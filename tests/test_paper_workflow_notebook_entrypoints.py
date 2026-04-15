@@ -22,9 +22,12 @@ NOTEBOOK_PW00_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW00_Paper_Eva
 NOTEBOOK_PW01_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW01_Source_Event_Shards.ipynb"
 NOTEBOOK_PW02_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW02_Source_Merge_And_Global_Thresholds.ipynb"
 NOTEBOOK_PW03_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW03_Attack_Event_Shards.ipynb"
-NOTEBOOK_PW04_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics.ipynb"
+NOTEBOOK_PW04_PREPARE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 1.prepare.ipynb"
+NOTEBOOK_PW04_QUALITY_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 2.quality_shard.ipynb"
+NOTEBOOK_PW04_FINALIZE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 3.finalize.ipynb"
 NOTEBOOK_PW05_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW05_Release_And_Signoff.ipynb"
 README_PATH = REPO_ROOT / "paper_workflow" / "README.md"
+PAPER_PILOT_PROMPT_PATH = REPO_ROOT / "prompts" / "paper_pilot_10.txt"
 
 
 def _load_notebook(notebook_path: Path) -> Dict[str, Any]:
@@ -184,16 +187,26 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
         'from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout',
     )
     pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
+    pw03_constants = _find_code_cell_source(NOTEBOOK_PW03_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw05_constants = _find_code_cell_source(NOTEBOOK_PW05_PATH, "SCRIPT_PATH = REPO_ROOT")
 
     assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
     assert 'HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
     assert 'HF_HUB_CACHE = HF_HOME / "hub"' in pw00_constants
     assert 'TRANSFORMERS_CACHE = HF_HOME / "transformers"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
+    assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"' in pw00_constants
+    assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_constants
+    assert 'SOURCE_SHARD_COUNT = 4' in pw00_constants
+    assert 'ATTACK_SHARD_COUNT = 16' in pw00_constants
     assert 'run_checked([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], cwd=REPO_ROOT)' in pw00_bootstrap
     assert 'ensure_attestation_env_bootstrap(' in pw00_bootstrap
     assert 'snapshot_download(' not in pw00_bootstrap
     assert '"--drive-project-root"' in pw00_execute
     assert '"--family-id"' in pw00_execute
+    assert '"--pw-base-config-path"' in pw00_execute
+    assert 'PW_BASE_CONFIG_PATH' in pw00_execute
     assert '"--prompt-file"' in pw00_execute
     assert '"--seed-list"' in pw00_execute
     assert '"--source-shard-count"' in pw00_execute
@@ -204,8 +217,10 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw01_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw01_constants
     assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
     assert '"planner_conditioned_control_negative": "control_negative"' in pw01_constants
+    assert 'SHARD_COUNT = 4' in pw01_constants
     assert 'PW01_WORKER_COUNT = 2' in pw01_constants
     assert 'MODEL_CACHE_LAYOUT = resolve_notebook_model_cache_layout(DRIVE_MOUNT_ROOT, REPO_ROOT, create_directories=True)' in pw01_repo_bootstrap
     assert '"model_cache_mode": "local_session_primary"' in pw01_repo_bootstrap
@@ -226,10 +241,21 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw02_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw02_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw02_constants
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw02_constants
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in pw02_bootstrap
     assert 'snapshot_download(' not in pw02_bootstrap
     assert '"--drive-project-root"' in pw02_execute
     assert '"--family-id"' in pw02_execute
+
+    assert '"PW03_Attack_Event_Shards.py"' in pw03_constants
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw03_constants
+    assert 'ATTACK_SHARD_COUNT = 16' in pw03_constants
+    assert 'ATTACK_LOCAL_WORKER_COUNT = 4' in pw03_constants
+    assert 'ATTACK_FAMILY_ALLOWLIST = None' in pw03_constants
+
+    assert '"PW05_Release_And_Signoff.py"' in pw05_constants
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw05_constants
+    assert 'FORCE_RERUN = False' in pw05_constants
 
 
 def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan() -> None:
@@ -271,18 +297,31 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     Returns:
         None.
     """
-    pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, "SOURCE_SHARD_COUNT = 2")
+    pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'PROMPT_FILE = "prompts/paper_pilot_10.txt"')
     pw00_precheck = _find_code_cell_source(NOTEBOOK_PW00_PATH, "PRECHECK_RESULTS = []")
     pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
     pw00_output_check = _find_code_cell_source(NOTEBOOK_PW00_PATH, "output_check = {")
     pw00_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW00_PATH, "扩展规则：")
     pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, "parallel_extension_guide = {")
 
-    assert 'ATTACK_SHARD_COUNT = None' in pw00_constants
-    assert 'None 表示回退到 SOURCE_SHARD_COUNT' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
+    assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"' in pw00_constants
+    assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_constants
+    assert 'SOURCE_SHARD_COUNT = 4' in pw00_constants
+    assert 'ATTACK_SHARD_COUNT = 16' in pw00_constants
+    assert 'pilot 默认冻结为 16' in pw00_constants
     assert 'RESOLVED_ATTACK_SHARD_COUNT = SOURCE_SHARD_COUNT if ATTACK_SHARD_COUNT is None else ATTACK_SHARD_COUNT' in pw00_constants
+    assert 'PW_BASE_CONFIG_RESOLVED_PATH = Path(PW_BASE_CONFIG_PATH).expanduser()' in pw00_precheck
+    assert '"PW base config 存在"' in pw00_precheck
+    assert 'len(PROMPT_LINES) == 10' in pw00_precheck
+    assert 'SEED_LIST == [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_precheck
+    assert 'SOURCE_SHARD_COUNT == 4' in pw00_precheck
+    assert 'ATTACK_SHARD_COUNT == 16' in pw00_precheck
     assert '"attack_shard_count 合法（None 表示回退到 source_shard_count）"' in pw00_precheck
     assert '"resolved_attack_shard_count": str(RESOLVED_ATTACK_SHARD_COUNT)' in pw00_precheck
+    assert '"--pw-base-config-path"' in pw00_execute
+    assert 'PW_BASE_CONFIG_PATH' in pw00_execute
     assert 'if ATTACK_SHARD_COUNT is not None:' in pw00_execute
     assert '"--attack-shard-count"' in pw00_execute
     assert 'str(ATTACK_SHARD_COUNT)' in pw00_execute
@@ -294,6 +333,42 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     assert '"current_attack_shard_count": ATTACK_SHARD_COUNT' in pw00_parallel_guide
     assert '"resolved_attack_shard_count": RESOLVED_ATTACK_SHARD_COUNT' in pw00_parallel_guide
     assert '"--attack-shard-count"' in pw00_parallel_guide
+
+
+def test_paper_pilot_prompt_file_has_ten_non_empty_prompts_in_five_categories() -> None:
+    """
+    Verify the pilot prompt file exists and freezes ten prompts across five categories.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    prompt_lines = [
+        line.strip()
+        for line in PAPER_PILOT_PROMPT_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    category_counts: Dict[str, int] = {}
+    expected_category_counts = {
+        "portrait": 2,
+        "animal": 2,
+        "nature": 2,
+        "urban": 2,
+        "still_life": 2,
+    }
+
+    assert PAPER_PILOT_PROMPT_PATH.exists()
+    assert len(prompt_lines) == 10
+
+    for prompt_line in prompt_lines:
+        category, separator, prompt_text = prompt_line.partition(":")
+        assert separator == ":"
+        assert prompt_text.strip()
+        category_counts[category.strip()] = category_counts.get(category.strip(), 0) + 1
+
+    assert category_counts == expected_category_counts
 
 
 def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> None:
@@ -426,7 +501,9 @@ def test_paper_workflow_all_notebook_script_paths_use_existing_wrapper_entrypoin
         (NOTEBOOK_PW01_PATH, "PW01_Source_Event_Shards.py"),
         (NOTEBOOK_PW02_PATH, "PW02_Source_Merge_And_Global_Thresholds.py"),
         (NOTEBOOK_PW03_PATH, "PW03_Attack_Event_Shards.py"),
-        (NOTEBOOK_PW04_PATH, "PW04_Attack_Merge_And_Metrics.py"),
+        (NOTEBOOK_PW04_PREPARE_PATH, "PW04_Attack_Merge_And_Metrics.py"),
+        (NOTEBOOK_PW04_QUALITY_PATH, "PW04_Attack_Merge_And_Metrics.py"),
+        (NOTEBOOK_PW04_FINALIZE_PATH, "PW04_Attack_Merge_And_Metrics.py"),
         (NOTEBOOK_PW05_PATH, "PW05_Release_And_Signoff.py"),
     ]
 

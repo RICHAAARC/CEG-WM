@@ -365,6 +365,9 @@ def test_pw00_records_pilot_base_and_matrix_paths_and_freezes_pilot_geometry_pol
     )
 
     family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    method_identity_snapshot = json.loads(
+        Path(str(family_manifest["paths"]["method_identity_snapshot"])).read_text(encoding="utf-8")
+    )
     geometry_optional_claim_plan = json.loads(
         Path(str(summary["geometry_optional_claim_plan_path"])).read_text(encoding="utf-8")
     )
@@ -377,6 +380,18 @@ def test_pw00_records_pilot_base_and_matrix_paths_and_freezes_pilot_geometry_pol
     assert summary["pw_matrix_config_path"] == normalize_path_value(PILOT_PW_MATRIX_CONFIG_PATH)
     assert family_manifest["pw_base_config_path"] == normalize_path_value(PILOT_PW_BASE_CONFIG_PATH)
     assert family_manifest["pw_matrix_config_path"] == normalize_path_value(PILOT_PW_MATRIX_CONFIG_PATH)
+    assert method_identity_snapshot["source_alignment_reference_files"] == [
+        "paper_workflow/configs/pw_base_pilot.yaml",
+        "paper_workflow/configs/pw_matrix_pilot.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
+        "scripts/notebook_runtime_common.py",
+        "configs/default.yaml",
+    ]
     assert summary["matrix_profile"] == "family_x_severity_pilot_v1"
     assert family_manifest["attack_parameters"]["matrix_profile"] == "family_x_severity_pilot_v1"
     assert summary["system_event_count_sweep"]["repeat_count"] == 48

@@ -22,8 +22,8 @@ event_identity:
 source_shards:
   default_count: 2
 source_alignment_reference_files:
-  - "paper_workflow/configs/pw_base.yaml"
-  - "paper_workflow/configs/pw_matrix.yaml"
+  - "paper_workflow/configs/pw_base_pilot.yaml"
+  - "paper_workflow/configs/pw_matrix_pilot.yaml"
   - "paper_workflow/scripts/pw_common.py"
   - "paper_workflow/scripts/pw00_build_family_manifest.py"
   - "paper_workflow/scripts/pw01_stage_runtime_helpers.py"

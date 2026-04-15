@@ -16,7 +16,14 @@ import pytest
 from scripts.notebook_runtime_common import REPO_ROOT
 
 
-NOTEBOOK_PW04_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics.ipynb"
+NOTEBOOK_PW04_PREPARE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 1.prepare.ipynb"
+NOTEBOOK_PW04_QUALITY_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 2.quality_shard.ipynb"
+NOTEBOOK_PW04_FINALIZE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 3.finalize.ipynb"
+NOTEBOOK_PW04_PATHS = [
+    (NOTEBOOK_PW04_PREPARE_PATH, "prepare"),
+    (NOTEBOOK_PW04_QUALITY_PATH, "quality_shard"),
+    (NOTEBOOK_PW04_FINALIZE_PATH, "finalize"),
+]
 
 
 def _load_notebook(notebook_path: Path) -> Dict[str, Any]:
@@ -85,7 +92,11 @@ def _find_code_cell_source(notebook_path: Path, marker: str) -> str:
     return matches[0]
 
 
-def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
+@pytest.mark.parametrize(("notebook_path", "expected_mode"), NOTEBOOK_PW04_PATHS)
+def test_pw04_notebook_binds_expected_script_and_parameters(
+    notebook_path: Path,
+    expected_mode: str,
+) -> None:
     """
     Verify the PW04 notebook binds the real script and required parameters.
 
@@ -95,15 +106,16 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
     Returns:
         None.
     """
-    constants_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "SCRIPT_PATH = REPO_ROOT")
-    bootstrap_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout")
-    execute_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "COMMAND = [")
+    constants_source = _find_code_cell_source(notebook_path, "SCRIPT_PATH = REPO_ROOT")
+    bootstrap_source = _find_code_cell_source(notebook_path, "from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout")
+    execute_source = _find_code_cell_source(notebook_path, "COMMAND = [")
 
     assert '"PW04_Attack_Merge_And_Metrics.py"' in constants_source
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
-    assert 'PW04_MODE = "prepare"' in constants_source
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in constants_source
+    assert f'PW04_MODE = "{expected_mode}"' in constants_source
     assert 'QUALITY_SHARD_INDEX = 0' in constants_source
     assert 'FORCE_RERUN = False' in constants_source
     assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
@@ -122,7 +134,8 @@ def test_pw04_notebook_binds_expected_script_and_parameters() -> None:
     assert '"--enable-tail-estimation"' in execute_source
 
 
-def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs() -> None:
+@pytest.mark.parametrize("notebook_path", [path for path, _ in NOTEBOOK_PW04_PATHS])
+def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs(notebook_path: Path) -> None:
     """
     Verify the PW04 notebook precheck and summary cells read the expected artifacts.
 
@@ -132,8 +145,8 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs() -> None:
     Returns:
         None.
     """
-    precheck_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "PRECHECK_RESULTS = []")
-    summary_source = _find_code_cell_source(NOTEBOOK_PW04_PATH, "PW04_RESULT_SUMMARY = {")
+    precheck_source = _find_code_cell_source(notebook_path, "PRECHECK_RESULTS = []")
+    summary_source = _find_code_cell_source(notebook_path, "PW04_RESULT_SUMMARY = {")
 
     assert 'PW02_SUMMARY_PATH = FAMILY_ROOT / "runtime_state" / "pw02_summary.json"' in precheck_source
     assert 'FINALIZE_MANIFEST_PATH = FAMILY_ROOT / "exports" / "pw02" / "paper_source_finalize_manifest.json"' in precheck_source

@@ -1,0 +1,10 @@
+portrait: a studio portrait of a violinist in soft window light
+portrait: a candid portrait of a chef in a bright kitchen
+animal: a tabby cat curled up on a linen sofa
+animal: a golden retriever running through shallow water
+nature: a macro photo of wildflower petals covered with morning dew
+nature: a misty mountain lake at sunrise with pine reflections
+urban: a rainy tram stop on a modern city street at dusk
+urban: an aerial view of a dense downtown block at blue hour
+still_life: a ceramic teapot with sliced citrus on a wooden table
+still_life: a watercolor sketch of books, glasses, and a coffee cup
