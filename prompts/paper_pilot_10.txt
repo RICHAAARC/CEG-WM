@@ -1,10 +1,10 @@
-portrait: a studio portrait of a violinist in soft window light
-portrait: a candid portrait of a chef in a bright kitchen
-animal: a tabby cat curled up on a linen sofa
-animal: a golden retriever running through shallow water
-nature: a macro photo of wildflower petals covered with morning dew
-nature: a misty mountain lake at sunrise with pine reflections
-urban: a rainy tram stop on a modern city street at dusk
-urban: an aerial view of a dense downtown block at blue hour
-still_life: a ceramic teapot with sliced citrus on a wooden table
-still_life: a watercolor sketch of books, glasses, and a coffee cup
+still_life_low_texture: a plain white ceramic bowl on a matte gray table under soft diffuse light
+still_life_low_texture: a single smooth glass vase against a beige wall with minimal shadows
+high_texture_object: a woven basket filled with colorful yarn balls on a wooden desk
+high_texture_object: a close-up photo of embroidered fabric with dense repeating patterns
+indoor_scene: a quiet reading room with bookshelves, a desk lamp, and a chair
+indoor_scene: a modern kitchen counter with utensils, tiles, and soft window light
+outdoor_nature: a misty mountain lake at sunrise with pine tree reflections
+outdoor_nature: a forest trail covered with leaves and scattered sunlight
+structured_geometry: a tiled subway corridor with strong perspective lines and repeating columns
+structured_geometry: a modern building facade with grid windows and sharp geometric edges
