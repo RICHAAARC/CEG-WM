@@ -459,6 +459,23 @@ def test_pw00_notebook_passes_seed_list_as_single_argument() -> None:
     assert '"--seed-list",\n    *(str(seed) for seed in SEED_LIST)' not in execute_source
 
 
+def test_pw00_notebook_passes_repo_import_env_to_subprocess() -> None:
+    """
+    Verify the PW00 notebook passes the repo import environment to its subprocess.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    source = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
+
+    assert "build_repo_import_subprocess_env" in source
+    assert "PW00_SUBPROCESS_ENV = build_repo_import_subprocess_env(repo_root=REPO_ROOT)" in source
+    assert "env=PW00_SUBPROCESS_ENV" in source
+
+
 @pytest.mark.parametrize(
     "notebook_path",
     [NOTEBOOK_PW00_PATH, NOTEBOOK_PW01_PATH, NOTEBOOK_PW03_PATH],
