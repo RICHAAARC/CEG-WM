@@ -201,6 +201,106 @@ def test_safe_clean_local_runtime_does_not_allow_drive_attestation_root(
     assert drive_secrets_root.as_posix() in existing_paths
 
 
+def test_read_optional_json_returns_none_for_missing_path(tmp_path: Path) -> None:
+    """
+    Verify read_optional_json returns None when the path is missing.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    assert read_optional_json(tmp_path / "missing.json") is None
+
+
+def test_read_optional_json_returns_none_for_directory(tmp_path: Path) -> None:
+    """
+    Verify read_optional_json returns None for directory paths.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    assert read_optional_json(tmp_path) is None
+
+
+def test_read_optional_json_returns_none_for_invalid_json(tmp_path: Path) -> None:
+    """
+    Verify read_optional_json returns None for invalid JSON payloads.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    payload_path = tmp_path / "invalid.json"
+    payload_path.write_text("{invalid", encoding="utf-8")
+
+    assert read_optional_json(payload_path) is None
+
+
+def test_read_optional_json_returns_none_for_non_object_json(tmp_path: Path) -> None:
+    """
+    Verify read_optional_json returns None when the JSON root is not a mapping.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    payload_path = tmp_path / "list.json"
+    payload_path.write_text("[1, 2, 3]", encoding="utf-8")
+
+    assert read_optional_json(payload_path) is None
+
+
+def test_read_optional_json_reads_json_object(tmp_path: Path) -> None:
+    """
+    Verify read_optional_json returns parsed mappings for valid JSON objects.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    assert read_optional_json(payload_path) == {"ok": True}
+
+
+def test_read_optional_json_rejects_non_path_argument() -> None:
+    """
+    Verify read_optional_json rejects non-Path inputs.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    with pytest.raises(TypeError, match="path_obj must be Path"):
+        read_optional_json("not-a-path")  # type: ignore[arg-type]
+
+
 def test_pw00_bundle_archive_and_pw01_prepare_roundtrip(tmp_path: Path) -> None:
     """
     Verify PW00 bundle archive can be restored by PW01 prepare without Drive live mode.

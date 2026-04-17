@@ -159,6 +159,21 @@ def _find_markdown_cell_source(notebook_path: Path, marker: str) -> str:
     raise AssertionError(f"markdown cell marker not found: {marker}")
 
 
+def test_notebook_runtime_common_exports_read_optional_json() -> None:
+    """
+    Verify notebook runtime common exports the optional JSON helper used by PW00.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    from scripts.notebook_runtime_common import read_optional_json
+
+    assert callable(read_optional_json)
+
+
 def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     """
     Verify notebook code cells bind expected script paths and args.

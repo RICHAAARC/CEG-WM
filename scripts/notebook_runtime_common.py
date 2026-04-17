@@ -1164,6 +1164,29 @@ def read_json_dict(path_obj: Path) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload) if isinstance(payload, dict) else {}
 
 
+def read_optional_json(path_obj: Path) -> Dict[str, Any] | None:
+    """
+    功能：读取可选 JSON 对象文件。
+
+    Read an optional JSON file and return None when unavailable or invalid.
+
+    Args:
+        path_obj: JSON file path.
+
+    Returns:
+        Parsed mapping, or None when missing, not a file, invalid, or not a mapping.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    if not path_obj.exists() or not path_obj.is_file():
+        return None
+    try:
+        payload = json.loads(path_obj.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return cast(Dict[str, Any], payload) if isinstance(payload, dict) else None
+
+
 def read_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
     """
     功能：严格读取必需 JSON 对象文件。
