@@ -130,7 +130,10 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     assert '当前允许 1、2、3 或 4' in constants_source
     assert 'LOCAL_RUNTIME_ENABLED = True' in constants_source
     assert 'LOCAL_PROJECT_ROOT = Path("/content/CEG_WM_PaperWorkflow")' in constants_source
+    assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+    assert 'ATTESTATION_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
     assert 'DRIVE_BUNDLE_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow_Bundles"' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
     assert '必须与 PW00 和 PW01 一致' not in constants_source
     assert '当前只允许 1 或 2' not in constants_source
 
@@ -141,6 +144,7 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     assert 'MODEL_DOWNLOAD_SUMMARY = dict(MODEL_CACHE_BOOTSTRAP["model_audit_summary"])' in bootstrap_source
     assert '"snapshot_source": MODEL_CACHE_BOOTSTRAP["snapshot_source"]' in bootstrap_source
     assert '"model_source_binding": MODEL_CACHE_BOOTSTRAP["model_source_binding"]' in bootstrap_source
+    assert '    ATTESTATION_PROJECT_ROOT,' in bootstrap_source
     assert 'print_json("model_cache_bootstrap", MODEL_CACHE_BOOTSTRAP)' in bootstrap_source
 
     assert '"--drive-project-root"' in execute_source
@@ -173,6 +177,9 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
     assert 'PW03_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH' in precheck_source
     assert 'write_yaml_mapping(PW03_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)' in precheck_source
     assert 'PW03_PREFLIGHT = detect_pw03_preflight(PW03_BOUND_CONFIG_PATH)' in precheck_source
+    assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in precheck_source
+    assert 'record_precheck(PROJECT_ROOT_PRECHECK_LABEL, DRIVE_PROJECT_ROOT.exists(), str(DRIVE_PROJECT_ROOT))' in precheck_source
+    assert 'record_precheck("attestation 持久根目录存在", ATTESTATION_PROJECT_ROOT.exists(), str(ATTESTATION_PROJECT_ROOT))' in precheck_source
     assert 'record_precheck("PW03 preflight"' in precheck_source
     assert '"pw03_preflight": PW03_PREFLIGHT' in precheck_source
     assert 'detect_stage_01_preflight' not in precheck_source

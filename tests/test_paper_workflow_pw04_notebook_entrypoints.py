@@ -111,6 +111,8 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     execute_source = _find_code_cell_source(notebook_path, "COMMAND = [")
 
     assert '"PW04_Attack_Merge_And_Metrics.py"' in constants_source
+    assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
@@ -153,6 +155,8 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs(notebook_path: Path) -
     assert 'ATTACK_SHARD_PLAN_PATH = FAMILY_ROOT / "manifests" / "attack_shard_plan.json"' in precheck_source
     assert 'CONTENT_THRESHOLD_EXPORT_PATH = FAMILY_ROOT / "exports" / "pw02" / "thresholds" / "content" / "thresholds.json"' in precheck_source
     assert 'ATTESTATION_THRESHOLD_EXPORT_PATH = FAMILY_ROOT / "exports" / "pw02" / "thresholds" / "attestation" / "thresholds.json"' in precheck_source
+    assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in precheck_source
+    assert 'record_precheck(PROJECT_ROOT_PRECHECK_LABEL, DRIVE_PROJECT_ROOT.exists(), str(DRIVE_PROJECT_ROOT))' in precheck_source
     assert 'PREPARE_MANIFEST_PATH = FAMILY_ROOT / "exports" / "pw04" / "manifests" / "pw04_prepare_manifest.json"' in precheck_source
     assert 'QUALITY_PAIR_PLAN_PATH = QUALITY_ROOT / "quality_pair_plan.json"' in precheck_source
     assert 'SELECTED_QUALITY_SHARD_PATH = QUALITY_ROOT / "shards" / f"quality_shard_{QUALITY_SHARD_INDEX:04d}.json"' in precheck_source

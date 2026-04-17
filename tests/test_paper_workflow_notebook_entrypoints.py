@@ -350,10 +350,11 @@ def test_paper_workflow_notebooks_enable_local_runtime_bundle_mode(
     archive_source = _find_code_cell_source(notebook_path, "archive_local_runtime_for_stage(")
 
     assert 'LOCAL_PROJECT_ROOT = Path("/content/CEG_WM_PaperWorkflow")' in constants_source
+    assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
     assert 'DRIVE_BUNDLE_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow_Bundles"' in constants_source
     assert 'if LOCAL_RUNTIME_ENABLED:' in constants_source
     assert 'DRIVE_PROJECT_ROOT = LOCAL_PROJECT_ROOT' in constants_source
-    assert 'DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
 
     assert 'from paper_workflow.scripts.pw_local_runtime import prepare_local_runtime_for_stage' in prepare_source
     assert f'stage_name="{prepare_stage_name}"' in prepare_source
@@ -372,6 +373,74 @@ def test_paper_workflow_notebooks_enable_local_runtime_bundle_mode(
     assert 'if LOCAL_RUNTIME_ENABLED:' in archive_source
     for token in archive_tokens:
         assert token in archive_source
+
+
+def test_pw00_notebook_has_no_legacy_attestation_bootstrap_call() -> None:
+    """
+    Verify the PW00 notebook no longer contains the legacy attestation bootstrap call.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    notebook_text = NOTEBOOK_PW00_PATH.read_text(encoding="utf-8")
+
+    assert 'notebook_name=NOTEBOOK_NAME' not in notebook_text
+    assert 'ensure_attestation_env_bootstrap(CONFIG_PATH, DRIVE_PROJECT_ROOT' not in notebook_text
+
+
+@pytest.mark.parametrize(
+    "notebook_path",
+    [NOTEBOOK_PW00_PATH, NOTEBOOK_PW01_PATH, NOTEBOOK_PW03_PATH],
+)
+def test_notebooks_use_persistent_attestation_project_root(notebook_path: Path) -> None:
+    """
+    Verify attestation bootstrap notebooks bind a persistent Drive root that is
+    distinct from the local runtime root.
+
+    Args:
+        notebook_path: Notebook path.
+
+    Returns:
+        None.
+    """
+    constants_source = _find_code_cell_source(notebook_path, "LOCAL_RUNTIME_ENABLED = True")
+    bootstrap_source = _find_code_cell_source(
+        notebook_path,
+        "ATTESTATION_BOOTSTRAP = ensure_attestation_env_bootstrap(",
+    )
+
+    assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+    assert 'ATTESTATION_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = LOCAL_PROJECT_ROOT' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
+    assert '    ATTESTATION_PROJECT_ROOT,' in bootstrap_source
+    assert '    DRIVE_PROJECT_ROOT,' not in bootstrap_source
+
+
+@pytest.mark.parametrize(
+    "notebook_path",
+    [NOTEBOOK_PW00_PATH, NOTEBOOK_PW01_PATH, NOTEBOOK_PW03_PATH],
+)
+def test_attestation_project_root_is_not_local_runtime_root(notebook_path: Path) -> None:
+    """
+    Verify the attestation root remains bound to persistent Drive storage rather
+    than the local runtime root.
+
+    Args:
+        notebook_path: Notebook path.
+
+    Returns:
+        None.
+    """
+    constants_source = _find_code_cell_source(notebook_path, "LOCAL_RUNTIME_ENABLED = True")
+
+    assert 'LOCAL_PROJECT_ROOT = Path("/content/CEG_WM_PaperWorkflow")' in constants_source
+    assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+    assert 'ATTESTATION_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
+    assert 'ATTESTATION_PROJECT_ROOT = LOCAL_PROJECT_ROOT' not in constants_source
 
 
 def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan() -> None:
@@ -431,6 +500,7 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     assert 'RESOLVED_ATTACK_SHARD_COUNT = SOURCE_SHARD_COUNT if ATTACK_SHARD_COUNT is None else ATTACK_SHARD_COUNT' in pw00_constants
     assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in pw00_precheck
     assert 'record_precheck("prompt 文件存在"' in pw00_precheck
+    assert 'record_precheck("attestation 持久根目录存在"' in pw00_precheck
     assert 'record_precheck("attestation_env_root 存在"' in pw00_precheck
     assert 'print_json("pw00_precheck", precheck_results)' in pw00_precheck
     assert 'failed_prechecks = [item for item in precheck_results if not item["passed"]]' in pw00_precheck
@@ -520,6 +590,7 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
     assert 'build_directory_digest_summary(Path(MODEL_SNAPSHOT_PATH))' not in pw01_bootstrap
     assert 'print_json("model_cache_bootstrap", MODEL_CACHE_BOOTSTRAP)' in pw01_bootstrap
     assert 'ATTESTATION_BOOTSTRAP = ensure_attestation_env_bootstrap(' in pw01_bootstrap
+    assert '    ATTESTATION_PROJECT_ROOT,' in pw01_bootstrap
     assert 'print_json("attestation_env_bootstrap", ATTESTATION_BOOTSTRAP)' in pw01_bootstrap
     assert 'run_checked(["nvidia-smi"])' in pw01_bootstrap
 
@@ -532,6 +603,9 @@ def test_pw01_notebook_restores_bootstrap_before_single_formal_precheck() -> Non
         "PRECHECK_RESULTS = []",
     )
     assert 'SOURCE_SPLIT_PLAN_PATH = FAMILY_ROOT / "manifests" / "source_split_plan.json"' in pw01_precheck
+    assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in pw01_precheck
+    assert 'record_precheck(PROJECT_ROOT_PRECHECK_LABEL, DRIVE_PROJECT_ROOT.exists(), str(DRIVE_PROJECT_ROOT))' in pw01_precheck
+    assert 'record_precheck("attestation 持久根目录存在", ATTESTATION_PROJECT_ROOT.exists(), str(ATTESTATION_PROJECT_ROOT))' in pw01_precheck
     assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
     assert 'persistent Huggingface 路径仅兼容保留' in pw01_precheck
     assert '模型 snapshot 来源为本地会话缓存' in pw01_precheck

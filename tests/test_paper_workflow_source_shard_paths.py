@@ -126,7 +126,32 @@ def _patch_pw01_base_runner(monkeypatch: pytest.MonkeyPatch) -> None:
         (logs_root / f"{stage_name}_stderr.log").write_text("\n", encoding="utf-8")
 
         if stage_name == "embed":
-            write_json_atomic(records_root / "embed_record.json", {"record_type": "embed"})
+            write_json_atomic(
+                records_root / "embed_record.json",
+                {
+                    "record_type": "embed",
+                    "content_evidence": {
+                        "status": "ok",
+                        "plan_digest": "plan_digest_pw01_test",
+                        "basis_digest": "basis_digest_pw01_test",
+                        "score_parts": {
+                            "lf_metrics": {
+                                "message_length": 8,
+                                "ecc_sparsity": 3,
+                                "plan_digest": "plan_digest_pw01_test",
+                                "basis_digest": "basis_digest_pw01_test",
+                                "message_source": "attestation_event_digest",
+                                "parity_check_digest": "parity_check_digest_pw01_test",
+                            }
+                        },
+                    },
+                    "attestation": {
+                        "event_binding_digest": "event_binding_digest_pw01_test",
+                        "event_binding_mode": "trajectory_bound",
+                        "lf_payload_hex": "ab",
+                    },
+                },
+            )
         elif stage_name == "detect":
             write_json_atomic(
                 records_root / "detect_record.json",

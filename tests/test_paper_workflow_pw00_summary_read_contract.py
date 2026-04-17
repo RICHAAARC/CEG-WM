@@ -71,12 +71,12 @@ def test_pw00_notebook_reads_formal_summary_file_instead_of_stdout_tail() -> Non
     Returns:
         None.
     """
-    pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "PW00_RESULT = subprocess.run(")
+    pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
 
     assert 'FAMILY_ROOT = DRIVE_PROJECT_ROOT / "paper_workflow" / "families" / FAMILY_ID' in pw00_execute
     assert 'PW00_SUMMARY_PATH = FAMILY_ROOT / "runtime_state" / "pw00_summary.json"' in pw00_execute
+    assert 'subprocess.run(' in pw00_execute
     assert 'if not PW00_SUMMARY_PATH.exists():' in pw00_execute
     assert 'PW00_SUMMARY = json.loads(PW00_SUMMARY_PATH.read_text(encoding="utf-8"))' in pw00_execute
-    assert 'summary_path={PW00_SUMMARY_PATH} stdout={PW00_RESULT.stdout} stderr={PW00_RESULT.stderr}' in pw00_execute
     assert 'pw00_stdout_lines = [line.strip() for line in PW00_RESULT.stdout.splitlines() if line.strip()]' not in pw00_execute
     assert 'json.loads(pw00_stdout_lines[-1])' not in pw00_execute

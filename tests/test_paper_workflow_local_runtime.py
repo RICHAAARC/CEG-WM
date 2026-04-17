@@ -146,6 +146,61 @@ def test_safe_clean_local_runtime_rejects_protected_paths() -> None:
         safe_clean_local_runtime(Path("/content/ceg_wm_workspace"))
 
 
+def test_safe_clean_local_runtime_does_not_allow_drive_attestation_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify safe local-runtime cleanup rejects Drive-backed attestation roots and
+    never touches persistent Drive secrets while cleaning the local runtime root.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    local_project_root = Path("/content/CEG_WM_PaperWorkflow")
+    drive_attestation_root = Path("/content/drive/MyDrive/CEG_WM_PaperWorkflow")
+    drive_secrets_root = drive_attestation_root / "secrets"
+    existing_paths = {
+        local_project_root.as_posix(),
+        drive_attestation_root.as_posix(),
+        drive_secrets_root.as_posix(),
+    }
+    deleted_paths: list[str] = []
+    path_type = type(local_project_root)
+
+    def fake_exists(self: Path) -> bool:
+        return self.as_posix() in existing_paths
+
+    def fake_is_dir(self: Path) -> bool:
+        return self.as_posix() in existing_paths
+
+    def fake_rmtree(path_obj: Path) -> None:
+        path_text = Path(path_obj).as_posix()
+        deleted_paths.append(path_text)
+        for existing_path in list(existing_paths):
+            if existing_path == path_text or existing_path.startswith(f"{path_text}/"):
+                existing_paths.discard(existing_path)
+
+    monkeypatch.setattr(path_type, "exists", fake_exists, raising=False)
+    monkeypatch.setattr(path_type, "is_dir", fake_is_dir, raising=False)
+    monkeypatch.setattr("paper_workflow.scripts.pw_local_runtime.shutil.rmtree", fake_rmtree)
+
+    with pytest.raises(RuntimeError, match="must not contain drive"):
+        safe_clean_local_runtime(Path("/content/drive"))
+
+    with pytest.raises(RuntimeError, match="must not contain drive"):
+        safe_clean_local_runtime(drive_attestation_root)
+
+    clean_summary = safe_clean_local_runtime(local_project_root)
+
+    assert clean_summary["status"] == "cleaned"
+    assert clean_summary["local_project_root"] == local_project_root.as_posix()
+    assert deleted_paths == [local_project_root.as_posix()]
+    assert drive_secrets_root.as_posix() in existing_paths
+
+
 def test_pw00_bundle_archive_and_pw01_prepare_roundtrip(tmp_path: Path) -> None:
     """
     Verify PW00 bundle archive can be restored by PW01 prepare without Drive live mode.
