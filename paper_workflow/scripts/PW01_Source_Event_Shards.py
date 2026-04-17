@@ -1,5 +1,5 @@
-"""
-File purpose: CLI entrypoint for PW01 source event shards.
+﻿"""
+File purpose: CLI wrapper entrypoint for PW01 source event shards.
 Module type: General module
 """
 
@@ -53,7 +53,11 @@ def main() -> int:
         required=True,
         help="Notebook-bound runtime config snapshot path.",
     )
-    parser.add_argument("--force-rerun", action="store_true", help="Clear completed shard root before rerun.")
+    parser.add_argument(
+        "--force-rerun",
+        action="store_true",
+        help="Force rerun even if shard outputs already exist.",
+    )
     args = parser.parse_args()
 
     summary = run_pw01_source_event_shard(

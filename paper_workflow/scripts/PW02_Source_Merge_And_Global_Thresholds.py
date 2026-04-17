@@ -1,5 +1,5 @@
-"""
-File purpose: CLI entrypoint for PW02 source merge and global thresholds.
+﻿"""
+File purpose: CLI wrapper entrypoint for PW02 source merge and global thresholds.
 Module type: General module
 """
 

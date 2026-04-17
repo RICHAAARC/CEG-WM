@@ -123,11 +123,14 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in constants_source
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'ATTACK_SHARD_INDEX = 0' in constants_source
-    assert 'ATTACK_SHARD_COUNT = 2' in constants_source
+    assert 'ATTACK_SHARD_COUNT = 16' in constants_source
     assert 'ATTACK_LOCAL_WORKER_COUNT =' in constants_source
     assert 'ATTACK_FAMILY_ALLOWLIST = None' in constants_source
     assert 'PW00 family 冻结的 attack_shard_count' in constants_source
     assert '当前允许 1、2、3 或 4' in constants_source
+    assert 'LOCAL_RUNTIME_ENABLED = True' in constants_source
+    assert 'LOCAL_PROJECT_ROOT = Path("/content/CEG_WM_PaperWorkflow")' in constants_source
+    assert 'DRIVE_BUNDLE_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow_Bundles"' in constants_source
     assert '必须与 PW00 和 PW01 一致' not in constants_source
     assert '当前只允许 1 或 2' not in constants_source
 

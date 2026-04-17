@@ -258,6 +258,122 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'FORCE_RERUN = False' in pw05_constants
 
 
+@pytest.mark.parametrize(
+    (
+        "notebook_path",
+        "prepare_stage_name",
+        "archive_stage_name",
+        "prepare_tokens",
+        "archive_tokens",
+    ),
+    [
+        (
+            NOTEBOOK_PW00_PATH,
+            "PW00_Paper_Eval_Family_Manifest",
+            "PW00_Paper_Eval_Family_Manifest",
+            [],
+            [],
+        ),
+        (
+            NOTEBOOK_PW01_PATH,
+            "PW01_Source_Event_Shards",
+            "PW01_Source_Event_Shards",
+            ["sample_role=SAMPLE_ROLE", "shard_index=SHARD_INDEX", "shard_count=SHARD_COUNT"],
+            ["sample_role=SAMPLE_ROLE", "shard_index=SHARD_INDEX", "shard_count=SHARD_COUNT"],
+        ),
+        (
+            NOTEBOOK_PW02_PATH,
+            "PW02_Source_Merge_And_Global_Thresholds",
+            "PW02_Source_Merge_And_Global_Thresholds",
+            [],
+            [],
+        ),
+        (
+            NOTEBOOK_PW03_PATH,
+            "PW03_Attack_Event_Shards",
+            "PW03_Attack_Event_Shards",
+            ["shard_index=ATTACK_SHARD_INDEX", "shard_count=ATTACK_SHARD_COUNT"],
+            ["shard_index=ATTACK_SHARD_INDEX", "shard_count=ATTACK_SHARD_COUNT"],
+        ),
+        (
+            NOTEBOOK_PW04_PREPARE_PATH,
+            "PW04_Attack_Merge_And_Metrics_prepare",
+            "PW04_Attack_Merge_And_Metrics_prepare",
+            [],
+            [],
+        ),
+        (
+            NOTEBOOK_PW04_QUALITY_PATH,
+            "PW04_Attack_Merge_And_Metrics_quality_shard",
+            "PW04_Attack_Merge_And_Metrics_quality_shard",
+            ["shard_index=QUALITY_SHARD_INDEX"],
+            ["shard_index=QUALITY_SHARD_INDEX"],
+        ),
+        (
+            NOTEBOOK_PW04_FINALIZE_PATH,
+            "PW04_Attack_Merge_And_Metrics_finalize",
+            "PW04_Attack_Merge_And_Metrics_finalize",
+            [],
+            [],
+        ),
+        (
+            NOTEBOOK_PW05_PATH,
+            "PW05_Release_And_Signoff",
+            "PW05_Release_And_Signoff",
+            [],
+            [],
+        ),
+    ],
+)
+def test_paper_workflow_notebooks_enable_local_runtime_bundle_mode(
+    notebook_path: Path,
+    prepare_stage_name: str,
+    archive_stage_name: str,
+    prepare_tokens: List[str],
+    archive_tokens: List[str],
+) -> None:
+    """
+    Verify notebooks expose local runtime variables and bundle prepare/archive hooks.
+
+    Args:
+        notebook_path: Notebook path.
+        prepare_stage_name: Expected prepare stage name.
+        archive_stage_name: Expected archive stage name.
+        prepare_tokens: Additional prepare-call tokens.
+        archive_tokens: Additional archive-call tokens.
+
+    Returns:
+        None.
+    """
+    constants_source = _find_code_cell_source(notebook_path, "LOCAL_RUNTIME_ENABLED = True")
+    prepare_source = _find_code_cell_source(notebook_path, "prepare_local_runtime_for_stage(")
+    archive_source = _find_code_cell_source(notebook_path, "archive_local_runtime_for_stage(")
+
+    assert 'LOCAL_PROJECT_ROOT = Path("/content/CEG_WM_PaperWorkflow")' in constants_source
+    assert 'DRIVE_BUNDLE_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow_Bundles"' in constants_source
+    assert 'if LOCAL_RUNTIME_ENABLED:' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = LOCAL_PROJECT_ROOT' in constants_source
+    assert 'DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+
+    assert 'from paper_workflow.scripts.pw_local_runtime import prepare_local_runtime_for_stage' in prepare_source
+    assert f'stage_name="{prepare_stage_name}"' in prepare_source
+    assert 'local_project_root=LOCAL_PROJECT_ROOT' in prepare_source
+    assert 'drive_bundle_root=DRIVE_BUNDLE_ROOT' in prepare_source
+    assert 'clean_before_run=True' in prepare_source
+    assert 'if LOCAL_RUNTIME_ENABLED:' in prepare_source
+    for token in prepare_tokens:
+        assert token in prepare_source
+
+    assert 'from paper_workflow.scripts.pw_local_runtime import archive_local_runtime_for_stage' in archive_source
+    assert f'stage_name="{archive_stage_name}"' in archive_source
+    assert 'local_project_root=LOCAL_PROJECT_ROOT' in archive_source
+    assert 'drive_bundle_root=DRIVE_BUNDLE_ROOT' in archive_source
+    assert 'clean_after_archive=False' in archive_source
+    assert 'if LOCAL_RUNTIME_ENABLED:' in archive_source
+    for token in archive_tokens:
+        assert token in archive_source
+
+
 def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan() -> None:
     """
     Verify PW01 notebook promotes the precheck-bound config into the execute
@@ -271,7 +387,7 @@ def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan
     """
     pw01_precheck = _find_code_cell_source(NOTEBOOK_PW01_PATH, "PRECHECK_RESULTS = []")
     pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
-    pw01_parallel_plan = _find_code_cell_source(NOTEBOOK_PW01_PATH, "parallel_plan = []")
+    pw01_parallel_plan = _find_code_cell_source(NOTEBOOK_PW01_PATH, 'print("[PW01 后续并行运行说明]")')
 
     assert "PW01_BOUND_CONFIG_PATH = PRECHECK_BOUND_CONFIG_PATH" in pw01_precheck
     assert "write_yaml_mapping(PW01_BOUND_CONFIG_PATH, PRECHECK_BOUND_CFG)" in pw01_precheck
@@ -283,8 +399,9 @@ def test_pw01_notebook_passes_precheck_bound_config_to_execute_and_parallel_plan
     assert 'SAMPLE_ROLE in manifest_sample_roles' in pw01_precheck
     assert '"--bound-config-path"' in pw01_execute
     assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_execute
-    assert '"--bound-config-path"' in pw01_parallel_plan
-    assert 'str(PW01_BOUND_CONFIG_PATH)' in pw01_parallel_plan
+    assert '当前 shard 设置：SHARD_COUNT = {SHARD_COUNT}' in pw01_parallel_plan
+    assert '当前 notebook 只运行：{SAMPLE_ROLE} shard {SHARD_INDEX}' in pw01_parallel_plan
+    assert 'PW02 运行条件：positive_source 与 clean_negative 的全部 shard 均完成后，运行 PW02 一次。' in pw01_parallel_plan
 
 
 def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None:
@@ -298,11 +415,11 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
         None.
     """
     pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'PROMPT_FILE = "prompts/paper_pilot_10.txt"')
-    pw00_precheck = _find_code_cell_source(NOTEBOOK_PW00_PATH, "PRECHECK_RESULTS = []")
+    pw00_precheck = _find_code_cell_source(NOTEBOOK_PW00_PATH, "precheck_results = []")
     pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
     pw00_output_check = _find_code_cell_source(NOTEBOOK_PW00_PATH, "output_check = {")
     pw00_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW00_PATH, "扩展规则：")
-    pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, "parallel_extension_guide = {")
+    pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'print("[后续并行运行说明]")')
 
     assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
@@ -312,27 +429,24 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     assert 'ATTACK_SHARD_COUNT = 16' in pw00_constants
     assert 'pilot 默认冻结为 16' in pw00_constants
     assert 'RESOLVED_ATTACK_SHARD_COUNT = SOURCE_SHARD_COUNT if ATTACK_SHARD_COUNT is None else ATTACK_SHARD_COUNT' in pw00_constants
-    assert 'PW_BASE_CONFIG_RESOLVED_PATH = Path(PW_BASE_CONFIG_PATH).expanduser()' in pw00_precheck
-    assert '"PW base config 存在"' in pw00_precheck
-    assert 'len(PROMPT_LINES) == 10' in pw00_precheck
-    assert 'SEED_LIST == [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_precheck
-    assert 'SOURCE_SHARD_COUNT == 4' in pw00_precheck
-    assert 'ATTACK_SHARD_COUNT == 16' in pw00_precheck
-    assert '"attack_shard_count 合法（None 表示回退到 source_shard_count）"' in pw00_precheck
-    assert '"resolved_attack_shard_count": str(RESOLVED_ATTACK_SHARD_COUNT)' in pw00_precheck
+    assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in pw00_precheck
+    assert 'record_precheck("prompt 文件存在"' in pw00_precheck
+    assert 'record_precheck("attestation_env_root 存在"' in pw00_precheck
+    assert 'print_json("pw00_precheck", precheck_results)' in pw00_precheck
+    assert 'failed_prechecks = [item for item in precheck_results if not item["passed"]]' in pw00_precheck
     assert '"--pw-base-config-path"' in pw00_execute
     assert 'PW_BASE_CONFIG_PATH' in pw00_execute
-    assert 'if ATTACK_SHARD_COUNT is not None:' in pw00_execute
     assert '"--attack-shard-count"' in pw00_execute
-    assert 'str(ATTACK_SHARD_COUNT)' in pw00_execute
+    assert 'str(RESOLVED_ATTACK_SHARD_COUNT)' in pw00_execute
     assert 'ATTACK_SHARD_PLAN_PATH = Path(PW00_SUMMARY["attack_shard_plan_path"])' in pw00_output_check
     assert '"attack_shard_plan": {"path": str(ATTACK_SHARD_PLAN_PATH), "exists": ATTACK_SHARD_PLAN_PATH.exists()}' in pw00_output_check
     assert 'SOURCE_SHARD_COUNT 控制 source shard' in pw00_parallel_markdown
     assert 'ATTACK_SHARD_COUNT 控制 attack shard' in pw00_parallel_markdown
     assert '若未显式提供 ATTACK_SHARD_COUNT，则默认回退到 SOURCE_SHARD_COUNT' in pw00_parallel_markdown
-    assert '"current_attack_shard_count": ATTACK_SHARD_COUNT' in pw00_parallel_guide
-    assert '"resolved_attack_shard_count": RESOLVED_ATTACK_SHARD_COUNT' in pw00_parallel_guide
-    assert '"--attack-shard-count"' in pw00_parallel_guide
+    assert 'PW01 需要设置：SHARD_COUNT = {SOURCE_SHARD_COUNT}' in pw00_parallel_guide
+    assert 'PW03 需要设置：ATTACK_SHARD_COUNT = {RESOLVED_ATTACK_SHARD_COUNT}' in pw00_parallel_guide
+    assert 'PW04 运行顺序：prepare 一次 → quality_shard 全部完成 → finalize 一次。' in pw00_parallel_guide
+    assert 'PW05 运行条件：PW04 finalize 完成后，运行 PW05 一次。' in pw00_parallel_guide
 
 
 def test_paper_pilot_prompt_file_has_ten_non_empty_prompts_in_five_categories() -> None:
@@ -352,11 +466,11 @@ def test_paper_pilot_prompt_file_has_ten_non_empty_prompts_in_five_categories() 
     ]
     category_counts: Dict[str, int] = {}
     expected_category_counts = {
-        "portrait": 2,
-        "animal": 2,
-        "nature": 2,
-        "urban": 2,
-        "still_life": 2,
+        "still_life_low_texture": 2,
+        "high_texture_object": 2,
+        "indoor_scene": 2,
+        "outdoor_nature": 2,
+        "structured_geometry": 2,
     }
 
     assert PAPER_PILOT_PROMPT_PATH.exists()
@@ -564,9 +678,12 @@ def test_paper_workflow_readme_and_pw00_command_template_use_wrapper_entrypoints
     ]:
         assert wrapper_relative_path in readme_text
 
-    pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, '"pw01_command_template": [')
-    assert 'paper_workflow/scripts/PW01_Source_Event_Shards.py' in pw00_parallel_guide
-    assert 'paper_workflow/scripts/pw01_source_event_shards.py' not in pw00_parallel_guide
+    pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw01_constants = _find_code_cell_source(NOTEBOOK_PW01_PATH, "SCRIPT_PATH = REPO_ROOT")
+    pw02_constants = _find_code_cell_source(NOTEBOOK_PW02_PATH, "SCRIPT_PATH = REPO_ROOT")
+    assert '"PW00_Paper_Eval_Family_Manifest.py"' in pw00_constants
+    assert '"PW01_Source_Event_Shards.py"' in pw01_constants
+    assert '"PW02_Source_Merge_And_Global_Thresholds.py"' in pw02_constants
 
 
 def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -> None:
