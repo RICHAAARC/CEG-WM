@@ -943,6 +943,92 @@ def _initial_dependency_references(
     return refs
 
 
+def _append_formal_source_shard_dependencies(
+    *,
+    required_bundles: List[Dict[str, Any]],
+    discovery: Dict[str, Any],
+    family_id: str,
+    local_project_root: Path,
+    drive_bundle_root: Path,
+    include_optional_control_negative: bool = False,
+) -> None:
+    """
+    功能：向 stage 依赖中追加 formal source shard bundles。
+
+    Append the formal source-shard dependency bundles for one stage.
+
+    Args:
+        required_bundles: Dependency bundle descriptors being accumulated.
+        discovery: Discovery payload mapping to update in place.
+        family_id: Family identifier.
+        local_project_root: Local runtime project root.
+        drive_bundle_root: Drive bundle root.
+        include_optional_control_negative: Whether optional control-negative shards should be appended.
+
+    Returns:
+        None.
+    """
+    if not isinstance(required_bundles, list):
+        raise TypeError("required_bundles must be list")
+    if not isinstance(discovery, dict):
+        raise TypeError("discovery must be dict")
+    if not isinstance(local_project_root, Path):
+        raise TypeError("local_project_root must be Path")
+    if not isinstance(drive_bundle_root, Path):
+        raise TypeError("drive_bundle_root must be Path")
+
+    role_discoveries: List[tuple[str, Dict[str, Any]]] = [
+        (
+            POSITIVE_SOURCE_ROLE,
+            discover_expected_shards(
+                family_id=family_id,
+                local_project_root=local_project_root,
+                drive_bundle_root=drive_bundle_root,
+                shard_kind="source",
+                sample_role=POSITIVE_SOURCE_ROLE,
+            ),
+        ),
+        (
+            CLEAN_NEGATIVE_ROLE,
+            discover_expected_shards(
+                family_id=family_id,
+                local_project_root=local_project_root,
+                drive_bundle_root=drive_bundle_root,
+                shard_kind="source",
+                sample_role=CLEAN_NEGATIVE_ROLE,
+            ),
+        ),
+    ]
+    if include_optional_control_negative:
+        role_discoveries.append(
+            (
+                CONTROL_NEGATIVE_ROLE,
+                discover_expected_shards(
+                    family_id=family_id,
+                    local_project_root=local_project_root,
+                    drive_bundle_root=drive_bundle_root,
+                    shard_kind="source",
+                    sample_role=CONTROL_NEGATIVE_ROLE,
+                ),
+            )
+        )
+
+    for source_role, role_discovery in role_discoveries:
+        discovery[source_role] = role_discovery
+        resolved_shard_count = int(role_discovery["shard_count"])
+        for expected_index in cast(List[int], role_discovery["expected_indices"]):
+            required_bundles.append(
+                _build_bundle_reference(
+                    stage_name=PW01_STAGE_NAME,
+                    family_id=family_id,
+                    drive_bundle_root=drive_bundle_root,
+                    sample_role=source_role,
+                    shard_index=expected_index,
+                    shard_count=resolved_shard_count,
+                )
+            )
+
+
 def resolve_stage_dependencies(
     *,
     stage_name: str,
@@ -1004,64 +1090,22 @@ def resolve_stage_dependencies(
             "discovery": {},
         }
 
-    if stage_name in {PW02_STAGE_NAME, PW03_STAGE_NAME}:
-        positive_discovery = discover_expected_shards(
+    if stage_name in {PW02_STAGE_NAME, PW03_STAGE_NAME, PW04_QUALITY_STAGE_NAME}:
+        _append_formal_source_shard_dependencies(
+            required_bundles=required_bundles,
+            discovery=discovery,
             family_id=family_id,
             local_project_root=local_project_root,
             drive_bundle_root=drive_bundle_root,
-            shard_kind="source",
-            sample_role=POSITIVE_SOURCE_ROLE,
+            include_optional_control_negative=include_optional_control_negative,
         )
-        negative_discovery = discover_expected_shards(
-            family_id=family_id,
-            local_project_root=local_project_root,
-            drive_bundle_root=drive_bundle_root,
-            shard_kind="source",
-            sample_role=CLEAN_NEGATIVE_ROLE,
-        )
-        discovery[POSITIVE_SOURCE_ROLE] = positive_discovery
-        discovery[CLEAN_NEGATIVE_ROLE] = negative_discovery
-        for source_role, role_discovery in [
-            (POSITIVE_SOURCE_ROLE, positive_discovery),
-            (CLEAN_NEGATIVE_ROLE, negative_discovery),
-        ]:
-            for expected_index in cast(List[int], role_discovery["expected_indices"]):
-                required_bundles.append(
-                    _build_bundle_reference(
-                        stage_name=PW01_STAGE_NAME,
-                        family_id=family_id,
-                        drive_bundle_root=drive_bundle_root,
-                        sample_role=source_role,
-                        shard_index=expected_index,
-                        shard_count=int(role_discovery["shard_count"]),
-                    )
-                )
-        if stage_name == PW02_STAGE_NAME and include_optional_control_negative:
-            control_discovery = discover_expected_shards(
-                family_id=family_id,
-                local_project_root=local_project_root,
-                drive_bundle_root=drive_bundle_root,
-                shard_kind="source",
-                sample_role=CONTROL_NEGATIVE_ROLE,
-            )
-            discovery[CONTROL_NEGATIVE_ROLE] = control_discovery
-            for expected_index in cast(List[int], control_discovery["expected_indices"]):
-                required_bundles.append(
-                    _build_bundle_reference(
-                        stage_name=PW01_STAGE_NAME,
-                        family_id=family_id,
-                        drive_bundle_root=drive_bundle_root,
-                        sample_role=CONTROL_NEGATIVE_ROLE,
-                        shard_index=expected_index,
-                        shard_count=int(control_discovery["shard_count"]),
-                    )
-                )
-        return {
-            "stage_name": stage_name,
-            "family_id": family_id,
-            "required_bundles": required_bundles,
-            "discovery": discovery,
-        }
+        if stage_name in {PW02_STAGE_NAME, PW03_STAGE_NAME}:
+            return {
+                "stage_name": stage_name,
+                "family_id": family_id,
+                "required_bundles": required_bundles,
+                "discovery": discovery,
+            }
 
     attack_discovery = discover_expected_shards(
         family_id=family_id,
@@ -1106,6 +1150,81 @@ def resolve_stage_dependencies(
         "required_bundles": required_bundles,
         "discovery": discovery,
     }
+
+
+def _append_formal_source_shard_required_paths(
+    *,
+    required_paths: List[str],
+    family_id: str,
+    local_project_root: Path,
+    drive_bundle_root: Path,
+    include_optional_control_negative: bool = False,
+) -> None:
+    """
+    功能：向 stage 必需输入列表追加 formal source shard 目录。
+
+    Append the formal source-shard directories to one required-input list.
+
+    Args:
+        required_paths: Required relative paths being accumulated.
+        family_id: Family identifier.
+        local_project_root: Local runtime project root.
+        drive_bundle_root: Drive bundle root.
+        include_optional_control_negative: Whether optional control-negative shard directories should be appended.
+
+    Returns:
+        None.
+    """
+    if not isinstance(required_paths, list):
+        raise TypeError("required_paths must be list")
+    if not isinstance(local_project_root, Path):
+        raise TypeError("local_project_root must be Path")
+    if not isinstance(drive_bundle_root, Path):
+        raise TypeError("drive_bundle_root must be Path")
+
+    family_root_relative = f"paper_workflow/families/{family_id}"
+    role_discoveries: List[tuple[str, Dict[str, Any]]] = [
+        (
+            POSITIVE_SOURCE_ROLE,
+            discover_expected_shards(
+                family_id=family_id,
+                local_project_root=local_project_root,
+                drive_bundle_root=drive_bundle_root,
+                shard_kind="source",
+                sample_role=POSITIVE_SOURCE_ROLE,
+            ),
+        ),
+        (
+            CLEAN_NEGATIVE_ROLE,
+            discover_expected_shards(
+                family_id=family_id,
+                local_project_root=local_project_root,
+                drive_bundle_root=drive_bundle_root,
+                shard_kind="source",
+                sample_role=CLEAN_NEGATIVE_ROLE,
+            ),
+        ),
+    ]
+    if include_optional_control_negative:
+        role_discoveries.append(
+            (
+                CONTROL_NEGATIVE_ROLE,
+                discover_expected_shards(
+                    family_id=family_id,
+                    local_project_root=local_project_root,
+                    drive_bundle_root=drive_bundle_root,
+                    shard_kind="source",
+                    sample_role=CONTROL_NEGATIVE_ROLE,
+                ),
+            )
+        )
+
+    for source_role, role_discovery in role_discoveries:
+        role_directory_name = SOURCE_ROLE_DIRECTORY_NAMES[source_role]
+        for expected_index in cast(List[int], role_discovery["expected_indices"]):
+            required_paths.append(
+                f"{family_root_relative}/source_shards/{role_directory_name}/shard_{expected_index:04d}"
+            )
 
 
 def safe_clean_local_runtime(local_project_root: Path) -> Dict[str, Any]:
@@ -1497,20 +1616,6 @@ def _required_input_paths_for_stage(
         return required_paths
 
     if stage_name in {PW02_STAGE_NAME, PW03_STAGE_NAME}:
-        positive_discovery = discover_expected_shards(
-            family_id=family_id,
-            local_project_root=local_project_root,
-            drive_bundle_root=drive_bundle_root,
-            shard_kind="source",
-            sample_role=POSITIVE_SOURCE_ROLE,
-        )
-        negative_discovery = discover_expected_shards(
-            family_id=family_id,
-            local_project_root=local_project_root,
-            drive_bundle_root=drive_bundle_root,
-            shard_kind="source",
-            sample_role=CLEAN_NEGATIVE_ROLE,
-        )
         required_paths.extend(
             [
                 f"{family_root_relative}/manifests/paper_eval_family_manifest.json",
@@ -1519,26 +1624,13 @@ def _required_input_paths_for_stage(
                 f"{family_root_relative}/runtime_state/pw00_summary.json",
             ]
         )
-        for expected_index in cast(List[int], positive_discovery["expected_indices"]):
-            required_paths.append(
-                f"{family_root_relative}/source_shards/positive/shard_{expected_index:04d}"
-            )
-        for expected_index in cast(List[int], negative_discovery["expected_indices"]):
-            required_paths.append(
-                f"{family_root_relative}/source_shards/negative/shard_{expected_index:04d}"
-            )
-        if stage_name == PW02_STAGE_NAME and include_optional_control_negative:
-            control_discovery = discover_expected_shards(
-                family_id=family_id,
-                local_project_root=local_project_root,
-                drive_bundle_root=drive_bundle_root,
-                shard_kind="source",
-                sample_role=CONTROL_NEGATIVE_ROLE,
-            )
-            for expected_index in cast(List[int], control_discovery["expected_indices"]):
-                required_paths.append(
-                    f"{family_root_relative}/source_shards/control_negative/shard_{expected_index:04d}"
-                )
+        _append_formal_source_shard_required_paths(
+            required_paths=required_paths,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+            include_optional_control_negative=include_optional_control_negative,
+        )
         if stage_name == PW03_STAGE_NAME:
             required_paths.extend(
                 [
@@ -1581,6 +1673,13 @@ def _required_input_paths_for_stage(
         ]
     )
     if stage_name == PW04_QUALITY_STAGE_NAME:
+        _append_formal_source_shard_required_paths(
+            required_paths=required_paths,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+            include_optional_control_negative=include_optional_control_negative,
+        )
         return required_paths
 
     quality_discovery = discover_expected_shards(

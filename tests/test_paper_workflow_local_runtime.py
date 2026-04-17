@@ -17,7 +17,9 @@ from paper_workflow.scripts.pw_local_runtime import (
     PW00_STAGE_NAME,
     PW01_STAGE_NAME,
     PW03_STAGE_NAME,
+    PW04_QUALITY_STAGE_NAME,
     PW04_FINALIZE_STAGE_NAME,
+    _verify_required_inputs_for_stage,
     archive_local_runtime_for_stage,
     discover_expected_shards,
     prepare_local_runtime_for_stage,
@@ -124,6 +126,55 @@ def _build_pw00_family_tree(
     )
     _write_text(snapshots_root / "config_snapshot.yaml", "model_id: test-model\n")
     return family_root
+
+
+def _write_bundle_sidecar(
+    drive_bundle_root: Path,
+    family_id: str,
+    stage_directory: str,
+    bundle_base_name: str,
+    *,
+    sample_role: str | None = None,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
+    source_shard_count: int | None = None,
+    attack_shard_count: int | None = None,
+) -> Path:
+    """
+    Write one minimal bundle sidecar for dependency-resolution tests.
+
+    Args:
+        drive_bundle_root: Bundle root.
+        family_id: Family identifier.
+        stage_directory: Stage directory token.
+        bundle_base_name: Bundle base file name.
+        sample_role: Optional sample role.
+        shard_index: Optional shard index.
+        shard_count: Optional shard count.
+        source_shard_count: Optional frozen source shard count.
+        attack_shard_count: Optional frozen attack shard count.
+
+    Returns:
+        Written sidecar path.
+    """
+    sidecar_path = drive_bundle_root / family_id / stage_directory / f"{bundle_base_name}.bundle.json"
+    payload: Dict[str, Any] = {
+        "status": "complete",
+        "bundle_base_name": bundle_base_name,
+        "bundle_id": f"{stage_directory}/{bundle_base_name}",
+    }
+    if sample_role is not None:
+        payload["sample_role"] = sample_role
+    if shard_index is not None:
+        payload["shard_index"] = shard_index
+    if shard_count is not None:
+        payload["shard_count"] = shard_count
+    if source_shard_count is not None:
+        payload["source_shard_count"] = source_shard_count
+    if attack_shard_count is not None:
+        payload["attack_shard_count"] = attack_shard_count
+    _write_json(sidecar_path, payload)
+    return sidecar_path
 
 
 def test_safe_clean_local_runtime_rejects_protected_paths() -> None:
@@ -433,3 +484,146 @@ def test_discover_expected_shards_and_resolve_dependencies_are_dynamic(tmp_path:
     assert quality_discovery["expected_indices"] == [0, 1]
     assert len(pw03_dependencies) == 5
     assert len(pw04_quality_dependencies) == 2
+
+
+def test_pw04_quality_dependency_requires_formal_source_shards(tmp_path: Path) -> None:
+    """
+    Verify PW04 quality_shard dependencies include all formal source shards.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    family_id = "family_pw04_quality_dependencies"
+    local_project_root = tmp_path / "local_runtime"
+    drive_bundle_root = tmp_path / "drive_bundles"
+
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw00_bootstrap",
+        "pw00_bootstrap",
+        source_shard_count=2,
+        attack_shard_count=2,
+    )
+    _write_bundle_sidecar(drive_bundle_root, family_id, "pw02_source_merge", "pw02_source_merge")
+    _write_bundle_sidecar(drive_bundle_root, family_id, "pw04_prepare", "pw04_prepare")
+    for shard_index in range(2):
+        _write_bundle_sidecar(
+            drive_bundle_root,
+            family_id,
+            "pw03_attack",
+            f"attack_shard_{shard_index:04d}",
+            shard_index=shard_index,
+            shard_count=2,
+        )
+        _write_bundle_sidecar(
+            drive_bundle_root,
+            family_id,
+            "pw01_source",
+            f"positive_source__shard_{shard_index:04d}",
+            sample_role=POSITIVE_SOURCE_ROLE,
+            shard_index=shard_index,
+            shard_count=2,
+        )
+        _write_bundle_sidecar(
+            drive_bundle_root,
+            family_id,
+            "pw01_source",
+            f"clean_negative__shard_{shard_index:04d}",
+            sample_role=CLEAN_NEGATIVE_ROLE,
+            shard_index=shard_index,
+            shard_count=2,
+        )
+
+    resolution = resolve_stage_dependencies(
+        stage_name=PW04_QUALITY_STAGE_NAME,
+        family_id=family_id,
+        local_project_root=local_project_root,
+        drive_bundle_root=drive_bundle_root,
+        include_optional_control_negative=False,
+    )
+
+    bundle_ids = {str(bundle["bundle_id"]) for bundle in resolution["required_bundles"]}
+
+    assert "pw01_source/positive_source__shard_0000" in bundle_ids
+    assert "pw01_source/positive_source__shard_0001" in bundle_ids
+    assert "pw01_source/clean_negative__shard_0000" in bundle_ids
+    assert "pw01_source/clean_negative__shard_0001" in bundle_ids
+    assert "pw04_prepare/pw04_prepare" in bundle_ids
+    assert "pw03_attack/attack_shard_0000" in bundle_ids
+    assert "pw03_attack/attack_shard_0001" in bundle_ids
+    assert all("control_negative" not in bundle_id for bundle_id in bundle_ids)
+    assert resolution["discovery"][POSITIVE_SOURCE_ROLE]["shard_count"] == 2
+    assert resolution["discovery"][POSITIVE_SOURCE_ROLE]["expected_indices"] == [0, 1]
+    assert resolution["discovery"][CLEAN_NEGATIVE_ROLE]["shard_count"] == 2
+    assert resolution["discovery"][CLEAN_NEGATIVE_ROLE]["expected_indices"] == [0, 1]
+    assert resolution["discovery"]["attack"]["shard_count"] == 2
+    assert resolution["discovery"]["attack"]["expected_indices"] == [0, 1]
+
+
+def test_pw04_quality_required_inputs_include_formal_source_shard_dirs(tmp_path: Path) -> None:
+    """
+    Verify PW04 quality_shard required-input checks fail fast when formal source shard directories are absent.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    family_id = "family_pw04_quality_missing_sources"
+    local_project_root = tmp_path / "local_runtime"
+    drive_bundle_root = tmp_path / "drive_bundles"
+
+    family_root = _build_pw00_family_tree(
+        local_project_root,
+        family_id,
+        source_shard_count=1,
+        attack_shard_count=1,
+    )
+    _write_json(family_root / "runtime_state" / "pw02_summary.json", {"family_id": family_id, "status": "ok"})
+    _write_json(
+        family_root / "exports" / "pw02" / "paper_source_finalize_manifest.json",
+        {"family_id": family_id, "status": "ok"},
+    )
+    _write_json(
+        family_root / "exports" / "pw02" / "thresholds" / "content" / "thresholds.json",
+        {"status": "ok"},
+    )
+    _write_json(
+        family_root / "exports" / "pw02" / "thresholds" / "attestation" / "thresholds.json",
+        {"status": "ok"},
+    )
+    _write_json(
+        family_root / "exports" / "pw04" / "manifests" / "pw04_prepare_manifest.json",
+        {
+            "family_id": family_id,
+            "expected_quality_shard_paths": [
+                str((family_root / "exports" / "pw04" / "quality" / "shards" / "quality_shard_0000.json").as_posix())
+            ],
+        },
+    )
+    _write_json(
+        family_root / "exports" / "pw04" / "quality" / "quality_pair_plan.json",
+        {"family_id": family_id, "shards": [{"quality_shard_index": 0}]},
+    )
+    _write_json(
+        family_root / "attack_shards" / "shard_0000" / "shard_manifest.json",
+        {"family_id": family_id, "status": "completed"},
+    )
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        _verify_required_inputs_for_stage(
+            stage_name=PW04_QUALITY_STAGE_NAME,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+            include_optional_control_negative=False,
+        )
+
+    error_text = str(exc_info.value)
+    assert "source_shards/positive/shard_0000" in error_text
+    assert "source_shards/negative/shard_0000" in error_text
