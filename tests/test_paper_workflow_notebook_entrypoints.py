@@ -406,6 +406,59 @@ def test_pw00_notebook_has_no_legacy_attestation_bootstrap_call() -> None:
     assert 'ensure_attestation_env_bootstrap(CONFIG_PATH, DRIVE_PROJECT_ROOT' not in notebook_text
 
 
+def test_pw00_notebook_uses_current_attestation_bootstrap_fields() -> None:
+    """
+    Verify the PW00 notebook uses the current attestation bootstrap field names.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    constants_source = _find_code_cell_source(NOTEBOOK_PW00_PATH, "LOCAL_RUNTIME_ENABLED = True")
+    bootstrap_source = _find_code_cell_source(
+        NOTEBOOK_PW00_PATH,
+        "ATTESTATION_BOOTSTRAP = ensure_attestation_env_bootstrap(",
+    )
+    precheck_source = _find_code_cell_source(NOTEBOOK_PW00_PATH, "precheck_results = []")
+
+    assert 'ATTESTATION_BOOTSTRAP["attestation_env_root"]' not in precheck_source
+    assert 'ATTESTATION_BOOTSTRAP["attestation_env_snapshot"]' not in precheck_source
+    assert 'record_precheck("attestation_env_root 存在"' not in precheck_source
+    assert 'record_precheck("attestation_env_snapshot 存在"' not in precheck_source
+
+    assert 'ATTESTATION_BOOTSTRAP.get("attestation_env_path")' in precheck_source
+    assert 'ATTESTATION_BOOTSTRAP.get("attestation_env_info_path")' in precheck_source
+    assert 'attestation_env 文件存在' in precheck_source
+    assert 'attestation_env_info 文件存在' in precheck_source
+
+    assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
+    assert 'ATTESTATION_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
+    assert 'ensure_attestation_env_bootstrap(' in bootstrap_source
+    assert '    ATTESTATION_PROJECT_ROOT,' in bootstrap_source
+
+
+def test_pw00_notebook_passes_seed_list_as_single_argument() -> None:
+    """
+    Verify the PW00 notebook passes seed_list as one CLI argument string.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    constants_source = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'PROMPT_FILE = "prompts/paper_pilot_10.txt"')
+    execute_source = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
+
+    assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in constants_source
+    assert '"--seed-list"' in execute_source
+    assert 'json.dumps(SEED_LIST, ensure_ascii=False)' in execute_source
+    assert '*(str(seed) for seed in SEED_LIST)' not in execute_source
+    assert '"--seed-list",\n    *(str(seed) for seed in SEED_LIST)' not in execute_source
+
+
 @pytest.mark.parametrize(
     "notebook_path",
     [NOTEBOOK_PW00_PATH, NOTEBOOK_PW01_PATH, NOTEBOOK_PW03_PATH],
@@ -516,11 +569,19 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in pw00_precheck
     assert 'record_precheck("prompt 文件存在"' in pw00_precheck
     assert 'record_precheck("attestation 持久根目录存在"' in pw00_precheck
-    assert 'record_precheck("attestation_env_root 存在"' in pw00_precheck
+    assert 'ATTESTATION_BOOTSTRAP.get("attestation_env_path")' in pw00_precheck
+    assert 'ATTESTATION_BOOTSTRAP.get("attestation_env_info_path")' in pw00_precheck
+    assert 'record_precheck("attestation_env 文件存在"' in pw00_precheck
+    assert 'record_precheck("attestation_env_info 文件存在"' in pw00_precheck
+    assert 'record_precheck("attestation_env_root 存在"' not in pw00_precheck
+    assert 'record_precheck("attestation_env_snapshot 存在"' not in pw00_precheck
     assert 'print_json("pw00_precheck", precheck_results)' in pw00_precheck
     assert 'failed_prechecks = [item for item in precheck_results if not item["passed"]]' in pw00_precheck
     assert '"--pw-base-config-path"' in pw00_execute
     assert 'PW_BASE_CONFIG_PATH' in pw00_execute
+    assert '"--seed-list"' in pw00_execute
+    assert 'json.dumps(SEED_LIST, ensure_ascii=False)' in pw00_execute
+    assert '*(str(seed) for seed in SEED_LIST)' not in pw00_execute
     assert '"--attack-shard-count"' in pw00_execute
     assert 'str(RESOLVED_ATTACK_SHARD_COUNT)' in pw00_execute
     assert 'ATTACK_SHARD_PLAN_PATH = Path(PW00_SUMMARY["attack_shard_plan_path"])' in pw00_output_check
