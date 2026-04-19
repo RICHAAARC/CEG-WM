@@ -448,8 +448,8 @@ def resolve_pw04_quality_runtime_summary(
             f"cuda runtime with approximately {detected_cuda_total_memory_gib} GiB memory uses conservative GPU batch defaults"
         )
     else:
-        default_lpips_batch_size = 32
-        default_clip_batch_size = 128
+        default_lpips_batch_size = 96
+        default_clip_batch_size = 256
         batch_default_reason = "cuda runtime uses default GPU batch sizes"
 
     lpips_batch_size, lpips_warning, lpips_batch_size_source = _normalize_positive_batch_size(
