@@ -107,8 +107,10 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         None.
     """
     constants_source = _find_code_cell_source(notebook_path, "SCRIPT_PATH = REPO_ROOT")
-    bootstrap_source = _find_code_cell_source(notebook_path, "from scripts.notebook_runtime_common import resolve_notebook_model_cache_layout")
-    execute_source = _find_code_cell_source(notebook_path, "COMMAND = [")
+    bootstrap_source = _find_code_cell_source(notebook_path, "prepare_local_runtime_for_stage(")
+    quality_runtime_source = _find_code_cell_source(notebook_path, "resolve_pw04_quality_runtime_summary(")
+    execute_source = _find_code_cell_source(notebook_path, "build_pw04_command(")
+    result_source = _find_code_cell_source(notebook_path, "read_pw04_result_summary(")
 
     assert '"PW04_Attack_Merge_And_Metrics.py"' in constants_source
     assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
@@ -121,19 +123,38 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'QUALITY_SHARD_INDEX = 0' in constants_source
     assert 'FORCE_RERUN = False' in constants_source
     assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
+    assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
 
+    assert 'prepare_local_runtime_for_stage(' in bootstrap_source
+    assert 'resolve_notebook_model_cache_layout(DRIVE_MOUNT_ROOT, REPO_ROOT, create_directories=True)' in bootstrap_source
+    assert 'run_checked([sys.executable, "-m", "pip", "install", "lpips", "open_clip_torch"], cwd=REPO_ROOT)' in bootstrap_source
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in bootstrap_source
     assert 'snapshot_download(' not in bootstrap_source
     assert 'bootstrap_notebook_model_cache(' not in bootstrap_source
+    assert 'quality_dependency_check' not in bootstrap_source
 
-    assert '"--drive-project-root"' in execute_source
-    assert '"--family-id"' in execute_source
-    assert '"--pw04-mode"' in execute_source
-    assert 'if PW04_MODE == "quality_shard":' in execute_source
-    assert '"--quality-shard-index"' in execute_source
-    assert 'str(QUALITY_SHARD_INDEX)' in execute_source
-    assert '"--force-rerun"' in execute_source
-    assert '"--enable-tail-estimation"' in execute_source
+    assert 'resolve_pw04_quality_runtime_summary(' in quality_runtime_source
+    assert 'quality_device_override=QUALITY_DEVICE_OVERRIDE' in quality_runtime_source
+    assert 'base_env=os.environ' in quality_runtime_source
+    assert 'normalize_quality_device_request' not in quality_runtime_source
+
+    assert 'build_pw04_command(' in execute_source
+    assert 'build_pw04_subprocess_env(' in execute_source
+    assert 'resolve_pw04_expected_output(' in execute_source
+    assert 'load_gpu_peak_summary(' in execute_source
+    assert 'build_gpu_peak_notebook_summary(' in execute_source
+    assert 'pw04_mode=PW04_MODE' in execute_source
+    assert 'quality_shard_index=QUALITY_SHARD_INDEX' in execute_source
+    assert 'force_rerun=FORCE_RERUN' in execute_source
+    assert 'enable_tail_estimation=ENABLE_TAIL_ESTIMATION' in execute_source
+    assert 'def load_gpu_peak_summary(' not in execute_source
+    assert 'def build_gpu_peak_notebook_summary(' not in execute_source
+
+    assert 'read_pw04_result_summary(' in result_source
+    assert 'prepare_manifest_path=PREPARE_MANIFEST_PATH' in result_source
+    assert 'selected_quality_shard_path=SELECTED_QUALITY_SHARD_PATH' in result_source
+    assert 'pw04_summary_path=PW04_SUMMARY_PATH' in result_source
+    assert 'gpu_peak_notebook_summary=GPU_PEAK_NOTEBOOK_SUMMARY' in result_source
 
 
 @pytest.mark.parametrize("notebook_path", [path for path, _ in NOTEBOOK_PW04_PATHS])
@@ -148,7 +169,7 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs(notebook_path: Path) -
         None.
     """
     precheck_source = _find_code_cell_source(notebook_path, "PRECHECK_RESULTS = []")
-    summary_source = _find_code_cell_source(notebook_path, "PW04_RESULT_SUMMARY = {")
+    summary_source = _find_code_cell_source(notebook_path, "read_pw04_result_summary(")
 
     assert 'PW02_SUMMARY_PATH = FAMILY_ROOT / "runtime_state" / "pw02_summary.json"' in precheck_source
     assert 'FINALIZE_MANIFEST_PATH = FAMILY_ROOT / "exports" / "pw02" / "paper_source_finalize_manifest.json"' in precheck_source
@@ -167,24 +188,14 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs(notebook_path: Path) -
     assert '全部计划内 quality shard 已完成' in precheck_source
 
     assert 'PW04_SUMMARY_PATH = FAMILY_ROOT / "runtime_state" / "pw04_summary.json"' in precheck_source
-    assert 'if PW04_MODE == "prepare":' in summary_source
-    assert '"prepare_manifest": json.loads(PREPARE_MANIFEST_PATH.read_text(encoding="utf-8"))' in summary_source
-    assert 'elif PW04_MODE == "quality_shard":' in summary_source
-    assert '"quality_shard": json.loads(SELECTED_QUALITY_SHARD_PATH.read_text(encoding="utf-8"))' in summary_source
-    assert 'FORMAL_ATTACK_FINAL_DECISION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "formal_attack_final_decision_metrics.json"' in summary_source
-    assert 'FORMAL_ATTACK_ATTESTATION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "formal_attack_attestation_metrics.json"' in summary_source
-    assert 'DERIVED_ATTACK_UNION_METRICS_PATH = FAMILY_ROOT / "exports" / "pw04" / "derived_attack_union_metrics.json"' in summary_source
-    assert 'CLEAN_ATTACK_OVERVIEW_PATH = FAMILY_ROOT / "exports" / "pw04" / "clean_attack_overview.json"' in summary_source
-    assert 'PAPER_SCOPE_REGISTRY_PATH = Path(str(PW04_SUMMARY["paper_scope_registry_path"]))' in summary_source
-    assert 'CANONICAL_METRICS_PATHS = dict(PW04_SUMMARY.get("canonical_metrics_paths", {}))' in summary_source
-    assert 'PAPER_TABLE_PATHS = dict(PW04_SUMMARY.get("paper_tables_paths", {}))' in summary_source
-    assert 'PAPER_FIGURE_PATHS = dict(PW04_SUMMARY.get("paper_figures_paths", {}))' in summary_source
-    assert 'TAIL_ESTIMATION_PATHS = dict(PW04_SUMMARY.get("tail_estimation_paths", {}))' in summary_source
-    assert 'BOOTSTRAP_CONFIDENCE_INTERVALS_PATH = Path(str(PW04_SUMMARY["bootstrap_confidence_intervals_path"]))' in summary_source
-    assert '"paper_metric_registry": json.loads(PAPER_SCOPE_REGISTRY_PATH.read_text(encoding="utf-8"))' in summary_source
-    assert '"content_chain_metrics": json.loads(Path(str(CANONICAL_METRICS_PATHS["content_chain"])).read_text(encoding="utf-8"))' in summary_source
-    assert '"paper_figures_paths": {' in summary_source
-    assert '"estimated_tail_fpr_1e4": json.loads(Path(str(TAIL_ESTIMATION_PATHS["estimated_tail_fpr_1e4_path"])).read_text(encoding="utf-8"))' in summary_source
+    assert 'prepare_manifest_path=PREPARE_MANIFEST_PATH' in summary_source
+    assert 'selected_quality_shard_path=SELECTED_QUALITY_SHARD_PATH' in summary_source
+    assert 'pw04_summary_path=PW04_SUMMARY_PATH' in summary_source
+    assert 'gpu_peak_notebook_summary=GPU_PEAK_NOTEBOOK_SUMMARY' in summary_source
+    assert 'if PW04_MODE == "prepare":' not in summary_source
+    assert 'FORMAL_ATTACK_FINAL_DECISION_METRICS_PATH' not in summary_source
+    assert 'PAPER_SCOPE_REGISTRY_PATH' not in summary_source
+    assert 'TAIL_ESTIMATION_PATHS' not in summary_source
     assert 'matplotlib' not in summary_source
     assert 'np.random' not in summary_source
 
