@@ -2234,6 +2234,7 @@ def run_pw04_merge_attack_event_shards(
     enable_tail_estimation: bool = False,
     pw04_mode: str = PW04_MODE_PREPARE,
     quality_shard_index: int | None = None,
+    quality_shard_count: int | None = None,
 ) -> Dict[str, Any]:
     """
     Execute the PW04 attack merge and metrics materialization stage.
@@ -2245,6 +2246,7 @@ def run_pw04_merge_attack_event_shards(
         enable_tail_estimation: Whether optional tail estimation exports should be produced.
         pw04_mode: Explicit PW04 execution mode.
         quality_shard_index: Optional quality shard index for worker mode.
+        quality_shard_count: Optional explicit quality shard count for prepare mode.
 
     Returns:
         Mode-specific PW04 execution summary.
@@ -2263,6 +2265,12 @@ def run_pw04_merge_attack_event_shards(
         or quality_shard_index < 0
     ):
         raise TypeError("quality_shard_index must be non-negative int when provided")
+    if quality_shard_count is not None and (
+        not isinstance(quality_shard_count, int)
+        or isinstance(quality_shard_count, bool)
+        or quality_shard_count <= 0
+    ):
+        raise TypeError("quality_shard_count must be positive int when provided")
 
     resolved_mode = _resolve_pw04_mode(pw04_mode)
     normalized_drive_root = drive_project_root.expanduser().resolve()
@@ -2270,6 +2278,8 @@ def run_pw04_merge_attack_event_shards(
     pw04_paths = _resolve_pw04_paths(family_root)
     if resolved_mode != PW04_MODE_QUALITY_SHARD and quality_shard_index is not None:
         raise ValueError("quality_shard_index is only valid when pw04_mode=quality_shard")
+    if resolved_mode != PW04_MODE_PREPARE and quality_shard_count is not None:
+        raise ValueError("quality_shard_count is only valid when pw04_mode=prepare")
 
     if resolved_mode == PW04_MODE_PREPARE:
         _prepare_pw04_outputs(
@@ -2380,21 +2390,36 @@ def run_pw04_merge_attack_event_shards(
             row for row in materialized_attack_event_rows if row.get("sample_role") == ATTACKED_NEGATIVE_SAMPLE_ROLE
         ]
 
+        resolved_quality_shard_count = quality_shard_count or expected_attack_shard_count
+
         quality_pair_plan_export = run_pw04_prepare_quality_pairs(
             family_id=family_id,
             family_root=family_root,
             pw02_summary=pw02_summary,
             attack_event_rows=positive_attack_event_rows,
             quality_root=cast(Path, pw04_paths["quality_root"]),
-            planned_shard_count=expected_attack_shard_count,
+            planned_shard_count=resolved_quality_shard_count,
         )
         quality_pair_plan_path = Path(str(quality_pair_plan_export["path"])).expanduser().resolve()
         quality_pair_plan_payload = cast(Mapping[str, Any], quality_pair_plan_export["payload"])
+        materialized_quality_shard_count = quality_pair_plan_payload.get("quality_shard_count")
+        if (
+            not isinstance(materialized_quality_shard_count, int)
+            or isinstance(materialized_quality_shard_count, bool)
+            or materialized_quality_shard_count <= 0
+        ):
+            raise ValueError("PW04 quality pair plan missing quality_shard_count")
+        if materialized_quality_shard_count != resolved_quality_shard_count:
+            raise ValueError("PW04 quality pair plan quality_shard_count mismatch with prepare contract")
         expected_quality_shard_paths = _build_expected_quality_shard_paths(
             family_root=family_root,
             quality_root=cast(Path, pw04_paths["quality_root"]),
             quality_pair_plan=quality_pair_plan_payload,
         )
+        if materialized_quality_shard_count != len(expected_quality_shard_paths):
+            raise ValueError(
+                "PW04 quality pair plan quality_shard_count mismatch with expected quality shard paths"
+            )
 
         attack_merge_manifest_payload = _build_attack_merge_manifest_payload(
             family_id=family_id,
@@ -2529,7 +2554,7 @@ def run_pw04_merge_attack_event_shards(
             "per_attack_family_metrics_path": normalize_path_value(cast(Path, pw04_paths["per_attack_family_metrics_path"])),
             "per_attack_condition_metrics_path": normalize_path_value(cast(Path, pw04_paths["per_attack_condition_metrics_path"])),
             "quality_pair_plan_path": normalize_path_value(quality_pair_plan_path),
-            "quality_shard_count": len(expected_quality_shard_paths),
+            "quality_shard_count": resolved_quality_shard_count,
             "expected_quality_shard_paths": [normalize_path_value(path_obj) for path_obj in expected_quality_shard_paths],
             "completed_attack_event_count": len(materialized_attack_event_rows),
             "attacked_positive_event_count": len(positive_attack_event_rows),

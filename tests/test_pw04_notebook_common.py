@@ -166,17 +166,20 @@ def test_build_pw04_subprocess_env_injects_repo_and_quality_runtime(tmp_path: Pa
 
 
 @pytest.mark.parametrize(
-    ("pw04_mode", "expected_has_quality_index"),
+    ("pw04_mode", "quality_shard_count", "expected_has_quality_index", "expected_has_quality_count"),
     [
-        ("prepare", False),
-        ("quality_shard", True),
-        ("finalize", False),
+        ("prepare", None, False, False),
+        ("prepare", 3, False, True),
+        ("quality_shard", None, True, False),
+        ("finalize", None, False, False),
     ],
 )
 def test_build_pw04_command_handles_mode_specific_flags(
     tmp_path: Path,
     pw04_mode: str,
+    quality_shard_count: int | None,
     expected_has_quality_index: bool,
+    expected_has_quality_count: bool,
 ) -> None:
     """
     Verify command construction preserves mode-specific flags.
@@ -194,7 +197,8 @@ def test_build_pw04_command_handles_mode_specific_flags(
         drive_project_root=tmp_path / "drive_root",
         family_id="family_demo",
         pw04_mode=pw04_mode,
-        quality_shard_index=4,
+        quality_shard_index=7,
+        quality_shard_count=quality_shard_count,
         force_rerun=True,
         enable_tail_estimation=True,
     )
@@ -204,9 +208,39 @@ def test_build_pw04_command_handles_mode_specific_flags(
     assert "--family-id" in command
     assert "--pw04-mode" in command
     assert ("--quality-shard-index" in command) is expected_has_quality_index
-    assert ("4" in command) is expected_has_quality_index
+    assert ("7" in command) is expected_has_quality_index
+    assert ("--quality-shard-count" in command) is expected_has_quality_count
+    assert ("3" in command) is expected_has_quality_count
     assert "--force-rerun" in command
     assert "--enable-tail-estimation" in command
+
+
+@pytest.mark.parametrize("pw04_mode", ["quality_shard", "finalize"])
+def test_build_pw04_command_rejects_quality_shard_count_outside_prepare(
+    tmp_path: Path,
+    pw04_mode: str,
+) -> None:
+    """
+    Verify explicit quality_shard_count is rejected outside prepare mode.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        pw04_mode: Non-prepare PW04 mode token.
+
+    Returns:
+        None.
+    """
+    with pytest.raises(ValueError, match="quality_shard_count is only valid"):
+        build_pw04_command(
+            script_path=tmp_path / "PW04_Attack_Merge_And_Metrics.py",
+            drive_project_root=tmp_path / "drive_root",
+            family_id="family_demo",
+            pw04_mode=pw04_mode,
+            quality_shard_index=7,
+            quality_shard_count=2,
+            force_rerun=False,
+            enable_tail_estimation=False,
+        )
 
 
 def test_resolve_pw04_expected_output_maps_modes_to_paths(tmp_path: Path) -> None:

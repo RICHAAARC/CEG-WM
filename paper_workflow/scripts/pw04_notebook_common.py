@@ -540,6 +540,7 @@ def build_pw04_command(
     family_id: str,
     pw04_mode: str,
     quality_shard_index: int,
+    quality_shard_count: int | None = None,
     force_rerun: bool,
     enable_tail_estimation: bool,
 ) -> list[str]:
@@ -554,6 +555,7 @@ def build_pw04_command(
         family_id: Family identifier.
         pw04_mode: PW04 mode.
         quality_shard_index: Quality shard index.
+        quality_shard_count: Optional explicit quality shard count for prepare mode.
         force_rerun: Whether rerun is enabled.
         enable_tail_estimation: Whether tail estimation is enabled.
 
@@ -568,12 +570,20 @@ def build_pw04_command(
         raise TypeError("family_id must be non-empty str")
     if not isinstance(quality_shard_index, int) or isinstance(quality_shard_index, bool) or quality_shard_index < 0:
         raise TypeError("quality_shard_index must be non-negative int")
+    if quality_shard_count is not None and (
+        not isinstance(quality_shard_count, int)
+        or isinstance(quality_shard_count, bool)
+        or quality_shard_count <= 0
+    ):
+        raise TypeError("quality_shard_count must be positive int when provided")
     if not isinstance(force_rerun, bool):
         raise TypeError("force_rerun must be bool")
     if not isinstance(enable_tail_estimation, bool):
         raise TypeError("enable_tail_estimation must be bool")
 
     resolved_mode = _resolve_pw04_mode(pw04_mode)
+    if resolved_mode != "prepare" and quality_shard_count is not None:
+        raise ValueError("quality_shard_count is only valid when pw04_mode=prepare")
     command = [
         sys.executable,
         str(script_path),
@@ -584,6 +594,8 @@ def build_pw04_command(
         "--pw04-mode",
         resolved_mode,
     ]
+    if resolved_mode == "prepare" and quality_shard_count is not None:
+        command.extend(["--quality-shard-count", str(quality_shard_count)])
     if resolved_mode == "quality_shard":
         command.extend(["--quality-shard-index", str(quality_shard_index)])
     if force_rerun:

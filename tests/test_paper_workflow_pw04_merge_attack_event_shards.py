@@ -1944,6 +1944,90 @@ def test_pw04_finalize_requires_all_planned_quality_shards(tmp_path: Path, monke
         )
 
 
+def test_pw04_prepare_allows_independent_quality_shard_count(tmp_path: Path, monkeypatch: Any) -> None:
+    """
+    Verify PW04 prepare can freeze a quality shard count independent from PW03 attack shards.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity",
+        _fake_clip_text_similarity,
+    )
+    fixture = _build_pw04_fixture(tmp_path, "family_pw04_independent_quality_shards")
+    family_root = Path(str(cast(Dict[str, Any], fixture["summary"])["family_root"]))
+    attack_shard_plan = _load_json_dict(family_root / "manifests" / "attack_shard_plan.json")
+
+    prepare_summary = pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_independent_quality_shards",
+        pw04_mode=pw04_module.PW04_MODE_PREPARE,
+        quality_shard_count=1,
+    )
+
+    prepare_manifest_path = Path(str(prepare_summary["prepare_manifest_path"]))
+    quality_pair_plan_path = Path(str(prepare_summary["quality_pair_plan_path"]))
+    prepare_manifest = _load_json_dict(prepare_manifest_path)
+    quality_pair_plan = _load_json_dict(quality_pair_plan_path)
+    planned_quality_shard_paths = cast(List[str], prepare_summary["expected_quality_shard_paths"])
+
+    assert attack_shard_plan["attack_shard_count"] == 2
+    assert prepare_summary["quality_shard_count"] == 1
+    assert len(planned_quality_shard_paths) == 1
+    assert prepare_manifest["quality_shard_count"] == 1
+    assert len(cast(List[str], prepare_manifest["expected_quality_shard_paths"])) == 1
+    assert prepare_manifest["expected_attack_shard_count"] == 2
+    assert prepare_manifest["quality_shard_count"] != prepare_manifest["expected_attack_shard_count"]
+    assert quality_pair_plan["quality_shard_count"] == 1
+    assert len(cast(List[Dict[str, Any]], quality_pair_plan["shards"])) == 1
+
+    shard_summary = pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_independent_quality_shards",
+        pw04_mode=pw04_module.PW04_MODE_QUALITY_SHARD,
+        quality_shard_index=0,
+    )
+    finalize_summary = pw04_module.run_pw04_merge_attack_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_pw04_independent_quality_shards",
+        pw04_mode=pw04_module.PW04_MODE_FINALIZE,
+    )
+
+    assert Path(str(shard_summary["quality_shard_path"])).exists()
+    assert finalize_summary["quality_shard_count"] == 1
+    assert len(cast(List[str], finalize_summary["quality_shard_paths"])) == 1
+
+
+@pytest.mark.parametrize("pw04_mode", [pw04_module.PW04_MODE_QUALITY_SHARD, pw04_module.PW04_MODE_FINALIZE])
+def test_pw04_quality_shard_count_is_prepare_only(tmp_path: Path, pw04_mode: str) -> None:
+    """
+    Verify quality_shard_count is rejected outside prepare mode.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        pw04_mode: Non-prepare PW04 mode token.
+
+    Returns:
+        None.
+    """
+    _build_pw04_fixture(tmp_path, f"family_pw04_prepare_only_{pw04_mode}")
+
+    with pytest.raises(ValueError, match="quality_shard_count is only valid"):
+        pw04_module.run_pw04_merge_attack_event_shards(
+            drive_project_root=tmp_path / "drive",
+            family_id=f"family_pw04_prepare_only_{pw04_mode}",
+            pw04_mode=pw04_mode,
+            quality_shard_index=0 if pw04_mode == pw04_module.PW04_MODE_QUALITY_SHARD else None,
+            quality_shard_count=1,
+        )
+
+
 def test_pw04_payload_attack_summary_prefers_decode_sidecar_metrics(tmp_path: Path) -> None:
     """
     Verify PW04 payload attack summary prefers decode sidecar metrics over legacy LF trace values.

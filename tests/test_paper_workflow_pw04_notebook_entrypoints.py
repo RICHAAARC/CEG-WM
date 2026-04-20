@@ -16,9 +16,9 @@ import pytest
 from scripts.notebook_runtime_common import REPO_ROOT
 
 
-NOTEBOOK_PW04_PREPARE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 1.prepare.ipynb"
-NOTEBOOK_PW04_QUALITY_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 2.quality_shard.ipynb"
-NOTEBOOK_PW04_FINALIZE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 3.finalize.ipynb"
+NOTEBOOK_PW04_PREPARE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 1.Prepare.ipynb"
+NOTEBOOK_PW04_QUALITY_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 2.Quality.ipynb"
+NOTEBOOK_PW04_FINALIZE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 3.Finalize.ipynb"
 NOTEBOOK_PW04_PATHS = [
     (NOTEBOOK_PW04_PREPARE_PATH, "prepare"),
     (NOTEBOOK_PW04_QUALITY_PATH, "quality_shard"),
@@ -121,6 +121,10 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in constants_source
     assert f'PW04_MODE = "{expected_mode}"' in constants_source
     assert 'QUALITY_SHARD_INDEX = 0' in constants_source
+    if expected_mode == "prepare":
+        assert 'QUALITY_SHARD_COUNT = None' in constants_source
+    else:
+        assert 'QUALITY_SHARD_COUNT' not in constants_source
     assert 'FORCE_RERUN = False' in constants_source
     assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
     assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
@@ -145,6 +149,10 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'build_gpu_peak_notebook_summary(' in execute_source
     assert 'pw04_mode=PW04_MODE' in execute_source
     assert 'quality_shard_index=QUALITY_SHARD_INDEX' in execute_source
+    if expected_mode == "prepare":
+        assert 'quality_shard_count=QUALITY_SHARD_COUNT' in execute_source
+    else:
+        assert 'quality_shard_count=' not in execute_source
     assert 'force_rerun=FORCE_RERUN' in execute_source
     assert 'enable_tail_estimation=ENABLE_TAIL_ESTIMATION' in execute_source
     assert 'def load_gpu_peak_summary(' not in execute_source
@@ -242,5 +250,52 @@ def test_pw04_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch,
     assert captured["family_id"] == "family_pw04_demo"
     assert captured["pw04_mode"] == "quality_shard"
     assert captured["quality_shard_index"] == 3
+    assert captured["quality_shard_count"] is None
     assert captured["force_rerun"] is True
     assert captured["enable_tail_estimation"] is True
+
+
+def test_pw04_wrapper_prepare_mode_forwards_quality_shard_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    Verify the PW04 wrapper forwards quality_shard_count only for prepare mode.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    wrapper_module = importlib.import_module("paper_workflow.scripts.PW04_Attack_Merge_And_Metrics")
+    captured: Dict[str, Any] = {}
+
+    def fake_run_pw04_merge_attack_event_shards(**kwargs: Any) -> Dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(wrapper_module, "run_pw04_merge_attack_event_shards", fake_run_pw04_merge_attack_event_shards)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "PW04_Attack_Merge_And_Metrics.py",
+            "--drive-project-root",
+            str(tmp_path / "drive_root"),
+            "--family-id",
+            "family_pw04_demo",
+            "--pw04-mode",
+            "prepare",
+            "--quality-shard-count",
+            "1",
+        ],
+    )
+
+    assert wrapper_module.main() == 0
+    assert captured["drive_project_root"] == tmp_path / "drive_root"
+    assert captured["family_id"] == "family_pw04_demo"
+    assert captured["pw04_mode"] == "prepare"
+    assert captured["quality_shard_index"] is None
+    assert captured["quality_shard_count"] == 1

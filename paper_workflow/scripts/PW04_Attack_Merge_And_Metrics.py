@@ -43,6 +43,12 @@ def main() -> int:
         default=None,
         help="Zero-based quality shard index required for quality_shard mode.",
     )
+    parser.add_argument(
+        "--quality-shard-count",
+        type=int,
+        default=None,
+        help="Optional explicit quality shard count used only for prepare mode.",
+    )
     parser.add_argument("--force-rerun", action="store_true", help="Clear completed PW04 outputs before rerun.")
     parser.add_argument(
         "--enable-tail-estimation",
@@ -58,6 +64,7 @@ def main() -> int:
         enable_tail_estimation=bool(args.enable_tail_estimation),
         pw04_mode=str(args.pw04_mode),
         quality_shard_index=args.quality_shard_index,
+        quality_shard_count=args.quality_shard_count,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
