@@ -22,9 +22,9 @@ NOTEBOOK_PW00_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW00_Paper_Eva
 NOTEBOOK_PW01_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW01_Source_Event_Shards.ipynb"
 NOTEBOOK_PW02_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW02_Source_Merge_And_Global_Thresholds.ipynb"
 NOTEBOOK_PW03_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW03_Attack_Event_Shards.ipynb"
-NOTEBOOK_PW04_PREPARE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 1.prepare.ipynb"
-NOTEBOOK_PW04_QUALITY_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 2.quality_shard.ipynb"
-NOTEBOOK_PW04_FINALIZE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 3.finalize.ipynb"
+NOTEBOOK_PW04_PREPARE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 1.Prepare.ipynb"
+NOTEBOOK_PW04_QUALITY_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 2.Quality.ipynb"
+NOTEBOOK_PW04_FINALIZE_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW04_Attack_Merge_And_Metrics - 3.Finalize.ipynb"
 NOTEBOOK_PW05_PATH = REPO_ROOT / "paper_workflow" / "notebook" / "PW05_Release_And_Signoff.ipynb"
 README_PATH = REPO_ROOT / "paper_workflow" / "README.md"
 PAPER_PILOT_PROMPT_PATH = REPO_ROOT / "prompts" / "paper_pilot_10.txt"
@@ -381,7 +381,10 @@ def test_paper_workflow_notebooks_enable_local_runtime_bundle_mode(
         assert token in prepare_source
 
     assert 'from paper_workflow.scripts.pw_local_runtime import archive_local_runtime_for_stage' in archive_source
-    assert f'stage_name="{archive_stage_name}"' in archive_source
+    if notebook_path in {NOTEBOOK_PW04_PREPARE_PATH, NOTEBOOK_PW04_QUALITY_PATH, NOTEBOOK_PW04_FINALIZE_PATH}:
+        assert 'stage_name=PW04_ARCHIVE_STAGE_NAME' in archive_source
+    else:
+        assert f'stage_name="{archive_stage_name}"' in archive_source
     assert 'local_project_root=LOCAL_PROJECT_ROOT' in archive_source
     assert 'drive_bundle_root=DRIVE_BUNDLE_ROOT' in archive_source
     assert 'clean_after_archive=False' in archive_source
@@ -474,6 +477,49 @@ def test_pw00_notebook_passes_repo_import_env_to_subprocess() -> None:
     assert "build_repo_import_subprocess_env" in source
     assert "PW00_SUBPROCESS_ENV = build_repo_import_subprocess_env(repo_root=REPO_ROOT)" in source
     assert "env=PW00_SUBPROCESS_ENV" in source
+
+
+def test_pw00_pw01_pw02_pw03_pw04_pw05_notebooks_write_runtime_diagnostics_before_archive() -> None:
+    """
+    Verify all PW notebooks write runtime diagnostics before bundle archive.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw00_execute = _find_code_cell_source(NOTEBOOK_PW00_PATH, "COMMAND = [")
+    pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "COMMAND = [")
+    pw02_execute = _find_code_cell_source(NOTEBOOK_PW02_PATH, "COMMAND = [")
+    pw03_execute = _find_code_cell_source(NOTEBOOK_PW03_PATH, "COMMAND = [")
+    pw04_prepare_execute = _find_code_cell_source(NOTEBOOK_PW04_PREPARE_PATH, "build_pw04_command(")
+    pw04_quality_execute = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "build_pw04_command(")
+    pw04_finalize_execute = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "build_pw04_command(")
+    pw05_execute = _find_code_cell_source(NOTEBOOK_PW05_PATH, "COMMAND = [")
+
+    for source_text, diagnostics_name in [
+        (pw00_execute, "pw00_runtime_diagnostics.json"),
+        (pw01_execute, "pw01_"),
+        (pw02_execute, "pw02_runtime_diagnostics.json"),
+        (pw03_execute, "pw03_attack_shard_"),
+        (pw04_prepare_execute, "pw04_prepare_runtime_diagnostics.json"),
+        (pw04_quality_execute, "pw04_quality_shard_"),
+        (pw04_finalize_execute, "pw04_finalize_runtime_diagnostics.json"),
+        (pw05_execute, "pw05_runtime_diagnostics.json"),
+    ]:
+        assert 'from datetime import datetime, timezone' in source_text
+        assert 'import time' in source_text
+        assert 'RUN_STARTED_AT_UTC = datetime.now(timezone.utc).isoformat()' in source_text
+        assert 'RUN_FINISHED_AT_UTC = datetime.now(timezone.utc).isoformat()' in source_text
+        assert 'RUN_ELAPSED_SECONDS = time.perf_counter() - RUN_STARTED_AT_MONOTONIC' in source_text
+        assert 'build_stage_runtime_diagnostics_payload' in source_text
+        assert 'build_stage_runtime_workload_summary' in source_text
+        assert 'write_stage_runtime_diagnostics' in source_text
+        assert 'count_summary=' in source_text
+        assert 'workload_summary=' in source_text
+        assert diagnostics_name in source_text
+        assert source_text.index('write_stage_runtime_diagnostics(') < source_text.index('archive_local_runtime_for_stage(')
 
 
 @pytest.mark.parametrize(

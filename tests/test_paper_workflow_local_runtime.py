@@ -16,9 +16,12 @@ from paper_workflow.scripts.pw_local_runtime import (
     POSITIVE_SOURCE_ROLE,
     PW00_STAGE_NAME,
     PW01_STAGE_NAME,
+    PW02_STAGE_NAME,
     PW03_STAGE_NAME,
+    PW04_PREPARE_STAGE_NAME,
     PW04_QUALITY_STAGE_NAME,
     PW04_FINALIZE_STAGE_NAME,
+    _stage_output_relative_paths,
     _verify_required_inputs_for_stage,
     archive_local_runtime_for_stage,
     discover_expected_shards,
@@ -122,6 +125,15 @@ def _build_pw00_family_tree(
             "family_id": family_id,
             "source_shard_count": source_shard_count,
             "attack_shard_count": attack_shard_count,
+        },
+    )
+    _write_json(
+        runtime_state_root / "pw00_runtime_diagnostics.json",
+        {
+            "stage_name": PW00_STAGE_NAME,
+            "family_id": family_id,
+            "expected_output_exists": True,
+            "return_code": 0,
         },
     )
     _write_text(snapshots_root / "config_snapshot.yaml", "model_id: test-model\n")
@@ -407,8 +419,57 @@ def test_pw00_bundle_archive_and_pw01_prepare_roundtrip(tmp_path: Path) -> None:
     assert (restored_family_root / "manifests" / "paper_eval_family_manifest.json").exists()
     assert (restored_family_root / "manifests" / "source_event_grid.jsonl").exists()
     assert (restored_family_root / "runtime_state" / "pw00_summary.json").exists()
+    assert (restored_family_root / "runtime_state" / "pw00_runtime_diagnostics.json").exists()
     assert (restored_family_root / "snapshots" / "config_snapshot.yaml").exists()
     assert str(family_root.name) == family_id
+
+
+def test_stage_output_relative_paths_include_runtime_diagnostics() -> None:
+    """
+    Verify staged archive outputs include required runtime diagnostics artifacts.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    family_id = "family_stage_output_contract"
+
+    pw00_paths = _stage_output_relative_paths(stage_name=PW00_STAGE_NAME, family_id=family_id)
+    pw01_paths = _stage_output_relative_paths(
+        stage_name=PW01_STAGE_NAME,
+        family_id=family_id,
+        sample_role="positive_source",
+        shard_index=2,
+    )
+    pw02_paths = _stage_output_relative_paths(stage_name=PW02_STAGE_NAME, family_id=family_id)
+    pw03_paths = _stage_output_relative_paths(
+        stage_name=PW03_STAGE_NAME,
+        family_id=family_id,
+        shard_index=5,
+    )
+    pw04_prepare_paths = _stage_output_relative_paths(stage_name=PW04_PREPARE_STAGE_NAME, family_id=family_id)
+    pw04_quality_paths = _stage_output_relative_paths(
+        stage_name=PW04_QUALITY_STAGE_NAME,
+        family_id=family_id,
+        shard_index=3,
+    )
+    pw04_finalize_paths = _stage_output_relative_paths(stage_name=PW04_FINALIZE_STAGE_NAME, family_id=family_id)
+
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw00_runtime_diagnostics.json" in pw00_paths
+    assert (
+        f"paper_workflow/families/{family_id}/runtime_state/pw01_positive_source_shard_0002_runtime_diagnostics.json"
+        in pw01_paths
+    )
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw02_runtime_diagnostics.json" in pw02_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw03_attack_shard_0005_runtime_diagnostics.json" in pw03_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw04_prepare_runtime_diagnostics.json" in pw04_prepare_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw04_prepare_gpu_session_peak.json" in pw04_prepare_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw04_quality_shard_0003_runtime_diagnostics.json" in pw04_quality_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw04_quality_shard_0003_gpu_session_peak.json" in pw04_quality_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw04_finalize_runtime_diagnostics.json" in pw04_finalize_paths
+    assert f"paper_workflow/families/{family_id}/runtime_state/pw04_finalize_gpu_session_peak.json" in pw04_finalize_paths
 
 
 def test_discover_expected_shards_and_resolve_dependencies_are_dynamic(tmp_path: Path) -> None:

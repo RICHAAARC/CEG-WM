@@ -1771,6 +1771,7 @@ def _stage_output_relative_paths(
         return [
             f"{family_root_relative}/manifests",
             f"{family_root_relative}/runtime_state/pw00_summary.json",
+            f"{family_root_relative}/runtime_state/pw00_runtime_diagnostics.json",
             f"{family_root_relative}/snapshots",
         ]
     if stage_name == PW01_STAGE_NAME:
@@ -1779,30 +1780,43 @@ def _stage_output_relative_paths(
         if not isinstance(shard_index, int) or shard_index < 0:
             raise ValueError("PW01 archive requires non-negative shard_index")
         return [
-            f"{family_root_relative}/source_shards/{SOURCE_ROLE_DIRECTORY_NAMES[sample_role]}/shard_{shard_index:04d}"
+            f"{family_root_relative}/source_shards/{SOURCE_ROLE_DIRECTORY_NAMES[sample_role]}/shard_{shard_index:04d}",
+            f"{family_root_relative}/runtime_state/pw01_{sample_role}_shard_{shard_index:04d}_runtime_diagnostics.json",
         ]
     if stage_name == PW02_STAGE_NAME:
         return [
             f"{family_root_relative}/manifests",
             f"{family_root_relative}/exports/pw02",
             f"{family_root_relative}/runtime_state/pw02_summary.json",
+            f"{family_root_relative}/runtime_state/pw02_runtime_diagnostics.json",
         ]
     if stage_name == PW03_STAGE_NAME:
         if not isinstance(shard_index, int) or shard_index < 0:
             raise ValueError("PW03 archive requires non-negative shard_index")
-        return [f"{family_root_relative}/attack_shards/shard_{shard_index:04d}"]
+        return [
+            f"{family_root_relative}/attack_shards/shard_{shard_index:04d}",
+            f"{family_root_relative}/runtime_state/pw03_attack_shard_{shard_index:04d}_runtime_diagnostics.json",
+        ]
     if stage_name == PW04_PREPARE_STAGE_NAME:
-        return [f"{family_root_relative}/exports/pw04"]
+        return [
+            f"{family_root_relative}/exports/pw04",
+            f"{family_root_relative}/runtime_state/pw04_prepare_runtime_diagnostics.json",
+            f"{family_root_relative}/runtime_state/pw04_prepare_gpu_session_peak.json",
+        ]
     if stage_name == PW04_QUALITY_STAGE_NAME:
         if not isinstance(shard_index, int) or shard_index < 0:
             raise ValueError("PW04 quality archive requires non-negative shard_index")
         return [
-            f"{family_root_relative}/exports/pw04/quality/shards/quality_shard_{shard_index:04d}.json"
+            f"{family_root_relative}/exports/pw04/quality/shards/quality_shard_{shard_index:04d}.json",
+            f"{family_root_relative}/runtime_state/pw04_quality_shard_{shard_index:04d}_runtime_diagnostics.json",
+            f"{family_root_relative}/runtime_state/pw04_quality_shard_{shard_index:04d}_gpu_session_peak.json",
         ]
     if stage_name == PW04_FINALIZE_STAGE_NAME:
         return [
             f"{family_root_relative}/exports/pw04",
             f"{family_root_relative}/runtime_state/pw04_summary.json",
+            f"{family_root_relative}/runtime_state/pw04_finalize_runtime_diagnostics.json",
+            f"{family_root_relative}/runtime_state/pw04_finalize_gpu_session_peak.json",
         ]
     if stage_name == PW05_STAGE_NAME:
         return [family_root_relative]

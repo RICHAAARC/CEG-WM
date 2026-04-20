@@ -107,6 +107,13 @@ def test_pw05_notebook_binds_expected_script_and_parameters() -> None:
     assert '"--drive-project-root"' in execute_source
     assert '"--family-id"' in execute_source
     assert 'COMMAND.append("--force-rerun")' in execute_source
+    assert 'build_stage_runtime_diagnostics_payload' in execute_source
+    assert 'build_stage_runtime_workload_summary' in execute_source
+    assert 'write_stage_runtime_diagnostics' in execute_source
+    assert 'pw05_runtime_diagnostics.json' in execute_source
+    assert 'PW05_SIGNOFF_REPORT_PATH_VALUE = PW05_SUMMARY.get("signoff_report_path")' in execute_source
+    assert 'PW05_COUNT_SUMMARY = {' in execute_source
+    assert 'unit_label="checked_source_artifacts"' in execute_source
 
 
 def test_pw05_notebook_reads_pw04_inputs_and_pw05_outputs() -> None:

@@ -296,12 +296,16 @@ def test_load_gpu_peak_summary_and_build_notebook_summary(tmp_path: Path) -> Non
         summary_path,
         {
             "status": "completed",
+            "started_at_utc": "2026-04-20T00:00:00+00:00",
+            "finished_at_utc": "2026-04-20T00:00:03+00:00",
+            "elapsed_seconds": 3.0,
             "session_board_peak_memory_used_mib": 2048,
             "session_board_peak_increment_mib": 1024,
             "peak_gpu_index": 0,
             "peak_gpu_uuid": "GPU-FAKE",
             "peak_gpu_name": "Fake GPU",
             "visible_gpu_count": 1,
+            "wrapped_command": ["python", "demo.py"],
             "wrapped_return_code": 0,
         },
     )
@@ -330,6 +334,10 @@ def test_load_gpu_peak_summary_and_build_notebook_summary(tmp_path: Path) -> Non
     assert notebook_summary["gpu_session_peak_path"] == str(summary_path)
     assert notebook_summary["gpu_peak_memory_mib"] == 2048
     assert notebook_summary["peak_gpu_name"] == "Fake GPU"
+    assert notebook_summary["monitor_started_at_utc"] == "2026-04-20T00:00:00+00:00"
+    assert notebook_summary["monitor_finished_at_utc"] == "2026-04-20T00:00:03+00:00"
+    assert notebook_summary["monitor_elapsed_seconds"] == 3.0
+    assert notebook_summary["wrapped_command"] == ["python", "demo.py"]
     assert notebook_summary["monitor_recommendation"] == "24 GB 档更稳妥"
 
 

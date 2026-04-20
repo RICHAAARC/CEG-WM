@@ -194,9 +194,15 @@ def test_pw03_notebook_reads_pw02_finalize_inputs_and_shard_outputs() -> None:
 
     assert 'SHARD_ROOT = FAMILY_ROOT / "attack_shards" / f"shard_{ATTACK_SHARD_INDEX:04d}"' in execute_source
     assert 'PW03_SHARD_MANIFEST_PATH = SHARD_ROOT / "shard_manifest.json"' in execute_source
+    assert 'PW03_RUNTIME_DIAGNOSTICS_PATH = (' in execute_source
     assert 'GPU_PEAK_SUMMARY_PATH = SHARD_ROOT / "artifacts" / "gpu_session_peak.json"' in execute_source
     assert 'PW03_SUMMARY = json.loads(PW03_SHARD_MANIFEST_PATH.read_text(encoding="utf-8"))' in execute_source
     assert 'GPU_PEAK_SUMMARY = json.loads(GPU_PEAK_SUMMARY_PATH.read_text(encoding="utf-8"))' in execute_source
+    assert 'build_stage_runtime_diagnostics_payload(' in execute_source
+    assert 'build_stage_runtime_workload_summary(' in execute_source
+    assert 'PW03_COUNT_SUMMARY = {' in execute_source
+    assert 'PW03_WORKLOAD_UNIT_COUNT = PW03_COUNT_SUMMARY["assigned_attack_event_count"]' in execute_source
+    assert 'print_json("pw03_runtime_diagnostics", PW03_RUNTIME_DIAGNOSTICS)' in execute_source
     assert 'print_json("gpu_session_peak_summary", GPU_PEAK_NOTEBOOK_SUMMARY)' in execute_source
 
     assert '"total_event_count": PW03_SUMMARY.get("event_count")' in summary_source

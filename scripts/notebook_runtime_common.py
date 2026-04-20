@@ -43,6 +43,8 @@ ATTESTATION_ENV_FILE_NAME = "attestation_env.json"
 ATTESTATION_ENV_INFO_FILE_NAME = "attestation_env_info.json"
 NOTEBOOK_MODEL_SNAPSHOT_ENV_VAR = "CEG_WM_MODEL_SNAPSHOT_PATH"
 NOTEBOOK_MODEL_SNAPSHOT_BINDING_SOURCE = "notebook_snapshot_download"
+RUNTIME_DIAGNOSTICS_SCHEMA_VERSION = "pw_runtime_diagnostics_v1"
+RUNTIME_DIAGNOSTICS_STDIO_TAIL_LIMIT = 4000
 ATTESTATION_ENV_VAR_LENGTHS = {
     "k_master_env_var": 64,
     "k_prompt_env_var": 32,
@@ -1121,6 +1123,269 @@ def write_json_atomic(path_obj: Path, payload: Mapping[str, Any]) -> None:
         json.dumps(dict(payload), indent=2, ensure_ascii=False, sort_keys=True),
         encoding="utf-8",
     )
+
+
+def _truncate_output_tail(text: str | None, *, limit: int = RUNTIME_DIAGNOSTICS_STDIO_TAIL_LIMIT) -> str | None:
+    """
+    功能：截断 stdout / stderr 尾部文本。
+
+    Truncate one stdout or stderr payload to a stable tail section.
+
+    Args:
+        text: Full subprocess output text.
+        limit: Maximum retained character count.
+
+    Returns:
+        Truncated tail text, or None when unavailable.
+    """
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        raise TypeError("text must be str or None")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise TypeError("limit must be positive int")
+    if len(text) <= limit:
+        return text
+    return f"...\n{text[-limit:]}"
+
+
+def _normalize_runtime_count_summary(count_summary: Mapping[str, Any]) -> Dict[str, int]:
+    """
+    功能：规范化 stage runtime diagnostics 的 count_summary。 
+
+    Normalize one runtime diagnostics count summary into non-negative integers.
+
+    Args:
+        count_summary: Stage-specific count mapping.
+
+    Returns:
+        Normalized count mapping.
+    """
+    if not isinstance(count_summary, Mapping):
+        raise TypeError("count_summary must be Mapping")
+
+    normalized: Dict[str, int] = {}
+    for raw_key, raw_value in count_summary.items():
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise TypeError("count_summary keys must be non-empty str")
+        if not isinstance(raw_value, int) or isinstance(raw_value, bool) or raw_value < 0:
+            raise TypeError(f"count_summary[{raw_key!r}] must be non-negative int")
+        normalized[raw_key.strip()] = int(raw_value)
+
+    if not normalized:
+        raise ValueError("count_summary must not be empty")
+    return normalized
+
+
+def build_stage_runtime_workload_summary(
+    *,
+    unit_label: str,
+    unit_count: int,
+    elapsed_seconds: float,
+) -> Dict[str, Any]:
+    """
+    功能：构造 stage runtime diagnostics 的 workload_summary。 
+
+    Build the workload summary for one stage runtime diagnostics payload.
+
+    Args:
+        unit_label: Canonical workload unit label.
+        unit_count: Number of workload units.
+        elapsed_seconds: Stage elapsed seconds.
+
+    Returns:
+        Workload summary mapping with per-unit elapsed time.
+    """
+    if not isinstance(unit_label, str) or not unit_label.strip():
+        raise TypeError("unit_label must be non-empty str")
+    if not isinstance(unit_count, int) or isinstance(unit_count, bool) or unit_count < 0:
+        raise TypeError("unit_count must be non-negative int")
+    if not isinstance(elapsed_seconds, (int, float)) or isinstance(elapsed_seconds, bool) or float(elapsed_seconds) < 0:
+        raise TypeError("elapsed_seconds must be non-negative float")
+
+    normalized_elapsed_seconds = float(elapsed_seconds)
+    elapsed_seconds_per_unit = None
+    if unit_count > 0:
+        elapsed_seconds_per_unit = normalized_elapsed_seconds / float(unit_count)
+
+    return {
+        "unit_label": unit_label.strip(),
+        "unit_count": int(unit_count),
+        "elapsed_seconds_per_unit": elapsed_seconds_per_unit,
+    }
+
+
+def _normalize_runtime_workload_summary(workload_summary: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    功能：规范化 stage runtime diagnostics 的 workload_summary。 
+
+    Normalize one runtime diagnostics workload summary payload.
+
+    Args:
+        workload_summary: Raw workload summary mapping.
+
+    Returns:
+        Normalized workload summary mapping.
+    """
+    if not isinstance(workload_summary, Mapping):
+        raise TypeError("workload_summary must be Mapping")
+
+    unit_label = workload_summary.get("unit_label")
+    unit_count = workload_summary.get("unit_count")
+    elapsed_seconds_per_unit = workload_summary.get("elapsed_seconds_per_unit")
+
+    if not isinstance(unit_label, str) or not unit_label.strip():
+        raise TypeError("workload_summary.unit_label must be non-empty str")
+    if not isinstance(unit_count, int) or isinstance(unit_count, bool) or unit_count < 0:
+        raise TypeError("workload_summary.unit_count must be non-negative int")
+    if elapsed_seconds_per_unit is not None and (
+        not isinstance(elapsed_seconds_per_unit, (int, float))
+        or isinstance(elapsed_seconds_per_unit, bool)
+        or float(elapsed_seconds_per_unit) < 0
+    ):
+        raise TypeError("workload_summary.elapsed_seconds_per_unit must be non-negative float or None")
+
+    normalized = {
+        "unit_label": unit_label.strip(),
+        "unit_count": int(unit_count),
+        "elapsed_seconds_per_unit": (
+            None if elapsed_seconds_per_unit is None else float(elapsed_seconds_per_unit)
+        ),
+    }
+    for raw_key, raw_value in workload_summary.items():
+        if raw_key in normalized:
+            continue
+        normalized[str(raw_key)] = raw_value
+    return normalized
+
+
+def build_stage_runtime_diagnostics_payload(
+    *,
+    stage_name: str,
+    family_id: str,
+    expected_output_label: str,
+    expected_output_path: Path,
+    started_at_utc: str,
+    finished_at_utc: str,
+    elapsed_seconds: float,
+    return_code: int,
+    stdout_text: str | None,
+    stderr_text: str | None,
+    count_summary: Mapping[str, Any],
+    workload_summary: Mapping[str, Any],
+    shard_index: int | None = None,
+    sample_role: str | None = None,
+    gpu_session_peak_path: Path | None = None,
+    monitor_status: str | None = None,
+) -> Dict[str, Any]:
+    """
+    功能：构造 notebook stage 级运行时诊断 JSON 载荷。
+
+    Build the stage-level runtime diagnostics payload for one notebook stage.
+
+    Args:
+        stage_name: Canonical stage name.
+        family_id: Family identifier.
+        expected_output_label: Human-readable expected output label.
+        expected_output_path: Expected output path.
+        started_at_utc: Stage start timestamp in UTC.
+        finished_at_utc: Stage finish timestamp in UTC.
+        elapsed_seconds: Stage elapsed seconds.
+        return_code: Subprocess return code.
+        stdout_text: Full subprocess stdout text.
+        stderr_text: Full subprocess stderr text.
+        count_summary: Stage-specific count mapping.
+        workload_summary: Stage workload summary mapping.
+        shard_index: Optional shard index.
+        sample_role: Optional sample role.
+        gpu_session_peak_path: Optional GPU peak summary path.
+        monitor_status: Optional monitor status.
+
+    Returns:
+        Runtime diagnostics mapping ready for JSON persistence.
+    """
+    if not isinstance(stage_name, str) or not stage_name.strip():
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(family_id, str) or not family_id.strip():
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(expected_output_label, str) or not expected_output_label.strip():
+        raise TypeError("expected_output_label must be non-empty str")
+    if not isinstance(expected_output_path, Path):
+        raise TypeError("expected_output_path must be Path")
+    if not isinstance(started_at_utc, str) or not started_at_utc.strip():
+        raise TypeError("started_at_utc must be non-empty str")
+    if not isinstance(finished_at_utc, str) or not finished_at_utc.strip():
+        raise TypeError("finished_at_utc must be non-empty str")
+    if not isinstance(elapsed_seconds, (int, float)) or isinstance(elapsed_seconds, bool) or float(elapsed_seconds) < 0:
+        raise TypeError("elapsed_seconds must be non-negative float")
+    if not isinstance(return_code, int) or isinstance(return_code, bool):
+        raise TypeError("return_code must be int")
+    if stdout_text is not None and not isinstance(stdout_text, str):
+        raise TypeError("stdout_text must be str or None")
+    if stderr_text is not None and not isinstance(stderr_text, str):
+        raise TypeError("stderr_text must be str or None")
+    normalized_count_summary = _normalize_runtime_count_summary(count_summary)
+    normalized_workload_summary = _normalize_runtime_workload_summary(workload_summary)
+    if shard_index is not None and (
+        not isinstance(shard_index, int)
+        or isinstance(shard_index, bool)
+        or shard_index < 0
+    ):
+        raise TypeError("shard_index must be non-negative int or None")
+    if sample_role is not None and (not isinstance(sample_role, str) or not sample_role.strip()):
+        raise TypeError("sample_role must be non-empty str or None")
+    if gpu_session_peak_path is not None and not isinstance(gpu_session_peak_path, Path):
+        raise TypeError("gpu_session_peak_path must be Path or None")
+    if monitor_status is not None and (not isinstance(monitor_status, str) or not monitor_status.strip()):
+        raise TypeError("monitor_status must be non-empty str or None")
+
+    return {
+        "artifact_type": "paper_workflow_stage_runtime_diagnostics",
+        "schema_version": RUNTIME_DIAGNOSTICS_SCHEMA_VERSION,
+        "created_at": utc_now_iso(),
+        "stage_name": stage_name.strip(),
+        "family_id": family_id.strip(),
+        "sample_role": sample_role.strip() if isinstance(sample_role, str) else None,
+        "shard_index": shard_index,
+        "expected_output_label": expected_output_label.strip(),
+        "expected_output_path": normalize_path_value(expected_output_path),
+        "expected_output_exists": expected_output_path.exists(),
+        "started_at_utc": started_at_utc.strip(),
+        "finished_at_utc": finished_at_utc.strip(),
+        "elapsed_seconds": float(elapsed_seconds),
+        "count_summary": normalized_count_summary,
+        "workload_summary": normalized_workload_summary,
+        "return_code": int(return_code),
+        "stdout_tail": _truncate_output_tail(stdout_text),
+        "stderr_tail": _truncate_output_tail(stderr_text),
+        "gpu_session_peak_path": normalize_path_value(gpu_session_peak_path) if isinstance(gpu_session_peak_path, Path) else None,
+        "monitor_status": monitor_status.strip() if isinstance(monitor_status, str) else None,
+    }
+
+
+def write_stage_runtime_diagnostics(
+    *,
+    diagnostics_path: Path,
+    payload: Mapping[str, Any],
+) -> Path:
+    """
+    功能：写出 notebook stage 级运行时诊断 JSON。
+
+    Persist one notebook stage runtime diagnostics JSON payload.
+
+    Args:
+        diagnostics_path: Runtime diagnostics output path.
+        payload: Diagnostics mapping payload.
+
+    Returns:
+        Written diagnostics path.
+    """
+    if not isinstance(diagnostics_path, Path):
+        raise TypeError("diagnostics_path must be Path")
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be Mapping")
+    write_json_atomic(diagnostics_path, payload)
+    return diagnostics_path
 
 
 def compute_mapping_sha256(payload: Mapping[str, Any]) -> str:

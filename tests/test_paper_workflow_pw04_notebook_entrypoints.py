@@ -143,18 +143,32 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'normalize_quality_device_request' not in quality_runtime_source
 
     assert 'build_pw04_command(' in execute_source
+    assert 'PW04_COMMAND_KWARGS = {' in execute_source
     assert 'build_pw04_subprocess_env(' in execute_source
     assert 'resolve_pw04_expected_output(' in execute_source
     assert 'load_gpu_peak_summary(' in execute_source
     assert 'build_gpu_peak_notebook_summary(' in execute_source
+    assert 'build_stage_runtime_diagnostics_payload(' in execute_source
+    assert 'build_stage_runtime_workload_summary(' in execute_source
+    assert 'write_stage_runtime_diagnostics(' in execute_source
+    assert 'PW04_RUNTIME_DIAGNOSTICS_PATH =' in execute_source
+    assert 'PW04_ARCHIVE_STAGE_NAME = f"PW04_Attack_Merge_And_Metrics_{PW04_MODE}"' in execute_source
+    assert 'PW04_COUNT_SUMMARY = {' in execute_source
     assert 'pw04_mode=PW04_MODE' in execute_source
-    assert 'quality_shard_index=QUALITY_SHARD_INDEX' in execute_source
+    assert '"quality_shard_index": QUALITY_SHARD_INDEX' in execute_source
     if expected_mode == "prepare":
-        assert 'quality_shard_count=QUALITY_SHARD_COUNT' in execute_source
+        assert 'PW04_COMMAND_KWARGS["quality_shard_count"] = QUALITY_SHARD_COUNT' in execute_source
+        assert 'pw04_prepare_runtime_diagnostics.json' in execute_source
     else:
-        assert 'quality_shard_count=' not in execute_source
-    assert 'force_rerun=FORCE_RERUN' in execute_source
-    assert 'enable_tail_estimation=ENABLE_TAIL_ESTIMATION' in execute_source
+        assert 'if PW04_MODE == "prepare":' in execute_source
+    if expected_mode == "quality_shard":
+        assert 'pw04_quality_shard_' in execute_source
+        assert 'unit_label="quality_pairs"' in execute_source
+    if expected_mode == "finalize":
+        assert 'pw04_finalize_runtime_diagnostics.json' in execute_source
+        assert 'unit_label="quality_shards"' in execute_source
+    assert '"force_rerun": FORCE_RERUN' in execute_source
+    assert '"enable_tail_estimation": ENABLE_TAIL_ESTIMATION' in execute_source
     assert 'def load_gpu_peak_summary(' not in execute_source
     assert 'def build_gpu_peak_notebook_summary(' not in execute_source
 
@@ -206,6 +220,25 @@ def test_pw04_notebook_reads_pw02_inputs_and_pw04_outputs(notebook_path: Path) -
     assert 'TAIL_ESTIMATION_PATHS' not in summary_source
     assert 'matplotlib' not in summary_source
     assert 'np.random' not in summary_source
+
+
+def test_pw04_notebook_runtime_diagnostics_names_are_mode_specific() -> None:
+    """
+    Verify PW04 notebooks bind distinct runtime diagnostics file names by mode.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    prepare_execute = _find_code_cell_source(NOTEBOOK_PW04_PREPARE_PATH, "build_pw04_command(")
+    quality_execute = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "build_pw04_command(")
+    finalize_execute = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "build_pw04_command(")
+
+    assert 'pw04_prepare_runtime_diagnostics.json' in prepare_execute
+    assert 'pw04_quality_shard_' in quality_execute
+    assert 'pw04_finalize_runtime_diagnostics.json' in finalize_execute
 
 
 def test_pw04_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
