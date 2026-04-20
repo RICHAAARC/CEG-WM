@@ -775,11 +775,28 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
         "family_root": family_root,
         "family_manifest_path": family_manifest_path,
         "config_snapshot_path": config_snapshot_path,
+        "pw02_payload_reference_sidecar_path": pw02_payload_reference_sidecar_path,
+        "pw02_payload_decode_sidecar_path": pw02_payload_decode_sidecar_path,
+        "pw04_payload_decode_sidecar_path": pw04_payload_decode_sidecar_path,
         "pw02_finalize_manifest_path": pw02_finalize_manifest_path,
         "pw02_content_threshold_export_path": pw02_content_threshold_export_path,
         "pw02_attestation_threshold_export_path": pw02_attestation_threshold_export_path,
         "pw04_summary_path": pw04_summary_path,
     }
+
+
+def _read_zip_members(path_obj: Path) -> set[str]:
+    """
+    Read one ZIP member set.
+
+    Args:
+        path_obj: ZIP archive path.
+
+    Returns:
+        Archive member names.
+    """
+    with zipfile.ZipFile(path_obj, "r") as archive:
+        return set(archive.namelist())
 
 
 def test_pw05_release_signoff_packages_canonical_pw04_exports(tmp_path: Path) -> None:
@@ -1140,4 +1157,120 @@ def test_pw05_requires_completed_pw04_exports(tmp_path: Path) -> None:
             drive_project_root=Path(str(fixture["drive_root"])),
             family_id=str(fixture["family_id"]),
             stage_run_id="pw05_release_demo",
+        )
+
+
+def test_pw05_direct_drive_keeps_payload_sidecars_in_release_package(tmp_path: Path) -> None:
+    """
+    Verify direct-drive PW05 still packages payload sidecars when they exist.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    fixture = _build_pw05_family_fixture(tmp_path)
+
+    summary = pw05_module.run_pw05_release_signoff(
+        drive_project_root=Path(str(fixture["drive_root"])),
+        family_id=str(fixture["family_id"]),
+        stage_run_id="pw05_direct_drive_sidecars",
+    )
+
+    release_manifest = _load_json_dict(Path(str(summary["release_manifest_path"])))
+    signoff_report = _load_json_dict(Path(str(summary["signoff_report_path"])))
+    zip_members = _read_zip_members(Path(str(summary["package_path"])))
+
+    assert summary["missing_payload_sidecar_count"] == 0
+    assert summary["missing_payload_sidecar_annotations"] == []
+    assert release_manifest["missing_payload_sidecar_count"] == 0
+    assert release_manifest["missing_payload_sidecar_annotations"] == []
+    assert signoff_report["missing_payload_sidecar_count"] == 0
+    assert signoff_report["missing_payload_sidecar_annotations"] == []
+    assert "pw02_positive_source_payload_reference_sidecar_e000001" in release_manifest["source_artifact_index"]
+    assert "pw02_positive_source_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
+    assert "pw04_attacked_positive_payload_decode_sidecar_e000001" in release_manifest["source_artifact_index"]
+    assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_reference_sidecar.json" in zip_members
+    assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in zip_members
+    assert "source/attack_shards/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" in zip_members
+
+
+def test_pw05_allows_missing_payload_sidecars_for_local_runtime_alignment(tmp_path: Path) -> None:
+    """
+    Verify missing payload sidecars become non-blocking omissions under local-runtime alignment.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    fixture = _build_pw05_family_fixture(tmp_path)
+    for key_name in [
+        "pw02_payload_reference_sidecar_path",
+        "pw02_payload_decode_sidecar_path",
+        "pw04_payload_decode_sidecar_path",
+    ]:
+        Path(str(fixture[key_name])).unlink()
+
+    summary = pw05_module.run_pw05_release_signoff(
+        drive_project_root=Path(str(fixture["drive_root"])),
+        family_id=str(fixture["family_id"]),
+        stage_run_id="pw05_local_runtime_alignment",
+    )
+
+    release_manifest = _load_json_dict(Path(str(summary["release_manifest_path"])))
+    signoff_report = _load_json_dict(Path(str(summary["signoff_report_path"])))
+    zip_members = _read_zip_members(Path(str(summary["package_path"])))
+    omission_annotations = cast(List[Dict[str, Any]], release_manifest["missing_payload_sidecar_annotations"])
+
+    assert summary["status"] == "completed"
+    assert summary["decision"] == "ALLOW_FREEZE"
+    assert signoff_report["decision"] == "ALLOW_FREEZE"
+    assert signoff_report["blocking_reason_count"] == 0
+    assert summary["missing_payload_sidecar_count"] == 3
+    assert release_manifest["missing_payload_sidecar_count"] == 3
+    assert signoff_report["missing_payload_sidecar_count"] == 3
+    assert omission_annotations
+    assert signoff_report["missing_payload_sidecar_annotations"] == omission_annotations
+    assert summary["missing_payload_sidecar_annotations"] == omission_annotations
+    for label in [
+        "pw02_positive_source_payload_reference_sidecar_e000001",
+        "pw02_positive_source_payload_decode_sidecar_e000001",
+        "pw04_attacked_positive_payload_decode_sidecar_e000001",
+    ]:
+        assert label not in release_manifest["source_artifact_index"]
+    for annotation in omission_annotations:
+        assert annotation["reason"] == pw05_module.PAYLOAD_SIDECAR_OMISSION_REASON
+        assert annotation["source_stage"] in {"PW02", "PW04"}
+        assert annotation["canonical"] is False
+        assert annotation["analysis_only"] is True
+        assert annotation["blocking"] is False
+        assert annotation["local_runtime_alignment"] is True
+        assert isinstance(annotation["label"], str) and annotation["label"]
+        assert isinstance(annotation["source_path"], str) and annotation["source_path"]
+    assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_reference_sidecar.json" not in zip_members
+    assert "source/source_shards/positive/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" not in zip_members
+    assert "source/attack_shards/shard_0000/events/event_000001/artifacts/payload_decode_sidecar.json" not in zip_members
+
+
+def test_pw05_still_requires_canonical_artifacts_when_payload_sidecars_are_relaxed(tmp_path: Path) -> None:
+    """
+    Verify canonical PW05 source artifacts remain strict even after sidecar omission relaxation.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    fixture = _build_pw05_family_fixture(tmp_path)
+    Path(str(fixture["pw02_content_threshold_export_path"])).unlink()
+
+    with pytest.raises(FileNotFoundError, match="pw02_content_threshold_export"):
+        pw05_module.run_pw05_release_signoff(
+            drive_project_root=Path(str(fixture["drive_root"])),
+            family_id=str(fixture["family_id"]),
+            stage_run_id="pw05_missing_canonical_artifact",
         )

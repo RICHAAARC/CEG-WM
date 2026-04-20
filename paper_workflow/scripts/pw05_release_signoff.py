@@ -44,6 +44,7 @@ ALLOW_FREEZE = "ALLOW_FREEZE"
 BLOCK_FREEZE = "BLOCK_FREEZE"
 FORMAL_SIGNOFF_PASS_STATUS = "passed"
 FORMAL_SIGNOFF_BLOCK_STATUS = "blocked"
+PAYLOAD_SIDECAR_OMISSION_REASON = "not_packaged_in_upstream_bundle_or_not_available_in_local_runtime"
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -71,7 +72,12 @@ def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload)
 
 
-def _resolve_path_value_under_family_root(path_value: Any, family_root: Path, label: str) -> Path:
+def _resolve_path_value_under_family_root(
+    path_value: Any,
+    family_root: Path,
+    label: str,
+    require_exists: bool = True,
+) -> Path:
     """
     功能：把 summary 中的路径解析并约束到 family_root 内。
 
@@ -81,6 +87,7 @@ def _resolve_path_value_under_family_root(path_value: Any, family_root: Path, la
         path_value: Raw path-like value.
         family_root: Family root path.
         label: Human-readable label.
+        require_exists: Whether the resolved path must already exist as one file.
 
     Returns:
         Resolved file path.
@@ -89,6 +96,8 @@ def _resolve_path_value_under_family_root(path_value: Any, family_root: Path, la
         raise TypeError("family_root must be Path")
     if not isinstance(label, str) or not label:
         raise TypeError("label must be non-empty str")
+    if not isinstance(require_exists, bool):
+        raise TypeError("require_exists must be bool")
     if not isinstance(path_value, str) or not path_value.strip():
         raise ValueError(f"{label} must be non-empty path string")
 
@@ -99,7 +108,7 @@ def _resolve_path_value_under_family_root(path_value: Any, family_root: Path, la
         candidate_path = candidate_path.resolve()
 
     validate_path_within_base(family_root, candidate_path, label)
-    if not candidate_path.exists() or not candidate_path.is_file():
+    if require_exists and (not candidate_path.exists() or not candidate_path.is_file()):
         raise FileNotFoundError(f"{label} not found: {normalize_path_value(candidate_path)}")
     return candidate_path
 
@@ -321,6 +330,7 @@ def _collect_release_source_paths(
     family_id: str,
     family_root: Path,
     pw04_summary: Mapping[str, Any],
+    missing_payload_sidecar_annotations: List[Dict[str, Any]],
 ) -> Dict[str, Path]:
     """
     功能：收集并校验 PW05 release 所需的全部源工件。
@@ -331,6 +341,7 @@ def _collect_release_source_paths(
         family_id: Family identifier.
         family_root: Family root path.
         pw04_summary: PW04 summary mapping.
+        missing_payload_sidecar_annotations: Mutable omission annotation list.
 
     Returns:
         Fully validated label-to-path mapping.
@@ -341,6 +352,8 @@ def _collect_release_source_paths(
         raise TypeError("family_root must be Path")
     if not isinstance(pw04_summary, Mapping):
         raise TypeError("pw04_summary must be Mapping")
+    if not isinstance(missing_payload_sidecar_annotations, list):
+        raise TypeError("missing_payload_sidecar_annotations must be list")
 
     summary_family_id = pw04_summary.get("family_id")
     if isinstance(summary_family_id, str) and summary_family_id and summary_family_id != family_id:
@@ -455,6 +468,7 @@ def _collect_release_source_paths(
         _collect_payload_sidecar_source_paths(
             family_root=family_root,
             source_paths=source_paths,
+            missing_payload_sidecar_annotations=missing_payload_sidecar_annotations,
         )
     )
 
@@ -1115,10 +1129,111 @@ def _build_payload_sidecar_source_label(prefix: str, event_index: Any, fallback_
     return f"{prefix}_{fallback_ordinal:06d}"
 
 
+def _build_missing_payload_sidecar_annotation(
+    *,
+    label: str,
+    source_path: Path,
+    source_stage: str,
+) -> Dict[str, Any]:
+    """
+    功能：为缺失的 payload sidecar 生成非阻断 omission 注记。
+
+    Build one non-blocking omission annotation for a missing payload sidecar.
+
+    Args:
+        label: Stable payload sidecar label.
+        source_path: Resolved sidecar path under the family root.
+        source_stage: Upstream stage token.
+
+    Returns:
+        Non-blocking omission annotation mapping.
+    """
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if not isinstance(source_path, Path):
+        raise TypeError("source_path must be Path")
+    if source_stage not in {"PW02", "PW04"}:
+        raise ValueError("source_stage must be PW02 or PW04")
+
+    return {
+        "label": label,
+        "source_path": normalize_path_value(source_path),
+        "reason": PAYLOAD_SIDECAR_OMISSION_REASON,
+        "source_stage": source_stage,
+        "canonical": False,
+        "analysis_only": True,
+        "blocking": False,
+        "local_runtime_alignment": True,
+    }
+
+
+def _append_payload_sidecar_source_path_if_available(
+    *,
+    collected_paths: Dict[str, Path],
+    missing_payload_sidecar_annotations: List[Dict[str, Any]],
+    label: str,
+    path_value: str,
+    family_root: Path,
+    resolve_label: str,
+    source_stage: str,
+) -> None:
+    """
+    功能：在 sidecar 文件可用时纳入 release，否则记录 omission 注记。
+
+    Collect one payload sidecar path when available; otherwise record a
+    non-blocking omission annotation.
+
+    Args:
+        collected_paths: Mutable collected source-path mapping.
+        missing_payload_sidecar_annotations: Mutable omission annotation list.
+        label: Stable payload sidecar label.
+        path_value: Raw path string from upstream manifests.
+        family_root: Family root path.
+        resolve_label: Human-readable resolver label.
+        source_stage: Upstream stage token.
+
+    Returns:
+        None.
+    """
+    if not isinstance(collected_paths, dict):
+        raise TypeError("collected_paths must be dict")
+    if not isinstance(missing_payload_sidecar_annotations, list):
+        raise TypeError("missing_payload_sidecar_annotations must be list")
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise TypeError("path_value must be non-empty str")
+    if not isinstance(family_root, Path):
+        raise TypeError("family_root must be Path")
+    if not isinstance(resolve_label, str) or not resolve_label:
+        raise TypeError("resolve_label must be non-empty str")
+
+    resolved_path = _resolve_path_value_under_family_root(
+        path_value,
+        family_root,
+        resolve_label,
+        require_exists=False,
+    )
+    if resolved_path.exists():
+        if not resolved_path.is_file():
+            raise FileNotFoundError(f"{resolve_label} not found: {normalize_path_value(resolved_path)}")
+        collected_paths[label] = resolved_path
+        return
+
+    missing_payload_sidecar_annotations.append(
+        _build_missing_payload_sidecar_annotation(
+            label=label,
+            source_path=resolved_path,
+            source_stage=source_stage,
+        )
+    )
+
+
 def _collect_payload_sidecar_source_paths(
     *,
     family_root: Path,
     source_paths: Mapping[str, Path],
+    missing_payload_sidecar_annotations: List[Dict[str, Any]],
 ) -> Dict[str, Path]:
     """
     功能：从 PW02 与 PW04 pool manifest 收集 payload sidecar 源工件。
@@ -1128,6 +1243,7 @@ def _collect_payload_sidecar_source_paths(
     Args:
         family_root: Family root path.
         source_paths: Validated canonical source paths.
+        missing_payload_sidecar_annotations: Mutable omission annotation list.
 
     Returns:
         Additional label-to-path mappings for payload sidecars.
@@ -1136,6 +1252,8 @@ def _collect_payload_sidecar_source_paths(
         raise TypeError("family_root must be Path")
     if not isinstance(source_paths, Mapping):
         raise TypeError("source_paths must be Mapping")
+    if not isinstance(missing_payload_sidecar_annotations, list):
+        raise TypeError("missing_payload_sidecar_annotations must be list")
 
     collected_paths: Dict[str, Path] = {}
 
@@ -1165,29 +1283,33 @@ def _collect_payload_sidecar_source_paths(
                             event_index = event_node.get("event_index")
                             reference_path_value = event_node.get("payload_reference_sidecar_path")
                             if isinstance(reference_path_value, str) and reference_path_value.strip():
-                                collected_paths[
-                                    _build_payload_sidecar_source_label(
+                                _append_payload_sidecar_source_path_if_available(
+                                    collected_paths=collected_paths,
+                                    missing_payload_sidecar_annotations=missing_payload_sidecar_annotations,
+                                    label=_build_payload_sidecar_source_label(
                                         "pw02_positive_source_payload_reference_sidecar",
                                         event_index,
                                         ordinal,
-                                    )
-                                ] = _resolve_path_value_under_family_root(
-                                    reference_path_value,
-                                    family_root,
-                                    "PW02 payload reference sidecar",
+                                    ),
+                                    path_value=reference_path_value,
+                                    family_root=family_root,
+                                    resolve_label="PW02 payload reference sidecar",
+                                    source_stage="PW02",
                                 )
                             decode_path_value = event_node.get("payload_decode_sidecar_path")
                             if isinstance(decode_path_value, str) and decode_path_value.strip():
-                                collected_paths[
-                                    _build_payload_sidecar_source_label(
+                                _append_payload_sidecar_source_path_if_available(
+                                    collected_paths=collected_paths,
+                                    missing_payload_sidecar_annotations=missing_payload_sidecar_annotations,
+                                    label=_build_payload_sidecar_source_label(
                                         "pw02_positive_source_payload_decode_sidecar",
                                         event_index,
                                         ordinal,
-                                    )
-                                ] = _resolve_path_value_under_family_root(
-                                    decode_path_value,
-                                    family_root,
-                                    "PW02 payload decode sidecar",
+                                    ),
+                                    path_value=decode_path_value,
+                                    family_root=family_root,
+                                    resolve_label="PW02 payload decode sidecar",
+                                    source_stage="PW02",
                                 )
 
     attack_positive_pool_manifest_path = source_paths.get("pw04_attack_positive_pool_manifest")
@@ -1204,16 +1326,18 @@ def _collect_payload_sidecar_source_paths(
                 attack_event_index = event_node.get("attack_event_index")
                 decode_path_value = event_node.get("payload_decode_sidecar_path")
                 if isinstance(decode_path_value, str) and decode_path_value.strip():
-                    collected_paths[
-                        _build_payload_sidecar_source_label(
+                    _append_payload_sidecar_source_path_if_available(
+                        collected_paths=collected_paths,
+                        missing_payload_sidecar_annotations=missing_payload_sidecar_annotations,
+                        label=_build_payload_sidecar_source_label(
                             "pw04_attacked_positive_payload_decode_sidecar",
                             attack_event_index,
                             ordinal,
-                        )
-                    ] = _resolve_path_value_under_family_root(
-                        decode_path_value,
-                        family_root,
-                        "PW04 payload decode sidecar",
+                        ),
+                        path_value=decode_path_value,
+                        family_root=family_root,
+                        resolve_label="PW04 payload decode sidecar",
+                        source_stage="PW04",
                     )
 
     return collected_paths
@@ -1340,10 +1464,12 @@ def run_pw05_release_signoff(
 
     pw04_summary_path = family_root / "runtime_state" / PW04_SUMMARY_FILE_NAME
     pw04_summary = _load_required_json_dict(pw04_summary_path, "PW04 summary")
+    missing_payload_sidecar_annotations: List[Dict[str, Any]] = []
     canonical_source_paths = _collect_release_source_paths(
         family_id=family_id,
         family_root=family_root,
         pw04_summary=pw04_summary,
+        missing_payload_sidecar_annotations=missing_payload_sidecar_annotations,
     )
     analysis_only_source_bindings = _collect_analysis_only_source_bindings(
         family_root=family_root,
@@ -1418,6 +1544,8 @@ def run_pw05_release_signoff(
         "blocking_reasons": blocking_reasons,
         "checked_source_artifact_count": len(source_artifact_index),
         "analysis_only_artifact_count": len(analysis_only_release_annotations),
+        "missing_payload_sidecar_count": len(missing_payload_sidecar_annotations),
+        "missing_payload_sidecar_annotations": missing_payload_sidecar_annotations,
         "checked_source_artifacts": source_artifact_index,
         "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "pw04_summary_anchor": {
@@ -1461,6 +1589,8 @@ def run_pw05_release_signoff(
         "source_artifact_index": source_artifact_index,
         "release_copy_paths": release_copy_paths,
         "analysis_only_artifact_annotations": analysis_only_release_annotations,
+        "missing_payload_sidecar_count": len(missing_payload_sidecar_annotations),
+        "missing_payload_sidecar_annotations": missing_payload_sidecar_annotations,
         "formal_run_readiness_report_path": normalize_path_value(formal_run_readiness_report_path),
         "created_at": utc_now_iso(),
     }
@@ -1613,6 +1743,8 @@ def run_pw05_release_signoff(
             for label, path_obj in analysis_only_source_paths.items()
         },
         "analysis_only_artifact_annotations": analysis_only_release_annotations,
+        "missing_payload_sidecar_count": len(missing_payload_sidecar_annotations),
+        "missing_payload_sidecar_annotations": missing_payload_sidecar_annotations,
         "source_artifact_index": source_artifact_index,
         "generated_artifact_index": final_generated_artifact_index,
         "status": "completed",
