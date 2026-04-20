@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, cast
 
 from paper_workflow.scripts.pw_quality_metrics import build_quality_metrics_from_pairs
-from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, utc_now_iso, write_json_atomic
+from scripts.notebook_runtime_common import (
+    ensure_directory,
+    normalize_path_value,
+    utc_now_iso,
+    write_json_atomic_compact,
+)
 
 
 SCHEMA_VERSION = "pw_stage_04_v1"
@@ -157,7 +162,7 @@ def run_pw04_quality_shard(
         "clean_quality_summary": clean_quality_summary,
         "attack_quality_summary": attack_quality_summary,
     }
-    write_json_atomic(output_path, payload)
+    write_json_atomic_compact(output_path, payload)
     return {
         "path": normalize_path_value(output_path),
         "payload": payload,

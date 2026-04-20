@@ -1125,6 +1125,30 @@ def write_json_atomic(path_obj: Path, payload: Mapping[str, Any]) -> None:
     )
 
 
+def write_json_atomic_compact(path_obj: Path, payload: Mapping[str, Any]) -> None:
+    """
+    功能：以紧凑 JSON 文本稳定写出文件。
+
+    Persist a mapping as compact JSON with parent-directory creation.
+
+    Args:
+        path_obj: Destination JSON path.
+        payload: Mapping payload.
+
+    Returns:
+        None.
+    """
+    if not isinstance(path_obj, Path):
+        raise TypeError("path_obj must be Path")
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be Mapping")
+    ensure_directory(path_obj.parent)
+    path_obj.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
 def _truncate_output_tail(text: str | None, *, limit: int = RUNTIME_DIAGNOSTICS_STDIO_TAIL_LIMIT) -> str | None:
     """
     功能：截断 stdout / stderr 尾部文本。

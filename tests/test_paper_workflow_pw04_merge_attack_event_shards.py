@@ -158,7 +158,9 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
     def fake_clip_text_similarity_batch(
         candidate_images: Any,
         prompt_texts: Any,
-        torch_device: str = "cpu",
+        *,
+        torch_device: str,
+        text_feature_cache: Any,
     ) -> List[float]:
         clip_batch_calls.append(
             {
@@ -181,7 +183,7 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
     monkeypatch.setattr(pw_quality_metrics_module, "_compute_lpips_values_batch", fake_lpips_values_batch)
     monkeypatch.setattr(
         pw_quality_metrics_module,
-        "_compute_clip_text_similarity_batch",
+        "_compute_clip_text_similarity_batch_with_cached_text_features",
         fake_clip_text_similarity_batch,
     )
     monkeypatch.setattr(pw_quality_metrics_module, "_compute_lpips_value", fail_single_lpips)
@@ -216,6 +218,333 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
     assert all(
         row["clip_text_similarity"] is not None
         for row in cast(List[Dict[str, Any]], quality_summary["pair_rows"])
+    )
+
+
+def test_build_quality_metrics_from_pairs_reuses_reference_image_cache(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify repeated reference bindings reuse the call-local reference cache.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    reference_path = tmp_path / "shared_reference.png"
+    Image.new("RGB", (8, 8), color=(40, 70, 100)).save(reference_path)
+
+    pair_specs: List[Dict[str, Any]] = []
+    candidate_paths: List[Path] = []
+    for pair_index, color_offset in enumerate([2, 4, 6], start=1):
+        candidate_path = tmp_path / f"candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(40 + color_offset, 70, 100)).save(candidate_path)
+        candidate_paths.append(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+            }
+        )
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_lpips_value",
+        lambda reference_image, candidate_image, torch_device="cpu": 0.25,
+    )
+    baseline_summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+    )
+
+    original_load_rgb_image = pw_quality_metrics_module._load_rgb_image
+    load_counts: Dict[Path, int] = {}
+
+    def counting_load_rgb_image(image_path: Path) -> Any:
+        resolved_path = Path(image_path).resolve()
+        load_counts[resolved_path] = load_counts.get(resolved_path, 0) + 1
+        return original_load_rgb_image(resolved_path)
+
+    monkeypatch.setattr(pw_quality_metrics_module, "_load_rgb_image", counting_load_rgb_image)
+
+    cached_summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+    )
+
+    assert load_counts[reference_path.resolve()] == 1
+    for candidate_path in candidate_paths:
+        assert load_counts[candidate_path.resolve()] == 1
+    assert cached_summary["status"] == baseline_summary["status"]
+    assert cached_summary["count"] == baseline_summary["count"]
+    assert cached_summary["missing_count"] == baseline_summary["missing_count"]
+    assert cached_summary["error_count"] == baseline_summary["error_count"]
+    assert cached_summary["mean_psnr"] == baseline_summary["mean_psnr"]
+    assert cached_summary["mean_ssim"] == baseline_summary["mean_ssim"]
+    assert cached_summary["mean_lpips"] == baseline_summary["mean_lpips"]
+    assert cached_summary["quality_readiness_status"] == baseline_summary["quality_readiness_status"]
+    assert cached_summary["pair_rows"] == baseline_summary["pair_rows"]
+
+
+def test_build_quality_metrics_from_pairs_reuses_clip_text_embeddings_across_batches(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify repeated prompt texts reuse cached CLIP text features across batches.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    prompt_texts = [" prompt alpha ", "prompt alpha", "prompt beta", "prompt alpha", "prompt beta "]
+    pair_specs: List[Dict[str, Any]] = []
+    expected_clip_values: List[float] = []
+    for pair_index, prompt_text in enumerate(prompt_texts, start=1):
+        reference_path = tmp_path / f"reference_{pair_index}.png"
+        candidate_path = tmp_path / f"candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(80 + pair_index, 30, 50)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(82 + pair_index, 30, 50)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": prompt_text,
+            }
+        )
+        expected_clip_values.append(0.91 if prompt_text.strip() == "prompt alpha" else 0.63)
+
+    text_encode_calls: List[List[str]] = []
+    image_batch_calls: List[int] = []
+
+    def fake_encode_clip_text_features_batch(prompt_batch: Any, *, torch_device: str) -> List[str]:
+        text_encode_calls.append(list(prompt_batch))
+        return [f"feature::{prompt_text}" for prompt_text in prompt_batch]
+
+    def fake_clip_text_similarity_batch_with_cached_text_features(
+        candidate_images: Any,
+        prompt_batch: Any,
+        *,
+        torch_device: str,
+        text_feature_cache: Any,
+    ) -> List[float]:
+        image_batch_calls.append(len(candidate_images))
+        cached_features = pw_quality_metrics_module._resolve_cached_clip_text_features(
+            prompt_batch,
+            torch_device=torch_device,
+            text_feature_cache=text_feature_cache,
+        )
+        output_values: List[float] = []
+        for prompt_text in prompt_batch:
+            cleaned_prompt = str(prompt_text).strip()
+            feature_token = cached_features[cleaned_prompt]
+            output_values.append(0.91 if feature_token == "feature::prompt alpha" else 0.63)
+        return output_values
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_encode_clip_text_features_batch",
+        fake_encode_clip_text_features_batch,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity_batch_with_cached_text_features",
+        fake_clip_text_similarity_batch_with_cached_text_features,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_lpips_value",
+        lambda reference_image, candidate_image, torch_device="cpu": 0.2,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        clip_batch_size=2,
+    )
+
+    assert text_encode_calls == [["prompt alpha"], ["prompt beta"]]
+    assert image_batch_calls == [2, 2, 1]
+    assert [row["clip_text_similarity"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == expected_clip_values
+    assert summary["clip_sample_count"] == len(prompt_texts)
+    assert summary["clip_status"] == "ok"
+
+
+def test_build_quality_metrics_from_pairs_streaming_batches_preserve_summary_semantics(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify mid-loop streaming flushes preserve the same summary semantics as a
+    tail-only flush driven by an oversized batch size.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    prompt_sequence = ["prompt one", "prompt two", None, "", "prompt one"]
+    for pair_index, prompt_text in enumerate(prompt_sequence, start=1):
+        reference_path = tmp_path / f"stream_reference_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(100 + pair_index, 40, 60)).save(reference_path)
+        if pair_index == 3:
+            candidate_path_value = ""
+        else:
+            candidate_path = tmp_path / f"stream_candidate_{pair_index}.png"
+            Image.new("RGB", (8, 8), color=(103 + pair_index, 40, 60)).save(candidate_path)
+            candidate_path_value = normalize_path_value(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"stream_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": candidate_path_value,
+                "prompt_text": prompt_text,
+            }
+        )
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_lpips_values_batch",
+        lambda reference_images, candidate_images, torch_device="cpu": [0.15 for _ in candidate_images],
+    )
+
+    def fake_clip_text_similarity_batch_with_cached_text_features(
+        candidate_images: Any,
+        prompt_batch: Any,
+        *,
+        torch_device: str,
+        text_feature_cache: Any,
+    ) -> List[float]:
+        return [0.82 if str(prompt_text).strip() == "prompt one" else 0.74 for prompt_text in prompt_batch]
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity_batch_with_cached_text_features",
+        fake_clip_text_similarity_batch_with_cached_text_features,
+    )
+
+    streamed_summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        lpips_batch_size=2,
+        clip_batch_size=2,
+    )
+    tail_only_summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        lpips_batch_size=100,
+        clip_batch_size=100,
+    )
+
+    assert streamed_summary["missing_count"] == tail_only_summary["missing_count"]
+    assert streamed_summary["error_count"] == tail_only_summary["error_count"]
+    assert streamed_summary["mean_psnr"] == pytest.approx(cast(float, tail_only_summary["mean_psnr"]))
+    assert streamed_summary["mean_ssim"] == pytest.approx(cast(float, tail_only_summary["mean_ssim"]))
+    assert streamed_summary["mean_lpips"] == pytest.approx(cast(float, tail_only_summary["mean_lpips"]))
+    assert streamed_summary["mean_clip_text_similarity"] == pytest.approx(
+        cast(float, tail_only_summary["mean_clip_text_similarity"])
+    )
+    assert streamed_summary["quality_readiness_status"] == tail_only_summary["quality_readiness_status"]
+
+
+def test_build_quality_metrics_from_pairs_batch_failure_falls_back_to_single_item_compat(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify LPIPS and CLIP batch failures fall back to the single-item compat paths.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index, prompt_text in enumerate(["prompt one", "prompt two", "prompt one"], start=1):
+        reference_path = tmp_path / f"fallback_reference_{pair_index}.png"
+        candidate_path = tmp_path / f"fallback_candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(130 + pair_index, 55, 75)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(132 + pair_index, 55, 75)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"fallback_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": prompt_text,
+            }
+        )
+
+    lpips_single_calls: List[str] = []
+    clip_single_calls: List[str] = []
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_lpips_values_batch",
+        lambda reference_images, candidate_images, torch_device="cpu": (_ for _ in ()).throw(RuntimeError("lpips batch failed")),
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity_batch_with_cached_text_features",
+        lambda candidate_images, prompt_texts, *, torch_device, text_feature_cache: (_ for _ in ()).throw(RuntimeError("clip batch failed")),
+    )
+
+    def fake_lpips_single(reference_image: Any, candidate_image: Any, *, torch_device: str) -> float:
+        lpips_single_calls.append(torch_device)
+        return 0.33
+
+    def fake_clip_single(candidate_image: Any, prompt_text: str, *, torch_device: str) -> float:
+        clip_single_calls.append(prompt_text.strip())
+        return 0.77 if prompt_text.strip() == "prompt one" else 0.66
+
+    monkeypatch.setattr(pw_quality_metrics_module, "_call_lpips_value_compat", fake_lpips_single)
+    monkeypatch.setattr(pw_quality_metrics_module, "_call_clip_text_similarity_compat", fake_clip_single)
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        lpips_batch_size=2,
+        clip_batch_size=2,
+    )
+
+    assert len(lpips_single_calls) == len(pair_specs)
+    assert clip_single_calls == ["prompt one", "prompt two", "prompt one"]
+    assert summary["lpips_status"] == "ok"
+    assert summary["clip_status"] == "ok"
+    assert summary["quality_readiness_status"] == "ready"
+    assert all(row["lpips"] is not None for row in cast(List[Dict[str, Any]], summary["pair_rows"]))
+    assert all(
+        row["clip_text_similarity"] is not None
+        for row in cast(List[Dict[str, Any]], summary["pair_rows"])
     )
 
 
@@ -1822,6 +2151,10 @@ def test_pw04_quality_shard_worker_only_writes_shard_payload(tmp_path: Path, mon
     assert shard_payload["attack_pair_count"] == 1
     assert shard_payload["clean_quality_summary"]["count"] == 1
     assert shard_payload["attack_quality_summary"]["count"] == 1
+    assert isinstance(shard_payload["clean_quality_summary"]["pair_rows"], list)
+    assert isinstance(shard_payload["attack_quality_summary"]["pair_rows"], list)
+    assert shard_payload["clean_quality_summary"]["pair_rows"][0]["pair_id"] == "source_event_000001"
+    assert shard_payload["attack_quality_summary"]["pair_rows"][0]["pair_id"] == "attack_event_000001"
     assert not (family_root / "exports" / "pw04" / "metrics" / "clean_quality_metrics.json").exists()
     assert not (family_root / "exports" / "pw04" / "metrics" / "attack_quality_metrics.json").exists()
     assert not (family_root / "exports" / "pw04" / "tables").exists()
