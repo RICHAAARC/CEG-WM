@@ -918,10 +918,26 @@ def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -
 
     assert "formal 双 role shard（positive_source 与 clean_negative）" in pw02_intro
     assert "完整 planner_conditioned_control_negative cohort 时额外导出 optional diagnostic pool" in pw02_intro
-
     assert "positive_source 与 clean_negative 视为 PW02 formal 主流程硬依赖" in pw02_precheck_markdown
     assert "planner_conditioned_control_negative 缺失可接受" in pw02_precheck_markdown
     assert "若只完成部分 shard，PW02 CLI 会快速失败" in pw02_precheck_markdown
+
+
+def test_pw00_notebook_default_family_and_base_config_remain_pilot_bound() -> None:
+    """
+    Verify PW00 notebook defaults remain bound to the pilot family and pilot pw_base config.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"')
+
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
+    assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"' in pw00_constants
 
 
 @pytest.mark.parametrize(

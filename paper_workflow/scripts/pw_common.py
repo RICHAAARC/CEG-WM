@@ -2443,19 +2443,26 @@ def build_attack_condition_catalog(
     attack_plan = eval_attack_plan.generate_attack_plan(dict(normalized_protocol_spec))
     if not attack_plan.conditions:
         raise ValueError("attack protocol must declare at least one condition")
+    planned_condition_keys = list(attack_plan.conditions)
     if materialization_profile == "matrix_defined_concrete_conditions":
         declared_condition_keys = set(concrete_conditions.keys())
         protocol_condition_keys = set(attack_plan.conditions)
-        missing_condition_keys = sorted(protocol_condition_keys - declared_condition_keys)
         extra_condition_keys = sorted(declared_condition_keys - protocol_condition_keys)
-        if missing_condition_keys or extra_condition_keys:
+        if extra_condition_keys:
             raise ValueError(
-                "pw_matrix concrete_conditions must match attack protocol conditions exactly: "
-                f"missing={missing_condition_keys}, extra={extra_condition_keys}"
+                "pw_matrix concrete_conditions keys must be declared by configs/attack_protocol.yaml: "
+                f"extra={extra_condition_keys}"
+            )
+        planned_condition_keys = [
+            condition_key for condition_key in attack_plan.conditions if condition_key in declared_condition_keys
+        ]
+        if not planned_condition_keys:
+            raise ValueError(
+                "pw_matrix.concrete_conditions must declare at least one attack condition present in configs/attack_protocol.yaml"
             )
 
     condition_rows: List[Dict[str, Any]] = []
-    for condition_key in attack_plan.conditions:
+    for condition_key in planned_condition_keys:
         condition_spec = eval_attack_runner.resolve_condition_spec_from_protocol(
             dict(normalized_protocol_spec),
             condition_key,

@@ -12,6 +12,7 @@ import sys
 
 import pytest
 
+from main.evaluation import attack_plan, protocol_loader
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import (
     build_attack_condition_catalog,
@@ -19,13 +20,15 @@ from paper_workflow.scripts.pw_common import (
     read_jsonl,
     resolve_pw_matrix_settings,
 )
-from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subprocess_env, normalize_path_value
+from scripts.notebook_runtime_common import REPO_ROOT, build_repo_import_subprocess_env, load_yaml_mapping, normalize_path_value
 
 
 DEFAULT_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base.yaml").resolve()
 DEFAULT_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix.yaml").resolve()
 PILOT_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base_pilot.yaml").resolve()
 PILOT_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_pilot.yaml").resolve()
+RESCUE_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_rescue_v1.yaml").resolve()
+RESCUE_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_rescue_v1.yaml").resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -453,3 +456,175 @@ def test_attack_matrix_validation_rejects_unknown_geometry_candidate_set() -> No
                 },
             }
         )
+
+
+def test_attack_protocol_geometry_rescue_versions_are_loadable() -> None:
+    """
+    Verify append-only geometry-rescue protocol versions are loadable.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    protocol_spec = protocol_loader.load_attack_protocol_spec({})
+    params_versions = protocol_spec.get("params_versions", {})
+    generated_plan = attack_plan.generate_attack_plan(protocol_spec)
+
+    expected_condition_keys = {
+        "rotate::v2",
+        "resize::v2",
+        "crop::v2",
+        "composite::rotate_resize_jpeg_v1",
+        "composite::rotate_resize_jpeg_v2",
+        "composite::crop_resize_v1",
+    }
+
+    assert expected_condition_keys.issubset(set(params_versions))
+    assert expected_condition_keys.issubset(set(generated_plan.conditions))
+
+
+def test_geometry_rescue_matrix_materializes_expected_condition_subset() -> None:
+    """
+    Verify the geometry-rescue matrix parses and materializes the expected concrete conditions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    matrix_cfg = load_pw_matrix_config(matrix_config_path=RESCUE_PW_MATRIX_CONFIG_PATH)
+    matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
+    attack_condition_catalog = build_attack_condition_catalog(matrix_cfg=matrix_cfg)
+
+    expected_families = ["rotate", "resize", "crop", "composite"]
+    expected_condition_keys = [
+        "composite::crop_resize_v1::sev00",
+        "composite::rotate_resize_jpeg_v1::sev00",
+        "composite::rotate_resize_jpeg_v2::sev00",
+        "crop::v2::sev00",
+        "crop::v2::sev01",
+        "crop::v2::sev02",
+        "resize::v2::sev00",
+        "resize::v2::sev01",
+        "resize::v2::sev02",
+        "rotate::v2::sev00",
+        "rotate::v2::sev01",
+        "rotate::v2::sev02",
+    ]
+
+    assert matrix_settings["matrix_profile"] == "geometry_rescue_slice_v1"
+    assert matrix_settings["matrix_version"] == "pw_attack_matrix_geometry_rescue_v1"
+    assert matrix_settings["materialization_profile"] == "matrix_defined_concrete_conditions"
+    assert matrix_settings["attack_sets"]["general_attacks"] == expected_families
+    assert matrix_settings["attack_sets"]["geometry_rescue_candidates"] == expected_families
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_set"] == "geometry_rescue_candidates"
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_families"] == expected_families
+    assert matrix_settings["geometry_optional_claim"]["boundary_rule_version"] == "geometry_optional_claim_boundary_band_v3"
+    assert matrix_settings["geometry_optional_claim"]["boundary_metric"] == "abs_content_margin"
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.35)
+    assert [row["attack_condition_key"] for row in attack_condition_catalog] == expected_condition_keys
+
+
+def test_pw00_binds_geometry_rescue_base_and_freezes_new_reference_pair(tmp_path: Path) -> None:
+    """
+    Verify PW00 can bind the geometry-rescue base config and freeze the rescue reference pair.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="family_pw00_geometry_rescue_v1",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=RESCUE_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    method_identity_snapshot = json.loads(
+        Path(str(family_manifest["paths"]["method_identity_snapshot"])).read_text(encoding="utf-8")
+    )
+    geometry_optional_claim_plan = json.loads(
+        Path(str(summary["geometry_optional_claim_plan_path"])).read_text(encoding="utf-8")
+    )
+
+    assert summary["pw_base_config_path"] == normalize_path_value(RESCUE_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(RESCUE_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(RESCUE_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(RESCUE_PW_MATRIX_CONFIG_PATH)
+    assert summary["matrix_profile"] == "geometry_rescue_slice_v1"
+    assert summary["attack_condition_count"] == 12
+    assert summary["system_event_count_sweep"]["repeat_count"] == 48
+    assert summary["geometry_optional_claim_boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert summary["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.35)
+    assert method_identity_snapshot["source_alignment_reference_files"] == [
+        "paper_workflow/configs/pw_base_geometry_rescue_v1.yaml",
+        "paper_workflow/configs/pw_matrix_geometry_rescue_v1.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
+        "scripts/notebook_runtime_common.py",
+        "configs/default.yaml",
+    ]
+    assert geometry_optional_claim_plan["geometry_rescue_candidate_attack_families"] == [
+        "rotate",
+        "resize",
+        "crop",
+        "composite",
+    ]
+    assert geometry_optional_claim_plan["boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert geometry_optional_claim_plan["boundary_abs_margin_max"] == pytest.approx(0.35)
+
+
+def test_pilot_base_and_matrix_remain_unchanged_after_geometry_rescue_append_only_addition() -> None:
+    """
+    Verify the default pilot binding and matrix content remain unchanged.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pilot_base_cfg = load_yaml_mapping(PILOT_PW_BASE_CONFIG_PATH)
+    pilot_matrix_cfg = load_yaml_mapping(PILOT_PW_MATRIX_CONFIG_PATH)
+    pilot_matrix_settings = resolve_pw_matrix_settings(pilot_matrix_cfg)
+    pilot_catalog = build_attack_condition_catalog(matrix_cfg=pilot_matrix_cfg)
+
+    assert pilot_base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_pilot.yaml"
+    assert pilot_matrix_cfg["matrix_profile"] == "family_x_severity_pilot_v1"
+    assert pilot_matrix_settings["attack_sets"]["general_attacks"] == [
+        "rotate",
+        "resize",
+        "crop",
+        "translate",
+        "jpeg",
+        "gaussian_noise",
+        "gaussian_blur",
+        "composite",
+    ]
+    assert pilot_matrix_settings["attack_sets"]["geometry_rescue_candidates"] == [
+        "rotate",
+        "resize",
+        "crop",
+        "composite",
+    ]
+    assert pilot_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert pilot_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.25)
+    assert len(pilot_catalog) == 19
+    assert all("::v2" not in str(row["attack_condition_base_key"]) for row in pilot_catalog)
