@@ -786,6 +786,27 @@ def test_pw01_notebook_wraps_command_with_gpu_peak_monitor_and_reads_shard_manif
     assert 'print_json("gpu_session_peak_summary", GPU_PEAK_NOTEBOOK_SUMMARY)' in pw01_execute
 
 
+def test_pw01_notebook_runtime_diagnostics_counts_follow_worker_manifest_schema() -> None:
+    """
+    Verify PW01 runtime diagnostics count completed and failed events from
+    worker rows and shard-level fallback fields rather than per-event status.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    pw01_execute = _find_code_cell_source(NOTEBOOK_PW01_PATH, "PW01_COMPLETED_EVENT_COUNT")
+
+    assert 'event.get("status") == "completed"' not in pw01_execute
+    assert 'event.get("status") != "completed"' not in pw01_execute
+    assert 'worker.get("completed_event_ids", [])' in pw01_execute
+    assert 'worker.get("status") == "completed"' in pw01_execute
+    assert 'PW01_SUMMARY.get("status") == "completed"' in pw01_execute
+    assert 'PW01_FAILED_EVENT_COUNT = max(0, PW01_EVENT_COUNT - PW01_COMPLETED_EVENT_COUNT)' in pw01_execute
+
+
 def test_pw02_notebook_reads_summary_from_runtime_state() -> None:
     """
     Verify PW02 notebook binds the expected script and reads the runtime summary.
