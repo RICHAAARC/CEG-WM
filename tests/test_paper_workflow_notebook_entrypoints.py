@@ -522,6 +522,84 @@ def test_pw00_pw01_pw02_pw03_pw04_pw05_notebooks_write_runtime_diagnostics_befor
         assert source_text.index('write_stage_runtime_diagnostics(') < source_text.index('archive_local_runtime_for_stage(')
 
 
+def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() -> None:
+    """
+    Verify the first PW04 notebook code cell only exposes stage-relevant user parameters.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    prepare_constants = _find_code_cell_source(NOTEBOOK_PW04_PREPARE_PATH, "SCRIPT_PATH = REPO_ROOT")
+    quality_constants = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "SCRIPT_PATH = REPO_ROOT")
+    finalize_constants = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "SCRIPT_PATH = REPO_ROOT")
+
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in prepare_constants
+    assert 'QUALITY_SHARD_COUNT = None' in prepare_constants
+    assert 'FORCE_RERUN = False' in prepare_constants
+    assert 'ENABLE_TAIL_ESTIMATION = False' in prepare_constants
+    assert 'PW04_MODE =' not in prepare_constants
+    assert 'QUALITY_SHARD_INDEX' not in prepare_constants
+    assert 'QUALITY_DEVICE_OVERRIDE' not in prepare_constants
+    assert 'QUALITY_LPIPS_BATCH_SIZE' not in prepare_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE' not in prepare_constants
+
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in quality_constants
+    assert 'QUALITY_SHARD_INDEX = 0' in quality_constants
+    assert 'FORCE_RERUN = False' in quality_constants
+    assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in quality_constants
+    assert 'QUALITY_LPIPS_BATCH_SIZE = None' in quality_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE = None' in quality_constants
+    assert 'PW04_MODE =' not in quality_constants
+    assert 'QUALITY_SHARD_COUNT' not in quality_constants
+    assert 'ENABLE_TAIL_ESTIMATION' not in quality_constants
+
+    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in finalize_constants
+    assert 'FORCE_RERUN = False' in finalize_constants
+    assert 'PW04_MODE =' not in finalize_constants
+    assert 'QUALITY_SHARD_INDEX' not in finalize_constants
+    assert 'QUALITY_SHARD_COUNT' not in finalize_constants
+    assert 'ENABLE_TAIL_ESTIMATION' not in finalize_constants
+    assert 'QUALITY_DEVICE_OVERRIDE' not in finalize_constants
+    assert 'QUALITY_LPIPS_BATCH_SIZE' not in finalize_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE' not in finalize_constants
+
+
+def test_pw04_notebooks_keep_fixed_internal_modes_for_command_construction() -> None:
+    """
+    Verify PW04 notebooks keep fixed internal modes after removing PW04_MODE from the user parameter cell.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    prepare_precheck = _find_code_cell_source(NOTEBOOK_PW04_PREPARE_PATH, "PRECHECK_RESULTS = []")
+    quality_precheck = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "PRECHECK_RESULTS = []")
+    finalize_precheck = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "PRECHECK_RESULTS = []")
+    prepare_execute = _find_code_cell_source(NOTEBOOK_PW04_PREPARE_PATH, "build_pw04_command(")
+    quality_execute = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "build_pw04_command(")
+    finalize_execute = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "build_pw04_command(")
+
+    assert 'PW04_MODE = "prepare"' in prepare_precheck
+    assert 'QUALITY_SHARD_INDEX = 0' in prepare_precheck
+    assert '"pw04_mode": PW04_MODE' in prepare_execute
+    assert 'PW04_COMMAND_KWARGS["quality_shard_count"] = QUALITY_SHARD_COUNT' in prepare_execute
+
+    assert 'PW04_MODE = "quality_shard"' in quality_precheck
+    assert 'ENABLE_TAIL_ESTIMATION = False' in quality_precheck
+    assert '"pw04_mode": PW04_MODE' in quality_execute
+    assert '"quality_shard_index": QUALITY_SHARD_INDEX' in quality_execute
+
+    assert 'PW04_MODE = "finalize"' in finalize_precheck
+    assert 'QUALITY_SHARD_INDEX = 0' in finalize_precheck
+    assert 'ENABLE_TAIL_ESTIMATION = False' in finalize_precheck
+    assert '"pw04_mode": PW04_MODE' in finalize_execute
+
+
 @pytest.mark.parametrize(
     "notebook_path",
     [NOTEBOOK_PW00_PATH, NOTEBOOK_PW01_PATH, NOTEBOOK_PW03_PATH],

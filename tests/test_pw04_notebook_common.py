@@ -22,6 +22,7 @@ from paper_workflow.scripts.pw04_notebook_common import (
     resolve_pw04_expected_output,
     resolve_pw04_quality_runtime_summary,
 )
+from paper_workflow.scripts.pw_quality_metrics import DEFAULT_QUALITY_BATCH_SIZE
 
 
 def _write_json(path_obj: Path, payload: Dict[str, Any]) -> None:
@@ -102,8 +103,10 @@ def test_resolve_pw04_quality_runtime_summary_auto_returns_valid_structure(
 
     assert summary["requested_device"] == "auto"
     assert summary["selected_device"] == "cpu"
-    assert summary["lpips_batch_size"] == 1
-    assert summary["clip_batch_size"] == 1
+    assert summary["lpips_batch_size"] == DEFAULT_QUALITY_BATCH_SIZE
+    assert summary["clip_batch_size"] == DEFAULT_QUALITY_BATCH_SIZE
+    assert summary["lpips_batch_size_source"] == "device_default"
+    assert summary["clip_batch_size_source"] == "device_default"
     assert summary["warnings"] == []
     assert summary["torch_runtime_status"] == "imported"
 
@@ -139,6 +142,96 @@ def test_resolve_pw04_quality_runtime_summary_invalid_device_falls_back_and_read
     assert any("QUALITY_DEVICE_OVERRIDE" in warning for warning in summary["warnings"])
 
 
+def test_resolve_pw04_quality_runtime_summary_cuda_defaults_use_fixed_gpu_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify CUDA defaults always use the fixed GPU batch sizes.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _install_fake_torch(monkeypatch, cuda_available=True, device_count=1)
+
+    summary = resolve_pw04_quality_runtime_summary(
+        quality_device_override="auto",
+        base_env={},
+    )
+
+    assert summary["selected_device"] == "cuda"
+    assert summary["detected_cuda_total_memory_gib"] == 10.0
+    assert summary["lpips_batch_size"] == 128
+    assert summary["clip_batch_size"] == 256
+    assert summary["lpips_batch_size_source"] == "device_default"
+    assert summary["clip_batch_size_source"] == "device_default"
+    assert "conservative" not in summary["batch_default_reason"]
+
+
+def test_resolve_pw04_quality_runtime_summary_notebook_override_wins_over_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify notebook batch overrides take precedence over environment values.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _install_fake_torch(monkeypatch, cuda_available=True, device_count=1)
+
+    summary = resolve_pw04_quality_runtime_summary(
+        quality_device_override="auto",
+        quality_lpips_batch_size_override=9,
+        quality_clip_batch_size_override="11",
+        base_env={
+            "PW_QUALITY_LPIPS_BATCH_SIZE": "3",
+            "PW_QUALITY_CLIP_BATCH_SIZE": "5",
+        },
+    )
+
+    assert summary["lpips_batch_size"] == 9
+    assert summary["clip_batch_size"] == 11
+    assert summary["lpips_batch_size_source"] == "notebook_override"
+    assert summary["clip_batch_size_source"] == "notebook_override"
+
+
+def test_resolve_pw04_quality_runtime_summary_invalid_notebook_override_falls_back_to_device_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify invalid notebook overrides fall back to device defaults with warnings.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _install_fake_torch(monkeypatch, cuda_available=True, device_count=1)
+
+    summary = resolve_pw04_quality_runtime_summary(
+        quality_device_override="auto",
+        quality_lpips_batch_size_override=0,
+        quality_clip_batch_size_override="invalid",
+        base_env={
+            "PW_QUALITY_LPIPS_BATCH_SIZE": "7",
+            "PW_QUALITY_CLIP_BATCH_SIZE": "13",
+        },
+    )
+
+    assert summary["lpips_batch_size"] == 128
+    assert summary["clip_batch_size"] == 256
+    assert summary["lpips_batch_size_source"] == "device_default"
+    assert summary["clip_batch_size_source"] == "device_default"
+    assert any("QUALITY_LPIPS_BATCH_SIZE" in warning for warning in summary["warnings"])
+    assert any("QUALITY_CLIP_BATCH_SIZE" in warning for warning in summary["warnings"])
+
+
 def test_build_pw04_subprocess_env_injects_repo_and_quality_runtime(tmp_path: Path) -> None:
     """
     Verify subprocess env includes repo import context and quality runtime variables.
@@ -152,6 +245,7 @@ def test_build_pw04_subprocess_env_injects_repo_and_quality_runtime(tmp_path: Pa
     env_mapping = build_pw04_subprocess_env(
         repo_root=tmp_path,
         base_env={"PATH": "demo-path", "PYTHONPATH": "existing-path"},
+        pw04_mode="quality_shard",
         quality_runtime_summary={
             "selected_device": "cuda",
             "lpips_batch_size": 7,
@@ -162,6 +256,28 @@ def test_build_pw04_subprocess_env_injects_repo_and_quality_runtime(tmp_path: Pa
     assert env_mapping["PW_QUALITY_TORCH_DEVICE"] == "cuda"
     assert env_mapping["PW_QUALITY_LPIPS_BATCH_SIZE"] == "7"
     assert env_mapping["PW_QUALITY_CLIP_BATCH_SIZE"] == "11"
+    assert str(tmp_path.resolve()) in env_mapping["PYTHONPATH"]
+
+
+def test_build_pw04_subprocess_env_prepare_mode_skips_quality_runtime_binding(tmp_path: Path) -> None:
+    """
+    Verify prepare mode leaves quality runtime variables unbound.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    env_mapping = build_pw04_subprocess_env(
+        repo_root=tmp_path,
+        base_env={"PATH": "demo-path", "PYTHONPATH": "existing-path"},
+        pw04_mode="prepare",
+    )
+
+    assert "PW_QUALITY_TORCH_DEVICE" not in env_mapping
+    assert "PW_QUALITY_LPIPS_BATCH_SIZE" not in env_mapping
+    assert "PW_QUALITY_CLIP_BATCH_SIZE" not in env_mapping
     assert str(tmp_path.resolve()) in env_mapping["PYTHONPATH"]
 
 

@@ -108,9 +108,14 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     """
     constants_source = _find_code_cell_source(notebook_path, "SCRIPT_PATH = REPO_ROOT")
     bootstrap_source = _find_code_cell_source(notebook_path, "prepare_local_runtime_for_stage(")
-    quality_runtime_source = _find_code_cell_source(notebook_path, "resolve_pw04_quality_runtime_summary(")
+    precheck_source = _find_code_cell_source(notebook_path, "PRECHECK_RESULTS = []")
     execute_source = _find_code_cell_source(notebook_path, "build_pw04_command(")
     result_source = _find_code_cell_source(notebook_path, "read_pw04_result_summary(")
+    quality_runtime_matches = _find_cell_sources(
+        notebook_path,
+        "resolve_pw04_quality_runtime_summary(",
+        "code",
+    )
 
     assert '"PW04_Attack_Merge_And_Metrics.py"' in constants_source
     assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
@@ -119,15 +124,60 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
     assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in constants_source
-    assert f'PW04_MODE = "{expected_mode}"' in constants_source
-    assert 'QUALITY_SHARD_INDEX = 0' in constants_source
+    assert 'PW04_MODE =' not in constants_source
+    assert 'FORCE_RERUN = False' in constants_source
+
     if expected_mode == "prepare":
         assert 'QUALITY_SHARD_COUNT = None' in constants_source
-    else:
+        assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
+        assert 'QUALITY_SHARD_INDEX' not in constants_source
+        assert 'QUALITY_DEVICE_OVERRIDE' not in constants_source
+        assert 'QUALITY_LPIPS_BATCH_SIZE' not in constants_source
+        assert 'QUALITY_CLIP_BATCH_SIZE' not in constants_source
+        assert 'PW04_MODE = "prepare"' in precheck_source
+        assert 'QUALITY_SHARD_INDEX = 0' in precheck_source
+        assert quality_runtime_matches == []
+        assert 'quality_runtime_summary=QUALITY_RUNTIME_SUMMARY' not in execute_source
+        assert 'pw04_mode=PW04_MODE' in execute_source
+        assert 'PW04_COMMAND_KWARGS["quality_shard_count"] = QUALITY_SHARD_COUNT' in execute_source
+        assert 'pw04_prepare_runtime_diagnostics.json' in execute_source
+    elif expected_mode == "quality_shard":
+        assert 'QUALITY_SHARD_INDEX = 0' in constants_source
+        assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
+        assert 'QUALITY_LPIPS_BATCH_SIZE = None' in constants_source
+        assert 'QUALITY_CLIP_BATCH_SIZE = None' in constants_source
         assert 'QUALITY_SHARD_COUNT' not in constants_source
-    assert 'FORCE_RERUN = False' in constants_source
-    assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
-    assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
+        assert 'ENABLE_TAIL_ESTIMATION' not in constants_source
+        assert 'PW04_MODE = "quality_shard"' in precheck_source
+        assert 'ENABLE_TAIL_ESTIMATION = False' in precheck_source
+        assert len(quality_runtime_matches) == 1
+        quality_runtime_source = quality_runtime_matches[0]
+        assert 'quality_device_override=QUALITY_DEVICE_OVERRIDE' in quality_runtime_source
+        assert 'quality_lpips_batch_size_override=QUALITY_LPIPS_BATCH_SIZE' in quality_runtime_source
+        assert 'quality_clip_batch_size_override=QUALITY_CLIP_BATCH_SIZE' in quality_runtime_source
+        assert 'base_env=os.environ' in quality_runtime_source
+        assert 'quality_runtime_summary=QUALITY_RUNTIME_SUMMARY' in execute_source
+        assert 'pw04_mode=PW04_MODE' in execute_source
+        assert 'lpips_batch_size_source' in execute_source
+        assert 'clip_batch_size_source' in execute_source
+        assert 'batch_default_reason' in execute_source
+        assert 'pw04_quality_shard_' in execute_source
+        assert 'unit_label="quality_pairs"' in execute_source
+    else:
+        assert 'QUALITY_SHARD_INDEX' not in constants_source
+        assert 'QUALITY_SHARD_COUNT' not in constants_source
+        assert 'ENABLE_TAIL_ESTIMATION' not in constants_source
+        assert 'QUALITY_DEVICE_OVERRIDE' not in constants_source
+        assert 'QUALITY_LPIPS_BATCH_SIZE' not in constants_source
+        assert 'QUALITY_CLIP_BATCH_SIZE' not in constants_source
+        assert 'PW04_MODE = "finalize"' in precheck_source
+        assert 'QUALITY_SHARD_INDEX = 0' in precheck_source
+        assert 'ENABLE_TAIL_ESTIMATION = False' in precheck_source
+        assert quality_runtime_matches == []
+        assert 'quality_runtime_summary=QUALITY_RUNTIME_SUMMARY' not in execute_source
+        assert 'pw04_mode=PW04_MODE' in execute_source
+        assert 'pw04_finalize_runtime_diagnostics.json' in execute_source
+        assert 'unit_label="quality_shards"' in execute_source
 
     assert 'prepare_local_runtime_for_stage(' in bootstrap_source
     assert 'resolve_notebook_model_cache_layout(DRIVE_MOUNT_ROOT, REPO_ROOT, create_directories=True)' in bootstrap_source
@@ -136,11 +186,6 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'snapshot_download(' not in bootstrap_source
     assert 'bootstrap_notebook_model_cache(' not in bootstrap_source
     assert 'quality_dependency_check' not in bootstrap_source
-
-    assert 'resolve_pw04_quality_runtime_summary(' in quality_runtime_source
-    assert 'quality_device_override=QUALITY_DEVICE_OVERRIDE' in quality_runtime_source
-    assert 'base_env=os.environ' in quality_runtime_source
-    assert 'normalize_quality_device_request' not in quality_runtime_source
 
     assert 'build_pw04_command(' in execute_source
     assert 'PW04_COMMAND_KWARGS = {' in execute_source
@@ -154,19 +199,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'PW04_RUNTIME_DIAGNOSTICS_PATH =' in execute_source
     assert 'PW04_ARCHIVE_STAGE_NAME = f"PW04_Attack_Merge_And_Metrics_{PW04_MODE}"' in execute_source
     assert 'PW04_COUNT_SUMMARY = {' in execute_source
-    assert 'pw04_mode=PW04_MODE' in execute_source
     assert '"quality_shard_index": QUALITY_SHARD_INDEX' in execute_source
-    if expected_mode == "prepare":
-        assert 'PW04_COMMAND_KWARGS["quality_shard_count"] = QUALITY_SHARD_COUNT' in execute_source
-        assert 'pw04_prepare_runtime_diagnostics.json' in execute_source
-    else:
-        assert 'if PW04_MODE == "prepare":' in execute_source
-    if expected_mode == "quality_shard":
-        assert 'pw04_quality_shard_' in execute_source
-        assert 'unit_label="quality_pairs"' in execute_source
-    if expected_mode == "finalize":
-        assert 'pw04_finalize_runtime_diagnostics.json' in execute_source
-        assert 'unit_label="quality_shards"' in execute_source
     assert '"force_rerun": FORCE_RERUN' in execute_source
     assert '"enable_tail_estimation": ENABLE_TAIL_ESTIMATION' in execute_source
     assert 'def load_gpu_peak_summary(' not in execute_source
@@ -177,6 +210,62 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'selected_quality_shard_path=SELECTED_QUALITY_SHARD_PATH' in result_source
     assert 'pw04_summary_path=PW04_SUMMARY_PATH' in result_source
     assert 'gpu_peak_notebook_summary=GPU_PEAK_NOTEBOOK_SUMMARY' in result_source
+
+
+def test_pw04_notebook_markdown_matches_stage_specific_runtime_scope() -> None:
+    """
+    Verify PW04 notebook markdown exposes only the parameters and runtime guidance relevant to each stage.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    prepare_params = _find_cell_sources(
+        NOTEBOOK_PW04_PREPARE_PATH,
+        "## 运行参数与基础路径说明",
+        "markdown",
+    )[0]
+    quality_params = _find_cell_sources(
+        NOTEBOOK_PW04_QUALITY_PATH,
+        "## 运行参数与基础路径说明",
+        "markdown",
+    )[0]
+    quality_runtime_markdown = _find_cell_sources(
+        NOTEBOOK_PW04_QUALITY_PATH,
+        "## Quality Runtime 配置说明",
+        "markdown",
+    )[0]
+    finalize_params = _find_cell_sources(
+        NOTEBOOK_PW04_FINALIZE_PATH,
+        "## 运行参数与基础路径说明",
+        "markdown",
+    )[0]
+
+    assert 'QUALITY_SHARD_INDEX' not in prepare_params
+    assert 'QUALITY_DEVICE_OVERRIDE' not in prepare_params
+    assert 'QUALITY_LPIPS_BATCH_SIZE' not in prepare_params
+    assert 'QUALITY_CLIP_BATCH_SIZE' not in prepare_params
+
+    assert 'QUALITY_SHARD_INDEX' in quality_params
+    assert 'QUALITY_DEVICE_OVERRIDE' in quality_params
+    assert 'QUALITY_LPIPS_BATCH_SIZE' in quality_params
+    assert 'QUALITY_CLIP_BATCH_SIZE' in quality_params
+    assert 'QUALITY_SHARD_COUNT' not in quality_params
+    assert 'ENABLE_TAIL_ESTIMATION' not in quality_params
+    assert 'None 表示不覆盖' in quality_runtime_markdown
+    assert 'notebook override 优先于环境变量' in quality_runtime_markdown
+    assert 'LPIPS=128' in quality_runtime_markdown
+    assert 'CLIP=256' in quality_runtime_markdown
+    assert '低显存' not in quality_runtime_markdown
+
+    assert 'QUALITY_SHARD_INDEX' not in finalize_params
+    assert 'QUALITY_SHARD_COUNT' not in finalize_params
+    assert 'ENABLE_TAIL_ESTIMATION' not in finalize_params
+    assert 'QUALITY_DEVICE_OVERRIDE' not in finalize_params
+    assert 'QUALITY_LPIPS_BATCH_SIZE' not in finalize_params
+    assert 'QUALITY_CLIP_BATCH_SIZE' not in finalize_params
 
 
 @pytest.mark.parametrize("notebook_path", [path for path, _ in NOTEBOOK_PW04_PATHS])
@@ -239,6 +328,26 @@ def test_pw04_notebook_runtime_diagnostics_names_are_mode_specific() -> None:
     assert 'pw04_prepare_runtime_diagnostics.json' in prepare_execute
     assert 'pw04_quality_shard_' in quality_execute
     assert 'pw04_finalize_runtime_diagnostics.json' in finalize_execute
+
+
+def test_pw04_prepare_notebook_has_single_main_execution_cell() -> None:
+    """
+    Verify the PW04 prepare notebook contains only one main execution cell.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    execute_cells = _find_cell_sources(
+        NOTEBOOK_PW04_PREPARE_PATH,
+        "build_pw04_command(",
+        "code",
+    )
+
+    assert len(execute_cells) == 1
+    assert 'quality_runtime_summary=QUALITY_RUNTIME_SUMMARY' not in execute_cells[0]
 
 
 def test_pw04_wrapper_delegates_to_run_function(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

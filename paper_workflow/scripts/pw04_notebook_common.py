@@ -27,7 +27,6 @@ from scripts.notebook_runtime_common import build_repo_import_subprocess_env, no
 
 
 VALID_QUALITY_DEVICE_REQUESTS = {"auto", "cuda", "cpu"}
-LOW_MEMORY_CUDA_THRESHOLD_GIB = 12.0
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -109,6 +108,8 @@ def _normalize_positive_batch_size(
     raw_value: Any,
     label: str,
     default_value: int,
+    *,
+    source_label: str,
 ) -> tuple[int, str | None, str]:
     """
     功能：规范化 batch size 输入。
@@ -119,6 +120,7 @@ def _normalize_positive_batch_size(
         raw_value: Candidate raw value.
         label: Human-readable label.
         default_value: Fallback batch size.
+        source_label: Source tag for valid overrides.
 
     Returns:
         Tuple of (batch_size, warning_or_none, source_label).
@@ -127,6 +129,8 @@ def _normalize_positive_batch_size(
         raise TypeError("label must be non-empty str")
     if not isinstance(default_value, int) or isinstance(default_value, bool) or default_value <= 0:
         raise TypeError("default_value must be positive int")
+    if source_label not in {"notebook_override", "environment"}:
+        raise TypeError("source_label must be notebook_override or environment")
     if raw_value is None:
         return default_value, None, "device_default"
     try:
@@ -135,7 +139,7 @@ def _normalize_positive_batch_size(
         return default_value, f"{label}={raw_value!r} invalid; fallback to {default_value}", "device_default"
     if normalized_value <= 0:
         return default_value, f"{label}={raw_value!r} invalid; fallback to {default_value}", "device_default"
-    return normalized_value, None, "environment"
+    return normalized_value, None, source_label
 
 
 def _resolve_pw04_mode(pw04_mode: str) -> str:
@@ -324,6 +328,8 @@ def _build_fallback_gpu_peak_display_summary(
 def resolve_pw04_quality_runtime_summary(
     *,
     quality_device_override: str,
+    quality_lpips_batch_size_override: Any | None = None,
+    quality_clip_batch_size_override: Any | None = None,
     base_env: Mapping[str, str] | None = None,
 ) -> Dict[str, Any]:
     """
@@ -333,6 +339,8 @@ def resolve_pw04_quality_runtime_summary(
 
     Args:
         quality_device_override: Notebook-level quality device override.
+        quality_lpips_batch_size_override: Optional notebook-level LPIPS batch override.
+        quality_clip_batch_size_override: Optional notebook-level CLIP batch override.
         base_env: Optional source environment mapping.
 
     Returns:
@@ -437,33 +445,42 @@ def resolve_pw04_quality_runtime_summary(
     if selected_device == "cpu":
         default_lpips_batch_size = DEFAULT_QUALITY_BATCH_SIZE
         default_clip_batch_size = DEFAULT_QUALITY_BATCH_SIZE
-        batch_default_reason = "cpu runtime uses single-item batch defaults"
-    elif (
-        isinstance(detected_cuda_total_memory_gib, float)
-        and detected_cuda_total_memory_gib < LOW_MEMORY_CUDA_THRESHOLD_GIB
-    ):
-        default_lpips_batch_size = 4
-        default_clip_batch_size = 8
-        batch_default_reason = (
-            f"cuda runtime with approximately {detected_cuda_total_memory_gib} GiB memory uses conservative GPU batch defaults"
-        )
+        batch_default_reason = "cpu runtime uses DEFAULT_QUALITY_BATCH_SIZE for LPIPS and CLIP"
     else:
-        default_lpips_batch_size = 96
+        default_lpips_batch_size = 128
         default_clip_batch_size = 256
-        batch_default_reason = "cuda runtime uses default GPU batch sizes"
+        batch_default_reason = "cuda runtime uses fixed notebook GPU batch defaults"
 
+    if quality_lpips_batch_size_override is not None:
+        lpips_batch_size_raw = quality_lpips_batch_size_override
+        lpips_label = "QUALITY_LPIPS_BATCH_SIZE"
+        lpips_source_label = "notebook_override"
+    else:
+        lpips_batch_size_raw = env_mapping.get(QUALITY_LPIPS_BATCH_SIZE_ENV)
+        lpips_label = QUALITY_LPIPS_BATCH_SIZE_ENV
+        lpips_source_label = "environment"
     lpips_batch_size, lpips_warning, lpips_batch_size_source = _normalize_positive_batch_size(
-        env_mapping.get(QUALITY_LPIPS_BATCH_SIZE_ENV),
-        QUALITY_LPIPS_BATCH_SIZE_ENV,
+        lpips_batch_size_raw,
+        lpips_label,
         default_lpips_batch_size,
+        source_label=lpips_source_label,
     )
     if lpips_warning is not None:
         quality_warnings.append(lpips_warning)
 
+    if quality_clip_batch_size_override is not None:
+        clip_batch_size_raw = quality_clip_batch_size_override
+        clip_label = "QUALITY_CLIP_BATCH_SIZE"
+        clip_source_label = "notebook_override"
+    else:
+        clip_batch_size_raw = env_mapping.get(QUALITY_CLIP_BATCH_SIZE_ENV)
+        clip_label = QUALITY_CLIP_BATCH_SIZE_ENV
+        clip_source_label = "environment"
     clip_batch_size, clip_warning, clip_batch_size_source = _normalize_positive_batch_size(
-        env_mapping.get(QUALITY_CLIP_BATCH_SIZE_ENV),
-        QUALITY_CLIP_BATCH_SIZE_ENV,
+        clip_batch_size_raw,
+        clip_label,
         default_clip_batch_size,
+        source_label=clip_source_label,
     )
     if clip_warning is not None:
         quality_warnings.append(clip_warning)
@@ -493,7 +510,8 @@ def build_pw04_subprocess_env(
     *,
     repo_root: Path,
     base_env: Mapping[str, str],
-    quality_runtime_summary: Mapping[str, Any],
+    quality_runtime_summary: Mapping[str, Any] | None = None,
+    pw04_mode: str | None = None,
 ) -> Dict[str, str]:
     """
     功能：构造带 PW04 quality runtime 绑定的子进程环境。
@@ -503,7 +521,8 @@ def build_pw04_subprocess_env(
     Args:
         repo_root: Repository root path.
         base_env: Source environment mapping.
-        quality_runtime_summary: Resolved quality runtime summary.
+        quality_runtime_summary: Optional resolved quality runtime summary.
+        pw04_mode: Optional PW04 stage selector.
 
     Returns:
         Subprocess environment mapping.
@@ -512,10 +531,16 @@ def build_pw04_subprocess_env(
         raise TypeError("repo_root must be Path")
     if not isinstance(base_env, Mapping):
         raise TypeError("base_env must be Mapping[str, str]")
-    if not isinstance(quality_runtime_summary, Mapping):
-        raise TypeError("quality_runtime_summary must be Mapping")
 
     env_mapping = build_repo_import_subprocess_env(base_env=base_env, repo_root=repo_root)
+    resolved_mode = _resolve_pw04_mode(pw04_mode) if pw04_mode is not None else None
+    if resolved_mode in {"prepare", "finalize"}:
+        return env_mapping
+    if quality_runtime_summary is None:
+        return env_mapping
+    if not isinstance(quality_runtime_summary, Mapping):
+        raise TypeError("quality_runtime_summary must be Mapping or None")
+
     selected_device = quality_runtime_summary.get("selected_device", DEFAULT_QUALITY_TORCH_DEVICE)
     if not isinstance(selected_device, str) or selected_device not in {"cpu", "cuda"}:
         selected_device = DEFAULT_QUALITY_TORCH_DEVICE
