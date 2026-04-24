@@ -8,6 +8,7 @@ from __future__ import annotations
 import builtins
 import csv
 import json
+import types
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple, cast
 
@@ -18,6 +19,7 @@ import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
 import paper_workflow.scripts.pw04_metrics_extensions as pw04_metrics_extensions_module
 import paper_workflow.scripts.pw04_run_quality_shard as pw04_quality_shard_module
+import paper_workflow.scripts.pw_quality_phase_profiler as pw_quality_phase_profiler_module
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from main.watermarking.provenance.attestation_statement import (
     ATTESTATION_SCHEMA,
@@ -208,6 +210,8 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
         "lpips_batch_size": 2,
         "clip_batch_size": 2,
     }
+    assert "quality_phase_profile" not in quality_summary
+    assert "quality_phase_profile_path" not in quality_summary
     assert quality_summary["lpips_status"] == "ok"
     assert quality_summary["clip_status"] == "ok"
     assert quality_summary["prompt_text_coverage_status"] == "ok"
@@ -546,6 +550,222 @@ def test_build_quality_metrics_from_pairs_batch_failure_falls_back_to_single_ite
         row["clip_text_similarity"] is not None
         for row in cast(List[Dict[str, Any]], summary["pair_rows"])
     )
+
+
+def test_build_quality_metrics_from_pairs_phase_profiler_writes_cpu_json(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify CPU-only phase profiling emits stable JSON without changing legacy fields.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index, prompt_text in enumerate(["prompt one", "prompt two"], start=1):
+        reference_path = tmp_path / f"cpu_reference_{pair_index}.png"
+        candidate_path = tmp_path / f"cpu_candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(50 + pair_index, 70, 90)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(53 + pair_index, 70, 90)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"cpu_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": prompt_text,
+            }
+        )
+
+    output_path = tmp_path / "cpu_phase_profile.json"
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.14,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_clip_text_similarity_compat",
+        lambda candidate_image, prompt_text, *, torch_device: 0.83 if prompt_text == "prompt one" else 0.71,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        enable_phase_profiler=True,
+        phase_profile_output_path=output_path,
+        phase_profile_label="cpu_profile",
+    )
+
+    profile_payload = _load_json_dict(output_path)
+    assert summary["quality_phase_profile_path"] == normalize_path_value(output_path)
+    assert summary["quality_phase_profile"]["schema_version"] == pw_quality_phase_profiler_module.PHASE_PROFILE_SCHEMA_VERSION
+    assert profile_payload["artifact_type"] == pw_quality_phase_profiler_module.PHASE_PROFILE_ARTIFACT_TYPE
+    assert profile_payload["phase_profile_label"] == "cpu_profile"
+    assert profile_payload["monitor_backend"]["board_monitor"] == "cpu_only"
+    assert set(profile_payload["phases"].keys()) == {"psnr_ssim", "lpips", "clip"}
+    assert profile_payload["phases"]["psnr_ssim"]["board_monitor_status"] == "cpu_only"
+    assert profile_payload["phases"]["lpips"]["board_monitor_status"] == "cpu_only"
+    assert profile_payload["phases"]["clip"]["board_monitor_status"] == "cpu_only"
+    assert profile_payload["phases"]["clip"]["includes_text_encoding"] is True
+    assert profile_payload["overall"]["successful_pair_count"] == 2
+
+
+def test_build_quality_metrics_from_pairs_phase_profiler_tracks_batch_flushes(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify phase profiling records LPIPS and CLIP batch flush structure.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index in range(3):
+        reference_path = tmp_path / f"flush_reference_{pair_index}.png"
+        candidate_path = tmp_path / f"flush_candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(90 + pair_index, 44, 66)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(93 + pair_index, 44, 66)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"flush_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": "prompt one" if pair_index != 1 else "prompt two",
+            }
+        )
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_lpips_values_batch",
+        lambda reference_images, candidate_images, torch_device="cpu": [0.21 for _ in candidate_images],
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_compute_clip_text_similarity_batch_with_cached_text_features",
+        lambda candidate_images, prompt_texts, *, torch_device, text_feature_cache: [0.77 for _ in prompt_texts],
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        lpips_batch_size=2,
+        clip_batch_size=2,
+        enable_phase_profiler=True,
+    )
+
+    phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    lpips_phase = cast(Dict[str, Any], phase_profile["phases"]["lpips"])
+    clip_phase = cast(Dict[str, Any], phase_profile["phases"]["clip"])
+    assert lpips_phase["batch_count"] == 2
+    assert lpips_phase["batch_sizes"] == [2, 1]
+    assert lpips_phase["sample_count"] == 3
+    assert clip_phase["batch_count"] == 2
+    assert clip_phase["batch_sizes"] == [2, 1]
+    assert clip_phase["sample_count"] == 3
+
+
+def test_build_quality_metrics_from_pairs_phase_profiler_records_fake_cuda_peaks_without_nvml(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify fake CUDA profiling records torch peak memory and degrades cleanly without NVML.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    reference_path = tmp_path / "cuda_reference.png"
+    candidate_path = tmp_path / "cuda_candidate.png"
+    Image.new("RGB", (8, 8), color=(120, 50, 40)).save(reference_path)
+    Image.new("RGB", (8, 8), color=(123, 50, 40)).save(candidate_path)
+
+    class _FakeCuda:
+        def is_available(self) -> bool:
+            return True
+
+        def synchronize(self, device: str) -> None:
+            return None
+
+        def reset_peak_memory_stats(self, device: str) -> None:
+            return None
+
+        def memory_allocated(self, device: str) -> int:
+            return 48 * 1024 * 1024
+
+        def memory_reserved(self, device: str) -> int:
+            return 64 * 1024 * 1024
+
+        def max_memory_allocated(self, device: str) -> int:
+            return 96 * 1024 * 1024
+
+        def max_memory_reserved(self, device: str) -> int:
+            return 128 * 1024 * 1024
+
+        def current_device(self) -> int:
+            return 0
+
+    fake_torch = types.SimpleNamespace(cuda=_FakeCuda())
+    monkeypatch.setattr(pw_quality_phase_profiler_module, "_load_torch_module", lambda: fake_torch)
+    monkeypatch.setattr(pw_quality_phase_profiler_module, "_load_pynvml_module", lambda: None)
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.11,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_clip_text_similarity_compat",
+        lambda candidate_image, prompt_text, *, torch_device: 0.88,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=[
+            {
+                "pair_id": "cuda_pair_1",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": "prompt one",
+            }
+        ],
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        torch_device="cuda:0",
+        enable_phase_profiler=True,
+    )
+
+    phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    lpips_phase = cast(Dict[str, Any], phase_profile["phases"]["lpips"])
+    clip_phase = cast(Dict[str, Any], phase_profile["phases"]["clip"])
+    assert phase_profile["monitor_backend"]["torch_cuda"] == "available"
+    assert phase_profile["monitor_backend"]["board_monitor"] == "torch_only"
+    assert lpips_phase["torch_peak_memory_allocated_mib"] == 96.0
+    assert lpips_phase["torch_peak_memory_reserved_mib"] == 128.0
+    assert lpips_phase["torch_memory_samples_count"] >= 2
+    assert clip_phase["board_monitor_status"] == "nvml_unavailable"
+    assert clip_phase["board_samples_count"] == 0
+
 
 
 def _load_json_dict(path_obj: Path) -> Dict[str, Any]:
@@ -2145,12 +2365,22 @@ def test_pw04_quality_shard_worker_only_writes_shard_payload(tmp_path: Path, mon
 
     shard_path = Path(str(shard_export["path"]))
     shard_payload = _load_json_dict(shard_path)
+    clean_phase_profile_path = Path(str(shard_payload["clean_quality_phase_profile_path"]))
+    attack_phase_profile_path = Path(str(shard_payload["attack_quality_phase_profile_path"]))
+    clean_phase_profile = _load_json_dict(clean_phase_profile_path)
+    attack_phase_profile = _load_json_dict(attack_phase_profile_path)
     assert shard_path.exists()
     assert shard_payload["artifact_type"] == "paper_workflow_pw04_quality_shard"
     assert shard_payload["clean_pair_count"] == 1
     assert shard_payload["attack_pair_count"] == 1
+    assert clean_phase_profile_path.exists()
+    assert attack_phase_profile_path.exists()
+    assert clean_phase_profile["schema_version"] == pw_quality_phase_profiler_module.PHASE_PROFILE_SCHEMA_VERSION
+    assert attack_phase_profile["schema_version"] == pw_quality_phase_profiler_module.PHASE_PROFILE_SCHEMA_VERSION
     assert shard_payload["clean_quality_summary"]["count"] == 1
     assert shard_payload["attack_quality_summary"]["count"] == 1
+    assert shard_payload["clean_quality_summary"]["quality_phase_profile_path"] == normalize_path_value(clean_phase_profile_path)
+    assert shard_payload["attack_quality_summary"]["quality_phase_profile_path"] == normalize_path_value(attack_phase_profile_path)
     assert isinstance(shard_payload["clean_quality_summary"]["pair_rows"], list)
     assert isinstance(shard_payload["attack_quality_summary"]["pair_rows"], list)
     assert shard_payload["clean_quality_summary"]["pair_rows"][0]["pair_id"] == "source_event_000001"

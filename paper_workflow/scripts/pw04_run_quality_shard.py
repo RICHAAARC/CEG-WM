@@ -46,7 +46,12 @@ def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
     return cast(Dict[str, Any], payload)
 
 
-def _build_clean_quality_summary(pair_specs: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def _build_clean_quality_summary(
+    pair_specs: Sequence[Mapping[str, Any]],
+    *,
+    phase_profile_output_path: Path | None = None,
+    phase_profile_label: str | None = None,
+) -> Dict[str, Any]:
     """
     功能：计算一个 quality shard 的 clean 质量摘要。
 
@@ -65,10 +70,18 @@ def _build_clean_quality_summary(pair_specs: Sequence[Mapping[str, Any]]) -> Dic
         pair_id_key="event_id",
         text_key="prompt_text",
         extra_metadata_keys=["pair_namespace", "sample_role", "plain_preview_image_path", "watermarked_output_image_path"],
+        enable_phase_profiler=True,
+        phase_profile_output_path=phase_profile_output_path,
+        phase_profile_label=phase_profile_label,
     )
 
 
-def _build_attack_quality_summary(pair_specs: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def _build_attack_quality_summary(
+    pair_specs: Sequence[Mapping[str, Any]],
+    *,
+    phase_profile_output_path: Path | None = None,
+    phase_profile_label: str | None = None,
+) -> Dict[str, Any]:
     """
     功能：计算一个 quality shard 的 attack 质量摘要。
 
@@ -87,6 +100,9 @@ def _build_attack_quality_summary(pair_specs: Sequence[Mapping[str, Any]]) -> Di
         pair_id_key="attack_event_id",
         text_key="prompt_text",
         extra_metadata_keys=["pair_namespace", "parent_event_id", "attack_family", "attack_condition_key", "attack_config_name"],
+        enable_phase_profiler=True,
+        phase_profile_output_path=phase_profile_output_path,
+        phase_profile_label=phase_profile_label,
     )
 
 
@@ -146,9 +162,19 @@ def run_pw04_quality_shard(
         if isinstance(pair_row, Mapping) and pair_row.get("attack_event_id") in attack_pair_id_set
     ]
 
-    clean_quality_summary = _build_clean_quality_summary(clean_pairs)
-    attack_quality_summary = _build_attack_quality_summary(attack_pairs)
     output_path = quality_pair_plan_path.parent / "shards" / f"quality_shard_{quality_shard_index:04d}.json"
+    clean_phase_profile_path = output_path.with_name(f"quality_shard_{quality_shard_index:04d}.clean_phase_profile.json")
+    attack_phase_profile_path = output_path.with_name(f"quality_shard_{quality_shard_index:04d}.attack_phase_profile.json")
+    clean_quality_summary = _build_clean_quality_summary(
+        clean_pairs,
+        phase_profile_output_path=clean_phase_profile_path,
+        phase_profile_label=f"{family_id}:quality_shard_{quality_shard_index:04d}:clean",
+    )
+    attack_quality_summary = _build_attack_quality_summary(
+        attack_pairs,
+        phase_profile_output_path=attack_phase_profile_path,
+        phase_profile_label=f"{family_id}:quality_shard_{quality_shard_index:04d}:attack",
+    )
     ensure_directory(output_path.parent)
     payload = {
         "artifact_type": "paper_workflow_pw04_quality_shard",
@@ -159,6 +185,8 @@ def run_pw04_quality_shard(
         "quality_shard_index": quality_shard_index,
         "clean_pair_count": len(clean_pairs),
         "attack_pair_count": len(attack_pairs),
+        "clean_quality_phase_profile_path": normalize_path_value(clean_phase_profile_path),
+        "attack_quality_phase_profile_path": normalize_path_value(attack_phase_profile_path),
         "clean_quality_summary": clean_quality_summary,
         "attack_quality_summary": attack_quality_summary,
     }

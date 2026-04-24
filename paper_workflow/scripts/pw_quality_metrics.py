@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, cast
 
@@ -14,6 +15,7 @@ import numpy as np
 from PIL import Image
 
 from main.evaluation.image_quality import compute_psnr, compute_ssim
+from paper_workflow.scripts.pw_quality_phase_profiler import QualityPhaseProfiler
 from scripts.notebook_runtime_common import normalize_path_value
 
 
@@ -742,6 +744,7 @@ def _flush_lpips_pending_batch(
     lpips_values: List[float],
     resolved_torch_device: str,
     lpips_reason_ref: List[str | None],
+    phase_profiler: QualityPhaseProfiler | None = None,
 ) -> None:
     """
     功能：立即刷写一个 LPIPS pending batch，并在失败时回退单样本路径。
@@ -764,33 +767,41 @@ def _flush_lpips_pending_batch(
 
     batch = list(lpips_pending)
     lpips_pending.clear()
-    try:
-        batch_values = _compute_lpips_values_batch(
-            [reference_image for _, reference_image, _ in batch],
-            [candidate_image for _, _, candidate_image in batch],
-            torch_device=resolved_torch_device,
-        )
-    except Exception as exc:
-        if lpips_reason_ref[0] is None:
-            lpips_reason_ref[0] = f"{type(exc).__name__}: {exc}"
-        for pair_row_index, reference_image, candidate_image in batch:
-            try:
-                lpips_value = _call_lpips_value_compat(
-                    reference_image,
-                    candidate_image,
-                    torch_device=resolved_torch_device,
-                )
-            except Exception as single_exc:
-                if lpips_reason_ref[0] is None:
-                    lpips_reason_ref[0] = f"{type(single_exc).__name__}: {single_exc}"
-            else:
-                pair_rows[pair_row_index]["lpips"] = lpips_value
-                lpips_values.append(lpips_value)
-        return
+    phase_context = (
+        phase_profiler.phase("lpips", sample_count=len(batch), batch_size=len(batch))
+        if phase_profiler is not None
+        else None
+    )
+    if phase_context is None:
+        phase_context = _NoopQualityPhaseContext()
+    with phase_context:
+        try:
+            batch_values = _compute_lpips_values_batch(
+                [reference_image for _, reference_image, _ in batch],
+                [candidate_image for _, _, candidate_image in batch],
+                torch_device=resolved_torch_device,
+            )
+        except Exception as exc:
+            if lpips_reason_ref[0] is None:
+                lpips_reason_ref[0] = f"{type(exc).__name__}: {exc}"
+            for pair_row_index, reference_image, candidate_image in batch:
+                try:
+                    lpips_value = _call_lpips_value_compat(
+                        reference_image,
+                        candidate_image,
+                        torch_device=resolved_torch_device,
+                    )
+                except Exception as single_exc:
+                    if lpips_reason_ref[0] is None:
+                        lpips_reason_ref[0] = f"{type(single_exc).__name__}: {single_exc}"
+                else:
+                    pair_rows[pair_row_index]["lpips"] = lpips_value
+                    lpips_values.append(lpips_value)
+            return
 
-    for (pair_row_index, _, _), lpips_value in zip(batch, batch_values, strict=False):
-        pair_rows[pair_row_index]["lpips"] = lpips_value
-        lpips_values.append(lpips_value)
+        for (pair_row_index, _, _), lpips_value in zip(batch, batch_values, strict=False):
+            pair_rows[pair_row_index]["lpips"] = lpips_value
+            lpips_values.append(lpips_value)
 
 
 def _flush_clip_pending_batch(
@@ -802,6 +813,7 @@ def _flush_clip_pending_batch(
     clip_reason_ref: List[str | None],
     clip_error_count_ref: List[int],
     text_feature_cache: Dict[str, Any],
+    phase_profiler: QualityPhaseProfiler | None = None,
 ) -> None:
     """
     功能：立即刷写一个 CLIP pending batch，并在失败时回退单样本路径。
@@ -826,36 +838,52 @@ def _flush_clip_pending_batch(
 
     batch = list(clip_pending)
     clip_pending.clear()
-    try:
-        batch_values = _compute_clip_text_similarity_batch_with_cached_text_features(
-            [candidate_image for _, candidate_image, _ in batch],
-            [prompt_text for _, _, prompt_text in batch],
-            torch_device=resolved_torch_device,
-            text_feature_cache=text_feature_cache,
-        )
-    except Exception as exc:
-        clip_error_count_ref[0] += len(batch)
-        if clip_reason_ref[0] is None:
-            clip_reason_ref[0] = f"{type(exc).__name__}: {exc}"
-        for pair_row_index, candidate_image, prompt_text in batch:
-            try:
-                clip_value = _call_clip_text_similarity_compat(
-                    candidate_image,
-                    prompt_text,
-                    torch_device=resolved_torch_device,
-                )
-            except Exception as single_exc:
-                if clip_reason_ref[0] is None:
-                    clip_reason_ref[0] = f"{type(single_exc).__name__}: {single_exc}"
-            else:
-                clip_error_count_ref[0] -= 1
-                pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
-                clip_values.append(clip_value)
-        return
+    phase_context = (
+        phase_profiler.phase("clip", sample_count=len(batch), batch_size=len(batch))
+        if phase_profiler is not None
+        else None
+    )
+    if phase_context is None:
+        phase_context = _NoopQualityPhaseContext()
+    with phase_context:
+        try:
+            batch_values = _compute_clip_text_similarity_batch_with_cached_text_features(
+                [candidate_image for _, candidate_image, _ in batch],
+                [prompt_text for _, _, prompt_text in batch],
+                torch_device=resolved_torch_device,
+                text_feature_cache=text_feature_cache,
+            )
+        except Exception as exc:
+            clip_error_count_ref[0] += len(batch)
+            if clip_reason_ref[0] is None:
+                clip_reason_ref[0] = f"{type(exc).__name__}: {exc}"
+            for pair_row_index, candidate_image, prompt_text in batch:
+                try:
+                    clip_value = _call_clip_text_similarity_compat(
+                        candidate_image,
+                        prompt_text,
+                        torch_device=resolved_torch_device,
+                    )
+                except Exception as single_exc:
+                    if clip_reason_ref[0] is None:
+                        clip_reason_ref[0] = f"{type(single_exc).__name__}: {single_exc}"
+                else:
+                    clip_error_count_ref[0] -= 1
+                    pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
+                    clip_values.append(clip_value)
+            return
 
-    for (pair_row_index, _, _), clip_value in zip(batch, batch_values, strict=False):
-        pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
-        clip_values.append(clip_value)
+        for (pair_row_index, _, _), clip_value in zip(batch, batch_values, strict=False):
+            pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
+            clip_values.append(clip_value)
+
+
+class _NoopQualityPhaseContext:
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type: Any, exc: Any, exc_tb: Any) -> None:
+        return None
 
 
 def build_quality_metrics_from_pairs(
@@ -869,6 +897,9 @@ def build_quality_metrics_from_pairs(
     torch_device: str | None = None,
     lpips_batch_size: int | None = None,
     clip_batch_size: int | None = None,
+    enable_phase_profiler: bool = False,
+    phase_profile_output_path: Path | str | None = None,
+    phase_profile_label: str | None = None,
 ) -> Dict[str, Any]:
     """
     功能：对一组图像路径对计算质量指标摘要。
@@ -885,6 +916,9 @@ def build_quality_metrics_from_pairs(
         torch_device: Optional torch device string used by LPIPS and CLIP.
         lpips_batch_size: Optional LPIPS batch size.
         clip_batch_size: Optional CLIP batch size.
+        enable_phase_profiler: Whether to collect phase-level runtime metrics.
+        phase_profile_output_path: Optional JSON output path for the phase profile.
+        phase_profile_label: Optional human-readable phase profile label.
 
     Returns:
         Quality summary payload with aggregate metrics and per-pair rows.
@@ -911,6 +945,17 @@ def build_quality_metrics_from_pairs(
     resolved_torch_device = str(runtime_options["torch_device"])
     resolved_lpips_batch_size = int(runtime_options["lpips_batch_size"])
     resolved_clip_batch_size = int(runtime_options["clip_batch_size"])
+    phase_profiler_enabled = bool(enable_phase_profiler or phase_profile_output_path is not None)
+    phase_profiler = (
+        QualityPhaseProfiler(
+            torch_device=resolved_torch_device,
+            output_path=phase_profile_output_path,
+            label=phase_profile_label,
+        )
+        if phase_profiler_enabled
+        else None
+    )
+    started_at_monotonic = time.perf_counter() if phase_profiler is not None else 0.0
 
     pair_rows: List[Dict[str, Any]] = []
     psnr_values: List[float] = []
@@ -975,10 +1020,16 @@ def build_quality_metrics_from_pairs(
         pair_row["reference_image_path"] = normalize_path_value(reference_path)
         pair_row["candidate_image_path"] = normalize_path_value(candidate_path)
         try:
-            reference_image = _load_rgb_image_cached(reference_path, image_cache=image_cache)
-            candidate_image = _load_rgb_image(candidate_path)
-            psnr_value = float(compute_psnr(reference_image, candidate_image))
-            ssim_value = float(compute_ssim(reference_image, candidate_image))
+            phase_context = (
+                phase_profiler.phase("psnr_ssim", sample_count=1, batch_size=1)
+                if phase_profiler is not None
+                else _NoopQualityPhaseContext()
+            )
+            with phase_context:
+                reference_image = _load_rgb_image_cached(reference_path, image_cache=image_cache)
+                candidate_image = _load_rgb_image(candidate_path)
+                psnr_value = float(compute_psnr(reference_image, candidate_image))
+                ssim_value = float(compute_ssim(reference_image, candidate_image))
         except FileNotFoundError as exc:
             pair_row["status"] = "missing_file"
             pair_row["failure_reason"] = str(exc)
@@ -1009,20 +1060,27 @@ def build_quality_metrics_from_pairs(
                     lpips_values=lpips_values,
                     resolved_torch_device=resolved_torch_device,
                     lpips_reason_ref=lpips_reason_ref,
+                    phase_profiler=phase_profiler,
                 )
         else:
-            try:
-                lpips_value = _call_lpips_value_compat(
-                    reference_image,
-                    candidate_image,
-                    torch_device=resolved_torch_device,
-                )
-            except Exception as exc:
-                if lpips_reason_ref[0] is None:
-                    lpips_reason_ref[0] = f"{type(exc).__name__}: {exc}"
-            else:
-                pair_row["lpips"] = lpips_value
-                lpips_values.append(lpips_value)
+            phase_context = (
+                phase_profiler.phase("lpips", sample_count=1, batch_size=1)
+                if phase_profiler is not None
+                else _NoopQualityPhaseContext()
+            )
+            with phase_context:
+                try:
+                    lpips_value = _call_lpips_value_compat(
+                        reference_image,
+                        candidate_image,
+                        torch_device=resolved_torch_device,
+                    )
+                except Exception as exc:
+                    if lpips_reason_ref[0] is None:
+                        lpips_reason_ref[0] = f"{type(exc).__name__}: {exc}"
+                else:
+                    pair_row["lpips"] = lpips_value
+                    lpips_values.append(lpips_value)
 
         if text_key is not None:
             if isinstance(prompt_text, str) and prompt_text.strip():
@@ -1037,21 +1095,28 @@ def build_quality_metrics_from_pairs(
                             clip_reason_ref=clip_reason_ref,
                             clip_error_count_ref=clip_error_count_ref,
                             text_feature_cache=text_feature_cache,
+                            phase_profiler=phase_profiler,
                         )
                 else:
-                    try:
-                        clip_value = _call_clip_text_similarity_compat(
-                            candidate_image,
-                            prompt_text,
-                            torch_device=resolved_torch_device,
-                        )
-                    except Exception as exc:
-                        clip_error_count_ref[0] += 1
-                        if clip_reason_ref[0] is None:
-                            clip_reason_ref[0] = f"{type(exc).__name__}: {exc}"
-                    else:
-                        pair_row["clip_text_similarity"] = clip_value
-                        clip_values.append(clip_value)
+                    phase_context = (
+                        phase_profiler.phase("clip", sample_count=1, batch_size=1)
+                        if phase_profiler is not None
+                        else _NoopQualityPhaseContext()
+                    )
+                    with phase_context:
+                        try:
+                            clip_value = _call_clip_text_similarity_compat(
+                                candidate_image,
+                                prompt_text,
+                                torch_device=resolved_torch_device,
+                            )
+                        except Exception as exc:
+                            clip_error_count_ref[0] += 1
+                            if clip_reason_ref[0] is None:
+                                clip_reason_ref[0] = f"{type(exc).__name__}: {exc}"
+                        else:
+                            pair_row["clip_text_similarity"] = clip_value
+                            clip_values.append(clip_value)
             else:
                 clip_missing_text_count += 1
 
@@ -1062,6 +1127,7 @@ def build_quality_metrics_from_pairs(
             lpips_values=lpips_values,
             resolved_torch_device=resolved_torch_device,
             lpips_reason_ref=lpips_reason_ref,
+            phase_profiler=phase_profiler,
         )
 
     if resolved_clip_batch_size > 1 and clip_pending:
@@ -1073,6 +1139,7 @@ def build_quality_metrics_from_pairs(
             clip_reason_ref=clip_reason_ref,
             clip_error_count_ref=clip_error_count_ref,
             text_feature_cache=text_feature_cache,
+            phase_profiler=phase_profiler,
         )
 
     lpips_reason = lpips_reason_ref[0]
@@ -1165,7 +1232,7 @@ def build_quality_metrics_from_pairs(
             quality_readiness_status = "ready"
             quality_readiness_reason = None
 
-    return {
+    quality_summary = {
         "status": status,
         "availability_reason": availability_reason,
         "expected_count": len(pair_specs),
@@ -1198,3 +1265,15 @@ def build_quality_metrics_from_pairs(
         "quality_readiness_required_for_formal_release": True,
         "pair_rows": pair_rows,
     }
+    if phase_profiler is not None:
+        quality_phase_profile = phase_profiler.finalize(
+            pair_spec_count=len(pair_specs),
+            successful_pair_count=successful_count,
+            missing_count=missing_count,
+            error_count=error_count,
+            elapsed_seconds_total=time.perf_counter() - started_at_monotonic,
+        )
+        quality_summary["quality_phase_profile"] = quality_phase_profile
+        if phase_profiler.output_path is not None:
+            quality_summary["quality_phase_profile_path"] = normalize_path_value(phase_profiler.output_path)
+    return quality_summary
