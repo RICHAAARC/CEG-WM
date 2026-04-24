@@ -611,6 +611,8 @@ def test_build_quality_metrics_from_pairs_phase_profiler_writes_cpu_json(
     assert profile_payload["phase_profile_label"] == "cpu_profile"
     assert profile_payload["monitor_backend"]["board_monitor"] == "cpu_only"
     assert set(profile_payload["phases"].keys()) == {"psnr_ssim", "lpips", "clip"}
+    assert profile_payload["phases"]["psnr_ssim"]["measurement_mode"] == "aggregate_only"
+    assert profile_payload["phases"]["psnr_ssim"]["gpu_measurement_mode"] == "not_measured_per_pair"
     assert profile_payload["phases"]["psnr_ssim"]["board_monitor_status"] == "cpu_only"
     assert profile_payload["phases"]["lpips"]["board_monitor_status"] == "cpu_only"
     assert profile_payload["phases"]["clip"]["board_monitor_status"] == "cpu_only"
@@ -670,8 +672,11 @@ def test_build_quality_metrics_from_pairs_phase_profiler_tracks_batch_flushes(
     )
 
     phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
     lpips_phase = cast(Dict[str, Any], phase_profile["phases"]["lpips"])
     clip_phase = cast(Dict[str, Any], phase_profile["phases"]["clip"])
+    assert psnr_ssim_phase["sample_count"] == 3
+    assert psnr_ssim_phase["elapsed_seconds_total"] > 0.0
     assert lpips_phase["batch_count"] == 2
     assert lpips_phase["batch_sizes"] == [2, 1]
     assert lpips_phase["sample_count"] == 3
@@ -756,15 +761,130 @@ def test_build_quality_metrics_from_pairs_phase_profiler_records_fake_cuda_peaks
     )
 
     phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
     lpips_phase = cast(Dict[str, Any], phase_profile["phases"]["lpips"])
     clip_phase = cast(Dict[str, Any], phase_profile["phases"]["clip"])
     assert phase_profile["monitor_backend"]["torch_cuda"] == "available"
     assert phase_profile["monitor_backend"]["board_monitor"] == "torch_only"
+    assert psnr_ssim_phase["measurement_mode"] == "aggregate_only"
+    assert psnr_ssim_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert psnr_ssim_phase["torch_peak_memory_allocated_mib"] is None
+    assert psnr_ssim_phase["torch_peak_memory_reserved_mib"] is None
     assert lpips_phase["torch_peak_memory_allocated_mib"] == 96.0
     assert lpips_phase["torch_peak_memory_reserved_mib"] == 128.0
     assert lpips_phase["torch_memory_samples_count"] >= 2
     assert clip_phase["board_monitor_status"] == "nvml_unavailable"
     assert clip_phase["board_samples_count"] == 0
+
+
+def test_build_quality_metrics_from_pairs_psnr_ssim_uses_aggregate_phase_recording(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify psnr_ssim uses aggregate recording instead of entering the full phase scope.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index in range(2):
+        reference_path = tmp_path / f"aggregate_reference_{pair_index}.png"
+        candidate_path = tmp_path / f"aggregate_candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(140 + pair_index, 60, 80)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(142 + pair_index, 60, 80)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"aggregate_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": "prompt one",
+            }
+        )
+
+    full_phase_begin_calls: List[str] = []
+    aggregate_record_calls: List[Dict[str, Any]] = []
+    original_begin_phase = pw_quality_phase_profiler_module.QualityPhaseProfiler._begin_phase
+    original_record_aggregate = pw_quality_phase_profiler_module.QualityPhaseProfiler.record_aggregate_phase_timing
+
+    def tracking_begin_phase(self: Any, *, phase_name: str, sample_count: int, batch_size: int | None) -> None:
+        full_phase_begin_calls.append(str(phase_name))
+        original_begin_phase(self, phase_name=phase_name, sample_count=sample_count, batch_size=batch_size)
+
+    def tracking_record_aggregate(
+        self: Any,
+        phase_name: str,
+        *,
+        elapsed_seconds: float,
+        sample_count: int = 0,
+        batch_count: int = 0,
+        batch_size: int | None = None,
+    ) -> None:
+        aggregate_record_calls.append(
+            {
+                "phase_name": str(phase_name),
+                "sample_count": int(sample_count),
+                "batch_count": int(batch_count),
+                "batch_size": batch_size,
+                "elapsed_seconds": float(elapsed_seconds),
+            }
+        )
+        original_record_aggregate(
+            self,
+            phase_name,
+            elapsed_seconds=elapsed_seconds,
+            sample_count=sample_count,
+            batch_count=batch_count,
+            batch_size=batch_size,
+        )
+
+    monkeypatch.setattr(
+        pw_quality_phase_profiler_module.QualityPhaseProfiler,
+        "_begin_phase",
+        tracking_begin_phase,
+    )
+    monkeypatch.setattr(
+        pw_quality_phase_profiler_module.QualityPhaseProfiler,
+        "record_aggregate_phase_timing",
+        tracking_record_aggregate,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.19,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_clip_text_similarity_compat",
+        lambda candidate_image, prompt_text, *, torch_device: 0.86,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        enable_phase_profiler=True,
+    )
+
+    phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
+    assert "psnr_ssim" not in full_phase_begin_calls
+    assert [row["phase_name"] for row in aggregate_record_calls] == ["psnr_ssim", "psnr_ssim"]
+    assert all(row["sample_count"] == 1 for row in aggregate_record_calls)
+    assert all(row["batch_count"] == 0 for row in aggregate_record_calls)
+    assert all(row["batch_size"] is None for row in aggregate_record_calls)
+    assert all(row["elapsed_seconds"] > 0.0 for row in aggregate_record_calls)
+    assert psnr_ssim_phase["sample_count"] == 2
+    assert psnr_ssim_phase["invocation_count"] == 2
+    assert psnr_ssim_phase["batch_count"] == 0
+    assert psnr_ssim_phase["batch_sizes"] == []
+    assert psnr_ssim_phase["elapsed_seconds_total"] > 0.0
 
 
 

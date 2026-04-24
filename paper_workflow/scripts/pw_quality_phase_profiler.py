@@ -138,6 +138,8 @@ class _PhaseMetrics:
     phase_name: str
     phase_scope: str
     includes_text_encoding: bool = False
+    measurement_mode: str = "full_phase_scope"
+    gpu_measurement_mode: str = "full_phase_scope"
     invocation_count: int = 0
     sample_count: int = 0
     batch_count: int = 0
@@ -188,6 +190,8 @@ class _PhaseMetrics:
             "phase_name": self.phase_name,
             "phase_scope": self.phase_scope,
             "includes_text_encoding": self.includes_text_encoding,
+            "measurement_mode": self.measurement_mode,
+            "gpu_measurement_mode": self.gpu_measurement_mode,
             "invocation_count": int(self.invocation_count),
             "sample_count": int(self.sample_count),
             "batch_count": int(self.batch_count),
@@ -407,18 +411,24 @@ class QualityPhaseProfiler:
                 phase_name="psnr_ssim",
                 phase_scope="image_load + PSNR + SSIM per pair",
                 includes_text_encoding=False,
+                measurement_mode="aggregate_only",
+                gpu_measurement_mode="not_measured_per_pair",
                 board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
             ),
             "lpips": _PhaseMetrics(
                 phase_name="lpips",
                 phase_scope="LPIPS batch flushes and single-item fallback path",
                 includes_text_encoding=False,
+                measurement_mode="full_phase_scope",
+                gpu_measurement_mode="full_phase_scope",
                 board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
             ),
             "clip": _PhaseMetrics(
                 phase_name="clip",
                 phase_scope="CLIP image-text similarity batches, including text encoding on cache miss",
                 includes_text_encoding=True,
+                measurement_mode="full_phase_scope",
+                gpu_measurement_mode="full_phase_scope",
                 board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
             ),
         }
@@ -464,6 +474,52 @@ class QualityPhaseProfiler:
             sample_count=sample_count,
             batch_size=batch_size,
         )
+
+    def record_aggregate_phase_timing(
+        self,
+        phase_name: str,
+        *,
+        elapsed_seconds: float,
+        sample_count: int = 0,
+        batch_count: int = 0,
+        batch_size: int | None = None,
+    ) -> None:
+        """
+        功能：轻量记录一次 phase 聚合观测而不进入完整 phase scope。
+
+        Record one aggregate-only phase observation without entering the full
+        phase scope and without triggering CUDA or board-level sampling.
+
+        Args:
+            phase_name: Stable phase name.
+            elapsed_seconds: Measured wall-clock duration.
+            sample_count: Number of logical samples covered by the observation.
+            batch_count: Number of logical batches covered by the observation.
+            batch_size: Optional batch size recorded for the observation.
+
+        Returns:
+            None.
+        """
+        if phase_name not in self._phases:
+            raise ValueError(f"unsupported phase_name: {phase_name}")
+        if not isinstance(sample_count, int) or isinstance(sample_count, bool) or sample_count < 0:
+            raise TypeError("sample_count must be non-negative int")
+        if not isinstance(batch_count, int) or isinstance(batch_count, bool) or batch_count < 0:
+            raise TypeError("batch_count must be non-negative int")
+        if batch_size is not None and (not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0):
+            raise TypeError("batch_size must be positive int or None")
+
+        phase_metrics = self._phases[phase_name]
+        phase_metrics.invocation_count += 1
+        phase_metrics.sample_count += int(sample_count)
+        phase_metrics.batch_count += int(batch_count)
+        if batch_size is not None:
+            append_count = int(batch_count) if batch_count > 0 else 1
+            for _ in range(append_count):
+                phase_metrics.batch_sizes.append(int(batch_size))
+        normalized_elapsed_seconds = max(float(elapsed_seconds), 0.0)
+        phase_metrics.elapsed_seconds_total += normalized_elapsed_seconds
+        phase_metrics.elapsed_seconds_max = max(phase_metrics.elapsed_seconds_max, normalized_elapsed_seconds)
 
     def finalize(
         self,

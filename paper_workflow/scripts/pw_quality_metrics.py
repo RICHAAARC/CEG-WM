@@ -1019,29 +1019,43 @@ def build_quality_metrics_from_pairs(
         candidate_path = Path(candidate_value).expanduser().resolve()
         pair_row["reference_image_path"] = normalize_path_value(reference_path)
         pair_row["candidate_image_path"] = normalize_path_value(candidate_path)
+        psnr_ssim_started_at = time.perf_counter() if phase_profiler is not None else 0.0
         try:
-            phase_context = (
-                phase_profiler.phase("psnr_ssim", sample_count=1, batch_size=1)
-                if phase_profiler is not None
-                else _NoopQualityPhaseContext()
-            )
-            with phase_context:
-                reference_image = _load_rgb_image_cached(reference_path, image_cache=image_cache)
-                candidate_image = _load_rgb_image(candidate_path)
-                psnr_value = float(compute_psnr(reference_image, candidate_image))
-                ssim_value = float(compute_ssim(reference_image, candidate_image))
+            reference_image = _load_rgb_image_cached(reference_path, image_cache=image_cache)
+            candidate_image = _load_rgb_image(candidate_path)
+            psnr_value = float(compute_psnr(reference_image, candidate_image))
+            ssim_value = float(compute_ssim(reference_image, candidate_image))
         except FileNotFoundError as exc:
             pair_row["status"] = "missing_file"
             pair_row["failure_reason"] = str(exc)
             missing_count += 1
             pair_rows.append(pair_row)
+            if phase_profiler is not None:
+                phase_profiler.record_aggregate_phase_timing(
+                    "psnr_ssim",
+                    elapsed_seconds=time.perf_counter() - psnr_ssim_started_at,
+                    sample_count=1,
+                )
             continue
         except Exception as exc:
             pair_row["status"] = "error"
             pair_row["failure_reason"] = f"{type(exc).__name__}: {exc}"
             error_count += 1
             pair_rows.append(pair_row)
+            if phase_profiler is not None:
+                phase_profiler.record_aggregate_phase_timing(
+                    "psnr_ssim",
+                    elapsed_seconds=time.perf_counter() - psnr_ssim_started_at,
+                    sample_count=1,
+                )
             continue
+
+        if phase_profiler is not None:
+            phase_profiler.record_aggregate_phase_timing(
+                "psnr_ssim",
+                elapsed_seconds=time.perf_counter() - psnr_ssim_started_at,
+                sample_count=1,
+            )
 
         pair_row["status"] = "ok"
         pair_row["psnr"] = psnr_value
