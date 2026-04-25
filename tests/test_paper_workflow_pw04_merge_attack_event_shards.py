@@ -209,6 +209,8 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
         "torch_device": "cuda:0",
         "lpips_batch_size": 2,
         "clip_batch_size": 2,
+        "psnr_ssim_batch_size": 16384,
+        "psnr_ssim_batch_source": "default_element_budget",
     }
     assert "quality_phase_profile" not in quality_summary
     assert "quality_phase_profile_path" not in quality_summary
@@ -223,6 +225,146 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
         row["clip_text_similarity"] is not None
         for row in cast(List[Dict[str, Any]], quality_summary["pair_rows"])
     )
+
+
+def test_resolve_psnr_ssim_batch_size_defaults_to_existing_element_budget(monkeypatch: Any) -> None:
+    """
+    Verify PSNR/SSIM batch resolution preserves the legacy default rule when no env override is set.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.delenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, raising=False)
+    monkeypatch.delenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, raising=False)
+
+    image_shape = (32, 32, 3)
+    expected_batch_size = max(
+        1,
+        pw_quality_metrics_module._PSNR_SSIM_BATCH_ELEMENT_BUDGET // (32 * 32 * 3),
+    )
+
+    assert pw_quality_metrics_module._resolve_psnr_ssim_batch_size(image_shape) == expected_batch_size
+
+
+def test_resolve_psnr_ssim_batch_size_env_batch_size_override_has_highest_priority(monkeypatch: Any) -> None:
+    """
+    Verify explicit PSNR/SSIM batch size env overrides image-shape inference and budget env.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, "16")
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, "3")
+
+    assert pw_quality_metrics_module._resolve_psnr_ssim_batch_size((2048, 2048, 3)) == 16
+
+
+@pytest.mark.parametrize(
+    ("env_name", "env_value"),
+    [
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, ""),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, "abc"),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, "0"),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, "-4"),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, ""),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, "abc"),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, "0"),
+        (pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, "-4"),
+    ],
+)
+def test_resolve_psnr_ssim_batch_size_invalid_env_values_fall_back(
+    monkeypatch: Any,
+    env_name: str,
+    env_value: str,
+) -> None:
+    """
+    Verify invalid PSNR/SSIM env overrides are ignored without raising and fall back to the default rule.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        env_name: Target environment variable name.
+        env_value: Invalid environment variable value.
+
+    Returns:
+        None.
+    """
+    monkeypatch.delenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, raising=False)
+    monkeypatch.delenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, raising=False)
+    monkeypatch.setenv(env_name, env_value)
+
+    image_shape = (32, 32, 3)
+    expected_batch_size = max(
+        1,
+        pw_quality_metrics_module._PSNR_SSIM_BATCH_ELEMENT_BUDGET // (32 * 32 * 3),
+    )
+
+    assert pw_quality_metrics_module._resolve_psnr_ssim_batch_size(image_shape) == expected_batch_size
+
+
+def test_resolve_psnr_ssim_batch_size_uses_env_element_budget(monkeypatch: Any) -> None:
+    """
+    Verify PSNR/SSIM batch resolution uses the environment element budget when provided.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    monkeypatch.delenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, raising=False)
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV, str(8 * 8 * 3 * 5))
+
+    assert pw_quality_metrics_module._resolve_psnr_ssim_batch_size((8, 8, 3)) == 5
+
+
+def test_build_quality_metrics_from_pairs_reports_psnr_ssim_batch_runtime(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify quality_runtime exposes PSNR/SSIM batch size and source fields.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    reference_path = tmp_path / "runtime_reference.png"
+    candidate_path = tmp_path / "runtime_candidate.png"
+    Image.new("RGB", (8, 8), color=(80, 40, 20)).save(reference_path)
+    Image.new("RGB", (8, 8), color=(82, 40, 20)).save(candidate_path)
+
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_BATCH_SIZE_ENV, "16")
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.12,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=[
+            {
+                "pair_id": "runtime_pair",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+            }
+        ],
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+    )
+
+    quality_runtime = cast(Dict[str, Any], summary["quality_runtime"])
+    assert quality_runtime["psnr_ssim_batch_size"] == 16
+    assert quality_runtime["psnr_ssim_batch_source"] == "env_batch_size"
 
 
 def test_build_quality_metrics_from_pairs_reuses_reference_image_cache(

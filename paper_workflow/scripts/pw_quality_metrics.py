@@ -32,6 +32,8 @@ _CLIP_MODEL_PRETRAINED = "laion2b_s34b_b79k"
 QUALITY_TORCH_DEVICE_ENV = "PW_QUALITY_TORCH_DEVICE"
 QUALITY_LPIPS_BATCH_SIZE_ENV = "PW_QUALITY_LPIPS_BATCH_SIZE"
 QUALITY_CLIP_BATCH_SIZE_ENV = "PW_QUALITY_CLIP_BATCH_SIZE"
+QUALITY_PSNR_SSIM_BATCH_SIZE_ENV = "PW_QUALITY_PSNR_SSIM_BATCH_SIZE"
+QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV = "PW_QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET"
 DEFAULT_QUALITY_TORCH_DEVICE = "cpu"
 DEFAULT_QUALITY_BATCH_SIZE = 1
 _PSNR_SSIM_BATCH_ELEMENT_BUDGET = 4 * 512 * 512 * 3
@@ -204,6 +206,42 @@ def _normalize_batch_size(batch_size_value: Any, label: str) -> int:
     if normalized_batch_size <= 0:
         raise TypeError(f"{label} must be positive int")
     return normalized_batch_size
+
+
+def _read_positive_int_env(env_name: str) -> int | None:
+    """
+    功能：读取正整数环境变量并在非法值时优雅忽略。
+
+    Read one positive-integer environment override.
+
+    Args:
+        env_name: Environment variable name.
+
+    Returns:
+        Parsed positive integer, or None when the variable is unset or invalid.
+
+    Raises:
+        TypeError: If env_name is invalid.
+    """
+    if not isinstance(env_name, str) or not env_name:
+        raise TypeError("env_name must be non-empty str")
+
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return None
+
+    stripped_value = raw_value.strip()
+    if not stripped_value:
+        return None
+
+    try:
+        normalized_value = int(stripped_value)
+    except ValueError:
+        return None
+
+    if normalized_value <= 0:
+        return None
+    return normalized_value
 
 
 def _resolve_quality_runtime_options(
@@ -753,6 +791,45 @@ def _resolve_psnr_ssim_batch_size(image_shape: Sequence[int]) -> int:
     Raises:
         ValueError: If image_shape is invalid.
     """
+    resolved_batch_size, _ = _resolve_psnr_ssim_batch_runtime(image_shape)
+    if resolved_batch_size is None:
+        raise ValueError("image_shape is required for PSNR/SSIM batch resolution")
+    return resolved_batch_size
+
+
+def _resolve_psnr_ssim_batch_runtime(image_shape: Sequence[int] | None) -> tuple[int | None, str]:
+    """
+    功能：解析 PSNR/SSIM batch 大小及其来源。 
+
+    Resolve the internal PSNR/SSIM batch size and source label.
+
+    Args:
+        image_shape: Optional image shape tuple.
+
+    Returns:
+        Tuple of resolved batch size and source label.
+
+    Raises:
+        ValueError: If image_shape is invalid.
+    """
+    batch_size_override = _read_positive_int_env(QUALITY_PSNR_SSIM_BATCH_SIZE_ENV)
+    if batch_size_override is not None:
+        return batch_size_override, "env_batch_size"
+
+    batch_element_budget_override = _read_positive_int_env(QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV)
+    resolved_batch_element_budget = (
+        batch_element_budget_override
+        if batch_element_budget_override is not None
+        else _PSNR_SSIM_BATCH_ELEMENT_BUDGET
+    )
+    batch_source = (
+        "env_batch_element_budget"
+        if batch_element_budget_override is not None
+        else "default_element_budget"
+    )
+    if image_shape is None:
+        return None, batch_source
+
     if len(image_shape) == 2:
         height, width = int(image_shape[0]), int(image_shape[1])
         channel_count = 1
@@ -761,7 +838,7 @@ def _resolve_psnr_ssim_batch_size(image_shape: Sequence[int]) -> int:
     else:
         raise ValueError(f"unsupported image shape for PSNR/SSIM batching: {image_shape}")
     per_image_elements = max(height * width * max(channel_count, 1), 1)
-    return max(1, _PSNR_SSIM_BATCH_ELEMENT_BUDGET // per_image_elements)
+    return max(1, resolved_batch_element_budget // per_image_elements), batch_source
 
 
 def _flush_psnr_ssim_pending_batch(
@@ -1416,6 +1493,10 @@ def build_quality_metrics_from_pairs(
             quality_readiness_status = "ready"
             quality_readiness_reason = None
 
+    psnr_ssim_batch_size, psnr_ssim_batch_source = _resolve_psnr_ssim_batch_runtime(
+        quality_valid_rows[0][1].shape if quality_valid_rows else None
+    )
+
     quality_summary = {
         "status": status,
         "availability_reason": availability_reason,
@@ -1437,6 +1518,8 @@ def build_quality_metrics_from_pairs(
             "torch_device": resolved_torch_device,
             "lpips_batch_size": resolved_lpips_batch_size,
             "clip_batch_size": resolved_clip_batch_size,
+            "psnr_ssim_batch_size": psnr_ssim_batch_size,
+            "psnr_ssim_batch_source": psnr_ssim_batch_source,
         },
         "prompt_text_expected": prompt_text_expected,
         "prompt_text_available_count": prompt_text_available_count,
