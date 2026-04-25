@@ -11,9 +11,11 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
+from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple, cast
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -21,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from PIL import Image
 
+from main.cli import run_detect as detect_cli
 from main.evaluation import attack_runner as eval_attack_runner
 from paper_workflow.scripts.pw_common import (
     ACTIVE_SAMPLE_ROLE,
@@ -42,6 +45,7 @@ from paper_workflow.scripts.pw_common import (
     read_jsonl,
     resolve_family_id_from_path,
 )
+from scripts import gpu_session_peak as gpu_session_peak_module
 from scripts.notebook_runtime_common import (
     build_repo_import_subprocess_env,
     compute_file_sha256,
@@ -459,6 +463,21 @@ def _build_worker_log_paths(worker_root: Path) -> Tuple[Path, Path]:
         raise TypeError("worker_root must be Path")
     logs_root = worker_root / "logs"
     return logs_root / "worker_stdout.log", logs_root / "worker_stderr.log"
+
+
+def _build_worker_gpu_summary_path(worker_root: Path) -> Path:
+    """
+    Resolve the worker-local GPU summary path.
+
+    Args:
+        worker_root: Worker root path.
+
+    Returns:
+        Worker-local GPU summary path.
+    """
+    if not isinstance(worker_root, Path):
+        raise TypeError("worker_root must be Path")
+    return worker_root / "gpu_session_peak.json"
 
 
 def _resolve_pw02_summary_path(family_root: Path) -> Path:
@@ -2028,6 +2047,265 @@ def _run_command_with_gpu_monitor(
     return result
 
 
+def _build_pw03_detect_runtime_session(*, bound_config_path: Path) -> Dict[str, Any]:
+    """
+    Build the reusable detect runtime session for one PW03 worker.
+
+    Args:
+        bound_config_path: Worker-bound config path.
+
+    Returns:
+        Detect runtime session payload.
+    """
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
+    return detect_cli.build_detect_runtime_session(str(bound_config_path))
+
+
+def _run_pw03_detect_with_runtime(
+    *,
+    run_root: Path,
+    runtime_config_path: Path,
+    detect_input_record_path: Path,
+    detect_runtime_session: Mapping[str, Any],
+    stdout_log_path: Path,
+    stderr_log_path: Path,
+    gpu_summary_path: Path,
+) -> Dict[str, Any]:
+    """
+    Execute one attacked-image detect run with a persistent worker-local runtime.
+
+    Args:
+        run_root: Detect run root.
+        runtime_config_path: Event runtime config path.
+        detect_input_record_path: Detect input record path.
+        detect_runtime_session: Reusable detect runtime session.
+        stdout_log_path: Event stdout log path.
+        stderr_log_path: Event stderr log path.
+        gpu_summary_path: Worker-local GPU summary path.
+
+    Returns:
+        Detect execution summary.
+    """
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(runtime_config_path, Path):
+        raise TypeError("runtime_config_path must be Path")
+    if not isinstance(detect_input_record_path, Path):
+        raise TypeError("detect_input_record_path must be Path")
+    if not isinstance(detect_runtime_session, Mapping):
+        raise TypeError("detect_runtime_session must be Mapping")
+    if not isinstance(stdout_log_path, Path):
+        raise TypeError("stdout_log_path must be Path")
+    if not isinstance(stderr_log_path, Path):
+        raise TypeError("stderr_log_path must be Path")
+    if not isinstance(gpu_summary_path, Path):
+        raise TypeError("gpu_summary_path must be Path")
+
+    ensure_directory(stdout_log_path.parent)
+    ensure_directory(stderr_log_path.parent)
+    stdout_log_path.write_text("", encoding="utf-8")
+    stderr_log_path.write_text("", encoding="utf-8")
+    detect_cli.run_detect(
+        str(run_root),
+        str(runtime_config_path),
+        str(detect_input_record_path),
+        runtime_session=dict(cast(Mapping[str, Any], detect_runtime_session)),
+    )
+    return {
+        "return_code": 0,
+        "command": ["persistent_runtime_session"],
+        "stdout_log_path": normalize_path_value(stdout_log_path),
+        "stderr_log_path": normalize_path_value(stderr_log_path),
+        "gpu_session_peak_path": normalize_path_value(gpu_summary_path),
+        "gpu_session_peak": None,
+        "execution_mode": "persistent_runtime_session",
+    }
+
+
+def _run_callable_with_gpu_monitor(
+    *,
+    label: str,
+    gpu_summary_path: Path,
+    wrapped_callable: Callable[[], Any],
+) -> Dict[str, Any]:
+    """
+    Execute one callable under the same GPU peak monitor semantics used by the wrapper script.
+
+    Args:
+        label: Stable monitor label.
+        gpu_summary_path: Destination GPU summary path.
+        wrapped_callable: Callable to execute.
+
+    Returns:
+        Execution summary containing the callable result and GPU summary payload.
+    """
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if not isinstance(gpu_summary_path, Path):
+        raise TypeError("gpu_summary_path must be Path")
+    if not callable(wrapped_callable):
+        raise TypeError("wrapped_callable must be callable")
+
+    ensure_directory(gpu_summary_path.parent)
+    nvidia_smi_path = gpu_session_peak_module.shutil.which("nvidia-smi")
+    started_at_utc = utc_now_iso()
+    started_at_monotonic = time.monotonic()
+
+    per_gpu_state: Dict[str, Dict[str, Any]] = {}
+    first_error_state: Dict[str, str | None] = {"message": None}
+    sample_error_state: Dict[str, int] = {"count": 0}
+    successful_sample_state: Dict[str, int] = {"count": 0}
+    current_peak: Dict[str, Any] = {"record": None}
+
+    start_sample = gpu_session_peak_module._capture_sample_if_available(
+        nvidia_smi_path,
+        per_gpu_state,
+        first_error_state,
+        sample_error_state,
+        successful_sample_state,
+        current_peak,
+    )
+
+    wrapped_result_holder: Dict[str, Any] = {"result": None, "exception": None}
+
+    def _run_wrapped_callable() -> None:
+        try:
+            wrapped_result_holder["result"] = wrapped_callable()
+        except Exception as exc:
+            wrapped_result_holder["exception"] = exc
+
+    worker_thread = threading.Thread(target=_run_wrapped_callable, name="pw03_worker_gpu_monitor")
+    worker_thread.start()
+    sample_interval_seconds = DEFAULT_SAMPLE_INTERVAL_MS / 1000.0
+
+    while worker_thread.is_alive():
+        worker_thread.join(timeout=sample_interval_seconds)
+        if worker_thread.is_alive():
+            gpu_session_peak_module._capture_sample_if_available(
+                nvidia_smi_path,
+                per_gpu_state,
+                first_error_state,
+                sample_error_state,
+                successful_sample_state,
+                current_peak,
+            )
+
+    worker_thread.join()
+    end_sample = gpu_session_peak_module._capture_sample_if_available(
+        nvidia_smi_path,
+        per_gpu_state,
+        first_error_state,
+        sample_error_state,
+        successful_sample_state,
+        current_peak,
+    )
+
+    finished_at_utc = utc_now_iso()
+    elapsed_seconds = round(time.monotonic() - started_at_monotonic, 6)
+    peak_sample = current_peak["record"]
+    wrapped_exception = wrapped_result_holder["exception"]
+    wrapped_return_code = 0 if wrapped_exception is None else 1
+
+    if not nvidia_smi_path:
+        status = "absent"
+    elif peak_sample is not None:
+        status = "ok"
+    else:
+        status = "failed"
+
+    start_memory_used_mib = start_sample.board_memory_used_mib if start_sample is not None else None
+    end_memory_used_mib = end_sample.board_memory_used_mib if end_sample is not None else None
+    peak_memory_used_mib = peak_sample.board_memory_used_mib if peak_sample is not None else None
+    peak_memory_used_bytes = peak_memory_used_mib * 1024 * 1024 if peak_memory_used_mib is not None else None
+    peak_memory_increment_mib = (
+        peak_memory_used_mib - start_memory_used_mib
+        if peak_memory_used_mib is not None and start_memory_used_mib is not None
+        else None
+    )
+
+    summary_payload: Dict[str, Any] = {
+        "status": status,
+        "label": label,
+        "monitor_source": "nvidia-smi",
+        "nvidia_smi_available": bool(nvidia_smi_path),
+        "nvidia_smi_path": nvidia_smi_path,
+        "sample_interval_ms": int(DEFAULT_SAMPLE_INTERVAL_MS),
+        "sample_count": int(successful_sample_state["count"]),
+        "sampling_error_count": int(sample_error_state["count"]),
+        "monitor_error": first_error_state["message"],
+        "started_at_utc": started_at_utc,
+        "finished_at_utc": finished_at_utc,
+        "elapsed_seconds": elapsed_seconds,
+        "wrapped_command": [label],
+        "wrapped_return_code": wrapped_return_code,
+        "visible_gpu_count": len(per_gpu_state),
+        "visible_gpus": gpu_session_peak_module._build_visible_gpu_payload(per_gpu_state),
+        "session_board_memory_used_mib_at_start": start_memory_used_mib,
+        "session_board_memory_used_mib_at_end": end_memory_used_mib,
+        "session_board_peak_memory_used_mib": peak_memory_used_mib,
+        "session_board_peak_memory_used_bytes": peak_memory_used_bytes,
+        "session_board_peak_increment_mib": peak_memory_increment_mib,
+        "peak_observed_at_utc": peak_sample.observed_at_utc if peak_sample is not None else None,
+        "peak_gpu_index": peak_sample.peak_gpu_index if peak_sample is not None else None,
+        "peak_gpu_uuid": peak_sample.peak_gpu_uuid if peak_sample is not None else None,
+        "peak_gpu_name": peak_sample.peak_gpu_name if peak_sample is not None else None,
+        "wrapped_command_error": f"{type(wrapped_exception).__name__}: {wrapped_exception}" if wrapped_exception else None,
+    }
+    write_json_atomic(gpu_summary_path, summary_payload)
+    return {
+        "return_code": wrapped_return_code,
+        "gpu_session_peak_path": normalize_path_value(gpu_summary_path),
+        "gpu_session_peak": summary_payload,
+        "callable_result": wrapped_result_holder["result"],
+        "callable_exception": wrapped_exception,
+    }
+
+
+def _attach_worker_gpu_summary_to_worker_result(
+    *,
+    worker_result_path: Path,
+    worker_result: Mapping[str, Any],
+    worker_gpu_summary_path: Path,
+    local_worker_index: int,
+) -> Dict[str, Any]:
+    """
+    Attach the finalized worker GPU summary to one persisted worker result.
+
+    Args:
+        worker_result_path: Worker result JSON path.
+        worker_result: Worker result payload.
+        worker_gpu_summary_path: Worker GPU summary path.
+        local_worker_index: Local worker index.
+
+    Returns:
+        Updated worker result payload.
+    """
+    if not isinstance(worker_result_path, Path):
+        raise TypeError("worker_result_path must be Path")
+    if not isinstance(worker_result, Mapping):
+        raise TypeError("worker_result must be Mapping")
+    if not isinstance(worker_gpu_summary_path, Path):
+        raise TypeError("worker_gpu_summary_path must be Path")
+    if not isinstance(local_worker_index, int) or local_worker_index < 0:
+        raise TypeError("local_worker_index must be non-negative int")
+
+    updated_worker_result = dict(cast(Mapping[str, Any], worker_result))
+    if not worker_gpu_summary_path.exists() or not worker_gpu_summary_path.is_file():
+        return updated_worker_result
+
+    worker_gpu_summary = _load_required_json_dict(
+        worker_gpu_summary_path,
+        f"PW03 worker gpu peak {local_worker_index}",
+    )
+    worker_gpu_summary["summary_path"] = normalize_path_value(worker_gpu_summary_path)
+    worker_gpu_summary["worker_local_index"] = local_worker_index
+    updated_worker_result["worker_gpu_session_peak_path"] = normalize_path_value(worker_gpu_summary_path)
+    updated_worker_result["worker_gpu_session_peak"] = worker_gpu_summary
+    write_json_atomic(worker_result_path, updated_worker_result)
+    return updated_worker_result
+
+
 def _run_attack_detect_event(
     *,
     attack_event_spec: Mapping[str, Any],
@@ -2035,6 +2313,8 @@ def _run_attack_detect_event(
     event_root: Path,
     runtime_config_path: Path,
     attacked_image_path: Path,
+    detect_runtime_session: Mapping[str, Any] | None = None,
+    worker_gpu_summary_path: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Run detect on one attacked image.
@@ -2055,10 +2335,17 @@ def _run_attack_detect_event(
     detect_input_record_path = event_root / "detect_input_record.json"
     detect_stdout_log_path = logs_root / "detect_stdout.log"
     detect_stderr_log_path = logs_root / "detect_stderr.log"
-    event_gpu_summary_path = artifacts_root / "gpu_session_peak.json"
+    if worker_gpu_summary_path is not None and not isinstance(worker_gpu_summary_path, Path):
+        raise TypeError("worker_gpu_summary_path must be Path or None")
+    if detect_runtime_session is not None and not isinstance(detect_runtime_session, Mapping):
+        raise TypeError("detect_runtime_session must be Mapping or None")
+    if detect_runtime_session is not None and worker_gpu_summary_path is None:
+        raise ValueError("worker_gpu_summary_path must be provided when detect_runtime_session is reused")
+    event_gpu_summary_path = worker_gpu_summary_path if worker_gpu_summary_path is not None else artifacts_root / "gpu_session_peak.json"
     staged_detect_record_path = shard_root / "records" / f"event_{int(attack_event_spec.get('attack_event_index', attack_event_spec.get('event_index', 0))):06d}_detect_record.json"
 
     validate_path_within_base(shard_root, detect_input_record_path, "PW03 detect_input_record path")
+    validate_path_within_base(shard_root, event_gpu_summary_path, "PW03 event gpu_session_peak path")
     validate_path_within_base(shard_root, staged_detect_record_path, "PW03 staged detect record path")
     ensure_directory(detect_input_record_path.parent)
     ensure_directory(staged_detect_record_path.parent)
@@ -2068,24 +2355,35 @@ def _run_attack_detect_event(
     )
     write_json_atomic(detect_input_record_path, detect_input_record)
 
-    detect_command = [
-        sys.executable,
-        "-m",
-        "main.cli.run_detect",
-        "--out",
-        str(run_root),
-        "--config",
-        str(runtime_config_path),
-        "--input",
-        str(detect_input_record_path),
-    ]
-    detect_result = _run_command_with_gpu_monitor(
-        command=detect_command,
-        label=f"{STAGE_NAME}:attack_detect:{attack_event_spec.get('event_id', '<absent>')}",
-        gpu_summary_path=event_gpu_summary_path,
-        stdout_log_path=detect_stdout_log_path,
-        stderr_log_path=detect_stderr_log_path,
-    )
+    if detect_runtime_session is None:
+        detect_command = [
+            sys.executable,
+            "-m",
+            "main.cli.run_detect",
+            "--out",
+            str(run_root),
+            "--config",
+            str(runtime_config_path),
+            "--input",
+            str(detect_input_record_path),
+        ]
+        detect_result = _run_command_with_gpu_monitor(
+            command=detect_command,
+            label=f"{STAGE_NAME}:attack_detect:{attack_event_spec.get('event_id', '<absent>')}",
+            gpu_summary_path=event_gpu_summary_path,
+            stdout_log_path=detect_stdout_log_path,
+            stderr_log_path=detect_stderr_log_path,
+        )
+    else:
+        detect_result = _run_pw03_detect_with_runtime(
+            run_root=run_root,
+            runtime_config_path=runtime_config_path,
+            detect_input_record_path=detect_input_record_path,
+            detect_runtime_session=detect_runtime_session,
+            stdout_log_path=detect_stdout_log_path,
+            stderr_log_path=detect_stderr_log_path,
+            gpu_summary_path=event_gpu_summary_path,
+        )
     if int(detect_result.get("return_code", 1)) != 0:
         raise RuntimeError(
             "PW03 detect failed: "
@@ -2661,6 +2959,7 @@ def _prepare_local_worker_plans(
                 "worker_root": normalize_path_value(worker_root),
                 "worker_plan_path": normalize_path_value(worker_plan_path),
                 "worker_result_path": normalize_path_value(worker_result_path),
+                "worker_gpu_summary_path": normalize_path_value(_build_worker_gpu_summary_path(worker_root)),
                 "stdout_log_path": normalize_path_value(stdout_log_path),
                 "stderr_log_path": normalize_path_value(stderr_log_path),
                 "assigned_attack_event_ids": list(cast(List[str], assignment["assigned_attack_event_ids"])),
@@ -2694,6 +2993,7 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
     launches: List[Dict[str, Any]] = []
     for worker_plan in worker_plans:
         worker_root = Path(str(worker_plan["worker_root"]))
+        worker_gpu_summary_path = Path(str(worker_plan["worker_gpu_summary_path"]))
         stdout_log_path = Path(str(worker_plan["stdout_log_path"]))
         stderr_log_path = Path(str(worker_plan["stderr_log_path"]))
         ensure_directory(worker_root)
@@ -2701,9 +3001,22 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
         ensure_directory(stderr_log_path.parent)
         stdout_handle = stdout_log_path.open("w", encoding="utf-8")
         stderr_handle = stderr_log_path.open("w", encoding="utf-8")
+        raw_command = list(cast(Sequence[str], worker_plan["command"]))
+        monitored_command = [
+            sys.executable,
+            str(GPU_PEAK_SCRIPT_PATH),
+            "--output-json",
+            str(worker_gpu_summary_path),
+            "--label",
+            f"{STAGE_NAME}:worker:{int(worker_plan['local_worker_index']):02d}",
+            "--sample-interval-ms",
+            str(DEFAULT_SAMPLE_INTERVAL_MS),
+            "--",
+            *raw_command,
+        ]
         try:
             process = subprocess.Popen(
-                list(cast(Sequence[str], worker_plan["command"])),
+                monitored_command,
                 cwd=str(REPO_ROOT),
                 env=env_mapping,
                 stdout=stdout_handle,
@@ -2720,10 +3033,11 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
                 "worker_root": worker_root,
                 "worker_plan_path": Path(str(worker_plan["worker_plan_path"])),
                 "worker_result_path": Path(str(worker_plan["worker_result_path"])),
+                "worker_gpu_summary_path": worker_gpu_summary_path,
                 "stdout_log_path": stdout_log_path,
                 "stderr_log_path": stderr_log_path,
                 "assigned_attack_event_ids": list(cast(Sequence[str], worker_plan["assigned_attack_event_ids"])),
-                "command": list(cast(Sequence[str], worker_plan["command"])),
+                "command": raw_command,
                 "process": process,
                 "stdout_handle": stdout_handle,
                 "stderr_handle": stderr_handle,
@@ -2738,12 +3052,14 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
         cast(Any, launch["stdout_handle"]).close()
         cast(Any, launch["stderr_handle"]).close()
         worker_result_path = cast(Path, launch["worker_result_path"])
+        worker_gpu_summary_path = cast(Path, launch["worker_gpu_summary_path"])
         result_exists = worker_result_path.exists() and worker_result_path.is_file()
         worker_execution = {
             "local_worker_index": int(launch["local_worker_index"]),
             "worker_root": normalize_path_value(cast(Path, launch["worker_root"])),
             "worker_plan_path": normalize_path_value(cast(Path, launch["worker_plan_path"])),
             "worker_result_path": normalize_path_value(worker_result_path),
+            "worker_gpu_summary_path": normalize_path_value(worker_gpu_summary_path),
             "stdout_log_path": normalize_path_value(cast(Path, launch["stdout_log_path"])),
             "stderr_log_path": normalize_path_value(cast(Path, launch["stderr_log_path"])),
             "assigned_attack_event_ids": list(cast(List[str], launch["assigned_attack_event_ids"])),
@@ -2753,10 +3069,16 @@ def _run_local_worker_plans(worker_plans: Sequence[Mapping[str, Any]]) -> Tuple[
         }
         worker_executions.append(worker_execution)
         if result_exists:
+            worker_result = _load_required_json_dict(
+                worker_result_path,
+                f"PW03 worker result {worker_execution['local_worker_index']}",
+            )
             worker_results.append(
-                _load_required_json_dict(
-                    worker_result_path,
-                    f"PW03 worker result {worker_execution['local_worker_index']}",
+                _attach_worker_gpu_summary_to_worker_result(
+                    worker_result_path=worker_result_path,
+                    worker_result=worker_result,
+                    worker_gpu_summary_path=worker_gpu_summary_path,
+                    local_worker_index=int(worker_execution["local_worker_index"]),
                 )
             )
     return worker_executions, worker_results
@@ -2938,6 +3260,16 @@ def _write_worker_gpu_session_peak(
     Returns:
         Worker GPU summary payload.
     """
+    worker_gpu_summary_path = _build_worker_gpu_summary_path(worker_root)
+    if worker_gpu_summary_path.exists() and worker_gpu_summary_path.is_file():
+        worker_gpu_summary = _load_required_json_dict(
+            worker_gpu_summary_path,
+            f"PW03 worker gpu peak {local_worker_index}",
+        )
+        worker_gpu_summary["worker_local_index"] = local_worker_index
+        worker_gpu_summary["summary_path"] = normalize_path_value(worker_gpu_summary_path)
+        return worker_gpu_summary
+
     gpu_peak_payloads: List[Dict[str, Any]] = []
     for event in events:
         gpu_peak_path_value = event.get("gpu_session_peak_path")
@@ -2958,7 +3290,6 @@ def _write_worker_gpu_session_peak(
         gpu_peak_payloads=gpu_peak_payloads,
     )
     worker_gpu_summary["worker_local_index"] = local_worker_index
-    worker_gpu_summary_path = worker_root / "gpu_session_peak.json"
     write_json_atomic(worker_gpu_summary_path, worker_gpu_summary)
     worker_gpu_summary["summary_path"] = normalize_path_value(worker_gpu_summary_path)
     return worker_gpu_summary
@@ -3059,6 +3390,7 @@ def _run_attack_event_by_worker(
     shard_root: Path,
     bound_cfg_obj: Mapping[str, Any],
     assigned_attack_events: Sequence[Mapping[str, Any]],
+    detect_runtime_session: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Execute the assigned attack events for one worker.
@@ -3079,6 +3411,7 @@ def _run_attack_event_by_worker(
     """
     executed_events: List[Dict[str, Any]] = []
     worker_plan_path = worker_root / PW03_WORKER_PLAN_FILE_NAME
+    worker_gpu_summary_path = _build_worker_gpu_summary_path(worker_root)
     for attack_event_spec in assigned_attack_events:
         attack_event_index = int(attack_event_spec.get("attack_event_index", attack_event_spec.get("event_index", -1)))
         event_root = ensure_directory(shard_root / "events" / f"event_{attack_event_index:06d}")
@@ -3106,6 +3439,8 @@ def _run_attack_event_by_worker(
                 event_root=event_root,
                 runtime_config_path=Path(str(runtime_config_summary["runtime_config_path"])),
                 attacked_image_path=Path(str(attack_artifacts["attacked_image_path"])),
+                detect_runtime_session=detect_runtime_session,
+                worker_gpu_summary_path=worker_gpu_summary_path,
             )
             wrong_event_attestation_challenge_summary = _write_wrong_event_attestation_challenge_record(
                 family_id=family_id,
@@ -3235,7 +3570,8 @@ def run_pw03_attack_event_worker(
     bound_config_path_value = worker_plan.get("bound_config_path")
     if not isinstance(bound_config_path_value, str) or not bound_config_path_value:
         raise ValueError("worker plan missing bound_config_path")
-    _, bound_cfg_obj = _load_required_bound_config(Path(bound_config_path_value))
+    bound_config_path = Path(bound_config_path_value)
+    _, bound_cfg_obj = _load_required_bound_config(bound_config_path)
 
     assigned_attack_events_node = worker_plan.get("assigned_attack_events")
     if not isinstance(assigned_attack_events_node, list):
@@ -3248,6 +3584,8 @@ def run_pw03_attack_event_worker(
     if len(assigned_attack_events) != len(assigned_attack_events_node):
         raise ValueError("worker plan assigned_attack_events must contain objects")
 
+    detect_runtime_session = _build_pw03_detect_runtime_session(bound_config_path=bound_config_path)
+
     return _run_attack_event_by_worker(
         family_id=family_id,
         attack_shard_index=attack_shard_index,
@@ -3258,6 +3596,7 @@ def run_pw03_attack_event_worker(
         shard_root=shard_root,
         bound_cfg_obj=bound_cfg_obj,
         assigned_attack_events=assigned_attack_events,
+        detect_runtime_session=detect_runtime_session,
     )
 
 
@@ -3612,30 +3951,55 @@ def run_pw03_attack_event_shard(
     worker_execution_mode = "single_process" if attack_local_worker_count == 1 else "shard_local_subprocess_parallel"
     if attack_local_worker_count == 1:
         only_plan = worker_plans[0]
-        worker_result = run_pw03_attack_event_worker(
-            drive_project_root=normalized_drive_root,
-            family_id=family_id,
-            attack_shard_index=attack_shard_index,
-            attack_shard_count=attack_shard_count,
-            attack_local_worker_count=attack_local_worker_count,
-            local_worker_index=int(only_plan["local_worker_index"]),
-            worker_plan_path=Path(str(only_plan["worker_plan_path"])),
+        worker_result_path = Path(str(only_plan["worker_result_path"]))
+        worker_gpu_summary_path = Path(str(only_plan["worker_gpu_summary_path"]))
+        worker_monitor_result = _run_callable_with_gpu_monitor(
+            label=f"{STAGE_NAME}:worker:{int(only_plan['local_worker_index']):02d}",
+            gpu_summary_path=worker_gpu_summary_path,
+            wrapped_callable=lambda: run_pw03_attack_event_worker(
+                drive_project_root=normalized_drive_root,
+                family_id=family_id,
+                attack_shard_index=attack_shard_index,
+                attack_shard_count=attack_shard_count,
+                attack_local_worker_count=attack_local_worker_count,
+                local_worker_index=int(only_plan["local_worker_index"]),
+                worker_plan_path=Path(str(only_plan["worker_plan_path"])),
+            ),
         )
+        worker_result_candidate = worker_monitor_result.get("callable_result")
+        if isinstance(worker_result_candidate, Mapping):
+            worker_result = dict(cast(Mapping[str, Any], worker_result_candidate))
+        elif worker_result_path.exists() and worker_result_path.is_file():
+            worker_result = _load_required_json_dict(worker_result_path, "PW03 worker result 0")
+        else:
+            worker_result = None
+        if isinstance(worker_result, dict):
+            worker_result = _attach_worker_gpu_summary_to_worker_result(
+                worker_result_path=worker_result_path,
+                worker_result=worker_result,
+                worker_gpu_summary_path=worker_gpu_summary_path,
+                local_worker_index=int(only_plan["local_worker_index"]),
+            )
+            worker_results = [worker_result]
+            result_exists = True
+        else:
+            worker_results = []
+            result_exists = False
         worker_executions = [
             {
                 "local_worker_index": int(only_plan["local_worker_index"]),
                 "worker_root": only_plan.get("worker_root"),
                 "worker_plan_path": only_plan.get("worker_plan_path"),
                 "worker_result_path": only_plan.get("worker_result_path"),
+                "worker_gpu_summary_path": only_plan.get("worker_gpu_summary_path"),
                 "stdout_log_path": only_plan.get("stdout_log_path"),
                 "stderr_log_path": only_plan.get("stderr_log_path"),
                 "assigned_attack_event_ids": only_plan.get("assigned_attack_event_ids", []),
                 "command": only_plan.get("command"),
-                "return_code": 0,
-                "result_exists": True,
+                "return_code": int(worker_monitor_result.get("return_code", 1)),
+                "result_exists": result_exists,
             }
         ]
-        worker_results = [worker_result]
     else:
         worker_executions, worker_results = _run_local_worker_plans(worker_plans)
 

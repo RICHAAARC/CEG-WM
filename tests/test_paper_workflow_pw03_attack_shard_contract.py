@@ -437,18 +437,36 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
         "run_roots": [],
         "detect_input_paths": [],
         "detect_input_payloads": [],
+        "worker_gpu_summary_paths": [],
     }
 
-    def fake_run_command_with_gpu_monitor(
+    def _build_gpu_payload(ordinal: int) -> Dict[str, Any]:
+        peak_memory_mib = 1536 + ordinal
+        return {
+            "status": "ok",
+            "session_board_peak_memory_used_mib": peak_memory_mib,
+            "peak_observed_at_utc": "2026-04-05T00:00:00Z",
+            "peak_gpu_name": "Test GPU",
+            "visible_gpu_count": 1,
+            "visible_gpus": [
+                {
+                    "index": 0,
+                    "uuid": "gpu-0",
+                    "name": "Test GPU",
+                    "memory_total_mib": 24576,
+                    "peak_memory_used_mib": peak_memory_mib,
+                }
+            ],
+            "wrapped_return_code": 0,
+        }
+
+    def _write_fake_detect_outputs(
         *,
-        command: List[str],
-        label: str,
-        gpu_summary_path: Path,
+        run_root: Path,
+        detect_input_path: Path,
         stdout_log_path: Path,
         stderr_log_path: Path,
-    ) -> Dict[str, Any]:
-        run_root = Path(str(command[command.index("--out") + 1]))
-        detect_input_path = Path(str(command[command.index("--input") + 1]))
+    ) -> None:
         detect_input_payload = json.loads(detect_input_path.read_text(encoding="utf-8"))
         captures["run_roots"].append(run_root)
         captures["detect_input_paths"].append(detect_input_path)
@@ -531,23 +549,24 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
                 },
             },
         )
-        gpu_payload = {
-            "status": "ok",
-            "session_board_peak_memory_used_mib": 1536 + len(captures["run_roots"]),
-            "peak_observed_at_utc": "2026-04-05T00:00:00Z",
-            "peak_gpu_name": "Test GPU",
-            "visible_gpu_count": 1,
-            "visible_gpus": [
-                {
-                    "index": 0,
-                    "uuid": "gpu-0",
-                    "name": "Test GPU",
-                    "memory_total_mib": 24576,
-                    "peak_memory_used_mib": 1536 + len(captures["run_roots"]),
-                }
-            ],
-            "wrapped_return_code": 0,
-        }
+
+    def fake_run_command_with_gpu_monitor(
+        *,
+        command: List[str],
+        label: str,
+        gpu_summary_path: Path,
+        stdout_log_path: Path,
+        stderr_log_path: Path,
+    ) -> Dict[str, Any]:
+        run_root = Path(str(command[command.index("--out") + 1]))
+        detect_input_path = Path(str(command[command.index("--input") + 1]))
+        _write_fake_detect_outputs(
+            run_root=run_root,
+            detect_input_path=detect_input_path,
+            stdout_log_path=stdout_log_path,
+            stderr_log_path=stderr_log_path,
+        )
+        gpu_payload = _build_gpu_payload(len(captures["detect_input_paths"]))
         write_json_atomic(gpu_summary_path, gpu_payload)
         return {
             "return_code": 0,
@@ -558,6 +577,74 @@ def _patch_pw03_detect(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
             "gpu_session_peak": gpu_payload,
         }
 
+    def fake_build_pw03_detect_runtime_session(*, bound_config_path: Path) -> Dict[str, Any]:
+        return {
+            "bound_config_path": str(bound_config_path),
+            "runtime_kind": "fake_pw03_detect_runtime_session",
+        }
+
+    def fake_run_pw03_detect_with_runtime(
+        *,
+        run_root: Path,
+        runtime_config_path: Path,
+        detect_input_record_path: Path,
+        detect_runtime_session: Mapping[str, Any],
+        stdout_log_path: Path,
+        stderr_log_path: Path,
+        gpu_summary_path: Path,
+    ) -> Dict[str, Any]:
+        _ = runtime_config_path
+        _ = detect_runtime_session
+        _ = gpu_summary_path
+        _write_fake_detect_outputs(
+            run_root=run_root,
+            detect_input_path=detect_input_record_path,
+            stdout_log_path=stdout_log_path,
+            stderr_log_path=stderr_log_path,
+        )
+        return {
+            "return_code": 0,
+            "stdout_log_path": stdout_log_path.as_posix(),
+            "stderr_log_path": stderr_log_path.as_posix(),
+            "command": ["persistent_runtime_session"],
+            "gpu_session_peak_path": gpu_summary_path.as_posix(),
+            "gpu_session_peak": None,
+            "execution_mode": "persistent_runtime_session",
+        }
+
+    def fake_run_callable_with_gpu_monitor(
+        *,
+        label: str,
+        gpu_summary_path: Path,
+        wrapped_callable: Any,
+    ) -> Dict[str, Any]:
+        _ = label
+        captures["worker_gpu_summary_paths"].append(gpu_summary_path)
+        try:
+            callable_result = wrapped_callable()
+        except Exception as exc:
+            gpu_payload = _build_gpu_payload(len(captures["worker_gpu_summary_paths"]))
+            write_json_atomic(gpu_summary_path, gpu_payload)
+            return {
+                "return_code": 1,
+                "gpu_session_peak_path": gpu_summary_path.as_posix(),
+                "gpu_session_peak": gpu_payload,
+                "callable_result": None,
+                "callable_exception": exc,
+            }
+        gpu_payload = _build_gpu_payload(len(captures["worker_gpu_summary_paths"]))
+        write_json_atomic(gpu_summary_path, gpu_payload)
+        return {
+            "return_code": 0,
+            "gpu_session_peak_path": gpu_summary_path.as_posix(),
+            "gpu_session_peak": gpu_payload,
+            "callable_result": callable_result,
+            "callable_exception": None,
+        }
+
+    monkeypatch.setattr(pw03_module, "_build_pw03_detect_runtime_session", fake_build_pw03_detect_runtime_session)
+    monkeypatch.setattr(pw03_module, "_run_pw03_detect_with_runtime", fake_run_pw03_detect_with_runtime)
+    monkeypatch.setattr(pw03_module, "_run_callable_with_gpu_monitor", fake_run_callable_with_gpu_monitor)
     monkeypatch.setattr(pw03_module, "_run_command_with_gpu_monitor", fake_run_command_with_gpu_monitor)
     return captures
 
@@ -596,7 +683,8 @@ def _patch_pw03_worker_popen(monkeypatch: pytest.MonkeyPatch) -> None:
             self._return_code: int | None = None
 
         def _arg_value(self, flag: str) -> str:
-            return self.command[self.command.index(flag) + 1]
+            worker_command = self.command[self.command.index("--") + 1 :] if "--" in self.command else self.command
+            return worker_command[worker_command.index(flag) + 1]
 
         def wait(self) -> int:
             if self._return_code is None:
@@ -615,6 +703,30 @@ def _patch_pw03_worker_popen(monkeypatch: pytest.MonkeyPatch) -> None:
                     local_worker_index=int(self._arg_value("--local-worker-index")),
                     worker_plan_path=Path(self._arg_value("--worker-plan-path")),
                 )
+                if "--output-json" in self.command:
+                    gpu_summary_path = Path(self.command[self.command.index("--output-json") + 1])
+                    local_worker_index = int(self._arg_value("--local-worker-index"))
+                    peak_memory_mib = 1536 + local_worker_index + 1
+                    write_json_atomic(
+                        gpu_summary_path,
+                        {
+                            "status": "ok",
+                            "session_board_peak_memory_used_mib": peak_memory_mib,
+                            "peak_observed_at_utc": "2026-04-05T00:00:00Z",
+                            "peak_gpu_name": "Test GPU",
+                            "visible_gpu_count": 1,
+                            "visible_gpus": [
+                                {
+                                    "index": 0,
+                                    "uuid": "gpu-0",
+                                    "name": "Test GPU",
+                                    "memory_total_mib": 24576,
+                                    "peak_memory_used_mib": peak_memory_mib,
+                                }
+                            ],
+                            "wrapped_return_code": 0,
+                        },
+                    )
                 self._return_code = 0
             return self._return_code
 

@@ -288,3 +288,65 @@ def test_same_seed_control_rerun_passes_runtime_phase_label(
 
     assert captured_kwargs["runtime_phase_label"] == run_detect_module.DETECT_SAME_SEED_CONTROL_INFERENCE_PHASE_LABEL
     assert context["same_seed_control_reason"] == "same_seed_control_inference_unavailable"
+
+
+def test_run_detect_runtime_session_reuses_static_runtime_components(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """
+    功能：runtime_session 复用时必须保留 event 级 config 加载，并跳过重复的 pipeline / impl set 构建。
+    """
+    captured_kwargs: Dict[str, Any] = {}
+    call_counts = {
+        "load_and_validate_config": 0,
+        "build_pipeline_shell": 0,
+        "build_runtime_impl_set_from_cfg": 0,
+    }
+
+    _prepare_detect_main_inference_env(monkeypatch, tmp_path, captured_kwargs)
+
+    original_load_and_validate_config = run_detect_module.config_loader.load_and_validate_config
+    original_build_pipeline_shell = run_detect_module.pipeline_factory.build_pipeline_shell
+    original_build_runtime_impl_set_from_cfg = run_detect_module.runtime_resolver.build_runtime_impl_set_from_cfg
+
+    def _counted_load_and_validate_config(*args: Any, **kwargs: Any) -> tuple[Dict[str, Any], str, Dict[str, str]]:
+        call_counts["load_and_validate_config"] += 1
+        return original_load_and_validate_config(*args, **kwargs)
+
+    def _counted_build_pipeline_shell(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        call_counts["build_pipeline_shell"] += 1
+        return original_build_pipeline_shell(*args, **kwargs)
+
+    def _counted_build_runtime_impl_set_from_cfg(*args: Any, **kwargs: Any) -> tuple[_FakeDetectImplIdentity, _FakeDetectImplSet, str]:
+        call_counts["build_runtime_impl_set_from_cfg"] += 1
+        return original_build_runtime_impl_set_from_cfg(*args, **kwargs)
+
+    monkeypatch.setattr(run_detect_module.config_loader, "load_and_validate_config", _counted_load_and_validate_config)
+    monkeypatch.setattr(run_detect_module.pipeline_factory, "build_pipeline_shell", _counted_build_pipeline_shell)
+    monkeypatch.setattr(
+        run_detect_module.runtime_resolver,
+        "build_runtime_impl_set_from_cfg",
+        _counted_build_runtime_impl_set_from_cfg,
+    )
+
+    runtime_session = run_detect_module.build_detect_runtime_session("configs/default.yaml")
+
+    assert call_counts["load_and_validate_config"] == 1
+    assert call_counts["build_pipeline_shell"] == 1
+    assert call_counts["build_runtime_impl_set_from_cfg"] == 1
+
+    with pytest.raises(StopAfterDetectInference):
+        run_detect_module.run_detect(
+            output_dir=str(tmp_path / "out"),
+            config_path="configs/default.yaml",
+            input_record_path=None,
+            overrides=None,
+            thresholds_path=None,
+            runtime_session=runtime_session,
+        )
+
+    assert call_counts["load_and_validate_config"] == 2
+    assert call_counts["build_pipeline_shell"] == 1
+    assert call_counts["build_runtime_impl_set_from_cfg"] == 1
+    assert captured_kwargs["runtime_phase_label"] == run_detect_module.DETECT_MAIN_INFERENCE_PHASE_LABEL

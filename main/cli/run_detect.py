@@ -1118,12 +1118,190 @@ def _build_hf_truncation_baseline_payload(record: Any, cfg: Any) -> Dict[str, An
     return result
 
 
+def _build_detect_runtime_reuse_signature(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构建 detect runtime 复用兼容性签名。
+
+    Build the compatibility signature used for detect runtime session reuse.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Mapping containing the stable fields that must remain unchanged when a
+        runtime session is reused.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    model_cfg = _resolve_nested_mapping(cfg, "model")
+    model_source_binding = cfg.get("model_source_binding")
+    model_source_binding_digest = (
+        digests.canonical_sha256(model_source_binding)
+        if isinstance(model_source_binding, dict)
+        else None
+    )
+    return {
+        "policy_path": cfg.get("policy_path"),
+        "device": cfg.get("device"),
+        "model_id": cfg.get("model_id"),
+        "model_source": cfg.get("model_source"),
+        "hf_revision": cfg.get("hf_revision"),
+        "model_snapshot_path": cfg.get("model_snapshot_path"),
+        "model_dtype": model_cfg.get("dtype"),
+        "model_height": model_cfg.get("height"),
+        "model_width": model_cfg.get("width"),
+        "model_source_binding_digest": model_source_binding_digest,
+    }
+
+
+def _validate_detect_runtime_session(runtime_session: Any) -> Dict[str, Any]:
+    """
+    功能：校验 detect runtime session 的最小结构。
+
+    Validate the minimum structure required by a detect runtime session.
+
+    Args:
+        runtime_session: Candidate runtime session payload.
+
+    Returns:
+        Validated runtime session mapping.
+
+    Raises:
+        TypeError: If runtime_session is not a mapping.
+        ValueError: If required fields are missing.
+    """
+    if not isinstance(runtime_session, dict):
+        raise TypeError("runtime_session must be dict")
+
+    required_keys = [
+        "contracts",
+        "whitelist",
+        "semantics",
+        "injection_scope_manifest",
+        "interpretation",
+        "snapshot",
+        "pipeline_result",
+        "impl_identity",
+        "impl_set",
+        "impl_set_capabilities_digest",
+        "runtime_reuse_signature",
+    ]
+    missing_keys = [key_name for key_name in required_keys if key_name not in runtime_session]
+    if missing_keys:
+        raise ValueError(f"runtime_session missing required keys: {missing_keys}")
+    return cast(Dict[str, Any], runtime_session)
+
+
+def build_detect_runtime_session(
+    config_path: Any,
+    overrides: Any = None,
+    thresholds_path: Any = None,
+) -> Dict[str, Any]:
+    """
+    功能：构建可复用的 detect 静态 runtime session。
+
+    Build reusable static detect runtime state for multiple detect executions.
+
+    Args:
+        config_path: YAML config path used to construct the static runtime.
+        overrides: Optional CLI override args list.
+        thresholds_path: Optional thresholds artifact path.
+
+    Returns:
+        Mapping containing reusable fact-source objects, pipeline state, and
+        implementation instances.
+
+    Raises:
+        ValueError: If config_path is invalid.
+        TypeError: If overrides or thresholds_path are invalid.
+    """
+    if not isinstance(config_path, str) or not config_path:
+        raise ValueError("config_path must be non-empty str")
+    if overrides is not None:
+        if not isinstance(overrides, list):
+            raise TypeError("overrides must be list[str] or None")
+        overrides_list = cast(list[Any], overrides)
+        for override_item in overrides_list:
+            if not isinstance(override_item, str):
+                raise TypeError("overrides must be list[str] or None")
+    if thresholds_path is not None and not isinstance(thresholds_path, str):
+        raise TypeError("thresholds_path must be str or None")
+
+    validated_overrides = cast(list[str] | None, overrides)
+    validated_thresholds_path = cast(str | None, thresholds_path)
+
+    contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
+    whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
+    semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
+    injection_scope_manifest = config_loader.load_injection_scope_manifest()
+    assert_consistent_with_semantics(whitelist, semantics)
+    interpretation = get_contract_interpretation(contracts)
+    cfg, _, _ = config_loader.load_and_validate_config(
+        config_path,
+        whitelist,
+        semantics,
+        contracts,
+        interpretation,
+        overrides=validated_overrides,
+    )
+
+    _, _, seed_value, _ = build_seed_audit(cfg, "detect")
+    cfg["seed"] = seed_value
+
+    session_meta: Dict[str, Any] = {}
+    if validated_thresholds_path:
+        resolved_thresholds_path = str(Path(validated_thresholds_path).resolve())
+        cfg["__thresholds_artifact__"] = detect_orchestrator.load_thresholds_artifact_controlled(
+            resolved_thresholds_path
+        )
+        session_meta["thresholds_path_injected"] = resolved_thresholds_path
+
+    if cfg.get("__thresholds_artifact__") is None:
+        detect_cfg = _resolve_detect_cfg(cfg)
+        calibration_artifact_path = detect_cfg.get("calibration_artifact_path")
+        if isinstance(calibration_artifact_path, str) and calibration_artifact_path:
+            resolved_calibration_artifact_path = str(Path(calibration_artifact_path).resolve())
+            cfg["__thresholds_artifact__"] = detect_orchestrator.load_thresholds_artifact_controlled(
+                resolved_calibration_artifact_path
+            )
+            session_meta["thresholds_path_injected"] = resolved_calibration_artifact_path
+            session_meta["thresholds_source"] = "detect_calibration_artifact_path"
+        _bind_observation_only_threshold_semantics(cfg, session_meta)
+
+    pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
+    impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+        cfg,
+        whitelist,
+    )
+    snapshot = records_io.build_fact_sources_snapshot(
+        contracts,
+        whitelist,
+        semantics,
+        injection_scope_manifest,
+    )
+    return {
+        "contracts": contracts,
+        "whitelist": whitelist,
+        "semantics": semantics,
+        "injection_scope_manifest": injection_scope_manifest,
+        "interpretation": interpretation,
+        "snapshot": snapshot,
+        "pipeline_result": pipeline_result,
+        "impl_identity": impl_identity,
+        "impl_set": impl_set,
+        "impl_set_capabilities_digest": impl_set_capabilities_digest,
+        "runtime_reuse_signature": _build_detect_runtime_reuse_signature(cfg),
+    }
+
+
 def run_detect(
     output_dir: Any,
     config_path: Any,
     input_record_path: Any = None,
     overrides: Any = None,
     thresholds_path: Any = None,
+    runtime_session: Any = None,
 ) -> None:
     """
     功能：执行检测流程，本阶段为基线实现。
@@ -1136,6 +1314,7 @@ def run_detect(
         input_record_path: Optional input record path (baseline if not provided).
         overrides: Optional CLI override args list.
         thresholds_path: Optional path to thresholds artifact for NP threshold injection.
+        runtime_session: Optional reusable detect runtime session.
     
     Returns:
         None.
@@ -1161,10 +1340,17 @@ def run_detect(
     if thresholds_path is not None and not isinstance(thresholds_path, str):
         # thresholds_path 输入不合法，必须 fail-fast。
         raise TypeError("thresholds_path must be str or None")
+    if runtime_session is not None and not isinstance(runtime_session, dict):
+        raise TypeError("runtime_session must be dict or None")
 
     validated_overrides = cast(list[str] | None, overrides)
     validated_input_record_path = cast(str | None, input_record_path)
     validated_thresholds_path = cast(str | None, thresholds_path)
+    validated_runtime_session = (
+        _validate_detect_runtime_session(runtime_session)
+        if runtime_session is not None
+        else None
+    )
 
     run_root = path_policy.derive_run_root(Path(output_dir))
     records_dir = run_root / "records"
@@ -1217,37 +1403,60 @@ def run_detect(
     pipeline_result: Dict[str, Any] | None = None
     record: Dict[str, Any] | None = None
     try:
-        # 加载事实源。
-        print("[Detect] Loading fact sources...")
-        contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
-        whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
-        semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
-        injection_scope_manifest = config_loader.load_injection_scope_manifest()
+        if validated_runtime_session is None:
+            # 加载事实源。
+            print("[Detect] Loading fact sources...")
+            contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
+            whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
+            semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
+            injection_scope_manifest = config_loader.load_injection_scope_manifest()
 
-        # 绑定冻结锚点到 run_meta。
-        print("[Detect] Binding freeze anchors to run_meta...")
-        status.bind_freeze_anchors_to_run_meta(
-            run_meta,
-            contracts,
-            whitelist,
-            semantics,
-            injection_scope_manifest
-        )
+            # 绑定冻结锚点到 run_meta。
+            print("[Detect] Binding freeze anchors to run_meta...")
+            status.bind_freeze_anchors_to_run_meta(
+                run_meta,
+                contracts,
+                whitelist,
+                semantics,
+                injection_scope_manifest
+            )
 
-        # 生成事实源快照用于运行期一致性校验。
-        snapshot = records_io.build_fact_sources_snapshot(
-            contracts,
-            whitelist,
-            semantics,
-            injection_scope_manifest
-        )
-        run_meta["bound_fact_sources"] = snapshot
+            # 生成事实源快照用于运行期一致性校验。
+            snapshot = records_io.build_fact_sources_snapshot(
+                contracts,
+                whitelist,
+                semantics,
+                injection_scope_manifest
+            )
+            run_meta["bound_fact_sources"] = snapshot
 
-        # 验证 whitelist 与 semantics 一致性。
-        print("[Detect] Validating whitelist-semantics consistency...")
-        assert_consistent_with_semantics(whitelist, semantics)
+            # 验证 whitelist 与 semantics 一致性。
+            print("[Detect] Validating whitelist-semantics consistency...")
+            assert_consistent_with_semantics(whitelist, semantics)
 
-        interpretation = get_contract_interpretation(contracts)
+            interpretation = get_contract_interpretation(contracts)
+        else:
+            print("[Detect] Reusing runtime session static state...")
+            contracts = validated_runtime_session["contracts"]
+            whitelist = validated_runtime_session["whitelist"]
+            semantics = validated_runtime_session["semantics"]
+            injection_scope_manifest = validated_runtime_session["injection_scope_manifest"]
+            interpretation = validated_runtime_session["interpretation"]
+
+            print("[Detect] Binding freeze anchors to run_meta...")
+            status.bind_freeze_anchors_to_run_meta(
+                run_meta,
+                contracts,
+                whitelist,
+                semantics,
+                injection_scope_manifest
+            )
+            snapshot = dict(cast(Dict[str, Any], validated_runtime_session["snapshot"]))
+            run_meta["bound_fact_sources"] = snapshot
+
+            print("[Detect] Validating whitelist-semantics consistency...")
+            assert_consistent_with_semantics(whitelist, semantics)
+
         try:
             cfg, cfg_digest, cfg_audit_metadata = config_loader.load_and_validate_config(
                 config_path,
@@ -1262,6 +1471,13 @@ def run_detect(
             raise
         run_meta["cfg_digest"] = cfg_digest
         run_meta["policy_path"] = cfg["policy_path"]
+
+        if validated_runtime_session is not None:
+            runtime_reuse_signature = _build_detect_runtime_reuse_signature(cfg)
+            if runtime_reuse_signature != validated_runtime_session["runtime_reuse_signature"]:
+                reuse_mismatch_exc = ValueError("runtime_session config signature mismatch")
+                set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, reuse_mismatch_exc)
+                raise reuse_mismatch_exc
 
         seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "detect")
         cfg["seed"] = seed_value
@@ -1278,7 +1494,10 @@ def run_detect(
         if nondeterminism_notes is not None:
             run_meta["nondeterminism_notes"] = nondeterminism_notes
 
-        pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
+        if validated_runtime_session is None:
+            pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
+        else:
+            pipeline_result = cast(Dict[str, Any], validated_runtime_session["pipeline_result"])
         run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
         run_meta["pipeline_status"] = pipeline_result.get("pipeline_status")
         run_meta["pipeline_error"] = pipeline_result.get("pipeline_error")
@@ -1292,14 +1511,19 @@ def run_detect(
         run_meta["safetensors_version"] = pipeline_result.get("safetensors_version")
         run_meta["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
 
-        try:
-            impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
-                cfg,
-                whitelist,
-            )
-        except Exception as exc:
-            set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
-            raise
+        if validated_runtime_session is None:
+            try:
+                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+                    cfg,
+                    whitelist,
+                )
+            except Exception as exc:
+                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
+                raise
+        else:
+            impl_identity = validated_runtime_session["impl_identity"]
+            impl_set = validated_runtime_session["impl_set"]
+            impl_set_capabilities_digest = validated_runtime_session["impl_set_capabilities_digest"]
         run_meta["impl_id"] = impl_identity.content_extractor_id
         run_meta["impl_version"] = impl_set.content_extractor.impl_version
         run_meta["impl_identity"] = impl_identity.as_dict()
