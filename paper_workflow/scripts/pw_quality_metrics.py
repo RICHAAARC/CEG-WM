@@ -795,6 +795,7 @@ def _flush_psnr_ssim_pending_batch(
     started_at = time.perf_counter() if phase_profiler is not None else 0.0
     successful_sample_count = 0
     batch = list(psnr_ssim_pending)
+    batch_sample_count = len(batch)
     try:
         batch_psnr_values = compute_psnr_batch(
             [reference_image for _, reference_image, _ in batch],
@@ -838,9 +839,9 @@ def _flush_psnr_ssim_pending_batch(
 
     if phase_profiler is not None and successful_sample_count > 0:
         phase_profiler.record_aggregate_phase_timing(
-            "psnr_ssim",
+            "psnr_ssim_compute",
             elapsed_seconds=time.perf_counter() - started_at,
-            sample_count=successful_sample_count,
+            sample_count=batch_sample_count,
             batch_count=1,
             batch_size=len(batch),
         )
@@ -1126,6 +1127,8 @@ def build_quality_metrics_from_pairs(
     clip_reason_ref: List[str | None] = [None]
     clip_missing_text_count = 0
     clip_error_count_ref: List[int] = [0]
+    image_load_elapsed_seconds_total = 0.0
+    image_load_sample_count = 0
 
     for pair_spec in pair_specs:
         if not isinstance(pair_spec, Mapping):
@@ -1173,6 +1176,7 @@ def build_quality_metrics_from_pairs(
         candidate_path = Path(candidate_value).expanduser().resolve()
         pair_row["reference_image_path"] = normalize_path_value(reference_path)
         pair_row["candidate_image_path"] = normalize_path_value(candidate_path)
+        image_load_started_at = time.perf_counter() if phase_profiler is not None else 0.0
         try:
             reference_image = _load_rgb_image_cached(reference_path, image_cache=image_cache)
             candidate_image = _load_rgb_image(candidate_path)
@@ -1190,6 +1194,10 @@ def build_quality_metrics_from_pairs(
             error_count += 1
             pair_rows.append(pair_row)
             continue
+        finally:
+            if phase_profiler is not None:
+                image_load_elapsed_seconds_total += time.perf_counter() - image_load_started_at
+                image_load_sample_count += 1
 
         pair_row["status"] = "ok"
         pair_rows.append(pair_row)
@@ -1202,6 +1210,13 @@ def build_quality_metrics_from_pairs(
                 candidate_image,
                 prompt_text.strip() if isinstance(prompt_text, str) and prompt_text.strip() else None,
             )
+        )
+
+    if phase_profiler is not None and image_load_sample_count > 0:
+        phase_profiler.record_aggregate_phase_timing(
+            "image_load",
+            elapsed_seconds=image_load_elapsed_seconds_total,
+            sample_count=image_load_sample_count,
         )
 
     psnr_ssim_error_count_ref: List[int] = [error_count]

@@ -605,17 +605,36 @@ def test_build_quality_metrics_from_pairs_phase_profiler_writes_cpu_json(
     )
 
     profile_payload = _load_json_dict(output_path)
+    image_load_phase = cast(Dict[str, Any], profile_payload["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], profile_payload["phases"]["psnr_ssim_compute"])
+    compat_phase = cast(Dict[str, Any], profile_payload["phases"]["psnr_ssim"])
     assert summary["quality_phase_profile_path"] == normalize_path_value(output_path)
     assert summary["quality_phase_profile"]["schema_version"] == pw_quality_phase_profiler_module.PHASE_PROFILE_SCHEMA_VERSION
     assert profile_payload["artifact_type"] == pw_quality_phase_profiler_module.PHASE_PROFILE_ARTIFACT_TYPE
     assert profile_payload["phase_profile_label"] == "cpu_profile"
     assert profile_payload["monitor_backend"]["board_monitor"] == "cpu_only"
-    assert set(profile_payload["phases"].keys()) == {"psnr_ssim", "lpips", "clip"}
-    assert profile_payload["phases"]["psnr_ssim"]["measurement_mode"] == "aggregate_only"
-    assert profile_payload["phases"]["psnr_ssim"]["gpu_measurement_mode"] == "not_measured_per_pair"
-    assert profile_payload["phases"]["psnr_ssim"]["board_monitor_status"] == "cpu_only"
-    assert profile_payload["phases"]["psnr_ssim"]["sample_count"] == 2
-    assert profile_payload["phases"]["psnr_ssim"]["elapsed_seconds_total"] > 0.0
+    assert set(profile_payload["phases"].keys()) == {"psnr_ssim", "image_load", "psnr_ssim_compute", "lpips", "clip"}
+    assert compat_phase["measurement_mode"] == "aggregate_only"
+    assert compat_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert compat_phase["board_monitor_status"] == "cpu_only"
+    assert compat_phase["sample_count"] == 2
+    assert compat_phase["elapsed_seconds_total"] > 0.0
+    assert image_load_phase["measurement_mode"] == "aggregate_only"
+    assert image_load_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert image_load_phase["board_monitor_status"] == "cpu_only"
+    assert image_load_phase["sample_count"] == 2
+    assert image_load_phase["batch_count"] == 0
+    assert image_load_phase["batch_sizes"] == []
+    assert compute_phase["measurement_mode"] == "aggregate_only"
+    assert compute_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert compute_phase["board_monitor_status"] == "cpu_only"
+    assert compute_phase["sample_count"] == 2
+    assert compute_phase["batch_count"] == 1
+    assert compute_phase["batch_sizes"] == [2]
+    assert compat_phase["elapsed_seconds_total"] == pytest.approx(
+        image_load_phase["elapsed_seconds_total"] + compute_phase["elapsed_seconds_total"],
+        abs=2e-6,
+    )
     assert profile_payload["phases"]["lpips"]["board_monitor_status"] == "cpu_only"
     assert profile_payload["phases"]["clip"]["board_monitor_status"] == "cpu_only"
     assert profile_payload["phases"]["clip"]["includes_text_encoding"] is True
@@ -674,11 +693,23 @@ def test_build_quality_metrics_from_pairs_phase_profiler_tracks_batch_flushes(
     )
 
     phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    image_load_phase = cast(Dict[str, Any], phase_profile["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim_compute"])
     psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
     lpips_phase = cast(Dict[str, Any], phase_profile["phases"]["lpips"])
     clip_phase = cast(Dict[str, Any], phase_profile["phases"]["clip"])
+    assert image_load_phase["sample_count"] == 3
+    assert image_load_phase["batch_count"] == 0
+    assert image_load_phase["batch_sizes"] == []
+    assert compute_phase["sample_count"] == 3
+    assert compute_phase["batch_count"] == 1
+    assert compute_phase["batch_sizes"] == [3]
     assert psnr_ssim_phase["sample_count"] == 3
     assert psnr_ssim_phase["elapsed_seconds_total"] > 0.0
+    assert psnr_ssim_phase["elapsed_seconds_total"] == pytest.approx(
+        image_load_phase["elapsed_seconds_total"] + compute_phase["elapsed_seconds_total"],
+        abs=2e-6,
+    )
     assert lpips_phase["batch_count"] == 2
     assert lpips_phase["batch_sizes"] == [2, 1]
     assert lpips_phase["sample_count"] == 3
@@ -763,6 +794,8 @@ def test_build_quality_metrics_from_pairs_phase_profiler_records_fake_cuda_peaks
     )
 
     phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    image_load_phase = cast(Dict[str, Any], phase_profile["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim_compute"])
     psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
     lpips_phase = cast(Dict[str, Any], phase_profile["phases"]["lpips"])
     clip_phase = cast(Dict[str, Any], phase_profile["phases"]["clip"])
@@ -772,6 +805,14 @@ def test_build_quality_metrics_from_pairs_phase_profiler_records_fake_cuda_peaks
     assert psnr_ssim_phase["gpu_measurement_mode"] == "not_measured_per_pair"
     assert psnr_ssim_phase["torch_peak_memory_allocated_mib"] is None
     assert psnr_ssim_phase["torch_peak_memory_reserved_mib"] is None
+    assert image_load_phase["measurement_mode"] == "aggregate_only"
+    assert image_load_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert image_load_phase["torch_peak_memory_allocated_mib"] is None
+    assert image_load_phase["torch_peak_memory_reserved_mib"] is None
+    assert compute_phase["measurement_mode"] == "aggregate_only"
+    assert compute_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert compute_phase["torch_peak_memory_allocated_mib"] is None
+    assert compute_phase["torch_peak_memory_reserved_mib"] is None
     assert lpips_phase["torch_peak_memory_allocated_mib"] == 96.0
     assert lpips_phase["torch_peak_memory_reserved_mib"] == 128.0
     assert lpips_phase["torch_memory_samples_count"] >= 2
@@ -779,12 +820,12 @@ def test_build_quality_metrics_from_pairs_phase_profiler_records_fake_cuda_peaks
     assert clip_phase["board_samples_count"] == 0
 
 
-def test_build_quality_metrics_from_pairs_psnr_ssim_uses_aggregate_phase_recording(
+def test_build_quality_metrics_from_pairs_splits_psnr_ssim_into_image_load_and_compute_phases(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
     """
-    Verify psnr_ssim uses aggregate recording instead of entering the full phase scope.
+    Verify PSNR/SSIM aggregate profiling is split into image_load and psnr_ssim_compute while preserving psnr_ssim compatibility.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -875,18 +916,36 @@ def test_build_quality_metrics_from_pairs_psnr_ssim_uses_aggregate_phase_recordi
     )
 
     phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    image_load_phase = cast(Dict[str, Any], phase_profile["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim_compute"])
     psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
     assert "psnr_ssim" not in full_phase_begin_calls
-    assert [row["phase_name"] for row in aggregate_record_calls] == ["psnr_ssim"]
+    assert "image_load" not in full_phase_begin_calls
+    assert "psnr_ssim_compute" not in full_phase_begin_calls
+    assert [row["phase_name"] for row in aggregate_record_calls] == ["image_load", "psnr_ssim_compute"]
     assert aggregate_record_calls[0]["sample_count"] == 2
-    assert aggregate_record_calls[0]["batch_count"] == 1
-    assert aggregate_record_calls[0]["batch_size"] == 2
+    assert aggregate_record_calls[0]["batch_count"] == 0
+    assert aggregate_record_calls[0]["batch_size"] is None
+    assert aggregate_record_calls[1]["sample_count"] == 2
+    assert aggregate_record_calls[1]["batch_count"] == 1
+    assert aggregate_record_calls[1]["batch_size"] == 2
     assert all(row["elapsed_seconds"] > 0.0 for row in aggregate_record_calls)
+    assert image_load_phase["sample_count"] == 2
+    assert image_load_phase["invocation_count"] == 1
+    assert image_load_phase["batch_count"] == 0
+    assert image_load_phase["batch_sizes"] == []
+    assert compute_phase["sample_count"] == 2
+    assert compute_phase["invocation_count"] == 1
+    assert compute_phase["batch_count"] == 1
+    assert compute_phase["batch_sizes"] == [2]
     assert psnr_ssim_phase["sample_count"] == 2
     assert psnr_ssim_phase["invocation_count"] == 1
     assert psnr_ssim_phase["batch_count"] == 1
     assert psnr_ssim_phase["batch_sizes"] == [2]
-    assert psnr_ssim_phase["elapsed_seconds_total"] > 0.0
+    assert psnr_ssim_phase["elapsed_seconds_total"] == pytest.approx(
+        image_load_phase["elapsed_seconds_total"] + compute_phase["elapsed_seconds_total"],
+        abs=2e-6,
+    )
 
 
 def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
@@ -963,7 +1022,95 @@ def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
     assert ssim_batch_calls == [3]
     assert [row["psnr"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == [31.0, 32.0, 33.0]
     assert [row["ssim"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == [0.91, 0.9, 0.89]
+    assert summary["quality_phase_profile"]["phases"]["image_load"]["sample_count"] == 3
+    assert summary["quality_phase_profile"]["phases"]["psnr_ssim_compute"]["sample_count"] == 3
     assert summary["quality_phase_profile"]["phases"]["psnr_ssim"]["sample_count"] == 3
+
+
+def test_build_quality_metrics_from_pairs_image_load_counts_attempts_but_compute_counts_only_valid_pairs(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify image_load counts attempted loads while psnr_ssim_compute counts only valid pairs that enter batch computation.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    valid_reference_path = tmp_path / "valid_reference.png"
+    valid_candidate_path = tmp_path / "valid_candidate.png"
+    missing_reference_path = tmp_path / "missing_reference.png"
+    shape_reference_path = tmp_path / "shape_reference.png"
+    shape_candidate_path = tmp_path / "shape_candidate.png"
+    missing_candidate_path = tmp_path / "missing_candidate.png"
+    Image.new("RGB", (8, 8), color=(170, 60, 20)).save(valid_reference_path)
+    Image.new("RGB", (8, 8), color=(173, 60, 20)).save(valid_candidate_path)
+    Image.new("RGB", (8, 8), color=(180, 40, 30)).save(missing_reference_path)
+    Image.new("RGB", (8, 8), color=(190, 30, 70)).save(shape_reference_path)
+    Image.new("RGB", (10, 10), color=(192, 30, 70)).save(shape_candidate_path)
+
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.12,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_clip_text_similarity_compat",
+        lambda candidate_image, prompt_text, *, torch_device: 0.79,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=[
+            {
+                "pair_id": "valid_pair",
+                "reference_image_path": normalize_path_value(valid_reference_path),
+                "candidate_image_path": normalize_path_value(valid_candidate_path),
+                "prompt_text": "prompt one",
+            },
+            {
+                "pair_id": "missing_pair",
+                "reference_image_path": normalize_path_value(missing_reference_path),
+                "candidate_image_path": normalize_path_value(missing_candidate_path),
+                "prompt_text": "prompt one",
+            },
+            {
+                "pair_id": "shape_pair",
+                "reference_image_path": normalize_path_value(shape_reference_path),
+                "candidate_image_path": normalize_path_value(shape_candidate_path),
+                "prompt_text": "prompt one",
+            },
+        ],
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        enable_phase_profiler=True,
+    )
+
+    phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    image_load_phase = cast(Dict[str, Any], phase_profile["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim_compute"])
+    compat_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
+    pair_rows = cast(List[Dict[str, Any]], summary["pair_rows"])
+
+    assert summary["count"] == 1
+    assert summary["missing_count"] == 1
+    assert summary["error_count"] == 1
+    assert image_load_phase["sample_count"] == 3
+    assert compute_phase["sample_count"] == 1
+    assert compute_phase["batch_count"] == 1
+    assert compute_phase["batch_sizes"] == [1]
+    assert compat_phase["sample_count"] == 1
+    assert compat_phase["elapsed_seconds_total"] == pytest.approx(
+        image_load_phase["elapsed_seconds_total"] + compute_phase["elapsed_seconds_total"],
+        abs=2e-6,
+    )
+    assert [row["status"] for row in pair_rows] == ["ok", "missing_file", "error"]
 
 
 

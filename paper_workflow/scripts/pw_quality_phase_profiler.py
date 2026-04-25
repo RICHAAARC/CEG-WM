@@ -18,7 +18,7 @@ from scripts.notebook_runtime_common import write_json_atomic_compact
 PHASE_PROFILE_ARTIFACT_TYPE = "paper_workflow_quality_phase_profile"
 PHASE_PROFILE_SCHEMA_VERSION = "pw_quality_phase_profile_v1"
 PHASE_PROFILE_SAMPLE_INTERVAL_SECONDS = 0.05
-SUPPORTED_PHASE_NAMES = ("psnr_ssim", "lpips", "clip")
+SUPPORTED_PHASE_NAMES = ("psnr_ssim", "image_load", "psnr_ssim_compute", "lpips", "clip")
 
 
 def _load_torch_module() -> Any | None:
@@ -409,7 +409,23 @@ class QualityPhaseProfiler:
         self._phases: Dict[str, _PhaseMetrics] = {
             "psnr_ssim": _PhaseMetrics(
                 phase_name="psnr_ssim",
-                phase_scope="image_load + PSNR + SSIM per pair",
+                phase_scope="compatibility summary of image_load + psnr_ssim_compute",
+                includes_text_encoding=False,
+                measurement_mode="aggregate_only",
+                gpu_measurement_mode="not_measured_per_pair",
+                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+            ),
+            "image_load": _PhaseMetrics(
+                phase_name="image_load",
+                phase_scope="reference/candidate image load, decode, numpy conversion, and shape validation",
+                includes_text_encoding=False,
+                measurement_mode="aggregate_only",
+                gpu_measurement_mode="not_measured_per_pair",
+                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+            ),
+            "psnr_ssim_compute": _PhaseMetrics(
+                phase_name="psnr_ssim_compute",
+                phase_scope="batched PSNR/SSIM compute and pair-row assignment",
                 includes_text_encoding=False,
                 measurement_mode="aggregate_only",
                 gpu_measurement_mode="not_measured_per_pair",
@@ -554,6 +570,8 @@ class QualityPhaseProfiler:
         if not isinstance(error_count, int) or isinstance(error_count, bool) or error_count < 0:
             raise TypeError("error_count must be non-negative int")
 
+        self._synthesize_psnr_ssim_compatibility_phase(successful_pair_count=successful_pair_count)
+
         profile_payload = {
             "artifact_type": PHASE_PROFILE_ARTIFACT_TYPE,
             "schema_version": PHASE_PROFILE_SCHEMA_VERSION,
@@ -601,6 +619,8 @@ class QualityPhaseProfiler:
         if pynvml_module is None:
             self._board_monitor_backend = "torch_only"
             for phase_metrics in self._phases.values():
+                if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
+                    continue
                 phase_metrics.board_monitor_status = "nvml_unavailable"
             return
 
@@ -615,6 +635,8 @@ class QualityPhaseProfiler:
         except Exception:
             self._board_monitor_backend = "torch_only"
             for phase_metrics in self._phases.values():
+                if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
+                    continue
                 phase_metrics.board_monitor_status = "nvml_unavailable"
             return
 
@@ -622,7 +644,36 @@ class QualityPhaseProfiler:
         self._nvml_initialized = True
         self._board_monitor_backend = "nvml"
         for phase_metrics in self._phases.values():
+            if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
+                continue
             phase_metrics.board_monitor_status = "nvml"
+
+    def _synthesize_psnr_ssim_compatibility_phase(self, *, successful_pair_count: int) -> None:
+        compat_phase = self._phases["psnr_ssim"]
+        image_load_phase = self._phases["image_load"]
+        compute_phase = self._phases["psnr_ssim_compute"]
+        compatibility_elapsed_seconds_total = (
+            float(image_load_phase.elapsed_seconds_total) + float(compute_phase.elapsed_seconds_total)
+        )
+        compatibility_has_observation = (
+            image_load_phase.invocation_count > 0
+            or compute_phase.invocation_count > 0
+            or compatibility_elapsed_seconds_total > 0.0
+        )
+
+        compat_phase.invocation_count = 1 if compatibility_has_observation else 0
+        compat_phase.sample_count = int(successful_pair_count)
+        compat_phase.batch_count = int(compute_phase.batch_count)
+        compat_phase.batch_sizes = [int(value) for value in compute_phase.batch_sizes]
+        compat_phase.elapsed_seconds_total = compatibility_elapsed_seconds_total
+        compat_phase.elapsed_seconds_max = compatibility_elapsed_seconds_total if compatibility_has_observation else 0.0
+        compat_phase.torch_peak_memory_allocated_mib = None
+        compat_phase.torch_peak_memory_reserved_mib = None
+        compat_phase.torch_memory_samples_count = 0
+        compat_phase.board_peak_memory_used_mib = None
+        compat_phase.board_peak_gpu_utilization_percent = None
+        compat_phase.board_peak_memory_utilization_percent = None
+        compat_phase.board_samples_count = 0
 
     def _shutdown_nvml_if_needed(self) -> None:
         if not self._nvml_initialized or self._nvml_module is None:
