@@ -614,6 +614,8 @@ def test_build_quality_metrics_from_pairs_phase_profiler_writes_cpu_json(
     assert profile_payload["phases"]["psnr_ssim"]["measurement_mode"] == "aggregate_only"
     assert profile_payload["phases"]["psnr_ssim"]["gpu_measurement_mode"] == "not_measured_per_pair"
     assert profile_payload["phases"]["psnr_ssim"]["board_monitor_status"] == "cpu_only"
+    assert profile_payload["phases"]["psnr_ssim"]["sample_count"] == 2
+    assert profile_payload["phases"]["psnr_ssim"]["elapsed_seconds_total"] > 0.0
     assert profile_payload["phases"]["lpips"]["board_monitor_status"] == "cpu_only"
     assert profile_payload["phases"]["clip"]["board_monitor_status"] == "cpu_only"
     assert profile_payload["phases"]["clip"]["includes_text_encoding"] is True
@@ -875,16 +877,93 @@ def test_build_quality_metrics_from_pairs_psnr_ssim_uses_aggregate_phase_recordi
     phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
     psnr_ssim_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
     assert "psnr_ssim" not in full_phase_begin_calls
-    assert [row["phase_name"] for row in aggregate_record_calls] == ["psnr_ssim", "psnr_ssim"]
-    assert all(row["sample_count"] == 1 for row in aggregate_record_calls)
-    assert all(row["batch_count"] == 0 for row in aggregate_record_calls)
-    assert all(row["batch_size"] is None for row in aggregate_record_calls)
+    assert [row["phase_name"] for row in aggregate_record_calls] == ["psnr_ssim"]
+    assert aggregate_record_calls[0]["sample_count"] == 2
+    assert aggregate_record_calls[0]["batch_count"] == 1
+    assert aggregate_record_calls[0]["batch_size"] == 2
     assert all(row["elapsed_seconds"] > 0.0 for row in aggregate_record_calls)
     assert psnr_ssim_phase["sample_count"] == 2
-    assert psnr_ssim_phase["invocation_count"] == 2
-    assert psnr_ssim_phase["batch_count"] == 0
-    assert psnr_ssim_phase["batch_sizes"] == []
+    assert psnr_ssim_phase["invocation_count"] == 1
+    assert psnr_ssim_phase["batch_count"] == 1
+    assert psnr_ssim_phase["batch_sizes"] == [2]
     assert psnr_ssim_phase["elapsed_seconds_total"] > 0.0
+
+
+def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify build_quality_metrics_from_pairs uses batched PSNR/SSIM helpers instead of per-pair single-item calls.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index in range(3):
+        reference_path = tmp_path / f"batched_reference_{pair_index}.png"
+        candidate_path = tmp_path / f"batched_candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(160 + pair_index, 30, 90)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(162 + pair_index, 30, 90)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"batched_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+                "prompt_text": "prompt one",
+            }
+        )
+
+    psnr_batch_calls: List[int] = []
+    ssim_batch_calls: List[int] = []
+
+    def fail_single_psnr(*args: Any, **kwargs: Any) -> float:
+        raise AssertionError("single-item PSNR path should not run for successful batched quality evaluation")
+
+    def fail_single_ssim(*args: Any, **kwargs: Any) -> float:
+        raise AssertionError("single-item SSIM path should not run for successful batched quality evaluation")
+
+    def fake_psnr_batch(reference_batch: Any, candidate_batch: Any, max_val: float = 255.0) -> List[float]:
+        psnr_batch_calls.append(len(reference_batch))
+        return [31.0 + float(index) for index in range(len(reference_batch))]
+
+    def fake_ssim_batch(reference_batch: Any, candidate_batch: Any, win_size: int = 7, data_range: float = 255.0) -> List[float]:
+        ssim_batch_calls.append(len(reference_batch))
+        return [0.91 - (0.01 * float(index)) for index in range(len(reference_batch))]
+
+    monkeypatch.setattr(pw_quality_metrics_module, "compute_psnr", fail_single_psnr)
+    monkeypatch.setattr(pw_quality_metrics_module, "compute_ssim", fail_single_ssim)
+    monkeypatch.setattr(pw_quality_metrics_module, "compute_psnr_batch", fake_psnr_batch)
+    monkeypatch.setattr(pw_quality_metrics_module, "compute_ssim_batch", fake_ssim_batch)
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.18,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_clip_text_similarity_compat",
+        lambda candidate_image, prompt_text, *, torch_device: 0.84,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        text_key="prompt_text",
+        enable_phase_profiler=True,
+    )
+
+    assert psnr_batch_calls == [3]
+    assert ssim_batch_calls == [3]
+    assert [row["psnr"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == [31.0, 32.0, 33.0]
+    assert [row["ssim"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == [0.91, 0.9, 0.89]
+    assert summary["quality_phase_profile"]["phases"]["psnr_ssim"]["sample_count"] == 3
 
 
 

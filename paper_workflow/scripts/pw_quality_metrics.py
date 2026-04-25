@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Mapping, Sequence, cast
 import numpy as np
 from PIL import Image
 
-from main.evaluation.image_quality import compute_psnr, compute_ssim
+from main.evaluation.image_quality import compute_psnr, compute_psnr_batch, compute_ssim, compute_ssim_batch
 from paper_workflow.scripts.pw_quality_phase_profiler import QualityPhaseProfiler
 from scripts.notebook_runtime_common import normalize_path_value
 
@@ -34,6 +34,7 @@ QUALITY_LPIPS_BATCH_SIZE_ENV = "PW_QUALITY_LPIPS_BATCH_SIZE"
 QUALITY_CLIP_BATCH_SIZE_ENV = "PW_QUALITY_CLIP_BATCH_SIZE"
 DEFAULT_QUALITY_TORCH_DEVICE = "cpu"
 DEFAULT_QUALITY_BATCH_SIZE = 1
+_PSNR_SSIM_BATCH_ELEMENT_BUDGET = 4 * 512 * 512 * 3
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -737,6 +738,157 @@ def _call_clip_text_similarity_compat(
     return _compute_clip_text_similarity(candidate_image, prompt_text)
 
 
+def _resolve_psnr_ssim_batch_size(image_shape: Sequence[int]) -> int:
+    """
+    功能：根据图像尺寸解析内部 PSNR/SSIM batch 大小。 
+
+    Resolve one internal PSNR/SSIM batch size from the image shape.
+
+    Args:
+        image_shape: Image shape tuple.
+
+    Returns:
+        Positive batch size.
+
+    Raises:
+        ValueError: If image_shape is invalid.
+    """
+    if len(image_shape) == 2:
+        height, width = int(image_shape[0]), int(image_shape[1])
+        channel_count = 1
+    elif len(image_shape) == 3:
+        height, width, channel_count = int(image_shape[0]), int(image_shape[1]), int(image_shape[2])
+    else:
+        raise ValueError(f"unsupported image shape for PSNR/SSIM batching: {image_shape}")
+    per_image_elements = max(height * width * max(channel_count, 1), 1)
+    return max(1, _PSNR_SSIM_BATCH_ELEMENT_BUDGET // per_image_elements)
+
+
+def _flush_psnr_ssim_pending_batch(
+    *,
+    pair_rows: List[Dict[str, Any]],
+    psnr_ssim_pending: Sequence[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any]]],
+    psnr_values: List[float],
+    ssim_values: List[float],
+    error_count_ref: List[int],
+    phase_profiler: QualityPhaseProfiler | None = None,
+) -> None:
+    """
+    功能：批量计算一个 PSNR/SSIM pending batch，并在失败时回退单样本路径。 
+
+    Compute one pending PSNR/SSIM batch and preserve single-item fallback on failure.
+
+    Args:
+        pair_rows: Mutable per-pair output rows.
+        psnr_ssim_pending: Pending PSNR/SSIM batch.
+        psnr_values: Successful PSNR accumulator.
+        ssim_values: Successful SSIM accumulator.
+        error_count_ref: Single-slot mutable error counter.
+        phase_profiler: Optional aggregate phase profiler.
+
+    Returns:
+        None.
+    """
+    if not psnr_ssim_pending:
+        return
+
+    started_at = time.perf_counter() if phase_profiler is not None else 0.0
+    successful_sample_count = 0
+    batch = list(psnr_ssim_pending)
+    try:
+        batch_psnr_values = compute_psnr_batch(
+            [reference_image for _, reference_image, _ in batch],
+            [candidate_image for _, _, candidate_image in batch],
+        )
+        batch_ssim_values = compute_ssim_batch(
+            [reference_image for _, reference_image, _ in batch],
+            [candidate_image for _, _, candidate_image in batch],
+        )
+        if len(batch_psnr_values) != len(batch) or len(batch_ssim_values) != len(batch):
+            raise RuntimeError("PSNR/SSIM batch size mismatch")
+    except Exception:
+        for pair_row_index, reference_image, candidate_image in batch:
+            try:
+                psnr_value = compute_psnr(reference_image, candidate_image)
+                ssim_value = compute_ssim(reference_image, candidate_image)
+            except Exception as single_exc:
+                pair_rows[pair_row_index]["status"] = "error"
+                pair_rows[pair_row_index]["failure_reason"] = f"{type(single_exc).__name__}: {single_exc}"
+                pair_rows[pair_row_index]["psnr"] = None
+                pair_rows[pair_row_index]["ssim"] = None
+                error_count_ref[0] += 1
+            else:
+                pair_rows[pair_row_index]["psnr"] = psnr_value
+                pair_rows[pair_row_index]["ssim"] = ssim_value
+                psnr_values.append(psnr_value)
+                ssim_values.append(ssim_value)
+                successful_sample_count += 1
+    else:
+        for (pair_row_index, _, _), psnr_value, ssim_value in zip(
+            batch,
+            batch_psnr_values,
+            batch_ssim_values,
+            strict=False,
+        ):
+            pair_rows[pair_row_index]["psnr"] = psnr_value
+            pair_rows[pair_row_index]["ssim"] = ssim_value
+            psnr_values.append(psnr_value)
+            ssim_values.append(ssim_value)
+            successful_sample_count += 1
+
+    if phase_profiler is not None and successful_sample_count > 0:
+        phase_profiler.record_aggregate_phase_timing(
+            "psnr_ssim",
+            elapsed_seconds=time.perf_counter() - started_at,
+            sample_count=successful_sample_count,
+            batch_count=1,
+            batch_size=len(batch),
+        )
+
+
+def _flush_grouped_psnr_ssim_pending_batches(
+    *,
+    pair_rows: List[Dict[str, Any]],
+    psnr_ssim_pending: Sequence[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any]]],
+    psnr_values: List[float],
+    ssim_values: List[float],
+    error_count_ref: List[int],
+    phase_profiler: QualityPhaseProfiler | None = None,
+) -> None:
+    """
+    功能：按图像 shape 分组刷写全部 PSNR/SSIM pending batch。 
+
+    Flush all pending PSNR/SSIM items grouped by image shape.
+
+    Args:
+        pair_rows: Mutable per-pair output rows.
+        psnr_ssim_pending: Pending PSNR/SSIM items.
+        psnr_values: Successful PSNR accumulator.
+        ssim_values: Successful SSIM accumulator.
+        error_count_ref: Single-slot mutable error counter.
+        phase_profiler: Optional aggregate phase profiler.
+
+    Returns:
+        None.
+    """
+    grouped_pending: Dict[tuple[int, ...], List[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any]]]] = {}
+    for pending_item in psnr_ssim_pending:
+        image_shape_key = tuple(int(dimension) for dimension in pending_item[1].shape)
+        grouped_pending.setdefault(image_shape_key, []).append(pending_item)
+
+    for image_shape_key, grouped_batch in grouped_pending.items():
+        batch_size = _resolve_psnr_ssim_batch_size(image_shape_key)
+        for start_index in range(0, len(grouped_batch), batch_size):
+            _flush_psnr_ssim_pending_batch(
+                pair_rows=pair_rows,
+                psnr_ssim_pending=grouped_batch[start_index:start_index + batch_size],
+                psnr_values=psnr_values,
+                ssim_values=ssim_values,
+                error_count_ref=error_count_ref,
+                phase_profiler=phase_profiler,
+            )
+
+
 def _flush_lpips_pending_batch(
     *,
     pair_rows: List[Dict[str, Any]],
@@ -962,6 +1114,8 @@ def build_quality_metrics_from_pairs(
     ssim_values: List[float] = []
     lpips_values: List[float] = []
     clip_values: List[float] = []
+    psnr_ssim_pending: List[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any]]] = []
+    quality_valid_rows: List[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any], str | None]] = []
     lpips_pending: List[tuple[int, np.ndarray[Any, Any], np.ndarray[Any, Any]]] = []
     clip_pending: List[tuple[int, np.ndarray[Any, Any], str]] = []
     image_cache: Dict[Path, np.ndarray[Any, Any]] = {}
@@ -1019,51 +1173,51 @@ def build_quality_metrics_from_pairs(
         candidate_path = Path(candidate_value).expanduser().resolve()
         pair_row["reference_image_path"] = normalize_path_value(reference_path)
         pair_row["candidate_image_path"] = normalize_path_value(candidate_path)
-        psnr_ssim_started_at = time.perf_counter() if phase_profiler is not None else 0.0
         try:
             reference_image = _load_rgb_image_cached(reference_path, image_cache=image_cache)
             candidate_image = _load_rgb_image(candidate_path)
-            psnr_value = float(compute_psnr(reference_image, candidate_image))
-            ssim_value = float(compute_ssim(reference_image, candidate_image))
+            if reference_image.shape != candidate_image.shape:
+                raise ValueError("img_original and img_watermarked must have the same shape")
         except FileNotFoundError as exc:
             pair_row["status"] = "missing_file"
             pair_row["failure_reason"] = str(exc)
             missing_count += 1
             pair_rows.append(pair_row)
-            if phase_profiler is not None:
-                phase_profiler.record_aggregate_phase_timing(
-                    "psnr_ssim",
-                    elapsed_seconds=time.perf_counter() - psnr_ssim_started_at,
-                    sample_count=1,
-                )
             continue
         except Exception as exc:
             pair_row["status"] = "error"
             pair_row["failure_reason"] = f"{type(exc).__name__}: {exc}"
             error_count += 1
             pair_rows.append(pair_row)
-            if phase_profiler is not None:
-                phase_profiler.record_aggregate_phase_timing(
-                    "psnr_ssim",
-                    elapsed_seconds=time.perf_counter() - psnr_ssim_started_at,
-                    sample_count=1,
-                )
             continue
 
-        if phase_profiler is not None:
-            phase_profiler.record_aggregate_phase_timing(
-                "psnr_ssim",
-                elapsed_seconds=time.perf_counter() - psnr_ssim_started_at,
-                sample_count=1,
-            )
-
         pair_row["status"] = "ok"
-        pair_row["psnr"] = psnr_value
-        pair_row["ssim"] = ssim_value
         pair_rows.append(pair_row)
         pair_row_index = len(pair_rows) - 1
-        psnr_values.append(psnr_value)
-        ssim_values.append(ssim_value)
+        psnr_ssim_pending.append((pair_row_index, reference_image, candidate_image))
+        quality_valid_rows.append(
+            (
+                pair_row_index,
+                reference_image,
+                candidate_image,
+                prompt_text.strip() if isinstance(prompt_text, str) and prompt_text.strip() else None,
+            )
+        )
+
+    psnr_ssim_error_count_ref: List[int] = [error_count]
+    _flush_grouped_psnr_ssim_pending_batches(
+        pair_rows=pair_rows,
+        psnr_ssim_pending=psnr_ssim_pending,
+        psnr_values=psnr_values,
+        ssim_values=ssim_values,
+        error_count_ref=psnr_ssim_error_count_ref,
+        phase_profiler=phase_profiler,
+    )
+    error_count = psnr_ssim_error_count_ref[0]
+
+    for pair_row_index, reference_image, candidate_image, cleaned_prompt_text in quality_valid_rows:
+        if pair_rows[pair_row_index]["status"] != "ok":
+            continue
 
         if resolved_lpips_batch_size > 1:
             lpips_pending.append((pair_row_index, reference_image, candidate_image))
@@ -1093,46 +1247,47 @@ def build_quality_metrics_from_pairs(
                     if lpips_reason_ref[0] is None:
                         lpips_reason_ref[0] = f"{type(exc).__name__}: {exc}"
                 else:
-                    pair_row["lpips"] = lpips_value
+                    pair_rows[pair_row_index]["lpips"] = lpips_value
                     lpips_values.append(lpips_value)
 
-        if text_key is not None:
-            if isinstance(prompt_text, str) and prompt_text.strip():
-                if resolved_clip_batch_size > 1:
-                    clip_pending.append((pair_row_index, candidate_image, prompt_text.strip()))
-                    if len(clip_pending) >= resolved_clip_batch_size:
-                        _flush_clip_pending_batch(
-                            pair_rows=pair_rows,
-                            clip_pending=clip_pending,
-                            clip_values=clip_values,
-                            resolved_torch_device=resolved_torch_device,
-                            clip_reason_ref=clip_reason_ref,
-                            clip_error_count_ref=clip_error_count_ref,
-                            text_feature_cache=text_feature_cache,
-                            phase_profiler=phase_profiler,
-                        )
-                else:
-                    phase_context = (
-                        phase_profiler.phase("clip", sample_count=1, batch_size=1)
-                        if phase_profiler is not None
-                        else _NoopQualityPhaseContext()
+        if text_key is None:
+            continue
+        if cleaned_prompt_text is None:
+            clip_missing_text_count += 1
+            continue
+        if resolved_clip_batch_size > 1:
+            clip_pending.append((pair_row_index, candidate_image, cleaned_prompt_text))
+            if len(clip_pending) >= resolved_clip_batch_size:
+                _flush_clip_pending_batch(
+                    pair_rows=pair_rows,
+                    clip_pending=clip_pending,
+                    clip_values=clip_values,
+                    resolved_torch_device=resolved_torch_device,
+                    clip_reason_ref=clip_reason_ref,
+                    clip_error_count_ref=clip_error_count_ref,
+                    text_feature_cache=text_feature_cache,
+                    phase_profiler=phase_profiler,
+                )
+        else:
+            phase_context = (
+                phase_profiler.phase("clip", sample_count=1, batch_size=1)
+                if phase_profiler is not None
+                else _NoopQualityPhaseContext()
+            )
+            with phase_context:
+                try:
+                    clip_value = _call_clip_text_similarity_compat(
+                        candidate_image,
+                        cleaned_prompt_text,
+                        torch_device=resolved_torch_device,
                     )
-                    with phase_context:
-                        try:
-                            clip_value = _call_clip_text_similarity_compat(
-                                candidate_image,
-                                prompt_text,
-                                torch_device=resolved_torch_device,
-                            )
-                        except Exception as exc:
-                            clip_error_count_ref[0] += 1
-                            if clip_reason_ref[0] is None:
-                                clip_reason_ref[0] = f"{type(exc).__name__}: {exc}"
-                        else:
-                            pair_row["clip_text_similarity"] = clip_value
-                            clip_values.append(clip_value)
-            else:
-                clip_missing_text_count += 1
+                except Exception as exc:
+                    clip_error_count_ref[0] += 1
+                    if clip_reason_ref[0] is None:
+                        clip_reason_ref[0] = f"{type(exc).__name__}: {exc}"
+                else:
+                    pair_rows[pair_row_index]["clip_text_similarity"] = clip_value
+                    clip_values.append(clip_value)
 
     if resolved_lpips_batch_size > 1 and lpips_pending:
         _flush_lpips_pending_batch(
