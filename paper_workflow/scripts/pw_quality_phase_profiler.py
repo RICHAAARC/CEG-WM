@@ -339,7 +339,7 @@ class _PhaseScope(AbstractContextManager[None]):
             batch_size=self._batch_size,
         )
         self._started_at = time.perf_counter()
-        self._board_sampler = self._profiler._start_board_sampler()
+        self._board_sampler = self._profiler._start_board_sampler(phase_name=self._phase_name)
         return None
 
     def __exit__(self, exc_type: Any, exc: Any, exc_tb: Any) -> None:
@@ -381,12 +381,17 @@ class QualityPhaseProfiler:
         self,
         *,
         torch_device: str,
+        psnr_ssim_compute_device: str | None = None,
         output_path: Path | str | None = None,
         label: str | None = None,
         sample_interval_seconds: float = PHASE_PROFILE_SAMPLE_INTERVAL_SECONDS,
     ) -> None:
         if not isinstance(torch_device, str) or not torch_device.strip():
             raise TypeError("torch_device must be non-empty str")
+        if psnr_ssim_compute_device is not None and (
+            not isinstance(psnr_ssim_compute_device, str) or not psnr_ssim_compute_device.strip()
+        ):
+            raise TypeError("psnr_ssim_compute_device must be non-empty str or None")
         if output_path is not None and not isinstance(output_path, (Path, str)):
             raise TypeError("output_path must be Path, str, or None")
         if label is not None and not isinstance(label, str):
@@ -395,6 +400,11 @@ class QualityPhaseProfiler:
             raise TypeError("sample_interval_seconds must be positive")
 
         self._torch_device = torch_device.strip()
+        self._psnr_ssim_compute_device = (
+            psnr_ssim_compute_device.strip()
+            if isinstance(psnr_ssim_compute_device, str) and psnr_ssim_compute_device.strip()
+            else "cpu"
+        )
         self._output_path = Path(output_path).expanduser().resolve() if output_path is not None else None
         self._label = label.strip() if isinstance(label, str) and label.strip() else None
         self._sample_interval_seconds = float(sample_interval_seconds)
@@ -405,7 +415,7 @@ class QualityPhaseProfiler:
             and callable(getattr(self._torch_module.cuda, "is_available", None))
             and bool(self._torch_module.cuda.is_available())
         )
-        self._device_is_cuda = self._torch_device.lower().startswith("cuda")
+        self._nvml_handles: Dict[str, Any] = {}
         self._phases: Dict[str, _PhaseMetrics] = {
             "psnr_ssim": _PhaseMetrics(
                 phase_name="psnr_ssim",
@@ -413,7 +423,7 @@ class QualityPhaseProfiler:
                 includes_text_encoding=False,
                 measurement_mode="aggregate_only",
                 gpu_measurement_mode="not_measured_per_pair",
-                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+                board_monitor_status="cpu_only",
             ),
             "image_load": _PhaseMetrics(
                 phase_name="image_load",
@@ -421,15 +431,27 @@ class QualityPhaseProfiler:
                 includes_text_encoding=False,
                 measurement_mode="aggregate_only",
                 gpu_measurement_mode="not_measured_per_pair",
-                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+                board_monitor_status="cpu_only",
             ),
             "psnr_ssim_compute": _PhaseMetrics(
                 phase_name="psnr_ssim_compute",
                 phase_scope="batched PSNR/SSIM compute and pair-row assignment",
                 includes_text_encoding=False,
-                measurement_mode="aggregate_only",
-                gpu_measurement_mode="not_measured_per_pair",
-                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+                measurement_mode=(
+                    "full_phase_scope"
+                    if self._phase_uses_cuda("psnr_ssim_compute")
+                    else "aggregate_only"
+                ),
+                gpu_measurement_mode=(
+                    "full_phase_scope"
+                    if self._phase_uses_cuda("psnr_ssim_compute")
+                    else "not_measured_per_pair"
+                ),
+                board_monitor_status=(
+                    "not_available"
+                    if self._phase_uses_cuda("psnr_ssim_compute")
+                    else "cpu_only"
+                ),
             ),
             "lpips": _PhaseMetrics(
                 phase_name="lpips",
@@ -437,7 +459,7 @@ class QualityPhaseProfiler:
                 includes_text_encoding=False,
                 measurement_mode="full_phase_scope",
                 gpu_measurement_mode="full_phase_scope",
-                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+                board_monitor_status="cpu_only" if not self._phase_uses_cuda("lpips") else "not_available",
             ),
             "clip": _PhaseMetrics(
                 phase_name="clip",
@@ -445,7 +467,7 @@ class QualityPhaseProfiler:
                 includes_text_encoding=True,
                 measurement_mode="full_phase_scope",
                 gpu_measurement_mode="full_phase_scope",
-                board_monitor_status="cpu_only" if not self._device_is_cuda else "not_available",
+                board_monitor_status="cpu_only" if not self._phase_uses_cuda("clip") else "not_available",
             ),
         }
         self._nvml_module: Any | None = None
@@ -593,7 +615,7 @@ class QualityPhaseProfiler:
                 phase_name: phase_metrics.to_payload(
                     overall_elapsed_seconds=float(elapsed_seconds_total),
                     torch_cuda_available=self._torch_cuda_available,
-                    torch_device=self._torch_device,
+                    torch_device=self._get_phase_torch_device(phase_name),
                 )
                 for phase_name, phase_metrics in self._phases.items()
             },
@@ -604,49 +626,47 @@ class QualityPhaseProfiler:
         return profile_payload
 
     def _prepare_board_monitor(self) -> None:
-        if not self._device_is_cuda:
+        cuda_phase_names = [
+            phase_name
+            for phase_name, phase_metrics in self._phases.items()
+            if phase_metrics.gpu_measurement_mode != "not_measured_per_pair"
+            and self._phase_uses_cuda(phase_name)
+        ]
+        if not cuda_phase_names:
             self._board_monitor_backend = "cpu_only"
             for phase_metrics in self._phases.values():
-                phase_metrics.board_monitor_status = "cpu_only"
+                if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
+                    phase_metrics.board_monitor_status = "cpu_only"
+                    continue
+                if phase_metrics.board_monitor_status != "not_available":
+                    phase_metrics.board_monitor_status = "cpu_only"
             return
         if not self._torch_cuda_available:
             self._board_monitor_backend = "not_available"
-            for phase_metrics in self._phases.values():
-                phase_metrics.board_monitor_status = "not_available"
+            for phase_name in cuda_phase_names:
+                self._phases[phase_name].board_monitor_status = "not_available"
             return
 
         pynvml_module = _load_pynvml_module()
         if pynvml_module is None:
             self._board_monitor_backend = "torch_only"
-            for phase_metrics in self._phases.values():
-                if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
-                    continue
-                phase_metrics.board_monitor_status = "nvml_unavailable"
+            for phase_name in cuda_phase_names:
+                self._phases[phase_name].board_monitor_status = "nvml_unavailable"
             return
 
         try:
             pynvml_module.nvmlInit()
-            device_index = _parse_cuda_device_index(self._torch_device)
-            if device_index is None and hasattr(self._torch_module.cuda, "current_device"):
-                device_index = int(self._torch_module.cuda.current_device())
-            if device_index is None:
-                device_index = 0
-            self._nvml_handle = pynvml_module.nvmlDeviceGetHandleByIndex(device_index)
         except Exception:
             self._board_monitor_backend = "torch_only"
-            for phase_metrics in self._phases.values():
-                if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
-                    continue
-                phase_metrics.board_monitor_status = "nvml_unavailable"
+            for phase_name in cuda_phase_names:
+                self._phases[phase_name].board_monitor_status = "nvml_unavailable"
             return
 
         self._nvml_module = pynvml_module
         self._nvml_initialized = True
         self._board_monitor_backend = "nvml"
-        for phase_metrics in self._phases.values():
-            if phase_metrics.gpu_measurement_mode == "not_measured_per_pair":
-                continue
-            phase_metrics.board_monitor_status = "nvml"
+        for phase_name in cuda_phase_names:
+            self._phases[phase_name].board_monitor_status = "nvml"
 
     def _synthesize_psnr_ssim_compatibility_phase(self, *, successful_pair_count: int) -> None:
         compat_phase = self._phases["psnr_ssim"]
@@ -684,12 +704,20 @@ class QualityPhaseProfiler:
             return
         self._nvml_initialized = False
 
-    def _start_board_sampler(self) -> _BoardMonitorSampler | None:
-        if self._board_monitor_backend != "nvml" or self._nvml_module is None or self._nvml_handle is None:
+    def _start_board_sampler(self, *, phase_name: str) -> _BoardMonitorSampler | None:
+        if self._board_monitor_backend != "nvml" or self._nvml_module is None:
+            return None
+        if not self._phase_uses_cuda(phase_name):
+            return None
+        if self._phases[phase_name].gpu_measurement_mode == "not_measured_per_pair":
+            return None
+        nvml_handle = self._resolve_nvml_handle(self._get_phase_torch_device(phase_name))
+        if nvml_handle is None:
+            self._phases[phase_name].board_monitor_status = "nvml_unavailable"
             return None
         sampler = _BoardMonitorSampler(
             pynvml_module=self._nvml_module,
-            handle=self._nvml_handle,
+            handle=nvml_handle,
             sample_interval_seconds=self._sample_interval_seconds,
         )
         sampler.start()
@@ -708,7 +736,7 @@ class QualityPhaseProfiler:
         if batch_size is not None:
             phase_metrics.batch_count += 1
             phase_metrics.batch_sizes.append(int(batch_size))
-        self._prepare_torch_phase_memory_tracking(phase_metrics)
+        self._prepare_torch_phase_memory_tracking(phase_name, phase_metrics)
 
     def _end_phase(
         self,
@@ -720,7 +748,7 @@ class QualityPhaseProfiler:
         phase_metrics = self._phases[phase_name]
         phase_metrics.elapsed_seconds_total += max(float(elapsed_seconds), 0.0)
         phase_metrics.elapsed_seconds_max = max(phase_metrics.elapsed_seconds_max, max(float(elapsed_seconds), 0.0))
-        self._finalize_torch_phase_memory_tracking(phase_metrics)
+        self._finalize_torch_phase_memory_tracking(phase_name, phase_metrics)
         if board_state is None:
             return
         phase_metrics.board_monitor_status = board_state.monitor_status
@@ -738,34 +766,36 @@ class QualityPhaseProfiler:
             board_state.peak_memory_utilization_percent,
         )
 
-    def _prepare_torch_phase_memory_tracking(self, phase_metrics: _PhaseMetrics) -> None:
-        if not self._device_is_cuda or not self._torch_cuda_available or self._torch_module is None:
+    def _prepare_torch_phase_memory_tracking(self, phase_name: str, phase_metrics: _PhaseMetrics) -> None:
+        if not self._phase_uses_cuda(phase_name) or not self._torch_cuda_available or self._torch_module is None:
             return
+        phase_torch_device = self._get_phase_torch_device(phase_name)
         try:
             if hasattr(self._torch_module.cuda, "synchronize"):
-                self._torch_module.cuda.synchronize(self._torch_device)
+                self._torch_module.cuda.synchronize(phase_torch_device)
             if hasattr(self._torch_module.cuda, "reset_peak_memory_stats"):
-                self._torch_module.cuda.reset_peak_memory_stats(self._torch_device)
-            self._sample_torch_current_memory(phase_metrics)
+                self._torch_module.cuda.reset_peak_memory_stats(phase_torch_device)
+            self._sample_torch_current_memory(phase_metrics, phase_torch_device)
         except Exception:
             return
 
-    def _finalize_torch_phase_memory_tracking(self, phase_metrics: _PhaseMetrics) -> None:
-        if not self._device_is_cuda or not self._torch_cuda_available or self._torch_module is None:
+    def _finalize_torch_phase_memory_tracking(self, phase_name: str, phase_metrics: _PhaseMetrics) -> None:
+        if not self._phase_uses_cuda(phase_name) or not self._torch_cuda_available or self._torch_module is None:
             return
+        phase_torch_device = self._get_phase_torch_device(phase_name)
         try:
             if hasattr(self._torch_module.cuda, "synchronize"):
-                self._torch_module.cuda.synchronize(self._torch_device)
+                self._torch_module.cuda.synchronize(phase_torch_device)
         except Exception:
             return
 
-        self._sample_torch_current_memory(phase_metrics)
-        self._sample_torch_peak_memory(phase_metrics)
+        self._sample_torch_current_memory(phase_metrics, phase_torch_device)
+        self._sample_torch_peak_memory(phase_metrics, phase_torch_device)
 
-    def _sample_torch_current_memory(self, phase_metrics: _PhaseMetrics) -> None:
+    def _sample_torch_current_memory(self, phase_metrics: _PhaseMetrics, torch_device: str) -> None:
         try:
-            allocated_bytes = self._torch_module.cuda.memory_allocated(self._torch_device)
-            reserved_bytes = self._torch_module.cuda.memory_reserved(self._torch_device)
+            allocated_bytes = self._torch_module.cuda.memory_allocated(torch_device)
+            reserved_bytes = self._torch_module.cuda.memory_reserved(torch_device)
         except Exception:
             return
         phase_metrics.torch_memory_samples_count += 1
@@ -778,10 +808,10 @@ class QualityPhaseProfiler:
             _mib_from_bytes(reserved_bytes),
         )
 
-    def _sample_torch_peak_memory(self, phase_metrics: _PhaseMetrics) -> None:
+    def _sample_torch_peak_memory(self, phase_metrics: _PhaseMetrics, torch_device: str) -> None:
         try:
-            max_allocated_bytes = self._torch_module.cuda.max_memory_allocated(self._torch_device)
-            max_reserved_bytes = self._torch_module.cuda.max_memory_reserved(self._torch_device)
+            max_allocated_bytes = self._torch_module.cuda.max_memory_allocated(torch_device)
+            max_reserved_bytes = self._torch_module.cuda.max_memory_reserved(torch_device)
         except Exception:
             return
         phase_metrics.torch_memory_samples_count += 1
@@ -793,6 +823,39 @@ class QualityPhaseProfiler:
             phase_metrics.torch_peak_memory_reserved_mib,
             _mib_from_bytes(max_reserved_bytes),
         )
+
+    def _get_phase_torch_device(self, phase_name: str) -> str:
+        if phase_name == "psnr_ssim_compute":
+            return self._psnr_ssim_compute_device
+        if phase_name in {"image_load", "psnr_ssim"}:
+            return "cpu"
+        return self._torch_device
+
+    def _phase_uses_cuda(self, phase_name: str) -> bool:
+        return self._get_phase_torch_device(phase_name).lower().startswith("cuda")
+
+    def _resolve_nvml_handle(self, torch_device: str) -> Any | None:
+        if self._nvml_module is None:
+            return None
+        cached_handle = self._nvml_handles.get(torch_device)
+        if cached_handle is not None:
+            return cached_handle
+
+        device_index = _parse_cuda_device_index(torch_device)
+        if device_index is None and self._torch_module is not None and hasattr(self._torch_module.cuda, "current_device"):
+            try:
+                device_index = int(self._torch_module.cuda.current_device())
+            except Exception:
+                device_index = None
+        if device_index is None:
+            device_index = 0
+
+        try:
+            nvml_handle = self._nvml_module.nvmlDeviceGetHandleByIndex(device_index)
+        except Exception:
+            return None
+        self._nvml_handles[torch_device] = nvml_handle
+        return nvml_handle
 
 
 __all__ = [

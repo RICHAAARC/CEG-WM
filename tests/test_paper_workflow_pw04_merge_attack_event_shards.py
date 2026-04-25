@@ -1173,6 +1173,285 @@ def test_build_quality_metrics_from_pairs_splits_psnr_ssim_into_image_load_and_c
     )
 
 
+def test_build_quality_metrics_from_pairs_psnr_ssim_compute_stays_aggregate_only_on_cpu(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify CPU PSNR/SSIM compute keeps aggregate-only profiling and does not enter full phase scope.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    pair_specs: List[Dict[str, Any]] = []
+    for pair_index in range(2):
+        reference_path = tmp_path / f"cpu_mode_reference_{pair_index}.png"
+        candidate_path = tmp_path / f"cpu_mode_candidate_{pair_index}.png"
+        Image.new("RGB", (8, 8), color=(150 + pair_index, 35, 70)).save(reference_path)
+        Image.new("RGB", (8, 8), color=(152 + pair_index, 35, 70)).save(candidate_path)
+        pair_specs.append(
+            {
+                "pair_id": f"cpu_mode_pair_{pair_index}",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+            }
+        )
+
+    full_phase_begin_calls: List[str] = []
+    aggregate_record_calls: List[str] = []
+    original_begin_phase = pw_quality_phase_profiler_module.QualityPhaseProfiler._begin_phase
+    original_record_aggregate = pw_quality_phase_profiler_module.QualityPhaseProfiler.record_aggregate_phase_timing
+
+    def tracking_begin_phase(self: Any, *, phase_name: str, sample_count: int, batch_size: int | None) -> None:
+        full_phase_begin_calls.append(str(phase_name))
+        original_begin_phase(self, phase_name=phase_name, sample_count=sample_count, batch_size=batch_size)
+
+    def tracking_record_aggregate(
+        self: Any,
+        phase_name: str,
+        *,
+        elapsed_seconds: float,
+        sample_count: int = 0,
+        batch_count: int = 0,
+        batch_size: int | None = None,
+    ) -> None:
+        aggregate_record_calls.append(str(phase_name))
+        original_record_aggregate(
+            self,
+            phase_name,
+            elapsed_seconds=elapsed_seconds,
+            sample_count=sample_count,
+            batch_count=batch_count,
+            batch_size=batch_size,
+        )
+
+    monkeypatch.setattr(
+        pw_quality_phase_profiler_module.QualityPhaseProfiler,
+        "_begin_phase",
+        tracking_begin_phase,
+    )
+    monkeypatch.setattr(
+        pw_quality_phase_profiler_module.QualityPhaseProfiler,
+        "record_aggregate_phase_timing",
+        tracking_record_aggregate,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.16,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=pair_specs,
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        enable_phase_profiler=True,
+    )
+
+    phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    image_load_phase = cast(Dict[str, Any], phase_profile["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim_compute"])
+    compat_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
+
+    assert "psnr_ssim_compute" not in full_phase_begin_calls
+    assert aggregate_record_calls == ["image_load", "psnr_ssim_compute"]
+    assert image_load_phase["measurement_mode"] == "aggregate_only"
+    assert compute_phase["measurement_mode"] == "aggregate_only"
+    assert compute_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert compute_phase["torch_peak_memory_allocated_mib"] is None
+    assert compute_phase["torch_peak_memory_reserved_mib"] is None
+    assert compat_phase["elapsed_seconds_total"] == pytest.approx(
+        image_load_phase["elapsed_seconds_total"] + compute_phase["elapsed_seconds_total"],
+        abs=2e-6,
+    )
+
+
+def test_build_quality_metrics_from_pairs_psnr_ssim_compute_uses_full_phase_scope_on_cuda(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify CUDA PSNR/SSIM compute enters full phase scope and records GPU peaks per batch flush.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    reference_path = tmp_path / "psnr_cuda_reference.png"
+    candidate_path = tmp_path / "psnr_cuda_candidate.png"
+    Image.new("RGB", (8, 8), color=(110, 45, 20)).save(reference_path)
+    Image.new("RGB", (8, 8), color=(113, 45, 20)).save(candidate_path)
+
+    full_phase_begin_calls: List[str] = []
+    aggregate_record_calls: List[str] = []
+    psnr_batch_devices: List[str | None] = []
+    ssim_batch_devices: List[str | None] = []
+    original_begin_phase = pw_quality_phase_profiler_module.QualityPhaseProfiler._begin_phase
+    original_record_aggregate = pw_quality_phase_profiler_module.QualityPhaseProfiler.record_aggregate_phase_timing
+
+    class _FakeCuda:
+        def is_available(self) -> bool:
+            return True
+
+        def device_count(self) -> int:
+            return 1
+
+        def synchronize(self, device: str) -> None:
+            return None
+
+        def reset_peak_memory_stats(self, device: str) -> None:
+            return None
+
+        def memory_allocated(self, device: str) -> int:
+            return 40 * 1024 * 1024
+
+        def memory_reserved(self, device: str) -> int:
+            return 64 * 1024 * 1024
+
+        def max_memory_allocated(self, device: str) -> int:
+            return 96 * 1024 * 1024
+
+        def max_memory_reserved(self, device: str) -> int:
+            return 128 * 1024 * 1024
+
+        def current_device(self) -> int:
+            return 0
+
+    class _FakePynvml:
+        @staticmethod
+        def nvmlInit() -> None:
+            return None
+
+        @staticmethod
+        def nvmlShutdown() -> None:
+            return None
+
+        @staticmethod
+        def nvmlDeviceGetHandleByIndex(index: int) -> int:
+            return index
+
+        @staticmethod
+        def nvmlDeviceGetMemoryInfo(handle: Any) -> Any:
+            return types.SimpleNamespace(used=200 * 1024 * 1024, total=400 * 1024 * 1024)
+
+        @staticmethod
+        def nvmlDeviceGetUtilizationRates(handle: Any) -> Any:
+            return types.SimpleNamespace(gpu=73)
+
+    def tracking_begin_phase(self: Any, *, phase_name: str, sample_count: int, batch_size: int | None) -> None:
+        full_phase_begin_calls.append(str(phase_name))
+        original_begin_phase(self, phase_name=phase_name, sample_count=sample_count, batch_size=batch_size)
+
+    def tracking_record_aggregate(
+        self: Any,
+        phase_name: str,
+        *,
+        elapsed_seconds: float,
+        sample_count: int = 0,
+        batch_count: int = 0,
+        batch_size: int | None = None,
+    ) -> None:
+        aggregate_record_calls.append(str(phase_name))
+        original_record_aggregate(
+            self,
+            phase_name,
+            elapsed_seconds=elapsed_seconds,
+            sample_count=sample_count,
+            batch_count=batch_count,
+            batch_size=batch_size,
+        )
+
+    fake_torch = types.SimpleNamespace(cuda=_FakeCuda())
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(pw_quality_phase_profiler_module, "_load_torch_module", lambda: fake_torch)
+    monkeypatch.setattr(pw_quality_phase_profiler_module, "_load_pynvml_module", lambda: _FakePynvml())
+    monkeypatch.setattr(
+        pw_quality_phase_profiler_module.QualityPhaseProfiler,
+        "_begin_phase",
+        tracking_begin_phase,
+    )
+    monkeypatch.setattr(
+        pw_quality_phase_profiler_module.QualityPhaseProfiler,
+        "record_aggregate_phase_timing",
+        tracking_record_aggregate,
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "compute_psnr_batch",
+        lambda reference_batch, candidate_batch, max_val=255.0, device=None: (
+            psnr_batch_devices.append(device),
+            [30.0 for _ in range(len(reference_batch))],
+        )[1],
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "compute_ssim_batch",
+        lambda reference_batch, candidate_batch, win_size=7, data_range=255.0, device=None: (
+            ssim_batch_devices.append(device),
+            [0.9 for _ in range(len(reference_batch))],
+        )[1],
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.13,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=[
+            {
+                "pair_id": "psnr_cuda_pair",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+            }
+        ],
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+        psnr_ssim_device_override="cuda:0",
+        enable_phase_profiler=True,
+    )
+
+    phase_profile = cast(Dict[str, Any], summary["quality_phase_profile"])
+    image_load_phase = cast(Dict[str, Any], phase_profile["phases"]["image_load"])
+    compute_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim_compute"])
+    compat_phase = cast(Dict[str, Any], phase_profile["phases"]["psnr_ssim"])
+
+    assert phase_profile["monitor_backend"]["torch_cuda"] == "available"
+    assert phase_profile["monitor_backend"]["board_monitor"] == "nvml"
+    assert psnr_batch_devices == ["cuda:0"]
+    assert ssim_batch_devices == ["cuda:0"]
+    assert "psnr_ssim_compute" in full_phase_begin_calls
+    assert aggregate_record_calls == ["image_load"]
+    assert image_load_phase["measurement_mode"] == "aggregate_only"
+    assert image_load_phase["gpu_measurement_mode"] == "not_measured_per_pair"
+    assert compute_phase["measurement_mode"] == "full_phase_scope"
+    assert compute_phase["gpu_measurement_mode"] == "full_phase_scope"
+    assert compute_phase["torch_device"] == "cuda:0"
+    assert compute_phase["sample_count"] == 1
+    assert compute_phase["batch_count"] == 1
+    assert compute_phase["batch_sizes"] == [1]
+    assert compute_phase["torch_peak_memory_allocated_mib"] == 96.0
+    assert compute_phase["torch_peak_memory_reserved_mib"] == 128.0
+    assert compute_phase["board_peak_memory_used_mib"] == 200.0
+    assert compute_phase["board_peak_gpu_utilization_percent"] == 73.0
+    assert compute_phase["board_peak_memory_utilization_percent"] == 50.0
+    assert compute_phase["board_samples_count"] >= 2
+    assert compat_phase["measurement_mode"] == "aggregate_only"
+    assert compat_phase["elapsed_seconds_total"] == pytest.approx(
+        image_load_phase["elapsed_seconds_total"] + compute_phase["elapsed_seconds_total"],
+        abs=2e-6,
+    )
+
+
 def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
     tmp_path: Path,
     monkeypatch: Any,

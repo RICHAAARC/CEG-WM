@@ -947,54 +947,66 @@ def _flush_psnr_ssim_pending_batch(
     if not psnr_ssim_pending:
         return
 
-    started_at = time.perf_counter() if phase_profiler is not None else 0.0
-    successful_sample_count = 0
     batch = list(psnr_ssim_pending)
     batch_sample_count = len(batch)
-    try:
-        batch_psnr_values = compute_psnr_batch(
-            [reference_image for _, reference_image, _ in batch],
-            [candidate_image for _, _, candidate_image in batch],
-            device=resolved_psnr_ssim_device,
-        )
-        batch_ssim_values = compute_ssim_batch(
-            [reference_image for _, reference_image, _ in batch],
-            [candidate_image for _, _, candidate_image in batch],
-            device=resolved_psnr_ssim_device,
-        )
-        if len(batch_psnr_values) != len(batch) or len(batch_ssim_values) != len(batch):
-            raise RuntimeError("PSNR/SSIM batch size mismatch")
-    except Exception:
-        for pair_row_index, reference_image, candidate_image in batch:
-            try:
-                psnr_value = compute_psnr(reference_image, candidate_image)
-                ssim_value = compute_ssim(reference_image, candidate_image)
-            except Exception as single_exc:
-                pair_rows[pair_row_index]["status"] = "error"
-                pair_rows[pair_row_index]["failure_reason"] = f"{type(single_exc).__name__}: {single_exc}"
-                pair_rows[pair_row_index]["psnr"] = None
-                pair_rows[pair_row_index]["ssim"] = None
-                error_count_ref[0] += 1
-            else:
+    use_full_phase_scope = (
+        phase_profiler is not None
+        and isinstance(resolved_psnr_ssim_device, str)
+        and resolved_psnr_ssim_device.lower().startswith("cuda")
+    )
+    started_at = time.perf_counter() if phase_profiler is not None and not use_full_phase_scope else 0.0
+    successful_sample_count = 0
+    phase_context = (
+        phase_profiler.phase("psnr_ssim_compute", sample_count=batch_sample_count, batch_size=len(batch))
+        if use_full_phase_scope and phase_profiler is not None
+        else _NoopQualityPhaseContext()
+    )
+
+    with phase_context:
+        try:
+            batch_psnr_values = compute_psnr_batch(
+                [reference_image for _, reference_image, _ in batch],
+                [candidate_image for _, _, candidate_image in batch],
+                device=resolved_psnr_ssim_device,
+            )
+            batch_ssim_values = compute_ssim_batch(
+                [reference_image for _, reference_image, _ in batch],
+                [candidate_image for _, _, candidate_image in batch],
+                device=resolved_psnr_ssim_device,
+            )
+            if len(batch_psnr_values) != len(batch) or len(batch_ssim_values) != len(batch):
+                raise RuntimeError("PSNR/SSIM batch size mismatch")
+        except Exception:
+            for pair_row_index, reference_image, candidate_image in batch:
+                try:
+                    psnr_value = compute_psnr(reference_image, candidate_image)
+                    ssim_value = compute_ssim(reference_image, candidate_image)
+                except Exception as single_exc:
+                    pair_rows[pair_row_index]["status"] = "error"
+                    pair_rows[pair_row_index]["failure_reason"] = f"{type(single_exc).__name__}: {single_exc}"
+                    pair_rows[pair_row_index]["psnr"] = None
+                    pair_rows[pair_row_index]["ssim"] = None
+                    error_count_ref[0] += 1
+                else:
+                    pair_rows[pair_row_index]["psnr"] = psnr_value
+                    pair_rows[pair_row_index]["ssim"] = ssim_value
+                    psnr_values.append(psnr_value)
+                    ssim_values.append(ssim_value)
+                    successful_sample_count += 1
+        else:
+            for (pair_row_index, _, _), psnr_value, ssim_value in zip(
+                batch,
+                batch_psnr_values,
+                batch_ssim_values,
+                strict=False,
+            ):
                 pair_rows[pair_row_index]["psnr"] = psnr_value
                 pair_rows[pair_row_index]["ssim"] = ssim_value
                 psnr_values.append(psnr_value)
                 ssim_values.append(ssim_value)
                 successful_sample_count += 1
-    else:
-        for (pair_row_index, _, _), psnr_value, ssim_value in zip(
-            batch,
-            batch_psnr_values,
-            batch_ssim_values,
-            strict=False,
-        ):
-            pair_rows[pair_row_index]["psnr"] = psnr_value
-            pair_rows[pair_row_index]["ssim"] = ssim_value
-            psnr_values.append(psnr_value)
-            ssim_values.append(ssim_value)
-            successful_sample_count += 1
 
-    if phase_profiler is not None and successful_sample_count > 0:
+    if phase_profiler is not None and not use_full_phase_scope and successful_sample_count > 0:
         phase_profiler.record_aggregate_phase_timing(
             "psnr_ssim_compute",
             elapsed_seconds=time.perf_counter() - started_at,
@@ -1267,6 +1279,7 @@ def build_quality_metrics_from_pairs(
     phase_profiler = (
         QualityPhaseProfiler(
             torch_device=resolved_torch_device,
+            psnr_ssim_compute_device=resolved_psnr_ssim_device,
             output_path=phase_profile_output_path,
             label=phase_profile_label,
         )
