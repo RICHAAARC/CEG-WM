@@ -65,6 +65,7 @@ STAGE_NAME = "PW03_Attack_Event_Shards"
 GPU_PEAK_SCRIPT_PATH = REPO_ROOT / "scripts" / "gpu_session_peak.py"
 DEFAULT_SAMPLE_INTERVAL_MS = 200
 DEFAULT_ATTACK_LOCAL_WORKER_COUNT = 1
+RECOMMENDED_ATTACK_LOCAL_WORKER_COUNT_FOR_VALIDATION = 2
 ALLOWED_ATTACK_LOCAL_WORKER_COUNTS = {1, 2, 3, 4}
 ALLOWED_ATTACK_LOCAL_WORKER_COUNT_ERROR = "attack_local_worker_count must be one of 1, 2, 3, or 4"
 PW02_SUMMARY_FILE_NAME = "pw02_summary.json"
@@ -2582,6 +2583,7 @@ def _write_attack_event_manifest(
     detect_summary: Mapping[str, Any],
     wrong_event_attestation_challenge_summary: Mapping[str, Any],
     worker_local_index: int,
+    event_gpu_peak_collection_mode: str | None,
     status: str,
     start_time: str,
     end_time: str,
@@ -2603,6 +2605,7 @@ def _write_attack_event_manifest(
         detect_summary: Detect execution summary.
         wrong_event_attestation_challenge_summary: Wrong-event challenge summary.
         worker_local_index: Local worker index.
+        event_gpu_peak_collection_mode: Event-level GPU peak collection mode.
         status: Event status.
         start_time: Event start time.
         end_time: Event end time.
@@ -2702,6 +2705,7 @@ def _write_attack_event_manifest(
         else None,
         "gpu_session_peak_path": detect_summary.get("event_gpu_session_peak_path"),
         "gpu_session_peak_package_relative_path": detect_summary.get("event_gpu_session_peak_package_relative_path"),
+        "event_gpu_peak_collection_mode": event_gpu_peak_collection_mode,
         "worker_local_index": worker_local_index,
         "start_time": start_time,
         "end_time": end_time,
@@ -2731,6 +2735,7 @@ def _build_failed_attack_event_manifest(
     shard_root: Path,
     event_root: Path,
     worker_local_index: int,
+    event_gpu_peak_collection_mode: str | None,
     start_time: str,
     failure_reason: str,
     exc: Exception,
@@ -2759,6 +2764,7 @@ def _build_failed_attack_event_manifest(
         attack_artifacts={},
         detect_summary={},
         worker_local_index=worker_local_index,
+        event_gpu_peak_collection_mode=event_gpu_peak_collection_mode,
         status="failed",
         start_time=start_time,
         end_time=utc_now_iso(),
@@ -3309,6 +3315,8 @@ def _build_worker_result_payload(
     events: Sequence[Mapping[str, Any]],
     status: str,
     worker_gpu_summary: Mapping[str, Any],
+    persistent_detector_worker_enabled: bool,
+    worker_detect_runtime_init_elapsed_seconds: float | None,
     failure_reason: str | None = None,
     exception_type: str | None = None,
     exception_message: str | None = None,
@@ -3330,6 +3338,8 @@ def _build_worker_result_payload(
         events: Event manifest payloads.
         status: Worker status.
         worker_gpu_summary: Worker GPU summary.
+        persistent_detector_worker_enabled: Whether this worker used a persistent detect runtime.
+        worker_detect_runtime_init_elapsed_seconds: Detect runtime init elapsed seconds.
         failure_reason: Optional failure reason.
         exception_type: Optional exception type.
         exception_message: Optional exception message.
@@ -3369,6 +3379,10 @@ def _build_worker_result_payload(
         "failed_event_ids": failed_event_ids,
         "completed_event_count": len(completed_event_ids),
         "failed_event_count": len(failed_event_ids),
+        "worker_detect_event_count": len(events),
+        "persistent_detector_worker_enabled": persistent_detector_worker_enabled,
+        "recommended_attack_local_worker_count_for_validation": RECOMMENDED_ATTACK_LOCAL_WORKER_COUNT_FOR_VALIDATION,
+        "worker_detect_runtime_init_elapsed_seconds": worker_detect_runtime_init_elapsed_seconds,
         "events": [dict(cast(Mapping[str, Any], event)) for event in events],
         "worker_gpu_session_peak_path": worker_gpu_summary.get("summary_path"),
         "worker_gpu_session_peak": dict(cast(Mapping[str, Any], worker_gpu_summary)),
@@ -3391,6 +3405,7 @@ def _run_attack_event_by_worker(
     bound_cfg_obj: Mapping[str, Any],
     assigned_attack_events: Sequence[Mapping[str, Any]],
     detect_runtime_session: Mapping[str, Any] | None = None,
+    worker_detect_runtime_init_elapsed_seconds: float | None = None,
 ) -> Dict[str, Any]:
     """
     Execute the assigned attack events for one worker.
@@ -3412,6 +3427,8 @@ def _run_attack_event_by_worker(
     executed_events: List[Dict[str, Any]] = []
     worker_plan_path = worker_root / PW03_WORKER_PLAN_FILE_NAME
     worker_gpu_summary_path = _build_worker_gpu_summary_path(worker_root)
+    persistent_detector_worker_enabled = detect_runtime_session is not None
+    event_gpu_peak_collection_mode = "worker_level_only" if persistent_detector_worker_enabled else "event_level"
     for attack_event_spec in assigned_attack_events:
         attack_event_index = int(attack_event_spec.get("attack_event_index", attack_event_spec.get("event_index", -1)))
         event_root = ensure_directory(shard_root / "events" / f"event_{attack_event_index:06d}")
@@ -3461,6 +3478,7 @@ def _run_attack_event_by_worker(
                 detect_summary=detect_summary,
                 wrong_event_attestation_challenge_summary=wrong_event_attestation_challenge_summary,
                 worker_local_index=local_worker_index,
+                event_gpu_peak_collection_mode=event_gpu_peak_collection_mode,
                 status="completed",
                 start_time=event_start_time,
                 end_time=utc_now_iso(),
@@ -3471,6 +3489,7 @@ def _run_attack_event_by_worker(
                 shard_root=shard_root,
                 event_root=event_root,
                 worker_local_index=local_worker_index,
+                event_gpu_peak_collection_mode=event_gpu_peak_collection_mode,
                 start_time=event_start_time,
                 failure_reason="pw03_attack_event_failed",
                 exc=exc,
@@ -3499,6 +3518,10 @@ def _run_attack_event_by_worker(
         events=executed_events,
         status=worker_status,
         worker_gpu_summary=worker_gpu_summary,
+        persistent_detector_worker_enabled=persistent_detector_worker_enabled,
+        worker_detect_runtime_init_elapsed_seconds=(
+            worker_detect_runtime_init_elapsed_seconds if persistent_detector_worker_enabled else None
+        ),
         failure_reason=None if worker_status == "completed" else "pw03_worker_event_execution_failed",
     )
     write_json_atomic(_build_worker_result_path(worker_root), worker_result)
@@ -3584,7 +3607,12 @@ def run_pw03_attack_event_worker(
     if len(assigned_attack_events) != len(assigned_attack_events_node):
         raise ValueError("worker plan assigned_attack_events must contain objects")
 
+    detect_runtime_init_started_at = time.perf_counter()
     detect_runtime_session = _build_pw03_detect_runtime_session(bound_config_path=bound_config_path)
+    worker_detect_runtime_init_elapsed_seconds = round(
+        time.perf_counter() - detect_runtime_init_started_at,
+        6,
+    )
 
     return _run_attack_event_by_worker(
         family_id=family_id,
@@ -3597,6 +3625,7 @@ def run_pw03_attack_event_worker(
         bound_cfg_obj=bound_cfg_obj,
         assigned_attack_events=assigned_attack_events,
         detect_runtime_session=detect_runtime_session,
+        worker_detect_runtime_init_elapsed_seconds=worker_detect_runtime_init_elapsed_seconds,
     )
 
 

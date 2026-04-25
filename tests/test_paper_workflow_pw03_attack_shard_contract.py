@@ -839,9 +839,17 @@ def test_pw03_consumes_finalized_positive_pool_and_writes_event_artifacts(
     assert pw03_summary["completed_event_count"] == pw03_summary["event_count"]
     assert captures["detect_input_payloads"]
     assert Path(str(summary["geometry_optional_claim_plan_path"])).exists()
+    worker_outcome = cast(Dict[str, Any], pw03_summary["worker_outcomes"][0])
+    worker_result = json.loads(Path(str(worker_outcome["worker_result_path"])).read_text(encoding="utf-8"))
+    assert worker_result["persistent_detector_worker_enabled"] is True
+    assert worker_result["recommended_attack_local_worker_count_for_validation"] == 2
+    assert isinstance(worker_result["worker_detect_runtime_init_elapsed_seconds"], (int, float))
+    assert worker_result["worker_detect_runtime_init_elapsed_seconds"] >= 0.0
+    assert worker_result["worker_detect_event_count"] == len(cast(List[Dict[str, Any]], worker_result["events"]))
 
     first_event = cast(Dict[str, Any], pw03_summary["events"][0])
     assert first_event["sample_role"] == pw03_module.ATTACKED_POSITIVE_SAMPLE_ROLE
+    assert first_event["event_gpu_peak_collection_mode"] == "worker_level_only"
     assert Path(str(first_event["attacked_image_path"])).exists()
     assert Path(str(first_event["runtime_config_snapshot_path"])).exists()
     assert Path(str(first_event["threshold_binding_summary_path"])).exists()
@@ -1496,6 +1504,18 @@ def test_pw03_parallel_worker_launch_supports_three_and_four_workers(
     assert all(Path(str(worker_outcome["stdout_log_path"])).exists() for worker_outcome in worker_outcomes)
     assert all(Path(str(worker_outcome["stderr_log_path"])).exists() for worker_outcome in worker_outcomes)
     assert all(Path(str(worker_outcome["worker_gpu_session_peak_path"])).exists() for worker_outcome in worker_outcomes)
+    worker_results = [
+        json.loads(Path(str(worker_outcome["worker_result_path"])).read_text(encoding="utf-8"))
+        for worker_outcome in worker_outcomes
+    ]
+    assert all(worker_result["persistent_detector_worker_enabled"] is True for worker_result in worker_results)
+    assert all(worker_result["recommended_attack_local_worker_count_for_validation"] == 2 for worker_result in worker_results)
+    assert all(isinstance(worker_result["worker_detect_runtime_init_elapsed_seconds"], (int, float)) for worker_result in worker_results)
+    assert all(worker_result["worker_detect_runtime_init_elapsed_seconds"] >= 0.0 for worker_result in worker_results)
+    assert all(
+        int(worker_result["worker_detect_event_count"]) == len(cast(List[Dict[str, Any]], worker_result["events"]))
+        for worker_result in worker_results
+    )
     assert len(cast(List[Dict[str, Any]], shard_gpu_summary["worker_local_peaks"])) == attack_local_worker_count
     assert shard_gpu_summary["wrapped_command_count"] == attack_local_worker_count
     assert len(cast(List[str], pw03_summary["event_ids"])) == len(set(cast(List[str], pw03_summary["event_ids"])))
