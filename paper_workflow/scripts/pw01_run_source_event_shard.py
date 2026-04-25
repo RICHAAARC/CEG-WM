@@ -11,6 +11,7 @@ import os
 import subprocess
 import shutil
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
@@ -61,6 +62,11 @@ EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
 }
 DEFAULT_PW01_WORKER_COUNT = 1
 _PERSISTENT_STAGE_EXECUTION_MODE = "persistent_worker_runtime"
+_RECOMMENDED_PW01_WORKER_COUNT_FOR_VALIDATION = {
+    ACTIVE_SAMPLE_ROLE: 1,
+    CLEAN_NEGATIVE_SAMPLE_ROLE: 2,
+    PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: 2,
+}
 
 _CLEAN_NEGATIVE_FREEZE_ANCHOR_FIELDS = (
     "contract_version",
@@ -209,15 +215,30 @@ def _build_pw01_stage_runtime_bundle(
 
     bundle: Dict[str, Any] = {
         "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
+        "persistent_stage_worker_enabled": True,
+        "embed_runtime_session_enabled": False,
+        "detect_runtime_session_enabled": False,
+        "worker_embed_runtime_init_elapsed_seconds": None,
+        "worker_detect_runtime_init_elapsed_seconds": None,
     }
     if normalized_sample_role == ACTIVE_SAMPLE_ROLE:
+        embed_runtime_started_at = time.perf_counter()
         bundle["embed_runtime_session"] = build_embed_runtime_session(
             str(bound_config_path),
             overrides=pw01_stage_runtime_helpers._build_stage_overrides("embed"),
         )
+        bundle["embed_runtime_session_enabled"] = True
+        bundle["worker_embed_runtime_init_elapsed_seconds"] = (
+            time.perf_counter() - embed_runtime_started_at
+        )
+    detect_runtime_started_at = time.perf_counter()
     bundle["detect_runtime_session"] = build_detect_runtime_session(
         str(bound_config_path),
         overrides=pw01_stage_runtime_helpers._build_stage_overrides("detect"),
+    )
+    bundle["detect_runtime_session_enabled"] = True
+    bundle["worker_detect_runtime_init_elapsed_seconds"] = (
+        time.perf_counter() - detect_runtime_started_at
     )
     return bundle
 
@@ -1343,6 +1364,7 @@ def _build_worker_result_payload(
     assigned_event_indices: Sequence[int],
     events: Sequence[Mapping[str, Any]],
     status: str,
+    stage_runtime_bundle: Mapping[str, Any] | None = None,
     failure_reason: str | None = None,
     exception_type: str | None = None,
     exception_message: str | None = None,
@@ -1362,6 +1384,7 @@ def _build_worker_result_payload(
         assigned_event_indices: Assigned event indices.
         events: Event manifest payloads completed by this worker.
         status: Worker status.
+        stage_runtime_bundle: Optional persistent runtime diagnostics bundle.
         failure_reason: Optional failure reason.
         exception_type: Optional exception type.
         exception_message: Optional exception message.
@@ -1391,6 +1414,54 @@ def _build_worker_result_payload(
             raise ValueError("worker event manifest missing event_id")
         completed_event_ids.append(event_id)
 
+    normalized_stage_runtime_bundle = (
+        dict(cast(Dict[str, Any], stage_runtime_bundle))
+        if isinstance(stage_runtime_bundle, dict)
+        else {}
+    )
+    persistent_stage_worker_enabled = (
+        normalized_stage_runtime_bundle.get("execution_mode") == _PERSISTENT_STAGE_EXECUTION_MODE
+    )
+    embed_runtime_session_enabled = isinstance(
+        normalized_stage_runtime_bundle.get("embed_runtime_session"),
+        dict,
+    )
+    detect_runtime_session_enabled = isinstance(
+        normalized_stage_runtime_bundle.get("detect_runtime_session"),
+        dict,
+    )
+    worker_embed_runtime_init_elapsed_seconds = normalized_stage_runtime_bundle.get(
+        "worker_embed_runtime_init_elapsed_seconds"
+    )
+    if not isinstance(worker_embed_runtime_init_elapsed_seconds, (int, float)) or isinstance(
+        worker_embed_runtime_init_elapsed_seconds,
+        bool,
+    ):
+        worker_embed_runtime_init_elapsed_seconds = None
+    else:
+        worker_embed_runtime_init_elapsed_seconds = float(worker_embed_runtime_init_elapsed_seconds)
+    worker_detect_runtime_init_elapsed_seconds = normalized_stage_runtime_bundle.get(
+        "worker_detect_runtime_init_elapsed_seconds"
+    )
+    if not isinstance(worker_detect_runtime_init_elapsed_seconds, (int, float)) or isinstance(
+        worker_detect_runtime_init_elapsed_seconds,
+        bool,
+    ):
+        worker_detect_runtime_init_elapsed_seconds = None
+    else:
+        worker_detect_runtime_init_elapsed_seconds = float(worker_detect_runtime_init_elapsed_seconds)
+
+    worker_embed_event_count = 0
+    worker_detect_event_count = 0
+    for event in events:
+        stage_results = event.get("stage_results")
+        if not isinstance(stage_results, dict):
+            continue
+        if isinstance(stage_results.get("embed"), dict):
+            worker_embed_event_count += 1
+        if isinstance(stage_results.get("detect"), dict):
+            worker_detect_event_count += 1
+
     return {
         "artifact_type": "paper_workflow_source_shard_worker_result",
         "schema_version": "pw01_v1",
@@ -1410,6 +1481,16 @@ def _build_worker_result_payload(
         "assigned_event_count": len(assigned_event_ids),
         "completed_event_ids": completed_event_ids,
         "completed_event_count": len(completed_event_ids),
+        "persistent_stage_worker_enabled": persistent_stage_worker_enabled,
+        "embed_runtime_session_enabled": embed_runtime_session_enabled,
+        "detect_runtime_session_enabled": detect_runtime_session_enabled,
+        "worker_embed_runtime_init_elapsed_seconds": worker_embed_runtime_init_elapsed_seconds,
+        "worker_detect_runtime_init_elapsed_seconds": worker_detect_runtime_init_elapsed_seconds,
+        "worker_embed_event_count": worker_embed_event_count,
+        "worker_detect_event_count": worker_detect_event_count,
+        "recommended_pw01_worker_count_for_validation": _RECOMMENDED_PW01_WORKER_COUNT_FOR_VALIDATION[
+            normalized_sample_role
+        ],
         "events": [dict(event) for event in events],
         "failure_reason": failure_reason,
         "exception_type": exception_type,
@@ -3077,6 +3158,7 @@ def run_pw01_source_event_shard_worker(
             assigned_event_indices=assigned_event_indices,
             events=executed_events,
             status="completed",
+            stage_runtime_bundle=stage_runtime_bundle,
         )
         write_json_atomic(worker_result_path, worker_result)
         return worker_result
@@ -3094,6 +3176,7 @@ def run_pw01_source_event_shard_worker(
             assigned_event_indices=assigned_event_indices,
             events=executed_events,
             status="failed",
+            stage_runtime_bundle=stage_runtime_bundle,
             failure_reason="pw01_worker_event_execution_failed",
             exception_type=type(exc).__name__,
             exception_message=str(exc),

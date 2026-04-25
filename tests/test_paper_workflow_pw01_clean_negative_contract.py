@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, cast
+from typing import Any, Dict, List, cast
 
 import pytest
 
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 import paper_workflow.scripts.pw01_run_source_event_shard as pw01_module
+from paper_workflow.scripts.pw_common import read_jsonl
 from scripts.notebook_runtime_common import (
     apply_notebook_model_snapshot_binding,
     ensure_directory,
@@ -67,6 +68,39 @@ def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Pa
     bound_config_path = drive_project_root / "runtime_state" / f"{marker}_bound_config.yaml"
     write_yaml_mapping(bound_config_path, bound_cfg)
     return bound_config_path
+
+
+def _load_shard_assigned_events(
+    summary: Dict[str, Any],
+    shard_index: int,
+    sample_role: str,
+) -> List[Dict[str, Any]]:
+    """
+    Load the ordered assigned events for one shard and sample role.
+
+    Args:
+        summary: PW00 summary payload.
+        shard_index: Shard index.
+        sample_role: Supported PW01 sample role.
+
+    Returns:
+        Ordered shard-assigned events.
+    """
+    shard_plan = json.loads(Path(str(summary["source_shard_plan_path"])).read_text(encoding="utf-8"))
+    shard_assignment = pw01_module.resolve_source_shard_assignment(
+        shard_plan,
+        sample_role=sample_role,
+        shard_index=shard_index,
+        shard_count=2,
+    )
+    event_lookup = {
+        row["event_id"]: row
+        for row in read_jsonl(Path(str(summary["source_event_grid_path"])))
+    }
+    return [
+        cast(Dict[str, Any], event_lookup[event_id])
+        for event_id in cast(List[str], shard_assignment["assigned_event_ids"])
+    ]
 
 
 def _patch_clean_negative_runner(
@@ -595,6 +629,66 @@ def test_pw01_control_negative_writes_statement_only_provenance(tmp_path: Path, 
     assert run_closure["records_bundle"]["bundle_canon_sha256"] == records_manifest["bundle_canon_sha256"]
 
 
+def test_pw01_clean_negative_worker_result_includes_persistent_runtime_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Persist worker-level persistent-runtime diagnostics for clean_negative execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_worker_runtime_clean_negative")
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    default_config_path = pw01_module._resolve_default_config_path(family_manifest)
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_worker_runtime_clean_negative",
+    )
+    captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
+    perf_counter_values = iter([30.0, 31.25])
+    monkeypatch.setattr(pw01_module.time, "perf_counter", lambda: next(perf_counter_values))
+
+    family_root = Path(str(summary["family_root"]))
+    shard_root = ensure_directory(pw01_module._build_role_shard_root(family_root, "clean_negative", 0))
+    worker_plans = pw01_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_runtime_clean_negative",
+        sample_role="clean_negative",
+        shard_index=0,
+        shard_count=2,
+        pw01_worker_count=1,
+        shard_root=shard_root,
+        default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
+        assigned_events=_load_shard_assigned_events(summary, 0, "clean_negative"),
+    )
+
+    worker_result = pw01_module.run_pw01_source_event_shard_worker(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_runtime_clean_negative",
+        shard_index=0,
+        pw01_worker_count=1,
+        local_worker_index=0,
+        worker_plan_path=Path(str(worker_plans[0]["worker_plan_path"])),
+    )
+
+    assert len(captures["detect_runtime_sessions"]) == 1
+    assert worker_result["persistent_stage_worker_enabled"] is True
+    assert worker_result["embed_runtime_session_enabled"] is False
+    assert worker_result["detect_runtime_session_enabled"] is True
+    assert worker_result["worker_embed_runtime_init_elapsed_seconds"] is None
+    assert worker_result["worker_detect_runtime_init_elapsed_seconds"] == 1.25
+    assert worker_result["worker_embed_event_count"] == 0
+    assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
+    assert worker_result["recommended_pw01_worker_count_for_validation"] == 2
+
+
 def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -642,6 +736,77 @@ def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
     assert first_event["stage_results"]["detect"]["execution_mode"] == "persistent_worker_runtime"
     assert Path(str(first_event["stage_results"]["detect_probe"]["stdout_log_path"])).exists()
     assert Path(str(first_event["stage_results"]["detect"]["stdout_log_path"])).exists()
+
+
+def test_pw01_control_negative_worker_result_includes_persistent_runtime_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Persist worker-level persistent-runtime diagnostics for control-negative execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_worker_runtime_control_negative")
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    default_config_path = pw01_module._resolve_default_config_path(family_manifest)
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_worker_runtime_control_negative",
+    )
+    captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
+    perf_counter_values = iter([40.0, 40.75])
+    monkeypatch.setattr(pw01_module.time, "perf_counter", lambda: next(perf_counter_values))
+
+    family_root = Path(str(summary["family_root"]))
+    shard_root = ensure_directory(
+        pw01_module._build_role_shard_root(
+            family_root,
+            pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+            0,
+        )
+    )
+    worker_plans = pw01_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_runtime_control_negative",
+        sample_role=pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        shard_index=0,
+        shard_count=2,
+        pw01_worker_count=1,
+        shard_root=shard_root,
+        default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
+        assigned_events=_load_shard_assigned_events(
+            summary,
+            0,
+            pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        ),
+    )
+
+    worker_result = pw01_module.run_pw01_source_event_shard_worker(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_runtime_control_negative",
+        shard_index=0,
+        pw01_worker_count=1,
+        local_worker_index=0,
+        worker_plan_path=Path(str(worker_plans[0]["worker_plan_path"])),
+    )
+
+    assert len(captures["detect_runtime_sessions"]) == 1
+    assert worker_result["persistent_stage_worker_enabled"] is True
+    assert worker_result["embed_runtime_session_enabled"] is False
+    assert worker_result["detect_runtime_session_enabled"] is True
+    assert worker_result["worker_embed_runtime_init_elapsed_seconds"] is None
+    assert worker_result["worker_detect_runtime_init_elapsed_seconds"] == 0.75
+    assert worker_result["worker_embed_event_count"] == 0
+    assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
+    assert len(captures["detect_runtime_calls"]) == worker_result["completed_event_count"] * 2
+    assert worker_result["recommended_pw01_worker_count_for_validation"] == 2
 
 
 def test_pw01_clean_negative_remains_strict_formal_null_without_probe(

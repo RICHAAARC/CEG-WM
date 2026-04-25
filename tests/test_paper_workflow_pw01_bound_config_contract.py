@@ -652,6 +652,71 @@ def test_pw01_worker_plan_persists_and_worker_loads_bound_config_path(
     assert runtime_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
 
 
+def test_pw01_positive_source_worker_result_includes_persistent_runtime_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Persist worker-level persistent-runtime diagnostics for positive_source execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    summary = _build_pw00_family(tmp_path, family_id="family_worker_runtime_positive")
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    default_config_path = pw01_module._resolve_default_config_path(family_manifest)
+    bound_config_path, snapshot_dir = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="worker_runtime_positive",
+    )
+    captures = _patch_pw01_base_runner(
+        monkeypatch,
+        expected_snapshot_path=snapshot_dir,
+        persistent_runtime=True,
+    )
+    perf_counter_values = iter([10.0, 12.5, 20.0, 23.0])
+    monkeypatch.setattr(pw01_module.time, "perf_counter", lambda: next(perf_counter_values))
+
+    family_root = Path(str(summary["family_root"]))
+    shard_root = ensure_directory(pw01_module._build_shard_root(family_root, 0))
+    worker_plans = pw01_module._prepare_local_worker_plans(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_runtime_positive",
+        sample_role="positive_source",
+        shard_index=0,
+        shard_count=2,
+        pw01_worker_count=1,
+        shard_root=shard_root,
+        default_config_path=default_config_path,
+        bound_config_path=bound_config_path,
+        assigned_events=_load_shard_assigned_events(summary, 0),
+    )
+
+    worker_result = pw01_module.run_pw01_source_event_shard_worker(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_worker_runtime_positive",
+        shard_index=0,
+        pw01_worker_count=1,
+        local_worker_index=0,
+        worker_plan_path=Path(str(worker_plans[0]["worker_plan_path"])),
+    )
+
+    assert len(captures["embed_runtime_sessions"]) == 1
+    assert len(captures["detect_runtime_sessions"]) == 1
+    assert worker_result["persistent_stage_worker_enabled"] is True
+    assert worker_result["embed_runtime_session_enabled"] is True
+    assert worker_result["detect_runtime_session_enabled"] is True
+    assert worker_result["worker_embed_runtime_init_elapsed_seconds"] == 2.5
+    assert worker_result["worker_detect_runtime_init_elapsed_seconds"] == 3.0
+    assert worker_result["worker_embed_event_count"] == worker_result["completed_event_count"]
+    assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
+    assert worker_result["recommended_pw01_worker_count_for_validation"] == 1
+
+
 def test_pw01_positive_source_single_process_uses_persistent_stage_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
