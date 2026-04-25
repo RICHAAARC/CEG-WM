@@ -34,6 +34,7 @@ QUALITY_LPIPS_BATCH_SIZE_ENV = "PW_QUALITY_LPIPS_BATCH_SIZE"
 QUALITY_CLIP_BATCH_SIZE_ENV = "PW_QUALITY_CLIP_BATCH_SIZE"
 QUALITY_PSNR_SSIM_BATCH_SIZE_ENV = "PW_QUALITY_PSNR_SSIM_BATCH_SIZE"
 QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV = "PW_QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET"
+QUALITY_PSNR_SSIM_DEVICE_ENV = "PW_QUALITY_PSNR_SSIM_DEVICE"
 DEFAULT_QUALITY_TORCH_DEVICE = "cpu"
 DEFAULT_QUALITY_BATCH_SIZE = 1
 _PSNR_SSIM_BATCH_ELEMENT_BUDGET = 4 * 512 * 512 * 3
@@ -242,6 +243,36 @@ def _read_positive_int_env(env_name: str) -> int | None:
     if normalized_value <= 0:
         return None
     return normalized_value
+
+
+def _read_optional_device_env(env_name: str) -> str | None:
+    """
+    功能：读取可选的 PSNR/SSIM device 环境变量。 
+
+    Read one optional PSNR/SSIM device environment override.
+
+    Args:
+        env_name: Environment variable name.
+
+    Returns:
+        Normalized device token, or None when the variable is unset or invalid.
+
+    Raises:
+        TypeError: If env_name is invalid.
+    """
+    if not isinstance(env_name, str) or not env_name:
+        raise TypeError("env_name must be non-empty str")
+
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return None
+
+    normalized_value = raw_value.strip().lower()
+    if not normalized_value:
+        return None
+    if normalized_value == "cpu" or normalized_value.startswith("cuda"):
+        return normalized_value
+    return None
 
 
 def _resolve_quality_runtime_options(
@@ -841,6 +872,51 @@ def _resolve_psnr_ssim_batch_runtime(image_shape: Sequence[int] | None) -> tuple
     return max(1, resolved_batch_element_budget // per_image_elements), batch_source
 
 
+def _resolve_psnr_ssim_device_runtime(
+    psnr_ssim_device_override: str | None = None,
+) -> tuple[str | None, str, str]:
+    """
+    功能：解析 PSNR/SSIM batched 计算的 device 请求与实际执行 device。 
+
+    Resolve the requested and effective device for batched PSNR/SSIM computation.
+
+    Args:
+        psnr_ssim_device_override: Optional explicit PSNR/SSIM device override.
+
+    Returns:
+        Tuple of (requested_device_or_none, resolved_device, source_label).
+    """
+    requested_device = None
+    source_label = "default_cpu"
+
+    if isinstance(psnr_ssim_device_override, str) and psnr_ssim_device_override.strip():
+        normalized_override = psnr_ssim_device_override.strip().lower()
+        if normalized_override == "cpu" or normalized_override.startswith("cuda"):
+            requested_device = normalized_override
+            source_label = "argument"
+    if requested_device is None:
+        requested_device = _read_optional_device_env(QUALITY_PSNR_SSIM_DEVICE_ENV)
+        if requested_device is not None:
+            source_label = "environment"
+
+    if requested_device is None or requested_device == "cpu":
+        return requested_device, "cpu", source_label
+
+    try:
+        import torch
+    except Exception:
+        return requested_device, "cpu", source_label
+
+    try:
+        cuda_available = bool(torch.cuda.is_available()) and int(torch.cuda.device_count()) > 0
+    except Exception:
+        cuda_available = False
+
+    if not cuda_available:
+        return requested_device, "cpu", source_label
+    return requested_device, requested_device, source_label
+
+
 def _flush_psnr_ssim_pending_batch(
     *,
     pair_rows: List[Dict[str, Any]],
@@ -848,6 +924,7 @@ def _flush_psnr_ssim_pending_batch(
     psnr_values: List[float],
     ssim_values: List[float],
     error_count_ref: List[int],
+    resolved_psnr_ssim_device: str,
     phase_profiler: QualityPhaseProfiler | None = None,
 ) -> None:
     """
@@ -861,6 +938,7 @@ def _flush_psnr_ssim_pending_batch(
         psnr_values: Successful PSNR accumulator.
         ssim_values: Successful SSIM accumulator.
         error_count_ref: Single-slot mutable error counter.
+        resolved_psnr_ssim_device: Effective torch device used for batched PSNR/SSIM.
         phase_profiler: Optional aggregate phase profiler.
 
     Returns:
@@ -877,10 +955,12 @@ def _flush_psnr_ssim_pending_batch(
         batch_psnr_values = compute_psnr_batch(
             [reference_image for _, reference_image, _ in batch],
             [candidate_image for _, _, candidate_image in batch],
+            device=resolved_psnr_ssim_device,
         )
         batch_ssim_values = compute_ssim_batch(
             [reference_image for _, reference_image, _ in batch],
             [candidate_image for _, _, candidate_image in batch],
+            device=resolved_psnr_ssim_device,
         )
         if len(batch_psnr_values) != len(batch) or len(batch_ssim_values) != len(batch):
             raise RuntimeError("PSNR/SSIM batch size mismatch")
@@ -931,6 +1011,7 @@ def _flush_grouped_psnr_ssim_pending_batches(
     psnr_values: List[float],
     ssim_values: List[float],
     error_count_ref: List[int],
+    resolved_psnr_ssim_device: str,
     phase_profiler: QualityPhaseProfiler | None = None,
 ) -> None:
     """
@@ -944,6 +1025,7 @@ def _flush_grouped_psnr_ssim_pending_batches(
         psnr_values: Successful PSNR accumulator.
         ssim_values: Successful SSIM accumulator.
         error_count_ref: Single-slot mutable error counter.
+        resolved_psnr_ssim_device: Effective torch device used for batched PSNR/SSIM.
         phase_profiler: Optional aggregate phase profiler.
 
     Returns:
@@ -963,6 +1045,7 @@ def _flush_grouped_psnr_ssim_pending_batches(
                 psnr_values=psnr_values,
                 ssim_values=ssim_values,
                 error_count_ref=error_count_ref,
+                resolved_psnr_ssim_device=resolved_psnr_ssim_device,
                 phase_profiler=phase_profiler,
             )
 
@@ -1127,6 +1210,7 @@ def build_quality_metrics_from_pairs(
     torch_device: str | None = None,
     lpips_batch_size: int | None = None,
     clip_batch_size: int | None = None,
+    psnr_ssim_device_override: str | None = None,
     enable_phase_profiler: bool = False,
     phase_profile_output_path: Path | str | None = None,
     phase_profile_label: str | None = None,
@@ -1146,6 +1230,7 @@ def build_quality_metrics_from_pairs(
         torch_device: Optional torch device string used by LPIPS and CLIP.
         lpips_batch_size: Optional LPIPS batch size.
         clip_batch_size: Optional CLIP batch size.
+        psnr_ssim_device_override: Optional explicit device override used only by batched PSNR/SSIM.
         enable_phase_profiler: Whether to collect phase-level runtime metrics.
         phase_profile_output_path: Optional JSON output path for the phase profile.
         phase_profile_label: Optional human-readable phase profile label.
@@ -1175,6 +1260,9 @@ def build_quality_metrics_from_pairs(
     resolved_torch_device = str(runtime_options["torch_device"])
     resolved_lpips_batch_size = int(runtime_options["lpips_batch_size"])
     resolved_clip_batch_size = int(runtime_options["clip_batch_size"])
+    requested_psnr_ssim_device, resolved_psnr_ssim_device, psnr_ssim_device_source = _resolve_psnr_ssim_device_runtime(
+        psnr_ssim_device_override
+    )
     phase_profiler_enabled = bool(enable_phase_profiler or phase_profile_output_path is not None)
     phase_profiler = (
         QualityPhaseProfiler(
@@ -1303,6 +1391,7 @@ def build_quality_metrics_from_pairs(
         psnr_values=psnr_values,
         ssim_values=ssim_values,
         error_count_ref=psnr_ssim_error_count_ref,
+        resolved_psnr_ssim_device=resolved_psnr_ssim_device,
         phase_profiler=phase_profiler,
     )
     error_count = psnr_ssim_error_count_ref[0]
@@ -1518,6 +1607,9 @@ def build_quality_metrics_from_pairs(
             "torch_device": resolved_torch_device,
             "lpips_batch_size": resolved_lpips_batch_size,
             "clip_batch_size": resolved_clip_batch_size,
+            "psnr_ssim_device_requested": requested_psnr_ssim_device,
+            "psnr_ssim_device_resolved": resolved_psnr_ssim_device,
+            "psnr_ssim_device_source": psnr_ssim_device_source,
             "psnr_ssim_batch_size": psnr_ssim_batch_size,
             "psnr_ssim_batch_source": psnr_ssim_batch_source,
         },

@@ -8,6 +8,7 @@ from __future__ import annotations
 import builtins
 import csv
 import json
+import sys
 import types
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple, cast
@@ -209,6 +210,9 @@ def test_build_quality_metrics_from_pairs_supports_env_gpu_batch_runtime(
         "torch_device": "cuda:0",
         "lpips_batch_size": 2,
         "clip_batch_size": 2,
+        "psnr_ssim_device_requested": None,
+        "psnr_ssim_device_resolved": "cpu",
+        "psnr_ssim_device_source": "default_cpu",
         "psnr_ssim_batch_size": 16384,
         "psnr_ssim_batch_source": "default_element_budget",
     }
@@ -363,8 +367,87 @@ def test_build_quality_metrics_from_pairs_reports_psnr_ssim_batch_runtime(
     )
 
     quality_runtime = cast(Dict[str, Any], summary["quality_runtime"])
+    assert quality_runtime["psnr_ssim_device_requested"] is None
+    assert quality_runtime["psnr_ssim_device_resolved"] == "cpu"
+    assert quality_runtime["psnr_ssim_device_source"] == "default_cpu"
     assert quality_runtime["psnr_ssim_batch_size"] == 16
     assert quality_runtime["psnr_ssim_batch_source"] == "env_batch_size"
+
+
+def test_build_quality_metrics_from_pairs_reports_psnr_ssim_device_runtime(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify PSNR/SSIM device requests are reported separately from the resolved execution device.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    reference_path = tmp_path / "device_reference.png"
+    candidate_path = tmp_path / "device_candidate.png"
+    Image.new("RGB", (8, 8), color=(60, 30, 10)).save(reference_path)
+    Image.new("RGB", (8, 8), color=(62, 30, 10)).save(candidate_path)
+
+    psnr_batch_devices: List[str | None] = []
+    ssim_batch_devices: List[str | None] = []
+
+    monkeypatch.setenv(pw_quality_metrics_module.QUALITY_PSNR_SSIM_DEVICE_ENV, "cuda")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: False,
+                device_count=lambda: 0,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "compute_psnr_batch",
+        lambda reference_batch, candidate_batch, max_val=255.0, device=None: (
+            psnr_batch_devices.append(device),
+            [30.0 for _ in range(len(reference_batch))],
+        )[1],
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "compute_ssim_batch",
+        lambda reference_batch, candidate_batch, win_size=7, data_range=255.0, device=None: (
+            ssim_batch_devices.append(device),
+            [0.9 for _ in range(len(reference_batch))],
+        )[1],
+    )
+    monkeypatch.setattr(
+        pw_quality_metrics_module,
+        "_call_lpips_value_compat",
+        lambda reference_image, candidate_image, *, torch_device: 0.12,
+    )
+
+    summary = pw_quality_metrics_module.build_quality_metrics_from_pairs(
+        pair_specs=[
+            {
+                "pair_id": "device_pair",
+                "reference_image_path": normalize_path_value(reference_path),
+                "candidate_image_path": normalize_path_value(candidate_path),
+            }
+        ],
+        reference_path_key="reference_image_path",
+        candidate_path_key="candidate_image_path",
+        pair_id_key="pair_id",
+    )
+
+    quality_runtime = cast(Dict[str, Any], summary["quality_runtime"])
+    assert psnr_batch_devices == ["cpu"]
+    assert ssim_batch_devices == ["cpu"]
+    assert quality_runtime["psnr_ssim_device_requested"] == "cuda"
+    assert quality_runtime["psnr_ssim_device_resolved"] == "cpu"
+    assert quality_runtime["psnr_ssim_device_source"] == "environment"
 
 
 def test_build_quality_metrics_from_pairs_reuses_reference_image_cache(
@@ -1121,6 +1204,8 @@ def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
 
     psnr_batch_calls: List[int] = []
     ssim_batch_calls: List[int] = []
+    psnr_batch_devices: List[str | None] = []
+    ssim_batch_devices: List[str | None] = []
 
     def fail_single_psnr(*args: Any, **kwargs: Any) -> float:
         raise AssertionError("single-item PSNR path should not run for successful batched quality evaluation")
@@ -1128,12 +1213,25 @@ def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
     def fail_single_ssim(*args: Any, **kwargs: Any) -> float:
         raise AssertionError("single-item SSIM path should not run for successful batched quality evaluation")
 
-    def fake_psnr_batch(reference_batch: Any, candidate_batch: Any, max_val: float = 255.0) -> List[float]:
+    def fake_psnr_batch(
+        reference_batch: Any,
+        candidate_batch: Any,
+        max_val: float = 255.0,
+        device: Any | None = None,
+    ) -> List[float]:
         psnr_batch_calls.append(len(reference_batch))
+        psnr_batch_devices.append(device)
         return [31.0 + float(index) for index in range(len(reference_batch))]
 
-    def fake_ssim_batch(reference_batch: Any, candidate_batch: Any, win_size: int = 7, data_range: float = 255.0) -> List[float]:
+    def fake_ssim_batch(
+        reference_batch: Any,
+        candidate_batch: Any,
+        win_size: int = 7,
+        data_range: float = 255.0,
+        device: Any | None = None,
+    ) -> List[float]:
         ssim_batch_calls.append(len(reference_batch))
+        ssim_batch_devices.append(device)
         return [0.91 - (0.01 * float(index)) for index in range(len(reference_batch))]
 
     monkeypatch.setattr(pw_quality_metrics_module, "compute_psnr", fail_single_psnr)
@@ -1162,6 +1260,8 @@ def test_build_quality_metrics_from_pairs_uses_batched_psnr_ssim_path(
 
     assert psnr_batch_calls == [3]
     assert ssim_batch_calls == [3]
+    assert psnr_batch_devices == ["cpu"]
+    assert ssim_batch_devices == ["cpu"]
     assert [row["psnr"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == [31.0, 32.0, 33.0]
     assert [row["ssim"] for row in cast(List[Dict[str, Any]], summary["pair_rows"])] == [0.91, 0.9, 0.89]
     assert summary["quality_phase_profile"]["phases"]["image_load"]["sample_count"] == 3

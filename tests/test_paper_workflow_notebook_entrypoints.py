@@ -554,6 +554,7 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in quality_constants
     assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in quality_constants
     assert 'QUALITY_CLIP_BATCH_SIZE = 400' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_DEVICE = None' in quality_constants
     assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in quality_constants
     assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in quality_constants
     assert 'PW04_MODE =' not in quality_constants
@@ -587,6 +588,7 @@ def test_pw04_quality_notebook_constants_include_psnr_ssim_batch_parameters() ->
 
     assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in quality_constants
     assert 'QUALITY_CLIP_BATCH_SIZE = 400' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_DEVICE = None' in quality_constants
     assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in quality_constants
     assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in quality_constants
 

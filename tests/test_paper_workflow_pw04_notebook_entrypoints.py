@@ -148,6 +148,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
         assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in constants_source
         assert 'QUALITY_CLIP_BATCH_SIZE = 400' in constants_source
+        assert 'QUALITY_PSNR_SSIM_DEVICE = None' in constants_source
         assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in constants_source
         assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in constants_source
         assert 'QUALITY_SHARD_COUNT' not in constants_source
@@ -159,6 +160,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         assert 'quality_device_override=QUALITY_DEVICE_OVERRIDE' in quality_runtime_source
         assert 'quality_lpips_batch_size_override=QUALITY_LPIPS_BATCH_SIZE' in quality_runtime_source
         assert 'quality_clip_batch_size_override=QUALITY_CLIP_BATCH_SIZE' in quality_runtime_source
+        assert 'quality_psnr_ssim_device_override=QUALITY_PSNR_SSIM_DEVICE' in quality_runtime_source
         assert 'quality_psnr_ssim_batch_size_override=QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_source
         assert 'quality_psnr_ssim_batch_element_budget_override=QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_source
         assert 'base_env=os.environ' in quality_runtime_source
@@ -262,6 +264,7 @@ def test_pw04_notebook_markdown_matches_stage_specific_runtime_scope() -> None:
     assert 'QUALITY_DEVICE_OVERRIDE' in quality_params
     assert 'QUALITY_LPIPS_BATCH_SIZE' in quality_params
     assert 'QUALITY_CLIP_BATCH_SIZE' in quality_params
+    assert 'QUALITY_PSNR_SSIM_DEVICE' in quality_params
     assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_params
     assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_params
     assert 'QUALITY_SHARD_COUNT' not in quality_params
@@ -270,6 +273,7 @@ def test_pw04_notebook_markdown_matches_stage_specific_runtime_scope() -> None:
     assert 'notebook override 优先于环境变量' in quality_runtime_markdown
     assert 'LPIPS=128' in quality_runtime_markdown
     assert 'CLIP=256' in quality_runtime_markdown
+    assert 'PW_QUALITY_PSNR_SSIM_DEVICE' in quality_runtime_markdown
     assert 'PW_QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_markdown
     assert 'PW_QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_markdown
     assert '低显存' not in quality_runtime_markdown
@@ -307,8 +311,11 @@ def test_pw04_quality_notebook_wires_psnr_ssim_batch_overrides() -> None:
 
     assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in constants_source
     assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in constants_source
+    assert 'QUALITY_PSNR_SSIM_DEVICE = None' in constants_source
+    assert 'quality_psnr_ssim_device_override=QUALITY_PSNR_SSIM_DEVICE' in quality_runtime_source
     assert 'quality_psnr_ssim_batch_size_override=QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_source
     assert 'quality_psnr_ssim_batch_element_budget_override=QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_source
+    assert 'PW_QUALITY_PSNR_SSIM_DEVICE' in quality_runtime_markdown
     assert 'PW_QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_markdown
     assert 'PW_QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_markdown
 

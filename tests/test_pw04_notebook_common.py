@@ -24,6 +24,7 @@ from paper_workflow.scripts.pw04_notebook_common import (
 )
 from paper_workflow.scripts.pw_quality_metrics import (
     DEFAULT_QUALITY_BATCH_SIZE,
+    QUALITY_PSNR_SSIM_DEVICE_ENV,
     QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV,
     QUALITY_PSNR_SSIM_BATCH_SIZE_ENV,
 )
@@ -254,6 +255,7 @@ def test_build_pw04_subprocess_env_injects_repo_and_quality_runtime(tmp_path: Pa
             "selected_device": "cuda",
             "lpips_batch_size": 7,
             "clip_batch_size": 11,
+            "psnr_ssim_device_override": None,
             "psnr_ssim_batch_size_override": None,
             "psnr_ssim_batch_element_budget_override": None,
         },
@@ -262,9 +264,43 @@ def test_build_pw04_subprocess_env_injects_repo_and_quality_runtime(tmp_path: Pa
     assert env_mapping["PW_QUALITY_TORCH_DEVICE"] == "cuda"
     assert env_mapping["PW_QUALITY_LPIPS_BATCH_SIZE"] == "7"
     assert env_mapping["PW_QUALITY_CLIP_BATCH_SIZE"] == "11"
+    assert QUALITY_PSNR_SSIM_DEVICE_ENV not in env_mapping
     assert QUALITY_PSNR_SSIM_BATCH_SIZE_ENV not in env_mapping
     assert QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV not in env_mapping
     assert str(tmp_path.resolve()) in env_mapping["PYTHONPATH"]
+
+
+def test_build_pw04_subprocess_env_injects_psnr_ssim_device_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify notebook PSNR/SSIM device override is injected into the subprocess environment.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _install_fake_torch(monkeypatch, cuda_available=False)
+
+    quality_runtime_summary = resolve_pw04_quality_runtime_summary(
+        quality_device_override="auto",
+        quality_psnr_ssim_device_override="cuda",
+        base_env={},
+    )
+    env_mapping = build_pw04_subprocess_env(
+        repo_root=tmp_path,
+        base_env={"PATH": "demo-path"},
+        pw04_mode="quality_shard",
+        quality_runtime_summary=quality_runtime_summary,
+    )
+
+    assert env_mapping[QUALITY_PSNR_SSIM_DEVICE_ENV] == "cuda"
+    assert QUALITY_PSNR_SSIM_BATCH_SIZE_ENV not in env_mapping
+    assert QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV not in env_mapping
 
 
 def test_build_pw04_subprocess_env_injects_psnr_ssim_batch_size_override(

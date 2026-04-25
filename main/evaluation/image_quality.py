@@ -105,7 +105,46 @@ def _prepare_batched_image_array(images: Any) -> npt.NDArray[np.float32]:
     return np.stack(normalized_images, axis=0).astype(np.float32, copy=False)
 
 
-def _prepare_batched_image_tensor(images: Any) -> Any:
+def _resolve_torch_compute_device(device: Any | None = None) -> tuple[Any, str]:
+    """
+    功能：解析 batched 图像质量计算所使用的 torch device。 
+
+    Resolve the effective torch device for batched image-quality computation.
+
+    Args:
+        device: Optional requested torch device token or torch.device instance.
+
+    Returns:
+        Tuple of (resolved_torch_device, resolved_device_label).
+
+    Raises:
+        RuntimeError: If torch is unavailable.
+        ValueError: If the requested device token is invalid.
+    """
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"torch unavailable for batched image quality: {type(exc).__name__}: {exc}") from exc
+
+    if device is None:
+        return torch.device("cpu"), "cpu"
+
+    device_text = str(device).strip()
+    if not device_text:
+        return torch.device("cpu"), "cpu"
+
+    if device_text.lower().startswith("cuda"):
+        try:
+            cuda_available = bool(torch.cuda.is_available())
+        except Exception:
+            cuda_available = False
+        if not cuda_available:
+            return torch.device("cpu"), "cpu"
+
+    return torch.device(device_text), device_text
+
+
+def _prepare_batched_image_tensor(images: Any, *, device: Any | None = None) -> Any:
     """
     功能：将批量图像数组转换为 NCHW float32 tensor。 
 
@@ -113,6 +152,7 @@ def _prepare_batched_image_tensor(images: Any) -> Any:
 
     Args:
         images: One image, one batched image array, or a sequence of images.
+        device: Optional torch device request for tensor placement.
 
     Returns:
         Torch tensor with shape [N, C, H, W].
@@ -126,7 +166,11 @@ def _prepare_batched_image_tensor(images: Any) -> Any:
         raise RuntimeError(f"torch unavailable for batched image quality: {type(exc).__name__}: {exc}") from exc
 
     image_batch = _prepare_batched_image_array(images)
-    return torch.as_tensor(image_batch, dtype=torch.float32).permute(0, 3, 1, 2).contiguous()
+    image_tensor = torch.as_tensor(image_batch, dtype=torch.float32).permute(0, 3, 1, 2).contiguous()
+    resolved_device, _ = _resolve_torch_compute_device(device)
+    if hasattr(image_tensor, "to"):
+        image_tensor = image_tensor.to(resolved_device)
+    return image_tensor
 
 
 def _compute_ssim_batch_reference(
@@ -181,6 +225,7 @@ def compute_psnr_batch(
     img_original_batch: Any,
     img_watermarked_batch: Any,
     max_val: float = 255.0,
+    device: Any | None = None,
 ) -> List[float]:
     """
     功能：批量计算 Peak Signal-to-Noise Ratio。 
@@ -191,6 +236,7 @@ def compute_psnr_batch(
         img_original_batch: Original images with NHWC batch semantics or an image sequence.
         img_watermarked_batch: Compared images aligned with img_original_batch.
         max_val: Maximum pixel value.
+        device: Optional torch device request for batched tensor execution.
 
     Returns:
         Per-image PSNR values in dB.
@@ -218,8 +264,9 @@ def compute_psnr_batch(
         return output_values
 
     with torch.inference_mode():
-        image_original_tensor = _prepare_batched_image_tensor(image_original_batch)
-        image_watermarked_tensor = _prepare_batched_image_tensor(image_watermarked_batch)
+        resolved_device, _ = _resolve_torch_compute_device(device)
+        image_original_tensor = _prepare_batched_image_tensor(image_original_batch, device=resolved_device)
+        image_watermarked_tensor = _prepare_batched_image_tensor(image_watermarked_batch, device=resolved_device)
         mse_values = torch.mean((image_original_tensor - image_watermarked_tensor) ** 2, dim=(1, 2, 3))
         max_val_tensor = torch.full_like(mse_values, float(max_val))
         psnr_values = (20.0 * torch.log10(max_val_tensor)) - (10.0 * torch.log10(torch.clamp(mse_values, min=1e-12)))
@@ -232,6 +279,7 @@ def compute_ssim_batch(
     img_watermarked_batch: Any,
     win_size: int = 7,
     data_range: float = 255.0,
+    device: Any | None = None,
 ) -> List[float]:
     """
     功能：批量计算 Structural Similarity Index。 
@@ -244,6 +292,7 @@ def compute_ssim_batch(
         img_watermarked_batch: Compared images aligned with img_original_batch.
         win_size: Odd window size.
         data_range: Pixel dynamic range.
+        device: Optional torch device request for batched tensor execution.
 
     Returns:
         Per-image mean SSIM scores in [0, 1].
@@ -284,8 +333,9 @@ def compute_ssim_batch(
     c1 = (_SSIM_K1 * data_range) ** 2
     c2 = (_SSIM_K2 * data_range) ** 2
     with torch.inference_mode():
-        image_original_tensor = _prepare_batched_image_tensor(image_original_batch)
-        image_watermarked_tensor = _prepare_batched_image_tensor(image_watermarked_batch)
+        resolved_device, _ = _resolve_torch_compute_device(device)
+        image_original_tensor = _prepare_batched_image_tensor(image_original_batch, device=resolved_device)
+        image_watermarked_tensor = _prepare_batched_image_tensor(image_watermarked_batch, device=resolved_device)
         channel_count = int(image_original_tensor.shape[1])
         kernel = torch.full(
             (channel_count, 1, win_size, win_size),

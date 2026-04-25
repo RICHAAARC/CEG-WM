@@ -3,6 +3,9 @@ File purpose: 图像质量指标（PSNR/SSIM）回归测试。
 Module type: General module
 """
 
+import sys
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -104,3 +107,49 @@ def test_compute_ssim_batch_matches_legacy_reference() -> None:
     assert len(batch_values) == len(reference_values)
     for batch_value, reference_value in zip(batch_values, reference_values, strict=False):
         assert batch_value == pytest.approx(reference_value, abs=1e-4)
+
+
+def test_compute_psnr_ssim_batch_accepts_explicit_cpu_device() -> None:
+    """
+    Verify explicit CPU device requests preserve the existing numerical results.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    original = np.full((16, 16, 3), 96, dtype=np.uint8)
+    watermarked = np.full((16, 16, 3), 99, dtype=np.uint8)
+
+    default_psnr_values = compute_psnr_batch([original], [watermarked])
+    default_ssim_values = compute_ssim_batch([original], [watermarked])
+    psnr_values = compute_psnr_batch([original], [watermarked], device="cpu")
+    ssim_values = compute_ssim_batch([original], [watermarked], device="cpu")
+
+    assert psnr_values == default_psnr_values
+    assert ssim_values == default_ssim_values
+
+
+def test_resolve_torch_compute_device_cuda_request_falls_back_to_cpu_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify CUDA requests degrade to CPU when torch reports CUDA as unavailable.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(is_available=lambda: False),
+        device=lambda value: f"device:{value}",
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    resolved_device, resolved_label = image_quality_module._resolve_torch_compute_device("cuda")
+
+    assert resolved_device == "device:cpu"
+    assert resolved_label == "cpu"
