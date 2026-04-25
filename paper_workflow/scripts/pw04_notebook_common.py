@@ -21,6 +21,8 @@ from paper_workflow.scripts.pw_quality_metrics import (
     DEFAULT_QUALITY_TORCH_DEVICE,
     QUALITY_CLIP_BATCH_SIZE_ENV,
     QUALITY_LPIPS_BATCH_SIZE_ENV,
+    QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV,
+    QUALITY_PSNR_SSIM_BATCH_SIZE_ENV,
     QUALITY_TORCH_DEVICE_ENV,
 )
 from scripts.notebook_runtime_common import build_repo_import_subprocess_env, normalize_path_value
@@ -140,6 +142,35 @@ def _normalize_positive_batch_size(
     if normalized_value <= 0:
         return default_value, f"{label}={raw_value!r} invalid; fallback to {default_value}", "device_default"
     return normalized_value, None, source_label
+
+
+def _normalize_optional_positive_override(
+    raw_value: Any,
+    label: str,
+) -> tuple[int | None, str | None]:
+    """
+    功能：规范化可选的 notebook 正整数覆盖参数。
+
+    Normalize one optional positive notebook override.
+
+    Args:
+        raw_value: Candidate raw value.
+        label: Human-readable label.
+
+    Returns:
+        Tuple of (normalized_override_or_none, warning_or_none).
+    """
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if raw_value is None:
+        return None, None
+    try:
+        normalized_value = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None, f"{label}={raw_value!r} invalid; ignore notebook override"
+    if normalized_value <= 0:
+        return None, f"{label}={raw_value!r} invalid; ignore notebook override"
+    return normalized_value, None
 
 
 def _resolve_pw04_mode(pw04_mode: str) -> str:
@@ -330,6 +361,8 @@ def resolve_pw04_quality_runtime_summary(
     quality_device_override: str,
     quality_lpips_batch_size_override: Any | None = None,
     quality_clip_batch_size_override: Any | None = None,
+    quality_psnr_ssim_batch_size_override: Any | None = None,
+    quality_psnr_ssim_batch_element_budget_override: Any | None = None,
     base_env: Mapping[str, str] | None = None,
 ) -> Dict[str, Any]:
     """
@@ -341,6 +374,8 @@ def resolve_pw04_quality_runtime_summary(
         quality_device_override: Notebook-level quality device override.
         quality_lpips_batch_size_override: Optional notebook-level LPIPS batch override.
         quality_clip_batch_size_override: Optional notebook-level CLIP batch override.
+        quality_psnr_ssim_batch_size_override: Optional notebook-level PSNR/SSIM batch-size override.
+        quality_psnr_ssim_batch_element_budget_override: Optional notebook-level PSNR/SSIM batch-element-budget override.
         base_env: Optional source environment mapping.
 
     Returns:
@@ -485,6 +520,20 @@ def resolve_pw04_quality_runtime_summary(
     if clip_warning is not None:
         quality_warnings.append(clip_warning)
 
+    psnr_ssim_batch_size_override, psnr_ssim_batch_size_warning = _normalize_optional_positive_override(
+        quality_psnr_ssim_batch_size_override,
+        "QUALITY_PSNR_SSIM_BATCH_SIZE",
+    )
+    if psnr_ssim_batch_size_warning is not None:
+        quality_warnings.append(psnr_ssim_batch_size_warning)
+
+    psnr_ssim_batch_element_budget_override, psnr_ssim_batch_element_budget_warning = _normalize_optional_positive_override(
+        quality_psnr_ssim_batch_element_budget_override,
+        "QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET",
+    )
+    if psnr_ssim_batch_element_budget_warning is not None:
+        quality_warnings.append(psnr_ssim_batch_element_budget_warning)
+
     return {
         "requested_device": requested_device,
         "requested_device_source": requested_device_source,
@@ -502,6 +551,8 @@ def resolve_pw04_quality_runtime_summary(
         "selection_reason": selection_reason,
         "fallback_reason": fallback_reason,
         "batch_default_reason": batch_default_reason,
+        "psnr_ssim_batch_size_override": psnr_ssim_batch_size_override,
+        "psnr_ssim_batch_element_budget_override": psnr_ssim_batch_element_budget_override,
         "warnings": quality_warnings,
     }
 
@@ -547,6 +598,8 @@ def build_pw04_subprocess_env(
 
     lpips_batch_size = quality_runtime_summary.get("lpips_batch_size", DEFAULT_QUALITY_BATCH_SIZE)
     clip_batch_size = quality_runtime_summary.get("clip_batch_size", DEFAULT_QUALITY_BATCH_SIZE)
+    psnr_ssim_batch_size_override = quality_runtime_summary.get("psnr_ssim_batch_size_override")
+    psnr_ssim_batch_element_budget_override = quality_runtime_summary.get("psnr_ssim_batch_element_budget_override")
     if not isinstance(lpips_batch_size, int) or isinstance(lpips_batch_size, bool) or lpips_batch_size <= 0:
         lpips_batch_size = DEFAULT_QUALITY_BATCH_SIZE
     if not isinstance(clip_batch_size, int) or isinstance(clip_batch_size, bool) or clip_batch_size <= 0:
@@ -555,6 +608,14 @@ def build_pw04_subprocess_env(
     env_mapping[QUALITY_TORCH_DEVICE_ENV] = selected_device
     env_mapping[QUALITY_LPIPS_BATCH_SIZE_ENV] = str(lpips_batch_size)
     env_mapping[QUALITY_CLIP_BATCH_SIZE_ENV] = str(clip_batch_size)
+    if isinstance(psnr_ssim_batch_size_override, int) and not isinstance(psnr_ssim_batch_size_override, bool) and psnr_ssim_batch_size_override > 0:
+        env_mapping[QUALITY_PSNR_SSIM_BATCH_SIZE_ENV] = str(psnr_ssim_batch_size_override)
+    if (
+        isinstance(psnr_ssim_batch_element_budget_override, int)
+        and not isinstance(psnr_ssim_batch_element_budget_override, bool)
+        and psnr_ssim_batch_element_budget_override > 0
+    ):
+        env_mapping[QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET_ENV] = str(psnr_ssim_batch_element_budget_override)
     return env_mapping
 
 

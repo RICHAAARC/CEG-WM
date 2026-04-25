@@ -134,6 +134,8 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         assert 'QUALITY_DEVICE_OVERRIDE' not in constants_source
         assert 'QUALITY_LPIPS_BATCH_SIZE' not in constants_source
         assert 'QUALITY_CLIP_BATCH_SIZE' not in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in constants_source
         assert 'PW04_MODE = "prepare"' in precheck_source
         assert 'QUALITY_SHARD_INDEX = 0' in precheck_source
         assert quality_runtime_matches == []
@@ -144,8 +146,10 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     elif expected_mode == "quality_shard":
         assert 'QUALITY_SHARD_INDEX = 0' in constants_source
         assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
-        assert 'QUALITY_LPIPS_BATCH_SIZE = None' in constants_source
-        assert 'QUALITY_CLIP_BATCH_SIZE = None' in constants_source
+        assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in constants_source
+        assert 'QUALITY_CLIP_BATCH_SIZE = 400' in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in constants_source
         assert 'QUALITY_SHARD_COUNT' not in constants_source
         assert 'ENABLE_TAIL_ESTIMATION' not in constants_source
         assert 'PW04_MODE = "quality_shard"' in precheck_source
@@ -155,6 +159,8 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         assert 'quality_device_override=QUALITY_DEVICE_OVERRIDE' in quality_runtime_source
         assert 'quality_lpips_batch_size_override=QUALITY_LPIPS_BATCH_SIZE' in quality_runtime_source
         assert 'quality_clip_batch_size_override=QUALITY_CLIP_BATCH_SIZE' in quality_runtime_source
+        assert 'quality_psnr_ssim_batch_size_override=QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_source
+        assert 'quality_psnr_ssim_batch_element_budget_override=QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_source
         assert 'base_env=os.environ' in quality_runtime_source
         assert 'quality_runtime_summary=QUALITY_RUNTIME_SUMMARY' in execute_source
         assert 'pw04_mode=PW04_MODE' in execute_source
@@ -170,6 +176,8 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         assert 'QUALITY_DEVICE_OVERRIDE' not in constants_source
         assert 'QUALITY_LPIPS_BATCH_SIZE' not in constants_source
         assert 'QUALITY_CLIP_BATCH_SIZE' not in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in constants_source
         assert 'PW04_MODE = "finalize"' in precheck_source
         assert 'QUALITY_SHARD_INDEX = 0' in precheck_source
         assert 'ENABLE_TAIL_ESTIMATION = False' in precheck_source
@@ -247,17 +255,23 @@ def test_pw04_notebook_markdown_matches_stage_specific_runtime_scope() -> None:
     assert 'QUALITY_DEVICE_OVERRIDE' not in prepare_params
     assert 'QUALITY_LPIPS_BATCH_SIZE' not in prepare_params
     assert 'QUALITY_CLIP_BATCH_SIZE' not in prepare_params
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in prepare_params
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in prepare_params
 
     assert 'QUALITY_SHARD_INDEX' in quality_params
     assert 'QUALITY_DEVICE_OVERRIDE' in quality_params
     assert 'QUALITY_LPIPS_BATCH_SIZE' in quality_params
     assert 'QUALITY_CLIP_BATCH_SIZE' in quality_params
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_params
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_params
     assert 'QUALITY_SHARD_COUNT' not in quality_params
     assert 'ENABLE_TAIL_ESTIMATION' not in quality_params
     assert 'None 表示不覆盖' in quality_runtime_markdown
     assert 'notebook override 优先于环境变量' in quality_runtime_markdown
     assert 'LPIPS=128' in quality_runtime_markdown
     assert 'CLIP=256' in quality_runtime_markdown
+    assert 'PW_QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_markdown
+    assert 'PW_QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_markdown
     assert '低显存' not in quality_runtime_markdown
 
     assert 'QUALITY_SHARD_INDEX' not in finalize_params
@@ -266,6 +280,37 @@ def test_pw04_notebook_markdown_matches_stage_specific_runtime_scope() -> None:
     assert 'QUALITY_DEVICE_OVERRIDE' not in finalize_params
     assert 'QUALITY_LPIPS_BATCH_SIZE' not in finalize_params
     assert 'QUALITY_CLIP_BATCH_SIZE' not in finalize_params
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in finalize_params
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in finalize_params
+
+
+def test_pw04_quality_notebook_wires_psnr_ssim_batch_overrides() -> None:
+    """
+    Verify the PW04 quality notebook exposes and forwards PSNR/SSIM batch override parameters.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    constants_source = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "SCRIPT_PATH = REPO_ROOT")
+    quality_runtime_source = _find_code_cell_source(
+        NOTEBOOK_PW04_QUALITY_PATH,
+        "resolve_pw04_quality_runtime_summary(",
+    )
+    quality_runtime_markdown = _find_cell_sources(
+        NOTEBOOK_PW04_QUALITY_PATH,
+        "## Quality Runtime 配置说明",
+        "markdown",
+    )[0]
+
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in constants_source
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in constants_source
+    assert 'quality_psnr_ssim_batch_size_override=QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_source
+    assert 'quality_psnr_ssim_batch_element_budget_override=QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_source
+    assert 'PW_QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_markdown
+    assert 'PW_QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_markdown
 
 
 @pytest.mark.parametrize("notebook_path", [path for path, _ in NOTEBOOK_PW04_PATHS])

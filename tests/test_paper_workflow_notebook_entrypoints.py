@@ -545,13 +545,17 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     assert 'QUALITY_DEVICE_OVERRIDE' not in prepare_constants
     assert 'QUALITY_LPIPS_BATCH_SIZE' not in prepare_constants
     assert 'QUALITY_CLIP_BATCH_SIZE' not in prepare_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in prepare_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in prepare_constants
 
     assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in quality_constants
     assert 'QUALITY_SHARD_INDEX = 0' in quality_constants
     assert 'FORCE_RERUN = False' in quality_constants
     assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in quality_constants
-    assert 'QUALITY_LPIPS_BATCH_SIZE = None' in quality_constants
-    assert 'QUALITY_CLIP_BATCH_SIZE = None' in quality_constants
+    assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in quality_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE = 400' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in quality_constants
     assert 'PW04_MODE =' not in quality_constants
     assert 'QUALITY_SHARD_COUNT' not in quality_constants
     assert 'ENABLE_TAIL_ESTIMATION' not in quality_constants
@@ -565,6 +569,26 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     assert 'QUALITY_DEVICE_OVERRIDE' not in finalize_constants
     assert 'QUALITY_LPIPS_BATCH_SIZE' not in finalize_constants
     assert 'QUALITY_CLIP_BATCH_SIZE' not in finalize_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in finalize_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in finalize_constants
+
+
+def test_pw04_quality_notebook_constants_include_psnr_ssim_batch_parameters() -> None:
+    """
+    Verify the PW04 quality notebook exposes PSNR/SSIM batch parameter entrypoints.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    quality_constants = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "SCRIPT_PATH = REPO_ROOT")
+
+    assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in quality_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE = 400' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in quality_constants
 
 
 def test_pw04_notebooks_keep_fixed_internal_modes_for_command_construction() -> None:
