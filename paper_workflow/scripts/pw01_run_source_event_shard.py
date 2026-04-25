@@ -225,7 +225,7 @@ def _build_pw01_stage_runtime_bundle(
         embed_runtime_started_at = time.perf_counter()
         bundle["embed_runtime_session"] = build_embed_runtime_session(
             str(bound_config_path),
-            overrides=pw01_stage_runtime_helpers._build_stage_overrides("embed"),
+            overrides=pw01_stage_runtime_helpers._build_stage_override_items("embed"),
         )
         bundle["embed_runtime_session_enabled"] = True
         bundle["worker_embed_runtime_init_elapsed_seconds"] = (
@@ -234,7 +234,7 @@ def _build_pw01_stage_runtime_bundle(
     detect_runtime_started_at = time.perf_counter()
     bundle["detect_runtime_session"] = build_detect_runtime_session(
         str(bound_config_path),
-        overrides=pw01_stage_runtime_helpers._build_stage_overrides("detect"),
+        overrides=pw01_stage_runtime_helpers._build_stage_override_items("detect"),
     )
     bundle["detect_runtime_session_enabled"] = True
     bundle["worker_detect_runtime_init_elapsed_seconds"] = (

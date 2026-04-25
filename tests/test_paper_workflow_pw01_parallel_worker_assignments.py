@@ -11,6 +11,7 @@ from typing import Any, Dict
 import pytest
 
 import paper_workflow.scripts.pw01_run_source_event_shard as pw01_module
+from paper_workflow.scripts import pw01_stage_runtime_helpers
 
 
 def _make_event(
@@ -132,6 +133,36 @@ def test_pw01_local_worker_assignments_use_local_event_ordinal() -> None:
                 }
             ],
         },
+    ]
+
+
+def test_pw01_stage_command_keeps_cli_override_tokens() -> None:
+    """
+    Keep subprocess stage commands on CLI-style override tokens while exposing raw items separately.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    raw_items = pw01_stage_runtime_helpers._build_stage_override_items("detect")
+    command = pw01_stage_runtime_helpers._build_stage_command(
+        "detect",
+        Path("/tmp/runtime_config.yaml"),
+        Path("/tmp/run_root"),
+    )
+
+    assert raw_items == [
+        "run_root_reuse_allowed=true",
+        "run_root_reuse_reason=\"paper_workflow_pw01_detect\"",
+    ]
+    assert "--override" not in raw_items
+    assert command[-4:] == [
+        "--override",
+        "run_root_reuse_allowed=true",
+        "--override",
+        "run_root_reuse_reason=\"paper_workflow_pw01_detect\"",
     ]
 
 

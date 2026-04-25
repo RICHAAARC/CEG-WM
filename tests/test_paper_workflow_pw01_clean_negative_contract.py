@@ -389,10 +389,13 @@ def _patch_clean_negative_runner(
         thresholds_path: Any = None,
     ) -> Dict[str, Any]:
         _ = thresholds_path
+        override_items = list(cast(List[str], overrides or []))
+        if any(item == "--override" for item in override_items):
+            raise ValueError("override arg must be key=value: --override")
         session = {
             "session_kind": "detect",
             "config_path": config_path,
-            "overrides": list(overrides or []),
+            "overrides": override_items,
         }
         captures["detect_runtime_sessions"].append(session)
         return session
@@ -727,6 +730,10 @@ def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
 
     assert len(captures["detect_runtime_sessions"]) == 1
     assert len(captures["detect_runtime_calls"]) == event_count * 2
+    assert captures["detect_runtime_sessions"][0]["overrides"] == [
+        "run_root_reuse_allowed=true",
+        "run_root_reuse_reason=\"paper_workflow_pw01_detect\"",
+    ]
     assert {call["runtime_session_id"] for call in captures["detect_runtime_calls"]} == {
         id(captures["detect_runtime_sessions"][0])
     }

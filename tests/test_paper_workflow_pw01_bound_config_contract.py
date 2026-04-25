@@ -352,10 +352,13 @@ def _patch_pw01_base_runner(
         return payload
 
     def fake_build_embed_runtime_session(config_path: str, overrides: Any = None) -> Dict[str, Any]:
+        override_items = list(cast(List[str], overrides or []))
+        if any(item == "--override" for item in override_items):
+            raise ValueError("override arg must be key=value: --override")
         session = {
             "session_kind": "embed",
             "config_path": config_path,
-            "overrides": list(cast(List[str], overrides or [])),
+            "overrides": override_items,
         }
         captures["embed_runtime_sessions"].append(session)
         return session
@@ -366,10 +369,13 @@ def _patch_pw01_base_runner(
         thresholds_path: Any = None,
     ) -> Dict[str, Any]:
         _ = thresholds_path
+        override_items = list(cast(List[str], overrides or []))
+        if any(item == "--override" for item in override_items):
+            raise ValueError("override arg must be key=value: --override")
         session = {
             "session_kind": "detect",
             "config_path": config_path,
-            "overrides": list(cast(List[str], overrides or [])),
+            "overrides": override_items,
         }
         captures["detect_runtime_sessions"].append(session)
         return session
@@ -760,6 +766,14 @@ def test_pw01_positive_source_single_process_uses_persistent_stage_runtime(
     assert len(captures["detect_runtime_sessions"]) == 1
     assert len(captures["embed_runtime_calls"]) == event_count
     assert len(captures["detect_runtime_calls"]) == event_count
+    assert captures["embed_runtime_sessions"][0]["overrides"] == [
+        "run_root_reuse_allowed=true",
+        "run_root_reuse_reason=\"paper_workflow_pw01_embed\"",
+    ]
+    assert captures["detect_runtime_sessions"][0]["overrides"] == [
+        "run_root_reuse_allowed=true",
+        "run_root_reuse_reason=\"paper_workflow_pw01_detect\"",
+    ]
     assert {call["runtime_session_id"] for call in captures["embed_runtime_calls"]} == {
         id(captures["embed_runtime_sessions"][0])
     }

@@ -48,6 +48,32 @@ def _format_override_arg(arg_name: str, value: Any) -> str:
     return f"{arg_name}={json.dumps(value, ensure_ascii=False)}"
 
 
+def _build_stage_override_items(
+    stage_name: str,
+    extra_overrides: Optional[Sequence[str]] = None,
+) -> list[str]:
+    """
+    Build shared raw override items for one PW01 substage.
+
+    Args:
+        stage_name: Workflow stage name.
+        extra_overrides: Optional extra raw override items.
+
+    Returns:
+        Flat raw override item list containing only key=value entries.
+    """
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+
+    override_items = [
+        _format_override_arg("run_root_reuse_allowed", True),
+        _format_override_arg("run_root_reuse_reason", f"paper_workflow_pw01_{stage_name}"),
+    ]
+    if extra_overrides is not None:
+        override_items.extend(str(item) for item in extra_overrides)
+    return override_items
+
+
 def _build_stage_overrides(stage_name: str, extra_overrides: Optional[Sequence[str]] = None) -> list[str]:
     """
     Build shared CLI overrides for one PW01 substage.
@@ -62,12 +88,7 @@ def _build_stage_overrides(stage_name: str, extra_overrides: Optional[Sequence[s
     if not isinstance(stage_name, str) or not stage_name:
         raise TypeError("stage_name must be non-empty str")
 
-    override_items = [
-        _format_override_arg("run_root_reuse_allowed", True),
-        _format_override_arg("run_root_reuse_reason", f"paper_workflow_pw01_{stage_name}"),
-    ]
-    if extra_overrides is not None:
-        override_items.extend(str(item) for item in extra_overrides)
+    override_items = _build_stage_override_items(stage_name, extra_overrides)
 
     command_args: list[str] = []
     for override_arg in override_items:
