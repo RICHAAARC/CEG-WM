@@ -125,6 +125,7 @@ def _patch_pw01_base_runner(
     monkeypatch: pytest.MonkeyPatch,
     *,
     expected_snapshot_path: Path,
+    persistent_runtime: bool = False,
 ) -> Dict[str, Any]:
     """
     Patch PW01 base-runner calls with lightweight stubs and capture runtime cfgs.
@@ -137,6 +138,11 @@ def _patch_pw01_base_runner(
         Mutable capture mapping.
     """
     captures: Dict[str, Any] = {"preview_cfgs": []}
+    if persistent_runtime:
+        captures["embed_runtime_sessions"] = []
+        captures["detect_runtime_sessions"] = []
+        captures["embed_runtime_calls"] = []
+        captures["detect_runtime_calls"] = []
 
     def fake_build_stage_command(stage_name: str, config_path: Path, run_root: Path) -> list[str]:
         return [stage_name, str(config_path), str(run_root)]
@@ -345,6 +351,132 @@ def _patch_pw01_base_runner(
         payload["record_usage"] = record_usage
         return payload
 
+    def fake_build_embed_runtime_session(config_path: str, overrides: Any = None) -> Dict[str, Any]:
+        session = {
+            "session_kind": "embed",
+            "config_path": config_path,
+            "overrides": list(cast(List[str], overrides or [])),
+        }
+        captures["embed_runtime_sessions"].append(session)
+        return session
+
+    def fake_build_detect_runtime_session(
+        config_path: str,
+        overrides: Any = None,
+        thresholds_path: Any = None,
+    ) -> Dict[str, Any]:
+        _ = thresholds_path
+        session = {
+            "session_kind": "detect",
+            "config_path": config_path,
+            "overrides": list(cast(List[str], overrides or [])),
+        }
+        captures["detect_runtime_sessions"].append(session)
+        return session
+
+    def fake_run_embed(
+        output_dir: str,
+        config_path: str,
+        overrides: Any = None,
+        input_image_path: Any = None,
+        runtime_session: Any = None,
+    ) -> None:
+        _ = input_image_path
+        captures["embed_runtime_calls"].append(
+            {
+                "output_dir": output_dir,
+                "config_path": config_path,
+                "overrides": list(cast(List[str], overrides or [])),
+                "runtime_session_id": id(runtime_session),
+            }
+        )
+        records_root = ensure_directory(Path(output_dir) / "records")
+        write_json_atomic(
+            records_root / "embed_record.json",
+            {
+                "record_type": "embed",
+                "content_evidence": {
+                    "status": "ok",
+                    "plan_digest": "plan_digest_pw01_test",
+                    "basis_digest": "basis_digest_pw01_test",
+                    "score_parts": {
+                        "lf_metrics": {
+                            "message_length": 8,
+                            "ecc_sparsity": 3,
+                            "plan_digest": "plan_digest_pw01_test",
+                            "basis_digest": "basis_digest_pw01_test",
+                            "message_source": "attestation_event_digest",
+                            "parity_check_digest": "parity_check_digest_pw01_test",
+                        }
+                    },
+                },
+                "attestation": {
+                    "event_binding_digest": "event_binding_digest_pw01_test",
+                    "event_binding_mode": "trajectory_bound",
+                    "lf_payload_hex": "ab",
+                },
+            },
+        )
+
+    def fake_run_detect(
+        output_dir: str,
+        config_path: str,
+        input_record_path: Any = None,
+        overrides: Any = None,
+        thresholds_path: Any = None,
+        runtime_session: Any = None,
+    ) -> None:
+        _ = input_record_path
+        _ = thresholds_path
+        captures["detect_runtime_calls"].append(
+            {
+                "output_dir": output_dir,
+                "config_path": config_path,
+                "overrides": list(cast(List[str], overrides or [])),
+                "runtime_session_id": id(runtime_session),
+            }
+        )
+        records_root = ensure_directory(Path(output_dir) / "records")
+        write_json_atomic(
+            records_root / "detect_record.json",
+            {
+                "record_type": "detect",
+                "content_evidence_payload": {
+                    "status": "ok",
+                    "score": 0.75,
+                    "content_chain_score": 0.75,
+                    "score_parts": {
+                        "lf_trajectory_detect_trace": {
+                            "codeword_agreement": 1.0,
+                            "n_bits_compared": 8,
+                            "detect_variant": "correlation_v2",
+                            "message_source": "attestation_event_digest",
+                        }
+                    },
+                },
+                "attestation": {
+                    "_lf_attestation_trace_artifact": {
+                        "mismatch_indices": [],
+                        "n_bits_compared": 8,
+                        "agreement_count": 8,
+                    },
+                    "final_event_attested_decision": {
+                        "event_attestation_score_name": "event_attestation_score",
+                        "event_attestation_score": 0.61,
+                    }
+                },
+                "final_decision": {
+                    "decision_status": "abstain",
+                    "is_watermarked": None,
+                },
+            },
+        )
+
+    def fail_run_stage(stage_name: str, command: list[str], run_root: Path) -> Dict[str, Any]:
+        raise AssertionError(
+            f"subprocess _run_stage should not be used in persistent runtime mode: {stage_name}"
+        )
+
     monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_build_stage_command", fake_build_stage_command)
     monkeypatch.setattr(
         pw01_module.BASE_RUNNER_MODULE,
@@ -372,6 +504,14 @@ def _patch_pw01_base_runner(
         "_normalize_direct_detect_payload",
         fake_normalize_direct_detect_payload,
     )
+    if persistent_runtime:
+        monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_run_stage", fail_run_stage)
+        monkeypatch.setattr(pw01_module, "build_embed_runtime_session", fake_build_embed_runtime_session)
+        monkeypatch.setattr(pw01_module, "build_detect_runtime_session", fake_build_detect_runtime_session)
+        monkeypatch.setattr(pw01_module, "run_embed", fake_run_embed)
+        monkeypatch.setattr(pw01_module, "run_detect", fake_run_detect)
+    else:
+        monkeypatch.setattr(pw01_module, "_build_pw01_stage_runtime_bundle", lambda **_: None)
     return captures
 
 
@@ -510,6 +650,61 @@ def test_pw01_worker_plan_persists_and_worker_loads_bound_config_path(
     runtime_cfg = load_yaml_mapping(Path(str(first_event["runtime_config_path"])))
     assert runtime_cfg["test_config_origin"] == "worker_bound"
     assert runtime_cfg["model_snapshot_path"] == snapshot_dir.resolve().as_posix()
+
+
+def test_pw01_positive_source_single_process_uses_persistent_stage_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Reuse shard-local embed and detect runtime sessions in single-process PW01 execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_positive_persistent_runtime")
+    bound_config_path, snapshot_dir = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="positive_persistent_runtime",
+    )
+    captures = _patch_pw01_base_runner(
+        monkeypatch,
+        expected_snapshot_path=snapshot_dir,
+        persistent_runtime=True,
+    )
+
+    summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_positive_persistent_runtime",
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    shard_manifest = json.loads(
+        (Path(str(summary["shard_root"])) / "shard_manifest.json").read_text(encoding="utf-8")
+    )
+    event_count = len(cast(List[Dict[str, Any]], shard_manifest["events"]))
+    first_event = cast(Dict[str, Any], shard_manifest["events"][0])
+
+    assert len(captures["embed_runtime_sessions"]) == 1
+    assert len(captures["detect_runtime_sessions"]) == 1
+    assert len(captures["embed_runtime_calls"]) == event_count
+    assert len(captures["detect_runtime_calls"]) == event_count
+    assert {call["runtime_session_id"] for call in captures["embed_runtime_calls"]} == {
+        id(captures["embed_runtime_sessions"][0])
+    }
+    assert {call["runtime_session_id"] for call in captures["detect_runtime_calls"]} == {
+        id(captures["detect_runtime_sessions"][0])
+    }
+    assert first_event["stage_results"]["embed"]["execution_mode"] == "persistent_worker_runtime"
+    assert first_event["stage_results"]["detect"]["execution_mode"] == "persistent_worker_runtime"
+    assert Path(str(first_event["stage_results"]["embed"]["stdout_log_path"])).exists()
+    assert Path(str(first_event["stage_results"]["detect"]["stdout_log_path"])).exists()
 
 
 def test_run_positive_source_event_preserves_model_snapshot_binding(

@@ -15,6 +15,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple, cast
 
+from main.cli.run_detect import build_detect_runtime_session, run_detect
+from main.cli.run_embed import build_embed_runtime_session, run_embed
 from main.core import status as run_status
 from main.core.errors import RunFailureReason
 from scripts.notebook_runtime_common import (
@@ -58,6 +60,7 @@ EVENT_RECORD_USAGE_BY_SAMPLE_ROLE = {
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: "paper_workflow_planner_conditioned_control_negative",
 }
 DEFAULT_PW01_WORKER_COUNT = 1
+_PERSISTENT_STAGE_EXECUTION_MODE = "persistent_worker_runtime"
 
 _CLEAN_NEGATIVE_FREEZE_ANCHOR_FIELDS = (
     "contract_version",
@@ -91,6 +94,229 @@ _CLEAN_NEGATIVE_REQUIRED_PROBE_PLANNER_FIELDS = (
     "plan_input_digest",
     "plan_input_schema_version",
 )
+
+
+def _extract_stage_override_tokens(command: Sequence[str]) -> List[str]:
+    """
+    Extract repeatable override tokens from one stage command.
+
+    Args:
+        command: Stage command token list.
+
+    Returns:
+        Ordered override token list.
+    """
+    override_tokens: List[str] = []
+    command_items = [str(item) for item in command]
+    index = 0
+    while index < len(command_items):
+        if command_items[index] == "--override":
+            if index + 1 >= len(command_items):
+                raise ValueError("stage command missing override value")
+            override_tokens.append(command_items[index + 1])
+            index += 2
+            continue
+        index += 1
+    return override_tokens
+
+
+def _resolve_stage_input_record_path(command: Sequence[str]) -> str | None:
+    """
+    Resolve the explicit detect input record path from one stage command.
+
+    Args:
+        command: Stage command token list.
+
+    Returns:
+        Explicit input record path when present; otherwise None.
+    """
+    command_items = [str(item) for item in command]
+    if "--input" not in command_items:
+        return None
+    input_index = command_items.index("--input")
+    if input_index + 1 >= len(command_items):
+        raise ValueError("stage command missing input record path")
+    input_record_path = command_items[input_index + 1]
+    if not input_record_path:
+        raise ValueError("stage command input record path must be non-empty str")
+    return input_record_path
+
+
+def _write_persistent_stage_log(
+    *,
+    log_path: Path,
+    stage_name: str,
+    command: Sequence[str],
+    status: str,
+    detail: str,
+) -> None:
+    """
+    Write a compatibility log for in-process stage execution.
+
+    Args:
+        log_path: Target log file path.
+        stage_name: Stage name.
+        command: Stage command tokens.
+        status: Execution status token.
+        detail: Human-readable log detail.
+
+    Returns:
+        None.
+    """
+    if not isinstance(log_path, Path):
+        raise TypeError("log_path must be Path")
+    if not isinstance(stage_name, str) or not stage_name:
+        raise TypeError("stage_name must be non-empty str")
+    if not isinstance(status, str) or not status:
+        raise TypeError("status must be non-empty str")
+    if not isinstance(detail, str) or not detail:
+        raise TypeError("detail must be non-empty str")
+
+    ensure_directory(log_path.parent)
+    log_path.write_text(
+        "\n".join(
+            [
+                f"stage_name: {stage_name}",
+                f"execution_mode: {_PERSISTENT_STAGE_EXECUTION_MODE}",
+                f"status: {status}",
+                f"command: {json.dumps([str(item) for item in command], ensure_ascii=False)}",
+                f"detail: {detail}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _build_pw01_stage_runtime_bundle(
+    *,
+    bound_config_path: Path,
+    sample_role: str,
+) -> Dict[str, Any]:
+    """
+    Build one shard-local persistent stage runtime bundle for PW01.
+
+    Args:
+        bound_config_path: Notebook-bound config snapshot path.
+        sample_role: PW01 source sample role.
+
+    Returns:
+        Mapping containing reusable stage runtime sessions.
+    """
+    if not isinstance(bound_config_path, Path):
+        raise TypeError("bound_config_path must be Path")
+    normalized_sample_role = validate_source_sample_role(sample_role)
+
+    bundle: Dict[str, Any] = {
+        "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
+    }
+    if normalized_sample_role == ACTIVE_SAMPLE_ROLE:
+        bundle["embed_runtime_session"] = build_embed_runtime_session(
+            str(bound_config_path),
+            overrides=pw01_stage_runtime_helpers._build_stage_overrides("embed"),
+        )
+    bundle["detect_runtime_session"] = build_detect_runtime_session(
+        str(bound_config_path),
+        overrides=pw01_stage_runtime_helpers._build_stage_overrides("detect"),
+    )
+    return bundle
+
+
+def _run_stage_with_runtime_bundle(
+    *,
+    stage_name: str,
+    command: Sequence[str],
+    run_root: Path,
+    config_path: Path,
+    stage_runtime_bundle: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    Run one PW01 stage via subprocess or in-process persistent runtime.
+
+    Args:
+        stage_name: Stage name.
+        command: Stage command token list.
+        run_root: Prompt-local run root.
+        config_path: Runtime config path.
+        stage_runtime_bundle: Optional persistent stage runtime bundle.
+
+    Returns:
+        Stage execution summary.
+    """
+    if stage_runtime_bundle is None:
+        return pw01_stage_runtime_helpers._run_stage(stage_name, command, run_root)
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+
+    normalized_command = [str(item) for item in command]
+    logs_dir = ensure_directory(run_root / "logs")
+    stdout_log_path = logs_dir / f"{stage_name}_stdout.log"
+    stderr_log_path = logs_dir / f"{stage_name}_stderr.log"
+
+    try:
+        overrides = _extract_stage_override_tokens(normalized_command)
+        if stage_name == "embed":
+            runtime_session = stage_runtime_bundle.get("embed_runtime_session")
+            if not isinstance(runtime_session, dict):
+                raise ValueError("stage_runtime_bundle missing embed_runtime_session")
+            run_embed(
+                str(run_root),
+                str(config_path),
+                overrides=overrides,
+                runtime_session=runtime_session,
+            )
+        elif stage_name in {"detect", "detect_probe"}:
+            runtime_session = stage_runtime_bundle.get("detect_runtime_session")
+            if not isinstance(runtime_session, dict):
+                raise ValueError("stage_runtime_bundle missing detect_runtime_session")
+            run_detect(
+                str(run_root),
+                str(config_path),
+                input_record_path=_resolve_stage_input_record_path(normalized_command),
+                overrides=overrides,
+                runtime_session=runtime_session,
+            )
+        else:
+            raise ValueError(f"unsupported persistent stage_name: {stage_name}")
+
+        _write_persistent_stage_log(
+            log_path=stdout_log_path,
+            stage_name=stage_name,
+            command=normalized_command,
+            status="ok",
+            detail="stage executed in-process via persistent shard-local runtime session",
+        )
+        stderr_log_path.write_text("", encoding="utf-8")
+        return {
+            "return_code": 0,
+            "command": normalized_command,
+            "stdout_log_path": normalize_path_value(stdout_log_path),
+            "stderr_log_path": normalize_path_value(stderr_log_path),
+            "status": "ok",
+            "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
+        }
+    except Exception as exc:
+        _write_persistent_stage_log(
+            log_path=stdout_log_path,
+            stage_name=stage_name,
+            command=normalized_command,
+            status="failed",
+            detail="stage execution raised before subprocess log emission; see stderr log for traceback",
+        )
+        stderr_log_path.write_text(traceback.format_exc(), encoding="utf-8")
+        return {
+            "return_code": 1,
+            "command": normalized_command,
+            "stdout_log_path": normalize_path_value(stdout_log_path),
+            "stderr_log_path": normalize_path_value(stderr_log_path),
+            "status": "failed",
+            "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
+            "failure_reason": "persistent_stage_runtime_execution_failed",
+            "exception_type": type(exc).__name__,
+            "exception_message": str(exc),
+        }
 
 
 def _load_required_json_dict(path_obj: Path, label: str) -> Dict[str, Any]:
@@ -1771,6 +1997,7 @@ def _run_clean_negative_event(
     shard_root: Path,
     default_cfg_obj: Mapping[str, Any],
     bound_config_path: Path,
+    stage_runtime_bundle: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Execute one strict clean_negative event without planner-conditioned override.
@@ -1891,7 +2118,13 @@ def _run_clean_negative_event(
         run_root=prompt_run_root,
         input_record_path=detect_input_record_path,
     )
-    detect_result = pw01_stage_runtime_helpers._run_stage("detect", detect_command, prompt_run_root)
+    detect_result = _run_stage_with_runtime_bundle(
+        stage_name="detect",
+        command=detect_command,
+        run_root=prompt_run_root,
+        config_path=runtime_cfg_path,
+        stage_runtime_bundle=stage_runtime_bundle,
+    )
     stage_results["detect"] = detect_result
     if int(detect_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -1993,6 +2226,7 @@ def _run_planner_conditioned_control_negative_event(
     shard_root: Path,
     default_cfg_obj: Mapping[str, Any],
     bound_config_path: Path,
+    stage_runtime_bundle: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Execute one planner-conditioned control negative event with statement-only provenance.
@@ -2116,7 +2350,13 @@ def _run_planner_conditioned_control_negative_event(
         run_root=prompt_run_root,
         input_record_path=detect_input_record_path,
     )
-    detect_probe_result = pw01_stage_runtime_helpers._run_stage("detect_probe", detect_probe_command, prompt_run_root)
+    detect_probe_result = _run_stage_with_runtime_bundle(
+        stage_name="detect_probe",
+        command=detect_probe_command,
+        run_root=prompt_run_root,
+        config_path=runtime_cfg_path,
+        stage_runtime_bundle=stage_runtime_bundle,
+    )
     stage_results["detect_probe"] = detect_probe_result
     if int(detect_probe_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -2160,7 +2400,13 @@ def _run_planner_conditioned_control_negative_event(
         run_root=prompt_run_root,
         input_record_path=detect_input_record_path,
     )
-    detect_result = pw01_stage_runtime_helpers._run_stage("detect", detect_command, prompt_run_root)
+    detect_result = _run_stage_with_runtime_bundle(
+        stage_name="detect",
+        command=detect_command,
+        run_root=prompt_run_root,
+        config_path=runtime_cfg_path,
+        stage_runtime_bundle=stage_runtime_bundle,
+    )
     stage_results["detect"] = detect_result
     if int(detect_result.get("return_code", 1)) != 0:
         raise RuntimeError(
@@ -2262,6 +2508,7 @@ def _run_source_event_by_role(
     shard_root: Path,
     default_cfg_obj: Mapping[str, Any],
     bound_config_path: Path,
+    stage_runtime_bundle: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Dispatch one PW01 event to the role-specific executor.
@@ -2282,6 +2529,7 @@ def _run_source_event_by_role(
             shard_root=shard_root,
             default_cfg_obj=default_cfg_obj,
             bound_config_path=bound_config_path,
+            stage_runtime_bundle=stage_runtime_bundle,
         )
     if sample_role == CLEAN_NEGATIVE_SAMPLE_ROLE:
         return _run_clean_negative_event(
@@ -2289,6 +2537,7 @@ def _run_source_event_by_role(
             shard_root=shard_root,
             default_cfg_obj=default_cfg_obj,
             bound_config_path=bound_config_path,
+            stage_runtime_bundle=stage_runtime_bundle,
         )
     if sample_role == PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE:
         return _run_planner_conditioned_control_negative_event(
@@ -2296,6 +2545,7 @@ def _run_source_event_by_role(
             shard_root=shard_root,
             default_cfg_obj=default_cfg_obj,
             bound_config_path=bound_config_path,
+            stage_runtime_bundle=stage_runtime_bundle,
         )
     raise ValueError(f"unsupported PW01 sample_role: {sample_role}")
 
@@ -2306,6 +2556,7 @@ def _run_positive_source_event(
     shard_root: Path,
     default_cfg_obj: Mapping[str, Any],
     bound_config_path: Path,
+    stage_runtime_bundle: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Execute one positive_source event in event-bound mode.
@@ -2401,7 +2652,13 @@ def _run_positive_source_event(
     }
     for stage_name in ["embed", "detect"]:
         command = pw01_stage_runtime_helpers._build_stage_command(stage_name, runtime_cfg_path, prompt_run_root)
-        result = pw01_stage_runtime_helpers._run_stage(stage_name, command, prompt_run_root)
+        result = _run_stage_with_runtime_bundle(
+            stage_name=stage_name,
+            command=command,
+            run_root=prompt_run_root,
+            config_path=runtime_cfg_path,
+            stage_runtime_bundle=stage_runtime_bundle,
+        )
         stage_results[stage_name] = result
         if int(result.get("return_code", 1)) != 0:
             raise RuntimeError(
@@ -2787,6 +3044,14 @@ def run_pw01_source_event_shard_worker(
         raise ValueError("worker plan assigned_events must contain objects")
 
     executed_events: List[Dict[str, Any]] = []
+    stage_runtime_bundle = (
+        _build_pw01_stage_runtime_bundle(
+            bound_config_path=bound_config_path,
+            sample_role=plan_sample_role,
+        )
+        if assigned_events
+        else None
+    )
     try:
         for event in assigned_events:
             executed_events.append(
@@ -2795,6 +3060,7 @@ def run_pw01_source_event_shard_worker(
                     shard_root=shard_root,
                     default_cfg_obj=default_cfg_obj,
                     bound_config_path=bound_config_path,
+                    stage_runtime_bundle=stage_runtime_bundle,
                 )
             )
 
@@ -2975,6 +3241,14 @@ def run_pw01_source_event_shard(
     worker_results: List[Dict[str, Any]] = []
     try:
         if pw01_worker_count == 1:
+            stage_runtime_bundle = (
+                _build_pw01_stage_runtime_bundle(
+                    bound_config_path=resolved_bound_config_path,
+                    sample_role=normalized_sample_role,
+                )
+                if assigned_events
+                else None
+            )
             for event in assigned_events:
                 executed_events.append(
                     _run_source_event_by_role(
@@ -2982,6 +3256,7 @@ def run_pw01_source_event_shard(
                         shard_root=shard_root,
                         default_cfg_obj=default_cfg_obj,
                         bound_config_path=resolved_bound_config_path,
+                        stage_runtime_bundle=stage_runtime_bundle,
                     )
                 )
         else:

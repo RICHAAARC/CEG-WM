@@ -9,6 +9,7 @@
 
 import sys
 import argparse
+import copy
 import gc
 from pathlib import Path
 import uuid
@@ -1510,11 +1511,177 @@ def bind_impl_identity_fields(
     return _bind_impl_identity_fields(record, identity, impl_set, contracts)
 
 
+def _build_embed_runtime_reuse_signature(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    功能：构建 embed runtime 复用兼容性签名。
+
+    Build the compatibility signature used for embed runtime session reuse.
+
+    Args:
+        cfg: Configuration mapping.
+
+    Returns:
+        Mapping containing the stable fields that must remain unchanged when a
+        runtime session is reused.
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError("cfg must be dict")
+
+    signature_cfg = copy.deepcopy(cfg)
+    for field_name in [
+        "inference_prompt",
+        "seed",
+        "paper_workflow_event",
+        "input_image_path",
+        "pw01_source_pool_preview",
+    ]:
+        signature_cfg.pop(field_name, None)
+
+    embed_node = signature_cfg.get("embed")
+    if isinstance(embed_node, dict):
+        embed_cfg = dict(cast(Dict[str, Any], embed_node))
+        embed_cfg.pop("input_image_path", None)
+        signature_cfg["embed"] = embed_cfg
+
+    model_source_binding = signature_cfg.get("model_source_binding")
+    model_source_binding_digest = (
+        digests.canonical_sha256(model_source_binding)
+        if isinstance(model_source_binding, dict)
+        else None
+    )
+    return {
+        "policy_path": signature_cfg.get("policy_path"),
+        "device": signature_cfg.get("device"),
+        "model_id": signature_cfg.get("model_id"),
+        "model_source": signature_cfg.get("model_source"),
+        "hf_revision": signature_cfg.get("hf_revision"),
+        "model_snapshot_path": signature_cfg.get("model_snapshot_path"),
+        "model_source_binding_digest": model_source_binding_digest,
+        "static_cfg_digest": digests.canonical_sha256(signature_cfg),
+    }
+
+
+def _validate_embed_runtime_session(runtime_session: Any) -> Dict[str, Any]:
+    """
+    功能：校验 embed runtime session 的最小结构。
+
+    Validate the minimum structure required by an embed runtime session.
+
+    Args:
+        runtime_session: Candidate runtime session payload.
+
+    Returns:
+        Validated runtime session mapping.
+
+    Raises:
+        TypeError: If runtime_session is not a mapping.
+        ValueError: If required fields are missing.
+    """
+    if not isinstance(runtime_session, dict):
+        raise TypeError("runtime_session must be dict")
+
+    required_keys = [
+        "contracts",
+        "whitelist",
+        "semantics",
+        "injection_scope_manifest",
+        "interpretation",
+        "snapshot",
+        "pipeline_result",
+        "impl_identity",
+        "impl_set",
+        "impl_set_capabilities_digest",
+        "runtime_reuse_signature",
+    ]
+    missing_keys = [key_name for key_name in required_keys if key_name not in runtime_session]
+    if missing_keys:
+        raise ValueError(f"runtime_session missing required keys: {missing_keys}")
+    return cast(Dict[str, Any], runtime_session)
+
+
+def build_embed_runtime_session(
+    config_path: Any,
+    overrides: Any = None,
+) -> Dict[str, Any]:
+    """
+    功能：构建可复用的 embed 静态 runtime session。
+
+    Build reusable static embed runtime state for multiple embed executions.
+
+    Args:
+        config_path: YAML config path used to construct the static runtime.
+        overrides: Optional CLI override args list.
+
+    Returns:
+        Mapping containing reusable fact-source objects, pipeline state, and
+        implementation instances.
+
+    Raises:
+        ValueError: If config_path is invalid.
+        TypeError: If overrides is invalid.
+    """
+    if not isinstance(config_path, str) or not config_path:
+        raise ValueError("config_path must be non-empty str")
+    if overrides is not None:
+        if not isinstance(overrides, list):
+            raise TypeError("overrides must be list[str] or None")
+        overrides_list = cast(list[Any], overrides)
+        for override_item in overrides_list:
+            if not isinstance(override_item, str):
+                raise TypeError("overrides must be list[str] or None")
+
+    validated_overrides = cast(list[str] | None, overrides)
+
+    contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
+    whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
+    semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
+    injection_scope_manifest = config_loader.load_injection_scope_manifest()
+    assert_consistent_with_semantics(whitelist, semantics)
+    interpretation = get_contract_interpretation(contracts)
+    cfg, _, _ = config_loader.load_and_validate_config(
+        config_path,
+        whitelist,
+        semantics,
+        contracts,
+        interpretation,
+        overrides=validated_overrides,
+    )
+
+    _, _, seed_value, _ = build_seed_audit(cfg, "embed")
+    cfg["seed"] = seed_value
+
+    pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
+    impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+        cfg,
+        whitelist,
+    )
+    snapshot = records_io.build_fact_sources_snapshot(
+        contracts,
+        whitelist,
+        semantics,
+        injection_scope_manifest,
+    )
+    return {
+        "contracts": contracts,
+        "whitelist": whitelist,
+        "semantics": semantics,
+        "injection_scope_manifest": injection_scope_manifest,
+        "interpretation": interpretation,
+        "snapshot": snapshot,
+        "pipeline_result": pipeline_result,
+        "impl_identity": impl_identity,
+        "impl_set": impl_set,
+        "impl_set_capabilities_digest": impl_set_capabilities_digest,
+        "runtime_reuse_signature": _build_embed_runtime_reuse_signature(cfg),
+    }
+
+
 def run_embed(
     output_dir: Any,
     config_path: Any,
     overrides: Any = None,
-    input_image_path: Any = None
+    input_image_path: Any = None,
+    runtime_session: Any = None,
 ) -> None:
     """
     功能：执行嵌入流程，本阶段为基线实现。
@@ -1526,6 +1693,7 @@ def run_embed(
         config_path: YAML config path.
         overrides: Optional CLI override args list.
         input_image_path: Optional input image path for identity embed artifact flow.
+        runtime_session: Optional reusable embed runtime session.
     """
     if not isinstance(output_dir, str) or not output_dir:
         # output_dir 输入不合法，必须 fail-fast。
@@ -1539,6 +1707,9 @@ def run_embed(
     if input_image_path is not None and not isinstance(input_image_path, str):
         # input_image_path 输入不合法，必须 fail-fast。
         raise ValueError("input_image_path must be str or None")
+    if runtime_session is not None and not isinstance(runtime_session, dict):
+        # runtime_session 输入不合法，必须 fail-fast。
+        raise TypeError("runtime_session must be dict or None")
     validated_overrides: list[str] | None = None
     if isinstance(overrides, list):
         override_candidates = cast(list[Any], overrides)
@@ -1547,6 +1718,11 @@ def run_embed(
             raise ValueError("overrides items must be non-empty str")
         validated_overrides = cast(list[str], override_candidates)
     validated_input_image_path = input_image_path.strip() if isinstance(input_image_path, str) and input_image_path.strip() else None
+    validated_runtime_session = (
+        _validate_embed_runtime_session(runtime_session)
+        if runtime_session is not None
+        else None
+    )
 
     # 创建 layout 和最小 run_meta。
     run_root = path_policy.derive_run_root(Path(output_dir))
@@ -1594,12 +1770,28 @@ def run_embed(
     pipeline_result: Dict[str, Any] | None = None
     record: Dict[str, Any] | None = None
     try:
-        # 加载事实源。
-        print("[Embed] Loading fact sources...")
-        contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
-        whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
-        semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
-        injection_scope_manifest = config_loader.load_injection_scope_manifest()
+        if validated_runtime_session is None:
+            # 加载事实源。
+            print("[Embed] Loading fact sources...")
+            contracts = load_frozen_contracts(config_loader.FROZEN_CONTRACTS_PATH)
+            whitelist = load_runtime_whitelist(config_loader.RUNTIME_WHITELIST_PATH)
+            semantics = load_policy_path_semantics(config_loader.POLICY_PATH_SEMANTICS_PATH)
+            injection_scope_manifest = config_loader.load_injection_scope_manifest()
+            interpretation = get_contract_interpretation(contracts)
+            snapshot = records_io.build_fact_sources_snapshot(
+                contracts,
+                whitelist,
+                semantics,
+                injection_scope_manifest
+            )
+        else:
+            print("[Embed] Reusing runtime session static state...")
+            contracts = validated_runtime_session["contracts"]
+            whitelist = validated_runtime_session["whitelist"]
+            semantics = validated_runtime_session["semantics"]
+            injection_scope_manifest = validated_runtime_session["injection_scope_manifest"]
+            interpretation = validated_runtime_session["interpretation"]
+            snapshot = dict(cast(Dict[str, Any], validated_runtime_session["snapshot"]))
 
         # 绑定冻结锚点到 run_meta。
         print("[Embed] Binding freeze anchors to run_meta...")
@@ -1611,13 +1803,6 @@ def run_embed(
             injection_scope_manifest
         )
 
-        # 生成事实源快照用于运行期一致性校验。
-        snapshot = records_io.build_fact_sources_snapshot(
-            contracts,
-            whitelist,
-            semantics,
-            injection_scope_manifest
-        )
         run_meta["bound_fact_sources"] = snapshot
 
         # 验证 whitelist 与 semantics 一致性。
@@ -1639,7 +1824,6 @@ def run_embed(
             if bound_fact_sources != snapshot:
                 # 事实源快照不一致，必须 fail-fast。
                 raise ValueError(format_fact_sources_mismatch(snapshot, bound_fact_sources))
-            interpretation = get_contract_interpretation(contracts)
             try:
                 cfg, cfg_digest, cfg_audit_metadata = config_loader.load_and_validate_config(
                     config_path,
@@ -1654,6 +1838,13 @@ def run_embed(
                 raise
             run_meta["cfg_digest"] = cfg_digest
             run_meta["policy_path"] = cfg["policy_path"]
+
+            if validated_runtime_session is not None:
+                runtime_reuse_signature = _build_embed_runtime_reuse_signature(cfg)
+                if runtime_reuse_signature != validated_runtime_session["runtime_reuse_signature"]:
+                    reuse_mismatch_exc = ValueError("runtime_session config signature mismatch")
+                    set_failure_status(run_meta, RunFailureReason.CONFIG_INVALID, reuse_mismatch_exc)
+                    raise reuse_mismatch_exc
 
             seed_parts, seed_digest, seed_value, seed_rule_id = build_seed_audit(cfg, "embed")
             cfg["seed"] = seed_value
@@ -1689,7 +1880,10 @@ def run_embed(
 
             _validate_real_pipeline_identity_fields(cfg, config_path)
 
-            pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
+            if validated_runtime_session is None:
+                pipeline_result = pipeline_factory.build_pipeline_shell(cfg)
+            else:
+                pipeline_result = cast(Dict[str, Any], validated_runtime_session["pipeline_result"])
             run_meta["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
             run_meta["pipeline_status"] = pipeline_result.get("pipeline_status")
             run_meta["pipeline_error"] = pipeline_result.get("pipeline_error")
@@ -1700,14 +1894,19 @@ def run_embed(
             run_meta["safetensors_version"] = pipeline_result.get("safetensors_version")
             run_meta["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
 
-            try:
-                impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
-                    cfg,
-                    whitelist,
-                )
-            except Exception as exc:
-                set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
-                raise
+            if validated_runtime_session is None:
+                try:
+                    impl_identity, impl_set, impl_set_capabilities_digest = runtime_resolver.build_runtime_impl_set_from_cfg(
+                        cfg,
+                        whitelist,
+                    )
+                except Exception as exc:
+                    set_failure_status(run_meta, RunFailureReason.IMPL_RESOLVE_FAILED, exc)
+                    raise
+            else:
+                impl_identity = validated_runtime_session["impl_identity"]
+                impl_set = validated_runtime_session["impl_set"]
+                impl_set_capabilities_digest = validated_runtime_session["impl_set_capabilities_digest"]
             run_meta["impl_id"] = impl_identity.content_extractor_id
             run_meta["impl_version"] = impl_set.content_extractor.impl_version
             run_meta["impl_identity"] = impl_identity.as_dict()

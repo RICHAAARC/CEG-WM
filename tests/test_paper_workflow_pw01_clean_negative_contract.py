@@ -69,7 +69,11 @@ def _write_bound_config_snapshot(drive_project_root: Path, *, marker: str) -> Pa
     return bound_config_path
 
 
-def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
+def _patch_clean_negative_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    persistent_runtime: bool = False,
+) -> Dict[str, Any]:
     """
     Patch PW01 clean_negative runtime calls to lightweight stubs.
 
@@ -84,6 +88,10 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
         "detect_probe_inputs": [],
         "detect_inputs": [],
     }
+    if persistent_runtime:
+        captures["detect_runtime_sessions"] = []
+        captures["detect_runtime_calls"] = []
+        captures["probe_seen_run_roots"] = set()
 
     default_detect_probe_record: Dict[str, Any] = {
         "record_type": "detect_probe",
@@ -341,6 +349,117 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
         payload["record_usage"] = record_usage
         return payload
 
+    def fake_build_detect_runtime_session(
+        config_path: str,
+        overrides: Any = None,
+        thresholds_path: Any = None,
+    ) -> Dict[str, Any]:
+        _ = thresholds_path
+        session = {
+            "session_kind": "detect",
+            "config_path": config_path,
+            "overrides": list(overrides or []),
+        }
+        captures["detect_runtime_sessions"].append(session)
+        return session
+
+    def fake_run_detect(
+        output_dir: str,
+        config_path: str,
+        input_record_path: Any = None,
+        overrides: Any = None,
+        thresholds_path: Any = None,
+        runtime_session: Any = None,
+    ) -> None:
+        _ = config_path
+        _ = overrides
+        _ = thresholds_path
+        if not isinstance(input_record_path, str) or not input_record_path:
+            raise AssertionError("persistent runtime detect requires explicit input_record_path")
+
+        captures["detect_runtime_calls"].append(
+            {
+                "input_record_path": input_record_path,
+                "runtime_session_id": id(runtime_session),
+            }
+        )
+        records_root = ensure_directory(Path(output_dir) / "records")
+        detect_input_record = cast(Dict[str, Any], json.loads(Path(input_record_path).read_text(encoding="utf-8")))
+        expected_plan_digest = detect_input_record.get("plan_digest")
+        expected_basis_digest = detect_input_record.get("basis_digest")
+        has_expected_plan = isinstance(expected_plan_digest, str) and bool(expected_plan_digest)
+        probe_seen_run_roots = cast(set[str], captures["probe_seen_run_roots"])
+        run_root_key = str(Path(output_dir))
+        is_probe = not has_expected_plan and run_root_key not in probe_seen_run_roots
+
+        if is_probe:
+            probe_seen_run_roots.add(run_root_key)
+            captures["detect_probe_inputs"].append(dict(detect_input_record))
+            probe_record_override = captures.get("detect_probe_record_override")
+            probe_record_payload = (
+                cast(Dict[str, Any], probe_record_override)
+                if isinstance(probe_record_override, dict)
+                else default_detect_probe_record
+            )
+            write_json_atomic(records_root / "detect_record.json", probe_record_payload)
+            return
+
+        captures["detect_inputs"].append(dict(detect_input_record))
+        content_status = "ok" if has_expected_plan else "absent"
+        content_score = 0.12 if has_expected_plan else None
+        content_failure_reason = None if has_expected_plan else "detector_no_plan_expected"
+        write_json_atomic(
+            records_root / "detect_record.json",
+            {
+                "record_type": "detect",
+                "plan_digest_expected": expected_plan_digest if has_expected_plan else None,
+                "plan_digest_observed": "plan-probe",
+                "plan_digest_status": "ok" if has_expected_plan else "absent",
+                "plan_digest_validation_status": "ok" if has_expected_plan else "absent",
+                "contract_bound_digest": "contract-bound",
+                "whitelist_bound_digest": "whitelist-bound",
+                "policy_path_semantics_bound_digest": "semantics-bound",
+                "contract_version": "contracts-v1",
+                "contract_digest": "contract-digest",
+                "contract_file_sha256": "contract-file-sha",
+                "contract_canon_sha256": "contract-canon-sha",
+                "whitelist_version": "whitelist-v1",
+                "whitelist_digest": "whitelist-digest",
+                "whitelist_file_sha256": "whitelist-file-sha",
+                "whitelist_canon_sha256": "whitelist-canon-sha",
+                "policy_path_semantics_version": "semantics-v1",
+                "policy_path_semantics_digest": "semantics-digest",
+                "policy_path_semantics_file_sha256": "semantics-file-sha",
+                "policy_path_semantics_canon_sha256": "semantics-canon-sha",
+                "content_evidence_payload": {
+                    "status": content_status,
+                    "score": content_score,
+                    "content_chain_score": content_score,
+                    "plan_digest": "plan-probe",
+                    "basis_digest": expected_basis_digest if isinstance(expected_basis_digest, str) and expected_basis_digest else "basis-probe",
+                    "content_failure_reason": content_failure_reason,
+                },
+                "final_decision": {
+                    "is_watermarked": False,
+                    "decision_status": "ok" if has_expected_plan else "error",
+                },
+                "attestation": {
+                    "final_event_attested_decision": {
+                        "status": "absent",
+                        "is_event_attested": False,
+                        "event_attestation_score_name": "event_attestation_score",
+                        "event_attestation_score": 0.0,
+                    }
+                },
+            },
+        )
+        _write_detect_run_closure(Path(output_dir))
+
+    def fail_run_stage(stage_name: str, command: list[str], run_root: Path) -> Dict[str, Any]:
+        raise AssertionError(
+            f"subprocess _run_stage should not be used in persistent runtime mode: {stage_name}"
+        )
+
     monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_build_stage_command", fake_build_stage_command)
     monkeypatch.setattr(
         pw01_module.BASE_RUNNER_MODULE,
@@ -379,6 +498,12 @@ def _patch_clean_negative_runner(monkeypatch: pytest.MonkeyPatch) -> Dict[str, A
             "attestation_digest": "digest",
         },
     )
+    if persistent_runtime:
+        monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_run_stage", fail_run_stage)
+        monkeypatch.setattr(pw01_module, "build_detect_runtime_session", fake_build_detect_runtime_session)
+        monkeypatch.setattr(pw01_module, "run_detect", fake_run_detect)
+    else:
+        monkeypatch.setattr(pw01_module, "_build_pw01_stage_runtime_bundle", lambda **_: None)
 
     return captures
 
@@ -468,6 +593,55 @@ def test_pw01_control_negative_writes_statement_only_provenance(tmp_path: Path, 
     }
     assert run_closure["records_bundle"]["manifest_rel_path"] == "artifacts/records_manifest.json"
     assert run_closure["records_bundle"]["bundle_canon_sha256"] == records_manifest["bundle_canon_sha256"]
+
+
+def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Reuse one detect runtime session across probe and final detect in control-negative PW01 execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_control_negative_persistent_runtime")
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_control_negative_persistent_runtime",
+    )
+    captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
+
+    summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_control_negative_persistent_runtime",
+        sample_role=pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    shard_manifest = json.loads(
+        (Path(str(summary["shard_root"])) / "shard_manifest.json").read_text(encoding="utf-8")
+    )
+    event_count = len(cast(list[Dict[str, Any]], shard_manifest["events"]))
+    first_event = cast(Dict[str, Any], shard_manifest["events"][0])
+
+    assert len(captures["detect_runtime_sessions"]) == 1
+    assert len(captures["detect_runtime_calls"]) == event_count * 2
+    assert {call["runtime_session_id"] for call in captures["detect_runtime_calls"]} == {
+        id(captures["detect_runtime_sessions"][0])
+    }
+    assert len(captures["detect_probe_inputs"]) == event_count
+    assert len(captures["detect_inputs"]) == event_count
+    assert first_event["stage_results"]["detect_probe"]["execution_mode"] == "persistent_worker_runtime"
+    assert first_event["stage_results"]["detect"]["execution_mode"] == "persistent_worker_runtime"
+    assert Path(str(first_event["stage_results"]["detect_probe"]["stdout_log_path"])).exists()
+    assert Path(str(first_event["stage_results"]["detect"]["stdout_log_path"])).exists()
 
 
 def test_pw01_clean_negative_remains_strict_formal_null_without_probe(
