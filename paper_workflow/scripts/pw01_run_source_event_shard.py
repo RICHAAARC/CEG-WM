@@ -318,7 +318,7 @@ def _build_pw01_stage_runtime_bundle(
         "worker_embed_runtime_init_elapsed_seconds": None,
         "worker_detect_runtime_init_elapsed_seconds": None,
     }
-    if normalized_sample_role == ACTIVE_SAMPLE_ROLE:
+    if normalized_sample_role in {ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE}:
         preview_runtime_started_at = time.perf_counter()
         bundle["preview_runtime_session"] = pw01_stage_runtime_helpers.build_preview_runtime_session(
             bound_config_path,
@@ -327,6 +327,8 @@ def _build_pw01_stage_runtime_bundle(
         bundle["worker_preview_runtime_init_elapsed_seconds"] = (
             time.perf_counter() - preview_runtime_started_at
         )
+
+    if normalized_sample_role == ACTIVE_SAMPLE_ROLE:
         embed_runtime_started_at = time.perf_counter()
         bundle["embed_runtime_session"] = build_embed_runtime_session(
             str(bound_config_path),
@@ -2274,13 +2276,52 @@ def _run_clean_negative_event(
     )
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
-    preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
-        cfg_obj=runtime_cfg,
-        prompt_run_root=prompt_run_root,
-        prompt_text=prompt_text,
-        prompt_index=source_prompt_index,
-        prompt_file_path=prompt_file,
-    )
+    preview_stage_command = _build_preview_precompute_command(runtime_cfg_path, prompt_run_root)
+    preview_runtime_session = None
+    if isinstance(stage_runtime_bundle, Mapping):
+        if stage_runtime_bundle.get("execution_mode") == _PERSISTENT_STAGE_EXECUTION_MODE:
+            preview_runtime_session = stage_runtime_bundle.get("preview_runtime_session")
+            if not isinstance(preview_runtime_session, dict):
+                raise ValueError("stage_runtime_bundle missing preview_runtime_session")
+
+    if isinstance(preview_runtime_session, dict):
+        preview_stdout_log_path = prompt_run_root / "logs" / "preview_precompute_stdout.log"
+        preview_stderr_log_path = prompt_run_root / "logs" / "preview_precompute_stderr.log"
+        try:
+            preview_precompute = pw01_stage_runtime_helpers.prepare_source_pool_preview_artifact_with_runtime(
+                cfg_obj=runtime_cfg,
+                prompt_run_root=prompt_run_root,
+                prompt_text=prompt_text,
+                prompt_index=source_prompt_index,
+                prompt_file_path=prompt_file,
+                runtime_session=preview_runtime_session,
+            )
+            _write_persistent_stage_log(
+                log_path=preview_stdout_log_path,
+                stage_name="preview_precompute",
+                command=preview_stage_command,
+                status="ok",
+                detail="preview_precompute executed in-process via persistent shard-local preview runtime session",
+            )
+            preview_stderr_log_path.write_text("", encoding="utf-8")
+        except Exception:
+            _write_persistent_stage_log(
+                log_path=preview_stdout_log_path,
+                stage_name="preview_precompute",
+                command=preview_stage_command,
+                status="failed",
+                detail="preview_precompute raised before subprocess log emission; see stderr log for traceback",
+            )
+            preview_stderr_log_path.write_text(traceback.format_exc(), encoding="utf-8")
+            raise
+    else:
+        preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
+            cfg_obj=runtime_cfg,
+            prompt_run_root=prompt_run_root,
+            prompt_text=prompt_text,
+            prompt_index=source_prompt_index,
+            prompt_file_path=prompt_file,
+        )
     preview_runtime_cfg_node = preview_precompute.get("runtime_cfg")
     if not isinstance(preview_runtime_cfg_node, dict):
         raise ValueError("preview precompute result missing runtime_cfg")
@@ -2296,6 +2337,18 @@ def _run_clean_negative_event(
 
     preview_record_node = preview_precompute.get("preview_record")
     preview_record = cast(Dict[str, Any], preview_record_node) if isinstance(preview_record_node, dict) else {}
+    preview_stage_result = dict(preview_record)
+    if isinstance(preview_runtime_session, dict):
+        preview_stage_result.update(
+            {
+                "return_code": 0,
+                "command": preview_stage_command,
+                "stdout_log_path": normalize_path_value(prompt_run_root / "logs" / "preview_precompute_stdout.log"),
+                "stderr_log_path": normalize_path_value(prompt_run_root / "logs" / "preview_precompute_stderr.log"),
+                "status": preview_stage_result.get("status", "ok"),
+                "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
+            }
+        )
     preview_image_path_value = preview_record.get("persisted_artifact_path")
     if not isinstance(preview_image_path_value, str) or not preview_image_path_value:
         raise ValueError("clean_negative preview record missing persisted_artifact_path")
@@ -2316,7 +2369,7 @@ def _run_clean_negative_event(
     write_json_atomic(detect_input_record_path, detect_input_record)
 
     stage_results: Dict[str, Any] = {
-        "preview_precompute": preview_record,
+        "preview_precompute": preview_stage_result,
     }
 
     detect_command = _build_clean_negative_detect_command(

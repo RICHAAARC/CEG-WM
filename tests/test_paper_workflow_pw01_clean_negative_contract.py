@@ -123,6 +123,8 @@ def _patch_clean_negative_runner(
         "detect_inputs": [],
     }
     if persistent_runtime:
+        captures["preview_runtime_sessions"] = []
+        captures["preview_runtime_calls"] = []
         captures["detect_runtime_sessions"] = []
         captures["detect_runtime_calls"] = []
         captures["probe_seen_run_roots"] = set()
@@ -218,7 +220,7 @@ def _patch_clean_negative_runner(
     def fake_build_stage_command(stage_name: str, config_path: Path, run_root: Path) -> list[str]:
         return [stage_name, str(config_path), str(run_root)]
 
-    def fake_prepare_source_pool_preview_artifact(
+    def _build_preview_payload(
         *,
         cfg_obj: Dict[str, Any],
         prompt_run_root: Path,
@@ -243,6 +245,58 @@ def _patch_clean_negative_runner(
             "runtime_cfg": dict(cfg_obj),
             "preview_record": preview_record,
         }
+
+    def fake_prepare_source_pool_preview_artifact(
+        *,
+        cfg_obj: Dict[str, Any],
+        prompt_run_root: Path,
+        prompt_text: str,
+        prompt_index: int,
+        prompt_file_path: str,
+    ) -> Dict[str, Any]:
+        event_node = cfg_obj.get("paper_workflow_event")
+        sample_role = event_node.get("sample_role") if isinstance(event_node, dict) else None
+        if persistent_runtime and sample_role == pw01_module.CLEAN_NEGATIVE_SAMPLE_ROLE:
+            raise AssertionError("legacy preview helper should not be used for clean_negative in persistent runtime mode")
+        return _build_preview_payload(
+            cfg_obj=cfg_obj,
+            prompt_run_root=prompt_run_root,
+            prompt_text=prompt_text,
+            prompt_index=prompt_index,
+            prompt_file_path=prompt_file_path,
+        )
+
+    def fake_build_preview_runtime_session(config_path: Any) -> Dict[str, Any]:
+        session = {
+            "session_kind": "preview",
+            "config_path": str(config_path),
+            "pipeline_result": {"pipeline_status": "built", "pipeline_obj": object()},
+        }
+        captures["preview_runtime_sessions"].append(session)
+        return session
+
+    def fake_prepare_source_pool_preview_artifact_with_runtime(
+        *,
+        cfg_obj: Dict[str, Any],
+        prompt_run_root: Path,
+        prompt_text: str,
+        prompt_index: int,
+        prompt_file_path: str,
+        runtime_session: Any,
+    ) -> Dict[str, Any]:
+        captures["preview_runtime_calls"].append(
+            {
+                "prompt_index": prompt_index,
+                "runtime_session_id": id(runtime_session),
+            }
+        )
+        return _build_preview_payload(
+            cfg_obj=cfg_obj,
+            prompt_run_root=prompt_run_root,
+            prompt_text=prompt_text,
+            prompt_index=prompt_index,
+            prompt_file_path=prompt_file_path,
+        )
 
     def _read_detect_input_record(command: list[str]) -> Dict[str, Any]:
         if "--input" not in command:
@@ -427,7 +481,12 @@ def _patch_clean_negative_runner(
         has_expected_plan = isinstance(expected_plan_digest, str) and bool(expected_plan_digest)
         probe_seen_run_roots = cast(set[str], captures["probe_seen_run_roots"])
         run_root_key = str(Path(output_dir))
-        is_probe = not has_expected_plan and run_root_key not in probe_seen_run_roots
+        is_control_negative_run = "/source_shards/control_negative/" in Path(output_dir).as_posix()
+        is_probe = (
+            is_control_negative_run
+            and not has_expected_plan
+            and run_root_key not in probe_seen_run_roots
+        )
 
         if is_probe:
             probe_seen_run_roots.add(run_root_key)
@@ -537,6 +596,16 @@ def _patch_clean_negative_runner(
     )
     if persistent_runtime:
         monkeypatch.setattr(pw01_module.BASE_RUNNER_MODULE, "_run_stage", fail_run_stage)
+        monkeypatch.setattr(
+            pw01_module.BASE_RUNNER_MODULE,
+            "build_preview_runtime_session",
+            fake_build_preview_runtime_session,
+        )
+        monkeypatch.setattr(
+            pw01_module.BASE_RUNNER_MODULE,
+            "prepare_source_pool_preview_artifact_with_runtime",
+            fake_prepare_source_pool_preview_artifact_with_runtime,
+        )
         monkeypatch.setattr(pw01_module, "build_detect_runtime_session", fake_build_detect_runtime_session)
         monkeypatch.setattr(pw01_module, "run_detect", fake_run_detect)
     else:
@@ -654,7 +723,7 @@ def test_pw01_clean_negative_worker_result_includes_persistent_runtime_diagnosti
         marker="family_worker_runtime_clean_negative",
     )
     captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
-    perf_counter_values = iter([30.0, 31.25])
+    perf_counter_values = iter([30.0, 30.5, 31.0, 32.25])
     monkeypatch.setattr(pw01_module.time, "perf_counter", lambda: next(perf_counter_values))
 
     family_root = Path(str(summary["family_root"]))
@@ -681,15 +750,84 @@ def test_pw01_clean_negative_worker_result_includes_persistent_runtime_diagnosti
         worker_plan_path=Path(str(worker_plans[0]["worker_plan_path"])),
     )
 
+    assert len(captures["preview_runtime_sessions"]) == 1
     assert len(captures["detect_runtime_sessions"]) == 1
     assert worker_result["persistent_stage_worker_enabled"] is True
+    assert worker_result["preview_runtime_session_enabled"] is True
     assert worker_result["embed_runtime_session_enabled"] is False
     assert worker_result["detect_runtime_session_enabled"] is True
+    assert worker_result["worker_preview_runtime_init_elapsed_seconds"] == 0.5
     assert worker_result["worker_embed_runtime_init_elapsed_seconds"] is None
     assert worker_result["worker_detect_runtime_init_elapsed_seconds"] == 1.25
+    assert worker_result["worker_preview_event_count"] == worker_result["completed_event_count"]
     assert worker_result["worker_embed_event_count"] == 0
     assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
     assert worker_result["recommended_pw01_worker_count_for_validation"] == 2
+
+
+def test_pw01_clean_negative_single_process_uses_persistent_preview_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Reuse one preview runtime session across clean_negative events in single-process execution.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    _build_pw00_family(tmp_path, family_id="family_clean_negative_persistent_preview_runtime")
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="family_clean_negative_persistent_preview_runtime",
+    )
+    captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
+
+    summary = pw01_module.run_pw01_source_event_shard(
+        drive_project_root=tmp_path / "drive",
+        family_id="family_clean_negative_persistent_preview_runtime",
+        sample_role=pw01_module.CLEAN_NEGATIVE_SAMPLE_ROLE,
+        shard_index=0,
+        shard_count=2,
+        bound_config_path=bound_config_path,
+    )
+
+    shard_manifest = json.loads(
+        (Path(str(summary["shard_root"])) / "shard_manifest.json").read_text(encoding="utf-8")
+    )
+    event_count = len(cast(List[Dict[str, Any]], shard_manifest["events"]))
+    first_event = cast(Dict[str, Any], shard_manifest["events"][0])
+    first_worker = cast(Dict[str, Any], shard_manifest["workers"][0])
+    worker_result = json.loads(Path(str(first_worker["worker_result_path"])).read_text(encoding="utf-8"))
+
+    assert len(captures["preview_runtime_sessions"]) == 1
+    assert len(captures["detect_runtime_sessions"]) == 1
+    assert len(captures["preview_runtime_calls"]) == event_count
+    assert len(captures["detect_runtime_calls"]) == event_count
+    assert {call["runtime_session_id"] for call in captures["preview_runtime_calls"]} == {
+        id(captures["preview_runtime_sessions"][0])
+    }
+    assert {call["runtime_session_id"] for call in captures["detect_runtime_calls"]} == {
+        id(captures["detect_runtime_sessions"][0])
+    }
+    assert first_event["stage_results"]["preview_precompute"]["execution_mode"] == "persistent_worker_runtime"
+    assert first_event["stage_results"]["preview_precompute"]["return_code"] == 0
+    assert isinstance(first_event["stage_results"]["preview_precompute"]["command"], list)
+    assert Path(str(first_event["stage_results"]["preview_precompute"]["stdout_log_path"])).exists()
+    assert Path(str(first_event["stage_results"]["preview_precompute"]["stderr_log_path"])).exists()
+    assert first_event["stage_results"]["detect"]["execution_mode"] == "persistent_worker_runtime"
+    assert worker_result["persistent_stage_worker_enabled"] is True
+    assert worker_result["preview_runtime_session_enabled"] is True
+    assert worker_result["embed_runtime_session_enabled"] is False
+    assert worker_result["detect_runtime_session_enabled"] is True
+    assert isinstance(worker_result["worker_preview_runtime_init_elapsed_seconds"], float)
+    assert isinstance(worker_result["worker_detect_runtime_init_elapsed_seconds"], float)
+    assert worker_result["worker_preview_event_count"] == worker_result["completed_event_count"]
+    assert worker_result["worker_embed_event_count"] == 0
+    assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
 
 
 def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
@@ -728,7 +866,9 @@ def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
     event_count = len(cast(list[Dict[str, Any]], shard_manifest["events"]))
     first_event = cast(Dict[str, Any], shard_manifest["events"][0])
 
+    assert len(captures["preview_runtime_sessions"]) == 0
     assert len(captures["detect_runtime_sessions"]) == 1
+    assert len(captures["preview_runtime_calls"]) == 0
     assert len(captures["detect_runtime_calls"]) == event_count * 2
     assert captures["detect_runtime_sessions"][0]["overrides"] == [
         "run_root_reuse_allowed=true",
@@ -804,12 +944,17 @@ def test_pw01_control_negative_worker_result_includes_persistent_runtime_diagnos
         worker_plan_path=Path(str(worker_plans[0]["worker_plan_path"])),
     )
 
+    assert len(captures["preview_runtime_sessions"]) == 0
     assert len(captures["detect_runtime_sessions"]) == 1
+    assert len(captures["preview_runtime_calls"]) == 0
     assert worker_result["persistent_stage_worker_enabled"] is True
+    assert worker_result["preview_runtime_session_enabled"] is False
     assert worker_result["embed_runtime_session_enabled"] is False
     assert worker_result["detect_runtime_session_enabled"] is True
+    assert worker_result["worker_preview_runtime_init_elapsed_seconds"] is None
     assert worker_result["worker_embed_runtime_init_elapsed_seconds"] is None
     assert worker_result["worker_detect_runtime_init_elapsed_seconds"] == 0.75
+    assert worker_result["worker_preview_event_count"] == worker_result["completed_event_count"]
     assert worker_result["worker_embed_event_count"] == 0
     assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
     assert len(captures["detect_runtime_calls"]) == worker_result["completed_event_count"] * 2
