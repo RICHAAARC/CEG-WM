@@ -38,6 +38,12 @@ SHARED_BENCHMARK_PW_MATRIX_CONFIG_PATH = (
 SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH = (
     REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_shared_hardneg_benchmark_v1.yaml"
 ).resolve()
+INTERVAL_DISCOVERY_PW_BASE_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_interval_discovery_v1.yaml"
+).resolve()
+INTERVAL_DISCOVERY_PW_MATRIX_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_interval_discovery_v1.yaml"
+).resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -647,6 +653,176 @@ def test_shared_benchmark_matrix_uses_stronger_whitelisted_geometry_ladder_than_
     assert shared_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] < rescue_matrix_settings[
         "geometry_optional_claim"
     ]["boundary_abs_margin_max"]
+
+
+def test_attack_protocol_geometry_interval_discovery_versions_are_loadable() -> None:
+    """
+    Verify append-only geometry-interval-discovery protocol versions are loadable.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    protocol_spec = protocol_loader.load_attack_protocol_spec({})
+    params_versions = protocol_spec.get("params_versions", {})
+    generated_plan = attack_plan.generate_attack_plan(protocol_spec)
+
+    expected_condition_keys = {
+        "rotate::v3",
+        "resize::v3",
+        "crop::v3",
+        "composite::rotate_resize_jpeg_v3",
+        "composite::crop_resize_v2",
+    }
+
+    assert expected_condition_keys.issubset(set(params_versions))
+    assert expected_condition_keys.issubset(set(generated_plan.conditions))
+
+
+def test_geometry_interval_discovery_matrix_materializes_expected_condition_subset() -> None:
+    """
+    Verify the geometry-interval-discovery matrix parses and materializes the expected dense conditions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    discovery_base_cfg = load_yaml_mapping(INTERVAL_DISCOVERY_PW_BASE_CONFIG_PATH)
+    matrix_cfg = load_pw_matrix_config(matrix_config_path=INTERVAL_DISCOVERY_PW_MATRIX_CONFIG_PATH)
+    matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
+    attack_condition_catalog = build_attack_condition_catalog(matrix_cfg=matrix_cfg)
+    catalog_params = {
+        row["attack_condition_key"]: row["attack_params"]
+        for row in attack_condition_catalog
+    }
+
+    expected_families = ["rotate", "resize", "crop", "composite"]
+    expected_condition_keys = [
+        "composite::crop_resize_v2::sev00",
+        "composite::rotate_resize_jpeg_v2::sev00",
+        "composite::rotate_resize_jpeg_v3::sev00",
+        "crop::v3::sev00",
+        "crop::v3::sev01",
+        "crop::v3::sev02",
+        "crop::v3::sev03",
+        "resize::v3::sev00",
+        "resize::v3::sev01",
+        "resize::v3::sev02",
+        "resize::v3::sev03",
+        "rotate::v3::sev00",
+        "rotate::v3::sev01",
+        "rotate::v3::sev02",
+        "rotate::v3::sev03",
+        "rotate::v3::sev04",
+    ]
+
+    assert discovery_base_cfg["benchmark_mode"] == "geometry_interval_discovery"
+    assert discovery_base_cfg["benchmark_mode_version"] == "geometry_interval_discovery_v1"
+    assert discovery_base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_geometry_interval_discovery_v1.yaml"
+    assert discovery_base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_shared_hardneg_benchmark_v1.yaml"
+    assert discovery_base_cfg["sample_roles"]["active"] == [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]
+    assert discovery_base_cfg["sample_roles"]["reserved"] == ["attacked_positive", "attacked_negative"]
+    assert matrix_settings["matrix_profile"] == "geometry_interval_discovery_v1"
+    assert matrix_settings["matrix_version"] == "pw_attack_matrix_geometry_interval_discovery_v1"
+    assert matrix_settings["materialization_profile"] == "matrix_defined_concrete_conditions"
+    assert matrix_settings["attack_sets"]["general_attacks"] == expected_families
+    assert matrix_settings["attack_sets"]["geometry_rescue_candidates"] == expected_families
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_set"] == "geometry_rescue_candidates"
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_families"] == expected_families
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.01)
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.3)
+    assert [row["attack_condition_key"] for row in attack_condition_catalog] == expected_condition_keys
+    assert catalog_params["crop::v3::sev00"] == {"crop_ratios": 0.8}
+    assert catalog_params["crop::v3::sev01"] == {"crop_ratios": 0.75}
+    assert catalog_params["crop::v3::sev02"] == {"crop_ratios": 0.7}
+    assert catalog_params["crop::v3::sev03"] == {"crop_ratios": 0.65}
+    assert catalog_params["resize::v3::sev00"] == {"scale_factors": 0.75}
+    assert catalog_params["resize::v3::sev01"] == {"scale_factors": 0.7}
+    assert catalog_params["resize::v3::sev02"] == {"scale_factors": 0.65}
+    assert catalog_params["resize::v3::sev03"] == {"scale_factors": 0.6}
+    assert catalog_params["rotate::v3::sev00"] == {"degrees": 18}
+    assert catalog_params["rotate::v3::sev01"] == {"degrees": 20}
+    assert catalog_params["rotate::v3::sev02"] == {"degrees": 22}
+    assert catalog_params["rotate::v3::sev03"] == {"degrees": 24}
+    assert catalog_params["rotate::v3::sev04"] == {"degrees": 27}
+
+
+def test_pw00_binds_geometry_interval_discovery_base_and_shared_protocol(tmp_path: Path) -> None:
+    """
+    Verify PW00 can bind the geometry-interval-discovery base config and append shared benchmark provenance.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="paper_eval_family_geometry_interval_discovery_v1",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=INTERVAL_DISCOVERY_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    method_identity_snapshot = json.loads(
+        Path(str(family_manifest["paths"]["method_identity_snapshot"])).read_text(encoding="utf-8")
+    )
+
+    assert summary["pw_base_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_PW_MATRIX_CONFIG_PATH)
+    assert summary["benchmark_protocol_config_path"] == normalize_path_value(SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH)
+    assert summary["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert summary["matrix_profile"] == "geometry_interval_discovery_v1"
+    assert summary["matrix_version"] == "pw_attack_matrix_geometry_interval_discovery_v1"
+    assert summary["attack_condition_count"] == 16
+    assert summary["source_shard_count"] == 3
+    assert summary["attack_shard_count"] == 3
+    assert summary["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.3)
+    assert family_manifest["family_id"] == "paper_eval_family_geometry_interval_discovery_v1"
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["benchmark_protocol_config_path"] == normalize_path_value(
+        SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert family_manifest["benchmark_protocol"]["score_pools"]["content_chain_score"]["evaluate_role_order"] == [
+        "positive_source",
+        "clean_negative",
+    ]
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_interval_discovery_v1"
+    assert family_manifest["attack_parameters"]["matrix_version"] == "pw_attack_matrix_geometry_interval_discovery_v1"
+    assert family_manifest["attack_parameters"]["attack_condition_count"] == 16
+    assert family_manifest["attack_parameters"]["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.3)
+    assert method_identity_snapshot["source_alignment_reference_files"] == [
+        "paper_workflow/configs/pw_base_geometry_interval_discovery_v1.yaml",
+        "paper_workflow/configs/pw_matrix_geometry_interval_discovery_v1.yaml",
+        "paper_workflow/configs/pw_protocol_shared_hardneg_benchmark_v1.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/scripts/pw02_merge_source_event_shards.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
+        "paper_workflow/notebook/PW02_Source_Merge_And_Global_Thresholds.ipynb",
+        "scripts/notebook_runtime_common.py",
+        "configs/default.yaml",
+    ]
 
 
 def test_pw00_binds_shared_benchmark_protocol_and_provenance(tmp_path: Path) -> None:
