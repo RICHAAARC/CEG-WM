@@ -866,10 +866,13 @@ def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
     event_count = len(cast(list[Dict[str, Any]], shard_manifest["events"]))
     first_event = cast(Dict[str, Any], shard_manifest["events"][0])
 
-    assert len(captures["preview_runtime_sessions"]) == 0
+    assert len(captures["preview_runtime_sessions"]) == 1
     assert len(captures["detect_runtime_sessions"]) == 1
-    assert len(captures["preview_runtime_calls"]) == 0
+    assert len(captures["preview_runtime_calls"]) == event_count
     assert len(captures["detect_runtime_calls"]) == event_count * 2
+    assert {call["runtime_session_id"] for call in captures["preview_runtime_calls"]} == {
+        id(captures["preview_runtime_sessions"][0])
+    }
     assert captures["detect_runtime_sessions"][0]["overrides"] == [
         "run_root_reuse_allowed=true",
         "run_root_reuse_reason=\"paper_workflow_pw01_detect\"",
@@ -879,6 +882,10 @@ def test_pw01_control_negative_persistent_runtime_reuses_detect_session(
     }
     assert len(captures["detect_probe_inputs"]) == event_count
     assert len(captures["detect_inputs"]) == event_count
+    assert first_event["stage_results"]["preview_precompute"]["execution_mode"] == "persistent_worker_runtime"
+    assert first_event["stage_results"]["preview_precompute"]["return_code"] == 0
+    assert Path(str(first_event["stage_results"]["preview_precompute"]["stdout_log_path"])).exists()
+    assert Path(str(first_event["stage_results"]["preview_precompute"]["stderr_log_path"])).exists()
     assert first_event["stage_results"]["detect_probe"]["execution_mode"] == "persistent_worker_runtime"
     assert first_event["stage_results"]["detect"]["execution_mode"] == "persistent_worker_runtime"
     assert Path(str(first_event["stage_results"]["detect_probe"]["stdout_log_path"])).exists()
@@ -907,7 +914,7 @@ def test_pw01_control_negative_worker_result_includes_persistent_runtime_diagnos
         marker="family_worker_runtime_control_negative",
     )
     captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
-    perf_counter_values = iter([40.0, 40.75])
+    perf_counter_values = iter([40.0, 40.5, 41.0, 41.75])
     monkeypatch.setattr(pw01_module.time, "perf_counter", lambda: next(perf_counter_values))
 
     family_root = Path(str(summary["family_root"]))
@@ -944,14 +951,14 @@ def test_pw01_control_negative_worker_result_includes_persistent_runtime_diagnos
         worker_plan_path=Path(str(worker_plans[0]["worker_plan_path"])),
     )
 
-    assert len(captures["preview_runtime_sessions"]) == 0
+    assert len(captures["preview_runtime_sessions"]) == 1
     assert len(captures["detect_runtime_sessions"]) == 1
-    assert len(captures["preview_runtime_calls"]) == 0
+    assert len(captures["preview_runtime_calls"]) == worker_result["completed_event_count"]
     assert worker_result["persistent_stage_worker_enabled"] is True
-    assert worker_result["preview_runtime_session_enabled"] is False
+    assert worker_result["preview_runtime_session_enabled"] is True
     assert worker_result["embed_runtime_session_enabled"] is False
     assert worker_result["detect_runtime_session_enabled"] is True
-    assert worker_result["worker_preview_runtime_init_elapsed_seconds"] is None
+    assert worker_result["worker_preview_runtime_init_elapsed_seconds"] == 0.5
     assert worker_result["worker_embed_runtime_init_elapsed_seconds"] is None
     assert worker_result["worker_detect_runtime_init_elapsed_seconds"] == 0.75
     assert worker_result["worker_preview_event_count"] == worker_result["completed_event_count"]
@@ -959,6 +966,67 @@ def test_pw01_control_negative_worker_result_includes_persistent_runtime_diagnos
     assert worker_result["worker_detect_event_count"] == worker_result["completed_event_count"]
     assert len(captures["detect_runtime_calls"]) == worker_result["completed_event_count"] * 2
     assert worker_result["recommended_pw01_worker_count_for_validation"] == 2
+
+
+def test_run_control_negative_event_falls_back_to_cold_preview_when_preview_session_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Retain the cold-preview fallback when the control-negative preview session is absent.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    bound_config_path = _write_bound_config_snapshot(
+        tmp_path / "drive",
+        marker="control_negative_preview_fallback",
+    )
+    bound_cfg_obj = load_yaml_mapping(bound_config_path)
+    captures = _patch_clean_negative_runner(monkeypatch, persistent_runtime=True)
+
+    event_manifest = pw01_module._run_planner_conditioned_control_negative_event(
+        event={
+            "event_id": "evt_control_negative_fallback_0000",
+            "event_index": 0,
+            "sample_role": pw01_module.PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+            "source_prompt_index": 0,
+            "prompt_text": "prompt one",
+            "prompt_sha256": "sha256-prompt-one",
+            "seed": 3,
+            "prompt_file": "prompts/paper_small.txt",
+        },
+        shard_root=ensure_directory(
+            tmp_path
+            / "drive"
+            / "paper_workflow"
+            / "families"
+            / "family_control_negative_preview_fallback"
+            / "source_shards"
+            / "control_negative"
+            / "shard_0000"
+        ),
+        default_cfg_obj=bound_cfg_obj,
+        bound_config_path=bound_config_path,
+        stage_runtime_bundle={
+            "execution_mode": pw01_module._PERSISTENT_STAGE_EXECUTION_MODE,
+            "preview_runtime_session": None,
+            "detect_runtime_session": {"session_kind": "detect"},
+        },
+    )
+
+    assert len(captures["preview_runtime_sessions"]) == 0
+    assert len(captures["preview_runtime_calls"]) == 0
+    assert len(captures["detect_runtime_calls"]) == 2
+    assert len(captures["detect_probe_inputs"]) == 1
+    assert len(captures["detect_inputs"]) == 1
+    assert event_manifest["stage_results"]["detect_probe"]["execution_mode"] == "persistent_worker_runtime"
+    assert event_manifest["stage_results"]["detect"]["execution_mode"] == "persistent_worker_runtime"
+    assert "execution_mode" not in event_manifest["stage_results"]["preview_precompute"]
 
 
 def test_pw01_clean_negative_remains_strict_formal_null_without_probe(
