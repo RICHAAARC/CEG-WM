@@ -8,8 +8,10 @@ sample_roles:
   active:
     - "positive_source"
     - "clean_negative"
+    - "planner_conditioned_control_negative"
   reserved:
     - "attacked_positive"
+    - "attacked_negative"
 calibration_fraction: 0.5
 event_identity:
   unit_definition: "sample_event = (prompt_index, prompt_text, seed, sample_role)"

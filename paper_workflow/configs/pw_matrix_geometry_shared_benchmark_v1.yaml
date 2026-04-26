@@ -29,22 +29,6 @@ concrete_conditions:
             params:
               scale_factor: 0.75
         seed_policy: "shared"
-  "composite::rotate_resize_jpeg_v1":
-    - condition_suffix: "sev00"
-      severity_label: "rotate12+resize0.85+jpeg85"
-      severity_level_index: 0
-      params:
-        steps:
-          - family: "rotate"
-            params:
-              degrees: 12
-          - family: "resize"
-            params:
-              scale_factor: 0.85
-          - family: "jpeg"
-            params:
-              quality: 85
-        seed_policy: "shared"
   "composite::rotate_resize_jpeg_v2":
     - condition_suffix: "sev00"
       severity_label: "rotate18+resize0.75+jpeg75"
@@ -61,17 +45,32 @@ concrete_conditions:
             params:
               quality: 75
         seed_policy: "shared"
-  "crop::v2":
-    - condition_suffix: "sev00"
-      severity_label: "crop_ratio=0.85"
-      severity_level_index: 0
-      params:
-        crop_ratios: 0.85
     - condition_suffix: "sev01"
-      severity_label: "crop_ratio=0.75"
+      severity_label: "rotate18+resize0.75+jpeg75"
       severity_level_index: 1
       params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 18
+          - family: "resize"
+            params:
+              scale_factor: 0.75
+          - family: "jpeg"
+            params:
+              quality: 75
+        seed_policy: "shared"
+  "crop::v2":
+    - condition_suffix: "sev00"
+      severity_label: "crop_ratio=0.75"
+      severity_level_index: 0
+      params:
         crop_ratios: 0.75
+    - condition_suffix: "sev01"
+      severity_label: "crop_ratio=0.65"
+      severity_level_index: 1
+      params:
+        crop_ratios: 0.65
     - condition_suffix: "sev02"
       severity_label: "crop_ratio=0.65"
       severity_level_index: 2
@@ -79,15 +78,15 @@ concrete_conditions:
         crop_ratios: 0.65
   "resize::v2":
     - condition_suffix: "sev00"
-      severity_label: "scale_factor=0.85"
+      severity_label: "scale_factor=0.7"
       severity_level_index: 0
       params:
-        scale_factors: 0.85
+        scale_factors: 0.7
     - condition_suffix: "sev01"
-      severity_label: "scale_factor=0.7"
+      severity_label: "scale_factor=0.6"
       severity_level_index: 1
       params:
-        scale_factors: 0.7
+        scale_factors: 0.6
     - condition_suffix: "sev02"
       severity_label: "scale_factor=0.6"
       severity_level_index: 2
@@ -95,15 +94,15 @@ concrete_conditions:
         scale_factors: 0.6
   "rotate::v2":
     - condition_suffix: "sev00"
-      severity_label: "degrees=12"
+      severity_label: "degrees=18"
       severity_level_index: 0
       params:
-        degrees: 12
+        degrees: 18
     - condition_suffix: "sev01"
-      severity_label: "degrees=18"
+      severity_label: "degrees=24"
       severity_level_index: 1
       params:
-        degrees: 18
+        degrees: 24
     - condition_suffix: "sev02"
       severity_label: "degrees=24"
       severity_level_index: 2
@@ -114,7 +113,7 @@ geometry_optional_claim:
   boundary_rule_version: "geometry_optional_claim_boundary_band_v3"
   boundary_metric: "abs_content_margin"
   boundary_abs_margin_min: 0.01
-  boundary_abs_margin_max: 0.35
+  boundary_abs_margin_max: 0.3
 system_event_count_sweep:
   event_counts:
     - 1

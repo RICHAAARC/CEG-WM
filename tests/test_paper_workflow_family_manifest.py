@@ -600,6 +600,55 @@ def test_pw00_binds_geometry_rescue_base_and_freezes_new_reference_pair(tmp_path
     assert geometry_optional_claim_plan["boundary_abs_margin_max"] == pytest.approx(0.35)
 
 
+def test_shared_benchmark_matrix_uses_stronger_whitelisted_geometry_ladder_than_rescue() -> None:
+    """
+    Verify the shared benchmark matrix stays whitelist-compliant and is stricter than rescue.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    rescue_matrix_cfg = load_pw_matrix_config(matrix_config_path=RESCUE_PW_MATRIX_CONFIG_PATH)
+    rescue_matrix_settings = resolve_pw_matrix_settings(rescue_matrix_cfg)
+    shared_matrix_cfg = load_pw_matrix_config(matrix_config_path=SHARED_BENCHMARK_PW_MATRIX_CONFIG_PATH)
+    shared_matrix_settings = resolve_pw_matrix_settings(shared_matrix_cfg)
+    shared_catalog = build_attack_condition_catalog(matrix_cfg=shared_matrix_cfg)
+    shared_params_by_key = {
+        row["attack_condition_key"]: row["attack_params"]
+        for row in shared_catalog
+    }
+
+    assert [row["attack_condition_key"] for row in shared_catalog] == [
+        "composite::crop_resize_v1::sev00",
+        "composite::rotate_resize_jpeg_v2::sev00",
+        "composite::rotate_resize_jpeg_v2::sev01",
+        "crop::v2::sev00",
+        "crop::v2::sev01",
+        "crop::v2::sev02",
+        "resize::v2::sev00",
+        "resize::v2::sev01",
+        "resize::v2::sev02",
+        "rotate::v2::sev00",
+        "rotate::v2::sev01",
+        "rotate::v2::sev02",
+    ]
+    assert shared_params_by_key["crop::v2::sev00"] == {"crop_ratios": 0.75}
+    assert shared_params_by_key["crop::v2::sev01"] == {"crop_ratios": 0.65}
+    assert shared_params_by_key["crop::v2::sev02"] == {"crop_ratios": 0.65}
+    assert shared_params_by_key["resize::v2::sev00"] == {"scale_factors": 0.7}
+    assert shared_params_by_key["resize::v2::sev01"] == {"scale_factors": 0.6}
+    assert shared_params_by_key["resize::v2::sev02"] == {"scale_factors": 0.6}
+    assert shared_params_by_key["rotate::v2::sev00"] == {"degrees": 18}
+    assert shared_params_by_key["rotate::v2::sev01"] == {"degrees": 24}
+    assert shared_params_by_key["rotate::v2::sev02"] == {"degrees": 24}
+    assert shared_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.3)
+    assert shared_matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] < rescue_matrix_settings[
+        "geometry_optional_claim"
+    ]["boundary_abs_margin_max"]
+
+
 def test_pw00_binds_shared_benchmark_protocol_and_provenance(tmp_path: Path) -> None:
     """
     Verify PW00 appends shared benchmark protocol config and provenance to summary artifacts.
@@ -644,10 +693,27 @@ def test_pw00_binds_shared_benchmark_protocol_and_provenance(tmp_path: Path) -> 
     assert family_manifest["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
     assert family_manifest["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
     assert family_manifest["benchmark_provenance"]["schema_version"] == "pw_shared_benchmark_protocol_v1"
+    assert family_manifest["sample_roles"]["active"] == [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]
+    assert family_manifest["sample_roles"]["reserved"] == ["attacked_positive", "attacked_negative"]
+    assert family_manifest["benchmark_protocol"]["score_pools"]["content_chain_score"]["calibration_role_order"] == [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]
+    assert family_manifest["benchmark_protocol"]["score_pools"]["content_chain_score"]["evaluate_role_order"] == [
+        "positive_source",
+        "clean_negative",
+    ]
     assert family_manifest["paths"]["benchmark_protocol_config"] == normalize_path_value(
         SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH
     )
     assert summary["matrix_profile"] == "geometry_shared_benchmark_v1"
+    assert summary["attack_condition_count"] == 12
+    assert summary["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.3)
     assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_shared_benchmark_v1"
     assert method_identity_snapshot["source_alignment_reference_files"] == [
         "paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml",

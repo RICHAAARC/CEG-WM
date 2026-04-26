@@ -22,11 +22,9 @@ score_pools:
     evaluate_role_order:
       - "positive_source"
       - "clean_negative"
-      - "planner_conditioned_control_negative"
     evaluate_event_id_keys:
       positive_source: "eval_pos_event_ids"
       clean_negative: "eval_neg_event_ids"
-      planner_conditioned_control_negative: "eval_control_event_ids"
   event_attestation_score:
     calibration_role_order:
       - "positive_source"
