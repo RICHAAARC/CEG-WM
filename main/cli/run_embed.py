@@ -1527,37 +1527,49 @@ def _build_embed_runtime_reuse_signature(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(cfg, dict):
         raise TypeError("cfg must be dict")
 
-    signature_cfg = copy.deepcopy(cfg)
-    for field_name in [
-        "inference_prompt",
-        "seed",
-        "paper_workflow_event",
-        "input_image_path",
-        "pw01_source_pool_preview",
-    ]:
-        signature_cfg.pop(field_name, None)
+    model_cfg = cast(Dict[str, Any], cfg.get("model")) if isinstance(cfg.get("model"), dict) else {}
+    pipeline_cfg = cast(Dict[str, Any], cfg.get("pipeline")) if isinstance(cfg.get("pipeline"), dict) else {}
+    impl_cfg = cast(Dict[str, Any], cfg.get("impl")) if isinstance(cfg.get("impl"), dict) else {}
+    paper_cfg = (
+        cast(Dict[str, Any], cfg.get("paper_faithfulness"))
+        if isinstance(cfg.get("paper_faithfulness"), dict)
+        else {}
+    )
+    mask_cfg = cast(Dict[str, Any], cfg.get("mask")) if isinstance(cfg.get("mask"), dict) else {}
 
-    embed_node = signature_cfg.get("embed")
-    if isinstance(embed_node, dict):
-        embed_cfg = dict(cast(Dict[str, Any], embed_node))
-        embed_cfg.pop("input_image_path", None)
-        signature_cfg["embed"] = embed_cfg
-
-    model_source_binding = signature_cfg.get("model_source_binding")
+    model_source_binding = cfg.get("model_source_binding")
     model_source_binding_digest = (
         digests.canonical_sha256(model_source_binding)
         if isinstance(model_source_binding, dict)
         else None
     )
+    pipeline_impl_id = cfg.get("pipeline_impl_id")
+    if pipeline_impl_id is None:
+        pipeline_impl_id = pipeline_cfg.get("pipeline_impl_id")
+
     return {
-        "policy_path": signature_cfg.get("policy_path"),
-        "device": signature_cfg.get("device"),
-        "model_id": signature_cfg.get("model_id"),
-        "model_source": signature_cfg.get("model_source"),
-        "hf_revision": signature_cfg.get("hf_revision"),
-        "model_snapshot_path": signature_cfg.get("model_snapshot_path"),
+        "policy_path": cfg.get("policy_path"),
+        "device": cfg.get("device"),
+        "model_id": cfg.get("model_id"),
+        "model_source": cfg.get("model_source"),
+        "hf_revision": cfg.get("hf_revision"),
+        "model_snapshot_path": cfg.get("model_snapshot_path"),
         "model_source_binding_digest": model_source_binding_digest,
-        "static_cfg_digest": digests.canonical_sha256(signature_cfg),
+        "pipeline_impl_id": pipeline_impl_id,
+        "pipeline_build_enabled": cfg.get("pipeline_build_enabled"),
+        "paper_faithfulness_enabled": paper_cfg.get("enabled"),
+        "model_dtype": model_cfg.get("dtype"),
+        "impl_content_extractor_id": impl_cfg.get("content_extractor_id"),
+        "impl_geometry_extractor_id": impl_cfg.get("geometry_extractor_id"),
+        "impl_fusion_rule_id": impl_cfg.get("fusion_rule_id"),
+        "impl_subspace_planner_id": impl_cfg.get("subspace_planner_id"),
+        "impl_sync_module_id": impl_cfg.get("sync_module_id"),
+        "impl_hf_embedder_id": impl_cfg.get("hf_embedder_id"),
+        "impl_lf_coder_id": impl_cfg.get("lf_coder_id"),
+        "mask_enabled": cfg.get("enable_mask"),
+        "mask_impl_id": mask_cfg.get("impl_id"),
+        "mask_semantic_model_source": mask_cfg.get("semantic_model_source"),
+        "mask_semantic_model_path": mask_cfg.get("semantic_model_path"),
     }
 
 

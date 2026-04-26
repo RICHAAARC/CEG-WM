@@ -5,6 +5,7 @@ Module type: General module
 
 from __future__ import annotations
 
+import copy
 from contextlib import contextmanager
 import json
 from pathlib import Path
@@ -18,9 +19,154 @@ import pytest
 
 from main.cli import run_embed as run_embed_module
 from main.diffusion.sd3 import diffusers_loader, pipeline_factory
+from paper_workflow.scripts.pw01_stage_runtime_helpers import (
+    _build_stage_override_items,
+    _inject_source_pool_input_image_path,
+)
+from scripts.notebook_runtime_common import (
+    apply_notebook_model_snapshot_binding,
+    load_yaml_mapping,
+    write_yaml_mapping,
+)
 
 
 build_statement_only_formal_scaffold = run_embed_module._build_statement_only_formal_scaffold  # pyright: ignore[reportPrivateUsage]
+TEST_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_bound_embed_signature_config(tmp_path: Path, *, marker: str) -> tuple[Path, Dict[str, Any]]:
+    """
+    Build a notebook-bound embed config snapshot for runtime signature tests.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        marker: Stable marker for temporary paths.
+
+    Returns:
+        Tuple of bound config path and bound config mapping.
+    """
+    snapshot_dir = tmp_path / f"{marker}_model_snapshot"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    bound_cfg = apply_notebook_model_snapshot_binding(
+        load_yaml_mapping((TEST_REPO_ROOT / "configs" / "default.yaml").resolve()),
+        env_mapping={"CEG_WM_MODEL_SNAPSHOT_PATH": snapshot_dir.as_posix()},
+    )
+    bound_cfg_path = tmp_path / f"{marker}_bound_config.yaml"
+    write_yaml_mapping(bound_cfg_path, bound_cfg)
+    return bound_cfg_path, bound_cfg
+
+
+def _load_validated_embed_signature_cfg(config_path: Path) -> Dict[str, Any]:
+    """
+    Load one embed config through the real validation path for signature tests.
+
+    Args:
+        config_path: Config path to validate.
+
+    Returns:
+        Validated runtime config mapping.
+    """
+    contracts = run_embed_module.load_frozen_contracts(run_embed_module.config_loader.FROZEN_CONTRACTS_PATH)
+    whitelist = run_embed_module.load_runtime_whitelist(run_embed_module.config_loader.RUNTIME_WHITELIST_PATH)
+    semantics = run_embed_module.load_policy_path_semantics(run_embed_module.config_loader.POLICY_PATH_SEMANTICS_PATH)
+    interpretation = run_embed_module.get_contract_interpretation(contracts)
+    cfg, _, _ = run_embed_module.config_loader.load_and_validate_config(
+        str(config_path),
+        whitelist,
+        semantics,
+        contracts,
+        interpretation,
+        overrides=_build_stage_override_items("embed"),
+    )
+    return cfg
+
+
+def test_embed_runtime_reuse_signature_matches_preview_injected_runtime_cfg(tmp_path: Path) -> None:
+    """
+    Keep embed runtime reuse signatures stable before and after PW01 preview input injection.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    bound_config_path, bound_cfg = _write_bound_embed_signature_config(
+        tmp_path,
+        marker="embed_signature_preview",
+    )
+    runtime_cfg = copy.deepcopy(bound_cfg)
+    runtime_cfg["inference_prompt"] = "prompt one"
+    runtime_cfg["seed"] = 3
+    runtime_cfg["paper_workflow_event"] = {
+        "event_id": "evt_000000",
+        "event_index": 0,
+        "source_prompt_index": 0,
+        "sample_role": "positive_source",
+    }
+    preview_cfg = _inject_source_pool_input_image_path(
+        runtime_cfg,
+        input_image_path=(tmp_path / "preview.png").as_posix(),
+        preview_record_path=(tmp_path / "preview_record.json").as_posix(),
+        preview_record_rel_path="preview_generation_record.json",
+        artifact_rel_path="preview/preview.png",
+        creation_mode="prompt_conditioned_preview",
+    )
+    preview_cfg_path = tmp_path / "embed_signature_preview_runtime.yaml"
+    write_yaml_mapping(preview_cfg_path, preview_cfg)
+
+    session_cfg = _load_validated_embed_signature_cfg(bound_config_path)
+    event_cfg = _load_validated_embed_signature_cfg(preview_cfg_path)
+
+    assert (
+        run_embed_module._build_embed_runtime_reuse_signature(session_cfg)
+        == run_embed_module._build_embed_runtime_reuse_signature(event_cfg)
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "mutate_cfg"),
+    [
+        ("device", lambda cfg: cfg.__setitem__("device", "cpu")),
+        ("model_id", lambda cfg: cfg.__setitem__("model_id", "stub/model")),
+        ("model_source", lambda cfg: cfg.__setitem__("model_source", "local")),
+        ("hf_revision", lambda cfg: cfg.__setitem__("hf_revision", "rev-test")),
+        ("model_snapshot_path", lambda cfg: cfg.__setitem__("model_snapshot_path", "d:/tmp/other_snapshot")),
+        (
+            "model_source_binding",
+            lambda cfg: cfg.__setitem__(
+                "model_source_binding",
+                {
+                    **copy.deepcopy(cfg.get("model_source_binding", {})),
+                    "model_snapshot_path": "d:/tmp/other_snapshot",
+                },
+            ),
+        ),
+    ],
+)
+def test_embed_runtime_reuse_signature_rejects_static_runtime_field_changes(
+    tmp_path: Path,
+    field_name: str,
+    mutate_cfg: Any,
+) -> None:
+    """
+    Reject embed runtime reuse when static runtime fields change.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        field_name: Mutated static field name.
+        mutate_cfg: Mutation callback.
+
+    Returns:
+        None.
+    """
+    _ = field_name
+    _, bound_cfg = _write_bound_embed_signature_config(tmp_path, marker="embed_signature_static")
+    baseline_signature = run_embed_module._build_embed_runtime_reuse_signature(bound_cfg)
+    mutated_cfg = copy.deepcopy(bound_cfg)
+    mutate_cfg(mutated_cfg)
+
+    assert run_embed_module._build_embed_runtime_reuse_signature(mutated_cfg) != baseline_signature
 
 
 class StopAfterContentExtract(Exception):
