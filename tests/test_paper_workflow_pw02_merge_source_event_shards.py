@@ -21,7 +21,15 @@ import paper_workflow.scripts.pw02_metrics_extensions as pw02_metrics_extensions
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import build_source_shard_root, read_jsonl
-from scripts.notebook_runtime_common import ensure_directory, normalize_path_value, write_json_atomic, write_yaml_mapping
+from scripts.notebook_runtime_common import REPO_ROOT, ensure_directory, normalize_path_value, write_json_atomic, write_yaml_mapping
+
+
+INTERVAL_DISCOVERY_V2_PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_interval_discovery_v2.yaml"
+INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH = normalize_path_value(
+    (REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_interval_discovery_v2.yaml").resolve()
+)
+INTERVAL_DISCOVERY_V2_PROTOCOL_ID = "geometry_interval_discovery_v2"
+INTERVAL_DISCOVERY_V2_FAMILY_ID = "paper_eval_family_geometry_interval_discovery_v2"
 
 
 def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
@@ -1187,6 +1195,72 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert finalize_manifest["system_final"]["mode"] == "derived_metrics_from_content_evaluate_inputs"
     assert finalize_manifest["system_final"]["is_formal_evaluate_record"] is False
     assert finalize_manifest["system_final"]["artifact_path"] == pw02_summary["system_final_metrics_artifact_path"]
+
+
+def test_pw02_propagates_geometry_interval_discovery_v2_protocol_provenance(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Verify PW02 threshold exports, summary, and finalize manifest inherit the discovery-v2 protocol provenance.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    prompt_file = tmp_path / "pw02_discovery_v2_prompts.txt"
+    prompt_file.write_text("prompt one\nprompt two\n", encoding="utf-8")
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=tmp_path / "drive",
+        family_id=INTERVAL_DISCOVERY_V2_FAMILY_ID,
+        prompt_file=str(prompt_file),
+        seed_list=[3, 9],
+        source_shard_count=2,
+        pw_base_config_path=INTERVAL_DISCOVERY_V2_PW_BASE_CONFIG_PATH,
+    )
+    _materialize_completed_pw01_shards(summary)
+    _patch_pw02_python_stage_runner(monkeypatch)
+
+    pw02_summary = pw02_module.run_pw02_merge_source_event_shards(
+        drive_project_root=tmp_path / "drive",
+        family_id=INTERVAL_DISCOVERY_V2_FAMILY_ID,
+    )
+
+    content_threshold_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["threshold_exports"])["content"])).read_text(encoding="utf-8")
+    )
+    attestation_threshold_export = json.loads(
+        Path(str(cast(Dict[str, Any], pw02_summary["threshold_exports"])["attestation"])).read_text(encoding="utf-8")
+    )
+    finalize_manifest = json.loads(
+        Path(str(pw02_summary["paper_source_finalize_manifest_path"])).read_text(encoding="utf-8")
+    )
+
+    assert pw02_summary["benchmark_protocol"]["protocol_id"] == INTERVAL_DISCOVERY_V2_PROTOCOL_ID
+    assert pw02_summary["benchmark_protocol"]["protocol_family_id"] == INTERVAL_DISCOVERY_V2_FAMILY_ID
+    assert pw02_summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == (
+        "geometry_interval_discovery_v2"
+    )
+    assert pw02_summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == (
+        "pw_attack_matrix_geometry_interval_discovery_v2"
+    )
+    assert content_threshold_export["benchmark_provenance"]["protocol_id"] == INTERVAL_DISCOVERY_V2_PROTOCOL_ID
+    assert content_threshold_export["benchmark_provenance"]["benchmark_protocol_config_path"] == (
+        INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH
+    )
+    assert attestation_threshold_export["benchmark_provenance"]["protocol_id"] == INTERVAL_DISCOVERY_V2_PROTOCOL_ID
+    assert attestation_threshold_export["benchmark_provenance"]["benchmark_protocol_config_path"] == (
+        INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH
+    )
+    assert finalize_manifest["benchmark_protocol"]["protocol_id"] == INTERVAL_DISCOVERY_V2_PROTOCOL_ID
+    assert finalize_manifest["benchmark_protocol"]["protocol_family_id"] == INTERVAL_DISCOVERY_V2_FAMILY_ID
+    assert finalize_manifest["benchmark_provenance"]["protocol_id"] == INTERVAL_DISCOVERY_V2_PROTOCOL_ID
+    assert finalize_manifest["benchmark_provenance"]["benchmark_protocol_config_path"] == (
+        INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH
+    )
 
 
 def test_pw02_payload_clean_summary_prefers_decode_sidecar_metrics(tmp_path: Path) -> None:

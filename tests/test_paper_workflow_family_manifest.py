@@ -50,6 +50,9 @@ INTERVAL_DISCOVERY_V2_PW_BASE_CONFIG_PATH = (
 INTERVAL_DISCOVERY_V2_PW_MATRIX_CONFIG_PATH = (
     REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_interval_discovery_v2.yaml"
 ).resolve()
+INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_interval_discovery_v2.yaml"
+).resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -902,7 +905,7 @@ def test_geometry_interval_discovery_v2_matrix_materializes_expected_condition_s
     assert discovery_base_cfg["benchmark_mode"] == "geometry_interval_discovery"
     assert discovery_base_cfg["benchmark_mode_version"] == "geometry_interval_discovery_v2"
     assert discovery_base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_geometry_interval_discovery_v2.yaml"
-    assert discovery_base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_shared_hardneg_benchmark_v1.yaml"
+    assert discovery_base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_geometry_interval_discovery_v2.yaml"
     assert discovery_base_cfg["sample_roles"]["active"] == [
         "positive_source",
         "clean_negative",
@@ -939,7 +942,7 @@ def test_geometry_interval_discovery_v2_matrix_materializes_expected_condition_s
 
 def test_pw00_binds_geometry_interval_discovery_v2_base_and_shared_protocol(tmp_path: Path) -> None:
     """
-    Verify PW00 can bind the geometry-interval-discovery-v2 base config and append shared benchmark provenance.
+    Verify PW00 can bind the geometry-interval-discovery-v2 base config and append discovery-v2 protocol provenance.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -967,8 +970,15 @@ def test_pw00_binds_geometry_interval_discovery_v2_base_and_shared_protocol(tmp_
 
     assert summary["pw_base_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_V2_PW_BASE_CONFIG_PATH)
     assert summary["pw_matrix_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_V2_PW_MATRIX_CONFIG_PATH)
-    assert summary["benchmark_protocol_config_path"] == normalize_path_value(SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH)
-    assert summary["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert summary["benchmark_protocol_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH)
+    assert summary["benchmark_protocol"]["protocol_id"] == "geometry_interval_discovery_v2"
+    assert summary["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_interval_discovery_v2"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_interval_discovery_v2"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_interval_discovery_v2"
+    assert summary["benchmark_provenance"]["protocol_id"] == "geometry_interval_discovery_v2"
+    assert summary["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH
+    )
     assert summary["matrix_profile"] == "geometry_interval_discovery_v2"
     assert summary["matrix_version"] == "pw_attack_matrix_geometry_interval_discovery_v2"
     assert summary["attack_condition_count"] == 18
@@ -979,9 +989,16 @@ def test_pw00_binds_geometry_interval_discovery_v2_base_and_shared_protocol(tmp_
     assert family_manifest["pw_base_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_V2_PW_BASE_CONFIG_PATH)
     assert family_manifest["pw_matrix_config_path"] == normalize_path_value(INTERVAL_DISCOVERY_V2_PW_MATRIX_CONFIG_PATH)
     assert family_manifest["benchmark_protocol_config_path"] == normalize_path_value(
-        SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH
+        INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH
     )
-    assert family_manifest["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert family_manifest["benchmark_protocol"]["protocol_id"] == "geometry_interval_discovery_v2"
+    assert family_manifest["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_interval_discovery_v2"
+    assert family_manifest["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_interval_discovery_v2"
+    assert family_manifest["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_interval_discovery_v2"
+    assert family_manifest["benchmark_provenance"]["protocol_id"] == "geometry_interval_discovery_v2"
+    assert family_manifest["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH
+    )
     assert family_manifest["benchmark_protocol"]["score_pools"]["content_chain_score"]["evaluate_role_order"] == [
         "positive_source",
         "clean_negative",
@@ -993,7 +1010,7 @@ def test_pw00_binds_geometry_interval_discovery_v2_base_and_shared_protocol(tmp_
     assert method_identity_snapshot["source_alignment_reference_files"] == [
         "paper_workflow/configs/pw_base_geometry_interval_discovery_v2.yaml",
         "paper_workflow/configs/pw_matrix_geometry_interval_discovery_v2.yaml",
-        "paper_workflow/configs/pw_protocol_shared_hardneg_benchmark_v1.yaml",
+        "paper_workflow/configs/pw_protocol_geometry_interval_discovery_v2.yaml",
         "paper_workflow/scripts/pw_common.py",
         "paper_workflow/scripts/pw00_build_family_manifest.py",
         "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
