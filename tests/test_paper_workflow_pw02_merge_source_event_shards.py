@@ -43,6 +43,7 @@ def _build_pw00_family(tmp_path: Path, family_id: str) -> Dict[str, Any]:
         prompt_file=str(prompt_file),
         seed_list=[3, 9],
         source_shard_count=2,
+        pw_base_config_path="paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml",
     )
 
 
@@ -630,10 +631,20 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
 
     content_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.CONTENT_SCORE_NAME])
     attestation_run = cast(Dict[str, Any], pw02_summary["score_runs"][pw02_module.EVENT_ATTESTATION_SCORE_NAME])
-    assert content_run["calibration_inputs"]["record_count"] == 4
-    assert content_run["evaluate_inputs"]["record_count"] == 4
+    assert content_run["calibration_inputs"]["record_count"] == 6
+    assert content_run["evaluate_inputs"]["record_count"] == 6
     assert attestation_run["calibration_inputs"]["record_count"] == 4
     assert attestation_run["evaluate_inputs"]["record_count"] == 4
+    assert content_run["score_pool"]["calibration_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+        "planner_conditioned_control_negative": 2,
+    }
+    assert attestation_run["score_pool"]["calibration_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+    }
+    assert content_run["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
     assert Path(str(pw02_summary["planner_conditioned_control_negative_pool_manifest_path"])).exists()
     assert pw02_summary["planner_conditioned_control_negative_cohort_status"] == "completed"
     assert pw02_summary["planner_conditioned_control_negative_role_requirement"] == "optional_diagnostic"
@@ -718,14 +729,14 @@ def test_pw02_merges_dual_role_shards_and_builds_score_runs(tmp_path: Path, monk
 
     formal_final_decision_metrics = cast(Dict[str, Any], pw02_summary["formal_final_decision_metrics"])
     derived_system_union_metrics = cast(Dict[str, Any], pw02_summary["derived_system_union_metrics"])
-    assert formal_final_decision_metrics["n_total"] == 4
+    assert formal_final_decision_metrics["n_total"] == 6
     assert formal_final_decision_metrics["n_positive"] == 2
-    assert formal_final_decision_metrics["n_negative"] == 2
+    assert formal_final_decision_metrics["n_negative"] == 4
     assert formal_final_decision_metrics["content_chain_available_rate"] == 1.0
-    assert formal_final_decision_metrics["final_decision_status_counts"] == {"decided": 4}
-    assert derived_system_union_metrics["n_total"] == 4
+    assert formal_final_decision_metrics["final_decision_status_counts"] == {"decided": 6}
+    assert derived_system_union_metrics["n_total"] == 6
     assert derived_system_union_metrics["n_positive"] == 2
-    assert derived_system_union_metrics["n_negative"] == 2
+    assert derived_system_union_metrics["n_negative"] == 4
     assert pw02_summary["system_final_metrics"] == derived_system_union_metrics
 
 
@@ -954,10 +965,21 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert content_threshold_export["score_name"] == pw02_module.CONTENT_SCORE_NAME
     assert content_threshold_export["source_thresholds_artifact_path"] == content_run["thresholds_artifact_path"]
     assert content_threshold_export["thresholds_artifact"]["score_name"] == pw02_module.CONTENT_SCORE_NAME
+    assert content_threshold_export["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert content_threshold_export["score_pool"]["calibration_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+        "planner_conditioned_control_negative": 2,
+    }
 
     assert attestation_threshold_export["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
     assert attestation_threshold_export["source_thresholds_artifact_path"] == attestation_run["thresholds_artifact_path"]
     assert attestation_threshold_export["thresholds_artifact"]["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
+    assert attestation_threshold_export["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert attestation_threshold_export["score_pool"]["calibration_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+    }
 
     assert content_clean_evaluate_export["score_name"] == pw02_module.CONTENT_SCORE_NAME
     assert content_clean_evaluate_export["source_evaluate_run_root"] == content_run["evaluate_run_root"]
@@ -965,6 +987,13 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
     assert content_clean_evaluate_export["evaluate_input_counts"] == {
         "positive_source": 2,
         "clean_negative": 2,
+        "planner_conditioned_control_negative": 2,
+    }
+    assert content_clean_evaluate_export["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert content_clean_evaluate_export["score_pool"]["evaluate_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+        "planner_conditioned_control_negative": 2,
     }
     assert content_clean_evaluate_export["evaluate_record"]["status"] == "ok"
 
@@ -975,11 +1004,22 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
         "positive_source": 2,
         "clean_negative": 2,
     }
+    assert attestation_clean_evaluate_export["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert attestation_clean_evaluate_export["score_pool"]["evaluate_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+    }
     assert attestation_clean_evaluate_export["evaluate_record"]["status"] == "ok"
 
     assert content_clean_score_analysis["score_name"] == pw02_module.CONTENT_SCORE_NAME
     assert content_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
     assert content_clean_score_analysis["clean_positive_quality_pair_manifest_path"] == pw02_summary["clean_quality_pair_manifest_path"]
+    assert content_clean_score_analysis["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert content_clean_score_analysis["score_pool"]["evaluate_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+        "planner_conditioned_control_negative": 2,
+    }
     assert clean_quality_pair_manifest["artifact_type"] == "paper_workflow_pw02_clean_quality_pair_manifest"
     assert clean_quality_pair_manifest["scope"] == "content_chain"
     assert clean_quality_pair_manifest["status"] == "ok"
@@ -1009,7 +1049,20 @@ def test_pw02_writes_top_level_exports_with_honest_system_final_metrics(tmp_path
 
     assert attestation_clean_score_analysis["score_name"] == pw02_module.EVENT_ATTESTATION_SCORE_NAME
     assert attestation_clean_score_analysis["roc_auc"]["auc"] == pytest.approx(1.0)
+    assert attestation_clean_score_analysis["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert attestation_clean_score_analysis["score_pool"]["evaluate_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+    }
     assert "clean_positive_quality_pair_manifest_path" not in attestation_clean_score_analysis
+
+    assert pw02_summary["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert finalize_manifest["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert finalize_manifest["score_runs"][pw02_module.CONTENT_SCORE_NAME]["score_pool"]["evaluate_role_counts"] == {
+        "positive_source": 2,
+        "clean_negative": 2,
+        "planner_conditioned_control_negative": 2,
+    }
 
     assert set(cast(Dict[str, Any], pw02_summary["roc_curve_paths"]).keys()) == {
         "content_chain",

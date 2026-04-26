@@ -157,6 +157,181 @@ def _resolve_role_plan(source_shard_plan: Mapping[str, Any], sample_role: str) -
     return cast(Dict[str, Any], role_plan_node)
 
 
+def _normalize_role_order(node: Any, *, label: str) -> List[str]:
+    """
+    Normalize one score-pool role order.
+
+    Args:
+        node: Candidate role-order node.
+        label: Error label.
+
+    Returns:
+        Normalized role order.
+    """
+    if not isinstance(node, list) or not node:
+        raise ValueError(f"{label} must be non-empty list[str]")
+
+    normalized_role_order: List[str] = []
+    for raw_role in cast(List[object], node):
+        if not isinstance(raw_role, str) or not raw_role.strip():
+            raise ValueError(f"{label} entries must be non-empty str")
+        normalized_role = validate_source_sample_role(raw_role.strip())
+        if normalized_role not in normalized_role_order:
+            normalized_role_order.append(normalized_role)
+    return normalized_role_order
+
+
+def _normalize_role_event_id_keys(node: Any, *, label: str) -> Dict[str, str]:
+    """
+    Normalize one score-pool event-id key mapping.
+
+    Args:
+        node: Candidate mapping.
+        label: Error label.
+
+    Returns:
+        Normalized mapping from sample_role to split-plan key.
+    """
+    if not isinstance(node, Mapping):
+        raise ValueError(f"{label} must be mapping[str, str]")
+
+    normalized_mapping: Dict[str, str] = {}
+    for raw_role, raw_split_key in cast(Mapping[Any, Any], node).items():
+        if not isinstance(raw_role, str) or not raw_role.strip():
+            raise ValueError(f"{label} keys must be non-empty str")
+        if not isinstance(raw_split_key, str) or not raw_split_key.strip():
+            raise ValueError(f"{label} values must be non-empty str")
+        normalized_mapping[validate_source_sample_role(raw_role.strip())] = raw_split_key.strip()
+    return normalized_mapping
+
+
+def _default_score_pool_spec(score_name: str) -> Dict[str, Any]:
+    """
+    Build the default PW02 score-pool specification.
+
+    Args:
+        score_name: Canonical score name.
+
+    Returns:
+        Default score-pool spec.
+    """
+    if not isinstance(score_name, str) or not score_name:
+        raise TypeError("score_name must be non-empty str")
+    if score_name not in {CONTENT_SCORE_NAME, EVENT_ATTESTATION_SCORE_NAME}:
+        raise ValueError(f"unsupported score_name: {score_name}")
+    return {
+        "calibration_role_order": [ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE],
+        "calibration_event_id_keys": {
+            ACTIVE_SAMPLE_ROLE: "calib_pos_event_ids",
+            CLEAN_NEGATIVE_SAMPLE_ROLE: "calib_neg_event_ids",
+        },
+        "evaluate_role_order": [ACTIVE_SAMPLE_ROLE, CLEAN_NEGATIVE_SAMPLE_ROLE],
+        "evaluate_event_id_keys": {
+            ACTIVE_SAMPLE_ROLE: "eval_pos_event_ids",
+            CLEAN_NEGATIVE_SAMPLE_ROLE: "eval_neg_event_ids",
+        },
+    }
+
+
+def _resolve_benchmark_protocol_bundle(family_manifest: Mapping[str, Any]) -> Dict[str, Any] | None:
+    """
+    Resolve the optional shared benchmark protocol bundle from PW00 outputs.
+
+    Args:
+        family_manifest: Family manifest payload.
+
+    Returns:
+        Benchmark protocol bundle or None.
+    """
+    if not isinstance(family_manifest, Mapping):
+        raise TypeError("family_manifest must be Mapping")
+
+    benchmark_protocol_node = family_manifest.get("benchmark_protocol")
+    benchmark_protocol_payload = (
+        dict(cast(Mapping[str, Any], benchmark_protocol_node))
+        if isinstance(benchmark_protocol_node, Mapping)
+        else None
+    )
+    benchmark_protocol_config_path_value = family_manifest.get("benchmark_protocol_config_path")
+    if benchmark_protocol_payload is None:
+        if not isinstance(benchmark_protocol_config_path_value, str) or not benchmark_protocol_config_path_value.strip():
+            return None
+        benchmark_protocol_payload = load_yaml_mapping(
+            Path(benchmark_protocol_config_path_value).expanduser().resolve()
+        )
+        if not isinstance(benchmark_protocol_payload, dict):
+            raise TypeError("benchmark protocol config must load as dict")
+
+    benchmark_provenance_node = family_manifest.get("benchmark_provenance")
+    benchmark_provenance = (
+        copy.deepcopy(dict(cast(Mapping[str, Any], benchmark_provenance_node)))
+        if isinstance(benchmark_provenance_node, Mapping)
+        else {}
+    )
+    if isinstance(benchmark_protocol_config_path_value, str) and benchmark_protocol_config_path_value.strip():
+        benchmark_provenance.setdefault(
+            "benchmark_protocol_config_path",
+            benchmark_protocol_config_path_value,
+        )
+
+    return {
+        "config_path": benchmark_provenance.get("benchmark_protocol_config_path"),
+        "protocol": copy.deepcopy(benchmark_protocol_payload),
+        "provenance": benchmark_provenance,
+    }
+
+
+def _resolve_score_pool_spec(
+    *,
+    score_name: str,
+    benchmark_protocol_bundle: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    Resolve one score-pool spec from the optional benchmark protocol.
+
+    Args:
+        score_name: Canonical score name.
+        benchmark_protocol_bundle: Optional benchmark protocol bundle.
+
+    Returns:
+        Normalized score-pool spec.
+    """
+    default_score_pool_spec = _default_score_pool_spec(score_name)
+    if not isinstance(benchmark_protocol_bundle, Mapping):
+        return default_score_pool_spec
+
+    benchmark_protocol = benchmark_protocol_bundle.get("protocol")
+    if not isinstance(benchmark_protocol, Mapping):
+        return default_score_pool_spec
+
+    score_pools_node = benchmark_protocol.get("score_pools")
+    if not isinstance(score_pools_node, Mapping):
+        raise ValueError("benchmark_protocol.score_pools must be mapping")
+
+    score_pool_node = score_pools_node.get(score_name)
+    if not isinstance(score_pool_node, Mapping):
+        raise ValueError(f"benchmark protocol missing score_pools.{score_name}")
+
+    return {
+        "calibration_role_order": _normalize_role_order(
+            score_pool_node.get("calibration_role_order"),
+            label=f"benchmark_protocol.score_pools.{score_name}.calibration_role_order",
+        ),
+        "calibration_event_id_keys": _normalize_role_event_id_keys(
+            score_pool_node.get("calibration_event_id_keys"),
+            label=f"benchmark_protocol.score_pools.{score_name}.calibration_event_id_keys",
+        ),
+        "evaluate_role_order": _normalize_role_order(
+            score_pool_node.get("evaluate_role_order"),
+            label=f"benchmark_protocol.score_pools.{score_name}.evaluate_role_order",
+        ),
+        "evaluate_event_id_keys": _normalize_role_event_id_keys(
+            score_pool_node.get("evaluate_event_id_keys"),
+            label=f"benchmark_protocol.score_pools.{score_name}.evaluate_event_id_keys",
+        ),
+    }
+
+
 def _collect_completed_events_for_role(
     *,
     family_root: Path,
@@ -540,6 +715,12 @@ def _build_threshold_export(
         "thresholds_artifact": thresholds_artifact,
         "calibration_record_status": calibration_record.get("status", "<absent>"),
     }
+    benchmark_provenance = score_run.get("benchmark_provenance")
+    if isinstance(benchmark_provenance, Mapping):
+        payload["benchmark_provenance"] = copy.deepcopy(dict(cast(Mapping[str, Any], benchmark_provenance)))
+    score_pool = score_run.get("score_pool")
+    if isinstance(score_pool, Mapping):
+        payload["score_pool"] = copy.deepcopy(dict(cast(Mapping[str, Any], score_pool)))
     write_json_atomic(export_path, payload)
     return {
         "score_name": score_name,
@@ -579,10 +760,7 @@ def _count_records_by_role(records_summary: Mapping[str, Any]) -> Dict[str, int]
     Returns:
         Sample-role counts.
     """
-    counts = {
-        ACTIVE_SAMPLE_ROLE: 0,
-        CLEAN_NEGATIVE_SAMPLE_ROLE: 0,
-    }
+    counts: Dict[str, int] = {}
     records_node = records_summary.get("records")
     if not isinstance(records_node, list):
         return counts
@@ -590,8 +768,8 @@ def _count_records_by_role(records_summary: Mapping[str, Any]) -> Dict[str, int]
         if not isinstance(record_node, Mapping):
             continue
         sample_role = record_node.get("sample_role")
-        if isinstance(sample_role, str) and sample_role in counts:
-            counts[sample_role] += 1
+        if isinstance(sample_role, str) and sample_role:
+            counts[sample_role] = counts.get(sample_role, 0) + 1
     return counts
 
 
@@ -603,7 +781,7 @@ def _build_clean_evaluate_export(
     score_run: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
-    Build one top-level clean-evaluate export from the real evaluate outputs.
+    Build one top-level clean evaluate export from the real evaluate outputs.
 
     Args:
         family_id: Family identifier.
@@ -637,6 +815,12 @@ def _build_clean_evaluate_export(
         "evaluate_input_counts": _count_records_by_role(evaluate_inputs),
         "evaluate_record": evaluate_record,
     }
+    benchmark_provenance = score_run.get("benchmark_provenance")
+    if isinstance(benchmark_provenance, Mapping):
+        payload["benchmark_provenance"] = copy.deepcopy(dict(cast(Mapping[str, Any], benchmark_provenance)))
+    score_pool = score_run.get("score_pool")
+    if isinstance(score_pool, Mapping):
+        payload["score_pool"] = copy.deepcopy(dict(cast(Mapping[str, Any], score_pool)))
     write_json_atomic(export_path, payload)
     return {
         "score_name": score_name,
@@ -861,6 +1045,7 @@ def _build_clean_quality_pair_manifest(
     stage_root: Path,
     positive_event_lookup: Mapping[str, Dict[str, Any]],
     eval_positive_event_ids: Sequence[str],
+    score_run: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Build one reusable clean-pair manifest for downstream PW04 quality metrics.
@@ -974,6 +1159,13 @@ def _build_clean_quality_pair_manifest(
         "prompt_text_missing_count": expected_pair_count - prompt_text_available_count,
         "pair_rows": pair_rows,
     }
+    if isinstance(score_run, Mapping):
+        benchmark_provenance = score_run.get("benchmark_provenance")
+        if isinstance(benchmark_provenance, Mapping):
+            payload["benchmark_provenance"] = copy.deepcopy(dict(cast(Mapping[str, Any], benchmark_provenance)))
+        score_pool = score_run.get("score_pool")
+        if isinstance(score_pool, Mapping):
+            payload["score_pool"] = copy.deepcopy(dict(cast(Mapping[str, Any], score_pool)))
     write_json_atomic(output_path, payload)
     return {
         "path": normalize_path_value(output_path),
@@ -1175,6 +1367,12 @@ def _build_clean_score_analysis_export(
             "thresholds": roc_thresholds,
         },
     }
+    benchmark_provenance = score_run.get("benchmark_provenance")
+    if isinstance(benchmark_provenance, Mapping):
+        payload["benchmark_provenance"] = copy.deepcopy(dict(cast(Mapping[str, Any], benchmark_provenance)))
+    score_pool = score_run.get("score_pool")
+    if isinstance(score_pool, Mapping):
+        payload["score_pool"] = copy.deepcopy(dict(cast(Mapping[str, Any], score_pool)))
     if eval_metrics.is_content_chain_score_name(score_name):
         pair_manifest_path = None
         if isinstance(clean_quality_pair_manifest_export, Mapping):
@@ -1298,6 +1496,7 @@ def _build_finalize_manifest_payload(
     formal_final_decision_export: Mapping[str, Any],
     derived_system_union_export: Mapping[str, Any],
     score_runs: Mapping[str, Dict[str, Any]],
+    benchmark_protocol_bundle: Mapping[str, Any] | None,
     split_counts: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
@@ -1334,7 +1533,7 @@ def _build_finalize_manifest_payload(
         Mapping[str, Any],
         clean_quality_pair_manifest_export.get("payload", {}),
     )
-    return {
+    payload: Dict[str, Any] = {
         "artifact_type": "paper_workflow_pw02_finalize_manifest",
         "schema_version": "pw_stage_02_v1",
         "created_at": utc_now_iso(),
@@ -1442,10 +1641,22 @@ def _build_finalize_manifest_payload(
                 "evaluate_run_root": score_run.get("evaluate_run_root"),
                 "thresholds_artifact_path": score_run.get("thresholds_artifact_path"),
                 "evaluate_record_path": score_run.get("evaluate_record_path"),
+                "score_pool": copy.deepcopy(dict(cast(Mapping[str, Any], score_run.get("score_pool", {})))),
+                "benchmark_provenance": copy.deepcopy(
+                    dict(cast(Mapping[str, Any], score_run.get("benchmark_provenance", {})))
+                ),
             }
             for score_name, score_run in score_runs.items()
         },
     }
+    if isinstance(benchmark_protocol_bundle, Mapping):
+        protocol_node = benchmark_protocol_bundle.get("protocol")
+        if isinstance(protocol_node, Mapping):
+            payload["benchmark_protocol"] = copy.deepcopy(dict(cast(Mapping[str, Any], protocol_node)))
+        provenance_node = benchmark_protocol_bundle.get("provenance")
+        if isinstance(provenance_node, Mapping):
+            payload["benchmark_provenance"] = copy.deepcopy(dict(cast(Mapping[str, Any], provenance_node)))
+    return payload
 
 
 def _build_labelled_detect_payload(
@@ -1567,6 +1778,160 @@ def _build_prepared_records(
             }
         )
     return prepared_records
+
+
+def _build_records_for_score_pool_split(
+    *,
+    family_id: str,
+    split_kind: str,
+    source_split_plan: Mapping[str, Any],
+    role_order: Sequence[str],
+    event_id_keys_by_role: Mapping[str, str],
+    event_lookup_by_role: Mapping[str, Mapping[str, Dict[str, Any]]],
+) -> Dict[str, Any]:
+    """
+    Build one split worth of prepared records for a score-specific pool.
+
+    Args:
+        family_id: Family identifier.
+        split_kind: Split-kind token.
+        source_split_plan: Source split plan payload.
+        role_order: Ordered sample roles for this split.
+        event_id_keys_by_role: Mapping from sample_role to split-plan key.
+        event_lookup_by_role: Mapping from sample_role to event lookup.
+
+    Returns:
+        Split summary with prepared records and role counts.
+    """
+    if not isinstance(source_split_plan, Mapping):
+        raise TypeError("source_split_plan must be Mapping")
+
+    prepared_records: List[Dict[str, Any]] = []
+    included_roles: List[str] = []
+    skipped_roles: List[str] = []
+    role_counts: Dict[str, int] = {}
+
+    for sample_role in role_order:
+        split_event_id_key = event_id_keys_by_role.get(sample_role)
+        if not isinstance(split_event_id_key, str) or not split_event_id_key:
+            raise ValueError(f"missing split event id key for sample_role={sample_role}")
+
+        role_event_lookup = event_lookup_by_role.get(sample_role)
+        if not isinstance(role_event_lookup, Mapping):
+            raise ValueError(f"missing event lookup for sample_role={sample_role}")
+
+        if sample_role == PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE and not role_event_lookup:
+            skipped_roles.append(sample_role)
+            continue
+
+        event_ids_node = source_split_plan.get(split_event_id_key)
+        if not isinstance(event_ids_node, list):
+            raise ValueError(f"source split plan missing {split_event_id_key}")
+
+        role_prepared_records = _build_prepared_records(
+            family_id=family_id,
+            split_kind=split_kind,
+            event_ids=cast(Sequence[str], event_ids_node),
+            sample_role=sample_role,
+            event_lookup=cast(Mapping[str, Dict[str, Any]], role_event_lookup),
+        )
+        prepared_records.extend(role_prepared_records)
+        included_roles.append(sample_role)
+        role_counts[sample_role] = len(role_prepared_records)
+
+    return {
+        "records": prepared_records,
+        "included_roles": included_roles,
+        "skipped_roles": skipped_roles,
+        "role_counts": role_counts,
+    }
+
+
+def _build_score_pool_records(
+    *,
+    family_id: str,
+    score_name: str,
+    source_split_plan: Mapping[str, Any],
+    positive_events: Mapping[str, Dict[str, Any]],
+    clean_negative_events: Mapping[str, Dict[str, Any]],
+    control_negative_events: Mapping[str, Dict[str, Any]],
+    benchmark_protocol_bundle: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    """
+    Build score-specific calibration and evaluate pools.
+
+    Args:
+        family_id: Family identifier.
+        score_name: Canonical score name.
+        source_split_plan: Source split plan payload.
+        positive_events: Positive-source event lookup.
+        clean_negative_events: Clean-negative event lookup.
+        control_negative_events: Control-negative event lookup.
+        benchmark_protocol_bundle: Optional benchmark protocol bundle.
+
+    Returns:
+        Score-pool summary.
+    """
+    score_pool_spec = _resolve_score_pool_spec(
+        score_name=score_name,
+        benchmark_protocol_bundle=benchmark_protocol_bundle,
+    )
+    event_lookup_by_role: Dict[str, Mapping[str, Dict[str, Any]]] = {
+        ACTIVE_SAMPLE_ROLE: positive_events,
+        CLEAN_NEGATIVE_SAMPLE_ROLE: clean_negative_events,
+        PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE: control_negative_events,
+    }
+    calibration_split = _build_records_for_score_pool_split(
+        family_id=family_id,
+        split_kind="calibration",
+        source_split_plan=source_split_plan,
+        role_order=cast(Sequence[str], score_pool_spec["calibration_role_order"]),
+        event_id_keys_by_role=cast(Mapping[str, str], score_pool_spec["calibration_event_id_keys"]),
+        event_lookup_by_role=event_lookup_by_role,
+    )
+    evaluate_split = _build_records_for_score_pool_split(
+        family_id=family_id,
+        split_kind="evaluate",
+        source_split_plan=source_split_plan,
+        role_order=cast(Sequence[str], score_pool_spec["evaluate_role_order"]),
+        event_id_keys_by_role=cast(Mapping[str, str], score_pool_spec["evaluate_event_id_keys"]),
+        event_lookup_by_role=event_lookup_by_role,
+    )
+
+    benchmark_provenance = None
+    if isinstance(benchmark_protocol_bundle, Mapping):
+        benchmark_provenance = copy.deepcopy(
+            cast(Mapping[str, Any], benchmark_protocol_bundle.get("provenance", {}))
+        )
+        if isinstance(benchmark_provenance, dict):
+            benchmark_provenance["score_name"] = score_name
+            benchmark_provenance["calibration_role_order"] = list(
+                cast(Sequence[str], score_pool_spec["calibration_role_order"])
+            )
+            benchmark_provenance["calibration_event_id_keys"] = dict(
+                cast(Mapping[str, str], score_pool_spec["calibration_event_id_keys"])
+            )
+            benchmark_provenance["evaluate_role_order"] = list(
+                cast(Sequence[str], score_pool_spec["evaluate_role_order"])
+            )
+            benchmark_provenance["evaluate_event_id_keys"] = dict(
+                cast(Mapping[str, str], score_pool_spec["evaluate_event_id_keys"])
+            )
+
+    return {
+        "calibration_records": cast(List[Dict[str, Any]], calibration_split["records"]),
+        "evaluate_records": cast(List[Dict[str, Any]], evaluate_split["records"]),
+        "score_pool": {
+            "score_name": score_name,
+            "calibration_role_counts": dict(cast(Mapping[str, int], calibration_split["role_counts"])),
+            "calibration_included_roles": list(cast(Sequence[str], calibration_split["included_roles"])),
+            "calibration_skipped_roles": list(cast(Sequence[str], calibration_split["skipped_roles"])),
+            "evaluate_role_counts": dict(cast(Mapping[str, int], evaluate_split["role_counts"])),
+            "evaluate_included_roles": list(cast(Sequence[str], evaluate_split["included_roles"])),
+            "evaluate_skipped_roles": list(cast(Sequence[str], evaluate_split["skipped_roles"])),
+        },
+        "benchmark_provenance": benchmark_provenance,
+    }
 
 
 def _write_score_split_records(
@@ -1945,39 +2310,27 @@ def run_pw02_merge_source_event_shards(
         sample_role=PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
     )
     control_negative_events = cast(Dict[str, Dict[str, Any]], control_negative_collection["event_lookup"])
-
-    calibration_records = _build_prepared_records(
-        family_id=family_id,
-        split_kind="calibration",
-        event_ids=cast(List[str], source_split_plan.get("calib_pos_event_ids", [])),
-        sample_role=ACTIVE_SAMPLE_ROLE,
-        event_lookup=positive_events,
-    )
-    calibration_records.extend(
-        _build_prepared_records(
+    benchmark_protocol_bundle = _resolve_benchmark_protocol_bundle(family_manifest)
+    score_pool_records = {
+        CONTENT_SCORE_NAME: _build_score_pool_records(
             family_id=family_id,
-            split_kind="calibration",
-            event_ids=cast(List[str], source_split_plan.get("calib_neg_event_ids", [])),
-            sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
-            event_lookup=clean_negative_events,
-        )
-    )
-    evaluate_records = _build_prepared_records(
-        family_id=family_id,
-        split_kind="evaluate",
-        event_ids=cast(List[str], source_split_plan.get("eval_pos_event_ids", [])),
-        sample_role=ACTIVE_SAMPLE_ROLE,
-        event_lookup=positive_events,
-    )
-    evaluate_records.extend(
-        _build_prepared_records(
+            score_name=CONTENT_SCORE_NAME,
+            source_split_plan=source_split_plan,
+            positive_events=positive_events,
+            clean_negative_events=clean_negative_events,
+            control_negative_events=control_negative_events,
+            benchmark_protocol_bundle=benchmark_protocol_bundle,
+        ),
+        EVENT_ATTESTATION_SCORE_NAME: _build_score_pool_records(
             family_id=family_id,
-            split_kind="evaluate",
-            event_ids=cast(List[str], source_split_plan.get("eval_neg_event_ids", [])),
-            sample_role=CLEAN_NEGATIVE_SAMPLE_ROLE,
-            event_lookup=clean_negative_events,
-        )
-    )
+            score_name=EVENT_ATTESTATION_SCORE_NAME,
+            source_split_plan=source_split_plan,
+            positive_events=positive_events,
+            clean_negative_events=clean_negative_events,
+            control_negative_events=control_negative_events,
+            benchmark_protocol_bundle=benchmark_protocol_bundle,
+        ),
+    }
 
     stage_root = ensure_directory(layout["exports_root"] / "pw02")
     validate_path_within_base(family_root, stage_root, "PW02 stage root")
@@ -1993,12 +2346,20 @@ def run_pw02_merge_source_event_shards(
         "source_shard_plan_path": normalize_path_value(layout["source_shard_plan_path"]),
         "source_split_plan_path": normalize_path_value(layout["source_split_plan_path"]),
         "split_counts": {
-            "calibration": len(calibration_records),
-            "evaluate": len(evaluate_records),
+            "calibration": len(cast(List[str], source_split_plan.get("calib_pos_event_ids", [])))
+            + len(cast(List[str], source_split_plan.get("calib_neg_event_ids", []))),
+            "evaluate": len(cast(List[str], source_split_plan.get("eval_pos_event_ids", [])))
+            + len(cast(List[str], source_split_plan.get("eval_neg_event_ids", []))),
         },
         "split_event_ids": {
-            "calibration": [str(record["event_id"]) for record in calibration_records],
-            "evaluate": [str(record["event_id"]) for record in evaluate_records],
+            "calibration": [
+                *[str(event_id) for event_id in cast(List[str], source_split_plan.get("calib_pos_event_ids", []))],
+                *[str(event_id) for event_id in cast(List[str], source_split_plan.get("calib_neg_event_ids", []))],
+            ],
+            "evaluate": [
+                *[str(event_id) for event_id in cast(List[str], source_split_plan.get("eval_pos_event_ids", []))],
+                *[str(event_id) for event_id in cast(List[str], source_split_plan.get("eval_neg_event_ids", []))],
+            ],
         },
     }
     write_json_atomic(merge_manifest_path, merge_manifest_payload)
@@ -2063,29 +2424,41 @@ def run_pw02_merge_source_event_shards(
         discovered_source_shard_count=int(control_negative_collection["discovered_source_shard_count"]),
         missing_source_shard_indices=cast(List[int], control_negative_collection["missing_source_shard_indices"]),
     )
-    clean_quality_pair_manifest_export = _build_clean_quality_pair_manifest(
-        family_id=family_id,
-        stage_root=stage_root,
-        positive_event_lookup=positive_events,
-        eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
-    )
-
     score_runs = {
         CONTENT_SCORE_NAME: _run_score_pipeline(
             score_name=CONTENT_SCORE_NAME,
             stage_root=stage_root,
             base_cfg_obj=base_cfg_obj,
-            calibration_records=calibration_records,
-            evaluate_records=evaluate_records,
+            calibration_records=cast(List[Dict[str, Any]], score_pool_records[CONTENT_SCORE_NAME]["calibration_records"]),
+            evaluate_records=cast(List[Dict[str, Any]], score_pool_records[CONTENT_SCORE_NAME]["evaluate_records"]),
         ),
         EVENT_ATTESTATION_SCORE_NAME: _run_score_pipeline(
             score_name=EVENT_ATTESTATION_SCORE_NAME,
             stage_root=stage_root,
             base_cfg_obj=base_cfg_obj,
-            calibration_records=calibration_records,
-            evaluate_records=evaluate_records,
+            calibration_records=cast(
+                List[Dict[str, Any]],
+                score_pool_records[EVENT_ATTESTATION_SCORE_NAME]["calibration_records"],
+            ),
+            evaluate_records=cast(
+                List[Dict[str, Any]],
+                score_pool_records[EVENT_ATTESTATION_SCORE_NAME]["evaluate_records"],
+            ),
         ),
     }
+    for score_name, score_run in score_runs.items():
+        score_run["score_pool"] = copy.deepcopy(cast(Mapping[str, Any], score_pool_records[score_name]["score_pool"]))
+        score_run["benchmark_provenance"] = copy.deepcopy(
+            cast(Mapping[str, Any], score_pool_records[score_name].get("benchmark_provenance", {}) or {})
+        )
+
+    clean_quality_pair_manifest_export = _build_clean_quality_pair_manifest(
+        family_id=family_id,
+        stage_root=stage_root,
+        positive_event_lookup=positive_events,
+        eval_positive_event_ids=cast(Sequence[str], source_split_plan.get("eval_pos_event_ids", [])),
+        score_run=cast(Mapping[str, Any], score_runs[CONTENT_SCORE_NAME]),
+    )
 
     content_evaluate_root = Path(str(score_runs[CONTENT_SCORE_NAME]["evaluate_run_root"]))
     formal_final_decision_metrics = _build_formal_final_decision_metrics_for_run(content_evaluate_root)
@@ -2179,6 +2552,7 @@ def run_pw02_merge_source_event_shards(
         formal_final_decision_export=formal_final_decision_export,
         derived_system_union_export=derived_system_union_export,
         score_runs=score_runs,
+        benchmark_protocol_bundle=benchmark_protocol_bundle,
         split_counts=cast(Mapping[str, Any], merge_manifest_payload["split_counts"]),
     )
     write_json_atomic(finalize_manifest_path, finalize_manifest_payload)
@@ -2235,5 +2609,12 @@ def run_pw02_merge_source_event_shards(
         "system_final_metrics_artifact_path": str(derived_system_union_export["path"]),
         "split_counts": merge_manifest_payload["split_counts"],
     }
+    if isinstance(benchmark_protocol_bundle, Mapping):
+        protocol_node = benchmark_protocol_bundle.get("protocol")
+        if isinstance(protocol_node, Mapping):
+            summary["benchmark_protocol"] = copy.deepcopy(dict(cast(Mapping[str, Any], protocol_node)))
+        provenance_node = benchmark_protocol_bundle.get("provenance")
+        if isinstance(provenance_node, Mapping):
+            summary["benchmark_provenance"] = copy.deepcopy(dict(cast(Mapping[str, Any], provenance_node)))
     write_json_atomic(summary_path, summary)
     return summary

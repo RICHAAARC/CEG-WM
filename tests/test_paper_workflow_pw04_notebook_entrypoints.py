@@ -123,12 +123,12 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in constants_source
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in constants_source
     assert 'PW04_MODE =' not in constants_source
     assert 'FORCE_RERUN = False' in constants_source
 
     if expected_mode == "prepare":
-        assert 'QUALITY_SHARD_COUNT = None' in constants_source
+        assert 'QUALITY_SHARD_COUNT = 3' in constants_source
         assert 'ENABLE_TAIL_ESTIMATION = False' in constants_source
         assert 'QUALITY_SHARD_INDEX' not in constants_source
         assert 'QUALITY_DEVICE_OVERRIDE' not in constants_source
@@ -147,10 +147,10 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
         assert 'QUALITY_SHARD_INDEX = 0' in constants_source
         assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in constants_source
         assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in constants_source
-        assert 'QUALITY_CLIP_BATCH_SIZE = 400' in constants_source
-        assert 'QUALITY_PSNR_SSIM_DEVICE = None' in constants_source
-        assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in constants_source
-        assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in constants_source
+        assert 'QUALITY_CLIP_BATCH_SIZE = 600' in constants_source
+        assert 'QUALITY_PSNR_SSIM_DEVICE = "cuda"' in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = 128' in constants_source
+        assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = 128' in constants_source
         assert 'QUALITY_SHARD_COUNT' not in constants_source
         assert 'ENABLE_TAIL_ESTIMATION' not in constants_source
         assert 'PW04_MODE = "quality_shard"' in precheck_source
@@ -309,9 +309,9 @@ def test_pw04_quality_notebook_wires_psnr_ssim_batch_overrides() -> None:
         "markdown",
     )[0]
 
-    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in constants_source
-    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in constants_source
-    assert 'QUALITY_PSNR_SSIM_DEVICE = None' in constants_source
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = 128' in constants_source
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = 128' in constants_source
+    assert 'QUALITY_PSNR_SSIM_DEVICE = "cuda"' in constants_source
     assert 'quality_psnr_ssim_device_override=QUALITY_PSNR_SSIM_DEVICE' in quality_runtime_source
     assert 'quality_psnr_ssim_batch_size_override=QUALITY_PSNR_SSIM_BATCH_SIZE' in quality_runtime_source
     assert 'quality_psnr_ssim_batch_element_budget_override=QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' in quality_runtime_source

@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Sequence, cast
 
 from scripts.notebook_runtime_common import (
     REPO_ROOT,
+    compute_file_sha256,
     load_yaml_mapping,
     normalize_path_value,
     utc_now_iso,
@@ -27,6 +28,7 @@ from paper_workflow.scripts.pw_common import (
     ATTACK_SEVERITY_RULE_VERSION,
     CLEAN_NEGATIVE_SAMPLE_ROLE,
     PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE,
+    canonical_mapping_sha256,
     DEFAULT_CONFIG_RELATIVE_PATH,
     DEFAULT_PW_BASE_CONFIG_RELATIVE_PATH,
     DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH,
@@ -123,6 +125,55 @@ def _resolve_matrix_config_path(pw_base_cfg: Dict[str, Any]) -> Path:
     if not isinstance(matrix_config_path_value, str) or not matrix_config_path_value.strip():
         matrix_config_path_value = DEFAULT_PW_MATRIX_CONFIG_RELATIVE_PATH
     return (REPO_ROOT / matrix_config_path_value).resolve()
+
+
+def _resolve_benchmark_protocol_config_path(pw_base_cfg: Dict[str, Any]) -> Path | None:
+    """
+    Resolve the optional shared benchmark protocol config path.
+
+    Args:
+        pw_base_cfg: Parsed pw_base config mapping.
+
+    Returns:
+        Resolved benchmark protocol config path or None.
+    """
+    benchmark_protocol_config_path_value = pw_base_cfg.get("benchmark_protocol_config_path")
+    if not isinstance(benchmark_protocol_config_path_value, str) or not benchmark_protocol_config_path_value.strip():
+        return None
+    return (REPO_ROOT / benchmark_protocol_config_path_value).resolve()
+
+
+def _load_benchmark_protocol_bundle(pw_base_cfg: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    Load the optional shared benchmark protocol bundle.
+
+    Args:
+        pw_base_cfg: Parsed pw_base config mapping.
+
+    Returns:
+        Benchmark protocol bundle with payload and provenance, or None.
+    """
+    benchmark_protocol_config_path = _resolve_benchmark_protocol_config_path(pw_base_cfg)
+    if benchmark_protocol_config_path is None:
+        return None
+
+    benchmark_protocol_cfg = load_yaml_mapping(benchmark_protocol_config_path)
+    if not isinstance(benchmark_protocol_cfg, dict):
+        raise TypeError("benchmark protocol config must load as dict")
+
+    normalized_protocol_config_path = normalize_path_value(benchmark_protocol_config_path)
+    benchmark_protocol_provenance = {
+        "benchmark_protocol_config_path": normalized_protocol_config_path,
+        "benchmark_protocol_file_sha256": compute_file_sha256(benchmark_protocol_config_path),
+        "benchmark_protocol_digest": canonical_mapping_sha256(benchmark_protocol_cfg),
+        "protocol_id": str(benchmark_protocol_cfg.get("protocol_id") or "<absent>"),
+        "schema_version": str(benchmark_protocol_cfg.get("schema_version") or "<absent>"),
+    }
+    return {
+        "config_path": normalized_protocol_config_path,
+        "payload": copy.deepcopy(benchmark_protocol_cfg),
+        "provenance": benchmark_protocol_provenance,
+    }
 
 
 def _resolve_pw_base_config_path(pw_base_config_path: Path | str | None) -> Path:
@@ -436,6 +487,7 @@ def run_pw00_build_family_manifest(
     resolved_pw_base_config_path = _resolve_pw_base_config_path(pw_base_config_path)
     pw_base_cfg = load_yaml_mapping(resolved_pw_base_config_path)
     matrix_config_path = _resolve_matrix_config_path(pw_base_cfg)
+    benchmark_protocol_bundle = _load_benchmark_protocol_bundle(pw_base_cfg)
     matrix_cfg = load_pw_matrix_config(REPO_ROOT, base_config_path=resolved_pw_base_config_path)
     matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
     normalized_seeds = parse_seed_list(seed_list)
@@ -727,6 +779,17 @@ def run_pw00_build_family_manifest(
         "pw_base_config_path": normalize_path_value(resolved_pw_base_config_path),
         "pw_matrix_config_path": normalize_path_value(matrix_config_path),
     }
+    if benchmark_protocol_bundle is not None:
+        family_manifest["benchmark_protocol_config_path"] = str(benchmark_protocol_bundle["config_path"])
+        family_manifest["benchmark_protocol"] = copy.deepcopy(
+            cast(Dict[str, Any], benchmark_protocol_bundle["payload"])
+        )
+        family_manifest["benchmark_provenance"] = copy.deepcopy(
+            cast(Dict[str, Any], benchmark_protocol_bundle["provenance"])
+        )
+        cast(Dict[str, Any], family_manifest["paths"])["benchmark_protocol_config"] = str(
+            benchmark_protocol_bundle["config_path"]
+        )
 
     layout["prompt_snapshot_path"].write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")
     write_json_atomic(layout["method_identity_snapshot_path"], method_identity_snapshot)
@@ -797,5 +860,13 @@ def run_pw00_build_family_manifest(
         "pw_base_config_path": normalize_path_value(resolved_pw_base_config_path),
         "pw_matrix_config_path": normalize_path_value(matrix_config_path),
     }
+    if benchmark_protocol_bundle is not None:
+        summary["benchmark_protocol_config_path"] = str(benchmark_protocol_bundle["config_path"])
+        summary["benchmark_protocol"] = copy.deepcopy(
+            cast(Dict[str, Any], benchmark_protocol_bundle["payload"])
+        )
+        summary["benchmark_provenance"] = copy.deepcopy(
+            cast(Dict[str, Any], benchmark_protocol_bundle["provenance"])
+        )
     write_json_atomic(summary_path, summary)
     return summary

@@ -1,0 +1,53 @@
+schema_version: "pw_shared_benchmark_protocol_v1"
+protocol_id: "shared_hardneg_geometry_benchmark_v1"
+benchmark_name: "shared_hard_negative_geometry_benchmark"
+protocol_family_id: "paper_eval_family_geometry_shared_benchmark_v1"
+content_calibration:
+  protocol_mode: "shared_hard_negative"
+  null_hypothesis_roles:
+    - "clean_negative"
+    - "planner_conditioned_control_negative"
+  control_negative_usage_requirement: "completed_or_skip"
+  expected_effect: "content_failed_subset_emerges_naturally"
+score_pools:
+  content_chain_score:
+    calibration_role_order:
+      - "positive_source"
+      - "clean_negative"
+      - "planner_conditioned_control_negative"
+    calibration_event_id_keys:
+      positive_source: "calib_pos_event_ids"
+      clean_negative: "calib_neg_event_ids"
+      planner_conditioned_control_negative: "calib_control_event_ids"
+    evaluate_role_order:
+      - "positive_source"
+      - "clean_negative"
+      - "planner_conditioned_control_negative"
+    evaluate_event_id_keys:
+      positive_source: "eval_pos_event_ids"
+      clean_negative: "eval_neg_event_ids"
+      planner_conditioned_control_negative: "eval_control_event_ids"
+  event_attestation_score:
+    calibration_role_order:
+      - "positive_source"
+      - "clean_negative"
+    calibration_event_id_keys:
+      positive_source: "calib_pos_event_ids"
+      clean_negative: "calib_neg_event_ids"
+    evaluate_role_order:
+      - "positive_source"
+      - "clean_negative"
+    evaluate_event_id_keys:
+      positive_source: "eval_pos_event_ids"
+      clean_negative: "eval_neg_event_ids"
+geometry_dominant_severity_ladder:
+  matrix_profile: "geometry_shared_benchmark_v1"
+  matrix_version: "pw_attack_matrix_geometry_shared_benchmark_v1"
+  target_subset: "attacked_positive_content_failed_subset"
+  rescue_validation_hypothesis: "formal_geometry_conditional_rescue_favors_multi_evidence_chain"
+append_only_contract:
+  preserve_formal_semantics: true
+  frozen_boundaries:
+    - "main/evaluation/workflow_inputs.py"
+    - "main/watermarking/fusion/neyman_pearson.py"
+    - "main/watermarking/fusion/decision.py"

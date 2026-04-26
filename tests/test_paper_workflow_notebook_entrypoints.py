@@ -209,12 +209,12 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
     assert 'HF_HUB_CACHE = HF_HOME / "hub"' in pw00_constants
     assert 'TRANSFORMERS_CACHE = HF_HOME / "transformers"' in pw00_constants
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
-    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml"' in pw00_constants
     assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_constants
-    assert 'SOURCE_SHARD_COUNT = 4' in pw00_constants
-    assert 'ATTACK_SHARD_COUNT = 16' in pw00_constants
+    assert 'SOURCE_SHARD_COUNT = 3' in pw00_constants
+    assert 'ATTACK_SHARD_COUNT = 3' in pw00_constants
     assert 'run_checked([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], cwd=REPO_ROOT)' in pw00_bootstrap
     assert 'ensure_attestation_env_bootstrap(' in pw00_bootstrap
     assert 'snapshot_download(' not in pw00_bootstrap
@@ -232,11 +232,11 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw01_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw01_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw01_constants
     assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
     assert '"planner_conditioned_control_negative": "control_negative"' in pw01_constants
-    assert 'SHARD_COUNT = 4' in pw01_constants
-    assert 'PW01_WORKER_COUNT = 2' in pw01_constants
+    assert 'SHARD_COUNT = 3' in pw01_constants
+    assert 'PW01_WORKER_COUNT = 1' in pw01_constants
     assert 'MODEL_CACHE_LAYOUT = resolve_notebook_model_cache_layout(DRIVE_MOUNT_ROOT, REPO_ROOT, create_directories=True)' in pw01_repo_bootstrap
     assert '"model_cache_mode": "local_session_primary"' in pw01_repo_bootstrap
     assert '"persistent_hf_root_role": "compatibility_only"' in pw01_repo_bootstrap
@@ -256,20 +256,20 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw02_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw02_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw02_constants
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw02_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw02_constants
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in pw02_bootstrap
     assert 'snapshot_download(' not in pw02_bootstrap
     assert '"--drive-project-root"' in pw02_execute
     assert '"--family-id"' in pw02_execute
 
     assert '"PW03_Attack_Event_Shards.py"' in pw03_constants
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw03_constants
-    assert 'ATTACK_SHARD_COUNT = 16' in pw03_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw03_constants
+    assert 'ATTACK_SHARD_COUNT = 3' in pw03_constants
     assert 'ATTACK_LOCAL_WORKER_COUNT = 4' in pw03_constants
     assert 'ATTACK_FAMILY_ALLOWLIST = None' in pw03_constants
 
     assert '"PW05_Release_And_Signoff.py"' in pw05_constants
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw05_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw05_constants
     assert 'FORCE_RERUN = False' in pw05_constants
 
 
@@ -536,8 +536,8 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     quality_constants = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "SCRIPT_PATH = REPO_ROOT")
     finalize_constants = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "SCRIPT_PATH = REPO_ROOT")
 
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in prepare_constants
-    assert 'QUALITY_SHARD_COUNT = None' in prepare_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in prepare_constants
+    assert 'QUALITY_SHARD_COUNT = 3' in prepare_constants
     assert 'FORCE_RERUN = False' in prepare_constants
     assert 'ENABLE_TAIL_ESTIMATION = False' in prepare_constants
     assert 'PW04_MODE =' not in prepare_constants
@@ -548,20 +548,20 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in prepare_constants
     assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in prepare_constants
 
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in quality_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in quality_constants
     assert 'QUALITY_SHARD_INDEX = 0' in quality_constants
     assert 'FORCE_RERUN = False' in quality_constants
     assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in quality_constants
     assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in quality_constants
-    assert 'QUALITY_CLIP_BATCH_SIZE = 400' in quality_constants
-    assert 'QUALITY_PSNR_SSIM_DEVICE = None' in quality_constants
-    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in quality_constants
-    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in quality_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE = 600' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_DEVICE = "cuda"' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = 128' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = 128' in quality_constants
     assert 'PW04_MODE =' not in quality_constants
     assert 'QUALITY_SHARD_COUNT' not in quality_constants
     assert 'ENABLE_TAIL_ESTIMATION' not in quality_constants
 
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in finalize_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in finalize_constants
     assert 'FORCE_RERUN = False' in finalize_constants
     assert 'PW04_MODE =' not in finalize_constants
     assert 'QUALITY_SHARD_INDEX' not in finalize_constants
@@ -587,10 +587,10 @@ def test_pw04_quality_notebook_constants_include_psnr_ssim_batch_parameters() ->
     quality_constants = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "SCRIPT_PATH = REPO_ROOT")
 
     assert 'QUALITY_LPIPS_BATCH_SIZE = 256' in quality_constants
-    assert 'QUALITY_CLIP_BATCH_SIZE = 400' in quality_constants
-    assert 'QUALITY_PSNR_SSIM_DEVICE = None' in quality_constants
-    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = None' in quality_constants
-    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = None' in quality_constants
+    assert 'QUALITY_CLIP_BATCH_SIZE = 600' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_DEVICE = "cuda"' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_SIZE = 128' in quality_constants
+    assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET = 128' in quality_constants
 
 
 def test_pw04_notebooks_keep_fixed_internal_modes_for_command_construction() -> None:
@@ -725,13 +725,13 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     pw00_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW00_PATH, "扩展规则：")
     pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'print("[后续并行运行说明]")')
 
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
-    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml"' in pw00_constants
     assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_constants
-    assert 'SOURCE_SHARD_COUNT = 4' in pw00_constants
-    assert 'ATTACK_SHARD_COUNT = 16' in pw00_constants
-    assert 'pilot 默认冻结为 16' in pw00_constants
+    assert 'SOURCE_SHARD_COUNT = 3' in pw00_constants
+    assert 'ATTACK_SHARD_COUNT = 3' in pw00_constants
+    assert 'shared benchmark 默认冻结为 3' in pw00_constants
     assert 'RESOLVED_ATTACK_SHARD_COUNT = SOURCE_SHARD_COUNT if ATTACK_SHARD_COUNT is None else ATTACK_SHARD_COUNT' in pw00_constants
     assert 'PROJECT_ROOT_PRECHECK_LABEL = "项目运行根目录存在" if LOCAL_RUNTIME_ENABLED else "Drive 项目根目录存在"' in pw00_precheck
     assert 'record_precheck("prompt 文件存在"' in pw00_precheck
@@ -1058,11 +1058,14 @@ def test_pw00_notebook_default_family_and_base_config_remain_pilot_bound() -> No
     Returns:
         None.
     """
-    pw00_constants = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"')
+    pw00_constants = _find_code_cell_source(
+        NOTEBOOK_PW00_PATH,
+        'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml"',
+    )
 
-    assert 'FAMILY_ID = "paper_eval_family_pilot_v1"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
-    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_pilot.yaml"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml"' in pw00_constants
 
 
 @pytest.mark.parametrize(

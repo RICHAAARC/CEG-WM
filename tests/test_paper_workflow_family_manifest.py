@@ -29,6 +29,15 @@ PILOT_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base
 PILOT_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_pilot.yaml").resolve()
 RESCUE_PW_BASE_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_rescue_v1.yaml").resolve()
 RESCUE_PW_MATRIX_CONFIG_PATH = (REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_rescue_v1.yaml").resolve()
+SHARED_BENCHMARK_PW_BASE_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_shared_benchmark_v1.yaml"
+).resolve()
+SHARED_BENCHMARK_PW_MATRIX_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_shared_benchmark_v1.yaml"
+).resolve()
+SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_shared_hardneg_benchmark_v1.yaml"
+).resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -589,6 +598,72 @@ def test_pw00_binds_geometry_rescue_base_and_freezes_new_reference_pair(tmp_path
     ]
     assert geometry_optional_claim_plan["boundary_abs_margin_min"] == pytest.approx(0.01)
     assert geometry_optional_claim_plan["boundary_abs_margin_max"] == pytest.approx(0.35)
+
+
+def test_pw00_binds_shared_benchmark_protocol_and_provenance(tmp_path: Path) -> None:
+    """
+    Verify PW00 appends shared benchmark protocol config and provenance to summary artifacts.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="paper_eval_family_geometry_shared_benchmark_v1",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=SHARED_BENCHMARK_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    method_identity_snapshot = json.loads(
+        Path(str(family_manifest["paths"]["method_identity_snapshot"])).read_text(encoding="utf-8")
+    )
+
+    assert summary["pw_base_config_path"] == normalize_path_value(SHARED_BENCHMARK_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(SHARED_BENCHMARK_PW_MATRIX_CONFIG_PATH)
+    assert summary["benchmark_protocol_config_path"] == normalize_path_value(SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH)
+    assert summary["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert summary["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_shared_benchmark_v1"
+    assert summary["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(SHARED_BENCHMARK_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(SHARED_BENCHMARK_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["benchmark_protocol_config_path"] == normalize_path_value(
+        SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["benchmark_protocol"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert family_manifest["benchmark_provenance"]["protocol_id"] == "shared_hardneg_geometry_benchmark_v1"
+    assert family_manifest["benchmark_provenance"]["schema_version"] == "pw_shared_benchmark_protocol_v1"
+    assert family_manifest["paths"]["benchmark_protocol_config"] == normalize_path_value(
+        SHARED_BENCHMARK_PROTOCOL_CONFIG_PATH
+    )
+    assert summary["matrix_profile"] == "geometry_shared_benchmark_v1"
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_shared_benchmark_v1"
+    assert method_identity_snapshot["source_alignment_reference_files"] == [
+        "paper_workflow/configs/pw_base_geometry_shared_benchmark_v1.yaml",
+        "paper_workflow/configs/pw_matrix_geometry_shared_benchmark_v1.yaml",
+        "paper_workflow/configs/pw_protocol_shared_hardneg_benchmark_v1.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/scripts/pw02_merge_source_event_shards.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
+        "paper_workflow/notebook/PW02_Source_Merge_And_Global_Thresholds.ipynb",
+        "scripts/notebook_runtime_common.py",
+        "configs/default.yaml",
+    ]
 
 
 def test_pilot_base_and_matrix_remain_unchanged_after_geometry_rescue_append_only_addition() -> None:
