@@ -122,7 +122,7 @@ def test_pw03_notebook_binds_expected_script_and_parameters() -> None:
     assert 'PERSISTENT_INSPYRENET_ROOT = DRIVE_MODELS_ROOT / "inspyrenet"' in constants_source
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in constants_source
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
-    assert 'FAMILY_ID = "paper_eval_family_geometry_shared_benchmark_v1"' in constants_source
+    assert 'FAMILY_ID = "paper_eval_family_geometry_interval_discovery_v2"' in constants_source
     assert 'ATTACK_SHARD_INDEX = 0' in constants_source
     assert 'ATTACK_SHARD_COUNT = 3' in constants_source
     assert 'ATTACK_LOCAL_WORKER_COUNT =' in constants_source

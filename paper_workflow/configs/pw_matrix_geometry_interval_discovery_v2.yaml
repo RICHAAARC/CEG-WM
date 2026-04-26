@@ -1,0 +1,158 @@
+schema_version: "pw_matrix_v1"
+matrix_profile: "geometry_interval_discovery_v2"
+matrix_version: "pw_attack_matrix_geometry_interval_discovery_v2"
+materialization_profile: "matrix_defined_concrete_conditions"
+attack_sets:
+  general_attacks:
+    families:
+      - "rotate"
+      - "resize"
+      - "crop"
+      - "composite"
+  geometry_rescue_candidates:
+    families:
+      - "rotate"
+      - "resize"
+      - "crop"
+      - "composite"
+concrete_conditions:
+  "composite::crop_resize_v3":
+    - condition_suffix: "sev00"
+      severity_label: "crop0.8+resize0.7"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "crop"
+            params:
+              crop_ratio: 0.80
+          - family: "resize"
+            params:
+              scale_factor: 0.70
+        seed_policy: "shared"
+  "composite::rotate_resize_jpeg_v4":
+    - condition_suffix: "sev00"
+      severity_label: "rotate18+resize0.75+jpeg75"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 18
+          - family: "resize"
+            params:
+              scale_factor: 0.75
+          - family: "jpeg"
+            params:
+              quality: 75
+        seed_policy: "shared"
+  "composite::rotate_resize_jpeg_v5":
+    - condition_suffix: "sev00"
+      severity_label: "rotate24+resize0.7+jpeg75"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 24
+          - family: "resize"
+            params:
+              scale_factor: 0.70
+          - family: "jpeg"
+            params:
+              quality: 75
+        seed_policy: "shared"
+  "crop::v4":
+    - condition_suffix: "sev00"
+      severity_label: "crop_ratio=0.8"
+      severity_level_index: 0
+      params:
+        crop_ratios: 0.80
+    - condition_suffix: "sev01"
+      severity_label: "crop_ratio=0.75"
+      severity_level_index: 1
+      params:
+        crop_ratios: 0.75
+    - condition_suffix: "sev02"
+      severity_label: "crop_ratio=0.7"
+      severity_level_index: 2
+      params:
+        crop_ratios: 0.70
+    - condition_suffix: "sev03"
+      severity_label: "crop_ratio=0.675"
+      severity_level_index: 3
+      params:
+        crop_ratios: 0.675
+    - condition_suffix: "sev04"
+      severity_label: "crop_ratio=0.65"
+      severity_level_index: 4
+      params:
+        crop_ratios: 0.65
+  "resize::v4":
+    - condition_suffix: "sev00"
+      severity_label: "scale_factor=0.75"
+      severity_level_index: 0
+      params:
+        scale_factors: 0.75
+    - condition_suffix: "sev01"
+      severity_label: "scale_factor=0.7"
+      severity_level_index: 1
+      params:
+        scale_factors: 0.70
+    - condition_suffix: "sev02"
+      severity_label: "scale_factor=0.675"
+      severity_level_index: 2
+      params:
+        scale_factors: 0.675
+    - condition_suffix: "sev03"
+      severity_label: "scale_factor=0.65"
+      severity_level_index: 3
+      params:
+        scale_factors: 0.65
+    - condition_suffix: "sev04"
+      severity_label: "scale_factor=0.6"
+      severity_level_index: 4
+      params:
+        scale_factors: 0.60
+  "rotate::v4":
+    - condition_suffix: "sev00"
+      severity_label: "degrees=18"
+      severity_level_index: 0
+      params:
+        degrees: 18
+    - condition_suffix: "sev01"
+      severity_label: "degrees=20"
+      severity_level_index: 1
+      params:
+        degrees: 20
+    - condition_suffix: "sev02"
+      severity_label: "degrees=22"
+      severity_level_index: 2
+      params:
+        degrees: 22
+    - condition_suffix: "sev03"
+      severity_label: "degrees=24"
+      severity_level_index: 3
+      params:
+        degrees: 24
+    - condition_suffix: "sev04"
+      severity_label: "degrees=27"
+      severity_level_index: 4
+      params:
+        degrees: 27
+geometry_optional_claim:
+  candidate_attack_set: "geometry_rescue_candidates"
+  boundary_rule_version: "geometry_optional_claim_boundary_band_v3"
+  boundary_metric: "abs_content_margin"
+  boundary_abs_margin_min: 0.01
+  boundary_abs_margin_max: 0.3
+system_event_count_sweep:
+  event_counts:
+    - 1
+    - 2
+    - 4
+    - 8
+    - 16
+    - 32
+    - 64
+  repeat_count: 48
+  random_seed: 20260415
