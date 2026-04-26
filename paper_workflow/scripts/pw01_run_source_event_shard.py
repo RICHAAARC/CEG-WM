@@ -194,6 +194,98 @@ def _write_persistent_stage_log(
     )
 
 
+def _build_preview_precompute_command(config_path: Path, run_root: Path) -> List[str]:
+    """
+    Build a compatibility command payload for in-process preview_precompute execution.
+
+    Args:
+        config_path: Event runtime config path.
+        run_root: Prompt-bound run root.
+
+    Returns:
+        Synthetic command token list used only for audit-compatible stage results.
+    """
+    if not isinstance(config_path, Path):
+        raise TypeError("config_path must be Path")
+    if not isinstance(run_root, Path):
+        raise TypeError("run_root must be Path")
+
+    return [
+        "preview_precompute",
+        "--config",
+        str(config_path),
+        "--out",
+        str(run_root),
+    ]
+
+
+def _write_in_process_worker_log(
+    *,
+    worker_plan: Mapping[str, Any],
+    status: str,
+    detail: str,
+    stderr_text: str,
+) -> None:
+    """
+    Write compatibility logs for one in-process single-worker execution.
+
+    Args:
+        worker_plan: Worker plan payload.
+        status: Worker execution status.
+        detail: Human-readable detail string.
+        stderr_text: Text written to the compatibility stderr log.
+
+    Returns:
+        None.
+    """
+    stdout_log_path = Path(str(worker_plan["stdout_log_path"]))
+    stderr_log_path = Path(str(worker_plan["stderr_log_path"]))
+    _write_persistent_stage_log(
+        log_path=stdout_log_path,
+        stage_name="pw01_worker",
+        command=cast(Sequence[str], worker_plan["command"]),
+        status=status,
+        detail=detail,
+    )
+    stderr_log_path.write_text(stderr_text, encoding="utf-8")
+
+
+def _build_in_process_worker_execution(
+    *,
+    worker_plan: Mapping[str, Any],
+    return_code: int,
+    result_exists: bool,
+) -> Dict[str, Any]:
+    """
+    Build one worker-execution row for in-process single-worker execution.
+
+    Args:
+        worker_plan: Worker plan payload.
+        return_code: Compatibility return code.
+        result_exists: Whether worker_result.json was written.
+
+    Returns:
+        Worker execution summary mapping.
+    """
+    if not isinstance(return_code, int) or isinstance(return_code, bool):
+        raise TypeError("return_code must be int")
+    if not isinstance(result_exists, bool):
+        raise TypeError("result_exists must be bool")
+
+    return {
+        "local_worker_index": int(worker_plan["local_worker_index"]),
+        "worker_root": worker_plan["worker_root"],
+        "worker_plan_path": worker_plan["worker_plan_path"],
+        "worker_result_path": worker_plan["worker_result_path"],
+        "stdout_log_path": worker_plan["stdout_log_path"],
+        "stderr_log_path": worker_plan["stderr_log_path"],
+        "command": list(cast(Sequence[str], worker_plan["command"])),
+        "assigned_event_ids": list(cast(Sequence[str], worker_plan["assigned_event_ids"])),
+        "return_code": return_code,
+        "result_exists": result_exists,
+    }
+
+
 def _build_pw01_stage_runtime_bundle(
     *,
     bound_config_path: Path,
@@ -216,12 +308,25 @@ def _build_pw01_stage_runtime_bundle(
     bundle: Dict[str, Any] = {
         "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
         "persistent_stage_worker_enabled": True,
+        "preview_runtime_session": None,
+        "preview_runtime_session_enabled": False,
+        "embed_runtime_session": None,
         "embed_runtime_session_enabled": False,
+        "detect_runtime_session": None,
         "detect_runtime_session_enabled": False,
+        "worker_preview_runtime_init_elapsed_seconds": None,
         "worker_embed_runtime_init_elapsed_seconds": None,
         "worker_detect_runtime_init_elapsed_seconds": None,
     }
     if normalized_sample_role == ACTIVE_SAMPLE_ROLE:
+        preview_runtime_started_at = time.perf_counter()
+        bundle["preview_runtime_session"] = pw01_stage_runtime_helpers.build_preview_runtime_session(
+            bound_config_path,
+        )
+        bundle["preview_runtime_session_enabled"] = True
+        bundle["worker_preview_runtime_init_elapsed_seconds"] = (
+            time.perf_counter() - preview_runtime_started_at
+        )
         embed_runtime_started_at = time.perf_counter()
         bundle["embed_runtime_session"] = build_embed_runtime_session(
             str(bound_config_path),
@@ -1422,6 +1527,10 @@ def _build_worker_result_payload(
     persistent_stage_worker_enabled = (
         normalized_stage_runtime_bundle.get("execution_mode") == _PERSISTENT_STAGE_EXECUTION_MODE
     )
+    preview_runtime_session_enabled = isinstance(
+        normalized_stage_runtime_bundle.get("preview_runtime_session"),
+        dict,
+    )
     embed_runtime_session_enabled = isinstance(
         normalized_stage_runtime_bundle.get("embed_runtime_session"),
         dict,
@@ -1440,6 +1549,16 @@ def _build_worker_result_payload(
         worker_embed_runtime_init_elapsed_seconds = None
     else:
         worker_embed_runtime_init_elapsed_seconds = float(worker_embed_runtime_init_elapsed_seconds)
+    worker_preview_runtime_init_elapsed_seconds = normalized_stage_runtime_bundle.get(
+        "worker_preview_runtime_init_elapsed_seconds"
+    )
+    if not isinstance(worker_preview_runtime_init_elapsed_seconds, (int, float)) or isinstance(
+        worker_preview_runtime_init_elapsed_seconds,
+        bool,
+    ):
+        worker_preview_runtime_init_elapsed_seconds = None
+    else:
+        worker_preview_runtime_init_elapsed_seconds = float(worker_preview_runtime_init_elapsed_seconds)
     worker_detect_runtime_init_elapsed_seconds = normalized_stage_runtime_bundle.get(
         "worker_detect_runtime_init_elapsed_seconds"
     )
@@ -1451,12 +1570,15 @@ def _build_worker_result_payload(
     else:
         worker_detect_runtime_init_elapsed_seconds = float(worker_detect_runtime_init_elapsed_seconds)
 
+    worker_preview_event_count = 0
     worker_embed_event_count = 0
     worker_detect_event_count = 0
     for event in events:
         stage_results = event.get("stage_results")
         if not isinstance(stage_results, dict):
             continue
+        if isinstance(stage_results.get("preview_precompute"), dict):
+            worker_preview_event_count += 1
         if isinstance(stage_results.get("embed"), dict):
             worker_embed_event_count += 1
         if isinstance(stage_results.get("detect"), dict):
@@ -1482,10 +1604,13 @@ def _build_worker_result_payload(
         "completed_event_ids": completed_event_ids,
         "completed_event_count": len(completed_event_ids),
         "persistent_stage_worker_enabled": persistent_stage_worker_enabled,
+        "preview_runtime_session_enabled": preview_runtime_session_enabled,
         "embed_runtime_session_enabled": embed_runtime_session_enabled,
         "detect_runtime_session_enabled": detect_runtime_session_enabled,
+        "worker_preview_runtime_init_elapsed_seconds": worker_preview_runtime_init_elapsed_seconds,
         "worker_embed_runtime_init_elapsed_seconds": worker_embed_runtime_init_elapsed_seconds,
         "worker_detect_runtime_init_elapsed_seconds": worker_detect_runtime_init_elapsed_seconds,
+        "worker_preview_event_count": worker_preview_event_count,
         "worker_embed_event_count": worker_embed_event_count,
         "worker_detect_event_count": worker_detect_event_count,
         "recommended_pw01_worker_count_for_validation": _RECOMMENDED_PW01_WORKER_COUNT_FOR_VALIDATION[
@@ -2708,13 +2833,52 @@ def _run_positive_source_event(
     )
     write_yaml_mapping(runtime_cfg_path, runtime_cfg)
 
-    preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
-        cfg_obj=runtime_cfg,
-        prompt_run_root=prompt_run_root,
-        prompt_text=prompt_text,
-        prompt_index=source_prompt_index,
-        prompt_file_path=prompt_file,
-    )
+    preview_stage_command = _build_preview_precompute_command(runtime_cfg_path, prompt_run_root)
+    preview_runtime_session = None
+    if isinstance(stage_runtime_bundle, Mapping):
+        if stage_runtime_bundle.get("execution_mode") == _PERSISTENT_STAGE_EXECUTION_MODE:
+            preview_runtime_session = stage_runtime_bundle.get("preview_runtime_session")
+            if not isinstance(preview_runtime_session, dict):
+                raise ValueError("stage_runtime_bundle missing preview_runtime_session")
+
+    if isinstance(preview_runtime_session, dict):
+        preview_stdout_log_path = prompt_run_root / "logs" / "preview_precompute_stdout.log"
+        preview_stderr_log_path = prompt_run_root / "logs" / "preview_precompute_stderr.log"
+        try:
+            preview_precompute = pw01_stage_runtime_helpers.prepare_source_pool_preview_artifact_with_runtime(
+                cfg_obj=runtime_cfg,
+                prompt_run_root=prompt_run_root,
+                prompt_text=prompt_text,
+                prompt_index=source_prompt_index,
+                prompt_file_path=prompt_file,
+                runtime_session=preview_runtime_session,
+            )
+            _write_persistent_stage_log(
+                log_path=preview_stdout_log_path,
+                stage_name="preview_precompute",
+                command=preview_stage_command,
+                status="ok",
+                detail="preview_precompute executed in-process via persistent shard-local preview runtime session",
+            )
+            preview_stderr_log_path.write_text("", encoding="utf-8")
+        except Exception:
+            _write_persistent_stage_log(
+                log_path=preview_stdout_log_path,
+                stage_name="preview_precompute",
+                command=preview_stage_command,
+                status="failed",
+                detail="preview_precompute raised before subprocess log emission; see stderr log for traceback",
+            )
+            preview_stderr_log_path.write_text(traceback.format_exc(), encoding="utf-8")
+            raise
+    else:
+        preview_precompute = pw01_stage_runtime_helpers._prepare_source_pool_preview_artifact(
+            cfg_obj=runtime_cfg,
+            prompt_run_root=prompt_run_root,
+            prompt_text=prompt_text,
+            prompt_index=source_prompt_index,
+            prompt_file_path=prompt_file,
+        )
     preview_runtime_cfg_node = preview_precompute.get("runtime_cfg")
     if not isinstance(preview_runtime_cfg_node, dict):
         raise ValueError("preview precompute result missing runtime_cfg")
@@ -2728,8 +2892,23 @@ def _run_positive_source_event(
     )
     write_yaml_mapping(runtime_cfg_path, preview_runtime_cfg)
 
+    preview_stage_result = preview_precompute.get("preview_record", {})
+    if not isinstance(preview_stage_result, dict):
+        preview_stage_result = {}
+    if isinstance(preview_runtime_session, dict):
+        preview_stage_result = dict(cast(Dict[str, Any], preview_stage_result))
+        preview_stage_result.update(
+            {
+                "return_code": 0,
+                "command": preview_stage_command,
+                "stdout_log_path": normalize_path_value(prompt_run_root / "logs" / "preview_precompute_stdout.log"),
+                "stderr_log_path": normalize_path_value(prompt_run_root / "logs" / "preview_precompute_stderr.log"),
+                "status": preview_stage_result.get("status", "ok"),
+                "execution_mode": _PERSISTENT_STAGE_EXECUTION_MODE,
+            }
+        )
     stage_results: Dict[str, Any] = {
-        "preview_precompute": preview_precompute.get("preview_record", {}),
+        "preview_precompute": dict(cast(Dict[str, Any], preview_stage_result)),
     }
     for stage_name in ["embed", "detect"]:
         command = pw01_stage_runtime_helpers._build_stage_command(stage_name, runtime_cfg_path, prompt_run_root)
@@ -3322,8 +3501,33 @@ def run_pw01_source_event_shard(
     worker_plans: List[Dict[str, Any]] = []
     worker_executions: List[Dict[str, Any]] = []
     worker_results: List[Dict[str, Any]] = []
+    stage_runtime_bundle: Mapping[str, Any] | None = None
     try:
         if pw01_worker_count == 1:
+            worker_plans = (
+                _prepare_local_worker_plans(
+                    drive_project_root=normalized_drive_root,
+                    family_id=family_id,
+                    sample_role=normalized_sample_role,
+                    shard_index=shard_index,
+                    shard_count=shard_count,
+                    pw01_worker_count=pw01_worker_count,
+                    shard_root=shard_root,
+                    default_config_path=default_config_path,
+                    bound_config_path=resolved_bound_config_path,
+                    assigned_events=assigned_events,
+                )
+                if assigned_events
+                else []
+            )
+            if worker_plans:
+                running_manifest["workers"] = _build_worker_state_rows(
+                    worker_plans=worker_plans,
+                    worker_executions=[],
+                    worker_results=[],
+                )
+                write_json_atomic(shard_manifest_path, running_manifest)
+
             stage_runtime_bundle = (
                 _build_pw01_stage_runtime_bundle(
                     bound_config_path=resolved_bound_config_path,
@@ -3342,6 +3546,38 @@ def run_pw01_source_event_shard(
                         stage_runtime_bundle=stage_runtime_bundle,
                     )
                 )
+            if worker_plans:
+                worker_plan = cast(Dict[str, Any], worker_plans[0])
+                worker_result = _build_worker_result_payload(
+                    family_id=family_id,
+                    sample_role=normalized_sample_role,
+                    shard_index=shard_index,
+                    shard_count=shard_count,
+                    pw01_worker_count=pw01_worker_count,
+                    local_worker_index=int(worker_plan["local_worker_index"]),
+                    worker_root=Path(str(worker_plan["worker_root"])),
+                    worker_plan_path=Path(str(worker_plan["worker_plan_path"])),
+                    assigned_event_ids=cast(Sequence[str], worker_plan["assigned_event_ids"]),
+                    assigned_event_indices=cast(Sequence[int], worker_plan["assigned_event_indices"]),
+                    events=executed_events,
+                    status="completed",
+                    stage_runtime_bundle=stage_runtime_bundle,
+                )
+                _write_in_process_worker_log(
+                    worker_plan=worker_plan,
+                    status="ok",
+                    detail="worker executed in-process in single_process mode; no shard-local worker subprocess launched",
+                    stderr_text="",
+                )
+                write_json_atomic(Path(str(worker_plan["worker_result_path"])), worker_result)
+                worker_executions = [
+                    _build_in_process_worker_execution(
+                        worker_plan=worker_plan,
+                        return_code=0,
+                        result_exists=True,
+                    )
+                ]
+                worker_results = [worker_result]
         else:
             worker_plans = _prepare_local_worker_plans(
                 drive_project_root=normalized_drive_root,
@@ -3400,6 +3636,44 @@ def run_pw01_source_event_shard(
             "bound_config_path": normalize_path_value(resolved_bound_config_path),
         }
     except Exception as exc:
+        if pw01_worker_count == 1 and worker_plans and not worker_results:
+            worker_plan = cast(Dict[str, Any], worker_plans[0])
+            worker_traceback = traceback.format_exc()
+            worker_result = _build_worker_result_payload(
+                family_id=family_id,
+                sample_role=normalized_sample_role,
+                shard_index=shard_index,
+                shard_count=shard_count,
+                pw01_worker_count=pw01_worker_count,
+                local_worker_index=int(worker_plan["local_worker_index"]),
+                worker_root=Path(str(worker_plan["worker_root"])),
+                worker_plan_path=Path(str(worker_plan["worker_plan_path"])),
+                assigned_event_ids=cast(Sequence[str], worker_plan["assigned_event_ids"]),
+                assigned_event_indices=cast(Sequence[int], worker_plan["assigned_event_indices"]),
+                events=executed_events,
+                status="failed",
+                stage_runtime_bundle=stage_runtime_bundle,
+                failure_reason="pw01_worker_event_execution_failed",
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+            )
+            worker_result["traceback"] = worker_traceback
+            _write_in_process_worker_log(
+                worker_plan=worker_plan,
+                status="failed",
+                detail="worker executed in-process and raised before shard completion; see stderr log for traceback",
+                stderr_text=worker_traceback,
+            )
+            write_json_atomic(Path(str(worker_plan["worker_result_path"])), worker_result)
+            worker_executions = [
+                _build_in_process_worker_execution(
+                    worker_plan=worker_plan,
+                    return_code=1,
+                    result_exists=True,
+                )
+            ]
+            worker_results = [worker_result]
+
         failed_manifest = dict(running_manifest)
         failed_manifest["status"] = "failed"
         failed_manifest["failed_at"] = utc_now_iso()

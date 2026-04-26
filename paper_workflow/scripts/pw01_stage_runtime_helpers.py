@@ -19,6 +19,7 @@ from scripts.notebook_runtime_common import (
     compute_file_sha256,
     copy_file,
     ensure_directory,
+    load_yaml_mapping,
     normalize_path_value,
     run_command_with_logs,
     write_json_atomic,
@@ -129,6 +130,40 @@ def _build_stage_command(
         command.extend(["--input", str(run_root / "records" / "embed_record.json")])
     command.extend(_build_stage_overrides(stage_name, extra_overrides))
     return command
+
+
+def build_preview_runtime_session(config_path: Path | str) -> Dict[str, Any]:
+    """
+    Build reusable static preview runtime state for multiple PW01 preview generations.
+
+    Args:
+        config_path: Notebook-bound config snapshot path.
+
+    Returns:
+        Mapping containing reusable preview pipeline state.
+    """
+    if isinstance(config_path, Path):
+        resolved_config_path = config_path.expanduser().resolve()
+    elif isinstance(config_path, str) and config_path.strip():
+        resolved_config_path = Path(config_path).expanduser().resolve()
+    else:
+        raise TypeError("config_path must be Path or non-empty str")
+
+    cfg_obj = load_yaml_mapping(resolved_config_path)
+    if not isinstance(cfg_obj, dict):
+        raise TypeError("preview config must be dict")
+
+    _resolve_source_pool_preview_generation_cfg(cfg_obj)
+    existing_input_image_path = _resolve_source_pool_existing_input_image_path(cfg_obj)
+    pipeline_result: Dict[str, Any] | None = None
+    if existing_input_image_path is None:
+        pipeline_result = pipeline_factory.build_pipeline_shell(cfg_obj)
+
+    return {
+        "config_path": normalize_path_value(resolved_config_path),
+        "existing_input_image_path": existing_input_image_path,
+        "pipeline_result": pipeline_result,
+    }
 
 
 def _build_prompt_sha256(prompt_text: str) -> str:
@@ -341,13 +376,15 @@ def _persist_source_pool_preview_artifact(*, source_path: Path, target_path: Pat
         copy_file(source_path, target_path)
 
 
-def _prepare_source_pool_preview_artifact(
+def _prepare_source_pool_preview_artifact_impl(
     *,
     cfg_obj: Dict[str, Any],
     prompt_run_root: Path,
     prompt_text: str,
     prompt_index: int,
     prompt_file_path: str,
+    pipeline_result: Mapping[str, Any] | None,
+    allow_pipeline_build: bool,
 ) -> Dict[str, Any]:
     """
     Prepare the authoritative prompt-conditioned preview artifact consumed by PW01.
@@ -358,6 +395,8 @@ def _prepare_source_pool_preview_artifact(
         prompt_text: Prompt text.
         prompt_index: Prompt index.
         prompt_file_path: Normalized prompt file path.
+        pipeline_result: Optional reusable pipeline result mapping.
+        allow_pipeline_build: Whether per-call pipeline construction is allowed.
 
     Returns:
         Mapping carrying the updated runtime config and preview-generation record payload.
@@ -372,6 +411,10 @@ def _prepare_source_pool_preview_artifact(
         raise TypeError("prompt_index must be non-negative int")
     if not isinstance(prompt_file_path, str) or not prompt_file_path:
         raise TypeError("prompt_file_path must be non-empty str")
+    if not isinstance(allow_pipeline_build, bool):
+        raise TypeError("allow_pipeline_build must be bool")
+    if pipeline_result is not None and not isinstance(pipeline_result, Mapping):
+        raise TypeError("pipeline_result must be Mapping or None")
 
     preview_cfg = _resolve_source_pool_preview_generation_cfg(cfg_obj)
     artifact_rel_path = preview_cfg["artifact_rel_path"]
@@ -455,13 +498,20 @@ def _prepare_source_pool_preview_artifact(
             "preview_record": preview_record,
         }
 
-    pipeline_result = pipeline_factory.build_pipeline_shell(cfg_obj)
-    preview_record["pipeline_status"] = pipeline_result.get("pipeline_status")
-    preview_record["pipeline_error"] = pipeline_result.get("pipeline_error")
-    preview_record["pipeline_runtime_meta"] = pipeline_result.get("pipeline_runtime_meta")
-    preview_record["pipeline_provenance_canon_sha256"] = pipeline_result.get("pipeline_provenance_canon_sha256")
-    preview_record["model_provenance_canon_sha256"] = pipeline_result.get("model_provenance_canon_sha256")
-    preview_pipeline_obj = pipeline_result.get("pipeline_obj")
+    resolved_pipeline_result: Dict[str, Any]
+    if pipeline_result is None:
+        if not allow_pipeline_build:
+            raise ValueError("preview runtime_session missing reusable pipeline_result")
+        resolved_pipeline_result = pipeline_factory.build_pipeline_shell(cfg_obj)
+    else:
+        resolved_pipeline_result = dict(cast(Mapping[str, Any], pipeline_result))
+
+    preview_record["pipeline_status"] = resolved_pipeline_result.get("pipeline_status")
+    preview_record["pipeline_error"] = resolved_pipeline_result.get("pipeline_error")
+    preview_record["pipeline_runtime_meta"] = resolved_pipeline_result.get("pipeline_runtime_meta")
+    preview_record["pipeline_provenance_canon_sha256"] = resolved_pipeline_result.get("pipeline_provenance_canon_sha256")
+    preview_record["model_provenance_canon_sha256"] = resolved_pipeline_result.get("model_provenance_canon_sha256")
+    preview_pipeline_obj = resolved_pipeline_result.get("pipeline_obj")
     preview_device = cfg_obj.get("device", "cpu")
 
     try:
@@ -525,6 +575,75 @@ def _prepare_source_pool_preview_artifact(
         ),
         "preview_record": preview_record,
     }
+
+
+def _prepare_source_pool_preview_artifact(
+    *,
+    cfg_obj: Dict[str, Any],
+    prompt_run_root: Path,
+    prompt_text: str,
+    prompt_index: int,
+    prompt_file_path: str,
+) -> Dict[str, Any]:
+    """
+    Prepare the authoritative prompt-conditioned preview artifact consumed by PW01.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+        prompt_run_root: Prompt-bound subrun root.
+        prompt_text: Prompt text.
+        prompt_index: Prompt index.
+        prompt_file_path: Normalized prompt file path.
+
+    Returns:
+        Mapping carrying the updated runtime config and preview-generation record payload.
+    """
+    return _prepare_source_pool_preview_artifact_impl(
+        cfg_obj=cfg_obj,
+        prompt_run_root=prompt_run_root,
+        prompt_text=prompt_text,
+        prompt_index=prompt_index,
+        prompt_file_path=prompt_file_path,
+        pipeline_result=None,
+        allow_pipeline_build=True,
+    )
+
+
+def prepare_source_pool_preview_artifact_with_runtime(
+    *,
+    cfg_obj: Dict[str, Any],
+    prompt_run_root: Path,
+    prompt_text: str,
+    prompt_index: int,
+    prompt_file_path: str,
+    runtime_session: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Prepare one PW01 preview artifact using a reusable worker-local preview runtime.
+
+    Args:
+        cfg_obj: Prompt-bound runtime config mapping.
+        prompt_run_root: Prompt-bound subrun root.
+        prompt_text: Prompt text.
+        prompt_index: Prompt index.
+        prompt_file_path: Normalized prompt file path.
+        runtime_session: Preview runtime session mapping.
+
+    Returns:
+        Mapping carrying the updated runtime config and preview-generation record payload.
+    """
+    if not isinstance(runtime_session, Mapping):
+        raise TypeError("runtime_session must be Mapping")
+
+    return _prepare_source_pool_preview_artifact_impl(
+        cfg_obj=cfg_obj,
+        prompt_run_root=prompt_run_root,
+        prompt_text=prompt_text,
+        prompt_index=prompt_index,
+        prompt_file_path=prompt_file_path,
+        pipeline_result=cast(Mapping[str, Any] | None, runtime_session.get("pipeline_result")),
+        allow_pipeline_build=False,
+    )
 
 
 def _build_prompt_scoped_package_relative_path(relative_root: str, index: int, file_name: str) -> str:
