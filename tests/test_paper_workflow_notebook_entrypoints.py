@@ -371,12 +371,17 @@ def test_paper_workflow_notebooks_enable_local_runtime_bundle_mode(
     assert 'DRIVE_PROJECT_ROOT = LOCAL_PROJECT_ROOT' in constants_source
     assert 'DRIVE_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
 
-    assert 'from paper_workflow.scripts.pw_local_runtime import prepare_local_runtime_for_stage' in prepare_source
+    assert 'prepare_local_runtime_for_stage' in prepare_source
     assert f'stage_name="{prepare_stage_name}"' in prepare_source
     assert 'local_project_root=LOCAL_PROJECT_ROOT' in prepare_source
     assert 'drive_bundle_root=DRIVE_BUNDLE_ROOT' in prepare_source
     assert 'clean_before_run=True' in prepare_source
     assert 'if LOCAL_RUNTIME_ENABLED:' in prepare_source
+    if notebook_path == NOTEBOOK_PW02_PATH:
+        assert 'resolve_optional_control_negative_inclusion' in prepare_source
+        assert 'INCLUDE_OPTIONAL_CONTROL_NEGATIVE = resolve_optional_control_negative_inclusion(' in prepare_source
+        assert 'include_optional_control_negative=INCLUDE_OPTIONAL_CONTROL_NEGATIVE' in prepare_source
+        assert 'include_optional_control_negative=False' not in prepare_source
     for token in prepare_tokens:
         assert token in prepare_source
 

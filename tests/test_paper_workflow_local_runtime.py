@@ -13,6 +13,7 @@ import pytest
 
 from paper_workflow.scripts.pw_local_runtime import (
     CLEAN_NEGATIVE_ROLE,
+    CONTROL_NEGATIVE_ROLE,
     POSITIVE_SOURCE_ROLE,
     PW00_STAGE_NAME,
     PW01_STAGE_NAME,
@@ -27,6 +28,7 @@ from paper_workflow.scripts.pw_local_runtime import (
     discover_expected_shards,
     prepare_local_runtime_for_stage,
     read_bundle_sidecar,
+    resolve_optional_control_negative_inclusion,
     resolve_stage_dependencies,
     safe_clean_local_runtime,
     verify_bundle_integrity,
@@ -545,6 +547,179 @@ def test_discover_expected_shards_and_resolve_dependencies_are_dynamic(tmp_path:
     assert quality_discovery["expected_indices"] == [0, 1]
     assert len(pw03_dependencies) == 5
     assert len(pw04_quality_dependencies) == 2
+
+
+def test_resolve_optional_control_negative_inclusion_returns_false_when_absent(tmp_path: Path) -> None:
+    """
+    Verify PW02 auto-inclusion stays disabled when no complete control-negative bundles exist.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    family_id = "family_pw02_control_negative_absent"
+    local_project_root = tmp_path / "local_runtime"
+    drive_bundle_root = tmp_path / "drive_bundles"
+
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw00_bootstrap",
+        "pw00_bootstrap",
+        source_shard_count=2,
+        attack_shard_count=1,
+    )
+
+    assert (
+        resolve_optional_control_negative_inclusion(
+            stage_name=PW02_STAGE_NAME,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+        )
+        is False
+    )
+
+
+def test_resolve_optional_control_negative_inclusion_returns_true_when_complete(tmp_path: Path) -> None:
+    """
+    Verify PW02 auto-inclusion enables control-negative staging only when all bundles are complete.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    family_id = "family_pw02_control_negative_complete"
+    local_project_root = tmp_path / "local_runtime"
+    drive_bundle_root = tmp_path / "drive_bundles"
+
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw00_bootstrap",
+        "pw00_bootstrap",
+        source_shard_count=2,
+        attack_shard_count=1,
+    )
+    for shard_index in range(2):
+        _write_bundle_sidecar(
+            drive_bundle_root,
+            family_id,
+            "pw01_source",
+            f"control_negative__shard_{shard_index:04d}",
+            sample_role=CONTROL_NEGATIVE_ROLE,
+            shard_index=shard_index,
+            shard_count=2,
+        )
+
+    assert (
+        resolve_optional_control_negative_inclusion(
+            stage_name=PW02_STAGE_NAME,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+        )
+        is True
+    )
+
+
+def test_resolve_optional_control_negative_inclusion_raises_on_partial_bundles(tmp_path: Path) -> None:
+    """
+    Verify PW02 auto-inclusion fails fast when control-negative bundles are only partially complete.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    family_id = "family_pw02_control_negative_partial"
+    local_project_root = tmp_path / "local_runtime"
+    drive_bundle_root = tmp_path / "drive_bundles"
+
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw00_bootstrap",
+        "pw00_bootstrap",
+        source_shard_count=2,
+        attack_shard_count=1,
+    )
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw01_source",
+        "control_negative__shard_0000",
+        sample_role=CONTROL_NEGATIVE_ROLE,
+        shard_index=0,
+        shard_count=2,
+    )
+
+    with pytest.raises(RuntimeError, match="partial optional control-negative source shards detected"):
+        resolve_optional_control_negative_inclusion(
+            stage_name=PW02_STAGE_NAME,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+        )
+
+
+def test_resolve_optional_control_negative_inclusion_honors_explicit_override(tmp_path: Path) -> None:
+    """
+    Verify explicit helper overrides take precedence over PW02 auto-detection.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    family_id = "family_pw02_control_negative_override"
+    local_project_root = tmp_path / "local_runtime"
+    drive_bundle_root = tmp_path / "drive_bundles"
+
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw00_bootstrap",
+        "pw00_bootstrap",
+        source_shard_count=2,
+        attack_shard_count=1,
+    )
+    _write_bundle_sidecar(
+        drive_bundle_root,
+        family_id,
+        "pw01_source",
+        "control_negative__shard_0000",
+        sample_role=CONTROL_NEGATIVE_ROLE,
+        shard_index=0,
+        shard_count=2,
+    )
+
+    assert (
+        resolve_optional_control_negative_inclusion(
+            stage_name=PW02_STAGE_NAME,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+            include_optional_control_negative=False,
+        )
+        is False
+    )
+    assert (
+        resolve_optional_control_negative_inclusion(
+            stage_name=PW02_STAGE_NAME,
+            family_id=family_id,
+            local_project_root=local_project_root,
+            drive_bundle_root=drive_bundle_root,
+            include_optional_control_negative=True,
+        )
+        is True
+    )
 
 
 def test_pw04_quality_dependency_requires_formal_source_shards(tmp_path: Path) -> None:

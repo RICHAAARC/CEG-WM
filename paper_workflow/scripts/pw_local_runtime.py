@@ -880,6 +880,90 @@ def discover_expected_shards(
     raise FileNotFoundError(f"unable to discover quality shard count: family_id={family_id}")
 
 
+def resolve_optional_control_negative_inclusion(
+    *,
+    stage_name: str,
+    family_id: str,
+    local_project_root: Path,
+    drive_bundle_root: Path,
+    include_optional_control_negative: bool | None = None,
+) -> bool:
+    """
+    功能：为 PW02 自动判定是否纳入 optional control-negative source shards。
+
+    Resolve whether PW02 should include optional control-negative source shards.
+
+    Args:
+        stage_name: Canonical stage name requesting optional control-negative staging.
+        family_id: Family identifier.
+        local_project_root: Local runtime project root.
+        drive_bundle_root: Drive bundle root.
+        include_optional_control_negative: Explicit override. When provided,
+            the helper returns this value directly without auto-detection.
+
+    Returns:
+        True when PW02 should pull optional control-negative inputs; otherwise False.
+
+    Raises:
+        RuntimeError: If complete-consumable control-negative shard bundles are
+            only partially available.
+    """
+    if stage_name not in STAGE_DIRECTORY_NAMES:
+        raise ValueError(f"unsupported stage_name: {stage_name}")
+    if not isinstance(family_id, str) or not family_id.strip():
+        raise TypeError("family_id must be non-empty str")
+    if not isinstance(local_project_root, Path):
+        raise TypeError("local_project_root must be Path")
+    if not isinstance(drive_bundle_root, Path):
+        raise TypeError("drive_bundle_root must be Path")
+    if include_optional_control_negative is not None:
+        if not isinstance(include_optional_control_negative, bool):
+            raise TypeError("include_optional_control_negative must be bool or None")
+        return include_optional_control_negative
+    if stage_name != PW02_STAGE_NAME:
+        return False
+
+    expected_discovery = discover_expected_shards(
+        family_id=family_id,
+        local_project_root=local_project_root,
+        drive_bundle_root=drive_bundle_root,
+        shard_kind="source",
+        sample_role=CONTROL_NEGATIVE_ROLE,
+    )
+    scan_payload = _scan_shard_sidecars(
+        drive_bundle_root=drive_bundle_root,
+        family_id=family_id,
+        stage_name=PW01_STAGE_NAME,
+        sample_role=CONTROL_NEGATIVE_ROLE,
+    )
+    if scan_payload is None:
+        return False
+
+    expected_indices = sorted(int(index) for index in cast(List[int], expected_discovery["expected_indices"]))
+    present_indices = sorted(int(index) for index in cast(List[int], scan_payload["present_indices"]))
+    if not present_indices:
+        return False
+
+    expected_shard_count = int(expected_discovery["shard_count"])
+    sidecar_shard_count = int(scan_payload["shard_count"])
+    if sidecar_shard_count != expected_shard_count:
+        raise RuntimeError(
+            "optional control-negative shard_count mismatch: "
+            f"family_id={family_id}, expected={expected_shard_count}, sidecar_shard_count={sidecar_shard_count}"
+        )
+
+    missing_indices = sorted(set(expected_indices) - set(present_indices))
+    unexpected_indices = sorted(set(present_indices) - set(expected_indices))
+    if missing_indices or unexpected_indices:
+        raise RuntimeError(
+            "partial optional control-negative source shards detected: "
+            f"family_id={family_id}, expected_indices={expected_indices}, "
+            f"present_indices={present_indices}, missing_indices={missing_indices}, "
+            f"unexpected_indices={unexpected_indices}"
+        )
+    return True
+
+
 def _initial_dependency_references(
     *,
     stage_name: str,
