@@ -28,6 +28,8 @@ families:
         degrees: [18, 20, 22, 24, 27]
       v4:
         degrees: [18, 20, 22, 24, 27]
+      v5:
+        degrees: [19, 21, 23, 26, 30]
   resize:
     description: "resize attacks"
     params_versions:
@@ -50,12 +52,17 @@ families:
         crop_ratios: [0.8, 0.75, 0.7, 0.65]
       v4:
         crop_ratios: [0.80, 0.75, 0.70, 0.675, 0.65]
+      v5:
+        crop_ratios: [0.78, 0.72, 0.68, 0.62, 0.58]
   translate:
     description: "translation attacks"
     params_versions:
       v1:
         x_shift: [-24, -12, 12, 24]
         y_shift: [-24, -12, 12, 24]
+      v2:
+        x_shift: [8, 12, 16]
+        y_shift: [0, 4, 8]
   jpeg:
     description: "jpeg compression attacks"
     params_versions:
@@ -151,6 +158,47 @@ families:
           - family: "resize"
             params: {scale_factor: 0.70}
         seed_policy: "shared"
+      rotate_crop_v1:
+        steps:
+          - family: "rotate"
+            params: {degrees: 19}
+          - family: "crop"
+            params: {crop_ratio: 0.78}
+        seed_policy: "shared"
+      rotate_crop_v2:
+        steps:
+          - family: "rotate"
+            params: {degrees: 23}
+          - family: "crop"
+            params: {crop_ratio: 0.72}
+        seed_policy: "shared"
+      rotate_resize_jpeg_v6:
+        steps:
+          - family: "rotate"
+            params: {degrees: 26}
+          - family: "resize"
+            params: {scale_factor: 0.66}
+          - family: "jpeg"
+            params: {quality: 70}
+        seed_policy: "shared"
+      crop_resize_translate_v1:
+        steps:
+          - family: "crop"
+            params: {crop_ratio: 0.68}
+          - family: "resize"
+            params: {scale_factor: 0.62}
+          - family: "translate"
+            params: {x_shift: 8, y_shift: 0}
+        seed_policy: "shared"
+      rotate_translate_resize_v1:
+        steps:
+          - family: "rotate"
+            params: {degrees: 21}
+          - family: "translate"
+            params: {x_shift: 12, y_shift: 4}
+          - family: "resize"
+            params: {scale_factor: 0.72}
+        seed_policy: "shared"
 
 params_versions:
   rotate::v1:
@@ -165,6 +213,9 @@ params_versions:
   rotate::v4:
     family: "rotate"
     params: {degrees: [18, 20, 22, 24, 27]}
+  rotate::v5:
+    family: "rotate"
+    params: {degrees: [19, 21, 23, 26, 30]}
   resize::v1:
     family: "resize"
     params: {scale_factors: [0.75, 0.9, 1.1]}
@@ -189,9 +240,15 @@ params_versions:
   crop::v4:
     family: "crop"
     params: {crop_ratios: [0.80, 0.75, 0.70, 0.675, 0.65]}
+  crop::v5:
+    family: "crop"
+    params: {crop_ratios: [0.78, 0.72, 0.68, 0.62, 0.58]}
   translate::v1:
     family: "translate"
     params: {x_shift: [-24, -12, 12, 24], y_shift: [-24, -12, 12, 24]}
+  translate::v2:
+    family: "translate"
+    params: {x_shift: [8, 12, 16], y_shift: [0, 4, 8]}
   jpeg::v1:
     family: "jpeg"
     params: {quality: [95, 85, 75], seed_policy: "inherit"}
@@ -291,4 +348,55 @@ params_versions:
           params: {crop_ratio: 0.80}
         - family: "resize"
           params: {scale_factor: 0.70}
+      seed_policy: "shared"
+  composite::rotate_crop_v1:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 19}
+        - family: "crop"
+          params: {crop_ratio: 0.78}
+      seed_policy: "shared"
+  composite::rotate_crop_v2:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 23}
+        - family: "crop"
+          params: {crop_ratio: 0.72}
+      seed_policy: "shared"
+  composite::rotate_resize_jpeg_v6:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 26}
+        - family: "resize"
+          params: {scale_factor: 0.66}
+        - family: "jpeg"
+          params: {quality: 70}
+      seed_policy: "shared"
+  composite::crop_resize_translate_v1:
+    family: "composite"
+    params:
+      steps:
+        - family: "crop"
+          params: {crop_ratio: 0.68}
+        - family: "resize"
+          params: {scale_factor: 0.62}
+        - family: "translate"
+          params: {x_shift: 8, y_shift: 0}
+      seed_policy: "shared"
+  composite::rotate_translate_resize_v1:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 21}
+        - family: "translate"
+          params: {x_shift: 12, y_shift: 4}
+        - family: "resize"
+          params: {scale_factor: 0.72}
       seed_policy: "shared"

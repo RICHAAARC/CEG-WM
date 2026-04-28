@@ -123,7 +123,7 @@ def test_pw04_notebook_binds_expected_script_and_parameters(
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in constants_source
     assert 'LOCAL_HF_HUB_CACHE = LOCAL_HF_HOME / "hub"' in constants_source
     assert 'LOCAL_TRANSFORMERS_CACHE = LOCAL_HF_HOME / "transformers"' in constants_source
-    assert 'FAMILY_ID = "paper_eval_family_geometry_interval_discovery_v2"' in constants_source
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in constants_source
     assert 'PW04_MODE =' not in constants_source
     assert 'FORCE_RERUN = False' in constants_source
 

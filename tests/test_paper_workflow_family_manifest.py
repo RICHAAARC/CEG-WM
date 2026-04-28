@@ -53,6 +53,15 @@ INTERVAL_DISCOVERY_V2_PW_MATRIX_CONFIG_PATH = (
 INTERVAL_DISCOVERY_V2_PROTOCOL_CONFIG_PATH = (
     REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_interval_discovery_v2.yaml"
 ).resolve()
+GEOMETRY_MIX_PW_BASE_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_mix.yaml"
+).resolve()
+GEOMETRY_MIX_PW_MATRIX_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_mix.yaml"
+).resolve()
+GEOMETRY_MIX_PROTOCOL_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix.yaml"
+).resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -1011,6 +1020,229 @@ def test_pw00_binds_geometry_interval_discovery_v2_base_and_shared_protocol(tmp_
         "paper_workflow/configs/pw_base_geometry_interval_discovery_v2.yaml",
         "paper_workflow/configs/pw_matrix_geometry_interval_discovery_v2.yaml",
         "paper_workflow/configs/pw_protocol_geometry_interval_discovery_v2.yaml",
+        "paper_workflow/scripts/pw_common.py",
+        "paper_workflow/scripts/pw00_build_family_manifest.py",
+        "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
+        "paper_workflow/scripts/pw01_run_source_event_shard.py",
+        "paper_workflow/scripts/pw02_merge_source_event_shards.py",
+        "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb",
+        "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb",
+        "paper_workflow/notebook/PW02_Source_Merge_And_Global_Thresholds.ipynb",
+        "scripts/notebook_runtime_common.py",
+        "configs/default.yaml",
+    ]
+
+
+def test_attack_protocol_geometry_mix_versions_are_loadable() -> None:
+    """
+    Verify append-only geometry-mix protocol versions are loadable.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    protocol_spec = protocol_loader.load_attack_protocol_spec({})
+    params_versions = protocol_spec.get("params_versions", {})
+    generated_plan = attack_plan.generate_attack_plan(protocol_spec)
+
+    expected_condition_keys = {
+        "rotate::v5",
+        "crop::v5",
+        "translate::v2",
+        "composite::rotate_crop_v1",
+        "composite::rotate_crop_v2",
+        "composite::rotate_resize_jpeg_v6",
+        "composite::crop_resize_translate_v1",
+        "composite::rotate_translate_resize_v1",
+    }
+
+    assert expected_condition_keys.issubset(set(params_versions))
+    assert expected_condition_keys.issubset(set(generated_plan.conditions))
+
+
+def test_geometry_mix_matrix_materializes_expected_condition_subset() -> None:
+    """
+    Verify the geometry-mix matrix parses and materializes the new geometry-dominant conditions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    geometry_mix_base_cfg = load_yaml_mapping(GEOMETRY_MIX_PW_BASE_CONFIG_PATH)
+    matrix_cfg = load_pw_matrix_config(matrix_config_path=GEOMETRY_MIX_PW_MATRIX_CONFIG_PATH)
+    matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
+    attack_condition_catalog = build_attack_condition_catalog(matrix_cfg=matrix_cfg)
+    catalog_params = {
+        row["attack_condition_key"]: row["attack_params"]
+        for row in attack_condition_catalog
+    }
+
+    expected_families = ["rotate", "crop", "translate", "composite"]
+    expected_condition_keys = [
+        "composite::crop_resize_translate_v1::sev00",
+        "composite::rotate_crop_v1::sev00",
+        "composite::rotate_crop_v2::sev00",
+        "composite::rotate_resize_jpeg_v6::sev00",
+        "composite::rotate_translate_resize_v1::sev00",
+        "crop::v5::sev00",
+        "crop::v5::sev01",
+        "crop::v5::sev02",
+        "crop::v5::sev03",
+        "crop::v5::sev04",
+        "rotate::v5::sev00",
+        "rotate::v5::sev01",
+        "rotate::v5::sev02",
+        "rotate::v5::sev03",
+        "rotate::v5::sev04",
+        "translate::v2::sev00",
+        "translate::v2::sev01",
+        "translate::v2::sev02",
+    ]
+
+    assert geometry_mix_base_cfg["benchmark_mode"] == "geometry_mix"
+    assert geometry_mix_base_cfg["benchmark_mode_version"] == "geometry_mix_v1"
+    assert geometry_mix_base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_geometry_mix.yaml"
+    assert geometry_mix_base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_geometry_mix.yaml"
+    assert geometry_mix_base_cfg["sample_roles"]["active"] == [
+        "positive_source",
+        "clean_negative",
+        "planner_conditioned_control_negative",
+    ]
+    assert geometry_mix_base_cfg["sample_roles"]["reserved"] == ["attacked_positive", "attacked_negative"]
+    assert matrix_settings["matrix_profile"] == "geometry_mix_v1"
+    assert matrix_settings["matrix_version"] == "pw_attack_matrix_geometry_mix_v1"
+    assert matrix_settings["materialization_profile"] == "matrix_defined_concrete_conditions"
+    assert matrix_settings["attack_sets"]["general_attacks"] == expected_families
+    assert matrix_settings["attack_sets"]["geometry_rescue_candidates"] == expected_families
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_set"] == "geometry_rescue_candidates"
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_families"] == expected_families
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.18)
+    assert [row["attack_condition_key"] for row in attack_condition_catalog] == expected_condition_keys
+    assert len(attack_condition_catalog) == 18
+    assert catalog_params["rotate::v5::sev00"] == {"degrees": 19}
+    assert catalog_params["rotate::v5::sev04"] == {"degrees": 30}
+    assert catalog_params["crop::v5::sev00"] == {"crop_ratios": 0.78}
+    assert catalog_params["crop::v5::sev04"] == {"crop_ratios": 0.58}
+    assert catalog_params["translate::v2::sev00"] == {"x_shift": 8, "y_shift": 0}
+    assert catalog_params["translate::v2::sev02"] == {"x_shift": 16, "y_shift": 8}
+    assert catalog_params["composite::rotate_crop_v1::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 19}},
+            {"family": "crop", "params": {"crop_ratio": 0.78}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_crop_v2::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 23}},
+            {"family": "crop", "params": {"crop_ratio": 0.72}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_resize_jpeg_v6::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 26}},
+            {"family": "resize", "params": {"scale_factor": 0.66}},
+            {"family": "jpeg", "params": {"quality": 70}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::crop_resize_translate_v1::sev00"] == {
+        "steps": [
+            {"family": "crop", "params": {"crop_ratio": 0.68}},
+            {"family": "resize", "params": {"scale_factor": 0.62}},
+            {"family": "translate", "params": {"x_shift": 8, "y_shift": 0}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_translate_resize_v1::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 21}},
+            {"family": "translate", "params": {"x_shift": 12, "y_shift": 4}},
+            {"family": "resize", "params": {"scale_factor": 0.72}},
+        ],
+        "seed_policy": "shared",
+    }
+
+
+def test_pw00_binds_geometry_mix_base_and_shared_protocol(tmp_path: Path) -> None:
+    """
+    Verify PW00 can bind the geometry-mix base config and append geometry-mix protocol provenance.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="paper_eval_family_geometry_mix",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=GEOMETRY_MIX_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    method_identity_snapshot = json.loads(
+        Path(str(family_manifest["paths"]["method_identity_snapshot"])).read_text(encoding="utf-8")
+    )
+
+    assert summary["pw_base_config_path"] == normalize_path_value(GEOMETRY_MIX_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(GEOMETRY_MIX_PW_MATRIX_CONFIG_PATH)
+    assert summary["benchmark_protocol_config_path"] == normalize_path_value(GEOMETRY_MIX_PROTOCOL_CONFIG_PATH)
+    assert summary["benchmark_protocol"]["protocol_id"] == "geometry_mix_v1"
+    assert summary["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v1"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v1"
+    assert summary["benchmark_provenance"]["protocol_id"] == "geometry_mix_v1"
+    assert summary["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_PROTOCOL_CONFIG_PATH
+    )
+    assert summary["matrix_profile"] == "geometry_mix_v1"
+    assert summary["matrix_version"] == "pw_attack_matrix_geometry_mix_v1"
+    assert summary["attack_condition_count"] == 18
+    assert summary["source_shard_count"] == 3
+    assert summary["attack_shard_count"] == 3
+    assert summary["geometry_optional_claim_boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert summary["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.18)
+    assert family_manifest["family_id"] == "paper_eval_family_geometry_mix"
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(GEOMETRY_MIX_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(GEOMETRY_MIX_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["benchmark_protocol"]["protocol_id"] == "geometry_mix_v1"
+    assert family_manifest["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert family_manifest["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v1"
+    assert family_manifest["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v1"
+    assert family_manifest["benchmark_provenance"]["protocol_id"] == "geometry_mix_v1"
+    assert family_manifest["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["benchmark_protocol"]["score_pools"]["content_chain_score"]["evaluate_role_order"] == [
+        "positive_source",
+        "clean_negative",
+    ]
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_mix_v1"
+    assert family_manifest["attack_parameters"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v1"
+    assert family_manifest["attack_parameters"]["attack_condition_count"] == 18
+    assert family_manifest["attack_parameters"]["geometry_optional_claim_boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert family_manifest["attack_parameters"]["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.18)
+    assert method_identity_snapshot["source_alignment_reference_files"] == [
+        "paper_workflow/configs/pw_base_geometry_mix.yaml",
+        "paper_workflow/configs/pw_matrix_geometry_mix.yaml",
+        "paper_workflow/configs/pw_protocol_geometry_mix.yaml",
         "paper_workflow/scripts/pw_common.py",
         "paper_workflow/scripts/pw00_build_family_manifest.py",
         "paper_workflow/scripts/pw01_stage_runtime_helpers.py",
