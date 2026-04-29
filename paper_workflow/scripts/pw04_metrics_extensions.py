@@ -1558,8 +1558,11 @@ def _build_geometry_optional_claim_summary(
     )
     eligible_rows = [row for row in evidence_rows if row.get("geo_rescue_eligible") is True]
     boundary_subset_eligible_event_count = len(eligible_rows)
-    boundary_subset_rescue_applied_event_count = sum(
+    evidence_scope_rescue_applied_event_count = sum(
         1 for row in evidence_rows if row.get("geo_rescue_applied") is True
+    )
+    boundary_subset_rescue_applied_event_count = sum(
+        1 for row in eligible_rows if row.get("geo_rescue_applied") is True
     )
     boundary_excluded_event_count = sum(
         1
@@ -1624,6 +1627,7 @@ def _build_geometry_optional_claim_summary(
         "content_failed_subset_boundary_event_count": content_failed_subset_boundary_event_count,
         "boundary_subset_eligible_event_count": boundary_subset_eligible_event_count,
         "boundary_subset_rescue_applied_event_count": boundary_subset_rescue_applied_event_count,
+        "evidence_scope_rescue_applied_event_count": evidence_scope_rescue_applied_event_count,
         "boundary_resolved_event_count": len(available_evidence),
         "boundary_excluded_event_count": boundary_excluded_event_count,
         "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
@@ -1730,10 +1734,16 @@ def _build_geometry_optional_claim_summary_payload(
                 "for reference only and is not flattened into overall"
             ),
             "boundary_subset_eligible_event_count": (
-                "analysis-only boundary-scoped count of rows that satisfy optional-claim eligibility"
+                "count of rows eligible for the optional claim; this is eligible-scope and not an evidence count"
             ),
             "boundary_subset_rescue_applied_event_count": (
-                "analysis-only boundary-scoped count of rows where geo_rescue_applied is true inside optional-claim evidence scope"
+                "count of geo_rescue_applied == True within eligible_rows; this is the eligible-scope applied count"
+            ),
+            "evidence_scope_rescue_applied_event_count": (
+                "count of geo_rescue_applied == True within evidence_rows; this is the evidence-scope applied count"
+            ),
+            "supporting_evidence_event_count": (
+                "count of rows with supporting_evidence_available == True; this is not a rescue-applied count"
             ),
             "geo_rescue_applied_on_content_failed_count": (
                 "formal conditional rescue count on the content_failed subset from conditional_rescue_metrics"
@@ -1850,6 +1860,11 @@ def _build_geometry_optional_claim_export_rows(
     export_rows: List[Dict[str, Any]] = []
     for attack_event_row in attack_event_rows:
         evidence_payload = _load_geometry_optional_claim_evidence(attack_event_row)
+        boundary_subset_rescue_applied_count = int(
+            evidence_payload.get("geo_rescue_eligible") is True
+            and evidence_payload.get("geo_rescue_applied") is True
+        )
+        evidence_scope_rescue_applied_count = int(evidence_payload.get("geo_rescue_applied") is True)
         export_rows.append(
             {
                 "attack_event_id": attack_event_row.get("attack_event_id"),
@@ -1866,6 +1881,10 @@ def _build_geometry_optional_claim_export_rows(
                 "claim_mode": evidence_payload.get("claim_mode"),
                 "claim_scope": evidence_payload.get("claim_scope"),
                 "eligible_for_optional_claim": evidence_payload.get("eligible_for_optional_claim"),
+                "geo_rescue_eligible": evidence_payload.get("geo_rescue_eligible"),
+                "geo_rescue_applied": evidence_payload.get("geo_rescue_applied"),
+                "boundary_subset_rescue_applied_count": boundary_subset_rescue_applied_count,
+                "evidence_scope_rescue_applied_count": evidence_scope_rescue_applied_count,
                 "supporting_evidence_available": evidence_payload.get("supporting_evidence_available"),
                 "supporting_signal_count": evidence_payload.get("supporting_signal_count"),
                 "sync_success": evidence_payload.get("sync_success"),
@@ -3232,6 +3251,7 @@ def build_pw04_metrics_extensions(
             "content_failed_subset_boundary_event_count",
             "boundary_subset_eligible_event_count",
             "boundary_subset_rescue_applied_event_count",
+            "evidence_scope_rescue_applied_event_count",
             "boundary_resolved_event_count",
             "boundary_excluded_event_count",
             "boundary_resolution_failed_event_count",
@@ -3266,6 +3286,7 @@ def build_pw04_metrics_extensions(
             "content_failed_subset_boundary_event_count",
             "boundary_subset_eligible_event_count",
             "boundary_subset_rescue_applied_event_count",
+            "evidence_scope_rescue_applied_event_count",
             "boundary_resolved_event_count",
             "boundary_excluded_event_count",
             "boundary_resolution_failed_event_count",

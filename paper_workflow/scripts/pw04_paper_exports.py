@@ -224,6 +224,7 @@ GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_FIELDNAMES: List[str] = [
     "content_failed_count",
     "boundary_subset_eligible_count",
     "boundary_subset_rescue_applied_count",
+    "evidence_scope_rescue_applied_count",
     "boundary_member_count",
     "boundary_resolution_failed_event_count",
     "supporting_evidence_event_count",
@@ -920,6 +921,7 @@ def _build_geometry_optional_claim_by_family_severity_rows(
         content_failed_count = 0
         boundary_subset_eligible_count = 0
         boundary_subset_rescue_applied_count = 0
+        evidence_scope_rescue_applied_count = 0
         boundary_resolution_failed_event_count = 0
         supporting_evidence_event_count = 0
         content_scores: List[float] = []
@@ -931,6 +933,14 @@ def _build_geometry_optional_claim_by_family_severity_rows(
             attestation_payload = _extract_mapping(formal_record.get("attestation"))
             image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
             geometry_optional_claim_evidence = _extract_mapping(row.get("geometry_optional_claim_evidence"))
+            geo_rescue_eligible = (
+                geometry_optional_claim_evidence.get("geo_rescue_eligible") is True
+                or image_evidence_payload.get("geo_rescue_eligible") is True
+            )
+            geo_rescue_applied = (
+                geometry_optional_claim_evidence.get("geo_rescue_applied") is True
+                or image_evidence_payload.get("geo_rescue_applied") is True
+            )
             if (
                 geometry_optional_claim_evidence.get("parent_boundary_hit") is True
                 or geometry_optional_claim_evidence.get("eligible_for_optional_claim") is True
@@ -938,16 +948,12 @@ def _build_geometry_optional_claim_by_family_severity_rows(
                 boundary_hit_count += 1
             if geometry_optional_claim_evidence.get("attacked_content_failed") is True:
                 content_failed_count += 1
-            if (
-                geometry_optional_claim_evidence.get("geo_rescue_eligible") is True
-                or image_evidence_payload.get("geo_rescue_eligible") is True
-            ):
+            if geo_rescue_eligible:
                 boundary_subset_eligible_count += 1
-            if (
-                geometry_optional_claim_evidence.get("geo_rescue_applied") is True
-                or image_evidence_payload.get("geo_rescue_applied") is True
-            ):
+            if geo_rescue_eligible and geo_rescue_applied:
                 boundary_subset_rescue_applied_count += 1
+            if geo_rescue_applied:
+                evidence_scope_rescue_applied_count += 1
             if geometry_optional_claim_evidence.get("boundary_resolution_status") == "failed":
                 boundary_resolution_failed_event_count += 1
             if geometry_optional_claim_evidence.get("supporting_evidence_available") is True:
@@ -972,6 +978,7 @@ def _build_geometry_optional_claim_by_family_severity_rows(
                 "content_failed_count": content_failed_count,
                 "boundary_subset_eligible_count": boundary_subset_eligible_count,
                 "boundary_subset_rescue_applied_count": boundary_subset_rescue_applied_count,
+                "evidence_scope_rescue_applied_count": evidence_scope_rescue_applied_count,
                 "boundary_member_count": boundary_hit_count,
                 "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
                 "supporting_evidence_event_count": supporting_evidence_event_count,

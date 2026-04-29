@@ -19,6 +19,7 @@ from PIL import Image
 import paper_workflow.scripts.pw03_run_attack_event_shard as pw03_module
 import paper_workflow.scripts.pw04_merge_attack_event_shards as pw04_module
 import paper_workflow.scripts.pw04_metrics_extensions as pw04_metrics_extensions_module
+import paper_workflow.scripts.pw04_paper_exports as pw04_paper_exports_module
 import paper_workflow.scripts.pw04_run_quality_shard as pw04_quality_shard_module
 import paper_workflow.scripts.pw_quality_phase_profiler as pw_quality_phase_profiler_module
 import paper_workflow.scripts.pw_quality_metrics as pw_quality_metrics_module
@@ -2901,6 +2902,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
         "content_failed_count",
         "boundary_subset_eligible_count",
         "boundary_subset_rescue_applied_count",
+        "evidence_scope_rescue_applied_count",
     }.issubset(set(geometry_optional_claim_by_family_severity_rows[0].keys()))
 
     assert tail_fpr_1e4["tail_estimation_enabled"] is False
@@ -2959,6 +2961,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert geometry_optional_claim_summary["overall"]["boundary_hit_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_subset_eligible_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_subset_rescue_applied_event_count"] == 0
+    assert geometry_optional_claim_summary["overall"]["evidence_scope_rescue_applied_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_resolved_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_resolution_failed_event_count"] == expected_positive_attack_event_count
     assert geometry_optional_claim_summary["overall"]["evidence_event_count"] == 0
@@ -2966,6 +2969,7 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert "content_failed_subset_event_count" not in geometry_optional_claim_summary["overall"]
     assert "geo_rescue_applied_on_content_failed_count" not in geometry_optional_claim_summary["overall"]
     assert "geo_only_positive_on_content_failed_subset" not in geometry_optional_claim_summary["overall"]
+    assert "evidence_scope_rescue_applied_event_count" in geometry_optional_claim_summary["field_semantics"]
     assert geometry_optional_claim_summary["claim_contract"]["eligibility_is_boundary_subset_only"] is True
     assert len(geometry_optional_claim_by_family_rows) == attack_family_count
     assert all(row["status"] == "not_available" for row in geometry_optional_claim_by_family_rows)
@@ -3173,6 +3177,128 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert first_pool_event["formal_record_path"]
     assert Path(str(first_pool_event["formal_record_path"])).exists()
     assert summary["family_id"] == pw04_summary["family_id"]
+
+
+def test_geometry_optional_claim_applied_counts_distinguish_scopes() -> None:
+    """
+    Verify optional-claim applied counts distinguish eligible-scope from evidence-scope.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    base_evidence = {
+        "status": "ok",
+        "reason": None,
+        "plan_status": "ready",
+        "plan_reason": None,
+        "claim_mode": "optional_geometry_rescue_evidence_only",
+        "claim_scope": "attacked_positive_content_failed_subset",
+        "protocol_version": "pw04_test_v1",
+        "boundary_metric": "content_margin",
+        "boundary_abs_margin_max": 0.1,
+        "boundary_metric_value": 0.01,
+        "boundary_resolution_status": "ok",
+        "boundary_resolution_reason": None,
+        "supporting_evidence_available": False,
+    }
+    synthetic_rows = [
+        {
+            "attack_event_id": "attack_event_000001",
+            "parent_event_id": "parent_event_000001",
+            "attack_family": "resize",
+            "attack_condition_key": "resize::case_a",
+            "attack_config_name": "resize_case_a",
+            "severity_label": "scale_factor=0.75",
+            "severity_level_index": 0,
+            "severity_status": "ok",
+            "matrix_profile": "pilot",
+            "matrix_version": "v1",
+            "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
+            "content_score": 0.2,
+            "event_attestation_score": 0.7,
+            "geometry_optional_claim_evidence": {
+                **base_evidence,
+                "parent_boundary_hit": True,
+                "eligible_for_optional_claim": False,
+                "attacked_content_failed": True,
+                "geo_rescue_eligible": False,
+                "geo_rescue_applied": True,
+            },
+            "detect_payload": {
+                "paper_workflow_geometry_optional_claim_evidence": {
+                    **base_evidence,
+                    "parent_boundary_hit": True,
+                    "eligible_for_optional_claim": False,
+                    "attacked_content_failed": True,
+                    "geo_rescue_eligible": False,
+                    "geo_rescue_applied": True,
+                }
+            },
+            "formal_record": {
+                "derived_attack_union_positive": True,
+                "attestation": {"image_evidence_result": {"geo_rescue_applied": True}},
+            },
+        },
+        {
+            "attack_event_id": "attack_event_000002",
+            "parent_event_id": "parent_event_000002",
+            "attack_family": "resize",
+            "attack_condition_key": "resize::case_a",
+            "attack_config_name": "resize_case_a",
+            "severity_label": "scale_factor=0.75",
+            "severity_level_index": 0,
+            "severity_status": "ok",
+            "matrix_profile": "pilot",
+            "matrix_version": "v1",
+            "sample_role": pw04_module.ATTACKED_POSITIVE_SAMPLE_ROLE,
+            "content_score": 0.2,
+            "event_attestation_score": 0.7,
+            "geometry_optional_claim_evidence": {
+                **base_evidence,
+                "parent_boundary_hit": True,
+                "eligible_for_optional_claim": True,
+                "attacked_content_failed": True,
+                "geo_rescue_eligible": True,
+                "geo_rescue_applied": True,
+            },
+            "detect_payload": {
+                "paper_workflow_geometry_optional_claim_evidence": {
+                    **base_evidence,
+                    "parent_boundary_hit": True,
+                    "eligible_for_optional_claim": True,
+                    "attacked_content_failed": True,
+                    "geo_rescue_eligible": True,
+                    "geo_rescue_applied": True,
+                }
+            },
+            "formal_record": {
+                "derived_attack_union_positive": True,
+                "attestation": {"image_evidence_result": {"geo_rescue_applied": True}},
+            },
+        },
+    ]
+
+    summary_row = pw04_metrics_extensions_module._build_geometry_optional_claim_summary(synthetic_rows)
+    export_rows = pw04_metrics_extensions_module._build_geometry_optional_claim_export_rows(synthetic_rows)
+    severity_rows = pw04_metrics_extensions_module._build_geometry_optional_claim_by_severity_rows(synthetic_rows)
+    family_severity_rows = pw04_paper_exports_module._build_geometry_optional_claim_by_family_severity_rows(
+        synthetic_rows
+    )
+
+    assert summary_row["boundary_subset_eligible_event_count"] == 1
+    assert summary_row["boundary_subset_rescue_applied_event_count"] == 1
+    assert summary_row["evidence_scope_rescue_applied_event_count"] == 2
+    assert export_rows[0]["boundary_subset_rescue_applied_count"] == 0
+    assert export_rows[0]["evidence_scope_rescue_applied_count"] == 1
+    assert export_rows[1]["boundary_subset_rescue_applied_count"] == 1
+    assert export_rows[1]["evidence_scope_rescue_applied_count"] == 1
+    assert severity_rows[0]["boundary_subset_rescue_applied_event_count"] == 1
+    assert severity_rows[0]["evidence_scope_rescue_applied_event_count"] == 2
+    assert family_severity_rows[0]["boundary_subset_rescue_applied_count"] == 1
+    assert family_severity_rows[0]["evidence_scope_rescue_applied_count"] == 2
 
 
 def test_pw04_quality_shard_worker_only_writes_shard_payload(tmp_path: Path, monkeypatch: Any) -> None:
