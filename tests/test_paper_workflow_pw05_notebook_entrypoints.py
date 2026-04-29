@@ -101,7 +101,7 @@ def test_pw05_notebook_binds_expected_script_and_parameters() -> None:
     assert '"PW05_Release_And_Signoff.py"' in constants_source
     assert 'NOTEBOOK_NAME = "PW05_Release_And_Signoff"' in constants_source
     assert 'PERSISTENT_DRIVE_PROJECT_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "CEG_WM_PaperWorkflow"' in constants_source
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in constants_source
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in constants_source
     assert 'DRIVE_PROJECT_ROOT = PERSISTENT_DRIVE_PROJECT_ROOT' in constants_source
     assert 'FORCE_RERUN = False' in constants_source
 
