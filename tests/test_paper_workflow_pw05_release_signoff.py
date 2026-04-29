@@ -458,18 +458,25 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             },
             "overall": {
                 "event_count": 1,
-                "eligible_event_count": 1,
+                "boundary_subset_eligible_event_count": 1,
                 "evidence_event_count": 1,
+            },
+            "conditional_rescue_reference": {
+                "content_failed_subset_event_count": 1,
+                "geo_rescue_applied_on_content_failed_count": 1,
+                "geo_only_positive_on_content_failed_subset": 1,
+                "status": "ok",
+                "reason": None,
             },
         },
     )
     pw04_geometry_optional_claim_by_family_path = _write_text(
         family_root / "exports" / "pw04" / "geometry_diagnostics" / "geometry_optional_claim_by_family.csv",
-        "attack_family,status,eligible_event_count\nresize,ok,1\n",
+        "attack_family,status,boundary_subset_eligible_event_count\nresize,ok,1\n",
     )
     pw04_geometry_optional_claim_by_severity_path = _write_text(
         family_root / "exports" / "pw04" / "geometry_diagnostics" / "geometry_optional_claim_by_severity.csv",
-        "severity_level_index,severity_label,status,eligible_event_count\n0,scale_factor=0.75,ok,1\n",
+        "severity_level_index,severity_label,status,boundary_subset_eligible_event_count\n0,scale_factor=0.75,ok,1\n",
     )
     pw04_geometry_optional_claim_example_manifest_path = _write_json(
         family_root / "exports" / "pw04" / "geometry_diagnostics" / "geometry_optional_claim_example_manifest.json",
@@ -478,7 +485,7 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
             "family_id": family_id,
             "status": "ok",
             "reason": None,
-            "eligible_event_count": 1,
+            "boundary_subset_eligible_event_count": 1,
             "example_count": 1,
             "rows": [
                 {
@@ -582,7 +589,15 @@ def _build_pw05_family_fixture(tmp_path: Path) -> Dict[str, Any]:
     )
     pw04_rescue_metrics_summary_csv_path = _write_text(
         family_root / "exports" / "pw04" / "tables" / "rescue_metrics_summary.csv",
-        "scope,rescue_rate\nsystem_final,0.1\n",
+        (
+            "conditional_rescue_status,content_failed_subset_event_count,geo_rescue_eligible_on_content_failed_count,"
+            "geo_rescue_applied_on_content_failed_count,geo_only_positive_on_content_failed_subset,"
+            "geo_only_positive_on_content_failed_subset_rate,conditional_rescue_rate,rescue_precision,"
+            "rescue_lift_over_content_only,boundary_evidence_status,boundary_subset_eligible_event_count,"
+            "boundary_subset_rescue_applied_event_count,clean_false_accept_count,attack_true_accept_count,"
+            "attack_true_accept_count_by_family\n"
+            "ok,1,1,1,1,1.0,1.0,1.0,0.1,ok,1,1,0,1,{}\n"
+        ),
     )
     pw04_general_attacked_event_table_path = _write_text(
         family_root / "exports" / "pw04" / "tables" / "general_attacked_event_table.jsonl",

@@ -1543,7 +1543,6 @@ def _build_geometry_optional_claim_summary(
     if not isinstance(rows, Sequence):
         raise TypeError("rows must be Sequence")
 
-    conditional_summary = _build_geometry_conditional_rescue_summary(rows)
     evidence_rows = [_load_geometry_optional_claim_evidence(row) for row in rows]
     available_evidence = [
         row
@@ -1552,9 +1551,16 @@ def _build_geometry_optional_claim_summary(
     ]
     boundary_hit_event_count = sum(1 for row in evidence_rows if row.get("parent_boundary_hit") is True)
     content_failed_event_count = sum(1 for row in evidence_rows if row.get("attacked_content_failed") is True)
+    content_failed_subset_boundary_event_count = sum(
+        1
+        for row in evidence_rows
+        if row.get("parent_boundary_hit") is True and row.get("attacked_content_failed") is True
+    )
     eligible_rows = [row for row in evidence_rows if row.get("geo_rescue_eligible") is True]
-    eligible_event_count = len(eligible_rows)
-    rescue_applied_event_count = sum(1 for row in evidence_rows if row.get("geo_rescue_applied") is True)
+    boundary_subset_eligible_event_count = len(eligible_rows)
+    boundary_subset_rescue_applied_event_count = sum(
+        1 for row in evidence_rows if row.get("geo_rescue_applied") is True
+    )
     boundary_excluded_event_count = sum(
         1
         for row in evidence_rows
@@ -1615,8 +1621,9 @@ def _build_geometry_optional_claim_summary(
         "event_count": len(rows),
         "boundary_hit_event_count": boundary_hit_event_count,
         "content_failed_event_count": content_failed_event_count,
-        "eligible_event_count": eligible_event_count,
-        "rescue_applied_event_count": rescue_applied_event_count,
+        "content_failed_subset_boundary_event_count": content_failed_subset_boundary_event_count,
+        "boundary_subset_eligible_event_count": boundary_subset_eligible_event_count,
+        "boundary_subset_rescue_applied_event_count": boundary_subset_rescue_applied_event_count,
         "boundary_resolved_event_count": len(available_evidence),
         "boundary_excluded_event_count": boundary_excluded_event_count,
         "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
@@ -1634,16 +1641,6 @@ def _build_geometry_optional_claim_summary(
         "attention_anchor_support_count": attention_anchor_support_count,
         "claim_modes": claim_modes,
         "protocol_versions": protocol_versions,
-        "content_failed_subset_event_count": conditional_summary["content_failed_subset_event_count"],
-        "geo_rescue_applied_on_content_failed_count": conditional_summary[
-            "geo_rescue_applied_on_content_failed_count"
-        ],
-        "geo_only_positive_on_content_failed_subset": conditional_summary[
-            "geo_only_positive_on_content_failed_subset"
-        ],
-        "geo_only_positive_on_content_failed_subset_rate": conditional_summary[
-            "geo_only_positive_on_content_failed_subset_rate"
-        ],
     }
 
 
@@ -1709,6 +1706,7 @@ def _build_geometry_optional_claim_summary_payload(
         )
 
     overall_summary = _build_geometry_optional_claim_summary(attack_event_rows)
+    conditional_rescue_reference = _build_geometry_conditional_rescue_summary(attack_event_rows)
     readiness_status = "ready" if overall_summary["status"] in {"ok", "partial", "not_applicable"} else "not_ready"
     readiness_reason = None if readiness_status == "ready" else overall_summary["reason"]
 
@@ -1722,6 +1720,28 @@ def _build_geometry_optional_claim_summary_payload(
         "analysis_only": True,
         "status": overall_summary["status"],
         "reason": overall_summary["reason"],
+        "field_semantics": {
+            "overall_scope": (
+                "overall contains boundary / optional-claim evidence counts only; these fields are analysis-only "
+                "and are not the formal paper rescue metrics"
+            ),
+            "conditional_rescue_reference_scope": (
+                "conditional_rescue_reference mirrors the formal content_failed subset conditional rescue summary "
+                "for reference only and is not flattened into overall"
+            ),
+            "boundary_subset_eligible_event_count": (
+                "analysis-only boundary-scoped count of rows that satisfy optional-claim eligibility"
+            ),
+            "boundary_subset_rescue_applied_event_count": (
+                "analysis-only boundary-scoped count of rows where geo_rescue_applied is true inside optional-claim evidence scope"
+            ),
+            "geo_rescue_applied_on_content_failed_count": (
+                "formal conditional rescue count on the content_failed subset from conditional_rescue_metrics"
+            ),
+            "geo_only_positive_on_content_failed_subset": (
+                "formal rescue success count on the content_failed subset from conditional_rescue_metrics"
+            ),
+        },
         "claim_contract": {
             "claim_scope": claim_scopes[0] if len(claim_scopes) == 1 else claim_scopes,
             "claim_modes": overall_summary["claim_modes"],
@@ -1744,6 +1764,7 @@ def _build_geometry_optional_claim_summary_payload(
             "claim_scope": "geometry_optional_claim_optional",
         },
         "overall": overall_summary,
+        "conditional_rescue_reference": conditional_rescue_reference,
         "by_attack_family": [
             {
                 "attack_family": attack_family,
@@ -2000,7 +2021,7 @@ def _build_geometry_optional_claim_example_manifest(
                 "attack_event_id_asc",
             ],
         },
-        "eligible_event_count": len(eligible_rows),
+        "boundary_subset_eligible_event_count": len(eligible_rows),
         "example_count": len(selected_rows),
         "rows": selected_rows,
     }
@@ -3208,8 +3229,9 @@ def build_pw04_metrics_extensions(
             "event_count",
             "boundary_hit_event_count",
             "content_failed_event_count",
-            "eligible_event_count",
-            "rescue_applied_event_count",
+            "content_failed_subset_boundary_event_count",
+            "boundary_subset_eligible_event_count",
+            "boundary_subset_rescue_applied_event_count",
             "boundary_resolved_event_count",
             "boundary_excluded_event_count",
             "boundary_resolution_failed_event_count",
@@ -3223,10 +3245,6 @@ def build_pw04_metrics_extensions(
             "attention_anchor_support_count",
             "claim_modes",
             "protocol_versions",
-            "content_failed_subset_event_count",
-            "geo_rescue_applied_on_content_failed_count",
-            "geo_only_positive_on_content_failed_subset",
-            "geo_only_positive_on_content_failed_subset_rate",
         ],
         [
             _normalize_geometry_optional_claim_csv_row(row)
@@ -3245,8 +3263,9 @@ def build_pw04_metrics_extensions(
             "event_count",
             "boundary_hit_event_count",
             "content_failed_event_count",
-            "eligible_event_count",
-            "rescue_applied_event_count",
+            "content_failed_subset_boundary_event_count",
+            "boundary_subset_eligible_event_count",
+            "boundary_subset_rescue_applied_event_count",
             "boundary_resolved_event_count",
             "boundary_excluded_event_count",
             "boundary_resolution_failed_event_count",
@@ -3260,10 +3279,6 @@ def build_pw04_metrics_extensions(
             "attention_anchor_support_count",
             "claim_modes",
             "protocol_versions",
-            "content_failed_subset_event_count",
-            "geo_rescue_applied_on_content_failed_count",
-            "geo_only_positive_on_content_failed_subset",
-            "geo_only_positive_on_content_failed_subset_rate",
         ],
         _build_geometry_optional_claim_by_severity_rows(attack_event_rows),
     )

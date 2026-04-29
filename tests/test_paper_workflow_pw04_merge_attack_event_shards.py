@@ -2816,12 +2816,28 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
 
     assert len(rescue_rows) == 1
     rescue_row = rescue_rows[0]
+    assert rescue_row["conditional_rescue_status"] == conditional_rescue_metrics["overall"]["status"]
+    assert rescue_row["content_failed_subset_event_count"] == str(
+        conditional_rescue_metrics["overall"]["content_failed_subset_event_count"]
+    )
+    assert rescue_row["geo_rescue_applied_on_content_failed_count"] == str(
+        conditional_rescue_metrics["overall"]["geo_rescue_applied_on_content_failed_count"]
+    )
+    assert rescue_row["geo_only_positive_on_content_failed_subset"] == str(
+        conditional_rescue_metrics["overall"]["geo_only_positive_on_content_failed_subset"]
+    )
+    assert rescue_row["boundary_subset_eligible_event_count"] == str(
+        geometry_optional_claim_summary["overall"]["boundary_subset_eligible_event_count"]
+    )
+    assert rescue_row["boundary_subset_rescue_applied_event_count"] == str(
+        geometry_optional_claim_summary["overall"]["boundary_subset_rescue_applied_event_count"]
+    )
     assert rescue_row["clean_false_accept_count"] == "0"
     assert rescue_row["attack_true_accept_count"] == str(pw03_fixture["expected_derived_union_positive_count"])
     attack_true_accept_count_by_family = json.loads(rescue_row["attack_true_accept_count_by_family"])
     assert sum(int(value) for value in attack_true_accept_count_by_family.values()) == pw03_fixture["expected_derived_union_positive_count"]
-    geo_not_used_reason_counts = json.loads(rescue_row["geo_not_used_reason_counts"])
-    assert geo_not_used_reason_counts
+    assert "geo_rescue_applied_count" not in rescue_row
+    assert "rescue_rate" not in rescue_row
 
     assert set(bootstrap_payload["scopes"].keys()) == {"content_chain", "event_attestation", "system_final"}
     assert bootstrap_payload["scopes"]["content_chain"]["clean_tpr"]["status"] == "ok"
@@ -2883,8 +2899,8 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert {
         "boundary_hit_count",
         "content_failed_count",
-        "eligible_count",
-        "rescue_applied_count",
+        "boundary_subset_eligible_count",
+        "boundary_subset_rescue_applied_count",
     }.issubset(set(geometry_optional_claim_by_family_severity_rows[0].keys()))
 
     assert tail_fpr_1e4["tail_estimation_enabled"] is False
@@ -2938,23 +2954,27 @@ def test_pw04_merge_attack_event_shards_success_path(tmp_path: Path, monkeypatch
     assert geometry_optional_claim_summary["reason"] == "no_geometry_optional_claim_boundary_resolution_available"
     assert geometry_optional_claim_summary["readiness"]["status"] == "not_ready"
     assert geometry_optional_claim_summary["readiness"]["blocking"] is False
+    assert geometry_optional_claim_summary["conditional_rescue_reference"] == conditional_rescue_metrics["overall"]
     assert geometry_optional_claim_summary["overall"]["event_count"] == expected_positive_attack_event_count
     assert geometry_optional_claim_summary["overall"]["boundary_hit_event_count"] == 0
-    assert geometry_optional_claim_summary["overall"]["eligible_event_count"] == 0
-    assert geometry_optional_claim_summary["overall"]["rescue_applied_event_count"] == 0
+    assert geometry_optional_claim_summary["overall"]["boundary_subset_eligible_event_count"] == 0
+    assert geometry_optional_claim_summary["overall"]["boundary_subset_rescue_applied_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_resolved_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["boundary_resolution_failed_event_count"] == expected_positive_attack_event_count
     assert geometry_optional_claim_summary["overall"]["evidence_event_count"] == 0
     assert geometry_optional_claim_summary["overall"]["supporting_evidence_event_count"] == 0
+    assert "content_failed_subset_event_count" not in geometry_optional_claim_summary["overall"]
+    assert "geo_rescue_applied_on_content_failed_count" not in geometry_optional_claim_summary["overall"]
+    assert "geo_only_positive_on_content_failed_subset" not in geometry_optional_claim_summary["overall"]
     assert geometry_optional_claim_summary["claim_contract"]["eligibility_is_boundary_subset_only"] is True
     assert len(geometry_optional_claim_by_family_rows) == attack_family_count
     assert all(row["status"] == "not_available" for row in geometry_optional_claim_by_family_rows)
     assert all("boundary_hit_event_count" in row for row in geometry_optional_claim_by_family_rows)
-    assert all(row["eligible_event_count"] == "0" for row in geometry_optional_claim_by_family_rows)
+    assert all(row["boundary_subset_eligible_event_count"] == "0" for row in geometry_optional_claim_by_family_rows)
     assert geometry_optional_claim_by_severity_rows
     assert all(row["status"] == "not_available" for row in geometry_optional_claim_by_severity_rows)
     assert geometry_optional_claim_example_manifest["status"] == "not_available"
-    assert geometry_optional_claim_example_manifest["eligible_event_count"] == 0
+    assert geometry_optional_claim_example_manifest["boundary_subset_eligible_event_count"] == 0
     assert geometry_optional_claim_example_manifest["example_count"] == 0
     assert geometry_optional_claim_example_manifest["rows"] == []
 

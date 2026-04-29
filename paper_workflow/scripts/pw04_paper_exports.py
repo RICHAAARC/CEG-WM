@@ -124,16 +124,23 @@ ATTACK_CONDITION_PAPER_FIELDNAMES: List[str] = [
     "attack_mean_clip_text_similarity",
 ]
 RESCUE_METRICS_SUMMARY_FIELDNAMES: List[str] = [
-    "geo_helped_positive_count",
-    "geo_not_used_count",
-    "rescue_rate",
-    "attested_rate",
+    "conditional_rescue_status",
+    "conditional_rescue_reason",
+    "content_failed_subset_event_count",
+    "geo_rescue_eligible_on_content_failed_count",
+    "geo_rescue_applied_on_content_failed_count",
+    "geo_only_positive_on_content_failed_subset",
+    "geo_only_positive_on_content_failed_subset_rate",
+    "conditional_rescue_rate",
+    "rescue_precision",
+    "rescue_lift_over_content_only",
+    "boundary_evidence_status",
+    "boundary_evidence_reason",
+    "boundary_subset_eligible_event_count",
+    "boundary_subset_rescue_applied_event_count",
     "clean_false_accept_count",
     "attack_true_accept_count",
     "attack_true_accept_count_by_family",
-    "geo_rescue_eligible_count",
-    "geo_rescue_applied_count",
-    "geo_not_used_reason_counts",
 ]
 BOOTSTRAP_CSV_FIELDNAMES: List[str] = [
     "scope",
@@ -215,10 +222,8 @@ GEOMETRY_OPTIONAL_CLAIM_BY_FAMILY_SEVERITY_FIELDNAMES: List[str] = [
     "system_final_attack_tpr",
     "boundary_hit_count",
     "content_failed_count",
-    "eligible_count",
-    "rescue_applied_count",
-    "geo_rescue_eligible_count",
-    "geo_rescue_applied_count",
+    "boundary_subset_eligible_count",
+    "boundary_subset_rescue_applied_count",
     "boundary_member_count",
     "boundary_resolution_failed_event_count",
     "supporting_evidence_event_count",
@@ -913,8 +918,8 @@ def _build_geometry_optional_claim_by_family_severity_rows(
         system_final_positive_count = 0
         boundary_hit_count = 0
         content_failed_count = 0
-        eligible_count = 0
-        rescue_applied_count = 0
+        boundary_subset_eligible_count = 0
+        boundary_subset_rescue_applied_count = 0
         boundary_resolution_failed_event_count = 0
         supporting_evidence_event_count = 0
         content_scores: List[float] = []
@@ -937,12 +942,12 @@ def _build_geometry_optional_claim_by_family_severity_rows(
                 geometry_optional_claim_evidence.get("geo_rescue_eligible") is True
                 or image_evidence_payload.get("geo_rescue_eligible") is True
             ):
-                eligible_count += 1
+                boundary_subset_eligible_count += 1
             if (
                 geometry_optional_claim_evidence.get("geo_rescue_applied") is True
                 or image_evidence_payload.get("geo_rescue_applied") is True
             ):
-                rescue_applied_count += 1
+                boundary_subset_rescue_applied_count += 1
             if geometry_optional_claim_evidence.get("boundary_resolution_status") == "failed":
                 boundary_resolution_failed_event_count += 1
             if geometry_optional_claim_evidence.get("supporting_evidence_available") is True:
@@ -965,10 +970,8 @@ def _build_geometry_optional_claim_by_family_severity_rows(
                 "system_final_attack_tpr": _safe_rate(system_final_positive_count, len(rows)),
                 "boundary_hit_count": boundary_hit_count,
                 "content_failed_count": content_failed_count,
-                "eligible_count": eligible_count,
-                "rescue_applied_count": rescue_applied_count,
-                "geo_rescue_eligible_count": eligible_count,
-                "geo_rescue_applied_count": rescue_applied_count,
+                "boundary_subset_eligible_count": boundary_subset_eligible_count,
+                "boundary_subset_rescue_applied_count": boundary_subset_rescue_applied_count,
                 "boundary_member_count": boundary_hit_count,
                 "boundary_resolution_failed_event_count": boundary_resolution_failed_event_count,
                 "supporting_evidence_event_count": supporting_evidence_event_count,
@@ -1391,69 +1394,55 @@ def _build_rescue_metrics_summary_row(
     *,
     attack_event_rows: Sequence[Mapping[str, Any]],
     system_final_main_row: Mapping[str, Any],
+    conditional_rescue_metrics_payload: Mapping[str, Any],
+    geometry_optional_claim_summary_payload: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """
-    功能：从真实 attack formal records 构造 rescue 汇总行。
+    功能：从 formal conditional rescue 与 boundary evidence 载荷构造 rescue 汇总行。
 
-    Build the rescue summary row from real attack formal records and clean metrics.
+    Build the rescue summary row from the formal conditional rescue payload and
+    the boundary optional-claim evidence payload.
 
     Args:
         attack_event_rows: Materialized PW04 attack event rows.
         system_final_main_row: Canonical system_final main-summary row.
+        conditional_rescue_metrics_payload: In-memory conditional rescue metrics payload.
+        geometry_optional_claim_summary_payload: In-memory geometry optional-claim summary payload.
 
     Returns:
         One rescue summary row.
     """
-    geo_helped_positive_count = 0
-    geo_not_used_count = 0
-    geo_rescue_eligible_count = 0
-    geo_rescue_applied_count = 0
-    attested_positive_count = 0
-    attack_true_accept_count = 0
-    geo_not_used_reason_counts: Dict[str, int] = {}
     attack_true_accept_count_by_family: Dict[str, int] = {}
+    conditional_rescue_overall = _extract_mapping(conditional_rescue_metrics_payload.get("overall"))
+    boundary_evidence_overall = _extract_mapping(geometry_optional_claim_summary_payload.get("overall"))
 
     for attack_event_row in attack_event_rows:
         formal_record = _extract_mapping(attack_event_row.get("formal_record"))
-        attestation_payload = _extract_mapping(formal_record.get("attestation"))
-        image_evidence_payload = _extract_mapping(attestation_payload.get("image_evidence_result"))
-        formal_attestation_payload = _extract_mapping(formal_record.get("formal_event_attestation_decision"))
         attack_family = str(attack_event_row.get("attack_family", "<unknown>"))
         derived_attack_union_positive = bool(formal_record.get("derived_attack_union_positive", False))
-        geo_rescue_eligible = bool(image_evidence_payload.get("geo_rescue_eligible", False))
-        geo_rescue_applied = bool(image_evidence_payload.get("geo_rescue_applied", False))
-        geo_not_used_reason = image_evidence_payload.get("geo_not_used_reason")
-
-        if geo_rescue_eligible:
-            geo_rescue_eligible_count += 1
-        if geo_rescue_applied:
-            geo_rescue_applied_count += 1
-        if geo_rescue_applied and derived_attack_union_positive:
-            geo_helped_positive_count += 1
-        if isinstance(geo_not_used_reason, str) and geo_not_used_reason:
-            geo_not_used_count += 1
-            geo_not_used_reason_counts[geo_not_used_reason] = geo_not_used_reason_counts.get(geo_not_used_reason, 0) + 1
-        if formal_attestation_payload.get("is_watermarked") is True:
-            attested_positive_count += 1
         if derived_attack_union_positive:
-            attack_true_accept_count += 1
             attack_true_accept_count_by_family[attack_family] = attack_true_accept_count_by_family.get(attack_family, 0) + 1
 
-    attack_positive_count = _extract_int(system_final_main_row, "attack_positive_count")
+    attack_true_accept_count = _extract_int(system_final_main_row, "accepted_count_attack_positive")
     clean_false_accept_count = _extract_int(system_final_main_row, "accepted_count_clean_negative")
-    rescue_rate = None if attack_positive_count in {None, 0} else float(geo_helped_positive_count / attack_positive_count)
-    attested_rate = None if attack_positive_count in {None, 0} else float(attested_positive_count / attack_positive_count)
     return {
-        "geo_helped_positive_count": geo_helped_positive_count,
-        "geo_not_used_count": geo_not_used_count,
-        "rescue_rate": rescue_rate,
-        "attested_rate": attested_rate,
+        "conditional_rescue_status": conditional_rescue_overall.get("status"),
+        "conditional_rescue_reason": conditional_rescue_overall.get("reason"),
+        "content_failed_subset_event_count": conditional_rescue_overall.get("content_failed_subset_event_count"),
+        "geo_rescue_eligible_on_content_failed_count": conditional_rescue_overall.get("geo_rescue_eligible_on_content_failed_count"),
+        "geo_rescue_applied_on_content_failed_count": conditional_rescue_overall.get("geo_rescue_applied_on_content_failed_count"),
+        "geo_only_positive_on_content_failed_subset": conditional_rescue_overall.get("geo_only_positive_on_content_failed_subset"),
+        "geo_only_positive_on_content_failed_subset_rate": conditional_rescue_overall.get("geo_only_positive_on_content_failed_subset_rate"),
+        "conditional_rescue_rate": conditional_rescue_overall.get("conditional_rescue_rate"),
+        "rescue_precision": conditional_rescue_overall.get("rescue_precision"),
+        "rescue_lift_over_content_only": conditional_rescue_overall.get("rescue_lift_over_content_only"),
+        "boundary_evidence_status": boundary_evidence_overall.get("status"),
+        "boundary_evidence_reason": boundary_evidence_overall.get("reason"),
+        "boundary_subset_eligible_event_count": boundary_evidence_overall.get("boundary_subset_eligible_event_count"),
+        "boundary_subset_rescue_applied_event_count": boundary_evidence_overall.get("boundary_subset_rescue_applied_event_count"),
         "clean_false_accept_count": clean_false_accept_count,
         "attack_true_accept_count": attack_true_accept_count,
         "attack_true_accept_count_by_family": json.dumps(dict(sorted(attack_true_accept_count_by_family.items())), ensure_ascii=False, sort_keys=True),
-        "geo_rescue_eligible_count": geo_rescue_eligible_count,
-        "geo_rescue_applied_count": geo_rescue_applied_count,
-        "geo_not_used_reason_counts": json.dumps(dict(sorted(geo_not_used_reason_counts.items())), ensure_ascii=False, sort_keys=True),
     }
 
 
@@ -2341,8 +2330,8 @@ def _build_rescue_breakdown_figure(input_csv_path: Path, output_path: Path) -> N
         raise ValueError("rescue summary CSV must contain at least one row")
     row = rows[0]
     labels = [
-        "geo_helped_positive_count",
-        "geo_not_used_count",
+        "geo_only_positive_on_content_failed_subset",
+        "boundary_subset_rescue_applied_event_count",
         "clean_false_accept_count",
         "attack_true_accept_count",
     ]
@@ -2589,10 +2578,25 @@ def build_pw04_paper_exports(
     )
     _write_csv_rows(attack_condition_summary_paper_path, ATTACK_CONDITION_PAPER_FIELDNAMES, condition_rows)
 
+    from paper_workflow.scripts.pw04_metrics_extensions import (
+        _build_geometry_conditional_rescue_metrics_payload,
+        _build_geometry_optional_claim_summary_payload,
+    )
+
     system_final_main_row = next(row for row in ordered_main_rows if row["scope"] == "system_final")
+    conditional_rescue_metrics_payload = _build_geometry_conditional_rescue_metrics_payload(
+        family_id=family_id,
+        attack_event_rows=attack_event_rows,
+    )
+    geometry_optional_claim_summary_payload = _build_geometry_optional_claim_summary_payload(
+        family_id=family_id,
+        attack_event_rows=attack_event_rows,
+    )
     rescue_summary_row = _build_rescue_metrics_summary_row(
         attack_event_rows=attack_event_rows,
         system_final_main_row=system_final_main_row,
+        conditional_rescue_metrics_payload=conditional_rescue_metrics_payload,
+        geometry_optional_claim_summary_payload=geometry_optional_claim_summary_payload,
     )
     _write_csv_rows(rescue_metrics_summary_path, RESCUE_METRICS_SUMMARY_FIELDNAMES, [rescue_summary_row])
 
