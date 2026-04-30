@@ -1700,6 +1700,64 @@ def test_pw00_binds_geometry_mix_v2_base_and_protocol(tmp_path: Path) -> None:
     ]
 
 
+def test_pw00_binds_geometry_mix_family_to_v3_base_and_protocol(tmp_path: Path) -> None:
+    """
+    Verify PW00 keeps the geometry-mix family id while binding the v3 base config and protocol provenance.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text("prompt alpha\nprompt beta\n", encoding="utf-8")
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="paper_eval_family_geometry_mix",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=GEOMETRY_MIX_V3_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+
+    assert summary["family_id"] == "paper_eval_family_geometry_mix"
+    assert summary["pw_base_config_path"] == normalize_path_value(GEOMETRY_MIX_V3_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(GEOMETRY_MIX_V3_PW_MATRIX_CONFIG_PATH)
+    assert summary["benchmark_protocol_config_path"] == normalize_path_value(GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH)
+    assert summary["benchmark_protocol"]["protocol_id"] == "geometry_mix_v3"
+    assert summary["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v3"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+    assert summary["benchmark_provenance"]["protocol_id"] == "geometry_mix_v3"
+    assert summary["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH
+    )
+    assert summary["matrix_profile"] == "geometry_mix_v3"
+    assert summary["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+
+    assert family_manifest["family_id"] == "paper_eval_family_geometry_mix"
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(GEOMETRY_MIX_V3_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(GEOMETRY_MIX_V3_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["benchmark_protocol"]["protocol_id"] == "geometry_mix_v3"
+    assert family_manifest["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert family_manifest["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v3"
+    assert family_manifest["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+    assert family_manifest["benchmark_provenance"]["protocol_id"] == "geometry_mix_v3"
+    assert family_manifest["benchmark_provenance"]["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_mix_v3"
+    assert family_manifest["attack_parameters"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+
+
 def test_pw00_binds_shared_benchmark_protocol_and_provenance(tmp_path: Path) -> None:
     """
     Verify PW00 appends shared benchmark protocol config and provenance to summary artifacts.

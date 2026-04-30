@@ -209,9 +209,9 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'HF_HOME = REPO_ROOT / "huggingface_cache"' in pw00_constants
     assert 'HF_HUB_CACHE = HF_HOME / "hub"' in pw00_constants
     assert 'TRANSFORMERS_CACHE = HF_HOME / "transformers"' in pw00_constants
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
-    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v2.yaml"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v3.yaml"' in pw00_constants
     assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_constants
     assert 'SOURCE_SHARD_COUNT = 3' in pw00_constants
     assert 'ATTACK_SHARD_COUNT = 3' in pw00_constants
@@ -232,7 +232,7 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw01_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw01_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw01_constants
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw01_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw01_constants
     assert 'SAMPLE_ROLE = "positive_source"' in pw01_constants
     assert '"planner_conditioned_control_negative": "control_negative"' in pw01_constants
     assert 'SHARD_COUNT = 3' in pw01_constants
@@ -256,20 +256,20 @@ def test_paper_workflow_notebook_entrypoints_bind_expected_scripts() -> None:
     assert 'DRIVE_MODELS_ROOT = DRIVE_MOUNT_ROOT / "MyDrive" / "Models"' in pw02_constants
     assert 'PERSISTENT_HF_ROOT = DRIVE_MODELS_ROOT / "Huggingface"' in pw02_constants
     assert 'LOCAL_HF_HOME = REPO_ROOT / "huggingface_cache"' in pw02_constants
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw02_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw02_constants
     assert 'os.environ["HUGGINGFACE_HUB_CACHE"] = str(LOCAL_HF_HUB_CACHE)' in pw02_bootstrap
     assert 'snapshot_download(' not in pw02_bootstrap
     assert '"--drive-project-root"' in pw02_execute
     assert '"--family-id"' in pw02_execute
 
     assert '"PW03_Attack_Event_Shards.py"' in pw03_constants
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw03_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw03_constants
     assert 'ATTACK_SHARD_COUNT = 3' in pw03_constants
     assert 'ATTACK_LOCAL_WORKER_COUNT = 4' in pw03_constants
     assert 'ATTACK_FAMILY_ALLOWLIST = None' in pw03_constants
 
     assert '"PW05_Release_And_Signoff.py"' in pw05_constants
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw05_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw05_constants
     assert 'FORCE_RERUN = False' in pw05_constants
 
 
@@ -541,7 +541,7 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     quality_constants = _find_code_cell_source(NOTEBOOK_PW04_QUALITY_PATH, "SCRIPT_PATH = REPO_ROOT")
     finalize_constants = _find_code_cell_source(NOTEBOOK_PW04_FINALIZE_PATH, "SCRIPT_PATH = REPO_ROOT")
 
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in prepare_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in prepare_constants
     assert 'QUALITY_SHARD_COUNT = 3' in prepare_constants
     assert 'FORCE_RERUN = False' in prepare_constants
     assert 'ENABLE_TAIL_ESTIMATION = False' in prepare_constants
@@ -553,7 +553,7 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     assert 'QUALITY_PSNR_SSIM_BATCH_SIZE' not in prepare_constants
     assert 'QUALITY_PSNR_SSIM_BATCH_ELEMENT_BUDGET' not in prepare_constants
 
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in quality_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in quality_constants
     assert 'QUALITY_SHARD_INDEX = 0' in quality_constants
     assert 'FORCE_RERUN = False' in quality_constants
     assert 'QUALITY_DEVICE_OVERRIDE = "auto"' in quality_constants
@@ -566,7 +566,7 @@ def test_pw04_notebook_first_code_cells_expose_stage_specific_user_parameters() 
     assert 'QUALITY_SHARD_COUNT' not in quality_constants
     assert 'ENABLE_TAIL_ESTIMATION' not in quality_constants
 
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in finalize_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in finalize_constants
     assert 'FORCE_RERUN = False' in finalize_constants
     assert 'PW04_MODE =' not in finalize_constants
     assert 'QUALITY_SHARD_INDEX' not in finalize_constants
@@ -730,9 +730,9 @@ def test_pw00_notebook_exposes_independent_attack_shard_count_controls() -> None
     pw00_parallel_markdown = _find_markdown_cell_source(NOTEBOOK_PW00_PATH, "扩展规则：")
     pw00_parallel_guide = _find_code_cell_source(NOTEBOOK_PW00_PATH, 'print("[后续并行运行说明]")')
 
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
-    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v2.yaml"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v3.yaml"' in pw00_constants
     assert 'SEED_LIST = [100, 101, 102, 103, 104, 105, 106, 107]' in pw00_constants
     assert 'SOURCE_SHARD_COUNT = 3' in pw00_constants
     assert 'ATTACK_SHARD_COUNT = 3' in pw00_constants
@@ -1052,9 +1052,9 @@ def test_pw00_and_pw02_notebooks_explain_formal_vs_optional_control_boundary() -
     assert "若只完成部分 shard，PW02 CLI 会快速失败" in pw02_precheck_markdown
 
 
-def test_pw00_notebook_default_family_and_base_config_bind_discovery_v2() -> None:
+def test_pw00_notebook_default_family_and_base_config_bind_geometry_mix_v3() -> None:
     """
-    Verify PW00 notebook defaults bind the geometry-mix family and pw_base config.
+    Verify PW00 notebook defaults keep the geometry-mix family id while binding the v3 pw_base config.
 
     Args:
         None.
@@ -1064,12 +1064,12 @@ def test_pw00_notebook_default_family_and_base_config_bind_discovery_v2() -> Non
     """
     pw00_constants = _find_code_cell_source(
         NOTEBOOK_PW00_PATH,
-        'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v2.yaml"',
+        'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v3.yaml"',
     )
 
-    assert 'FAMILY_ID = "paper_eval_family_geometry_mix_v2"' in pw00_constants
+    assert 'FAMILY_ID = "paper_eval_family_geometry_mix"' in pw00_constants
     assert 'PROMPT_FILE = "prompts/paper_pilot_10.txt"' in pw00_constants
-    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v2.yaml"' in pw00_constants
+    assert 'PW_BASE_CONFIG_PATH = "paper_workflow/configs/pw_base_geometry_mix_v3.yaml"' in pw00_constants
 
 
 @pytest.mark.parametrize(
