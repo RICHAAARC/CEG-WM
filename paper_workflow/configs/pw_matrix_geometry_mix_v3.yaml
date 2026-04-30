@@ -1,0 +1,247 @@
+schema_version: "pw_matrix_v1"
+matrix_profile: "geometry_mix_v3"
+matrix_version: "pw_attack_matrix_geometry_mix_v3"
+materialization_profile: "matrix_defined_concrete_conditions"
+attack_sets:
+  general_attacks:
+    families:
+      - "rotate"
+      - "crop"
+      - "translate"
+      - "composite"
+  geometry_rescue_candidates:
+    families:
+      - "rotate"
+      - "crop"
+      - "composite"
+concrete_conditions:
+  "rotate::v7":
+    - condition_suffix: "sev00"
+      severity_label: "degrees=9"
+      severity_level_index: 0
+      params:
+        degrees: 9
+    - condition_suffix: "sev01"
+      severity_label: "degrees=11"
+      severity_level_index: 1
+      params:
+        degrees: 11
+    - condition_suffix: "sev02"
+      severity_label: "degrees=13"
+      severity_level_index: 2
+      params:
+        degrees: 13
+    - condition_suffix: "sev03"
+      severity_label: "degrees=15"
+      severity_level_index: 3
+      params:
+        degrees: 15
+    - condition_suffix: "sev04"
+      severity_label: "degrees=17"
+      severity_level_index: 4
+      params:
+        degrees: 17
+    - condition_suffix: "sev05"
+      severity_label: "degrees=19"
+      severity_level_index: 5
+      params:
+        degrees: 19
+    - condition_suffix: "sev06"
+      severity_label: "degrees=21"
+      severity_level_index: 6
+      params:
+        degrees: 21
+  "crop::v7":
+    - condition_suffix: "sev00"
+      severity_label: "crop_ratio=0.90"
+      severity_level_index: 0
+      params:
+        crop_ratios: 0.90
+    - condition_suffix: "sev01"
+      severity_label: "crop_ratio=0.86"
+      severity_level_index: 1
+      params:
+        crop_ratios: 0.86
+    - condition_suffix: "sev02"
+      severity_label: "crop_ratio=0.82"
+      severity_level_index: 2
+      params:
+        crop_ratios: 0.82
+    - condition_suffix: "sev03"
+      severity_label: "crop_ratio=0.78"
+      severity_level_index: 3
+      params:
+        crop_ratios: 0.78
+    - condition_suffix: "sev04"
+      severity_label: "crop_ratio=0.74"
+      severity_level_index: 4
+      params:
+        crop_ratios: 0.74
+    - condition_suffix: "sev05"
+      severity_label: "crop_ratio=0.70"
+      severity_level_index: 5
+      params:
+        crop_ratios: 0.70
+    - condition_suffix: "sev06"
+      severity_label: "crop_ratio=0.66"
+      severity_level_index: 6
+      params:
+        crop_ratios: 0.66
+  "translate::v4":
+    - condition_suffix: "sev00"
+      severity_label: "shift=(2,0)"
+      severity_level_index: 0
+      params:
+        x_shift: 2
+        y_shift: 0
+    - condition_suffix: "sev01"
+      severity_label: "shift=(4,0)"
+      severity_level_index: 1
+      params:
+        x_shift: 4
+        y_shift: 0
+    - condition_suffix: "sev02"
+      severity_label: "shift=(6,2)"
+      severity_level_index: 2
+      params:
+        x_shift: 6
+        y_shift: 2
+  "composite::rotate_crop_v5":
+    - condition_suffix: "sev00"
+      severity_label: "rotate11+crop0.86"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 11
+          - family: "crop"
+            params:
+              crop_ratio: 0.86
+        seed_policy: "shared"
+  "composite::rotate_crop_v6":
+    - condition_suffix: "sev00"
+      severity_label: "rotate15+crop0.78"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 15
+          - family: "crop"
+            params:
+              crop_ratio: 0.78
+        seed_policy: "shared"
+  "composite::rotate_crop_v7":
+    - condition_suffix: "sev00"
+      severity_label: "rotate19+crop0.70"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 19
+          - family: "crop"
+            params:
+              crop_ratio: 0.70
+        seed_policy: "shared"
+  "composite::rotate_resize_jpeg_v9":
+    - condition_suffix: "sev00"
+      severity_label: "rotate13+resize0.86+jpeg85"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 13
+          - family: "resize"
+            params:
+              scale_factor: 0.86
+          - family: "jpeg"
+            params:
+              quality: 85
+        seed_policy: "shared"
+  "composite::rotate_resize_jpeg_v10":
+    - condition_suffix: "sev00"
+      severity_label: "rotate17+resize0.80+jpeg80"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 17
+          - family: "resize"
+            params:
+              scale_factor: 0.80
+          - family: "jpeg"
+            params:
+              quality: 80
+        seed_policy: "shared"
+  "composite::crop_resize_translate_v4":
+    - condition_suffix: "sev00"
+      severity_label: "crop0.82+resize0.78+translate4x0"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "crop"
+            params:
+              crop_ratio: 0.82
+          - family: "resize"
+            params:
+              scale_factor: 0.78
+          - family: "translate"
+            params:
+              x_shift: 4
+              y_shift: 0
+        seed_policy: "shared"
+  "composite::crop_resize_translate_v5":
+    - condition_suffix: "sev00"
+      severity_label: "crop0.74+resize0.72+translate6x0"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "crop"
+            params:
+              crop_ratio: 0.74
+          - family: "resize"
+            params:
+              scale_factor: 0.72
+          - family: "translate"
+            params:
+              x_shift: 6
+              y_shift: 0
+        seed_policy: "shared"
+  "composite::rotate_translate_resize_v2":
+    - condition_suffix: "sev00"
+      severity_label: "rotate17+translate4x0+resize0.82"
+      severity_level_index: 0
+      params:
+        steps:
+          - family: "rotate"
+            params:
+              degrees: 17
+          - family: "translate"
+            params:
+              x_shift: 4
+              y_shift: 0
+          - family: "resize"
+            params:
+              scale_factor: 0.82
+        seed_policy: "shared"
+geometry_optional_claim:
+  candidate_attack_set: "geometry_rescue_candidates"
+  boundary_rule_version: "geometry_optional_claim_boundary_band_v3"
+  boundary_metric: "abs_content_margin"
+  boundary_abs_margin_min: 0.005
+  boundary_abs_margin_max: 0.10
+system_event_count_sweep:
+  event_counts:
+    - 1
+    - 2
+    - 4
+    - 8
+    - 16
+    - 32
+    - 64
+  repeat_count: 48
+  random_seed: 20260415

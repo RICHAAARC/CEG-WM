@@ -71,6 +71,15 @@ GEOMETRY_MIX_V2_PW_MATRIX_CONFIG_PATH = (
 GEOMETRY_MIX_V2_PROTOCOL_CONFIG_PATH = (
     REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix_v2.yaml"
 ).resolve()
+GEOMETRY_MIX_V3_PW_BASE_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_mix_v3.yaml"
+).resolve()
+GEOMETRY_MIX_V3_PW_MATRIX_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_mix_v3.yaml"
+).resolve()
+GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix_v3.yaml"
+).resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -1295,6 +1304,38 @@ def test_attack_protocol_geometry_mix_v2_versions_are_loadable() -> None:
     assert expected_condition_keys.issubset(set(generated_plan.conditions))
 
 
+def test_attack_protocol_geometry_mix_v3_versions_are_loadable() -> None:
+    """
+    Verify append-only geometry-mix-v3 protocol versions are loadable.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    protocol_spec = protocol_loader.load_attack_protocol_spec({})
+    params_versions = protocol_spec.get("params_versions", {})
+    generated_plan = attack_plan.generate_attack_plan(protocol_spec)
+
+    expected_condition_keys = {
+        "rotate::v7",
+        "crop::v7",
+        "translate::v4",
+        "composite::rotate_crop_v5",
+        "composite::rotate_crop_v6",
+        "composite::rotate_crop_v7",
+        "composite::rotate_resize_jpeg_v9",
+        "composite::rotate_resize_jpeg_v10",
+        "composite::crop_resize_translate_v4",
+        "composite::crop_resize_translate_v5",
+        "composite::rotate_translate_resize_v2",
+    }
+
+    assert expected_condition_keys.issubset(set(params_versions))
+    assert expected_condition_keys.issubset(set(generated_plan.conditions))
+
+
 def test_geometry_mix_v2_matrix_materializes_expected_condition_subset() -> None:
     """
     Verify the geometry-mix-v2 matrix parses and materializes the denser mild-to-strong conditions.
@@ -1413,6 +1454,155 @@ def test_geometry_mix_v2_matrix_materializes_expected_condition_subset() -> None
             {"family": "crop", "params": {"crop_ratio": 0.7}},
             {"family": "resize", "params": {"scale_factor": 0.68}},
             {"family": "translate", "params": {"x_shift": 8, "y_shift": 2}},
+        ],
+        "seed_policy": "shared",
+    }
+
+
+def test_geometry_mix_v3_matrix_materializes_expected_condition_subset() -> None:
+    """
+    Verify the geometry-mix-v3 matrix parses and materializes the lighter interval-search conditions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    geometry_mix_v3_base_cfg = load_yaml_mapping(GEOMETRY_MIX_V3_PW_BASE_CONFIG_PATH)
+    geometry_mix_v3_protocol_cfg = load_yaml_mapping(GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH)
+    matrix_cfg = load_pw_matrix_config(matrix_config_path=GEOMETRY_MIX_V3_PW_MATRIX_CONFIG_PATH)
+    matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
+    attack_condition_catalog = build_attack_condition_catalog(matrix_cfg=matrix_cfg)
+    catalog_params = {
+        row["attack_condition_key"]: row["attack_params"]
+        for row in attack_condition_catalog
+    }
+
+    expected_families = ["rotate", "crop", "translate", "composite"]
+    expected_rescue_families = ["rotate", "crop", "composite"]
+    expected_condition_keys = sorted(
+        [
+            "composite::crop_resize_translate_v4::sev00",
+            "composite::crop_resize_translate_v5::sev00",
+            "composite::rotate_crop_v5::sev00",
+            "composite::rotate_crop_v6::sev00",
+            "composite::rotate_crop_v7::sev00",
+            "composite::rotate_resize_jpeg_v10::sev00",
+            "composite::rotate_resize_jpeg_v9::sev00",
+            "composite::rotate_translate_resize_v2::sev00",
+            "crop::v7::sev00",
+            "crop::v7::sev01",
+            "crop::v7::sev02",
+            "crop::v7::sev03",
+            "crop::v7::sev04",
+            "crop::v7::sev05",
+            "crop::v7::sev06",
+            "rotate::v7::sev00",
+            "rotate::v7::sev01",
+            "rotate::v7::sev02",
+            "rotate::v7::sev03",
+            "rotate::v7::sev04",
+            "rotate::v7::sev05",
+            "rotate::v7::sev06",
+            "translate::v4::sev00",
+            "translate::v4::sev01",
+            "translate::v4::sev02",
+        ]
+    )
+
+    assert geometry_mix_v3_base_cfg["benchmark_mode"] == "geometry_mix"
+    assert geometry_mix_v3_base_cfg["benchmark_mode_version"] == "geometry_mix_v3"
+    assert geometry_mix_v3_base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_geometry_mix_v3.yaml"
+    assert geometry_mix_v3_base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_geometry_mix_v3.yaml"
+    assert geometry_mix_v3_base_cfg["source_alignment_reference_files"][:3] == [
+        "paper_workflow/configs/pw_base_geometry_mix_v3.yaml",
+        "paper_workflow/configs/pw_matrix_geometry_mix_v3.yaml",
+        "paper_workflow/configs/pw_protocol_geometry_mix_v3.yaml",
+    ]
+    assert geometry_mix_v3_protocol_cfg["protocol_id"] == "geometry_mix_v3"
+    assert geometry_mix_v3_protocol_cfg["benchmark_name"] == "geometry_mix_v3"
+    assert geometry_mix_v3_protocol_cfg["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert geometry_mix_v3_protocol_cfg["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v3"
+    assert geometry_mix_v3_protocol_cfg["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+    assert matrix_settings["matrix_profile"] == "geometry_mix_v3"
+    assert matrix_settings["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+    assert matrix_settings["materialization_profile"] == "matrix_defined_concrete_conditions"
+    assert matrix_settings["attack_sets"]["general_attacks"] == expected_families
+    assert matrix_settings["attack_sets"]["geometry_rescue_candidates"] == expected_rescue_families
+    assert "translate" not in matrix_settings["geometry_optional_claim"]["candidate_attack_families"]
+    assert matrix_settings["geometry_optional_claim"]["candidate_attack_set"] == "geometry_rescue_candidates"
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.10)
+    assert matrix_settings["system_event_count_sweep"]["event_counts"] == [1, 2, 4, 8, 16, 32, 64]
+    assert matrix_settings["system_event_count_sweep"]["repeat_count"] == 48
+    assert matrix_settings["system_event_count_sweep"]["random_seed"] == 20260415
+    assert [row["attack_condition_key"] for row in attack_condition_catalog] == expected_condition_keys
+    assert len(attack_condition_catalog) == 25
+    assert catalog_params["rotate::v7::sev00"] == {"degrees": 9}
+    assert catalog_params["rotate::v7::sev06"] == {"degrees": 21}
+    assert catalog_params["crop::v7::sev00"] == {"crop_ratios": 0.9}
+    assert catalog_params["crop::v7::sev06"] == {"crop_ratios": 0.66}
+    assert catalog_params["translate::v4::sev00"] == {"x_shift": 2, "y_shift": 0}
+    assert catalog_params["translate::v4::sev02"] == {"x_shift": 6, "y_shift": 2}
+    assert catalog_params["composite::rotate_crop_v5::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 11}},
+            {"family": "crop", "params": {"crop_ratio": 0.86}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_crop_v6::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 15}},
+            {"family": "crop", "params": {"crop_ratio": 0.78}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_crop_v7::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 19}},
+            {"family": "crop", "params": {"crop_ratio": 0.7}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_resize_jpeg_v9::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 13}},
+            {"family": "resize", "params": {"scale_factor": 0.86}},
+            {"family": "jpeg", "params": {"quality": 85}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_resize_jpeg_v10::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 17}},
+            {"family": "resize", "params": {"scale_factor": 0.8}},
+            {"family": "jpeg", "params": {"quality": 80}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::crop_resize_translate_v4::sev00"] == {
+        "steps": [
+            {"family": "crop", "params": {"crop_ratio": 0.82}},
+            {"family": "resize", "params": {"scale_factor": 0.78}},
+            {"family": "translate", "params": {"x_shift": 4, "y_shift": 0}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::crop_resize_translate_v5::sev00"] == {
+        "steps": [
+            {"family": "crop", "params": {"crop_ratio": 0.74}},
+            {"family": "resize", "params": {"scale_factor": 0.72}},
+            {"family": "translate", "params": {"x_shift": 6, "y_shift": 0}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_translate_resize_v2::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 17}},
+            {"family": "translate", "params": {"x_shift": 4, "y_shift": 0}},
+            {"family": "resize", "params": {"scale_factor": 0.82}},
         ],
         "seed_policy": "shared",
     }
