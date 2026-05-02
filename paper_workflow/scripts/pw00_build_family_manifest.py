@@ -493,11 +493,20 @@ def run_pw00_build_family_manifest(
     normalized_seeds = parse_seed_list(seed_list)
     prompt_path, prompt_lines = load_prompt_lines(prompt_file)
     prompt_file_normalized = normalize_path_value(prompt_path)
+    pw_base_config_label = normalize_path_value(resolved_pw_base_config_path)
 
     calibration_fraction_raw = pw_base_cfg.get("calibration_fraction")
     if not isinstance(calibration_fraction_raw, (int, float)) or isinstance(calibration_fraction_raw, bool):
-        raise TypeError("paper_workflow/configs/pw_base.yaml calibration_fraction must be numeric")
+        raise TypeError(f"{pw_base_config_label} calibration_fraction must be numeric")
     calibration_fraction = float(calibration_fraction_raw)
+    calibration_fraction_by_role_raw = pw_base_cfg.get("calibration_fraction_by_role")
+    if calibration_fraction_by_role_raw is not None and not isinstance(calibration_fraction_by_role_raw, Mapping):
+        raise TypeError(f"{pw_base_config_label} calibration_fraction_by_role must be mapping when provided")
+    calibration_fraction_by_role = (
+        dict(cast(Mapping[str, Any], calibration_fraction_by_role_raw))
+        if isinstance(calibration_fraction_by_role_raw, Mapping)
+        else None
+    )
 
     event_grid = build_source_event_grid(
         family_id=family_id,
@@ -515,6 +524,16 @@ def run_pw00_build_family_manifest(
         family_id=family_id,
         events=event_grid,
         calibration_fraction=calibration_fraction,
+        calibration_fraction_by_role=calibration_fraction_by_role,
+    )
+    effective_calibration_fraction_by_role = dict(
+        cast(Mapping[str, Any], source_split_plan["calibration_fraction_by_role"])
+    )
+    role_level_calibration_counts = dict(
+        cast(Mapping[str, Any], source_split_plan["role_level_calibration_counts"])
+    )
+    control_negative_calibration_fraction_effective = float(
+        effective_calibration_fraction_by_role[PLANNER_CONDITIONED_CONTROL_NEGATIVE_SAMPLE_ROLE]
     )
 
     positive_source_event_count = sum(
@@ -654,6 +673,9 @@ def run_pw00_build_family_manifest(
             "seed_count": len(normalized_seeds),
             "source_shard_count": source_shard_count,
             "calibration_fraction": calibration_fraction,
+            "calibration_fraction_by_role": copy.deepcopy(effective_calibration_fraction_by_role),
+            "control_negative_calibration_fraction_effective": control_negative_calibration_fraction_effective,
+            "role_level_calibration_counts": copy.deepcopy(role_level_calibration_counts),
         },
         "attack_parameters": {
             "attack_shard_count": resolved_attack_shard_count,
@@ -778,6 +800,10 @@ def run_pw00_build_family_manifest(
         "default_config_path": normalize_path_value(default_cfg_path),
         "pw_base_config_path": normalize_path_value(resolved_pw_base_config_path),
         "pw_matrix_config_path": normalize_path_value(matrix_config_path),
+        "calibration_fraction": calibration_fraction,
+        "calibration_fraction_by_role": copy.deepcopy(effective_calibration_fraction_by_role),
+        "control_negative_calibration_fraction_effective": control_negative_calibration_fraction_effective,
+        "role_level_calibration_counts": copy.deepcopy(role_level_calibration_counts),
     }
     if benchmark_protocol_bundle is not None:
         family_manifest["benchmark_protocol_config_path"] = str(benchmark_protocol_bundle["config_path"])
@@ -859,6 +885,10 @@ def run_pw00_build_family_manifest(
         ),
         "pw_base_config_path": normalize_path_value(resolved_pw_base_config_path),
         "pw_matrix_config_path": normalize_path_value(matrix_config_path),
+        "calibration_fraction": calibration_fraction,
+        "calibration_fraction_by_role": copy.deepcopy(effective_calibration_fraction_by_role),
+        "control_negative_calibration_fraction_effective": control_negative_calibration_fraction_effective,
+        "role_level_calibration_counts": copy.deepcopy(role_level_calibration_counts),
     }
     if benchmark_protocol_bundle is not None:
         summary["benchmark_protocol_config_path"] = str(benchmark_protocol_bundle["config_path"])

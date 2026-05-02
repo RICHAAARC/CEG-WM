@@ -16,6 +16,8 @@ from main.evaluation import attack_plan, protocol_loader
 from paper_workflow.scripts.pw00_build_family_manifest import run_pw00_build_family_manifest
 from paper_workflow.scripts.pw_common import (
     build_attack_condition_catalog,
+    build_source_event_grid,
+    build_source_split_plan,
     load_pw_matrix_config,
     read_jsonl,
     resolve_pw_matrix_settings,
@@ -79,6 +81,15 @@ GEOMETRY_MIX_V3_PW_MATRIX_CONFIG_PATH = (
 ).resolve()
 GEOMETRY_MIX_V3_PROTOCOL_CONFIG_PATH = (
     REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix_v3.yaml"
+).resolve()
+GEOMETRY_MIX_V4_PW_BASE_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_mix_v4.yaml"
+).resolve()
+GEOMETRY_MIX_V4_PW_MATRIX_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_matrix_geometry_mix_v4.yaml"
+).resolve()
+GEOMETRY_MIX_V4_PROTOCOL_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix_v4.yaml"
 ).resolve()
 
 
@@ -1336,6 +1347,36 @@ def test_attack_protocol_geometry_mix_v3_versions_are_loadable() -> None:
     assert expected_condition_keys.issubset(set(generated_plan.conditions))
 
 
+def test_attack_protocol_geometry_mix_v4_versions_are_loadable() -> None:
+    """
+    Verify append-only geometry-mix-v4 protocol versions are loadable.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    protocol_spec = protocol_loader.load_attack_protocol_spec({})
+    params_versions = protocol_spec.get("params_versions", {})
+    generated_plan = attack_plan.generate_attack_plan(protocol_spec)
+
+    expected_condition_keys = {
+        "rotate::v8",
+        "crop::v8",
+        "translate::v5",
+        "composite::rotate_crop_v8",
+        "composite::rotate_crop_v9",
+        "composite::rotate_resize_jpeg_v11",
+        "composite::rotate_resize_jpeg_v12",
+        "composite::crop_resize_translate_v6",
+        "composite::crop_resize_translate_v7",
+    }
+
+    assert expected_condition_keys.issubset(set(params_versions))
+    assert expected_condition_keys.issubset(set(generated_plan.conditions))
+
+
 def test_geometry_mix_v2_matrix_materializes_expected_condition_subset() -> None:
     """
     Verify the geometry-mix-v2 matrix parses and materializes the denser mild-to-strong conditions.
@@ -1608,6 +1649,202 @@ def test_geometry_mix_v3_matrix_materializes_expected_condition_subset() -> None
     }
 
 
+def test_geometry_mix_v4_matrix_materializes_expected_condition_subset() -> None:
+    """
+    Verify the geometry-mix-v4 matrix parses and materializes the intentionally weakened conditions.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    geometry_mix_v4_base_cfg = load_yaml_mapping(GEOMETRY_MIX_V4_PW_BASE_CONFIG_PATH)
+    geometry_mix_v4_protocol_cfg = load_yaml_mapping(GEOMETRY_MIX_V4_PROTOCOL_CONFIG_PATH)
+    matrix_cfg = load_pw_matrix_config(matrix_config_path=GEOMETRY_MIX_V4_PW_MATRIX_CONFIG_PATH)
+    matrix_settings = resolve_pw_matrix_settings(matrix_cfg)
+    attack_condition_catalog = build_attack_condition_catalog(matrix_cfg=matrix_cfg)
+    catalog_params = {
+        row["attack_condition_key"]: row["attack_params"]
+        for row in attack_condition_catalog
+    }
+
+    rotate_condition_keys = sorted(
+        row["attack_condition_key"]
+        for row in attack_condition_catalog
+        if row["attack_condition_base_key"] == "rotate::v8"
+    )
+    crop_condition_keys = sorted(
+        row["attack_condition_key"]
+        for row in attack_condition_catalog
+        if row["attack_condition_base_key"] == "crop::v8"
+    )
+    translate_condition_keys = sorted(
+        row["attack_condition_key"]
+        for row in attack_condition_catalog
+        if row["attack_condition_base_key"] == "translate::v5"
+    )
+    composite_condition_keys = sorted(
+        row["attack_condition_key"]
+        for row in attack_condition_catalog
+        if row["attack_family"] == "composite"
+    )
+
+    assert geometry_mix_v4_base_cfg["benchmark_mode"] == "geometry_mix"
+    assert geometry_mix_v4_base_cfg["benchmark_mode_version"] == "geometry_mix_v4"
+    assert geometry_mix_v4_base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_geometry_mix_v4.yaml"
+    assert geometry_mix_v4_base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_geometry_mix_v4.yaml"
+    assert geometry_mix_v4_base_cfg["calibration_fraction"] == pytest.approx(0.5)
+    assert geometry_mix_v4_base_cfg["calibration_fraction_by_role"] == {
+        "positive_source": 0.5,
+        "clean_negative": 0.5,
+        "planner_conditioned_control_negative": 0.15,
+    }
+    assert geometry_mix_v4_protocol_cfg["protocol_id"] == "geometry_mix_v4"
+    assert geometry_mix_v4_protocol_cfg["benchmark_name"] == "geometry_mix_v4"
+    assert geometry_mix_v4_protocol_cfg["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert geometry_mix_v4_protocol_cfg["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v4"
+    assert geometry_mix_v4_protocol_cfg["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v4"
+    assert matrix_settings["matrix_profile"] == "geometry_mix_v4"
+    assert matrix_settings["matrix_version"] == "pw_attack_matrix_geometry_mix_v4"
+    assert matrix_settings["materialization_profile"] == "matrix_defined_concrete_conditions"
+    assert matrix_settings["attack_sets"]["general_attacks"] == ["rotate", "crop", "translate", "composite"]
+    assert matrix_settings["attack_sets"]["geometry_rescue_candidates"] == ["rotate", "crop", "composite"]
+    assert "translate" not in matrix_settings["geometry_optional_claim"]["candidate_attack_families"]
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert matrix_settings["geometry_optional_claim"]["boundary_abs_margin_max"] == pytest.approx(0.08)
+    assert matrix_settings["system_event_count_sweep"]["event_counts"] == [1, 2, 4, 8, 16, 32, 64]
+    assert matrix_settings["system_event_count_sweep"]["repeat_count"] == 48
+    assert matrix_settings["system_event_count_sweep"]["random_seed"] == 20260415
+    assert len(attack_condition_catalog) == 21
+    assert rotate_condition_keys == [
+        "rotate::v8::sev00",
+        "rotate::v8::sev01",
+        "rotate::v8::sev02",
+        "rotate::v8::sev03",
+        "rotate::v8::sev04",
+        "rotate::v8::sev05",
+    ]
+    assert crop_condition_keys == [
+        "crop::v8::sev00",
+        "crop::v8::sev01",
+        "crop::v8::sev02",
+        "crop::v8::sev03",
+        "crop::v8::sev04",
+        "crop::v8::sev05",
+    ]
+    assert translate_condition_keys == [
+        "translate::v5::sev00",
+        "translate::v5::sev01",
+        "translate::v5::sev02",
+    ]
+    assert composite_condition_keys == [
+        "composite::crop_resize_translate_v6::sev00",
+        "composite::crop_resize_translate_v7::sev00",
+        "composite::rotate_crop_v8::sev00",
+        "composite::rotate_crop_v9::sev00",
+        "composite::rotate_resize_jpeg_v11::sev00",
+        "composite::rotate_resize_jpeg_v12::sev00",
+    ]
+    assert catalog_params["rotate::v8::sev00"] == {"degrees": 7}
+    assert catalog_params["rotate::v8::sev05"] == {"degrees": 17}
+    assert catalog_params["crop::v8::sev00"] == {"crop_ratios": 0.94}
+    assert catalog_params["crop::v8::sev05"] == {"crop_ratios": 0.74}
+    assert catalog_params["translate::v5::sev02"] == {"x_shift": 6, "y_shift": 0}
+    assert catalog_params["composite::rotate_crop_v8::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 9}},
+            {"family": "crop", "params": {"crop_ratio": 0.9}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_crop_v9::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 13}},
+            {"family": "crop", "params": {"crop_ratio": 0.82}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_resize_jpeg_v11::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 11}},
+            {"family": "resize", "params": {"scale_factor": 0.9}},
+            {"family": "jpeg", "params": {"quality": 90}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::rotate_resize_jpeg_v12::sev00"] == {
+        "steps": [
+            {"family": "rotate", "params": {"degrees": 15}},
+            {"family": "resize", "params": {"scale_factor": 0.84}},
+            {"family": "jpeg", "params": {"quality": 85}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::crop_resize_translate_v6::sev00"] == {
+        "steps": [
+            {"family": "crop", "params": {"crop_ratio": 0.86}},
+            {"family": "resize", "params": {"scale_factor": 0.82}},
+            {"family": "translate", "params": {"x_shift": 2, "y_shift": 0}},
+        ],
+        "seed_policy": "shared",
+    }
+    assert catalog_params["composite::crop_resize_translate_v7::sev00"] == {
+        "steps": [
+            {"family": "crop", "params": {"crop_ratio": 0.78}},
+            {"family": "resize", "params": {"scale_factor": 0.76}},
+            {"family": "translate", "params": {"x_shift": 4, "y_shift": 0}},
+        ],
+        "seed_policy": "shared",
+    }
+
+
+def test_build_source_split_plan_supports_role_level_calibration_fraction() -> None:
+    """
+    Verify source split can apply a weaker calibration fraction to control-negative role.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    prompt_lines = [f"prompt {index}" for index in range(20)]
+    event_grid = build_source_event_grid(
+        family_id="paper_eval_family_geometry_mix",
+        prompt_lines=prompt_lines,
+        seeds=[0],
+        prompt_file="prompts/paper_pilot_10.txt",
+        sample_roles=[
+            "positive_source",
+            "clean_negative",
+            "planner_conditioned_control_negative",
+        ],
+    )
+
+    split_plan = build_source_split_plan(
+        family_id="paper_eval_family_geometry_mix",
+        events=event_grid,
+        calibration_fraction=0.5,
+        calibration_fraction_by_role={
+            "positive_source": 0.5,
+            "clean_negative": 0.5,
+            "planner_conditioned_control_negative": 0.15,
+        },
+    )
+
+    assert split_plan["calibration_fraction"] == pytest.approx(0.5)
+    assert split_plan["calibration_fraction_by_role"] == {
+        "positive_source": 0.5,
+        "clean_negative": 0.5,
+        "planner_conditioned_control_negative": 0.15,
+    }
+    assert split_plan["role_level_calibration_counts"]["positive_source"]["calibration_event_count"] == 10
+    assert split_plan["role_level_calibration_counts"]["clean_negative"]["calibration_event_count"] == 10
+    assert split_plan["role_level_calibration_counts"]["planner_conditioned_control_negative"]["calibration_event_count"] == 3
+    assert split_plan["roles"]["planner_conditioned_control_negative"]["evaluate_event_count"] == 17
+
+
 def test_pw00_binds_geometry_mix_v2_base_and_protocol(tmp_path: Path) -> None:
     """
     Verify PW00 can bind the geometry-mix-v2 base config and append geometry-mix-v2 protocol provenance.
@@ -1756,6 +1993,77 @@ def test_pw00_binds_geometry_mix_family_to_v3_base_and_protocol(tmp_path: Path) 
     )
     assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_mix_v3"
     assert family_manifest["attack_parameters"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v3"
+
+
+def test_pw00_binds_geometry_mix_family_to_v4_base_and_role_calibration(tmp_path: Path) -> None:
+    """
+    Verify PW00 keeps the geometry-mix family id while binding the v4 calibration and matrix provenance.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+    """
+    drive_project_root = tmp_path / "drive_root"
+    prompt_file = tmp_path / "paper_prompts.txt"
+    prompt_file.write_text(
+        "prompt alpha\nprompt beta\nprompt gamma\nprompt delta\n",
+        encoding="utf-8",
+    )
+
+    summary = run_pw00_build_family_manifest(
+        drive_project_root=drive_project_root,
+        family_id="paper_eval_family_geometry_mix",
+        prompt_file=str(prompt_file),
+        seed_list=[0, 7],
+        source_shard_count=3,
+        pw_base_config_path=GEOMETRY_MIX_V4_PW_BASE_CONFIG_PATH,
+    )
+
+    family_manifest = json.loads(Path(str(summary["paper_eval_family_manifest_path"])).read_text(encoding="utf-8"))
+    source_split_plan = json.loads(Path(str(summary["source_split_plan_path"])).read_text(encoding="utf-8"))
+
+    assert summary["family_id"] == "paper_eval_family_geometry_mix"
+    assert summary["pw_base_config_path"] == normalize_path_value(GEOMETRY_MIX_V4_PW_BASE_CONFIG_PATH)
+    assert summary["pw_matrix_config_path"] == normalize_path_value(GEOMETRY_MIX_V4_PW_MATRIX_CONFIG_PATH)
+    assert summary["benchmark_protocol_config_path"] == normalize_path_value(GEOMETRY_MIX_V4_PROTOCOL_CONFIG_PATH)
+    assert summary["benchmark_protocol"]["protocol_id"] == "geometry_mix_v4"
+    assert summary["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v4"
+    assert summary["benchmark_protocol"]["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v4"
+    assert summary["matrix_profile"] == "geometry_mix_v4"
+    assert summary["matrix_version"] == "pw_attack_matrix_geometry_mix_v4"
+    assert summary["attack_condition_count"] == 21
+    assert summary["geometry_optional_claim_boundary_abs_margin_min"] == pytest.approx(0.005)
+    assert summary["geometry_optional_claim_boundary_abs_margin_max"] == pytest.approx(0.08)
+    assert summary["calibration_fraction"] == pytest.approx(0.5)
+    assert summary["calibration_fraction_by_role"]["planner_conditioned_control_negative"] == pytest.approx(0.15)
+    assert summary["control_negative_calibration_fraction_effective"] == pytest.approx(0.15)
+    assert summary["role_level_calibration_counts"]["planner_conditioned_control_negative"]["calibration_event_count"] == 1
+
+    assert family_manifest["family_id"] == "paper_eval_family_geometry_mix"
+    assert family_manifest["pw_base_config_path"] == normalize_path_value(GEOMETRY_MIX_V4_PW_BASE_CONFIG_PATH)
+    assert family_manifest["pw_matrix_config_path"] == normalize_path_value(GEOMETRY_MIX_V4_PW_MATRIX_CONFIG_PATH)
+    assert family_manifest["benchmark_protocol_config_path"] == normalize_path_value(
+        GEOMETRY_MIX_V4_PROTOCOL_CONFIG_PATH
+    )
+    assert family_manifest["benchmark_protocol"]["protocol_id"] == "geometry_mix_v4"
+    assert family_manifest["benchmark_protocol"]["protocol_family_id"] == "paper_eval_family_geometry_mix"
+    assert family_manifest["attack_parameters"]["matrix_profile"] == "geometry_mix_v4"
+    assert family_manifest["attack_parameters"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v4"
+    assert family_manifest["source_parameters"]["calibration_fraction"] == pytest.approx(0.5)
+    assert family_manifest["source_parameters"]["calibration_fraction_by_role"][
+        "planner_conditioned_control_negative"
+    ] == pytest.approx(0.15)
+    assert family_manifest["source_parameters"]["control_negative_calibration_fraction_effective"] == pytest.approx(0.15)
+
+    assert source_split_plan["calibration_fraction"] == pytest.approx(0.5)
+    assert source_split_plan["calibration_fraction_by_role"]["positive_source"] == pytest.approx(0.5)
+    assert source_split_plan["calibration_fraction_by_role"]["clean_negative"] == pytest.approx(0.5)
+    assert source_split_plan["calibration_fraction_by_role"]["planner_conditioned_control_negative"] == pytest.approx(0.15)
+    assert source_split_plan["role_level_calibration_counts"]["planner_conditioned_control_negative"]["calibration_event_count"] == 1
+    assert source_split_plan["role_level_calibration_counts"]["positive_source"]["calibration_event_count"] == 4
 
 
 def test_pw00_binds_shared_benchmark_protocol_and_provenance(tmp_path: Path) -> None:

@@ -1856,11 +1856,34 @@ def build_positive_source_event_grid(
     )
 
 
+def _validate_calibration_fraction_value(*, fraction: Any, label: str) -> float:
+    """
+    Validate one calibration fraction scalar.
+
+    Args:
+        fraction: Candidate calibration fraction.
+        label: Human-readable field label.
+
+    Returns:
+        Validated calibration fraction.
+    """
+    if not isinstance(label, str) or not label:
+        raise TypeError("label must be non-empty str")
+    if not isinstance(fraction, (int, float)) or isinstance(fraction, bool):
+        raise TypeError(f"{label} must be numeric")
+
+    fraction_value = float(fraction)
+    if not 0.0 < fraction_value < 1.0:
+        raise ValueError(f"{label} must satisfy 0 < fraction < 1")
+    return fraction_value
+
+
 def build_source_split_plan(
     *,
     family_id: str,
     events: Sequence[Mapping[str, Any]],
     calibration_fraction: float,
+    calibration_fraction_by_role: Mapping[str, float] | None = None,
 ) -> Dict[str, Any]:
     """
     Build deterministic calibration/evaluate split plan for source roles.
@@ -1869,18 +1892,31 @@ def build_source_split_plan(
         family_id: Family identifier.
         events: Full source event grid.
         calibration_fraction: Fraction assigned to calibration within each role.
+        calibration_fraction_by_role: Optional role-level calibration fractions.
 
     Returns:
         Split-plan payload with role-specific and flattened event-id lists.
     """
     if not family_id:
         raise TypeError("family_id must be non-empty str")
-    if not isinstance(calibration_fraction, (int, float)):
-        raise TypeError("calibration_fraction must be float")
 
-    calibration_fraction_value = float(calibration_fraction)
-    if not 0.0 < calibration_fraction_value < 1.0:
-        raise ValueError("calibration_fraction must satisfy 0 < calibration_fraction < 1")
+    calibration_fraction_value = _validate_calibration_fraction_value(
+        fraction=calibration_fraction,
+        label="calibration_fraction",
+    )
+
+    requested_fraction_by_role: Dict[str, float] = {}
+    if calibration_fraction_by_role is not None:
+        if not isinstance(calibration_fraction_by_role, Mapping):
+            raise TypeError("calibration_fraction_by_role must be Mapping when provided")
+        for raw_sample_role, raw_fraction in cast(Mapping[Any, Any], calibration_fraction_by_role).items():
+            if not isinstance(raw_sample_role, str) or not raw_sample_role.strip():
+                raise TypeError("calibration_fraction_by_role keys must be non-empty str")
+            normalized_role = validate_source_sample_role(raw_sample_role.strip())
+            requested_fraction_by_role[normalized_role] = _validate_calibration_fraction_value(
+                fraction=raw_fraction,
+                label=f"calibration_fraction_by_role.{normalized_role}",
+            )
 
     events_by_role: Dict[str, List[Dict[str, Any]]] = {
         sample_role: []
@@ -1905,11 +1941,12 @@ def build_source_split_plan(
         if not ordered_events:
             raise ValueError(f"source split requires non-empty events for role: {sample_role}")
 
-        calibration_count = int(len(ordered_events) * calibration_fraction_value)
+        role_calibration_fraction = requested_fraction_by_role.get(sample_role, calibration_fraction_value)
+        calibration_count = int(len(ordered_events) * role_calibration_fraction)
         if calibration_count <= 0 or calibration_count >= len(ordered_events):
             raise ValueError(
                 "source split requires non-empty calibration and evaluate partitions: "
-                f"sample_role={sample_role}, event_count={len(ordered_events)}, calibration_fraction={calibration_fraction_value}"
+                f"sample_role={sample_role}, event_count={len(ordered_events)}, calibration_fraction={role_calibration_fraction}"
             )
 
         calibration_events = ordered_events[:calibration_count]
@@ -1927,6 +1964,18 @@ def build_source_split_plan(
         "schema_version": "pw_stage_02_v1",
         "family_id": family_id,
         "calibration_fraction": calibration_fraction_value,
+        "calibration_fraction_by_role": {
+            sample_role: requested_fraction_by_role.get(sample_role, calibration_fraction_value)
+            for sample_role in ACTIVE_SOURCE_SAMPLE_ROLES
+        },
+        "role_level_calibration_counts": {
+            sample_role: {
+                "event_count": int(split_roles[sample_role]["event_count"]),
+                "calibration_event_count": int(split_roles[sample_role]["calibration_event_count"]),
+                "evaluate_event_count": int(split_roles[sample_role]["evaluate_event_count"]),
+            }
+            for sample_role in ACTIVE_SOURCE_SAMPLE_ROLES
+        },
         "sample_roles_active": list(ACTIVE_SOURCE_SAMPLE_ROLES),
         "sample_roles_reserved": list(RESERVED_SAMPLE_ROLES),
         "roles": split_roles,

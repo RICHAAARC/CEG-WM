@@ -34,6 +34,8 @@ families:
         degrees: [15, 17, 19, 21, 23, 25, 27]
       v7:
         degrees: [9, 11, 13, 15, 17, 19, 21]
+      v8:
+        degrees: [7, 9, 11, 13, 15, 17]
   resize:
     description: "resize attacks"
     params_versions:
@@ -62,6 +64,8 @@ families:
         crop_ratios: [0.84, 0.80, 0.76, 0.72, 0.68, 0.64, 0.60]
       v7:
         crop_ratios: [0.90, 0.86, 0.82, 0.78, 0.74, 0.70, 0.66]
+      v8:
+        crop_ratios: [0.94, 0.90, 0.86, 0.82, 0.78, 0.74]
   translate:
     description: "translation attacks"
     params_versions:
@@ -77,6 +81,9 @@ families:
       v4:
         x_shift: [2, 4, 6]
         y_shift: [0, 2]
+      v5:
+        x_shift: [2, 4, 6]
+        y_shift: [0]
   jpeg:
     description: "jpeg compression attacks"
     params_versions:
@@ -329,6 +336,56 @@ families:
           - family: "resize"
             params: {scale_factor: 0.82}
         seed_policy: "shared"
+      rotate_crop_v8:
+        steps:
+          - family: "rotate"
+            params: {degrees: 9}
+          - family: "crop"
+            params: {crop_ratio: 0.90}
+        seed_policy: "shared"
+      rotate_crop_v9:
+        steps:
+          - family: "rotate"
+            params: {degrees: 13}
+          - family: "crop"
+            params: {crop_ratio: 0.82}
+        seed_policy: "shared"
+      rotate_resize_jpeg_v11:
+        steps:
+          - family: "rotate"
+            params: {degrees: 11}
+          - family: "resize"
+            params: {scale_factor: 0.90}
+          - family: "jpeg"
+            params: {quality: 90}
+        seed_policy: "shared"
+      rotate_resize_jpeg_v12:
+        steps:
+          - family: "rotate"
+            params: {degrees: 15}
+          - family: "resize"
+            params: {scale_factor: 0.84}
+          - family: "jpeg"
+            params: {quality: 85}
+        seed_policy: "shared"
+      crop_resize_translate_v6:
+        steps:
+          - family: "crop"
+            params: {crop_ratio: 0.86}
+          - family: "resize"
+            params: {scale_factor: 0.82}
+          - family: "translate"
+            params: {x_shift: 2, y_shift: 0}
+        seed_policy: "shared"
+      crop_resize_translate_v7:
+        steps:
+          - family: "crop"
+            params: {crop_ratio: 0.78}
+          - family: "resize"
+            params: {scale_factor: 0.76}
+          - family: "translate"
+            params: {x_shift: 4, y_shift: 0}
+        seed_policy: "shared"
 
 params_versions:
   rotate::v1:
@@ -352,6 +409,9 @@ params_versions:
   rotate::v7:
     family: "rotate"
     params: {degrees: [9, 11, 13, 15, 17, 19, 21]}
+  rotate::v8:
+    family: "rotate"
+    params: {degrees: [7, 9, 11, 13, 15, 17]}
   resize::v1:
     family: "resize"
     params: {scale_factors: [0.75, 0.9, 1.1]}
@@ -385,6 +445,9 @@ params_versions:
   crop::v7:
     family: "crop"
     params: {crop_ratios: [0.90, 0.86, 0.82, 0.78, 0.74, 0.70, 0.66]}
+  crop::v8:
+    family: "crop"
+    params: {crop_ratios: [0.94, 0.90, 0.86, 0.82, 0.78, 0.74]}
   translate::v1:
     family: "translate"
     params: {x_shift: [-24, -12, 12, 24], y_shift: [-24, -12, 12, 24]}
@@ -397,6 +460,9 @@ params_versions:
   translate::v4:
     family: "translate"
     params: {x_shift: [2, 4, 6], y_shift: [0, 2]}
+  translate::v5:
+    family: "translate"
+    params: {x_shift: [2, 4, 6], y_shift: [0]}
   jpeg::v1:
     family: "jpeg"
     params: {quality: [95, 85, 75], seed_policy: "inherit"}
@@ -691,4 +757,66 @@ params_versions:
           params: {x_shift: 4, y_shift: 0}
         - family: "resize"
           params: {scale_factor: 0.82}
+      seed_policy: "shared"
+  composite::rotate_crop_v8:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 9}
+        - family: "crop"
+          params: {crop_ratio: 0.90}
+      seed_policy: "shared"
+  composite::rotate_crop_v9:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 13}
+        - family: "crop"
+          params: {crop_ratio: 0.82}
+      seed_policy: "shared"
+  composite::rotate_resize_jpeg_v11:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 11}
+        - family: "resize"
+          params: {scale_factor: 0.90}
+        - family: "jpeg"
+          params: {quality: 90}
+      seed_policy: "shared"
+  composite::rotate_resize_jpeg_v12:
+    family: "composite"
+    params:
+      steps:
+        - family: "rotate"
+          params: {degrees: 15}
+        - family: "resize"
+          params: {scale_factor: 0.84}
+        - family: "jpeg"
+          params: {quality: 85}
+      seed_policy: "shared"
+  composite::crop_resize_translate_v6:
+    family: "composite"
+    params:
+      steps:
+        - family: "crop"
+          params: {crop_ratio: 0.86}
+        - family: "resize"
+          params: {scale_factor: 0.82}
+        - family: "translate"
+          params: {x_shift: 2, y_shift: 0}
+      seed_policy: "shared"
+  composite::crop_resize_translate_v7:
+    family: "composite"
+    params:
+      steps:
+        - family: "crop"
+          params: {crop_ratio: 0.78}
+        - family: "resize"
+          params: {scale_factor: 0.76}
+        - family: "translate"
+          params: {x_shift: 4, y_shift: 0}
       seed_policy: "shared"

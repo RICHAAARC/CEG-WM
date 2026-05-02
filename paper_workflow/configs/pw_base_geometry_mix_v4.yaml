@@ -1,0 +1,46 @@
+schema_version: "pw01_v1"
+source_truth_stage: "PW01_Source_Event_Shards"
+default_config_path: "configs/default.yaml"
+matrix_config_path: "paper_workflow/configs/pw_matrix_geometry_mix_v4.yaml"
+benchmark_protocol_config_path: "paper_workflow/configs/pw_protocol_geometry_mix_v4.yaml"
+benchmark_mode: "geometry_mix"
+benchmark_mode_version: "geometry_mix_v4"
+family_root_relative: "paper_workflow/families"
+sample_roles:
+  active:
+    - "positive_source"
+    - "clean_negative"
+    - "planner_conditioned_control_negative"
+  reserved:
+    - "attacked_positive"
+    - "attacked_negative"
+calibration_fraction: 0.5
+calibration_fraction_by_role:
+  positive_source: 0.5
+  clean_negative: 0.5
+  planner_conditioned_control_negative: 0.15
+event_identity:
+  unit_definition: "sample_event = (prompt_index, prompt_text, seed, sample_role)"
+  id_fields:
+    - "family_id"
+    - "sample_role"
+    - "prompt_index"
+    - "prompt_sha256"
+    - "seed"
+  id_digest: "sha256"
+source_shards:
+  default_count: 3
+source_alignment_reference_files:
+  - "paper_workflow/configs/pw_base_geometry_mix_v4.yaml"
+  - "paper_workflow/configs/pw_matrix_geometry_mix_v4.yaml"
+  - "paper_workflow/configs/pw_protocol_geometry_mix_v4.yaml"
+  - "paper_workflow/scripts/pw_common.py"
+  - "paper_workflow/scripts/pw00_build_family_manifest.py"
+  - "paper_workflow/scripts/pw01_stage_runtime_helpers.py"
+  - "paper_workflow/scripts/pw01_run_source_event_shard.py"
+  - "paper_workflow/scripts/pw02_merge_source_event_shards.py"
+  - "paper_workflow/notebook/PW00_Paper_Eval_Family_Manifest.ipynb"
+  - "paper_workflow/notebook/PW01_Source_Event_Shards.ipynb"
+  - "paper_workflow/notebook/PW02_Source_Merge_And_Global_Thresholds.ipynb"
+  - "scripts/notebook_runtime_common.py"
+  - "configs/default.yaml"
