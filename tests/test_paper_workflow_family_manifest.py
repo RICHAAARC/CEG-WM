@@ -91,6 +91,12 @@ GEOMETRY_MIX_V4_PW_MATRIX_CONFIG_PATH = (
 GEOMETRY_MIX_V4_PROTOCOL_CONFIG_PATH = (
     REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix_v4.yaml"
 ).resolve()
+GEOMETRY_MIX_V4_CN000_PW_BASE_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_base_geometry_mix_v4_cn000.yaml"
+).resolve()
+GEOMETRY_MIX_V4_CN000_PROTOCOL_CONFIG_PATH = (
+    REPO_ROOT / "paper_workflow" / "configs" / "pw_protocol_geometry_mix_v4_cn000.yaml"
+).resolve()
 
 
 def test_pw00_builds_stable_event_grid_and_shard_plan(tmp_path: Path) -> None:
@@ -1797,6 +1803,56 @@ def test_geometry_mix_v4_matrix_materializes_expected_condition_subset() -> None
         ],
         "seed_policy": "shared",
     }
+
+
+def test_geometry_mix_v4_cn000_protocol_enforces_clean_only_content_calibration() -> None:
+    """
+    Verify the geometry-mix-v4-cn000 protocol keeps formal content calibration clean-only.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    assert GEOMETRY_MIX_V4_CN000_PROTOCOL_CONFIG_PATH.exists()
+
+    protocol_cfg = load_yaml_mapping(GEOMETRY_MIX_V4_CN000_PROTOCOL_CONFIG_PATH)
+    content_chain_score = protocol_cfg["score_pools"]["content_chain_score"]
+
+    assert protocol_cfg["protocol_id"] == "geometry_mix_v4_cn000"
+    assert content_chain_score["calibration_role_order"] == [
+        "positive_source",
+        "clean_negative",
+    ]
+    assert "planner_conditioned_control_negative" not in content_chain_score["calibration_role_order"]
+    assert "planner_conditioned_control_negative" not in content_chain_score["calibration_event_id_keys"]
+    assert content_chain_score["calibration_event_id_keys"] == {
+        "positive_source": "calib_pos_event_ids",
+        "clean_negative": "calib_neg_event_ids",
+    }
+    assert protocol_cfg["geometry_dominant_severity_ladder"]["matrix_profile"] == "geometry_mix_v4"
+    assert protocol_cfg["geometry_dominant_severity_ladder"]["matrix_version"] == "pw_attack_matrix_geometry_mix_v4"
+
+
+def test_geometry_mix_v4_cn000_base_binds_new_protocol_with_existing_matrix_and_control_fraction() -> None:
+    """
+    Verify the geometry-mix-v4-cn000 base config points to the cn000 protocol without changing matrix or control split.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
+    assert GEOMETRY_MIX_V4_CN000_PW_BASE_CONFIG_PATH.exists()
+
+    base_cfg = load_yaml_mapping(GEOMETRY_MIX_V4_CN000_PW_BASE_CONFIG_PATH)
+
+    assert base_cfg["benchmark_protocol_config_path"] == "paper_workflow/configs/pw_protocol_geometry_mix_v4_cn000.yaml"
+    assert base_cfg["matrix_config_path"] == "paper_workflow/configs/pw_matrix_geometry_mix_v4.yaml"
+    assert base_cfg["benchmark_mode_version"] == "geometry_mix_v4_cn000"
+    assert base_cfg["calibration_fraction_by_role"]["planner_conditioned_control_negative"] == pytest.approx(0.05)
 
 
 def test_build_source_split_plan_supports_role_level_calibration_fraction() -> None:
