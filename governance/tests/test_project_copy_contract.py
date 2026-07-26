@@ -10,7 +10,9 @@ from governance.harness.run_all_audits import run_all_audits
 
 
 @pytest.mark.constraint
-def test_governed_project_copy_preserves_project_authorities(tmp_path: Path) -> None:
+def test_governed_project_copy_without_revision_fails_only_construction_provenance(
+    tmp_path: Path,
+) -> None:
     source_root = Path.cwd()
     copied_root = tmp_path / "copied_project"
     copied_root.mkdir()
@@ -33,4 +35,18 @@ def test_governed_project_copy_preserves_project_authorities(tmp_path: Path) -> 
         shutil.copy2(source_root / file_name, copied_root / file_name)
     assert (copied_root / "README.md").exists()
     assert (copied_root / ".codex" / "research_state" / "research_definition.yaml").exists()
-    assert run_all_audits(copied_root)["overall_decision"] == "pass"
+    report = run_all_audits(copied_root)
+    assert report["overall_decision"] == "fail"
+    failures = [
+        audit_result
+        for audit_result in report["audit_results"]
+        if audit_result["decision"] != "pass"
+    ]
+    assert len(failures) == 1
+    assert failures[0]["audit_name"] == "audit_research_definition"
+    assert failures[0]["violations"] == [
+        {
+            "path": ".git",
+            "reason": "construction_repository_revision_unavailable",
+        }
+    ]

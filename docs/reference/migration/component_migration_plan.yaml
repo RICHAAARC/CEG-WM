@@ -1,5 +1,5 @@
 document_role: preconstruction_component_migration_plan
-project_stage: research_defined
+project_stage: method_construction_authorized
 implementation_status: not_implemented
 authority:
   component_and_candidate_mapping: ../../design/candidate_specifications.md

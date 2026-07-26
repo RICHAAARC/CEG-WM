@@ -2,9 +2,14 @@
 
 ## 项目定位
 
-CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印研究项目。当前阶段只有权威研究定义和治理控制平面，没有项目方法、runtime 或实验实现。
+CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印研究项目。当前已合法
+进入 `method_construction_authorized`，但仍只有权威研究定义、构建准入和治理
+控制平面，没有项目方法、runtime 或实验实现。
 
-阶段实施路径固定为 `research_defined → method_construction_authorized → method_implemented`。候选规格关闭、独立审计、用户授权和可审计 repository revision 齐备后，先用不含方法实现的独立变更进入实施准入阶段；实质 `main/` 工作只能在后续变更中开始。当前仍为 `research_defined`。
+阶段实施路径固定为 `research_defined → method_construction_authorized → method_implemented`。
+候选规格关闭、独立审计、用户授权和可审计 repository revision 已齐备；当前转换
+以不含方法实现的独立变更进入实施准入阶段。用户要求本轮停在转换后，实质
+`main/` 工作只能在该转换独立审计通过并获得后续单独授权后开始。
 
 `method_implemented` 的 readiness AST 审计只承担候选绑定、固定模块路径、symbol 调用和断言接线检查；它不能单独证明非代理实现。该阶段还必须有绑定候选规格摘要、实现路径、方法特异性测试节点和 repository revision 的独立语义复核 `approve`，且复核后这些受保护路径没有变化。
 

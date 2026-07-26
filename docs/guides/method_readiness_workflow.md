@@ -8,7 +8,9 @@
 .codex/research_state/method_readiness.yaml
 ```
 
-当前该文件不存在，也不应在 `research_defined / not_implemented` 创建。当前只有
+当前该文件不存在，也不应在
+`method_construction_authorized / not_implemented` 且 13 项职责尚未实现时创建。
+当前只有
 外层权威 `governance/templates/method_readiness.yaml` 和
 `governance/policies/method_readiness_rules.yaml`；它们是未来
 填写规则，不是完成记录。

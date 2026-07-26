@@ -2,7 +2,10 @@
 
 ## Purpose
 
-本文档把 [algorithm_primitives.md](algorithm_primitives.md) 中的算法原语和 [candidate_specifications.md](candidate_specifications.md) 中已关闭的有限候选组织为可实现、可验证且不越过当前 `research_defined` 阶段的端到端机制。它可以在未来授权后指导实现，但自身不提供实现或授权。
+本文档把 [algorithm_primitives.md](algorithm_primitives.md) 中的算法原语和
+[candidate_specifications.md](candidate_specifications.md) 中已关闭的有限候选组织为
+可实现、可验证且不越过当前 `method_construction_authorized` 阶段的端到端机制。
+它可以指导后续实现，但自身、admission 和阶段转换都不提供实现或科学证据。
 
 ## Method Identity
 
@@ -367,15 +370,18 @@ runtime 不负责：
 
 root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
 backbone/runtime 已由具名候选关闭，未来实现者必须按候选 ID 工作，不能自行发明
-替代方案。候选规格仍需独立复审；通过后再申请 CEG-WM 版本身份和构建授权，以
-不含 `main/` 变更的独立 revision 进入 `method_construction_authorized`，实质实施
-于后续 revision 开始。
+替代方案。候选规格已独立复审批准，CEG-WM 版本身份和 construction admission
+已绑定，项目已以不含 `main/` 变更的独立 revision 进入
+`method_construction_authorized`。实质实施只能在该转换独立审计通过并获得后续
+单独授权后，于新的 revision 开始。
 
 ## Current Status
 
-当前只完成研究职责与机制设计。项目仍为 `research_defined`：
+当前只完成研究职责、机制设计和构建准入。项目为
+`method_construction_authorized / not_implemented`：
 
 - 没有项目方法实现；
+- 没有 method readiness；
 - 没有冻结 runtime；
 - 没有本项目 calibration 阈值；
 - 没有正式 GPU 或论文 records；

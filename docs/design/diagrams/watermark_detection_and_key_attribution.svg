@@ -14,7 +14,7 @@
   </defs>
   <rect width="1800" height="1280" fill="#fff"/>
   <text x="40" y="48" class="title">Watermark Presence And Key Attribution Decision (planned blind detection)</text>
-  <text x="40" y="76" class="sub">Not payload decoding. Scope: research_defined / not_implemented. Content evidence is the only positive authority; geometry is conditional recovery only.</text>
+  <text x="40" y="76" class="sub">Not payload decoding. Scope: method_construction_authorized / not_implemented. Content evidence is the only positive authority; geometry is conditional recovery only.</text>
   <text x="40" y="98" class="sub">Sources: ../content_chain.md · ../geometry_chain.md · ../joint_decision.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
 
   <rect x="40" y="145" width="300" height="190" class="box"/>

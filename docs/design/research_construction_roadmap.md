@@ -2,7 +2,8 @@
 
 ## Roadmap Authority
 
-本文档定义从当前 `research_defined` 到论文全部数据、可重建产物和受支持结论的构建路线。它是研究与工程准入顺序，不是完成状态报告。
+本文档定义从当前 `method_construction_authorized` 到论文全部数据、可重建产物和
+受支持结论的构建路线。它是研究与工程准入顺序，不是完成状态报告。
 
 文中的语义化名称是证据门，不是新的 `project_stage`。正式阶段仍以 `governance/policies/method_readiness_rules.yaml` 登记的顺序为准：
 
@@ -99,18 +100,25 @@ formal_evidence_available
 - 组合候选不按攻击类型切换；
 - 回正前后 detector 和 threshold 身份保持一致；
 - 候选选择只使用 development 或 calibration 职责数据。
-- 当前目录无 CEG-WM revision 时，允许独立审计候选规格和历史源 provisional provenance；不得声称已迁移、已有 CEG-WM method revision 或完整 migration provenance。
+- 在 CEG-WM baseline revision 建立前，允许独立审计候选规格和历史源 provisional
+  provenance；不得声称已迁移、已有 CEG-WM method revision 或完整 migration
+  provenance。
 - key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime 均已有明确、可证伪且无隐式选择的候选规格。
 
 ### Pass Result
 
-本门在无 CEG-WM Git 时即可提交独立审计。审计通过后才向用户申请两项连续授权：
+本门在无 CEG-WM Git 时即可提交独立审计。该流程已完成候选审计、基线版本身份和
+construction admission；以下仍是进入当前阶段所遵循的两项分离授权：
 
 1. 建立 CEG-WM 可审计版本身份，并把当前已审候选规格保存为 authorization base revision；
 2. 按 `method_construction_admission.yaml` 绑定审计/用户授权引用，以一个不含任何 `main/` 变更的独立 revision 进入 `method_construction_authorized`，随后才在后续 revision 开始迁移/实现。
 
-历史源 revision 或许可证无法确认时记录 fail-closed migration gap；它不阻止提出 CEG-WM 版本身份授权，但缺口关闭前不得实际复制历史代码。research-definition audit 必须从 base revision 验证阶段转换。这一步只开放实施，不表示方法已实现。
+历史源 revision 或许可证无法确认时记录 fail-closed migration gap；它不阻止提出
+CEG-WM 版本身份授权，但缺口关闭前不得实际复制历史代码。当前 research-definition
+audit 必须从 authorization base revision
+`e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9` 验证阶段转换。这一步只开放后续
+实施，不表示方法已实现；本轮用户要求在转换后停止。
 
 ## Evidence Gate: Method Implementation Ready
 

@@ -392,4 +392,6 @@ registry 共 10 个 ID：9 个待实施/晋升候选和 1 个强制同预算禁�
 
 仍开放的是候选能否通过本项目 CPU、synthetic、真实 runtime、candidate-selection、calibration 和 formal evaluation 门，以及由互斥 calibration 职责拟合的阈值数值。这些是证据结果，不是实现空白。
 
-因此权威设计可以在未来用户授权后直接指导 Codex 实现具名候选。当前仍为 `research_defined`，尚无实施授权、CEG-WM revision、方法实现、runtime 证明或效果证据。
+因此权威设计可以指导后续具名候选实现。当前已通过独立的无 `main/` 变更 revision
+进入 `method_construction_authorized`，并已有可审计 CEG-WM revision；但仍无方法
+实现、runtime 证明或效果证据。本轮按用户要求停在阶段转换，不能直接开始实施。

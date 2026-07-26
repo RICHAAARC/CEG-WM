@@ -6,17 +6,22 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 
 ## Current Stage
 
-- `project_stage`: `research_defined`
-- `target_construction_phase`: `dual_chain_governance_validation`
-- 当前允许修订研究定义、架构契约、机器 policy、harness、测试分层和方法就绪门禁。
-- 当前不得引入 LF、HF、几何或联合判定的项目实现，不得接入真实模型，不得运行 GPU、正式攻击矩阵或论文实验。
-- `research_defined` 只表示研究问题和方法边界已经登记，不表示任何机制已经实现或有效。
+- `project_stage`: `method_construction_authorized`
+- `target_construction_phase`: `dual_chain_method_construction`
+- 项目已依据关闭的候选规格、独立审计批准、用户明确授权和可审计基线 revision
+  合法进入构建准入阶段；该阶段只允许在后续独立变更中实施方法，不表示任何组件
+  已经实现或有效。
+- 本次阶段转换不含任何 `main/` 变更；当前仍无 LF、HF、几何或联合判定组件实现。
+  用户要求转换完成后立即停止，实质实施须等待本 revision 的独立审计和后续单独授权。
+- 当前不得接入真实模型，不得运行 GPU、正式攻击矩阵或论文实验。
 - root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
   registry 是 9 个待实施/晋升候选加 1 个强制 routing 禁用对照。仍开放的是实验
   晋升结果和 calibration 数值，不允许实现者自行发明新算法。
-- 权威设计可以在未来授权后直接指导实现，但文档本身不构成实施授权。候选规格通过独立审计后，必须再次取得用户明确授权，才能建立 CEG-WM 版本身份并在一个不包含 `main/` 变更的独立 revision 中进入 `method_construction_authorized`。
+- 权威设计可以指导后续具名候选实现，但文档、阶段转换或 admission 本身都不是实现
+  或科学证据。当前 admission 只绑定已批准的基线与阶段授权；实质实施必须发生在
+  本转换通过独立审计后的后续独立 revision。
 
 ## Method Authority
 
@@ -99,9 +104,13 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 
 ## Repository Revision Admission
 
-1. 当前目录没有可审计 Git revision。不得擅自初始化仓库、提交或虚构 source commit。
-2. 无 CEG-WM Git 时允许完成并独立审计候选规格与历史源 provisional provenance；历史仓库真实 revision/文件摘要可登记，但不得声称已经迁移。
-3. 候选规格审计通过后，才向用户申请建立 CEG-WM 可审计版本身份、独立阶段转换和后续迁移/实现授权。
+1. CEG-WM 已由用户授权建立可审计版本身份；本次 construction admission 精确绑定
+   根基线 `e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9`。不得虚构、缩写或替换该授权
+   基线。
+2. 在 CEG-WM Git 建立前，允许完成并独立审计候选规格与历史源 provisional
+   provenance；历史仓库真实 revision/文件摘要可登记，但不得声称已经迁移。
+3. 候选规格审计、版本身份和阶段授权已经分别完成；当前阶段转换仍不授权在同一
+   revision 中实施、迁移历史源码或继承历史证据。
 4. 在迁移历史代码或进入 `method_construction_authorized` 前，必须由用户明确授权建立 CEG-WM 版本身份；历史源 revision 或许可证缺口不得阻止提出该授权请求，但实际复制代码在缺口关闭前 fail closed。
 5. 版本身份只提供 provenance，不替代候选规格、实现测试、runtime 验证或科学证据。
 

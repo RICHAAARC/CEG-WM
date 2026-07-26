@@ -1,6 +1,8 @@
 # CPU Validation Environment
 
-CEG-WM 使用项目根目录下的 `.venv` 执行 pytest、governance 自测和 harness。该环境当前只服务 `research_defined` 阶段的轻量 CPU 验证，不包含 Torch、模型权重、GPU runtime 或实验依赖。
+CEG-WM 使用项目根目录下的 `.venv` 执行 pytest、governance 自测和 harness。该环境
+当前只服务 `method_construction_authorized / not_implemented` 状态的轻量 CPU
+治理验证，不包含 Torch、模型权重、GPU runtime 或实验依赖。
 
 ## Create
 

@@ -39,10 +39,11 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 
 ## 当前阶段
 
-- `project_stage`: `research_defined`
-- 当前已经建立项目研究定义、双链架构边界、威胁模型和验证问题。
+- `project_stage`: `method_construction_authorized`
+- 当前已经以不含 `main/` 变更的独立 revision 完成构建准入；这不表示方法已实现。
 - 当前没有 LF、HF、几何链或联合判定的项目实现。
 - 当前没有 runtime、攻击实现、正式实验 records 或论文效果证据。
+- 本次转换后停止；实质方法实施须等待该转换的独立审计和后续单独授权。
 
 `SLM-WM`、`SLM-WM-FlowHF`、`CEG-WM-OLD-main` 和 `CEG-O-master` 仅作为历史来源与偏离案例；它们的固定 LF/HF 融合、reference-based 几何、嵌入端私有状态依赖和系统级 attestation 路线不自动成为本项目方法。
 
