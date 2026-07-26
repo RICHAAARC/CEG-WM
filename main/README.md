@@ -7,5 +7,6 @@
 
 此层不得导入 runtime、experiments、paper artifacts、notebooks、infrastructure、tests 或任何外层控制平面，也不得保存实验 records、论文构建或模型后端适配。
 
-当前尚无方法或占位实现；实质 Python 定义只能在合法构建阶段且取得单独后续授权的
-revision 中加入。目录与空入口不表示任何组件或能力已经完成。
+当前处于 `method_construction_authorized` 的分批实施期。共享层
+`main/shared/key_schedule.py` 已进入批次 1 实施与 CPU 验证；其余 12 项职责仍未
+实现。单个批次通过不表示完整方法完成，也不得提前创建 method readiness。
