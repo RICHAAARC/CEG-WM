@@ -10,8 +10,21 @@ from typing import Literal, Sequence
 
 from main.shared.key_schedule import stable_json_utf8
 
-from .hf_carrier import HfCarrierResult
-from .lf_carrier import LfCarrierResult
+from .hf_carrier import (
+    HfCarrierError,
+    HfCarrierResult,
+    validate_hf_carrier_routing_binding,
+)
+from .lf_carrier import (
+    LfCarrierError,
+    LfCarrierResult,
+    validate_lf_carrier_routing_binding,
+)
+from .routing import (
+    ContentRouterError,
+    ContentRoutingResult,
+    validate_content_routing_result,
+)
 
 CONTENT_RELATIVE_L2_NUMERATOR = 3
 CONTENT_RELATIVE_L2_DENOMINATOR = 250
@@ -51,6 +64,8 @@ class ContentEmbeddingResult:
     target_component_hf_norm: float | None
     lf_carrier_config_digest: str | None
     hf_carrier_config_digest: str | None
+    route_identity: str | None
+    route_config_digest: str | None
     embedder_config_digest: str
 
 
@@ -151,6 +166,7 @@ def content_embedder(
     *,
     lf_carrier_result: LfCarrierResult | None = None,
     mixing_coefficient: float | None = None,
+    routing_result: ContentRoutingResult | None = None,
 ) -> ContentEmbeddingResult:
     """产生 HF-only、LF-only 或冻结 `a` 的 combined 理论更新。"""
 
@@ -204,6 +220,28 @@ def content_embedder(
     lf_scale: float | None
     hf_scale: float | None
     if lf_direction is not None and hf_direction is not None:
+        if routing_result is None:
+            raise ContentEmbedderError(
+                "combined mode requires one validated ContentRoutingResult"
+            )
+        try:
+            route = validate_content_routing_result(routing_result)
+            validate_hf_carrier_routing_binding(
+                hf_carrier_value,
+                route,
+            )
+            validate_lf_carrier_routing_binding(
+                lf_carrier_value,
+                route,
+            )
+        except (ContentRouterError, HfCarrierError, LfCarrierError) as exc:
+            raise ContentEmbedderError(
+                "combined carrier routing binding validation failed"
+            ) from exc
+        if route.latent_shape != reference_shape:
+            raise ContentEmbedderError("combined routing result shape mismatch")
+        route_identity = route.route_identity
+        route_config_digest = route.route_config_digest
         if (
             isinstance(mixing_coefficient, bool)
             or not isinstance(mixing_coefficient, (int, float))
@@ -257,6 +295,10 @@ def content_embedder(
         lf_scale = mixing_value / combined_norm
         hf_scale = one_minus_a / combined_norm
     elif hf_direction is not None:
+        if routing_result is not None:
+            raise ContentEmbedderError(
+                "HF-only mode does not consume a combined routing result"
+            )
         if mixing_coefficient is not None:
             raise ContentEmbedderError(
                 "HF-only mode does not accept a mixing coefficient"
@@ -268,7 +310,13 @@ def content_embedder(
         content_direction = hf_direction
         lf_scale = None
         hf_scale = 1.0
+        route_identity = None
+        route_config_digest = None
     else:
+        if routing_result is not None:
+            raise ContentEmbedderError(
+                "LF-only mode does not consume a combined routing result"
+            )
         if mixing_coefficient is not None:
             raise ContentEmbedderError(
                 "LF-only mode does not accept a mixing coefficient"
@@ -280,6 +328,8 @@ def content_embedder(
         content_direction = lf_direction
         lf_scale = 1.0
         hf_scale = None
+        route_identity = None
+        route_config_digest = None
 
     target_relative_l2 = _float32(
         CONTENT_RELATIVE_L2_NUMERATOR / CONTENT_RELATIVE_L2_DENOMINATOR
@@ -329,6 +379,9 @@ def content_embedder(
         "rho_content_numerator": CONTENT_RELATIVE_L2_NUMERATOR,
         "shape": list(reference_shape),
     }
+    if route_identity is not None:
+        identity["route_config_digest"] = route_config_digest
+        identity["route_identity"] = route_identity
     return ContentEmbeddingResult(
         candidate_ids=EMBEDDER_CANDIDATE_IDS,
         mode=mode,
@@ -363,6 +416,8 @@ def content_embedder(
             if hf_carrier_value is not None
             else None
         ),
+        route_identity=route_identity,
+        route_config_digest=route_config_digest,
         embedder_config_digest=sha256(
             stable_json_utf8(identity)
         ).hexdigest(),

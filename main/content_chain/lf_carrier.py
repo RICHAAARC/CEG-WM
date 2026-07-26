@@ -19,6 +19,11 @@ from main.shared.key_schedule import (
 )
 
 from .hf_carrier import MODEL_REVISION
+from .routing import (
+    ContentRouterError,
+    ContentRoutingResult,
+    validate_content_routing_result,
+)
 
 LF_CANDIDATE_ID = "lf_low_pass"
 KEY_SCHEDULE_CANDIDATE_ID = "key_schedule_sha256_counter"
@@ -41,6 +46,8 @@ class LfCarrierResult:
     template_digest: str
     direction_digest: str
     mask_digest: str
+    route_identity: str | None
+    route_config_digest: str | None
     root_key_public_digest: str
     key_role: str
     wrong_key_index: int | None
@@ -180,11 +187,36 @@ def _derive_lf_gaussian(
     return stream, root_digest, key_role, wrong_key_index
 
 
+def _carrier_config_identity(
+    *,
+    mask_digest: str,
+    normalized_shape: tuple[int, int, int, int],
+    route_identity: str | None,
+    route_config_digest: str | None,
+) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "average_kernel_size": AVERAGE_KERNEL_SIZE,
+        "candidate_ids": [KEY_SCHEDULE_CANDIDATE_ID, LF_CANDIDATE_ID],
+        "center_per_sample": True,
+        "count_include_pad": True,
+        "dtype": "float32",
+        "key_schedule_config_digest": DEFAULT_KEY_SCHEDULE_CONFIG.config_digest,
+        "mask_digest": mask_digest,
+        "model_revision": MODEL_REVISION,
+        "shape": list(normalized_shape),
+    }
+    if route_identity is not None:
+        identity["route_config_digest"] = route_config_digest
+        identity["route_identity"] = route_identity
+    return identity
+
+
 def lf_carrier(
     detection_key: str | DerivedWrongKeyMaterial,
     shape: Sequence[int],
     *,
     mask_lf: Sequence[float] | None = None,
+    routing_result: ContentRoutingResult | None = None,
     model_revision: str = MODEL_REVISION,
 ) -> LfCarrierResult:
     """构造 center-per-sample 的 LF 单位模板与 mask 后单位方向。"""
@@ -193,7 +225,23 @@ def lf_carrier(
     if model_revision != MODEL_REVISION:
         raise LfCarrierError("LF model revision does not match the frozen candidate")
     element_count = prod(normalized_shape)
-    if mask_lf is None:
+    route_identity: str | None = None
+    route_config_digest: str | None = None
+    if routing_result is not None:
+        if mask_lf is not None:
+            raise LfCarrierError(
+                "LF carrier accepts either routing_result or mask_lf, not both"
+            )
+        try:
+            validated_route = validate_content_routing_result(routing_result)
+        except ContentRouterError as exc:
+            raise LfCarrierError("LF routing result validation failed") from exc
+        if validated_route.latent_shape != normalized_shape:
+            raise LfCarrierError("LF routing result shape mismatch")
+        mask = validated_route.mask_lf
+        route_identity = validated_route.route_identity
+        route_config_digest = validated_route.route_config_digest
+    elif mask_lf is None:
         mask = (1.0,) * element_count
     else:
         mask = _vector(mask_lf, element_count, "mask_lf")
@@ -225,17 +273,12 @@ def lf_carrier(
         direction = _normalize(masked_template, "LF masked direction")
 
     mask_digest = _digest(mask)
-    carrier_identity = {
-        "average_kernel_size": AVERAGE_KERNEL_SIZE,
-        "candidate_ids": [KEY_SCHEDULE_CANDIDATE_ID, LF_CANDIDATE_ID],
-        "center_per_sample": True,
-        "count_include_pad": True,
-        "dtype": "float32",
-        "key_schedule_config_digest": DEFAULT_KEY_SCHEDULE_CONFIG.config_digest,
-        "mask_digest": mask_digest,
-        "model_revision": model_revision,
-        "shape": list(normalized_shape),
-    }
+    carrier_identity = _carrier_config_identity(
+        mask_digest=mask_digest,
+        normalized_shape=normalized_shape,
+        route_identity=route_identity,
+        route_config_digest=route_config_digest,
+    )
     return LfCarrierResult(
         candidate_id=LF_CANDIDATE_ID,
         candidate_ids=(KEY_SCHEDULE_CANDIDATE_ID, LF_CANDIDATE_ID),
@@ -245,6 +288,8 @@ def lf_carrier(
         template_digest=_digest(template),
         direction_digest=_digest(direction),
         mask_digest=mask_digest,
+        route_identity=route_identity,
+        route_config_digest=route_config_digest,
         root_key_public_digest=root_digest,
         key_role=key_role,
         wrong_key_index=wrong_key_index,
@@ -253,3 +298,68 @@ def lf_carrier(
             stable_json_utf8(carrier_identity)
         ).hexdigest(),
     )
+
+
+def validate_lf_carrier_routing_binding(
+    carrier: object,
+    routing_result: object,
+) -> LfCarrierResult:
+    """验证 LF carrier 确由给定 route 的 LF mask 生成。"""
+
+    if type(carrier) is not LfCarrierResult:
+        raise LfCarrierError("LF routing binding requires LfCarrierResult")
+    try:
+        route = validate_content_routing_result(routing_result)
+    except ContentRouterError as exc:
+        raise LfCarrierError("LF routing result validation failed") from exc
+    if (
+        carrier.candidate_id != LF_CANDIDATE_ID
+        or carrier.shape != route.latent_shape
+        or carrier.route_identity != route.route_identity
+        or carrier.route_config_digest != route.route_config_digest
+        or carrier.mask_digest != route.mask_lf_digest
+    ):
+        raise LfCarrierError("LF carrier route binding mismatch")
+    template = _vector(
+        carrier.template,
+        prod(carrier.shape),
+        "LF carrier template",
+    )
+    direction = _vector(
+        carrier.direction,
+        prod(carrier.shape),
+        "LF carrier direction",
+    )
+    if (
+        _digest(template) != carrier.template_digest
+        or _digest(direction) != carrier.direction_digest
+    ):
+        raise LfCarrierError("LF carrier template or direction digest mismatch")
+    masked_template = tuple(
+        _float32(value * weight)
+        for value, weight in zip(
+            template,
+            route.mask_lf,
+            strict=True,
+        )
+    )
+    expected_direction = (
+        template
+        if all(weight == 1.0 for weight in route.mask_lf)
+        else _normalize(masked_template, "LF routed direction")
+    )
+    if direction != expected_direction:
+        raise LfCarrierError("LF carrier direction does not match routed LF mask")
+    expected_config_digest = sha256(
+        stable_json_utf8(
+            _carrier_config_identity(
+                mask_digest=carrier.mask_digest,
+                normalized_shape=carrier.shape,
+                route_identity=carrier.route_identity,
+                route_config_digest=carrier.route_config_digest,
+            )
+        )
+    ).hexdigest()
+    if carrier.carrier_config_digest != expected_config_digest:
+        raise LfCarrierError("LF carrier config digest does not match route binding")
+    return carrier

@@ -101,7 +101,7 @@ Notebook 与 repository module 的跨边界数据
 | key_role | cross_boundary | method_identity | none | true | false | false | 当前检测 key 是 registered 还是预登记 wrong-key。 |
 | wrong_key_index | persisted_protocol | provenance | none | true | false | false | wrong-key roster 的预登记非负索引；registered key 时为空。 |
 | key_domain_digest | cross_boundary | provenance | none | false | false | false | carrier 实际消费的 key schedule 职责域摘要。 |
-| carrier_config_digest | cross_boundary | method_identity | none | false | false | false | carrier 算法、shape、mask 与 key schedule 配置身份摘要。 |
+| carrier_config_digest | cross_boundary | method_identity | none | false | false | false | carrier 算法、shape、mask、可选权威 route 绑定与 key schedule 配置身份摘要。 |
 | delta_content | cross_boundary | method_state | none | false | false | false | content embedder 产生、尚未由 runtime 物化的理论内容更新。 |
 | delta_content_digest | cross_boundary | provenance | none | false | false | false | 理论 `delta_content` 的 float32 字节摘要。 |
 | latent_norm | cross_boundary | method_state | none | false | false | false | content embedder 计算共同总预算时消费的 callback latent 理论 L2 norm。 |
@@ -118,7 +118,7 @@ Notebook 与 repository module 的跨边界数据
 | hf_carrier_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 实际消费的 HF carrier 配置摘要；HF 未启用时为空。 |
 | embedder_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 候选、模式和共同总预算身份摘要。 |
 | observation_protocol | cross_boundary | method_identity | none | false | false | false | 普通检测图像进入 LF/HF detector 的公共编码协议身份。 |
-| observation_digest | cross_boundary | provenance | none | false | false | false | 普通检测图像侧 LF/HF 编码观测的 float32 字节摘要。 |
+| observation_digest | cross_boundary | provenance | none | false | false | false | 普通检测图像侧 LF/HF 编码观测的 float32 字节摘要；两分支组合时必须相同。 |
 | hf_score | cross_boundary | method_statistic | none | true | false | false | HF detector 独立产生的 blind direct score。 |
 | lf_score | cross_boundary | method_statistic | none | true | false | false | LF detector 独立产生的 blind low-pass score。 |
 | combined_score | cross_boundary | method_statistic | none | true | false | false | 由冻结 C0/C1/C2 公式产生且当前仅用于未晋升候选诊断的组合统计。 |
@@ -145,8 +145,8 @@ Notebook 与 repository module 的跨边界数据
 | mean_routing_map | cross_boundary | method_statistic | none | true | false | false | router `A` 在完整 latent CHW 广播后的均值。 |
 | mean_mask_lf | cross_boundary | method_statistic | none | true | false | false | LF routing mask 在完整 latent CHW 广播后的均值。 |
 | mean_mask_hf | cross_boundary | method_statistic | none | true | false | false | HF routing mask 在完整 latent CHW 广播后的均值。 |
-| route_config_digest | cross_boundary | method_identity | none | false | false | false | 路由公式、插值、候选和 latent shape 的配置摘要。 |
-| route_identity | cross_boundary | method_identity | none | true | false | false | 路由配置、observation 与 mask 摘要共同形成的路由身份。 |
+| route_config_digest | cross_boundary | method_identity | none | false | false | false | 路由公式、插值、候选和 latent shape 的配置摘要；route、carrier 与 combined embedder 必须一致。 |
+| route_identity | cross_boundary | method_identity | none | true | false | false | 路由配置、observation 与 mask 摘要共同形成并由两 carrier、combined embedder 共同绑定的路由身份。 |
 | score | persisted_protocol | method_statistic | none | true | false | false | empirical CDF null record 保存的分支 float64 分数。 |
 | source_cluster_id | persisted_protocol | provenance | none | true | false | false | calibration null record 所属 Prompt、seed、lineage 与 key family 聚类身份。 |
 | sample_id | persisted_protocol | provenance | none | true | false | false | calibration null record 在 source cluster 内的稳定样本身份。 |

@@ -18,6 +18,12 @@ from main.shared.key_schedule import (
     stable_json_utf8,
 )
 
+from .routing import (
+    ContentRouterError,
+    ContentRoutingResult,
+    validate_content_routing_result,
+)
+
 HF_CANDIDATE_ID = "hf_sparse_tail"
 RUNTIME_CANDIDATE_ID = "runtime_sd35_flowmatch"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
@@ -42,6 +48,8 @@ class HfCarrierResult:
     template_digest: str
     direction_digest: str
     mask_digest: str
+    route_identity: str | None
+    route_config_digest: str | None
     root_key_public_digest: str
     key_role: str
     wrong_key_index: int | None
@@ -193,11 +201,40 @@ def _derive_hf_gaussian(
     return stream, root_digest, key_role, wrong_key_index
 
 
+def _carrier_config_identity(
+    *,
+    mask_digest: str,
+    normalized_shape: tuple[int, int, int, int],
+    route_identity: str | None,
+    route_config_digest: str | None,
+) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "average_kernel_size": AVERAGE_KERNEL_SIZE,
+        "candidate_id": HF_CANDIDATE_ID,
+        "count_include_pad": True,
+        "dtype": "float32",
+        "key_schedule_config_digest": DEFAULT_KEY_SCHEDULE_CONFIG.config_digest,
+        "mask_digest": mask_digest,
+        "model_revision": MODEL_REVISION,
+        "runtime_candidate_id": RUNTIME_CANDIDATE_ID,
+        "shape": list(normalized_shape),
+        "tail_denominator": TAIL_DENOMINATOR,
+        "tail_numerator": TAIL_NUMERATOR,
+        "template_time_centering": False,
+        "tie_break": "negative_absolute_then_flat_index",
+    }
+    if route_identity is not None:
+        identity["route_config_digest"] = route_config_digest
+        identity["route_identity"] = route_identity
+    return identity
+
+
 def hf_carrier(
     detection_key: str | DerivedWrongKeyMaterial,
     shape: Sequence[int],
     *,
     mask_hf: Sequence[float] | None = None,
+    routing_result: ContentRoutingResult | None = None,
     model_revision: str = MODEL_REVISION,
 ) -> HfCarrierResult:
     """构造未中心化 sparse-tail 模板及 mask 后单位 HF 写入方向。"""
@@ -206,7 +243,23 @@ def hf_carrier(
     if model_revision != MODEL_REVISION:
         raise HfCarrierError("HF model revision does not match the frozen candidate")
     element_count = prod(normalized_shape)
-    if mask_hf is None:
+    route_identity: str | None = None
+    route_config_digest: str | None = None
+    if routing_result is not None:
+        if mask_hf is not None:
+            raise HfCarrierError(
+                "HF carrier accepts either routing_result or mask_hf, not both"
+            )
+        try:
+            validated_route = validate_content_routing_result(routing_result)
+        except ContentRouterError as exc:
+            raise HfCarrierError("HF routing result validation failed") from exc
+        if validated_route.latent_shape != normalized_shape:
+            raise HfCarrierError("HF routing result shape mismatch")
+        mask = validated_route.mask_hf
+        route_identity = validated_route.route_identity
+        route_config_digest = validated_route.route_config_digest
+    elif mask_hf is None:
         mask = (1.0,) * element_count
     else:
         mask = _float32_vector(mask_hf, element_count, "mask_hf")
@@ -238,21 +291,12 @@ def hf_carrier(
     template_digest = _float32_digest(template)
     direction_digest = _float32_digest(direction)
     mask_digest = _float32_digest(mask)
-    carrier_identity = {
-        "average_kernel_size": AVERAGE_KERNEL_SIZE,
-        "candidate_id": HF_CANDIDATE_ID,
-        "count_include_pad": True,
-        "dtype": "float32",
-        "key_schedule_config_digest": DEFAULT_KEY_SCHEDULE_CONFIG.config_digest,
-        "mask_digest": mask_digest,
-        "model_revision": model_revision,
-        "runtime_candidate_id": RUNTIME_CANDIDATE_ID,
-        "shape": list(normalized_shape),
-        "tail_denominator": TAIL_DENOMINATOR,
-        "tail_numerator": TAIL_NUMERATOR,
-        "template_time_centering": False,
-        "tie_break": "negative_absolute_then_flat_index",
-    }
+    carrier_identity = _carrier_config_identity(
+        mask_digest=mask_digest,
+        normalized_shape=normalized_shape,
+        route_identity=route_identity,
+        route_config_digest=route_config_digest,
+    )
     carrier_config_digest = sha256(stable_json_utf8(carrier_identity)).hexdigest()
     return HfCarrierResult(
         candidate_id=HF_CANDIDATE_ID,
@@ -263,9 +307,76 @@ def hf_carrier(
         template_digest=template_digest,
         direction_digest=direction_digest,
         mask_digest=mask_digest,
+        route_identity=route_identity,
+        route_config_digest=route_config_digest,
         root_key_public_digest=root_digest,
         key_role=key_role,
         wrong_key_index=wrong_key_index,
         key_domain_digest=gaussian_stream.domain_digest,
         carrier_config_digest=carrier_config_digest,
     )
+
+
+def validate_hf_carrier_routing_binding(
+    carrier: object,
+    routing_result: object,
+) -> HfCarrierResult:
+    """验证 HF carrier 确由给定 route 的 HF mask 生成。"""
+
+    if type(carrier) is not HfCarrierResult:
+        raise HfCarrierError("HF routing binding requires HfCarrierResult")
+    try:
+        route = validate_content_routing_result(routing_result)
+    except ContentRouterError as exc:
+        raise HfCarrierError("HF routing result validation failed") from exc
+    if (
+        carrier.candidate_id != HF_CANDIDATE_ID
+        or carrier.shape != route.latent_shape
+        or carrier.route_identity != route.route_identity
+        or carrier.route_config_digest != route.route_config_digest
+        or carrier.mask_digest != route.mask_hf_digest
+    ):
+        raise HfCarrierError("HF carrier route binding mismatch")
+    template = _float32_vector(
+        carrier.template,
+        prod(carrier.shape),
+        "HF carrier template",
+    )
+    direction = _float32_vector(
+        carrier.direction,
+        prod(carrier.shape),
+        "HF carrier direction",
+    )
+    if (
+        _float32_digest(template) != carrier.template_digest
+        or _float32_digest(direction) != carrier.direction_digest
+    ):
+        raise HfCarrierError("HF carrier template or direction digest mismatch")
+    masked_template = tuple(
+        _float32(value * weight)
+        for value, weight in zip(
+            template,
+            route.mask_hf,
+            strict=True,
+        )
+    )
+    expected_direction = (
+        template
+        if all(weight == 1.0 for weight in route.mask_hf)
+        else _normalize_float32(masked_template, "HF routed direction")
+    )
+    if direction != expected_direction:
+        raise HfCarrierError("HF carrier direction does not match routed HF mask")
+    expected_config_digest = sha256(
+        stable_json_utf8(
+            _carrier_config_identity(
+                mask_digest=carrier.mask_digest,
+                normalized_shape=carrier.shape,
+                route_identity=carrier.route_identity,
+                route_config_digest=carrier.route_config_digest,
+            )
+        )
+    ).hexdigest()
+    if carrier.carrier_config_digest != expected_config_digest:
+        raise HfCarrierError("HF carrier config digest does not match route binding")
+    return carrier

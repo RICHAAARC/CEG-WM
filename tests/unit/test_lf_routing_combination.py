@@ -95,12 +95,20 @@ def _float32_digest(values: tuple[float, ...]) -> str:
 def _branch_results():
     hf_template = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     lf_template = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
+    image_encoding = tuple(
+        hf_value + lf_value + 0.25
+        for hf_value, lf_value in zip(
+            hf_template.template,
+            lf_template.template,
+            strict=True,
+        )
+    )
     hf_observation = HfDetectionObservation.from_public_image_encoding(
-        tuple(value + 1.75 for value in hf_template.template),
+        image_encoding,
         BATCH3_SHAPE,
     )
     lf_observation = LfDetectionObservation.from_public_image_encoding(
-        tuple(value - 2.25 for value in lf_template.template),
+        image_encoding,
         BATCH3_SHAPE,
     )
     return (
@@ -292,22 +300,22 @@ def test_content_embedding_branch_consumption() -> None:
     lf_first = lf_carrier(
         BATCH3_ROOT,
         BATCH3_SHAPE,
-        mask_lf=first_route.mask_lf,
+        routing_result=first_route,
     )
     hf_first = hf_carrier(
         BATCH3_ROOT,
         BATCH3_SHAPE,
-        mask_hf=first_route.mask_hf,
+        routing_result=first_route,
     )
     lf_second = lf_carrier(
         BATCH3_ROOT,
         BATCH3_SHAPE,
-        mask_lf=second_route.mask_lf,
+        routing_result=second_route,
     )
     hf_second = hf_carrier(
         BATCH3_ROOT,
         BATCH3_SHAPE,
-        mask_hf=second_route.mask_hf,
+        routing_result=second_route,
     )
     latent = _latent(len(hf_first.direction))
 
@@ -318,12 +326,14 @@ def test_content_embedding_branch_consumption() -> None:
         hf_first,
         lf_carrier_result=lf_first,
         mixing_coefficient=0.25,
+        routing_result=first_route,
     )
     combined_second = content_embedder(
         latent,
         hf_second,
         lf_carrier_result=lf_second,
         mixing_coefficient=0.25,
+        routing_result=second_route,
     )
     assert {hf_only.mode, lf_only.mode, combined_first.mode} == {
         "hf_only",
@@ -344,6 +354,80 @@ def test_content_embedding_branch_consumption() -> None:
     assert combined_first.lf_carrier_config_digest == (
         lf_first.carrier_config_digest
     )
+    assert combined_first.route_identity == first_route.route_identity
+    assert combined_second.route_identity == second_route.route_identity
+
+
+@pytest.mark.unit
+def test_content_embedding_route_identity_fail_closed() -> None:
+    first_route = content_router(
+        BATCH3_SHAPE,
+        mode="routing_stqr",
+        observations=_observations(),
+    )
+    second_route = content_router(
+        BATCH3_SHAPE,
+        mode="routing_stqr",
+        observations=_observations(texture_reverse=True),
+    )
+    lf_first = lf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        routing_result=first_route,
+    )
+    hf_first = hf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        routing_result=first_route,
+    )
+    lf_second = lf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        routing_result=second_route,
+    )
+    latent = _latent(len(hf_first.direction))
+
+    with pytest.raises(ContentEmbedderError, match="routing binding"):
+        content_embedder(
+            latent,
+            hf_first,
+            lf_carrier_result=lf_second,
+            mixing_coefficient=0.50,
+            routing_result=first_route,
+        )
+
+    raw_half_mask = (0.5,) * len(hf_first.direction)
+    raw_lf = lf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        mask_lf=raw_half_mask,
+    )
+    raw_hf = hf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        mask_hf=raw_half_mask,
+    )
+    with pytest.raises(ContentEmbedderError, match="routing binding"):
+        content_embedder(
+            latent,
+            raw_hf,
+            lf_carrier_result=raw_lf,
+            mixing_coefficient=0.50,
+            routing_result=first_route,
+        )
+
+    forged_route = replace(
+        first_route,
+        mask_lf=raw_half_mask,
+    )
+    with pytest.raises(ContentEmbedderError, match="routing binding"):
+        content_embedder(
+            latent,
+            hf_first,
+            lf_carrier_result=lf_first,
+            mixing_coefficient=0.50,
+            routing_result=forged_route,
+        )
 
 
 @pytest.mark.unit
@@ -352,12 +436,12 @@ def test_content_embedding_total_budget_and_frozen_allocation() -> None:
     lf_result = lf_carrier(
         BATCH3_ROOT,
         BATCH3_SHAPE,
-        mask_lf=route.mask_lf,
+        routing_result=route,
     )
     hf_result = hf_carrier(
         BATCH3_ROOT,
         BATCH3_SHAPE,
-        mask_hf=route.mask_hf,
+        routing_result=route,
     )
     latent = _latent(len(hf_result.direction))
     controls = [
@@ -370,6 +454,7 @@ def test_content_embedding_total_budget_and_frozen_allocation() -> None:
             hf_result,
             lf_carrier_result=lf_result,
             mixing_coefficient=coefficient,
+            routing_result=route,
         )
         for coefficient in (0.25, 0.50, 0.75)
     ]
@@ -418,7 +503,6 @@ def test_content_embedding_total_budget_and_frozen_allocation() -> None:
 @pytest.mark.unit
 def test_content_embedding_active_zero_direction_fail_closed() -> None:
     hf_result = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
-    lf_result = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     latent = _latent(len(hf_result.direction))
     zero = (0.0,) * len(hf_result.direction)
     forged_zero_hf = replace(
@@ -429,25 +513,69 @@ def test_content_embedding_active_zero_direction_fail_closed() -> None:
     with pytest.raises(ContentEmbedderError, match="active HF direction"):
         content_embedder(latent, forged_zero_hf)
 
-    opposite_hf = tuple(-value for value in hf_result.direction)
-    forged_opposite_lf = replace(
-        lf_result,
-        direction=opposite_hf,
-        direction_digest=_float32_digest(opposite_hf),
+    zero_shape = (1, 1, 6, 6)
+    zero_support_index = 14
+    zero_route = content_router(
+        zero_shape,
+        mode="routing_stqr",
+        observations=RoutingObservations(
+            semantic=_spatial(
+                tuple(
+                    0.0 if index == zero_support_index else 1.0
+                    for index in range(36)
+                ),
+                (6, 6),
+                "combined-zero-semantic",
+            ),
+            texture=_spatial(
+                (0.5,) * 36,
+                (6, 6),
+                "combined-zero-texture",
+            ),
+            response=_spatial(
+                (0.0,) * 36,
+                (6, 6),
+                "combined-zero-response",
+            ),
+            sensitivity=_spatial(
+                (0.0,) * 36,
+                (6, 6),
+                "combined-zero-sensitivity",
+            ),
+        ),
     )
-    with pytest.raises(ContentEmbedderError, match="combined content direction"):
+    routed_hf = hf_carrier(
+        "ceg-wm-combined-zero-root-001",
+        zero_shape,
+        routing_result=zero_route,
+    )
+    routed_lf = lf_carrier(
+        "ceg-wm-combined-zero-root-001",
+        zero_shape,
+        routing_result=zero_route,
+    )
+    zero_latent = _latent(len(routed_hf.direction))
+    assert routed_lf.direction == tuple(
+        -value for value in routed_hf.direction
+    )
+    with pytest.raises(
+        ContentEmbedderError,
+        match="combined content direction",
+    ):
         content_embedder(
-            latent,
-            hf_result,
-            lf_carrier_result=forged_opposite_lf,
+            zero_latent,
+            routed_hf,
+            lf_carrier_result=routed_lf,
             mixing_coefficient=0.50,
+            routing_result=zero_route,
         )
     with pytest.raises(ContentEmbedderError, match="0.25"):
         content_embedder(
-            latent,
-            hf_result,
-            lf_carrier_result=lf_result,
+            zero_latent,
+            routed_hf,
+            lf_carrier_result=routed_lf,
             mixing_coefficient=0.70,
+            routing_result=zero_route,
         )
 
 
@@ -484,16 +612,24 @@ def test_content_wrong_key_rejection() -> None:
 def test_content_scores_independently_observable() -> None:
     hf_template = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     lf_template = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
+    image_encoding = tuple(
+        hf_value + lf_value
+        for hf_value, lf_value in zip(
+            hf_template.template,
+            lf_template.template,
+            strict=True,
+        )
+    )
     hf_result = hf_detector(
         HfDetectionObservation.from_public_image_encoding(
-            hf_template.template,
+            image_encoding,
             BATCH3_SHAPE,
         ),
         BATCH3_ROOT,
     )
     lf_result = lf_detector(
         LfDetectionObservation.from_public_image_encoding(
-            lf_template.template,
+            image_encoding,
             BATCH3_SHAPE,
         ),
         BATCH3_ROOT,
@@ -514,7 +650,7 @@ def test_content_scores_independently_observable() -> None:
 
 
 @pytest.mark.unit
-def test_content_combination_branch_consumption() -> None:
+def test_content_detector_cross_image_rejected() -> None:
     hf_template = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     lf_template = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     hf_result = hf_detector(
@@ -527,6 +663,38 @@ def test_content_combination_branch_consumption() -> None:
     lf_result = lf_detector(
         LfDetectionObservation.from_public_image_encoding(
             lf_template.template,
+            BATCH3_SHAPE,
+        ),
+        BATCH3_ROOT,
+    )
+
+    assert hf_result.observation_digest != lf_result.observation_digest
+    with pytest.raises(ContentDetectorError, match="cross-image"):
+        content_detector(hf_result, lf_result)
+
+
+@pytest.mark.unit
+def test_content_combination_branch_consumption() -> None:
+    hf_template = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
+    lf_template = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
+    image_encoding = tuple(
+        hf_value + lf_value
+        for hf_value, lf_value in zip(
+            hf_template.template,
+            lf_template.template,
+            strict=True,
+        )
+    )
+    hf_result = hf_detector(
+        HfDetectionObservation.from_public_image_encoding(
+            image_encoding,
+            BATCH3_SHAPE,
+        ),
+        BATCH3_ROOT,
+    )
+    lf_result = lf_detector(
+        LfDetectionObservation.from_public_image_encoding(
+            image_encoding,
             BATCH3_SHAPE,
         ),
         BATCH3_ROOT,
@@ -578,16 +746,24 @@ def test_content_combination_branch_consumption() -> None:
 def test_content_combination_frozen_formula_identity() -> None:
     hf_template = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     lf_template = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
+    image_encoding = tuple(
+        hf_value + lf_value
+        for hf_value, lf_value in zip(
+            hf_template.template,
+            lf_template.template,
+            strict=True,
+        )
+    )
     hf_result = hf_detector(
         HfDetectionObservation.from_public_image_encoding(
-            hf_template.template,
+            image_encoding,
             BATCH3_SHAPE,
         ),
         BATCH3_ROOT,
     )
     lf_result = lf_detector(
         LfDetectionObservation.from_public_image_encoding(
-            lf_template.template,
+            image_encoding,
             BATCH3_SHAPE,
         ),
         BATCH3_ROOT,
@@ -674,12 +850,20 @@ def test_content_combination_wrong_key_not_masked() -> None:
     )
     hf_template = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     lf_template = lf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
+    image_encoding = tuple(
+        hf_value + lf_value
+        for hf_value, lf_value in zip(
+            hf_template.template,
+            lf_template.template,
+            strict=True,
+        )
+    )
     hf_observation = HfDetectionObservation.from_public_image_encoding(
-        hf_template.template,
+        image_encoding,
         BATCH3_SHAPE,
     )
     lf_observation = LfDetectionObservation.from_public_image_encoding(
-        lf_template.template,
+        image_encoding,
         BATCH3_SHAPE,
     )
     hf_wrong = hf_detector(hf_observation, wrong_key)

@@ -206,6 +206,10 @@ def _validate_shared_key_semantics(
         raise ContentDetectorError(
             "LF/HF branch key semantics differ; combination is forbidden"
         )
+    if hf_result.observation_digest != lf_result.observation_digest:
+        raise ContentDetectorError(
+            "LF/HF observation digests differ; cross-image combination is forbidden"
+        )
 
 
 def _standardize_branch(

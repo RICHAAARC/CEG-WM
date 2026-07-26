@@ -177,33 +177,15 @@ def _identity_digest(value: object) -> str:
     return sha256(stable_json_utf8(value)).hexdigest()
 
 
-def _build_result(
-    *,
+def _route_config(
     mode: RoutingMode,
     latent_shape: tuple[int, int, int, int],
-    routing_map: tuple[float, ...],
-    mask_lf: tuple[float, ...],
-    mask_hf: tuple[float, ...],
-    observation_digests: tuple[tuple[str, str, str], ...],
-) -> ContentRoutingResult:
-    if any(not 0.0 <= value <= 1.0 for value in routing_map + mask_lf + mask_hf):
-        raise ContentRouterError("routing outputs must remain in [0,1]")
-    if mode == ROUTING_CANDIDATE_ID and any(
-        abs((lf_value + hf_value) - routing_value) > 4e-7
-        for routing_value, lf_value, hf_value in zip(
-            routing_map,
-            mask_lf,
-            mask_hf,
-            strict=True,
-        )
-    ):
-        raise ContentRouterError("routing masks do not partition routing_map")
-
+) -> dict[str, object]:
     candidate_ids = (
         ROUTING_KEY_CANDIDATE_ID,
         mode,
     )
-    route_config = {
+    return {
         "candidate_ids": list(candidate_ids),
         "formula": (
             "A=((1-S)*(1-R)*(1-Q_sens))^(1/3);"
@@ -217,6 +199,148 @@ def _build_result(
         "mode": mode,
         "uniform_control_reads_observations": False,
     }
+
+
+def _validate_result_vector(
+    values: object,
+    element_count: int,
+    role: str,
+) -> tuple[float, ...]:
+    if type(values) is not tuple or len(values) != element_count:
+        raise ContentRouterError(f"{role} length does not match latent shape")
+    normalized: list[float] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ContentRouterError(f"{role} must contain finite float32 values")
+        converted = _float32(float(value))
+        if converted != value or not 0.0 <= converted <= 1.0:
+            raise ContentRouterError(f"{role} must contain float32 values in [0,1]")
+        normalized.append(converted)
+    return tuple(normalized)
+
+
+def _is_sha256_digest(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def validate_content_routing_result(
+    result: object,
+) -> ContentRoutingResult:
+    """重算并验证 route 的 shape、partition、digests 与完整 identity。"""
+
+    if type(result) is not ContentRoutingResult:
+        raise ContentRouterError("routing binding requires ContentRoutingResult")
+    latent_shape = _validate_latent_shape(result.latent_shape)
+    if result.mode not in {
+        ROUTING_CANDIDATE_ID,
+        UNIFORM_CONTROL_CANDIDATE_ID,
+    }:
+        raise ContentRouterError("routing result mode is unsupported")
+    if result.candidate_id != result.mode or result.candidate_ids != (
+        ROUTING_KEY_CANDIDATE_ID,
+        result.mode,
+    ):
+        raise ContentRouterError("routing result candidate identity mismatch")
+
+    element_count = prod(latent_shape)
+    routing_map = _validate_result_vector(
+        result.routing_map,
+        element_count,
+        "routing_map",
+    )
+    mask_lf = _validate_result_vector(result.mask_lf, element_count, "mask_lf")
+    mask_hf = _validate_result_vector(result.mask_hf, element_count, "mask_hf")
+    if result.mode == ROUTING_CANDIDATE_ID:
+        if any(
+            abs((lf_value + hf_value) - routing_value) > 4e-7
+            for routing_value, lf_value, hf_value in zip(
+                routing_map,
+                mask_lf,
+                mask_hf,
+                strict=True,
+            )
+        ):
+            raise ContentRouterError("routing masks do not partition routing_map")
+        expected_roles = ("S", "T", "R", "Q_sens")
+        if (
+            type(result.observation_digests) is not tuple
+            or len(result.observation_digests) != len(expected_roles)
+        ):
+            raise ContentRouterError("routed result requires four observation digests")
+        for item, expected_role in zip(
+            result.observation_digests,
+            expected_roles,
+            strict=True,
+        ):
+            if (
+                type(item) is not tuple
+                or len(item) != 3
+                or item[0] != expected_role
+                or not _is_sha256_digest(item[1])
+                or not _is_sha256_digest(item[2])
+            ):
+                raise ContentRouterError("routing observation digest identity mismatch")
+    elif (
+        result.observation_digests != ()
+        or any(value != 1.0 for value in routing_map)
+        or any(value != 1.0 for value in mask_lf)
+        or any(value != 1.0 for value in mask_hf)
+    ):
+        raise ContentRouterError("uniform control must contain only public ones")
+
+    expected_routing_map_digest = _digest_float32(routing_map)
+    expected_mask_lf_digest = _digest_float32(mask_lf)
+    expected_mask_hf_digest = _digest_float32(mask_hf)
+    if (
+        result.routing_map_digest != expected_routing_map_digest
+        or result.mask_lf_digest != expected_mask_lf_digest
+        or result.mask_hf_digest != expected_mask_hf_digest
+    ):
+        raise ContentRouterError("routing result mask digest mismatch")
+    expected_route_config_digest = _identity_digest(
+        _route_config(result.mode, latent_shape)
+    )
+    if result.route_config_digest != expected_route_config_digest:
+        raise ContentRouterError("routing result config digest mismatch")
+    expected_route_identity = _identity_digest(
+        {
+            "routing_map_digest": expected_routing_map_digest,
+            "mask_hf_digest": expected_mask_hf_digest,
+            "mask_lf_digest": expected_mask_lf_digest,
+            "observation_digests": [
+                list(item) for item in result.observation_digests
+            ],
+            "route_config_digest": expected_route_config_digest,
+        }
+    )
+    if result.route_identity != expected_route_identity:
+        raise ContentRouterError("routing result identity mismatch")
+
+    count = len(routing_map)
+    if (
+        result.mean_routing_map != sum(routing_map) / count
+        or result.mean_mask_lf != sum(mask_lf) / count
+        or result.mean_mask_hf != sum(mask_hf) / count
+    ):
+        raise ContentRouterError("routing result summary statistic mismatch")
+    return result
+
+
+def _build_result(
+    *,
+    mode: RoutingMode,
+    latent_shape: tuple[int, int, int, int],
+    routing_map: tuple[float, ...],
+    mask_lf: tuple[float, ...],
+    mask_hf: tuple[float, ...],
+    observation_digests: tuple[tuple[str, str, str], ...],
+) -> ContentRoutingResult:
+    candidate_ids = (ROUTING_KEY_CANDIDATE_ID, mode)
+    route_config = _route_config(mode, latent_shape)
     route_config_digest = _identity_digest(route_config)
     routing_map_digest = _digest_float32(routing_map)
     mask_lf_digest = _digest_float32(mask_lf)
@@ -231,7 +355,7 @@ def _build_result(
         }
     )
     count = len(routing_map)
-    return ContentRoutingResult(
+    result = ContentRoutingResult(
         candidate_id=mode,
         candidate_ids=candidate_ids,
         mode=mode,
@@ -249,6 +373,7 @@ def _build_result(
         route_config_digest=route_config_digest,
         route_identity=route_identity,
     )
+    return validate_content_routing_result(result)
 
 
 def content_router(
