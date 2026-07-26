@@ -14,6 +14,7 @@ from .key_schedule import (
     derive_wrong_key_stream,
     identify_root_key,
     key_schedule_sha256_counter,
+    normal_quantile_table_lookup,
     stable_json_utf8,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "derive_wrong_key_stream",
     "identify_root_key",
     "key_schedule_sha256_counter",
+    "normal_quantile_table_lookup",
     "stable_json_utf8",
 ]

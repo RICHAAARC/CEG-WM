@@ -21,6 +21,7 @@ from main.shared.key_schedule import (
     derive_wrong_key_stream,
     identify_root_key,
     key_schedule_sha256_counter,
+    normal_quantile_table_lookup,
     stable_json_utf8,
 )
 
@@ -147,7 +148,7 @@ def test_key_schedule_counter_quantile_golden() -> None:
     assert gaussian.domain_digest == (
         "e5b8e35d13815c1d23a09286da0bfe661e0330e38eda19e239f19224f7b1998f"
     )
-    assert gaussian.quantile_indices == (
+    assert gaussian.quantile_indices_random == (
         172059,
         964892,
         707530,
@@ -184,7 +185,7 @@ def test_key_schedule_counter_quantile_golden() -> None:
     assert cross_block.domain_digest == (
         "f70de8c70d23476c05d67457103c1aceecfd320ef512a7895479f5a113d7d170"
     )
-    assert cross_block.quantile_indices == (
+    assert cross_block.quantile_indices_random == (
         666601,
         190935,
         927525,
@@ -369,6 +370,19 @@ def test_key_schedule_configuration_and_results_are_immutable() -> None:
         config.candidate_id = "drift"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         result.domain_digest = "drift"  # type: ignore[misc]
+
+
+@pytest.mark.unit
+def test_key_schedule_public_quantile_lookup_reuses_frozen_asset() -> None:
+    assert pack(">f", normal_quantile_table_lookup(0)).hex() == "c09cd4b3"
+    assert pack(">f", normal_quantile_table_lookup(524288)).hex() == "35a06c99"
+    assert pack(">f", normal_quantile_table_lookup((1 << 20) - 1)).hex() == (
+        "409cd4b3"
+    )
+    with pytest.raises(KeyScheduleError, match="index"):
+        normal_quantile_table_lookup(-1)
+    with pytest.raises(KeyScheduleError, match="index"):
+        normal_quantile_table_lookup(1 << 20)
 
 
 @pytest.mark.unit

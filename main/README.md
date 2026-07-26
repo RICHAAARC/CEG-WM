@@ -8,7 +8,8 @@
 此层不得导入 runtime、experiments、paper artifacts、notebooks、infrastructure、tests 或任何外层控制平面，也不得保存实验 records、论文构建或模型后端适配。
 
 当前处于 `method_construction_authorized` 的分批实施期。批次 1 共享
-`key_schedule` 已完成双重独立审核；本 revision 实现批次 2 的 HF carrier、HF-only
-content embedder、HF detector 和当前 HF-only content detector，仍需独立审核。
-LF、routing、几何、联合判定与其余职责仍未实现。单个批次通过不表示完整方法完成，
+`key_schedule` 与批次 2 HF 内容主干均已完成双重独立审核；本 revision 实现批次 3
+的 S/T/R/Q 数值路由、LF carrier、LF blind detector、共同总预算内容组合和
+未晋升 C0/C1/C2 诊断。正式 content detector 仍保持 HF-only，不能据此选择
+`a`、组合函数或阈值。几何与联合判定尚未实现。单个批次通过不表示完整方法完成，
 也不得提前创建 method readiness。

@@ -12,6 +12,7 @@
 
 | test_path | level | default_run | responsibility |
 | --- | --- | --- | --- |
+| `tests/unit/test_lf_routing_combination.py` | `unit` | yes | LF carrier/blind detector、S/T/R/Q routing、同预算 LF/HF embedder 与未晋升 C0/C1/C2 组合诊断。 |
 | `tests/unit/test_hf_content_backbone.py` | `unit` | yes | HF sparse-tail 载体、HF-only 共同总预算、盲 direct score、wrong-key 与当前 HF-only content detector。 |
 | `tests/unit/test_key_schedule.py` | `unit` | yes | 冻结 key schedule 的 root/domain、counter/quantile golden、wrong/public 派生、不可变身份与失败边界。 |
 | `tests/unit/test_comparison_preflight.py` | `unit` | yes | 公平对比协议、切分隔离与 baseline 完整性。 |

@@ -119,7 +119,7 @@ class KeyStreamResult:
     domain_digest: str
     config_digest: str
     values_float32_be_sha256: str
-    quantile_indices: tuple[int, ...] | None
+    quantile_indices_random: tuple[int, ...] | None
 
 
 DEFAULT_CONFIG = KeyScheduleConfig()
@@ -489,6 +489,21 @@ def _load_normal_quantile_table() -> bytes:
     return table
 
 
+def normal_quantile_table_lookup(
+    index: int,
+    *,
+    config: KeyScheduleConfig = DEFAULT_CONFIG,
+) -> float:
+    """按冻结表的 IEEE-754 binary32 原值查询一个 midpoint normal quantile。"""
+
+    _validate_config(config)
+    if type(index) is not int or not 0 <= index < _NORMAL_TABLE_ENTRY_COUNT:
+        raise KeyScheduleError(
+            "normal quantile table index must be an integer in [0,1048575]"
+        )
+    return unpack_from(">f", _load_normal_quantile_table(), index * 4)[0]
+
+
 def _uniform_values(
     domain_digest: bytes,
     element_count: int,
@@ -532,7 +547,7 @@ def _result(
     values: tuple[float, ...],
     domain_digest: bytes,
     config: KeyScheduleConfig,
-    quantile_indices: tuple[int, ...] | None,
+    quantile_indices_random: tuple[int, ...] | None,
 ) -> KeyStreamResult:
     encoded_values = b"".join(pack(">f", value) for value in values)
     return KeyStreamResult(
@@ -543,7 +558,7 @@ def _result(
         domain_digest=domain_digest.hex(),
         config_digest=config.config_digest,
         values_float32_be_sha256=sha256(encoded_values).hexdigest(),
-        quantile_indices=quantile_indices,
+        quantile_indices_random=quantile_indices_random,
     )
 
 
@@ -574,7 +589,7 @@ def _derive_stream(
             values=values,
             domain_digest=digest,
             config=config,
-            quantile_indices=None,
+            quantile_indices_random=None,
         )
 
     indices = _gaussian_indices(digest, element_count, block_count)
@@ -586,7 +601,7 @@ def _derive_stream(
         values=values,
         domain_digest=digest,
         config=config,
-        quantile_indices=indices,
+        quantile_indices_random=indices,
     )
 
 

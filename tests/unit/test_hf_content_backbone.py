@@ -239,8 +239,10 @@ def test_hf_only_content_detector_preserves_branch_result_and_identity() -> None
     assert result.content_score == branch.hf_score
     assert result.hf_result is branch
     assert result.detector_identity != branch.detector_identity
-    assert not hasattr(result, "lf_score")
-    assert not hasattr(result, "combined_score")
+    assert result.formal_mode == "hf_only"
+    assert result.lf_score is None
+    assert result.combined_score is None
+    assert result.diagnostic_combination is None
     with pytest.raises(ContentDetectorError):
         content_detector(0.5)  # type: ignore[arg-type]
 
