@@ -7,6 +7,8 @@
 
 此层不得导入 runtime、experiments、paper artifacts、notebooks、infrastructure、tests 或任何外层控制平面，也不得保存实验 records、论文构建或模型后端适配。
 
-当前处于 `method_construction_authorized` 的分批实施期。共享层
-`main/shared/key_schedule.py` 已进入批次 1 实施与 CPU 验证；其余 12 项职责仍未
-实现。单个批次通过不表示完整方法完成，也不得提前创建 method readiness。
+当前处于 `method_construction_authorized` 的分批实施期。批次 1 共享
+`key_schedule` 已完成双重独立审核；本 revision 实现批次 2 的 HF carrier、HF-only
+content embedder、HF detector 和当前 HF-only content detector，仍需独立审核。
+LF、routing、几何、联合判定与其余职责仍未实现。单个批次通过不表示完整方法完成，
+也不得提前创建 method readiness。

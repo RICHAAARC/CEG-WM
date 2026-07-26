@@ -76,6 +76,31 @@ Notebook 与 repository module 的跨边界数据
 | root_key_public_digest | persisted_protocol | provenance | none | true | false | false | root key 的不可逆公开身份；原始 root key 和派生材料不得持久化。 |
 | domain_digest | cross_boundary | provenance | none | false | false | false | 规范 key material、职责字段与 shape 共同形成的密钥流域摘要。 |
 | values_float32_be_sha256 | cross_boundary | provenance | none | false | false | false | row-major CPU float32 流按 IEEE-754 big-endian 拼接后的输出摘要。 |
+| shape | cross_boundary | method_identity | none | false | false | false | 方法张量的显式 row-major 维度身份。 |
+| template | cross_boundary | method_state | none | false | false | false | carrier 输出、可由 key 与公共身份重建的单位模板。 |
+| direction | cross_boundary | method_state | none | false | false | false | carrier 经 mask 后交给 content embedder 的单位写入方向。 |
+| support_indices | cross_boundary | method_state | none | false | false | false | HF sparse-tail 模板的 row-major 非零支持坐标。 |
+| template_digest | cross_boundary | provenance | none | false | false | false | HF 模板 float32 字节摘要。 |
+| direction_digest | cross_boundary | provenance | none | false | false | false | mask 后 HF 单位方向的 float32 字节摘要。 |
+| mask_digest | cross_boundary | provenance | none | false | false | false | carrier 实际消费的空间 mask float32 字节摘要。 |
+| key_role | cross_boundary | method_identity | none | true | false | false | 当前检测 key 是 registered 还是预登记 wrong-key。 |
+| wrong_key_index | persisted_protocol | provenance | none | true | false | false | wrong-key roster 的预登记非负索引；registered key 时为空。 |
+| key_domain_digest | cross_boundary | provenance | none | false | false | false | carrier 实际消费的 key schedule 职责域摘要。 |
+| carrier_config_digest | cross_boundary | method_identity | none | false | false | false | carrier 算法、shape、mask 与 key schedule 配置身份摘要。 |
+| delta_content | cross_boundary | method_state | none | false | false | false | content embedder 产生、尚未由 runtime 物化的理论内容更新。 |
+| delta_content_digest | cross_boundary | provenance | none | false | false | false | 理论 `delta_content` 的 float32 字节摘要。 |
+| latent_norm | cross_boundary | method_state | none | false | false | false | content embedder 计算共同总预算时消费的 callback latent 理论 L2 norm。 |
+| target_total_norm | cross_boundary | method_state | none | false | false | false | runtime 物化前共同内容更新的目标总 L2 norm。 |
+| target_relative_l2 | cross_boundary | method_state | none | false | false | false | runtime 物化前共同内容更新相对 latent 的目标 L2 比例。 |
+| embedder_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 候选、模式和共同总预算身份摘要。 |
+| observation_protocol | cross_boundary | method_identity | none | false | false | false | 普通检测图像进入 HF detector 的公共编码协议身份。 |
+| observation_digest | cross_boundary | provenance | none | false | false | false | 普通检测图像侧编码观测的 float32 字节摘要。 |
+| hf_score | cross_boundary | method_statistic | none | true | false | false | HF detector 独立产生的 blind direct score。 |
+| detector_identity | cross_boundary | method_identity | none | true | false | false | 分支或 content detector 的完整算法身份摘要。 |
+| detector_config_digest | cross_boundary | method_identity | none | false | false | false | HF direct detector 的配置身份摘要。 |
+| content_score | cross_boundary | method_statistic | none | true | false | false | 当前正式 content detector 输出的 `D_M` 分数。 |
+| content_config_digest | cross_boundary | method_identity | none | false | false | false | 当前 content detector 的分支与组合状态身份摘要。 |
+| hf_result | cross_boundary | method_state | none | false | false | false | content detector 原样保留的独立 HF 分支结果。 |
 | declared_deviation | persisted_protocol | protocol | none | false | false | false | baseline 相对上游实现的已声明语义偏差。 |
 | methods | persisted_protocol | protocol | none | false | false | false | Comparison protocol 中参与方法规格的有序集合。 |
 | method_code_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的方法代码 revision。 |
