@@ -131,13 +131,14 @@ Notebook 与 repository module 的跨边界数据
 | formal_mode | cross_boundary | method_identity | none | true | false | false | 当前拥有正式 `D_M` 解释权的 content detector 模式；批次 3 保持 `hf_only`。 |
 | diagnostic_combination | cross_boundary | method_state | none | false | false | false | 未晋升 C0/C1/C2 的完整标准化与组合诊断；不存在时为空。 |
 | diagnostic_identity | cross_boundary | method_identity | none | false | false | false | 连接正式 HF-only detector 与未晋升组合诊断的不可变摘要。 |
+| routing_observations | cross_boundary | method_state | none | false | false | false | routed result 保留的实际不可变 S/T/R/Q_sens 观测集合，供公式重演验证；uniform control 时为空。 |
 | routing_map | cross_boundary | method_state | none | false | false | false | `routing_stqr` 输出并按 latent channels 广播的空间权威图 `A`。 |
 | mask_lf | cross_boundary | method_state | none | false | false | false | content router 输出、供 LF carrier 消费的空间 mask。 |
 | mask_hf | cross_boundary | method_state | none | false | false | false | content router 输出、供 HF carrier 消费的空间 mask。 |
 | routing_map_digest | cross_boundary | provenance | none | false | false | false | router `A` 的 row-major float32 字节摘要。 |
 | mask_lf_digest | cross_boundary | provenance | none | false | false | false | router LF mask 的 row-major float32 字节摘要。 |
 | mask_hf_digest | cross_boundary | provenance | none | false | false | false | router HF mask 的 row-major float32 字节摘要。 |
-| observation_digests | cross_boundary | provenance | none | false | false | false | S/T/R/Q_sens 数值摘要与各自 runtime 来源身份的有序集合。 |
+| observation_digests | cross_boundary | provenance | none | false | false | false | 从实际 `routing_observations` 重算的 S/T/R/Q_sens 数值摘要与各自 runtime 来源身份有序集合。 |
 | semantic | cross_boundary | method_state | none | false | false | false | content router 消费的 runtime-provided 语义观测 `S`。 |
 | texture | cross_boundary | method_state | none | false | false | false | content router 消费的 runtime-provided 纹理观测 `T`。 |
 | response | cross_boundary | method_state | none | false | false | false | content router 消费的 callback latent 响应观测 `R`。 |

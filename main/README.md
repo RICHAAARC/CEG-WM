@@ -12,5 +12,6 @@
 的 S/T/R/Q 数值路由、LF carrier、LF blind detector、共同总预算内容组合和
 未晋升 C0/C1/C2 诊断。正式 content detector 仍保持 HF-only，不能据此选择
 `a`、组合函数或阈值。组合写入要求两个 carrier 绑定同一个经重算验证的 route，
+其中 routed result 保留实际不可变 S/T/R/Q 观测并据此重演插值与路由公式；
 组合诊断只接受同一普通图像编码观测。几何与联合判定尚未实现。单个批次通过不表示
 完整方法完成，也不得提前创建 method readiness。

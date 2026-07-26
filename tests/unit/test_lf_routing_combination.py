@@ -26,16 +26,19 @@ from main.content_chain.lf_detector import (
     lf_detector,
 )
 from main.content_chain.routing import (
+    ContentRouterError,
     ContentRoutingResult,
     RoutingObservations,
     SpatialRoutingObservation,
     content_router,
+    validate_content_routing_result,
 )
 from main.shared.key_schedule import (
     KeyScheduleError,
     derive_wrong_key_material,
     identify_root_key,
     normal_quantile_table_lookup,
+    stable_json_utf8,
 )
 
 BATCH3_ROOT = "ceg-wm-batch-three-root-π"
@@ -261,6 +264,7 @@ def test_routing_mask_partition_and_range() -> None:
         )
     )
     assert result.observation_digests[0][0] == "S"
+    assert result.routing_observations is observations
     assert not hasattr(result, "mixing_coefficient")
     assert not hasattr(result, "budget_lf")
 
@@ -278,11 +282,59 @@ def test_routing_disabled_uniform_control() -> None:
     )
     routed = _route()
     assert result.candidate_id == "routing_uniform_control"
+    assert result.routing_observations is None
     assert result.observation_digests == ()
     assert set(result.routing_map) == {1.0}
     assert set(result.mask_lf) == {1.0}
     assert set(result.mask_hf) == {1.0}
     assert result.route_identity != routed.route_identity
+
+
+@pytest.mark.unit
+def test_routing_formula_recomputation_rejects_coordinated_forgery() -> None:
+    result = content_router(
+        BATCH3_SHAPE,
+        mode="routing_stqr",
+        observations=_observations(),
+    )
+    element_count = len(result.routing_map)
+    forged_routing_map = (1.0,) * element_count
+    forged_mask_lf = (0.5,) * element_count
+    forged_mask_hf = (0.5,) * element_count
+    forged_routing_map_digest = _float32_digest(forged_routing_map)
+    forged_mask_lf_digest = _float32_digest(forged_mask_lf)
+    forged_mask_hf_digest = _float32_digest(forged_mask_hf)
+    forged_route_identity = sha256(
+        stable_json_utf8(
+            {
+                "routing_map_digest": forged_routing_map_digest,
+                "mask_hf_digest": forged_mask_hf_digest,
+                "mask_lf_digest": forged_mask_lf_digest,
+                "observation_digests": [
+                    list(item) for item in result.observation_digests
+                ],
+                "route_config_digest": result.route_config_digest,
+            }
+        )
+    ).hexdigest()
+    forged = replace(
+        result,
+        routing_map=forged_routing_map,
+        mask_lf=forged_mask_lf,
+        mask_hf=forged_mask_hf,
+        routing_map_digest=forged_routing_map_digest,
+        mask_lf_digest=forged_mask_lf_digest,
+        mask_hf_digest=forged_mask_hf_digest,
+        mean_routing_map=1.0,
+        mean_mask_lf=0.5,
+        mean_mask_hf=0.5,
+        route_identity=forged_route_identity,
+    )
+
+    assert forged.routing_observations is result.routing_observations
+    assert forged.observation_digests == result.observation_digests
+    with pytest.raises(ContentRouterError, match="authoritative routing formula"):
+        validate_content_routing_result(forged)
 
 
 @pytest.mark.unit

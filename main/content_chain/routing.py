@@ -117,6 +117,7 @@ class ContentRoutingResult:
     candidate_ids: tuple[str, ...]
     mode: RoutingMode
     latent_shape: tuple[int, int, int, int]
+    routing_observations: RoutingObservations | None
     routing_map: tuple[float, ...]
     mask_lf: tuple[float, ...]
     mask_hf: tuple[float, ...]
@@ -227,6 +228,158 @@ def _is_sha256_digest(value: object) -> bool:
     )
 
 
+def _validate_spatial_observation(
+    observation: object,
+    role: str,
+) -> SpatialRoutingObservation:
+    if type(observation) is not SpatialRoutingObservation:
+        raise ContentRouterError(
+            f"{role} must be an immutable SpatialRoutingObservation"
+        )
+    if (
+        type(observation.spatial_shape) is not tuple
+        or len(observation.spatial_shape) != 2
+        or any(
+            type(size) is not int or size <= 0
+            for size in observation.spatial_shape
+        )
+    ):
+        raise ContentRouterError(f"{role} spatial shape is invalid")
+    element_count = prod(observation.spatial_shape)
+    values = _validate_result_vector(
+        observation.values,
+        element_count,
+        f"{role} values",
+    )
+    if not _is_sha256_digest(observation.source_identity_digest):
+        raise ContentRouterError(f"{role} source identity is invalid")
+    if observation.values_digest != _digest_float32(values):
+        raise ContentRouterError(f"{role} values digest mismatch")
+    return observation
+
+
+def _validate_routing_observations(
+    observations: object,
+) -> RoutingObservations:
+    if type(observations) is not RoutingObservations:
+        raise ContentRouterError(
+            "routed result requires immutable RoutingObservations"
+        )
+    for role, observation in (
+        ("S", observations.semantic),
+        ("T", observations.texture),
+        ("R", observations.response),
+        ("Q_sens", observations.sensitivity),
+    ):
+        _validate_spatial_observation(observation, role)
+    return observations
+
+
+def _routing_observation_digests(
+    observations: RoutingObservations,
+) -> tuple[tuple[str, str, str], ...]:
+    return tuple(
+        (
+            role,
+            observation.values_digest,
+            observation.source_identity_digest,
+        )
+        for role, observation in (
+            ("S", observations.semantic),
+            ("T", observations.texture),
+            ("R", observations.response),
+            ("Q_sens", observations.sensitivity),
+        )
+    )
+
+
+def _derive_routed_tensors(
+    observations: object,
+    latent_shape: tuple[int, int, int, int],
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    validated = _validate_routing_observations(observations)
+    _, channels, target_height, target_width = latent_shape
+    spatial_maps = {
+        "S": _resize_bilinear_align_corners_false(
+            validated.semantic,
+            target_height,
+            target_width,
+        ),
+        "T": _resize_bilinear_align_corners_false(
+            validated.texture,
+            target_height,
+            target_width,
+        ),
+        "R": _resize_bilinear_align_corners_false(
+            validated.response,
+            target_height,
+            target_width,
+        ),
+        "Q_sens": _resize_bilinear_align_corners_false(
+            validated.sensitivity,
+            target_height,
+            target_width,
+        ),
+    }
+    routing_spatial = tuple(
+        _float32(
+            (
+                (1.0 - semantic)
+                * (1.0 - response)
+                * (1.0 - sensitivity)
+            )
+            ** (1.0 / 3.0)
+        )
+        for semantic, response, sensitivity in zip(
+            spatial_maps["S"],
+            spatial_maps["R"],
+            spatial_maps["Q_sens"],
+            strict=True,
+        )
+    )
+    mask_lf_spatial = tuple(
+        _float32(routing_value * (1.0 - texture))
+        for routing_value, texture in zip(
+            routing_spatial,
+            spatial_maps["T"],
+            strict=True,
+        )
+    )
+    mask_hf_spatial = tuple(
+        _float32(routing_value * texture)
+        for routing_value, texture in zip(
+            routing_spatial,
+            spatial_maps["T"],
+            strict=True,
+        )
+    )
+    return (
+        _broadcast_spatial(routing_spatial, channels),
+        _broadcast_spatial(mask_lf_spatial, channels),
+        _broadcast_spatial(mask_hf_spatial, channels),
+    )
+
+
+def _derive_route_outputs(
+    mode: RoutingMode,
+    latent_shape: tuple[int, int, int, int],
+    routing_observations: RoutingObservations | None,
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    if mode == ROUTING_CANDIDATE_ID:
+        return _derive_routed_tensors(
+            routing_observations,
+            latent_shape,
+        )
+    if mode == UNIFORM_CONTROL_CANDIDATE_ID:
+        if routing_observations is not None:
+            raise ContentRouterError(
+                "uniform control result must not retain observations"
+            )
+        ones = (1.0,) * prod(latent_shape)
+        return ones, ones, ones
+    raise ContentRouterError("routing result mode is unsupported")
+
+
 def validate_content_routing_result(
     result: object,
 ) -> ContentRoutingResult:
@@ -254,43 +407,29 @@ def validate_content_routing_result(
     )
     mask_lf = _validate_result_vector(result.mask_lf, element_count, "mask_lf")
     mask_hf = _validate_result_vector(result.mask_hf, element_count, "mask_hf")
+    expected_routing_map, expected_mask_lf, expected_mask_hf = (
+        _derive_route_outputs(
+            result.mode,
+            latent_shape,
+            result.routing_observations,
+        )
+    )
     if result.mode == ROUTING_CANDIDATE_ID:
-        if any(
-            abs((lf_value + hf_value) - routing_value) > 4e-7
-            for routing_value, lf_value, hf_value in zip(
-                routing_map,
-                mask_lf,
-                mask_hf,
-                strict=True,
-            )
-        ):
-            raise ContentRouterError("routing masks do not partition routing_map")
-        expected_roles = ("S", "T", "R", "Q_sens")
-        if (
-            type(result.observation_digests) is not tuple
-            or len(result.observation_digests) != len(expected_roles)
-        ):
-            raise ContentRouterError("routed result requires four observation digests")
-        for item, expected_role in zip(
-            result.observation_digests,
-            expected_roles,
-            strict=True,
-        ):
-            if (
-                type(item) is not tuple
-                or len(item) != 3
-                or item[0] != expected_role
-                or not _is_sha256_digest(item[1])
-                or not _is_sha256_digest(item[2])
-            ):
-                raise ContentRouterError("routing observation digest identity mismatch")
-    elif (
-        result.observation_digests != ()
-        or any(value != 1.0 for value in routing_map)
-        or any(value != 1.0 for value in mask_lf)
-        or any(value != 1.0 for value in mask_hf)
+        expected_observation_digests = _routing_observation_digests(
+            result.routing_observations
+        )
+        if result.observation_digests != expected_observation_digests:
+            raise ContentRouterError("routing observation digest identity mismatch")
+    elif result.observation_digests != ():
+        raise ContentRouterError("uniform control must not retain observation digests")
+    if (
+        routing_map != expected_routing_map
+        or mask_lf != expected_mask_lf
+        or mask_hf != expected_mask_hf
     ):
-        raise ContentRouterError("uniform control must contain only public ones")
+        raise ContentRouterError(
+            "routing result does not match the authoritative routing formula"
+        )
 
     expected_routing_map_digest = _digest_float32(routing_map)
     expected_mask_lf_digest = _digest_float32(mask_lf)
@@ -334,11 +473,18 @@ def _build_result(
     *,
     mode: RoutingMode,
     latent_shape: tuple[int, int, int, int],
-    routing_map: tuple[float, ...],
-    mask_lf: tuple[float, ...],
-    mask_hf: tuple[float, ...],
-    observation_digests: tuple[tuple[str, str, str], ...],
+    routing_observations: RoutingObservations | None,
 ) -> ContentRoutingResult:
+    routing_map, mask_lf, mask_hf = _derive_route_outputs(
+        mode,
+        latent_shape,
+        routing_observations,
+    )
+    observation_digests = (
+        _routing_observation_digests(routing_observations)
+        if routing_observations is not None
+        else ()
+    )
     candidate_ids = (ROUTING_KEY_CANDIDATE_ID, mode)
     route_config = _route_config(mode, latent_shape)
     route_config_digest = _identity_digest(route_config)
@@ -360,6 +506,7 @@ def _build_result(
         candidate_ids=candidate_ids,
         mode=mode,
         latent_shape=latent_shape,
+        routing_observations=routing_observations,
         routing_map=routing_map,
         mask_lf=mask_lf,
         mask_hf=mask_hf,
@@ -385,88 +532,18 @@ def content_router(
     """执行冻结 routed 公式或完全不读取 observations 的 uniform control。"""
 
     normalized_shape = _validate_latent_shape(latent_shape)
-    element_count = prod(normalized_shape)
     if mode == UNIFORM_CONTROL_CANDIDATE_ID:
-        ones = (1.0,) * element_count
         return _build_result(
             mode=mode,
             latent_shape=normalized_shape,
-            routing_map=ones,
-            mask_lf=ones,
-            mask_hf=ones,
-            observation_digests=(),
+            routing_observations=None,
         )
     if mode != ROUTING_CANDIDATE_ID:
         raise ContentRouterError("unsupported routing mode")
     if type(observations) is not RoutingObservations:
         raise ContentRouterError("routing_stqr requires numeric S/T/R/Q observations")
-
-    _, channels, target_height, target_width = normalized_shape
-    spatial_maps = {
-        "S": _resize_bilinear_align_corners_false(
-            observations.semantic,
-            target_height,
-            target_width,
-        ),
-        "T": _resize_bilinear_align_corners_false(
-            observations.texture,
-            target_height,
-            target_width,
-        ),
-        "R": _resize_bilinear_align_corners_false(
-            observations.response,
-            target_height,
-            target_width,
-        ),
-        "Q_sens": _resize_bilinear_align_corners_false(
-            observations.sensitivity,
-            target_height,
-            target_width,
-        ),
-    }
-    routing_spatial = tuple(
-        _float32(((1.0 - semantic) * (1.0 - response) * (1.0 - sensitivity)) ** (1.0 / 3.0))
-        for semantic, response, sensitivity in zip(
-            spatial_maps["S"],
-            spatial_maps["R"],
-            spatial_maps["Q_sens"],
-            strict=True,
-        )
-    )
-    mask_lf_spatial = tuple(
-        _float32(routing_value * (1.0 - texture))
-        for routing_value, texture in zip(
-            routing_spatial,
-            spatial_maps["T"],
-            strict=True,
-        )
-    )
-    mask_hf_spatial = tuple(
-        _float32(routing_value * texture)
-        for routing_value, texture in zip(
-            routing_spatial,
-            spatial_maps["T"],
-            strict=True,
-        )
-    )
-    observation_digests = tuple(
-        (
-            name,
-            observation.values_digest,
-            observation.source_identity_digest,
-        )
-        for name, observation in (
-            ("S", observations.semantic),
-            ("T", observations.texture),
-            ("R", observations.response),
-            ("Q_sens", observations.sensitivity),
-        )
-    )
     return _build_result(
         mode=mode,
         latent_shape=normalized_shape,
-        routing_map=_broadcast_spatial(routing_spatial, channels),
-        mask_lf=_broadcast_spatial(mask_lf_spatial, channels),
-        mask_hf=_broadcast_spatial(mask_hf_spatial, channels),
-        observation_digests=observation_digests,
+        routing_observations=observations,
     )
