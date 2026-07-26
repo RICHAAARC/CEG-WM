@@ -1,7 +1,9 @@
 from base64 import b64encode
 from dataclasses import FrozenInstanceError
+from fractions import Fraction
 from hashlib import sha256
 from pathlib import Path
+from random import Random
 from struct import pack
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from main.shared import key_schedule as key_schedule_module
 from main.shared.key_schedule import (
     CANDIDATE_ID,
+    DerivedWrongKeyMaterial,
     KEYED_PRG_VERSION,
     NORMAL_QUANTILE_TABLE_SHA256,
     KeyScheduleConfig,
@@ -64,6 +67,43 @@ PUBLIC_QK_DOMAIN = {
     "conditioning_protocol": "sd3_empty_text_triplet_without_cfg",
     "tensor_role": "scheduler_noise",
 }
+
+
+def _positive_binary32_fraction(binary32_bits: int) -> Fraction:
+    exponent_bits = (binary32_bits >> 23) & 0xFF
+    fraction_bits = binary32_bits & ((1 << 23) - 1)
+    if exponent_bits == 0:
+        significand = fraction_bits
+        exponent = -149
+    else:
+        significand = (1 << 23) | fraction_bits
+        exponent = exponent_bits - 127 - 23
+    if exponent >= 0:
+        return Fraction(significand << exponent, 1)
+    return Fraction(significand, 1 << (-exponent))
+
+
+def _oracle_uniform_binary32_bits(mantissa: int) -> int:
+    target = Fraction(mantissa + 1, (1 << 53) + 2)
+    lower_bits = 0
+    upper_bits = 0x3F800000
+    while lower_bits + 1 < upper_bits:
+        middle_bits = (lower_bits + upper_bits) // 2
+        if _positive_binary32_fraction(middle_bits) <= target:
+            lower_bits = middle_bits
+        else:
+            upper_bits = middle_bits
+    lower_value = _positive_binary32_fraction(lower_bits)
+    if lower_value == target:
+        return lower_bits
+    upper_value = _positive_binary32_fraction(upper_bits)
+    lower_distance = target - lower_value
+    upper_distance = upper_value - target
+    if lower_distance < upper_distance:
+        return lower_bits
+    if upper_distance < lower_distance:
+        return upper_bits
+    return lower_bits if lower_bits & 1 == 0 else upper_bits
 
 
 @pytest.mark.unit
@@ -163,6 +203,41 @@ def test_key_schedule_counter_quantile_golden() -> None:
 
 
 @pytest.mark.unit
+def test_key_schedule_uniform_exact_binary32_adversarial_rounding() -> None:
+    adversarial_mantissa = 6755399172620288
+    result = key_schedule_module._uniform_mantissa_to_float32(
+        adversarial_mantissa
+    )
+    assert pack(">f", result).hex() == "3f3fffff"
+    assert int.from_bytes(pack(">f", result), "big") == (
+        _oracle_uniform_binary32_bits(adversarial_mantissa)
+    )
+
+
+@pytest.mark.unit
+def test_key_schedule_uniform_exact_binary32_edges_and_random_cross_check() -> None:
+    edge_mantissas = (
+        0,
+        1,
+        (1 << 24) - 1,
+        1 << 24,
+        (1 << 52) - 1,
+        1 << 52,
+        6755399172620287,
+        6755399172620288,
+        6755399172620289,
+        (1 << 53) - 2,
+        (1 << 53) - 1,
+    )
+    generator = Random(20260727)
+    sampled_mantissas = tuple(generator.getrandbits(53) for _ in range(256))
+    for mantissa in edge_mantissas + sampled_mantissas:
+        actual_value = key_schedule_module._uniform_mantissa_to_float32(mantissa)
+        actual_bits = int.from_bytes(pack(">f", actual_value), "big")
+        assert actual_bits == _oracle_uniform_binary32_bits(mantissa)
+
+
+@pytest.mark.unit
 def test_key_schedule_wrong_key_and_public_noise() -> None:
     registered = identify_root_key("ceg-wm-golden-root-π")
     wrong = derive_wrong_key_material(registered.root_key_public_digest, 0)
@@ -199,6 +274,35 @@ def test_key_schedule_wrong_key_and_public_noise() -> None:
         registered_stream.domain_digest,
         wrong_stream.domain_digest,
     }
+
+
+@pytest.mark.unit
+def test_key_schedule_wrong_key_stream_rederives_material_from_public_identity() -> None:
+    registered = identify_root_key("ceg-wm-golden-root-π")
+    canonical = derive_wrong_key_material(registered.root_key_public_digest, 3)
+    baseline = derive_wrong_key_stream(
+        canonical,
+        GEOMETRY_DOMAIN,
+        [2, 3],
+        distribution="uniform",
+    )
+
+    directly_constructed = DerivedWrongKeyMaterial(
+        wrong_key_index=3,
+        registered_root_key_public_digest=registered.root_key_public_digest,
+    )
+    assert derive_wrong_key_stream(
+        directly_constructed,
+        GEOMETRY_DOMAIN,
+        [2, 3],
+        distribution="uniform",
+    ) == baseline
+    with pytest.raises(TypeError):
+        DerivedWrongKeyMaterial(
+            wrong_key_index=3,
+            registered_root_key_public_digest=registered.root_key_public_digest,
+            material_text="attacker-chosen-material",
+        )
 
 
 @pytest.mark.unit

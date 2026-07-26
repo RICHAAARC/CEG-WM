@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from base64 import b64decode
 from binascii import Error as Base64Error
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import sha256
 import json
@@ -93,11 +93,19 @@ class RootKeyIdentity:
 
 @dataclass(frozen=True, slots=True)
 class DerivedWrongKeyMaterial:
-    """仅供内存调用的预登记 wrong-key 派生材料。"""
+    """预登记 wrong-key 的公开派生身份。"""
 
     wrong_key_index: int
     registered_root_key_public_digest: str
-    material_text: str = field(repr=False)
+
+    @property
+    def material_text(self) -> str:
+        """按冻结公式重建仅供内存调用的派生材料。"""
+
+        return _derive_wrong_key_material_text(
+            self.registered_root_key_public_digest,
+            self.wrong_key_index,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,18 +386,26 @@ def derive_wrong_key_material(
     digest = _validate_public_digest(registered_root_key_public_digest)
     if type(wrong_key_index) is not int or wrong_key_index < 0:
         raise KeyScheduleError("wrong_key_index must be a non-negative integer")
+    return DerivedWrongKeyMaterial(
+        wrong_key_index=wrong_key_index,
+        registered_root_key_public_digest=digest,
+    )
+
+
+def _derive_wrong_key_material_text(
+    registered_root_key_public_digest: str,
+    wrong_key_index: int,
+) -> str:
+    digest = _validate_public_digest(registered_root_key_public_digest)
+    if type(wrong_key_index) is not int or wrong_key_index < 0:
+        raise KeyScheduleError("wrong_key_index must be a non-negative integer")
     payload = {
         "candidate_id": CANDIDATE_ID,
         "derivation_role": "geometry_and_content_wrong_key",
         "registered_root_key_public_digest": digest,
         "wrong_key_index": wrong_key_index,
     }
-    material_text = "ceg-wm-wrong-key:" + sha256(stable_json_utf8(payload)).hexdigest()
-    return DerivedWrongKeyMaterial(
-        wrong_key_index=wrong_key_index,
-        registered_root_key_public_digest=digest,
-        material_text=material_text,
-    )
+    return "ceg-wm-wrong-key:" + sha256(stable_json_utf8(payload)).hexdigest()
 
 
 def _required_block_count(element_count: int, distribution: Distribution) -> int:
@@ -423,8 +439,40 @@ def _counter_blocks(domain_digest: bytes, block_count: int):
         yield sha256(domain_digest + counter.to_bytes(16, "big", signed=False)).digest()
 
 
-def _float32(value: float) -> float:
-    return unpack(">f", pack(">f", value))[0]
+def _uniform_mantissa_to_float32(mantissa: int) -> float:
+    """把冻结的 53-bit 有理数直接按 RNE 物化为 IEEE-754 binary32。"""
+
+    if type(mantissa) is not int or not 0 <= mantissa < (1 << 53):
+        raise KeyScheduleError("uniform mantissa must be an unsigned 53-bit integer")
+
+    numerator = mantissa + 1
+    denominator = (1 << 53) + 2
+    exponent = numerator.bit_length() - denominator.bit_length()
+    if exponent >= 0:
+        if numerator < (denominator << exponent):
+            exponent -= 1
+    elif numerator << (-exponent) < denominator:
+        exponent -= 1
+
+    scaled_numerator = numerator << (23 - exponent)
+    significand, remainder = divmod(scaled_numerator, denominator)
+    doubled_remainder = remainder << 1
+    if doubled_remainder > denominator or (
+        doubled_remainder == denominator and significand & 1
+    ):
+        significand += 1
+
+    if significand == 1 << 24:
+        significand >>= 1
+        exponent += 1
+    if not (1 << 23) <= significand < (1 << 24):
+        raise KeyScheduleError("uniform binary32 significand is out of range")
+
+    exponent_bits = exponent + 127
+    if not 1 <= exponent_bits <= 127:
+        raise KeyScheduleError("uniform binary32 exponent is out of range")
+    binary32_bits = (exponent_bits << 23) | (significand - (1 << 23))
+    return unpack(">f", pack(">I", binary32_bits))[0]
 
 
 @lru_cache(maxsize=1)
@@ -447,12 +495,11 @@ def _uniform_values(
     block_count: int,
 ) -> tuple[float, ...]:
     values: list[float] = []
-    denominator = (1 << 53) + 2
     for block in _counter_blocks(domain_digest, block_count):
         for offset in (0, 8, 16, 24):
             word = int.from_bytes(block[offset : offset + 8], "big", signed=False)
             mantissa = word >> 11
-            values.append(_float32((mantissa + 1) / denominator))
+            values.append(_uniform_mantissa_to_float32(mantissa))
             if len(values) == element_count:
                 return tuple(values)
     raise KeyScheduleError("uniform counter stream ended unexpectedly")
@@ -576,8 +623,12 @@ def derive_wrong_key_stream(
 
     if type(wrong_key_material) is not DerivedWrongKeyMaterial:
         raise KeyScheduleError("wrong_key_material must come from derive_wrong_key_material")
+    material_text = _derive_wrong_key_material_text(
+        wrong_key_material.registered_root_key_public_digest,
+        wrong_key_material.wrong_key_index,
+    )
     return _derive_stream(
-        key_material=wrong_key_material.material_text,
+        key_material=material_text,
         shape=shape,
         domain_fields=domain_fields,
         distribution=distribution,
