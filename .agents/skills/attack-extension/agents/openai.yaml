@@ -1,0 +1,4 @@
+interface:
+  display_name: "Attack Extension"
+  short_description: "Govern attack implementations and parameters"
+  default_prompt: "Use $attack-extension to implement or review this experiment attack."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Experiment Protocol Change"
+  short_description: "Govern CEG-WM validation and comparison protocols"
+  default_prompt: "Use $experiment-protocol-change to define or revise a CEG-WM experiment protocol."

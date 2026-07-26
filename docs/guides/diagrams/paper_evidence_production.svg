@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1320" viewBox="0 0 1900 1320">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L9,3 L0,6 Z" fill="#334155"/></marker>
+    <style>
+      .title{font:700 28px sans-serif;fill:#0f172a}.sub{font:14px sans-serif;fill:#475569}.hdr{font:700 16px sans-serif;fill:#0f172a}
+      .txt{font:14px sans-serif;fill:#1e293b}.small{font:12px sans-serif;fill:#334155}
+      .box{fill:#f8fafc;stroke:#64748b;stroke-width:2;rx:12}.method{fill:#eff6ff;stroke:#2563eb;stroke-width:2;rx:12}
+      .data{fill:#f5f3ff;stroke:#7c3aed;stroke-width:2;rx:12}.internal{fill:#ecfeff;stroke:#0891b2;stroke-width:2;rx:12}
+      .external{fill:#fff7ed;stroke:#ea580c;stroke-width:2;rx:12}.record{fill:#ecfdf5;stroke:#059669;stroke-width:2;rx:12}
+      .artifact{fill:#f0fdf4;stroke:#15803d;stroke-width:2;rx:12}.fail{fill:#fef2f2;stroke:#b91c1c;stroke-width:2;rx:12}
+      .flow{fill:none;stroke:#334155;stroke-width:2.2;marker-end:url(#arrow)}.dash{fill:none;stroke:#64748b;stroke-width:2;stroke-dasharray:8 6;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1900" height="1320" fill="#fff"/>
+  <text x="40" y="48" class="title">Paper Evidence Production (planned governed evidence chain)</text>
+  <text x="40" y="76" class="sub">Guide visualization only; no experiment facts or results. Scope: research_defined / not_implemented.</text>
+  <text x="40" y="98" class="sub">Sources: ../project_advancement.md · ../../design/evaluation_design.md · ../../design/research_construction_roadmap.md · ../../reference/artifact_evidence.md</text>
+
+  <rect x="40" y="140" width="350" height="180" class="method"/>
+  <text x="60" y="170" class="hdr">Frozen method identity</text>
+  <text x="60" y="200" class="txt"><tspan x="60">CEG-WM method/config digest</tspan><tspan x="60" dy="24">repository + model revision</tspan><tspan x="60" dy="24">detector/key/threshold identity</tspan><tspan x="60" dy="24">no change during formal evaluation</tspan></text>
+
+  <rect x="440" y="140" width="500" height="250" class="data"/>
+  <text x="460" y="170" class="hdr">Preregistered data, samples and mutually exclusive roles</text>
+  <text x="460" y="200" class="txt"><tspan x="460">sample manifest · prompt/seed/key clusters · attack manifest</tspan><tspan x="460" dy="26">1 candidate-selection (selection + untouched confirmation)</tspan><tspan x="460" dy="26">2 content-threshold-fit</tspan><tspan x="460" dy="26">3 rescue-window-fit</tspan><tspan x="460" dy="26">4 geometry-reliability-fit</tspan><tspan x="460" dy="26">5 end-to-end calibration check</tspan><tspan x="460" dy="26">formal evaluation is disjoint and never selects candidates</tspan></text>
+
+  <rect x="990" y="140" width="400" height="180" class="internal"/>
+  <text x="1010" y="170" class="hdr">Internal candidate validation</text>
+  <text x="1010" y="200" class="txt"><tspan x="1010">LF / HF / routing / combination</tspan><tspan x="1010" dy="24">Q/K / estimator / reliability / rescue</tspan><tspan x="1010" dy="24">promotion or honest negative closure</tspan><tspan x="1010" dy="24">not an external baseline comparison</tspan></text>
+
+  <rect x="1440" y="140" width="410" height="250" class="external"/>
+  <text x="1460" y="170" class="hdr">External comparison registration</text>
+  <text x="1460" y="200" class="txt"><tspan x="1460">immutable baseline source + revision/archive digest</tspan><tspan x="1460" dy="24">license / reuse authorization</tspan><tspan x="1460" dy="24">adapter + exact config + deviation record</tspan><tspan x="1460" dy="24">no source/rights → baseline admission fails</tspan><tspan x="1460" dy="24">shared samples / budget / attacks / metrics</tspan><tspan x="1460" dy="24">internal validation and comparison remain separate</tspan></text>
+
+  <rect x="550" y="455" width="800" height="130" class="box"/>
+  <text x="570" y="485" class="hdr">Protocol preflight</text>
+  <text x="570" y="515" class="txt"><tspan x="570">freeze method + data/split + calibration roles + baseline identities + adapters</tspan><tspan x="570" dy="24">verify fair samples, total watermark budget, attack order/parameters, metrics, failure denominator and FPR definition</tspan><tspan x="570" dy="24">any leakage, rights gap, identity drift or missing input → fail closed before high-cost run</tspan></text>
+
+  <rect x="650" y="640" width="600" height="120" class="record"/>
+  <text x="670" y="675" class="hdr">Unique governed runner</text>
+  <text x="670" y="705" class="txt"><tspan x="670">only composition/execution surface for method + baseline + attacks + metrics</tspan><tspan x="670" dy="24">writes governed records; no hand-edited result channel</tspan></text>
+
+  <rect x="40" y="825" width="430" height="180" class="record"/>
+  <text x="60" y="855" class="hdr">Governed records: full denominator</text>
+  <text x="60" y="885" class="txt"><tspan x="60">success · failure · exclusion</tspan><tspan x="60" dy="24">raw / rectified scores + decisions</tspan><tspan x="60" dy="24">attacks / metrics / resource failures</tspan><tspan x="60" dy="24">no silent retry or dropped sample</tspan></text>
+
+  <rect x="520" y="825" width="350" height="180" class="record"/>
+  <text x="540" y="855" class="hdr">Provenance</text>
+  <text x="540" y="885" class="txt"><tspan x="540">method/model/source revisions</tspan><tspan x="540" dy="24">sample/split/config digests</tspan><tspan x="540" dy="24">baseline license + deviation</tspan><tspan x="540" dy="24">runner and environment identity</tspan></text>
+
+  <rect x="920" y="825" width="350" height="180" class="record"/>
+  <text x="940" y="855" class="hdr">Frozen manifest</text>
+  <text x="940" y="885" class="txt"><tspan x="940">declared records and digests</tspan><tspan x="940" dy="24">config_digest + code_version</tspan><tspan x="940" dy="24">artifact inputs / outputs</tspan><tspan x="940" dy="24">rebuild command</tspan></text>
+
+  <rect x="1320" y="825" width="530" height="180" class="artifact"/>
+  <text x="1340" y="855" class="hdr">paper_artifacts rebuild only</text>
+  <text x="1340" y="885" class="txt"><tspan x="1340">consume frozen records + manifests</tspan><tspan x="1340" dy="24">deterministically rebuild tables / figures / reports</tspan><tspan x="1340" dy="24">must not rerun method, attack or baseline</tspan><tspan x="1340" dy="24">must not read audit/log/notebook as facts</tspan></text>
+
+  <rect x="1320" y="1050" width="250" height="120" class="artifact"/>
+  <text x="1340" y="1080" class="hdr">Claim audit</text>
+  <text x="1340" y="1110" class="txt"><tspan x="1340">claim → artifact → manifest</tspan><tspan x="1340" dy="24">→ governed source records</tspan></text>
+
+  <rect x="1600" y="1050" width="250" height="170" class="artifact"/>
+  <text x="1620" y="1080" class="hdr">Three release packages</text>
+  <text x="1620" y="1110" class="txt"><tspan x="1620">minimal method</tspan><tspan x="1620" dy="24">experiment execution</tspan><tspan x="1620" dy="24">paper artifact rebuild</tspan><tspan x="1620" dy="24">extraction profiles govern contents</tspan></text>
+
+  <rect x="40" y="1060" width="1180" height="160" class="fail"/>
+  <text x="60" y="1090" class="hdr">Not scientific evidence</text>
+  <text x="60" y="1120" class="txt"><tspan x="60">tests · governance audits · audit_reports · logs · Notebook outputs · directory presence · documentation · screenshots</tspan><tspan x="60" dy="26">These may verify process or software behavior but cannot support a paper claim without governed records and frozen manifests.</tspan><tspan x="60" dy="26">paper_artifacts is a pure rebuild layer; failures remain explicit and unsupported claims remain unsupported.</tspan></text>
+
+  <path d="M390 230 H440" class="flow"/>
+  <path d="M940 230 H990" class="flow"/>
+  <path d="M215 320 V430 H650 V455" class="flow"/>
+  <path d="M690 390 V455" class="flow"/>
+  <path d="M1190 320 V430 H1120 V455" class="flow"/>
+  <path d="M1645 390 V430 H1250 V455" class="flow"/>
+  <path d="M950 585 V640" class="flow"/>
+  <path d="M950 760 V790 H255 V825" class="flow"/>
+  <path d="M950 790 H695 V825" class="flow"/>
+  <path d="M870 915 H920" class="flow"/>
+  <path d="M1270 915 H1320" class="flow"/>
+  <path d="M1585 1005 V1050 H1445" class="flow"/>
+  <path d="M1570 1110 H1600" class="flow"/>
+</svg>

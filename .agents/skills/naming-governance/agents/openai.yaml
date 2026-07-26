@@ -1,0 +1,4 @@
+interface:
+  display_name: "Naming Governance"
+  short_description: "Validate governed semantic names and fields"
+  default_prompt: "Use $naming-governance to review names introduced by this change."

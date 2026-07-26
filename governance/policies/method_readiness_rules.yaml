@@ -1,0 +1,270 @@
+{
+  "policy_version": 8,
+  "project_name": "ceg_wm",
+  "stage_order": [
+    "project_constraint_framework",
+    "research_defined",
+    "method_construction_authorized",
+    "method_implemented",
+    "runtime_verified",
+    "experiment_ready",
+    "formal_evidence_available"
+  ],
+  "research_definition_stages": [
+    "research_defined",
+    "method_construction_authorized",
+    "method_implemented",
+    "runtime_verified",
+    "experiment_ready",
+    "formal_evidence_available"
+  ],
+  "research_definition_manifest_path": ".codex/research_state/research_definition.yaml",
+  "required_research_design_roles": [
+    "research_definition",
+    "method_architecture",
+    "content_chain",
+    "geometry_chain",
+    "joint_decision",
+    "evaluation_design",
+    "candidate_specification",
+    "algorithm_primitives",
+    "method_mechanism",
+    "research_construction_roadmap"
+  ],
+  "required_method_invariants": [
+    "key_schedule_domain_separation",
+    "content_evidence_primary",
+    "hf_direct_detector",
+    "lf_role_requires_project_validation",
+    "geometry_no_direct_positive",
+    "geometry_blind_detection_boundary",
+    "conditional_near_threshold_recovery",
+    "same_detector_same_threshold",
+    "historical_projects_non_authoritative"
+  ],
+  "implementation_forbidden_stages": [
+    "project_constraint_framework",
+    "research_defined"
+  ],
+  "implementation_authorized_stages": [
+    "method_construction_authorized",
+    "method_implemented",
+    "runtime_verified",
+    "experiment_ready",
+    "formal_evidence_available"
+  ],
+  "construction_authorization_stage": "method_construction_authorized",
+  "construction_admission_manifest_path": ".codex/research_state/method_construction_admission.yaml",
+  "construction_authorization_requirements": [
+    "candidate_specification_closed",
+    "independent_candidate_specification_review_passed",
+    "explicit_user_authorization",
+    "auditable_repository_revision",
+    "stage_change_without_method_implementation"
+  ],
+  "method_readiness_stages": [
+    "method_implemented",
+    "runtime_verified",
+    "experiment_ready",
+    "formal_evidence_available"
+  ],
+  "manifest_path": ".codex/research_state/method_readiness.yaml",
+  "candidate_specification_path": "docs/design/candidate_specifications.md",
+  "design_root": "docs/design",
+  "implementation_root": "main",
+  "test_roots": ["tests/unit", "tests/functional"],
+  "required_method_component_count": 13,
+  "required_method_components": [
+    "key_schedule",
+    "content_router",
+    "lf_carrier",
+    "hf_carrier",
+    "content_embedder",
+    "lf_detector",
+    "hf_detector",
+    "content_detector",
+    "qk_geometry_sync",
+    "geometric_transform_estimator",
+    "geometry_reliability",
+    "image_rectifier",
+    "conditional_recovery_decision"
+  ],
+  "required_component_responsibilities": {
+    "key_schedule": "root_key_derivation_and_prg",
+    "content_router": "content_observation_and_adaptive_routing",
+    "lf_carrier": "low_frequency_carrier_template_and_write_direction",
+    "hf_carrier": "high_frequency_carrier_template_and_write_direction",
+    "content_embedder": "lf_hf_combined_embedding_and_total_budget",
+    "lf_detector": "low_frequency_blind_scoring",
+    "hf_detector": "high_frequency_direct_scoring",
+    "content_detector": "lf_hf_score_standardization_and_content_detection",
+    "qk_geometry_sync": "keyed_qk_geometry_synchronization_and_relation_observation",
+    "geometric_transform_estimator": "blind_bounded_geometric_transform_estimation",
+    "geometry_reliability": "independent_geometry_reliability_conjunction",
+    "image_rectifier": "image_coordinate_rectification",
+    "conditional_recovery_decision": "conditional_same_detector_recovery"
+  },
+  "required_component_paths": {
+    "key_schedule": "main/shared/key_schedule.py",
+    "content_router": "main/content_chain/routing.py",
+    "lf_carrier": "main/content_chain/lf_carrier.py",
+    "hf_carrier": "main/content_chain/hf_carrier.py",
+    "content_embedder": "main/content_chain/embedder.py",
+    "lf_detector": "main/content_chain/lf_detector.py",
+    "hf_detector": "main/content_chain/hf_detector.py",
+    "content_detector": "main/content_chain/detector.py",
+    "qk_geometry_sync": "main/geometry_chain/qk_sync.py",
+    "geometric_transform_estimator": "main/geometry_chain/transform_estimator.py",
+    "geometry_reliability": "main/geometry_chain/reliability.py",
+    "image_rectifier": "main/geometry_chain/rectifier.py",
+    "conditional_recovery_decision": "main/joint_decision/detector.py"
+  },
+  "required_component_candidate_ids": {
+    "key_schedule": ["key_schedule_sha256_counter"],
+    "content_router": [
+      "key_schedule_sha256_counter",
+      "routing_stqr",
+      "routing_uniform_control"
+    ],
+    "lf_carrier": ["key_schedule_sha256_counter", "lf_low_pass"],
+    "hf_carrier": [
+      "key_schedule_sha256_counter",
+      "runtime_sd35_flowmatch",
+      "hf_sparse_tail"
+    ],
+    "content_embedder": [
+      "runtime_sd35_flowmatch",
+      "hf_sparse_tail",
+      "lf_low_pass",
+      "routing_stqr",
+      "routing_uniform_control"
+    ],
+    "lf_detector": ["key_schedule_sha256_counter", "lf_low_pass"],
+    "hf_detector": ["key_schedule_sha256_counter", "hf_sparse_tail"],
+    "content_detector": [
+      "hf_sparse_tail",
+      "lf_low_pass",
+      "content_combination_calibrated"
+    ],
+    "qk_geometry_sync": [
+      "key_schedule_sha256_counter",
+      "runtime_sd35_flowmatch",
+      "qk_relation_similarity"
+    ],
+    "geometric_transform_estimator": [
+      "key_schedule_sha256_counter",
+      "qk_relation_similarity",
+      "rectification_similarity"
+    ],
+    "geometry_reliability": [
+      "key_schedule_sha256_counter",
+      "qk_relation_similarity",
+      "rectification_similarity"
+    ],
+    "image_rectifier": ["rectification_similarity"],
+    "conditional_recovery_decision": ["joint_conditional_recovery"]
+  },
+  "required_behavioral_checks": [
+    "key_schedule_root_and_domain_separation",
+    "key_schedule_counter_quantile_golden",
+    "key_schedule_wrong_key_and_public_noise",
+    "hf_sparse_support",
+    "hf_template_normalization_order_and_unit_l2",
+    "hf_direct_score_time_centering",
+    "lf_domain_and_independent_key",
+    "lf_blind_score_time_centering",
+    "lf_wrong_key_rejection",
+    "routing_mask_partition_and_range",
+    "routing_disabled_uniform_control",
+    "content_embedding_branch_consumption",
+    "content_embedding_total_budget_and_frozen_allocation",
+    "content_embedding_active_zero_direction_fail_closed",
+    "content_wrong_key_rejection",
+    "content_scores_independently_observable",
+    "content_combination_branch_consumption",
+    "content_combination_frozen_formula_identity",
+    "content_combination_wrong_key_not_masked",
+    "qk_relation_consumption",
+    "qk_similarity_transform_identifiability",
+    "geometry_reliability_fail_closed",
+    "geometry_reliability_wrong_key_and_raw_metrics",
+    "rectification_coordinate_protocol",
+    "near_threshold_recovery_gate",
+    "geometry_no_direct_positive",
+    "joint_same_detector_threshold"
+  ],
+  "required_behavior_component_bindings": {
+    "key_schedule_root_and_domain_separation": ["key_schedule"],
+    "key_schedule_counter_quantile_golden": ["key_schedule"],
+    "key_schedule_wrong_key_and_public_noise": ["key_schedule"],
+    "hf_sparse_support": ["hf_carrier"],
+    "hf_template_normalization_order_and_unit_l2": ["hf_carrier"],
+    "hf_direct_score_time_centering": ["hf_detector"],
+    "lf_domain_and_independent_key": ["lf_carrier"],
+    "lf_blind_score_time_centering": ["lf_detector"],
+    "lf_wrong_key_rejection": ["lf_carrier", "lf_detector"],
+    "routing_mask_partition_and_range": ["content_router"],
+    "routing_disabled_uniform_control": ["content_router"],
+    "content_embedding_branch_consumption": [
+      "content_router",
+      "lf_carrier",
+      "hf_carrier",
+      "content_embedder"
+    ],
+    "content_embedding_total_budget_and_frozen_allocation": [
+      "content_embedder"
+    ],
+    "content_embedding_active_zero_direction_fail_closed": [
+      "content_embedder"
+    ],
+    "content_wrong_key_rejection": [
+      "hf_carrier",
+      "hf_detector",
+      "lf_carrier",
+      "lf_detector"
+    ],
+    "content_scores_independently_observable": [
+      "lf_detector",
+      "hf_detector",
+      "content_detector"
+    ],
+    "content_combination_branch_consumption": [
+      "lf_detector",
+      "hf_detector",
+      "content_detector"
+    ],
+    "content_combination_frozen_formula_identity": ["content_detector"],
+    "content_combination_wrong_key_not_masked": [
+      "lf_detector",
+      "hf_detector",
+      "content_detector"
+    ],
+    "qk_relation_consumption": ["qk_geometry_sync"],
+    "qk_similarity_transform_identifiability": [
+      "qk_geometry_sync",
+      "geometric_transform_estimator"
+    ],
+    "geometry_reliability_fail_closed": [
+      "geometric_transform_estimator",
+      "geometry_reliability"
+    ],
+    "geometry_reliability_wrong_key_and_raw_metrics": [
+      "geometric_transform_estimator",
+      "geometry_reliability"
+    ],
+    "rectification_coordinate_protocol": ["image_rectifier"],
+    "near_threshold_recovery_gate": [
+      "conditional_recovery_decision"
+    ],
+    "geometry_no_direct_positive": [
+      "geometry_reliability",
+      "conditional_recovery_decision"
+    ],
+    "joint_same_detector_threshold": [
+      "content_detector",
+      "image_rectifier",
+      "conditional_recovery_decision"
+    ]
+  },
+  "independent_semantic_review_required": true
+}

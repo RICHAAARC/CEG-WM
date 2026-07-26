@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Case Governance"
+  short_description: "Govern CEG-WM tests and readiness evidence"
+  default_prompt: "Use $test-case-governance to place and validate CEG-WM tests."

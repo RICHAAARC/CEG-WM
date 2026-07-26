@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-m", "(constraint or unit or quick) and not integration and not smoke and not slow and not formal"]
+markers = [
+    "unit: 极快测试, 不依赖真实 I/O 或外部资源",
+    "constraint: 约束测试, 用于命名、边界、schema、文档和治理规则",
+    "quick: 轻量功能测试, 可以使用 tmp_path 和小型 fixture",
+    "integration: 集成测试, 默认排除",
+    "smoke: 关键端到端路径, 默认排除",
+    "slow: 耗时测试, 默认排除",
+    "formal: 正式门禁或发布前证据测试, 默认排除",
+]

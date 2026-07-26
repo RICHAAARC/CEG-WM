@@ -1,0 +1,22 @@
+{
+  "policy_version": 2,
+  "layers": {
+    "main.shared": {"allowed_project_dependencies": []},
+    "main.content_chain": {"allowed_project_dependencies": ["main.shared"]},
+    "main.geometry_chain": {"allowed_project_dependencies": ["main.shared"]},
+    "main.joint_decision": {"allowed_project_dependencies": ["main.shared", "main.content_chain", "main.geometry_chain"]},
+    "main": {"allowed_project_dependencies": ["main.shared", "main.content_chain", "main.geometry_chain", "main.joint_decision"]},
+    "runtime": {"allowed_project_dependencies": ["main"]},
+    "experiments.protocol": {"allowed_project_dependencies": []},
+    "experiments.methods": {"allowed_project_dependencies": ["main", "runtime", "experiments.protocol"]},
+    "experiments.attacks": {"allowed_project_dependencies": ["experiments.protocol"]},
+    "experiments.metrics": {"allowed_project_dependencies": ["experiments.protocol"]},
+    "experiments.runners": {"allowed_project_dependencies": ["main", "runtime", "experiments.protocol", "experiments.methods", "experiments.attacks", "experiments.metrics"]},
+    "paper_artifacts": {"allowed_project_dependencies": ["experiments.protocol"]},
+    "notebooks": {"allowed_project_dependencies": ["main", "runtime", "experiments.protocol", "experiments.runners", "paper_artifacts"]},
+    "infrastructure": {"allowed_project_dependencies": ["runtime", "experiments.runners"]}
+  },
+  "forbidden_dependency": "governance",
+  "delivery_code_roots": ["scripts", "infrastructure", "notebooks"],
+  "record_writer_layers": ["experiments.runners"]
+}

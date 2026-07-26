@@ -1,0 +1,4 @@
+interface:
+  display_name: "Claim Audit"
+  short_description: "Trace supported claims to governed evidence"
+  default_prompt: "Use $claim-audit to audit the evidence supporting these research claims."

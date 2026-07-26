@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Research Definition"
+  short_description: "Define CEG-WM dual-chain research boundaries"
+  default_prompt: "Use $project-research-definition to define or revise the CEG-WM research boundary."

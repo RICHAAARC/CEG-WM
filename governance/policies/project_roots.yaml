@@ -1,0 +1,33 @@
+{
+  "policy_version": 1,
+  "root_registry": {
+    ".agents": {"kind": "project_skills", "audited": false},
+    ".codex": {"kind": "governance_guidance", "audited": true},
+    ".conda": {"kind": "local_environment", "audited": false},
+    ".git": {"kind": "version_control", "audited": false},
+    ".pytest_cache": {"kind": "generated_cache", "audited": false},
+    ".venv": {"kind": "local_environment", "audited": false},
+    ".vscode": {"kind": "editor_state", "audited": false},
+    "audit_reports": {"kind": "generated_asset", "audited": false},
+    "configs": {"kind": "governed_configuration", "audited": true},
+    "docs": {"kind": "governed_documentation", "audited": true},
+    "experiments": {"kind": "governed_code", "audited": true},
+    "governance": {"kind": "control_plane", "audited": false},
+    "infrastructure": {"kind": "entrypoint", "audited": true},
+    "main": {"kind": "governed_code", "audited": true},
+    "outputs": {"kind": "generated_asset", "audited": false},
+    "paper_artifacts": {"kind": "derived_artifact_code", "audited": true},
+    "notebooks": {"kind": "entrypoint", "audited": true},
+    "release_packages": {"kind": "generated_asset", "audited": false},
+    "runtime": {"kind": "governed_code", "audited": true},
+    "scripts": {"kind": "support_code", "audited": true},
+    "templates": {"kind": "framework_asset", "audited": true},
+    "third_party": {"kind": "external_dependency", "audited": false},
+    "tests": {"kind": "test_code", "audited": true}
+  },
+  "governed_files": ["AGENTS.md", "README.md", "pyproject.toml", "requirements_cpu.txt"],
+  "extension_rule": {
+    "unknown_root": "fail",
+    "registration_required": true
+  }
+}

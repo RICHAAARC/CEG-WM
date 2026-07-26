@@ -1,0 +1,4 @@
+interface:
+  display_name: "Governed Runner Change"
+  short_description: "Govern experiment composition and record writing"
+  default_prompt: "Use $governed-runner-change to implement or review this experiment runner."

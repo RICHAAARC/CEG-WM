@@ -1,0 +1,4 @@
+interface:
+  display_name: "Artifact Rebuild"
+  short_description: "Govern record-based paper artifact rebuilding"
+  default_prompt: "Use $artifact-rebuild to implement or review this paper artifact workflow."

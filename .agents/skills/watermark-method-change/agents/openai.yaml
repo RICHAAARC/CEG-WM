@@ -1,0 +1,4 @@
+interface:
+  display_name: "Watermark Method Change"
+  short_description: "Govern CEG-WM dual-chain method changes"
+  default_prompt: "Use $watermark-method-change to implement or review a CEG-WM method change."

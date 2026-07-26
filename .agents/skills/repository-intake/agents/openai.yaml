@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repository Intake"
+  short_description: "Inspect CEG-WM repository boundaries and stage"
+  default_prompt: "Use $repository-intake to inspect this CEG-WM repository before making changes."

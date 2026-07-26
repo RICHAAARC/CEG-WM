@@ -1,0 +1,339 @@
+document_role: preconstruction_component_migration_plan
+project_stage: research_defined
+implementation_status: not_implemented
+authority:
+  component_and_candidate_mapping: ../../design/candidate_specifications.md
+  readiness_policy: ../../../governance/policies/method_readiness_rules.yaml
+  source_facts: historical_source_registry.yaml
+not_a_completion_record: true
+not_method_readiness: true
+not_construction_authorization: true
+future_manifest_rule: create_one_per_component_only_after_actual_migration
+components:
+  - component_id: key_schedule
+    responsibility: root_key_derivation_and_prg
+    candidate_ids:
+      - key_schedule_sha256_counter
+    planned_target_path: main/shared/key_schedule.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/core/keyed_prg.py
+          - main/core/normal_quantile_table.py
+      - source_id: slm_wm_flowhf
+        source_files:
+          - flowhf/key_plan.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - framework_rng_or_device_dependent_prg
+      - raw_key_persistence
+      - incompatible_component_local_key_derivation
+    required_method_specific_tests:
+      - key_schedule_root_and_domain_separation
+      - key_schedule_counter_quantile_golden
+      - key_schedule_wrong_key_and_public_noise
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: content_router
+    responsibility: content_observation_and_adaptive_routing
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - routing_stqr
+      - routing_uniform_control
+    planned_target_path: main/content_chain/routing.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/content/routing.py
+          - main/methods/content/saliency.py
+          - main/methods/content/prompt_saliency_runtime.py
+          - main/methods/content/texture.py
+          - main/methods/content/latent_response.py
+          - main/methods/content/local_sensitivity.py
+          - experiments/protocol/content_routing_reference_quantile.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - router_owned_allocation_or_budget
+      - private_detection_state_or_attack_label_routing
+      - fixed_historical_risk_weights
+    required_method_specific_tests:
+      - routing_mask_partition_and_range
+      - routing_disabled_uniform_control
+      - content_embedding_branch_consumption
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: lf_carrier
+    responsibility: low_frequency_carrier_template_and_write_direction
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - lf_low_pass
+    planned_target_path: main/content_chain/lf_carrier.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/carrier/low_frequency.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - carrier_owned_delta_or_budget
+      - shared_lf_hf_key_domain
+      - inherited_fixed_lf_strength
+    required_method_specific_tests:
+      - lf_domain_and_independent_key
+      - lf_wrong_key_rejection
+      - content_embedding_branch_consumption
+      - content_wrong_key_rejection
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: hf_carrier
+    responsibility: high_frequency_carrier_template_and_write_direction
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - runtime_sd35_flowmatch
+      - hf_sparse_tail
+    planned_target_path: main/content_chain/hf_carrier.py
+    historical_references:
+      - source_id: slm_wm_flowhf
+        source_files:
+          - flowhf/hf_injector.py
+          - tests/fixtures/hf_template_golden.json
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - template_time_centering
+      - carrier_owned_actual_write_energy
+      - historical_method_identity_or_success_inheritance
+    required_method_specific_tests:
+      - hf_sparse_support
+      - hf_template_normalization_order_and_unit_l2
+      - content_embedding_branch_consumption
+      - content_wrong_key_rejection
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: content_embedder
+    responsibility: lf_hf_combined_embedding_and_total_budget
+    candidate_ids:
+      - runtime_sd35_flowmatch
+      - hf_sparse_tail
+      - lf_low_pass
+      - routing_stqr
+      - routing_uniform_control
+    planned_target_path: main/content_chain/embedder.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/carrier/content_update.py
+      - source_id: slm_wm_flowhf
+        source_files:
+          - flowhf/hf_injector.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - fixed_0_70_0_30_or_0_50_0_50_fusion
+      - mixing_coefficients_as_additive_energy_fractions
+      - runtime_or_carrier_owned_budget_reallocation
+    required_method_specific_tests:
+      - content_embedding_branch_consumption
+      - content_embedding_total_budget_and_frozen_allocation
+      - content_embedding_active_zero_direction_fail_closed
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: lf_detector
+    responsibility: low_frequency_blind_scoring
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - lf_low_pass
+    planned_target_path: main/content_chain/lf_detector.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/carrier/low_frequency.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - reference_image_or_embed_record_input
+      - private_latent_or_routing_state_input
+      - generic_low_frequency_shift_without_key_attribution
+    required_method_specific_tests:
+      - lf_blind_score_time_centering
+      - lf_wrong_key_rejection
+      - content_wrong_key_rejection
+      - content_scores_independently_observable
+      - content_combination_branch_consumption
+      - content_combination_wrong_key_not_masked
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: hf_detector
+    responsibility: high_frequency_direct_scoring
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - hf_sparse_tail
+    planned_target_path: main/content_chain/hf_detector.py
+    historical_references:
+      - source_id: slm_wm_flowhf
+        source_files:
+          - flowhf/direct_detector.py
+          - flowhf/evaluate_keys.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - inversion_or_oracle_callback_latent_detection
+      - template_time_centering
+      - historical_threshold_or_result_inheritance
+    required_method_specific_tests:
+      - hf_direct_score_time_centering
+      - content_wrong_key_rejection
+      - content_scores_independently_observable
+      - content_combination_branch_consumption
+      - content_combination_wrong_key_not_masked
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: content_detector
+    responsibility: lf_hf_score_standardization_and_content_detection
+    candidate_ids:
+      - hf_sparse_tail
+      - lf_low_pass
+      - content_combination_calibrated
+    planned_target_path: main/content_chain/detector.py
+    historical_references: []
+    independent_design_reason: frozen_ceg_wm_combination_spec_is_authoritative
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: no_direct_historical_reuse_planned
+    forbidden_historical_deviations:
+      - fixed_historical_fusion_weights
+      - branch_failure_or_wrong_key_masking
+      - attack_specific_combination_or_rectified_only_threshold
+    required_method_specific_tests:
+      - content_scores_independently_observable
+      - content_combination_branch_consumption
+      - content_combination_frozen_formula_identity
+      - content_combination_wrong_key_not_masked
+      - joint_same_detector_threshold
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: qk_geometry_sync
+    responsibility: keyed_qk_geometry_synchronization_and_relation_observation
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - runtime_sd35_flowmatch
+      - qk_relation_similarity
+    planned_target_path: main/geometry_chain/qk_sync.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/geometry/differentiable_attention.py
+          - main/methods/geometry/sync_update.py
+          - experiments/protocol/method_runtime_config.py
+          - experiments/runners/semantic_watermark_runtime.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - generated_conditional_qk_as_blind_detection_observation
+      - private_embed_qk_cache
+      - fixed_historical_geometry_strength_or_risk_budget
+    required_method_specific_tests:
+      - qk_relation_consumption
+      - qk_similarity_transform_identifiability
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: geometric_transform_estimator
+    responsibility: blind_bounded_geometric_transform_estimation
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - qk_relation_similarity
+      - rectification_similarity
+    planned_target_path: main/geometry_chain/transform_estimator.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/geometry/differentiable_attention.py
+          - main/methods/geometry/attention_alignment.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - reference_image_or_true_attack_parameter_input
+      - estimator_owned_reliability_decision
+      - geometry_score_as_content_positive
+    required_method_specific_tests:
+      - qk_similarity_transform_identifiability
+      - geometry_reliability_fail_closed
+      - geometry_reliability_wrong_key_and_raw_metrics
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: geometry_reliability
+    responsibility: independent_geometry_reliability_conjunction
+    candidate_ids:
+      - key_schedule_sha256_counter
+      - qk_relation_similarity
+      - rectification_similarity
+    planned_target_path: main/geometry_chain/reliability.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/geometry/attention_alignment.py
+    planned_strategy: reference_only
+    independent_design_reason: ceg_wm_requires_a_separate_fail_closed_conjunction
+    rights_and_license_gate: unresolved_reference_only_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - reliability_folded_into_estimator
+      - nonfinite_or_boundary_solution_accepted
+      - reliability_added_to_content_score
+    required_method_specific_tests:
+      - geometry_reliability_fail_closed
+      - geometry_reliability_wrong_key_and_raw_metrics
+      - geometry_no_direct_positive
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: image_rectifier
+    responsibility: image_coordinate_rectification
+    candidate_ids:
+      - rectification_similarity
+    planned_target_path: main/geometry_chain/rectifier.py
+    historical_references:
+      - source_id: slm_wm
+        source_files:
+          - main/methods/geometry/attention_alignment.py
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: unresolved_direct_reuse_blocked
+    forbidden_historical_deviations:
+      - reference_based_or_oracle_rectification
+      - invalid_support_silently_accepted
+      - detector_or_threshold_change_after_rectification
+    required_method_specific_tests:
+      - rectification_coordinate_protocol
+      - joint_same_detector_threshold
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started
+
+  - component_id: conditional_recovery_decision
+    responsibility: conditional_same_detector_recovery
+    candidate_ids:
+      - joint_conditional_recovery
+    planned_target_path: main/joint_decision/detector.py
+    historical_references: []
+    independent_design_reason: ceg_wm_joint_decision_is_defined_by_current_authoritative_design
+    planned_strategy: independent_rewrite
+    rights_and_license_gate: no_direct_historical_reuse_planned
+    forbidden_historical_deviations:
+      - geometry_always_or_far_negative_rescue
+      - geometry_direct_positive_or_score_addition
+      - different_detector_key_preprocess_config_or_threshold_after_rectification
+    required_method_specific_tests:
+      - near_threshold_recovery_gate
+      - geometry_no_direct_positive
+      - joint_same_detector_threshold
+    independent_audit_gate: revision_bound_candidate_specific_semantic_review_required
+    status: not_started

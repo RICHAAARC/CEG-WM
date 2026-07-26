@@ -1,0 +1,2 @@
+# CPU-only validation dependencies for the research-defined stage.
+pytest==8.4.2

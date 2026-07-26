@@ -1,0 +1,4 @@
+interface:
+  display_name: "Runtime Adapter Change"
+  short_description: "Govern CEG-WM model and Q/K runtime adapters"
+  default_prompt: "Use $runtime-adapter-change to implement or review a CEG-WM runtime adapter."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Metric Extension"
+  short_description: "Govern metric semantics and aggregation"
+  default_prompt: "Use $metric-extension to implement or review this experiment metric."

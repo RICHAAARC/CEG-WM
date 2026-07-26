@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1280" viewBox="0 0 1800 1280">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L9,3 L0,6 Z" fill="#334155"/></marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L9,3 L0,6 Z" fill="#b91c1c"/></marker>
+    <style>
+      .title{font:700 28px sans-serif;fill:#0f172a}.sub{font:14px sans-serif;fill:#475569}.hdr{font:700 16px sans-serif;fill:#0f172a}
+      .txt{font:14px sans-serif;fill:#1e293b}.small{font:12px sans-serif;fill:#334155}
+      .box{fill:#f8fafc;stroke:#64748b;stroke-width:2;rx:12}.content{fill:#eff6ff;stroke:#2563eb;stroke-width:2;rx:12}
+      .geometry{fill:#fff7ed;stroke:#ea580c;stroke-width:2;rx:12}.joint{fill:#f5f3ff;stroke:#7c3aed;stroke-width:2;rx:12}
+      .pos{fill:#f0fdf4;stroke:#15803d;stroke-width:2.5;rx:12}.neg{fill:#fef2f2;stroke:#b91c1c;stroke-width:2;rx:12}
+      .flow{fill:none;stroke:#334155;stroke-width:2.2;marker-end:url(#arrow)}.loop{fill:none;stroke:#7c3aed;stroke-width:3;stroke-dasharray:9 6;marker-end:url(#arrow)}
+      .bad{fill:none;stroke:#b91c1c;stroke-width:2;stroke-dasharray:7 5;marker-end:url(#arrow-red)}
+    </style>
+  </defs>
+  <rect width="1800" height="1280" fill="#fff"/>
+  <text x="40" y="48" class="title">Watermark Presence And Key Attribution Decision (planned blind detection)</text>
+  <text x="40" y="76" class="sub">Not payload decoding. Scope: research_defined / not_implemented. Content evidence is the only positive authority; geometry is conditional recovery only.</text>
+  <text x="40" y="98" class="sub">Sources: ../content_chain.md · ../geometry_chain.md · ../joint_decision.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
+
+  <rect x="40" y="145" width="300" height="190" class="box"/>
+  <text x="60" y="175" class="hdr">Formal detector inputs</text>
+  <text x="60" y="205" class="txt"><tspan x="60">ordinary detection RGB</tspan><tspan x="60" dy="24">detection key</tspan><tspan x="60" dy="24">frozen public model/assets</tspan><tspan x="60" dy="24">content detector config identity</tspan><tspan x="60" dy="24">frozen tau + rescue identity</tspan></text>
+
+  <rect x="390" y="145" width="300" height="190" class="content"/>
+  <text x="410" y="175" class="hdr">Shared preprocess (planned)</text>
+  <text x="410" y="205" class="txt"><tspan x="410">ordinary RGB preprocessing</tspan><tspan x="410" dy="24">VAE posterior mode (no sample)</tspan><tspan x="410" dy="24">same model / revision / dtype</tspan><tspan x="410" dy="24">key-only template reconstruction</tspan><tspan x="410" dy="24">no reference / embed state</tspan></text>
+
+  <rect x="750" y="130" width="240" height="155" class="content"/>
+  <text x="770" y="160" class="hdr">LF blind detector (planned)</text>
+  <text x="770" y="190" class="txt"><tspan x="770">independent T_lf</tspan><tspan x="770" dy="24">score-time correlation</tspan><tspan x="770" dy="24">output s_lf + failure</tspan></text>
+
+  <rect x="750" y="320" width="240" height="155" class="content"/>
+  <text x="770" y="350" class="hdr">HF blind detector (planned)</text>
+  <text x="770" y="380" class="txt"><tspan x="770">independent T_hf</tspan><tspan x="770" dy="24">HF direct score</tspan><tspan x="770" dy="24">output s_hf + failure</tspan></text>
+
+  <rect x="1050" y="190" width="330" height="230" class="content"/>
+  <text x="1070" y="220" class="hdr">Same content detector (planned)</text>
+  <text x="1070" y="250" class="txt"><tspan x="1070">observe s_lf and s_hf independently</tspan><tspan x="1070" dy="24">s_combined only after candidate promotion</tspan><tspan x="1070" dy="24">current D_M identity remains HF-only</tspan><tspan x="1070" dy="24">same key / preprocess / config / tau</tspan><tspan x="1070" dy="24">output raw score, tau, margin</tspan><tspan x="1070" dy="24">branch failures never hidden</tspan></text>
+
+  <rect x="1450" y="145" width="300" height="110" class="pos"/>
+  <text x="1470" y="180" class="hdr">Raw content positive</text>
+  <text x="1470" y="210" class="txt">raw score ≥ tau → final positive</text>
+
+  <rect x="1450" y="300" width="300" height="110" class="neg"/>
+  <text x="1470" y="335" class="hdr">Far-negative content</text>
+  <text x="1470" y="365" class="txt">margin outside rescue → final negative</text>
+
+  <rect x="1050" y="500" width="330" height="135" class="joint"/>
+  <text x="1070" y="530" class="hdr">Near-threshold gate (planned)</text>
+  <text x="1070" y="560" class="txt"><tspan x="1070">raw score &lt; tau</tspan><tspan x="1070" dy="24">and margin in frozen rescue window</tspan><tspan x="1070" dy="24">only this branch may call geometry</tspan></text>
+
+  <rect x="680" y="540" width="300" height="170" class="geometry"/>
+  <text x="700" y="570" class="hdr">Blind Q/K observation (planned)</text>
+  <text x="700" y="600" class="txt"><tspan x="700">same detection RGB + key + public assets</tspan><tspan x="700" dy="24">image-only empty-condition forward</tspan><tspan x="700" dy="24">registered layers / relation identity</tspan><tspan x="700" dy="24">no embed Q/K cache or true attack</tspan></text>
+
+  <rect x="330" y="540" width="300" height="170" class="geometry"/>
+  <text x="350" y="570" class="hdr">Transform estimator (planned)</text>
+  <text x="350" y="600" class="txt"><tspan x="350">bounded crop / scale / rotation / shift</tspan><tspan x="350" dy="24">raw score, gap, residual</tspan><tspan x="350" dy="24">coverage, uniqueness, boundary flags</tspan><tspan x="350" dy="24">estimator does not decide reliability</tspan></text>
+
+  <rect x="40" y="540" width="240" height="210" class="geometry"/>
+  <text x="60" y="570" class="hdr">Reliability conjunction</text>
+  <text x="60" y="600" class="txt"><tspan x="60">independent planned component</tspan><tspan x="60" dy="24">wrong-key reject</tspan><tspan x="60" dy="24">coverage + uniqueness + gap</tspan><tspan x="60" dy="24">residual + finite + interior</tspan><tspan x="60" dy="24">all gates must pass</tspan><tspan x="60" dy="24">never a content positive</tspan></text>
+
+  <rect x="40" y="825" width="280" height="145" class="neg"/>
+  <text x="60" y="855" class="hdr">Geometry fail closed</text>
+  <text x="60" y="885" class="txt"><tspan x="60">wrong key / unreliable / non-finite</tspan><tspan x="60" dy="24">or boundary / low coverage</tspan><tspan x="60" dy="24">→ preserve raw negative</tspan></text>
+
+  <rect x="380" y="825" width="300" height="145" class="geometry"/>
+  <text x="400" y="855" class="hdr">Image rectifier (planned)</text>
+  <text x="400" y="885" class="txt"><tspan x="400">only after reliable estimate</tspan><tspan x="400" dy="24">inverse warp + valid support</tspan><tspan x="400" dy="24">ordinary rectified RGB or failure</tspan></text>
+
+  <rect x="750" y="805" width="410" height="190" class="joint"/>
+  <text x="770" y="835" class="hdr">Exact same detector re-entry</text>
+  <text x="770" y="865" class="txt"><tspan x="770">rectified ordinary RGB → same preprocess</tspan><tspan x="770" dy="24">same LF/HF detectors and content detector</tspan><tspan x="770" dy="24">same key semantics / config identity / tau</tspan><tspan x="770" dy="24">no rectified-only classifier or threshold</tspan><tspan x="770" dy="24">invalid rectification preserves raw negative</tspan></text>
+
+  <rect x="1260" y="805" width="490" height="190" class="joint"/>
+  <text x="1280" y="835" class="hdr">Rectified content decision</text>
+  <text x="1280" y="865" class="txt"><tspan x="1280">rectified score ≥ same tau → final positive</tspan><tspan x="1280" dy="24">rectified score &lt; tau → final negative</tspan><tspan x="1280" dy="24">positive authority is content score only</tspan><tspan x="1280" dy="24">geometry reliability cannot add score</tspan><tspan x="1280" dy="24">wrong-key attribution failure → fail closed</tspan></text>
+
+  <rect x="40" y="1055" width="1710" height="145" class="neg"/>
+  <text x="60" y="1085" class="hdr">Formal blind-detection boundary and failure propagation</text>
+  <text x="60" y="1115" class="txt"><tspan x="60">Forbidden inputs: reference image, embed record, private latent statistics, generation Q/K cache, oracle attack parameters.</tspan><tspan x="60" dy="26">Only raw or rectified content score crossing the same tau can produce positive. Far-negative, wrong-key, unreliable geometry and invalid rectification stay negative.</tspan><tspan x="60" dy="26">All failures remain observable and in the evaluation denominator; this diagram is planned behavior, not runtime or scientific evidence.</tspan></text>
+
+  <path d="M340 240 H390" class="flow"/>
+  <path d="M690 220 H720 V205 H750" class="flow"/>
+  <path d="M690 260 H720 V395 H750" class="flow"/>
+  <path d="M990 205 H1050" class="flow"/>
+  <path d="M990 395 H1050" class="flow"/>
+  <path d="M1380 245 H1450 V200" class="flow"/>
+  <path d="M1380 330 H1450 V355" class="flow"/>
+  <path d="M1215 420 V500" class="flow"/>
+  <path d="M1050 570 H980" class="flow"/>
+  <path d="M680 625 H630" class="flow"/>
+  <path d="M330 625 H280" class="flow"/>
+  <path d="M160 750 V825" class="bad"/>
+  <path d="M280 700 H350 V825 H380" class="flow"/>
+  <path d="M680 900 H750" class="flow"/>
+  <path d="M1160 900 H1260" class="flow"/>
+  <path d="M955 805 V775 H1410 V120 H710 V240 H690" class="loop"/>
+  <path d="M530 970 V1030 H180 V1055" class="bad"/>
+  <path d="M1505 995 V1055" class="bad"/>
+</svg>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Placeholder and Random Fields"
+  short_description: "Govern placeholder and random trace fields"
+  default_prompt: "Use $placeholder-random-field-governance to review new persisted fields."

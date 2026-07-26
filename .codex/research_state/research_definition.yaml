@@ -1,0 +1,27 @@
+{
+  "project_name": "ceg_wm",
+  "design_paths": {
+    "research_definition": "docs/design/research_definition.md",
+    "method_architecture": "docs/design/method_architecture.md",
+    "content_chain": "docs/design/content_chain.md",
+    "geometry_chain": "docs/design/geometry_chain.md",
+    "joint_decision": "docs/design/joint_decision.md",
+    "evaluation_design": "docs/design/evaluation_design.md",
+    "candidate_specification": "docs/design/candidate_specifications.md",
+    "algorithm_primitives": "docs/design/algorithm_primitives.md",
+    "method_mechanism": "docs/design/method_mechanism.md",
+    "research_construction_roadmap": "docs/design/research_construction_roadmap.md"
+  },
+  "method_invariants": [
+    "key_schedule_domain_separation",
+    "content_evidence_primary",
+    "hf_direct_detector",
+    "lf_role_requires_project_validation",
+    "geometry_no_direct_positive",
+    "geometry_blind_detection_boundary",
+    "conditional_near_threshold_recovery",
+    "same_detector_same_threshold",
+    "historical_projects_non_authoritative"
+  ],
+  "implementation_status": "not_implemented"
+}

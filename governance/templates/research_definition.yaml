@@ -1,0 +1,27 @@
+{
+  "project_name": "",
+  "design_paths": {
+    "research_definition": "",
+    "method_architecture": "",
+    "content_chain": "",
+    "geometry_chain": "",
+    "joint_decision": "",
+    "evaluation_design": "",
+    "candidate_specification": "",
+    "algorithm_primitives": "",
+    "method_mechanism": "",
+    "research_construction_roadmap": ""
+  },
+  "method_invariants": [
+    "key_schedule_domain_separation",
+    "content_evidence_primary",
+    "hf_direct_detector",
+    "lf_role_requires_project_validation",
+    "geometry_no_direct_positive",
+    "geometry_blind_detection_boundary",
+    "conditional_near_threshold_recovery",
+    "same_detector_same_threshold",
+    "historical_projects_non_authoritative"
+  ],
+  "implementation_status": "not_implemented"
+}

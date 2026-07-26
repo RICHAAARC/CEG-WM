@@ -1,0 +1,32 @@
+{
+  "comparison_group_name": "",
+  "sample_manifest_digest": "",
+  "split_manifest_digest": "",
+  "generation_conditions_digest": "",
+  "seed_policy_digest": "",
+  "output_specification_digest": "",
+  "attack_matrix_digest": "",
+  "metric_set_digest": "",
+  "calibration_split": "",
+  "evaluation_split": "",
+  "tuning_budget_policy_digest": "",
+  "compute_budget_policy_digest": "",
+  "failure_policy_digest": "",
+  "exclusion_policy_digest": "",
+  "methods": [
+    {
+      "method_name": "",
+      "method_role": "project_method",
+      "implementation_revision": "",
+      "config_digest": "",
+      "declared_deviation": ""
+    },
+    {
+      "method_name": "",
+      "method_role": "external_baseline",
+      "implementation_revision": "",
+      "config_digest": "",
+      "declared_deviation": ""
+    }
+  ]
+}

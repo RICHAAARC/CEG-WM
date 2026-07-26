@@ -1,0 +1,176 @@
+registry_role: provisional_historical_source_intake
+project_stage: research_defined
+implementation_status: not_implemented
+authority: read_only_non_authoritative
+verified_on: "2026-07-27"
+global_rules:
+  direct_copy_requires:
+    - immutable_source_identity
+    - file_digest
+    - resolved_license_or_explicit_reuse_authorization
+    - existing_candidate_id
+    - unique_target_responsibility_and_path
+    - candidate_specific_tests
+    - independent_semantic_review
+  inherited_evidence_allowed: false
+  migration_performed: false
+sources:
+  - source_id: slm_wm
+    project_name: SLM-WM
+    read_only_path: /home/richar/projects/SLM-WM
+    source_kind: git_worktree
+    git_revision: 47bd9a1850c434aa47ee03caa7377706f4d283de
+    observed_worktree_state:
+      tracked_files: clean_at_revision
+      untracked_paths:
+        - .codex/config.toml
+        - docs/ceg_wm_direct_hf_scope_decision.md
+    snapshot_digest: null
+    license_files_found: []
+    license_observation: no_license_copying_or_notice_file_found
+    license_status: unresolved
+    reuse_authorization_status: unresolved
+    allowed_uses:
+      - provisional_algorithm_source_provenance
+      - read_only_candidate_semantics_comparison
+      - deviation_identification
+    forbidden_uses:
+      - direct_copy_before_rights_resolution
+      - inherited_method_or_evidence_status
+      - private_embed_state_detection
+      - fixed_historical_fusion
+    candidate_mapping_plan:
+      status: provisional_not_migrated
+      candidate_ids:
+        - key_schedule_sha256_counter
+        - lf_low_pass
+        - routing_stqr
+        - qk_relation_similarity
+        - rectification_similarity
+      target_mapping_authority: ../../design/candidate_specifications.md
+    source_admission:
+      status: provisional_read_only
+      copy_gate: fail_closed_for_copy
+
+  - source_id: slm_wm_flowhf
+    project_name: SLM-WM-FlowHF
+    read_only_path: /home/richar/projects/SLM-WM-FlowHF
+    source_kind: git_worktree
+    git_revision: a7f33825d0913d4707af5723b236beb65f53f4e5
+    observed_worktree_state:
+      tracked_files: clean_at_revision
+      untracked_paths: []
+    snapshot_digest: null
+    license_files_found: []
+    license_observation: no_license_copying_or_notice_file_found
+    license_status: unresolved
+    reuse_authorization_status: unresolved
+    allowed_uses:
+      - provisional_hf_algorithm_source_provenance
+      - read_only_runtime_candidate_semantics_comparison
+      - parameter_identity_comparison_without_evidence_inheritance
+    forbidden_uses:
+      - direct_copy_before_rights_resolution
+      - inherited_fixed_fpr_or_robustness_claim
+      - inversion_or_oracle_detection
+      - historical_method_identity_for_ceg_wm
+    candidate_mapping_plan:
+      status: provisional_not_migrated
+      candidate_ids:
+        - key_schedule_sha256_counter
+        - runtime_sd35_flowmatch
+        - hf_sparse_tail
+      target_mapping_authority: ../../design/candidate_specifications.md
+    source_admission:
+      status: provisional_read_only
+      copy_gate: fail_closed_for_copy
+
+  - source_id: ceg_wm_old_main
+    project_name: CEG-WM-OLD-main
+    read_only_path: /home/richar/projects/CEG-WM-OLD-main/CEG-WM-OLD-main
+    source_kind: unversioned_directory_snapshot
+    git_revision: null
+    observed_worktree_state: not_applicable_without_git
+    snapshot_digest: null
+    snapshot_digest_strategy:
+      status: required_before_any_source_admission
+      algorithm: sha256
+      identity: sorted_relative_path_and_file_bytes_manifest
+      exclusions:
+        - vcs_metadata
+        - cache_directories
+        - generated_outputs
+    verified_file_digests:
+      - relative_path: README.md
+        sha256: e98282789605785809f9d86dd7935cfcfa53e45e4e81554674bd492e7ad89584
+      - relative_path: pyproject.toml
+        sha256: 0e03f9246f6960ebc7500151b250143971de9dd6680093599aafebd7932c2f13
+      - relative_path: configs/default.yaml
+        sha256: 0b77d7b8511be5d6003c7ce0cee034c2066502d6d68f789feb4fd57c4efad50f
+    license_files_found: []
+    license_observation: no_license_copying_or_notice_file_found
+    license_status: unresolved
+    reuse_authorization_status: unresolved
+    allowed_uses:
+      - read_only_discrepancy_discovery_after_explicit_scope
+      - archive_identity_planning
+    forbidden_uses:
+      - source_copy
+      - candidate_or_component_authority
+      - inherited_configuration_threshold_or_result
+      - payload_or_attestation_mainline
+    candidate_mapping_plan:
+      status: no_candidate_mapping_registered
+      candidate_ids: []
+      target_mapping_authority: ../../design/candidate_specifications.md
+    source_admission:
+      status: provisional_read_only
+      copy_gate: fail_closed_for_copy
+      blockers:
+        - snapshot_digest_missing
+        - reuse_rights_unresolved
+
+  - source_id: ceg_o_master
+    project_name: CEG-O-master
+    read_only_path: /home/richar/projects/CEG-O-master/CEG-O-master
+    source_kind: unversioned_directory_snapshot
+    git_revision: null
+    observed_worktree_state: not_applicable_without_git
+    snapshot_digest: null
+    snapshot_digest_strategy:
+      status: required_before_any_source_admission
+      algorithm: sha256
+      identity: sorted_relative_path_and_file_bytes_manifest
+      exclusions:
+        - vcs_metadata
+        - cache_directories
+        - generated_outputs
+    verified_file_digests:
+      - relative_path: README.md
+        sha256: 1de57fa34b81967f83c8dd7f7348337b8e2312afc9c5e6e467a1ae0ffe2b1b7e
+      - relative_path: pyproject.toml
+        sha256: 2676e25910ef089e65b86be062dca9496c9b0706099b9dc2402edc45dd2d4ee5
+      - relative_path: configs/ceg_method_contract.yaml
+        sha256: f57695bc73bc57917688334fe4364711113f4d32e06d8bd88e7286e7417cae40
+    license_files_found: []
+    license_observation: no_license_copying_or_notice_file_found
+    license_status: unresolved
+    reuse_authorization_status: unresolved
+    allowed_uses:
+      - read_only_discrepancy_discovery_after_explicit_scope
+      - archive_identity_planning
+    forbidden_uses:
+      - source_copy
+      - candidate_or_component_authority
+      - inherited_configuration_threshold_or_result
+      - reference_based_geometry_or_private_state_detection
+    candidate_mapping_plan:
+      status: no_candidate_mapping_registered
+      candidate_ids: []
+      target_mapping_authority: ../../design/candidate_specifications.md
+    source_admission:
+      status: provisional_read_only
+      copy_gate: fail_closed_for_copy
+      blockers:
+        - snapshot_digest_missing
+        - reuse_rights_unresolved

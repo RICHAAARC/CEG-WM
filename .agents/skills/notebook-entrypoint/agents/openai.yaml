@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notebook Entrypoint"
+  short_description: "Keep notebooks as orchestration entrypoints"
+  default_prompt: "Use $notebook-entrypoint to review this notebook workflow change."

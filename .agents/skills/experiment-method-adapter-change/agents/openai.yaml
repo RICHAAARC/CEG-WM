@@ -1,0 +1,4 @@
+interface:
+  display_name: "Experiment Method Adapter Change"
+  short_description: "Govern experimental method adapters"
+  default_prompt: "Use $experiment-method-adapter-change to implement or review this experimental method adapter."

@@ -1,0 +1,36 @@
+{
+  "policy_version": 1,
+  "skill_root": ".agents/skills",
+  "required_skills": [
+    "artifact-rebuild",
+    "attack-extension",
+    "claim-audit",
+    "experiment-method-adapter-change",
+    "experiment-protocol-change",
+    "governed-runner-change",
+    "metric-extension",
+    "minimal-release",
+    "naming-governance",
+    "notebook-entrypoint",
+    "placeholder-random-field-governance",
+    "project-research-definition",
+    "repository-intake",
+    "runtime-adapter-change",
+    "stage-progression-guard",
+    "test-case-governance",
+    "watermark-method-change"
+  ],
+  "required_files": [
+    "SKILL.md",
+    "agents/openai.yaml"
+  ],
+  "required_sections": [
+    "## Workflow",
+    "## Blocking Rules",
+    "## Required Validation"
+  ],
+  "forbidden_legacy_roots": [
+    ".codex/skills"
+  ],
+  "unknown_skill": "fail"
+}

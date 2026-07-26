@@ -1,0 +1,4 @@
+interface:
+  display_name: "Minimal Release"
+  short_description: "Extract a minimal reproducible release package"
+  default_prompt: "Use $minimal-release to prepare and validate the requested release package."

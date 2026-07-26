@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#b91c1c"/>
+    </marker>
+    <style>
+      .title{font:700 28px sans-serif;fill:#0f172a}.sub{font:14px sans-serif;fill:#475569}
+      .hdr{font:700 16px sans-serif;fill:#0f172a}.txt{font:14px sans-serif;fill:#1e293b}
+      .small{font:12px sans-serif;fill:#334155}.box{fill:#f8fafc;stroke:#64748b;stroke-width:2;rx:12}
+      .content{fill:#eff6ff;stroke:#2563eb;stroke-width:2;rx:12}
+      .key{fill:#f5f3ff;stroke:#7c3aed;stroke-width:2;rx:12}
+      .runtime{fill:#ecfdf5;stroke:#059669;stroke-width:2;rx:12}
+      .geometry{fill:#fff7ed;stroke:#ea580c;stroke-width:2;rx:12}
+      .fail{fill:#fef2f2;stroke:#b91c1c;stroke-width:2;rx:12}
+      .out{fill:#f0fdf4;stroke:#15803d;stroke-width:2.5;rx:12}
+      .flow{fill:none;stroke:#334155;stroke-width:2.2;marker-end:url(#arrow)}
+      .dash{fill:none;stroke:#334155;stroke-width:2;stroke-dasharray:8 6;marker-end:url(#arrow)}
+      .bad{fill:none;stroke:#b91c1c;stroke-width:2;stroke-dasharray:7 5;marker-end:url(#arrow-red)}
+    </style>
+  </defs>
+  <rect width="1800" height="1180" fill="#ffffff"/>
+  <text x="40" y="48" class="title">Prompt → Watermarked Image (planned CEG-WM generation path)</text>
+  <text x="40" y="76" class="sub">Scope: research_defined / not_implemented. Derived visualization only; Markdown contract, candidate specifications and method mechanism remain authoritative.</text>
+  <text x="40" y="98" class="sub">Sources: ../candidate_specifications.md · ../algorithm_primitives.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
+
+  <rect x="40" y="140" width="270" height="205" class="box"/>
+  <text x="60" y="170" class="hdr">Generation inputs</text>
+  <text x="60" y="200" class="txt"><tspan x="60">Prompt + negative Prompt</tspan><tspan x="60" dy="24">generation seed</tspan><tspan x="60" dy="24">model revision / scheduler</tspan><tspan x="60" dy="24">steps / guidance / size</tspan><tspan x="60" dy="24">frozen config identity</tspan></text>
+
+  <rect x="40" y="390" width="270" height="175" class="key"/>
+  <text x="60" y="420" class="hdr">Secret input boundary</text>
+  <text x="60" y="450" class="txt"><tspan x="60">root_key_text (input only)</tspan><tspan x="60" dy="24">planned shared key_schedule</tspan><tspan x="60" dy="24">stable KDF / counter PRG</tspan><tspan x="60" dy="24">public digest only may persist</tspan></text>
+
+  <rect x="350" y="140" width="300" height="205" class="runtime"/>
+  <text x="370" y="170" class="hdr">Paired runtime setup (planned)</text>
+  <text x="370" y="200" class="txt"><tspan x="370">same prompt / seed / model config</tspan><tspan x="370" dy="24">base latent generated once</tspan><tspan x="370" dy="24">clean branch: no method update</tspan><tspan x="370" dy="24">watermarked branch: governed updates</tspan><tspan x="370" dy="24">identity and failure propagated</tspan></text>
+
+  <rect x="350" y="390" width="300" height="175" class="key"/>
+  <text x="370" y="420" class="hdr">Domain-separated outputs (planned)</text>
+  <text x="370" y="450" class="txt"><tspan x="370">LF carrier domain</tspan><tspan x="370" dy="24">HF carrier domain</tspan><tspan x="370" dy="24">Q/K geometry domain</tspan><tspan x="370" dy="24">routing public-noise domain</tspan></text>
+
+  <rect x="700" y="140" width="430" height="180" class="content"/>
+  <text x="720" y="170" class="hdr">Content observation + router (planned)</text>
+  <text x="720" y="200" class="txt"><tspan x="720">S / T / R / Q_sens observations</tspan><tspan x="720" dy="24">A, mask_lf, mask_hf + identity/digests</tspan><tspan x="720" dy="24">mask_lf + mask_hf = A; each in [0,1]</tspan><tspan x="720" dy="24">router does not choose a or budgets</tspan></text>
+
+  <rect x="700" y="355" width="200" height="165" class="content"/>
+  <text x="720" y="385" class="hdr">LF carrier (planned)</text>
+  <text x="720" y="415" class="txt"><tspan x="720">keyed T_lf</tspan><tspan x="720" dy="24">mask_lf support</tspan><tspan x="720" dy="24">unit direction u_lf</tspan><tspan x="720" dy="24">no delta / no score</tspan></text>
+
+  <rect x="930" y="355" width="200" height="165" class="content"/>
+  <text x="950" y="385" class="hdr">HF carrier (planned)</text>
+  <text x="950" y="415" class="txt"><tspan x="950">sparse-tail T_hf</tspan><tspan x="950" dy="24">mask_hf support</tspan><tspan x="950" dy="24">unit direction u_hf</tspan><tspan x="950" dy="24">no delta / no score</tspan></text>
+
+  <rect x="700" y="560" width="430" height="205" class="content"/>
+  <text x="720" y="590" class="hdr">Content embedder (planned responsibility)</text>
+  <text x="720" y="620" class="txt"><tspan x="720">frozen a ∈ {0.25, 0.50, 0.75}</tspan><tspan x="720" dy="24">v = a·u_lf + (1-a)·u_hf; c = ||v||</tspan><tspan x="720" dy="24">u_content = v/c (non-orthogonal cross term)</tspan><tspan x="720" dy="24">common target total relative-L2 budget</tspan><tspan x="720" dy="24">delta_content; zero/non-finite → fail closed</tspan></text>
+
+  <rect x="1190" y="140" width="540" height="280" class="geometry"/>
+  <text x="1210" y="170" class="hdr">Q/K geometry synchronization write (planned)</text>
+  <text x="1210" y="200" class="txt"><tspan x="1210">image-only, empty-condition Q/K observation identity</tspan><tspan x="1210" dy="24">registered layers / heads / token coordinates</tspan><tspan x="1210" dy="24">keyed relation target from geometry domain</tspan><tspan x="1210" dy="24">sync update projected outside content span</tspan><tspan x="1210" dy="24">span{u_lf,u_hf}; no LF/HF content-budget theft</tspan><tspan x="1210" dy="24">actual-dtype bounded line search; failure retained</tspan><tspan x="1210" dy="24">geometry update never defines watermark evidence</tspan></text>
+
+  <rect x="1190" y="470" width="540" height="185" class="runtime"/>
+  <text x="1210" y="500" class="hdr">Frozen callback/model materialization (planned runtime)</text>
+  <text x="1210" y="530" class="txt"><tspan x="1210">materialize content + geometry updates at registered boundary</tspan><tspan x="1210" dy="24">return actual-dtype tensor and delta_content_actual</tspan><tspan x="1210" dy="24">measure realized combined total norm / relative L2</tspan><tspan x="1210" dy="24">embedder judges target vs realized; runtime owns no budget</tspan></text>
+
+  <rect x="1190" y="700" width="260" height="135" class="runtime"/>
+  <text x="1210" y="730" class="hdr">Scheduler suffix replay</text>
+  <text x="1210" y="760" class="txt"><tspan x="1210">same scheduler identity</tspan><tspan x="1210" dy="24">remaining interval(s)</tspan><tspan x="1210" dy="24">non-finite/runtime failure retained</tspan></text>
+
+  <rect x="1480" y="700" width="250" height="135" class="runtime"/>
+  <text x="1500" y="730" class="hdr">VAE decode</text>
+  <text x="1500" y="760" class="txt"><tspan x="1500">frozen scale + shift</tspan><tspan x="1500" dy="24">ordinary RGB output</tspan><tspan x="1500" dy="24">no private method state exported</tspan></text>
+
+  <rect x="1190" y="885" width="260" height="115" class="out"/>
+  <text x="1210" y="920" class="hdr">Clean RGB image</text>
+  <text x="1210" y="950" class="txt"><tspan x="1210">paired control output</tspan><tspan x="1210" dy="22">same prompt / seed / config</tspan></text>
+
+  <rect x="1480" y="885" width="250" height="115" class="out"/>
+  <text x="1500" y="920" class="hdr">Watermarked RGB image</text>
+  <text x="1500" y="950" class="txt"><tspan x="1500">ordinary image only</tspan><tspan x="1500" dy="22">planned output, not evidence</tspan></text>
+
+  <rect x="40" y="880" width="1030" height="160" class="fail"/>
+  <text x="60" y="910" class="hdr">Fail-closed propagation and forbidden outputs</text>
+  <text x="60" y="940" class="txt"><tspan x="60">invalid key/domain/config · zero carrier/combined direction · callback/QK identity drift · budget/materialization failure · non-finite tensor</tspan><tspan x="60" dy="26">→ explicit sample/runtime failure; no silent fallback, reallocation or historical threshold.</tspan><tspan x="60" dy="26">Never output or persist root key, private latent, embed record, generation Q/K cache or an embedding-state dependency for detection.</tspan></text>
+
+  <path d="M310 240 H350" class="flow"/>
+  <path d="M310 475 H350" class="flow"/>
+  <path d="M650 240 H700" class="flow"/>
+  <path d="M500 390 V350 H680 V230 H700" class="flow"/>
+  <path d="M500 565 V540 H800 V520" class="flow"/>
+  <path d="M500 565 V540 H1030 V520" class="flow"/>
+  <path d="M915 320 V355" class="flow"/>
+  <path d="M800 520 V560" class="flow"/>
+  <path d="M1030 520 V560" class="flow"/>
+  <path d="M1130 660 H1160 V280 H1190" class="flow"/>
+  <path d="M1130 660 H1160 V560 H1190" class="flow"/>
+  <path d="M1460 420 V470" class="flow"/>
+  <path d="M1460 655 V680 H1320 V700" class="flow"/>
+  <path d="M1450 768 H1480" class="flow"/>
+  <path d="M1605 835 V885" class="flow"/>
+  <path d="M650 300 H670 V820 H1320 V885" class="dash"/>
+  <path d="M700 700 H660 V880" class="bad"/>
+  <path d="M1190 610 H1160 V850 H1000 V880" class="bad"/>
+</svg>

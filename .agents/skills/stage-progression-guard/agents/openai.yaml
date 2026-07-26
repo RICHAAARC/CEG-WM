@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stage Progression Guard"
+  short_description: "Validate CEG-WM research stage progression"
+  default_prompt: "Use $stage-progression-guard to verify whether CEG-WM can advance stages."
