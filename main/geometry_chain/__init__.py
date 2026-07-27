@@ -16,6 +16,7 @@ from .rectifier import (
     ImageRectificationResult,
     ImageRectifierError,
     image_rectifier,
+    validate_image_rectification_result,
 )
 from .reliability import (
     GeometryReliabilityError,
@@ -56,4 +57,5 @@ __all__ = [
     "validate_qk_geometry_sync_result",
     "validate_geometric_transform_estimation",
     "validate_geometry_reliability_result",
+    "validate_image_rectification_result",
 ]

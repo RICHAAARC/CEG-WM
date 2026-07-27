@@ -31,6 +31,16 @@ class ContentDetectorError(ValueError):
     """分支统计、CDF 身份、组合公式或密钥语义无效。"""
 
 
+def _require_non_empty_identity_strings(
+    values: Sequence[tuple[str, object]],
+) -> None:
+    if any(type(value) is not str or not value for _, value in values):
+        roles = ", ".join(role for role, _ in values)
+        raise ContentDetectorError(
+            f"identity fields must be non-empty strings: {roles}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class NullScoreRecord:
     """primary-null 的 float64 分支分数与稳定排序身份。"""
@@ -179,8 +189,38 @@ def _validate_hf_result(result: object) -> HfDetectionResult:
         raise ContentDetectorError(
             "content detector requires HfDetectionResult"
         )
-    if result.candidate_id != "hf_sparse_tail" or not isfinite(result.hf_score):
+    if (
+        result.candidate_id != "hf_sparse_tail"
+        or isinstance(result.hf_score, bool)
+        or not isinstance(result.hf_score, (int, float))
+        or not isfinite(float(result.hf_score))
+    ):
         raise ContentDetectorError("HF branch identity or score is invalid")
+    _require_non_empty_identity_strings(
+        (
+            ("detector_identity", result.detector_identity),
+            ("detector_config_digest", result.detector_config_digest),
+            ("root_key_public_digest", result.root_key_public_digest),
+            ("key_role", result.key_role),
+            ("observation_digest", result.observation_digest),
+            ("template_digest", result.template_digest),
+        )
+    )
+    if (
+        result.key_role not in {"registered", "wrong"}
+        or (
+            result.key_role == "registered"
+            and result.wrong_key_index is not None
+        )
+        or (
+            result.key_role == "wrong"
+            and (
+                type(result.wrong_key_index) is not int
+                or result.wrong_key_index < 0
+            )
+        )
+    ):
+        raise ContentDetectorError("HF branch key semantics are invalid")
     return result
 
 
@@ -189,8 +229,38 @@ def _validate_lf_result(result: object) -> LfDetectionResult:
         raise ContentDetectorError(
             "LF diagnostic branch requires LfDetectionResult"
         )
-    if result.candidate_id != "lf_low_pass" or not isfinite(result.lf_score):
+    if (
+        result.candidate_id != "lf_low_pass"
+        or isinstance(result.lf_score, bool)
+        or not isinstance(result.lf_score, (int, float))
+        or not isfinite(float(result.lf_score))
+    ):
         raise ContentDetectorError("LF branch identity or score is invalid")
+    _require_non_empty_identity_strings(
+        (
+            ("detector_identity", result.detector_identity),
+            ("detector_config_digest", result.detector_config_digest),
+            ("root_key_public_digest", result.root_key_public_digest),
+            ("key_role", result.key_role),
+            ("observation_digest", result.observation_digest),
+            ("template_digest", result.template_digest),
+        )
+    )
+    if (
+        result.key_role not in {"registered", "wrong"}
+        or (
+            result.key_role == "registered"
+            and result.wrong_key_index is not None
+        )
+        or (
+            result.key_role == "wrong"
+            and (
+                type(result.wrong_key_index) is not int
+                or result.wrong_key_index < 0
+            )
+        )
+    ):
+        raise ContentDetectorError("LF branch key semantics are invalid")
     return result
 
 
@@ -258,6 +328,45 @@ def _standardize_branch(
         z_score=z_score,
         calibration_identity=calibration.calibration_identity,
     )
+
+
+def _combination_formula_identity(
+    *,
+    formula: str,
+    function_id: str,
+    weight: float | None,
+) -> str:
+    return sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": "content_combination_calibrated",
+                "formula": formula,
+                "function_id": function_id,
+                "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
+                "weight_float64_hex": (
+                    weight.hex() if weight is not None else None
+                ),
+            }
+        )
+    ).hexdigest()
+
+
+def _combination_identity(
+    *,
+    formula_identity: str,
+    hf_calibration_identity: str,
+    lf_calibration_identity: str | None,
+) -> str:
+    return sha256(
+        stable_json_utf8(
+            {
+                "formula_identity": formula_identity,
+                "hf_calibration_identity": hf_calibration_identity,
+                "lf_calibration_identity": lf_calibration_identity,
+                "promotion_status": "diagnostic_not_promoted",
+            }
+        )
+    ).hexdigest()
 
 
 def _combine_diagnostic(
@@ -330,37 +439,20 @@ def _combine_diagnostic(
     if not isfinite(combined_score):
         raise ContentDetectorError("combined diagnostic score must be finite")
 
-    formula_identity = sha256(
-        stable_json_utf8(
-            {
-                "candidate_id": "content_combination_calibrated",
-                "formula": formula,
-                "function_id": function_id,
-                "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
-                "weight_float64_hex": (
-                    normalized_weight.hex()
-                    if normalized_weight is not None
-                    else None
-                ),
-            }
-        )
-    ).hexdigest()
-    combination_identity = sha256(
-        stable_json_utf8(
-            {
-                "formula_identity": formula_identity,
-                "hf_calibration_identity": (
-                    hf_standardization.calibration_identity
-                ),
-                "lf_calibration_identity": (
-                    lf_standardization.calibration_identity
-                    if lf_standardization is not None
-                    else None
-                ),
-                "promotion_status": "diagnostic_not_promoted",
-            }
-        )
-    ).hexdigest()
+    formula_identity = _combination_formula_identity(
+        formula=formula,
+        function_id=function_id,
+        weight=normalized_weight,
+    )
+    combination_identity = _combination_identity(
+        formula_identity=formula_identity,
+        hf_calibration_identity=hf_standardization.calibration_identity,
+        lf_calibration_identity=(
+            lf_standardization.calibration_identity
+            if lf_standardization is not None
+            else None
+        ),
+    )
     return CalibratedCombinationResult(
         candidate_id="content_combination_calibrated",
         function_id=function_id,
@@ -373,6 +465,272 @@ def _combine_diagnostic(
         diagnostic_only=True,
         promoted=False,
     )
+
+
+def _formal_content_identity(
+    hf_result: HfDetectionResult,
+) -> tuple[str, str]:
+    content_config_digest = sha256(
+        stable_json_utf8(
+            {
+                "branch_detector_identity": hf_result.detector_identity,
+                "candidate_id": "hf_sparse_tail",
+                "content_detector_role": "hf_only_direct_score",
+                "lf_combination_enabled": False,
+            }
+        )
+    ).hexdigest()
+    detector_identity = sha256(
+        stable_json_utf8(
+            {
+                "branch_detector_identity": hf_result.detector_identity,
+                "content_config_digest": content_config_digest,
+                "detector_name": "ceg_wm_hf_only_content_detector",
+            }
+        )
+    ).hexdigest()
+    return content_config_digest, detector_identity
+
+
+def _content_diagnostic_identity(
+    *,
+    detector_identity: str,
+    diagnostic: CalibratedCombinationResult,
+) -> str:
+    return sha256(
+        stable_json_utf8(
+            {
+                "candidate_ids": list(CONTENT_DETECTOR_CANDIDATE_IDS),
+                "combination_identity": diagnostic.combination_identity,
+                "formal_detector_identity": detector_identity,
+                "formal_mode": "hf_only",
+            }
+        )
+    ).hexdigest()
+
+
+def _validate_standardization_result(
+    result: object,
+    *,
+    expected_branch: BranchName,
+    expected_raw_score: float,
+) -> BranchStandardizationResult:
+    if type(result) is not BranchStandardizationResult:
+        raise ContentDetectorError(
+            "diagnostic branch must be BranchStandardizationResult"
+        )
+    if result.branch != expected_branch:
+        raise ContentDetectorError(
+            "diagnostic standardization branch identity mismatch"
+        )
+    for role, value in (
+        ("raw_score", result.raw_score),
+        ("u_raw", result.u_raw),
+        ("epsilon_n", result.epsilon_n),
+        ("u_clipped", result.u_clipped),
+        ("z_score", result.z_score),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(float(value))
+        ):
+            raise ContentDetectorError(
+                f"diagnostic standardization {role} must be finite"
+            )
+    for role, value in (
+        ("less_count", result.less_count),
+        ("equal_count", result.equal_count),
+        ("null_count", result.null_count),
+        ("quantile_index", result.quantile_index),
+    ):
+        if type(value) is not int:
+            raise ContentDetectorError(
+                f"diagnostic standardization {role} must be an integer"
+            )
+    if type(result.calibration_identity) is not str or not (
+        result.calibration_identity
+    ):
+        raise ContentDetectorError(
+            "diagnostic calibration identity must be a non-empty string"
+        )
+    if (
+        result.raw_score != expected_raw_score
+        or result.null_count < 2
+        or result.less_count < 0
+        or result.equal_count < 0
+        or result.less_count + result.equal_count > result.null_count
+    ):
+        raise ContentDetectorError(
+            "diagnostic standardization count or raw-score binding mismatch"
+        )
+    expected_u_raw = (
+        result.less_count + 0.5 * result.equal_count
+    ) / result.null_count
+    expected_epsilon_n = 1.0 / (2.0 * result.null_count)
+    expected_u_clipped = min(
+        max(expected_u_raw, expected_epsilon_n),
+        1.0 - expected_epsilon_n,
+    )
+    expected_quantile_index = min(
+        (1 << 20) - 1,
+        floor(expected_u_clipped * (1 << 20)),
+    )
+    try:
+        expected_z_score = float(
+            normal_quantile_table_lookup(expected_quantile_index)
+        )
+    except KeyScheduleError as exc:
+        raise ContentDetectorError(
+            "frozen normal quantile replay failed"
+        ) from exc
+    if (
+        result.u_raw != expected_u_raw
+        or result.epsilon_n != expected_epsilon_n
+        or result.u_clipped != expected_u_clipped
+        or result.quantile_index != expected_quantile_index
+        or result.z_score != expected_z_score
+    ):
+        raise ContentDetectorError(
+            "diagnostic standardization replay mismatch"
+        )
+    return result
+
+
+def _validate_diagnostic_result(
+    diagnostic: object,
+    *,
+    hf_result: HfDetectionResult,
+    lf_result: LfDetectionResult | None,
+) -> CalibratedCombinationResult:
+    if type(diagnostic) is not CalibratedCombinationResult:
+        raise ContentDetectorError(
+            "diagnostic combination must be CalibratedCombinationResult"
+        )
+    if (
+        diagnostic.candidate_id != "content_combination_calibrated"
+        or type(diagnostic.function_id) is not str
+        or not diagnostic.function_id
+        or type(diagnostic.formula_identity) is not str
+        or not diagnostic.formula_identity
+        or type(diagnostic.combination_identity) is not str
+        or not diagnostic.combination_identity
+        or type(diagnostic.diagnostic_only) is not bool
+        or not diagnostic.diagnostic_only
+        or type(diagnostic.promoted) is not bool
+        or diagnostic.promoted
+        or isinstance(diagnostic.combined_score, bool)
+        or not isinstance(diagnostic.combined_score, (int, float))
+        or not isfinite(float(diagnostic.combined_score))
+    ):
+        raise ContentDetectorError(
+            "content combination must remain finite, diagnostic, and unpromoted"
+        )
+    hf_standardization = _validate_standardization_result(
+        diagnostic.hf_standardization,
+        expected_branch="hf",
+        expected_raw_score=hf_result.hf_score,
+    )
+    lf_standardization: BranchStandardizationResult | None
+    formula: str
+    expected_score: float
+    normalized_weight: float | None
+    if diagnostic.function_id == "C0":
+        if (
+            diagnostic.weight is not None
+            or diagnostic.lf_standardization is not None
+        ):
+            raise ContentDetectorError(
+                "C0 diagnostic accepts neither weight nor LF standardization"
+            )
+        lf_standardization = None
+        formula = "z_hf"
+        expected_score = hf_standardization.z_score
+        normalized_weight = None
+    elif diagnostic.function_id in {
+        "C1_w025",
+        "C1_w050",
+        "C1_w075",
+    }:
+        expected_weight = {
+            "C1_w025": 0.25,
+            "C1_w050": 0.50,
+            "C1_w075": 0.75,
+        }[diagnostic.function_id]
+        if (
+            isinstance(diagnostic.weight, bool)
+            or not isinstance(diagnostic.weight, (int, float))
+            or float(diagnostic.weight) != expected_weight
+            or lf_result is None
+            or type(diagnostic.lf_standardization)
+            is not BranchStandardizationResult
+        ):
+            raise ContentDetectorError(
+                "C1 diagnostic requires its frozen weight and LF result"
+            )
+        normalized_weight = float(diagnostic.weight)
+        lf_standardization = _validate_standardization_result(
+            diagnostic.lf_standardization,
+            expected_branch="lf",
+            expected_raw_score=lf_result.lf_score,
+        )
+        formula = "w*z_hf+sqrt(1-w^2)*z_lf"
+        expected_score = (
+            normalized_weight * hf_standardization.z_score
+            + sqrt(1.0 - normalized_weight * normalized_weight)
+            * lf_standardization.z_score
+        )
+    elif diagnostic.function_id == "C2":
+        if (
+            diagnostic.weight is not None
+            or lf_result is None
+            or type(diagnostic.lf_standardization)
+            is not BranchStandardizationResult
+        ):
+            raise ContentDetectorError(
+                "C2 diagnostic requires LF standardization without a weight"
+            )
+        lf_standardization = _validate_standardization_result(
+            diagnostic.lf_standardization,
+            expected_branch="lf",
+            expected_raw_score=lf_result.lf_score,
+        )
+        formula = "max(z_hf,z_lf)"
+        expected_score = max(
+            hf_standardization.z_score,
+            lf_standardization.z_score,
+        )
+        normalized_weight = None
+    else:
+        raise ContentDetectorError(
+            "diagnostic function identity must be frozen C0, C1, or C2"
+        )
+    if diagnostic.combined_score != expected_score:
+        raise ContentDetectorError(
+            "diagnostic combined score replay mismatch"
+        )
+    expected_formula_identity = _combination_formula_identity(
+        formula=formula,
+        function_id=diagnostic.function_id,
+        weight=normalized_weight,
+    )
+    expected_combination_identity = _combination_identity(
+        formula_identity=expected_formula_identity,
+        hf_calibration_identity=hf_standardization.calibration_identity,
+        lf_calibration_identity=(
+            lf_standardization.calibration_identity
+            if lf_standardization is not None
+            else None
+        ),
+    )
+    if (
+        diagnostic.formula_identity != expected_formula_identity
+        or diagnostic.combination_identity != expected_combination_identity
+    ):
+        raise ContentDetectorError(
+            "diagnostic formula or combination identity replay mismatch"
+        )
+    return diagnostic
 
 
 def content_detector(
@@ -413,35 +771,14 @@ def content_detector(
         )
 
     # This is deliberately byte-for-byte the batch-2 formal HF-only identity.
-    content_config = {
-        "branch_detector_identity": hf_result.detector_identity,
-        "candidate_id": "hf_sparse_tail",
-        "content_detector_role": "hf_only_direct_score",
-        "lf_combination_enabled": False,
-    }
-    content_config_digest = sha256(
-        stable_json_utf8(content_config)
-    ).hexdigest()
-    detector_identity = sha256(
-        stable_json_utf8(
-            {
-                "branch_detector_identity": hf_result.detector_identity,
-                "content_config_digest": content_config_digest,
-                "detector_name": "ceg_wm_hf_only_content_detector",
-            }
-        )
-    ).hexdigest()
+    content_config_digest, detector_identity = _formal_content_identity(
+        hf_result
+    )
     diagnostic_identity = (
-        sha256(
-            stable_json_utf8(
-                {
-                    "candidate_ids": list(CONTENT_DETECTOR_CANDIDATE_IDS),
-                    "combination_identity": diagnostic.combination_identity,
-                    "formal_detector_identity": detector_identity,
-                    "formal_mode": "hf_only",
-                }
-            )
-        ).hexdigest()
+        _content_diagnostic_identity(
+            detector_identity=detector_identity,
+            diagnostic=diagnostic,
+        )
         if diagnostic is not None
         else None
     )
@@ -465,3 +802,105 @@ def content_detector(
         diagnostic_combination=diagnostic,
         diagnostic_identity=diagnostic_identity,
     )
+
+
+def validate_content_detection_result(
+    result: ContentDetectionResult,
+) -> ContentDetectionResult:
+    """Validate the current formal HF-only result without reimplementing its score."""
+
+    if type(result) is not ContentDetectionResult:
+        raise ContentDetectorError(
+            "result must be ContentDetectionResult"
+        )
+    hf_result = _validate_hf_result(result.hf_result)
+    lf_result = (
+        _validate_lf_result(result.lf_result)
+        if result.lf_result is not None
+        else None
+    )
+    if lf_result is not None:
+        _validate_shared_key_semantics(hf_result, lf_result)
+    if result.candidate_ids != CONTENT_DETECTOR_CANDIDATE_IDS:
+        raise ContentDetectorError("content detector candidate identity mismatch")
+    _require_non_empty_identity_strings(
+        (
+            ("detector_identity", result.detector_identity),
+            ("content_config_digest", result.content_config_digest),
+        )
+    )
+    if result.formal_mode != "hf_only":
+        raise ContentDetectorError(
+            "current formal content detector mode must remain hf_only"
+        )
+    if (
+        isinstance(result.content_score, bool)
+        or not isinstance(result.content_score, (int, float))
+        or not isfinite(float(result.content_score))
+        or isinstance(result.hf_score, bool)
+        or not isinstance(result.hf_score, (int, float))
+        or not isfinite(float(result.hf_score))
+        or result.content_score != hf_result.hf_score
+        or result.hf_score != hf_result.hf_score
+    ):
+        raise ContentDetectorError(
+            "formal content score must equal the validated HF direct score"
+        )
+    if result.lf_score != (
+        lf_result.lf_score if lf_result is not None else None
+    ):
+        raise ContentDetectorError("LF score/result consistency mismatch")
+    diagnostic = (
+        _validate_diagnostic_result(
+            result.diagnostic_combination,
+            hf_result=hf_result,
+            lf_result=lf_result,
+        )
+        if result.diagnostic_combination is not None
+        else None
+    )
+    if result.combined_score != (
+        diagnostic.combined_score
+        if diagnostic is not None
+        else None
+    ):
+        raise ContentDetectorError(
+            "combined score/diagnostic consistency mismatch"
+        )
+    content_config_digest, detector_identity = _formal_content_identity(
+        hf_result
+    )
+    if (
+        result.content_config_digest != content_config_digest
+        or result.detector_identity != detector_identity
+    ):
+        raise ContentDetectorError(
+            "formal content detector identity replay mismatch"
+        )
+    if diagnostic is None:
+        if result.diagnostic_identity is not None:
+            raise ContentDetectorError(
+                "diagnostic identity requires a diagnostic combination"
+            )
+    else:
+        expected_diagnostic_identity = _content_diagnostic_identity(
+            detector_identity=detector_identity,
+            diagnostic=diagnostic,
+        )
+        if result.diagnostic_identity != expected_diagnostic_identity:
+            raise ContentDetectorError(
+                "content diagnostic identity replay mismatch"
+            )
+    return result
+
+
+__all__ = [
+    "BranchNullCalibration",
+    "BranchStandardizationResult",
+    "CalibratedCombinationResult",
+    "ContentDetectionResult",
+    "ContentDetectorError",
+    "NullScoreRecord",
+    "content_detector",
+    "validate_content_detection_result",
+]

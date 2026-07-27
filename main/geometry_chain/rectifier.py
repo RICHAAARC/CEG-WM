@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from math import isfinite
+from math import isclose, isfinite
 
 import torch
 import torch.nn.functional as functional
@@ -143,7 +143,7 @@ def image_rectifier(
         tuple(float(value) for value in row)
         for row in matrix.to(device="cpu")
     )
-    return ImageRectificationResult(
+    result = ImageRectificationResult(
         rectified_image=rectified,
         valid_support_mask=valid_support,
         token_crop_support=float(token_crop_support),
@@ -152,10 +152,118 @@ def image_rectifier(
         canonical_to_observed_matrix=matrix_value,
         rectification_config_digest=_rectification_config_digest(height, width),
     )
+    return validate_image_rectification_result(
+        result,
+        estimation,
+        reliability,
+    )
+
+
+def validate_image_rectification_result(
+    result: ImageRectificationResult,
+    estimation: GeometricTransformEstimation,
+    reliability: GeometryReliabilityResult,
+) -> ImageRectificationResult:
+    """Validate rectifier-owned image, support, transform, and config relations."""
+
+    if type(result) is not ImageRectificationResult:
+        raise ImageRectifierError(
+            "result must be ImageRectificationResult"
+        )
+    try:
+        replayed_reliable = validate_geometry_reliability_result(
+            reliability,
+            estimation,
+        )
+    except GeometryReliabilityError as exc:
+        raise ImageRectifierError(
+            "rectification reliability validation failed"
+        ) from exc
+    if not replayed_reliable:
+        raise ImageRectifierError(
+            "rectification result requires reliable geometry"
+        )
+    image = result.rectified_image
+    support = result.valid_support_mask
+    if (
+        not isinstance(image, torch.Tensor)
+        or image.dtype is not torch.uint8
+        or image.ndim != 4
+        or tuple(image.shape[:2]) != (1, 3)
+        or image.shape[2] <= 1
+        or image.shape[3] <= 1
+    ):
+        raise ImageRectifierError(
+            "rectified image must be RGB uint8 [1,3,H,W]"
+        )
+    if (
+        not isinstance(support, torch.Tensor)
+        or support.dtype is not torch.bool
+        or support.shape != (1, 1, image.shape[2], image.shape[3])
+        or not bool(support.any())
+    ):
+        raise ImageRectifierError(
+            "valid support mask must be non-empty bool [1,1,H,W]"
+        )
+    expected_matrix = tuple(
+        tuple(float(value) for value in row)
+        for row in estimation.transform.tensor()
+    )
+    if result.canonical_to_observed_matrix != expected_matrix:
+        raise ImageRectifierError(
+            "rectification matrix does not match estimation"
+        )
+    token_support = result.token_crop_support
+    pixel_support = result.pixel_crop_support
+    if (
+        isinstance(token_support, bool)
+        or not isinstance(token_support, (int, float))
+        or not isfinite(float(token_support))
+        or isinstance(pixel_support, bool)
+        or not isinstance(pixel_support, (int, float))
+        or not isfinite(float(pixel_support))
+        or not 0.0 <= float(token_support) <= 1.0
+        or not 0.0 <= float(pixel_support) <= 1.0
+    ):
+        raise ImageRectifierError(
+            "rectification support values must be finite in [0,1]"
+        )
+    expected_pixel_support = float(
+        support.to(dtype=torch.float32).mean()
+    )
+    if (
+        not isclose(
+            float(token_support),
+            float(estimation.coverage),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or not isclose(
+            float(pixel_support),
+            expected_pixel_support,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or result.crop_support
+        != (float(token_support), float(pixel_support))
+    ):
+        raise ImageRectifierError(
+            "rectification support values are inconsistent"
+        )
+    expected_config_digest = _rectification_config_digest(
+        int(image.shape[2]),
+        int(image.shape[3]),
+    )
+    if result.rectification_config_digest != expected_config_digest:
+        raise ImageRectifierError(
+            "rectification config digest mismatch"
+        )
+    return result
 
 
 __all__ = [
     "ImageRectificationResult",
     "ImageRectifierError",
     "image_rectifier",
+    "validate_image_rectification_result",
 ]

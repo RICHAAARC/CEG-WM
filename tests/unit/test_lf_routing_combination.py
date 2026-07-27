@@ -10,6 +10,7 @@ from main.content_chain.detector import (
     ContentDetectorError,
     NullScoreRecord,
     content_detector,
+    validate_content_detection_result,
 )
 from main.content_chain.embedder import (
     ContentEmbedderError,
@@ -833,11 +834,12 @@ def test_content_combination_frozen_formula_identity() -> None:
     lf_null = _null_calibration("lf", lf_result.detector_identity, scores)
 
     assert hf_null.calibration_identity == hf_permuted.calibration_identity
-    c0 = content_detector(
+    c0_result = content_detector(
         hf_query,
         hf_null=hf_null,
         combination="C0",
-    ).diagnostic_combination
+    )
+    c0 = c0_result.diagnostic_combination
     assert c0.hf_standardization.less_count == 1
     assert c0.hf_standardization.equal_count == 2
     assert c0.hf_standardization.u_raw == 0.5
@@ -845,7 +847,7 @@ def test_content_combination_frozen_formula_identity() -> None:
     assert pack(">f", c0.hf_standardization.z_score).hex() == "35a06c99"
     assert pack(">f", normal_quantile_table_lookup(524288)).hex() == "35a06c99"
 
-    combinations = [
+    combination_results = [
         content_detector(
             hf_query,
             lf_query,
@@ -853,16 +855,20 @@ def test_content_combination_frozen_formula_identity() -> None:
             lf_null=lf_null,
             combination="C1",
             weight=weight,
-        ).diagnostic_combination
+        )
         for weight in (0.25, 0.50, 0.75)
     ]
-    c2 = content_detector(
+    combinations = [
+        result.diagnostic_combination for result in combination_results
+    ]
+    c2_result = content_detector(
         hf_query,
         lf_query,
         hf_null=hf_null,
         lf_null=lf_null,
         combination="C2",
-    ).diagnostic_combination
+    )
+    c2 = c2_result.diagnostic_combination
     for result in combinations:
         expected = (
             result.weight * result.hf_standardization.z_score
@@ -877,6 +883,64 @@ def test_content_combination_frozen_formula_identity() -> None:
         c2.hf_standardization.z_score,
         c2.lf_standardization.z_score,
     )
+    c1_result = combination_results[1]
+    c1 = c1_result.diagnostic_combination
+    tampered_score = c1.combined_score + 0.25
+    coordinated_score_tamper = replace(
+        c1_result,
+        combined_score=tampered_score,
+        diagnostic_combination=replace(
+            c1,
+            combined_score=tampered_score,
+        ),
+    )
+    with pytest.raises(ContentDetectorError, match="score replay"):
+        validate_content_detection_result(coordinated_score_tamper)
+    formula_identity_tamper = replace(
+        c1_result,
+        diagnostic_combination=replace(
+            c1,
+            formula_identity="f" * 64,
+        ),
+    )
+    with pytest.raises(ContentDetectorError, match="formula"):
+        validate_content_detection_result(formula_identity_tamper)
+    standardization_tamper = replace(
+        c1_result,
+        diagnostic_combination=replace(
+            c1,
+            hf_standardization=replace(
+                c1.hf_standardization,
+                less_count=c1.hf_standardization.less_count + 1,
+            ),
+        ),
+    )
+    with pytest.raises(ContentDetectorError, match="standardization"):
+        validate_content_detection_result(standardization_tamper)
+    with pytest.raises(ContentDetectorError, match="C0"):
+        validate_content_detection_result(
+            replace(
+                c0_result,
+                diagnostic_combination=replace(c0, weight=0.25),
+            )
+        )
+    with pytest.raises(ContentDetectorError, match="C1"):
+        validate_content_detection_result(
+            replace(
+                c1_result,
+                diagnostic_combination=replace(
+                    c1,
+                    lf_standardization=None,
+                ),
+            )
+        )
+    with pytest.raises(ContentDetectorError, match="C2"):
+        validate_content_detection_result(
+            replace(
+                c2_result,
+                diagnostic_combination=replace(c2, weight=0.25),
+            )
+        )
 
     with pytest.raises(ContentDetectorError, match="C1 weight"):
         content_detector(

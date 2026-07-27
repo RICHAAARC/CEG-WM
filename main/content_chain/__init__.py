@@ -8,6 +8,7 @@ from .detector import (
     ContentDetectorError,
     NullScoreRecord,
     content_detector,
+    validate_content_detection_result,
 )
 from .embedder import (
     ContentEmbeddingResult,
@@ -74,4 +75,5 @@ __all__ = [
     "hf_detector",
     "lf_carrier",
     "lf_detector",
+    "validate_content_detection_result",
 ]

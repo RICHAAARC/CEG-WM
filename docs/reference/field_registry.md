@@ -254,6 +254,30 @@ Notebook 与 repository module 的跨边界数据
 | crop_support | cross_boundary | method_statistic | none | true | false | false | 同时保存 token 双向 coverage 与 pixel mask 比例的有序二元组。 |
 | canonical_to_observed_matrix | cross_boundary | method_state | none | true | false | false | rectifier 实际作为 output-to-input theta 消费的 estimator affine matrix。 |
 | rectification_config_digest | cross_boundary | method_identity | none | false | false | 图像/支持插值、padding、align-corners、量化与尺寸的配置摘要。 |
+| content_detection_operation | cross_boundary | method_state | none | false | false | false | 同一联合调用在原图与回正图上复用的普通图像内容检测 operation 对象；不进入稳定序列化。 |
+| preprocessing_identity | cross_boundary | method_identity | none | true | false | false | 原图与回正图共同绑定的普通图像编码和内容检测预处理身份。 |
+| detector_binding_digest | cross_boundary | method_identity | none | true | false | false | content detector、正式模式、预处理与同一 operation 角色的联合绑定摘要。 |
+| hf_detector_identity | cross_boundary | method_identity | none | false | false | false | joint binding 显式固定的正式 HF branch detector 身份；raw 与 rectified 结果必须一致。 |
+| hf_detector_config_digest | cross_boundary | method_identity | none | false | false | false | joint binding 显式固定的正式 HF branch detector 配置摘要。 |
+| hf_template_digest | cross_boundary | provenance | none | false | false | false | joint binding 对当前注册 key 的 HF 模板摘要；raw 与 rectified 重判必须一致。 |
+| tau | cross_boundary | method_identity | none | true | false | false | 当前 content detector 身份在独立 calibration 中冻结的唯一阳性阈值。 |
+| tau_rescue | cross_boundary | method_identity | none | true | false | false | 只控制几何恢复资格且严格低于 `tau` 的近阈值负区间下界。 |
+| threshold_identity | cross_boundary | method_identity | none | true | false | false | `tau`、`tau_rescue`、detector binding 与 calibration provenance 的联合摘要。 |
+| raw_content_result | cross_boundary | method_state | none | false | false | false | 联合判定首次对原始普通图像执行正式 content detector 得到的完整不可变结果。 |
+| source_image_digest | cross_boundary | provenance | none | true | false | false | 联合判定原始 RGB8 输入的 dtype、shape 与逐值字节摘要；用于绑定 raw/rescue 结果来源。 |
+| raw_content_score | cross_boundary | method_statistic | none | true | false | false | 联合判定从 `raw_content_result` 原样读取的正式 `D_M` 分数。 |
+| geometry_triggered | cross_boundary | method_state | none | true | false | false | 原始内容分数是否位于 `[tau_rescue,tau)` 并实际惰性调用几何估计。 |
+| trigger_reason | cross_boundary | method_state | none | true | false | false | raw 阳性、远阈值负样本、近阈值资格或 raw 内容失败对应的互斥触发原因。 |
+| geometry_estimation | cross_boundary | method_state | none | false | false | false | 近阈值门后才产生并经公开 validator 复验的完整变换估计结果。 |
+| geometry_reliability_result | cross_boundary | method_state | none | false | false | false | joint 委托独立 reliability 组件对同一 estimation 产生并复验的结果。 |
+| image_rectification_result | cross_boundary | method_state | none | false | false | false | 仅可靠 geometry 后由真实 image rectifier 产生的完整回正结果。 |
+| rectified_content_result | cross_boundary | method_state | none | false | false | false | 同一 detector operation、密钥语义、预处理和阈值对回正普通图像产生的内容结果。 |
+| rectified_content_score | cross_boundary | method_statistic | none | true | false | false | 从 `rectified_content_result` 原样读取、以同一 `tau` 重判的正式内容分数。 |
+| joint_content_positive | cross_boundary | method_state | none | true | false | false | 只由 raw 或 rectified content score 达到同一 `tau` 形成的方法整体联合内容判定。 |
+| positive_source | cross_boundary | method_state | none | true | false | false | 最终阳性唯一允许的 `raw_content` 或 `rectified_content` 内容证据来源；负样本为空。 |
+| full_ceg_wm_eligible | cross_boundary | method_state | none | true | false | false | 当前联合结果是否具备完整 CEG-WM 身份资格；HF-only construction candidate 固定为 false。 |
+| positive_path | cross_boundary | method_state | none | true | false | false | 联合阳性的 `raw_positive` 或 `rescue_positive` 控制流路径；负样本为空，FPR 由实验层结合 null 标签计算。 |
+| decision_identity_digest | cross_boundary | method_identity | none | true | false | false | 联合路径、分数、内容/几何/阈值身份、阳性来源与失败状态的一致性摘要。 |
 | declared_deviation | persisted_protocol | protocol | none | false | false | false | baseline 相对上游实现的已声明语义偏差。 |
 | methods | persisted_protocol | protocol | none | false | false | false | Comparison protocol 中参与方法规格的有序集合。 |
 | method_code_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的方法代码 revision。 |
