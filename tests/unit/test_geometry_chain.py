@@ -22,7 +22,11 @@ from main.geometry_chain.qk_sync import (
     row_normalized_relation_score,
     validate_qk_geometry_sync_result,
 )
-from main.geometry_chain.rectifier import ImageRectifierError, image_rectifier
+from main.geometry_chain.rectifier import (
+    ImageRectifierError,
+    image_rectifier,
+    validate_image_rectification_result,
+)
 from main.geometry_chain.reliability import (
     GeometryReliabilityError,
     GeometryReliabilityResult,
@@ -749,6 +753,15 @@ def test_rectification_coordinate_protocol():
     )
     image = torch.arange(3 * 7 * 7, dtype=torch.uint8).reshape(1, 3, 7, 7)
     result = image_rectifier(image, identity_estimation, reliability)
+    assert (
+        validate_image_rectification_result(
+            result,
+            image,
+            identity_estimation,
+            reliability,
+        )
+        is result
+    )
 
     theta = identity_estimation.transform.tensor().unsqueeze(0)
     grid = functional.affine_grid(theta, image.shape, align_corners=True)

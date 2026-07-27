@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from math import floor, isfinite, sqrt
 from typing import Literal, Sequence
@@ -12,6 +12,11 @@ from main.shared.key_schedule import (
     KeyScheduleError,
     normal_quantile_table_lookup,
     stable_json_utf8,
+)
+from main.shared.rgb8 import (
+    Rgb8ImageError,
+    rgb8_image_digest,
+    validate_rgb8_image_digest,
 )
 
 from .hf_detector import HfDetectionResult
@@ -182,6 +187,7 @@ class ContentDetectionResult:
     lf_result: LfDetectionResult | None
     diagnostic_combination: CalibratedCombinationResult | None
     diagnostic_identity: str | None
+    content_input_image_digest: str | None
 
 
 def _validate_hf_result(result: object) -> HfDetectionResult:
@@ -801,11 +807,13 @@ def content_detector(
         lf_result=normalized_lf_result,
         diagnostic_combination=diagnostic,
         diagnostic_identity=diagnostic_identity,
+        content_input_image_digest=None,
     )
 
 
 def validate_content_detection_result(
     result: ContentDetectionResult,
+    input_image: object | None = None,
 ) -> ContentDetectionResult:
     """Validate the current formal HF-only result without reimplementing its score."""
 
@@ -823,6 +831,24 @@ def validate_content_detection_result(
         _validate_shared_key_semantics(hf_result, lf_result)
     if result.candidate_ids != CONTENT_DETECTOR_CANDIDATE_IDS:
         raise ContentDetectorError("content detector candidate identity mismatch")
+    if result.content_input_image_digest is not None:
+        try:
+            validate_rgb8_image_digest(result.content_input_image_digest)
+        except Rgb8ImageError as exc:
+            raise ContentDetectorError(
+                "content input image digest is invalid"
+            ) from exc
+    if input_image is not None:
+        try:
+            expected_input_digest = rgb8_image_digest(input_image)
+        except Rgb8ImageError as exc:
+            raise ContentDetectorError(
+                "content input image is not ordinary RGB8"
+            ) from exc
+        if result.content_input_image_digest != expected_input_digest:
+            raise ContentDetectorError(
+                "content result is not bound to the supplied input image"
+            )
     _require_non_empty_identity_strings(
         (
             ("detector_identity", result.detector_identity),
@@ -894,6 +920,33 @@ def validate_content_detection_result(
     return result
 
 
+def bind_content_detection_result_to_image(
+    result: ContentDetectionResult,
+    input_image: object,
+) -> ContentDetectionResult:
+    """Bind a content-owned result to the exact ordinary RGB8 input values."""
+
+    validated = validate_content_detection_result(result)
+    try:
+        input_digest = rgb8_image_digest(input_image)
+    except Rgb8ImageError as exc:
+        raise ContentDetectorError(
+            "content input image is not ordinary RGB8"
+        ) from exc
+    if (
+        validated.content_input_image_digest is not None
+        and validated.content_input_image_digest != input_digest
+    ):
+        raise ContentDetectorError(
+            "content result is already bound to another input image"
+        )
+    bound = replace(
+        validated,
+        content_input_image_digest=input_digest,
+    )
+    return validate_content_detection_result(bound, input_image)
+
+
 __all__ = [
     "BranchNullCalibration",
     "BranchStandardizationResult",
@@ -901,6 +954,7 @@ __all__ = [
     "ContentDetectionResult",
     "ContentDetectorError",
     "NullScoreRecord",
+    "bind_content_detection_result_to_image",
     "content_detector",
     "validate_content_detection_result",
 ]

@@ -40,6 +40,13 @@ from main.shared.key_schedule import (
     identify_root_key,
     stable_json_utf8,
 )
+from main.shared.rgb8 import (
+    Rgb8ImageError,
+    clone_rgb8_image,
+    rgb8_image_digest,
+    validate_rgb8_image,
+    validate_rgb8_image_digest,
+)
 
 JOINT_CANDIDATE_ID = "joint_conditional_recovery"
 
@@ -121,7 +128,7 @@ class JointOperationError(RuntimeError):
 
 
 class ContentDetectionOperation(Protocol):
-    """Runtime-provided public-image encoding followed by the content detector."""
+    """Public-image content detection returning a content-owned image binding."""
 
     def __call__(
         self,
@@ -254,6 +261,7 @@ class ConditionalRecoveryResult:
     candidate_id: str
     formal_mode: str
     full_ceg_wm_eligible: bool
+    source_image: torch.Tensor
     source_image_digest: str
     raw_content_result: ContentDetectionResult | None
     raw_content_score: float | None
@@ -286,6 +294,16 @@ class ConditionalRecoveryResult:
     decision_identity_digest: str = field(init=False)
 
     def __post_init__(self) -> None:
+        try:
+            object.__setattr__(
+                self,
+                "source_image",
+                clone_rgb8_image(self.source_image),
+            )
+        except Rgb8ImageError as exc:
+            raise ConditionalRecoveryError(
+                "joint source image binding is invalid"
+            ) from exc
         _validate_conditional_result_types(self)
         object.__setattr__(
             self,
@@ -298,6 +316,17 @@ class ConditionalRecoveryResult:
 def _validate_conditional_result_types(
     result: ConditionalRecoveryResult,
 ) -> None:
+    try:
+        validate_rgb8_image(result.source_image)
+        validate_rgb8_image_digest(result.source_image_digest)
+    except Rgb8ImageError as exc:
+        raise ConditionalRecoveryError(
+            "joint source image binding is invalid"
+        ) from exc
+    if rgb8_image_digest(result.source_image) != result.source_image_digest:
+        raise ConditionalRecoveryError(
+            "joint source image digest mismatch"
+        )
     optional_types = (
         ("raw_content_result", result.raw_content_result, ContentDetectionResult),
         (
@@ -326,17 +355,6 @@ def _validate_conditional_result_types(
             raise ConditionalRecoveryError(
                 f"{role} has an invalid result type"
             )
-    for content_result in (
-        result.raw_content_result,
-        result.rectified_content_result,
-    ):
-        if content_result is not None:
-            try:
-                validate_content_detection_result(content_result)
-            except ContentDetectorError as exc:
-                raise ConditionalRecoveryError(
-                    "nested content result validation failed"
-                ) from exc
     for role, value in (
         ("raw_content_score", result.raw_content_score),
         ("rectified_content_score", result.rectified_content_score),
@@ -380,17 +398,6 @@ def _validate_conditional_result_types(
             raise ConditionalRecoveryError(
                 f"{role} must be a non-empty string"
             )
-    if (
-        type(result.source_image_digest) is not str
-        or len(result.source_image_digest) != 64
-        or any(
-            character not in "0123456789abcdef"
-            for character in result.source_image_digest
-        )
-    ):
-        raise ConditionalRecoveryError(
-            "source_image_digest must be lowercase SHA-256 hex"
-        )
     for role, value in (
         ("positive_source", result.positive_source),
         ("positive_path", result.positive_path),
@@ -530,6 +537,7 @@ def _content_result_identity_payload(
             else _number_identity(result.combined_score)
         ),
         "content_config_digest": result.content_config_digest,
+        "content_input_image_digest": result.content_input_image_digest,
         "content_score": _number_identity(result.content_score),
         "detector_identity": result.detector_identity,
         "diagnostic_identity": result.diagnostic_identity,
@@ -563,11 +571,6 @@ def _tensor_payload(tensor: object) -> dict[str, object]:
     }
 
 
-def _rgb8_image_digest(image: torch.Tensor) -> str:
-    payload = _tensor_payload(image)
-    return sha256(stable_json_utf8(payload)).hexdigest()
-
-
 def _rectification_identity_payload(
     result: ImageRectificationResult | None,
 ) -> dict[str, object] | None:
@@ -593,7 +596,9 @@ def _rectification_identity_payload(
             result.pixel_crop_support
         ),
         "rectification_config_digest": result.rectification_config_digest,
+        "rectified_image_digest": result.rectified_image_digest,
         "rectified_image": _tensor_payload(result.rectified_image),
+        "source_image_digest": result.source_image_digest,
         "token_crop_support": _number_identity(result.token_crop_support),
         "valid_support_mask": _tensor_payload(result.valid_support_mask),
     }
@@ -655,6 +660,7 @@ def _decision_identity_digest(result: ConditionalRecoveryResult) -> str:
             result.rectified_content_result
         ),
         "root_key_public_digest": result.root_key_public_digest,
+        "source_image": _tensor_payload(result.source_image),
         "source_image_digest": result.source_image_digest,
         "status": result.status,
         "tau_float64_hex": _number_identity(result.tau),
@@ -669,6 +675,7 @@ def _decision_identity_digest(result: ConditionalRecoveryResult) -> str:
 def _validate_bound_content_result(
     result: ContentDetectionResult,
     *,
+    actual_image: torch.Tensor,
     detector_identity: str,
     content_config_digest: str,
     hf_detector_identity: str,
@@ -678,7 +685,7 @@ def _validate_bound_content_result(
     root_key_public_digest: str,
 ) -> ContentDetectionResult:
     try:
-        validate_content_detection_result(result)
+        validate_content_detection_result(result, actual_image)
     except ContentDetectorError as exc:
         raise ConditionalRecoveryError(
             "content result validation failed"
@@ -706,21 +713,6 @@ def _validate_bound_content_result(
     return result
 
 
-def _validate_image(image: object) -> torch.Tensor:
-    if (
-        not isinstance(image, torch.Tensor)
-        or image.dtype is not torch.uint8
-        or image.ndim != 4
-        or tuple(image.shape[:2]) != (1, 3)
-        or image.shape[2] <= 1
-        or image.shape[3] <= 1
-    ):
-        raise ConditionalRecoveryError(
-            "image must be RGB uint8 [1,3,H,W] with H,W > 1"
-        )
-    return image
-
-
 def _failure_name(exc: Exception) -> str:
     return type(exc).__name__
 
@@ -729,7 +721,7 @@ def _result(
     *,
     binding: ContentDetectorBinding,
     thresholds: JointDecisionThresholds,
-    source_image_digest: str,
+    source_image: torch.Tensor,
     root_key_public_digest: str,
     raw_content_result: ContentDetectionResult | None,
     geometry_triggered: bool,
@@ -754,7 +746,8 @@ def _result(
         candidate_id=JOINT_CANDIDATE_ID,
         formal_mode=binding.formal_mode,
         full_ceg_wm_eligible=False,
-        source_image_digest=source_image_digest,
+        source_image=source_image,
+        source_image_digest=rgb8_image_digest(source_image),
         raw_content_result=raw_content_result,
         raw_content_score=(
             float(raw_content_result.content_score)
@@ -805,8 +798,12 @@ def conditional_recovery_decision(
 ) -> ConditionalRecoveryResult:
     """Execute the frozen raw/near-threshold/recheck flow, fail closed."""
 
-    validated_image = _validate_image(image)
-    source_image_digest = _rgb8_image_digest(validated_image)
+    try:
+        source_image = clone_rgb8_image(image)
+    except Rgb8ImageError as exc:
+        raise ConditionalRecoveryError(
+            "image must be RGB uint8 [1,3,H,W] with H,W > 1"
+        ) from exc
     if type(content_detector_binding) is not ContentDetectorBinding:
         raise ConditionalRecoveryError(
             "content_detector_binding must be ContentDetectorBinding"
@@ -839,7 +836,7 @@ def conditional_recovery_decision(
 
     try:
         raw_result = content_detector_binding.content_detection_operation(
-            validated_image,
+            clone_rgb8_image(source_image),
             detection_key,
         )
     except (
@@ -852,7 +849,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=None,
             geometry_triggered=False,
@@ -863,6 +860,7 @@ def conditional_recovery_decision(
     try:
         _validate_bound_content_result(
             raw_result,
+            actual_image=source_image,
             detector_identity=content_detector_binding.detector_identity,
             content_config_digest=content_detector_binding.content_config_digest,
             hf_detector_identity=content_detector_binding.hf_detector_identity,
@@ -877,7 +875,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=None,
             geometry_triggered=False,
@@ -891,7 +889,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=False,
@@ -904,7 +902,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=False,
@@ -914,7 +912,7 @@ def conditional_recovery_decision(
 
     try:
         estimation = geometry_estimation_operation(
-            validated_image,
+            clone_rgb8_image(source_image),
             detection_key,
         )
     except (
@@ -925,7 +923,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -943,7 +941,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -965,7 +963,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -978,7 +976,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -991,7 +989,7 @@ def conditional_recovery_decision(
 
     try:
         rectification = image_rectifier(
-            validated_image,
+            source_image,
             estimation,
             reliability,
         )
@@ -999,7 +997,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -1012,7 +1010,7 @@ def conditional_recovery_decision(
 
     try:
         rectified_result = content_detector_binding.content_detection_operation(
-            rectification.rectified_image,
+            clone_rgb8_image(rectification.rectified_image),
             detection_key,
         )
     except (
@@ -1025,7 +1023,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -1039,6 +1037,7 @@ def conditional_recovery_decision(
     try:
         _validate_bound_content_result(
             rectified_result,
+            actual_image=rectification.rectified_image,
             detector_identity=content_detector_binding.detector_identity,
             content_config_digest=content_detector_binding.content_config_digest,
             hf_detector_identity=content_detector_binding.hf_detector_identity,
@@ -1053,7 +1052,7 @@ def conditional_recovery_decision(
         return _result(
             binding=content_detector_binding,
             thresholds=thresholds,
-            source_image_digest=source_image_digest,
+            source_image=source_image,
             root_key_public_digest=root_digest,
             raw_content_result=raw_result,
             geometry_triggered=True,
@@ -1071,7 +1070,7 @@ def conditional_recovery_decision(
     return _result(
         binding=content_detector_binding,
         thresholds=thresholds,
-        source_image_digest=source_image_digest,
+        source_image=source_image,
         root_key_public_digest=root_digest,
         raw_content_result=raw_result,
         geometry_triggered=True,
@@ -1095,9 +1094,11 @@ def conditional_recovery_decision(
 def _validate_content_result_identity(
     result: ConditionalRecoveryResult,
     content_result: ContentDetectionResult,
+    actual_image: torch.Tensor,
 ) -> None:
     _validate_bound_content_result(
         content_result,
+        actual_image=actual_image,
         detector_identity=result.detector_identity,
         content_config_digest=result.content_config_digest,
         hf_detector_identity=result.hf_detector_identity,
@@ -1211,7 +1212,11 @@ def validate_conditional_recovery_result(
     raw = result.raw_content_result
     rectified = result.rectified_content_result
     if raw is not None:
-        _validate_content_result_identity(result, raw)
+        _validate_content_result_identity(
+            result,
+            raw,
+            result.source_image,
+        )
         if result.raw_content_score != float(raw.content_score):
             raise ConditionalRecoveryError("raw content score mismatch")
     elif result.raw_content_score is not None:
@@ -1279,6 +1284,7 @@ def validate_conditional_recovery_result(
         try:
             validate_image_rectification_result(
                 result.image_rectification_result,
+                result.source_image,
                 result.geometry_estimation,
                 result.geometry_reliability_result,
             )
@@ -1291,7 +1297,11 @@ def validate_conditional_recovery_result(
             raise ConditionalRecoveryError(
                 "rectified content result requires image rectification"
             )
-        _validate_content_result_identity(result, rectified)
+        _validate_content_result_identity(
+            result,
+            rectified,
+            result.image_rectification_result.rectified_image,
+        )
         if result.rectified_content_score != float(rectified.content_score):
             raise ConditionalRecoveryError("rectified content score mismatch")
     elif result.rectified_content_score is not None:

@@ -10,6 +10,7 @@ import torch.nn.functional as functional
 
 from main.content_chain import (
     HfDetectionObservation,
+    bind_content_detection_result_to_image,
     content_detector,
     hf_detector,
 )
@@ -17,6 +18,7 @@ from main.geometry_chain import (
     GeometricTransformEstimation,
     GeometryReliabilityThresholds,
     SimilarityTransform,
+    image_rectifier,
 )
 from main.joint_decision import (
     ConditionalRecoveryError,
@@ -26,7 +28,7 @@ from main.joint_decision import (
     conditional_recovery_decision,
     validate_conditional_recovery_result,
 )
-from main.shared import identify_root_key
+from main.shared import identify_root_key, rgb8_image_digest
 
 _ROOT_KEY = "joint-decision-cpu-key"
 _SHAPE = (1, 3, 9, 9)
@@ -44,7 +46,10 @@ class _ActualContentOperation:
             tuple((image.to(dtype=torch.float32) / 255.0).reshape(-1).tolist()),
             tuple(image.shape),
         )
-        return content_detector(hf_detector(observation, detection_key))
+        return bind_content_detection_result_to_image(
+            content_detector(hf_detector(observation, detection_key)),
+            image,
+        )
 
 
 class _GeometryOperation:
@@ -469,6 +474,18 @@ def test_joint_same_detector_threshold() -> None:
     assert rescue_positive.source_image_digest != (
         direct_positive.source_image_digest
     )
+    assert torch.equal(rescue_positive.source_image, rescue_null)
+    assert rescue_positive.source_image.data_ptr() != rescue_null.data_ptr()
+    assert rescue_positive.raw_content_result.content_input_image_digest == (
+        rescue_positive.source_image_digest
+    )
+    assert (
+        rescue_positive.rectified_content_result.content_input_image_digest
+        == rescue_positive.image_rectification_result.rectified_image_digest
+    )
+    assert rescue_positive.image_rectification_result.source_image_digest == (
+        rescue_positive.source_image_digest
+    )
     assert len(rescue_positive.source_image_digest) == 64
     assert rescue_positive.source_image_digest == (
         rescue_positive.source_image_digest.lower()
@@ -479,9 +496,22 @@ def test_joint_same_detector_threshold() -> None:
     )
     with pytest.raises(
         ConditionalRecoveryError,
-        match="source_image_digest",
+        match="source image binding",
     ):
         replace(rescue_positive, source_image_digest="A" * 64)
+    coordinated_source = torch.flip(
+        rescue_positive.source_image,
+        dims=(3,),
+    ).contiguous()
+    with pytest.raises(
+        ConditionalRecoveryError,
+        match="content result validation",
+    ):
+        replace(
+            rescue_positive,
+            source_image=coordinated_source,
+            source_image_digest=rgb8_image_digest(coordinated_source),
+        )
     with pytest.raises(ConditionalRecoveryError):
         replace(rescue_positive, positive_source="raw_content")
     with pytest.raises(ConditionalRecoveryError, match="unknown"):
@@ -532,6 +562,41 @@ def test_joint_same_detector_threshold() -> None:
             image_rectification_result=tampered_rectification,
         )
 
+    other_source = torch.flip(rescue_null, dims=(2,)).contiguous()
+    other_rectification = image_rectifier(
+        other_source,
+        rescue_positive.geometry_estimation,
+        rescue_positive.geometry_reliability_result,
+    )
+    other_rectified_content = operation(
+        other_rectification.rectified_image,
+        _ROOT_KEY,
+    )
+    with pytest.raises(
+        ConditionalRecoveryError,
+        match="rectification result validation",
+    ):
+        replace(
+            rescue_positive,
+            image_rectification_result=other_rectification,
+            rectified_content_result=other_rectified_content,
+            rectified_content_score=other_rectified_content.content_score,
+        )
+    coordinated_other_rectification = replace(
+        other_rectification,
+        source_image_digest=rescue_positive.source_image_digest,
+    )
+    with pytest.raises(
+        ConditionalRecoveryError,
+        match="rectification result validation",
+    ):
+        replace(
+            rescue_positive,
+            image_rectification_result=coordinated_other_rectification,
+            rectified_content_result=other_rectified_content,
+            rectified_content_score=other_rectified_content.content_score,
+        )
+
     class _SecondCallIdentityDrift(_ActualContentOperation):
         def __call__(self, image: torch.Tensor, detection_key: str):
             content_result = super().__call__(image, detection_key)
@@ -563,11 +628,15 @@ def test_joint_same_detector_threshold() -> None:
     assert drifting_result.status == (
         "negative_rectified_content_identity_failure"
     )
+    source_mutation = replace(rescue_positive)
+    source_mutation.source_image[0, 0, 0, 0] ^= 1
+    with pytest.raises(
+        ConditionalRecoveryError,
+        match="source image digest",
+    ):
+        validate_conditional_recovery_result(source_mutation)
     rescue_positive.image_rectification_result.rectified_image[
         0, 0, 0, 0
     ] ^= 1
-    with pytest.raises(
-        ConditionalRecoveryError,
-        match="decision identity digest",
-    ):
+    with pytest.raises(ConditionalRecoveryError):
         validate_conditional_recovery_result(rescue_positive)

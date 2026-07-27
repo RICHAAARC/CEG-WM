@@ -17,6 +17,13 @@ from .key_schedule import (
     normal_quantile_table_lookup,
     stable_json_utf8,
 )
+from .rgb8 import (
+    Rgb8ImageError,
+    clone_rgb8_image,
+    rgb8_image_digest,
+    validate_rgb8_image,
+    validate_rgb8_image_digest,
+)
 
 __all__ = [
     "CANDIDATE_ID",
@@ -27,11 +34,16 @@ __all__ = [
     "KeyScheduleError",
     "KeyStreamResult",
     "RootKeyIdentity",
+    "Rgb8ImageError",
+    "clone_rgb8_image",
     "derive_public_noise_stream",
     "derive_wrong_key_material",
     "derive_wrong_key_stream",
     "identify_root_key",
     "key_schedule_sha256_counter",
     "normal_quantile_table_lookup",
+    "rgb8_image_digest",
     "stable_json_utf8",
+    "validate_rgb8_image",
+    "validate_rgb8_image_digest",
 ]

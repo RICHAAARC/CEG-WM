@@ -7,6 +7,7 @@ from .detector import (
     ContentDetectionResult,
     ContentDetectorError,
     NullScoreRecord,
+    bind_content_detection_result_to_image,
     content_detector,
     validate_content_detection_result,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "NullScoreRecord",
     "RoutingObservations",
     "SpatialRoutingObservation",
+    "bind_content_detection_result_to_image",
     "content_detector",
     "content_embedder",
     "content_router",

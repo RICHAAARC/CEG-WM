@@ -248,6 +248,7 @@ Notebook 与 repository module 的跨边界数据
 | estimator_search_config_digest | cross_boundary | method_identity | none | false | false | false | reliability 输出回绑 estimator 搜索身份的摘要。 |
 | reliability_identity_digest | cross_boundary | method_identity | none | true | false | false | reliability 的阈值全值、决策字段和 estimator/search/root 绑定的整体摘要。 |
 | rectified_image | cross_boundary | method_state | none | false | false | false | PyTorch inverse warp 后按 clamp、乘 255、floor 产生的 RGB uint8 图像。 |
+| rectified_image_digest | cross_boundary | provenance | none | true | false | false | rectifier 对回正 RGB8 dtype、shape 与逐值字节的稳定摘要；内容重判必须绑定同一回正图。 |
 | valid_support_mask | cross_boundary | method_state | none | true | false | false | 同 grid 对全 1 输入以 nearest/zeros 得到的有效像素支持 mask。 |
 | token_crop_support | cross_boundary | method_statistic | none | true | false | false | estimator forward/backward token coverage 的较小值。 |
 | pixel_crop_support | cross_boundary | method_statistic | none | true | false | false | valid-support pixel mask 的有效比例。 |
@@ -264,7 +265,9 @@ Notebook 与 repository module 的跨边界数据
 | tau_rescue | cross_boundary | method_identity | none | true | false | false | 只控制几何恢复资格且严格低于 `tau` 的近阈值负区间下界。 |
 | threshold_identity | cross_boundary | method_identity | none | true | false | false | `tau`、`tau_rescue`、detector binding 与 calibration provenance 的联合摘要。 |
 | raw_content_result | cross_boundary | method_state | none | false | false | false | 联合判定首次对原始普通图像执行正式 content detector 得到的完整不可变结果。 |
-| source_image_digest | cross_boundary | provenance | none | true | false | false | 联合判定原始 RGB8 输入的 dtype、shape 与逐值字节摘要；用于绑定 raw/rescue 结果来源。 |
+| source_image | cross_boundary | method_state | none | false | false | false | 联合判定保存的普通 RGB8 原始输入防共享副本；用于重放内容绑定和几何回正。 |
+| source_image_digest | cross_boundary | provenance | none | true | false | false | 联合判定与 rectifier 对原始 RGB8 dtype、shape 与逐值字节的稳定摘要；用于绑定 raw/rescue 结果来源。 |
+| content_input_image_digest | cross_boundary | provenance | none | true | false | false | 内容链对本次实际普通 RGB8 输入的稳定摘要；joint 分别以原图和回正图调用内容侧 validator 复核。 |
 | raw_content_score | cross_boundary | method_statistic | none | true | false | false | 联合判定从 `raw_content_result` 原样读取的正式 `D_M` 分数。 |
 | geometry_triggered | cross_boundary | method_state | none | true | false | false | 原始内容分数是否位于 `[tau_rescue,tau)` 并实际惰性调用几何估计。 |
 | trigger_reason | cross_boundary | method_state | none | true | false | false | raw 阳性、远阈值负样本、近阈值资格或 raw 内容失败对应的互斥触发原因。 |
@@ -277,7 +280,7 @@ Notebook 与 repository module 的跨边界数据
 | positive_source | cross_boundary | method_state | none | true | false | false | 最终阳性唯一允许的 `raw_content` 或 `rectified_content` 内容证据来源；负样本为空。 |
 | full_ceg_wm_eligible | cross_boundary | method_state | none | true | false | false | 当前联合结果是否具备完整 CEG-WM 身份资格；HF-only construction candidate 固定为 false。 |
 | positive_path | cross_boundary | method_state | none | true | false | false | 联合阳性的 `raw_positive` 或 `rescue_positive` 控制流路径；负样本为空，FPR 由实验层结合 null 标签计算。 |
-| decision_identity_digest | cross_boundary | method_identity | none | true | false | false | 联合路径、分数、内容/几何/阈值身份、阳性来源与失败状态的一致性摘要。 |
+| decision_identity_digest | cross_boundary | method_identity | none | true | false | false | 联合路径、原始 RGB8 防共享副本及摘要、分数、内容/几何/阈值身份、阳性来源与失败状态的一致性摘要。 |
 | declared_deviation | persisted_protocol | protocol | none | false | false | false | baseline 相对上游实现的已声明语义偏差。 |
 | methods | persisted_protocol | protocol | none | false | false | false | Comparison protocol 中参与方法规格的有序集合。 |
 | method_code_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的方法代码 revision。 |
