@@ -51,4 +51,7 @@ oracle transform 不能进入正式方法结果。
 
 ## Current Status
 
-判定语义已冻结；检测器、阈值和几何组件尚未在本项目实现或校准。
+近阈值门控、几何不直接阳性、同 detector/key/preprocess/threshold 回正重判已完成
+CPU/synthetic 实现和行为验证。正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+`full_ceg_wm_eligible=false`；`tau`、`tau_rescue` 与 reliability 尚未正式 calibration，
+完整 raw+rescue FPR、runtime/GPU 和科学效果均无证据。实际阶段仍等待独立迁移。

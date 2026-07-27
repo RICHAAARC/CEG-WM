@@ -72,4 +72,7 @@ key margin、inlier、residual、boundary 和 identity margin 等原始指标。
 
 ## Current Status
 
-几何职责、输入边界、失败语义和首个可实施候选已冻结；候选尚未通过 synthetic 或真实 runtime 验证，当前没有几何链项目实现。
+Q/K 同步、变换估计、独立可靠性与图像回正已完成真实 CPU/synthetic 实现和
+synthetic crop/scale/rotation、wrong-key、低可靠性拒绝及 inverse-warp 行为验证。
+这不证明登记 SD3.5 层上的真实 Q/K 捕获或 GPU/runtime qualification，也不产生
+水印阳性或正式 FPR/科学证据。实际阶段仍等待独立迁移。

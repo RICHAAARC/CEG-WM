@@ -8,4 +8,4 @@
 .venv/bin/python governance/harness/run_all_audits.py
 ```
 
-审计包括 CEG-WM 研究定义、未实现阶段边界和组件化方法就绪门禁。审计通过不构成研究方法或实验效果证据。
+审计包括 CEG-WM 研究定义、语义阶段边界和组件化方法就绪门禁。审计通过不构成研究方法或实验效果证据。

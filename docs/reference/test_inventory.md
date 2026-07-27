@@ -5,8 +5,10 @@
 研究测试节点会随方法和实验实现增长，不维护逐函数的第二份静态真相。使用以下命令获得项目测试列表：
 
 ```bash
-.venv/bin/python -m pytest --collect-only -q -s
+conda run -n CEG-WM python -m pytest --collect-only -q -s
 ```
+
+默认方法节点导入 PyTorch；缺少 `torch` 的 `.venv` 不得用于该根级收集命令。
 
 ## 当前测试入口
 
@@ -16,6 +18,7 @@
 | `tests/unit/test_lf_routing_combination.py` | `unit` | yes | LF carrier/blind detector、从实际 S/T/R/Q 观测重演公式的 routing、同 route/mask 绑定的 LF/HF embedder、同普通图像观测约束与未晋升 C0/C1/C2 组合诊断。 |
 | `tests/unit/test_hf_content_backbone.py` | `unit` | yes | HF sparse-tail 载体、HF-only 共同总预算、盲 direct score、wrong-key 与当前 HF-only content detector。 |
 | `tests/unit/test_key_schedule.py` | `unit` | yes | 冻结 key schedule 的 root/domain、counter/quantile golden、wrong/public 派生、不可变身份与失败边界。 |
+| `tests/unit/test_joint_decision.py` | `unit` | yes | 近阈值门控、几何不直接阳性、同 detector/key/preprocess/threshold 回正重判和 raw/rescue 阳性路径。 |
 | `tests/unit/test_comparison_preflight.py` | `unit` | yes | 公平对比协议、切分隔离与 baseline 完整性。 |
 | `tests/functional/test_governed_artifact_structures.py` | `quick` | yes | records provenance 与 artifact manifest 结构。 |
 
@@ -37,10 +40,12 @@
 
 ## 几何 CPU/synthetic 环境
 
-批次 4 的几何默认测试需要真实 CPU PyTorch 与 NumPy，使用项目登记的 Conda 环境：
+方法默认测试需要真实 CPU PyTorch 与 NumPy，使用项目登记的 Conda 环境。完整三门为：
 
 ```bash
-conda run -n CEG-WM python -m pytest -q -s tests/unit/test_geometry_chain.py
+conda run -n CEG-WM python -m pytest -q -s
+conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
+conda run -n CEG-WM python governance/harness/run_all_audits.py
 ```
 
 该环境只证明 CPU/synthetic 方法行为，不替代冻结 SD3.5 revision、真实登记层 Q/K

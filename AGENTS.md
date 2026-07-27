@@ -14,5 +14,5 @@
 12. Placeholder fields must end with `_placeholder`; random traces must end with `_random` or `_digest_random`.
 13. Supported claims must map to governed records, manifests and rebuildable artifacts.
 14. Avoid duplicated defensive validation and error-message construction in business paths.
-15. Complete authorized changes with the affected tests, `.venv/bin/python -m pytest -q -s`, governance self-tests and `.venv/bin/python governance/harness/run_all_audits.py`.
+15. Complete authorized changes with the affected tests and the registered full CPU gates: `conda run -n CEG-WM python -m pytest -q -s`, `conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini`, and `conda run -n CEG-WM python governance/harness/run_all_audits.py`; a `.venv` without PyTorch is governance-only and must not collect the default method suite.
 16. Docs, governance, policies, skills and tests cannot substitute for method, runtime or experiment implementation when the task explicitly targets those layers.

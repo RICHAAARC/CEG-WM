@@ -73,7 +73,7 @@ normalized-correlation 评分时中心化；该顺序具有 historical DirectHF 
 
 当前 content detector 候选冻结为 HF direct score。LF/HF 组合成为正式 content detector 之前，LF 不得静默改变 near-threshold 或 rescue 语义。
 
-## Planned Dependency Direction
+## Dependency Direction
 
 ```text
 main.shared
@@ -91,8 +91,8 @@ main.shared
 
 `main.content_chain` 与 `main.geometry_chain` 不互相依赖。runtime 不得拥有最终判定规则；experiment adapter 不得复制方法算法。
 
-未来获授权实现的 readiness 责任固定为以下 13 项，不允许别名、职责折叠或用单个
-集中代理文件代替：
+当前已实现并登记的 readiness 责任固定为以下 13 项，不允许别名、职责折叠或用
+单个集中代理文件代替：
 
 ```text
 main/shared/key_schedule.py                key_schedule
@@ -115,8 +115,8 @@ uniform control；`content_embedder` 独占冻结 `a`、LF/HF 组合写入、共
 方向内积/组合归一因子、target total 与 realized combined total norm/relative L2，以及
 active/combined 零方向失败；
 `lf_detector` 独占盲 LF 分数；`geometry_reliability` 独占 estimator 原始指标上的
-合取门。候选 registry 仍是 10 个 ID（9 个待实施/晋升候选加 1 个 routing
-强制对照），与这里的 13 项实现职责不是同一计数。
+合取门。候选 registry 仍是 10 个 ID（9 个具名候选加 1 个 routing 强制对照）；
+CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现职责不是同一计数。
 
 每个责任还必须绑定 `candidate_specifications.md` 中 policy 规定的候选 ID 和独立方法特异性验收节点；路径存在或 AST 结构通过都不等于方法完成。
 
@@ -136,4 +136,9 @@ active/combined 零方向失败；
 
 ## Current Implementation Status
 
-当前没有项目方法实现。本文件和关联机制文档只定义未来实现的模块边界、数据流、候选晋升和禁止依赖。构建顺序及每个通过门后的允许动作见 [research_construction_roadmap.md](research_construction_roadmap.md)。
+固定 13 项职责与 27 个 CPU/synthetic 方法行为节点已经实现，并由唯一 readiness
+绑定候选摘要、真实 symbol、测试节点和独立语义审核。实际 stage/status 仍为
+`method_construction_authorized / not_implemented`，等待独立阶段迁移。当前正式
+detector 仍为 HF-only；LF/routing 未实验晋升，`full_ceg_wm_eligible=false`。
+尚无真实 runtime/GPU qualification、完整联合 FPR 或科学效果证据。后续门序见
+[research_construction_roadmap.md](research_construction_roadmap.md)。

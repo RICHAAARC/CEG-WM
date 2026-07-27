@@ -83,11 +83,14 @@ content-threshold-fit 重新拟合，不能跨五类 calibration 职责复用。
 
 若 LF 或 routing 未晋升，应登记为内容分支 `research_question_closed_negative`。该负结果可发表、可进入消融和失败分析，但不能通过与完整方法相同的成功门。HF-only 加 geometry 不是“完整 CEG-WM”；若要继续为 reduced-scope 方法，必须重新命名、缩小论文主张并独立获得研究定义与构建授权。
 
-## Planned Output Semantics
+## Output Semantics
 
-未来内容检测输出需要独立携带 LF、HF、combined 三类分数，以及路由、组合身份、
-阈值身份、margin、密钥身份摘要和失败语义。具体 schema 在实验协议阶段登记。
+当前 CPU/synthetic 内容检测结果独立携带 LF、HF、combined 分支统计及路由、组合、
+密钥和失败身份；正式 calibration 阈值与实验 records schema 仍在后续协议阶段登记。
 
 ## Current Status
 
-HF carrier、HF direct score、LF、路由和组合的可实施候选已冻结；它们尚未通过本项目设计验证或晋升，当前没有内容链项目实现。
+HF carrier、HF direct score、LF、路由、组合写入与分支检测已完成 CPU/synthetic
+实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；LF/routing/组合
+尚未通过实验晋升，`full_ceg_wm_eligible=false`。当前没有真实 runtime/GPU、
+正式 calibration、完整联合 FPR 或科学效果证据；实际阶段仍等待独立迁移。

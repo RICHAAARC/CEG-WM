@@ -15,15 +15,18 @@ runtime 验证或论文证据。
 - `implementation_status: not_implemented`；
 - authorization base revision 为
   `e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9`；
-- construction admission 已登记，但 13 项职责仍全部未实现；
-- 本轮用户要求停在阶段转换后；实施须等待该 revision 独立审计和后续单独授权。
+- construction admission、13 项职责、27 个 CPU/synthetic 行为节点、唯一 readiness
+  和 revision-bound 独立语义复核均已登记；
+- 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+  `full_ceg_wm_eligible=false`；
+- 未完成 runtime/GPU/FPR/科学证据；当前等待独立阶段迁移。
 
 ## Advancement Map
 
 | current → requested stage | allowed work | required inputs | required output | admission and stop rule |
 | --- | --- | --- | --- | --- |
 | `research_defined → method_construction_authorized` | 关闭候选规格审计；核验历史来源与复用权；准备版本身份和独立阶段变更。 | 十份登记设计；候选规格独立 `approve`；用户明确授权；用户授权建立的 CEG-WM revision。 | 从模板创建的 construction admission；不含 `main/` 实现的独立阶段 revision。 | 任一输入缺失即停止；不得把本文档授权解释为版本、阶段或实现授权。 |
-| `method_construction_authorized → method_implemented` | 在后续独立 revision 实现 13 项职责及方法特异性测试。 | 已批准 admission；固定候选摘要；受保护实现/测试路径。 | 全部真实组件、非同构行为测试、未来唯一 readiness YAML 和 revision-bound 独立语义复核。 | 缺组件、别名/代理、弱测试、候选漂移或复核失败即停止在在建阶段。 |
+| `method_construction_authorized → method_implemented` | 当前实现/readiness 已闭合；只准备独立阶段迁移。 | 已批准 admission；固定候选摘要；受保护实现/测试路径；已审 readiness。 | 全部真实组件、27 个非同构行为测试、唯一 readiness YAML 和 revision-bound 独立语义复核。 | 阶段迁移前再次核验受保护路径；缺组件、候选漂移或复核失效即停止在在建阶段。 |
 | `method_implemented → runtime_verified` | 接入冻结真实模型、callback、VAE、Q/K、device/dtype 边界并验证。 | 已批准方法 revision；冻结 runtime candidate 与依赖。 | 真实 runtime identity、determinism、actual-dtype combined delta、Q/K observation 和失败记录。 | CPU fixture、mock 或 dry run 不能替代真实 runtime；资源或身份失败保持 fail closed。 |
 | `runtime_verified → experiment_ready` | 实现并冻结内部设计验证、外部 comparison、互斥 calibration、runner 和 records 协议。 | runtime 证据；预登记样本/split/攻击/指标；baseline 来源与许可。 | preflight 通过的冻结协议、唯一 governed runner、可追溯配置和空白 evaluation admission。 | 数据泄漏、不公平预算、baseline 权限未闭合或 rescue/FPR 口径不完整即停止。 |
 | `experiment_ready → formal_evidence_available` | 运行正式矩阵并冻结全部成功、失败、排除 records 与 manifests。 | 未被 evaluation 使用过的冻结方法、协议、数据和 revision。 | governed records、provenance、frozen manifests；可重建 artifacts 的事实输入。 | 运行中改方法/协议、失败丢分母或 FPR 样本量不足时不得宣称正式证据。 |
@@ -69,12 +72,13 @@ runtime 验证或论文证据。
 6. 论文 evidence 链遵循
    [artifact evidence semantics](../reference/artifact_evidence.md)。
 
-基础 CPU 验证命令：
+完整 CPU 三门验证命令：
 
 ```bash
-.venv/bin/python -m pytest -q -s
-.venv/bin/python -m pytest -q -s -c governance/pytest.ini
-.venv/bin/python governance/harness/run_all_audits.py
+conda run -n CEG-WM python -m pytest -q -s
+conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
+conda run -n CEG-WM python governance/harness/run_all_audits.py
 ```
 
-这些命令只验证当前可执行门禁，不会自动授权阶段推进。
+这些命令只验证当前可执行门禁，不会自动授权阶段推进。`.venv` 缺少 PyTorch 时
+只能运行轻量治理检查，不得用于会收集默认方法测试的根 pytest 命令。

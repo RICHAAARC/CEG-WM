@@ -5,8 +5,8 @@
 
 - [historical_source_registry.yaml](historical_source_registry.yaml)：历史来源准入事实，
   包括四个非权威来源的路径、版本/摘要身份、复用权状态和允许/禁止用途。
-- [component_migration_plan.yaml](component_migration_plan.yaml)：构建前 13 项职责迁移
-  计划；所有条目均为 `not_started`，不表示已实现或已迁移。
+- [component_migration_plan.yaml](component_migration_plan.yaml)：历史迁移计划快照；
+  所有条目仍为 `not_started`，不表示当前实现来自历史源码或已经迁移。
 - 迁移操作边界见
   [historical_code_migration.md](../../guides/historical_code_migration.md)。
 - 候选和 13 项目标职责的唯一权威映射见
@@ -17,7 +17,7 @@
 1. source registry 是历史来源准入事实；
 2. component migration plan 是构建前 13 项计划；
 3. future per-component migration manifest 是实际迁移后才创建的 provenance；
-4. future method readiness 是实现完成门禁。
+4. 当前唯一 method readiness 是实现完成门禁，不是 migration provenance。
 
 四者不得互相替代。registry 中的 `provisional`、`read_only` 或 `unresolved` 不是
 migration evidence；plan 也不是构建授权、实际 migration manifest 或 readiness。

@@ -5,7 +5,8 @@
 本文档把 [algorithm_primitives.md](algorithm_primitives.md) 中的算法原语和
 [candidate_specifications.md](candidate_specifications.md) 中已关闭的有限候选组织为
 可实现、可验证且不越过当前 `method_construction_authorized` 阶段的端到端机制。
-它可以指导后续实现，但自身、admission 和阶段转换都不提供实现或科学证据。
+当前 13 项职责已按它实现并经 CPU/synthetic readiness 审核；本文档自身、
+admission、readiness 和阶段转换都不提供 runtime 或科学证据。
 
 ## Method Identity
 
@@ -290,9 +291,9 @@ method identity
 
 阈值摘要必须绑定内容检测器完整身份。几何配置可以影响是否产生回正图，但不能改变 `tau` 的数值解释。完整联合检测器必须额外验证几何救援没有突破预设 FPR 预算。
 
-## Planned Public Interfaces
+## Public Interfaces
 
-后续实现必须按权威 13 项职责提供独立 symbol；接口语义至少覆盖：
+当前实现按权威 13 项职责提供独立 symbol；接口语义覆盖：
 
 - 构造内容载体候选；
 - 组合 LF/HF 写入并保持共同总预算；
@@ -369,19 +370,20 @@ runtime 不负责：
 前一项未通过时，不得用后一项的复杂度掩盖根因。
 
 root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
-backbone/runtime 已由具名候选关闭，未来实现者必须按候选 ID 工作，不能自行发明
+backbone/runtime 已由具名候选关闭，后续 method/runtime 工作必须按候选 ID 工作，不能自行发明
 替代方案。候选规格已独立复审批准，CEG-WM 版本身份和 construction admission
 已绑定，项目已以不含 `main/` 变更的独立 revision 进入
-`method_construction_authorized`。实质实施只能在该转换独立审计通过并获得后续
-单独授权后，于新的 revision 开始。
+`method_construction_authorized`。随后独立 revisions 已按候选完成方法实现、
+CPU/synthetic 验证与 readiness 审核；阶段迁移仍须独立执行。
 
 ## Current Status
 
-当前只完成研究职责、机制设计和构建准入。项目为
+当前项目仍登记为
 `method_construction_authorized / not_implemented`：
 
-- 没有项目方法实现；
-- 没有 method readiness；
+- 13 项职责、27 个 CPU/synthetic 行为节点和唯一 method readiness 已完成并审计；
+- 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+  `full_ceg_wm_eligible=false`；
 - 没有冻结 runtime；
 - 没有本项目 calibration 阈值；
 - 没有正式 GPU 或论文 records；

@@ -9,19 +9,21 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 - `project_stage`: `method_construction_authorized`
 - `target_construction_phase`: `dual_chain_method_construction`
 - 项目已依据关闭的候选规格、独立审计批准、用户明确授权和可审计基线 revision
-  合法进入构建准入阶段；该阶段只允许在后续独立变更中实施方法，不表示任何组件
-  已经实现或有效。
-- 本次阶段转换不含任何 `main/` 变更；当前仍无 LF、HF、几何或联合判定组件实现。
-  用户要求转换完成后立即停止，实质实施须等待本 revision 的独立审计和后续单独授权。
+  合法进入构建准入阶段。随后独立 revisions 已完成固定 13 项真实职责、27 个
+  方法特异性 CPU/synthetic 行为节点和唯一 `method_readiness.yaml`，并通过
+  revision-bound 独立语义审计。
+- 实际阶段和 research-definition 状态仍保持
+  `method_construction_authorized / not_implemented`；readiness 完成记录不自动
+  修改阶段，必须等待独立阶段迁移授权。
 - 当前不得接入真实模型，不得运行 GPU、正式攻击矩阵或论文实验。
 - root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
-  registry 是 9 个待实施/晋升候选加 1 个强制 routing 禁用对照。仍开放的是实验
-  晋升结果和 calibration 数值，不允许实现者自行发明新算法。
-- 权威设计可以指导后续具名候选实现，但文档、阶段转换或 admission 本身都不是实现
-  或科学证据。当前 admission 只绑定已批准的基线与阶段授权；实质实施必须发生在
-  本转换通过独立审计后的后续独立 revision。
+  registry 是 9 个具名候选加 1 个强制 routing 禁用对照。CPU/synthetic 实现不
+  等于实验晋升；仍开放的是 LF/routing/组合晋升结果和 calibration 数值。
+- 当前正式 detector 仍为 HF-only，LF/routing 尚未实验晋升，
+  `full_ceg_wm_eligible=false`。readiness、文档、阶段转换或 admission 都不是
+  runtime、GPU、固定 FPR、鲁棒性或科学效果证据。
 
 ## Method Authority
 
@@ -32,7 +34,7 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 2. 内容链包含 `content_router`、`lf_carrier`、`hf_carrier`、独立
    `content_embedder`、`lf_detector`、`hf_detector` 和正式联合入口
    `content_detector`；组合写入、LF 盲分数和统计组合不得互相代行。
-3. 当前冻结的 HF 主检测候选使用 CEG-WM 自有身份；其稀疏尾部算法具有 historical DirectHF 来源的 provisional provenance，但尚未迁移或由本项目验证。
+3. 当前冻结的 HF 主检测候选使用 CEG-WM 自有身份；其稀疏尾部算法具有 historical DirectHF 来源的 provisional provenance。当前实现按 CEG-WM 候选规格独立完成，不声明历史源码已迁移、复用权已关闭或继承历史效果证据。
 4. LF、路由和 LF/HF 组合已有明确有限候选；`content_embedder` 独占共同总预算
    与冻结 `a` 的组合写入，`lf_detector` 独占 `s_lf`。它们仍属于本项目设计验证
    问题，不是已晋升方法事实。
@@ -95,7 +97,7 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 1. 阶段名称必须登记在 `governance/policies/method_readiness_rules.yaml`。
 2. `research_defined` 及以后阶段必须提供 `.codex/research_state/research_definition.yaml`，连接具体设计文档和冻结方法不变量。
 3. `method_construction_authorized` 是唯一允许开始实质 `main/` 实施的在建阶段。进入该阶段必须同时满足：候选规格已关闭并独立审计通过、用户明确授权、已有用户授权建立的可审计 repository revision、按模板登记 construction admission、阶段变更本身不包含 `main/` 实现；research-definition audit 必须从 admission 绑定的 base revision 验证该独立转换。
-4. `method_construction_authorized` 只表示允许实施，不表示任何组件已完成；实质实现必须在后续独立变更中进行。
+4. `method_construction_authorized` 本身只表示允许实施，不自动表示组件完成；当前组件完成事实由后续独立 revisions、唯一 readiness 和独立语义复核另行记录。
 5. `method_implemented` 及以后阶段必须提供 `.codex/research_state/method_readiness.yaml`，逐项连接唯一的 13 个正式职责组件、固定架构路径、候选 ID、具体实现 symbol、责任和方法特异性行为测试。候选 registry 的 10 个 ID 与 13 项职责不得混淆。
 6. 只有全部必需组件、候选特异性非同构行为测试以及绑定同一候选摘要和受保护 revision 的独立语义复核通过后，才允许从 `method_construction_authorized` 进入 `method_implemented`。
 7. readiness AST 审计只检查必要的结构和接线；空目录、placeholder、单一通用函数、集中式代理模块、重复同构测试、机械 audit pass 或 readiness 元数据不能替代项目实现与独立语义复核。
@@ -117,7 +119,9 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 ## Governance Freeze And Extension Rule
 
 1. 本轮阻断关闭后，治理平面进入冻结状态。
-2. 下一主线必须是候选规格独立审计，以及通过后申请版本/阶段/迁移授权和开展实质方法实施。
+2. 本轮阻断关闭并经独立审核后，下一步只能另行申请从
+   `method_construction_authorized` 进入 `method_implemented`；本条不授权阶段迁移，
+   也不授权 runtime、GPU 或实验。
 3. 除非真实方法、runtime、实验或证据工作暴露一个具体且可复现的缺口，不得新增通用 policy、skill、schema、harness 或治理目录。
 4. 发现具体缺口时，优先最小修改现有规则与测试；不得以治理文件数量、机械审计通过或元数据规模替代研究推进。
 
@@ -147,10 +151,13 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 
 ## Required Completion Commands
 
-使用项目根目录下的 CPU 验证环境：
+完整三门使用登记的 `CEG-WM` CPU Conda 环境：
 
 ```bash
-.venv/bin/python -m pytest -q -s
-.venv/bin/python -m pytest -q -s -c governance/pytest.ini
-.venv/bin/python governance/harness/run_all_audits.py
+conda run -n CEG-WM python -m pytest -q -s
+conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
+conda run -n CEG-WM python governance/harness/run_all_audits.py
 ```
+
+`.venv` 只用于不依赖 PyTorch 的轻量治理检查；缺少 `torch` 时不得用它运行会收集
+默认方法测试的根 pytest 命令。

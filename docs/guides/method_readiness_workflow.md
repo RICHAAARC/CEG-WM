@@ -2,20 +2,20 @@
 
 ## Single Source Of Truth
 
-未来唯一的项目方法就绪记录是：
+唯一的项目方法就绪记录是：
 
 ```text
 .codex/research_state/method_readiness.yaml
 ```
 
-当前该文件不存在，也不应在
-`method_construction_authorized / not_implemented` 且 13 项职责尚未实现时创建。
-当前只有
-外层权威 `governance/templates/method_readiness.yaml` 和
-`governance/policies/method_readiness_rules.yaml`；它们是未来
-填写规则，不是完成记录。
+当前该文件已在 13 项职责、27 个 CPU/synthetic 方法行为节点和 revision-bound
+独立语义复核完成后从模板唯一实例化。实际 stage/status 仍为
+`method_construction_authorized / not_implemented`，等待独立阶段迁移；readiness
+本身不得改阶段。外层权威 `governance/templates/method_readiness.yaml` 和
+`governance/policies/method_readiness_rules.yaml` 仍分别定义结构与规则，不是第二份
+完成记录。
 
-不得维护第二份 13 模块状态表、手工进度表或人类签字清单。人类报告只能从未来 YAML
+不得维护第二份 13 模块状态表、手工进度表或人类签字清单。人类报告只能从该 YAML
 和审计结果生成，不能成为另一事实源。
 
 ## Creation Point
@@ -28,11 +28,11 @@
 4. 执行者准备申请进入 `method_implemented`；
 5. 有可审计 CEG-WM revision 可供独立语义复核绑定。
 
-YAML 应在申请 `method_implemented` 的受控变更中创建；创建本身不代表阶段已经通过。
+该创建点已满足并登记；创建本身不代表阶段已经通过。
 
 ## Required Bindings
 
-未来记录必须对 policy 中每项唯一职责绑定：
+当前记录对 policy 中每项唯一职责绑定：
 
 - 唯一 component 和精确 responsibility；
 - policy-fixed implementation path；
@@ -57,12 +57,14 @@ reliability 和 joint decision 不得折叠。27 个行为节点的精确清单�
 5. 审计后候选、实现或登记测试路径发生变化时，批准失效并重新复核。
 6. 全部门禁通过后，才可单独申请 `method_implemented` 阶段转换。
 
+当前已完成步骤 1–5，并通过三任务独立复核；步骤 6 的独立阶段迁移尚未执行。
 readiness 只证明“登记候选已由真实项目组件实现并通过规定门禁”。它不证明 runtime
-真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。
+真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。正式 detector
+仍为 HF-only；LF/routing 尚未实验晋升，`full_ceg_wm_eligible=false`。
 
 ## Fail-Closed Conditions
 
-- 当前阶段提前创建 readiness YAML；
+- 13/27 实现或独立语义复核完成前提前创建 readiness YAML；
 - 任一职责缺失、路径错置、symbol 复用、alias-only 或集中代理；
 - 候选 ID、摘要或 implementation revision 缺失；
 - 测试只验证 API 形状、常量、通用算术或重复同构行为；

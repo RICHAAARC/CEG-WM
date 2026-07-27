@@ -7,13 +7,13 @@
   用户授权引用和完整 authorization base revision；它只证明合法进入
   `method_construction_authorized`，不证明实现完成。
 - 当前为 `method_construction_authorized / not_implemented`；阶段转换本身不含
-  `main/` 变更，13 项职责均尚未实现。用户要求本轮停在转换后，实质方法工作只能
-  在本 revision 独立审计通过后的后续单独授权变更中开始。
-- 进入 `method_implemented` 前，按
-  `governance/templates/method_readiness.yaml` 创建 `method_readiness.yaml`，逐项连接
-  唯一的 13 个正式职责组件、固定架构路径、候选 ID、责任、唯一实现 symbol、
-  方法特异性非同构行为测试和 revision-bound 独立语义复核。10 个候选 ID 与
-  13 项职责不是同一计数。
-- 当前 `method_readiness.yaml` 不存在是正确状态。
+  `main/` 变更；随后独立 revisions 已完成 13 项职责和 27 个 CPU/synthetic
+  方法行为节点，但阶段/status 尚未迁移。
+- 唯一 `method_readiness.yaml` 已从模板实例化，逐项连接固定路径、候选 ID、
+  责任、唯一实现 symbol、27 个非同构行为节点、候选摘要和 revision-bound
+  独立语义复核。10 个候选 ID 与 13 项职责不是同一计数。
+- readiness 只记录方法构建闭合，不是阶段文件，也不是 runtime、GPU、正式 FPR
+  或科学证据。当前正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+  `full_ceg_wm_eligible=false`；等待独立阶段迁移。
 
 删除 `.codex/` 后，研究项目必须仍可运行；这里的元数据不能成为方法输入。

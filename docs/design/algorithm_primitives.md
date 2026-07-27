@@ -387,11 +387,15 @@ else:
 - `rectification_similarity` 固定搜索域、目标、可靠性指标和回正规则；
 - `joint_conditional_recovery` 固定联合判定。
 
-registry 共 10 个 ID：9 个待实施/晋升候选和 1 个强制同预算禁用对照
-`routing_uniform_control`。该计数不等于固定的 13 项实现职责，也不把对照视为方法候选。
+registry 共 10 个 ID：9 个具名候选和 1 个强制同预算禁用对照
+`routing_uniform_control`。CPU/synthetic 实现不等于实验晋升；该计数不等于固定的
+13 项实现职责，也不把对照视为方法候选。
 
-仍开放的是候选能否通过本项目 CPU、synthetic、真实 runtime、candidate-selection、calibration 和 formal evaluation 门，以及由互斥 calibration 职责拟合的阈值数值。这些是证据结果，不是实现空白。
+CPU/synthetic 实现与方法行为门已经闭合。仍开放的是候选能否通过真实 runtime、
+candidate-selection、calibration 和 formal evaluation 门，以及由互斥 calibration
+职责拟合的阈值数值。这些是证据结果，不是实现空白。
 
-因此权威设计可以指导后续具名候选实现。当前已通过独立的无 `main/` 变更 revision
-进入 `method_construction_authorized`，并已有可审计 CEG-WM revision；但仍无方法
-实现、runtime 证明或效果证据。本轮按用户要求停在阶段转换，不能直接开始实施。
+13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
+审计。实际 stage/status 仍为 `method_construction_authorized / not_implemented`，
+等待独立阶段迁移。正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
+`full_ceg_wm_eligible=false`；仍无 runtime/GPU、正式 FPR 或效果证据。

@@ -51,12 +51,15 @@ root key 的 UTF-8 语义、职责域派生、wrong-key 和 public-noise 由
 - 回正后由同一检测器产生的分数；
 - 最终内容判定。
 
-这些字段是未来协议要求，不表示当前已经实现。
+当前 CPU/synthetic 方法结果已覆盖其中的方法级分支统计、门控、几何、回正和判定
+身份；正式 calibration 阈值与持久化 records 字段仍是未来协议要求。
 
-未来方法实现按 13 项正式职责分层：共享 key schedule；内容链的 router、LF/HF
+当前方法实现按 13 项正式职责分层：共享 key schedule；内容链的 router、LF/HF
 carrier、content embedder、LF/HF detector、content detector；几何链的 Q/K sync、
 transform estimator、独立 geometry reliability、rectifier；以及 conditional recovery
-decision。候选 registry 的 10 个 ID 是算法身份计数，不是组件计数。
+decision。27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并审计；实际
+stage/status 仍为 `method_construction_authorized / not_implemented`，等待独立迁移。
+候选 registry 的 10 个 ID 是算法身份计数，不是组件计数。
 
 ## Success Conditions
 
@@ -75,7 +78,8 @@ decision。候选 registry 的 10 个 ID 是算法身份计数，不是组件计
 - 不把 payload 恢复或系统级 attestation 作为当前主方法链。
 - 不继承历史项目的固定 LF/HF 权重。
 - 不以治理通过、代码数量或示例输出支持科研结论。
-- 当前阶段不把候选 LF 载体、路由算法、组合函数或几何估计器误写成已经验证的方法。
+- 不把 CPU/synthetic 实现与行为通过误写成 LF/routing 实验晋升、runtime/GPU、
+  正式 FPR 或科学效果验证。
 
 ## Expected Failure Modes
 

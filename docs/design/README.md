@@ -15,9 +15,10 @@
 
 这些文档定义项目要研究什么以及实现不得偏离什么，不构成方法实现或效果证据。任何与这里冲突的历史代码、配置、Notebook 或实验脚本都不是项目权威。
 
-未来实现采用唯一的 13 项职责组件口径；精确 responsibility、计划路径和现有候选
-绑定见 [candidate_specifications.md](candidate_specifications.md)。候选 registry
-保持 10 个 ID（9 个待实施/晋升候选加 1 个 routing 对照），不得与组件数混淆。
+当前 CPU/synthetic 方法实现采用唯一的 13 项职责组件口径；精确 responsibility、
+固定路径和候选绑定见 [candidate_specifications.md](candidate_specifications.md)。
+候选 registry 保持 10 个 ID（9 个具名候选加 1 个 routing 对照）；实现不等于
+LF/routing 的实验晋升，该计数不得与组件数混淆。
 
 ## Derived Method Diagrams
 
@@ -28,5 +29,6 @@
 
 两张图只是上述十份权威设计的派生可视化，不增加
 `.codex/research_state/research_definition.yaml` 的 design path。图与 Markdown、
-contract 或 policy 冲突时以后者为准；图中节点均为 planned responsibility，不表示
-当前已经实现。
+contract 或 policy 冲突时以后者为准。图中方法职责已有 CPU/synthetic 实现；标为
+planned 的部分表示尚未完成的真实 runtime/GPU 集成，不是方法未实现，也不是效果
+证据。

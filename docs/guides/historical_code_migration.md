@@ -96,7 +96,7 @@ preprocess、config identity 和 threshold。
 
 ## Current Stop
 
-本轮只完成 source registry 和 component migration plan。尚未建立 CEG-WM revision，
-四个来源的复用权均未关闭，两个 archive 来源也没有冻结 snapshot digest；因此当前
-所有直接迁移均 fail closed。plan 不能替代 future per-component manifest、readiness
-或构建授权。
+CEG-WM 已建立可审计 revision，并已依据冻结候选独立完成当前方法实现；这不表示
+历史源码已迁移。四个来源的复用权仍未关闭，两个 archive 来源也没有冻结 snapshot
+digest，因此所有直接历史源码迁移继续 fail closed。plan 不能替代 future
+per-component migration manifest、当前 readiness 或独立迁移授权。

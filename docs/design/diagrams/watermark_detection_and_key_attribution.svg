@@ -14,7 +14,7 @@
   </defs>
   <rect width="1800" height="1280" fill="#fff"/>
   <text x="40" y="48" class="title">Watermark Presence And Key Attribution Decision (planned blind detection)</text>
-  <text x="40" y="76" class="sub">Not payload decoding. Scope: method_construction_authorized / not_implemented. Content evidence is the only positive authority; geometry is conditional recovery only.</text>
+  <text x="40" y="76" class="sub">Scope: method_construction_authorized / not_implemented; 13 components + 27 CPU/synthetic readiness nodes recorded; stage transition pending. No runtime/GPU/formal evidence.</text>
   <text x="40" y="98" class="sub">Sources: ../content_chain.md · ../geometry_chain.md · ../joint_decision.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
 
   <rect x="40" y="145" width="300" height="190" class="box"/>
@@ -79,7 +79,7 @@
 
   <rect x="40" y="1055" width="1710" height="145" class="neg"/>
   <text x="60" y="1085" class="hdr">Formal blind-detection boundary and failure propagation</text>
-  <text x="60" y="1115" class="txt"><tspan x="60">Forbidden inputs: reference image, embed record, private latent statistics, generation Q/K cache, oracle attack parameters.</tspan><tspan x="60" dy="26">Only raw or rectified content score crossing the same tau can produce positive. Far-negative, wrong-key, unreliable geometry and invalid rectification stay negative.</tspan><tspan x="60" dy="26">All failures remain observable and in the evaluation denominator; this diagram is planned behavior, not runtime or scientific evidence.</tspan></text>
+  <text x="60" y="1115" class="txt"><tspan x="60">Forbidden inputs: reference image, embed record, private latent statistics, generation Q/K cache, oracle attack parameters.</tspan><tspan x="60" dy="26">Only raw or rectified content score crossing the same tau can produce positive. Far-negative, wrong-key, unreliable geometry and invalid rectification stay negative.</tspan><tspan x="60" dy="26">All failures remain observable and in the evaluation denominator; CPU/synthetic behavior is recorded, not runtime or scientific evidence.</tspan></text>
 
   <path d="M340 240 H390" class="flow"/>
   <path d="M690 220 H720 V205 H750" class="flow"/>

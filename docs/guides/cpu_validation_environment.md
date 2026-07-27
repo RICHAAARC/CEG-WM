@@ -1,8 +1,8 @@
 # CPU Validation Environment
 
-CEG-WM 的轻量治理验证使用项目根目录下的 `.venv`。当默认方法测试需要
-PyTorch 而 `.venv` 不适配时，使用已获授权、可复建的 `CEG-WM` CPU Conda
-环境执行完整默认测试、governance 自测和 harness。两套环境都只服务
+CEG-WM 的完整 CPU 三门使用已登记、可复建的 `CEG-WM` Conda 环境。项目根目录
+`.venv` 只用于不依赖 PyTorch 的轻量治理检查；缺少 `torch` 时不能运行会收集默认
+方法节点的根 pytest 命令。两套环境都只服务
 `method_construction_authorized` 阶段的 CPU 验证，不包含模型权重、GPU runtime
 或正式实验依赖。
 
@@ -31,20 +31,19 @@ conda env create --file configs/environments/ceg_wm_cpu.yaml
 
 ## Validate
 
-不要求激活环境，直接使用项目解释器：
-
-```bash
-.venv/bin/python -m pytest -q -s
-.venv/bin/python -m pytest -q -s -c governance/pytest.ini
-.venv/bin/python governance/harness/run_all_audits.py
-```
-
-当默认方法测试需要 PyTorch 时，使用已登记 Conda 环境执行同一组完整门禁：
+不要求激活环境，完整三门直接使用已登记 Conda 环境：
 
 ```bash
 conda run -n CEG-WM python -m pytest -q -s
 conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
 conda run -n CEG-WM python governance/harness/run_all_audits.py
+```
+
+`.venv` 可以运行明确不收集方法测试的轻量治理入口，例如：
+
+```bash
+.venv/bin/python -m pytest -q -s -c governance/pytest.ini
+.venv/bin/python governance/harness/run_all_audits.py
 ```
 
 `-s` 用于规避部分 WSL/Windows 临时目录上的 pytest capture 文件异常；它不改变测试选择或断言语义。
@@ -55,5 +54,5 @@ conda run -n CEG-WM python governance/harness/run_all_audits.py
 - `requirements_cpu.txt` 是轻量 `.venv` CPU 治理验证依赖的版本权威。
 - `configs/environments/ceg_wm_cpu.yaml` 是获授权 CPU 方法验证依赖的版本权威；
   它不是 runtime 或 GPU 依赖锁。
-- 方法、runtime 或正式实验所需依赖必须在相应阶段另行设计和固定。
+- 真实 runtime、GPU 或正式实验所需依赖必须在相应阶段另行设计和固定。
 - 环境存在、pytest 通过或 harness 通过不能证明水印机制有效。

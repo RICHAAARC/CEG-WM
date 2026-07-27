@@ -23,6 +23,12 @@ formal_evidence_available
 
 任何证据门未通过时，必须停在当前阶段、保存失败事实并修订对应设计，不能跳过、放宽门禁或用后续实验掩盖失败。`method_construction_authorized` 是实施准入/在建阶段，不是完成结论：候选规格关闭并独立审计通过后，用户先授权建立可审计版本身份与阶段变更；阶段变更本身不得包含 `main/` 实现，方法实施只能在之后的独立变更中开始。
 
+当前检查点：13 项职责、27 个 CPU/synthetic 方法行为节点和唯一 readiness 已在
+后续独立 revisions 完成并审计；实际 stage/status 仍为
+`method_construction_authorized / not_implemented`，等待独立阶段迁移。正式 detector
+仍为 HF-only，LF/routing 未实验晋升，`full_ceg_wm_eligible=false`；尚无真实
+runtime/GPU、完整联合 FPR、正式 records 或科学效果证据。
+
 ## Paper Research Target
 
 最终目标是形成一套可独立重建的 CEG-WM 论文证据，至少支持以下问题：
@@ -60,8 +66,8 @@ formal_evidence_available
 
 - research-definition audit 通过；
 - 所有登记设计路径存在、内容实质且互不矛盾；
-- 当前 `implementation_status` 仍为 `not_implemented`；
-- `main/` 不包含实质方法实现；
+- 该门关闭时 `implementation_status` 为 `not_implemented`；
+- 该门关闭 revision 的 `main/` 不包含实质方法实现；
 - 默认测试、治理自测和全量 harness 通过。
 
 ### Pass Result
@@ -93,7 +99,7 @@ formal_evidence_available
 ### Validation
 
 - 每个候选都有明确输入、输出、身份、失败语义和可证伪指标；
-- registry 计数固定为 10 个 ID：9 个待实施/晋升候选和 1 个 mandatory
+- registry 计数固定为 10 个 ID：9 个具名候选和 1 个 mandatory
   `routing_uniform_control`；不得把对照计入方法候选数；
 - 不存在固定历史 LF/HF 权重；
 - 不存在 reference image、embed record 或私有嵌入状态检测依赖；
@@ -115,16 +121,18 @@ construction admission；以下仍是进入当前阶段所遵循的两项分离�
 2. 按 `method_construction_admission.yaml` 绑定审计/用户授权引用，以一个不含任何 `main/` 变更的独立 revision 进入 `method_construction_authorized`，随后才在后续 revision 开始迁移/实现。
 
 历史源 revision 或许可证无法确认时记录 fail-closed migration gap；它不阻止提出
-CEG-WM 版本身份授权，但缺口关闭前不得实际复制历史代码。当前 research-definition
+CEG-WM 版本身份授权，但缺口关闭前不得实际复制历史代码。construction admission 的
+research-definition
 audit 必须从 authorization base revision
 `e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9` 验证阶段转换。这一步只开放后续
-实施，不表示方法已实现；本轮用户要求在转换后停止。
+实施，不表示方法已实现；实际实现和 readiness 已在更后的独立 revisions 完成。
 
 ## Evidence Gate: Method Implementation Ready
 
 ### Work
 
-只有项目已在更早的独立变更中进入 `method_construction_authorized` 后，才在后续变更中实现：
+该门要求项目先在更早的独立变更中进入 `method_construction_authorized`，再于后续
+变更实现：
 
 - `main/shared/key_schedule.py` 的独占 root-key/KDF/PRG 责任和不可变结果类型；
 - content router、LF/HF carrier 与独立 content embedder；
@@ -167,6 +175,9 @@ audit 必须从 authorization base revision
 `method_implemented`。缺少任一 13 项职责，或把 content embedder、LF detector、
 geometry reliability 折回其他组件，都不得推进；机械 readiness pass
 单独不证明非代理实现。
+
+当前该实现/readiness 门已由 13 项职责、27 个非同构 CPU/synthetic 节点、候选摘要、
+受保护 revision 和三任务独立语义复核闭合；独立阶段迁移尚未执行。
 
 ## Evidence Gate: HF Candidate Identity Reproduced
 
@@ -620,7 +631,12 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 
 ## Governance Freeze And Extension Rule
 
-本次阻断修订完成后，通用治理平面冻结。下一主线只能是关闭 Candidate Specification、接受独立审计，以及在用户明确授权版本身份和阶段推进后的实质 method/runtime/experiment/evidence 工作。除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、skill、schema 或 harness；存在缺口时优先对现有规则做最小、可测试的增量修订。治理文件数量、机械 audit 数量或文档篇幅都不能替代研究实现和证据推进。
+本次 readiness 阻断修订经独立审核后，通用治理平面冻结。下一步只能另行申请从
+`method_construction_authorized` 进入 `method_implemented`；本段不授权该迁移。
+只有迁移另行获准并闭合后，后续主线才按既定门序进入 runtime、experiment 和
+evidence 工作。除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、
+skill、schema 或 harness；存在缺口时优先对现有规则做最小、可测试的增量修订。
+治理文件数量、机械 audit 数量或文档篇幅都不能替代研究实现和证据推进。
 
 ## Stop And Return Rules
 
