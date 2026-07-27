@@ -557,6 +557,10 @@ def test_content_embedding_total_budget_and_frozen_allocation() -> None:
 def test_content_embedding_active_zero_direction_fail_closed() -> None:
     hf_result = hf_carrier(BATCH3_ROOT, BATCH3_SHAPE)
     latent = _latent(len(hf_result.direction))
+    baseline = content_embedder(latent, hf_result)
+    assert baseline.mode == "hf_only"
+    assert baseline.hf_carrier_config_digest == hf_result.carrier_config_digest
+
     zero = (0.0,) * len(hf_result.direction)
     forged_zero_hf = replace(
         hf_result,

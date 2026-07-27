@@ -11,24 +11,25 @@ import torch.nn.functional as functional
 from main.content_chain import (
     ContentDetectorError,
     HfDetectionObservation,
-    content_detector,
-    hf_detector,
     validate_content_detection_result,
 )
+from main.content_chain.detector import content_detector
+from main.content_chain.hf_detector import hf_detector
 from main.geometry_chain import (
     GeometricTransformEstimation,
     GeometryReliabilityThresholds,
     SimilarityTransform,
-    image_rectifier,
 )
+from main.geometry_chain.rectifier import image_rectifier
+from main.geometry_chain.reliability import geometry_reliability
 from main.joint_decision import (
     ConditionalRecoveryError,
     ContentDetectorBinding,
     JointOperationError,
     JointDecisionThresholds,
-    conditional_recovery_decision,
     validate_conditional_recovery_result,
 )
+from main.joint_decision.detector import conditional_recovery_decision
 from main.shared import identify_root_key, rgb8_image_digest
 
 _ROOT_KEY = "joint-decision-cpu-key"
@@ -370,7 +371,15 @@ def test_geometry_no_direct_positive() -> None:
     binding = _binding(operation, image)
     raw_score = operation(image, _ROOT_KEY).content_score
     operation.calls.clear()
-    geometry = _GeometryOperation(_estimation())
+    estimation = _estimation()
+    reliability_thresholds = _reliability_thresholds(gap=0.3)
+    directly_unreliable = geometry_reliability(
+        estimation,
+        reliability_thresholds,
+    )
+    assert not directly_unreliable.reliable
+    assert not directly_unreliable.allow_rectification
+    geometry = _GeometryOperation(estimation)
     result = conditional_recovery_decision(
         image,
         _ROOT_KEY,
@@ -382,7 +391,7 @@ def test_geometry_no_direct_positive() -> None:
             calibration_identity="unreliable-geometry-calibration",
         ),
         geometry_estimation_operation=geometry,
-        geometry_reliability_thresholds=_reliability_thresholds(gap=0.3),
+        geometry_reliability_thresholds=reliability_thresholds,
     )
 
     assert result.status == "negative_geometry_unreliable"
@@ -428,6 +437,18 @@ def test_joint_same_detector_threshold() -> None:
     raw_score = operation(rescue_null, _ROOT_KEY).content_score
     foreign_content_result = operation(direct_null, _ROOT_KEY)
     direct_score = foreign_content_result.content_score
+    replayed_observation = HfDetectionObservation.from_public_image_encoding(
+        tuple(
+            (rescue_null.to(dtype=torch.float32) / 255.0)
+            .reshape(-1)
+            .tolist()
+        ),
+        tuple(rescue_null.shape),
+    )
+    replayed_content = content_detector(
+        hf_detector(replayed_observation, _ROOT_KEY)
+    )
+    assert replayed_content.content_score == pytest.approx(raw_score)
     operation.calls.clear()
     assert direct_score > raw_score
     tau = (raw_score + direct_score) / 2.0
@@ -567,6 +588,41 @@ def test_joint_same_detector_threshold() -> None:
     )
     assert rescue_positive.image_rectification_result.source_image_digest == (
         rescue_positive.source_image_digest
+    )
+    replayed_rectification = image_rectifier(
+        rescue_null,
+        rescue_positive.geometry_estimation,
+        rescue_positive.geometry_reliability_result,
+    )
+    joint_rectification = rescue_positive.image_rectification_result
+    assert torch.equal(
+        replayed_rectification.rectified_image,
+        joint_rectification.rectified_image,
+    )
+    assert torch.equal(
+        replayed_rectification.valid_support_mask,
+        joint_rectification.valid_support_mask,
+    )
+    assert replayed_rectification.source_image_digest == (
+        joint_rectification.source_image_digest
+    )
+    assert replayed_rectification.rectified_image_digest == (
+        joint_rectification.rectified_image_digest
+    )
+    assert replayed_rectification.token_crop_support == (
+        joint_rectification.token_crop_support
+    )
+    assert replayed_rectification.pixel_crop_support == (
+        joint_rectification.pixel_crop_support
+    )
+    assert replayed_rectification.crop_support == (
+        joint_rectification.crop_support
+    )
+    assert replayed_rectification.canonical_to_observed_matrix == (
+        joint_rectification.canonical_to_observed_matrix
+    )
+    assert replayed_rectification.rectification_config_digest == (
+        joint_rectification.rectification_config_digest
     )
     assert len(rescue_positive.source_image_digest) == 64
     assert rescue_positive.source_image_digest == (

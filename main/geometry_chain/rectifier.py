@@ -188,7 +188,7 @@ def image_rectifier(
     result = ImageRectificationResult(
         rectified_image=rectified,
         valid_support_mask=valid_support,
-        source_image_digest=rgb8_image_digest(validated_image),
+        source_image_digest=rgb8_image_digest(image),
         rectified_image_digest=rgb8_image_digest(rectified),
         token_crop_support=token_crop_support,
         pixel_crop_support=pixel_support,

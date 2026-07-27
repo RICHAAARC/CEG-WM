@@ -365,6 +365,7 @@ def test_qk_similarity_transform_identifiability():
     )
     scale_observations, _ = _actual_qk_observation(side=8, seed=2305)
     base_scale = qk_geometry_sync(scale_observations, _REGISTERED_KEY)
+    assert base_small.descriptor_digest != base_structured.descriptor_digest
     finest_rotation_resolution = 8.0 / 9.0
     finest_log_scale_resolution = log(sqrt(2.0)) / 18.0
     finest_translation_resolution = 0.14 / 9.0
