@@ -786,6 +786,95 @@ def test_rectification_coordinate_protocol():
         (result.token_crop_support, result.pixel_crop_support)
     )
 
+    translated_transform = SimilarityTransform(
+        dihedral="identity",
+        residual_rotation_degrees=0.0,
+        log_scale=0.0,
+        translation_x=0.20,
+        translation_y=0.0,
+        matrix=((1.0, 0.0, 0.20), (0.0, 1.0, 0.0)),
+        is_exact_identity=False,
+        continuous_parameter_on_search_boundary=False,
+    )
+    translated_estimation = replace(
+        identity_estimation,
+        transform=translated_transform,
+    )
+    translated_reliability = geometry_reliability(
+        translated_estimation,
+        _thresholds(gap=0.01, key=0.05, inlier=0.5),
+    )
+    translated_result = image_rectifier(
+        image,
+        translated_estimation,
+        translated_reliability,
+    )
+    translated_theta = translated_transform.tensor().unsqueeze(0)
+    translated_grid = functional.affine_grid(
+        translated_theta,
+        image.shape,
+        align_corners=True,
+    )
+    expected_translated_image = torch.floor(
+        torch.clamp(
+            functional.grid_sample(
+                image.float() / 255.0,
+                translated_grid,
+                mode="bilinear",
+                padding_mode="border",
+                align_corners=True,
+            ),
+            0.0,
+            1.0,
+        )
+        * 255.0
+    ).to(dtype=torch.uint8)
+    expected_translated_support = (
+        functional.grid_sample(
+            torch.ones((1, 1, 7, 7), dtype=torch.float32),
+            translated_grid,
+            mode="nearest",
+            padding_mode="zeros",
+            align_corners=True,
+        )
+        > 0.5
+    )
+    incorrect_border_support = (
+        functional.grid_sample(
+            torch.ones((1, 1, 7, 7), dtype=torch.float32),
+            translated_grid,
+            mode="nearest",
+            padding_mode="border",
+            align_corners=True,
+        )
+        > 0.5
+    )
+    assert torch.equal(
+        translated_result.rectified_image,
+        expected_translated_image,
+    )
+    assert torch.equal(
+        translated_result.valid_support_mask,
+        expected_translated_support,
+    )
+    assert bool(translated_result.valid_support_mask[:, :, :, 0].all())
+    assert not bool(translated_result.valid_support_mask[:, :, :, -1].any())
+    assert bool(translated_result.rectified_image[:, :, :, -1].any())
+    assert not bool(translated_result.valid_support_mask.all())
+    assert translated_result.pixel_crop_support < 1.0
+    assert translated_result.pixel_crop_support == pytest.approx(
+        float(expected_translated_support.float().mean())
+    )
+    assert bool(incorrect_border_support.all())
+    assert not torch.equal(
+        translated_result.valid_support_mask,
+        incorrect_border_support,
+    )
+    assert torch.equal(
+        torch.tensor(translated_result.canonical_to_observed_matrix),
+        translated_transform.tensor(),
+    )
+
     flipped_transform = SimilarityTransform(
         dihedral="x_flip",
         residual_rotation_degrees=0.0,
