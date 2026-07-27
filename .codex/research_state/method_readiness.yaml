@@ -1,0 +1,248 @@
+{
+  "method_name": "ceg_wm_dual_chain",
+  "design_path": "docs/design/method_architecture.md",
+  "candidate_specification_path": "docs/design/candidate_specifications.md",
+  "candidate_specification_sha256": "f3d287b6f59ab6f7de563864937f2f3e4838bd2f7afc3b982237eb1f19e0a9ee",
+  "components": {
+    "key_schedule": {
+      "responsibility": "root_key_derivation_and_prg",
+      "candidate_ids": ["key_schedule_sha256_counter"],
+      "implementation_path": "main/shared/key_schedule.py",
+      "implementation_symbol": "key_schedule_sha256_counter"
+    },
+    "content_router": {
+      "responsibility": "content_observation_and_adaptive_routing",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "routing_stqr",
+        "routing_uniform_control"
+      ],
+      "implementation_path": "main/content_chain/routing.py",
+      "implementation_symbol": "content_router"
+    },
+    "lf_carrier": {
+      "responsibility": "low_frequency_carrier_template_and_write_direction",
+      "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
+      "implementation_path": "main/content_chain/lf_carrier.py",
+      "implementation_symbol": "lf_carrier"
+    },
+    "hf_carrier": {
+      "responsibility": "high_frequency_carrier_template_and_write_direction",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail"
+      ],
+      "implementation_path": "main/content_chain/hf_carrier.py",
+      "implementation_symbol": "hf_carrier"
+    },
+    "content_embedder": {
+      "responsibility": "lf_hf_combined_embedding_and_total_budget",
+      "candidate_ids": [
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "routing_stqr",
+        "routing_uniform_control"
+      ],
+      "implementation_path": "main/content_chain/embedder.py",
+      "implementation_symbol": "content_embedder"
+    },
+    "lf_detector": {
+      "responsibility": "low_frequency_blind_scoring",
+      "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
+      "implementation_path": "main/content_chain/lf_detector.py",
+      "implementation_symbol": "lf_detector"
+    },
+    "hf_detector": {
+      "responsibility": "high_frequency_direct_scoring",
+      "candidate_ids": ["key_schedule_sha256_counter", "hf_sparse_tail"],
+      "implementation_path": "main/content_chain/hf_detector.py",
+      "implementation_symbol": "hf_detector"
+    },
+    "content_detector": {
+      "responsibility": "lf_hf_score_standardization_and_content_detection",
+      "candidate_ids": [
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "content_combination_calibrated"
+      ],
+      "implementation_path": "main/content_chain/detector.py",
+      "implementation_symbol": "content_detector"
+    },
+    "qk_geometry_sync": {
+      "responsibility": "keyed_qk_geometry_synchronization_and_relation_observation",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "qk_relation_similarity"
+      ],
+      "implementation_path": "main/geometry_chain/qk_sync.py",
+      "implementation_symbol": "qk_geometry_sync"
+    },
+    "geometric_transform_estimator": {
+      "responsibility": "blind_bounded_geometric_transform_estimation",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "qk_relation_similarity",
+        "rectification_similarity"
+      ],
+      "implementation_path": "main/geometry_chain/transform_estimator.py",
+      "implementation_symbol": "geometric_transform_estimator"
+    },
+    "geometry_reliability": {
+      "responsibility": "independent_geometry_reliability_conjunction",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "qk_relation_similarity",
+        "rectification_similarity"
+      ],
+      "implementation_path": "main/geometry_chain/reliability.py",
+      "implementation_symbol": "geometry_reliability"
+    },
+    "image_rectifier": {
+      "responsibility": "image_coordinate_rectification",
+      "candidate_ids": ["rectification_similarity"],
+      "implementation_path": "main/geometry_chain/rectifier.py",
+      "implementation_symbol": "image_rectifier"
+    },
+    "conditional_recovery_decision": {
+      "responsibility": "conditional_same_detector_recovery",
+      "candidate_ids": ["joint_conditional_recovery"],
+      "implementation_path": "main/joint_decision/detector.py",
+      "implementation_symbol": "conditional_recovery_decision"
+    }
+  },
+  "test_paths": [
+    "tests/unit/test_key_schedule.py",
+    "tests/unit/test_hf_content_backbone.py",
+    "tests/unit/test_lf_routing_combination.py",
+    "tests/unit/test_geometry_chain.py",
+    "tests/unit/test_joint_decision.py"
+  ],
+  "behavioral_checks": {
+    "key_schedule_root_and_domain_separation": {
+      "test_node": "tests/unit/test_key_schedule.py::test_key_schedule_root_and_domain_separation",
+      "components": ["key_schedule"]
+    },
+    "key_schedule_counter_quantile_golden": {
+      "test_node": "tests/unit/test_key_schedule.py::test_key_schedule_counter_quantile_golden",
+      "components": ["key_schedule"]
+    },
+    "key_schedule_wrong_key_and_public_noise": {
+      "test_node": "tests/unit/test_key_schedule.py::test_key_schedule_wrong_key_and_public_noise",
+      "components": ["key_schedule"]
+    },
+    "hf_sparse_support": {
+      "test_node": "tests/unit/test_hf_content_backbone.py::test_hf_sparse_support",
+      "components": ["hf_carrier"]
+    },
+    "hf_template_normalization_order_and_unit_l2": {
+      "test_node": "tests/unit/test_hf_content_backbone.py::test_hf_template_normalization_order_and_unit_l2",
+      "components": ["hf_carrier"]
+    },
+    "hf_direct_score_time_centering": {
+      "test_node": "tests/unit/test_hf_content_backbone.py::test_hf_direct_score_time_centering",
+      "components": ["hf_detector"]
+    },
+    "lf_domain_and_independent_key": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_lf_domain_and_independent_key",
+      "components": ["lf_carrier"]
+    },
+    "lf_blind_score_time_centering": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_lf_blind_score_time_centering",
+      "components": ["lf_detector"]
+    },
+    "lf_wrong_key_rejection": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_lf_wrong_key_rejection",
+      "components": ["lf_carrier", "lf_detector"]
+    },
+    "routing_mask_partition_and_range": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_routing_mask_partition_and_range",
+      "components": ["content_router"]
+    },
+    "routing_disabled_uniform_control": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_routing_disabled_uniform_control",
+      "components": ["content_router"]
+    },
+    "content_embedding_branch_consumption": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_embedding_branch_consumption",
+      "components": [
+        "content_router",
+        "lf_carrier",
+        "hf_carrier",
+        "content_embedder"
+      ]
+    },
+    "content_embedding_total_budget_and_frozen_allocation": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_embedding_total_budget_and_frozen_allocation",
+      "components": ["content_embedder"]
+    },
+    "content_embedding_active_zero_direction_fail_closed": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_embedding_active_zero_direction_fail_closed",
+      "components": ["content_embedder"]
+    },
+    "content_wrong_key_rejection": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_wrong_key_rejection",
+      "components": ["hf_carrier", "hf_detector", "lf_carrier", "lf_detector"]
+    },
+    "content_scores_independently_observable": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_scores_independently_observable",
+      "components": ["lf_detector", "hf_detector", "content_detector"]
+    },
+    "content_combination_branch_consumption": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_combination_branch_consumption",
+      "components": ["lf_detector", "hf_detector", "content_detector"]
+    },
+    "content_combination_frozen_formula_identity": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_combination_frozen_formula_identity",
+      "components": ["content_detector"]
+    },
+    "content_combination_wrong_key_not_masked": {
+      "test_node": "tests/unit/test_lf_routing_combination.py::test_content_combination_wrong_key_not_masked",
+      "components": ["lf_detector", "hf_detector", "content_detector"]
+    },
+    "qk_relation_consumption": {
+      "test_node": "tests/unit/test_geometry_chain.py::test_qk_relation_consumption",
+      "components": ["qk_geometry_sync"]
+    },
+    "qk_similarity_transform_identifiability": {
+      "test_node": "tests/unit/test_geometry_chain.py::test_qk_similarity_transform_identifiability",
+      "components": ["qk_geometry_sync", "geometric_transform_estimator"]
+    },
+    "geometry_reliability_fail_closed": {
+      "test_node": "tests/unit/test_geometry_chain.py::test_geometry_reliability_fail_closed",
+      "components": ["geometric_transform_estimator", "geometry_reliability"]
+    },
+    "geometry_reliability_wrong_key_and_raw_metrics": {
+      "test_node": "tests/unit/test_geometry_chain.py::test_geometry_reliability_wrong_key_and_raw_metrics",
+      "components": ["geometric_transform_estimator", "geometry_reliability"]
+    },
+    "rectification_coordinate_protocol": {
+      "test_node": "tests/unit/test_geometry_chain.py::test_rectification_coordinate_protocol",
+      "components": ["image_rectifier"]
+    },
+    "near_threshold_recovery_gate": {
+      "test_node": "tests/unit/test_joint_decision.py::test_near_threshold_recovery_gate",
+      "components": ["conditional_recovery_decision"]
+    },
+    "geometry_no_direct_positive": {
+      "test_node": "tests/unit/test_joint_decision.py::test_geometry_no_direct_positive",
+      "components": ["geometry_reliability", "conditional_recovery_decision"]
+    },
+    "joint_same_detector_threshold": {
+      "test_node": "tests/unit/test_joint_decision.py::test_joint_same_detector_threshold",
+      "components": [
+        "content_detector",
+        "image_rectifier",
+        "conditional_recovery_decision"
+      ]
+    }
+  },
+  "independent_semantic_review": {
+    "decision": "approve",
+    "review_reference": "codex-session=019f9dd0-21ef-7ca1-9c8b-53bc8f227e33;independent-semantic-review=approve;reviewed-revision=2394920aefd1b1e23ce578677f8ad56cf853c473",
+    "reviewed_repository_revision": "2394920aefd1b1e23ce578677f8ad56cf853c473",
+    "candidate_specification_sha256": "f3d287b6f59ab6f7de563864937f2f3e4838bd2f7afc3b982237eb1f19e0a9ee"
+  }
+}
