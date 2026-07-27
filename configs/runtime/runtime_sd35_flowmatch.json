@@ -1,0 +1,39 @@
+{
+  "runtime_schema_version": 1,
+  "candidate_id": "runtime_sd35_flowmatch",
+  "model_id": "stabilityai/stable-diffusion-3.5-medium",
+  "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+  "pipeline_class": "diffusers.StableDiffusion3Pipeline",
+  "scheduler_class": "diffusers.FlowMatchEulerDiscreteScheduler",
+  "inference_steps": 20,
+  "guidance_scale": 4.5,
+  "image_height": 512,
+  "image_width": 512,
+  "generation_seed_device": "cpu",
+  "latent_dtype": "float16",
+  "template_dtype": "float32",
+  "score_dtype": "float32",
+  "callback_index": 18,
+  "callback_hold_scheduler_intervals": 1,
+  "vae_decode_protocol": "latent_div_scaling_factor_add_shift_factor",
+  "vae_encode_protocol": "posterior_mode_sub_shift_factor_mul_scaling_factor",
+  "vae_scaling_factor_source": "pipeline.vae.config.scaling_factor",
+  "vae_shift_factor_source": "pipeline.vae.config.shift_factor",
+  "detection_schedule_index": 7,
+  "detection_conditioning_protocol": "sd3_empty_text_triplet_without_cfg",
+  "qk_layer_names": [
+    "transformer_blocks.0.attn",
+    "transformer_blocks.23.attn"
+  ],
+  "dependency_lock": [
+    {"package_name": "python", "version_specifier": ">=3.12"},
+    {"package_name": "diffusers", "version_specifier": "0.38.0"},
+    {"package_name": "torch", "version_specifier": "2.11.0"},
+    {"package_name": "transformers", "version_specifier": "5.12.1"},
+    {"package_name": "accelerate", "version_specifier": "1.14.0"},
+    {"package_name": "numpy", "version_specifier": "2.0.2"},
+    {"package_name": "Pillow", "version_specifier": "11.3.0"},
+    {"package_name": "safetensors", "version_specifier": "0.8.0"},
+    {"package_name": "huggingface-hub", "version_specifier": "1.20.1"}
+  ]
+}

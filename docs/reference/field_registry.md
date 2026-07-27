@@ -287,6 +287,35 @@ Notebook 与 repository module 的跨边界数据
 | methods | persisted_protocol | protocol | none | false | false | false | Comparison protocol 中参与方法规格的有序集合。 |
 | method_code_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的方法代码 revision。 |
 | model_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的生成模型 revision。 |
+| runtime_schema_version | persisted_protocol | runtime_identity | none | false | false | false | runtime 配置 JSON 的严格 schema 版本。 |
+| runtime_config_digest | cross_boundary | runtime_identity | none | false | false | false | 冻结 runtime 配置按 canonical JSON 计算的 SHA-256 身份。 |
+| model_id | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际加载的公开模型仓库身份。 |
+| pipeline_class | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际使用的完整 pipeline 类身份。 |
+| scheduler_class | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际使用的完整 scheduler 类身份。 |
+| inference_steps | persisted_protocol | runtime_identity | none | true | false | false | 生成和检测 schedule 绑定的冻结 inference step 数。 |
+| guidance_scale | persisted_protocol | runtime_identity | none | true | false | false | 生成路径冻结的 classifier-free guidance scale。 |
+| image_height | persisted_protocol | runtime_identity | none | true | false | false | runtime 候选冻结的 RGB 输出高度。 |
+| image_width | persisted_protocol | runtime_identity | none | true | false | false | runtime 候选冻结的 RGB 输出宽度。 |
+| generation_seed_device | persisted_protocol | runtime_identity | none | false | false | false | 基础 latent 随机 generator 的冻结设备身份。 |
+| latent_dtype | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际物化 latent 的 dtype。 |
+| template_dtype | persisted_protocol | runtime_identity | none | true | false | false | 方法模板计算的冻结 dtype。 |
+| score_dtype | persisted_protocol | runtime_identity | none | true | false | false | 内容与几何分数计算的冻结 dtype。 |
+| callback_index | persisted_protocol | runtime_identity | none | true | false | false | 内容及几何更新进入 scheduler 的冻结 callback index。 |
+| callback_hold_scheduler_intervals | persisted_protocol | runtime_identity | none | true | false | false | callback 写入后必须保留更新的 scheduler interval 数。 |
+| vae_decode_protocol | persisted_protocol | runtime_identity | none | true | false | false | 使用 VAE scaling 和 shift 解码 generation latent 的冻结公式身份。 |
+| vae_encode_protocol | persisted_protocol | runtime_identity | none | true | false | false | 使用 posterior mode、VAE shift 和 scaling 编码检测图像的冻结公式身份。 |
+| vae_scaling_factor_source | persisted_protocol | runtime_identity | none | false | false | false | VAE scaling factor 的实际模型配置来源路径。 |
+| vae_shift_factor_source | persisted_protocol | runtime_identity | none | false | false | false | VAE shift factor 的实际模型配置来源路径。 |
+| detection_schedule_index | persisted_protocol | runtime_identity | none | true | false | false | image-only Q/K 检测路径的冻结 scheduler index。 |
+| detection_conditioning_protocol | persisted_protocol | runtime_identity | none | true | false | false | 三路空文本且无 CFG 的 image-only Q/K conditioning 身份。 |
+| qk_layer_names | persisted_protocol | runtime_identity | none | true | false | false | runtime 必须按顺序捕获真实 Q/K 的登记 attention 层名。 |
+| dependency_lock | persisted_protocol | runtime_identity | none | false | false | false | runtime 候选冻结的 Python 与模型执行依赖版本映射。 |
+| package_name | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中按冻结顺序登记的包名。 |
+| version_specifier | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中与包名绑定的精确版本或 Python 版本约束。 |
+| cpu_available | cross_boundary | runtime_identity | none | false | false | false | backend 在加载模型前报告 CPU 是否可供控制流使用。 |
+| cuda_device_count | cross_boundary | runtime_identity | none | false | false | false | backend 在加载模型前报告的非负 CUDA 设备数量。 |
+| runtime_backend_name | cross_boundary | runtime_identity | none | false | false | false | 实际准备 runtime session 的 backend 实现身份。 |
+| selected_device | cross_boundary | runtime_identity | none | false | false | false | adapter 根据请求与可用设备确定的实际执行设备。 |
 | seed | persisted_protocol | protocol | none | true | false | false | 当前 record 实际使用的随机种子。 |
 | metric_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标名称。 |
 | metric_value | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标数值。 |
