@@ -136,6 +136,13 @@ class ContentDetectionOperation(Protocol):
         detection_key: str,
     ) -> ContentDetectionResult: ...
 
+    def replay_validate_content_result(
+        self,
+        result: ContentDetectionResult,
+        input_image: object,
+        detection_key: str,
+    ) -> ContentDetectionResult: ...
+
 
 class GeometryEstimationOperation(Protocol):
     """Lazy public-image Q/K extraction followed by the transform estimator."""
@@ -165,9 +172,18 @@ class ContentDetectorBinding:
     detector_binding_digest: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if not callable(self.content_detection_operation):
+        if (
+            not callable(self.content_detection_operation)
+            or not callable(
+                getattr(
+                    self.content_detection_operation,
+                    "replay_validate_content_result",
+                    None,
+                )
+            )
+        ):
             raise ConditionalRecoveryError(
-                "content detection operation must be callable"
+                "content detection operation must provide call and replay"
             )
         for role, value in (
             ("detector_identity", self.detector_identity),
@@ -283,6 +299,7 @@ class ConditionalRecoveryResult:
     hf_detector_config_digest: str
     hf_template_digest: str
     preprocessing_identity: str
+    content_detector_binding: ContentDetectorBinding
     detector_binding_digest: str
     tau: float
     tau_rescue: float
@@ -328,6 +345,11 @@ def _validate_conditional_result_types(
             "joint source image digest mismatch"
         )
     optional_types = (
+        (
+            "content_detector_binding",
+            result.content_detector_binding,
+            ContentDetectorBinding,
+        ),
         ("raw_content_result", result.raw_content_result, ContentDetectionResult),
         (
             "geometry_estimation",
@@ -626,6 +648,9 @@ def _decision_identity_digest(result: ConditionalRecoveryResult) -> str:
         "calibration_identity": result.calibration_identity,
         "candidate_id": result.candidate_id,
         "content_config_digest": result.content_config_digest,
+        "content_detector_binding_digest": (
+            result.content_detector_binding.detector_binding_digest
+        ),
         "detector_binding_digest": result.detector_binding_digest,
         "detector_identity": result.detector_identity,
         "failure_reason": result.failure_reason,
@@ -676,6 +701,8 @@ def _validate_bound_content_result(
     result: ContentDetectionResult,
     *,
     actual_image: torch.Tensor,
+    content_detection_operation: ContentDetectionOperation,
+    detection_key: str | None,
     detector_identity: str,
     content_config_digest: str,
     hf_detector_identity: str,
@@ -685,11 +712,28 @@ def _validate_bound_content_result(
     root_key_public_digest: str,
 ) -> ContentDetectionResult:
     try:
-        validate_content_detection_result(result, actual_image)
+        if result.content_input_image_digest != rgb8_image_digest(
+            actual_image
+        ):
+            raise ContentDetectorError(
+                "content result input digest differs from actual image"
+            )
+        if detection_key is None:
+            validate_content_detection_result(result)
+        else:
+            validate_content_detection_result(
+                result,
+                actual_image,
+                detection_key,
+            )
     except ContentDetectorError as exc:
         raise ConditionalRecoveryError(
             "content result validation failed"
         ) from exc
+    if result.content_replay_operation is not content_detection_operation:
+        raise ConditionalRecoveryError(
+            "content result replay operation differs from detector binding"
+        )
     if (
         result.detector_identity != detector_identity
         or result.content_config_digest != content_config_digest
@@ -776,6 +820,7 @@ def _result(
         hf_detector_config_digest=binding.hf_detector_config_digest,
         hf_template_digest=binding.hf_template_digest,
         preprocessing_identity=binding.preprocessing_identity,
+        content_detector_binding=binding,
         detector_binding_digest=binding.detector_binding_digest,
         tau=thresholds.tau,
         tau_rescue=thresholds.tau_rescue,
@@ -861,6 +906,10 @@ def conditional_recovery_decision(
         _validate_bound_content_result(
             raw_result,
             actual_image=source_image,
+            content_detection_operation=(
+                content_detector_binding.content_detection_operation
+            ),
+            detection_key=detection_key,
             detector_identity=content_detector_binding.detector_identity,
             content_config_digest=content_detector_binding.content_config_digest,
             hf_detector_identity=content_detector_binding.hf_detector_identity,
@@ -1038,6 +1087,10 @@ def conditional_recovery_decision(
         _validate_bound_content_result(
             rectified_result,
             actual_image=rectification.rectified_image,
+            content_detection_operation=(
+                content_detector_binding.content_detection_operation
+            ),
+            detection_key=detection_key,
             detector_identity=content_detector_binding.detector_identity,
             content_config_digest=content_detector_binding.content_config_digest,
             hf_detector_identity=content_detector_binding.hf_detector_identity,
@@ -1095,10 +1148,15 @@ def _validate_content_result_identity(
     result: ConditionalRecoveryResult,
     content_result: ContentDetectionResult,
     actual_image: torch.Tensor,
+    detection_key: str | None,
 ) -> None:
     _validate_bound_content_result(
         content_result,
         actual_image=actual_image,
+        content_detection_operation=(
+            result.content_detector_binding.content_detection_operation
+        ),
+        detection_key=detection_key,
         detector_identity=result.detector_identity,
         content_config_digest=result.content_config_digest,
         hf_detector_identity=result.hf_detector_identity,
@@ -1111,8 +1169,9 @@ def _validate_content_result_identity(
 
 def validate_conditional_recovery_result(
     result: ConditionalRecoveryResult,
+    detection_key: str | None = None,
 ) -> ConditionalRecoveryResult:
-    """Replay path, threshold, evidence-source, and identity consistency."""
+    """Validate structure, and replay content sources only with an explicit key."""
 
     if type(result) is not ConditionalRecoveryResult:
         raise ConditionalRecoveryError(
@@ -1128,6 +1187,42 @@ def validate_conditional_recovery_result(
     if result.key_role != "registered" or result.wrong_key_index is not None:
         raise ConditionalRecoveryError(
             "joint result key semantics must remain registered-root"
+        )
+    if detection_key is not None:
+        try:
+            replay_root_digest = identify_root_key(
+                detection_key
+            ).root_key_public_digest
+        except KeyScheduleError as exc:
+            raise ConditionalRecoveryError(
+                "joint replay detection key is invalid"
+            ) from exc
+        if replay_root_digest != result.root_key_public_digest:
+            raise ConditionalRecoveryError(
+                "joint replay detection key identity mismatch"
+            )
+    embedded_binding = result.content_detector_binding
+    if (
+        embedded_binding.detector_binding_digest
+        != result.detector_binding_digest
+        or embedded_binding.detector_identity != result.detector_identity
+        or embedded_binding.content_config_digest
+        != result.content_config_digest
+        or embedded_binding.hf_detector_identity
+        != result.hf_detector_identity
+        or embedded_binding.hf_detector_config_digest
+        != result.hf_detector_config_digest
+        or embedded_binding.hf_template_digest != result.hf_template_digest
+        or embedded_binding.preprocessing_identity
+        != result.preprocessing_identity
+        or embedded_binding.formal_mode != result.formal_mode
+        or embedded_binding.root_key_public_digest
+        != result.root_key_public_digest
+        or embedded_binding.key_role != result.key_role
+        or embedded_binding.wrong_key_index != result.wrong_key_index
+    ):
+        raise ConditionalRecoveryError(
+            "embedded content detector binding mismatch"
         )
     expected_binding_digest = _detector_binding_digest(
         detector_identity=result.detector_identity,
@@ -1216,6 +1311,7 @@ def validate_conditional_recovery_result(
             result,
             raw,
             result.source_image,
+            detection_key,
         )
         if result.raw_content_score != float(raw.content_score):
             raise ConditionalRecoveryError("raw content score mismatch")
@@ -1301,6 +1397,7 @@ def validate_conditional_recovery_result(
             result,
             rectified,
             result.image_rectification_result.rectified_image,
+            detection_key,
         )
         if result.rectified_content_score != float(rectified.content_score):
             raise ConditionalRecoveryError("rectified content score mismatch")

@@ -256,6 +256,8 @@ Notebook 与 repository module 的跨边界数据
 | canonical_to_observed_matrix | cross_boundary | method_state | none | true | false | false | rectifier 实际作为 output-to-input theta 消费的 estimator affine matrix。 |
 | rectification_config_digest | cross_boundary | method_identity | none | false | false | 图像/支持插值、padding、align-corners、量化与尺寸的配置摘要。 |
 | content_detection_operation | cross_boundary | method_state | none | false | false | false | 同一联合调用在原图与回正图上复用的普通图像内容检测 operation 对象；不进入稳定序列化。 |
+| content_replay_operation | cross_boundary | method_state | none | false | false | false | 内容结果保存的同一预处理/检测 operation；由调用方逐次显式传入 `detection_key`，重放实际图像到 observation、HF score 和完整 content result；不持有、持久化原始 key，且不进入稳定序列化。 |
+| content_detector_binding | cross_boundary | method_state | none | false | false | false | 联合结果保存的不可变 content detector binding；公开 validator 复用其中同一 operation 执行 raw/rectified 数据链重放。 |
 | preprocessing_identity | cross_boundary | method_identity | none | true | false | false | 原图与回正图共同绑定的普通图像编码和内容检测预处理身份。 |
 | detector_binding_digest | cross_boundary | method_identity | none | true | false | false | content detector、正式模式、预处理与同一 operation 角色的联合绑定摘要。 |
 | hf_detector_identity | cross_boundary | method_identity | none | false | false | false | joint binding 显式固定的正式 HF branch detector 身份；raw 与 rectified 结果必须一致。 |

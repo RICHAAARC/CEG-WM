@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from hashlib import sha256
 from math import floor, isfinite, sqrt
-from typing import Literal, Sequence
+from typing import Literal, Protocol, Sequence
 
 from main.shared.key_schedule import (
     NORMAL_QUANTILE_TABLE_SHA256,
@@ -34,6 +34,17 @@ CombinationFunction = Literal["C0", "C1", "C2"]
 
 class ContentDetectorError(ValueError):
     """分支统计、CDF 身份、组合公式或密钥语义无效。"""
+
+
+class ContentResultReplayOperation(Protocol):
+    """Preprocessing owner that can replay one image-to-content result chain."""
+
+    def replay_validate_content_result(
+        self,
+        result: ContentDetectionResult,
+        input_image: object,
+        detection_key: str,
+    ) -> ContentDetectionResult: ...
 
 
 def _require_non_empty_identity_strings(
@@ -188,6 +199,7 @@ class ContentDetectionResult:
     diagnostic_combination: CalibratedCombinationResult | None
     diagnostic_identity: str | None
     content_input_image_digest: str | None
+    content_replay_operation: ContentResultReplayOperation | None
 
 
 def _validate_hf_result(result: object) -> HfDetectionResult:
@@ -808,14 +820,16 @@ def content_detector(
         diagnostic_combination=diagnostic,
         diagnostic_identity=diagnostic_identity,
         content_input_image_digest=None,
+        content_replay_operation=None,
     )
 
 
 def validate_content_detection_result(
     result: ContentDetectionResult,
     input_image: object | None = None,
+    detection_key: str | None = None,
 ) -> ContentDetectionResult:
-    """Validate the current formal HF-only result without reimplementing its score."""
+    """Validate structure, and replay the actual image only with an explicit key."""
 
     if type(result) is not ContentDetectionResult:
         raise ContentDetectorError(
@@ -838,7 +852,33 @@ def validate_content_detection_result(
             raise ContentDetectorError(
                 "content input image digest is invalid"
             ) from exc
+    replay_method = (
+        getattr(
+            result.content_replay_operation,
+            "replay_validate_content_result",
+            None,
+        )
+        if result.content_replay_operation is not None
+        else None
+    )
+    if (result.content_input_image_digest is None) != (
+        result.content_replay_operation is None
+    ) or (
+        result.content_replay_operation is not None
+        and not callable(replay_method)
+    ):
+        raise ContentDetectorError(
+            "content image digest and replay operation must be bound together"
+        )
+    if (input_image is None) != (detection_key is None):
+        raise ContentDetectorError(
+            "actual-image replay requires both input_image and detection_key"
+        )
     if input_image is not None:
+        if type(detection_key) is not str or not detection_key:
+            raise ContentDetectorError(
+                "content replay detection_key must be non-empty text"
+            )
         try:
             expected_input_digest = rgb8_image_digest(input_image)
         except Rgb8ImageError as exc:
@@ -917,34 +957,21 @@ def validate_content_detection_result(
             raise ContentDetectorError(
                 "content diagnostic identity replay mismatch"
             )
-    return result
-
-
-def bind_content_detection_result_to_image(
-    result: ContentDetectionResult,
-    input_image: object,
-) -> ContentDetectionResult:
-    """Bind a content-owned result to the exact ordinary RGB8 input values."""
-
-    validated = validate_content_detection_result(result)
-    try:
-        input_digest = rgb8_image_digest(input_image)
-    except Rgb8ImageError as exc:
-        raise ContentDetectorError(
-            "content input image is not ordinary RGB8"
-        ) from exc
-    if (
-        validated.content_input_image_digest is not None
-        and validated.content_input_image_digest != input_digest
-    ):
-        raise ContentDetectorError(
-            "content result is already bound to another input image"
+    if input_image is not None:
+        if replay_method is None:
+            raise ContentDetectorError(
+                "actual-image validation requires content replay operation"
+            )
+        replayed_result = replay_method(
+            result,
+            input_image,
+            detection_key,
         )
-    bound = replace(
-        validated,
-        content_input_image_digest=input_digest,
-    )
-    return validate_content_detection_result(bound, input_image)
+        if replayed_result is not result:
+            raise ContentDetectorError(
+                "content replay operation must validate the supplied result"
+            )
+    return result
 
 
 __all__ = [
@@ -953,8 +980,8 @@ __all__ = [
     "CalibratedCombinationResult",
     "ContentDetectionResult",
     "ContentDetectorError",
+    "ContentResultReplayOperation",
     "NullScoreRecord",
-    "bind_content_detection_result_to_image",
     "content_detector",
     "validate_content_detection_result",
 ]

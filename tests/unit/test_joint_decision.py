@@ -9,10 +9,11 @@ import torch
 import torch.nn.functional as functional
 
 from main.content_chain import (
+    ContentDetectorError,
     HfDetectionObservation,
-    bind_content_detection_result_to_image,
     content_detector,
     hf_detector,
+    validate_content_detection_result,
 )
 from main.geometry_chain import (
     GeometricTransformEstimation,
@@ -38,18 +39,44 @@ class _ActualContentOperation:
     """Map RGB8 values to the real HF detector and formal content detector."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[int, str, torch.Tensor]] = []
+        self.calls: list[tuple[int, torch.Tensor]] = []
 
-    def __call__(self, image: torch.Tensor, detection_key: str):
-        self.calls.append((id(self), detection_key, image.detach().clone()))
+    def _detect(
+        self,
+        image: torch.Tensor,
+        detection_key: str,
+    ):
         observation = HfDetectionObservation.from_public_image_encoding(
             tuple((image.to(dtype=torch.float32) / 255.0).reshape(-1).tolist()),
             tuple(image.shape),
         )
-        return bind_content_detection_result_to_image(
+        return replace(
             content_detector(hf_detector(observation, detection_key)),
-            image,
+            content_input_image_digest=rgb8_image_digest(image),
+            content_replay_operation=self,
         )
+
+    def __call__(self, image: torch.Tensor, detection_key: str):
+        self.calls.append((id(self), image.detach().clone()))
+        return self._detect(image, detection_key)
+
+    def replay_validate_content_result(
+        self,
+        result,
+        input_image: object,
+        detection_key: str,
+    ):
+        if not isinstance(input_image, torch.Tensor):
+            raise ContentDetectorError(
+                "CPU content replay requires an RGB8 tensor"
+            )
+        expected = self._detect(input_image, detection_key)
+        validate_content_detection_result(expected)
+        if result != expected:
+            raise ContentDetectorError(
+                "CPU image-to-observation-to-score replay mismatch"
+            )
+        return result
 
 
 class _GeometryOperation:
@@ -399,10 +426,65 @@ def test_joint_same_detector_threshold() -> None:
     operation = _ActualContentOperation()
     binding = _binding(operation, direct_null)
     raw_score = operation(rescue_null, _ROOT_KEY).content_score
-    direct_score = operation(direct_null, _ROOT_KEY).content_score
+    foreign_content_result = operation(direct_null, _ROOT_KEY)
+    direct_score = foreign_content_result.content_score
     operation.calls.clear()
     assert direct_score > raw_score
     tau = (raw_score + direct_score) / 2.0
+    coordinated_foreign_content = replace(
+        foreign_content_result,
+        content_input_image_digest=rgb8_image_digest(rescue_null),
+    )
+    with pytest.raises(
+        ContentDetectorError,
+        match="requires both input_image and detection_key",
+    ):
+        validate_content_detection_result(
+            coordinated_foreign_content,
+            rescue_null,
+        )
+    with pytest.raises(
+        ContentDetectorError,
+        match="image-to-observation-to-score replay",
+    ):
+        validate_content_detection_result(
+            coordinated_foreign_content,
+            rescue_null,
+            _ROOT_KEY,
+        )
+
+    class _ForeignContentOperation(_ActualContentOperation):
+        def __init__(self, foreign_result) -> None:
+            super().__init__()
+            self.foreign_result = foreign_result
+
+        def __call__(self, image: torch.Tensor, detection_key: str):
+            self.calls.append(
+                (id(self), image.detach().clone())
+            )
+            return replace(
+                self.foreign_result,
+                content_input_image_digest=rgb8_image_digest(image),
+                content_replay_operation=self,
+            )
+
+    foreign_operation = _ForeignContentOperation(foreign_content_result)
+    foreign_binding = _binding(foreign_operation, direct_null)
+    contaminated_flow = conditional_recovery_decision(
+        rescue_null,
+        _ROOT_KEY,
+        content_detector_binding=foreign_binding,
+        thresholds=_thresholds(
+            foreign_binding,
+            tau=tau,
+            tau_rescue=raw_score - 0.1,
+            calibration_identity="foreign-content-replay-gatekeeper",
+        ),
+        geometry_estimation_operation=_GeometryOperation(_estimation(0.2)),
+        geometry_reliability_thresholds=_reliability_thresholds(),
+    )
+    assert contaminated_flow.status == "raw_content_identity_failure"
+    assert not contaminated_flow.joint_content_positive
 
     direct_positive = conditional_recovery_decision(
         direct_null,
@@ -466,9 +548,9 @@ def test_joint_same_detector_threshold() -> None:
         direct_positive.positive_path,
         rescue_positive.positive_path,
     } == {"raw_positive", "rescue_positive"}
-    assert torch.equal(operation.calls[-2][2], rescue_null)
+    assert torch.equal(operation.calls[-2][1], rescue_null)
     assert torch.equal(
-        operation.calls[-1][2],
+        operation.calls[-1][1],
         rescue_positive.image_rectification_result.rectified_image,
     )
     assert rescue_positive.source_image_digest != (
@@ -492,6 +574,13 @@ def test_joint_same_detector_threshold() -> None:
     )
     assert (
         validate_conditional_recovery_result(rescue_positive)
+        is rescue_positive
+    )
+    assert (
+        validate_conditional_recovery_result(
+            rescue_positive,
+            _ROOT_KEY,
+        )
         is rescue_positive
     )
     with pytest.raises(
