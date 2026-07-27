@@ -13,5 +13,8 @@
 未晋升 C0/C1/C2 诊断。正式 content detector 仍保持 HF-only，不能据此选择
 `a`、组合函数或阈值。组合写入要求两个 carrier 绑定同一个经重算验证的 route，
 其中 routed result 保留实际不可变 S/T/R/Q 观测并据此重演插值与路由公式；
-组合诊断只接受同一普通图像编码观测。几何与联合判定尚未实现。单个批次通过不表示
-完整方法完成，也不得提前创建 method readiness。
+组合诊断只接受同一普通图像编码观测。批次 4 已实现独立几何链：两登记层真实 Q/K
+四通道 relation、几何密钥投影、固定 similarity/dihedral 搜索、独立 reliability
+合取和 PyTorch 图像回正。该 CPU/synthetic 实现不声称真实 SD3.5 Q/K 捕获已成立，
+也不产生水印阳性；联合判定仍未实现。单个批次通过不表示完整方法完成，也不得提前
+创建 method readiness。

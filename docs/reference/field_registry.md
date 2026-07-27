@@ -172,6 +172,86 @@ Notebook 与 repository module 的跨边界数据
 | combination_identity | cross_boundary | method_identity | none | true | false | false | 公式与两分支 calibration identity 共同形成的未晋升组合身份。 |
 | diagnostic_only | cross_boundary | method_state | none | true | false | false | 明确组合输出只具诊断语义、不能替代当前正式 `D_M`。 |
 | promoted | cross_boundary | method_state | none | true | false | false | 组合候选是否已通过独立晋升门；批次 3 固定为 false 且不提供晋升权。 |
+| layers | cross_boundary | method_state | none | false | false | false | Q/K 几何结果中按冻结顺序保存的两个登记层 relation 结果。 |
+| layer_name | cross_boundary | method_identity | none | false | false | false | Q/K observation 与 projection 绑定的登记 attention 层名。 |
+| query | cross_boundary | method_state | none | false | false | false | runtime 登记层提供的真实 attention query tensor；必须消费数值本身，摘要不能替代 tensor。 |
+| attention_key | cross_boundary | method_state | none | false | false | false | runtime 登记层提供的真实 attention key tensor；与检测密钥语义分离且摘要不能替代 tensor。 |
+| head_count | cross_boundary | method_identity | none | false | false | false | 登记层 Q/K observation 的实际 attention head 数。 |
+| head_width | cross_boundary | method_identity | none | false | false | false | 登记层 Q/K observation 的实际单 head 宽度。 |
+| original_grid_side | cross_boundary | method_identity | none | false | false | false | 等距 token 采样前的原始方形图像 token 网格边长。 |
+| token_indices | cross_boundary | method_identity | none | false | false | false | 从原始图像 token 网格按冻结等距规则选择的 row-major 索引。 |
+| token_count | cross_boundary | method_identity | none | false | false | false | 单层 relation 实际消费的采样 token 数。 |
+| relation_shape | cross_boundary | method_identity | none | false | false | false | 四通道 relation 的显式 `[token,token,4]` 形状。 |
+| relation_values | cross_boundary | method_state | none | false | false | false | 从真实 Q/K 数值构造的两 token 轴四通道 float32 relation。 |
+| projection_values | cross_boundary | method_state | none | false | false | false | geometry-key 上三角镜像、零对角、固定 polarity 四通道投影。 |
+| relation_score | cross_boundary | method_statistic | none | true | false | false | 两登记层、四通道等权逐 row 中心化相关统计；无内容阳性语义。 |
+| descriptor_digest | cross_boundary | provenance | none | false | false | false | 两登记层实际 relation 数值和层序绑定的摘要。 |
+| projection_digest | cross_boundary | provenance | none | false | false | false | geometry-key 投影、层序和通道 polarity 绑定的摘要。 |
+| operator_identity | cross_boundary | method_identity | none | false | false | false | runtime 提供的 Q/K 投影、归一化、head layout 与 scale 算子身份。 |
+| geometry_config_digest | cross_boundary | method_identity | none | false | false | false | Q/K 层序、token 采样、rank、projection 与 row-score 配置摘要。 |
+| accepted | cross_boundary | method_state | none | false | false | false | actual-dtype 几何同步回溯是否找到满足全部冻结约束的候选。 |
+| status | cross_boundary | method_state | none | true | false | false | 几何同步、可靠性或回正边界的显式状态。 |
+| geometry_ratio | cross_boundary | method_identity | none | false | false | false | `rho_geo/rho_content` 的冻结有限候选值。 |
+| line_search_factor | cross_boundary | method_state | none | false | false | false | actual-dtype 回溯接受的首个 `lambda`；失败时为空。 |
+| baseline_score | cross_boundary | method_statistic | none | false | false | false | 几何同步 actual-dtype 回溯前的同一 image-only relation score。 |
+| accepted_score | cross_boundary | method_statistic | none | false | false | false | 回溯接受候选重新执行完整 image-only Q/K 路径后的 relation score。 |
+| geometry_relative_l2_actual | cross_boundary | method_statistic | none | true | false | false | 实际 dtype 几何增量相对 callback baseline latent 的 L2。 |
+| total_relative_l2_actual | cross_boundary | method_statistic | none | true | false | false | 内容与几何一次最终物化后实际总增量的相对 L2。 |
+| content_projection_relative | cross_boundary | method_statistic | none | true | false | false | actual geometry delta 投影回完整 LF/HF 内容方向 span 的相对范数。 |
+| written_latent | cross_boundary | method_state | none | false | false | false | 通过全部 actual-dtype 回溯约束后的 latent；失败时为空。 |
+| transform | cross_boundary | method_state | none | true | false | false | estimator 输出的 canonical-to-observed similarity affine 与搜索坐标。 |
+| dihedral | cross_boundary | method_identity | none | true | false | false | 冻结八个方形网格 dihedral 基元之一。 |
+| residual_rotation_degrees | cross_boundary | method_statistic | none | true | false | false | dihedral 后的有界连续 residual rotation 角度。 |
+| log_scale | cross_boundary | method_statistic | none | true | false | false | similarity scale 的自然对数参数。 |
+| translation_x | cross_boundary | method_statistic | none | true | false | false | canonical-to-observed 规范坐标 x translation。 |
+| translation_y | cross_boundary | method_statistic | none | true | false | false | canonical-to-observed 规范坐标 y translation。 |
+| matrix | cross_boundary | method_state | none | true | false | false | canonical-to-observed float32 `2x3` affine matrix。 |
+| is_exact_identity | cross_boundary | method_state | none | true | false | false | 首胜候选是否为精确 identity matrix 与零连续参数。 |
+| continuous_parameter_on_search_boundary | cross_boundary | method_state | none | true | false | false | 任一连续估计参数是否落在冻结搜索支持边界。 |
+| registered_objective | cross_boundary | method_statistic | none | true | false | false | 注册 geometry key 完整搜索的最高冻结 objective。 |
+| second_registered_objective | cross_boundary | method_statistic | none | true | false | false | 去除 best 重复 matrix 后注册 key 的次高 objective。 |
+| exact_identity_objective | cross_boundary | method_statistic | none | true | false | false | 注册 key 精确 identity candidate 的 objective。 |
+| wrong_key_objectives | cross_boundary | method_statistic | none | true | false | false | 预登记索引 `0..7` 八个 wrong geometry key 各自完整搜索的最高 objective。 |
+| canonical_score | cross_boundary | method_statistic | none | true | false | false | best candidate 的两层 canonical direction row-normalized score。 |
+| observation_score | cross_boundary | method_statistic | none | true | false | false | best candidate 的两层 observation direction row-normalized score。 |
+| coverage_forward | cross_boundary | method_statistic | none | true | false | false | canonical-to-observed sampling matrix 的有效 row 比例。 |
+| coverage_backward | cross_boundary | method_statistic | none | true | false | false | observed-to-canonical sampling matrix 的有效 row 比例。 |
+| uniqueness_forward | cross_boundary | method_statistic | none | true | false | false | forward valid row 的唯一 argmax token 覆盖比例。 |
+| uniqueness_backward | cross_boundary | method_statistic | none | true | false | false | backward valid row 的唯一 argmax token 覆盖比例。 |
+| coverage | cross_boundary | method_statistic | none | true | false | false | forward/backward coverage 的较小值。 |
+| uniqueness | cross_boundary | method_statistic | none | true | false | false | forward/backward uniqueness 的较小值。 |
+| gap | cross_boundary | method_statistic | none | true | false | false | 注册 key best 与 second-best objective 的差。 |
+| identity_margin | cross_boundary | method_statistic | none | true | false | false | 注册 key best 与 exact identity objective 的差。 |
+| key_margin | cross_boundary | method_statistic | none | true | false | false | 注册 key best objective 与八个 wrong-key best 最大值的差。 |
+| inlier_ratio | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor 在拟合 `epsilon_inlier` 下的有效最近点比例。 |
+| mean_residual | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor residual 的均值；任一越界时为非有限失败量。 |
+| epsilon_inlier | cross_boundary | method_identity | none | false | false | false | 独立 geometry-reliability-fit 冻结并供 anchor inlier 使用的阈值。 |
+| anchor_residuals | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor 到 observed grid 最近点的原始 residual。 |
+| observation_descriptor_digest | cross_boundary | provenance | none | false | false | estimator 实际消费的两层 Q/K relation observation 摘要。 |
+| observation_projection_digest | cross_boundary | provenance | none | false | false | false | estimator 已验证 Q/K observation 的 geometry-key projection、层序与 polarity 摘要。 |
+| observation_geometry_config_digest | cross_boundary | method_identity | none | false | false | false | estimator 已验证 Q/K observation 的层、token/operator 和 relation 配置摘要。 |
+| search_config_digest | cross_boundary | method_identity | none | false | false | dihedral/coarse/refine/objective/wrong-key roster 搜索配置摘要。 |
+| estimation_identity_digest | cross_boundary | method_identity | none | true | false | transform、全部原始指标、key family、完整 Q/K observation identity 与 search config 的绑定摘要。 |
+| gamma_coverage | cross_boundary | method_identity | none | false | false | false | 独立 reliability fit 冻结的 coverage 合取阈值。 |
+| gamma_uniqueness | cross_boundary | method_identity | none | false | false | false | 独立 reliability fit 冻结的 uniqueness 合取阈值。 |
+| gamma_gap | cross_boundary | method_identity | none | false | false | false | 独立 reliability fit 冻结的 best/second gap 合取阈值。 |
+| gamma_key | cross_boundary | method_identity | none | false | false | false | 独立 reliability fit 冻结的 registered/wrong-key margin 合取阈值。 |
+| gamma_inlier | cross_boundary | method_identity | none | false | false | false | 独立 reliability fit 冻结的 anchor inlier ratio 合取阈值。 |
+| gamma_residual | cross_boundary | method_identity | none | false | false | false | 独立 reliability fit 冻结的 mean residual 上界。 |
+| gamma_identity | cross_boundary | method_identity | none | false | false | false | 非 identity best 必须满足的 identity objective margin 阈值。 |
+| fit_identity | cross_boundary | provenance | none | false | false | false | geometry reliability thresholds 所属独立拟合职责身份。 |
+| reliable | cross_boundary | method_state | none | true | false | false | 冻结可靠性合取是否全部通过；无内容阳性语义。 |
+| allow_rectification | cross_boundary | method_state | none | true | false | false | 是否允许 image rectifier 消费同一 identity-bound estimation。 |
+| failure_reasons | cross_boundary | method_state | none | true | false | false | reliability fail-closed 的完整原因集合。 |
+| threshold_config_digest | cross_boundary | method_identity | none | false | false | false | 独立拟合阈值、fit identity 与冻结合取规则摘要。 |
+| estimator_search_config_digest | cross_boundary | method_identity | none | false | false | false | reliability 输出回绑 estimator 搜索身份的摘要。 |
+| rectified_image | cross_boundary | method_state | none | false | false | false | PyTorch inverse warp 后按 clamp、乘 255、floor 产生的 RGB uint8 图像。 |
+| valid_support_mask | cross_boundary | method_state | none | true | false | false | 同 grid 对全 1 输入以 nearest/zeros 得到的有效像素支持 mask。 |
+| token_crop_support | cross_boundary | method_statistic | none | true | false | false | estimator forward/backward token coverage 的较小值。 |
+| pixel_crop_support | cross_boundary | method_statistic | none | true | false | false | valid-support pixel mask 的有效比例。 |
+| crop_support | cross_boundary | method_statistic | none | true | false | false | 同时保存 token 双向 coverage 与 pixel mask 比例的有序二元组。 |
+| canonical_to_observed_matrix | cross_boundary | method_state | none | true | false | false | rectifier 实际作为 output-to-input theta 消费的 estimator affine matrix。 |
+| rectification_config_digest | cross_boundary | method_identity | none | false | false | 图像/支持插值、padding、align-corners、量化与尺寸的配置摘要。 |
 | declared_deviation | persisted_protocol | protocol | none | false | false | false | baseline 相对上游实现的已声明语义偏差。 |
 | methods | persisted_protocol | protocol | none | false | false | false | Comparison protocol 中参与方法规格的有序集合。 |
 | method_code_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的方法代码 revision。 |

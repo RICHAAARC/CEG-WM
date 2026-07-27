@@ -12,6 +12,7 @@
 
 | test_path | level | default_run | responsibility |
 | --- | --- | --- | --- |
+| `tests/unit/test_geometry_chain.py` | `unit`, `quick` | yes | 真实 Q/K 数值关系、geometry-key 投影、actual-dtype 同步回溯、冻结 similarity 搜索、8 个 wrong-key、独立 reliability fail-closed 与 PyTorch 回正坐标协议；完整搜索节点 CPU 成本较高但仍是默认 synthetic 方法验证，不属于 real-model、`slow` 或 `formal`。 |
 | `tests/unit/test_lf_routing_combination.py` | `unit` | yes | LF carrier/blind detector、从实际 S/T/R/Q 观测重演公式的 routing、同 route/mask 绑定的 LF/HF embedder、同普通图像观测约束与未晋升 C0/C1/C2 组合诊断。 |
 | `tests/unit/test_hf_content_backbone.py` | `unit` | yes | HF sparse-tail 载体、HF-only 共同总预算、盲 direct score、wrong-key 与当前 HF-only content detector。 |
 | `tests/unit/test_key_schedule.py` | `unit` | yes | 冻结 key schedule 的 root/domain、counter/quantile golden、wrong/public 派生、不可变身份与失败边界。 |
@@ -33,3 +34,14 @@
 新增或移动研究测试时，应同步本页的“当前测试入口”；项目 pytest 规则以 `pyproject.toml` 为准。
 
 本清单只说明测试入口和执行成本，不把测试通过解释为方法或实验效果证据。
+
+## 几何 CPU/synthetic 环境
+
+批次 4 的几何默认测试需要真实 CPU PyTorch 与 NumPy，使用项目登记的 Conda 环境：
+
+```bash
+conda run -n CEG-WM python -m pytest -q -s tests/unit/test_geometry_chain.py
+```
+
+该环境只证明 CPU/synthetic 方法行为，不替代冻结 SD3.5 revision、真实登记层 Q/K
+捕获或 GPU/runtime qualification。
