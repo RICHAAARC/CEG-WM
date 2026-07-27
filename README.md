@@ -40,10 +40,10 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 
 ## 当前阶段
 
-- `project_stage`: `method_construction_authorized`
-- `implementation_status`: `not_implemented`
+- `project_stage`: `method_implemented`
+- `implementation_status`: `implemented`
 - 13 项真实职责、27 个方法特异性 CPU/synthetic 节点和唯一 readiness 已在后续
-  revisions 完成并经独立语义审计；等待独立阶段迁移，不能由 readiness 自动改阶段。
+  revisions 完成并经独立语义审计；独立阶段迁移已经完成，但不是由 readiness 自动改阶段。
 - 正式 detector 仍为 HF-only；LF/routing 尚未实验晋升，
   `full_ceg_wm_eligible=false`。
 - 当前没有真实 runtime/GPU qualification、完整联合 FPR、攻击矩阵、正式实验

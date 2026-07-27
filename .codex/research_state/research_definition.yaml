@@ -23,5 +23,5 @@
     "same_detector_same_threshold",
     "historical_projects_non_authoritative"
   ],
-  "implementation_status": "not_implemented"
+  "implementation_status": "implemented"
 }

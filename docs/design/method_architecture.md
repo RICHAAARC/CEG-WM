@@ -137,8 +137,8 @@ CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现�
 ## Current Implementation Status
 
 固定 13 项职责与 27 个 CPU/synthetic 方法行为节点已经实现，并由唯一 readiness
-绑定候选摘要、真实 symbol、测试节点和独立语义审核。实际 stage/status 仍为
-`method_construction_authorized / not_implemented`，等待独立阶段迁移。当前正式
+绑定候选摘要、真实 symbol、测试节点和独立语义审核。实际 stage/status 已由
+独立 revision 同步为 `method_implemented / implemented`。当前正式
 detector 仍为 HF-only；LF/routing 未实验晋升，`full_ceg_wm_eligible=false`。
 尚无真实 runtime/GPU qualification、完整联合 FPR 或科学效果证据。后续门序见
 [research_construction_roadmap.md](research_construction_roadmap.md)。

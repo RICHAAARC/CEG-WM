@@ -2,7 +2,7 @@
 
 ## Roadmap Authority
 
-本文档定义从当前 `method_construction_authorized` 到论文全部数据、可重建产物和
+本文档定义从当前 `method_implemented` 到论文全部数据、可重建产物和
 受支持结论的构建路线。它是研究与工程准入顺序，不是完成状态报告。
 
 文中的语义化名称是证据门，不是新的 `project_stage`。正式阶段仍以 `governance/policies/method_readiness_rules.yaml` 登记的顺序为准：
@@ -24,8 +24,8 @@ formal_evidence_available
 任何证据门未通过时，必须停在当前阶段、保存失败事实并修订对应设计，不能跳过、放宽门禁或用后续实验掩盖失败。`method_construction_authorized` 是实施准入/在建阶段，不是完成结论：候选规格关闭并独立审计通过后，用户先授权建立可审计版本身份与阶段变更；阶段变更本身不得包含 `main/` 实现，方法实施只能在之后的独立变更中开始。
 
 当前检查点：13 项职责、27 个 CPU/synthetic 方法行为节点和唯一 readiness 已在
-后续独立 revisions 完成并审计；实际 stage/status 仍为
-`method_construction_authorized / not_implemented`，等待独立阶段迁移。正式 detector
+后续独立 revisions 完成并审计；实际 stage/status 已由独立 revision 同步为
+`method_implemented / implemented`。正式 detector
 仍为 HF-only，LF/routing 未实验晋升，`full_ceg_wm_eligible=false`；尚无真实
 runtime/GPU、完整联合 FPR、正式 records 或科学效果证据。
 
@@ -115,7 +115,8 @@ runtime/GPU、完整联合 FPR、正式 records 或科学效果证据。
 ### Pass Result
 
 本门在无 CEG-WM Git 时即可提交独立审计。该流程已完成候选审计、基线版本身份和
-construction admission；以下仍是进入当前阶段所遵循的两项分离授权：
+construction admission；以下是此前进入 `method_construction_authorized` 所遵循的
+两项分离授权：
 
 1. 建立 CEG-WM 可审计版本身份，并把当前已审候选规格保存为 authorization base revision；
 2. 按 `method_construction_admission.yaml` 绑定审计/用户授权引用，以一个不含任何 `main/` 变更的独立 revision 进入 `method_construction_authorized`，随后才在后续 revision 开始迁移/实现。
@@ -177,7 +178,7 @@ geometry reliability 折回其他组件，都不得推进；机械 readiness pas
 单独不证明非代理实现。
 
 当前该实现/readiness 门已由 13 项职责、27 个非同构 CPU/synthetic 节点、候选摘要、
-受保护 revision 和三任务独立语义复核闭合；独立阶段迁移尚未执行。
+受保护 revision 和三任务独立语义复核闭合；独立阶段迁移已经完成。
 
 ## Evidence Gate: HF Candidate Identity Reproduced
 
@@ -631,10 +632,10 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 
 ## Governance Freeze And Extension Rule
 
-本次 readiness 阻断修订经独立审核后，通用治理平面冻结。下一步只能另行申请从
-`method_construction_authorized` 进入 `method_implemented`；本段不授权该迁移。
-只有迁移另行获准并闭合后，后续主线才按既定门序进入 runtime、experiment 和
-evidence 工作。除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、
+本次 readiness 阻断修订和独立阶段迁移完成后，通用治理平面冻结。下一步 runtime
+qualification 和进入 `runtime_verified` 必须另行获得明确授权；本段不授权 runtime、
+GPU 或实验。后续主线仍须按既定门序进入 runtime、experiment 和 evidence 工作。
+除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、
 skill、schema 或 harness；存在缺口时优先对现有规则做最小、可测试的增量修订。
 治理文件数量、机械 audit 数量或文档篇幅都不能替代研究实现和证据推进。
 

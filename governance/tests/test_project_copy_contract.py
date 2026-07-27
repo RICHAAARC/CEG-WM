@@ -10,7 +10,7 @@ from governance.harness.run_all_audits import run_all_audits
 
 
 @pytest.mark.constraint
-def test_governed_project_copy_without_revision_fails_only_construction_provenance(
+def test_governed_project_copy_without_revision_fails_revision_bound_provenance(
     tmp_path: Path,
 ) -> None:
     source_root = Path.cwd()
@@ -42,11 +42,29 @@ def test_governed_project_copy_without_revision_fails_only_construction_provenan
         for audit_result in report["audit_results"]
         if audit_result["decision"] != "pass"
     ]
-    assert len(failures) == 1
-    assert failures[0]["audit_name"] == "audit_research_definition"
-    assert failures[0]["violations"] == [
+    assert [
         {
-            "path": ".git",
-            "reason": "construction_repository_revision_unavailable",
+            "audit_name": failure["audit_name"],
+            "violations": failure["violations"],
         }
+        for failure in failures
+    ] == [
+        {
+            "audit_name": "audit_research_definition",
+            "violations": [
+                {
+                    "path": ".git",
+                    "reason": "construction_repository_revision_unavailable",
+                }
+            ],
+        },
+        {
+            "audit_name": "audit_method_readiness",
+            "violations": [
+                {
+                    "path": ".codex/research_state/method_readiness.yaml",
+                    "reason": "method_independent_review_revision_unverifiable",
+                }
+            ],
+        },
     ]

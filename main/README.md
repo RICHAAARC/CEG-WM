@@ -7,10 +7,10 @@
 
 此层不得导入 runtime、experiments、paper artifacts、notebooks、infrastructure、tests 或任何外层控制平面，也不得保存实验 records、论文构建或模型后端适配。
 
-当前仍处于 `method_construction_authorized / not_implemented`。六个方法构建批次已完成
+当前处于 `method_implemented / implemented`。六个方法构建批次已完成
 13 项职责实现、CPU/synthetic 行为验证、readiness 收口及绑定实现 revision 的独立语义
-审核；唯一 `method_readiness.yaml` 已在第 6 批完成后创建并记录 `approve`。这些事实只构成
-另行申请进入 `method_implemented` 的前置证据，不自动迁移项目阶段或实现状态。
+审核；唯一 `method_readiness.yaml` 已在第 6 批完成后创建并记录 `approve`。这些事实此前
+构成独立阶段迁移的前置证据；本次 revision 只同步阶段和状态，不修改方法机制。
 
 内容链已经实现 S/T/R/Q 数值路由、LF/HF carrier、blind detector、共同总预算写入组合
 及 C0/C1/C2 诊断，但正式内容判定仍保持 `hf_only`。LF、routing 和组合行为尚未获得

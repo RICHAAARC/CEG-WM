@@ -58,7 +58,7 @@ root key 的 UTF-8 语义、职责域派生、wrong-key 和 public-noise 由
 carrier、content embedder、LF/HF detector、content detector；几何链的 Q/K sync、
 transform estimator、独立 geometry reliability、rectifier；以及 conditional recovery
 decision。27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并审计；实际
-stage/status 仍为 `method_construction_authorized / not_implemented`，等待独立迁移。
+stage/status 已由独立 revision 同步为 `method_implemented / implemented`。
 候选 registry 的 10 个 ID 是算法身份计数，不是组件计数。
 
 ## Success Conditions

@@ -6,15 +6,17 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 
 ## Current Stage
 
-- `project_stage`: `method_construction_authorized`
-- `target_construction_phase`: `dual_chain_method_construction`
+- `project_stage`: `method_implemented`
+- `target_construction_phase`: `method_implemented`
+- `method_transition_authorization_base_revision`:
+  `15e138ecf99e75084c6862b1f291b1747986123b`
 - 项目已依据关闭的候选规格、独立审计批准、用户明确授权和可审计基线 revision
   合法进入构建准入阶段。随后独立 revisions 已完成固定 13 项真实职责、27 个
   方法特异性 CPU/synthetic 行为节点和唯一 `method_readiness.yaml`，并通过
   revision-bound 独立语义审计。
-- 实际阶段和 research-definition 状态仍保持
-  `method_construction_authorized / not_implemented`；readiness 完成记录不自动
-  修改阶段，必须等待独立阶段迁移授权。
+- 用户已基于上述完整 revision 明确授权本次独立阶段迁移。本 revision 只把实际
+  阶段和 research-definition 状态同步为 `method_implemented / implemented`，
+  不修改方法实现、登记测试、候选规格或 readiness 语义。
 - 当前不得接入真实模型，不得运行 GPU、正式攻击矩阵或论文实验。
 - root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
@@ -111,17 +113,18 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    基线。
 2. 在 CEG-WM Git 建立前，允许完成并独立审计候选规格与历史源 provisional
    provenance；历史仓库真实 revision/文件摘要可登记，但不得声称已经迁移。
-3. 候选规格审计、版本身份和阶段授权已经分别完成；当前阶段转换仍不授权在同一
-   revision 中实施、迁移历史源码或继承历史证据。
+3. 候选规格审计、版本身份和 construction authorization 已经分别完成；此前进入
+   `method_construction_authorized` 的阶段转换不授权在同一 revision 中实施、
+   迁移历史源码或继承历史证据。
 4. 在迁移历史代码或进入 `method_construction_authorized` 前，必须由用户明确授权建立 CEG-WM 版本身份；历史源 revision 或许可证缺口不得阻止提出该授权请求，但实际复制代码在缺口关闭前 fail closed。
 5. 版本身份只提供 provenance，不替代候选规格、实现测试、runtime 验证或科学证据。
 
 ## Governance Freeze And Extension Rule
 
 1. 本轮阻断关闭后，治理平面进入冻结状态。
-2. 本轮阻断关闭并经独立审核后，下一步只能另行申请从
-   `method_construction_authorized` 进入 `method_implemented`；本条不授权阶段迁移，
-   也不授权 runtime、GPU 或实验。
+2. 本次独立 revision 只同步 `method_implemented` 阶段和 `implemented` 状态。
+   下一步 runtime qualification 和进入 `runtime_verified` 必须另行获得明确授权；
+   本次迁移不授权 runtime、GPU 或实验。
 3. 除非真实方法、runtime、实验或证据工作暴露一个具体且可复现的缺口，不得新增通用 policy、skill、schema、harness 或治理目录。
 4. 发现具体缺口时，优先最小修改现有规则与测试；不得以治理文件数量、机械审计通过或元数据规模替代研究推进。
 

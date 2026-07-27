@@ -2,13 +2,13 @@
 
 ## 项目定位
 
-CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印研究项目。当前已合法
+CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印研究项目。此前已合法
 进入 `method_construction_authorized`；随后独立 revisions 已完成固定 13 项职责、
 27 个 CPU/synthetic 方法行为节点和唯一 readiness，并经独立语义审计。
 
 阶段实施路径固定为 `research_defined → method_construction_authorized → method_implemented`。
-实际阶段/status 仍为 `method_construction_authorized / not_implemented`，等待独立
-阶段迁移。CPU/synthetic readiness 不证明 runtime、GPU、正式 FPR 或科学效果；
+实际阶段/status 已由独立 revision 同步为 `method_implemented / implemented`。
+CPU/synthetic readiness 不证明 runtime、GPU、正式 FPR 或科学效果；
 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
 `full_ceg_wm_eligible=false`。
 

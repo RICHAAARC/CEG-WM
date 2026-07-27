@@ -396,6 +396,6 @@ candidate-selection、calibration 和 formal evaluation 门，以及由互斥 ca
 职责拟合的阈值数值。这些是证据结果，不是实现空白。
 
 13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
-审计。实际 stage/status 仍为 `method_construction_authorized / not_implemented`，
-等待独立阶段迁移。正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
+审计。实际 stage/status 已由独立 revision 同步为
+`method_implemented / implemented`。正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
 `full_ceg_wm_eligible=false`；仍无 runtime/GPU、正式 FPR 或效果证据。

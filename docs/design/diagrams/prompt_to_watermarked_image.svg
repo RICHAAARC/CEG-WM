@@ -23,7 +23,7 @@
   </defs>
   <rect width="1800" height="1180" fill="#ffffff"/>
   <text x="40" y="48" class="title">Prompt → Watermarked Image (planned CEG-WM generation path)</text>
-  <text x="40" y="76" class="sub">Scope: method_construction_authorized / not_implemented; 13 components + 27 CPU/synthetic readiness nodes recorded; stage transition pending. No runtime/GPU/formal evidence.</text>
+  <text x="40" y="76" class="sub">Scope: method_implemented / implemented; 13 components + 27 CPU/synthetic readiness nodes recorded; stage transition complete. No runtime/GPU/formal evidence.</text>
   <text x="40" y="98" class="sub">Sources: ../candidate_specifications.md · ../algorithm_primitives.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
 
   <rect x="40" y="140" width="270" height="205" class="box"/>

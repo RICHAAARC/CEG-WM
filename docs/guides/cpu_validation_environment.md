@@ -3,8 +3,8 @@
 CEG-WM 的完整 CPU 三门使用已登记、可复建的 `CEG-WM` Conda 环境。项目根目录
 `.venv` 只用于不依赖 PyTorch 的轻量治理检查；缺少 `torch` 时不能运行会收集默认
 方法节点的根 pytest 命令。两套环境都只服务
-`method_construction_authorized` 阶段的 CPU 验证，不包含模型权重、GPU runtime
-或正式实验依赖。
+方法构建/readiness 的 CPU 验证，并继续适用于 `method_implemented` 的 CPU
+验证面；不包含模型权重、GPU runtime 或正式实验依赖。
 
 ## Create
 

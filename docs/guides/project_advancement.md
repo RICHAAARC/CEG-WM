@@ -2,7 +2,7 @@
 
 ## Scope And Authority
 
-本指南是从当前 `method_construction_authorized` 状态向后推进的薄操作索引，不定义新阶段，也不替代
+本指南是从当前 `method_implemented` 状态向后推进的薄操作索引，不定义新阶段，也不替代
 外层权威 `.codex/project_contract.md`、
 [构建路线图](../design/research_construction_roadmap.md) 或
 `governance/policies/method_readiness_rules.yaml`。发生冲突时，以
@@ -11,15 +11,18 @@ runtime 验证或论文证据。
 
 当前状态固定为：
 
-- `project_stage: method_construction_authorized`；
-- `implementation_status: not_implemented`；
+- `project_stage: method_implemented`；
+- `implementation_status: implemented`；
 - authorization base revision 为
   `e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9`；
+- method transition base revision 为
+  `15e138ecf99e75084c6862b1f291b1747986123b`；
 - construction admission、13 项职责、27 个 CPU/synthetic 行为节点、唯一 readiness
   和 revision-bound 独立语义复核均已登记；
 - 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
   `full_ceg_wm_eligible=false`；
-- 未完成 runtime/GPU/FPR/科学证据；当前等待独立阶段迁移。
+- 独立阶段迁移已经完成；未完成 runtime/GPU/FPR/科学证据，runtime qualification
+  和进入 `runtime_verified` 必须另行授权。
 
 ## Advancement Map
 

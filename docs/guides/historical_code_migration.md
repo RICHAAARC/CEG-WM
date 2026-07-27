@@ -3,8 +3,8 @@
 ## Current Boundary
 
 本指南只规定未来另行获授权后的迁移流程。当前处于
-`method_construction_authorized / not_implemented`；本次阶段授权不包含历史源码
-迁移，仍只允许保留来源事实和候选映射计划，禁止复制、改写、迁入或执行历史源码。
+`method_implemented / implemented`；本次独立阶段迁移不包含历史源码迁移，
+仍只允许保留来源事实和候选映射计划，禁止复制、改写、迁入或执行历史源码。
 
 四个历史项目均为非权威只读来源。来源事实见
 [historical source registry](../reference/migration/historical_source_registry.yaml)；
