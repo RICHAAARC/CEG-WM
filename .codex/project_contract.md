@@ -152,15 +152,26 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 2. 方法、runtime 或实验任务在阶段允许时必须产生目标业务层实质实现；只改 docs、policy、skills 或 tests 不构成方法完成。
 3. 当前阶段不允许的工作必须停在权威设计和阶段门禁，不得以 placeholder 实现绕过。
 
-## Required Completion Commands
+## Required Completion Profiles
 
-完整三门使用登记的 `CEG-WM` CPU Conda 环境：
+所有任务先运行最小受影响测试，再且只再选择一个完成档位：
+
+| profile | scope | completion gates |
+| --- | --- | --- |
+| `governance` | 仅修改外层治理实现/测试/skill，或不改变研究语义的普通指南、索引与说明。 | governance pytest + harness |
+| `method` | 仅修改研究代码、研究测试或非治理运行配置，不改变阶段、候选规格或治理规则。 | project pytest + harness |
+| `full` | 同时跨研究层与治理层，或修改阶段、`.codex/research_state/`、登记设计、候选/readiness 规则、`AGENTS.md`、本合同、`pyproject.toml`、`governance/pytest.ini` 或验证档位本身。 | project pytest + governance pytest + harness |
+
+权威设计虽然是文档，仍属于 `full`；普通文档也不得仅凭扩展名自动归为
+`governance`。范围含混时使用 `full`。统一入口：
 
 ```bash
-conda run -n CEG-WM python -m pytest -q -s
-conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
-conda run -n CEG-WM python governance/harness/run_all_audits.py
+conda run -n CEG-WM python governance/tools/run_validation_profile.py governance
+conda run -n CEG-WM python governance/tools/run_validation_profile.py method
+conda run -n CEG-WM python governance/tools/run_validation_profile.py full
 ```
 
-`.venv` 只用于不依赖 PyTorch 的轻量治理检查；缺少 `torch` 时不得用它运行会收集
-默认方法测试的根 pytest 命令。
+`governance` 档位不收集项目方法测试；`method` 档位不运行治理 pytest；三个档位都运行
+完整 harness。治理合同测试会验证研究代码在拆包与移除治理层后的可运行性，因此可能
+导入 `main` 并需要 PyTorch；三个正式档位统一使用登记 Conda 环境。缺少 `torch`
+的 `.venv` 只能运行明确不导入研究代码的定向轻量检查，不能完成任何 profile。

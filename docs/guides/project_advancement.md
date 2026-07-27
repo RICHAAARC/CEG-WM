@@ -75,13 +75,11 @@ runtime 验证或论文证据。
 6. 论文 evidence 链遵循
    [artifact evidence semantics](../reference/artifact_evidence.md)。
 
-完整 CPU 三门验证命令：
+阶段推进和阶段迁移属于 `full` 档位：
 
 ```bash
-conda run -n CEG-WM python -m pytest -q -s
-conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
-conda run -n CEG-WM python governance/harness/run_all_audits.py
+conda run -n CEG-WM python governance/tools/run_validation_profile.py full
 ```
 
-这些命令只验证当前可执行门禁，不会自动授权阶段推进。`.venv` 缺少 PyTorch 时
+该命令只验证当前可执行门禁，不会自动授权阶段推进。`.venv` 缺少 PyTorch 时
 只能运行轻量治理检查，不得用于会收集默认方法测试的根 pytest 命令。

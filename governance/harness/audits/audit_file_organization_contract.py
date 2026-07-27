@@ -22,6 +22,7 @@ REQUIRED_PATHS = [
     "governance/policies/README.md",
     "governance/harness/README.md",
     "governance/tools/extract_release_package.py",
+    "governance/tools/run_validation_profile.py",
     "governance/docs/extraction_manifest_contract.md",
     "docs/README.md",
     "docs/design/research_definition.md",

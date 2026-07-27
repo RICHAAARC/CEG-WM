@@ -29,6 +29,12 @@ description: Inspect the CEG-WM contract, research-definition manifest, register
 
 ## Required Validation
 
-- Run the tests appropriate to the changed layer.
-- Complete with `.venv/bin/python -m pytest -q -s` and `.venv/bin/python governance/harness/run_all_audits.py`.
-- When governance itself changes, also run `.venv/bin/python -m pytest -q -s -c governance/pytest.ini`.
+- Run the smallest tests appropriate to the changed layer first.
+- Complete governance-only work with
+  `conda run -n CEG-WM python governance/tools/run_validation_profile.py governance`.
+- Complete research-code-only work with
+  `conda run -n CEG-WM python governance/tools/run_validation_profile.py method`.
+- Use the `full` profile for cross-plane work, stage/research-state or registered
+  design changes, pytest-selection changes, and ambiguous scope.
+- Run every completion profile in the registered Conda environment; use `.venv`
+  only for targeted checks known not to import research code.

@@ -40,13 +40,18 @@ conda run -n CEG-WM python -m pytest --collect-only -q -s
 
 ## 几何 CPU/synthetic 环境
 
-方法默认测试需要真实 CPU PyTorch 与 NumPy，使用项目登记的 Conda 环境。完整三门为：
+方法默认测试需要真实 CPU PyTorch 与 NumPy，使用项目登记的 Conda 环境。只修改
+研究代码/测试时使用 `method`，跨层、阶段、登记设计或测试选择变化使用 `full`：
 
 ```bash
-conda run -n CEG-WM python -m pytest -q -s
-conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
-conda run -n CEG-WM python governance/harness/run_all_audits.py
+conda run -n CEG-WM python governance/tools/run_validation_profile.py method
+conda run -n CEG-WM python governance/tools/run_validation_profile.py full
 ```
+
+纯治理或非研究语义文档任务使用
+`conda run -n CEG-WM python governance/tools/run_validation_profile.py governance`，
+不收集上述方法节点。治理合同测试可能导入 `main`，所以正式治理档位不能使用缺少
+PyTorch 的 `.venv`。
 
 该环境只证明 CPU/synthetic 方法行为，不替代冻结 SD3.5 revision、真实登记层 Q/K
 捕获或 GPU/runtime qualification。

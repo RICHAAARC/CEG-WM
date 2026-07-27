@@ -76,21 +76,22 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 
 ## 治理验证
 
-完整方法门禁使用登记的 `CEG-WM` CPU Conda 环境：
+方法和完整门禁使用登记的 `CEG-WM` CPU Conda 环境：
 
 ```bash
 conda env create --file configs/environments/ceg_wm_cpu.yaml
 ```
 
-完整验证：
+按变更范围选择验证档位：
 
 ```bash
-conda run -n CEG-WM python -m pytest -q -s
-conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
-conda run -n CEG-WM python governance/harness/run_all_audits.py
+conda run -n CEG-WM python governance/tools/run_validation_profile.py governance
+conda run -n CEG-WM python governance/tools/run_validation_profile.py method
+conda run -n CEG-WM python governance/tools/run_validation_profile.py full
 ```
 
-`.venv` 仅支持不依赖 PyTorch 的轻量治理检查；缺少 `torch` 时不得用 `.venv`
-执行会收集默认方法测试的根 pytest 命令。
+先运行最小受影响测试；治理任务不再无条件收集方法测试。阶段、登记设计、pytest
+选择和跨治理/研究层变更仍使用 `full`。治理合同测试可能导入研究代码，因此三个
+正式 profile 都使用 Conda；`.venv` 只运行已知不导入研究代码的定向轻量检查。
 
 环境边界见 [CPU validation guide](docs/guides/cpu_validation_environment.md)。

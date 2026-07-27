@@ -38,4 +38,12 @@ description: Design, place, mark, and validate project tests by purpose and exec
 
 ## Required Validation
 
-- Run the smallest affected test group, then project tests with `.venv/bin/python -m pytest -q -s`, outer self-tests with `.venv/bin/python -m pytest -q -s -c governance/pytest.ini`, and the test-governance audit.
+- Run the smallest affected test group first.
+- Finish governance-only test/configuration work with
+  `conda run -n CEG-WM python governance/tools/run_validation_profile.py governance`.
+- Finish research-test-only work with
+  `conda run -n CEG-WM python governance/tools/run_validation_profile.py method`.
+- Use the `full` profile when pytest selection, this skill, the project contract,
+  registered design/state, or both governance and research tests change.
+- Use the registered Conda environment for every completion profile; a lightweight
+  `.venv` may run targeted governance checks only.

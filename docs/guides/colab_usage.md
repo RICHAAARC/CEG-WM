@@ -1,6 +1,9 @@
 # Colab Usage Guide
 
 当前 CEG-WM 没有具体 Notebook；以下流程约束后续 Colab 入口。
+从 `method_implemented` 到 `runtime_verified` 的本地 CPU 优先、固定 Notebook、
+Google Drive 结果包和独立审计流程见
+[Runtime And GPU Qualification Workflow](runtime_gpu_qualification_workflow.md)。
 
 1. 从 `notebooks/colab/` 选择语义明确的 Notebook。
 2. 在环境准备 cell 中安装固定依赖并定位 repository root。
