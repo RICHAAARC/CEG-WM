@@ -25,8 +25,10 @@ from main.geometry_chain.qk_sync import (
 from main.geometry_chain.rectifier import ImageRectifierError, image_rectifier
 from main.geometry_chain.reliability import (
     GeometryReliabilityError,
+    GeometryReliabilityResult,
     GeometryReliabilityThresholds,
     geometry_reliability,
+    validate_geometry_reliability_result,
 )
 from main.geometry_chain.transform_estimator import (
     GeometricTransformEstimation,
@@ -499,13 +501,101 @@ def test_geometry_reliability_fail_closed():
     assert not not_fitted.reliable
     assert not not_fitted.allow_rectification
     assert not_fitted.status == "reliability_not_fitted"
+    assert not_fitted.fitted_reliability_thresholds is None
+    assert not_fitted.threshold_config_digest is None
+    assert not validate_geometry_reliability_result(
+        not_fitted,
+        identity_estimation,
+    )
 
+    identity_thresholds = _thresholds(gap=0.01, key=0.05, inlier=0.5)
     identity_reliable = geometry_reliability(
         identity_estimation,
-        _thresholds(gap=0.01, key=0.05, inlier=0.5),
+        identity_thresholds,
     )
     assert identity_reliable.reliable
     assert identity_reliable.allow_rectification
+    assert (
+        identity_reliable.fitted_reliability_thresholds
+        == identity_thresholds
+    )
+    assert validate_geometry_reliability_result(
+        identity_reliable,
+        identity_estimation,
+    )
+    changed_threshold_result = geometry_reliability(
+        identity_estimation,
+        replace(identity_thresholds, gamma_gap=0.02),
+    )
+    assert validate_geometry_reliability_result(
+        changed_threshold_result,
+        identity_estimation,
+    )
+
+    forged_results = (
+        GeometryReliabilityResult(
+            reliable=True,
+            allow_rectification=True,
+            status="forged",
+            failure_reasons=(),
+            fitted_reliability_thresholds=None,
+            threshold_config_digest=None,
+            estimator_search_config_digest=(
+                identity_reliable.estimator_search_config_digest
+            ),
+            estimation_identity_digest=(
+                identity_reliable.estimation_identity_digest
+            ),
+            registered_root_key_public_digest=(
+                identity_reliable.registered_root_key_public_digest
+            ),
+            reliability_identity_digest=(
+                identity_reliable.reliability_identity_digest
+            ),
+        ),
+        replace(identity_reliable, status="unreliable"),
+        replace(
+            identity_reliable,
+            fitted_reliability_thresholds=None,
+            threshold_config_digest=None,
+        ),
+        replace(
+            identity_reliable,
+            fitted_reliability_thresholds=replace(
+                identity_thresholds,
+                gamma_gap=0.02,
+            ),
+        ),
+        replace(
+            identity_reliable,
+            fitted_reliability_thresholds=(
+                changed_threshold_result.fitted_reliability_thresholds
+            ),
+            threshold_config_digest=(
+                changed_threshold_result.threshold_config_digest
+            ),
+        ),
+        replace(
+            identity_reliable,
+            failure_reasons=("forged_reliability_reason",),
+        ),
+        replace(identity_reliable, reliable=False),
+        replace(identity_reliable, allow_rectification=False),
+        replace(identity_reliable, threshold_config_digest="0" * 64),
+        replace(identity_reliable, estimator_search_config_digest="0" * 64),
+        replace(identity_reliable, estimation_identity_digest="0" * 64),
+        replace(
+            identity_reliable,
+            registered_root_key_public_digest="0" * 64,
+        ),
+        replace(identity_reliable, reliability_identity_digest="0" * 64),
+    )
+    for forged_result in forged_results:
+        with pytest.raises(GeometryReliabilityError):
+            validate_geometry_reliability_result(
+                forged_result,
+                identity_estimation,
+            )
 
     low_coverage_estimation = replace(
         identity_estimation,
@@ -710,8 +800,97 @@ def test_rectification_coordinate_protocol():
         identity_estimation,
         transform=flipped_transform,
     )
-    with pytest.raises(ImageRectifierError, match="not bound"):
+    flipped_reliability = geometry_reliability(
+        different_estimation,
+        _thresholds(gap=0.01, key=0.05, inlier=0.5),
+    )
+    flipped_result = image_rectifier(
+        image,
+        different_estimation,
+        flipped_reliability,
+    )
+    flipped_theta = different_estimation.transform.tensor().unsqueeze(0)
+    flipped_grid = functional.affine_grid(
+        flipped_theta,
+        image.shape,
+        align_corners=True,
+    )
+    expected_flipped_image = torch.floor(
+        torch.clamp(
+            functional.grid_sample(
+                image.float() / 255.0,
+                flipped_grid,
+                mode="bilinear",
+                padding_mode="border",
+                align_corners=True,
+            ),
+            0.0,
+            1.0,
+        )
+        * 255.0
+    ).to(dtype=torch.uint8)
+    assert torch.equal(
+        flipped_result.rectified_image,
+        expected_flipped_image,
+    )
+    assert not torch.equal(flipped_result.rectified_image, image)
+    exact_horizontal_flip = torch.flip(image, dims=(3,))
+    flip_quantization_difference = torch.abs(
+        flipped_result.rectified_image.to(dtype=torch.int16)
+        - exact_horizontal_flip.to(dtype=torch.int16)
+    )
+    assert int(flip_quantization_difference.max()) <= 1
+    assert int(flip_quantization_difference[:, :, :, 0].max()) <= 1
+    assert int(flip_quantization_difference[:, :, :, -1].max()) <= 1
+    assert bool(
+        (
+            flipped_result.rectified_image[:, :, :, :-1]
+            >= flipped_result.rectified_image[:, :, :, 1:]
+        ).all()
+    )
+
+    with pytest.raises(
+        ImageRectifierError,
+        match="reliability result validation failed",
+    ):
         image_rectifier(image, different_estimation, reliability)
+
+    forged_rectifier_results = (
+        GeometryReliabilityResult(
+            reliable=True,
+            allow_rectification=True,
+            status="forged",
+            failure_reasons=(),
+            fitted_reliability_thresholds=None,
+            threshold_config_digest=None,
+            estimator_search_config_digest=(
+                reliability.estimator_search_config_digest
+            ),
+            estimation_identity_digest=(
+                reliability.estimation_identity_digest
+            ),
+            registered_root_key_public_digest=(
+                reliability.registered_root_key_public_digest
+            ),
+            reliability_identity_digest=(
+                reliability.reliability_identity_digest
+            ),
+        ),
+        replace(reliability, status="unreliable"),
+        replace(
+            reliability,
+            fitted_reliability_thresholds=None,
+            threshold_config_digest=None,
+        ),
+        replace(reliability, allow_rectification=False),
+        replace(reliability, reliability_identity_digest="0" * 64),
+    )
+    for forged_result in forged_rectifier_results:
+        with pytest.raises(
+            ImageRectifierError,
+            match="reliability result validation failed",
+        ):
+            image_rectifier(image, identity_estimation, forged_result)
 
     tampered_flag_estimation = replace(
         identity_estimation,
@@ -720,7 +899,10 @@ def test_rectification_coordinate_protocol():
             is_exact_identity=False,
         ),
     )
-    with pytest.raises(ImageRectifierError, match="identity validation failed"):
+    with pytest.raises(
+        ImageRectifierError,
+        match="reliability result validation failed",
+    ):
         image_rectifier(image, tampered_flag_estimation, reliability)
 
     with pytest.raises(ImageRectifierError, match="does not allow"):

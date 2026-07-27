@@ -11,11 +11,13 @@ import torch.nn.functional as functional
 
 from main.shared.key_schedule import stable_json_utf8
 
-from .reliability import GeometryReliabilityResult
+from .reliability import (
+    GeometryReliabilityError,
+    GeometryReliabilityResult,
+    validate_geometry_reliability_result,
+)
 from .transform_estimator import (
     GeometricTransformEstimation,
-    GeometricTransformEstimatorError,
-    validate_geometric_transform_estimation,
 )
 
 RECTIFICATION_CANDIDATE_ID = "rectification_similarity"
@@ -72,33 +74,17 @@ def image_rectifier(
         or image.shape[3] <= 1
     ):
         raise ImageRectifierError("image must be RGB uint8 [1,3,H,W] with H,W > 1")
-    if type(estimation) is not GeometricTransformEstimation:
-        raise ImageRectifierError(
-            "estimation must be GeometricTransformEstimation"
-        )
-    if type(reliability) is not GeometryReliabilityResult:
-        raise ImageRectifierError(
-            "reliability must be GeometryReliabilityResult"
-        )
     try:
-        validate_geometric_transform_estimation(estimation)
-    except GeometricTransformEstimatorError as exc:
-        raise ImageRectifierError(
-            "transform estimation identity validation failed"
-        ) from exc
-    if not reliability.reliable or not reliability.allow_rectification:
-        raise ImageRectifierError("geometry reliability does not allow rectification")
-    if (
-        reliability.estimation_identity_digest
-        != estimation.estimation_identity_digest
-        or reliability.estimator_search_config_digest
-        != estimation.search_config_digest
-        or reliability.registered_root_key_public_digest
-        != estimation.registered_root_key_public_digest
-    ):
-        raise ImageRectifierError(
-            "reliability is not bound to the supplied transform estimation"
+        replayed_reliable = validate_geometry_reliability_result(
+            reliability,
+            estimation,
         )
+    except GeometryReliabilityError as exc:
+        raise ImageRectifierError(
+            "geometry reliability result validation failed"
+        ) from exc
+    if not replayed_reliable:
+        raise ImageRectifierError("geometry reliability does not allow rectification")
     matrix = estimation.transform.tensor().to(
         device=image.device, dtype=torch.float32
     )

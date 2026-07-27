@@ -46,10 +46,20 @@ class GeometryReliabilityResult:
     allow_rectification: bool
     status: str
     failure_reasons: tuple[str, ...]
+    fitted_reliability_thresholds: GeometryReliabilityThresholds | None
     threshold_config_digest: str | None
     estimator_search_config_digest: str
     estimation_identity_digest: str
     registered_root_key_public_digest: str
+    reliability_identity_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ReliabilityDecision:
+    reliable: bool
+    allow_rectification: bool
+    status: str
+    failure_reasons: tuple[str, ...]
 
 
 def _validated_thresholds(
@@ -91,13 +101,10 @@ def _validated_thresholds(
     return thresholds
 
 
-def _threshold_digest(thresholds: GeometryReliabilityThresholds) -> str:
-    identity = {
-        "candidate_ids": [
-            "key_schedule_sha256_counter",
-            QK_CANDIDATE_ID,
-            RECTIFICATION_CANDIDATE_ID,
-        ],
+def _threshold_identity(
+    thresholds: GeometryReliabilityThresholds,
+) -> dict[str, str]:
+    return {
         "epsilon_inlier_decimal": format(thresholds.epsilon_inlier, ".17g"),
         "fit_identity": thresholds.fit_identity,
         "gamma_coverage_decimal": format(thresholds.gamma_coverage, ".17g"),
@@ -107,7 +114,18 @@ def _threshold_digest(thresholds: GeometryReliabilityThresholds) -> str:
         "gamma_key_decimal": format(thresholds.gamma_key, ".17g"),
         "gamma_residual_decimal": format(thresholds.gamma_residual, ".17g"),
         "gamma_uniqueness_decimal": format(thresholds.gamma_uniqueness, ".17g"),
+    }
+
+
+def _threshold_digest(thresholds: GeometryReliabilityThresholds) -> str:
+    identity = {
+        "candidate_ids": [
+            "key_schedule_sha256_counter",
+            QK_CANDIDATE_ID,
+            RECTIFICATION_CANDIDATE_ID,
+        ],
         "rule": "fitted_geometry_reliability_threshold_conjunction",
+        "thresholds": _threshold_identity(thresholds),
     }
     return sha256(stable_json_utf8(identity)).hexdigest()
 
@@ -169,12 +187,9 @@ def _estimator_metrics_in_domain(
     )
 
 
-def geometry_reliability(
-    estimation: GeometricTransformEstimation,
-    thresholds: GeometryReliabilityThresholds | None = None,
-) -> GeometryReliabilityResult:
-    """Apply the frozen conjunction without reading any content statistic."""
-
+def _validated_estimation(
+    estimation: object,
+) -> GeometricTransformEstimation:
     if type(estimation) is not GeometricTransformEstimation:
         raise GeometryReliabilityError(
             "estimation must be GeometricTransformEstimation"
@@ -185,20 +200,20 @@ def geometry_reliability(
         raise GeometryReliabilityError(
             "transform estimation identity validation failed"
         ) from exc
+    return estimation
+
+
+def _replay_reliability_decision(
+    estimation: GeometricTransformEstimation,
+    thresholds: GeometryReliabilityThresholds | None,
+) -> _ReliabilityDecision:
     if thresholds is None:
-        return GeometryReliabilityResult(
+        return _ReliabilityDecision(
             reliable=False,
             allow_rectification=False,
             status="reliability_not_fitted",
             failure_reasons=("reliability_not_fitted",),
-            threshold_config_digest=None,
-            estimator_search_config_digest=estimation.search_config_digest,
-            estimation_identity_digest=estimation.estimation_identity_digest,
-            registered_root_key_public_digest=(
-                estimation.registered_root_key_public_digest
-            ),
         )
-    thresholds = _validated_thresholds(thresholds)
     reasons: list[str] = []
     if thresholds.epsilon_inlier != estimation.epsilon_inlier:
         reasons.append("epsilon_inlier_identity_mismatch")
@@ -228,18 +243,181 @@ def geometry_reliability(
         reasons.append("identity_margin_below_threshold")
 
     reliable = not reasons
-    return GeometryReliabilityResult(
+    return _ReliabilityDecision(
         reliable=reliable,
         allow_rectification=reliable,
         status="reliable" if reliable else "unreliable",
         failure_reasons=tuple(reasons),
-        threshold_config_digest=_threshold_digest(thresholds),
+    )
+
+
+def _reliability_identity_digest(
+    *,
+    decision: _ReliabilityDecision,
+    fitted_thresholds: GeometryReliabilityThresholds | None,
+    threshold_config_digest: str | None,
+    estimator_search_config_digest: str,
+    estimation_identity_digest: str,
+    registered_root_key_public_digest: str,
+) -> str:
+    identity = {
+        "allow_rectification": decision.allow_rectification,
+        "estimation_identity_digest": estimation_identity_digest,
+        "estimator_search_config_digest": estimator_search_config_digest,
+        "failure_reasons": list(decision.failure_reasons),
+        "fitted_reliability_thresholds": (
+            None
+            if fitted_thresholds is None
+            else _threshold_identity(fitted_thresholds)
+        ),
+        "registered_root_key_public_digest": (
+            registered_root_key_public_digest
+        ),
+        "reliable": decision.reliable,
+        "status": decision.status,
+        "threshold_config_digest": threshold_config_digest,
+    }
+    return sha256(stable_json_utf8(identity)).hexdigest()
+
+
+def _build_reliability_result(
+    estimation: GeometricTransformEstimation,
+    fitted_thresholds: GeometryReliabilityThresholds | None,
+    decision: _ReliabilityDecision,
+) -> GeometryReliabilityResult:
+    threshold_config_digest = (
+        None
+        if fitted_thresholds is None
+        else _threshold_digest(fitted_thresholds)
+    )
+    reliability_identity_digest = _reliability_identity_digest(
+        decision=decision,
+        fitted_thresholds=fitted_thresholds,
+        threshold_config_digest=threshold_config_digest,
         estimator_search_config_digest=estimation.search_config_digest,
         estimation_identity_digest=estimation.estimation_identity_digest,
         registered_root_key_public_digest=(
             estimation.registered_root_key_public_digest
         ),
     )
+    return GeometryReliabilityResult(
+        reliable=decision.reliable,
+        allow_rectification=decision.allow_rectification,
+        status=decision.status,
+        failure_reasons=decision.failure_reasons,
+        fitted_reliability_thresholds=fitted_thresholds,
+        threshold_config_digest=threshold_config_digest,
+        estimator_search_config_digest=estimation.search_config_digest,
+        estimation_identity_digest=estimation.estimation_identity_digest,
+        registered_root_key_public_digest=(
+            estimation.registered_root_key_public_digest
+        ),
+        reliability_identity_digest=reliability_identity_digest,
+    )
+
+
+def geometry_reliability(
+    estimation: GeometricTransformEstimation,
+    thresholds: GeometryReliabilityThresholds | None = None,
+) -> GeometryReliabilityResult:
+    """Apply the frozen conjunction without reading any content statistic."""
+
+    validated_estimation = _validated_estimation(estimation)
+    fitted_thresholds = (
+        None if thresholds is None else _validated_thresholds(thresholds)
+    )
+    decision = _replay_reliability_decision(
+        validated_estimation,
+        fitted_thresholds,
+    )
+    return _build_reliability_result(
+        validated_estimation,
+        fitted_thresholds,
+        decision,
+    )
+
+
+def validate_geometry_reliability_result(
+    result: GeometryReliabilityResult,
+    estimation: GeometricTransformEstimation,
+) -> bool:
+    """Replay and validate a reliability result against one estimation."""
+
+    validated_estimation = _validated_estimation(estimation)
+    if type(result) is not GeometryReliabilityResult:
+        raise GeometryReliabilityError(
+            "result must be GeometryReliabilityResult"
+        )
+    if (
+        type(result.reliable) is not bool
+        or type(result.allow_rectification) is not bool
+        or type(result.status) is not str
+        or not result.status
+        or type(result.failure_reasons) is not tuple
+        or any(
+            type(reason) is not str or not reason
+            for reason in result.failure_reasons
+        )
+    ):
+        raise GeometryReliabilityError(
+            "geometry reliability result decision fields are invalid"
+        )
+    fitted_thresholds = result.fitted_reliability_thresholds
+    if fitted_thresholds is None:
+        if result.threshold_config_digest is not None:
+            raise GeometryReliabilityError(
+                "unfitted reliability result must not bind a threshold digest"
+            )
+    else:
+        fitted_thresholds = _validated_thresholds(fitted_thresholds)
+        if result.threshold_config_digest != _threshold_digest(
+            fitted_thresholds
+        ):
+            raise GeometryReliabilityError(
+                "geometry reliability threshold digest mismatch"
+            )
+    if (
+        result.estimator_search_config_digest
+        != validated_estimation.search_config_digest
+        or result.estimation_identity_digest
+        != validated_estimation.estimation_identity_digest
+        or result.registered_root_key_public_digest
+        != validated_estimation.registered_root_key_public_digest
+    ):
+        raise GeometryReliabilityError(
+            "geometry reliability result estimation binding mismatch"
+        )
+    replayed_decision = _replay_reliability_decision(
+        validated_estimation,
+        fitted_thresholds,
+    )
+    supplied_decision = _ReliabilityDecision(
+        reliable=result.reliable,
+        allow_rectification=result.allow_rectification,
+        status=result.status,
+        failure_reasons=result.failure_reasons,
+    )
+    if supplied_decision != replayed_decision:
+        raise GeometryReliabilityError(
+            "geometry reliability decision replay mismatch"
+        )
+    expected_identity_digest = _reliability_identity_digest(
+        decision=replayed_decision,
+        fitted_thresholds=fitted_thresholds,
+        threshold_config_digest=result.threshold_config_digest,
+        estimator_search_config_digest=(
+            result.estimator_search_config_digest
+        ),
+        estimation_identity_digest=result.estimation_identity_digest,
+        registered_root_key_public_digest=(
+            result.registered_root_key_public_digest
+        ),
+    )
+    if result.reliability_identity_digest != expected_identity_digest:
+        raise GeometryReliabilityError(
+            "geometry reliability identity digest mismatch"
+        )
+    return replayed_decision.reliable
 
 
 __all__ = [
@@ -247,4 +425,5 @@ __all__ = [
     "GeometryReliabilityResult",
     "GeometryReliabilityThresholds",
     "geometry_reliability",
+    "validate_geometry_reliability_result",
 ]

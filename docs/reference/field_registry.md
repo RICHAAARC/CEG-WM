@@ -243,8 +243,10 @@ Notebook 与 repository module 的跨边界数据
 | reliable | cross_boundary | method_state | none | true | false | false | 冻结可靠性合取是否全部通过；无内容阳性语义。 |
 | allow_rectification | cross_boundary | method_state | none | true | false | false | 是否允许 image rectifier 消费同一 identity-bound estimation。 |
 | failure_reasons | cross_boundary | method_state | none | true | false | false | reliability fail-closed 的完整原因集合。 |
+| fitted_reliability_thresholds | cross_boundary | method_identity | none | false | false | false | reliability 结果携带的完整不可变拟合阈值结构；未拟合结果为空。 |
 | threshold_config_digest | cross_boundary | method_identity | none | false | false | false | 独立拟合阈值、fit identity 与冻结合取规则摘要。 |
 | estimator_search_config_digest | cross_boundary | method_identity | none | false | false | false | reliability 输出回绑 estimator 搜索身份的摘要。 |
+| reliability_identity_digest | cross_boundary | method_identity | none | true | false | false | reliability 的阈值全值、决策字段和 estimator/search/root 绑定的整体摘要。 |
 | rectified_image | cross_boundary | method_state | none | false | false | false | PyTorch inverse warp 后按 clamp、乘 255、floor 产生的 RGB uint8 图像。 |
 | valid_support_mask | cross_boundary | method_state | none | true | false | false | 同 grid 对全 1 输入以 nearest/zeros 得到的有效像素支持 mask。 |
 | token_crop_support | cross_boundary | method_statistic | none | true | false | false | estimator forward/backward token coverage 的较小值。 |

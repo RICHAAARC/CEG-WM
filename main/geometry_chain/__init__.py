@@ -22,6 +22,7 @@ from .reliability import (
     GeometryReliabilityResult,
     GeometryReliabilityThresholds,
     geometry_reliability,
+    validate_geometry_reliability_result,
 )
 from .transform_estimator import (
     GeometricTransformEstimation,
@@ -54,4 +55,5 @@ __all__ = [
     "qk_relation_tensor",
     "validate_qk_geometry_sync_result",
     "validate_geometric_transform_estimation",
+    "validate_geometry_reliability_result",
 ]
