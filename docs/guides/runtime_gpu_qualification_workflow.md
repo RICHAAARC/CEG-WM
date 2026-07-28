@@ -149,6 +149,10 @@ float16、VAE 路径和 GPU qualification 尚未执行。
 - CPU/mock 覆盖缺层、重复 hook、shape/dtype 错误和非有限量；
 - 真实 Q/K 内容留到 Colab GPU 验证。
 
+当前本地实现提供可直接绑定真实 attention module 的 `to_q`/`to_k` hook 接口，
+并已覆盖 posterior-mode、public-noise、schedule/conditioning identity 和上述
+fail-closed 路径；这不表示 SD3.5 真实 Q/K 已捕获，后者仍属于 Colab GPU gate。
+
 ### Batch 4: Runner, Result Zip And Thin Notebook
 
 - 建立一个可从命令行运行的 runtime qualification runner；

@@ -17,6 +17,7 @@ from .backend import (
     RuntimeBackendIdentity,
     RuntimeContentBackend,
     RuntimeDeviceCapabilities,
+    RuntimeQkBackend,
     validate_backend_identity,
 )
 from .configuration import (
@@ -31,6 +32,7 @@ DeviceRequest = Literal["auto", "cpu", "cuda"]
 
 if TYPE_CHECKING:
     from .content_write import ContentWriteVaeResult
+    from .qk_observation import RuntimeQkObservationResult
 
 
 class RuntimeAdapterError(RuntimeError):
@@ -259,6 +261,45 @@ class Sd35RuntimeAdapter:
             self._release_after_failure(exc)
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected Batch-2 error"
+            ) from exc
+
+    def observe_detection_qk(
+        self,
+        detection_image: torch.Tensor,
+    ) -> RuntimeQkObservationResult:
+        """Run the frozen image-only Batch-3 observation path."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before Batch-3 execution"
+            )
+        if not isinstance(self._backend, RuntimeQkBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the Batch-3 Q/K execution protocol"
+            )
+        from .qk_observation import (
+            RuntimeQkObservationError,
+            observe_detection_qk,
+        )
+
+        try:
+            return observe_detection_qk(
+                self._backend,
+                self._configuration,
+                self.session,
+                detection_image,
+            )
+        except RuntimeQkObservationError as exc:
+            self._state = RuntimeAdapterState.FAILED
+            self._release_after_failure(exc)
+            raise RuntimeAdapterError(
+                "runtime Batch-3 Q/K observation failed closed"
+            ) from exc
+        except Exception as exc:
+            self._state = RuntimeAdapterState.FAILED
+            self._release_after_failure(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected Batch-3 error"
             ) from exc
 
     def _release_backend_resources(self) -> None:

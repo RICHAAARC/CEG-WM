@@ -30,7 +30,22 @@ finite/bitwise/nonzero 完整性检查。权威 gate 是 `main` 对 row-major bi
 combined content delta；nominal LF/HF directions 不构成 actual branch
 decomposition，geometry budget 独立。
 
+Batch 3 的本地 CPU/mock 路径当前已实现：
+
+- 普通 `512 x 512` RGB 检测图像经同一 VAE posterior `mode()` 重建 detection
+  latent，禁止 posterior sampling；
+- 由 `main` 顶层公开的 key schedule 生成 schedule index 7 的公开确定性噪声，
+  backend 必须重新建立冻结 20-step schedule 并调用 `scale_noise`；
+- 三路空文本、无 CFG 的单次 image-only forward 期间，runtime 直接 hook 两个登记
+  attention module 的真实 `to_q`/`to_k` 输出，再使用模块实际 heads 与
+  `norm_q`/`norm_k` 形成 `QkLayerObservation`；
+- 缺层、投影别名、重复/缺失捕获、shape/dtype/device/nonfinite、模型、scheduler、
+  conditioning 和层序身份漂移全部 fail closed；
+- 该入口只消费普通待检图像，不接受 generation cache、embed record、参考图或
+  私有嵌入状态，也不计算 relation、可靠性或最终判定。
+
 上述本地路径通过不表示 Batch 2 整体完成。真实 SD3.5 callback、actual float16 和
-VAE 路径仍须 GPU qualification；当前也未实现模型下载/加载、真实 Q/K 捕获、
-runner、Notebook 或 GPU qualification。本地 CPU 通过不是 `runtime_verified` 或
-科学证据，低 utilization 也不得在未来实验中用于结果后筛除。
+VAE 路径仍须 GPU qualification；Batch 3 当前只证明真实投影 hook 接口和
+CPU/mock 失败语义可执行，尚未用 SD3.5 捕获真实 Q/K。当前也未实现模型下载/加载、
+runner、Notebook 或 GPU qualification。本地 CPU 通过不是 `runtime_verified`
+或科学证据，低 utilization 也不得在未来实验中用于结果后筛除。

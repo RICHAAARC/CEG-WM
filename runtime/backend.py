@@ -119,8 +119,58 @@ class RuntimeVaePosterior(Protocol):
         """Return the deterministic posterior mode."""
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeDetectionConditioning:
+    """Frozen image-only conditioning passed to the prepared backend."""
+
+    prompt: str
+    prompt_2: str
+    prompt_3: str
+    do_classifier_free_guidance: bool
+    detection_conditioning_protocol: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDetectionScheduleStep:
+    """One timestep selected from a newly established detection schedule."""
+
+    scheduler_class: str
+    inference_steps: int
+    detection_schedule_index: int
+    detection_timestep: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeQkForwardIdentity:
+    """Backend-observed identity for one image-only Q/K forward."""
+
+    runtime_config_digest: str
+    model_id: str
+    model_revision: str
+    scheduler_class: str
+    inference_steps: int
+    detection_schedule_index: int
+    detection_conditioning_protocol: str
+    prompt: str
+    prompt_2: str
+    prompt_3: str
+    do_classifier_free_guidance: bool
+    qk_layer_names: tuple[str, ...]
+
+
 @runtime_checkable
-class RuntimeContentBackend(Protocol):
+class RuntimeVaeBackend(Protocol):
+    """Shared deterministic VAE boundary used by generation and detection."""
+
+    def vae_factors(self) -> RuntimeVaeFactors:
+        """Read actual scaling and shift factors from the prepared VAE."""
+
+    def vae_encode(self, image: torch.Tensor) -> RuntimeVaePosterior:
+        """Return the posterior for one ordinary image."""
+
+
+@runtime_checkable
+class RuntimeContentBackend(RuntimeVaeBackend, Protocol):
     """Batch-2 tensor execution boundary for a prepared model backend."""
 
     def run_generation(
@@ -130,14 +180,38 @@ class RuntimeContentBackend(Protocol):
     ) -> torch.Tensor:
         """Run a generation path and consume callback return tensors."""
 
-    def vae_factors(self) -> RuntimeVaeFactors:
-        """Read actual scaling and shift factors from the prepared VAE."""
-
     def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
         """Decode a latent already transformed by the frozen protocol."""
 
-    def vae_encode(self, image: torch.Tensor) -> RuntimeVaePosterior:
-        """Return the posterior for one ordinary image."""
+
+@runtime_checkable
+class RuntimeQkBackend(RuntimeVaeBackend, Protocol):
+    """Batch-3 image-only Q/K execution boundary for a prepared model."""
+
+    def create_detection_schedule(
+        self,
+        inference_steps: int,
+    ) -> RuntimeDetectionScheduleStep:
+        """Rebuild the frozen scheduler and select its registered step."""
+
+    def scale_detection_noise(
+        self,
+        detection_latent: torch.Tensor,
+        public_noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        """Call the prepared scheduler's ``scale_noise`` operation."""
+
+    def attention_module(self, layer_name: str) -> torch.nn.Module:
+        """Return the actual registered attention module by exact path."""
+
+    def run_qk_detection_forward(
+        self,
+        noisy_detection_latent: torch.Tensor,
+        timestep: torch.Tensor,
+        conditioning: RuntimeDetectionConditioning,
+    ) -> RuntimeQkForwardIdentity:
+        """Run one image-only transformer forward while hooks are active."""
 
 
 def validate_backend_identity(

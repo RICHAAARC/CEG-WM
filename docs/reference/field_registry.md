@@ -350,6 +350,15 @@ Notebook 与 repository module 的跨边界数据
 | detection_schedule_index | persisted_protocol | runtime_identity | none | true | false | false | image-only Q/K 检测路径的冻结 scheduler index。 |
 | detection_conditioning_protocol | persisted_protocol | runtime_identity | none | true | false | false | 三路空文本且无 CFG 的 image-only Q/K conditioning 身份。 |
 | qk_layer_names | persisted_protocol | runtime_identity | none | true | false | false | runtime 必须按顺序捕获真实 Q/K 的登记 attention 层名。 |
+| prompt | cross_boundary | runtime_identity | none | false | false | false | image-only Q/K backend 调用的第一路冻结空文本；不保存生成 Prompt。 |
+| prompt_2 | cross_boundary | runtime_identity | none | false | false | false | image-only Q/K backend 调用的第二路冻结空文本。 |
+| prompt_3 | cross_boundary | runtime_identity | none | false | false | false | image-only Q/K backend 调用的第三路冻结空文本。 |
+| do_classifier_free_guidance | cross_boundary | runtime_identity | none | false | false | false | image-only Q/K forward 的实际 CFG 开关；冻结为 false。 |
+| detection_timestep | cross_boundary | runtime_identity | none | true | false | false | 重新建立的冻结 detection schedule 在 index 7 选择的实际 timestep。 |
+| public_noise_domain_digest | cross_boundary | provenance | none | true | false | false | image-only Q/K 公开确定性 scheduler noise 的职责域摘要。 |
+| public_noise_values_float32_be_sha256 | cross_boundary | provenance | none | true | false | false | CPU row-major float32 公开噪声逐值 big-endian bytes 的可重放摘要。 |
+| qk_actual_dtype | cross_boundary | runtime_identity | none | true | false | false | 两登记 attention 层实际 `to_q`/`to_k` 捕获并经模块 normalization 后的 dtype。 |
+| qk_layer_observations | cross_boundary | method_state | none | false | false | false | runtime 按登记层序返回给 `main` 的真实 `QkLayerObservation` 集合；不得持久化原始 Q/K tensor。 |
 | dependency_lock | persisted_protocol | runtime_identity | none | false | false | false | runtime 候选冻结的 Python 与模型执行依赖版本映射。 |
 | package_name | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中按冻结顺序登记的包名。 |
 | version_specifier | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中与包名绑定的精确版本或 Python 版本约束。 |

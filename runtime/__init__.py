@@ -1,8 +1,8 @@
 """CEG-WM model runtime boundary.
 
 Batch 1 exposes frozen identity/lifecycle control. Batch 2 adds paired content
-materialization measurements and deterministic VAE boundaries while delegating
-all content-budget semantics to the public ``main`` method interface.
+materialization measurements and deterministic VAE boundaries. Batch 3 adds
+image-only registered-layer Q/K capture. Method semantics remain in ``main``.
 """
 
 from .adapter import (
@@ -19,7 +19,12 @@ from .backend import (
     RuntimeBackendError,
     RuntimeBackendIdentity,
     RuntimeContentBackend,
+    RuntimeDetectionConditioning,
+    RuntimeDetectionScheduleStep,
     RuntimeDeviceCapabilities,
+    RuntimeQkBackend,
+    RuntimeQkForwardIdentity,
+    RuntimeVaeBackend,
     RuntimeVaeFactors,
     RuntimeVaePosterior,
 )
@@ -40,6 +45,11 @@ from .content_write import (
     RuntimeContentExecutionError,
     measure_content_materialization,
 )
+from .qk_observation import (
+    RuntimeQkObservationError,
+    RuntimeQkObservationResult,
+    observe_detection_qk,
+)
 
 __all__ = [
     "DEFAULT_RUNTIME_CONFIG_PATH",
@@ -57,9 +67,16 @@ __all__ = [
     "RuntimeContentBackend",
     "RuntimeContentExecutionError",
     "RuntimeConfigurationError",
+    "RuntimeDetectionConditioning",
+    "RuntimeDetectionScheduleStep",
     "RuntimeDependencyLock",
     "RuntimeDeviceCapabilities",
+    "RuntimeQkBackend",
+    "RuntimeQkForwardIdentity",
+    "RuntimeQkObservationError",
+    "RuntimeQkObservationResult",
     "RuntimeSession",
+    "RuntimeVaeBackend",
     "RuntimeVaeFactors",
     "RuntimeVaePosterior",
     "Sd35RuntimeAdapter",
@@ -67,6 +84,7 @@ __all__ = [
     "create_runtime_adapter",
     "load_runtime_configuration",
     "measure_content_materialization",
+    "observe_detection_qk",
     "parse_runtime_configuration",
     "select_runtime_device",
 ]
