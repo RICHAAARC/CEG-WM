@@ -8,6 +8,26 @@ from pathlib import Path
 import pytest
 
 from governance.harness.audits.audit_naming_conventions import run_audit
+from governance.harness.lib.naming_rules import is_allowed_file_name
+
+
+@pytest.mark.unit
+def test_snake_case_notebook_file_name_is_allowed() -> None:
+    assert is_allowed_file_name("runtime_qualification.ipynb")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "file_name",
+    (
+        "RuntimeQualification.ipynb",
+        "runtime-qualification.ipynb",
+    ),
+)
+def test_non_snake_case_notebook_file_name_is_rejected(
+    file_name: str,
+) -> None:
+    assert not is_allowed_file_name(file_name)
 
 
 @pytest.mark.unit

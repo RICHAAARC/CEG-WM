@@ -18,6 +18,7 @@ ALLOWED_LITERAL_FILE_NAMES = {"README.md", "AGENTS.md", ".gitignore", "pyproject
 ALLOWED_DIRECTORY_NAMES = {".codex", ".git", ".pytest_cache", "__pycache__"}
 ALLOWED_FILE_SUFFIXES = {
     ".drawio",
+    ".ipynb",
     ".json",
     ".md",
     ".py",
