@@ -213,6 +213,63 @@ def _safe_relative(path_text: str) -> PurePosixPath:
     return path
 
 
+def _explicit_absolute_path(value: str | Path, field_name: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        raise QualificationRunnerError(
+            f"{field_name} must be an explicit absolute path"
+        )
+    return path.resolve()
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return (
+        first == second
+        or first in second.parents
+        or second in first.parents
+    )
+
+
+def _strictly_within(path: Path, root: Path) -> bool:
+    return path != root and root in path.parents
+
+
+def _validate_storage_boundaries(
+    *,
+    profile: str,
+    result_zip: str | Path,
+    ephemeral_root: str | Path,
+    persistent_root: str | Path,
+    replay_source: str | Path | None,
+) -> tuple[Path, Path, Path, Path | None]:
+    output_path = _explicit_absolute_path(result_zip, "result_zip")
+    ephemeral = _explicit_absolute_path(ephemeral_root, "ephemeral_root")
+    persistent = _explicit_absolute_path(persistent_root, "persistent_root")
+    if _paths_overlap(ephemeral, persistent):
+        raise QualificationRunnerError(
+            "ephemeral_root and persistent_root must be bidirectionally disjoint"
+        )
+    if not _strictly_within(output_path, ephemeral):
+        raise QualificationRunnerError(
+            "result_zip must be strictly within ephemeral_root"
+        )
+    if profile == "replay":
+        if replay_source is None:
+            raise QualificationRunnerError("replay source is required")
+        source = _explicit_absolute_path(replay_source, "replay_source")
+        if not _strictly_within(source, persistent):
+            raise QualificationRunnerError(
+                "replay_source must be strictly within persistent_root"
+            )
+    else:
+        if replay_source is not None:
+            raise QualificationRunnerError(
+                "replay_source is only allowed for replay profile"
+            )
+        source = None
+    return output_path, ephemeral, persistent, source
+
+
 def verify_execution_package(
     package_root: str | Path,
     runtime_candidate_revision: str,
@@ -758,6 +815,7 @@ def _execute_once(
     *,
     backend_factory: Any,
     cache_root: Path,
+    persistent_root: Path,
     hf_token: str | None,
     root_key: str,
     prompt: str,
@@ -773,6 +831,7 @@ def _execute_once(
     factory = backend_factory or Sd35PipelineBackend
     backend = factory(
         cache_root=cache_root,
+        persistent_root=persistent_root,
         hf_token=hf_token,
         prompt=prompt,
     )
@@ -885,6 +944,7 @@ def run_runtime_qualification(
     runtime_candidate_revision: str,
     result_zip: str | Path,
     ephemeral_root: str | Path,
+    persistent_root: str | Path,
     hf_token: str | None,
     root_key: str,
     prompt: str,
@@ -895,8 +955,13 @@ def run_runtime_qualification(
 ) -> dict[str, Any]:
     """Validate the package, execute the selected profile, and always zip status."""
 
-    output_path = Path(result_zip).resolve()
-    root = Path(ephemeral_root).resolve()
+    output_path, root, persistent, replay_path = _validate_storage_boundaries(
+        profile=profile,
+        result_zip=result_zip,
+        ephemeral_root=ephemeral_root,
+        persistent_root=persistent_root,
+        replay_source=replay_source,
+    )
     root.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists():
@@ -928,14 +993,13 @@ def run_runtime_qualification(
         )
         dependency_verified = True
         if profile == "replay":
-            if replay_source is None:
-                raise QualificationRunnerError("replay source is required")
+            assert replay_path is not None
             (
                 replay_source_run_id,
                 replay_digests,
                 replay_comparison_digests,
             ) = _load_replay_source(
-                replay_source,
+                replay_path,
                 runtime_candidate_revision,
                 prompt_sha256,
                 seed,
@@ -947,6 +1011,7 @@ def run_runtime_qualification(
                     _execute_once(
                         backend_factory=backend_factory,
                         cache_root=root / "cache",
+                        persistent_root=persistent,
                         hf_token=hf_token,
                         root_key=root_key,
                         prompt=prompt,
@@ -977,6 +1042,7 @@ def run_runtime_qualification(
                 _execute_once(
                     backend_factory=backend_factory,
                     cache_root=root / "cache",
+                    persistent_root=persistent,
                     hf_token=hf_token,
                     root_key=negative_key,
                     prompt=prompt,
@@ -1138,14 +1204,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--package-root", default=".")
     parser.add_argument("--runtime-candidate-revision", default="")
-    parser.add_argument(
-        "--result-zip",
-        default="/content/ceg_wm_runtime/early_failure.zip",
-    )
-    parser.add_argument(
-        "--ephemeral-root",
-        default="/content/ceg_wm_runtime",
-    )
+    parser.add_argument("--result-zip", required=True)
+    parser.add_argument("--ephemeral-root", required=True)
+    parser.add_argument("--persistent-root", required=True)
     parser.add_argument("--replay-source")
     parser.add_argument("--hf-token-env", default="HF_TOKEN")
     parser.add_argument("--root-key-env", default="CEG_WM_ROOT_KEY")
@@ -1161,6 +1222,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_candidate_revision=arguments.runtime_candidate_revision,
         result_zip=arguments.result_zip,
         ephemeral_root=arguments.ephemeral_root,
+        persistent_root=arguments.persistent_root,
         hf_token=os.environ.get(arguments.hf_token_env),
         root_key=os.environ.get(arguments.root_key_env, ""),
         prompt=arguments.prompt,

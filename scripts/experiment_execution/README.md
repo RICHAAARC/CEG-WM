@@ -39,6 +39,27 @@ The final archive path is outside the repository. Upload that one archive to
 the revision-specific Google Drive `execution_packages/<revision>/` directory;
 do not rebuild it in Colab.
 
+Use the following fixed archive and Notebook-ingress rules:
+
+1. The sole authoritative immutable archive is
+   `execution_packages/<runtime_candidate_revision>/ceg_wm_runtime_execution_<runtime_candidate_revision>.zip`.
+   Never overwrite or modify a frozen revision-specific archive.
+2. `execution_packages/current/ceg_wm_runtime_execution.zip` is only the fixed
+   Notebook ingress alias. It is not revision or evidence authority.
+3. Create the alias by copying the authoritative archive byte for byte. Do not
+   rebuild, repack, recompress, or otherwise modify the zip for the alias.
+4. After the copy, compute SHA-256 for both files and require the digests to be
+   identical.
+5. The `current` path supplies no runtime identity. After extraction and
+   verification, only `runtime_execution_manifest.json` field
+   `runtime_candidate_revision` identifies the run.
+6. The Notebook writes results under
+   `runs/<runtime_candidate_revision>/<run_id>/`, using the verified manifest
+   revision. To change candidates, overwrite only the alias with a byte-for-byte
+   copy of another frozen authoritative archive and recheck equal SHA-256
+   digests. Never overwrite an existing authoritative archive or historical
+   results.
+
 ## Run inside an independently unpacked package
 
 Unpack into a new ephemeral directory. Set `PYTHONDONTWRITEBYTECODE=1` before
@@ -59,8 +80,20 @@ python -m scripts.experiment_execution.runtime_qualification_runner \
   --package-root . \
   --runtime-candidate-revision '<40 hex revision from manifest>' \
   --result-zip /content/ceg_wm_runtime/result.zip \
-  --ephemeral-root /content/ceg_wm_runtime
+  --ephemeral-root /content/ceg_wm_runtime \
+  --persistent-root /content/drive/MyDrive/CEG-WM/runtime_qualification
 ```
+
+`--result-zip`, `--ephemeral-root`, and `--persistent-root` are explicit
+required arguments and have no runner defaults. The result target must be
+strictly inside the ephemeral root; the ephemeral and persistent roots must
+be disjoint in both ancestor directions. Only `replay` accepts
+`--replay-source`, and that source must be strictly inside the persistent
+root. Smoke and qualification must omit it. The backend receives the same
+persistent root and independently rejects a model-cache root that equals,
+contains, or is contained by it. The Notebook therefore produces the runner
+zip under ephemeral storage first and only then copies it into the
+manifest-revision/run-ID Drive directory.
 
 The runner verifies the complete manifest file set, file hashes/sizes,
 revision, requirements lock, and every installed dependency version before

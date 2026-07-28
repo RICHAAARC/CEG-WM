@@ -38,7 +38,19 @@ from scripts.experiment_execution.build_runtime_qualification_package import (
 pytestmark = pytest.mark.unit
 
 
-def test_sd35_backend_is_lazy_and_rejects_drive_cache(monkeypatch, tmp_path: Path) -> None:
+def _runner_storage(
+    tmp_path: Path,
+    label: str,
+) -> tuple[Path, Path, Path]:
+    ephemeral = tmp_path / f"{label}-ephemeral"
+    persistent = tmp_path / f"{label}-persistent"
+    return ephemeral, persistent, ephemeral / f"{label}.zip"
+
+
+def test_sd35_backend_is_lazy_and_accepts_disjoint_roots(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
         "runtime.sd35_backend.importlib.import_module",
@@ -46,13 +58,30 @@ def test_sd35_backend_is_lazy_and_rejects_drive_cache(monkeypatch, tmp_path: Pat
     )
     Sd35PipelineBackend(
         cache_root=tmp_path / "cache",
+        persistent_root=tmp_path / "persistent",
         hf_token=None,
         prompt="probe",
     )
     assert calls == []
-    with pytest.raises(Sd35BackendError, match="Google Drive"):
+
+
+@pytest.mark.parametrize(
+    ("cache_relative", "persistent_relative"),
+    (
+        ("shared", "shared"),
+        ("persistent/cache", "persistent"),
+        ("cache", "cache/persistent"),
+    ),
+)
+def test_sd35_backend_rejects_equal_or_nested_storage_roots(
+    tmp_path: Path,
+    cache_relative: str,
+    persistent_relative: str,
+) -> None:
+    with pytest.raises(Sd35BackendError, match="bidirectionally disjoint"):
         Sd35PipelineBackend(
-            cache_root="/content/drive/MyDrive/cache",
+            cache_root=tmp_path / cache_relative,
+            persistent_root=tmp_path / persistent_relative,
             hf_token=None,
             prompt="probe",
         )
@@ -203,6 +232,7 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
     backend = CpuTestBackend(
         cache_root=tmp_path / "cache",
+        persistent_root=tmp_path / "persistent",
         hf_token="memory-only",
         prompt="probe",
     )
@@ -412,6 +442,8 @@ def test_runner_profiles_create_minimal_result_zip(monkeypatch, tmp_path: Path) 
     package.mkdir()
     _package_manifest(package, revision)
     def execute(**kwargs):
+        assert kwargs["cache_root"] == ephemeral / "cache"
+        assert kwargs["persistent_root"] == persistent
         return _record(
             kwargs["key_control"],
             run_id=kwargs["run_id"],
@@ -419,14 +451,15 @@ def test_runner_profiles_create_minimal_result_zip(monkeypatch, tmp_path: Path) 
         )
 
     monkeypatch.setattr(runner, "_execute_once", execute)
-    output = tmp_path / "result.zip"
+    ephemeral, persistent, output = _runner_storage(tmp_path, "result")
     result = runner.run_runtime_qualification(
         profile="qualification",
         run_id="run-001",
         package_root=package,
         runtime_candidate_revision=revision,
         result_zip=output,
-        ephemeral_root=tmp_path / "ephemeral",
+        ephemeral_root=ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="qualification-key",
         prompt="probe",
@@ -501,14 +534,15 @@ def test_runner_packages_classified_failure(monkeypatch, tmp_path: Path) -> None
             raise RuntimeAdapterError("wrapped") from cause
 
     monkeypatch.setattr(runner, "_execute_once", fail)
-    output = tmp_path / "failure.zip"
+    ephemeral, persistent, output = _runner_storage(tmp_path, "failure")
     result = runner.run_runtime_qualification(
         profile="smoke",
         run_id="run-002",
         package_root=package,
         runtime_candidate_revision=revision,
         result_zip=output,
-        ephemeral_root=tmp_path / "ephemeral",
+        ephemeral_root=ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="qualification-key",
         prompt="probe",
@@ -524,14 +558,18 @@ def test_runner_packages_classified_failure(monkeypatch, tmp_path: Path) -> None
 
 
 def test_runner_packages_preflight_manifest_failure(tmp_path: Path) -> None:
-    output = tmp_path / "preflight-failure.zip"
+    ephemeral, persistent, output = _runner_storage(
+        tmp_path,
+        "preflight-failure",
+    )
     result = runner.run_runtime_qualification(
         profile="smoke",
         run_id="run-003",
         package_root=tmp_path / "missing-package",
         runtime_candidate_revision="3" * 40,
         result_zip=output,
-        ephemeral_root=tmp_path / "ephemeral",
+        ephemeral_root=ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="qualification-key",
         prompt="probe",
@@ -539,6 +577,97 @@ def test_runner_packages_preflight_manifest_failure(tmp_path: Path) -> None:
     )
     assert result["run_status"] == "failed"
     assert output.is_file()
+
+
+@pytest.mark.parametrize(
+    ("ephemeral_relative", "persistent_relative"),
+    (
+        ("shared", "shared"),
+        ("persistent/ephemeral", "persistent"),
+        ("ephemeral", "ephemeral/persistent"),
+    ),
+)
+def test_runner_rejects_equal_or_nested_storage_roots(
+    tmp_path: Path,
+    ephemeral_relative: str,
+    persistent_relative: str,
+) -> None:
+    ephemeral = tmp_path / ephemeral_relative
+    persistent = tmp_path / persistent_relative
+    with pytest.raises(
+        runner.QualificationRunnerError,
+        match="bidirectionally disjoint",
+    ):
+        runner.run_runtime_qualification(
+            profile="smoke",
+            run_id="storage-overlap",
+            package_root=tmp_path / "package",
+            runtime_candidate_revision="a" * 40,
+            result_zip=ephemeral / "result.zip",
+            ephemeral_root=ephemeral,
+            persistent_root=persistent,
+            hf_token=None,
+            root_key="key",
+            prompt="probe",
+        )
+
+
+def test_runner_rejects_result_outside_ephemeral_root(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        runner.QualificationRunnerError,
+        match="strictly within ephemeral_root",
+    ):
+        runner.run_runtime_qualification(
+            profile="smoke",
+            run_id="result-outside",
+            package_root=tmp_path / "package",
+            runtime_candidate_revision="a" * 40,
+            result_zip=tmp_path / "outside.zip",
+            ephemeral_root=tmp_path / "ephemeral",
+            persistent_root=tmp_path / "persistent",
+            hf_token=None,
+            root_key="key",
+            prompt="probe",
+        )
+
+
+@pytest.mark.parametrize(
+    ("profile", "source_location", "message"),
+    (
+        ("replay", None, "replay source is required"),
+        ("smoke", "persistent/source.zip", "only allowed for replay"),
+        ("qualification", "persistent/source.zip", "only allowed for replay"),
+        ("replay", "outside/source.zip", "strictly within persistent_root"),
+        ("replay", "persistent", "strictly within persistent_root"),
+    ),
+)
+def test_runner_enforces_profile_specific_replay_source_boundary(
+    tmp_path: Path,
+    profile: str,
+    source_location: str | None,
+    message: str,
+) -> None:
+    ephemeral = tmp_path / "ephemeral"
+    persistent = tmp_path / "persistent"
+    replay_source = (
+        None if source_location is None else tmp_path / source_location
+    )
+    with pytest.raises(runner.QualificationRunnerError, match=message):
+        runner.run_runtime_qualification(
+            profile=profile,
+            run_id="replay-boundary",
+            package_root=tmp_path / "package",
+            runtime_candidate_revision="a" * 40,
+            result_zip=ephemeral / "result.zip",
+            ephemeral_root=ephemeral,
+            persistent_root=persistent,
+            hf_token=None,
+            root_key="key",
+            prompt="probe",
+            replay_source=replay_source,
+        )
 
 
 @pytest.mark.parametrize(
@@ -579,13 +708,15 @@ def test_runner_rejects_incomplete_success_record(monkeypatch, tmp_path: Path) -
     package.mkdir()
     _package_manifest(package, revision)
     monkeypatch.setattr(runner, "_execute_once", lambda **_kwargs: {"budget_status": "accepted"})
+    ephemeral, persistent, output = _runner_storage(tmp_path, "schema")
     result = runner.run_runtime_qualification(
         profile="smoke",
         run_id="schema-failure",
         package_root=package,
         runtime_candidate_revision=revision,
-        result_zip=tmp_path / "schema.zip",
-        ephemeral_root=tmp_path / "ephemeral",
+        result_zip=output,
+        ephemeral_root=ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
@@ -618,13 +749,18 @@ def test_qualification_classifies_independent_repetition_drift(
         return record
 
     monkeypatch.setattr(runner, "_execute_once", execute)
+    ephemeral, persistent, output = _runner_storage(
+        tmp_path,
+        "determinism",
+    )
     result = runner.run_runtime_qualification(
         profile="qualification",
         run_id="determinism-drift",
         package_root=package,
         runtime_candidate_revision=revision,
-        result_zip=tmp_path / "determinism.zip",
-        ephemeral_root=tmp_path / "ephemeral",
+        result_zip=output,
+        ephemeral_root=ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
@@ -779,31 +915,40 @@ def test_replay_validates_source_then_reruns(monkeypatch, tmp_path: Path) -> Non
         )
 
     monkeypatch.setattr(runner, "_execute_once", execute)
-    qualification_zip = tmp_path / "qualification.zip"
+    qualification_ephemeral, persistent, qualification_zip = _runner_storage(
+        tmp_path,
+        "qualification",
+    )
     qualification = runner.run_runtime_qualification(
         profile="qualification",
         run_id="qualification-source",
         package_root=package,
         runtime_candidate_revision=revision,
         result_zip=qualification_zip,
-        ephemeral_root=tmp_path / "ephemeral-q",
+        ephemeral_root=qualification_ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
         supplied_dependency_versions=_versions(),
     )
+    replay_source = persistent / "runs" / revision / qualification_zip.name
+    replay_source.parent.mkdir(parents=True)
+    shutil.copy2(qualification_zip, replay_source)
     calls.clear()
+    replay_ephemeral = tmp_path / "replay-ephemeral"
     replay = runner.run_runtime_qualification(
         profile="replay",
         run_id="replay-run",
         package_root=package,
         runtime_candidate_revision=revision,
-        result_zip=tmp_path / "replay.zip",
-        ephemeral_root=tmp_path / "ephemeral-r",
+        result_zip=replay_ephemeral / "replay.zip",
+        ephemeral_root=replay_ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
-        replay_source=qualification_zip,
+        replay_source=replay_source,
         supplied_dependency_versions=_versions(),
     )
     assert qualification["run_status"] == replay["run_status"] == "passed"
@@ -846,14 +991,15 @@ def _qualification_source(
         )
 
     monkeypatch.setattr(runner, "_execute_once", execute)
-    source = tmp_path / "source.zip"
+    ephemeral, persistent, source = _runner_storage(tmp_path, "source")
     result = runner.run_runtime_qualification(
         profile="qualification",
         run_id="source-run",
         package_root=package,
         runtime_candidate_revision=revision,
         result_zip=source,
-        ephemeral_root=tmp_path / "source-ephemeral",
+        ephemeral_root=ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
@@ -982,21 +1128,25 @@ def test_replay_rejects_record_bytes_that_drift_from_summary(
         )
 
     monkeypatch.setattr(runner, "_execute_once", execute)
-    source = tmp_path / "source.zip"
+    source_ephemeral, persistent, source = _runner_storage(
+        tmp_path,
+        "record-source",
+    )
     source_result = runner.run_runtime_qualification(
         profile="qualification",
         run_id="source-run",
         package_root=package,
         runtime_candidate_revision=revision,
         result_zip=source,
-        ephemeral_root=tmp_path / "source-ephemeral",
+        ephemeral_root=source_ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
         supplied_dependency_versions=_versions(),
     )
     assert source_result["run_status"] == "passed"
-    tampered = tmp_path / "tampered" / source.name
+    tampered = persistent / "tampered" / source.name
     with zipfile.ZipFile(source) as original:
         record_payload = original.read("runtime_checks.jsonl").replace(
             b'"gpu_name": "Fake GPU"',
@@ -1008,13 +1158,15 @@ def test_replay_rejects_record_bytes_that_drift_from_summary(
         tampered,
         {"runtime_checks.jsonl": record_payload},
     )
+    replay_ephemeral = tmp_path / "record-replay-ephemeral"
     replay = runner.run_runtime_qualification(
         profile="replay",
         run_id="replay-run",
         package_root=package,
         runtime_candidate_revision=revision,
-        result_zip=tmp_path / "replay.zip",
-        ephemeral_root=tmp_path / "replay-ephemeral",
+        result_zip=replay_ephemeral / "replay.zip",
+        ephemeral_root=replay_ephemeral,
+        persistent_root=persistent,
         hf_token=None,
         root_key="key",
         prompt="probe",
@@ -1044,12 +1196,17 @@ def test_cli_exit_code_matches_result_status(
         "run_runtime_qualification",
         lambda **_kwargs: result,
     )
+    ephemeral = tmp_path / "cli-ephemeral"
     assert runner.main(
         [
             "--run-id",
             "cli-run",
             "--result-zip",
-            str(tmp_path / "result.zip"),
+            str(ephemeral / "result.zip"),
+            "--ephemeral-root",
+            str(ephemeral),
+            "--persistent-root",
+            str(tmp_path / "cli-persistent"),
         ]
     ) == expected
 
@@ -1058,6 +1215,82 @@ def test_cli_requires_run_id() -> None:
     with pytest.raises(SystemExit) as exc:
         runner.main([])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "missing_option",
+    ("--result-zip", "--ephemeral-root", "--persistent-root"),
+)
+def test_cli_requires_explicit_storage_arguments(
+    tmp_path: Path,
+    missing_option: str,
+) -> None:
+    ephemeral = tmp_path / "cli-required-ephemeral"
+    arguments = [
+        "--run-id",
+        "cli-required",
+        "--result-zip",
+        str(ephemeral / "result.zip"),
+        "--ephemeral-root",
+        str(ephemeral),
+        "--persistent-root",
+        str(tmp_path / "cli-required-persistent"),
+    ]
+    option_index = arguments.index(missing_option)
+    del arguments[option_index : option_index + 2]
+    with pytest.raises(SystemExit) as exc:
+        runner.main(arguments)
+    assert exc.value.code == 2
+
+
+def test_execute_once_passes_persistent_root_to_backend_factory(
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FactoryStop(RuntimeError):
+        pass
+
+    def factory(**kwargs):
+        captured.update(kwargs)
+        raise FactoryStop
+
+    with pytest.raises(FactoryStop):
+        runner._execute_once(
+            backend_factory=factory,
+            cache_root=tmp_path / "cache",
+            persistent_root=tmp_path / "persistent",
+            hf_token=None,
+            root_key="key",
+            prompt="probe",
+            seed=1,
+            key_control="registered",
+            run_id="factory-boundary",
+            runtime_candidate_revision="a" * 40,
+        )
+    assert captured["cache_root"] == tmp_path / "cache"
+    assert captured["persistent_root"] == tmp_path / "persistent"
+
+
+def test_delivery_python_sources_have_no_scanned_local_absolute_path() -> None:
+    root = Path(__file__).resolve().parents[2]
+    scanned_paths = (
+        root / "runtime/sd35_backend.py",
+        root / "scripts/experiment_execution/runtime_qualification_runner.py",
+    )
+    local_prefixes = (
+        "/home/",
+        "/Users/",
+        "/mnt/",
+        "/content/",
+        "/tmp/",
+        "/var/",
+        "/opt/",
+        "/root/",
+    )
+    for path in scanned_paths:
+        source = path.read_text(encoding="utf-8")
+        assert not any(prefix in source for prefix in local_prefixes)
 
 
 def _write_package_fixture(repo: Path) -> None:
@@ -1253,7 +1486,9 @@ def test_built_package_unpacks_and_runs_independently(tmp_path: Path) -> None:
         "raise AssertionError('main imported before package verification')\n",
         encoding="utf-8",
     )
-    failure_zip = tmp_path / "preimport-failure.zip"
+    preimport_ephemeral = tmp_path / "preimport-ephemeral"
+    preimport_persistent = tmp_path / "preimport-persistent"
+    failure_zip = preimport_ephemeral / "preimport-failure.zip"
     preimport = subprocess.run(
         [
             sys.executable,
@@ -1265,7 +1500,8 @@ def test_built_package_unpacks_and_runs_independently(tmp_path: Path) -> None:
                 "profile='smoke', run_id='preimport-check', package_root='.', "
                 f"runtime_candidate_revision='{revision}', "
                 f"result_zip={str(failure_zip)!r}, "
-                f"ephemeral_root={str(tmp_path / 'preimport-ephemeral')!r}, "
+                f"ephemeral_root={str(preimport_ephemeral)!r}, "
+                f"persistent_root={str(preimport_persistent)!r}, "
                 "hf_token=None, root_key='test-key', prompt='probe', "
                 "supplied_dependency_versions={}); "
                 "assert result['run_status'] == 'failed'; "
@@ -1297,6 +1533,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     assert "HF_TOKEN" in sources
     assert "/content/drive/MyDrive/CEG-WM/runtime_qualification" in sources
     assert '"--run-id", RUN_ID' in sources
+    assert '"--persistent-root", DRIVE_ROOT' in sources
     assert "completed.returncode" in sources
     assert "runner exit/status drifted" in sources
     assert 'summary["result_schema_version"] == 2' in sources

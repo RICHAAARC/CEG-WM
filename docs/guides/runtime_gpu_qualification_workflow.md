@@ -182,6 +182,23 @@ PYTHONDONTWRITEBYTECODE=1 python \
   "<输出目录>/ceg_wm_runtime_execution_${RUNTIME_CANDIDATE_REVISION}.zip"
 ```
 
+Drive 中 execution package 的身份与 Notebook 入口按以下固定规则处理：
+
+1. 唯一权威、不可变 archive 是
+   `execution_packages/<runtime_candidate_revision>/ceg_wm_runtime_execution_<runtime_candidate_revision>.zip`；
+   已冻结的 revision-specific archive 不得覆盖或改写。
+2. `execution_packages/current/ceg_wm_runtime_execution.zip` 只是固定 Notebook
+   ingress alias，不是 revision 或证据权威。
+3. alias 必须从上述权威 archive 逐字节复制；不得为 alias 重建、重新打包、重新
+   压缩或修改 zip。
+4. 复制后必须分别计算权威 archive 与 alias 的 SHA-256，并确认两者完全相同。
+5. current 路径不提供运行身份；Notebook 解包并校验后，只以包内
+   `runtime_execution_manifest.json` 的 `runtime_candidate_revision` 作为运行身份。
+6. Notebook 把结果写入
+   `runs/<runtime_candidate_revision>/<run_id>/`，其中 revision 来自已校验的
+   manifest。更换候选时，只能用另一个已冻结的权威 archive 覆盖 alias，并重新
+   核对两者 SHA-256 相同；不得改写既有权威 archive 或历史 results。
+
 包内独立运行的完整安装、Secret 环境变量、runner 参数、退出码和 result zip
 契约以包根 `README.md` 为准。必须先把包安全解压到新的临时目录，并在任何
 `main`/`runtime` 导入前校验 manifest 的 revision、`package_ready`、完整文件集、
@@ -189,6 +206,15 @@ PYTHONDONTWRITEBYTECODE=1 python \
 前设置。runner 的退出码 `0/1/2` 分别表示通过、已完成的失败、incomplete/preflight
 失败；任何非零退出都不得被 Notebook 隐藏，能形成的 failure zip 仍须复制回
 revision/run-id 对应的 Drive 目录。
+
+runner 的 `result_zip`、`ephemeral_root` 和 `persistent_root` 没有默认值，调用方
+必须显式提供。结果 zip 必须严格位于 ephemeral root 内；ephemeral 与 persistent
+root 在相等和两个祖先方向都必须不相交。只有 `replay` profile 可以提供
+`replay_source`，且 source 必须严格位于 persistent root 内；smoke/qualification
+携带 replay source 必须 fail closed。runtime backend 接收同一个 persistent root，
+并独立拒绝与其相等、包含它或被它包含的模型 cache root。Notebook 因此先让 runner
+在 `/content` 临时根生成结果，再逐字节复制到 manifest revision/run-id 对应的
+Drive 目录；这不改变上述 archive/alias 身份规则。
 
 ### Local Tests
 
@@ -369,13 +395,20 @@ G:\我的云端硬盘\CEG-WM\runtime_qualification\
 ```text
 runtime_qualification\
 ├── execution_packages\
-│   └── <runtime_candidate_revision>\
-│       └── ceg_wm_runtime_execution_<revision>.zip
+│   ├── <runtime_candidate_revision>\
+│   │   └── ceg_wm_runtime_execution_<runtime_candidate_revision>.zip
+│   └── current\
+│       └── ceg_wm_runtime_execution.zip
 └── runs\
     └── <runtime_candidate_revision>\
         └── <run_id>\
             └── ceg_wm_runtime_qualification_<run_id>.zip
 ```
+
+revision-specific archive 是不可变权威对象；`current` 文件只是在运行前从所选
+权威 archive 逐字节复制得到的 Notebook ingress alias。两份文件的 SHA-256 必须
+相同；实际 revision 必须从 alias 包内已校验 manifest 读取，结果按该 revision
+归档。切换候选只覆盖 alias 并重核 SHA-256，不覆盖历史权威 archive 或 results。
 
 Notebook 工作副本可放在：
 

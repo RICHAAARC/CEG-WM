@@ -31,6 +31,21 @@ class Sd35BackendError(RuntimeBackendError):
     """The real SD3.5 backend failed closed."""
 
 
+def _explicit_absolute_root(value: str | Path, field_name: str) -> Path:
+    root = Path(value)
+    if not root.is_absolute():
+        raise Sd35BackendError(f"{field_name} must be an explicit absolute path")
+    return root.resolve()
+
+
+def _roots_overlap(first: Path, second: Path) -> bool:
+    return (
+        first == second
+        or first in second.parents
+        or second in first.parents
+    )
+
+
 class Sd35PipelineBackend:
     """Diffusers SD3.5 backend connected to the Batch-2/3 protocols."""
 
@@ -38,20 +53,26 @@ class Sd35PipelineBackend:
         self,
         *,
         cache_root: str | Path,
+        persistent_root: str | Path,
         hf_token: str | None,
         prompt: str,
         negative_prompt: str = "",
     ) -> None:
-        root = Path(cache_root)
-        if not root.is_absolute():
-            raise Sd35BackendError("cache_root must be an explicit absolute path")
-        if root == Path("/content/drive") or Path("/content/drive") in root.parents:
-            raise Sd35BackendError("model caches must not be placed on Google Drive")
+        root = _explicit_absolute_root(cache_root, "cache_root")
+        persistent = _explicit_absolute_root(
+            persistent_root,
+            "persistent_root",
+        )
+        if _roots_overlap(root, persistent):
+            raise Sd35BackendError(
+                "cache_root and persistent_root must be bidirectionally disjoint"
+            )
         if not isinstance(hf_token, (str, type(None))):
             raise Sd35BackendError("hf_token must be text or None")
         if not isinstance(prompt, str) or not isinstance(negative_prompt, str):
             raise Sd35BackendError("generation prompts must be text")
         self._cache_root = root
+        self._persistent_root = persistent
         self._hf_token = hf_token
         self._prompt = prompt
         self._negative_prompt = negative_prompt
