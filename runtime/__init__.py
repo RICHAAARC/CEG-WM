@@ -1,8 +1,8 @@
 """CEG-WM model runtime boundary.
 
-Batch 1 exposes frozen configuration parsing, device selection, backend identity
-verification, and initialization lifecycle only. Model execution is deliberately
-absent until the later runtime batches.
+Batch 1 exposes frozen identity/lifecycle control. Batch 2 adds paired content
+materialization measurements and deterministic VAE boundaries without making a
+content-budget acceptance decision.
 """
 
 from .adapter import (
@@ -14,10 +14,14 @@ from .adapter import (
     select_runtime_device,
 )
 from .backend import (
+    GenerationCallback,
     RuntimeBackend,
     RuntimeBackendError,
     RuntimeBackendIdentity,
+    RuntimeContentBackend,
     RuntimeDeviceCapabilities,
+    RuntimeVaeFactors,
+    RuntimeVaePosterior,
 )
 from .configuration import (
     DEFAULT_RUNTIME_CONFIG_PATH,
@@ -28,23 +32,41 @@ from .configuration import (
     load_runtime_configuration,
     parse_runtime_configuration,
 )
+from .content_write import (
+    BudgetAcceptanceStatus,
+    ContentEmbeddingOperation,
+    ContentMaterializationMeasurement,
+    ContentWriteVaeResult,
+    RuntimeContentExecutionError,
+    measure_content_materialization,
+)
 
 __all__ = [
     "DEFAULT_RUNTIME_CONFIG_PATH",
+    "BudgetAcceptanceStatus",
+    "ContentEmbeddingOperation",
+    "ContentMaterializationMeasurement",
+    "ContentWriteVaeResult",
+    "GenerationCallback",
     "RUNTIME_CANDIDATE_ID",
     "RuntimeAdapterError",
     "RuntimeAdapterState",
     "RuntimeBackend",
     "RuntimeBackendError",
     "RuntimeBackendIdentity",
+    "RuntimeContentBackend",
+    "RuntimeContentExecutionError",
     "RuntimeConfigurationError",
     "RuntimeDependencyLock",
     "RuntimeDeviceCapabilities",
     "RuntimeSession",
+    "RuntimeVaeFactors",
+    "RuntimeVaePosterior",
     "Sd35RuntimeAdapter",
     "Sd35RuntimeConfiguration",
     "create_runtime_adapter",
     "load_runtime_configuration",
+    "measure_content_materialization",
     "parse_runtime_configuration",
     "select_runtime_device",
 ]

@@ -117,6 +117,28 @@ Notebook 与 repository module 的跨边界数据
 | lf_carrier_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 实际消费的 LF carrier 配置摘要；LF 未启用时为空。 |
 | hf_carrier_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 实际消费的 HF carrier 配置摘要；HF 未启用时为空。 |
 | embedder_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 候选、模式和共同总预算身份摘要。 |
+| paired_base_latent_digest | cross_boundary | provenance | none | false | false | false | clean/watermarked 两条生成路径共享且各自 clone 的同一基础 float16 latent 身份摘要。 |
+| clean_callback_indices | cross_boundary | runtime_identity | none | false | false | false | clean 生成路径实际触发 callback 的完整有序 index 序列。 |
+| watermarked_callback_indices | cross_boundary | runtime_identity | none | false | false | false | watermarked 生成路径实际触发 callback 的完整有序 index 序列。 |
+| content_materialization | cross_boundary | runtime_state | none | false | false | false | callback 18 的 actual-dtype 张量、独立重放身份和 realized 测量集合；不包含预算接受判定。 |
+| baseline_latent_actual | cross_boundary | runtime_state | none | false | false | false | callback 18 写入前、按注册 float16 dtype 物化的实际 latent 防共享副本。 |
+| written_latent_actual | cross_boundary | runtime_state | none | false | false | false | callback 18 将理论内容 delta 加入 baseline 后按注册 float16 dtype 物化的实际 latent。 |
+| delta_content_actual | cross_boundary | runtime_state | none | false | false | false | `float32(written_latent_actual)-float32(baseline_latent_actual)` 得到的 combined actual-dtype 内容更新。 |
+| baseline_latent_digest | cross_boundary | provenance | none | false | false | false | actual baseline 的 dtype、shape 和逐位张量内容摘要。 |
+| written_latent_digest | cross_boundary | provenance | none | false | false | false | actual written latent 的 dtype、shape 和逐位张量内容摘要。 |
+| delta_content_actual_digest | cross_boundary | provenance | none | false | false | false | `delta_content_actual` row-major float32 big-endian 字节摘要。 |
+| materialization_replay_identity | cross_boundary | runtime_identity | none | false | false | false | binary16 RNE 重放协议、callback、embedder identity、actual 张量摘要和 realized 测量的联合身份。 |
+| realized_total_l2 | cross_boundary | method_statistic | none | false | false | false | runtime 对 combined `delta_content_actual` 按固定 row-major float32 累加协议重算的实际总 L2；不单独表示预算合格。 |
+| realized_relative_l2 | cross_boundary | method_statistic | none | false | false | false | `realized_total_l2` 除以 actual callback baseline L2 的实际相对量；不单独表示预算合格。 |
+| budget_acceptance_status | cross_boundary | runtime_state | none | false | false | false | Batch 2 基础设施当前仅产生 `not_evaluated`；未预登记 acceptance rule 前不得输出 accepted/rejected。 |
+| clean_generation_terminal_latent | cross_boundary | runtime_state | none | false | false | false | clean 路径完成冻结 scheduler suffix 后、进入 generation VAE decode 的实际 latent。 |
+| watermarked_generation_terminal_latent | cross_boundary | runtime_state | none | false | false | false | watermarked 路径完成冻结 scheduler suffix 后、进入 generation VAE decode 的实际 latent。 |
+| vae_scaling_factor_actual | cross_boundary | runtime_identity | none | false | false | false | prepared backend 从登记 VAE config 来源读取的有限正 scaling factor 实际值。 |
+| vae_shift_factor_actual | cross_boundary | runtime_identity | none | false | false | false | prepared backend 从登记 VAE config 来源读取的有限 shift factor 实际值。 |
+| clean_image | cross_boundary | runtime_state | none | false | false | false | clean final latent 严格按冻结 scaling/shift decode 协议产生的普通图像张量。 |
+| watermarked_image | cross_boundary | runtime_state | none | false | false | false | watermarked final latent 严格按冻结 scaling/shift decode 协议产生的普通图像张量。 |
+| clean_detection_latent | cross_boundary | runtime_state | none | false | false | false | clean image 经 VAE posterior mode 和冻结 shift/scaling encode 协议得到的检测 latent。 |
+| watermarked_detection_latent | cross_boundary | runtime_state | none | false | false | false | watermarked image 经 VAE posterior mode 和冻结 shift/scaling encode 协议得到的检测 latent。 |
 | observation_protocol | cross_boundary | method_identity | none | false | false | false | 普通检测图像进入 LF/HF detector 的公共编码协议身份。 |
 | observation_digest | cross_boundary | provenance | none | false | false | false | 普通检测图像侧 LF/HF 编码观测的 float32 字节摘要；两分支组合时必须相同。 |
 | hf_score | cross_boundary | method_statistic | none | true | false | false | HF detector 独立产生的 blind direct score。 |

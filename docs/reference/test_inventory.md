@@ -15,6 +15,7 @@ conda run -n CEG-WM python -m pytest --collect-only -q -s
 | test_path | level | default_run | responsibility |
 | --- | --- | --- | --- |
 | `tests/unit/test_runtime_configuration_and_adapter.py` | `unit` | yes | 冻结 SD3.5 runtime 配置解析、稳定摘要、设备选择、mock backend 身份核验和 fail-closed 初始化控制流；不加载模型、不访问网络或 GPU。 |
+| `tests/unit/test_runtime_content_write_and_vae.py` | `unit` | yes | CPU tensor/fake backend 覆盖 clean/watermarked 同基础 latent、callback index 序列、float16 deterministic replay、actual delta/realized 测量、写入消失/非有限/overflow 失败以及 VAE decode/posterior-mode encode；不判定预算合格，不加载模型、不访问网络或 GPU。 |
 | `tests/unit/test_geometry_chain.py` | `unit`, `quick` | yes | 真实 Q/K 数值关系、geometry-key 投影、actual-dtype 同步回溯、冻结 similarity 搜索、8 个 wrong-key、独立 reliability fail-closed 与 PyTorch 回正坐标协议；完整搜索节点 CPU 成本较高但仍是默认 synthetic 方法验证，不属于 real-model、`slow` 或 `formal`。 |
 | `tests/unit/test_lf_routing_combination.py` | `unit` | yes | LF carrier/blind detector、从实际 S/T/R/Q 观测重演公式的 routing、同 route/mask 绑定的 LF/HF embedder、同普通图像观测约束与未晋升 C0/C1/C2 组合诊断。 |
 | `tests/unit/test_hf_content_backbone.py` | `unit` | yes | HF sparse-tail 载体、HF-only 共同总预算、盲 direct score、wrong-key 与当前 HF-only content detector。 |

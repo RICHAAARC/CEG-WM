@@ -125,7 +125,10 @@ Colab 重启重放时，才使用同一 Notebook 的 `replay` profile。
 - 计算 `delta_content_actual` 和 realized combined total norm/relative L2；
 - generation decode 使用冻结 VAE scaling/shift；
 - detection encode 使用 VAE posterior mode，不采样；
-- CPU/mock 覆盖 callback 未触发、重复触发、dtype 写入消失、非有限量和预算漂移。
+- CPU/mock 覆盖 callback 未触发、重复/错误 index、dtype 写入消失、非有限量、
+  overflow 和 deterministic binary16 replay；
+- 未预登记 actual-dtype budget acceptance rule 前只返回 realized 测量与
+  `budget_acceptance_status=not_evaluated`，不得由 runtime 声称预算合格。
 
 ### Batch 3: Q/K Observation Path
 
@@ -148,13 +151,18 @@ Colab 重启重放时，才使用同一 Notebook 的 `replay` profile。
 ### Local Tests
 
 真实 backend、GPU、network、large model、smoke 和 integration 不得进入默认 pytest。
-冻结本地 runtime candidate revision 前运行：
+每个本地批次先运行最小定向 CPU/mock 测试；完成时按项目合同且只运行一个注册
+validation profile：
 
 ```bash
-conda run -n CEG-WM python -m pytest -q -s
-conda run -n CEG-WM python -m pytest -q -s -c governance/pytest.ini
-conda run -n CEG-WM python governance/harness/run_all_audits.py
+conda run -n CEG-WM python governance/tools/run_validation_profile.py method
+conda run -n CEG-WM python governance/tools/run_validation_profile.py full
 ```
+
+research/runtime 代码、对应测试及普通非语义引用文档（包括字段登记和测试清单）
+使用 `method`；只有修改 registered design、readiness、stage/research-state、
+pytest selection 或实际跨治理平面时才使用 `full`。不得把两个 profile 都当作同一
+完成门重复运行。
 
 CPU 通过只表示可以申请 Colab/GPU 检查，不表示 runtime 已验证。
 
@@ -175,7 +183,8 @@ runtime 在 callback index 18 以 actual dtype 写入
   ↓
 runtime 返回实际写入量
   ↓
-main 判定预算是否合格
+main 判定预算是否合格（仅在另行预登记 acceptance rule 后；
+当前 Batch 2 状态为 not_evaluated）
   ↓
 VAE 解码普通 RGB 图像
 ```

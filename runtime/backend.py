@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from math import isfinite
+from typing import Callable, Protocol, runtime_checkable
+
+import torch
 
 from .configuration import RuntimeDependencyLock, Sd35RuntimeConfiguration
 
 
 class RuntimeBackendError(RuntimeError):
     """A backend could not provide the frozen runtime identity."""
+
+
+GenerationCallback = Callable[[int, torch.Tensor], torch.Tensor]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +84,60 @@ class RuntimeBackend(Protocol):
 
     def close(self) -> None:
         """Release any resources acquired by ``prepare``."""
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeVaeFactors:
+    """Actual VAE scaling and shift factors read from the prepared backend."""
+
+    scaling_factor: float
+    shift_factor: float
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.scaling_factor, bool)
+            or not isinstance(self.scaling_factor, (int, float))
+            or not isfinite(float(self.scaling_factor))
+            or float(self.scaling_factor) <= 0.0
+        ):
+            raise RuntimeBackendError(
+                "VAE scaling_factor must be finite and positive"
+            )
+        if (
+            isinstance(self.shift_factor, bool)
+            or not isinstance(self.shift_factor, (int, float))
+            or not isfinite(float(self.shift_factor))
+        ):
+            raise RuntimeBackendError("VAE shift_factor must be finite")
+
+
+@runtime_checkable
+class RuntimeVaePosterior(Protocol):
+    """Narrow posterior boundary; runtime is only allowed to call ``mode``."""
+
+    def mode(self) -> torch.Tensor:
+        """Return the deterministic posterior mode."""
+
+
+@runtime_checkable
+class RuntimeContentBackend(Protocol):
+    """Batch-2 tensor execution boundary for a prepared model backend."""
+
+    def run_generation(
+        self,
+        initial_latent: torch.Tensor,
+        callback: GenerationCallback,
+    ) -> torch.Tensor:
+        """Run a generation path and consume callback return tensors."""
+
+    def vae_factors(self) -> RuntimeVaeFactors:
+        """Read actual scaling and shift factors from the prepared VAE."""
+
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        """Decode a latent already transformed by the frozen protocol."""
+
+    def vae_encode(self, image: torch.Tensor) -> RuntimeVaePosterior:
+        """Return the posterior for one ordinary image."""
 
 
 def validate_backend_identity(

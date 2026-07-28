@@ -5,12 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Callable, Literal
+
+import torch
+
+from main import ContentEmbeddingResult
 
 from .backend import (
     RuntimeBackend,
     RuntimeBackendError,
     RuntimeBackendIdentity,
+    RuntimeContentBackend,
     RuntimeDeviceCapabilities,
     validate_backend_identity,
 )
@@ -23,6 +28,9 @@ from .configuration import (
 
 
 DeviceRequest = Literal["auto", "cpu", "cuda"]
+
+if TYPE_CHECKING:
+    from .content_write import ContentWriteVaeResult
 
 
 class RuntimeAdapterError(RuntimeError):
@@ -208,6 +216,50 @@ class Sd35RuntimeAdapter:
         self._session = None
         if prior_state is RuntimeAdapterState.READY:
             self._state = RuntimeAdapterState.CLOSED
+
+    def execute_content_write_and_vae(
+        self,
+        base_latent: torch.Tensor,
+        content_embedding_operation: Callable[
+            [tuple[float, ...]],
+            ContentEmbeddingResult,
+        ],
+    ) -> ContentWriteVaeResult:
+        """Run the Batch-2 path only after identity-checked preparation."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before Batch-2 execution"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the Batch-2 execution protocol"
+            )
+        from .content_write import (
+            RuntimeContentExecutionError,
+            execute_content_write_and_vae,
+        )
+
+        try:
+            return execute_content_write_and_vae(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+                content_embedding_operation,
+            )
+        except RuntimeContentExecutionError as exc:
+            self._state = RuntimeAdapterState.FAILED
+            self._release_after_failure(exc)
+            raise RuntimeAdapterError(
+                "runtime Batch-2 execution failed closed"
+            ) from exc
+        except Exception as exc:
+            self._state = RuntimeAdapterState.FAILED
+            self._release_after_failure(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected Batch-2 error"
+            ) from exc
 
     def _release_backend_resources(self) -> None:
         if not self._owns_backend_resources:
