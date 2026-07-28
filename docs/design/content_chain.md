@@ -54,13 +54,29 @@ route identity/digests 和不读取 observations 的 disabled uniform control。
 carrier 方向，按冻结 `a` 构造 `u_content(a)`，保持共同总能量预算并在任一 active
 方向或 combined 方向为零时 fail closed；`a` 与 `1-a` 是 mixing coefficients，
 combined norm 包含两方向的交叉项。它独占 HF-only/LF-only/combined delta、
-target total norm/relative L2 与 realized combined total norm/relative L2 核验。
+nominal/limit、actual-dtype materialization reconciliation 与 realized combined
+total norm/relative L2 核验。
 runtime 只物化 delta
 并返回 actual-dtype 张量及 combined delta 的 total norm/relative L2，不改变预算或
 方向，也不提供未定义的分支级实际写入量。embedder 不得计算检测统计。
 `lf_detector` 独立从普通待检图像、
 检测 key 和公共资产计算盲 `s_lf`。`content_detector` 消费独立可观测的 `s_lf`
 与 `s_hf`，负责标准化、冻结组合和正式 `D_M` 身份，不得隐藏分支失败或错误密钥归属。
+
+共同 nominal relative L2 与 actual-dtype combined content hard limit 均冻结为
+`3/250`。runtime 对 embedder 请求的 binary32 scale `s` 只物化
+`z_s=cast_actual(fp32(z0)+s*delta_content_nominal)`，用独立 binary16 RNE
+bitwise replay 和 row-major binary32 协议返回 actual delta/norm。embedder 以
+`A<=f32((3/250)*norm32(fp32(z0)))` 直接比较；full scale 超限时在 binary32
+`[0,1]` 二分至没有新 representable midpoint，返回最大非零可行 scale，或在
+zero plateau 后仍无非零可行写入时 fail closed。不得用 realized ratio、
+`q_budget`、`tau_actual_budget`、经验 tolerance 或实际强度下限代替硬比较。
+
+hard limit 只约束 LF/HF/routing 最终合成的 combined content delta。
+`content_direction`、`active_lf_direction`、`active_hf_direction` 与 target
+component 只是 nominal formula witnesses，不构成 actual branch decomposition；
+geometry delta 与现有 geometry/total budget 独立。`budget_utilization` 仅用于诊断，
+低 utilization 不得作为未来实验的事后样本筛选条件。
 
 任何 LF/HF 组合必须：
 

@@ -88,44 +88,77 @@ HF-only 对照令 `mask_hf = 1`。模板、稀疏支持、mask identity 和单�
 
 ### Content Embedder Write
 
-`content_embedder` 独占配置中的冻结 `a`、LF/HF 方向组合和共同相对能量
-`rho_content`。HF-only、LF-only 和 combined 都由它产生统一的
-`delta_content`；combined 情形为：
+`content_embedder` 独占配置中的冻结 `a`、LF/HF 方向组合、名义相对能量
+`content_relative_l2_nominal=3/250` 和 actual-dtype combined content hard limit
+`content_relative_l2_limit=3/250`。HF-only、LF-only 和 combined 都由它产生统一的
+`delta_content_nominal`；combined 情形为：
 
 ```text
 gamma_lh = dot(u_lf, u_hf)
 v_content(a) = a * u_lf + (1-a) * u_hf
 c(a) = ||v_content(a)||_2
 u_content(a) = v_content(a) / c(a)
-delta_content = rho_content * norm(z_j) * u_content(a)
+delta_content_nominal =
+    content_relative_l2_nominal * norm32(fp32(z0)) * u_content(a)
 ```
 
 `a` 只能取 `lf_low_pass` 登记的有限集合；`a` 与 `1-a` 是 mixing coefficients，
 不是可加的方向份额。HF-only/LF-only 直接使用相应单位方向，但仍
-受同一 target total budget 约束。任一 active direction 为零、`c(a)` 为零/非有限、
-target total 不符或 `a` 非法都由 `content_embedder` fail closed。
+受同一 nominal 与 actual hard limit 约束。任一 active direction 为零、`c(a)`
+为零/非有限、nominal formula replay 不符或 `a` 非法都由 `content_embedder`
+fail closed。方向、交叉项和 target components 都是 nominal formula witnesses；
+它们不定义 actual branch decomposition。
 
 ### Runtime Materialization
 
-runtime 只在冻结 callback/model/dtype 边界物化：
+令 `z0` 为 callback 18 已按登记 binary16 dtype 物化的 baseline。runtime 只在冻结
+callback/model/dtype 边界，按 `content_embedder` 请求的正 binary32 scale `s<=1`
+逐项物化：
 
 ```text
-z_written = materialize_dtype(z_j + delta_content)
-delta_content_actual = float32(z_written) - float32(materialize_dtype(z_j))
+d_s[i]            = f32(f32(delta_content_nominal[i]) * f32(s))
+precast[i]        = f32(f32(z0[i]) + d_s[i])
+z_s[i]            = binary16_RNE(precast[i])
+delta_actual_s[i] = f32(z_s[i]) - f32(z0[i])
 ```
 
-runtime 只返回实际张量和 `delta_content_actual` 的 realized combined total
-norm/relative L2；是否满足 target total budget 仍由 embedder 判定。runtime 不得
-改变 `a`、方向、`rho_content` 或重新分配能量，也不得声称可观测载体级实际写入
-分解。
-需要分支贡献诊断时，只记录 `a`、`gamma_lh`、`c(a)` 与可重建的 target
-component vectors/norms；它们因交叉项存在而不可加为 total。
+binary16 转换冻结为 round-to-nearest-ties-to-even；subnormal 按 binary16 规则保留
+或舍入为零，overflow、非有限或非法 baseline fail closed。runtime 对 `z_s` 做独立
+逐 bit replay，只返回实际张量、`delta_actual_s`、replay identity、完整性状态与
+realized 测量，不拥有 budget acceptance、retry 或 scale 选择。
+
+所有 norm 都按 row-major binary32 协议执行：
+
+```text
+S_0 = f32(0)
+q_i = f32(x_i*x_i)
+S_{i+1} = f32(S_i+q_i)
+norm32(x) = f32(sqrt(S_n))
+L = f32(norm32(fp32(z0)) * f32(3/250))
+A = norm32(delta_actual_s)
+accept iff A <= L
+```
+
+权威 gate 是 `A<=L` 的直接比较。realized relative L2 和
+`budget_utilization=A/L` 只作诊断；不得引入比值门、`q_budget`、
+`tau_actual_budget`、经验 tolerance 或 actual 强度下限。
+
+`content_embedder` 先请求 `s=1`。若超限，则在 binary32 `[0,1]` 上使用
+`f32(f32(f32(lower)+f32(upper))*f32(0.5))` midpoint 二分；actual delta 为零的
+点是不可接受 zero plateau，只推进 lower。midpoint 与任一边界 bitwise 相同时终止，
+返回最大非零可行 observation；若不存在则 fail closed。不得使用幂次粗回退。
+
+runtime 不得改变 `a`、方向、nominal/limit 或重新分配能量，也不得声称可观测载体级
+实际写入分解。需要分支贡献诊断时，只记录 `a`、`gamma_lh`、`c(a)` 与可重建的
+nominal target component vectors/norms；它们因交叉项存在而不可加为 total。actual
+hard limit 只约束最终 combined content delta；geometry delta 与其独立。低
+utilization 不得成为未来实验的结果后排除规则。
 注入位置、调度器、剩余生成区间、latent 变换和模型 revision 必须在 runtime 验证前
 冻结。
 
-历史项目中的 SD3.5、二十步 FlowMatch、callback index 18 和 relative L2 `0.012`
-只能作为迁移候选身份；它们必须在本项目中完成来源登记、字节或行为等价验证和独立
-复现后，才能成为项目参数。
+SD3.5、二十步 FlowMatch、callback index 18 与上述 `3/250` nominal/limit 已登记为
+当前项目候选身份；真实模型是否可执行仍必须通过独立 runtime/GPU qualification，
+不能由 CPU/mock 或历史结果替代。
 
 ### Direct Score
 
@@ -199,8 +232,9 @@ s_lf = score_lf_M(E_M(I), T_lf)
 - LF-only、HF-only、route-disabled 和 combined 都能由 `content_embedder` 在相同
   总预算下消融；
 - router 记录 mask 覆盖率和 identity/digests；`content_embedder` 核验 mixing
-  coefficients、方向/支持身份、target total norm/relative L2，并在真实 runtime
-  gate 核验 realized combined total norm/relative L2；
+  coefficients、方向/支持身份、nominal/limit，并在 runtime handshake 核验
+  integrity、scale/attempt/budget status 与 realized combined total
+  norm/relative L2；
 - 路由不得根据攻击标签、evaluation 分数或错误密钥结果改变。
 
 router 不返回 `budget_lf`、`budget_hf` 或其他标量预算。首轮必须同时评估无路由

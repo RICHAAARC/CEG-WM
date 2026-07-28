@@ -121,14 +121,24 @@ Colab 重启重放时，才使用同一 Notebook 的 `replay` profile。
 ### Batch 2: Content Write And VAE Path
 
 - 建立 clean/watermarked 同基础 latent 配对；
-- 在 callback index 18 物化 `main` 返回的内容 delta；
-- 计算 `delta_content_actual` 和 realized combined total norm/relative L2；
+- 在 callback index 18 按 `main` 请求的 binary32 scale 物化 nominal content delta；
+- 计算 `delta_content_actual`、realized combined total norm/relative L2 和 replay
+  identity；
 - generation decode 使用冻结 VAE scaling/shift；
 - detection encode 使用 VAE posterior mode，不采样；
 - CPU/mock 覆盖 callback 未触发、重复/错误 index、dtype 写入消失、非有限量、
   overflow 和 deterministic binary16 replay；
-- 未预登记 actual-dtype budget acceptance rule 前只返回 realized 测量与
-  `budget_acceptance_status=not_evaluated`，不得由 runtime 声称预算合格。
+- `content_relative_l2_nominal=content_relative_l2_limit=3/250`；runtime 只物化、
+  测量和执行完整性检查，`main.content_embedder` 独占 hard-budget 接受、重试、
+  scale 选择和最终 fail-closed；
+- CPU/property 覆盖 row-major binary32 算术、binary16 RNE/subnormal/overflow、
+  预算谓词单调性、无新 midpoint 终止、最大非零可行选择、zero plateau、轻微超限
+  和无非零可行写入；
+- 不设置 `tau_actual_budget`、`q_budget` 接近门、经验 tolerance 或 actual 强度
+  下限；ratio/utilization 只作诊断，低 utilization 不得结果后筛除。
+
+Batch 2 的本地实现与测试通过仍不表示本批完成；真实 SD3.5 callback、actual
+float16、VAE 路径和 GPU qualification 尚未执行。
 
 ### Batch 3: Q/K Observation Path
 
@@ -166,6 +176,25 @@ pytest selection 或实际跨治理平面时才使用 `full`。不得把两个 p
 
 CPU 通过只表示可以申请 Colab/GPU 检查，不表示 runtime 已验证。
 
+### Actual-Dtype Semantic Revision Closure
+
+actual-dtype 预算语义属于 registered design 与 readiness 受保护实现，必须使用两个
+独立 revisions 闭合：
+
+1. R1 同步 registered design、`main/content_chain/embedder.py`、runtime handshake
+   和真实行为/property tests；只运行定向 CPU/static 检查。旧
+   `method_readiness.yaml` 在 R1 后暂时 stale 是预期事实，不得运行 completion
+   profile 或声称 readiness 闭合。
+2. 独立语义审计必须绑定 R1 exact revision、新 candidate SHA 和全部受影响
+   方法/测试路径，给出 `APPROVE` 或 `REQUEST CHANGES`。
+3. 仅在 `APPROVE` 后创建 R2；R2 只更新 readiness 的 candidate SHA、reviewed
+   revision、真实审核引用及必要纯状态绑定，不夹带方法/runtime 修复。
+4. R2 在登记 `CEG-WM` Conda 环境运行唯一 `full` profile，再由独立 gatekeeper
+   核对 R1→R2、candidate digest、protected paths、工作树和 stage 仍为
+   `method_implemented`。未通过不得进入 Batch 3。
+
+该两-revision 闭环不等于 Batch 2、GPU qualification 或 `runtime_verified` 完成。
+
 ## Runtime Method Flow
 
 ### Generation
@@ -179,15 +208,30 @@ callback 写入前 latent 和必要 observation
   ↓
 main 计算 routing、LF/HF directions 和共同总预算 delta
   ↓
-runtime 在 callback index 18 以 actual dtype 写入
+runtime 在 callback index 18 按 main 请求的 scale 以 actual dtype 物化
   ↓
-runtime 返回实际写入量
+runtime 返回 actual 张量、replay、integrity 和 realized 测量
   ↓
-main 判定预算是否合格（仅在另行预登记 acceptance rule 后；
-当前 Batch 2 状态为 not_evaluated）
+main 直接执行 hard-budget 比较；超限时驱动 binary32 最大可行 scale 搜索
   ↓
 VAE 解码普通 RGB 图像
 ```
+
+冻结物化/预算摘要为：
+
+```text
+z_s = cast_binary16_RNE(fp32(z0) + f32(s*delta_content_nominal))
+delta_actual_s = fp32(z_s) - fp32(z0)
+A = norm32_row_major(delta_actual_s)
+L = f32(norm32_row_major(fp32(z0)) * f32(3/250))
+accept iff A <= L
+```
+
+full scale 超限时，`main.content_embedder` 在 binary32 `[0,1]` 上使用冻结 midpoint
+二分，直到 midpoint 与边界 bitwise 相同；zero plateau 不算可行写入，返回最大
+非零可行 scale 或 fail closed。runtime 不输出独立 budget decision。hard limit
+只约束 LF/HF/routing 最终 combined content delta；nominal directions 不是 actual
+branch decomposition，geometry budget 独立。
 
 ### Detection And Q/K
 
@@ -344,7 +388,8 @@ smoke 通过后检查：
 
 - clean/watermarked 同基础 latent 配对；
 - callback 不缺失、不重复；
-- actual-dtype 写入没有消失，预算量可测；
+- actual-dtype 写入没有消失，独立 replay 通过，`main` 返回 accepted 的
+  nonzero maximal feasible scale，预算状态与尝试身份可追溯；
 - VAE 路径和检测输入边界正确；
 - 登记 Q/K 层、shape、dtype 和检测端重建路径正确；
 - 同 Prompt/seed/key 重复运行在合理容差内一致；

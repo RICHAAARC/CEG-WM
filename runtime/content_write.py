@@ -10,7 +10,15 @@ from typing import Callable, Literal, Sequence
 
 import torch
 
-from main import ContentEmbeddingResult
+from main import (
+    ContentEmbeddingResult,
+    ContentEmbedderError,
+    ContentMaterializationObservation,
+    ContentMaterializationResult,
+    content_materialization_replay_identity,
+    reconcile_content_materialization_budget,
+    scale_content_delta_binary32,
+)
 
 from .adapter import RuntimeSession
 from .backend import (
@@ -25,7 +33,10 @@ ContentEmbeddingOperation = Callable[
     [tuple[float, ...]],
     ContentEmbeddingResult,
 ]
-BudgetAcceptanceStatus = Literal["not_evaluated"]
+MaterializationIntegrityStatus = Literal[
+    "passed",
+    "write_disappeared",
+]
 
 
 class RuntimeContentExecutionError(RuntimeError):
@@ -34,20 +45,40 @@ class RuntimeContentExecutionError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ContentMaterializationMeasurement:
-    """Runtime measurements only; no content-budget acceptance decision."""
+    """一个 scale 的 runtime 物化证据，不拥有预算判定。"""
 
+    attempt_index: int
     callback_index: int
     embedder_config_digest: str
+    materialization_scale: float
+    scaled_nominal_delta_digest: str
     baseline_latent_actual: torch.Tensor
     written_latent_actual: torch.Tensor
     delta_content_actual: torch.Tensor
     baseline_latent_digest: str
     written_latent_digest: str
     delta_content_actual_digest: str
+    tensor_replay_identity: str
     materialization_replay_identity: str
     realized_total_l2: float
     realized_relative_l2: float
-    budget_acceptance_status: BudgetAcceptanceStatus
+    integrity_status: MaterializationIntegrityStatus
+
+
+@dataclass(frozen=True, slots=True)
+class ContentMaterializationAttempt:
+    """不保留中间 tensor 的逐次 materialization 审计身份。"""
+
+    attempt_index: int
+    materialization_scale: float
+    scaled_nominal_delta_digest: str
+    written_latent_digest: str
+    delta_content_actual_digest: str
+    tensor_replay_identity: str
+    materialization_replay_identity: str
+    realized_total_l2: float
+    realized_relative_l2: float
+    integrity_status: MaterializationIntegrityStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +92,11 @@ class ContentWriteVaeResult:
     clean_callback_indices: tuple[int, ...]
     watermarked_callback_indices: tuple[int, ...]
     content_materialization: ContentMaterializationMeasurement
+    content_materialization_result: ContentMaterializationResult
+    content_materialization_attempts: tuple[
+        ContentMaterializationAttempt,
+        ...,
+    ]
     clean_generation_terminal_latent: torch.Tensor
     watermarked_generation_terminal_latent: torch.Tensor
     vae_scaling_factor_actual: float
@@ -199,6 +235,8 @@ def measure_content_materialization(
     baseline_latent_actual: torch.Tensor,
     written_latent_actual: torch.Tensor,
     *,
+    materialization_scale: float,
+    attempt_index: int,
     callback_index: int,
     expected_callback_index: int,
     actual_dtype: str,
@@ -208,6 +246,15 @@ def measure_content_materialization(
     if type(embedding_result) is not ContentEmbeddingResult:
         raise RuntimeContentExecutionError(
             "materialization requires ContentEmbeddingResult"
+        )
+    scale = _float32(materialization_scale, "materialization_scale")
+    if not 0.0 < scale <= 1.0:
+        raise RuntimeContentExecutionError(
+            "materialization_scale must be in (0,1]"
+        )
+    if type(attempt_index) is not int or attempt_index <= 0:
+        raise RuntimeContentExecutionError(
+            "materialization attempt index must be positive"
         )
     if actual_dtype != "float16":
         raise RuntimeContentExecutionError(
@@ -260,19 +307,34 @@ def measure_content_materialization(
         raise RuntimeContentExecutionError(
             "embedding latent norm does not match actual callback baseline"
         )
-    delta_values = _float32_vector(
+    nominal_delta_values = _float32_vector(
         embedding_result.delta_content,
         expected_size,
         "delta_content",
     )
-    if _float32_digest(delta_values) != embedding_result.delta_content_digest:
+    if (
+        _float32_digest(nominal_delta_values)
+        != embedding_result.delta_content_digest
+    ):
         raise RuntimeContentExecutionError("delta_content digest mismatch")
+    try:
+        scaled_nominal_delta = scale_content_delta_binary32(
+            embedding_result,
+            scale,
+        )
+    except ContentEmbedderError as exc:
+        raise RuntimeContentExecutionError(
+            f"scaled nominal content delta is invalid: {exc}"
+        ) from exc
+    scaled_nominal_delta_digest = _float32_digest(
+        scaled_nominal_delta
+    )
 
     expected_bits = tuple(
-        _float16_bits(_float32(base + delta, "content write sum"))
-        for base, delta in zip(
+        _float16_bits(_float32(base + scaled, "content write sum"))
+        for base, scaled in zip(
             baseline_values,
-            delta_values,
+            scaled_nominal_delta,
             strict=True,
         )
     )
@@ -293,39 +355,115 @@ def measure_content_materialization(
         delta_actual_values,
         "delta_content_actual",
     )
-    if realized_total_l2 == 0.0:
-        raise RuntimeContentExecutionError(
-            "actual-dtype content write disappeared"
+    integrity_status: MaterializationIntegrityStatus = (
+        "write_disappeared"
+        if realized_total_l2 == 0.0
+        else "passed"
+    )
+    realized_relative_l2 = (
+        0.0
+        if realized_total_l2 == 0.0
+        else _float32(
+            realized_total_l2 / baseline_norm,
+            "realized_relative_l2",
         )
-    realized_relative_l2 = _float32(
-        realized_total_l2 / baseline_norm,
-        "realized_relative_l2",
     )
     baseline_digest = _tensor_digest(baseline)
     written_digest = _tensor_digest(written)
     delta_digest = _float32_digest(delta_actual_values)
-    replay_identity = sha256(
+    tensor_replay_identity = sha256(
         (
-            f"float16-rne-v1\0{callback_index}\0"
+            f"float16-rne-v2\0{attempt_index}\0{callback_index}\0"
             f"{embedding_result.embedder_config_digest}\0"
+            f"{pack('>f', scale).hex()}\0"
+            f"{scaled_nominal_delta_digest}\0"
             f"{baseline_digest}\0{written_digest}\0{delta_digest}\0"
             f"{pack('>f', realized_total_l2).hex()}\0"
             f"{pack('>f', realized_relative_l2).hex()}"
         ).encode("ascii")
     ).hexdigest()
+    try:
+        replay_identity = content_materialization_replay_identity(
+            embedding_result,
+            materialization_scale=scale,
+            scaled_nominal_delta_digest=scaled_nominal_delta_digest,
+            baseline_norm=baseline_norm,
+            delta_content_actual=delta_actual_values,
+            realized_total_l2=realized_total_l2,
+            integrity_status=integrity_status,
+        )
+    except ContentEmbedderError as exc:
+        raise RuntimeContentExecutionError(
+            f"materialization replay identity failed: {exc}"
+        ) from exc
     return ContentMaterializationMeasurement(
+        attempt_index=attempt_index,
         callback_index=callback_index,
         embedder_config_digest=embedding_result.embedder_config_digest,
+        materialization_scale=scale,
+        scaled_nominal_delta_digest=scaled_nominal_delta_digest,
         baseline_latent_actual=baseline.detach().clone(),
         written_latent_actual=written.detach().clone(),
         delta_content_actual=delta_actual.detach().clone(),
         baseline_latent_digest=baseline_digest,
         written_latent_digest=written_digest,
         delta_content_actual_digest=delta_digest,
+        tensor_replay_identity=tensor_replay_identity,
         materialization_replay_identity=replay_identity,
         realized_total_l2=realized_total_l2,
         realized_relative_l2=realized_relative_l2,
-        budget_acceptance_status="not_evaluated",
+        integrity_status=integrity_status,
+    )
+
+
+def _method_observation(
+    measurement: ContentMaterializationMeasurement,
+) -> ContentMaterializationObservation:
+    return ContentMaterializationObservation(
+        materialization_scale=measurement.materialization_scale,
+        baseline_norm=_l2_float32(
+            _float32_values(
+                measurement.baseline_latent_actual,
+                "baseline_latent_actual",
+            ),
+            "baseline_latent_actual",
+        ),
+        scaled_nominal_delta_digest=(
+            measurement.scaled_nominal_delta_digest
+        ),
+        delta_content_actual=_float32_values(
+            measurement.delta_content_actual,
+            "delta_content_actual",
+        ),
+        realized_total_l2=measurement.realized_total_l2,
+        integrity_status=measurement.integrity_status,
+        deterministic_binary16_replay_passed=True,
+        materialization_replay_identity=(
+            measurement.materialization_replay_identity
+        ),
+    )
+
+
+def _attempt_record(
+    measurement: ContentMaterializationMeasurement,
+) -> ContentMaterializationAttempt:
+    return ContentMaterializationAttempt(
+        attempt_index=measurement.attempt_index,
+        materialization_scale=measurement.materialization_scale,
+        scaled_nominal_delta_digest=(
+            measurement.scaled_nominal_delta_digest
+        ),
+        written_latent_digest=measurement.written_latent_digest,
+        delta_content_actual_digest=(
+            measurement.delta_content_actual_digest
+        ),
+        tensor_replay_identity=measurement.tensor_replay_identity,
+        materialization_replay_identity=(
+            measurement.materialization_replay_identity
+        ),
+        realized_total_l2=measurement.realized_total_l2,
+        realized_relative_l2=measurement.realized_relative_l2,
+        integrity_status=measurement.integrity_status,
     )
 
 
@@ -378,7 +516,7 @@ def execute_content_write_and_vae(
     base_latent: torch.Tensor,
     content_embedding_operation: ContentEmbeddingOperation,
 ) -> ContentWriteVaeResult:
-    """Run one clean/watermarked pair without making a budget decision."""
+    """让 main 驱动 actual-dtype 预算闭环并执行一对生成。"""
 
     if not isinstance(backend, RuntimeContentBackend):
         raise RuntimeContentExecutionError(
@@ -487,13 +625,15 @@ def execute_content_write_and_vae(
     watermarked_indices: list[int] = []
     watermarked_seen: set[int] = set()
     materialization: ContentMaterializationMeasurement | None = None
+    materialization_result: ContentMaterializationResult | None = None
+    materialization_attempts: list[ContentMaterializationMeasurement] = []
     target_index = configuration.callback_index
 
     def watermarked_callback(
         index: int,
         callback_latent: torch.Tensor,
     ) -> torch.Tensor:
-        nonlocal materialization
+        nonlocal materialization, materialization_result
         if type(index) is not int or not 0 <= index < configuration.inference_steps:
             raise RuntimeContentExecutionError(
                 "watermarked generation reported a wrong callback index"
@@ -531,27 +671,85 @@ def execute_content_write_and_vae(
             raise RuntimeContentExecutionError(
                 "content embedding operation returned an invalid result"
             )
-        delta_values = _float32_vector(
-            embedding_result.delta_content,
-            current.numel(),
-            "delta_content",
+        baseline = current.detach().clone()
+
+        def materializer(
+            requested_embedding: ContentEmbeddingResult,
+            requested_scale: float,
+            /,
+        ) -> ContentMaterializationObservation:
+            if requested_embedding is not embedding_result:
+                raise ContentEmbedderError(
+                    "runtime materializer received a different embedding result"
+                )
+            try:
+                scaled_nominal_delta = scale_content_delta_binary32(
+                    embedding_result,
+                    requested_scale,
+                )
+                scaled_values = _float32_vector(
+                    scaled_nominal_delta,
+                    current.numel(),
+                    "scaled_nominal_delta",
+                )
+                written = (
+                    baseline.detach().to(dtype=torch.float32)
+                    + torch.tensor(
+                        scaled_values,
+                        dtype=torch.float32,
+                        device=baseline.device,
+                    ).reshape(baseline.shape)
+                ).to(dtype=torch.float16)
+                measurement = measure_content_materialization(
+                    embedding_result,
+                    baseline,
+                    written,
+                    materialization_scale=requested_scale,
+                    attempt_index=len(materialization_attempts) + 1,
+                    callback_index=index,
+                    expected_callback_index=configuration.callback_index,
+                    actual_dtype=configuration.latent_dtype,
+                )
+            except RuntimeContentExecutionError as exc:
+                raise ContentEmbedderError(str(exc)) from exc
+            materialization_attempts.append(measurement)
+            return _method_observation(measurement)
+
+        try:
+            materialization_result = (
+                reconcile_content_materialization_budget(
+                    embedding_result,
+                    materializer,
+                )
+            )
+        except ContentEmbedderError as exc:
+            raise RuntimeContentExecutionError(
+                f"content actual-dtype reconciliation failed: {exc}"
+            ) from exc
+        if (
+            materialization_result.attempt_count
+            != len(materialization_attempts)
+        ):
+            raise RuntimeContentExecutionError(
+                "content materialization attempt count drifted"
+            )
+        selected_identity = (
+            materialization_result.observation.materialization_replay_identity
         )
-        written = (
-            current.detach().to(dtype=torch.float32)
-            + torch.tensor(
-                delta_values,
-                dtype=torch.float32,
-                device=current.device,
-            ).reshape(current.shape)
-        ).to(dtype=torch.float16)
-        materialization = measure_content_materialization(
-            embedding_result,
-            current,
-            written,
-            callback_index=index,
-            expected_callback_index=configuration.callback_index,
-            actual_dtype=configuration.latent_dtype,
-        )
+        selected = [
+            attempt
+            for attempt in materialization_attempts
+            if attempt.materialization_replay_identity == selected_identity
+        ]
+        if len(selected) != 1:
+            raise RuntimeContentExecutionError(
+                "accepted materialization attempt identity is not unique"
+            )
+        materialization = selected[0]
+        if materialization.integrity_status != "passed":
+            raise RuntimeContentExecutionError(
+                "accepted materialization did not pass runtime integrity"
+            )
         return materialization.written_latent_actual.detach().clone()
 
     try:
@@ -578,6 +776,10 @@ def execute_content_write_and_vae(
     if materialization is None:
         raise RuntimeContentExecutionError(
             "content callback index was not triggered exactly once"
+        )
+    if materialization_result is None:
+        raise RuntimeContentExecutionError(
+            "content materialization result is missing"
         )
     if torch.equal(clean_terminal, watermarked_terminal):
         raise RuntimeContentExecutionError(
@@ -621,6 +823,11 @@ def execute_content_write_and_vae(
         clean_callback_indices=tuple(clean_indices),
         watermarked_callback_indices=tuple(watermarked_indices),
         content_materialization=materialization,
+        content_materialization_result=materialization_result,
+        content_materialization_attempts=tuple(
+            _attempt_record(attempt)
+            for attempt in materialization_attempts
+        ),
         clean_generation_terminal_latent=clean_terminal,
         watermarked_generation_terminal_latent=watermarked_terminal,
         vae_scaling_factor_actual=float(factors.scaling_factor),

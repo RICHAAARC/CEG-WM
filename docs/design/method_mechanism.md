@@ -106,19 +106,38 @@ HF 写入方向独立使用 CEG-WM HF carrier 职责域密钥。LF 候选写入�
 写入能量。
 
 独立 `content_embedder` 消费两条单位方向和 router masks，独占配置中的冻结 `a`、
-`u_content(a)`、共同总 relative-L2 预算、HF-only/LF-only/combined
-`delta_content`、target total norm/relative L2 与 active/combined 零方向失败。`a` 和
+`u_content(a)`、`content_relative_l2_nominal=3/250`、
+`content_relative_l2_limit=3/250`、HF-only/LF-only/combined
+`delta_content_nominal`、nominal total norm/relative L2 与 active/combined
+零方向失败。`a` 和
 `1-a` 只是 mixing coefficients；combined 方向的 norm 含
 `2*a*(1-a)*dot(u_lf,u_hf)` 交叉项。runtime 只在冻结 callback/model/dtype 边界物化
 该 delta，并把实际张量及 realized combined total norm/relative L2 返回给 embedder
 判定；runtime 不改变预算或方向。carrier、router、runtime 或 detector 不得代行
 组合与预算判定。
 
+对 callback 18 actual baseline `z0` 和一个正 binary32 scale `s<=1`，runtime
+只执行
+`z_s=cast_binary16_RNE(fp32(z0)+f32(s*delta_content_nominal))`，并返回
+`delta_actual_s=fp32(z_s)-fp32(z0)`。加法、scale 乘法、row-major norm 累加、
+`sqrt`、limit 乘法和比较逐步冻结为 binary32；binary16 RNE、subnormal 与 overflow
+语义按候选规格执行。完整性要求 finite、独立 bitwise replay 和最终 actual delta
+非零。
+
+`content_embedder` 以
+`norm32(delta_actual_s)<=f32((3/250)*norm32(fp32(z0)))` 直接比较，不使用 ratio
+边界、`q_budget`、`tau_actual_budget`、tolerance 或实际强度下限。full scale
+超限时，它在 binary32 `[0,1]` 上以冻结 midpoint 二分到没有新 representable
+midpoint；zero plateau 不作为可行写入，最终返回最大非零可行 scale 或 fail closed。
+runtime 不拥有 accept/retry/scale/final-failure 语义。
+
 因此正式候选的组合记录归 `content_embedder`：包括冻结 `a`、方向/支持 identity、
-`dot(u_lf,u_hf)`、combined pre-normalization norm、target total norm/relative L2、
-runtime 返回的 realized combined total norm/relative L2、误差及失败状态。若记录
-target component
-vectors/norms，必须注明不可相加为 total；不得记录未定义的载体级实际写入分解。
+`dot(u_lf,u_hf)`、combined pre-normalization norm、nominal 与 limit、runtime
+返回的 realized combined total norm/relative L2、materialization scale、
+attempt count、integrity/budget status 和仅诊断的 utilization。若记录 target
+component vectors/norms，必须注明它们只是 nominal formula witnesses 且不可相加
+为 total；`content_direction`、`active_lf_direction`、`active_hf_direction` 也不
+构成 actual branch decomposition。低 utilization 不得在未来实验中被事后筛除。
 route record 只保留 observations、`A`、masks、覆盖和 identity/digests。
 
 正式比较至少保持以下因果对照：
@@ -317,13 +336,14 @@ runtime 负责：
 - 真实 Q/K 捕获；
 - 图像张量和普通图像转换。
 - 在冻结 callback/model/dtype 边界物化 embedder 的 `delta_content`，并把实际张量
-  与 realized combined total norm/relative L2 返回给 embedder。
+  与 independent replay、integrity、realized combined total norm/relative L2
+  返回给 embedder。
 
 runtime 不负责：
 
 - LF/HF 组合规则；
-- `a`、共同总预算、方向选择或 target/realized combined total
-  norm/relative L2 是否合格的判定；
+- `a`、nominal/limit、方向选择、hard-budget acceptance、retry、最大非零可行
+  scale 或最终 budget failure；
 - `tau` 或 `tau_rescue`；
 - 几何可靠性决策语义；
 - 最终水印阳性；

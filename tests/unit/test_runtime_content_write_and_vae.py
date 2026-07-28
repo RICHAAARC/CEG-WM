@@ -1,11 +1,17 @@
 from dataclasses import replace
 from hashlib import sha256
-from struct import pack
+from math import sqrt
+from struct import pack, unpack
 
 import pytest
 import torch
 
-from main import ContentEmbeddingResult, content_embedder
+import runtime.content_write as runtime_content_write
+from main import (
+    ContentEmbeddingResult,
+    content_actual_budget_accepts,
+    content_embedder,
+)
 from main.content_chain.hf_carrier import hf_carrier
 from runtime import (
     RuntimeAdapterError,
@@ -155,6 +161,30 @@ def _base_latent() -> torch.Tensor:
     ).reshape(TEST_SHAPE).to(torch.float16)
 
 
+def _full_scale_accepted_latent() -> torch.Tensor:
+    return torch.tensor(
+        (
+            -0.0007700920104980469,
+            -0.0102081298828125,
+            -0.001689910888671875,
+            0.00917816162109375,
+            0.01580810546875,
+            0.01300811767578125,
+            0.01275634765625,
+            -0.002010345458984375,
+            0.004962921142578125,
+            -0.015716552734375,
+            0.00966644287109375,
+            -0.01148223876953125,
+            -0.01158905029296875,
+            0.003253936767578125,
+            -0.006313323974609375,
+            -0.0283966064453125,
+        ),
+        dtype=torch.float16,
+    ).reshape(TEST_SHAPE)
+
+
 def _embedding_operation(calls: list[tuple[float, ...]]):
     carrier = hf_carrier(TEST_ROOT_KEY, TEST_SHAPE)
 
@@ -172,7 +202,7 @@ def _initialized_adapter(backend: FakeContentBackend):
 
 
 @pytest.mark.unit
-def test_paired_write_returns_actual_measurements_without_budget_decision() -> None:
+def test_paired_write_uses_main_budget_result_and_maximal_scale() -> None:
     backend = FakeContentBackend()
     adapter = _initialized_adapter(backend)
     calls: list[tuple[float, ...]] = []
@@ -200,7 +230,43 @@ def test_paired_write_returns_actual_measurements_without_budget_decision() -> N
     assert measurement.delta_content_actual.dtype is torch.float32
     assert measurement.realized_total_l2 > 0.0
     assert measurement.realized_relative_l2 > 0.0
-    assert measurement.budget_acceptance_status == "not_evaluated"
+    method_result = result.content_materialization_result
+    assert method_result.budget_status == "accepted"
+    assert method_result.integrity_status == "passed"
+    assert method_result.attempt_count > 1
+    assert method_result.attempt_count == len(
+        result.content_materialization_attempts
+    )
+    assert method_result.materialization_scale < 1.0
+    assert method_result.budget_utilization <= 1.0
+    assert measurement.materialization_scale == (
+        method_result.materialization_scale
+    )
+    assert measurement.scaled_nominal_delta_digest == (
+        method_result.observation.scaled_nominal_delta_digest
+    )
+    assert measurement.materialization_replay_identity == (
+        method_result.observation.materialization_replay_identity
+    )
+    selected_bits = int.from_bytes(
+        pack(">f", method_result.materialization_scale),
+        byteorder="big",
+    )
+    next_scale = unpack(
+        ">f",
+        (selected_bits + 1).to_bytes(4, byteorder="big"),
+    )[0]
+    next_attempt = [
+        attempt
+        for attempt in result.content_materialization_attempts
+        if attempt.materialization_scale == next_scale
+    ]
+    assert len(next_attempt) == 1
+    assert not content_actual_budget_accepts(
+        method_result.observation.baseline_norm,
+        next_attempt[0].realized_total_l2,
+    )
+    assert not hasattr(measurement, "budget_acceptance_status")
     assert not hasattr(measurement, "budget_accepted")
     assert not torch.equal(
         result.clean_generation_terminal_latent,
@@ -234,6 +300,33 @@ def test_paired_write_returns_actual_measurements_without_budget_decision() -> N
 
 
 @pytest.mark.unit
+def test_full_scale_actual_write_can_be_accepted_without_retry() -> None:
+    backend = FakeContentBackend()
+    adapter = _initialized_adapter(backend)
+    calls: list[tuple[float, ...]] = []
+    result = adapter.execute_content_write_and_vae(
+        _full_scale_accepted_latent(),
+        _embedding_operation(calls),
+    )
+
+    method_result = result.content_materialization_result
+    embedding = method_result.embedding_result
+    assert len(calls) == 1
+    assert embedding.target_relative_l2 == pytest.approx(0.012)
+    assert sqrt(
+        sum(value * value for value in embedding.delta_content)
+    ) == pytest.approx(embedding.target_total_norm, rel=2e-5)
+    assert method_result.materialization_scale == 1.0
+    assert method_result.attempt_count == 1
+    assert len(result.content_materialization_attempts) == 1
+    assert result.content_materialization.integrity_status == "passed"
+    assert content_actual_budget_accepts(
+        method_result.observation.baseline_norm,
+        method_result.realized_total_l2,
+    )
+
+
+@pytest.mark.unit
 def test_materialization_replay_rejects_adjacent_float16_write() -> None:
     baseline = _base_latent()
     embedding = content_embedder(
@@ -259,6 +352,8 @@ def test_materialization_replay_rejects_adjacent_float16_write() -> None:
             embedding,
             baseline,
             forged,
+            materialization_scale=1.0,
+            attempt_index=1,
             callback_index=18,
             expected_callback_index=18,
             actual_dtype="float16",
@@ -288,10 +383,48 @@ def test_materialization_helper_rejects_wrong_actual_callback_index() -> None:
             embedding,
             baseline,
             written,
+            materialization_scale=1.0,
+            attempt_index=1,
             callback_index=17,
             expected_callback_index=18,
             actual_dtype="float16",
         )
+
+
+@pytest.mark.unit
+def test_subnormal_scale_returns_write_disappeared_attempt() -> None:
+    baseline = _base_latent()
+    embedding = content_embedder(
+        tuple(float(value) for value in baseline.to(torch.float32).reshape(-1)),
+        hf_carrier(TEST_ROOT_KEY, TEST_SHAPE),
+    )
+    minimum_subnormal_scale = unpack(">f", b"\x00\x00\x00\x01")[0]
+    measurement = measure_content_materialization(
+        embedding,
+        baseline,
+        baseline.detach().clone(),
+        materialization_scale=minimum_subnormal_scale,
+        attempt_index=1,
+        callback_index=18,
+        expected_callback_index=18,
+        actual_dtype="float16",
+    )
+
+    assert measurement.materialization_scale == minimum_subnormal_scale
+    assert measurement.integrity_status == "write_disappeared"
+    assert measurement.realized_total_l2 == 0.0
+    assert measurement.realized_relative_l2 == 0.0
+    assert measurement.scaled_nominal_delta_digest
+    assert measurement.tensor_replay_identity
+    assert measurement.materialization_replay_identity
+
+
+@pytest.mark.unit
+def test_runtime_module_does_not_own_budget_policy() -> None:
+    assert not hasattr(runtime_content_write, "content_actual_budget_accepts")
+    assert not hasattr(runtime_content_write, "CONTENT_RELATIVE_L2_NUMERATOR")
+    assert not hasattr(runtime_content_write, "CONTENT_RELATIVE_L2_DENOMINATOR")
+    assert not hasattr(runtime_content_write, "tau_actual_budget")
 
 
 @pytest.mark.unit
@@ -389,29 +522,36 @@ def test_embedding_from_different_baseline_norm_fails_closed() -> None:
 
 
 @pytest.mark.unit
-def test_actual_dtype_write_disappearance_fails_closed() -> None:
+def test_half_delta_method_result_never_reaches_runtime_acceptance() -> None:
     backend = FakeContentBackend()
     adapter = _initialized_adapter(backend)
     carrier = hf_carrier(TEST_ROOT_KEY, TEST_SHAPE)
-    zeros = (0.0,) * 16
 
-    def zero_operation(values: tuple[float, ...]) -> ContentEmbeddingResult:
+    def half_delta_operation(
+        values: tuple[float, ...],
+    ) -> ContentEmbeddingResult:
+        embedding = content_embedder(values, carrier)
+        half_delta = tuple(
+            unpack(">f", pack(">f", value * 0.5))[0]
+            for value in embedding.delta_content
+        )
         return replace(
-            content_embedder(values, carrier),
-            delta_content=zeros,
+            embedding,
+            delta_content=half_delta,
             delta_content_digest=sha256(
-                b"".join(pack(">f", value) for value in zeros)
+                b"".join(pack(">f", value) for value in half_delta)
             ).hexdigest(),
         )
 
     with pytest.raises(RuntimeAdapterError, match="failed closed") as exc_info:
         adapter.execute_content_write_and_vae(
             _base_latent(),
-            zero_operation,
+            half_delta_operation,
         )
 
-    assert "write disappeared" in str(exc_info.value.__cause__)
+    assert "nominal formula replay" in str(exc_info.value.__cause__)
     assert adapter.state is RuntimeAdapterState.FAILED
+    assert backend.close_calls == 1
 
 
 @pytest.mark.unit

@@ -29,6 +29,12 @@ formal_evidence_available
 仍为 HF-only，LF/routing 未实验晋升，`full_ceg_wm_eligible=false`；尚无真实
 runtime/GPU、完整联合 FPR、正式 records 或科学效果证据。
 
+actual-dtype 内容预算的 R1 语义闭环会使旧 readiness 摘要/revision 绑定暂时
+stale；R1 只允许定向 CPU/static 检查并须由独立语义审计绑定 exact revision 与新
+candidate digest。只有审核 `APPROVE` 后，R2 才可只更新 readiness 的 candidate
+SHA、reviewed revision 与真实审核引用，并运行唯一 `full` profile。R1/R2 都不
+迁移阶段；在 R2 闭合前不得继续 Batch 3。
+
 ## Paper Research Target
 
 最终目标是形成一套可独立重建的 CEG-WM 论文证据，至少支持以下问题：
@@ -84,9 +90,9 @@ runtime/GPU、完整联合 FPR、正式 records 或科学效果证据。
 - 在不要求 CEG-WM 已有 Git 的前提下，只读登记历史源真实 revision、逐文件摘要、许可证缺口、候选/偏离边界和逐参数映射，形成 provisional provenance；
 - 把 CEG-WM `hf_sparse_tail` 候选冻结为 `sparse tail → direct L2 normalize → score-time centering`，并只在 provenance 中注明 historical DirectHF 来源；任何 template-time centering 变体使用新的 CEG-WM HF 候选身份且不继承旧证据；
 - 冻结候选 HF 模板/单位方向、content embedder 的 mixing coefficients、
-  combined pre-normalization geometry、共同 target total norm/relative L2 与
-  delta、runtime 物化位置/realized combined total norm/relative L2 返回边界和
-  HF direct score；
+  combined pre-normalization geometry、`3/250` nominal 与 actual hard limit、
+  nominal delta、runtime 物化位置/realized combined total norm/relative L2
+  返回边界、binary32 最大非零可行 scale 选择和 HF direct score；
 - 预登记 LF 模板/单位方向、embedder 使用、runtime 物化边界和 score 候选集合；
 - 预登记内容路由的 observations、`A`、两 mask、identity/digests 和不读取观测的
   disabled uniform control；相同预算由 embedder/实验配对约束；
@@ -160,11 +166,13 @@ audit 必须从 authorization base revision
   HF sparse support/模板归一顺序/单位 L2、HF score-time centering、LF carrier 与
   独立盲 score、routing mask partition/range 与 disabled uniform control、
   router masks 经 carrier directions 进入 content embedder、embedder 的冻结
-  mixing coefficients/非正交交叉项/共同 target total budget/
-  HF-only-LF-only-combined delta/零方向、LF/HF/combined 独立可观测
+  mixing coefficients/非正交交叉项/共同 nominal/actual hard limit/
+  HF-only-LF-only-combined nominal delta/零方向、LF/HF/combined 独立可观测
   与冻结组合、真实 Q/K relation、synthetic transform、独立 reliability、
-  rectification 和 same-detector joint decision；actual-dtype 的 realized combined
-  total energy 必须留到真实 runtime gate，不得由 CPU 节点或可加分支伪字段冒充；
+  rectification 和 same-detector joint decision；actual-dtype 的冻结算术、
+  integrity、单调预算谓词、终止、最大可行 scale、plateau/subnormal/轻微超限与
+  无非零可行写入先由 CPU property tests 覆盖，真实 SD3.5 物化仍必须留到真实
+  runtime gate；不得由 CPU 节点或可加分支伪字段冒充 GPU evidence；
 - AST 审计只构成结构/接线必要门；独立语义审计必须审阅实现 revision、候选规格摘要和真实测试，且审阅后受保护代码不得变化；
 - `main.content_chain` 与 `main.geometry_chain` 无互相依赖；
 - 方法代码不导入 runtime、experiments 或 governance；
@@ -186,7 +194,8 @@ geometry reliability 折回其他组件，都不得推进；机械 readiness pas
 
 - 建立本项目 model/runtime adapter；
 - 从同一基础随机状态运行 clean 与 watermarked 配对生成；
-- 对迁移候选逐参数核对模板、写入、realized combined total norm/relative L2、
+- 对迁移候选逐参数核对模板、名义写入、actual-dtype hard-budget
+  scale/replay/integrity/status、realized combined total norm/relative L2、
   最终图像重编码和评分；
 - 使用预登记正确密钥与错误密钥 roster；
 - 保存普通图像、最小必要数值记录和 provenance；
@@ -560,8 +569,9 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 - HF-only、LF-only、route-disabled、routed 和 combined；
 - LF/HF 分数分布和组合贡献；
 - 内容路由覆盖、mixing coefficients、方向内积/组合归一因子，以及
-  `content_embedder` 核验的 target total 与 realized combined total
-  norm/relative L2；
+  `content_embedder` 核验的 nominal/limit、materialization scale、attempt/integrity/
+  budget status、diagnostic utilization 与 realized combined total norm/relative
+  L2；
 - LF 失败或未晋升时的完整负结果。
 
 ### Geometry Mechanism

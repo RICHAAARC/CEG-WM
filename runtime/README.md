@@ -11,17 +11,26 @@ near-threshold、几何救援和最终判定仍属于 `main/`。
 - 后端协议、实际后端身份核验和单次初始化生命周期；
 - 不加载模型的 mock backend 控制流测试。
 
-Batch 2 的本地非语义基础设施当前已实现：
+Batch 2 的本地 CPU/mock 路径当前已实现：
 
 - clean/watermarked 同基础 float16 latent 的防共享配对与 callback 全序列绑定；
 - callback index 18 exactly-once 内容写入、binary16 RNE 独立重放和 actual tensor /
   `delta_content_actual` / realized total-relative L2 测量；
+- runtime 按 `main.content_embedder` 请求的 binary32 scale 物化并返回全部 attempt
+  identity；`main` 以 nominal=limit=`3/250` 的冻结 direct hard comparison 驱动
+  full-scale 接受或 binary32 最大非零可行 scale 搜索；
 - generation VAE scaling/shift decode 与 detection posterior-mode encode；
 - missing/duplicate/wrong callback、pair drift、非有限、overflow、写入消失和禁止
   posterior sampling 的 CPU fake/backend 失败语义。
 
-上述基础设施通过不表示 Batch 2 整体完成。Batch 2 仍不拥有 actual-dtype budget
-acceptance rule，结果只登记 `budget_acceptance_status=not_evaluated`；真实
-SD3.5 callback、actual dtype 和 VAE 路径仍须 GPU qualification。当前也未实现模型
-下载/加载、真实 Q/K 捕获、runner、Notebook 或 GPU qualification；本地 CPU 通过
-不是 `runtime_verified` 或科学证据。
+runtime 不拥有 accept/retry/scale/final-failure 语义；它只物化、测量和执行
+finite/bitwise/nonzero 完整性检查。权威 gate 是 `main` 对 row-major binary32
+`realized_total_l2 <= limit_norm` 的直接比较；ratio/utilization 仅诊断，不存在
+`q_budget`、`tau_actual_budget`、容差或 actual 下限。hard limit 只约束最终
+combined content delta；nominal LF/HF directions 不构成 actual branch
+decomposition，geometry budget 独立。
+
+上述本地路径通过不表示 Batch 2 整体完成。真实 SD3.5 callback、actual float16 和
+VAE 路径仍须 GPU qualification；当前也未实现模型下载/加载、真实 Q/K 捕获、
+runner、Notebook 或 GPU qualification。本地 CPU 通过不是 `runtime_verified` 或
+科学证据，低 utilization 也不得在未来实验中用于结果后筛除。

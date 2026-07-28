@@ -102,11 +102,15 @@ Notebook 与 repository module 的跨边界数据
 | wrong_key_index | persisted_protocol | provenance | none | true | false | false | wrong-key roster 的预登记非负索引；registered key 时为空。 |
 | key_domain_digest | cross_boundary | provenance | none | false | false | false | carrier 实际消费的 key schedule 职责域摘要。 |
 | carrier_config_digest | cross_boundary | method_identity | none | false | false | false | carrier 算法、shape、mask、可选权威 route 绑定与 key schedule 配置身份摘要。 |
-| delta_content | cross_boundary | method_state | none | false | false | false | content embedder 产生、尚未由 runtime 物化的理论内容更新。 |
-| delta_content_digest | cross_boundary | provenance | none | false | false | false | 理论 `delta_content` 的 float32 字节摘要。 |
-| latent_norm | cross_boundary | method_state | none | false | false | false | content embedder 计算共同总预算时消费的 callback latent 理论 L2 norm。 |
-| target_total_norm | cross_boundary | method_state | none | false | false | false | runtime 物化前共同内容更新的目标总 L2 norm。 |
-| target_relative_l2 | cross_boundary | method_state | none | false | false | false | runtime 物化前共同内容更新相对 latent 的目标 L2 比例。 |
+| delta_content | cross_boundary | method_state | none | false | false | false | content embedder 产生、尚未由 runtime 缩放/物化的 binary32 nominal combined content delta。 |
+| delta_content_digest | cross_boundary | provenance | none | false | false | false | nominal `delta_content` 的 row-major binary32 字节摘要。 |
+| latent_norm | cross_boundary | method_state | none | false | false | false | content embedder 按冻结 row-major binary32 协议重算 callback actual baseline 的 L2 norm。 |
+| target_total_norm | cross_boundary | method_state | none | false | false | false | legacy-named nominal total L2 formula witness；不承诺 actual realized 值接近它。 |
+| target_relative_l2 | cross_boundary | method_state | none | false | false | false | legacy-named nominal relative-L2 formula witness，固定为 `3/250`；不是 actual ratio 接近门。 |
+| content_direction | cross_boundary | method_state | none | false | false | false | LF/HF/routing 最终 combined nominal unit direction 的公式重放 witness；不是 actual branch decomposition。 |
+| active_lf_direction | cross_boundary | method_state | none | false | false | false | nominal 组合公式实际启用的 LF masked unit direction witness；不表示 LF actual-dtype delta。 |
+| active_hf_direction | cross_boundary | method_state | none | false | false | false | nominal 组合公式实际启用的 HF masked unit direction witness；不表示 HF actual-dtype delta。 |
+| embedding_result_identity | cross_boundary | provenance | none | false | false | false | nominal embedding 全字段、方向 witness 与配置摘要的不可变身份。 |
 | mixing_coefficient | cross_boundary | method_identity | none | true | false | false | combined content embedder 使用的冻结 `a`；它是方向混合系数而非可加能量份额。 |
 | gamma_lh | cross_boundary | method_statistic | none | true | false | false | LF/HF 两条 masked unit direction 的内积交叉项。 |
 | combined_pre_normalization_norm | cross_boundary | method_statistic | none | true | false | false | 含 `gamma_lh` 交叉项的 combined direction 归一化因子 `c(a)`。 |
@@ -120,17 +124,32 @@ Notebook 与 repository module 的跨边界数据
 | paired_base_latent_digest | cross_boundary | provenance | none | false | false | false | clean/watermarked 两条生成路径共享且各自 clone 的同一基础 float16 latent 身份摘要。 |
 | clean_callback_indices | cross_boundary | runtime_identity | none | false | false | false | clean 生成路径实际触发 callback 的完整有序 index 序列。 |
 | watermarked_callback_indices | cross_boundary | runtime_identity | none | false | false | false | watermarked 生成路径实际触发 callback 的完整有序 index 序列。 |
-| content_materialization | cross_boundary | runtime_state | none | false | false | false | callback 18 的 actual-dtype 张量、独立重放身份和 realized 测量集合；不包含预算接受判定。 |
+| content_materialization | cross_boundary | runtime_state | none | false | false | false | `content_embedder` 最终选中 scale 对应的 callback 18 actual-dtype 张量、独立重放身份和 realized 测量；runtime 对象本身不拥有预算判定。 |
+| content_materialization_result | cross_boundary | method_state | none | false | false | false | `main.content_embedder` 返回的最终 nominal/limit、选中 observation、scale、attempt、integrity 与 budget 结果。 |
+| content_materialization_attempts | cross_boundary | runtime_state | none | false | false | false | runtime 按 `content_embedder` 请求顺序保存的不含中间 tensor 的全部物化尝试身份与 realized 测量。 |
+| embedding_result | cross_boundary | method_state | none | false | false | false | materialization 结果回绑且通过 nominal formula replay 的不可变 `ContentEmbeddingResult`。 |
+| observation | cross_boundary | method_state | none | false | false | false | `content_embedder` 最终接受的唯一 actual-dtype materialization observation。 |
 | baseline_latent_actual | cross_boundary | runtime_state | none | false | false | false | callback 18 写入前、按注册 float16 dtype 物化的实际 latent 防共享副本。 |
-| written_latent_actual | cross_boundary | runtime_state | none | false | false | false | callback 18 将理论内容 delta 加入 baseline 后按注册 float16 dtype 物化的实际 latent。 |
+| written_latent_actual | cross_boundary | runtime_state | none | false | false | false | callback 18 将选中 scale 的 nominal content delta 加入 baseline 后按注册 float16 RNE 物化的实际 latent。 |
 | delta_content_actual | cross_boundary | runtime_state | none | false | false | false | `float32(written_latent_actual)-float32(baseline_latent_actual)` 得到的 combined actual-dtype 内容更新。 |
+| content_relative_l2_nominal | cross_boundary | method_identity | none | true | false | false | 当前内容候选的 nominal relative-L2，固定为 `3/250`；不要求 actual ratio 接近它。 |
+| content_relative_l2_limit | cross_boundary | method_identity | none | true | false | false | combined actual content delta 的唯一 hard relative-L2 上限，固定为 `3/250`；geometry 不并入。 |
+| materialization_scale | cross_boundary | method_state | none | true | false | false | 在 `ContentMaterializationMeasurement`/`ContentMaterializationAttempt` 中是当前单次请求/尝试的 binary32 scale，可能超限或产生 `write_disappeared`；仅在 `ContentMaterializationResult` 中表示 `main.content_embedder` 最终选中的 greatest nonzero feasible scale，`s=1` 直接可行时也属于最终选中。 |
+| baseline_norm | cross_boundary | method_statistic | none | false | false | false | runtime observation 对 callback actual baseline 按 row-major binary32 协议计算的 L2，必须与 embedder 输入一致。 |
+| scaled_nominal_delta_digest | cross_boundary | provenance | none | false | false | false | 每次尝试按 `f32(delta_content*s)` 得到的 row-major binary32 nominal delta 摘要。 |
 | baseline_latent_digest | cross_boundary | provenance | none | false | false | false | actual baseline 的 dtype、shape 和逐位张量内容摘要。 |
 | written_latent_digest | cross_boundary | provenance | none | false | false | false | actual written latent 的 dtype、shape 和逐位张量内容摘要。 |
 | delta_content_actual_digest | cross_boundary | provenance | none | false | false | false | `delta_content_actual` row-major float32 big-endian 字节摘要。 |
-| materialization_replay_identity | cross_boundary | runtime_identity | none | false | false | false | binary16 RNE 重放协议、callback、embedder identity、actual 张量摘要和 realized 测量的联合身份。 |
-| realized_total_l2 | cross_boundary | method_statistic | none | false | false | false | runtime 对 combined `delta_content_actual` 按固定 row-major float32 累加协议重算的实际总 L2；不单独表示预算合格。 |
+| tensor_replay_identity | cross_boundary | runtime_identity | none | false | false | false | attempt index、callback、scale、binary16 actual tensor bits、delta digest 与 realized 测量的 runtime bitwise replay 身份。 |
+| materialization_replay_identity | cross_boundary | runtime_identity | none | false | false | false | scale、scaled nominal delta、callback baseline、combined actual delta、integrity 和 row-major realized L2 的方法/runtime 联合重放身份。 |
+| deterministic_binary16_replay_passed | cross_boundary | runtime_state | none | false | false | false | runtime 对登记 binary16 RNE 写入逐 bit 独立重放是否相同；false 必须 fail closed。 |
+| realized_total_l2 | cross_boundary | method_statistic | none | true | false | false | runtime 对 combined `delta_content_actual` 按固定 row-major binary32 累加协议重算的实际总 L2；hard gate 直接比较此值与 limit norm。 |
 | realized_relative_l2 | cross_boundary | method_statistic | none | false | false | false | `realized_total_l2` 除以 actual callback baseline L2 的实际相对量；不单独表示预算合格。 |
-| budget_acceptance_status | cross_boundary | runtime_state | none | false | false | false | Batch 2 基础设施当前仅产生 `not_evaluated`；未预登记 acceptance rule 前不得输出 accepted/rejected。 |
+| budget_utilization | cross_boundary | method_statistic | none | true | false | false | `realized_total_l2/limit_norm` 的 binary32 诊断量；不是权威 gate，低值不得事后筛除。 |
+| integrity_status | cross_boundary | method_state | none | true | false | false | 单次物化的 `passed` 或 `write_disappeared`；最终接受结果只能为 `passed`。 |
+| budget_status | cross_boundary | method_state | none | true | false | false | `main.content_embedder` 成功返回时固定为 `accepted`；超限且无非零可行写入时 fail closed，不伪造 rejected result。 |
+| attempt_index | cross_boundary | runtime_state | none | false | false | false | runtime 按 `content_embedder` 请求顺序从 1 起记录的单次 materialization 尝试序号。 |
+| attempt_count | cross_boundary | method_statistic | none | true | false | false | `content_embedder` 为 full-scale 检查与 binary32 最大可行搜索实际请求的总物化次数。 |
 | clean_generation_terminal_latent | cross_boundary | runtime_state | none | false | false | false | clean 路径完成冻结 scheduler suffix 后、进入 generation VAE decode 的实际 latent。 |
 | watermarked_generation_terminal_latent | cross_boundary | runtime_state | none | false | false | false | watermarked 路径完成冻结 scheduler suffix 后、进入 generation VAE decode 的实际 latent。 |
 | vae_scaling_factor_actual | cross_boundary | runtime_identity | none | false | false | false | prepared backend 从登记 VAE config 来源读取的有限正 scaling factor 实际值。 |

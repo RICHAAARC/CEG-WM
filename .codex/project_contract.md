@@ -26,6 +26,11 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 - 当前正式 detector 仍为 HF-only，LF/routing 尚未实验晋升，
   `full_ceg_wm_eligible=false`。readiness、文档、阶段转换或 admission 都不是
   runtime、GPU、固定 FPR、鲁棒性或科学效果证据。
+- actual-dtype 内容预算语义的 R1 会使旧 `method_readiness.yaml` 的候选摘要与
+  reviewed revision 暂时 stale；这不是阶段回退，也不能冒充 readiness 已闭合。
+  只有 R1 exact revision 通过独立语义审核、随后 R2 仅更新 readiness 绑定并在登记
+  `CEG-WM` 环境通过唯一 `full` profile 后，才能恢复 revision-bound readiness。
+  两个 revisions 均不得迁移阶段或声称 `runtime_verified`。
 
 ## Method Authority
 
@@ -46,8 +51,19 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    delta 并返回 actual-dtype 张量与 realized combined total norm/relative L2，
    预算合格与否仍由 embedder 判定；不得把 mixing coefficients 解释为可加分支
    能量，也不得声称 runtime 可观测 actual branch energy。
-6. 不得从历史项目继承固定 `0.7/0.3`、`0.5/0.5` 或其他未经 calibration/evaluation 验证的组合规则。
-7. 错误密钥、分支消融和组件分数必须可独立观测，组合分数不得掩盖密钥归属失败。
+6. 当前内容候选把 `content_relative_l2_nominal` 与
+   `content_relative_l2_limit` 都冻结为 `3/250`。对 callback 18 的 actual-dtype
+   baseline `z0`，runtime 仅按 embedder 请求的 binary32 scale `s` 物化
+   `z_s=cast_actual(fp32(z0)+s*delta_content_nominal)` 并返回
+   `delta_actual_s=fp32(z_s)-fp32(z0)`、完整性与 realized 测量；embedder 独占
+   hard-budget 直接比较、重试、最大非零可行 scale 选择和最终 fail-closed。
+   realized ratio/utilization 只作诊断，不是 gate，不得设置 `tau_actual_budget`、
+   经验 tolerance 或 actual 强度下限。
+7. 上述 actual hard limit 只约束 LF/HF/routing 最终合成并物化后的 combined
+   content delta；nominal directions/components 只用于公式重放，不构成 actual
+   branch decomposition。geometry delta 与现有 geometry/total budget 独立。
+8. 不得从历史项目继承固定 `0.7/0.3`、`0.5/0.5` 或其他未经 calibration/evaluation 验证的组合规则。
+9. 错误密钥、分支消融和组件分数必须可独立观测，组合分数不得掩盖密钥归属失败。
 
 ### Geometry Chain
 

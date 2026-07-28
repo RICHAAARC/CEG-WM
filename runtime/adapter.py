@@ -225,7 +225,7 @@ class Sd35RuntimeAdapter:
             ContentEmbeddingResult,
         ],
     ) -> ContentWriteVaeResult:
-        """Run the Batch-2 path only after identity-checked preparation."""
+        """Run Batch 2 while leaving actual-budget semantics in ``main``."""
 
         if self._state is not RuntimeAdapterState.READY:
             raise RuntimeAdapterError(

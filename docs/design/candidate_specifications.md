@@ -40,9 +40,9 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 | `image_rectifier` | `image_coordinate_rectification` | `main/geometry_chain/rectifier.py` | `rectification_similarity` |
 | `conditional_recovery_decision` | `conditional_same_detector_recovery` | `main/joint_decision/detector.py` | `joint_conditional_recovery` |
 
-`content_embedder` 独占 `u_content(a)`、共同 total relative-L2 budget、mixing
-coefficients、组合 delta 的 target/realized total norm/relative L2 和 active
-零方向失败；`lf_detector`
+`content_embedder` 独占 `u_content(a)`、nominal/actual hard limit、mixing
+coefficients、组合 delta 的 materialization reconciliation 与 realized
+norm/relative L2 和 active 零方向失败；`lf_detector`
 独占盲 `s_lf`；`geometry_reliability` 独占 estimator
 原始指标上的可靠性合取门。这三项不能由 carrier、content detector 或 transform
 estimator 代行。候选绑定表示该组件必须实现或消费的规格身份，不表示候选已经晋升。
@@ -268,6 +268,64 @@ combined total norm/relative L2。runtime 只负责物化、测量和返回；ta
 realized 是否合格仍由 `content_embedder` 判定，runtime 不拥有 mixing 或 budget，
 也不输出阳性判定。
 
+### Frozen Actual-Dtype Content Budget
+
+当前候选把名义写入强度与 actual-dtype 总内容扰动硬上限统一冻结为：
+
+```text
+content_relative_l2_nominal = 3/250 = 0.012
+content_relative_l2_limit   = 3/250 = 0.012
+```
+
+这不承诺每个样本的 actual realized ratio 接近名义值。令 `z0` 为 callback 18
+写入前已经按登记 actual dtype（当前为 binary16）物化的 baseline，
+`delta_content_nominal` 为 `content_embedder` 按 LF/HF/routing 最终合成方向产生的
+binary32 名义 delta。对一个正 binary32 scale `s<=1`，唯一物化对象为：
+
+```text
+d_s[i]            = f32(f32(delta_content_nominal[i]) * f32(s))
+precast[i]        = f32(f32(z0[i]) + d_s[i])
+z_s[i]            = binary16_RNE(precast[i])
+delta_actual_s[i] = f32(z_s[i]) - f32(z0[i])
+```
+
+binary16 转换使用 round-to-nearest-ties-to-even；有限 subnormal 按 binary16
+语义保留或舍入到零，overflow、NaN/Inf 和非法 baseline 全部 fail closed。runtime
+必须对 `z_s` 做独立逐 bit replay，并把实际张量、实际 delta、身份与测量返回给
+`content_embedder`。写入完整性要求 finite、bitwise replay 相同和最终 actual delta
+非零；中间搜索点舍入为零时只构成 zero plateau，不是可接受写入。
+
+所有向量按 row-major 顺序展平。binary32 L2 唯一定义为从 `S_0=f32(0)` 开始，
+逐项执行 `q_i=f32(x_i*x_i)`、`S_{i+1}=f32(S_i+q_i)`，最后
+`norm32(x)=f32(sqrt(S_n))`。硬预算右侧为：
+
+```text
+L = f32(norm32(fp32(z0)) * f32(3/250))
+A = norm32(delta_actual_s)
+accept iff A <= L
+```
+
+权威 gate 直接比较 `A` 与 `L`；`realized_relative_l2` 和
+`budget_utilization=A/L` 仅为诊断。不得使用比值边界、`q_budget`、
+`tau_actual_budget`、经验 tolerance 或 actual 强度下限。
+
+`content_embedder` 先请求 `s=1`；若完整且 `A<=L`，立即接受。若超限，则以
+binary32 `[0,1]` 为区间，冻结 midpoint 为
+`m=f32(f32(f32(lower)+f32(upper))*f32(0.5))`。非零合格点更新 lower 并成为当前
+最大可行 observation；超限点更新 upper；actual delta 为零的 plateau 点只推进
+lower，不得成为可行 observation。当 midpoint 与任一边界 bitwise 相同、区间内
+没有新的 representable midpoint 时停止，返回最大的非零合格 scale；若从未出现
+非零合格 observation，则 fail closed。不得用 `1,1/2,1/4` 粗回退、GPU 拟合阈值
+或结果后 tolerance 代替此协议。
+
+接受、重试、scale 选择和最终失败全部属于现有 `content_embedder`。runtime 只按
+请求物化、测量和执行完整性检查，不拥有预算语义。该 hard limit 只约束
+LF/HF/routing 最终合成的 combined content delta；不得相加分支 norm，不存在
+actual branch decomposition。`content_direction`、`active_lf_direction`、
+`active_hf_direction` 和 target component 只作为 nominal formula witnesses。
+geometry delta 与已有 geometry/total budget 保持独立，不并入
+`content_relative_l2_limit`。低 utilization 不得成为未来实验的事后筛选条件。
+
 ### Frozen Candidate Algorithm
 
 首个且唯一登记的 backbone/runtime 候选为：
@@ -311,9 +369,10 @@ realized 是否合格仍由 `content_embedder` 判定，runtime 不拥有 mixing
 - `hf_carrier` 消费 `[1,C,H,W]` latent 形状、HF 派生密钥、model identity 和
   `mask_hf`，只输出单位 L2 稀疏模板 `T_hf`、masked unit direction `u_hf`、支持集
   和必要身份元数据/摘要；HF-only 对照的 `mask_hf` 恒为全 1；
-- `content_embedder` 消费 `u_hf`。HF-only 时它仍独占共同总预算、
-  `delta_content`、target total relative L2、realized combined total relative L2
-  和零方向失败；组合模式下它还消费 LF direction 与 router 输出；
+- `content_embedder` 消费 `u_hf`。HF-only 时它仍独占 nominal/limit、
+  `delta_content_nominal`、actual-dtype hard-budget reconciliation、realized
+  combined total relative L2 和零方向失败；组合模式下它还消费 LF direction 与
+  router 输出；
 - `hf_detector` 只消费普通待检图像、检测 key 和公共 identity/资产，独立重构
   `T_hf` 并输出盲分数 `s_hf`；
 - `content_detector` 只消费 `s_hf`（当前 HF-only `D_M`），组合候选晋升后才同时
@@ -337,21 +396,25 @@ T_hf = S_hf / ||S_hf||_2
 u_hf = normalize(mask_hf * T_hf)
 ```
 
-模板构造不得中心化；tail 外必须保持精确零。`0.012`、tail `0.20`、5x5 zero-padded average、平局顺序和 callback 18 都是历史参数级迁移候选值，不是 CEG-WM 已验证事实。
+模板构造不得中心化；tail 外必须保持精确零。tail `0.20`、5x5 zero-padded
+average、平局顺序、callback 18 与 `3/250` 都已冻结为当前 CEG-WM 候选语义；
+其中参数来源具有历史 provenance，但真实模型/runtime 可执行性与科学效果仍未验证。
 
 ### Content Embedder And Runtime Boundary
 
 HF-only 对照的全 1 mask 使 `u_hf=T_hf`；`content_embedder` 按共同内容总预算产生：
 
 ```text
-delta_content = 0.012 * ||z_18||_2 * u_hf
-z_written = cast_dtype(float32(z_18) + delta_content)
+delta_content_nominal = (3/250) * norm32(fp32(z0)) * u_hf
+z_s = cast_actual(fp32(z0) + s * delta_content_nominal)
 ```
 
-`z_written` 由 runtime 在 callback 18 物化，并把实际 dtype latent 以及
-`delta_content_actual` 的 realized total norm/relative L2 返回；target total 与
-realized combined total 是否合格属于 `content_embedder` 的判定与输出记录。
-runtime 不得自行改变强度、方向或重新分配预算。
+`z_s` 由 runtime 在 callback 18 按上述 actual-dtype 协议物化；正式 runtime
+对象中的对应字段为 `written_latent_actual`。runtime 把该 actual-dtype latent、
+replay identity 以及 `delta_content_actual` 的 realized total
+norm/relative L2 返回；hard limit 比较、必要的 binary32 bisection 和最终
+accepted/fail-closed 属于 `content_embedder`。runtime 不得自行改变强度、方向、
+重新分配预算或输出自己的 budget decision。
 
 ### HF Detector Boundary
 
@@ -368,8 +431,9 @@ s_hf = dot(center(float32(Y)) / ||center(float32(Y))||,
 
 跨组件候选身份由各责任共同组成，但所有权不得混合：`hf_carrier` 拥有 PRG
 版本/domain、normal-quantile protocol、shape、low-pass 参数、tail fraction/order
-和模板归一顺序及 mask identity；`content_embedder` 拥有共同总预算和
-target/realized combined total norm/relative-L2 判定；runtime candidate 拥有
+和模板归一顺序及 mask identity；`content_embedder` 拥有 nominal/limit、
+hard-budget direct comparison、retry/scale/final failure 和 combined realized
+记录；runtime candidate 拥有
 callback/model/dtype 物化边界；
 `hf_detector` 拥有 VAE encode 与 score operator；model
 identity 和必要公共预处理身份由三者一致引用。该 CEG-WM 候选的算法顺序来自
@@ -379,13 +443,13 @@ callback latent、32 wrong-key roster 大小和四 Prompt 结果不进入当前 
 ### Failure, Checks And Gate
 
 - 失败归属：模板零/非有限、support 错误、tail 外非零或 template-time centering 由
-  `hf_carrier` fail closed；零方向、实际写入消失或 target/realized total
-  norm/relative L2 不符由
-  `content_embedder` fail closed；VAE/shape 漂移或评分零中心化能量由
+  `hf_carrier` fail closed；零方向、完整性失败、hard limit 超限且不存在非零
+  可行 scale 由 `content_embedder` fail closed；VAE/shape 漂移或评分零中心化能量由
   `hf_detector` fail closed。
 - CPU：分别检查 carrier 的 golden template/support/平局/单位 L2/tail 外零，
-  embedder 的共同 target total budget；实际 dtype 的 realized combined total
-  norm/relative L2 留到真实 runtime gate，以及 detector 的
+  embedder 的 nominal formula、hard-budget 算术、单调/终止/最大非零可行搜索；
+  真实 SD3.5 actual dtype 的 realized combined total norm/relative L2 留到真实
+  runtime gate，以及 detector 的
   score-time-only centering 和 key-only 重构。
 - 真实 runtime：同 seed clean/watermarked 配对，final-image VAE mode 评分，registered/wrong-key 分离，写入后一个 interval，质量与失败留分母。
 - 晋升：参数级 golden 与真实 holdout 都通过。
@@ -401,9 +465,9 @@ callback latent、32 wrong-key roster 大小和四 Prompt 结果不进入当前 
 - `lf_carrier` 消费 latent 形状、独立 LF 派生密钥、model identity 和
   `mask_lf`，只输出 `T_lf`、masked unit direction `u_lf` 及必要载体身份元数据；
 - `content_embedder` 消费 `u_lf`、由 `hf_carrier` 提供的 `u_hf` 和 router 输出，
-  独占 `a`、`u_content(a)`、共同总预算、`delta_content`、target total
-  norm/relative L2、realized combined total norm/relative L2 和任一 active
-  零方向失败；
+  独占 `a`、`u_content(a)`、nominal/limit、`delta_content_nominal`、hard-budget
+  accept/retry/scale/final failure、realized combined total norm/relative L2 和
+  任一 active 零方向失败；
 - `lf_detector` 只消费普通待检图像、检测 key 和公共 identity/资产，在不读取
   routing mask、callback latent、embed record 或参考图的条件下独立重构未遮罩
   `T_lf`，并输出盲分数 `s_lf`；
@@ -437,32 +501,39 @@ v_content(a) = a * u_lf + (1-a) * u_hf
 c(a) = ||v_content(a)||_2
      = sqrt(a^2 + (1-a)^2 + 2*a*(1-a)*gamma_lh)
 u_content(a) = v_content(a) / c(a)
-delta_content = 0.012 * ||z_18||_2 * u_content(a)
+delta_content_nominal =
+  (3/250) * norm32(fp32(z0)) * u_content(a)
 ```
 
 双载体候选的有限 mixing-coefficient 集合是
 `a in {0.25, 0.50, 0.75}`。`a` 与 `1-a` 是方向混合系数，不是可加的方向份额。
 LF-only、HF-only、route-disabled 和 routed 对照都使用相同
-target total relative L2 `rho_content=0.012`；若任一 active masked direction
+nominal relative L2 `rho_content_nominal=3/250`，且实际 combined content delta
+共同受 `content_relative_l2_limit=3/250` 硬上限约束；若任一 active masked direction
 为零，或 `c(a)=0`/非有限，则该样本显式失败，不重新分配能量。
 
-runtime 只把 `delta_content` 加到 callback 18 latent 并以实际 dtype 物化。其
-权威测量对象仅为：
+runtime 只按 `content_embedder` 请求的 binary32 scale 把名义 `delta_content`
+加到 callback 18 actual baseline 并以实际 dtype 物化。其权威测量对象仅为：
 
 ```text
 delta_content_actual =
-  float32(z_written) - float32(materialize_dtype(z_18))
+  float32(z_s) - float32(z0)
 realized_total_l2 = ||delta_content_actual||_2
 realized_relative_l2 = realized_total_l2 /
-                       ||float32(materialize_dtype(z_18))||_2
+                       ||float32(z0)||_2
 ```
 
-`content_embedder` 比较 target total 与 realized combined total 并判定预算失败。
+其中 `z_s` 在正式 runtime 结果对象中记录为 `written_latent_actual`，`z0` 记录为
+`baseline_latent_actual`。
+
+`content_embedder` 按本候选的冻结 binary32 直接硬比较、必要二分和最大非零可行
+选择判定 accepted 或 fail closed；不要求 realized 值接近 nominal，也不设置
+actual 下限。
 若实验需要报告 LF/HF contribution，只能记录可重建的 `a`、`gamma_lh`、`c(a)`，
 以及 target component vectors
-`delta_lf_target=rho_content*||z_18||*(a/c)*u_lf`、
-`delta_hf_target=rho_content*||z_18||*((1-a)/c)*u_hf` 及各自 norm。两向量之和才是
-`delta_content`；由于交叉项存在，它们的 norm/energy 不得相加冒充 total。
+`delta_lf_target=(3/250)*norm32(fp32(z0))*(a/c)*u_lf`、
+`delta_hf_target=(3/250)*norm32(fp32(z0))*((1-a)/c)*u_hf` 及各自 norm。两向量
+之和才是 nominal `delta_content`；由于交叉项存在，它们的 norm/energy 不得相加冒充 total。
 未定义也不可观测的分支级实际写入量不得出现在 runtime 或 evidence 中。
 
 ### LF Detector Boundary
@@ -477,7 +548,7 @@ s_lf = normalized_correlation(center(Y), center(T_lf))
 
 跨组件候选身份由各责任共同组成，但所有权唯一：`lf_carrier` 拥有独立 PRG domain、
 filter、模板中心化顺序与 mask identity；`content_embedder` 拥有 `a`、方向组合顺序、
-`gamma_lh`/`c(a)`、共同 target total budget 与 realized combined total
+`gamma_lh`/`c(a)`、nominal/limit、hard-budget scale 选择与 combined realized
 norm/relative L2；`lf_detector` 拥有 final-image VAE observation 与 score
 operator。历史固定
 `0.70/0.30` 检测权重与 `0.0025` LF 写入强度被排除；
@@ -486,12 +557,13 @@ operator。历史固定
 ### Failure, Checks And Gate
 
 - 失败归属：模板非有限/零能量或 domain 漂移由 `lf_carrier` fail closed；active
-  masked direction 为零、`c(a)` 为零/非有限或 target/realized combined total
-  budget 不符由 `content_embedder`
+  masked direction 为零、`c(a)` 为零/非有限、完整性失败或 hard limit 超限且无
+  非零可行 scale 由 `content_embedder`
   fail closed；依赖私有嵌入状态、模板重构失败或分数非有限由 `lf_detector`
   fail closed。
 - CPU：分别检查 carrier 的低通响应、单位 L2、LF/HF key-domain 分离与复现，
-  embedder 的 active 零方向/组合零方向失败和全部对照共同总预算，以及 detector 的
+  embedder 的 active 零方向/组合零方向失败、全部对照共同 nominal/limit 和冻结
+  binary32 搜索性质，以及 detector 的
   key-only 模板重构、正确 key/错误 key 分离和盲评分输入边界。
 - 真实 runtime：`content_embedder`/runtime 检查 realized combined total
   norm/relative L2；`lf_detector` 独立检查
@@ -724,7 +796,7 @@ delta_geo = rho_geo * ||z||_2 * u_geo
 `1e-12*||g_geo||` 时失败。content update 先物化为
 `z_content_actual=cast(z+delta_content)`；几何只在其上追加一次最终 dtype 写入。
 对 ratio `r`，总预算为
-`rho_total=0.012*sqrt(1+r^2)`。
+`rho_total=(3/250)*sqrt(1+r^2)`。
 
 按 `{1,1/2,...,1/128}` 顺序测试 `lambda`。每次必须完整 replay suffix 和同一
 image-only score，并对实际 dtype 张量计算：

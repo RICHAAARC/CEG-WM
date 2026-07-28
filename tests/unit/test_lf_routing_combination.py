@@ -1,7 +1,7 @@
 from dataclasses import replace
 from hashlib import sha256
 from math import sqrt
-from struct import pack
+from struct import pack, unpack
 
 import pytest
 
@@ -13,8 +13,14 @@ from main.content_chain.detector import (
     validate_content_detection_result,
 )
 from main.content_chain.embedder import (
+    ContentEmbeddingResult,
     ContentEmbedderError,
+    ContentMaterializationObservation,
+    content_actual_budget_accepts,
+    content_materialization_replay_identity,
     content_embedder,
+    reconcile_content_materialization_budget,
+    scale_content_delta_binary32,
 )
 from main.content_chain.hf_carrier import hf_carrier
 from main.content_chain.hf_detector import (
@@ -94,6 +100,116 @@ def _latent(size: int) -> tuple[float, ...]:
 
 def _float32_digest(values: tuple[float, ...]) -> str:
     return sha256(b"".join(pack(">f", value) for value in values)).hexdigest()
+
+
+def _test_float32(value: float) -> float:
+    return unpack(">f", pack(">f", value))[0]
+
+
+def _next_positive_float32(value: float) -> float:
+    bits = int.from_bytes(pack(">f", value), byteorder="big", signed=False)
+    return unpack(">f", (bits + 1).to_bytes(4, byteorder="big"))[0]
+
+
+def _test_l2_float32(values: tuple[float, ...]) -> float:
+    accumulator = 0.0
+    for value in values:
+        squared = _test_float32(value * value)
+        accumulator = _test_float32(accumulator + squared)
+    return _test_float32(sqrt(accumulator))
+
+
+def _related_actual_delta(
+    scaled_nominal_delta: tuple[float, ...],
+    target_norm: float,
+) -> tuple[float, ...]:
+    maximum = max(abs(value) for value in scaled_nominal_delta)
+    if maximum == 0.0:
+        return (0.0,) * len(scaled_nominal_delta)
+    direction = tuple(
+        _test_float32(value / maximum)
+        for value in scaled_nominal_delta
+    )
+    direction_norm = _test_l2_float32(direction)
+    multiplier = _test_float32(target_norm / direction_norm)
+    return tuple(
+        _test_float32(value * multiplier)
+        for value in direction
+    )
+
+
+class _MonotoneActualMaterializer:
+    """用于隔离验证 embedder binary32 搜索的单调 actual-dtype 假实现。"""
+
+    def __init__(
+        self,
+        *,
+        greatest_feasible_scale: float,
+        zero_through_scale: float = 0.0,
+        feasible_utilization: float = 1.0,
+        replay_passed: bool = True,
+    ) -> None:
+        self.greatest_feasible_scale = _test_float32(
+            greatest_feasible_scale
+        )
+        self.zero_through_scale = _test_float32(zero_through_scale)
+        self.feasible_utilization = _test_float32(feasible_utilization)
+        self.replay_passed = replay_passed
+        self.calls: list[float] = []
+
+    def __call__(
+        self,
+        embedding_result: ContentEmbeddingResult,
+        materialization_scale: float,
+        /,
+    ) -> ContentMaterializationObservation:
+        scale = _test_float32(materialization_scale)
+        self.calls.append(scale)
+        scaled_nominal_delta = scale_content_delta_binary32(
+            embedding_result,
+            scale,
+        )
+        scaled_nominal_delta_digest = _float32_digest(
+            scaled_nominal_delta
+        )
+        limit = _test_float32(
+            embedding_result.latent_norm * _test_float32(3.0 / 250.0)
+        )
+        if scale <= self.zero_through_scale:
+            delta = (0.0,) * len(embedding_result.delta_content)
+            status = "write_disappeared"
+        elif scale <= self.greatest_feasible_scale:
+            delta = _related_actual_delta(
+                scaled_nominal_delta,
+                _test_float32(limit * self.feasible_utilization),
+            )
+            status = "passed"
+        else:
+            delta = _related_actual_delta(
+                scaled_nominal_delta,
+                _test_float32(limit * 2.0),
+            )
+            status = "passed"
+        realized_total_l2 = _test_l2_float32(delta)
+        replay_identity = content_materialization_replay_identity(
+            embedding_result,
+            materialization_scale=scale,
+            scaled_nominal_delta_digest=scaled_nominal_delta_digest,
+            baseline_norm=embedding_result.latent_norm,
+            delta_content_actual=delta,
+            realized_total_l2=realized_total_l2,
+            integrity_status=status,
+        )
+        return ContentMaterializationObservation(
+            materialization_scale=scale,
+            baseline_norm=embedding_result.latent_norm,
+            scaled_nominal_delta_digest=scaled_nominal_delta_digest,
+            delta_content_actual=delta,
+            realized_total_l2=realized_total_l2,
+            integrity_status=status,
+            deterministic_binary16_replay_passed=self.replay_passed,
+            materialization_replay_identity=replay_identity,
+        )
 
 
 def _branch_results():
@@ -551,6 +667,263 @@ def test_content_embedding_total_budget_and_frozen_allocation() -> None:
             result.target_component_lf_norm
             + result.target_component_hf_norm
         ) != pytest.approx(result.target_total_norm, abs=1e-6)
+
+    materializer = _MonotoneActualMaterializer(
+        greatest_feasible_scale=1.0,
+        feasible_utilization=0.75,
+    )
+    actual = reconcile_content_materialization_budget(
+        controls[0],
+        materializer,
+    )
+    assert actual.content_relative_l2_nominal == pytest.approx(0.012)
+    assert actual.content_relative_l2_limit == pytest.approx(0.012)
+    assert actual.materialization_scale == 1.0
+    assert actual.attempt_count == 1
+    assert actual.integrity_status == "passed"
+    assert actual.budget_status == "accepted"
+    assert actual.budget_utilization == pytest.approx(0.75, rel=1e-6)
+    assert any(
+        value != 0.0
+        for value in actual.observation.delta_content_actual
+    )
+
+    half_delta = tuple(
+        _test_float32(value * 0.5)
+        for value in controls[0].delta_content
+    )
+    forged_half = replace(
+        controls[0],
+        delta_content=half_delta,
+        delta_content_digest=_float32_digest(half_delta),
+    )
+    with pytest.raises(ContentEmbedderError, match="nominal formula replay"):
+        reconcile_content_materialization_budget(
+            forged_half,
+            materializer,
+        )
+    opposite_delta = tuple(-value for value in controls[0].delta_content)
+    forged_opposite = replace(
+        controls[0],
+        delta_content=opposite_delta,
+        delta_content_digest=_float32_digest(opposite_delta),
+    )
+    with pytest.raises(ContentEmbedderError, match="nominal formula replay"):
+        reconcile_content_materialization_budget(
+            forged_opposite,
+            materializer,
+        )
+
+
+@pytest.mark.unit
+def test_actual_content_budget_predicate_is_monotone_and_strict() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    baseline_norm = embedding.latent_norm
+    limit = _test_float32(baseline_norm * _test_float32(3.0 / 250.0))
+    just_over = _next_positive_float32(limit)
+    decisions = [
+        content_actual_budget_accepts(baseline_norm, realized)
+        for realized in (0.0, _test_float32(limit * 0.5), limit, just_over)
+    ]
+    assert decisions == [True, True, True, False]
+    scale = _test_float32(0.30)
+    scaled = scale_content_delta_binary32(embedding, scale)
+    assert tuple(pack(">f", value) for value in scaled) == tuple(
+        pack(">f", _test_float32(value * scale))
+        for value in embedding.delta_content
+    )
+    with pytest.raises(ContentEmbedderError, match="nonnegative"):
+        content_actual_budget_accepts(baseline_norm, -1.0)
+    for invalid_baseline in (-1.0, 0.0):
+        with pytest.raises(ContentEmbedderError, match="positive"):
+            content_actual_budget_accepts(invalid_baseline, 0.0)
+
+
+@pytest.mark.unit
+def test_actual_budget_bisection_selects_maximal_scale_after_plateau() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    materializer = _MonotoneActualMaterializer(
+        greatest_feasible_scale=0.375,
+        zero_through_scale=0.30,
+        feasible_utilization=0.5,
+    )
+    result = reconcile_content_materialization_budget(
+        embedding,
+        materializer,
+    )
+    assert result.materialization_scale == _test_float32(0.375)
+    assert result.materialization_scale == max(
+        scale
+        for scale in materializer.calls
+        if 0.30 < scale <= 0.375
+    )
+    assert any(scale <= 0.30 for scale in materializer.calls)
+    assert result.attempt_count == len(materializer.calls)
+    assert result.attempt_count < 200
+    next_scale = _next_positive_float32(result.materialization_scale)
+    probe = _MonotoneActualMaterializer(
+        greatest_feasible_scale=0.375,
+        zero_through_scale=0.30,
+        feasible_utilization=0.5,
+    )
+    next_observation = probe(embedding, next_scale)
+    assert not content_actual_budget_accepts(
+        next_observation.baseline_norm,
+        next_observation.realized_total_l2,
+    )
+
+
+@pytest.mark.unit
+def test_actual_budget_bisection_handles_subnormal_scale_and_terminates() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    largest_subnormal = unpack(">f", b"\x00\x7f\xff\xff")[0]
+    materializer = _MonotoneActualMaterializer(
+        greatest_feasible_scale=largest_subnormal,
+        feasible_utilization=0.75,
+    )
+    result = reconcile_content_materialization_budget(
+        embedding,
+        materializer,
+    )
+    assert result.materialization_scale == largest_subnormal
+    assert result.attempt_count == len(materializer.calls)
+    assert result.attempt_count <= 151
+
+
+@pytest.mark.unit
+def test_actual_budget_fails_when_no_nonzero_scale_is_feasible() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    largest_below_one = unpack(">f", b"\x3f\x7f\xff\xff")[0]
+    materializer = _MonotoneActualMaterializer(
+        greatest_feasible_scale=0.0,
+        zero_through_scale=largest_below_one,
+    )
+    with pytest.raises(ContentEmbedderError, match="no nonzero"):
+        reconcile_content_materialization_budget(
+            embedding,
+            materializer,
+        )
+    assert len(materializer.calls) <= 151
+
+
+@pytest.mark.unit
+def test_actual_budget_integrity_failures_are_fail_closed() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    replay_failure = _MonotoneActualMaterializer(
+        greatest_feasible_scale=1.0,
+        replay_passed=False,
+    )
+    with pytest.raises(ContentEmbedderError, match="binary16 replay"):
+        reconcile_content_materialization_budget(
+            embedding,
+            replay_failure,
+        )
+
+    vanished_full_scale = _MonotoneActualMaterializer(
+        greatest_feasible_scale=1.0,
+        zero_through_scale=1.0,
+    )
+    with pytest.raises(ContentEmbedderError, match="full-scale"):
+        reconcile_content_materialization_budget(
+            embedding,
+            vanished_full_scale,
+        )
+
+
+@pytest.mark.unit
+def test_actual_materialization_observation_identity_failures() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    valid = _MonotoneActualMaterializer(
+        greatest_feasible_scale=1.0,
+        feasible_utilization=0.75,
+    )(embedding, 1.0)
+    zero_delta = (0.0,) * len(valid.delta_content_actual)
+    unrelated_delta = tuple(
+        -value for value in valid.delta_content_actual
+    )
+    cases = (
+        (
+            replace(valid, materialization_scale=0.5),
+            "scale identity",
+        ),
+        (
+            replace(
+                valid,
+                baseline_norm=_next_positive_float32(valid.baseline_norm),
+            ),
+            "baseline norm does not match",
+        ),
+        (
+            replace(valid, baseline_norm=-1.0),
+            "baseline L2 must be positive",
+        ),
+        (
+            replace(valid, baseline_norm=0.0),
+            "baseline L2 must be positive",
+        ),
+        (
+            replace(
+                valid,
+                realized_total_l2=_next_positive_float32(
+                    valid.realized_total_l2
+                ),
+            ),
+            "row-major binary32 replay",
+        ),
+        (
+            replace(valid, materialization_replay_identity="not-a-digest"),
+            "replay identity",
+        ),
+        (
+            replace(valid, integrity_status="invalid"),
+            "integrity status",
+        ),
+        (
+            replace(
+                valid,
+                delta_content_actual=zero_delta,
+                realized_total_l2=0.0,
+                integrity_status="passed",
+            ),
+            "passed observation has zero",
+        ),
+        (
+            replace(valid, integrity_status="write_disappeared"),
+            "write-disappeared observation has nonzero",
+        ),
+        (
+            replace(valid, scaled_nominal_delta_digest="0" * 64),
+            "scaled nominal delta digest drifted",
+        ),
+        (
+            replace(valid, delta_content_actual=unrelated_delta),
+            "replay identity mismatch",
+        ),
+    )
+    for forged, error_match in cases:
+        with pytest.raises(ContentEmbedderError, match=error_match):
+            reconcile_content_materialization_budget(
+                embedding,
+                lambda _embedding, _scale, forged=forged: forged,
+            )
 
 
 @pytest.mark.unit

@@ -36,7 +36,18 @@ callback/model/dtype 边界物化 embedder 给出的更新并把实际张量与 
 combined total norm/relative L2 返回给
 embedder 判定，不拥有路由、组合写入、预算判定或检测算法。router 只输出
 observations、`A`、两 mask 和 identity/digests；`a`、方向内积/组合归一因子、
-target total 与 realized combined total norm/relative L2 属于 embedder。
+nominal/limit、materialization reconciliation 与 realized combined total
+norm/relative L2 属于 embedder。
+
+当前 actual-dtype 内容预算把 nominal 与 hard limit 同时冻结为 `3/250`。对
+callback 18 actual baseline `z0`，runtime 只实现
+`z_s=cast_actual(fp32(z0)+s*delta_content_nominal)`，返回
+`delta_actual_s=fp32(z_s)-fp32(z0)`、binary16 bitwise replay 和 row-major
+binary32 realized 测量。`content_embedder` 直接比较
+`norm32(delta_actual_s) <= f32((3/250)*norm32(fp32(z0)))`，必要时在 binary32
+`[0,1]` 上二分到无新 representable midpoint，选择最大非零可行 scale 或 fail
+closed。ratio/utilization 只作诊断，不存在 tolerance、actual 下限或 runtime
+budget policy。
 
 首个 `hf_sparse_tail` 候选固定为高频剩余经 sparse tail 后直接 L2 normalize，只在
 normalized-correlation 评分时中心化；该顺序具有 historical DirectHF 来源，但历史
@@ -112,11 +123,17 @@ main/joint_decision/detector.py             conditional_recovery_decision
 
 `content_router` 只拥有 observations、`A`、两 mask、identity/digests 和 disabled
 uniform control；`content_embedder` 独占冻结 `a`、LF/HF 组合写入、共同总预算、
-方向内积/组合归一因子、target total 与 realized combined total norm/relative L2，以及
-active/combined 零方向失败；
+方向内积/组合归一因子、nominal/limit、materialization scale/attempt/integrity/
+budget status 与 realized combined total norm/relative L2，以及 active/combined
+零方向失败；
 `lf_detector` 独占盲 LF 分数；`geometry_reliability` 独占 estimator 原始指标上的
 合取门。候选 registry 仍是 10 个 ID（9 个具名候选加 1 个 routing 强制对照）；
 CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现职责不是同一计数。
+
+`content_direction`、`active_lf_direction`、`active_hf_direction` 及 target
+components 只绑定 nominal 组合公式；actual hard limit 只作用于最终 combined
+content delta，不定义或观测 LF/HF actual branch decomposition。geometry 写入与
+geometry/total budget 仍是独立职责。
 
 每个责任还必须绑定 `candidate_specifications.md` 中 policy 规定的候选 ID 和独立方法特异性验收节点；路径存在或 AST 结构通过都不等于方法完成。
 
