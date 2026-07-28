@@ -44,8 +44,20 @@ Batch 3 的本地 CPU/mock 路径当前已实现：
 - 该入口只消费普通待检图像，不接受 generation cache、embed record、参考图或
   私有嵌入状态，也不计算 relation、可靠性或最终判定。
 
-上述本地路径通过不表示 Batch 2 整体完成。真实 SD3.5 callback、actual float16 和
-VAE 路径仍须 GPU qualification；Batch 3 当前只证明真实投影 hook 接口和
-CPU/mock 失败语义可执行，尚未用 SD3.5 捕获真实 Q/K。当前也未实现模型下载/加载、
-runner、Notebook 或 GPU qualification。本地 CPU 通过不是 `runtime_verified`
-或科学证据，低 utilization 也不得在未来实验中用于结果后筛除。
+Batch 4 的本地交付代码当前提供：
+
+- 只在 `prepare()` 时导入 diffusers、加载固定 model revision 并要求 `cuda:0`
+  的 `Sd35PipelineBackend`，真实连接 Batch 2 callback/VAE 与 Batch 3
+  schedule/attention/QK 接口；
+- `smoke`、`qualification` 和可选 `replay` runner；qualification 对登记 key
+  重复执行并另跑一个确定性 negative-key identity control，结果 zip 区分
+  runtime/resource/integrity/budget/QK/determinism failure；
+- 只允许干净精确 HEAD 的 execution package builder、固定 Drive 输入输出边界的
+  唯一薄 Colab Notebook，以及不加载模型的 CPU fake/安全边界测试。
+
+上述本地路径通过不表示 Batch 2 整体完成。真实 SD3.5 callback、actual float16、
+VAE 与 Q/K 仍须 GPU qualification。runner 的 ordinary Python 异常会形成最小
+failure zip；解释器硬崩溃、进程被系统直接杀死或存储本身不可写无法由进程内逻辑
+保证打包，必须按 incomplete/resource failure 交接。本地 CPU、package、Notebook
+或 harness 通过都不是 `runtime_verified` 或科学证据，低 utilization 也不得在
+未来实验中用于结果后筛除。

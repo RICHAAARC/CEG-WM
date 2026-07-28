@@ -359,6 +359,69 @@ Notebook 与 repository module 的跨边界数据
 | public_noise_values_float32_be_sha256 | cross_boundary | provenance | none | true | false | false | CPU row-major float32 公开噪声逐值 big-endian bytes 的可重放摘要。 |
 | qk_actual_dtype | cross_boundary | runtime_identity | none | true | false | false | 两登记 attention 层实际 `to_q`/`to_k` 捕获并经模块 normalization 后的 dtype。 |
 | qk_layer_observations | cross_boundary | method_state | none | false | false | false | runtime 按登记层序返回给 `main` 的真实 `QkLayerObservation` 集合；不得持久化原始 Q/K tensor。 |
+| runtime_candidate_revision | persisted_protocol | provenance | none | true | false | false | execution package 与 qualification result 共同绑定的精确 40 位 Git revision。 |
+| package_schema_version | persisted_protocol | protocol | none | false | false | false | runtime execution manifest 的结构版本；不创建新的治理 schema。 |
+| profile_name | persisted_protocol | protocol | none | false | false | false | execution manifest 固定的 `experiment_execution_package` 提取档位名。 |
+| package_ready | persisted_protocol | protocol | none | false | false | false | package builder 在精确 revision、干净树、allowlist 与安全检查全部通过后写入的布尔状态。 |
+| profile | persisted_protocol | protocol | none | true | false | false | runtime qualification 运行档位：`smoke`、`qualification` 或可选 `replay`。 |
+| run_status | persisted_protocol | runtime_state | none | true | false | false | runner 自动写入的 `passed` 或 `failed` 完成状态；不能表示 `runtime_verified`。 |
+| callback_status | persisted_protocol | runtime_state | none | true | false | false | 当前 qualification record/summary 的 callback exactly-once 检查状态。 |
+| actual_dtype_status | persisted_protocol | runtime_state | none | true | false | false | actual-dtype 完整性及 main-owned hard-budget 闭环的聚合状态。 |
+| vae_status | persisted_protocol | runtime_state | none | true | false | false | VAE decode 与 detection-side posterior `mode()` encode 路径的完成状态。 |
+| qk_status | persisted_protocol | runtime_state | none | true | false | false | 两登记层真实 `to_q`/`to_k` 捕获及身份检查的完成状态。 |
+| determinism_status | persisted_protocol | runtime_state | none | true | false | false | qualification/replay 独立重复记录的一致性状态；smoke 明确为 `not_evaluated`。 |
+| package_status | persisted_protocol | runtime_state | none | false | false | false | execution manifest 完整文件集、hash/size 和 revision 的启动前校验状态。 |
+| dependency_status | persisted_protocol | runtime_state | none | false | false | false | requirements lock 与安装环境逐项匹配冻结 dependency lock 的状态。 |
+| repetition_count | persisted_protocol | runtime_state | none | false | false | false | 当前结果 zip 实际完成并记录的独立执行次数。 |
+| failure_class | persisted_protocol | runtime_state | none | true | false | false | runtime、resource、integrity、budget、Q/K、determinism 或 incomplete 失败分类。 |
+| failure_classes | persisted_protocol | runtime_state | none | true | false | false | run summary 按失败记录顺序保存的 failure class 列表。 |
+| exception_type | persisted_protocol | runtime_state | none | false | false | false | failure record 保存的最外层 Python exception 类型名，仅供诊断。 |
+| key_control | persisted_protocol | runtime_identity | none | true | false | false | qualification record 的 `registered` 或 `negative_identity` 路径；后者只验证另一 key identity 的 runtime 可执行性，不是正式 wrong-key 科学证据。 |
+| key_public_digest | persisted_protocol | provenance | none | true | false | false | qualification 使用 key 的公开摘要；禁止持久化 root key 原文。 |
+| prompt_identity | persisted_protocol | provenance | none | true | false | false | qualification 固定 prompt 契约的语义身份。 |
+| prompt_sha256 | persisted_protocol | provenance | none | true | false | false | 本次 prompt UTF-8 bytes 的 SHA-256；不持久化私有输入。 |
+| result_zip_sha256 | persisted_protocol | provenance | none | false | false | false | runner 结果 zip 的普通传输完整性摘要，不是方法或模型身份门。 |
+| result_schema_version | persisted_protocol | protocol | none | false | false | false | runtime qualification 结果 JSON 的局部结构版本。 |
+| started_at_utc | persisted_protocol | provenance | none | false | false | false | runner 记录的 UTC 开始时间。 |
+| finished_at_utc | persisted_protocol | provenance | none | false | false | false | runner 记录的 UTC 结束时间。 |
+| failure_count | persisted_protocol | runtime_state | none | false | false | false | 当前结果内自动记录的失败条目数量。 |
+| checks | persisted_protocol | runtime_state | none | false | false | false | run summary 中对 `runtime_checks.jsonl` 记录的内嵌小型副本；不含原始 tensor。 |
+| qk_layer_value_digests | persisted_protocol | provenance | none | true | false | false | 登记层实际 Q/K tensor 的逐层摘要集合，用于重复执行一致性检查，不持久化 tensor。 |
+| qk_operator_identities | persisted_protocol | runtime_identity | none | true | false | false | 两登记层真实 attention/to_q/to_k/norm/head layout 的 operator identity 序列。 |
+| query_sha256 | persisted_protocol | provenance | none | false | false | false | 单登记层实际 query tensor contiguous bytes 的 SHA-256。 |
+| attention_key_sha256 | persisted_protocol | provenance | none | false | false | false | 单登记层实际 attention-key tensor contiguous bytes 的 SHA-256。 |
+| package_filename | persisted_protocol | provenance | none | false | false | false | builder 创建的 execution package zip 基名。 |
+| package_sha256 | persisted_protocol | provenance | none | false | false | false | execution package zip 的普通传输完整性摘要。 |
+| copied_files | persisted_protocol | provenance | none | false | false | false | execution manifest 中 allowlist 实际复制文件及其摘要、大小列表。 |
+| size_bytes | persisted_protocol | provenance | none | false | false | false | manifest 单文件条目的精确 byte size。 |
+| sha256 | persisted_protocol | provenance | none | false | false | false | manifest 单文件内容 bytes 的 SHA-256。 |
+| excluded_parts | persisted_protocol | protocol | none | false | false | false | execution package 明确禁止纳入的路径部分集合。 |
+| result_zip | persisted_protocol | provenance | none | false | false | false | runner 返回的结果 zip 基名；权威路径由 Notebook/调用方决定。 |
+| result_zip_filename | persisted_protocol | provenance | none | true | false | false | 写入 run summary、且必须包含同一 run ID 的最小结果 zip 基名。 |
+| key_controls | persisted_protocol | runtime_identity | none | true | false | false | 当前结果按执行顺序记录的 `registered`/`negative_identity` key role 序列。 |
+| replay_source_run_id | persisted_protocol | provenance | none | true | false | false | replay 绑定的既有 passed qualification run ID。 |
+| replay_source_revision | persisted_protocol | provenance | none | true | false | false | replay 绑定的既有 qualification runtime candidate revision。 |
+| replay_source_record_digests | persisted_protocol | provenance | none | true | false | false | 从既有 qualification `runtime_checks.jsonl` 独立重算并与 summary 对照的记录摘要序列。 |
+| record_digests | persisted_protocol | provenance | none | true | false | false | 当前 runner 对完整 qualification records 逐条 canonical JSON 计算的摘要序列。 |
+| clean_image_sha256 | persisted_protocol | provenance | none | false | false | false | clean VAE decode 输出 tensor contiguous bytes 的摘要；不持久化 tensor。 |
+| watermarked_image_sha256 | persisted_protocol | provenance | none | false | false | false | watermarked VAE decode 输出 tensor contiguous bytes 的摘要；不持久化 tensor。 |
+| detection_latent_sha256 | persisted_protocol | provenance | none | false | false | false | detection-side posterior-mode latent contiguous bytes 的摘要；不持久化 tensor。 |
+| python | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 Python 版本。 |
+| torch | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 PyTorch 版本。 |
+| diffusers | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 diffusers 版本。 |
+| transformers | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 transformers 版本。 |
+| accelerate | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 accelerate distribution 版本。 |
+| numpy | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 NumPy distribution 版本。 |
+| pillow | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 Pillow distribution 版本。 |
+| safetensors | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 safetensors distribution 版本。 |
+| cuda_runtime | persisted_protocol | runtime_identity | none | false | false | false | PyTorch 报告的 CUDA runtime 版本。 |
+| cuda_available | persisted_protocol | runtime_identity | none | false | false | false | runner 启动时 PyTorch 是否报告 CUDA 可用。 |
+| gpu_name | persisted_protocol | runtime_identity | none | false | false | false | qualification 实际 CUDA device 0 名称；不是 GPU 能力证明的替代物。 |
+| dependency_lock_evidence | persisted_protocol | runtime_identity | none | true | false | false | runner 对完整冻结 dependency lock 逐项核验后写入的期望/实际版本记录。 |
+| expected_version | persisted_protocol | runtime_identity | none | false | false | false | 单项 dependency lock 登记的冻结版本或 Python 版本约束。 |
+| actual_version | persisted_protocol | runtime_identity | none | false | false | false | runner 通过 Python runtime 或 `importlib.metadata` 实际读取的版本。 |
+| huggingface_hub | persisted_protocol | runtime_identity | none | false | false | false | environment summary 中 `huggingface-hub` distribution 的实际版本。 |
+| materialization_attempt_count | persisted_protocol | runtime_state | none | true | false | false | 当前 qualification record 保存的 main-owned actual-dtype materialization 尝试次数。 |
 | dependency_lock | persisted_protocol | runtime_identity | none | false | false | false | runtime 候选冻结的 Python 与模型执行依赖版本映射。 |
 | package_name | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中按冻结顺序登记的包名。 |
 | version_specifier | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中与包名绑定的精确版本或 Python 版本约束。 |

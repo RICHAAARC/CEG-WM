@@ -12,6 +12,7 @@ from .content_chain.embedder import (
     reconcile_content_materialization_budget,
     scale_content_delta_binary32,
 )
+from .content_chain.hf_carrier import HfCarrierResult, hf_carrier
 from .geometry_chain import QkLayerObservation
 from .joint_decision import (
     ConditionalRecoveryError,
@@ -31,6 +32,7 @@ __all__ = [
     "ContentMaterializationObservation",
     "ContentMaterializationResult",
     "ContentMaterializer",
+    "HfCarrierResult",
     "ContentDetectorBinding",
     "JointDecisionThresholds",
     "QkLayerObservation",
@@ -38,6 +40,7 @@ __all__ = [
     "content_actual_budget_accepts",
     "content_materialization_replay_identity",
     "content_embedder",
+    "hf_carrier",
     "derive_public_noise_stream",
     "reconcile_content_materialization_budget",
     "scale_content_delta_binary32",

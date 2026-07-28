@@ -162,6 +162,34 @@ fail-closed 路径；这不表示 SD3.5 真实 Q/K 已捕获，后者仍属于 C
 - 创建唯一 `notebooks/colab/runtime_qualification.ipynb`；
 - Notebook boundary、smoke/integration 选择和 execution package 在本地先检查。
 
+当前本地实现已提供上述 backend、runner、revision-bound package builder 和唯一薄
+Notebook 源；它们仍须完成本批 CPU/mock 审计与注册 `method` profile 后才能固化。
+runner 可捕获普通 Python/runtime 失败并写出最小 failure zip；若解释器硬崩溃、
+进程被系统直接杀死或结果存储不可写，进程内打包不可能完成，必须诚实登记为
+`incomplete` 或 `resource_failure`，不得由 Notebook 伪造通过记录。
+
+Batch 4 最终 revision 提交且工作树干净后，只能从 exact HEAD 的 tracked blobs
+构建 execution package。`<输出目录>` 必须在仓库外：
+
+```bash
+RUNTIME_CANDIDATE_REVISION="$(git rev-parse HEAD)"
+test -z "$(git status --porcelain)"
+PYTHONDONTWRITEBYTECODE=1 python \
+  scripts/experiment_execution/build_runtime_qualification_package.py \
+  --root . \
+  --runtime-candidate-revision "${RUNTIME_CANDIDATE_REVISION}" \
+  --output-zip \
+  "<输出目录>/ceg_wm_runtime_execution_${RUNTIME_CANDIDATE_REVISION}.zip"
+```
+
+包内独立运行的完整安装、Secret 环境变量、runner 参数、退出码和 result zip
+契约以包根 `README.md` 为准。必须先把包安全解压到新的临时目录，并在任何
+`main`/`runtime` 导入前校验 manifest 的 revision、`package_ready`、完整文件集、
+逐文件 hash/size 和冻结依赖；`PYTHONDONTWRITEBYTECODE=1` 必须在启动 Python
+前设置。runner 的退出码 `0/1/2` 分别表示通过、已完成的失败、incomplete/preflight
+失败；任何非零退出都不得被 Notebook 隐藏，能形成的 failure zip 仍须复制回
+revision/run-id 对应的 Drive 目录。
+
 ### Local Tests
 
 真实 backend、GPU、network、large model、smoke 和 integration 不得进入默认 pytest。

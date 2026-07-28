@@ -50,6 +50,10 @@ from .qk_observation import (
     RuntimeQkObservationResult,
     observe_detection_qk,
 )
+from .sd35_backend import (
+    Sd35BackendError,
+    Sd35PipelineBackend,
+)
 
 __all__ = [
     "DEFAULT_RUNTIME_CONFIG_PATH",
@@ -81,6 +85,8 @@ __all__ = [
     "RuntimeVaePosterior",
     "Sd35RuntimeAdapter",
     "Sd35RuntimeConfiguration",
+    "Sd35BackendError",
+    "Sd35PipelineBackend",
     "create_runtime_adapter",
     "load_runtime_configuration",
     "measure_content_materialization",
