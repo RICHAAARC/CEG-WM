@@ -392,6 +392,15 @@ Notebook 与 repository module 的跨边界数据
 | attention_key_sha256 | persisted_protocol | provenance | none | false | false | false | 单登记层实际 attention-key tensor contiguous bytes 的 SHA-256。 |
 | package_filename | persisted_protocol | provenance | none | false | false | false | builder 创建的 execution package zip 基名。 |
 | package_sha256 | persisted_protocol | provenance | none | false | false | false | execution package zip 的普通传输完整性摘要。 |
+| expected_package_sha256 | persisted_protocol | provenance | none | false | false | false | 调用者从 package 外独立审核结果提供给 bootstrap 的完整 archive SHA-256；不得从 archive 同目录 sidecar 自动信任。 |
+| bootstrap_schema_version | persisted_protocol | protocol | none | false | false | false | package 外可信 bootstrap 的局部协议版本；当前只支持 package schema version 1。 |
+| bootstrap_failure_schema_version | persisted_protocol | protocol | none | false | false | false | runner 启动前失败诊断的局部结构版本；不属于 qualification result schema。 |
+| bootstrap_sha256 | persisted_protocol | provenance | none | false | false | false | 实际执行的 package 外 bootstrap 完整文件 SHA-256，由冻结 Notebook trust anchor 先行核对。 |
+| artifact_kind | persisted_protocol | runtime_state | none | false | false | false | bootstrap 输出的 `qualification_result` 或 `bootstrap_failure`，禁止把后者解释为正式 runtime 结果。 |
+| failure_stage | persisted_protocol | runtime_state | none | false | false | false | bootstrap 失败发生的 arguments、secrets、archive_digest、archive_safety、manifest、dependency_install、runner_start、runner_result 或 result_copy 控制面阶段。 |
+| bootstrap_exit_code | cross_boundary | runtime_state | none | false | false | false | bootstrap 自身预运行失败的退出码 3；与 runner 的 0/1/2 语义分离。 |
+| runner_exit_code | cross_boundary | runtime_state | none | false | false | false | bootstrap 独立核验并复制正式结果后原样返回的 runner 退出码 0、1 或 2。 |
+| diagnostic_zip | cross_boundary | provenance | none | false | false | false | runner 前失败时返回的独立 `bootstrap_failure` 诊断包绝对路径，不是 qualification result。 |
 | copied_files | persisted_protocol | provenance | none | false | false | false | execution manifest 中 allowlist 实际复制文件及其摘要、大小列表。 |
 | size_bytes | persisted_protocol | provenance | none | false | false | false | manifest 单文件条目的精确 byte size。 |
 | sha256 | persisted_protocol | provenance | none | false | false | false | manifest 单文件内容 bytes 的 SHA-256。 |

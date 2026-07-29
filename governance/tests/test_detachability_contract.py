@@ -58,8 +58,14 @@ def test_research_project_runs_after_outer_guard_is_removed(tmp_path: Path) -> N
         source = source_root / root_name
         if source.exists():
             shutil.copytree(source, detached_root / root_name, ignore=ignore)
-    for file_name in ("pyproject.toml",):
+    for file_name in (
+        "pyproject.toml",
+        "requirements_runtime_qualification.txt",
+    ):
         shutil.copy2(source_root / file_name, detached_root / file_name)
+    assert (
+        detached_root / "requirements_runtime_qualification.txt"
+    ).is_file()
 
     assert not (detached_root / ".agents").exists()
     assert not (detached_root / ".codex").exists()

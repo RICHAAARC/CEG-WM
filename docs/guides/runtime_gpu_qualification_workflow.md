@@ -12,7 +12,7 @@ CPU 验证、在必须使用 GPU 时停止并通知用户，最后依据 Colab �
 - 能在本地 CPU/mock 完成的工作不占用 Colab；
 - 只有真实 SD3.5、actual dtype、VAE 和 Q/K 等必须依赖 GPU 的检查才交给 Colab；
 - Notebook 只是固定运行入口，不承载方法、runtime 或判定逻辑；
-- Google Drive 只保存 Notebook 副本、执行包和小型结果压缩包；
+- Google Drive 只保存 Notebook 副本、独立可信 bootstrap、执行包和小型结果压缩包；
 - 模型权重、Hugging Face cache、pip cache 和临时张量只放 Colab 临时磁盘，
   每个新会话重新下载，不保存到 Google Drive；
 - 不要求对下载的模型权重逐文件计算或核验 hash；
@@ -158,12 +158,15 @@ fail-closed 路径；这不表示 SD3.5 真实 Q/K 已捕获，后者仍属于 C
 - 建立一个可从命令行运行的 runtime qualification runner；
 - runner 提供 `smoke`、`qualification`，必要时提供 `replay`；
 - runner 自己生成结果文件、失败状态和 zip，Notebook 不手写结果；
+- 建立 execution package 外、绑定 package schema version 1 的独立可信 bootstrap；
 - 建立最小 execution package，供没有 Git remote 的 Colab 会话使用；
 - 创建唯一 `notebooks/colab/runtime_qualification.ipynb`；
-- Notebook boundary、smoke/integration 选择和 execution package 在本地先检查。
+- Notebook boundary、bootstrap 安全边界、smoke/integration 选择和 execution
+  package 在本地先检查。
 
 当前本地实现已提供上述 backend、runner、revision-bound package builder 和唯一薄
-Notebook 源；它们仍须完成本批 CPU/mock 审计与注册 `method` profile 后才能固化。
+Notebook 源。可信 bootstrap 不从待验证 package 导入，也不进入 package 自验证；
+它们仍须完成本批 CPU/mock 审计与注册 `full` profile 后才能固化。
 runner 可捕获普通 Python/runtime 失败并写出最小 failure zip；若解释器硬崩溃、
 进程被系统直接杀死或结果存储不可写，进程内打包不可能完成，必须诚实登记为
 `incomplete` 或 `resource_failure`，不得由 Notebook 伪造通过记录。
@@ -199,22 +202,40 @@ Drive 中 execution package 的身份与 Notebook 入口按以下固定规则处
    manifest。更换候选时，只能用另一个已冻结的权威 archive 覆盖 alias，并重新
    核对两者 SHA-256 相同；不得改写既有权威 archive 或历史 results。
 
-包内独立运行的完整安装、Secret 环境变量、runner 参数、退出码和 result zip
-契约以包根 `README.md` 为准。必须先把包安全解压到新的临时目录，并在任何
-`main`/`runtime` 导入前校验 manifest 的 revision、`package_ready`、完整文件集、
-逐文件 hash/size 和冻结依赖；`PYTHONDONTWRITEBYTECODE=1` 必须在启动 Python
-前设置。runner 的退出码 `0/1/2` 分别表示通过、已完成的失败、incomplete/preflight
-失败；任何非零退出都不得被 Notebook 隐藏，能形成的 failure zip 仍须复制回
-revision/run-id 对应的 Drive 目录。
+package 进入 runner 前必须经过独立可信 bootstrap：
+
+1. bootstrap 固定支持 package schema version 1，其仓库 revision 和完整文件
+   SHA-256 由独立审核给出；bootstrap 文件不能来自待验证 package。
+2. Notebook 对 Drive bootstrap 只读取一次；先比较该 bytes 的 SHA-256，再以 `xb`
+   写入全新的 `/content` 本地快照并复核同一摘要，随后只执行本地快照。摘要不匹配
+   时不得启动任何 subprocess。调用者还须在运行时粘贴独立审核给出的完整 package
+   archive SHA-256；不得自动信任与 archive 同目录的可替换 sidecar。
+3. bootstrap 只用 Python 标准库执行预信任阶段。在任何 pip、requirements、
+   package import 或 runner 启动前，先把 Drive archive 单次流式复制到新建
+   ephemeral `xb` 快照并同步计算完整 SHA-256；不匹配时删除快照且不解包。匹配后
+   只从本地快照检查 ZIP traversal、绝对/Windows drive 路径、反斜线、重复成员、
+   symlink、成员/总大小，安全解包并验证 manifest
+   schema/profile/readiness/revision、allowlist、完整文件集及逐文件 hash/size。
+4. 全部检查通过后才安装冻结 requirements，并调用包内 runner。runner 继续独立
+   复核 package/dependency identity，不把 bootstrap 当作方法或 runtime 证据。
+
+runner 的退出码 `0/1/2` 分别表示通过、已完成的失败、incomplete/preflight 失败；
+这三种情况只要 runner 形成正式 result zip，bootstrap 都独立检查 result schema
+version 2、身份、固定文件集和退出状态，再复制到 revision/run-id Drive 目录。若在
+runner 可启动或形成正式结果前发生 archive ingress、解包、manifest、pip 或启动
+失败，bootstrap 写入独立的
+`ceg_wm_runtime_bootstrap_failure_<run_id>.zip`，其中只含
+`bootstrap_failure.json`。该诊断不是 qualification result，不得伪装通过或支撑
+`runtime_verified`。
 
 runner 的 `result_zip`、`ephemeral_root` 和 `persistent_root` 没有默认值，调用方
 必须显式提供。结果 zip 必须严格位于 ephemeral root 内；ephemeral 与 persistent
 root 在相等和两个祖先方向都必须不相交。只有 `replay` profile 可以提供
 `replay_source`，且 source 必须严格位于 persistent root 内；smoke/qualification
 携带 replay source 必须 fail closed。runtime backend 接收同一个 persistent root，
-并独立拒绝与其相等、包含它或被它包含的模型 cache root。Notebook 因此先让 runner
-在 `/content` 临时根生成结果，再逐字节复制到 manifest revision/run-id 对应的
-Drive 目录；这不改变上述 archive/alias 身份规则。
+并独立拒绝与其相等、包含它或被它包含的模型 cache root。bootstrap 因此先让 runner
+在 `/content` 临时根生成结果，独立核验后再逐字节复制到 manifest
+revision/run-id 对应的 Drive 目录；这不改变上述 archive/alias 身份规则。
 
 ### Local Tests
 
@@ -338,34 +359,31 @@ notebooks/colab/runtime_qualification.ipynb
 
 Notebook 只包含：
 
-1. 显示任务范围和当前 profile；
-2. 挂载 Google Drive；
-3. 检查 GPU/CUDA 和可用磁盘；
-4. 创建 Colab 临时 cache：
-
-   ```text
-   /content/ceg_wm_runtime/
-   /content/hf_cache/
-   /content/pip_cache/
-   ```
-
-5. 从 Drive 读取 execution package 并解包到 `/content`；
-6. 安装优先参考版本或 runner 指定依赖；
-7. 从 Colab Secret 读取必要访问 token；
-8. 调用包内唯一 runner；
-9. 把 runner 生成的结果 zip 写入 Drive；
-10. 显示结果路径和简短成功/失败摘要。
+1. 显示任务范围并挂载 Google Drive；
+2. 在运行时输入 `PROFILE`、package 路径、独立审核给出的 expected package
+   SHA-256 和必要的 replay source，不修改 Notebook 源；
+3. 检查 GPU/CUDA 和可用临时磁盘；
+4. 从 Colab Secrets 读取 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`；
+5. 单次读取独立可信 bootstrap，比较其 SHA-256，以 `xb` 写入新的 `/content`
+   本地快照并复核摘要；
+6. 只用上述本地可信快照，以显式 package、expected SHA、ephemeral/persistent
+   roots 调用 bootstrap；
+7. 显示 bootstrap 返回的正式结果或诊断包路径和简短状态。
 
 Notebook 不得包含：
 
+- package manifest schema、allowlist、逐文件 hash/size 或安全解包实现；
+- 正式 result zip 文件清单、result schema 或通过判定；
 - 方法、runtime、Q/K hook、阈值或统计实现；
 - 手写 records、通过判定或 zip 文件清单；
 - 模型 fallback、自动降级或结果后改参数；
 - token、root key、模型权重或私有数据；
 - 把 `/root/.cache/huggingface`、`HF_HOME`、pip cache 或临时模型目录设置到 Drive。
 
-Notebook 源 cells 首次审核后保持冻结。Colab 自动写入的 outputs 和 execution counts
-不算源逻辑变化，不回写仓库；后续功能变化修改 runner/config，不复制新的 Notebook。
+Notebook 源 cells 首次审核后保持字节冻结。profile、package、expected SHA 与 replay
+source 都通过运行时输入取得；切换档位或候选不得修改并保存 Notebook 源。Colab
+自动写入的 outputs 和 execution counts 不回写仓库；后续功能变化修改
+bootstrap/runner/config 并重新审核 trust anchor，不复制新的 Notebook。
 
 ## Colab Storage Rules
 
@@ -394,15 +412,21 @@ G:\我的云端硬盘\CEG-WM\runtime_qualification\
 
 ```text
 runtime_qualification\
+├── bootstrap\
+│   └── package_schema_1\
+│       └── runtime_qualification_bootstrap.py
 ├── execution_packages\
 │   ├── <runtime_candidate_revision>\
 │   │   └── ceg_wm_runtime_execution_<runtime_candidate_revision>.zip
 │   └── current\
 │       └── ceg_wm_runtime_execution.zip
-└── runs\
+├── runs\
     └── <runtime_candidate_revision>\
         └── <run_id>\
             └── ceg_wm_runtime_qualification_<run_id>.zip
+└── bootstrap_failures\
+    └── <run_id>\
+        └── ceg_wm_runtime_bootstrap_failure_<run_id>.zip
 ```
 
 revision-specific archive 是不可变权威对象；`current` 文件只是在运行前从所选
@@ -418,9 +442,11 @@ G:\我的云端硬盘\Colab Notebooks\CEG-WM\runtime_qualification.ipynb
 
 Drive 中只保存：
 
+- 独立审核并由 Notebook 固定 SHA-256 的 package-schema-v1 bootstrap；
 - 小型 execution package；
 - 固定 Notebook 工作副本；
 - smoke/qualification/replay 结果 zip；
+- runner 前失败产生的小型 `bootstrap_failure` 诊断 zip；
 - 用户明确要求保留的少量示例图。
 
 不得保存模型权重、HF cache、pip cache、完整 latent、原始 Q/K tensor 或大规模生成
@@ -477,18 +503,19 @@ replay 使用同一 Notebook 和 runner，不创建第三个 Notebook。
 
 ## Minimal Result Zip
 
-结果 zip 由 runner 自动生成，至少包含：
+正式 schema version 2 结果 zip 由 runner 自动生成，文件集必须精确为：
 
 ```text
 run_summary.json
 environment_summary.json
 runtime_checks.jsonl
 failures.jsonl
-console.log                 # 可选诊断附件
-artifacts/                  # 少量必要示例，可选
 ```
 
-`run_summary.json` 至少记录：
+不得加入 `console.log`、`artifacts/` 或其他可选成员。额外诊断只能通过既有四个成员的
+登记字段表达；runner 启动前失败则使用独立、只含 `bootstrap_failure.json` 的诊断包。
+
+`run_summary.json` 按 schema version 2 的冻结字段集记录：
 
 - profile、run ID、开始/结束时间和完成状态；
 - runtime candidate revision；

@@ -4,14 +4,12 @@ import json
 import hashlib
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import types
 import zipfile
 from dataclasses import replace
 from pathlib import Path
-from pathlib import PurePosixPath
 
 import pytest
 import torch
@@ -1370,6 +1368,10 @@ def test_package_builder_requires_clean_exact_revision(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_package_fixture(repo)
+    (
+        repo
+        / "scripts/experiment_execution/runtime_qualification_bootstrap.py"
+    ).write_text("# package-external bootstrap\n", encoding="utf-8")
     (repo / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
     _git(repo, "init")
     _git(repo, "add", ".")
@@ -1402,6 +1404,10 @@ def test_package_builder_requires_clean_exact_revision(tmp_path: Path) -> None:
         assert "runtime/ignored.pyc" not in archive.namelist()
         assert (
             "scripts/experiment_execution/build_runtime_qualification_package.py"
+            not in archive.namelist()
+        )
+        assert (
+            "scripts/experiment_execution/runtime_qualification_bootstrap.py"
             not in archive.namelist()
         )
         assert not any(name.startswith(".codex/") for name in archive.namelist())
@@ -1615,36 +1621,44 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     )
     assert all(cell.get("execution_count") is None for cell in document["cells"] if cell["cell_type"] == "code")
     assert all(cell.get("outputs", []) == [] for cell in document["cells"])
-    assert "runtime_qualification_runner" in sources
+    assert 5 <= len(document["cells"]) <= 7
+    assert "runtime_qualification_bootstrap.py" in sources
     assert "HF_TOKEN" in sources
+    assert "CEG_WM_ROOT_KEY" in sources
     assert "/content/drive/MyDrive/CEG-WM/runtime_qualification" in sources
-    assert '"--run-id", RUN_ID' in sources
-    assert '"--persistent-root", DRIVE_ROOT' in sources
+    assert "EXPECTED_PACKAGE_SHA256 = input(" in sources
+    assert "PROFILE = (input(" in sources
+    assert "REPLAY_SOURCE = input(" in sources
+    assert '"--expected-package-sha256"' in sources
+    assert '"--persistent-root"' in sources
     assert "completed.returncode" in sources
-    assert "runner exit/status drifted" in sources
-    assert 'summary["result_schema_version"] == 2' in sources
-    assert "completed.returncode in (0, 1, 2)" in sources
-    assert "shutil.copy2(TEMP_RESULT_ZIP, RESULT_ZIP)" in sources
-    assert sources.index("shutil.copy2(TEMP_RESULT_ZIP, RESULT_ZIP)") < sources.index(
-        "unexpected runner exit code"
+    assert "completed.returncode not in (0, 1, 2, 3)" in sources
+    assert "EXPECTED_BOOTSTRAP_SHA256" in sources
+    assert "hashlib.sha256" in sources
+    assert 'pathlib.Path(BOOTSTRAP).read_bytes()' in sources
+    assert 'open("xb")' in sources
+    assert "str(TRUSTED_BOOTSTRAP)" in sources
+    assert sources.count("pathlib.Path(BOOTSTRAP).read_bytes()") == 1
+    bootstrap_path = (
+        root
+        / "scripts/experiment_execution/runtime_qualification_bootstrap.py"
     )
-    assert sources.index("shutil.copy2(TEMP_RESULT_ZIP, RESULT_ZIP)") < sources.index(
-        'summary["result_schema_version"] == 2'
+    bootstrap_digest = hashlib.sha256(bootstrap_path.read_bytes()).hexdigest()
+    assert f'EXPECTED_BOOTSTRAP_SHA256 = "{bootstrap_digest}"' in sources
+    assert sources.index("hashlib.sha256") < sources.index(
+        "subprocess.run(command"
     )
-    assert sources.index("shutil.copy2(TEMP_RESULT_ZIP, RESULT_ZIP)") < sources.index(
-        "runner exit/status drifted"
+    assert sources.index("TRUSTED_BOOTSTRAP =") < sources.index(
+        "subprocess.run(command"
     )
-    assert sources.index("shutil.copy2(TEMP_RESULT_ZIP, RESULT_ZIP)") < sources.index(
-        "runner failed with exit code"
-    )
-    assert sources.index("verify_unpacked_package(PACKAGE_ROOT)") < sources.index(
-        '"pip", "install"'
-    )
-    assert sources.index("verify_unpacked_package(PACKAGE_ROOT)") < sources.index(
-        'userdata.get("HF_TOKEN")'
-    )
-    assert "archive.extractall" not in sources
     for forbidden in (
+        "runtime_qualification_runner",
+        "runtime_execution_manifest",
+        "package_schema_version",
+        "result_schema_version",
+        "zipfile",
+        "extractall",
+        "pip install",
         "content_embedder",
         "hf_carrier",
         "to_q",
@@ -1655,157 +1669,124 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
         assert forbidden not in sources
 
 
-def _notebook_package_boundary_namespace() -> dict[str, object]:
+def test_notebook_runtime_inputs_do_not_require_source_changes() -> None:
+    root = Path(__file__).resolve().parents[2]
+    notebook = root / "notebooks/colab/runtime_qualification.ipynb"
+    before = hashlib.sha256(notebook.read_bytes()).hexdigest()
+    document = json.loads(notebook.read_text(encoding="utf-8"))
+    sources = "\n".join(
+        "".join(cell.get("source", [])) for cell in document["cells"]
+    )
+    assert 'input("Profile [smoke]:' in sources
+    assert 'input(f"Execution package path [' in sources
+    assert 'input("Expected package SHA-256:' in sources
+    assert 'input("Replay source path [none]:' in sources
+    assert hashlib.sha256(notebook.read_bytes()).hexdigest() == before
+
+
+def _notebook_cell_source(marker: str) -> str:
     root = Path(__file__).resolve().parents[2]
     document = json.loads(
         (
             root / "notebooks/colab/runtime_qualification.ipynb"
         ).read_text(encoding="utf-8")
     )
-    source = next(
-        "".join(cell["source"])
+    return next(
+        "".join(cell.get("source", []))
         for cell in document["cells"]
-        if "def safe_extract_package" in "".join(cell.get("source", []))
+        if marker in "".join(cell.get("source", []))
     )
-    definition = source.split("\nsafe_extract_package(PACKAGE_ZIP", 1)[0]
-    namespace = {"Path": Path, "shutil": shutil}
-    exec(definition, namespace)
-    return namespace
 
 
-def _notebook_safe_extract_function() -> object:
-    return _notebook_package_boundary_namespace()["safe_extract_package"]
+def _install_fake_colab_userdata(monkeypatch) -> None:
+    google_module = types.ModuleType("google")
+    colab_module = types.ModuleType("google.colab")
+    colab_module.userdata = types.SimpleNamespace(get=lambda _name: "memory-only")
+    google_module.colab = colab_module
+    monkeypatch.setitem(sys.modules, "google", google_module)
+    monkeypatch.setitem(sys.modules, "google.colab", colab_module)
 
 
-def _notebook_manifest_validation_function() -> object:
-    return _notebook_package_boundary_namespace()["verify_unpacked_package"]
-
-
-def _write_unsafe_zip(
-    path: Path,
-    member_name: str,
-    *,
-    symlink: bool = False,
-    duplicate: bool = False,
-) -> None:
-    with zipfile.ZipFile(path, "w") as archive:
-        manifest = zipfile.ZipInfo("runtime_execution_manifest.json")
-        archive.writestr(manifest, "{}")
-        info = zipfile.ZipInfo(member_name)
-        if symlink:
-            info.create_system = 3
-            info.external_attr = (stat.S_IFLNK | 0o777) << 16
-        archive.writestr(info, "payload")
-        if duplicate:
-            archive.writestr(info, "duplicate")
-
-
-@pytest.mark.parametrize(
-    ("member_name", "symlink", "duplicate"),
-    (
-        ("../escape.py", False, False),
-        ("/absolute.py", False, False),
-        ("C:\\escape.py", False, False),
-        ("link.py", True, False),
-        ("duplicate.py", False, True),
-    ),
-)
-def test_notebook_safe_extract_rejects_hostile_members(
-    member_name: str,
-    symlink: bool,
-    duplicate: bool,
+def test_notebook_bootstrap_digest_mismatch_runs_no_subprocess(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    archive = tmp_path / "hostile.zip"
-    if duplicate:
-        with pytest.warns(UserWarning, match="Duplicate name"):
-            _write_unsafe_zip(
-                archive,
-                member_name,
-                symlink=symlink,
-                duplicate=True,
-            )
-    else:
-        _write_unsafe_zip(
-            archive,
-            member_name,
-            symlink=symlink,
-            duplicate=False,
+    _install_fake_colab_userdata(monkeypatch)
+    source = tmp_path / "bootstrap.py"
+    source.write_bytes(b"untrusted")
+    subprocess_calls: list[object] = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess_calls.append((args, kwargs)),
+    )
+    namespace = {
+        "BOOTSTRAP": str(source),
+        "EXPECTED_BOOTSTRAP_SHA256": "0" * 64,
+        "PROFILE": "smoke",
+        "CONTENT_ROOT": str(tmp_path),
+    }
+    with pytest.raises(RuntimeError, match="bootstrap SHA-256 mismatch"):
+        exec(_notebook_cell_source("bootstrap_payload ="), namespace)
+    assert subprocess_calls == []
+    assert not list(tmp_path.glob("ceg_wm_trusted_bootstrap_*"))
+
+
+def test_notebook_executes_verified_local_snapshot_after_drive_source_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _install_fake_colab_userdata(monkeypatch)
+    drive_source = tmp_path / "drive_bootstrap.py"
+    trusted_bytes = b"print('trusted bootstrap')\n"
+    drive_source.write_bytes(trusted_bytes)
+    digest = hashlib.sha256(trusted_bytes).hexdigest()
+
+    def gpu_check(*_args, **_kwargs):
+        return subprocess.CompletedProcess([], 0, "Fake GPU, 1 MiB\n", "")
+
+    monkeypatch.setattr(subprocess, "run", gpu_check)
+    namespace = {
+        "BOOTSTRAP": str(drive_source),
+        "EXPECTED_BOOTSTRAP_SHA256": digest,
+        "PROFILE": "smoke",
+        "CONTENT_ROOT": str(tmp_path),
+    }
+    exec(_notebook_cell_source("bootstrap_payload ="), namespace)
+    trusted_snapshot = Path(namespace["TRUSTED_BOOTSTRAP"])
+    assert trusted_snapshot.is_file()
+    assert trusted_snapshot.read_bytes() == trusted_bytes
+    assert trusted_snapshot.parent != drive_source.parent
+
+    drive_source.write_bytes(b"replacement after verification\n")
+    observed_commands: list[tuple[str, ...]] = []
+
+    def bootstrap_call(command, **_kwargs):
+        observed_commands.append(tuple(command))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                {
+                    "artifact_kind": "qualification_result",
+                    "profile": "smoke",
+                    "run_status": "passed",
+                    "result_zip": "/persistent/result.zip",
+                }
+            ),
+            "",
         )
-    extract = _notebook_safe_extract_function()
-    with pytest.raises(AssertionError):
-        extract(archive, tmp_path / "destination")
-    assert not (tmp_path / "escape.py").exists()
 
-
-def test_notebook_safe_extract_accepts_small_relative_package(
-    tmp_path: Path,
-) -> None:
-    archive = tmp_path / "safe.zip"
-    with zipfile.ZipFile(archive, "w") as output:
-        output.writestr("runtime_execution_manifest.json", "{}")
-        output.writestr("runtime/__init__.py", "# safe\n")
-    extract = _notebook_safe_extract_function()
-    destination = tmp_path / "destination"
-    extract(archive, destination)
-    assert (destination / "runtime/__init__.py").read_text() == "# safe\n"
-
-
-def test_notebook_manifest_validation_accepts_exact_package(
-    tmp_path: Path,
-) -> None:
-    package = tmp_path / "package"
-    package.mkdir()
-    revision = "a" * 40
-    _package_manifest(package, revision)
-    verify = _notebook_manifest_validation_function()
-    manifest = verify(package)
-    assert manifest["runtime_candidate_revision"] == revision
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    (
-        lambda manifest: manifest.update(package_schema_version=2),
-        lambda manifest: manifest.update(
-            runtime_candidate_revision="not-a-revision"
-        ),
-        lambda manifest: manifest.update(package_ready=False),
-        lambda manifest: manifest.update(unexpected=True),
-        lambda manifest: manifest["copied_files"][0].update(path=".env"),
-    ),
-)
-def test_notebook_manifest_validation_rejects_manifest_identity_drift(
-    mutation,
-    tmp_path: Path,
-) -> None:
-    package = tmp_path / "package"
-    package.mkdir()
-    _package_manifest(package, "b" * 40)
-    manifest_path = package / "runtime_execution_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    mutation(manifest)
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    verify = _notebook_manifest_validation_function()
-    with pytest.raises(AssertionError):
-        verify(package)
-
-
-@pytest.mark.parametrize("drift", ("tamper", "extra"))
-def test_notebook_manifest_validation_rejects_file_set_and_hash_drift(
-    drift: str,
-    tmp_path: Path,
-) -> None:
-    package = tmp_path / "package"
-    package.mkdir()
-    _package_manifest(package, "c" * 40)
-    if drift == "tamper":
-        (package / "README.md").write_text("tampered\n", encoding="utf-8")
-    else:
-        (package / "runtime/extra.py").write_text(
-            "# unmanifested\n",
-            encoding="utf-8",
-        )
-    verify = _notebook_manifest_validation_function()
-    with pytest.raises(AssertionError):
-        verify(package)
+    monkeypatch.setattr(subprocess, "run", bootstrap_call)
+    namespace.update(
+        {
+            "PACKAGE_ZIP": "/persistent/package.zip",
+            "EXPECTED_PACKAGE_SHA256": "1" * 64,
+            "REPLAY_SOURCE": None,
+            "DRIVE_ROOT": "/persistent",
+        }
+    )
+    exec(_notebook_cell_source("command = [sys.executable"), namespace)
+    assert observed_commands[0][1] == str(trusted_snapshot)
+    assert observed_commands[0][1] != str(drive_source)
+    assert trusted_snapshot.read_bytes() == trusted_bytes

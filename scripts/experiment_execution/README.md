@@ -11,6 +11,17 @@ optional. Model and package caches, temporary tensors, and uncompressed
 results must stay in the caller-supplied ephemeral root. Never persist an HF
 token, method key, model cache, or raw tensor in the result directory.
 
+The Colab entrypoint does not unpack or trust this archive directly. A
+separately reviewed, package-external
+`runtime_qualification_bootstrap.py`, bound to package schema version 1,
+must receive the full independently audited archive SHA-256 at run time.
+The bootstrap streams the Drive archive once into a unique ephemeral `xb`
+snapshot while computing that digest. A mismatch removes the snapshot without
+unpacking; a match causes all ZIP/manifest/file checks to use only the local
+snapshot before installing requirements or starting this package's runner. The
+bootstrap is deliberately excluded from this execution package, avoiding a
+self-verification loop.
+
 The runner catches ordinary Python/backend failures after it can resolve the
 requested result path and writes a minimal failure zip. A Python interpreter
 crash, an OS kill (including hard OOM), or an unwritable result filesystem is
@@ -60,7 +71,42 @@ Use the following fixed archive and Notebook-ingress rules:
    digests. Never overwrite an existing authoritative archive or historical
    results.
 
-## Run inside an independently unpacked package
+## Run through the package-external bootstrap
+
+The repository copy of the schema-v1 bootstrap is:
+
+```text
+scripts/experiment_execution/runtime_qualification_bootstrap.py
+```
+
+Freeze and distribute that file separately, record its full SHA-256, and make
+the Notebook read it once, verify those bytes, write them with `xb` to a new
+`/content` snapshot, verify the snapshot again, and invoke only that snapshot.
+The expected package SHA-256 is pasted at run time from the independent
+delivery audit; do not read it from a replaceable sidecar stored beside the
+package.
+
+The bootstrap CLI accepts `--profile`, `--package-zip`,
+`--expected-package-sha256`, `--ephemeral-root`, `--persistent-root`, and an
+optional `--replay-source`. It reads `HF_TOKEN` and `CEG_WM_ROOT_KEY` only from
+the process environment. It writes neither value to an archive, log, Drive
+file, nor unpacked package.
+
+Before any pip invocation, package import, or runner launch, the bootstrap
+checks the complete archive SHA-256, ZIP path/member/size/symlink safety,
+manifest schema/profile/readiness/revision, allowlist, complete file set,
+per-file size/hash, and exact frozen requirements. Only then does it install
+the dependencies into ephemeral cache space and start the runner.
+
+Runner exit `0`, `1`, or `2` retains a validated formal result under
+`runs/<runtime_candidate_revision>/<run_id>/`. An ingress, unpacking,
+manifest, pip, or pre-runner failure instead produces exactly one independent
+`bootstrap_failure.json` inside
+`bootstrap_failures/<run_id>/ceg_wm_runtime_bootstrap_failure_<run_id>.zip`.
+That diagnostic schema is not a qualification result and cannot support a
+runtime-stage claim.
+
+## Direct runner contract inside an independently unpacked package
 
 Unpack into a new ephemeral directory. Set `PYTHONDONTWRITEBYTECODE=1` before
 starting Python so package verification does not see interpreter cache files.
@@ -95,7 +141,7 @@ contains, or is contained by it. The Notebook therefore produces the runner
 zip under ephemeral storage first and only then copies it into the
 manifest-revision/run-ID Drive directory.
 
-The runner verifies the complete manifest file set, file hashes/sizes,
+The runner independently re-verifies the complete manifest file set, file hashes/sizes,
 revision, requirements lock, and every installed dependency version before
 importing `main` or `runtime`. Exit `0` means the requested profile passed;
 exit `1` means a completed runtime/resource/integrity/budget/Q/K/determinism
