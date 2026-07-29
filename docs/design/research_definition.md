@@ -10,7 +10,11 @@ CEG-WM 研究生成式图像中的密钥归属水印。目标是在常规内容�
 
 - 研究介质是生成式图像。
 - 生成与检测所用模型族必须能够提供 CEG-WM HF carrier/direct score 所需能力以及可复现的 Q/K 观测。
-- 首个 backbone/runtime 候选已限定为 `candidate_specifications.md` 的 `runtime_sd35_flowmatch`，包含具体 model revision、调度器、精度、尺寸、steps、VAE 与依赖锁；它是待本项目复现的候选，不是已经验证的项目事实。候选失败时必须先修订规格，不能在实现中静默换模型。
+- 首个 backbone/runtime 候选已限定为 `candidate_specifications.md` 的
+  `runtime_sd35_flowmatch`，包含具体 model revision、调度器、精度、尺寸、steps、
+  VAE 与依赖锁。该候选的真实 SD3.5 runtime 边界已由独立审核的 qualification
+  结果复现；这不把模型可执行性扩展为方法效果。未来候选失败或身份变化时必须先
+  修订规格并重新 qualification，不能在实现中静默换模型。
 - 项目方法 API 不得依赖具体设备、远程服务或 Notebook 状态。
 
 ## Access Model
@@ -58,7 +62,8 @@ root key 的 UTF-8 语义、职责域派生、wrong-key 和 public-noise 由
 carrier、content embedder、LF/HF detector、content detector；几何链的 Q/K sync、
 transform estimator、独立 geometry reliability、rectifier；以及 conditional recovery
 decision。27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并审计；实际
-stage/status 已由独立 revision 同步为 `method_implemented / implemented`。
+stage/status 已由独立 revisions 同步为 `runtime_verified / implemented`；真实
+qualification 只验证冻结 runtime 边界，不改变下述科学成功条件。
 候选 registry 的 10 个 ID 是算法身份计数，不是组件计数。
 
 ## Success Conditions

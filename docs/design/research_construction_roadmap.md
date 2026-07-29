@@ -2,7 +2,7 @@
 
 ## Roadmap Authority
 
-本文档定义从当前 `method_implemented` 到论文全部数据、可重建产物和
+本文档定义从当前 `runtime_verified` 到论文全部数据、可重建产物和
 受支持结论的构建路线。它是研究与工程准入顺序，不是完成状态报告。
 
 文中的语义化名称是证据门，不是新的 `project_stage`。正式阶段仍以 `governance/policies/method_readiness_rules.yaml` 登记的顺序为准：
@@ -23,17 +23,12 @@ formal_evidence_available
 
 任何证据门未通过时，必须停在当前阶段、保存失败事实并修订对应设计，不能跳过、放宽门禁或用后续实验掩盖失败。`method_construction_authorized` 是实施准入/在建阶段，不是完成结论：候选规格关闭并独立审计通过后，用户先授权建立可审计版本身份与阶段变更；阶段变更本身不得包含 `main/` 实现，方法实施只能在之后的独立变更中开始。
 
-当前检查点：13 项职责、27 个 CPU/synthetic 方法行为节点和唯一 readiness 已在
-后续独立 revisions 完成并审计；实际 stage/status 已由独立 revision 同步为
-`method_implemented / implemented`。正式 detector
-仍为 HF-only，LF/routing 未实验晋升，`full_ceg_wm_eligible=false`；尚无真实
-runtime/GPU、完整联合 FPR、正式 records 或科学效果证据。
-
-actual-dtype 内容预算的 R1 语义闭环会使旧 readiness 摘要/revision 绑定暂时
-stale；R1 只允许定向 CPU/static 检查并须由独立语义审计绑定 exact revision 与新
-candidate digest。只有审核 `APPROVE` 后，R2 才可只更新 readiness 的 candidate
-SHA、reviewed revision 与真实审核引用，并运行唯一 `full` profile。R1/R2 都不
-迁移阶段；在 R2 闭合前不得继续 Batch 3。
+当前检查点：13 项职责、27 个 CPU/synthetic 方法行为节点、唯一 readiness 和真实
+SD3.5 runtime qualification 已分别完成并审计；实际 stage/status 已由独立
+revisions 同步为 `runtime_verified / implemented`。runtime 证据精确绑定 candidate
+`8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 qualification run
+`20260729T110628Z`。正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+`full_ceg_wm_eligible=false`；尚无完整联合 FPR、正式 records 或科学效果证据。
 
 ## Paper Research Target
 
@@ -642,9 +637,10 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 
 ## Governance Freeze And Extension Rule
 
-本次 readiness 阻断修订和独立阶段迁移完成后，通用治理平面冻结。下一步 runtime
-qualification 和进入 `runtime_verified` 必须另行获得明确授权；本段不授权 runtime、
-GPU 或实验。后续主线仍须按既定门序进入 runtime、experiment 和 evidence 工作。
+方法 readiness、真实 runtime qualification 和独立 `runtime_verified` 阶段迁移完成
+后，通用治理平面继续冻结。下一步实验协议冻结、calibration、攻击矩阵和进入
+`experiment_ready` 必须另行获得明确授权；本段不授权这些工作。后续主线仍须按
+既定门序进入 experiment 和 evidence 工作。
 除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、
 skill、schema 或 harness；存在缺口时优先对现有规则做最小、可测试的增量修订。
 治理文件数量、机械 audit 数量或文档篇幅都不能替代研究实现和证据推进。

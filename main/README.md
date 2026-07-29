@@ -7,10 +7,11 @@
 
 此层不得导入 runtime、experiments、paper artifacts、notebooks、infrastructure、tests 或任何外层控制平面，也不得保存实验 records、论文构建或模型后端适配。
 
-当前处于 `method_implemented / implemented`。六个方法构建批次已完成
+当前项目处于 `runtime_verified / implemented`。六个方法构建批次已完成
 13 项职责实现、CPU/synthetic 行为验证、readiness 收口及绑定实现 revision 的独立语义
 审核；唯一 `method_readiness.yaml` 已在第 6 批完成后创建并记录 `approve`。这些事实此前
-构成独立阶段迁移的前置证据；本次 revision 只同步阶段和状态，不修改方法机制。
+构成独立方法阶段迁移的前置证据；后续真实 runtime qualification 和本次
+stage-only revision 均不修改方法机制。
 
 内容链已经实现 S/T/R/Q 数值路由、LF/HF carrier、blind detector、共同总预算写入组合
 及 C0/C1/C2 诊断，但正式内容判定仍保持 `hf_only`。LF、routing 和组合行为尚未获得
@@ -27,6 +28,6 @@ operation、HF branch identity、注册 key、预处理和 `tau` 重判。几何
 
 正式 content detector 仍为 `hf_only`，因此联合结果固定
 `full_ceg_wm_eligible=false`，只表示 construction-candidate 行为，不表示 LF/routing、
-reduced-scope 身份或完整 CEG-WM 已获实验晋升。当前 CPU/synthetic 实现和 readiness
-不构成真实 runtime/SD3.5 Q/K、GPU qualification、完整 FPR、鲁棒性或科学证据；FPR
-仍须由后续实验层结合 null 标签统计。
+reduced-scope 身份或完整 CEG-WM 已获实验晋升。独立真实 GPU qualification 已证明
+冻结 SD3.5 callback、actual dtype、VAE 和两层 Q/K runtime 边界可用；它不证明完整
+FPR、几何恢复效果、鲁棒性或科学效果，FPR 仍须由后续实验层结合 null 标签统计。

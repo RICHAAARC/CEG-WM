@@ -55,9 +55,11 @@ Batch 4 的本地交付代码当前提供：
 - 只允许干净精确 HEAD 的 execution package builder、固定 Drive 输入输出边界的
   唯一薄 Colab Notebook，以及不加载模型的 CPU fake/安全边界测试。
 
-上述本地路径通过不表示 Batch 2 整体完成。真实 SD3.5 callback、actual float16、
-VAE 与 Q/K 仍须 GPU qualification。runner 的 ordinary Python 异常会形成最小
-failure zip；解释器硬崩溃、进程被系统直接杀死或存储本身不可写无法由进程内逻辑
-保证打包，必须按 incomplete/resource failure 交接。本地 CPU、package、Notebook
-或 harness 通过都不是 `runtime_verified` 或科学证据，低 utilization 也不得在
+上述本地路径随后已由 candidate
+`8b2344756c4c247906ff0d4eab68e46a773e13f5` 的真实 SD3.5 GPU qualification 闭合
+callback、actual float16、VAE、两层 Q/K 和 registered-key 重复确定性边界。
+runner 的 ordinary Python 异常会形成最小 failure zip；解释器硬崩溃、进程被系统
+直接杀死或存储本身不可写无法由进程内逻辑保证打包，必须按
+incomplete/resource failure 交接。该 qualification 支持 `runtime_verified`，
+但不是 LF/routing 晋升、完整 FPR、鲁棒性或科学证据，低 utilization 也不得在
 未来实验中用于结果后筛除。

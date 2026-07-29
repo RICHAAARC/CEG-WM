@@ -2,9 +2,10 @@
 
 ## Purpose And Boundary
 
-本指南指导 Codex 从当前 `method_implemented` 状态建设真实 runtime、优先完成本地
-CPU 验证、在必须使用 GPU 时停止并通知用户，最后依据 Colab 结果申请进入
-`runtime_verified`。
+本指南记录从 `method_implemented` 建设真实 runtime、优先完成本地 CPU 验证、
+在必须使用 GPU 时停止并通知用户，最后依据 Colab 结果进入 `runtime_verified`
+的完整流程。当前项目已完成该流程；一般门序继续适用于未来 runtime 身份变化后的
+重新 qualification。
 
 本指南强调有限、可执行的方法推进：
 
@@ -20,19 +21,25 @@ CPU 验证、在必须使用 GPU 时停止并通知用户，最后依据 Colab �
   GPU 型号、驱动或 CUDA minor 的逐项一致设为硬门。
 
 本指南本身不授权修改 runtime、运行 GPU 或迁移阶段。开始 runtime 构建、通知用户
-运行 Colab、进入 `runtime_verified` 仍是三个独立权限。
+运行 Colab、进入 `runtime_verified` 始终是三个独立权限；当前三项权限已分别使用，
+不自动授权再次运行或后续实验。
 
 ## Current Starting Point
 
-开始 runtime 工作前确认：
+当前已闭合的 runtime 检查点为：
 
-- `project_stage: method_implemented`；
+- `project_stage: runtime_verified`；
 - `implementation_status: implemented`；
 - 13 项职责、27 个 CPU/synthetic 行为节点和 method readiness 仍有效；
+- runtime candidate
+  `8b2344756c4c247906ff0d4eab68e46a773e13f5` 的 execution package SHA-256 为
+  `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`；
+- qualification run `20260729T110628Z` 为 `passed`，result ZIP SHA-256 为
+  `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`；
 - 正式 detector 仍为 HF-only；
 - LF/routing/组合尚未实验晋升，`full_ceg_wm_eligible=false`；
-- 当前任务只建设和验证 runtime，不开始候选选择、正式 calibration、攻击矩阵、
-  baseline 或论文实验。
+- `negative_identity` 只证明 runtime/key identity control，不是 wrong-key FPR；
+- 当前阶段不开始候选选择、正式 calibration、攻击矩阵、baseline 或论文实验。
 
 ## Reference Colab Environments
 
@@ -144,8 +151,8 @@ Colab 重启重放时，才形成固定 `replay` profile 的新 Notebook revisio
 - 不设置 `tau_actual_budget`、`q_budget` 接近门、经验 tolerance 或 actual 强度
   下限；ratio/utilization 只作诊断，低 utilization 不得结果后筛除。
 
-Batch 2 的本地实现与测试通过仍不表示本批完成；真实 SD3.5 callback、actual
-float16、VAE 路径和 GPU qualification 尚未执行。
+Batch 2 的本地实现与测试通过本身不表示本批完成；当前精确 candidate 的真实
+SD3.5 callback、actual float16、VAE 路径已经由后续 GPU qualification 闭合。
 
 ### Batch 3: Q/K Observation Path
 
@@ -158,7 +165,8 @@ float16、VAE 路径和 GPU qualification 尚未执行。
 
 当前本地实现提供可直接绑定真实 attention module 的 `to_q`/`to_k` hook 接口，
 并已覆盖 posterior-mode、public-noise、schedule/conditioning identity 和上述
-fail-closed 路径；这不表示 SD3.5 真实 Q/K 已捕获，后者仍属于 Colab GPU gate。
+fail-closed 路径；精确 candidate 的两登记层真实 Q/K 已由后续 Colab GPU
+qualification 捕获并核验。
 
 ### Batch 4: Runner, Result Zip And Thin Notebook
 
@@ -392,9 +400,9 @@ Notebook 不得包含：
 `8b2344756c4c247906ff0d4eab68e46a773e13f5`、`PROFILE="qualification"`、`current`
 package 路径、独立审核的完整 package SHA-256
 `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38` 和
-`REPLAY_SOURCE=None`。用户直接
-**Run all**，不得编辑并保存 Notebook 源。该 candidate 的 smoke 结果已保存在独立
-revision/run-id 目录，本次快照不会覆盖；完整 qualification 尚未运行。后续切换
+`REPLAY_SOURCE=None`。该冻结快照已经完成一次授权的 **Run all**；不要重复运行或
+编辑并保存 Notebook 源。该 candidate 的 smoke 与 qualification 结果均保存在独立
+revision/run-id 目录，互不覆盖。后续切换
 `smoke`、`replay` 或
 候选 package 时，必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成
 新的 Notebook revision。Colab 自动写入的 outputs 和 execution counts 不回写仓库；
@@ -606,6 +614,11 @@ chore: 进入 runtime_verified 运行时验证阶段
 
 `runtime_verified` 只表示真实 runtime 边界可用，不表示 LF、routing、组合、FPR、
 鲁棒性或完整 CEG-WM 科学有效。
+
+当前精确 candidate 已满足上述条件，并由独立 stage-only revision 同步
+`runtime_verified`。qualification 没有具体含混点，因此 Optional Replay 不构成本次
+阶段迁移的强制前置条件。`negative_identity` 也只证明 key identity control 的
+runtime 分离，不得解释为 wrong-key FPR 或 attribution 科学结果。
 
 ## Stop And Notify Rules
 

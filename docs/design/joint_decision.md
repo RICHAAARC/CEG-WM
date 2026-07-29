@@ -54,5 +54,6 @@ oracle transform 不能进入正式方法结果。
 近阈值门控、几何不直接阳性、同 detector/key/preprocess/threshold 回正重判已完成
 CPU/synthetic 实现和行为验证。正式 detector 仍为 HF-only，LF/routing 未实验晋升，
 `full_ceg_wm_eligible=false`；`tau`、`tau_rescue` 与 reliability 尚未正式 calibration，
-完整 raw+rescue FPR、runtime/GPU 和科学效果均无证据。实际阶段/status 已由独立
-revision 同步为 `method_implemented / implemented`。
+真实 GPU qualification 只关闭 SD3.5 runtime、VAE 和 Q/K observation 边界，没有
+执行或证明完整 raw+rescue FPR 与联合恢复效果。实际阶段/status 已由独立 revisions
+同步为 `runtime_verified / implemented`，科学效果仍无证据。

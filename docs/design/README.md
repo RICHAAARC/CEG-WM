@@ -29,6 +29,6 @@ LF/routing 的实验晋升，该计数不得与组件数混淆。
 
 两张图只是上述十份权威设计的派生可视化，不增加
 `.codex/research_state/research_definition.yaml` 的 design path。图与 Markdown、
-contract 或 policy 冲突时以后者为准。图中方法职责已有 CPU/synthetic 实现；标为
-planned 的部分表示尚未完成的真实 runtime/GPU 集成，不是方法未实现，也不是效果
-证据。
+contract 或 policy 冲突时以后者为准。图中方法职责已有 CPU/synthetic 实现，冻结
+SD3.5 runtime 边界也已通过真实 GPU qualification；图中标为 planned 的内容仍表示
+尚未完成的候选晋升、calibration 或正式实验机制，不是效果证据。

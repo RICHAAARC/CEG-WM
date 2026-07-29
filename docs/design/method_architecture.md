@@ -155,7 +155,9 @@ geometry/total budget 仍是独立职责。
 
 固定 13 项职责与 27 个 CPU/synthetic 方法行为节点已经实现，并由唯一 readiness
 绑定候选摘要、真实 symbol、测试节点和独立语义审核。实际 stage/status 已由
-独立 revision 同步为 `method_implemented / implemented`。当前正式
-detector 仍为 HF-only；LF/routing 未实验晋升，`full_ceg_wm_eligible=false`。
-尚无真实 runtime/GPU qualification、完整联合 FPR 或科学效果证据。后续门序见
+独立 revisions 同步为 `runtime_verified / implemented`。冻结 SD3.5 candidate 的
+callback、actual dtype、VAE、两层真实 Q/K、registered-key 重复确定性和
+negative-key identity control 已通过真实 GPU qualification。当前正式 detector
+仍为 HF-only；LF/routing 未实验晋升，`full_ceg_wm_eligible=false`。该 runtime
+证据不是完整联合 FPR、几何恢复效果或科学效果证据。后续门序见
 [research_construction_roadmap.md](research_construction_roadmap.md)。

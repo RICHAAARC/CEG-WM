@@ -108,6 +108,8 @@ content-threshold-fit 重新拟合，不能跨五类 calibration 职责复用。
 
 HF carrier、HF direct score、LF、路由、组合写入与分支检测已完成 CPU/synthetic
 实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；LF/routing/组合
-尚未通过实验晋升，`full_ceg_wm_eligible=false`。当前没有真实 runtime/GPU、
-正式 calibration、完整联合 FPR 或科学效果证据；实际阶段/status 已由独立
-revision 同步为 `method_implemented / implemented`。
+尚未通过实验晋升，`full_ceg_wm_eligible=false`。actual-dtype combined content
+写入、完整性和 hard-budget 路径已在冻结 SD3.5 candidate 的真实 GPU
+qualification 中通过；这不构成 LF/routing/组合晋升。当前仍没有正式 calibration、
+完整联合 FPR 或科学效果证据；实际阶段/status 已由独立 revisions 同步为
+`runtime_verified / implemented`。

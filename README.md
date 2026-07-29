@@ -40,14 +40,18 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 
 ## 当前阶段
 
-- `project_stage`: `method_implemented`
+- `project_stage`: `runtime_verified`
 - `implementation_status`: `implemented`
 - 13 项真实职责、27 个方法特异性 CPU/synthetic 节点和唯一 readiness 已在后续
   revisions 完成并经独立语义审计；独立阶段迁移已经完成，但不是由 readiness 自动改阶段。
 - 正式 detector 仍为 HF-only；LF/routing 尚未实验晋升，
   `full_ceg_wm_eligible=false`。
-- 当前没有真实 runtime/GPU qualification、完整联合 FPR、攻击矩阵、正式实验
-  records 或论文效果证据。
+- 真实 SD3.5 runtime 边界已由 candidate
+  `8b2344756c4c247906ff0d4eab68e46a773e13f5` 的 `qualification / passed` run
+  `20260729T110628Z` 验证；result ZIP SHA-256 为
+  `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`。
+  这不表示 LF/routing/组合、几何恢复效果、完整联合 FPR、攻击鲁棒性、正式实验
+  records 或论文效果已经成立。
 
 `SLM-WM`、`SLM-WM-FlowHF`、`CEG-WM-OLD-main` 和 `CEG-O-master` 仅作为历史来源与偏离案例；它们的固定 LF/HF 融合、reference-based 几何、嵌入端私有状态依赖和系统级 attestation 路线不自动成为本项目方法。
 

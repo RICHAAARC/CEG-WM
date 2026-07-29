@@ -4,7 +4,7 @@ CEG-WM 的三个正式验证档位都使用已登记、可复建的 `CEG-WM` Con
 `.venv` 只用于明确不导入研究代码的定向轻量检查；治理合同测试可能通过拆包或
 可拆卸性验证导入 `main`，因此缺少 `torch` 的 `.venv` 不能完成 `governance`、
 `method`、`full` 或根 pytest 命令。两套环境都只服务
-方法构建/readiness 的 CPU 验证，并继续适用于 `method_implemented` 的 CPU
+方法构建/readiness 的 CPU 验证，并继续适用于 `runtime_verified` 的 CPU
 验证面；不包含模型权重、GPU runtime 或正式实验依赖。
 
 ## Create

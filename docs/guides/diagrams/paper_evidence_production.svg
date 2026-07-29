@@ -13,7 +13,7 @@
   </defs>
   <rect width="1900" height="1320" fill="#fff"/>
   <text x="40" y="48" class="title">Paper Evidence Production (planned governed evidence chain)</text>
-  <text x="40" y="76" class="sub">Scope: method_implemented / implemented; 13 components + 27 CPU/synthetic readiness nodes recorded; stage transition complete. No runtime/GPU/FPR/formal evidence.</text>
+  <text x="40" y="76" class="sub">Scope: runtime_verified / implemented; frozen SD3.5 runtime qualification passed. No LF/routing promotion, calibration, FPR, robustness, or formal evidence.</text>
   <text x="40" y="98" class="sub">Sources: ../project_advancement.md · ../../design/evaluation_design.md · ../../design/research_construction_roadmap.md · ../../reference/artifact_evidence.md</text>
 
   <rect x="40" y="140" width="350" height="180" class="method"/>

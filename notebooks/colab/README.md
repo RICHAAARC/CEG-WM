@@ -19,8 +19,9 @@ schema version 1 的可信 bootstrap 和包内 runner 分开承担。
 当前快照绑定 candidate
 `8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 package SHA-256
 `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`，用户只需
-**Run all**，不得编辑这些固定值。该 candidate 的既有 smoke 结果仍保存在独立
-revision/run-id 目录，本快照不覆盖历史结果；当前完整 qualification 尚未运行。
+**Run all**，不得编辑这些固定值。该 candidate 的既有 smoke 与 qualification
+结果仍保存在独立 revision/run-id 目录，本快照不覆盖历史结果；qualification run
+`20260729T110628Z` 已通过独立审核，当前快照不得重复运行。
 切换 `smoke`、`replay` 或候选 archive
 时，必须由实施者形成新的 Notebook revision，并经独立审计者和 gatekeeper 审核。
 提交副本必须保持 outputs 为空、execution count 为 null。

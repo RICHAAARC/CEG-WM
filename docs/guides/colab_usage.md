@@ -10,8 +10,8 @@ Google Drive 结果包和独立审计流程见
    execution package 路径、独立审核的 archive SHA-256
    `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38` 和
    `REPLAY_SOURCE=None`；用户只需 **Run all**，不编辑 Notebook cell。该
-   candidate 的既有 smoke 结果继续保存在独立 revision/run-id 目录，不被当前
-   快照覆盖；完整 qualification 尚未运行。
+   candidate 的 smoke 与 qualification 结果继续保存在各自的 revision/run-id
+   目录，不被当前快照覆盖；qualification run `20260729T110628Z` 已通过独立审核。
 2. Notebook 对 Drive bootstrap 只读取一次，先核对完整 SHA-256，再以 `xb` 写入
    全新的 `/content` 快照并复核摘要；只执行该本地快照，摘要不符时不启动
    subprocess。随后检查 GPU/磁盘并读取 Colab Secrets。bootstrap 位于 Drive 的
@@ -35,6 +35,7 @@ expected package SHA 必须来自 package 外的独立审核结果，不能从 a
 支持当前 package schema version 1；schema 改变时必须另行审核 bootstrap 与
 Notebook trust anchor。
 
-后续切换 `smoke`、`replay` 或其他候选 package 时，不由用户临时编辑
+当前 qualification 快照不得重复运行。后续切换 `smoke`、`replay` 或其他候选
+package 时，不由用户临时编辑
 Notebook；必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成新的
 Notebook revision。

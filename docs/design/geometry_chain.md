@@ -74,6 +74,7 @@ key margin、inlier、residual、boundary 和 identity margin 等原始指标。
 
 Q/K 同步、变换估计、独立可靠性与图像回正已完成真实 CPU/synthetic 实现和
 synthetic crop/scale/rotation、wrong-key、低可靠性拒绝及 inverse-warp 行为验证。
-这不证明登记 SD3.5 层上的真实 Q/K 捕获或 GPU/runtime qualification，也不产生
-水印阳性或正式 FPR/科学证据。实际阶段/status 已由独立 revision 同步为
-`method_implemented / implemented`。
+登记 SD3.5 的两层真实 `to_q`/`to_k` observation 已通过 GPU qualification；
+该 runtime 事实不证明 crop/scale/rotation 估计、可靠性或回正的真实图像科学效果，
+也不产生水印阳性或正式 FPR。实际阶段/status 已由独立 revisions 同步为
+`runtime_verified / implemented`。

@@ -10,7 +10,7 @@
 
 当前该文件已在 13 项职责、27 个 CPU/synthetic 方法行为节点和 revision-bound
 独立语义复核完成后从模板唯一实例化。实际 stage/status 已由独立 revision 同步为
-`method_implemented / implemented`；readiness 本身未自动修改阶段。外层权威
+`runtime_verified / implemented`；readiness 本身未自动修改任何阶段。外层权威
 `governance/templates/method_readiness.yaml` 和
 `governance/policies/method_readiness_rules.yaml` 仍分别定义结构与规则，不是第二份
 完成记录。
@@ -59,8 +59,9 @@ reliability 和 joint decision 不得折叠。27 个行为节点的精确清单�
 
 当前已完成步骤 1–6，并通过三任务独立复核及独立阶段迁移。
 readiness 只证明“登记候选已由真实项目组件实现并通过规定门禁”。它不证明 runtime
-真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。正式 detector
-仍为 HF-only；LF/routing 尚未实验晋升，`full_ceg_wm_eligible=false`。
+真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。当前另有独立
+真实 GPU qualification 支持 runtime 边界，但不改变 readiness 的职责。正式
+detector 仍为 HF-only；LF/routing 尚未实验晋升，`full_ceg_wm_eligible=false`。
 
 ## Fail-Closed Conditions
 

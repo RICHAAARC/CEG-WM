@@ -3,7 +3,13 @@
 This package is a revision-bound execution surface for the frozen SD3.5
 runtime candidate. It is not runtime/GPU evidence until the included runner
 finishes on a real supported GPU and the returned result zip is independently
-replayed.
+audited. Replay remains optional when the qualification evidence is not
+ambiguous and an independent audit identifies no concrete replay gap.
+
+Candidate `8b2344756c4c247906ff0d4eab68e46a773e13f5` has one independently
+audited `qualification / passed` result (`20260729T110628Z`). That result
+supports only the frozen SD3.5 runtime boundary; it is not LF/routing
+promotion, FPR, robustness, or scientific-effect evidence.
 
 Run only through the included qualification runner. The first run profile is
 `smoke`; `qualification` follows only after smoke succeeds. `replay` is

@@ -6,31 +6,41 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 
 ## Current Stage
 
-- `project_stage`: `method_implemented`
-- `target_construction_phase`: `method_implemented`
+- `project_stage`: `runtime_verified`
+- `target_construction_phase`: `runtime_verified`
 - `method_transition_authorization_base_revision`:
   `15e138ecf99e75084c6862b1f291b1747986123b`
+- `runtime_transition_authorization_base_revision`:
+  `82e1fefe2ccae2dc4be8205cc39a62b2052137ea`
+- `runtime_transition_authorization_reference`:
+  `source-thread=019fa382-130d-7a81-aef8-41c692a87676;authorization-text=批准创建 runtime_verified 阶段迁移 revision;authorized-after=qualification-passed-20260729T110628Z`
 - 项目已依据关闭的候选规格、独立审计批准、用户明确授权和可审计基线 revision
   合法进入构建准入阶段。随后独立 revisions 已完成固定 13 项真实职责、27 个
   方法特异性 CPU/synthetic 行为节点和唯一 `method_readiness.yaml`，并通过
   revision-bound 独立语义审计。
-- 用户已基于上述完整 revision 明确授权本次独立阶段迁移。本 revision 只把实际
-  阶段和 research-definition 状态同步为 `method_implemented / implemented`，
-  不修改方法实现、登记测试、候选规格或 readiness 语义。
-- 当前不得接入真实模型，不得运行 GPU、正式攻击矩阵或论文实验。
+- 用户已基于真实 runtime qualification 结果明确授权本次独立阶段迁移。本
+  revision 只把实际阶段同步为 `runtime_verified / implemented`，不修改方法、
+  runtime、Notebook、登记测试、候选规格或 readiness 语义。
+- 已独立核验的 runtime 边界精确绑定 candidate
+  `8b2344756c4c247906ff0d4eab68e46a773e13f5`、execution package SHA-256
+  `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`、
+  `qualification / passed` run `20260729T110628Z` 及 result ZIP SHA-256
+  `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`。
+  该结果证明冻结 SD3.5 runtime 的 callback 18、actual dtype/integrity/budget、
+  VAE、两层真实 Q/K、registered-key 重复确定性和 negative-key identity control
+  可执行；Optional Replay 在没有具体缺口时不强制。
+- 当前不得把该 runtime 证据扩展为 calibration、正式攻击矩阵、论文实验或科学效果
+  结论；任何后续高成本运行和进入 `experiment_ready` 均须另行授权。
 - root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
   registry 是 9 个具名候选加 1 个强制 routing 禁用对照。CPU/synthetic 实现不
   等于实验晋升；仍开放的是 LF/routing/组合晋升结果和 calibration 数值。
 - 当前正式 detector 仍为 HF-only，LF/routing 尚未实验晋升，
-  `full_ceg_wm_eligible=false`。readiness、文档、阶段转换或 admission 都不是
-  runtime、GPU、固定 FPR、鲁棒性或科学效果证据。
-- actual-dtype 内容预算语义的 R1 会使旧 `method_readiness.yaml` 的候选摘要与
-  reviewed revision 暂时 stale；这不是阶段回退，也不能冒充 readiness 已闭合。
-  只有 R1 exact revision 通过独立语义审核、随后 R2 仅更新 readiness 绑定并在登记
-  `CEG-WM` 环境通过唯一 `full` profile 后，才能恢复 revision-bound readiness。
-  两个 revisions 均不得迁移阶段或声称 `runtime_verified`。
+  `full_ceg_wm_eligible=false`。`negative_identity` 只证明 runtime/key identity
+  control 与 registered identity 分离，不是 wrong-key FPR、attribution 效果或科学
+  证据。readiness、runtime qualification 和阶段转换也不证明固定 FPR、鲁棒性、
+  几何恢复效果或完整 CEG-WM 科学成功。
 
 ## Method Authority
 
@@ -138,9 +148,9 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 ## Governance Freeze And Extension Rule
 
 1. 本轮阻断关闭后，治理平面进入冻结状态。
-2. 本次独立 revision 只同步 `method_implemented` 阶段和 `implemented` 状态。
-   下一步 runtime qualification 和进入 `runtime_verified` 必须另行获得明确授权；
-   本次迁移不授权 runtime、GPU 或实验。
+2. 本次独立 revision 只同步 `runtime_verified` 阶段，保留 `implemented` 状态。
+   下一步实验协议冻结、calibration、攻击矩阵和进入 `experiment_ready` 必须另行
+   获得明确授权；本次迁移不授权这些工作。
 3. 除非真实方法、runtime、实验或证据工作暴露一个具体且可复现的缺口，不得新增通用 policy、skill、schema、harness 或治理目录。
 4. 发现具体缺口时，优先最小修改现有规则与测试；不得以治理文件数量、机械审计通过或元数据规模替代研究推进。
 

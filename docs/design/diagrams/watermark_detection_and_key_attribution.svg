@@ -14,7 +14,7 @@
   </defs>
   <rect width="1800" height="1280" fill="#fff"/>
   <text x="40" y="48" class="title">Watermark Presence And Key Attribution Decision (planned blind detection)</text>
-  <text x="40" y="76" class="sub">Scope: method_implemented / implemented; 13 components + 27 CPU/synthetic readiness nodes recorded; stage transition complete. No runtime/GPU/formal evidence.</text>
+  <text x="40" y="76" class="sub">runtime_verified / implemented; frozen SD3.5 runtime qualification passed. Content score remains the only positive authority; no LF/routing promotion, FPR, robustness, or formal evidence.</text>
   <text x="40" y="98" class="sub">Sources: ../content_chain.md · ../geometry_chain.md · ../joint_decision.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
 
   <rect x="40" y="145" width="300" height="190" class="box"/>

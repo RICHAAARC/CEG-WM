@@ -157,7 +157,8 @@ utilization 不得成为未来实验的结果后排除规则。
 冻结。
 
 SD3.5、二十步 FlowMatch、callback index 18 与上述 `3/250` nominal/limit 已登记为
-当前项目候选身份；真实模型是否可执行仍必须通过独立 runtime/GPU qualification，
+当前项目候选身份；该精确 candidate 的真实模型执行已通过独立 runtime/GPU
+qualification。任何模型、revision、配置或方法身份变化仍须重新 qualification，
 不能由 CPU/mock 或历史结果替代。
 
 ### Direct Score
@@ -430,6 +431,7 @@ candidate-selection、calibration 和 formal evaluation 门，以及由互斥 ca
 职责拟合的阈值数值。这些是证据结果，不是实现空白。
 
 13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
-审计。实际 stage/status 已由独立 revision 同步为
-`method_implemented / implemented`。正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
-`full_ceg_wm_eligible=false`；仍无 runtime/GPU、正式 FPR 或效果证据。
+审计。实际 stage/status 已由独立 revisions 同步为
+`runtime_verified / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
+qualification；正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
+`full_ceg_wm_eligible=false`，仍无正式 FPR 或效果证据。
