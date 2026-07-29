@@ -11,6 +11,10 @@ from typing import Iterable
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
+INTERNAL_VALIDATION_PROTOCOL_ID = "ceg_wm_internal_scientific_validation_v1"
+INTERNAL_VALIDATION_PROTOCOL_VERSION = "1.0.0"
+CURRENT_EXECUTION_ACCESS_IDENTITY = "internal_scientific_validation_current_execution_v1"
+
 INTERNAL_VALIDATION_SPLITS = (
     "development",
     "candidate_selection",
@@ -108,6 +112,7 @@ class FrozenSplitManifest:
     """显式、可摘要且禁止 source cluster 泄漏的内部 split manifest。"""
 
     protocol_id: str
+    protocol_version: str
     manifest_id: str
     manifest_revision: str
     assignments: tuple[SplitAssignment, ...]
@@ -117,9 +122,13 @@ class FrozenSplitManifest:
 
     def validate(self, *, require_all_splits: bool = True) -> tuple[str, ...]:
         violations: list[str] = []
-        for name in ("protocol_id", "manifest_id", "manifest_revision"):
+        for name in ("protocol_id", "protocol_version", "manifest_id", "manifest_revision"):
             if not getattr(self, name).strip():
                 violations.append(f"{name}_missing")
+        if self.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID:
+            violations.append("protocol_id_frozen_identity_mismatch")
+        if self.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION:
+            violations.append("protocol_version_frozen_identity_mismatch")
 
         seen_units: set[str] = set()
         cluster_splits: dict[str, str] = {}
@@ -155,7 +164,7 @@ class SplitAccessGrant:
     @classmethod
     def current_execution(cls) -> SplitAccessGrant:
         return cls(
-            access_identity="internal_scientific_validation_current_execution_v1",
+            access_identity=CURRENT_EXECUTION_ACCESS_IDENTITY,
             allowed_splits=CURRENT_EXECUTION_ALLOWED_SPLITS,
         )
 
@@ -169,6 +178,11 @@ def authorize_split_access(
     violations = manifest.validate()
     if violations:
         raise ValueError(", ".join(violations))
+    if (
+        grant.access_identity != CURRENT_EXECUTION_ACCESS_IDENTITY
+        or grant.allowed_splits != CURRENT_EXECUTION_ALLOWED_SPLITS
+    ):
+        raise PermissionError("split_access_grant_not_current_authority")
     requested = frozenset(requested_splits)
     unknown = requested - set(INTERNAL_VALIDATION_SPLITS)
     if unknown:

@@ -5,13 +5,16 @@
 ## 当前实现
 
 - `internal_splits.py`：定义 unit/case/source-cluster identity、八个互斥职责 split、
-  显式 frozen manifest 和当前执行访问门；当前访问
-  `held_out_evaluation` 必须 fail closed。
+  显式 frozen manifest 和当前执行访问门；授权对象必须匹配当前 access identity
+  与精确允许集合，伪造或扩展 grant 失败，当前访问 `held_out_evaluation` 必须
+  fail closed。
 - `internal_matrix.py`：逐项连接 13 项方法职责与科学问题、split、metrics、
   negative controls、promotion gates 和 record field groups，并定义停止/晋升前置门。
 - `internal_records.py`：定义逐样本正式记录，保留 raw/rectified detector 身份、
   LF/HF/combined、routing、geometry、threshold、key/control、decision 和 provenance，
-  并区分 `success`、`failed`、`excluded`、`retry`。
+  并区分 `success`、`failed`、`excluded`、`retry`；同一 run/case 的可序列化
+  record collection 进一步验证 retry parent、连续 attempt、冻结上限、结构化
+  promotion stop 和 stop 后禁止继续。
 - `internal_validation.py`：加载并校验
   `configs/experiments/internal_scientific_validation_protocol.json` 的冻结协议身份。
 - `comparison.py`：定义外部 baseline 比较所需的 `ComparisonMethodSpec`、`ComparisonProtocol`、`PreflightApproval` 和运行前校验。

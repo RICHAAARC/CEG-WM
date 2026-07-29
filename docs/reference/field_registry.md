@@ -455,15 +455,20 @@ Notebook 与 repository module 的跨边界数据
 | protocol_id | persisted_protocol | protocol | none | true | false | false | 冻结内部科学验证协议的语义身份。 |
 | protocol_version | persisted_protocol | protocol | none | true | false | false | 冻结内部协议配置版本。 |
 | record_schema_version | persisted_protocol | protocol | none | true | false | false | 逐样本内部验证 record schema 身份。 |
+| record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | 一个 run/case 有序 records 集合的冻结 schema 身份。 |
+| maximum_record_attempts | persisted_protocol | protocol | none | true | false | false | 每个 unit/case/source cluster 在冻结协议中允许的最大执行尝试数。 |
 | analysis_unit_identity | persisted_protocol | provenance | none | true | false | false | unit、case、source cluster 与 Prompt/seed/image-lineage/key-family 的不可拆分身份结构。 |
 | unit_id | persisted_protocol | provenance | none | true | false | false | 一个 case 中被执行和记录的独立分析单位身份。 |
 | case_id | persisted_protocol | protocol | none | true | false | false | 预登记内部科学问题、攻击和 control 组合的 case 身份。 |
-| attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case 执行尝试的从零开始索引；retry 必须大于零。 |
+| record_sequence_index | persisted_protocol | protocol | none | true | false | false | 一个 run/case record collection 中从零开始且连续的序列索引。 |
+| record_attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case/source cluster 执行尝试的从零开始连续索引；retry 必须大于零。 |
 | exclusion_rule_id | persisted_protocol | protocol | none | true | false | false | `excluded` 状态绑定的预登记、与效果无关的排除规则身份。 |
 | retry_of_record_id | persisted_protocol | provenance | none | true | false | false | `retry` 状态回绑的前一失败尝试 record 身份。 |
 | detector_trace | persisted_protocol | method_state | none | true | false | false | raw/rectified detector、preprocessing 与对应内容分数的完整逐样本结构。 |
 | raw_detector_identity | persisted_protocol | method_identity | none | true | false | false | 原图实际调用的冻结 content detector 身份。 |
 | rectified_detector_identity | persisted_protocol | method_identity | none | true | false | false | 回正图绑定的 content detector 身份；必须等于 raw 身份。 |
+| raw_detector_config_digest | persisted_protocol | method_identity | none | true | false | false | 原图 content detector 完整配置身份摘要。 |
+| rectified_detector_config_digest | persisted_protocol | method_identity | none | true | false | false | 回正图 content detector 完整配置身份摘要；必须等于 raw 摘要。 |
 | raw_preprocessing_identity | persisted_protocol | method_identity | none | true | false | false | 原图普通图像检测预处理身份。 |
 | rectified_preprocessing_identity | persisted_protocol | method_identity | none | true | false | false | 回正图普通图像检测预处理身份；必须等于 raw 身份。 |
 | branch_score_trace | persisted_protocol | method_statistic | none | true | false | false | LF、HF 和 combined 三个独立分数的逐样本结构。 |
@@ -491,6 +496,12 @@ Notebook 与 repository module 的跨边界数据
 | watermark_decision | persisted_protocol | method_state | none | true | false | false | 水印判定的 `positive`、`negative`、`failed`、`excluded` 或 `retry`。 |
 | decision_reason | persisted_protocol | method_state | none | true | false | false | 最终判定或非成功状态的明确原因。 |
 | provenance_trace | persisted_protocol | provenance | none | true | false | false | protocol/split/method/model/environment/input/attack/metric 的完整不可变摘要结构。 |
+| promotion_gate_assessments | persisted_protocol | protocol | none | true | false | false | 一个 run/case 中按顺序保存、由具体 records 支撑的结构化晋升门裁决。 |
+| promotion_stop_gate_id | persisted_protocol | protocol | none | true | false | false | 首个失败且触发停止的已登记 promotion gate 身份；无失败时为空。 |
+| gate_id | persisted_protocol | protocol | none | true | false | false | 13 职责矩阵中已登记的 promotion gate 身份。 |
+| gate_status | persisted_protocol | protocol | none | true | false | false | promotion gate 的 `passed` 或 `failed` 状态。 |
+| evidence_record_ids | persisted_protocol | provenance | none | true | false | false | promotion gate 实际消费且必须存在于同一 run/case collection 的 record IDs。 |
+| stop_outcome | persisted_protocol | protocol | none | true | false | false | 失败 gate 对应的冻结负结果或返回前置门 outcome。 |
 | environment_digest | persisted_protocol | provenance | none | true | false | false | 当前执行环境与依赖锁的内容摘要。 |
 | input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
 | attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |

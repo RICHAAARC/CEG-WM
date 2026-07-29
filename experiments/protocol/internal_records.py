@@ -7,7 +7,16 @@ import math
 import re
 from typing import Any
 
-from experiments.protocol.internal_splits import AnalysisUnitIdentity, INTERNAL_VALIDATION_SPLITS
+from experiments.protocol.internal_matrix import (
+    PROMOTION_GATE_IDENTITIES,
+    PROMOTION_STOP_OUTCOMES,
+)
+from experiments.protocol.internal_splits import (
+    AnalysisUnitIdentity,
+    INTERNAL_VALIDATION_PROTOCOL_ID,
+    INTERNAL_VALIDATION_PROTOCOL_VERSION,
+    INTERNAL_VALIDATION_SPLITS,
+)
 
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -15,6 +24,11 @@ EXECUTION_STATUSES = frozenset({"success", "failed", "excluded", "retry"})
 KEY_ROLES = frozenset({"registered", "wrong_key", "unwatermarked_primary_null"})
 WATERMARK_DECISIONS = frozenset({"positive", "negative", "failed", "excluded", "retry"})
 POSITIVE_SOURCES = frozenset({"raw_content", "rectified_content"})
+INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION = "ceg_wm_internal_sample_record_v1"
+INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION = (
+    "ceg_wm_internal_run_case_record_collection_v1"
+)
+MAXIMUM_RECORD_ATTEMPTS = 3
 
 
 def _nonempty(value: str | None) -> bool:
@@ -37,6 +51,8 @@ def _finite_optional(value: float | None) -> bool:
 class DetectorTrace:
     raw_detector_identity: str
     rectified_detector_identity: str
+    raw_detector_config_digest: str
+    rectified_detector_config_digest: str
     raw_preprocessing_identity: str
     rectified_preprocessing_identity: str
     raw_content_score: float | None
@@ -113,10 +129,12 @@ class InternalValidationRecord:
     record_id: str
     run_id: str
     protocol_id: str
+    protocol_version: str
     record_schema_version: str
     analysis_unit_identity: AnalysisUnitIdentity
     split: str
-    attempt_index: int
+    record_sequence_index: int
+    record_attempt_index: int
     execution_status: str
     failure_reason: str | None
     exclusion_reason: str | None
@@ -135,17 +153,58 @@ class InternalValidationRecord:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class PromotionGateAssessment:
+    """一个由具体 record IDs 支撑的结构化晋升门裁决。"""
+
+    gate_id: str
+    gate_status: str
+    evidence_record_ids: tuple[str, ...]
+    stop_outcome: str | None
+
+
+@dataclass(frozen=True)
+class RunCaseRecordCollection:
+    """一个 run/case 的有序 records、retry 上限和 promotion stop 事实。"""
+
+    record_collection_schema_version: str
+    run_id: str
+    case_id: str
+    protocol_id: str
+    protocol_version: str
+    record_schema_version: str
+    maximum_record_attempts: int
+    records: tuple[InternalValidationRecord, ...]
+    promotion_gate_assessments: tuple[PromotionGateAssessment, ...]
+    promotion_stop_gate_id: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def validate_internal_record(record: InternalValidationRecord) -> tuple[str, ...]:
     violations: list[str] = list(record.analysis_unit_identity.validate())
-    for name in ("record_id", "run_id", "protocol_id", "record_schema_version"):
+    for name in (
+        "record_id",
+        "run_id",
+        "protocol_id",
+        "protocol_version",
+        "record_schema_version",
+    ):
         if not getattr(record, name).strip():
             violations.append(f"{name}_missing")
+    if record.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID:
+        violations.append("protocol_id_frozen_identity_mismatch")
+    if record.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION:
+        violations.append("protocol_version_frozen_identity_mismatch")
+    if record.record_schema_version != INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION:
+        violations.append("record_schema_version_frozen_identity_mismatch")
     if record.split not in INTERNAL_VALIDATION_SPLITS:
         violations.append("split_invalid")
-    if not isinstance(record.attempt_index, int) or isinstance(record.attempt_index, bool):
-        violations.append("attempt_index_invalid")
-    elif record.attempt_index < 0:
-        violations.append("attempt_index_invalid")
+    for name in ("record_sequence_index", "record_attempt_index"):
+        value = getattr(record, name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            violations.append(f"{name}_invalid")
     if record.execution_status not in EXECUTION_STATUSES:
         violations.append("execution_status_invalid")
 
@@ -191,8 +250,8 @@ def _validate_status(record: InternalValidationRecord, violations: list[str]) ->
             violations.append("retry_reason_or_parent_missing")
         if has_exclusion or has_exclusion_rule:
             violations.append("retry_exclusion_field_forbidden")
-        if record.attempt_index == 0:
-            violations.append("retry_attempt_index_must_be_positive")
+        if record.record_attempt_index == 0:
+            violations.append("retry_record_attempt_index_must_be_positive")
 
 
 def _validate_detector_and_threshold(
@@ -213,6 +272,14 @@ def _validate_detector_and_threshold(
             violations.append(f"{name}_missing")
     if detector.raw_detector_identity != detector.rectified_detector_identity:
         violations.append("raw_rectified_detector_identity_mismatch")
+    for name, value in (
+        ("raw_detector_config_digest", detector.raw_detector_config_digest),
+        ("rectified_detector_config_digest", detector.rectified_detector_config_digest),
+    ):
+        if not _digest_valid(value):
+            violations.append(f"{name}_invalid")
+    if detector.raw_detector_config_digest != detector.rectified_detector_config_digest:
+        violations.append("raw_rectified_detector_config_digest_mismatch")
     if detector.raw_preprocessing_identity != detector.rectified_preprocessing_identity:
         violations.append("raw_rectified_preprocessing_identity_mismatch")
     if threshold.raw_threshold_identity != threshold.rectified_threshold_identity:
@@ -353,6 +420,23 @@ def _validate_decision(record: InternalValidationRecord, violations: list[str]) 
         violations.append("success_watermark_decision_invalid")
     if decision.watermark_decision == "negative" and decision.positive_source is not None:
         violations.append("negative_positive_source_forbidden")
+    rectified_is_valid_content_source = (
+        detector.rectified_content_score is not None
+        and geometry.geometry_triggered
+        and geometry.geometry_reliable is True
+        and geometry.rectification_status == "succeeded"
+    )
+    if detector.rectified_content_score is not None and not rectified_is_valid_content_source:
+        violations.append("rectified_score_without_valid_content_source")
+    if decision.watermark_decision == "negative":
+        if detector.raw_content_score is not None and detector.raw_content_score >= threshold.tau:
+            violations.append("negative_raw_score_reached_tau")
+        if (
+            rectified_is_valid_content_source
+            and detector.rectified_content_score is not None
+            and detector.rectified_content_score >= threshold.tau
+        ):
+            violations.append("negative_rectified_score_reached_tau")
     if decision.watermark_decision == "positive":
         if decision.positive_source not in POSITIVE_SOURCES:
             violations.append("positive_content_source_missing")
@@ -372,3 +456,163 @@ def _validate_decision(record: InternalValidationRecord, violations: list[str]) 
         near_threshold = threshold.tau_rescue <= detector.raw_content_score < threshold.tau
         if geometry.geometry_triggered != near_threshold:
             violations.append("geometry_trigger_near_threshold_mismatch")
+
+
+def validate_run_case_record_collection(
+    collection: RunCaseRecordCollection,
+) -> tuple[str, ...]:
+    """验证有序 records 的 retry lineage、冻结上限与结构化 promotion stop。"""
+    violations: list[str] = []
+    for name in (
+        "record_collection_schema_version",
+        "run_id",
+        "case_id",
+        "protocol_id",
+        "protocol_version",
+        "record_schema_version",
+    ):
+        if not getattr(collection, name).strip():
+            violations.append(f"{name}_missing")
+    if (
+        collection.record_collection_schema_version
+        != INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
+    ):
+        violations.append("record_collection_schema_version_frozen_identity_mismatch")
+    if collection.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID:
+        violations.append("protocol_id_frozen_identity_mismatch")
+    if collection.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION:
+        violations.append("protocol_version_frozen_identity_mismatch")
+    if collection.record_schema_version != INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION:
+        violations.append("record_schema_version_frozen_identity_mismatch")
+    if collection.maximum_record_attempts != MAXIMUM_RECORD_ATTEMPTS:
+        violations.append("maximum_record_attempts_frozen_value_mismatch")
+    if not collection.records:
+        violations.append("records_missing")
+
+    records_by_id: dict[str, InternalValidationRecord] = {}
+    attempts_by_identity: dict[tuple[str, str, str], list[InternalValidationRecord]] = {}
+    for sequence_index, record in enumerate(collection.records):
+        violations.extend(validate_internal_record(record))
+        if record.record_id in records_by_id:
+            violations.append("record_id_duplicate")
+        records_by_id[record.record_id] = record
+        if record.record_sequence_index != sequence_index:
+            violations.append("record_sequence_index_not_contiguous")
+        if record.run_id != collection.run_id:
+            violations.append("record_run_id_collection_mismatch")
+        if record.analysis_unit_identity.case_id != collection.case_id:
+            violations.append("record_case_id_collection_mismatch")
+        if record.protocol_id != collection.protocol_id:
+            violations.append("record_protocol_id_collection_mismatch")
+        if record.protocol_version != collection.protocol_version:
+            violations.append("record_protocol_version_collection_mismatch")
+        if record.record_schema_version != collection.record_schema_version:
+            violations.append("record_schema_version_collection_mismatch")
+        identity = (
+            record.analysis_unit_identity.unit_id,
+            record.analysis_unit_identity.case_id,
+            record.analysis_unit_identity.source_cluster_id,
+        )
+        attempts_by_identity.setdefault(identity, []).append(record)
+
+    for identity_records in attempts_by_identity.values():
+        ordered = sorted(identity_records, key=lambda item: item.record_attempt_index)
+        attempt_indices = tuple(item.record_attempt_index for item in ordered)
+        if attempt_indices != tuple(range(len(ordered))):
+            violations.append("record_attempt_index_not_contiguous")
+        if len(ordered) > collection.maximum_record_attempts:
+            violations.append("maximum_record_attempts_exceeded")
+        if any(
+            item.record_attempt_index >= collection.maximum_record_attempts for item in ordered
+        ):
+            violations.append("record_attempt_index_exceeds_frozen_limit")
+
+    for record in collection.records:
+        if record.execution_status != "retry":
+            continue
+        parent = records_by_id.get(record.retry_of_record_id or "")
+        if parent is None:
+            violations.append("retry_parent_record_missing")
+            continue
+        child_identity = (
+            record.run_id,
+            record.analysis_unit_identity.unit_id,
+            record.analysis_unit_identity.case_id,
+            record.analysis_unit_identity.source_cluster_id,
+            record.split,
+        )
+        parent_identity = (
+            parent.run_id,
+            parent.analysis_unit_identity.unit_id,
+            parent.analysis_unit_identity.case_id,
+            parent.analysis_unit_identity.source_cluster_id,
+            parent.split,
+        )
+        if child_identity != parent_identity:
+            violations.append("retry_parent_identity_mismatch")
+        if parent.protocol_id != record.protocol_id or parent.protocol_version != record.protocol_version:
+            violations.append("retry_parent_protocol_identity_mismatch")
+        if parent.execution_status not in {"failed", "retry"}:
+            violations.append("retry_parent_status_invalid")
+        if record.record_attempt_index != parent.record_attempt_index + 1:
+            violations.append("retry_parent_attempt_not_contiguous")
+        if parent.record_sequence_index >= record.record_sequence_index:
+            violations.append("retry_parent_not_earlier")
+
+    _validate_promotion_stop(collection, records_by_id, violations)
+    return tuple(dict.fromkeys(violations))
+
+
+def _validate_promotion_stop(
+    collection: RunCaseRecordCollection,
+    records_by_id: dict[str, InternalValidationRecord],
+    violations: list[str],
+) -> None:
+    seen_gate_ids: set[str] = set()
+    failed_assessment: PromotionGateAssessment | None = None
+    failed_assessment_index: int | None = None
+    for assessment_index, assessment in enumerate(collection.promotion_gate_assessments):
+        if assessment.gate_id in seen_gate_ids:
+            violations.append("promotion_gate_id_duplicate")
+        seen_gate_ids.add(assessment.gate_id)
+        if assessment.gate_id not in PROMOTION_GATE_IDENTITIES:
+            violations.append("promotion_gate_id_invalid")
+        if assessment.gate_status not in {"passed", "failed"}:
+            violations.append("promotion_gate_status_invalid")
+        if not assessment.evidence_record_ids:
+            violations.append("promotion_gate_evidence_missing")
+        if len(set(assessment.evidence_record_ids)) != len(assessment.evidence_record_ids):
+            violations.append("promotion_gate_evidence_record_duplicate")
+        if any(record_id not in records_by_id for record_id in assessment.evidence_record_ids):
+            violations.append("promotion_gate_evidence_record_missing")
+        if assessment.gate_status == "passed" and assessment.stop_outcome is not None:
+            violations.append("passed_promotion_gate_stop_outcome_forbidden")
+        if assessment.gate_status == "failed":
+            if assessment.stop_outcome not in PROMOTION_STOP_OUTCOMES:
+                violations.append("failed_promotion_gate_stop_outcome_invalid")
+            if failed_assessment is None:
+                failed_assessment = assessment
+                failed_assessment_index = assessment_index
+    if failed_assessment is None:
+        if collection.promotion_stop_gate_id is not None:
+            violations.append("promotion_stop_without_failed_gate")
+        return
+    if collection.promotion_stop_gate_id != failed_assessment.gate_id:
+        violations.append("promotion_stop_gate_id_mismatch")
+    if (
+        failed_assessment_index is not None
+        and failed_assessment_index != len(collection.promotion_gate_assessments) - 1
+    ):
+        violations.append("promotion_gate_assessment_after_stop")
+    evidence_records = [
+        records_by_id[record_id]
+        for record_id in failed_assessment.evidence_record_ids
+        if record_id in records_by_id
+    ]
+    if not evidence_records:
+        return
+    stop_sequence_index = max(record.record_sequence_index for record in evidence_records)
+    if any(
+        record.record_sequence_index > stop_sequence_index for record in collection.records
+    ):
+        violations.append("record_continues_after_promotion_stop")

@@ -187,6 +187,24 @@ RESPONSIBILITY_VALIDATION_MATRIX = (
     ),
 )
 
+PROMOTION_GATE_IDENTITIES = frozenset(
+    {
+        "candidate_selection_frozen",
+        *(
+            gate
+            for specification in RESPONSIBILITY_VALIDATION_MATRIX
+            for gate in specification.promotion_gates
+        ),
+    }
+)
+
+PROMOTION_STOP_OUTCOMES = frozenset(
+    {
+        "content_branch_research_question_closed_negative",
+        "stop_and_return_to_prerequisite_gate",
+    }
+)
+
 
 def validate_responsibility_matrix(
     matrix: tuple[ResponsibilityValidationSpec, ...] = RESPONSIBILITY_VALIDATION_MATRIX,

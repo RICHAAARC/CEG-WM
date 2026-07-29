@@ -12,9 +12,16 @@ from experiments.protocol.internal_matrix import (
     REQUIRED_METHOD_RESPONSIBILITIES,
     SPLIT_PREREQUISITE_GATES,
 )
-from experiments.protocol.internal_records import EXECUTION_STATUSES
+from experiments.protocol.internal_records import (
+    EXECUTION_STATUSES,
+    INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
+    INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
+    MAXIMUM_RECORD_ATTEMPTS,
+)
 from experiments.protocol.internal_splits import (
     CURRENT_EXECUTION_ALLOWED_SPLITS,
+    INTERNAL_VALIDATION_PROTOCOL_ID,
+    INTERNAL_VALIDATION_PROTOCOL_VERSION,
     INTERNAL_VALIDATION_SPLITS,
 )
 
@@ -25,6 +32,8 @@ class FrozenInternalValidationProtocol:
     protocol_version: str
     protocol_kind: str
     record_schema_version: str
+    record_collection_schema_version: str
+    maximum_record_attempts: int
     split_assignment_mode: str
     source_cluster_identity_fields: tuple[str, ...]
     splits: tuple[str, ...]
@@ -52,6 +61,7 @@ class FrozenInternalValidationProtocol:
             "protocol_id",
             "protocol_version",
             "record_schema_version",
+            "record_collection_schema_version",
             "promotion_failure_semantics",
             "scientific_claim_boundary",
         ):
@@ -59,6 +69,19 @@ class FrozenInternalValidationProtocol:
                 violations.append(f"{name}_missing")
         if self.protocol_kind != "internal_scientific_validation":
             violations.append("protocol_kind_invalid")
+        if self.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID:
+            violations.append("protocol_id_frozen_identity_mismatch")
+        if self.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION:
+            violations.append("protocol_version_frozen_identity_mismatch")
+        if self.record_schema_version != INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION:
+            violations.append("record_schema_version_frozen_identity_mismatch")
+        if (
+            self.record_collection_schema_version
+            != INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
+        ):
+            violations.append("record_collection_schema_version_frozen_identity_mismatch")
+        if self.maximum_record_attempts != MAXIMUM_RECORD_ATTEMPTS:
+            violations.append("maximum_record_attempts_frozen_value_mismatch")
         if self.split_assignment_mode != "explicit_source_cluster_manifest":
             violations.append("split_assignment_mode_invalid")
         if self.source_cluster_identity_fields != (

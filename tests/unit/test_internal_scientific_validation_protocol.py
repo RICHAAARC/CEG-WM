@@ -20,15 +20,24 @@ from experiments.protocol.internal_records import (
     DetectorTrace,
     GeometryTrace,
     InternalValidationRecord,
+    INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
+    INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
     KeyControlTrace,
+    MAXIMUM_RECORD_ATTEMPTS,
+    PromotionGateAssessment,
     ProvenanceTrace,
+    RunCaseRecordCollection,
     RoutingTrace,
     ThresholdTrace,
     validate_internal_record,
+    validate_run_case_record_collection,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
+    CURRENT_EXECUTION_ALLOWED_SPLITS,
     FrozenSplitManifest,
+    INTERNAL_VALIDATION_PROTOCOL_ID,
+    INTERNAL_VALIDATION_PROTOCOL_VERSION,
     INTERNAL_VALIDATION_SPLITS,
     SplitAccessGrant,
     SplitAssignment,
@@ -82,7 +91,8 @@ def _unit(index: int) -> AnalysisUnitIdentity:
 
 def _manifest() -> FrozenSplitManifest:
     return FrozenSplitManifest(
-        protocol_id="ceg_wm_internal_scientific_validation_v1",
+        protocol_id=INTERNAL_VALIDATION_PROTOCOL_ID,
+        protocol_version=INTERNAL_VALIDATION_PROTOCOL_VERSION,
         manifest_id="frozen_split_manifest_test",
         manifest_revision="manifest_revision_1",
         assignments=tuple(
@@ -96,11 +106,13 @@ def _record(**changes: object) -> InternalValidationRecord:
     values: dict[str, object] = {
         "record_id": "record_1",
         "run_id": "run_1",
-        "protocol_id": "ceg_wm_internal_scientific_validation_v1",
-        "record_schema_version": "ceg_wm_internal_sample_record_v1",
+        "protocol_id": INTERNAL_VALIDATION_PROTOCOL_ID,
+        "protocol_version": INTERNAL_VALIDATION_PROTOCOL_VERSION,
+        "record_schema_version": INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
         "analysis_unit_identity": _unit(0),
         "split": "end_to_end_check",
-        "attempt_index": 0,
+        "record_sequence_index": 0,
+        "record_attempt_index": 0,
         "execution_status": "success",
         "failure_reason": None,
         "exclusion_reason": None,
@@ -109,6 +121,8 @@ def _record(**changes: object) -> InternalValidationRecord:
         "detector_trace": DetectorTrace(
             raw_detector_identity="content_detector_identity_1",
             rectified_detector_identity="content_detector_identity_1",
+            raw_detector_config_digest="b" * 64,
+            rectified_detector_config_digest="b" * 64,
             raw_preprocessing_identity="preprocessing_identity_1",
             rectified_preprocessing_identity="preprocessing_identity_1",
             raw_content_score=0.4,
@@ -168,11 +182,37 @@ def _record(**changes: object) -> InternalValidationRecord:
     return InternalValidationRecord(**values)
 
 
+def _collection(
+    *,
+    records: tuple[InternalValidationRecord, ...] | None = None,
+    promotion_gate_assessments: tuple[PromotionGateAssessment, ...] = (),
+    promotion_stop_gate_id: str | None = None,
+    **changes: object,
+) -> RunCaseRecordCollection:
+    values: dict[str, object] = {
+        "record_collection_schema_version": (
+            INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
+        ),
+        "run_id": "run_1",
+        "case_id": "case_0",
+        "protocol_id": INTERNAL_VALIDATION_PROTOCOL_ID,
+        "protocol_version": INTERNAL_VALIDATION_PROTOCOL_VERSION,
+        "record_schema_version": INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
+        "maximum_record_attempts": MAXIMUM_RECORD_ATTEMPTS,
+        "records": records if records is not None else (_record(),),
+        "promotion_gate_assessments": promotion_gate_assessments,
+        "promotion_stop_gate_id": promotion_stop_gate_id,
+    }
+    values.update(changes)
+    return RunCaseRecordCollection(**values)
+
+
 @pytest.mark.unit
 def test_frozen_protocol_config_has_exact_splits_and_denies_held_out_access() -> None:
     protocol = load_frozen_internal_validation_protocol(CONFIG_PATH)
     assert protocol.splits == INTERNAL_VALIDATION_SPLITS
     assert protocol.validate() == ()
+    assert protocol.maximum_record_attempts == MAXIMUM_RECORD_ATTEMPTS
     assert protocol.scientific_claim_boundary.endswith("no_scientific_validity_claim")
     with pytest.raises(PermissionError, match="held_out_evaluation"):
         authorize_split_access(
@@ -180,6 +220,21 @@ def test_frozen_protocol_config_has_exact_splits_and_denies_held_out_access() ->
             ("held_out_evaluation",),
             SplitAccessGrant.current_execution(),
         )
+
+
+@pytest.mark.unit
+def test_forged_or_extended_split_access_grants_are_rejected() -> None:
+    forged_identity = SplitAccessGrant(
+        access_identity="forged_current_execution_authority",
+        allowed_splits=CURRENT_EXECUTION_ALLOWED_SPLITS,
+    )
+    expanded = SplitAccessGrant(
+        access_identity=SplitAccessGrant.current_execution().access_identity,
+        allowed_splits=frozenset(INTERNAL_VALIDATION_SPLITS),
+    )
+    for grant in (forged_identity, expanded):
+        with pytest.raises(PermissionError, match="split_access_grant_not_current_authority"):
+            authorize_split_access(_manifest(), ("development",), grant)
 
 
 @pytest.mark.unit
@@ -221,6 +276,15 @@ def test_internal_record_contains_all_scientific_trace_groups() -> None:
 
 
 @pytest.mark.unit
+def test_internal_record_protocol_version_is_required_and_frozen() -> None:
+    missing = replace(_record(), protocol_version="")
+    drifted = replace(_record(), protocol_version="1.0.1")
+    assert "protocol_version_missing" in validate_internal_record(missing)
+    assert "protocol_version_frozen_identity_mismatch" in validate_internal_record(missing)
+    assert "protocol_version_frozen_identity_mismatch" in validate_internal_record(drifted)
+
+
+@pytest.mark.unit
 def test_success_failed_excluded_and_retry_semantics_are_mutually_exclusive() -> None:
     success = _record()
     failed = replace(
@@ -239,7 +303,7 @@ def test_success_failed_excluded_and_retry_semantics_are_mutually_exclusive() ->
     retry = replace(
         success,
         execution_status="retry",
-        attempt_index=1,
+        record_attempt_index=1,
         failure_reason="retryable_resource_failure",
         retry_of_record_id=success.record_id,
         decision_trace=DecisionTrace("retry", None, "retryable_resource_failure"),
@@ -247,8 +311,10 @@ def test_success_failed_excluded_and_retry_semantics_are_mutually_exclusive() ->
     assert validate_internal_record(failed) == ()
     assert validate_internal_record(excluded) == ()
     assert validate_internal_record(retry) == ()
-    invalid_retry = replace(retry, attempt_index=0)
-    assert "retry_attempt_index_must_be_positive" in validate_internal_record(invalid_retry)
+    invalid_retry = replace(retry, record_attempt_index=0)
+    assert "retry_record_attempt_index_must_be_positive" in validate_internal_record(
+        invalid_retry
+    )
 
 
 @pytest.mark.unit
@@ -256,17 +322,19 @@ def test_raw_rectified_identity_and_threshold_must_be_identical() -> None:
     record = _record()
     mismatched = replace(
         record,
-        detector_trace=replace(
-            record.detector_trace,
-            rectified_detector_identity="different_detector",
-        ),
         threshold_trace=replace(
             record.threshold_trace,
             rectified_threshold_identity="different_threshold",
         ),
+        detector_trace=replace(
+            record.detector_trace,
+            rectified_detector_identity="different_detector",
+            rectified_detector_config_digest="c" * 64,
+        ),
     )
     violations = validate_internal_record(mismatched)
     assert "raw_rectified_detector_identity_mismatch" in violations
+    assert "raw_rectified_detector_config_digest_mismatch" in violations
     assert "raw_rectified_threshold_identity_mismatch" in violations
 
 
@@ -312,6 +380,191 @@ def test_rescue_positive_requires_near_threshold_reliable_geometry_and_same_tau(
     violations = validate_internal_record(unreliable)
     assert "unreliable_geometry_rectification_forbidden" in violations
     assert "rectified_positive_requirements_not_met" in violations
+
+
+@pytest.mark.unit
+def test_successful_negative_cannot_hide_raw_or_valid_rectified_threshold_crossing() -> None:
+    raw_crossing = replace(
+        _record(),
+        detector_trace=replace(_record().detector_trace, raw_content_score=0.8),
+    )
+    assert "negative_raw_score_reached_tau" in validate_internal_record(raw_crossing)
+
+    base = _record()
+    rectified_crossing = replace(
+        base,
+        detector_trace=replace(
+            base.detector_trace,
+            raw_content_score=0.7,
+            rectified_content_score=0.85,
+        ),
+        geometry_trace=GeometryTrace(
+            geometry_triggered=True,
+            geometry_estimation_identity="estimation_identity_1",
+            geometry_reliability_identity="reliability_identity_1",
+            geometry_reliable=True,
+            geometry_transform={"rotation_degrees": 3.0, "scale": 1.0},
+            geometry_raw_metrics={"coverage": 0.8, "gap": 0.2},
+            geometry_failure_reason=None,
+            rectification_status="succeeded",
+        ),
+    )
+    assert "negative_rectified_score_reached_tau" in validate_internal_record(
+        rectified_crossing
+    )
+
+
+def _failed_initial_record() -> InternalValidationRecord:
+    return replace(
+        _record(),
+        execution_status="failed",
+        failure_reason="retryable_resource_failure",
+        decision_trace=DecisionTrace("failed", None, "retryable_resource_failure"),
+    )
+
+
+def _retry_record(
+    parent: InternalValidationRecord,
+    *,
+    record_id: str,
+    sequence_index: int,
+    attempt_index: int,
+) -> InternalValidationRecord:
+    return replace(
+        parent,
+        record_id=record_id,
+        record_sequence_index=sequence_index,
+        record_attempt_index=attempt_index,
+        execution_status="retry",
+        retry_of_record_id=parent.record_id,
+        decision_trace=DecisionTrace("retry", None, "retryable_resource_failure"),
+    )
+
+
+@pytest.mark.unit
+def test_record_collection_rejects_orphan_cross_case_and_non_failed_retry_parent() -> None:
+    failed = _failed_initial_record()
+    retry = _retry_record(
+        failed,
+        record_id="record_retry_1",
+        sequence_index=1,
+        attempt_index=1,
+    )
+    assert validate_run_case_record_collection(
+        _collection(records=(failed, retry))
+    ) == ()
+
+    orphan = replace(retry, retry_of_record_id="missing_parent")
+    assert "retry_parent_record_missing" in validate_run_case_record_collection(
+        _collection(records=(failed, orphan))
+    )
+
+    cross_case = replace(
+        retry,
+        analysis_unit_identity=replace(retry.analysis_unit_identity, case_id="different_case"),
+    )
+    cross_case_violations = validate_run_case_record_collection(
+        _collection(records=(failed, cross_case))
+    )
+    assert "retry_parent_identity_mismatch" in cross_case_violations
+    assert "record_case_id_collection_mismatch" in cross_case_violations
+
+    successful_parent = _record()
+    retry_after_success = _retry_record(
+        successful_parent,
+        record_id="record_retry_after_success",
+        sequence_index=1,
+        attempt_index=1,
+    )
+    assert "retry_parent_status_invalid" in validate_run_case_record_collection(
+        _collection(records=(successful_parent, retry_after_success))
+    )
+
+
+@pytest.mark.unit
+def test_record_collection_rejects_skipped_or_unbounded_retry_attempts() -> None:
+    failed = _failed_initial_record()
+    skipped = _retry_record(
+        failed,
+        record_id="record_retry_skipped",
+        sequence_index=1,
+        attempt_index=2,
+    )
+    skipped_violations = validate_run_case_record_collection(
+        _collection(records=(failed, skipped))
+    )
+    assert "record_attempt_index_not_contiguous" in skipped_violations
+    assert "retry_parent_attempt_not_contiguous" in skipped_violations
+
+    retry_1 = _retry_record(
+        failed,
+        record_id="record_retry_1",
+        sequence_index=1,
+        attempt_index=1,
+    )
+    retry_2 = _retry_record(
+        retry_1,
+        record_id="record_retry_2",
+        sequence_index=2,
+        attempt_index=2,
+    )
+    retry_3 = _retry_record(
+        retry_2,
+        record_id="record_retry_3",
+        sequence_index=3,
+        attempt_index=3,
+    )
+    over_limit = validate_run_case_record_collection(
+        _collection(records=(failed, retry_1, retry_2, retry_3))
+    )
+    assert "maximum_record_attempts_exceeded" in over_limit
+    assert "record_attempt_index_exceeds_frozen_limit" in over_limit
+
+
+@pytest.mark.unit
+def test_record_collection_requires_structured_stop_and_rejects_continuation() -> None:
+    failed = _failed_initial_record()
+    failed_gate = PromotionGateAssessment(
+        gate_id="content_branch_promotion_gate_passed",
+        gate_status="failed",
+        evidence_record_ids=(failed.record_id,),
+        stop_outcome="content_branch_research_question_closed_negative",
+    )
+    stopped = _collection(
+        records=(failed,),
+        promotion_gate_assessments=(failed_gate,),
+        promotion_stop_gate_id=failed_gate.gate_id,
+    )
+    assert validate_run_case_record_collection(stopped) == ()
+
+    continuation = replace(
+        _record(),
+        record_id="record_after_stop",
+        record_sequence_index=1,
+        record_attempt_index=1,
+    )
+    assert "record_continues_after_promotion_stop" in validate_run_case_record_collection(
+        _collection(
+            records=(failed, continuation),
+            promotion_gate_assessments=(failed_gate,),
+            promotion_stop_gate_id=failed_gate.gate_id,
+        )
+    )
+
+    unstructured = replace(
+        failed_gate,
+        gate_id="arbitrary_nonempty_gate",
+        stop_outcome="arbitrary_nonempty_outcome",
+    )
+    unstructured_violations = validate_run_case_record_collection(
+        _collection(
+            records=(failed,),
+            promotion_gate_assessments=(unstructured,),
+            promotion_stop_gate_id=unstructured.gate_id,
+        )
+    )
+    assert "promotion_gate_id_invalid" in unstructured_violations
+    assert "failed_promotion_gate_stop_outcome_invalid" in unstructured_violations
 
 
 @pytest.mark.unit
