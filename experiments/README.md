@@ -4,10 +4,11 @@
 
 | path | responsibility | current_state |
 | --- | --- | --- |
-| `protocol/` | 内部设计验证、外部比较、preflight 和 records。 | 当前只有通用外部比较与最小 record 结构。 |
+| `protocol/` | 内部设计验证、外部比较、preflight 和 records。 | 已实现冻结的内部 split/访问、13 职责验证矩阵、逐样本记录约束，以及通用外部比较结构。 |
 | `methods/` | 项目方法及 baseline 的协议适配。 | 仅有边界说明。 |
 | `attacks/` | 与方法正交的攻击变换。 | 仅有边界说明。 |
 | `metrics/` | 只依赖协议的指标计算。 | 仅有边界说明。 |
 | `runners/` | 组合组件、校验 preflight、执行并写 records。 | 仅有边界说明。 |
 
-内部 LF/HF、几何和联合判定验证协议尚未实现。目录存在不表示具体实验已经实现或产生证据。
+内部协议实现只关闭 schema、切分隔离、访问、状态和记录语义，不表示任何候选已经
+晋升，也不表示 calibration、正式运行或科学有效性已经完成。

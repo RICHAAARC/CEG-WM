@@ -442,6 +442,63 @@ Notebook 与 repository module 的跨边界数据
 | metric_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标名称。 |
 | metric_value | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标数值。 |
 | execution_status | persisted_protocol | protocol | none | true | false | false | 当前尝试成功、失败或被排除的显式状态。 |
+
+## 内部科学验证协议字段
+
+以下字段属于 `ceg_wm_internal_sample_record_v1`。既有的 `split`、
+`source_cluster_id`、`execution_status`、`lf_score`、`hf_score`、`combined_score`、
+`tau`、`tau_rescue`、`geometry_triggered`、`raw_content_score` 和
+`rectified_content_score` 继续使用上表既有语义，不在此重复登记。
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| protocol_id | persisted_protocol | protocol | none | true | false | false | 冻结内部科学验证协议的语义身份。 |
+| protocol_version | persisted_protocol | protocol | none | true | false | false | 冻结内部协议配置版本。 |
+| record_schema_version | persisted_protocol | protocol | none | true | false | false | 逐样本内部验证 record schema 身份。 |
+| analysis_unit_identity | persisted_protocol | provenance | none | true | false | false | unit、case、source cluster 与 Prompt/seed/image-lineage/key-family 的不可拆分身份结构。 |
+| unit_id | persisted_protocol | provenance | none | true | false | false | 一个 case 中被执行和记录的独立分析单位身份。 |
+| case_id | persisted_protocol | protocol | none | true | false | false | 预登记内部科学问题、攻击和 control 组合的 case 身份。 |
+| attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case 执行尝试的从零开始索引；retry 必须大于零。 |
+| exclusion_rule_id | persisted_protocol | protocol | none | true | false | false | `excluded` 状态绑定的预登记、与效果无关的排除规则身份。 |
+| retry_of_record_id | persisted_protocol | provenance | none | true | false | false | `retry` 状态回绑的前一失败尝试 record 身份。 |
+| detector_trace | persisted_protocol | method_state | none | true | false | false | raw/rectified detector、preprocessing 与对应内容分数的完整逐样本结构。 |
+| raw_detector_identity | persisted_protocol | method_identity | none | true | false | false | 原图实际调用的冻结 content detector 身份。 |
+| rectified_detector_identity | persisted_protocol | method_identity | none | true | false | false | 回正图绑定的 content detector 身份；必须等于 raw 身份。 |
+| raw_preprocessing_identity | persisted_protocol | method_identity | none | true | false | false | 原图普通图像检测预处理身份。 |
+| rectified_preprocessing_identity | persisted_protocol | method_identity | none | true | false | false | 回正图普通图像检测预处理身份；必须等于 raw 身份。 |
+| branch_score_trace | persisted_protocol | method_statistic | none | true | false | false | LF、HF 和 combined 三个独立分数的逐样本结构。 |
+| routing_trace | persisted_protocol | method_state | none | true | false | false | routing identity/control 与 observation/mask 摘要的逐样本结构。 |
+| routing_identity | persisted_protocol | method_identity | none | true | false | false | routed 或 uniform-control 执行实际绑定的路由候选身份。 |
+| routing_control | persisted_protocol | method_state | none | true | false | false | routed、uniform disabled 或分支禁用 control 身份。 |
+| routing_observation_digest | persisted_protocol | provenance | none | true | false | false | 本样本路由 observation 结构的内容摘要。 |
+| routing_mask_digest | persisted_protocol | provenance | none | true | false | false | 本样本实际 routing masks 的内容摘要。 |
+| geometry_trace | persisted_protocol | method_state | none | true | false | false | 几何触发、估计、原始指标、可靠性、变换、失败与回正状态的完整结构。 |
+| geometry_estimation_identity | persisted_protocol | method_identity | none | true | false | false | 实际几何估计结果及 search config 的绑定身份。 |
+| geometry_reliability_identity | persisted_protocol | method_identity | none | true | false | false | 独立 reliability fit 与合取结果的绑定身份。 |
+| geometry_reliable | persisted_protocol | method_state | none | true | false | false | 当前逐样本几何结果是否满足冻结独立可靠性门。 |
+| geometry_transform | persisted_protocol | method_statistic | none | true | false | false | 估计的有界 crop/scale/rotation/translation 参数 mapping。 |
+| geometry_raw_metrics | persisted_protocol | method_statistic | none | true | false | false | coverage、uniqueness、gap、key margin、inlier、residual 等 estimator 原始指标 mapping。 |
+| geometry_failure_reason | persisted_protocol | method_state | none | true | false | false | 几何估计、可靠性或回正失败的明确原因。 |
+| rectification_status | persisted_protocol | method_state | none | true | false | false | `not_attempted`、`succeeded` 或 `failed`。 |
+| threshold_trace | persisted_protocol | method_identity | none | true | false | false | raw/rectified threshold identity 与同一 `tau`、`tau_rescue` 的结构。 |
+| raw_threshold_identity | persisted_protocol | method_identity | none | true | false | false | 原图判定实际使用的 threshold/calibration 身份。 |
+| rectified_threshold_identity | persisted_protocol | method_identity | none | true | false | false | 回正重判 threshold 身份；必须等于 raw 身份。 |
+| key_control_trace | persisted_protocol | method_identity | none | true | false | false | registered key family、实际 detection key role 和 control 身份结构。 |
+| registered_key_public_digest | persisted_protocol | provenance | none | true | false | false | 当前 source cluster 注册 key family 的不可逆公开摘要。 |
+| detection_key_public_digest | persisted_protocol | provenance | none | true | false | false | 本次逐样本检测实际使用 key 的不可逆公开摘要。 |
+| control_identity | persisted_protocol | protocol | none | true | false | false | registered、wrong-key、unwatermarked、route-disabled 或其他预登记 control 身份。 |
+| decision_trace | persisted_protocol | method_state | none | true | false | false | final decision、只允许的 content positive source 与决策原因结构。 |
+| watermark_decision | persisted_protocol | method_state | none | true | false | false | 水印判定的 `positive`、`negative`、`failed`、`excluded` 或 `retry`。 |
+| decision_reason | persisted_protocol | method_state | none | true | false | false | 最终判定或非成功状态的明确原因。 |
+| provenance_trace | persisted_protocol | provenance | none | true | false | false | protocol/split/method/model/environment/input/attack/metric 的完整不可变摘要结构。 |
+| environment_digest | persisted_protocol | provenance | none | true | false | false | 当前执行环境与依赖锁的内容摘要。 |
+| input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
+| attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |
+
+## 通用记录、产物与 baseline 字段（续）
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | failure_reason | persisted_protocol | protocol | none | true | false | false | 执行失败时必须保存的原因。 |
 | exclusion_reason | persisted_protocol | protocol | none | true | false | false | 按预先规则排除时必须保存的原因。 |
 | artifact_id | persisted_protocol | artifact | none | false | false | false | 受治理论文产物的稳定标识。 |

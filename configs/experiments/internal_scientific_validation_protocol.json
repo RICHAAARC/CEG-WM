@@ -1,0 +1,81 @@
+{
+  "current_execution_allowed_splits": [
+    "development",
+    "candidate_selection",
+    "untouched_confirmation",
+    "content_threshold_fit",
+    "rescue_threshold_fit",
+    "reliability_fit",
+    "end_to_end_check"
+  ],
+  "execution_statuses": [
+    "success",
+    "failed",
+    "excluded",
+    "retry"
+  ],
+  "held_out_evaluation_access": "fail_closed_current_execution",
+  "method_responsibilities": [
+    "key_schedule",
+    "content_router",
+    "lf_carrier",
+    "hf_carrier",
+    "content_embedder",
+    "lf_detector",
+    "hf_detector",
+    "content_detector",
+    "qk_geometry_sync",
+    "geometric_transform_estimator",
+    "geometry_reliability",
+    "image_rectifier",
+    "conditional_recovery_decision"
+  ],
+  "promotion_failure_semantics": "stop_and_record_failed_or_closed_negative_without_advancing",
+  "protocol_id": "ceg_wm_internal_scientific_validation_v1",
+  "protocol_kind": "internal_scientific_validation",
+  "protocol_version": "1.0.0",
+  "record_schema_version": "ceg_wm_internal_sample_record_v1",
+  "scientific_claim_boundary": "schema_and_cpu_constraints_only_no_scientific_validity_claim",
+  "source_cluster_identity_fields": [
+    "prompt_digest",
+    "generation_seed",
+    "image_lineage_digest",
+    "registered_key_family_digest"
+  ],
+  "split_assignment_mode": "explicit_source_cluster_manifest",
+  "split_prerequisite_gates": {
+    "candidate_selection": [],
+    "content_threshold_fit": [
+      "content_branch_promotion_gate_passed"
+    ],
+    "development": [],
+    "end_to_end_check": [
+      "content_threshold_gate_passed",
+      "rescue_threshold_gate_passed",
+      "geometry_reliability_gate_passed"
+    ],
+    "held_out_evaluation": [
+      "end_to_end_gate_passed"
+    ],
+    "reliability_fit": [
+      "qk_sync_gate_passed",
+      "transform_estimation_gate_passed"
+    ],
+    "rescue_threshold_fit": [
+      "content_threshold_gate_passed"
+    ],
+    "untouched_confirmation": [
+      "candidate_selection_frozen"
+    ]
+  },
+  "splits": [
+    "development",
+    "candidate_selection",
+    "untouched_confirmation",
+    "content_threshold_fit",
+    "rescue_threshold_fit",
+    "reliability_fit",
+    "end_to_end_check",
+    "held_out_evaluation"
+  ]
+}

@@ -1,5 +1,10 @@
 # Experiment Configurations
 
-此目录未来保存 CEG-WM 内部设计验证矩阵和外部 `ComparisonProtocol` 实例。部署到 Colab 或 GPU 服务器时，应携带已经填充并通过 preflight 的项目配置，而不是在运行后补写条件。
+此目录保存 CEG-WM 内部设计验证和外部 `ComparisonProtocol` 的冻结配置。部署到
+Colab 或 GPU 服务器时，应携带已经填充并通过 preflight 的项目配置，而不是在运行后
+补写条件。
 
-协议必须在高成本运行前固定样本、切分、生成条件、随机策略、输出规格、攻击与指标集合、调参与计算预算、失败和排除规则。当前项目尚未实现内部设计验证协议或建立实验实例。
+`internal_scientific_validation_protocol.json` 固定八个职责 split、source-cluster identity、
+当前执行访问范围、四种 execution status、13 职责身份及 promotion prerequisites。
+它显式禁止当前执行访问 `held_out_evaluation`（最终 held-out 职责）。该配置与 CPU schema tests
+不构成 calibration、正式运行或科学有效性证据。
