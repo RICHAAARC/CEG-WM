@@ -456,7 +456,7 @@ Notebook 与 repository module 的跨边界数据
 | protocol_version | persisted_protocol | protocol | none | true | false | false | 冻结内部协议配置版本。 |
 | record_schema_version | persisted_protocol | protocol | none | true | false | false | 逐样本内部验证 record schema 身份。 |
 | record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | 一个 run/case 有序 records 集合的冻结 schema 身份。 |
-| record_collection_binding_fields | persisted_protocol | protocol | none | false | false | false | collection 必须与实际冻结 protocol/manifest 逐值绑定的摘要字段集合。 |
+| record_collection_binding_fields | persisted_protocol | protocol | none | false | false | false | `internal_validation.validate_run_case_record_collection` 只接受精确冻结 protocol/manifest dataclass trust anchors，并把 collection 与两者重算摘要逐值绑定。 |
 | maximum_record_attempts | persisted_protocol | protocol | none | true | false | false | 每个 unit/case/source cluster 在冻结协议中允许的最大执行尝试数。 |
 | retryable_parent_statuses | persisted_protocol | protocol | none | false | false | false | 允许作为后续 attempt parent 的冻结 outcome 集合，当前为 `failed` 与 `retry`。 |
 | retry_parent_required_after_attempt_zero | persisted_protocol | protocol | none | false | false | false | 是否要求所有 attempt index 大于零的 outcome 显式绑定 parent record。 |

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import math
 import re
-from typing import Any, Protocol
+from typing import Any
 
 from experiments.protocol.internal_matrix import (
     PROMOTION_GATE_IDENTITIES,
@@ -16,7 +16,7 @@ from experiments.protocol.internal_splits import (
     INTERNAL_VALIDATION_PROTOCOL_ID,
     INTERNAL_VALIDATION_PROTOCOL_VERSION,
     INTERNAL_VALIDATION_SPLITS,
-    FrozenSplitManifest,
+    SplitAssignment,
 )
 
 
@@ -31,20 +31,6 @@ INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION = (
 )
 MAXIMUM_RECORD_ATTEMPTS = 3
 RETRYABLE_PARENT_STATUSES = frozenset({"failed", "retry"})
-
-
-class FrozenProtocolBinding(Protocol):
-    """collection validator 所需的实际冻结协议只读表面。"""
-
-    protocol_id: str
-    protocol_version: str
-    record_schema_version: str
-    record_collection_schema_version: str
-    maximum_record_attempts: int
-
-    def digest(self) -> str: ...
-
-    def validate(self) -> tuple[str, ...]: ...
 
 
 def _nonempty(value: str | None) -> bool:
@@ -480,23 +466,22 @@ def _validate_decision(record: InternalValidationRecord, violations: list[str]) 
             violations.append("geometry_trigger_near_threshold_mismatch")
 
 
-def validate_run_case_record_collection(
+def _validate_run_case_record_collection_structure(
     collection: RunCaseRecordCollection,
-    frozen_protocol: FrozenProtocolBinding,
-    split_manifest: FrozenSplitManifest,
+    *,
+    frozen_protocol_id: str,
+    frozen_protocol_version: str,
+    frozen_record_schema_version: str,
+    frozen_record_collection_schema_version: str,
+    frozen_maximum_record_attempts: int,
+    actual_protocol_digest: str,
+    actual_split_manifest_digest: str,
+    split_manifest_protocol_id: str,
+    split_manifest_protocol_version: str,
+    manifest_assignments: tuple[SplitAssignment, ...],
 ) -> tuple[str, ...]:
-    """验证有序 records 的 retry lineage、冻结上限与结构化 promotion stop。"""
+    """由正式 trust-anchor 入口调用的 collection 结构校验。"""
     violations: list[str] = []
-    frozen_protocol_violations = frozen_protocol.validate()
-    if frozen_protocol_violations:
-        violations.append("frozen_protocol_invalid")
-        violations.extend(frozen_protocol_violations)
-    split_manifest_violations = split_manifest.validate()
-    if split_manifest_violations:
-        violations.append("split_manifest_invalid")
-        violations.extend(split_manifest_violations)
-    actual_protocol_digest = frozen_protocol.digest()
-    actual_split_manifest_digest = split_manifest.digest()
     for name in (
         "record_collection_schema_version",
         "run_id",
@@ -516,16 +501,16 @@ def validate_run_case_record_collection(
         violations.append("record_collection_schema_version_frozen_identity_mismatch")
     if (
         collection.record_collection_schema_version
-        != frozen_protocol.record_collection_schema_version
+        != frozen_record_collection_schema_version
     ):
         violations.append("collection_frozen_record_collection_schema_version_mismatch")
     if collection.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID:
         violations.append("protocol_id_frozen_identity_mismatch")
     if collection.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION:
         violations.append("protocol_version_frozen_identity_mismatch")
-    if collection.protocol_id != frozen_protocol.protocol_id:
+    if collection.protocol_id != frozen_protocol_id:
         violations.append("collection_frozen_protocol_id_mismatch")
-    if collection.protocol_version != frozen_protocol.protocol_version:
+    if collection.protocol_version != frozen_protocol_version:
         violations.append("collection_frozen_protocol_version_mismatch")
     if collection.protocol_digest != actual_protocol_digest:
         violations.append("collection_protocol_digest_mismatch")
@@ -535,25 +520,25 @@ def validate_run_case_record_collection(
         violations.append("collection_protocol_digest_invalid")
     if not _digest_valid(collection.split_manifest_digest):
         violations.append("collection_split_manifest_digest_invalid")
-    if split_manifest.protocol_id != frozen_protocol.protocol_id:
+    if split_manifest_protocol_id != frozen_protocol_id:
         violations.append("manifest_frozen_protocol_id_mismatch")
-    if split_manifest.protocol_version != frozen_protocol.protocol_version:
+    if split_manifest_protocol_version != frozen_protocol_version:
         violations.append("manifest_frozen_protocol_version_mismatch")
     if collection.record_schema_version != INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION:
         violations.append("record_schema_version_frozen_identity_mismatch")
-    if collection.record_schema_version != frozen_protocol.record_schema_version:
+    if collection.record_schema_version != frozen_record_schema_version:
         violations.append("collection_frozen_record_schema_version_mismatch")
     if collection.maximum_record_attempts != MAXIMUM_RECORD_ATTEMPTS:
         violations.append("maximum_record_attempts_frozen_value_mismatch")
-    if collection.maximum_record_attempts != frozen_protocol.maximum_record_attempts:
+    if collection.maximum_record_attempts != frozen_maximum_record_attempts:
         violations.append("collection_frozen_maximum_record_attempts_mismatch")
     if not collection.records:
         violations.append("records_missing")
 
     records_by_id: dict[str, InternalValidationRecord] = {}
     attempts_by_identity: dict[tuple[str, str, str], list[InternalValidationRecord]] = {}
-    manifest_assignments = {
-        (assignment.identity, assignment.split) for assignment in split_manifest.assignments
+    manifest_assignment_pairs = {
+        (assignment.identity, assignment.split) for assignment in manifest_assignments
     }
     for sequence_index, record in enumerate(collection.records):
         violations.extend(validate_internal_record(record))
@@ -576,7 +561,7 @@ def validate_run_case_record_collection(
             violations.append("record_protocol_digest_binding_mismatch")
         if record.provenance_trace.split_manifest_digest != actual_split_manifest_digest:
             violations.append("record_split_manifest_digest_binding_mismatch")
-        if (record.analysis_unit_identity, record.split) not in manifest_assignments:
+        if (record.analysis_unit_identity, record.split) not in manifest_assignment_pairs:
             violations.append("record_manifest_assignment_missing")
         identity = (
             record.analysis_unit_identity.unit_id,

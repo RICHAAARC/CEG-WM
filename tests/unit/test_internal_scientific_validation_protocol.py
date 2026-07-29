@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -30,7 +30,6 @@ from experiments.protocol.internal_records import (
     RoutingTrace,
     ThresholdTrace,
     validate_internal_record,
-    validate_run_case_record_collection,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
@@ -45,7 +44,9 @@ from experiments.protocol.internal_splits import (
     derive_source_cluster_id,
 )
 from experiments.protocol.internal_validation import (
+    FrozenInternalValidationProtocol,
     load_frozen_internal_validation_protocol,
+    validate_run_case_record_collection,
 )
 
 
@@ -243,6 +244,100 @@ def test_frozen_protocol_config_has_exact_splits_and_denies_held_out_access() ->
             ("held_out_evaluation",),
             SplitAccessGrant.current_execution(),
         )
+
+
+@pytest.mark.unit
+def test_collection_validator_rejects_forged_and_subclassed_trust_anchors() -> None:
+    frozen_protocol = _frozen_protocol()
+    split_manifest = _manifest()
+    collection = _collection()
+
+    class ForgedProtocol:
+        def validate(self) -> tuple[str, ...]:
+            return ()
+
+        def digest(self) -> str:
+            return frozen_protocol.digest()
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(frozen_protocol, name)
+
+    class ForgedManifest:
+        def validate(self) -> tuple[str, ...]:
+            return ()
+
+        def digest(self) -> str:
+            return split_manifest.digest()
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(split_manifest, name)
+
+    class ProtocolSubclass(FrozenInternalValidationProtocol):
+        pass
+
+    class ManifestSubclass(FrozenSplitManifest):
+        pass
+
+    forged_protocol_violations = validate_run_case_record_collection(
+        collection,
+        ForgedProtocol(),  # type: ignore[arg-type]
+        split_manifest,
+    )
+    assert "frozen_protocol_exact_type_required" in forged_protocol_violations
+
+    forged_manifest_violations = validate_run_case_record_collection(
+        collection,
+        frozen_protocol,
+        ForgedManifest(),  # type: ignore[arg-type]
+    )
+    assert "split_manifest_exact_type_required" in forged_manifest_violations
+
+    protocol_subclass = ProtocolSubclass(**asdict(frozen_protocol))
+    manifest_subclass = ManifestSubclass(**asdict(split_manifest))
+    assert "frozen_protocol_exact_type_required" in validate_run_case_record_collection(
+        collection,
+        protocol_subclass,
+        split_manifest,
+    )
+    assert "split_manifest_exact_type_required" in validate_run_case_record_collection(
+        collection,
+        frozen_protocol,
+        manifest_subclass,
+    )
+
+
+@pytest.mark.unit
+def test_frozen_protocol_rejects_changed_canonical_semantics_without_version_bump() -> None:
+    protocol = _frozen_protocol()
+    changed_claim_boundary = replace(
+        protocol,
+        scientific_claim_boundary="changed_but_nonempty_claim_boundary",
+    )
+    changed_promotion_semantics = replace(
+        protocol,
+        promotion_failure_semantics="changed_but_nonempty_promotion_semantics",
+    )
+    changed_status_order = replace(
+        protocol,
+        execution_statuses=tuple(reversed(protocol.execution_statuses)),
+    )
+    changed_retryable_parent_order = replace(
+        protocol,
+        retryable_parent_statuses=tuple(reversed(protocol.retryable_parent_statuses)),
+    )
+
+    assert "scientific_claim_boundary_invalid" in changed_claim_boundary.validate()
+    assert "promotion_failure_semantics_invalid" in changed_promotion_semantics.validate()
+    assert "execution_statuses_invalid" in changed_status_order.validate()
+    assert (
+        "retryable_parent_statuses_invalid"
+        in changed_retryable_parent_order.validate()
+    )
+    assert validate_run_case_record_collection(
+        _collection(),
+        changed_claim_boundary,
+        _manifest(),
+    )
 
 
 @pytest.mark.unit

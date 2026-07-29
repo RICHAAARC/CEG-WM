@@ -10,5 +10,9 @@
 | `metrics/` | 只依赖协议的指标计算。 | 仅有边界说明。 |
 | `runners/` | 组合组件、校验 preflight、执行并写 records。 | 仅有边界说明。 |
 
+未来 runner 在写入内部 run/case collection 前必须只调用
+`protocol.internal_validation.validate_run_case_record_collection` 这一正式入口；
+不得直接调用 `internal_records` 的私有结构 helper。
+
 内部协议实现只关闭 schema、切分隔离、访问、状态和记录语义，不表示任何候选已经
 晋升，也不表示 calibration、正式运行或科学有效性已经完成。

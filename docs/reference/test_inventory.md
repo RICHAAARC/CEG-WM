@@ -22,7 +22,7 @@ conda run -n CEG-WM python -m pytest --collect-only -q -s
 | `tests/unit/test_key_schedule.py` | `unit` | yes | 冻结 key schedule 的 root/domain、counter/quantile golden、wrong/public 派生、不可变身份与失败边界。 |
 | `tests/unit/test_joint_decision.py` | `unit` | yes | 近阈值门控、几何不直接阳性、同 detector/key/preprocess/threshold 回正重判和 raw/rescue 阳性路径。 |
 | `tests/unit/test_comparison_preflight.py` | `unit` | yes | 公平对比协议、切分隔离与 baseline 完整性。 |
-| `tests/unit/test_internal_scientific_validation_protocol.py` | `unit` | yes | 内部 unit/case/source-cluster identity、八 split 无泄漏、伪造 grant 与最终 held-out fail-closed、四类执行状态、真实 protocol/manifest digest 与 assignment 绑定、所有非初始 outcome 的 retry lineage/stop 集合状态机、协议版本绑定、13 职责验证矩阵、同 detector/config/threshold 和内容证据阳性/阴性约束；仅 CPU schema/constraint，不宣称科学有效。 |
+| `tests/unit/test_internal_scientific_validation_protocol.py` | `unit` | yes | 内部 unit/case/source-cluster identity、八 split 无泄漏、伪造 grant 与最终 held-out fail-closed、四类执行状态、精确 protocol/manifest dataclass trust anchors（拒绝 duck object/subclass）、全部 canonical 协议语义、实际 digest 与 assignment 绑定、所有非初始 outcome 的 retry lineage/stop 集合状态机、协议版本绑定、13 职责验证矩阵、同 detector/config/threshold 和内容证据阳性/阴性约束；仅 CPU schema/constraint，不宣称科学有效。 |
 | `tests/functional/test_governed_artifact_structures.py` | `quick` | yes | records provenance 与 artifact manifest 结构。 |
 
 ## 后续测试等级
