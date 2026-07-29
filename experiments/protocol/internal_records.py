@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import math
 import re
-from typing import Any
+from typing import Any, Protocol
 
 from experiments.protocol.internal_matrix import (
     PROMOTION_GATE_IDENTITIES,
@@ -16,6 +16,7 @@ from experiments.protocol.internal_splits import (
     INTERNAL_VALIDATION_PROTOCOL_ID,
     INTERNAL_VALIDATION_PROTOCOL_VERSION,
     INTERNAL_VALIDATION_SPLITS,
+    FrozenSplitManifest,
 )
 
 
@@ -29,6 +30,21 @@ INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION = (
     "ceg_wm_internal_run_case_record_collection_v1"
 )
 MAXIMUM_RECORD_ATTEMPTS = 3
+RETRYABLE_PARENT_STATUSES = frozenset({"failed", "retry"})
+
+
+class FrozenProtocolBinding(Protocol):
+    """collection validator 所需的实际冻结协议只读表面。"""
+
+    protocol_id: str
+    protocol_version: str
+    record_schema_version: str
+    record_collection_schema_version: str
+    maximum_record_attempts: int
+
+    def digest(self) -> str: ...
+
+    def validate(self) -> tuple[str, ...]: ...
 
 
 def _nonempty(value: str | None) -> bool:
@@ -172,6 +188,8 @@ class RunCaseRecordCollection:
     case_id: str
     protocol_id: str
     protocol_version: str
+    protocol_digest: str
+    split_manifest_digest: str
     record_schema_version: str
     maximum_record_attempts: int
     records: tuple[InternalValidationRecord, ...]
@@ -224,9 +242,13 @@ def _validate_status(record: InternalValidationRecord, violations: list[str]) ->
     has_exclusion = _nonempty(record.exclusion_reason)
     has_exclusion_rule = _nonempty(record.exclusion_rule_id)
     has_retry_parent = _nonempty(record.retry_of_record_id)
+    if record.record_attempt_index == 0 and has_retry_parent:
+        violations.append("initial_attempt_retry_parent_forbidden")
+    if record.record_attempt_index > 0 and not has_retry_parent:
+        violations.append("subsequent_attempt_retry_parent_missing")
     if status == "success":
-        if has_failure or has_exclusion or has_exclusion_rule or has_retry_parent:
-            violations.append("success_reason_or_retry_field_forbidden")
+        if has_failure or has_exclusion or has_exclusion_rule:
+            violations.append("success_failure_or_exclusion_field_forbidden")
         scores = (
             record.detector_trace.raw_content_score,
             record.branch_score_trace.lf_score,
@@ -238,13 +260,13 @@ def _validate_status(record: InternalValidationRecord, violations: list[str]) ->
     elif status == "failed":
         if not has_failure:
             violations.append("failure_reason_missing")
-        if has_exclusion or has_exclusion_rule or has_retry_parent:
-            violations.append("failed_exclusion_or_retry_field_forbidden")
+        if has_exclusion or has_exclusion_rule:
+            violations.append("failed_exclusion_field_forbidden")
     elif status == "excluded":
         if not has_exclusion or not has_exclusion_rule:
             violations.append("exclusion_reason_or_rule_missing")
-        if has_failure or has_retry_parent:
-            violations.append("excluded_failure_or_retry_field_forbidden")
+        if has_failure:
+            violations.append("excluded_failure_field_forbidden")
     elif status == "retry":
         if not has_failure or not has_retry_parent:
             violations.append("retry_reason_or_parent_missing")
@@ -460,15 +482,29 @@ def _validate_decision(record: InternalValidationRecord, violations: list[str]) 
 
 def validate_run_case_record_collection(
     collection: RunCaseRecordCollection,
+    frozen_protocol: FrozenProtocolBinding,
+    split_manifest: FrozenSplitManifest,
 ) -> tuple[str, ...]:
     """验证有序 records 的 retry lineage、冻结上限与结构化 promotion stop。"""
     violations: list[str] = []
+    frozen_protocol_violations = frozen_protocol.validate()
+    if frozen_protocol_violations:
+        violations.append("frozen_protocol_invalid")
+        violations.extend(frozen_protocol_violations)
+    split_manifest_violations = split_manifest.validate()
+    if split_manifest_violations:
+        violations.append("split_manifest_invalid")
+        violations.extend(split_manifest_violations)
+    actual_protocol_digest = frozen_protocol.digest()
+    actual_split_manifest_digest = split_manifest.digest()
     for name in (
         "record_collection_schema_version",
         "run_id",
         "case_id",
         "protocol_id",
         "protocol_version",
+        "protocol_digest",
+        "split_manifest_digest",
         "record_schema_version",
     ):
         if not getattr(collection, name).strip():
@@ -478,19 +514,47 @@ def validate_run_case_record_collection(
         != INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
     ):
         violations.append("record_collection_schema_version_frozen_identity_mismatch")
+    if (
+        collection.record_collection_schema_version
+        != frozen_protocol.record_collection_schema_version
+    ):
+        violations.append("collection_frozen_record_collection_schema_version_mismatch")
     if collection.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID:
         violations.append("protocol_id_frozen_identity_mismatch")
     if collection.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION:
         violations.append("protocol_version_frozen_identity_mismatch")
+    if collection.protocol_id != frozen_protocol.protocol_id:
+        violations.append("collection_frozen_protocol_id_mismatch")
+    if collection.protocol_version != frozen_protocol.protocol_version:
+        violations.append("collection_frozen_protocol_version_mismatch")
+    if collection.protocol_digest != actual_protocol_digest:
+        violations.append("collection_protocol_digest_mismatch")
+    if collection.split_manifest_digest != actual_split_manifest_digest:
+        violations.append("collection_split_manifest_digest_mismatch")
+    if not _digest_valid(collection.protocol_digest):
+        violations.append("collection_protocol_digest_invalid")
+    if not _digest_valid(collection.split_manifest_digest):
+        violations.append("collection_split_manifest_digest_invalid")
+    if split_manifest.protocol_id != frozen_protocol.protocol_id:
+        violations.append("manifest_frozen_protocol_id_mismatch")
+    if split_manifest.protocol_version != frozen_protocol.protocol_version:
+        violations.append("manifest_frozen_protocol_version_mismatch")
     if collection.record_schema_version != INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION:
         violations.append("record_schema_version_frozen_identity_mismatch")
+    if collection.record_schema_version != frozen_protocol.record_schema_version:
+        violations.append("collection_frozen_record_schema_version_mismatch")
     if collection.maximum_record_attempts != MAXIMUM_RECORD_ATTEMPTS:
         violations.append("maximum_record_attempts_frozen_value_mismatch")
+    if collection.maximum_record_attempts != frozen_protocol.maximum_record_attempts:
+        violations.append("collection_frozen_maximum_record_attempts_mismatch")
     if not collection.records:
         violations.append("records_missing")
 
     records_by_id: dict[str, InternalValidationRecord] = {}
     attempts_by_identity: dict[tuple[str, str, str], list[InternalValidationRecord]] = {}
+    manifest_assignments = {
+        (assignment.identity, assignment.split) for assignment in split_manifest.assignments
+    }
     for sequence_index, record in enumerate(collection.records):
         violations.extend(validate_internal_record(record))
         if record.record_id in records_by_id:
@@ -508,6 +572,12 @@ def validate_run_case_record_collection(
             violations.append("record_protocol_version_collection_mismatch")
         if record.record_schema_version != collection.record_schema_version:
             violations.append("record_schema_version_collection_mismatch")
+        if record.provenance_trace.protocol_digest != actual_protocol_digest:
+            violations.append("record_protocol_digest_binding_mismatch")
+        if record.provenance_trace.split_manifest_digest != actual_split_manifest_digest:
+            violations.append("record_split_manifest_digest_binding_mismatch")
+        if (record.analysis_unit_identity, record.split) not in manifest_assignments:
+            violations.append("record_manifest_assignment_missing")
         identity = (
             record.analysis_unit_identity.unit_id,
             record.analysis_unit_identity.case_id,
@@ -528,11 +598,11 @@ def validate_run_case_record_collection(
             violations.append("record_attempt_index_exceeds_frozen_limit")
 
     for record in collection.records:
-        if record.execution_status != "retry":
+        if record.record_attempt_index == 0:
             continue
         parent = records_by_id.get(record.retry_of_record_id or "")
         if parent is None:
-            violations.append("retry_parent_record_missing")
+            violations.append("attempt_parent_record_missing")
             continue
         child_identity = (
             record.run_id,
@@ -549,15 +619,15 @@ def validate_run_case_record_collection(
             parent.split,
         )
         if child_identity != parent_identity:
-            violations.append("retry_parent_identity_mismatch")
+            violations.append("attempt_parent_identity_mismatch")
         if parent.protocol_id != record.protocol_id or parent.protocol_version != record.protocol_version:
-            violations.append("retry_parent_protocol_identity_mismatch")
-        if parent.execution_status not in {"failed", "retry"}:
-            violations.append("retry_parent_status_invalid")
+            violations.append("attempt_parent_protocol_identity_mismatch")
+        if parent.execution_status not in RETRYABLE_PARENT_STATUSES:
+            violations.append("attempt_parent_status_not_retryable")
         if record.record_attempt_index != parent.record_attempt_index + 1:
-            violations.append("retry_parent_attempt_not_contiguous")
+            violations.append("attempt_parent_index_not_contiguous")
         if parent.record_sequence_index >= record.record_sequence_index:
-            violations.append("retry_parent_not_earlier")
+            violations.append("attempt_parent_not_earlier")
 
     _validate_promotion_stop(collection, records_by_id, violations)
     return tuple(dict.fromkeys(violations))

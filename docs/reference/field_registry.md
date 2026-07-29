@@ -456,14 +456,17 @@ Notebook 与 repository module 的跨边界数据
 | protocol_version | persisted_protocol | protocol | none | true | false | false | 冻结内部协议配置版本。 |
 | record_schema_version | persisted_protocol | protocol | none | true | false | false | 逐样本内部验证 record schema 身份。 |
 | record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | 一个 run/case 有序 records 集合的冻结 schema 身份。 |
+| record_collection_binding_fields | persisted_protocol | protocol | none | false | false | false | collection 必须与实际冻结 protocol/manifest 逐值绑定的摘要字段集合。 |
 | maximum_record_attempts | persisted_protocol | protocol | none | true | false | false | 每个 unit/case/source cluster 在冻结协议中允许的最大执行尝试数。 |
+| retryable_parent_statuses | persisted_protocol | protocol | none | false | false | false | 允许作为后续 attempt parent 的冻结 outcome 集合，当前为 `failed` 与 `retry`。 |
+| retry_parent_required_after_attempt_zero | persisted_protocol | protocol | none | false | false | false | 是否要求所有 attempt index 大于零的 outcome 显式绑定 parent record。 |
 | analysis_unit_identity | persisted_protocol | provenance | none | true | false | false | unit、case、source cluster 与 Prompt/seed/image-lineage/key-family 的不可拆分身份结构。 |
 | unit_id | persisted_protocol | provenance | none | true | false | false | 一个 case 中被执行和记录的独立分析单位身份。 |
 | case_id | persisted_protocol | protocol | none | true | false | false | 预登记内部科学问题、攻击和 control 组合的 case 身份。 |
 | record_sequence_index | persisted_protocol | protocol | none | true | false | false | 一个 run/case record collection 中从零开始且连续的序列索引。 |
 | record_attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case/source cluster 执行尝试的从零开始连续索引；retry 必须大于零。 |
 | exclusion_rule_id | persisted_protocol | protocol | none | true | false | false | `excluded` 状态绑定的预登记、与效果无关的排除规则身份。 |
-| retry_of_record_id | persisted_protocol | provenance | none | true | false | false | `retry` 状态回绑的前一失败尝试 record 身份。 |
+| retry_of_record_id | persisted_protocol | provenance | none | true | false | false | 任一非初始 attempt 回绑的前一可重试 outcome record 身份；attempt zero 必须为空。 |
 | detector_trace | persisted_protocol | method_state | none | true | false | false | raw/rectified detector、preprocessing 与对应内容分数的完整逐样本结构。 |
 | raw_detector_identity | persisted_protocol | method_identity | none | true | false | false | 原图实际调用的冻结 content detector 身份。 |
 | rectified_detector_identity | persisted_protocol | method_identity | none | true | false | false | 回正图绑定的 content detector 身份；必须等于 raw 身份。 |

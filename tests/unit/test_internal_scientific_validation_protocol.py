@@ -102,14 +102,20 @@ def _manifest() -> FrozenSplitManifest:
     )
 
 
+def _frozen_protocol():
+    return load_frozen_internal_validation_protocol(CONFIG_PATH)
+
+
 def _record(**changes: object) -> InternalValidationRecord:
+    frozen_protocol = _frozen_protocol()
+    split_manifest = _manifest()
     values: dict[str, object] = {
         "record_id": "record_1",
         "run_id": "run_1",
         "protocol_id": INTERNAL_VALIDATION_PROTOCOL_ID,
         "protocol_version": INTERNAL_VALIDATION_PROTOCOL_VERSION,
         "record_schema_version": INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
-        "analysis_unit_identity": _unit(0),
+        "analysis_unit_identity": _unit(6),
         "split": "end_to_end_check",
         "record_sequence_index": 0,
         "record_attempt_index": 0,
@@ -167,8 +173,8 @@ def _record(**changes: object) -> InternalValidationRecord:
             decision_reason="raw_below_rescue_threshold",
         ),
         "provenance_trace": ProvenanceTrace(
-            protocol_digest="4" * 64,
-            split_manifest_digest="5" * 64,
+            protocol_digest=frozen_protocol.digest(),
+            split_manifest_digest=split_manifest.digest(),
             method_code_revision="method_revision_1",
             method_config_digest="6" * 64,
             model_revision="model_revision_1",
@@ -189,14 +195,18 @@ def _collection(
     promotion_stop_gate_id: str | None = None,
     **changes: object,
 ) -> RunCaseRecordCollection:
+    frozen_protocol = _frozen_protocol()
+    split_manifest = _manifest()
     values: dict[str, object] = {
         "record_collection_schema_version": (
             INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
         ),
         "run_id": "run_1",
-        "case_id": "case_0",
+        "case_id": "case_6",
         "protocol_id": INTERNAL_VALIDATION_PROTOCOL_ID,
         "protocol_version": INTERNAL_VALIDATION_PROTOCOL_VERSION,
+        "protocol_digest": frozen_protocol.digest(),
+        "split_manifest_digest": split_manifest.digest(),
         "record_schema_version": INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
         "maximum_record_attempts": MAXIMUM_RECORD_ATTEMPTS,
         "records": records if records is not None else (_record(),),
@@ -205,6 +215,19 @@ def _collection(
     }
     values.update(changes)
     return RunCaseRecordCollection(**values)
+
+
+def _validate_collection(
+    collection: RunCaseRecordCollection,
+    *,
+    frozen_protocol=None,
+    split_manifest: FrozenSplitManifest | None = None,
+) -> tuple[str, ...]:
+    return validate_run_case_record_collection(
+        collection,
+        frozen_protocol if frozen_protocol is not None else _frozen_protocol(),
+        split_manifest if split_manifest is not None else _manifest(),
+    )
 
 
 @pytest.mark.unit
@@ -442,6 +465,114 @@ def _retry_record(
 
 
 @pytest.mark.unit
+def test_record_collection_binds_actual_protocol_manifest_and_record_provenance() -> None:
+    collection = _collection()
+    assert _validate_collection(collection) == ()
+
+    wrong_protocol_digest = replace(collection, protocol_digest="0" * 64)
+    assert "collection_protocol_digest_mismatch" in _validate_collection(
+        wrong_protocol_digest
+    )
+    wrong_manifest_digest = replace(collection, split_manifest_digest="1" * 64)
+    assert "collection_split_manifest_digest_mismatch" in _validate_collection(
+        wrong_manifest_digest
+    )
+
+    record = collection.records[0]
+    wrong_record_protocol = replace(
+        record,
+        provenance_trace=replace(record.provenance_trace, protocol_digest="2" * 64),
+    )
+    assert "record_protocol_digest_binding_mismatch" in _validate_collection(
+        replace(collection, records=(wrong_record_protocol,))
+    )
+    wrong_record_manifest = replace(
+        record,
+        provenance_trace=replace(record.provenance_trace, split_manifest_digest="3" * 64),
+    )
+    assert "record_split_manifest_digest_binding_mismatch" in _validate_collection(
+        replace(collection, records=(wrong_record_manifest,))
+    )
+
+    wrong_assignment = replace(
+        record,
+        analysis_unit_identity=_unit(0),
+    )
+    assignment_collection = replace(
+        collection,
+        case_id="case_0",
+        records=(wrong_assignment,),
+    )
+    assert "record_manifest_assignment_missing" in _validate_collection(
+        assignment_collection
+    )
+
+
+@pytest.mark.unit
+def test_all_subsequent_outcomes_require_retryable_parent_lineage() -> None:
+    failed = _failed_initial_record()
+    success_without_parent = replace(
+        _record(),
+        record_id="record_success_without_parent",
+        record_sequence_index=1,
+        record_attempt_index=1,
+    )
+    assert "subsequent_attempt_retry_parent_missing" in _validate_collection(
+        _collection(records=(failed, success_without_parent))
+    )
+
+    legal_success = replace(
+        success_without_parent,
+        retry_of_record_id=failed.record_id,
+    )
+    assert _validate_collection(_collection(records=(failed, legal_success))) == ()
+
+    failed_without_parent = replace(
+        failed,
+        record_id="record_failed_without_parent",
+        record_sequence_index=1,
+        record_attempt_index=1,
+    )
+    assert "subsequent_attempt_retry_parent_missing" in _validate_collection(
+        _collection(records=(failed, failed_without_parent))
+    )
+
+    excluded_without_parent = replace(
+        _record(),
+        record_id="record_excluded_without_parent",
+        record_sequence_index=1,
+        record_attempt_index=1,
+        execution_status="excluded",
+        exclusion_reason="predeclared_input_exclusion",
+        exclusion_rule_id="predeclared_input_integrity_rule",
+        decision_trace=DecisionTrace("excluded", None, "predeclared_input_exclusion"),
+    )
+    assert "subsequent_attempt_retry_parent_missing" in _validate_collection(
+        _collection(records=(failed, excluded_without_parent))
+    )
+
+    excluded_parent = replace(
+        _record(),
+        execution_status="excluded",
+        exclusion_reason="predeclared_input_exclusion",
+        exclusion_rule_id="predeclared_input_integrity_rule",
+        decision_trace=DecisionTrace("excluded", None, "predeclared_input_exclusion"),
+    )
+    success_after_excluded = replace(
+        legal_success,
+        retry_of_record_id=excluded_parent.record_id,
+    )
+    assert "attempt_parent_status_not_retryable" in _validate_collection(
+        _collection(records=(excluded_parent, success_after_excluded))
+    )
+
+    initial_with_parent = replace(failed, retry_of_record_id="unexpected_parent")
+    assert "initial_attempt_retry_parent_forbidden" in _validate_collection(
+        _collection(records=(initial_with_parent,))
+    )
+
+
+@pytest.mark.unit
 def test_record_collection_rejects_orphan_cross_case_and_non_failed_retry_parent() -> None:
     failed = _failed_initial_record()
     retry = _retry_record(
@@ -450,12 +581,12 @@ def test_record_collection_rejects_orphan_cross_case_and_non_failed_retry_parent
         sequence_index=1,
         attempt_index=1,
     )
-    assert validate_run_case_record_collection(
+    assert _validate_collection(
         _collection(records=(failed, retry))
     ) == ()
 
     orphan = replace(retry, retry_of_record_id="missing_parent")
-    assert "retry_parent_record_missing" in validate_run_case_record_collection(
+    assert "attempt_parent_record_missing" in _validate_collection(
         _collection(records=(failed, orphan))
     )
 
@@ -463,10 +594,10 @@ def test_record_collection_rejects_orphan_cross_case_and_non_failed_retry_parent
         retry,
         analysis_unit_identity=replace(retry.analysis_unit_identity, case_id="different_case"),
     )
-    cross_case_violations = validate_run_case_record_collection(
+    cross_case_violations = _validate_collection(
         _collection(records=(failed, cross_case))
     )
-    assert "retry_parent_identity_mismatch" in cross_case_violations
+    assert "attempt_parent_identity_mismatch" in cross_case_violations
     assert "record_case_id_collection_mismatch" in cross_case_violations
 
     successful_parent = _record()
@@ -476,7 +607,7 @@ def test_record_collection_rejects_orphan_cross_case_and_non_failed_retry_parent
         sequence_index=1,
         attempt_index=1,
     )
-    assert "retry_parent_status_invalid" in validate_run_case_record_collection(
+    assert "attempt_parent_status_not_retryable" in _validate_collection(
         _collection(records=(successful_parent, retry_after_success))
     )
 
@@ -490,11 +621,11 @@ def test_record_collection_rejects_skipped_or_unbounded_retry_attempts() -> None
         sequence_index=1,
         attempt_index=2,
     )
-    skipped_violations = validate_run_case_record_collection(
+    skipped_violations = _validate_collection(
         _collection(records=(failed, skipped))
     )
     assert "record_attempt_index_not_contiguous" in skipped_violations
-    assert "retry_parent_attempt_not_contiguous" in skipped_violations
+    assert "attempt_parent_index_not_contiguous" in skipped_violations
 
     retry_1 = _retry_record(
         failed,
@@ -514,7 +645,7 @@ def test_record_collection_rejects_skipped_or_unbounded_retry_attempts() -> None
         sequence_index=3,
         attempt_index=3,
     )
-    over_limit = validate_run_case_record_collection(
+    over_limit = _validate_collection(
         _collection(records=(failed, retry_1, retry_2, retry_3))
     )
     assert "maximum_record_attempts_exceeded" in over_limit
@@ -535,15 +666,16 @@ def test_record_collection_requires_structured_stop_and_rejects_continuation() -
         promotion_gate_assessments=(failed_gate,),
         promotion_stop_gate_id=failed_gate.gate_id,
     )
-    assert validate_run_case_record_collection(stopped) == ()
+    assert _validate_collection(stopped) == ()
 
     continuation = replace(
         _record(),
         record_id="record_after_stop",
         record_sequence_index=1,
         record_attempt_index=1,
+        retry_of_record_id=failed.record_id,
     )
-    assert "record_continues_after_promotion_stop" in validate_run_case_record_collection(
+    assert "record_continues_after_promotion_stop" in _validate_collection(
         _collection(
             records=(failed, continuation),
             promotion_gate_assessments=(failed_gate,),
@@ -556,7 +688,7 @@ def test_record_collection_requires_structured_stop_and_rejects_continuation() -
         gate_id="arbitrary_nonempty_gate",
         stop_outcome="arbitrary_nonempty_outcome",
     )
-    unstructured_violations = validate_run_case_record_collection(
+    unstructured_violations = _validate_collection(
         _collection(
             records=(failed,),
             promotion_gate_assessments=(unstructured,),

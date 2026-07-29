@@ -17,6 +17,7 @@ from experiments.protocol.internal_records import (
     INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
     INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
     MAXIMUM_RECORD_ATTEMPTS,
+    RETRYABLE_PARENT_STATUSES,
 )
 from experiments.protocol.internal_splits import (
     CURRENT_EXECUTION_ALLOWED_SPLITS,
@@ -33,7 +34,10 @@ class FrozenInternalValidationProtocol:
     protocol_kind: str
     record_schema_version: str
     record_collection_schema_version: str
+    record_collection_binding_fields: tuple[str, ...]
     maximum_record_attempts: int
+    retryable_parent_statuses: tuple[str, ...]
+    retry_parent_required_after_attempt_zero: bool
     split_assignment_mode: str
     source_cluster_identity_fields: tuple[str, ...]
     splits: tuple[str, ...]
@@ -82,6 +86,15 @@ class FrozenInternalValidationProtocol:
             violations.append("record_collection_schema_version_frozen_identity_mismatch")
         if self.maximum_record_attempts != MAXIMUM_RECORD_ATTEMPTS:
             violations.append("maximum_record_attempts_frozen_value_mismatch")
+        if self.record_collection_binding_fields != (
+            "protocol_digest",
+            "split_manifest_digest",
+        ):
+            violations.append("record_collection_binding_fields_invalid")
+        if frozenset(self.retryable_parent_statuses) != RETRYABLE_PARENT_STATUSES:
+            violations.append("retryable_parent_statuses_invalid")
+        if self.retry_parent_required_after_attempt_zero is not True:
+            violations.append("retry_parent_required_after_attempt_zero_invalid")
         if self.split_assignment_mode != "explicit_source_cluster_manifest":
             violations.append("split_assignment_mode_invalid")
         if self.source_cluster_identity_fields != (
@@ -118,6 +131,10 @@ def load_frozen_internal_validation_protocol(
     raw["splits"] = tuple(raw["splits"])
     raw["current_execution_allowed_splits"] = tuple(raw["current_execution_allowed_splits"])
     raw["execution_statuses"] = tuple(raw["execution_statuses"])
+    raw["record_collection_binding_fields"] = tuple(
+        raw["record_collection_binding_fields"]
+    )
+    raw["retryable_parent_statuses"] = tuple(raw["retryable_parent_statuses"])
     raw["method_responsibilities"] = tuple(raw["method_responsibilities"])
     raw["split_prerequisite_gates"] = {
         split_name: tuple(gates)

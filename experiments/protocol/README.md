@@ -13,8 +13,10 @@
 - `internal_records.py`：定义逐样本正式记录，保留 raw/rectified detector 身份、
   LF/HF/combined、routing、geometry、threshold、key/control、decision 和 provenance，
   并区分 `success`、`failed`、`excluded`、`retry`；同一 run/case 的可序列化
-  record collection 进一步验证 retry parent、连续 attempt、冻结上限、结构化
-  promotion stop 和 stop 后禁止继续。
+  record collection 必须接收实际加载的 frozen protocol 与 split manifest，重算
+  两者摘要并逐 record 核对 provenance 与 unit/split assignment；所有非初始
+  outcome 均验证可重试 parent、连续 attempt 与冻结上限，同时验证结构化 promotion
+  stop 和 stop 后禁止继续。
 - `internal_validation.py`：加载并校验
   `configs/experiments/internal_scientific_validation_protocol.json` 的冻结协议身份。
 - `comparison.py`：定义外部 baseline 比较所需的 `ComparisonMethodSpec`、`ComparisonProtocol`、`PreflightApproval` 和运行前校验。

@@ -35,8 +35,17 @@
   "protocol_id": "ceg_wm_internal_scientific_validation_v1",
   "protocol_kind": "internal_scientific_validation",
   "protocol_version": "1.0.0",
+  "record_collection_binding_fields": [
+    "protocol_digest",
+    "split_manifest_digest"
+  ],
   "record_collection_schema_version": "ceg_wm_internal_run_case_record_collection_v1",
   "record_schema_version": "ceg_wm_internal_sample_record_v1",
+  "retry_parent_required_after_attempt_zero": true,
+  "retryable_parent_statuses": [
+    "failed",
+    "retry"
+  ],
   "scientific_claim_boundary": "schema_and_cpu_constraints_only_no_scientific_validity_claim",
   "source_cluster_identity_fields": [
     "prompt_digest",
