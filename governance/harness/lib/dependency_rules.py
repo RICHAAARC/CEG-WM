@@ -27,6 +27,58 @@ def extract_imported_modules(path: Path) -> list[str]:
     return modules
 
 
+def extract_filesystem_write_calls(path: Path) -> list[str]:
+    """Return explicit filesystem mutation calls used by one Python module."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    writes: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        call_name = _call_name(node.func)
+        if call_name in {
+            "Path.write_text",
+            "Path.write_bytes",
+            "os.replace",
+            "os.rename",
+            "tempfile.NamedTemporaryFile",
+        }:
+            writes.append(call_name)
+            continue
+        if call_name not in {"open", "Path.open"}:
+            continue
+        mode_node = None
+        if call_name == "Path.open" and node.args:
+            mode_node = node.args[0]
+        elif len(node.args) >= 2:
+            mode_node = node.args[1]
+        for keyword in node.keywords:
+            if keyword.arg == "mode":
+                mode_node = keyword.value
+        if (
+            isinstance(mode_node, ast.Constant)
+            and isinstance(mode_node.value, str)
+            and any(flag in mode_node.value for flag in "wax+")
+        ):
+            writes.append(call_name)
+    return writes
+
+
+def _call_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if not isinstance(node, ast.Attribute):
+        return None
+    if node.attr in {"write_text", "write_bytes", "open"}:
+        return f"Path.{node.attr}"
+    if isinstance(node.value, ast.Name):
+        owner = node.value.id
+        if owner and owner[0].isupper():
+            owner = "Path"
+        return f"{owner}.{node.attr}"
+    return node.attr
+
+
 def layer_to_path(layer_name: str) -> str:
     """将 Python 模块层名转换为仓库相对路径。"""
     return layer_name.replace(".", "/")

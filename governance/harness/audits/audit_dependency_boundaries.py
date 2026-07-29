@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from governance.harness.lib.dependency_rules import (
     dependency_violation_reason,
+    extract_filesystem_write_calls,
     extract_imported_modules,
     get_source_layer,
     layer_to_path,
@@ -49,6 +50,20 @@ def run_audit(root: str | Path) -> dict:
                             "reason": reason,
                             "source_layer": source_layer,
                             "imported_module": module_name,
+                        }
+                    )
+            record_writer_layers = set(policy.get("record_writer_layers", []))
+            if (
+                layer_name.startswith("experiments.")
+                and layer_name not in record_writer_layers
+            ):
+                for call_name in extract_filesystem_write_calls(path):
+                    violations.append(
+                        {
+                            "path": str(relative),
+                            "reason": "record_write_outside_authorized_layer",
+                            "source_layer": source_layer,
+                            "write_call": call_name,
                         }
                     )
     forbidden_dependency = str(policy["forbidden_dependency"])

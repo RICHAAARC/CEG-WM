@@ -54,14 +54,14 @@ Notebook 与 repository module 的跨边界数据
 | method_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的方法名称。 |
 | comparison_group_name | persisted_protocol | protocol | none | true | false | false | 一组受同一公平对比协议约束的方法集合名称。 |
 | comparison_protocol_digest | persisted_protocol | protocol | none | true | false | false | 当前 record 所属公平对比协议的内容摘要。 |
-| protocol_digest | cross_boundary | protocol | none | false | false | false | Preflight approval 携带的 comparison protocol 内容摘要。 |
+| protocol_digest | cross_boundary | protocol | none | true | false | false | Preflight approval 或内部 record provenance 携带的协议内容摘要。 |
 | sample_manifest_digest | persisted_protocol | protocol | none | true | false | false | 当前运行所用样本 manifest 的内容摘要。 |
-| split_manifest_digest | persisted_protocol | protocol | none | false | false | false | calibration 与 evaluation 切分 manifest 的内容摘要。 |
+| split_manifest_digest | persisted_protocol | protocol | none | true | false | false | calibration 与 evaluation 切分 manifest 的内容摘要。 |
 | generation_conditions_digest | persisted_protocol | protocol | none | false | false | false | 各方法共享生成条件的内容摘要。 |
 | seed_policy_digest | persisted_protocol | protocol | none | false | false | false | 随机种子分配规则的内容摘要。 |
 | output_specification_digest | persisted_protocol | protocol | none | false | false | false | 可比输出规格的内容摘要。 |
 | attack_matrix_digest | persisted_protocol | protocol | none | false | false | false | 对比使用攻击矩阵的内容摘要。 |
-| metric_set_digest | persisted_protocol | protocol | none | false | false | false | 对比使用指标集合的内容摘要。 |
+| metric_set_digest | persisted_protocol | protocol | none | true | false | false | 对比或内部逐样本 record 绑定的指标集合内容摘要。 |
 | calibration_split | persisted_protocol | protocol | none | false | false | false | 仅用于调参与阈值校准的切分名称。 |
 | evaluation_split | persisted_protocol | protocol | none | false | false | false | 仅用于报告比较结果的独立切分名称。 |
 | tuning_budget_policy_digest | persisted_protocol | protocol | none | false | false | false | 各方法调参预算规则的内容摘要。 |
@@ -194,7 +194,7 @@ Notebook 与 repository module 的跨边界数据
 | sample_id | persisted_protocol | provenance | none | true | false | false | calibration null record 在 source cluster 内的稳定样本身份。 |
 | branch | cross_boundary | method_identity | none | false | false | false | empirical CDF 与标准化结果所属的 `hf` 或 `lf` 分支。 |
 | partition_identity | persisted_protocol | provenance | none | true | false | false | empirical CDF 所属互斥 calibration 职责 partition 身份。 |
-| records | cross_boundary | method_state | none | false | false | false | 分支 empirical CDF 消费的稳定排序 primary-null record 集合。 |
+| records | cross_boundary | method_state | none | true | false | false | 分支 empirical CDF 的稳定排序输入或一个 run/case governed record collection 的逐尝试集合。 |
 | calibration_identity | cross_boundary | method_identity | none | true | false | false | 分支 detector、partition、null records 与 quantile table 的绑定摘要。 |
 | raw_score | cross_boundary | method_statistic | none | true | false | false | empirical CDF 标准化前独立保存的分支查询分数。 |
 | less_count | cross_boundary | method_statistic | none | true | false | false | null multiset 中严格小于查询分数的记录数。 |
@@ -373,7 +373,7 @@ Notebook 与 repository module 的跨边界数据
 | package_status | persisted_protocol | runtime_state | none | false | false | false | execution manifest 完整文件集、hash/size 和 revision 的启动前校验状态。 |
 | dependency_status | persisted_protocol | runtime_state | none | false | false | false | requirements lock 与安装环境逐项匹配冻结 dependency lock 的状态；仅 `torch==2.11.0` 可保留符合冻结语法的 local build label。 |
 | repetition_count | persisted_protocol | runtime_state | none | false | false | false | 当前结果 zip 实际完成并记录的独立执行次数。 |
-| failure_class | persisted_protocol | runtime_state | none | true | false | false | runtime、resource、integrity、budget、Q/K、determinism 或 incomplete 失败分类。 |
+| failure_class | persisted_protocol | runtime_state | none | true | false | false | qualification 的 runtime/resource/integrity/budget/QK/determinism/incomplete 分类，或内部 runner 的 `resource_failure`/`execution_failure`/`scientific_failure` 分类；只有显式方法结果可形成科学失败。 |
 | failure_classes | persisted_protocol | runtime_state | none | true | false | false | run summary 按失败记录顺序保存的 failure class 列表。 |
 | exception_type | persisted_protocol | runtime_state | none | false | false | false | failure record 保存的最外层 Python exception 类型名，仅供诊断。 |
 | key_control | persisted_protocol | runtime_identity | none | true | false | false | qualification record 的 `registered` 或 `negative_identity` 路径；后者只验证另一 key identity 的 runtime 可执行性，不是正式 wrong-key 科学证据。 |
@@ -445,7 +445,10 @@ Notebook 与 repository module 的跨边界数据
 
 ## 内部科学验证协议字段
 
-以下字段属于 `ceg_wm_internal_sample_record_v1`。既有的 `split`、
+以下字段属于 `ceg_wm_internal_sample_record_v3`，并由
+`ceg_wm_internal_run_case_record_collection_v1` 聚合。可执行字段权威位于随执行包分发的
+`experiments/protocol/internal_record_registry.py`；本页由开发侧治理测试检查同步，
+不作为 runner 的运行时输入。既有的 `split`、
 `source_cluster_id`、`execution_status`、`lf_score`、`hf_score`、`combined_score`、
 `tau`、`tau_rescue`、`geometry_triggered`、`raw_content_score` 和
 `rectified_content_score` 继续使用上表既有语义，不在此重复登记。
@@ -462,6 +465,10 @@ Notebook 与 repository module 的跨边界数据
 | retry_parent_required_after_attempt_zero | persisted_protocol | protocol | none | false | false | false | 是否要求所有 attempt index 大于零的 outcome 显式绑定 parent record。 |
 | analysis_unit_identity | persisted_protocol | provenance | none | true | false | false | unit、case、source cluster 与 Prompt/seed/image-lineage/key-family 的不可拆分身份结构。 |
 | unit_id | persisted_protocol | provenance | none | true | false | false | 一个 case 中被执行和记录的独立分析单位身份。 |
+| prompt_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定 prompt 的内容摘要，不保存 prompt 明文。 |
+| generation_seed | persisted_protocol | provenance | none | true | false | false | 分析单位用于 source-cluster 隔离的冻结生成 seed。 |
+| image_lineage_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定图像 lineage 的内容摘要。 |
+| registered_key_family_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定 registered-key family 的公共摘要。 |
 | case_id | persisted_protocol | protocol | none | true | false | false | 预登记内部科学问题、攻击和 control 组合的 case 身份。 |
 | record_sequence_index | persisted_protocol | protocol | none | true | false | false | 一个 run/case record collection 中从零开始且连续的序列索引。 |
 | record_attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case/source cluster 执行尝试的从零开始连续索引；retry 必须大于零。 |
@@ -506,6 +513,19 @@ Notebook 与 repository module 的跨边界数据
 | evidence_record_ids | persisted_protocol | provenance | none | true | false | false | promotion gate 实际消费且必须存在于同一 run/case collection 的 record IDs。 |
 | stop_outcome | persisted_protocol | protocol | none | true | false | false | 失败 gate 对应的冻结负结果或返回前置门 outcome。 |
 | environment_digest | persisted_protocol | provenance | none | true | false | false | 当前执行环境与依赖锁的内容摘要。 |
+| input_manifest_digest | persisted_protocol | provenance | none | true | false | false | 当前 runner 消费的冻结逐 case 输入 manifest 内容摘要，独立于 split manifest。 |
+| candidate_config_digest | persisted_protocol | method_identity | none | true | false | false | 当前执行所绑定候选集合与候选配置的内容摘要。 |
+| execution_config_digest | persisted_protocol | protocol | none | true | false | false | method adapter、attack registry、metric registry 与 runner 配置的联合摘要。 |
+| resource_identity_digest | persisted_protocol | runtime_identity | none | true | false | false | 当前设备、dtype、依赖与资源分配身份的冻结摘要；资源失败不得解释为科学失败。 |
+
+以下 input-manifest 字段只描述 runner 的冻结输入边界，不直接支撑 claim：
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| manifest_schema_version | persisted_protocol | protocol | none | false | false | false | 内部逐 case input manifest 的结构身份。 |
+| manifest_id | persisted_protocol | protocol | none | false | false | false | 冻结 input manifest 的稳定身份。 |
+| manifest_revision | persisted_protocol | provenance | none | false | false | false | 冻结 input manifest 的修订身份。 |
+| entries | persisted_protocol | protocol | none | false | false | false | input manifest 中按 unit 保存的公开 case entries；原始密钥不进入该集合。 |
 | input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
 | attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |
 

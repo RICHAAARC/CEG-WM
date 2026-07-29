@@ -121,6 +121,7 @@ def _record(**changes: object) -> InternalValidationRecord:
         "record_sequence_index": 0,
         "record_attempt_index": 0,
         "execution_status": "success",
+        "failure_class": None,
         "failure_reason": None,
         "exclusion_reason": None,
         "exclusion_rule_id": None,
@@ -176,10 +177,14 @@ def _record(**changes: object) -> InternalValidationRecord:
         "provenance_trace": ProvenanceTrace(
             protocol_digest=frozen_protocol.digest(),
             split_manifest_digest=split_manifest.digest(),
+            input_manifest_digest="5" * 64,
             method_code_revision="method_revision_1",
+            candidate_config_digest="4" * 64,
             method_config_digest="6" * 64,
+            execution_config_digest="d" * 64,
             model_revision="model_revision_1",
             environment_digest="7" * 64,
+            resource_identity_digest="e" * 64,
             input_artifact_digest="8" * 64,
             attack_config_digest="9" * 64,
             metric_set_digest="a" * 64,
@@ -408,8 +413,20 @@ def test_success_failed_excluded_and_retry_semantics_are_mutually_exclusive() ->
     failed = replace(
         success,
         execution_status="failed",
-        failure_reason="runtime_failure",
-        decision_trace=DecisionTrace("failed", None, "runtime_failure"),
+        failure_class="scientific_failure",
+        failure_reason="registered_geometry_estimation_failure",
+        decision_trace=DecisionTrace(
+            "failed",
+            None,
+            "registered_geometry_estimation_failure",
+        ),
+    )
+    execution_failed = replace(
+        success,
+        execution_status="failed",
+        failure_class="execution_failure",
+        failure_reason="builtins.ValueError",
+        decision_trace=DecisionTrace("failed", None, "builtins.ValueError"),
     )
     excluded = replace(
         success,
@@ -422,11 +439,13 @@ def test_success_failed_excluded_and_retry_semantics_are_mutually_exclusive() ->
         success,
         execution_status="retry",
         record_attempt_index=1,
+        failure_class="resource_failure",
         failure_reason="retryable_resource_failure",
         retry_of_record_id=success.record_id,
         decision_trace=DecisionTrace("retry", None, "retryable_resource_failure"),
     )
     assert validate_internal_record(failed) == ()
+    assert validate_internal_record(execution_failed) == ()
     assert validate_internal_record(excluded) == ()
     assert validate_internal_record(retry) == ()
     invalid_retry = replace(retry, record_attempt_index=0)
@@ -536,6 +555,7 @@ def _failed_initial_record() -> InternalValidationRecord:
     return replace(
         _record(),
         execution_status="failed",
+        failure_class="resource_failure",
         failure_reason="retryable_resource_failure",
         decision_trace=DecisionTrace("failed", None, "retryable_resource_failure"),
     )

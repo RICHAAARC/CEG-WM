@@ -107,6 +107,59 @@ def test_delivery_code_cannot_import_governance(tmp_path: Path) -> None:
     assert report["violations"][0]["reason"] == "control_plane_import_forbidden"
 
 
+@pytest.mark.constraint
+def test_only_registered_runner_layer_can_write_experiment_records(
+    tmp_path: Path,
+) -> None:
+    policy_root = tmp_path / "governance" / "policies"
+    policy_root.mkdir(parents=True)
+    (policy_root / "dependency_rules.yaml").write_text(
+        json.dumps(
+            {
+                "layers": {
+                    "experiments.methods": {
+                        "allowed_project_dependencies": [],
+                    },
+                    "experiments.runners": {
+                        "allowed_project_dependencies": [
+                            "experiments.methods",
+                        ],
+                    },
+                },
+                "forbidden_dependency": "governance",
+                "delivery_code_roots": [],
+                "record_writer_layers": ["experiments.runners"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    methods_root = tmp_path / "experiments" / "methods"
+    methods_root.mkdir(parents=True)
+    (methods_root / "bad_writer.py").write_text(
+        "from pathlib import Path\n"
+        "def persist(path):\n"
+        "    Path(path).write_text('record', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    runners_root = tmp_path / "experiments" / "runners"
+    runners_root.mkdir(parents=True)
+    (runners_root / "writer.py").write_text(
+        "from pathlib import Path\n"
+        "def persist(path):\n"
+        "    Path(path).write_text('record', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+
+    report = run_dependency_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert [
+        violation["path"]
+        for violation in report["violations"]
+        if violation["reason"] == "record_write_outside_authorized_layer"
+    ] == ["experiments/methods/bad_writer.py"]
+
+
 @pytest.mark.unit
 def test_project_skill_registry_matches_skill_directories() -> None:
     root = Path.cwd()

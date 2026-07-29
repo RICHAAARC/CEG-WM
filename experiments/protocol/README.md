@@ -12,9 +12,13 @@
   negative controls、promotion gates 和 record field groups，并定义停止/晋升前置门。
 - `internal_records.py`：定义逐样本正式记录，保留 raw/rectified detector 身份、
   LF/HF/combined、routing、geometry、threshold、key/control、decision 和 provenance，
-  并区分 `success`、`failed`、`excluded`、`retry`；其中只保留由正式入口调用的
+  并区分 `success`、`failed`、`excluded`、`retry`，对失败进一步区分
+  `resource_failure`、`execution_failure` 与 `scientific_failure`；provenance 还绑定 candidate config、
+  独立 input manifest、execution config 和 resource identity 摘要。其中只保留由正式入口调用的
   私有 collection 结构校验 helper，验证所有非初始 outcome 的可重试 parent、
   连续 attempt、冻结上限、结构化 promotion stop 和 stop 后禁止继续。
+- `internal_record_registry.py`：保存随 execution package 分发的精确 record schema
+  binding 与允许字段集合。开发侧 Markdown 只镜像登记，不是 runner 的运行时输入。
 - `internal_validation.py`：加载并校验
   `configs/experiments/internal_scientific_validation_protocol.json` 的冻结协议身份；
   唯一正式 collection 入口 `validate_run_case_record_collection` 要求精确的

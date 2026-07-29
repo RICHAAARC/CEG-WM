@@ -8,6 +8,9 @@ from .geometric import (
     GeometricAttackSpec,
     apply_geometric_attack,
     load_attack_registry,
+    validate_attack_artifact,
+    validate_attack_registry,
+    validate_geometric_attack_spec,
 )
 
 __all__ = [
@@ -18,4 +21,7 @@ __all__ = [
     "GeometricAttackSpec",
     "apply_geometric_attack",
     "load_attack_registry",
+    "validate_attack_artifact",
+    "validate_attack_registry",
+    "validate_geometric_attack_spec",
 ]

@@ -40,7 +40,7 @@
     "split_manifest_digest"
   ],
   "record_collection_schema_version": "ceg_wm_internal_run_case_record_collection_v1",
-  "record_schema_version": "ceg_wm_internal_sample_record_v1",
+  "record_schema_version": "ceg_wm_internal_sample_record_v3",
   "retry_parent_required_after_attempt_zero": true,
   "retryable_parent_statuses": [
     "failed",

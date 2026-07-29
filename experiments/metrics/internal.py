@@ -242,47 +242,75 @@ class MetricRegistry:
     registry_digest: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if (
-            self.schema_version != "ceg_wm_internal_execution_components_v1"
-            or self.registry_version != "ceg_wm_internal_metric_registry_v1"
-            or self.analysis_unit
-            != "analysis_unit_identity_case_id_source_cluster_id"
-            or self.forbidden_split != FORBIDDEN_SPLIT
-            or self.metric_ids != REQUIRED_METRIC_IDS
-            or any(
-                type(binding) is not MetricSplitBinding
-                for binding in self.metric_split_bindings
-            )
-        ):
+        violations = _metric_registry_semantic_violations(self)
+        if "metric_registry_semantics_drifted" in violations:
             raise InternalMetricError("metric registry semantics drifted")
-        split_bindings = tuple(
-            (binding.metric_id, binding.allowed_splits)
-            for binding in self.metric_split_bindings
-        )
-        if split_bindings != REQUIRED_METRIC_SPLIT_BINDINGS:
+        if violations:
             raise InternalMetricError(
                 "metric split bindings drifted from the canonical registry"
             )
         object.__setattr__(
             self,
             "registry_digest",
-            _canonical_digest(
-                {
-                    "analysis_unit": self.analysis_unit,
-                    "forbidden_split": self.forbidden_split,
-                    "metric_ids": list(self.metric_ids),
-                    "metric_split_bindings": [
-                        {
-                            "allowed_splits": list(binding.allowed_splits),
-                            "metric_id": binding.metric_id,
-                        }
-                        for binding in self.metric_split_bindings
-                    ],
-                    "registry_version": self.registry_version,
-                    "schema_version": self.schema_version,
-                }
-            ),
+            _canonical_digest(_metric_registry_payload(self)),
         )
+
+
+def validate_metric_registry(registry: MetricRegistry) -> tuple[str, ...]:
+    """Revalidate current metric semantics and their construction-time digest."""
+
+    if type(registry) is not MetricRegistry:
+        return ("metric_registry_exact_type_required",)
+    violations = list(_metric_registry_semantic_violations(registry))
+    if registry.registry_digest != _canonical_digest(
+        _metric_registry_payload(registry)
+    ):
+        violations.append("metric_registry_digest_drifted")
+    return tuple(dict.fromkeys(violations))
+
+
+def _metric_registry_semantic_violations(
+    registry: MetricRegistry,
+) -> tuple[str, ...]:
+    violations: list[str] = []
+    if (
+        registry.schema_version != "ceg_wm_internal_execution_components_v1"
+        or registry.registry_version != "ceg_wm_internal_metric_registry_v1"
+        or registry.analysis_unit
+        != "analysis_unit_identity_case_id_source_cluster_id"
+        or registry.forbidden_split != FORBIDDEN_SPLIT
+        or registry.metric_ids != REQUIRED_METRIC_IDS
+        or any(
+            type(binding) is not MetricSplitBinding
+            for binding in registry.metric_split_bindings
+        )
+    ):
+        violations.append("metric_registry_semantics_drifted")
+        return tuple(violations)
+    split_bindings = tuple(
+        (binding.metric_id, binding.allowed_splits)
+        for binding in registry.metric_split_bindings
+    )
+    if split_bindings != REQUIRED_METRIC_SPLIT_BINDINGS:
+        violations.append("metric_registry_split_bindings_drifted")
+    return tuple(violations)
+
+
+def _metric_registry_payload(registry: MetricRegistry) -> dict[str, object]:
+    return {
+        "analysis_unit": registry.analysis_unit,
+        "forbidden_split": registry.forbidden_split,
+        "metric_ids": list(registry.metric_ids),
+        "metric_split_bindings": [
+            {
+                "allowed_splits": list(binding.allowed_splits),
+                "metric_id": binding.metric_id,
+            }
+            for binding in registry.metric_split_bindings
+        ],
+        "registry_version": registry.registry_version,
+        "schema_version": registry.schema_version,
+    }
 
 
 def load_metric_registry(

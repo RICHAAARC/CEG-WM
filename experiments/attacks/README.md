@@ -12,5 +12,10 @@
 - crop、scale、rotation 的范围由
   `configs/experiments/internal_execution_components.json` 冻结并进入摘要。
 
+`AttackArtifact` 与 `GeometricAttackSpec` 在构造和每次 public apply 前复用同一组
+无副作用 revalidator：前者按当前 RGB8 像素重算摘要，后者按当前 attack ID、
+全部参数边界与活动参数规则重算配置摘要。构造后 tensor 原地修改或字段/digest
+漂移必须在 affine/grid 计算前失败。
+
 攻击只依赖 `experiments/protocol/`，不导入项目方法、runtime、metrics、runner 或
 治理代码，不读取任何方法私有状态，也不写 governed records。当前未实现非几何攻击。

@@ -36,6 +36,7 @@ from .internal import (
     evaluate_detection_at_threshold,
     fit_fixed_fpr_threshold,
     load_metric_registry,
+    validate_metric_registry,
 )
 
 __all__ = [
@@ -74,4 +75,5 @@ __all__ = [
     "evaluate_detection_at_threshold",
     "fit_fixed_fpr_threshold",
     "load_metric_registry",
+    "validate_metric_registry",
 ]

@@ -22,10 +22,13 @@ from experiments.protocol.internal_splits import (
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXECUTION_STATUSES = frozenset({"success", "failed", "excluded", "retry"})
+FAILURE_CLASSES = frozenset(
+    {"execution_failure", "resource_failure", "scientific_failure"}
+)
 KEY_ROLES = frozenset({"registered", "wrong_key", "unwatermarked_primary_null"})
 WATERMARK_DECISIONS = frozenset({"positive", "negative", "failed", "excluded", "retry"})
 POSITIVE_SOURCES = frozenset({"raw_content", "rectified_content"})
-INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION = "ceg_wm_internal_sample_record_v1"
+INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION = "ceg_wm_internal_sample_record_v3"
 INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION = (
     "ceg_wm_internal_run_case_record_collection_v1"
 )
@@ -115,10 +118,14 @@ class DecisionTrace:
 class ProvenanceTrace:
     protocol_digest: str
     split_manifest_digest: str
+    input_manifest_digest: str
     method_code_revision: str
+    candidate_config_digest: str
     method_config_digest: str
+    execution_config_digest: str
     model_revision: str
     environment_digest: str
+    resource_identity_digest: str
     input_artifact_digest: str
     attack_config_digest: str
     metric_set_digest: str
@@ -138,6 +145,7 @@ class InternalValidationRecord:
     record_sequence_index: int
     record_attempt_index: int
     execution_status: str
+    failure_class: str | None
     failure_reason: str | None
     exclusion_reason: str | None
     exclusion_rule_id: str | None
@@ -225,6 +233,7 @@ def validate_internal_record(record: InternalValidationRecord) -> tuple[str, ...
 def _validate_status(record: InternalValidationRecord, violations: list[str]) -> None:
     status = record.execution_status
     has_failure = _nonempty(record.failure_reason)
+    has_failure_class = _nonempty(record.failure_class)
     has_exclusion = _nonempty(record.exclusion_reason)
     has_exclusion_rule = _nonempty(record.exclusion_rule_id)
     has_retry_parent = _nonempty(record.retry_of_record_id)
@@ -233,19 +242,20 @@ def _validate_status(record: InternalValidationRecord, violations: list[str]) ->
     if record.record_attempt_index > 0 and not has_retry_parent:
         violations.append("subsequent_attempt_retry_parent_missing")
     if status == "success":
-        if has_failure or has_exclusion or has_exclusion_rule:
+        if has_failure_class or has_failure or has_exclusion or has_exclusion_rule:
             violations.append("success_failure_or_exclusion_field_forbidden")
-        scores = (
+        required_scores = (
             record.detector_trace.raw_content_score,
-            record.branch_score_trace.lf_score,
             record.branch_score_trace.hf_score,
-            record.branch_score_trace.combined_score,
         )
-        if any(value is None or not _finite_optional(value) for value in scores):
+        if any(
+            value is None or not _finite_optional(value)
+            for value in required_scores
+        ):
             violations.append("success_required_score_missing_or_non_finite")
     elif status == "failed":
-        if not has_failure:
-            violations.append("failure_reason_missing")
+        if not has_failure or record.failure_class not in FAILURE_CLASSES:
+            violations.append("failure_class_or_reason_missing")
         if has_exclusion or has_exclusion_rule:
             violations.append("failed_exclusion_field_forbidden")
     elif status == "excluded":
@@ -253,9 +263,15 @@ def _validate_status(record: InternalValidationRecord, violations: list[str]) ->
             violations.append("exclusion_reason_or_rule_missing")
         if has_failure:
             violations.append("excluded_failure_field_forbidden")
+        if has_failure_class:
+            violations.append("excluded_failure_class_forbidden")
     elif status == "retry":
-        if not has_failure or not has_retry_parent:
-            violations.append("retry_reason_or_parent_missing")
+        if (
+            not has_failure
+            or not has_retry_parent
+            or record.failure_class != "resource_failure"
+        ):
+            violations.append("retry_resource_failure_reason_or_parent_missing")
         if has_exclusion or has_exclusion_rule:
             violations.append("retry_exclusion_field_forbidden")
         if record.record_attempt_index == 0:
@@ -322,6 +338,16 @@ def _validate_routing(trace: RoutingTrace, violations: list[str]) -> None:
             violations.append(f"{name}_invalid")
 
 
+def validate_routing_trace(trace: RoutingTrace) -> tuple[str, ...]:
+    """Validate one frozen routing trace before runner execution."""
+
+    if type(trace) is not RoutingTrace:
+        return ("routing_trace_exact_type_required",)
+    violations: list[str] = []
+    _validate_routing(trace, violations)
+    return tuple(dict.fromkeys(violations))
+
+
 def _validate_geometry(trace: GeometryTrace, violations: list[str]) -> None:
     if trace.rectification_status not in {"not_attempted", "succeeded", "failed"}:
         violations.append("rectification_status_invalid")
@@ -341,11 +367,27 @@ def _validate_geometry(trace: GeometryTrace, violations: list[str]) -> None:
         if trace.rectification_status != "not_attempted":
             violations.append("untriggered_rectification_status_invalid")
         return
-    if not _nonempty(trace.geometry_estimation_identity):
-        violations.append("geometry_estimation_identity_missing")
-    if not _nonempty(trace.geometry_reliability_identity):
-        violations.append("geometry_reliability_identity_missing")
-    if trace.geometry_reliable is None:
+    estimation_present = _nonempty(trace.geometry_estimation_identity)
+    reliability_present = _nonempty(trace.geometry_reliability_identity)
+    if not estimation_present:
+        if (
+            reliability_present
+            or trace.geometry_reliable is not None
+            or trace.geometry_transform is not None
+            or trace.geometry_raw_metrics is not None
+            or trace.rectification_status != "not_attempted"
+            or not _nonempty(trace.geometry_failure_reason)
+        ):
+            violations.append("geometry_pre_estimation_failure_invalid")
+        return
+    if not reliability_present:
+        if (
+            trace.geometry_reliable is not None
+            or trace.rectification_status != "not_attempted"
+            or not _nonempty(trace.geometry_failure_reason)
+        ):
+            violations.append("geometry_pre_reliability_failure_invalid")
+    elif trace.geometry_reliable is None:
         violations.append("geometry_reliable_missing")
     for mapping_name, mapping in (
         ("geometry_transform", trace.geometry_transform),
@@ -386,12 +428,26 @@ def _validate_key_control(trace: KeyControlTrace, violations: list[str]) -> None
         violations.append("wrong_key_identity_not_distinct")
 
 
+def validate_key_control_trace(trace: KeyControlTrace) -> tuple[str, ...]:
+    """Validate one frozen public key/control trace before runner execution."""
+
+    if type(trace) is not KeyControlTrace:
+        return ("key_control_trace_exact_type_required",)
+    violations: list[str] = []
+    _validate_key_control(trace, violations)
+    return tuple(dict.fromkeys(violations))
+
+
 def _validate_provenance(trace: ProvenanceTrace, violations: list[str]) -> None:
     for name in (
         "protocol_digest",
         "split_manifest_digest",
+        "input_manifest_digest",
+        "candidate_config_digest",
         "method_config_digest",
+        "execution_config_digest",
         "environment_digest",
+        "resource_identity_digest",
         "input_artifact_digest",
         "attack_config_digest",
         "metric_set_digest",
