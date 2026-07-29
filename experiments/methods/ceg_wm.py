@@ -62,20 +62,50 @@ DEFAULT_COMPONENT_CONFIG_PATH = (
     / "experiments"
     / "internal_execution_components.json"
 )
-REQUIRED_RESPONSIBILITIES = (
-    "key_schedule",
-    "content_router",
-    "lf_carrier",
-    "hf_carrier",
-    "content_embedder",
-    "lf_detector",
-    "hf_detector",
-    "content_detector",
-    "qk_geometry_sync",
-    "geometric_transform_estimator",
-    "geometry_reliability",
-    "image_rectifier",
-    "conditional_recovery_decision",
+REQUIRED_COMPONENT_BINDINGS = (
+    ("key_schedule", "main.identify_root_key", "config_digest"),
+    ("content_router", "main.content_router", "route_identity"),
+    ("lf_carrier", "main.lf_carrier", "carrier_config_digest"),
+    ("hf_carrier", "main.hf_carrier", "carrier_config_digest"),
+    (
+        "content_embedder",
+        "main.content_embedder",
+        "embedding_result_identity",
+    ),
+    ("lf_detector", "main.lf_detector", "detector_identity"),
+    ("hf_detector", "main.hf_detector", "detector_identity"),
+    ("content_detector", "main.content_detector", "detector_identity"),
+    (
+        "qk_geometry_sync",
+        (
+            "runtime.Sd35RuntimeAdapter.observe_detection_qk"
+            " -> main.qk_geometry_sync"
+        ),
+        "geometry_config_digest",
+    ),
+    (
+        "geometric_transform_estimator",
+        "main.geometric_transform_estimator",
+        "estimation_identity_digest",
+    ),
+    (
+        "geometry_reliability",
+        "main.geometry_reliability",
+        "reliability_identity_digest",
+    ),
+    (
+        "image_rectifier",
+        "main.image_rectifier",
+        "rectified_image_digest",
+    ),
+    (
+        "conditional_recovery_decision",
+        "main.conditional_recovery_decision",
+        "decision_identity_digest",
+    ),
+)
+REQUIRED_RESPONSIBILITIES = tuple(
+    binding[0] for binding in REQUIRED_COMPONENT_BINDINGS
 )
 REQUIRED_KEY_SCHEDULE_OPERATIONS = (
     (
@@ -88,7 +118,10 @@ REQUIRED_KEY_SCHEDULE_OPERATIONS = (
     ),
     (
         "derive_wrong_key_stream",
-        "main.derive_wrong_key_stream",
+        (
+            "main.derive_wrong_key_material"
+            " -> main.derive_wrong_key_stream"
+        ),
     ),
     (
         "derive_public_noise",
@@ -171,12 +204,17 @@ class CegWmExperimentAdapterConfiguration:
                 raise CegWmExperimentAdapterError(
                     "adapter configuration identities must be non-empty strings"
                 )
-        responsibilities = tuple(
-            binding.responsibility for binding in self.component_bindings
+        component_bindings = tuple(
+            (
+                binding.responsibility,
+                binding.public_callable,
+                binding.result_identity_field,
+            )
+            for binding in self.component_bindings
         )
-        if responsibilities != REQUIRED_RESPONSIBILITIES:
+        if component_bindings != REQUIRED_COMPONENT_BINDINGS:
             raise CegWmExperimentAdapterError(
-                "adapter component responsibilities or order drifted"
+                "adapter component bindings drifted from the canonical registry"
             )
         operations = tuple(
             (binding.operation_id, binding.public_callable)

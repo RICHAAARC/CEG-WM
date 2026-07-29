@@ -561,15 +561,18 @@ Notebook 与 repository module 的跨边界数据
 | analysis_unit | persisted_protocol | protocol | none | false | false | false | metric registry 冻结的 unit/case/source-cluster 分析单位。 |
 | forbidden_split | persisted_protocol | protocol | none | false | false | false | metric 层明确拒绝访问的 split。 |
 | metric_ids | persisted_protocol | protocol | none | false | false | false | 内部 metric registry 的冻结有序指标身份集合。 |
+| metric_split_bindings | persisted_protocol | protocol | none | false | false | false | 每个内部 metric 身份到合法 split 集合的冻结有序绑定。 |
+| allowed_splits | persisted_protocol | protocol | none | false | false | false | 单个内部 metric 获准消费的 split 身份有序集合。 |
 | metric_registry_digest | cross_boundary | provenance | none | false | false | false | 指标输入或结果绑定的 metric registry 摘要。 |
 | target_fpr | cross_boundary | method_statistic | none | false | false | false | fixed-FPR 或 rescue safety 使用的预登记目标假阳性率。 |
-| threshold | cross_boundary | method_statistic | none | false | false | false | primary-null calibration 得到的冻结内容分数阈值。 |
+| threshold | cross_boundary | method_statistic | none | false | false | false | primary-null calibration 得到的有限冻结内容分数阈值；通用 metric 层不臆定 detector-specific 范围。 |
 | false_positive_count | cross_boundary | method_statistic | none | false | false | false | fixed-FPR threshold fit 中观察到的 primary-null 假阳性数量。 |
 | primary_null_count | cross_boundary | method_statistic | none | false | false | false | primary-null case 数量；wrong-key 不计入。 |
 | empirical_fpr | cross_boundary | method_statistic | none | false | false | false | threshold fit primary null 上的经验 FPR。 |
 | confidence_level | cross_boundary | protocol | none | false | false | false | FPR 单侧置信上界使用的冻结置信水平。 |
 | fpr_upper_confidence_bound | cross_boundary | method_statistic | none | false | false | false | threshold-fit FPR 的单侧 Clopper-Pearson 上界。 |
 | source_cluster_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 source-cluster 身份有序集合的摘要。 |
+| calibration_case_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 split、unit、case、source-cluster、key-role 与 score 规范序列的摘要。 |
 | decisions | cross_boundary | method_statistic | none | false | false | false | fixed-threshold evaluation 的逐 case 检测决定集合。 |
 | positive | cross_boundary | method_statistic | none | false | false | false | 单个检测 case 是否达到冻结阈值。 |
 | registered_tpr | cross_boundary | method_statistic | none | false | false | false | registered-positive cases 的真阳性率。 |
@@ -638,6 +641,7 @@ Notebook 与 repository module 的跨边界数据
 | raw_positive | cross_boundary | method_statistic | none | false | false | false | primary-null case 是否在 raw 路径假阳性。 |
 | rescue_triggered | cross_boundary | method_state | none | false | false | false | primary-null case 是否实际触发 rescue 路径。 |
 | rectified_positive | cross_boundary | method_statistic | none | false | false | false | 已触发 rescue 的回正重判是否阳性。 |
+| watermark_decision_positive | cross_boundary | method_statistic | none | false | false | false | 严格由 raw 阳性或已触发 rescue 后的 rectified 阳性导出的最终水印判定。 |
 | raw_false_positive | cross_boundary | method_statistic | none | false | false | false | 单 primary-null case 的 raw 假阳性标记。 |
 | rescue_additional_false_positive | cross_boundary | method_statistic | none | false | false | false | 单 case 由 rescue 新增的假阳性标记。 |
 | global_false_positive | cross_boundary | method_statistic | none | false | false | false | 单 case raw 或 rescue 联合路径假阳性标记。 |

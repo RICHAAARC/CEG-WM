@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +31,7 @@ from experiments.methods import (
 from experiments.metrics import (
     BranchOutcomeCase,
     DetectionMetricCase,
+    FixedFprThresholdResult,
     InternalMetricError,
     QualityMetricCase,
     RectificationMetricCase,
@@ -476,7 +477,10 @@ def test_adapter_runs_actual_main_small_tensor_content_chain() -> None:
     )
     assert (
         wrong_stream_call.public_callable
-        == "main.derive_wrong_key_stream"
+        == (
+            "main.derive_wrong_key_material"
+            " -> main.derive_wrong_key_stream"
+        )
     )
     assert (
         public_stream_call.public_callable
@@ -730,6 +734,67 @@ def test_component_registries_reject_unregistered_config_fields(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    (
+        ("public_callable", "main.forged_callable"),
+        ("result_identity_field", "forged_identity"),
+    ),
+)
+def test_method_adapter_rejects_forged_component_binding(
+    tmp_path: Path,
+    field: str,
+    forged_value: str,
+) -> None:
+    document = json.loads(COMPONENT_CONFIG_PATH.read_text(encoding="utf-8"))
+    document["method_adapter"]["component_bindings"][7][field] = forged_value
+    drifted_path = tmp_path / f"forged_{field}.json"
+    drifted_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(
+        CegWmExperimentAdapterError,
+        match="canonical registry",
+    ):
+        load_ceg_wm_experiment_adapter_configuration(drifted_path)
+
+
+@pytest.mark.unit
+def test_registries_reject_forged_wrong_key_pipeline_and_metric_split(
+    tmp_path: Path,
+) -> None:
+    wrong_key_document = json.loads(
+        COMPONENT_CONFIG_PATH.read_text(encoding="utf-8")
+    )
+    wrong_key_document["method_adapter"]["key_schedule_operations"][2][
+        "public_callable"
+    ] = "main.derive_wrong_key_stream"
+    wrong_key_path = tmp_path / "forged_wrong_key_pipeline.json"
+    wrong_key_path.write_text(
+        json.dumps(wrong_key_document),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        CegWmExperimentAdapterError,
+        match="key schedule operation",
+    ):
+        load_ceg_wm_experiment_adapter_configuration(wrong_key_path)
+
+    split_document = json.loads(
+        COMPONENT_CONFIG_PATH.read_text(encoding="utf-8")
+    )
+    split_document["metric_registry"]["metric_split_bindings"][0][
+        "allowed_splits"
+    ] = ["development"]
+    split_path = tmp_path / "forged_metric_split.json"
+    split_path.write_text(json.dumps(split_document), encoding="utf-8")
+    with pytest.raises(
+        InternalMetricError,
+        match="canonical registry",
+    ):
+        load_metric_registry(split_path)
+
+
+@pytest.mark.unit
 def test_geometric_attacks_are_deterministic_and_identity_preserving() -> None:
     registry = load_attack_registry(COMPONENT_CONFIG_PATH)
     image = torch.arange(3 * 9 * 9, dtype=torch.uint8).reshape(1, 3, 9, 9)
@@ -867,6 +932,125 @@ def test_fixed_fpr_detection_keeps_wrong_key_separate() -> None:
     assert aggregate.wrong_key_positive_rate == 1.0
     assert aggregate.primary_null_count == 1
     assert aggregate.wrong_key_count == 1
+    assert threshold.split == "content_threshold_fit"
+    assert aggregate.split == "end_to_end_check"
+    assert all(
+        decision.split == aggregate.split for decision in aggregate.decisions
+    )
+
+
+@pytest.mark.unit
+def test_fixed_fpr_threshold_result_rejects_direct_and_post_init_forgery() -> None:
+    registry = load_metric_registry(COMPONENT_CONFIG_PATH)
+    calibration_cases = tuple(
+        _detection_case(
+            100 + index,
+            split="content_threshold_fit",
+            key_role="unwatermarked_primary_null",
+            score=score,
+        )
+        for index, score in enumerate((0.1, 0.2, 0.3, 0.4))
+    )
+    threshold = fit_fixed_fpr_threshold(
+        calibration_cases,
+        target_fpr=0.25,
+        registry=registry,
+    )
+    reordered_threshold = fit_fixed_fpr_threshold(
+        tuple(reversed(calibration_cases)),
+        target_fpr=0.25,
+        registry=registry,
+    )
+    changed_score_threshold = fit_fixed_fpr_threshold(
+        (
+            replace(calibration_cases[0], score=0.15),
+            *calibration_cases[1:],
+        ),
+        target_fpr=0.25,
+        registry=registry,
+    )
+    assert (
+        reordered_threshold.calibration_case_digest
+        == threshold.calibration_case_digest
+    )
+    assert reordered_threshold.threshold_identity == threshold.threshold_identity
+    assert changed_score_threshold.threshold == threshold.threshold
+    assert (
+        changed_score_threshold.calibration_case_digest
+        != threshold.calibration_case_digest
+    )
+    assert changed_score_threshold.threshold_identity != threshold.threshold_identity
+
+    nan_payload = asdict(threshold)
+    nan_payload["threshold"] = float("nan")
+    with pytest.raises(InternalMetricError, match="finite"):
+        FixedFprThresholdResult(**nan_payload)
+
+    count_payload = asdict(threshold)
+    count_payload["primary_null_count"] = True
+    with pytest.raises(InternalMetricError, match="consistent integers"):
+        FixedFprThresholdResult(**count_payload)
+
+    digest_payload = asdict(threshold)
+    digest_payload["source_cluster_digest"] = "not-a-digest"
+    with pytest.raises(InternalMetricError, match="SHA-256"):
+        FixedFprThresholdResult(**digest_payload)
+
+    unbounded_finite_threshold = fit_fixed_fpr_threshold(
+        tuple(
+            _detection_case(
+                105 + index,
+                split="content_threshold_fit",
+                key_role="unwatermarked_primary_null",
+                score=score,
+            )
+            for index, score in enumerate((1.1, 1.2, 1.3, 1.4))
+        ),
+        target_fpr=0.25,
+        registry=registry,
+    )
+    assert unbounded_finite_threshold.threshold > 1.0
+
+    identity_payload = asdict(threshold)
+    identity_payload["threshold_identity"] = "0" * 64
+    with pytest.raises(InternalMetricError, match="identity mismatch"):
+        FixedFprThresholdResult(**identity_payload)
+
+    with pytest.raises(InternalMetricError, match="does not match.*counts"):
+        replace(threshold, empirical_fpr=0.0)
+
+    forged_after_construction = replace(threshold)
+    object.__setattr__(
+        forged_after_construction,
+        "threshold_identity",
+        "0" * 64,
+    )
+    evaluation = (
+        _detection_case(
+            110,
+            split="end_to_end_check",
+            key_role="registered_positive",
+            score=0.8,
+        ),
+        _detection_case(
+            111,
+            split="end_to_end_check",
+            key_role="unwatermarked_primary_null",
+            score=0.1,
+        ),
+        _detection_case(
+            112,
+            split="end_to_end_check",
+            key_role="wrong_key",
+            score=0.2,
+        ),
+    )
+    with pytest.raises(InternalMetricError, match="identity mismatch"):
+        evaluate_detection_at_threshold(
+            evaluation,
+            forged_after_construction,
+            registry=registry,
+        )
 
 
 @pytest.mark.unit
@@ -896,6 +1080,8 @@ def test_quality_routing_and_branch_metrics_compute_real_paired_values() -> None
     )
     assert quality.mean_relative_l2 > 0.0
     assert quality.mean_squared_error == 1.25
+    assert quality.split == "untouched_confirmation"
+    assert all(case.split == quality.split for case in quality.cases)
 
     routing = aggregate_routing_gain(
         (
@@ -925,6 +1111,8 @@ def test_quality_routing_and_branch_metrics_compute_real_paired_values() -> None
     assert routing.mean_detection_gain == 0.5
     assert routing.mean_quality_non_degradation == pytest.approx(0.05)
     assert routing.cases[0].source_cluster_id == _unit(22).source_cluster_id
+    assert routing.split == "untouched_confirmation"
+    assert all(case.split == routing.split for case in routing.cases)
 
     branches = aggregate_branch_complementarity(
         (
@@ -951,6 +1139,8 @@ def test_quality_routing_and_branch_metrics_compute_real_paired_values() -> None
     assert branches.combined_gain_over_hf_count == 1
     assert branches.wrong_key_combined_positive_rate == 0.0
     assert branches.cases[0].lf_complements_hf
+    assert branches.split == "untouched_confirmation"
+    assert all(case.split == branches.split for case in branches.cases)
 
 
 @pytest.mark.unit
@@ -977,6 +1167,8 @@ def test_geometry_reliability_rectification_and_rescue_metrics() -> None:
     )
     assert transform.mean_rotation_absolute_error == 2.0
     assert transform.mean_translation_euclidean_error == pytest.approx(2**0.5 / 10)
+    assert transform.split == "end_to_end_check"
+    assert all(case.split == transform.split for case in transform.cases)
 
     reliability = aggregate_reliability(
         (
@@ -998,6 +1190,8 @@ def test_geometry_reliability_rectification_and_rescue_metrics() -> None:
     assert reliability.recoverable_accept_rate == 1.0
     assert reliability.unrecoverable_reject_rate == 1.0
     assert reliability.cases[0].expected_recoverable
+    assert reliability.split == "end_to_end_check"
+    assert all(case.split == reliability.split for case in reliability.cases)
 
     rectification = aggregate_rectification_delta(
         (
@@ -1017,6 +1211,8 @@ def test_geometry_reliability_rectification_and_rescue_metrics() -> None:
     assert rectification.mean_score_delta == pytest.approx(0.3)
     assert rectification.improved_fraction == 1.0
     assert rectification.cases[0].score_delta == pytest.approx(0.3)
+    assert rectification.split == "end_to_end_check"
+    assert all(case.split == rectification.split for case in rectification.cases)
 
     rescue = aggregate_rescue_fpr_safety(
         tuple(
@@ -1030,6 +1226,7 @@ def test_geometry_reliability_rectification_and_rescue_metrics() -> None:
                 raw_positive=index == 0,
                 rescue_triggered=index == 1,
                 rectified_positive=index == 1,
+                watermark_decision_positive=index in {0, 1},
             )
             for index in range(4)
         ),
@@ -1042,6 +1239,350 @@ def test_geometry_reliability_rectification_and_rescue_metrics() -> None:
     assert rescue.global_fpr_upper_confidence_bound > rescue.global_fpr
     assert not rescue.global_fpr_within_target
     assert rescue.cases[1].rescue_additional_false_positive
+    assert rescue.split == "end_to_end_check"
+    assert all(case.split == rescue.split for case in rescue.cases)
+
+
+def _aggregate_metric_probe(
+    metric_name: str,
+    splits: tuple[str, str],
+) -> object:
+    registry = load_metric_registry(COMPONENT_CONFIG_PATH)
+    first_split, second_split = splits
+    if metric_name == "detection":
+        threshold = fit_fixed_fpr_threshold(
+            tuple(
+                _detection_case(
+                    2000 + index,
+                    split="content_threshold_fit",
+                    key_role="unwatermarked_primary_null",
+                    score=score,
+                )
+                for index, score in enumerate((0.1, 0.2, 0.3, 0.4))
+            ),
+            target_fpr=0.25,
+            registry=registry,
+        )
+        return evaluate_detection_at_threshold(
+            (
+                _detection_case(
+                    2010,
+                    split=first_split,
+                    key_role="registered_positive",
+                    score=0.8,
+                ),
+                _detection_case(
+                    2011,
+                    split=second_split,
+                    key_role="unwatermarked_primary_null",
+                    score=0.1,
+                ),
+                _detection_case(
+                    2012,
+                    split=second_split,
+                    key_role="wrong_key",
+                    score=0.2,
+                ),
+            ),
+            threshold,
+            registry=registry,
+        )
+    if metric_name == "quality":
+        return aggregate_matched_budget_quality(
+            (
+                QualityMetricCase(
+                    _unit(2020),
+                    first_split,
+                    "condition",
+                    "budget",
+                    (1.0,),
+                    (1.1,),
+                ),
+                QualityMetricCase(
+                    _unit(2021),
+                    second_split,
+                    "condition",
+                    "budget",
+                    (1.0,),
+                    (1.1,),
+                ),
+            ),
+            registry=registry,
+        )
+    if metric_name == "routing":
+        return aggregate_routing_gain(
+            (
+                RoutingPairCase(
+                    _unit(2030),
+                    first_split,
+                    True,
+                    False,
+                    0.1,
+                    0.2,
+                    "budget",
+                    "budget",
+                ),
+                RoutingPairCase(
+                    _unit(2031),
+                    second_split,
+                    True,
+                    False,
+                    0.1,
+                    0.2,
+                    "budget",
+                    "budget",
+                ),
+            ),
+            registry=registry,
+        )
+    if metric_name == "branch":
+        return aggregate_branch_complementarity(
+            (
+                BranchOutcomeCase(
+                    _unit(2040),
+                    first_split,
+                    "registered_positive",
+                    False,
+                    True,
+                    True,
+                ),
+                BranchOutcomeCase(
+                    _unit(2041),
+                    second_split,
+                    "wrong_key",
+                    False,
+                    False,
+                    False,
+                ),
+            ),
+            registry=registry,
+        )
+    if metric_name == "transform":
+        return aggregate_transform_error(
+            (
+                TransformMetricCase(
+                    _unit(2050),
+                    first_split,
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                ),
+                TransformMetricCase(
+                    _unit(2051),
+                    second_split,
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                ),
+            ),
+            registry=registry,
+        )
+    if metric_name == "reliability":
+        return aggregate_reliability(
+            (
+                ReliabilityMetricCase(
+                    _unit(2060),
+                    first_split,
+                    True,
+                    True,
+                ),
+                ReliabilityMetricCase(
+                    _unit(2061),
+                    second_split,
+                    False,
+                    False,
+                ),
+            ),
+            registry=registry,
+        )
+    if metric_name == "rectification":
+        return aggregate_rectification_delta(
+            (
+                RectificationMetricCase(
+                    _unit(2070),
+                    first_split,
+                    "detector",
+                    "detector",
+                    "threshold",
+                    "threshold",
+                    0.1,
+                    0.2,
+                ),
+                RectificationMetricCase(
+                    _unit(2071),
+                    second_split,
+                    "detector",
+                    "detector",
+                    "threshold",
+                    "threshold",
+                    0.1,
+                    0.2,
+                ),
+            ),
+            registry=registry,
+        )
+    if metric_name == "rescue":
+        return aggregate_rescue_fpr_safety(
+            (
+                RescueSafetyCase(
+                    _unit(2080),
+                    first_split,
+                    "detector",
+                    "detector",
+                    "threshold",
+                    "threshold",
+                    False,
+                    False,
+                    False,
+                    False,
+                ),
+                RescueSafetyCase(
+                    _unit(2081),
+                    second_split,
+                    "detector",
+                    "detector",
+                    "threshold",
+                    "threshold",
+                    False,
+                    False,
+                    False,
+                    False,
+                ),
+            ),
+            target_fpr=0.25,
+            registry=registry,
+        )
+    raise AssertionError(f"unknown metric probe: {metric_name}")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metric_name", "legal_splits"),
+    (
+        ("detection", ("end_to_end_check", "end_to_end_check")),
+        ("quality", ("candidate_selection", "untouched_confirmation")),
+        ("routing", ("candidate_selection", "untouched_confirmation")),
+        ("branch", ("candidate_selection", "untouched_confirmation")),
+        ("transform", ("reliability_fit", "end_to_end_check")),
+        ("reliability", ("reliability_fit", "end_to_end_check")),
+        ("rectification", ("rescue_threshold_fit", "end_to_end_check")),
+        ("rescue", ("rescue_threshold_fit", "end_to_end_check")),
+    ),
+)
+def test_metric_aggregates_reject_mixed_split_identities(
+    metric_name: str,
+    legal_splits: tuple[str, str],
+) -> None:
+    first_split, second_split = legal_splits
+    if first_split == second_split:
+        second_split = "content_threshold_fit"
+    with pytest.raises(InternalMetricError, match="cannot mix split"):
+        _aggregate_metric_probe(metric_name, (first_split, second_split))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "metric_name",
+    (
+        "detection",
+        "quality",
+        "routing",
+        "branch",
+        "transform",
+        "reliability",
+        "rectification",
+        "rescue",
+    ),
+)
+def test_metric_aggregates_reject_uniform_but_illegal_split(
+    metric_name: str,
+) -> None:
+    with pytest.raises(InternalMetricError, match="does not allow split"):
+        _aggregate_metric_probe(metric_name, ("development", "development"))
+
+
+@pytest.mark.unit
+def test_rescue_safety_case_enforces_real_rescue_trajectory() -> None:
+    raw_positive = RescueSafetyCase(
+        _unit(2100),
+        "end_to_end_check",
+        "detector",
+        "detector",
+        "threshold",
+        "threshold",
+        True,
+        False,
+        False,
+        True,
+    )
+    rescued_positive = RescueSafetyCase(
+        _unit(2101),
+        "end_to_end_check",
+        "detector",
+        "detector",
+        "threshold",
+        "threshold",
+        False,
+        True,
+        True,
+        True,
+    )
+    assert raw_positive.watermark_decision_positive
+    assert rescued_positive.watermark_decision_positive
+
+    with pytest.raises(InternalMetricError, match="must not trigger rescue"):
+        RescueSafetyCase(
+            _unit(2102),
+            "end_to_end_check",
+            "detector",
+            "detector",
+            "threshold",
+            "threshold",
+            True,
+            True,
+            True,
+            True,
+        )
+    with pytest.raises(InternalMetricError, match="actual rescue trigger"):
+        RescueSafetyCase(
+            _unit(2103),
+            "end_to_end_check",
+            "detector",
+            "detector",
+            "threshold",
+            "threshold",
+            False,
+            False,
+            True,
+            False,
+        )
+    with pytest.raises(InternalMetricError, match="trajectory"):
+        RescueSafetyCase(
+            _unit(2104),
+            "end_to_end_check",
+            "detector",
+            "detector",
+            "threshold",
+            "threshold",
+            False,
+            True,
+            True,
+            False,
+        )
 
 
 @pytest.mark.unit

@@ -109,7 +109,7 @@
       },
       {
         "operation_id": "derive_wrong_key_stream",
-        "public_callable": "main.derive_wrong_key_stream"
+        "public_callable": "main.derive_wrong_key_material -> main.derive_wrong_key_stream"
       },
       {
         "operation_id": "derive_public_noise",
@@ -131,6 +131,71 @@
       "reliability_accept_reject",
       "rectification_same_detector_delta",
       "rescue_global_fpr_safety"
+    ],
+    "metric_split_bindings": [
+      {
+        "allowed_splits": [
+          "content_threshold_fit",
+          "end_to_end_check"
+        ],
+        "metric_id": "fixed_fpr_detection"
+      },
+      {
+        "allowed_splits": [
+          "end_to_end_check"
+        ],
+        "metric_id": "wrong_key_attribution"
+      },
+      {
+        "allowed_splits": [
+          "candidate_selection",
+          "untouched_confirmation",
+          "end_to_end_check"
+        ],
+        "metric_id": "matched_budget_quality"
+      },
+      {
+        "allowed_splits": [
+          "candidate_selection",
+          "untouched_confirmation"
+        ],
+        "metric_id": "routing_gain_non_degradation"
+      },
+      {
+        "allowed_splits": [
+          "candidate_selection",
+          "untouched_confirmation"
+        ],
+        "metric_id": "lf_hf_complementarity"
+      },
+      {
+        "allowed_splits": [
+          "reliability_fit",
+          "end_to_end_check"
+        ],
+        "metric_id": "transform_error"
+      },
+      {
+        "allowed_splits": [
+          "reliability_fit",
+          "end_to_end_check"
+        ],
+        "metric_id": "reliability_accept_reject"
+      },
+      {
+        "allowed_splits": [
+          "rescue_threshold_fit",
+          "end_to_end_check"
+        ],
+        "metric_id": "rectification_same_detector_delta"
+      },
+      {
+        "allowed_splits": [
+          "rescue_threshold_fit",
+          "end_to_end_check"
+        ],
+        "metric_id": "rescue_global_fpr_safety"
+      }
     ],
     "registry_version": "ceg_wm_internal_metric_registry_v1"
   },
