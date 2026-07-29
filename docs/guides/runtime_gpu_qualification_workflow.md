@@ -68,6 +68,12 @@ CUDA runtime 12.8
 环境设计原则：
 
 - 优先沿用上述 Python 和项目候选依赖版本；
+- dependency lock 继续把 PyTorch 公共版本精确冻结为 `2.11.0`。runner 只对
+  `torch` 接受完整实际版本 `2.11.0`，或接受 `2.11.0+<local>`，其中
+  `<local>` 必须完整匹配
+  `[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*`；实际读取的含 local label 版本原样写入
+  dependency evidence。该例外不归一化公共版本、不接受 prerelease，也不适用于
+  其他依赖；
 - 完整 qualification 优先选择 L4；T4 可先运行 smoke，并在资源允许时运行完整
   qualification；
 - Colab 当前驱动、CUDA minor、Python patch 或 GPU 型号合理变化时先尝试受支持的
@@ -537,7 +543,8 @@ failures.jsonl
 - 模型权重文件 hash；
 - Hugging Face cache hash；
 - 整个 Python 环境 hash；
-- 与旧 Colab 快照逐包逐版本完全一致；
+- 与旧 Colab 快照逐包逐版本完整字符串一致；PyTorch 仍必须满足上述冻结公共版本
+  与 local build label 规则；
 - 为了 runtime qualification 保存完整模型、缓存或大规模中间张量。
 
 可以为结果 zip 自动生成普通 SHA-256 sidecar 以检查 Drive 传输完整性，但 sidecar

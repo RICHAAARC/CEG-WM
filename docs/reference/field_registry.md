@@ -371,7 +371,7 @@ Notebook 与 repository module 的跨边界数据
 | qk_status | persisted_protocol | runtime_state | none | true | false | false | 两登记层真实 `to_q`/`to_k` 捕获及身份检查的完成状态。 |
 | determinism_status | persisted_protocol | runtime_state | none | true | false | false | qualification/replay 独立重复记录的一致性状态；smoke 明确为 `not_evaluated`。 |
 | package_status | persisted_protocol | runtime_state | none | false | false | false | execution manifest 完整文件集、hash/size 和 revision 的启动前校验状态。 |
-| dependency_status | persisted_protocol | runtime_state | none | false | false | false | requirements lock 与安装环境逐项匹配冻结 dependency lock 的状态。 |
+| dependency_status | persisted_protocol | runtime_state | none | false | false | false | requirements lock 与安装环境逐项匹配冻结 dependency lock 的状态；仅 `torch==2.11.0` 可保留符合冻结语法的 local build label。 |
 | repetition_count | persisted_protocol | runtime_state | none | false | false | false | 当前结果 zip 实际完成并记录的独立执行次数。 |
 | failure_class | persisted_protocol | runtime_state | none | true | false | false | runtime、resource、integrity、budget、Q/K、determinism 或 incomplete 失败分类。 |
 | failure_classes | persisted_protocol | runtime_state | none | true | false | false | run summary 按失败记录顺序保存的 failure class 列表。 |
@@ -426,9 +426,9 @@ Notebook 与 repository module 的跨边界数据
 | cuda_runtime | persisted_protocol | runtime_identity | none | false | false | false | PyTorch 报告的 CUDA runtime 版本。 |
 | cuda_available | persisted_protocol | runtime_identity | none | false | false | false | runner 启动时 PyTorch 是否报告 CUDA 可用。 |
 | gpu_name | persisted_protocol | runtime_identity | none | false | false | false | qualification 实际 CUDA device 0 名称；不是 GPU 能力证明的替代物。 |
-| dependency_lock_evidence | persisted_protocol | runtime_identity | none | true | false | false | runner 对完整冻结 dependency lock 逐项核验后写入的期望/实际版本记录。 |
+| dependency_lock_evidence | persisted_protocol | runtime_identity | none | true | false | false | runner 对完整冻结 dependency lock 逐项核验后写入的期望/实际版本记录；PyTorch local build label 不得从实际版本中剥离。 |
 | expected_version | persisted_protocol | runtime_identity | none | false | false | false | 单项 dependency lock 登记的冻结版本或 Python 版本约束。 |
-| actual_version | persisted_protocol | runtime_identity | none | false | false | false | runner 通过 Python runtime 或 `importlib.metadata` 实际读取的版本。 |
+| actual_version | persisted_protocol | runtime_identity | none | false | false | false | runner 通过 Python runtime 或 `importlib.metadata` 实际读取并原样保留的完整版本，包括获准的 PyTorch local build label。 |
 | huggingface_hub | persisted_protocol | runtime_identity | none | false | false | false | environment summary 中 `huggingface-hub` distribution 的实际版本。 |
 | materialization_attempt_count | persisted_protocol | runtime_state | none | true | false | false | 当前 qualification record 保存的 main-owned actual-dtype materialization 尝试次数。 |
 | dependency_lock | persisted_protocol | runtime_identity | none | false | false | false | runtime 候选冻结的 Python 与模型执行依赖版本映射。 |

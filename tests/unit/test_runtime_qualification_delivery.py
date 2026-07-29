@@ -783,6 +783,89 @@ def test_dependency_lock_drift_fails_closed(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "actual",
+    (
+        "2.11.0",
+        "2.11.0+cu128",
+        "2.11.0+cpu",
+        "2.11.0+cu128.ubuntu20.04",
+        "2.11.0+CU128_UBUNTU-20.04",
+    ),
+)
+def test_torch_dependency_lock_accepts_only_frozen_public_version_with_valid_local_label(
+    tmp_path: Path,
+    actual: str,
+) -> None:
+    revision = "d" * 40
+    package = tmp_path / "package"
+    package.mkdir()
+    _package_manifest(package, revision)
+    versions = _versions()
+    versions["torch"] = actual
+
+    evidence = runner.verify_dependency_lock(package, versions)
+
+    torch_evidence = next(
+        item for item in evidence if item["package_name"] == "torch"
+    )
+    assert torch_evidence == {
+        "package_name": "torch",
+        "expected_version": "2.11.0",
+        "actual_version": actual,
+    }
+
+
+@pytest.mark.parametrize(
+    "actual",
+    (
+        "2.11.00",
+        "2.11.0rc1+cu128",
+        "2.11.1+cu128",
+        "2.11.0+",
+        "2.11.0+cu128..ubuntu",
+        "2.11.0+cu128.",
+        "2.11.0+.cu128",
+        "2.11.0+cu128+ubuntu",
+        "2.11.0+cu 128",
+        "2.11.0+cuda-β",
+    ),
+)
+def test_torch_dependency_lock_rejects_public_or_local_version_drift(
+    tmp_path: Path,
+    actual: str,
+) -> None:
+    revision = "e" * 40
+    package = tmp_path / "package"
+    package.mkdir()
+    _package_manifest(package, revision)
+    versions = _versions()
+    versions["torch"] = actual
+
+    with pytest.raises(
+        runner.QualificationRunnerError,
+        match="dependency lock drifted",
+    ):
+        runner.verify_dependency_lock(package, versions)
+
+
+def test_non_torch_dependency_lock_rejects_local_version_label(
+    tmp_path: Path,
+) -> None:
+    revision = "9" * 40
+    package = tmp_path / "package"
+    package.mkdir()
+    _package_manifest(package, revision)
+    versions = _versions()
+    versions["diffusers"] = "0.38.0+cu128"
+
+    with pytest.raises(
+        runner.QualificationRunnerError,
+        match="dependency lock drifted",
+    ):
+        runner.verify_dependency_lock(package, versions)
+
+
 def test_dependency_lock_uses_metadata_for_every_frozen_package(
     monkeypatch,
     tmp_path: Path,
@@ -793,6 +876,7 @@ def test_dependency_lock_uses_metadata_for_every_frozen_package(
     _package_manifest(package, revision)
     calls: list[str] = []
     versions = _versions()
+    versions["torch"] = "2.11.0+cu128"
 
     def version(name: str) -> str:
         calls.append(name)
@@ -812,6 +896,11 @@ def test_dependency_lock_uses_metadata_for_every_frozen_package(
         "huggingface-hub",
     ]
     assert {item["package_name"] for item in evidence} == set(versions)
+    assert next(
+        item["actual_version"]
+        for item in evidence
+        if item["package_name"] == "torch"
+    ) == "2.11.0+cu128"
 
 
 def test_requirements_must_exactly_match_complete_dependency_lock(

@@ -40,6 +40,9 @@ REGISTERED_DEPENDENCY_LOCK = (
     ("safetensors", "0.8.0"),
     ("huggingface-hub", "1.20.1"),
 )
+TORCH_2_11_LOCAL_VERSION = re.compile(
+    r"^2\.11\.0\+[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$"
+)
 SENSITIVE_PARTS = (
     ".env",
     "credential",
@@ -380,11 +383,15 @@ def _dependency_versions(
             raise QualificationRunnerError(
                 f"required dependency is unavailable: {name}"
             )
-        accepted = (
-            tuple(map(int, actual.split(".")[:2])) >= (3, 12)
-            if name == "python" and expected == ">=3.12"
-            else actual == expected
-        )
+        if name == "python" and expected == ">=3.12":
+            accepted = tuple(map(int, actual.split(".")[:2])) >= (3, 12)
+        elif name == "torch" and expected == "2.11.0":
+            accepted = (
+                actual == expected
+                or TORCH_2_11_LOCAL_VERSION.fullmatch(actual) is not None
+            )
+        else:
+            accepted = actual == expected
         if not accepted:
             raise QualificationRunnerError(
                 f"dependency lock drifted: {name} expected {expected}, actual {actual}"
