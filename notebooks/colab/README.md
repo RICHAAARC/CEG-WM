@@ -4,7 +4,7 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 当前唯一 Notebook 是 `runtime_qualification.ipynb`，只负责：
 
-1. 挂载 Drive，并使用已审核后固定在源中的 candidate revision、`smoke` profile、
+1. 挂载 Drive，并使用已审核后固定在源中的 candidate revision、`qualification` profile、
    `current` package 路径、完整 package SHA-256 和空 replay source；
 2. 检查 GPU 与临时磁盘，从 Colab Secrets 读取 `HF_TOKEN` 和
    `CEG_WM_ROOT_KEY`；
@@ -19,6 +19,8 @@ schema version 1 的可信 bootstrap 和包内 runner 分开承担。
 当前快照绑定 candidate
 `8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 package SHA-256
 `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`，用户只需
-**Run all**，不得编辑这些固定值。切换 `qualification`、`replay` 或候选 archive
+**Run all**，不得编辑这些固定值。该 candidate 的既有 smoke 结果仍保存在独立
+revision/run-id 目录，本快照不覆盖历史结果；当前完整 qualification 尚未运行。
+切换 `smoke`、`replay` 或候选 archive
 时，必须由实施者形成新的 Notebook revision，并经独立审计者和 gatekeeper 审核。
 提交副本必须保持 outputs 为空、execution count 为 null。

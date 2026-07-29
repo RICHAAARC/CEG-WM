@@ -389,11 +389,13 @@ Notebook 不得包含：
 - 把 `/root/.cache/huggingface`、`HF_HOME`、pip cache 或临时模型目录设置到 Drive。
 
 当前 Notebook revision 固定绑定 candidate
-`8b2344756c4c247906ff0d4eab68e46a773e13f5`、`PROFILE="smoke"`、`current`
+`8b2344756c4c247906ff0d4eab68e46a773e13f5`、`PROFILE="qualification"`、`current`
 package 路径、独立审核的完整 package SHA-256
 `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38` 和
 `REPLAY_SOURCE=None`。用户直接
-**Run all**，不得编辑并保存 Notebook 源。后续切换 `qualification`、`replay` 或
+**Run all**，不得编辑并保存 Notebook 源。该 candidate 的 smoke 结果已保存在独立
+revision/run-id 目录，本次快照不会覆盖；完整 qualification 尚未运行。后续切换
+`smoke`、`replay` 或
 候选 package 时，必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成
 新的 Notebook revision。Colab 自动写入的 outputs 和 execution counts 不回写仓库；
 后续功能变化修改 bootstrap/runner/config 并重新审核 trust anchor。

@@ -1716,7 +1716,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     assert "HF_TOKEN" in sources
     assert "CEG_WM_ROOT_KEY" in sources
     assert "/content/drive/MyDrive/CEG-WM/runtime_qualification" in sources
-    assert 'PROFILE = "smoke"' in source_lines
+    assert source_lines.count('PROFILE = "qualification"') == 1
     assert (
         'EXPECTED_RUNTIME_CANDIDATE_REVISION = '
         '"8b2344756c4c247906ff0d4eab68e46a773e13f5"'
@@ -1787,7 +1787,7 @@ def test_notebook_direct_run_snapshot_requires_no_manual_parameters() -> None:
         "".join(cell.get("source", [])) for cell in document["cells"]
     )
     source_lines = sources.splitlines()
-    assert 'PROFILE = "smoke"' in source_lines
+    assert source_lines.count('PROFILE = "qualification"') == 1
     assert (
         'EXPECTED_RUNTIME_CANDIDATE_REVISION = '
         '"8b2344756c4c247906ff0d4eab68e46a773e13f5"'
@@ -1844,7 +1844,7 @@ def test_notebook_bootstrap_digest_mismatch_runs_no_subprocess(
     namespace = {
         "BOOTSTRAP": str(source),
         "EXPECTED_BOOTSTRAP_SHA256": "0" * 64,
-        "PROFILE": "smoke",
+        "PROFILE": "qualification",
         "CONTENT_ROOT": str(tmp_path),
     }
     with pytest.raises(RuntimeError, match="bootstrap SHA-256 mismatch"):
@@ -1870,7 +1870,7 @@ def test_notebook_executes_verified_local_snapshot_after_drive_source_changes(
     namespace = {
         "BOOTSTRAP": str(drive_source),
         "EXPECTED_BOOTSTRAP_SHA256": digest,
-        "PROFILE": "smoke",
+        "PROFILE": "qualification",
         "CONTENT_ROOT": str(tmp_path),
     }
     exec(_notebook_cell_source("bootstrap_payload ="), namespace)
@@ -1890,7 +1890,7 @@ def test_notebook_executes_verified_local_snapshot_after_drive_source_changes(
             json.dumps(
                 {
                     "artifact_kind": "qualification_result",
-                    "profile": "smoke",
+                    "profile": "qualification",
                     "run_status": "passed",
                     "runtime_candidate_revision": "8" * 40,
                     "result_zip": "/persistent/result.zip",
@@ -1936,7 +1936,7 @@ def _execute_notebook_status(
         "json": json,
         "os": os,
         "TRUSTED_BOOTSTRAP": Path("/content/trusted_bootstrap.py"),
-        "PROFILE": "smoke",
+        "PROFILE": "qualification",
         "PACKAGE_ZIP": "/persistent/package.zip",
         "EXPECTED_PACKAGE_SHA256": "1" * 64,
         "EXPECTED_RUNTIME_CANDIDATE_REVISION": "8" * 40,
@@ -1948,18 +1948,35 @@ def _execute_notebook_status(
     return namespace
 
 
+def test_notebook_accepts_bound_qualification_result_status(monkeypatch) -> None:
+    namespace = _execute_notebook_status(
+        monkeypatch,
+        {
+            "artifact_kind": "qualification_result",
+            "profile": "qualification",
+            "run_status": "passed",
+            "runtime_candidate_revision": "8" * 40,
+            "result_zip": "/persistent/result.zip",
+        },
+        returncode=0,
+    )
+    assert namespace["artifact_kind"] == "qualification_result"
+    assert namespace["status"]["profile"] == "qualification"
+    assert namespace["status"]["run_status"] == "passed"
+
+
 @pytest.mark.parametrize(
     "payload",
     (
         {
             "artifact_kind": "qualification_result",
-            "profile": "smoke",
+            "profile": "qualification",
             "run_status": "passed",
             "result_zip": "/persistent/result.zip",
         },
         {
             "artifact_kind": "qualification_result",
-            "profile": "smoke",
+            "profile": "qualification",
             "run_status": "passed",
             "runtime_candidate_revision": "9" * 40,
             "result_zip": "/persistent/result.zip",
@@ -1983,7 +2000,7 @@ def test_notebook_preserves_bootstrap_failure_without_revision(
         monkeypatch,
         {
             "artifact_kind": "bootstrap_failure",
-            "profile": "smoke",
+            "profile": "qualification",
             "run_status": "failed",
             "diagnostic_zip": "/persistent/bootstrap_failure.zip",
         },
@@ -2004,7 +2021,7 @@ def test_notebook_rejects_unknown_bootstrap_artifact_kind(monkeypatch) -> None:
             monkeypatch,
             {
                 "artifact_kind": "unknown",
-                "profile": "smoke",
+                "profile": "qualification",
                 "run_status": "failed",
             },
             returncode=3,
