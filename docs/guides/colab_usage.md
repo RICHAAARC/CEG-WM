@@ -5,8 +5,10 @@
 Google Drive 结果包和独立审计流程见
 [Runtime And GPU Qualification Workflow](runtime_gpu_qualification_workflow.md)。
 
-1. 挂载 Drive 后，在运行时输入 profile、execution package 路径、独立审核给出的
-   archive SHA-256 和可选 replay source；不要编辑 Notebook cell 保存这些值。
+1. 当前冻结入口固定绑定 candidate
+   `108b7fb4a8e07b58164e19079ec24456f730718a`、`PROFILE="smoke"`、`current`
+   execution package 路径、独立审核的 archive SHA-256 和
+   `REPLAY_SOURCE=None`；用户只需 **Run all**，不编辑 Notebook cell。
 2. Notebook 对 Drive bootstrap 只读取一次，先核对完整 SHA-256，再以 `xb` 写入
    全新的 `/content` 快照并复核摘要；只执行该本地快照，摘要不符时不启动
    subprocess。随后检查 GPU/磁盘并读取 Colab Secrets。bootstrap 位于 Drive 的
@@ -29,3 +31,7 @@ expected package SHA 必须来自 package 外的独立审核结果，不能从 a
 可替换 sidecar 自动信任。可信 bootstrap 本身以固定完整 SHA-256 绑定，其版本只
 支持当前 package schema version 1；schema 改变时必须另行审核 bootstrap 与
 Notebook trust anchor。
+
+后续切换 `qualification`、`replay` 或其他候选 package 时，不由用户临时编辑
+Notebook；必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成新的
+Notebook revision。

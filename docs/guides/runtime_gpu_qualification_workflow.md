@@ -105,7 +105,8 @@ Codex 从本地映射读取并审核结果
 ```
 
 默认不强制第三次完整 GPU replay。只有结果含混、独立审计提出具体问题，或需要确认
-Colab 重启重放时，才使用同一 Notebook 的 `replay` profile。
+Colab 重启重放时，才形成固定 `replay` profile 的新 Notebook revision，并重新
+完成实施者、独立审计者和 gatekeeper 审核。
 
 ## Local CPU-First Construction
 
@@ -208,8 +209,9 @@ package 进入 runner 前必须经过独立可信 bootstrap：
    SHA-256 由独立审核给出；bootstrap 文件不能来自待验证 package。
 2. Notebook 对 Drive bootstrap 只读取一次；先比较该 bytes 的 SHA-256，再以 `xb`
    写入全新的 `/content` 本地快照并复核同一摘要，随后只执行本地快照。摘要不匹配
-   时不得启动任何 subprocess。调用者还须在运行时粘贴独立审核给出的完整 package
-   archive SHA-256；不得自动信任与 archive 同目录的可替换 sidecar。
+   时不得启动任何 subprocess。完整 package archive SHA-256 必须来自独立审核并
+   固定在该 Notebook revision 中；不得自动信任与 archive 同目录的可替换
+   sidecar，也不得由用户在运行时替换。
 3. bootstrap 只用 Python 标准库执行预信任阶段。在任何 pip、requirements、
    package import 或 runner 启动前，先把 Drive archive 单次流式复制到新建
    ephemeral `xb` 快照并同步计算完整 SHA-256；不匹配时删除快照且不解包。匹配后
@@ -360,8 +362,8 @@ notebooks/colab/runtime_qualification.ipynb
 Notebook 只包含：
 
 1. 显示任务范围并挂载 Google Drive；
-2. 在运行时输入 `PROFILE`、package 路径、独立审核给出的 expected package
-   SHA-256 和必要的 replay source，不修改 Notebook 源；
+2. 使用独立审核后固定在 Notebook 源中的 candidate revision、`PROFILE`、package
+   路径、expected package SHA-256 和 replay source；
 3. 检查 GPU/CUDA 和可用临时磁盘；
 4. 从 Colab Secrets 读取 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`；
 5. 单次读取独立可信 bootstrap，比较其 SHA-256，以 `xb` 写入新的 `/content`
@@ -380,10 +382,13 @@ Notebook 不得包含：
 - token、root key、模型权重或私有数据；
 - 把 `/root/.cache/huggingface`、`HF_HOME`、pip cache 或临时模型目录设置到 Drive。
 
-Notebook 源 cells 首次审核后保持字节冻结。profile、package、expected SHA 与 replay
-source 都通过运行时输入取得；切换档位或候选不得修改并保存 Notebook 源。Colab
-自动写入的 outputs 和 execution counts 不回写仓库；后续功能变化修改
-bootstrap/runner/config 并重新审核 trust anchor，不复制新的 Notebook。
+当前 Notebook revision 固定绑定 candidate
+`108b7fb4a8e07b58164e19079ec24456f730718a`、`PROFILE="smoke"`、`current`
+package 路径、独立审核的完整 package SHA-256 和 `REPLAY_SOURCE=None`。用户直接
+**Run all**，不得编辑并保存 Notebook 源。后续切换 `qualification`、`replay` 或
+候选 package 时，必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成
+新的 Notebook revision。Colab 自动写入的 outputs 和 execution counts 不回写仓库；
+后续功能变化修改 bootstrap/runner/config 并重新审核 trust anchor。
 
 ## Colab Storage Rules
 
@@ -432,7 +437,9 @@ runtime_qualification\
 revision-specific archive 是不可变权威对象；`current` 文件只是在运行前从所选
 权威 archive 逐字节复制得到的 Notebook ingress alias。两份文件的 SHA-256 必须
 相同；实际 revision 必须从 alias 包内已校验 manifest 读取，结果按该 revision
-归档。切换候选只覆盖 alias 并重核 SHA-256，不覆盖历史权威 archive 或 results。
+归档。切换候选时只覆盖 alias 并重核 SHA-256，不覆盖历史权威 archive 或 results；
+同时必须形成绑定新 archive SHA-256 的三角色审核 Notebook revision，不能由用户
+只改 alias 或 Notebook 常量。
 
 Notebook 工作副本可放在：
 
@@ -499,7 +506,8 @@ smoke 通过后检查：
 - 需要确认 Colab restart 后的重放；
 - 独立审计指出一个具体检查需要复验。
 
-replay 使用同一 Notebook 和 runner，不创建第三个 Notebook。
+replay 继续使用唯一 Notebook 路径和同一 runner，但必须形成固定 replay 参数的新
+Notebook revision；不新增第二种 Notebook 入口。
 
 ## Minimal Result Zip
 

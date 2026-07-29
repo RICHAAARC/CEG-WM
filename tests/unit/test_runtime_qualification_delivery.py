@@ -1619,6 +1619,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
         "".join(cell.get("source", []))
         for cell in document["cells"]
     )
+    source_lines = sources.splitlines()
     assert all(cell.get("execution_count") is None for cell in document["cells"] if cell["cell_type"] == "code")
     assert all(cell.get("outputs", []) == [] for cell in document["cells"])
     assert 5 <= len(document["cells"]) <= 7
@@ -1626,9 +1627,24 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     assert "HF_TOKEN" in sources
     assert "CEG_WM_ROOT_KEY" in sources
     assert "/content/drive/MyDrive/CEG-WM/runtime_qualification" in sources
-    assert "EXPECTED_PACKAGE_SHA256 = input(" in sources
-    assert "PROFILE = (input(" in sources
-    assert "REPLAY_SOURCE = input(" in sources
+    assert 'PROFILE = "smoke"' in source_lines
+    assert (
+        'PACKAGE_ZIP = "/content/drive/MyDrive/CEG-WM/runtime_qualification/'
+        'execution_packages/current/ceg_wm_runtime_execution.zip"'
+    ) in source_lines
+    assert (
+        'EXPECTED_PACKAGE_SHA256 = '
+        '"f20ee4e574cec20b99f1e5021a21baf8617d374337468059dbc88b213a2710a3"'
+    ) in source_lines
+    assert "REPLAY_SOURCE = None" in source_lines
+    assert "input(" not in sources
+    assert "widget" not in sources.lower()
+    assert "PACKAGE_DEFAULT" not in sources
+    assert 'os.environ.get("PROFILE"' not in sources
+    assert 'os.environ.get("PACKAGE_ZIP"' not in sources
+    assert 'os.environ.get("EXPECTED_PACKAGE_SHA256"' not in sources
+    assert 'os.environ.get("REPLAY_SOURCE"' not in sources
+    assert "sidecar" not in sources.lower()
     assert '"--expected-package-sha256"' in sources
     assert '"--persistent-root"' in sources
     assert "completed.returncode" in sources
@@ -1669,7 +1685,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
         assert forbidden not in sources
 
 
-def test_notebook_runtime_inputs_do_not_require_source_changes() -> None:
+def test_notebook_direct_run_snapshot_requires_no_manual_parameters() -> None:
     root = Path(__file__).resolve().parents[2]
     notebook = root / "notebooks/colab/runtime_qualification.ipynb"
     before = hashlib.sha256(notebook.read_bytes()).hexdigest()
@@ -1677,10 +1693,18 @@ def test_notebook_runtime_inputs_do_not_require_source_changes() -> None:
     sources = "\n".join(
         "".join(cell.get("source", [])) for cell in document["cells"]
     )
-    assert 'input("Profile [smoke]:' in sources
-    assert 'input(f"Execution package path [' in sources
-    assert 'input("Expected package SHA-256:' in sources
-    assert 'input("Replay source path [none]:' in sources
+    source_lines = sources.splitlines()
+    assert 'PROFILE = "smoke"' in source_lines
+    assert (
+        'PACKAGE_ZIP = "/content/drive/MyDrive/CEG-WM/runtime_qualification/'
+        'execution_packages/current/ceg_wm_runtime_execution.zip"'
+    ) in source_lines
+    assert (
+        'EXPECTED_PACKAGE_SHA256 = '
+        '"f20ee4e574cec20b99f1e5021a21baf8617d374337468059dbc88b213a2710a3"'
+    ) in source_lines
+    assert "REPLAY_SOURCE = None" in source_lines
+    assert "input(" not in sources
     assert hashlib.sha256(notebook.read_bytes()).hexdigest() == before
 
 
