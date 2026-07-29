@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import wraps
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Generic, Sequence, TypeVar
+from typing import Callable, Concatenate, Generic, ParamSpec, Sequence, TypeVar
 
 import torch
 
@@ -129,6 +130,7 @@ REQUIRED_KEY_SCHEDULE_OPERATIONS = (
     ),
 )
 T = TypeVar("T")
+P = ParamSpec("P")
 
 
 class CegWmExperimentAdapterError(ValueError):
@@ -292,6 +294,24 @@ def _revalidate_adapter_configuration(
     return configuration
 
 
+def _revalidate_configuration_before_call(
+    method: Callable[
+        Concatenate[CegWmExperimentAdapter, P],
+        T,
+    ],
+) -> Callable[Concatenate[CegWmExperimentAdapter, P], T]:
+    @wraps(method)
+    def guarded(
+        adapter: CegWmExperimentAdapter,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
+        _revalidate_adapter_configuration(adapter._configuration)
+        return method(adapter, *args, **kwargs)
+
+    return guarded
+
+
 @dataclass(frozen=True, slots=True)
 class ComponentCallObservation(Generic[T]):
     """One actual delegated result plus its experiment-observable identity."""
@@ -419,6 +439,7 @@ class CegWmExperimentAdapter:
     def configuration(self) -> CegWmExperimentAdapterConfiguration:
         return self._configuration
 
+    @_revalidate_configuration_before_call
     def identify_key(self, root_key_text: str) -> ComponentCallObservation[RootKeyIdentity]:
         result = identify_root_key(root_key_text)
         return self._observe_key_schedule(
@@ -427,6 +448,7 @@ class CegWmExperimentAdapter:
             result_identity_field="root_key_public_digest",
         )
 
+    @_revalidate_configuration_before_call
     def derive_registered_key_stream(
         self,
         root_key_text: str,
@@ -449,6 +471,7 @@ class CegWmExperimentAdapter:
             result_identity_field="domain_digest",
         )
 
+    @_revalidate_configuration_before_call
     def derive_wrong_key_stream(
         self,
         registered_root_key_public_digest: str,
@@ -476,6 +499,7 @@ class CegWmExperimentAdapter:
             result_identity_field="domain_digest",
         )
 
+    @_revalidate_configuration_before_call
     def derive_public_noise(
         self,
         domain_fields: dict[str, object],
@@ -496,6 +520,7 @@ class CegWmExperimentAdapter:
             result_identity_field="domain_digest",
         )
 
+    @_revalidate_configuration_before_call
     def route_content(
         self,
         latent_shape: Sequence[int],
@@ -510,6 +535,7 @@ class CegWmExperimentAdapter:
         )
         return self._observe("content_router", result)
 
+    @_revalidate_configuration_before_call
     def build_lf_carrier(
         self,
         detection_key: str,
@@ -524,6 +550,7 @@ class CegWmExperimentAdapter:
         )
         return self._observe("lf_carrier", result)
 
+    @_revalidate_configuration_before_call
     def build_hf_carrier(
         self,
         detection_key: str,
@@ -538,6 +565,7 @@ class CegWmExperimentAdapter:
         )
         return self._observe("hf_carrier", result)
 
+    @_revalidate_configuration_before_call
     def embed_content(
         self,
         latent_values: Sequence[float],
@@ -556,6 +584,7 @@ class CegWmExperimentAdapter:
         )
         return self._observe("content_embedder", result)
 
+    @_revalidate_configuration_before_call
     def detect_lf(
         self,
         observation: LfDetectionObservation,
@@ -564,6 +593,7 @@ class CegWmExperimentAdapter:
         result = lf_detector(observation, detection_key)
         return self._observe("lf_detector", result)
 
+    @_revalidate_configuration_before_call
     def detect_hf(
         self,
         observation: HfDetectionObservation,
@@ -572,6 +602,7 @@ class CegWmExperimentAdapter:
         result = hf_detector(observation, detection_key)
         return self._observe("hf_detector", result)
 
+    @_revalidate_configuration_before_call
     def detect_content(
         self,
         hf_result: HfDetectionResult,
@@ -592,6 +623,7 @@ class CegWmExperimentAdapter:
         )
         return self._observe("content_detector", result)
 
+    @_revalidate_configuration_before_call
     def observe_qk_geometry(
         self,
         detection_image: torch.Tensor,
@@ -606,6 +638,7 @@ class CegWmExperimentAdapter:
         )
         return self.synchronize_qk_observation(runtime_result, detection_key)
 
+    @_revalidate_configuration_before_call
     def synchronize_qk_observation(
         self,
         runtime_result: RuntimeQkObservationResult,
@@ -631,6 +664,7 @@ class CegWmExperimentAdapter:
             upstream_runtime_identity=_runtime_observation_identity(runtime_result),
         )
 
+    @_revalidate_configuration_before_call
     def estimate_geometric_transform(
         self,
         observation: QkGeometrySyncResult,
@@ -645,6 +679,7 @@ class CegWmExperimentAdapter:
         )
         return self._observe("geometric_transform_estimator", result)
 
+    @_revalidate_configuration_before_call
     def assess_geometry_reliability(
         self,
         estimation: GeometricTransformEstimation,
@@ -653,6 +688,7 @@ class CegWmExperimentAdapter:
         result = geometry_reliability(estimation, thresholds)
         return self._observe("geometry_reliability", result)
 
+    @_revalidate_configuration_before_call
     def rectify_image(
         self,
         image: torch.Tensor,
@@ -662,6 +698,7 @@ class CegWmExperimentAdapter:
         result = image_rectifier(image, estimation, reliability)
         return self._observe("image_rectifier", result)
 
+    @_revalidate_configuration_before_call
     def decide_conditional_recovery(
         self,
         image: torch.Tensor,
@@ -691,6 +728,7 @@ class CegWmExperimentAdapter:
         result_identity_field: str | None = None,
         public_callable: str | None = None,
     ) -> ComponentCallObservation[T]:
+        _revalidate_adapter_configuration(self._configuration)
         binding = self._bindings[responsibility]
         identity_field = result_identity_field or binding.result_identity_field
         result_identity = getattr(result, identity_field, None)
@@ -716,6 +754,7 @@ class CegWmExperimentAdapter:
         *,
         result_identity_field: str,
     ) -> ComponentCallObservation[T]:
+        _revalidate_adapter_configuration(self._configuration)
         try:
             operation = self._key_schedule_operations[operation_id]
         except KeyError as exc:

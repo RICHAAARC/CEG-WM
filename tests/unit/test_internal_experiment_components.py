@@ -821,6 +821,122 @@ def test_method_adapter_revalidates_post_init_configuration_mutation(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutation_access",
+    ("constructor_argument", "configuration_property"),
+)
+@pytest.mark.parametrize(
+    ("mutation_kind", "message"),
+    (
+        ("component_binding", "canonical registry"),
+        ("config_digest", "configuration digest mismatch"),
+        ("key_operation", "key schedule operation"),
+    ),
+)
+def test_method_adapter_revalidates_post_constructor_mutation_before_call(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation_access: str,
+    mutation_kind: str,
+    message: str,
+) -> None:
+    import experiments.methods.ceg_wm as adapter_module
+
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration)
+    mutable_configuration = (
+        configuration
+        if mutation_access == "constructor_argument"
+        else adapter.configuration
+    )
+    method_calls: list[str] = []
+
+    def reject_method_call(*args: object, **kwargs: object) -> object:
+        method_calls.append("called")
+        raise AssertionError("method call occurred before configuration rejection")
+
+    if mutation_kind == "component_binding":
+        object.__setattr__(
+            mutable_configuration.component_bindings[1],
+            "public_callable",
+            "forged.after.constructor",
+        )
+        monkeypatch.setattr(
+            adapter_module,
+            "content_router",
+            reject_method_call,
+        )
+        operation = lambda: adapter.route_content(
+            (1, 1, 2, 2),
+            mode="routing_uniform_control",
+        )
+    elif mutation_kind == "config_digest":
+        object.__setattr__(
+            mutable_configuration,
+            "config_digest",
+            "f" * 64,
+        )
+        monkeypatch.setattr(
+            adapter_module,
+            "content_router",
+            reject_method_call,
+        )
+        operation = lambda: adapter.route_content(
+            (1, 1, 2, 2),
+            mode="routing_uniform_control",
+        )
+    elif mutation_kind == "key_operation":
+        object.__setattr__(
+            mutable_configuration.key_schedule_operations[0],
+            "public_callable",
+            "forged.key.after.constructor",
+        )
+        monkeypatch.setattr(
+            adapter_module,
+            "identify_root_key",
+            reject_method_call,
+        )
+        operation = lambda: adapter.identify_key("post-constructor-key")
+    else:
+        raise AssertionError(f"unknown mutation kind: {mutation_kind}")
+
+    with pytest.raises(CegWmExperimentAdapterError, match=message):
+        operation()
+    assert method_calls == []
+
+
+@pytest.mark.unit
+def test_method_adapter_all_public_execution_entries_revalidate_configuration() -> None:
+    public_execution_entries = (
+        "identify_key",
+        "derive_registered_key_stream",
+        "derive_wrong_key_stream",
+        "derive_public_noise",
+        "route_content",
+        "build_lf_carrier",
+        "build_hf_carrier",
+        "embed_content",
+        "detect_lf",
+        "detect_hf",
+        "detect_content",
+        "observe_qk_geometry",
+        "synchronize_qk_observation",
+        "estimate_geometric_transform",
+        "assess_geometry_reliability",
+        "rectify_image",
+        "decide_conditional_recovery",
+    )
+    assert all(
+        hasattr(
+            getattr(CegWmExperimentAdapter, entry),
+            "__wrapped__",
+        )
+        for entry in public_execution_entries
+    )
+
+
+@pytest.mark.unit
 def test_registries_reject_forged_wrong_key_pipeline_and_metric_split(
     tmp_path: Path,
 ) -> None:
