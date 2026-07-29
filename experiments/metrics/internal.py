@@ -1,0 +1,1176 @@
+"""Fail-closed per-case and aggregate metrics for internal validation."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from hashlib import sha256
+import json
+from math import exp, isfinite, lgamma, log, log1p, nextafter, sqrt
+from pathlib import Path
+from typing import Sequence
+
+from experiments.protocol.internal_splits import (
+    AnalysisUnitIdentity,
+    INTERNAL_VALIDATION_SPLITS,
+)
+
+
+DEFAULT_COMPONENT_CONFIG_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "configs"
+    / "experiments"
+    / "internal_execution_components.json"
+)
+FORBIDDEN_SPLIT = "held_out_evaluation"
+DETECTION_KEY_ROLES = (
+    "registered_positive",
+    "unwatermarked_primary_null",
+    "wrong_key",
+)
+
+
+class InternalMetricError(ValueError):
+    """Metric inputs, identities, or aggregation units failed closed."""
+
+
+def _canonical_digest(value: object) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
+
+
+def _finite(value: object, role: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(float(value))
+    ):
+        raise InternalMetricError(f"{role} must be a finite number")
+    return float(value)
+
+
+def _validate_case_identity(
+    analysis_unit_identity: AnalysisUnitIdentity,
+    split: str,
+) -> None:
+    if type(analysis_unit_identity) is not AnalysisUnitIdentity:
+        raise InternalMetricError("metric case requires AnalysisUnitIdentity")
+    violations = analysis_unit_identity.validate()
+    if violations:
+        raise InternalMetricError(
+            f"analysis unit identity invalid: {','.join(violations)}"
+        )
+    if split not in INTERNAL_VALIDATION_SPLITS:
+        raise InternalMetricError("metric split is not registered")
+    if split == FORBIDDEN_SPLIT:
+        raise PermissionError("metrics_forbid_held_out_evaluation_access")
+
+
+def _require_nonempty_identity(value: object, role: str) -> str:
+    if type(value) is not str or not value:
+        raise InternalMetricError(f"{role} must be a non-empty string")
+    return value
+
+
+def _require_cases(cases: Sequence[object]) -> None:
+    if isinstance(cases, (str, bytes)) or not isinstance(cases, Sequence) or not cases:
+        raise InternalMetricError("metric aggregation requires a non-empty sequence")
+
+
+def _ensure_unique_units(cases: Sequence[object]) -> None:
+    keys = []
+    for case in cases:
+        unit = getattr(case, "analysis_unit_identity", None)
+        role = getattr(case, "key_role", None)
+        keys.append(
+            (
+                unit.unit_id,
+                unit.case_id,
+                unit.source_cluster_id,
+                role,
+            )
+        )
+    if len(keys) != len(set(keys)):
+        raise InternalMetricError(
+            "metric aggregation contains duplicate unit/case/source-cluster roles"
+        )
+
+
+def _binomial_cdf(successes: int, trials: int, probability: float) -> float:
+    if probability <= 0.0:
+        return 1.0
+    if probability >= 1.0:
+        return 1.0 if successes == trials else 0.0
+    log_terms = tuple(
+        lgamma(trials + 1)
+        - lgamma(index + 1)
+        - lgamma(trials - index + 1)
+        + index * log(probability)
+        + (trials - index) * log1p(-probability)
+        for index in range(successes + 1)
+    )
+    maximum = max(log_terms)
+    return exp(maximum) * sum(exp(value - maximum) for value in log_terms)
+
+
+def _binomial_upper_confidence_bound(
+    successes: int,
+    trials: int,
+    *,
+    confidence_level: float = 0.95,
+) -> float:
+    if (
+        isinstance(successes, bool)
+        or isinstance(trials, bool)
+        or type(successes) is not int
+        or type(trials) is not int
+        or trials <= 0
+        or successes < 0
+        or successes > trials
+    ):
+        raise InternalMetricError("binomial count inputs are invalid")
+    confidence = _finite(confidence_level, "confidence_level")
+    if not 0.0 < confidence < 1.0:
+        raise InternalMetricError("confidence_level must be in (0,1)")
+    if successes == trials:
+        return 1.0
+    tail_probability = 1.0 - confidence
+    lower = successes / trials
+    upper = 1.0
+    for _ in range(80):
+        midpoint = (lower + upper) / 2.0
+        if _binomial_cdf(successes, trials, midpoint) > tail_probability:
+            lower = midpoint
+        else:
+            upper = midpoint
+    return upper
+
+
+@dataclass(frozen=True, slots=True)
+class MetricRegistry:
+    schema_version: str
+    registry_version: str
+    analysis_unit: str
+    forbidden_split: str
+    metric_ids: tuple[str, ...]
+    registry_digest: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if (
+            self.schema_version != "ceg_wm_internal_execution_components_v1"
+            or self.registry_version != "ceg_wm_internal_metric_registry_v1"
+            or self.analysis_unit
+            != "analysis_unit_identity_case_id_source_cluster_id"
+            or self.forbidden_split != FORBIDDEN_SPLIT
+            or self.metric_ids
+            != (
+                "fixed_fpr_detection",
+                "wrong_key_attribution",
+                "matched_budget_quality",
+                "routing_gain_non_degradation",
+                "lf_hf_complementarity",
+                "transform_error",
+                "reliability_accept_reject",
+                "rectification_same_detector_delta",
+                "rescue_global_fpr_safety",
+            )
+        ):
+            raise InternalMetricError("metric registry semantics drifted")
+        object.__setattr__(
+            self,
+            "registry_digest",
+            _canonical_digest(
+                {
+                    "analysis_unit": self.analysis_unit,
+                    "forbidden_split": self.forbidden_split,
+                    "metric_ids": list(self.metric_ids),
+                    "registry_version": self.registry_version,
+                    "schema_version": self.schema_version,
+                }
+            ),
+        )
+
+
+def load_metric_registry(
+    path: str | Path = DEFAULT_COMPONENT_CONFIG_PATH,
+) -> MetricRegistry:
+    with Path(path).open("r", encoding="utf-8") as handle:
+        document = json.load(handle)
+    if type(document) is not dict or set(document) != {
+        "attack_registry",
+        "method_adapter",
+        "metric_registry",
+        "schema_version",
+    }:
+        raise InternalMetricError(
+            "execution component configuration fields drifted"
+        )
+    raw = document.get("metric_registry")
+    if type(raw) is not dict or set(raw) != {
+        "analysis_unit",
+        "forbidden_split",
+        "metric_ids",
+        "registry_version",
+    }:
+        raise InternalMetricError("metric_registry configuration missing")
+    try:
+        return MetricRegistry(
+            schema_version=document["schema_version"],
+            registry_version=raw["registry_version"],
+            analysis_unit=raw["analysis_unit"],
+            forbidden_split=raw["forbidden_split"],
+            metric_ids=tuple(raw["metric_ids"]),
+        )
+    except (KeyError, TypeError) as exc:
+        raise InternalMetricError("metric registry is incomplete") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionMetricCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    detector_identity: str
+    key_role: str
+    score: float
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        _require_nonempty_identity(self.detector_identity, "detector_identity")
+        if self.key_role not in DETECTION_KEY_ROLES:
+            raise InternalMetricError("detection key_role is invalid")
+        object.__setattr__(self, "score", _finite(self.score, "detection score"))
+
+
+@dataclass(frozen=True, slots=True)
+class FixedFprThresholdResult:
+    detector_identity: str
+    target_fpr: float
+    threshold: float
+    false_positive_count: int
+    primary_null_count: int
+    empirical_fpr: float
+    fpr_upper_confidence_bound: float
+    confidence_level: float
+    source_cluster_digest: str
+    threshold_identity: str
+    metric_registry_digest: str
+
+
+def fit_fixed_fpr_threshold(
+    primary_null_cases: Sequence[DetectionMetricCase],
+    *,
+    target_fpr: float,
+    registry: MetricRegistry,
+) -> FixedFprThresholdResult:
+    """Fit the lowest finite threshold meeting the calibration null FPR."""
+
+    _require_cases(primary_null_cases)
+    if type(registry) is not MetricRegistry:
+        raise InternalMetricError("registry must be MetricRegistry")
+    alpha = _finite(target_fpr, "target_fpr")
+    if not 0.0 < alpha < 1.0:
+        raise InternalMetricError("target_fpr must be in (0,1)")
+    if any(type(case) is not DetectionMetricCase for case in primary_null_cases):
+        raise InternalMetricError("threshold inputs must be DetectionMetricCase")
+    _ensure_unique_units(primary_null_cases)
+    if any(
+        case.split != "content_threshold_fit"
+        or case.key_role != "unwatermarked_primary_null"
+        for case in primary_null_cases
+    ):
+        raise InternalMetricError(
+            "threshold fitting requires content_threshold_fit primary nulls"
+        )
+    detector_identities = {case.detector_identity for case in primary_null_cases}
+    if len(detector_identities) != 1:
+        raise InternalMetricError("threshold detector identity mismatch")
+    scores = tuple(case.score for case in primary_null_cases)
+    candidates = {
+        nextafter(max(scores), float("inf")),
+        *scores,
+    }
+    eligible = []
+    for candidate in candidates:
+        false_positives = sum(score >= candidate for score in scores)
+        empirical_fpr = false_positives / len(scores)
+        if empirical_fpr <= alpha and isfinite(candidate):
+            eligible.append((candidate, false_positives, empirical_fpr))
+    if not eligible:
+        raise InternalMetricError("no finite fixed-FPR threshold is available")
+    threshold, false_positive_count, empirical_fpr = min(
+        eligible,
+        key=lambda item: item[0],
+    )
+    cluster_ids = sorted(
+        case.analysis_unit_identity.source_cluster_id
+        for case in primary_null_cases
+    )
+    cluster_digest = _canonical_digest(cluster_ids)
+    detector_identity = next(iter(detector_identities))
+    threshold_identity = _canonical_digest(
+        {
+            "detector_identity": detector_identity,
+            "metric_registry_digest": registry.registry_digest,
+            "source_cluster_digest": cluster_digest,
+            "target_fpr": alpha.hex(),
+            "threshold": threshold.hex(),
+        }
+    )
+    return FixedFprThresholdResult(
+        detector_identity=detector_identity,
+        target_fpr=alpha,
+        threshold=threshold,
+        false_positive_count=false_positive_count,
+        primary_null_count=len(scores),
+        empirical_fpr=empirical_fpr,
+        fpr_upper_confidence_bound=_binomial_upper_confidence_bound(
+            false_positive_count,
+            len(scores),
+        ),
+        confidence_level=0.95,
+        source_cluster_digest=cluster_digest,
+        threshold_identity=threshold_identity,
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionCaseDecision:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    key_role: str
+    score: float
+    positive: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionAggregate:
+    decisions: tuple[DetectionCaseDecision, ...]
+    registered_tpr: float
+    primary_null_fpr: float
+    primary_null_fpr_upper_confidence_bound: float
+    confidence_level: float
+    wrong_key_positive_rate: float
+    registered_positive_count: int
+    primary_null_count: int
+    wrong_key_count: int
+    threshold_identity: str
+    metric_registry_digest: str
+
+
+def evaluate_detection_at_threshold(
+    cases: Sequence[DetectionMetricCase],
+    threshold: FixedFprThresholdResult,
+    *,
+    registry: MetricRegistry,
+) -> DetectionAggregate:
+    _require_cases(cases)
+    if (
+        type(threshold) is not FixedFprThresholdResult
+        or type(registry) is not MetricRegistry
+    ):
+        raise InternalMetricError("detection evaluation identities are invalid")
+    if threshold.metric_registry_digest != registry.registry_digest:
+        raise InternalMetricError("threshold metric registry identity mismatch")
+    if any(type(case) is not DetectionMetricCase for case in cases):
+        raise InternalMetricError("evaluation inputs must be DetectionMetricCase")
+    _ensure_unique_units(cases)
+    if any(case.detector_identity != threshold.detector_identity for case in cases):
+        raise InternalMetricError("evaluation detector identity mismatch")
+    grouped = {
+        role: [case for case in cases if case.key_role == role]
+        for role in DETECTION_KEY_ROLES
+    }
+    if any(not grouped[role] for role in DETECTION_KEY_ROLES):
+        raise InternalMetricError("detection evaluation requires all three key roles")
+    decisions = tuple(
+        DetectionCaseDecision(
+            unit_id=case.analysis_unit_identity.unit_id,
+            case_id=case.analysis_unit_identity.case_id,
+            source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+            key_role=case.key_role,
+            score=case.score,
+            positive=case.score >= threshold.threshold,
+        )
+        for case in cases
+    )
+    rates = {}
+    for role, role_cases in grouped.items():
+        rates[role] = (
+            sum(case.score >= threshold.threshold for case in role_cases)
+            / len(role_cases)
+        )
+    return DetectionAggregate(
+        decisions=decisions,
+        registered_tpr=rates["registered_positive"],
+        primary_null_fpr=rates["unwatermarked_primary_null"],
+        primary_null_fpr_upper_confidence_bound=(
+            _binomial_upper_confidence_bound(
+                sum(
+                    case.score >= threshold.threshold
+                    for case in grouped["unwatermarked_primary_null"]
+                ),
+                len(grouped["unwatermarked_primary_null"]),
+            )
+        ),
+        confidence_level=threshold.confidence_level,
+        wrong_key_positive_rate=rates["wrong_key"],
+        registered_positive_count=len(grouped["registered_positive"]),
+        primary_null_count=len(grouped["unwatermarked_primary_null"]),
+        wrong_key_count=len(grouped["wrong_key"]),
+        threshold_identity=threshold.threshold_identity,
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class QualityMetricCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    condition_identity: str
+    budget_identity: str
+    reference_values: tuple[float, ...]
+    candidate_values: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        _require_nonempty_identity(self.condition_identity, "condition_identity")
+        _require_nonempty_identity(self.budget_identity, "budget_identity")
+        if not self.reference_values or len(self.reference_values) != len(
+            self.candidate_values
+        ):
+            raise InternalMetricError(
+                "quality vectors must be non-empty and shape matched"
+            )
+        reference = tuple(
+            _finite(value, "quality reference value")
+            for value in self.reference_values
+        )
+        candidate = tuple(
+            _finite(value, "quality candidate value")
+            for value in self.candidate_values
+        )
+        object.__setattr__(self, "reference_values", reference)
+        object.__setattr__(self, "candidate_values", candidate)
+
+
+@dataclass(frozen=True, slots=True)
+class QualityCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    condition_identity: str
+    budget_identity: str
+    relative_l2: float
+    mean_squared_error: float
+
+
+def compute_quality_case(case: QualityMetricCase) -> QualityCaseResult:
+    if type(case) is not QualityMetricCase:
+        raise InternalMetricError("quality input must be QualityMetricCase")
+    differences = tuple(
+        candidate - reference
+        for reference, candidate in zip(
+            case.reference_values,
+            case.candidate_values,
+            strict=True,
+        )
+    )
+    reference_norm = sqrt(sum(value * value for value in case.reference_values))
+    if reference_norm == 0.0:
+        raise InternalMetricError("quality relative L2 reference has zero norm")
+    difference_norm = sqrt(sum(value * value for value in differences))
+    relative_l2 = difference_norm / reference_norm
+    mse = sum(value * value for value in differences) / len(differences)
+    if not isfinite(relative_l2) or not isfinite(mse):
+        raise InternalMetricError("quality result is non-finite")
+    return QualityCaseResult(
+        unit_id=case.analysis_unit_identity.unit_id,
+        case_id=case.analysis_unit_identity.case_id,
+        source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+        condition_identity=case.condition_identity,
+        budget_identity=case.budget_identity,
+        relative_l2=relative_l2,
+        mean_squared_error=mse,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MatchedBudgetQualityAggregate:
+    cases: tuple[QualityCaseResult, ...]
+    mean_relative_l2: float
+    mean_squared_error: float
+    budget_identity: str
+    metric_registry_digest: str
+
+
+def aggregate_matched_budget_quality(
+    cases: Sequence[QualityMetricCase],
+    *,
+    registry: MetricRegistry,
+) -> MatchedBudgetQualityAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry:
+        raise InternalMetricError("registry must be MetricRegistry")
+    if any(type(case) is not QualityMetricCase for case in cases):
+        raise InternalMetricError("quality cases have invalid types")
+    _ensure_unique_units(cases)
+    budget_identities = {case.budget_identity for case in cases}
+    if len(budget_identities) != 1:
+        raise InternalMetricError("matched-budget aggregation identity mismatch")
+    results = tuple(compute_quality_case(case) for case in cases)
+    return MatchedBudgetQualityAggregate(
+        cases=results,
+        mean_relative_l2=sum(case.relative_l2 for case in results) / len(results),
+        mean_squared_error=(
+            sum(case.mean_squared_error for case in results) / len(results)
+        ),
+        budget_identity=next(iter(budget_identities)),
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingPairCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    routed_positive: bool
+    uniform_control_positive: bool
+    routed_quality_mse: float
+    uniform_control_quality_mse: float
+    routed_budget_identity: str
+    uniform_control_budget_identity: str
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        if type(self.routed_positive) is not bool or type(
+            self.uniform_control_positive
+        ) is not bool:
+            raise InternalMetricError("routing decisions must be boolean")
+        object.__setattr__(
+            self,
+            "routed_quality_mse",
+            _finite(self.routed_quality_mse, "routed quality MSE"),
+        )
+        object.__setattr__(
+            self,
+            "uniform_control_quality_mse",
+            _finite(
+                self.uniform_control_quality_mse,
+                "uniform-control quality MSE",
+            ),
+        )
+        if (
+            self.routed_budget_identity != self.uniform_control_budget_identity
+            or not self.routed_budget_identity
+        ):
+            raise InternalMetricError("routing pair is not matched-budget")
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingGainAggregate:
+    cases: tuple[RoutingCaseResult, ...]
+    per_case_detection_gain: tuple[int, ...]
+    per_case_quality_non_degradation: tuple[float, ...]
+    mean_detection_gain: float
+    mean_quality_non_degradation: float
+    metric_registry_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    detection_gain: int
+    quality_non_degradation: float
+
+
+def aggregate_routing_gain(
+    cases: Sequence[RoutingPairCase],
+    *,
+    registry: MetricRegistry,
+) -> RoutingGainAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry or any(
+        type(case) is not RoutingPairCase for case in cases
+    ):
+        raise InternalMetricError("routing aggregation inputs are invalid")
+    _ensure_unique_units(cases)
+    results = tuple(
+        RoutingCaseResult(
+            unit_id=case.analysis_unit_identity.unit_id,
+            case_id=case.analysis_unit_identity.case_id,
+            source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+            detection_gain=(
+                int(case.routed_positive)
+                - int(case.uniform_control_positive)
+            ),
+            quality_non_degradation=(
+                case.uniform_control_quality_mse
+                - case.routed_quality_mse
+            ),
+        )
+        for case in cases
+    )
+    detection = tuple(case.detection_gain for case in results)
+    quality = tuple(case.quality_non_degradation for case in results)
+    return RoutingGainAggregate(
+        cases=results,
+        per_case_detection_gain=detection,
+        per_case_quality_non_degradation=quality,
+        mean_detection_gain=sum(detection) / len(detection),
+        mean_quality_non_degradation=sum(quality) / len(quality),
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class BranchOutcomeCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    key_role: str
+    hf_positive: bool
+    lf_positive: bool
+    combined_positive: bool
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        if self.key_role not in {"registered_positive", "wrong_key"}:
+            raise InternalMetricError("branch outcome key_role is invalid")
+        if any(
+            type(value) is not bool
+            for value in (
+                self.hf_positive,
+                self.lf_positive,
+                self.combined_positive,
+            )
+        ):
+            raise InternalMetricError("branch outcomes must be boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class BranchComplementarityAggregate:
+    cases: tuple[BranchCaseResult, ...]
+    registered_count: int
+    wrong_key_count: int
+    lf_complements_hf_count: int
+    combined_gain_over_hf_count: int
+    combined_regression_from_hf_count: int
+    wrong_key_combined_positive_rate: float
+    metric_registry_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class BranchCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    key_role: str
+    hf_positive: bool
+    lf_positive: bool
+    combined_positive: bool
+    lf_complements_hf: bool
+    combined_gain_over_hf: bool
+    combined_regression_from_hf: bool
+
+
+def aggregate_branch_complementarity(
+    cases: Sequence[BranchOutcomeCase],
+    *,
+    registry: MetricRegistry,
+) -> BranchComplementarityAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry or any(
+        type(case) is not BranchOutcomeCase for case in cases
+    ):
+        raise InternalMetricError("branch aggregation inputs are invalid")
+    _ensure_unique_units(cases)
+    registered = [
+        case for case in cases if case.key_role == "registered_positive"
+    ]
+    wrong = [case for case in cases if case.key_role == "wrong_key"]
+    if not registered or not wrong:
+        raise InternalMetricError(
+            "branch complementarity requires registered and wrong-key cases"
+        )
+    results = tuple(
+        BranchCaseResult(
+            unit_id=case.analysis_unit_identity.unit_id,
+            case_id=case.analysis_unit_identity.case_id,
+            source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+            key_role=case.key_role,
+            hf_positive=case.hf_positive,
+            lf_positive=case.lf_positive,
+            combined_positive=case.combined_positive,
+            lf_complements_hf=(
+                case.key_role == "registered_positive"
+                and not case.hf_positive
+                and case.lf_positive
+            ),
+            combined_gain_over_hf=(
+                case.key_role == "registered_positive"
+                and not case.hf_positive
+                and case.combined_positive
+            ),
+            combined_regression_from_hf=(
+                case.key_role == "registered_positive"
+                and case.hf_positive
+                and not case.combined_positive
+            ),
+        )
+        for case in cases
+    )
+    return BranchComplementarityAggregate(
+        cases=results,
+        registered_count=len(registered),
+        wrong_key_count=len(wrong),
+        lf_complements_hf_count=sum(
+            not case.hf_positive and case.lf_positive for case in registered
+        ),
+        combined_gain_over_hf_count=sum(
+            not case.hf_positive and case.combined_positive
+            for case in registered
+        ),
+        combined_regression_from_hf_count=sum(
+            case.hf_positive and not case.combined_positive
+            for case in registered
+        ),
+        wrong_key_combined_positive_rate=(
+            sum(case.combined_positive for case in wrong) / len(wrong)
+        ),
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TransformMetricCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    expected_rotation_degrees: float
+    estimated_rotation_degrees: float
+    expected_scale: float
+    estimated_scale: float
+    expected_translation_x: float
+    estimated_translation_x: float
+    expected_translation_y: float
+    estimated_translation_y: float
+    coverage: float
+    mean_residual: float
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        for name in (
+            "expected_rotation_degrees",
+            "estimated_rotation_degrees",
+            "expected_scale",
+            "estimated_scale",
+            "expected_translation_x",
+            "estimated_translation_x",
+            "expected_translation_y",
+            "estimated_translation_y",
+            "coverage",
+            "mean_residual",
+        ):
+            object.__setattr__(self, name, _finite(getattr(self, name), name))
+        if self.expected_scale <= 0.0 or self.estimated_scale <= 0.0:
+            raise InternalMetricError("transform scales must be positive")
+        if not 0.0 <= self.coverage <= 1.0 or self.mean_residual < 0.0:
+            raise InternalMetricError("transform coverage or residual is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class TransformCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    rotation_absolute_error: float
+    scale_absolute_error: float
+    translation_euclidean_error: float
+    coverage: float
+    mean_residual: float
+
+
+@dataclass(frozen=True, slots=True)
+class TransformErrorAggregate:
+    cases: tuple[TransformCaseResult, ...]
+    mean_rotation_absolute_error: float
+    mean_scale_absolute_error: float
+    mean_translation_euclidean_error: float
+    mean_coverage: float
+    mean_residual: float
+    metric_registry_digest: str
+
+
+def aggregate_transform_error(
+    cases: Sequence[TransformMetricCase],
+    *,
+    registry: MetricRegistry,
+) -> TransformErrorAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry or any(
+        type(case) is not TransformMetricCase for case in cases
+    ):
+        raise InternalMetricError("transform aggregation inputs are invalid")
+    _ensure_unique_units(cases)
+    results = []
+    for case in cases:
+        rotation_delta = (
+            (case.estimated_rotation_degrees - case.expected_rotation_degrees + 180.0)
+            % 360.0
+        ) - 180.0
+        results.append(
+            TransformCaseResult(
+                unit_id=case.analysis_unit_identity.unit_id,
+                case_id=case.analysis_unit_identity.case_id,
+                source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+                rotation_absolute_error=abs(rotation_delta),
+                scale_absolute_error=abs(
+                    case.estimated_scale - case.expected_scale
+                ),
+                translation_euclidean_error=sqrt(
+                    (
+                        case.estimated_translation_x
+                        - case.expected_translation_x
+                    )
+                    ** 2
+                    + (
+                        case.estimated_translation_y
+                        - case.expected_translation_y
+                    )
+                    ** 2
+                ),
+                coverage=case.coverage,
+                mean_residual=case.mean_residual,
+            )
+        )
+    result_tuple = tuple(results)
+    count = len(result_tuple)
+    return TransformErrorAggregate(
+        cases=result_tuple,
+        mean_rotation_absolute_error=sum(
+            case.rotation_absolute_error for case in result_tuple
+        )
+        / count,
+        mean_scale_absolute_error=sum(
+            case.scale_absolute_error for case in result_tuple
+        )
+        / count,
+        mean_translation_euclidean_error=sum(
+            case.translation_euclidean_error for case in result_tuple
+        )
+        / count,
+        mean_coverage=sum(case.coverage for case in result_tuple) / count,
+        mean_residual=sum(case.mean_residual for case in result_tuple) / count,
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ReliabilityMetricCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    expected_recoverable: bool
+    reliable: bool
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        if type(self.expected_recoverable) is not bool or type(
+            self.reliable
+        ) is not bool:
+            raise InternalMetricError("reliability labels must be boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class ReliabilityAggregate:
+    cases: tuple[ReliabilityCaseResult, ...]
+    recoverable_accept_rate: float
+    unrecoverable_reject_rate: float
+    false_reliable_rate: float
+    recoverable_count: int
+    unrecoverable_count: int
+    metric_registry_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReliabilityCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    expected_recoverable: bool
+    reliable: bool
+
+
+def aggregate_reliability(
+    cases: Sequence[ReliabilityMetricCase],
+    *,
+    registry: MetricRegistry,
+) -> ReliabilityAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry or any(
+        type(case) is not ReliabilityMetricCase for case in cases
+    ):
+        raise InternalMetricError("reliability aggregation inputs are invalid")
+    _ensure_unique_units(cases)
+    recoverable = [case for case in cases if case.expected_recoverable]
+    unrecoverable = [case for case in cases if not case.expected_recoverable]
+    if not recoverable or not unrecoverable:
+        raise InternalMetricError(
+            "reliability aggregation requires both expected classes"
+        )
+    accept_rate = sum(case.reliable for case in recoverable) / len(recoverable)
+    false_reliable = sum(case.reliable for case in unrecoverable) / len(
+        unrecoverable
+    )
+    results = tuple(
+        ReliabilityCaseResult(
+            unit_id=case.analysis_unit_identity.unit_id,
+            case_id=case.analysis_unit_identity.case_id,
+            source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+            expected_recoverable=case.expected_recoverable,
+            reliable=case.reliable,
+        )
+        for case in cases
+    )
+    return ReliabilityAggregate(
+        cases=results,
+        recoverable_accept_rate=accept_rate,
+        unrecoverable_reject_rate=1.0 - false_reliable,
+        false_reliable_rate=false_reliable,
+        recoverable_count=len(recoverable),
+        unrecoverable_count=len(unrecoverable),
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RectificationMetricCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    raw_detector_identity: str
+    rectified_detector_identity: str
+    raw_threshold_identity: str
+    rectified_threshold_identity: str
+    raw_score: float
+    rectified_score: float
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        for name in (
+            "raw_detector_identity",
+            "rectified_detector_identity",
+            "raw_threshold_identity",
+            "rectified_threshold_identity",
+        ):
+            _require_nonempty_identity(getattr(self, name), name)
+        if self.raw_detector_identity != self.rectified_detector_identity:
+            raise InternalMetricError("rectification detector identity mismatch")
+        if self.raw_threshold_identity != self.rectified_threshold_identity:
+            raise InternalMetricError("rectification threshold identity mismatch")
+        object.__setattr__(self, "raw_score", _finite(self.raw_score, "raw_score"))
+        object.__setattr__(
+            self,
+            "rectified_score",
+            _finite(self.rectified_score, "rectified_score"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RectificationDeltaAggregate:
+    cases: tuple[RectificationCaseResult, ...]
+    per_case_score_delta: tuple[float, ...]
+    mean_score_delta: float
+    improved_fraction: float
+    detector_identity: str
+    threshold_identity: str
+    metric_registry_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class RectificationCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    score_delta: float
+
+
+def aggregate_rectification_delta(
+    cases: Sequence[RectificationMetricCase],
+    *,
+    registry: MetricRegistry,
+) -> RectificationDeltaAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry or any(
+        type(case) is not RectificationMetricCase for case in cases
+    ):
+        raise InternalMetricError("rectification aggregation inputs are invalid")
+    _ensure_unique_units(cases)
+    detector_identities = {case.raw_detector_identity for case in cases}
+    threshold_identities = {case.raw_threshold_identity for case in cases}
+    if len(detector_identities) != 1 or len(threshold_identities) != 1:
+        raise InternalMetricError(
+            "rectification aggregate identity mismatch across cases"
+        )
+    results = tuple(
+        RectificationCaseResult(
+            unit_id=case.analysis_unit_identity.unit_id,
+            case_id=case.analysis_unit_identity.case_id,
+            source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+            score_delta=case.rectified_score - case.raw_score,
+        )
+        for case in cases
+    )
+    deltas = tuple(case.score_delta for case in results)
+    return RectificationDeltaAggregate(
+        cases=results,
+        per_case_score_delta=deltas,
+        mean_score_delta=sum(deltas) / len(deltas),
+        improved_fraction=sum(delta > 0.0 for delta in deltas) / len(deltas),
+        detector_identity=next(iter(detector_identities)),
+        threshold_identity=next(iter(threshold_identities)),
+        metric_registry_digest=registry.registry_digest,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RescueSafetyCase:
+    analysis_unit_identity: AnalysisUnitIdentity
+    split: str
+    raw_detector_identity: str
+    rectified_detector_identity: str
+    raw_threshold_identity: str
+    rectified_threshold_identity: str
+    raw_positive: bool
+    rescue_triggered: bool
+    rectified_positive: bool
+
+    def __post_init__(self) -> None:
+        _validate_case_identity(self.analysis_unit_identity, self.split)
+        for name in (
+            "raw_detector_identity",
+            "rectified_detector_identity",
+            "raw_threshold_identity",
+            "rectified_threshold_identity",
+        ):
+            _require_nonempty_identity(getattr(self, name), name)
+        if self.raw_detector_identity != self.rectified_detector_identity:
+            raise InternalMetricError("rescue detector identity mismatch")
+        if self.raw_threshold_identity != self.rectified_threshold_identity:
+            raise InternalMetricError("rescue threshold identity mismatch")
+        if any(
+            type(value) is not bool
+            for value in (
+                self.raw_positive,
+                self.rescue_triggered,
+                self.rectified_positive,
+            )
+        ):
+            raise InternalMetricError("rescue decisions must be boolean")
+        if self.rectified_positive and not self.rescue_triggered:
+            raise InternalMetricError(
+                "rectified positive requires an actual rescue trigger"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class RescueSafetyAggregate:
+    cases: tuple[RescueSafetyCaseResult, ...]
+    raw_fpr: float
+    rescue_additional_fpr: float
+    global_fpr: float
+    global_fpr_upper_confidence_bound: float
+    confidence_level: float
+    target_fpr: float
+    global_fpr_within_target: bool
+    primary_null_count: int
+    detector_identity: str
+    threshold_identity: str
+    metric_registry_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class RescueSafetyCaseResult:
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    raw_false_positive: bool
+    rescue_additional_false_positive: bool
+    global_false_positive: bool
+
+
+def aggregate_rescue_fpr_safety(
+    cases: Sequence[RescueSafetyCase],
+    *,
+    target_fpr: float,
+    registry: MetricRegistry,
+) -> RescueSafetyAggregate:
+    _require_cases(cases)
+    if type(registry) is not MetricRegistry or any(
+        type(case) is not RescueSafetyCase for case in cases
+    ):
+        raise InternalMetricError("rescue aggregation inputs are invalid")
+    _ensure_unique_units(cases)
+    alpha = _finite(target_fpr, "target_fpr")
+    if not 0.0 < alpha < 1.0:
+        raise InternalMetricError("target_fpr must be in (0,1)")
+    detector_identities = {case.raw_detector_identity for case in cases}
+    threshold_identities = {case.raw_threshold_identity for case in cases}
+    if len(detector_identities) != 1 or len(threshold_identities) != 1:
+        raise InternalMetricError("rescue aggregate identity mismatch")
+    count = len(cases)
+    raw_false_positives = sum(case.raw_positive for case in cases)
+    rescue_false_positives = sum(
+        not case.raw_positive
+        and case.rescue_triggered
+        and case.rectified_positive
+        for case in cases
+    )
+    global_false_positives = raw_false_positives + rescue_false_positives
+    global_fpr = global_false_positives / count
+    results = tuple(
+        RescueSafetyCaseResult(
+            unit_id=case.analysis_unit_identity.unit_id,
+            case_id=case.analysis_unit_identity.case_id,
+            source_cluster_id=case.analysis_unit_identity.source_cluster_id,
+            raw_false_positive=case.raw_positive,
+            rescue_additional_false_positive=(
+                not case.raw_positive
+                and case.rescue_triggered
+                and case.rectified_positive
+            ),
+            global_false_positive=(
+                case.raw_positive
+                or (
+                    case.rescue_triggered
+                    and case.rectified_positive
+                )
+            ),
+        )
+        for case in cases
+    )
+    global_upper_bound = _binomial_upper_confidence_bound(
+        global_false_positives,
+        count,
+    )
+    return RescueSafetyAggregate(
+        cases=results,
+        raw_fpr=raw_false_positives / count,
+        rescue_additional_fpr=rescue_false_positives / count,
+        global_fpr=global_fpr,
+        global_fpr_upper_confidence_bound=global_upper_bound,
+        confidence_level=0.95,
+        target_fpr=alpha,
+        global_fpr_within_target=(
+            global_fpr <= alpha and global_upper_bound <= alpha
+        ),
+        primary_null_count=count,
+        detector_identity=next(iter(detector_identities)),
+        threshold_identity=next(iter(threshold_identities)),
+        metric_registry_digest=registry.registry_digest,
+    )

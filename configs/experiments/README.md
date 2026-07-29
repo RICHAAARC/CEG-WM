@@ -14,3 +14,15 @@ scientific claim boundary）；正式 collection validator 只接受精确冻结
 作为 protocol/manifest trust anchors，不接受 duck object 或 subclass。
 它显式禁止当前执行访问 `held_out_evaluation`（最终 held-out 职责）。该配置与 CPU schema tests
 不构成 calibration、正式运行或科学有效性证据。
+
+`internal_execution_components.json` 冻结 A-2 内部执行组件 registry：
+
+- 项目方法薄适配器及 13 个实际公开调用职责；
+- identity/crop/scale/rotation/组合攻击、参数边界、插值、padding、量化与尺寸策略；
+- fixed-FPR、wrong-key、质量、routing、LF/HF、几何、可靠性、回正与 rescue 指标集合；
+- 指标的 `AnalysisUnitIdentity`/case/source-cluster 分析单位和
+  `held_out_evaluation` 禁止访问。
+
+三个 loader 都拒绝未登记配置键，并分别重算 adapter、attack 和 metric registry
+摘要。该配置不包含固定 LF/HF 权重，不授权 runner、Notebook、GPU、baseline 或
+held-out 执行。

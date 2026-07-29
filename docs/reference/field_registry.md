@@ -509,6 +509,144 @@ Notebook 与 repository module 的跨边界数据
 | input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
 | attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |
 
+## A-2 内部执行组件字段
+
+以下字段属于 `internal_execution_components.json` 及 methods、attacks、metrics
+公开 dataclass 表面。它们只支持内部组件执行与分析；进入 governed records 时仍须
+由 runner 显式映射到已冻结 record schema，不能直接支撑科学 claim。
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| schema_version | persisted_protocol | protocol | none | false | false | false | A-2 内部执行组件 JSON 的冻结 schema 身份。 |
+| registry_version | persisted_protocol | protocol | none | false | false | false | method、attack 或 metric registry 的冻结版本身份。 |
+| method_adapter | persisted_protocol | method_identity | none | false | false | false | 方法薄适配器配置段。 |
+| attack_registry | persisted_protocol | protocol | none | false | false | false | 几何攻击 registry 配置段。 |
+| metric_registry | persisted_protocol | protocol | none | false | false | false | 内部指标 registry 配置段。 |
+| adapter_id | persisted_protocol | method_identity | none | false | false | false | CEG-WM 内部实验适配器身份。 |
+| adapter_version | persisted_protocol | method_identity | none | false | false | false | CEG-WM 内部实验适配器版本。 |
+| component_bindings | persisted_protocol | method_identity | none | false | false | false | 13 个方法职责到公开调用及结果身份字段的有序绑定。 |
+| key_schedule_operations | persisted_protocol | method_identity | none | false | false | false | 四种 key schedule 操作到实际公开调用的冻结有序绑定。 |
+| operation_id | persisted_protocol | method_identity | none | false | false | false | key schedule 操作在实验适配器中的稳定身份。 |
+| responsibility | cross_boundary | method_identity | none | false | false | false | 一次适配调用实际承担的冻结方法职责。 |
+| public_callable | persisted_protocol | method_identity | none | false | false | false | 方法职责委托的公开 Python 调用身份。 |
+| result_identity_field | persisted_protocol | method_identity | none | false | false | false | 适配器从真实结果读取的不可空身份字段名。 |
+| adapter_config_digest | cross_boundary | provenance | none | false | false | false | 一次组件调用绑定的适配器配置摘要。 |
+| result_type | cross_boundary | provenance | none | false | false | false | 一次真实委托结果的完整 Python 类型身份。 |
+| result_identity | cross_boundary | provenance | none | false | false | false | 一次真实委托结果公开、不可空的身份值。 |
+| upstream_runtime_identity | cross_boundary | provenance | none | false | false | false | Q/K 同步调用所绑定的 runtime public observation 摘要。 |
+| result | cross_boundary | method_state | none | false | false | false | 薄适配器原样返回的真实 `main` 或 `runtime` 公开结果。 |
+| attack_ids | persisted_protocol | protocol | none | false | false | false | 几何攻击 registry 的冻结有序攻击身份集合。 |
+| attack_id | cross_boundary | protocol | none | false | false | false | 当前几何攻击或攻击结果身份。 |
+| image_interpolation | persisted_protocol | protocol | none | false | false | false | 攻击 registry 冻结的图像插值方式。 |
+| image_padding | persisted_protocol | protocol | none | false | false | false | 攻击 registry 冻结的越界 padding 方式。 |
+| align_corners | persisted_protocol | protocol | none | false | false | false | affine grid 与 sampling 是否使用对齐角点语义。 |
+| output_quantization | persisted_protocol | protocol | none | false | false | false | 攻击输出从浮点图像回到 RGB8 的冻结量化规则。 |
+| output_size_policy | persisted_protocol | protocol | none | false | false | false | 攻击输出空间尺寸策略。 |
+| parameter_bounds | persisted_protocol | protocol | none | false | false | false | crop、scale 与 rotation 参数边界配置段。 |
+| crop_fraction_bounds | cross_boundary | protocol | none | false | false | false | 攻击 registry 解析出的 crop fraction 上下界。 |
+| scale_factor_bounds | cross_boundary | protocol | none | false | false | false | 攻击 registry 解析出的 scale factor 上下界。 |
+| rotation_degrees_bounds | cross_boundary | protocol | none | false | false | false | 攻击 registry 解析出的 rotation degree 上下界。 |
+| registry_digest | cross_boundary | provenance | none | false | false | false | 当前 attack 或 metric registry 的稳定摘要。 |
+| attack_registry_digest | cross_boundary | provenance | none | false | false | false | 一次攻击结果绑定的攻击 registry 摘要。 |
+| crop_fraction | cross_boundary | protocol | none | false | false | false | output-to-input affine 使用的裁剪保留比例。 |
+| scale_factor | cross_boundary | protocol | none | false | false | false | output-to-input affine 使用的尺度因子。 |
+| rotation_degrees | cross_boundary | protocol | none | false | false | false | output-to-input affine 使用的旋转角度。 |
+| image | cross_boundary | artifact | none | false | false | false | 攻击组件消费或产生的 RGB8 `[1,3,H,W]` tensor。 |
+| image_digest | cross_boundary | provenance | none | false | false | false | RGB8 dtype、shape 和逐值字节的稳定摘要。 |
+| source_artifact_digest | cross_boundary | provenance | none | false | false | 攻击前源 RGB8 artifact 摘要。 |
+| attacked_artifact | cross_boundary | artifact | none | false | false | 保留分析单位身份的攻击后 RGB8 artifact。 |
+| output_to_input_matrix | cross_boundary | protocol | none | false | false | 攻击实际使用的二维 output-to-input affine 矩阵。 |
+| interpolation | cross_boundary | protocol | none | false | false | 单次攻击结果实际绑定的插值方式。 |
+| padding | cross_boundary | protocol | none | false | false | 单次攻击结果实际绑定的 padding 方式。 |
+| analysis_unit | persisted_protocol | protocol | none | false | false | false | metric registry 冻结的 unit/case/source-cluster 分析单位。 |
+| forbidden_split | persisted_protocol | protocol | none | false | false | false | metric 层明确拒绝访问的 split。 |
+| metric_ids | persisted_protocol | protocol | none | false | false | false | 内部 metric registry 的冻结有序指标身份集合。 |
+| metric_registry_digest | cross_boundary | provenance | none | false | false | false | 指标输入或结果绑定的 metric registry 摘要。 |
+| target_fpr | cross_boundary | method_statistic | none | false | false | false | fixed-FPR 或 rescue safety 使用的预登记目标假阳性率。 |
+| threshold | cross_boundary | method_statistic | none | false | false | false | primary-null calibration 得到的冻结内容分数阈值。 |
+| false_positive_count | cross_boundary | method_statistic | none | false | false | false | fixed-FPR threshold fit 中观察到的 primary-null 假阳性数量。 |
+| primary_null_count | cross_boundary | method_statistic | none | false | false | false | primary-null case 数量；wrong-key 不计入。 |
+| empirical_fpr | cross_boundary | method_statistic | none | false | false | false | threshold fit primary null 上的经验 FPR。 |
+| confidence_level | cross_boundary | protocol | none | false | false | false | FPR 单侧置信上界使用的冻结置信水平。 |
+| fpr_upper_confidence_bound | cross_boundary | method_statistic | none | false | false | false | threshold-fit FPR 的单侧 Clopper-Pearson 上界。 |
+| source_cluster_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 source-cluster 身份有序集合的摘要。 |
+| decisions | cross_boundary | method_statistic | none | false | false | false | fixed-threshold evaluation 的逐 case 检测决定集合。 |
+| positive | cross_boundary | method_statistic | none | false | false | false | 单个检测 case 是否达到冻结阈值。 |
+| registered_tpr | cross_boundary | method_statistic | none | false | false | false | registered-positive cases 的真阳性率。 |
+| registered_positive_count | cross_boundary | method_statistic | none | false | false | false | registered-positive case 数量。 |
+| primary_null_fpr | cross_boundary | method_statistic | none | false | false | false | evaluation primary-null cases 的经验 FPR。 |
+| primary_null_fpr_upper_confidence_bound | cross_boundary | method_statistic | none | false | false | false | evaluation primary-null FPR 的单侧 Clopper-Pearson 上界。 |
+| wrong_key_positive_rate | cross_boundary | method_statistic | none | false | false | false | 独立 wrong-key attribution null 的阳性率。 |
+| wrong_key_count | cross_boundary | method_statistic | none | false | false | false | wrong-key attribution case 数量。 |
+| condition_identity | cross_boundary | protocol | none | false | false | false | 图像质量 case 的实际方法或 control 条件身份。 |
+| budget_identity | cross_boundary | protocol | none | false | false | false | matched-budget 质量比较绑定的共同预算身份。 |
+| reference_values | cross_boundary | method_statistic | none | false | false | false | 质量度量 reference 向量。 |
+| candidate_values | cross_boundary | method_statistic | none | false | false | false | 质量度量 candidate 向量。 |
+| relative_l2 | cross_boundary | method_statistic | none | false | false | false | 单 case candidate-reference 相对 L2。 |
+| mean_relative_l2 | cross_boundary | method_statistic | none | false | false | false | matched-budget cases 的相对 L2 宏平均。 |
+| mean_squared_error | cross_boundary | method_statistic | none | false | false | false | 单 case 或 matched-budget cases 的均方误差。 |
+| cases | cross_boundary | method_statistic | none | false | false | false | 保留 unit、case、source-cluster 身份的逐 case 结果集合。 |
+| routed_positive | cross_boundary | method_statistic | none | false | false | false | routed 条件是否产生内容阳性。 |
+| uniform_control_positive | cross_boundary | method_statistic | none | false | false | false | matched uniform-control 条件是否产生内容阳性。 |
+| routed_quality_mse | cross_boundary | method_statistic | none | false | false | false | routed 条件的 matched-budget 质量 MSE。 |
+| uniform_control_quality_mse | cross_boundary | method_statistic | none | false | false | false | uniform-control 条件的 matched-budget 质量 MSE。 |
+| routed_budget_identity | cross_boundary | protocol | none | false | false | false | routed 条件绑定的预算身份。 |
+| uniform_control_budget_identity | cross_boundary | protocol | none | false | false | false | uniform-control 条件绑定的预算身份。 |
+| detection_gain | cross_boundary | method_statistic | none | false | false | false | 单 case routed 阳性相对 uniform-control 的差值。 |
+| quality_non_degradation | cross_boundary | method_statistic | none | false | false | false | 单 case uniform MSE 减 routed MSE；非负表示未劣化。 |
+| per_case_detection_gain | cross_boundary | method_statistic | none | false | false | false | routing cases 的 detection gain 有序集合。 |
+| per_case_quality_non_degradation | cross_boundary | method_statistic | none | false | false | false | routing cases 的 quality non-degradation 有序集合。 |
+| mean_detection_gain | cross_boundary | method_statistic | none | false | false | false | routing detection gain 宏平均。 |
+| mean_quality_non_degradation | cross_boundary | method_statistic | none | false | false | false | routing quality non-degradation 宏平均。 |
+| hf_positive | cross_boundary | method_statistic | none | false | false | false | 单 case HF 分支是否阳性。 |
+| lf_positive | cross_boundary | method_statistic | none | false | false | false | 单 case LF 分支是否阳性。 |
+| combined_positive | cross_boundary | method_statistic | none | false | false | false | 单 case 预登记组合判定是否阳性。 |
+| lf_complements_hf | cross_boundary | method_statistic | none | false | false | false | 单 registered case 是否 HF 阴性但 LF 阳性。 |
+| combined_gain_over_hf | cross_boundary | method_statistic | none | false | false | false | 单 registered case 是否组合相对 HF 增加阳性。 |
+| combined_regression_from_hf | cross_boundary | method_statistic | none | false | false | false | 单 registered case 是否组合丢失 HF 阳性。 |
+| registered_count | cross_boundary | method_statistic | none | false | false | false | LF/HF complementarity 中 registered cases 数量。 |
+| lf_complements_hf_count | cross_boundary | method_statistic | none | false | false | false | HF 阴性而 LF 阳性的 registered case 数量。 |
+| combined_gain_over_hf_count | cross_boundary | method_statistic | none | false | false | false | 组合相对 HF 新增阳性的 registered case 数量。 |
+| combined_regression_from_hf_count | cross_boundary | method_statistic | none | false | false | false | 组合相对 HF 丢失阳性的 registered case 数量。 |
+| wrong_key_combined_positive_rate | cross_boundary | method_statistic | none | false | false | false | wrong-key cases 上组合阳性率。 |
+| expected_rotation_degrees | cross_boundary | protocol | none | false | false | false | 攻击配置提供的预期旋转角。 |
+| estimated_rotation_degrees | cross_boundary | method_statistic | none | false | false | false | 几何估计器输出的旋转角。 |
+| expected_scale | cross_boundary | protocol | none | false | false | false | 攻击配置提供的预期尺度。 |
+| estimated_scale | cross_boundary | method_statistic | none | false | false | false | 几何估计器输出的尺度。 |
+| expected_translation_x | cross_boundary | protocol | none | false | false | false | 攻击配置提供的预期横向位移。 |
+| estimated_translation_x | cross_boundary | method_statistic | none | false | false | false | 几何估计器输出的横向位移。 |
+| expected_translation_y | cross_boundary | protocol | none | false | false | false | 攻击配置提供的预期纵向位移。 |
+| estimated_translation_y | cross_boundary | method_statistic | none | false | false | false | 几何估计器输出的纵向位移。 |
+| rotation_absolute_error | cross_boundary | method_statistic | none | false | false | false | 单 case wrap-aware 旋转绝对误差。 |
+| scale_absolute_error | cross_boundary | method_statistic | none | false | false | false | 单 case 尺度绝对误差。 |
+| translation_euclidean_error | cross_boundary | method_statistic | none | false | false | false | 单 case 二维位移欧氏误差。 |
+| mean_rotation_absolute_error | cross_boundary | method_statistic | none | false | false | false | 旋转绝对误差宏平均。 |
+| mean_scale_absolute_error | cross_boundary | method_statistic | none | false | false | false | 尺度绝对误差宏平均。 |
+| mean_translation_euclidean_error | cross_boundary | method_statistic | none | false | false | false | 位移欧氏误差宏平均。 |
+| mean_coverage | cross_boundary | method_statistic | none | false | false | false | 几何 estimation coverage 宏平均。 |
+| expected_recoverable | cross_boundary | protocol | none | false | false | false | reliability case 的预登记可恢复标签。 |
+| recoverable_accept_rate | cross_boundary | method_statistic | none | false | false | false | 预期可恢复 cases 被 reliability 接受的比例。 |
+| unrecoverable_reject_rate | cross_boundary | method_statistic | none | false | false | false | 预期不可恢复 cases 被 reliability 拒绝的比例。 |
+| false_reliable_rate | cross_boundary | method_statistic | none | false | false | false | 预期不可恢复 cases 被错误标为可靠的比例。 |
+| recoverable_count | cross_boundary | method_statistic | none | false | false | false | 预期可恢复 case 数量。 |
+| unrecoverable_count | cross_boundary | method_statistic | none | false | false | false | 预期不可恢复 case 数量。 |
+| rectified_score | cross_boundary | method_statistic | none | false | false | false | 同 detector/threshold 回正图内容分数。 |
+| score_delta | cross_boundary | method_statistic | none | false | false | false | 单 case rectified score 减 raw score。 |
+| per_case_score_delta | cross_boundary | method_statistic | none | false | false | false | rectification cases 的 score delta 有序集合。 |
+| mean_score_delta | cross_boundary | method_statistic | none | false | false | false | rectification score delta 宏平均。 |
+| improved_fraction | cross_boundary | method_statistic | none | false | false | false | rectified score 严格高于 raw score 的 case 比例。 |
+| raw_positive | cross_boundary | method_statistic | none | false | false | false | primary-null case 是否在 raw 路径假阳性。 |
+| rescue_triggered | cross_boundary | method_state | none | false | false | false | primary-null case 是否实际触发 rescue 路径。 |
+| rectified_positive | cross_boundary | method_statistic | none | false | false | false | 已触发 rescue 的回正重判是否阳性。 |
+| raw_false_positive | cross_boundary | method_statistic | none | false | false | false | 单 primary-null case 的 raw 假阳性标记。 |
+| rescue_additional_false_positive | cross_boundary | method_statistic | none | false | false | false | 单 case 由 rescue 新增的假阳性标记。 |
+| global_false_positive | cross_boundary | method_statistic | none | false | false | false | 单 case raw 或 rescue 联合路径假阳性标记。 |
+| raw_fpr | cross_boundary | method_statistic | none | false | false | false | primary null 上 raw 路径经验 FPR。 |
+| rescue_additional_fpr | cross_boundary | method_statistic | none | false | false | false | primary null 上 rescue 路径新增经验 FPR。 |
+| global_fpr | cross_boundary | method_statistic | none | false | false | false | primary null 上完整 raw+rescue 联合经验 FPR。 |
+| global_fpr_upper_confidence_bound | cross_boundary | method_statistic | none | false | false | false | 完整联合 FPR 的单侧 Clopper-Pearson 上界。 |
+| global_fpr_within_target | cross_boundary | method_statistic | none | false | false | false | 经验 global FPR 与单侧上界是否同时不超过 target。 |
+
 ## 通用记录、产物与 baseline 字段（续）
 
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |

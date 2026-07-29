@@ -1,0 +1,138 @@
+{
+  "attack_registry": {
+    "align_corners": true,
+    "attack_ids": [
+      "identity",
+      "crop",
+      "scale",
+      "rotation",
+      "crop_scale_rotation"
+    ],
+    "image_interpolation": "bilinear",
+    "image_padding": "zeros",
+    "output_quantization": "clamp_floor_uint8",
+    "output_size_policy": "preserve_source_size",
+    "parameter_bounds": {
+      "crop_fraction": [
+        0.45,
+        1.0
+      ],
+      "rotation_degrees": [
+        -32.0,
+        32.0
+      ],
+      "scale_factor": [
+        0.7071067811865476,
+        1.4142135623730951
+      ]
+    },
+    "registry_version": "ceg_wm_internal_attack_registry_v1"
+  },
+  "method_adapter": {
+    "adapter_id": "ceg_wm_internal_experiment_adapter",
+    "adapter_version": "1.0.0",
+    "component_bindings": [
+      {
+        "public_callable": "main.identify_root_key",
+        "responsibility": "key_schedule",
+        "result_identity_field": "config_digest"
+      },
+      {
+        "public_callable": "main.content_router",
+        "responsibility": "content_router",
+        "result_identity_field": "route_identity"
+      },
+      {
+        "public_callable": "main.lf_carrier",
+        "responsibility": "lf_carrier",
+        "result_identity_field": "carrier_config_digest"
+      },
+      {
+        "public_callable": "main.hf_carrier",
+        "responsibility": "hf_carrier",
+        "result_identity_field": "carrier_config_digest"
+      },
+      {
+        "public_callable": "main.content_embedder",
+        "responsibility": "content_embedder",
+        "result_identity_field": "embedding_result_identity"
+      },
+      {
+        "public_callable": "main.lf_detector",
+        "responsibility": "lf_detector",
+        "result_identity_field": "detector_identity"
+      },
+      {
+        "public_callable": "main.hf_detector",
+        "responsibility": "hf_detector",
+        "result_identity_field": "detector_identity"
+      },
+      {
+        "public_callable": "main.content_detector",
+        "responsibility": "content_detector",
+        "result_identity_field": "detector_identity"
+      },
+      {
+        "public_callable": "runtime.Sd35RuntimeAdapter.observe_detection_qk -> main.qk_geometry_sync",
+        "responsibility": "qk_geometry_sync",
+        "result_identity_field": "geometry_config_digest"
+      },
+      {
+        "public_callable": "main.geometric_transform_estimator",
+        "responsibility": "geometric_transform_estimator",
+        "result_identity_field": "estimation_identity_digest"
+      },
+      {
+        "public_callable": "main.geometry_reliability",
+        "responsibility": "geometry_reliability",
+        "result_identity_field": "reliability_identity_digest"
+      },
+      {
+        "public_callable": "main.image_rectifier",
+        "responsibility": "image_rectifier",
+        "result_identity_field": "rectified_image_digest"
+      },
+      {
+        "public_callable": "main.conditional_recovery_decision",
+        "responsibility": "conditional_recovery_decision",
+        "result_identity_field": "decision_identity_digest"
+      }
+    ],
+    "key_schedule_operations": [
+      {
+        "operation_id": "identify_key",
+        "public_callable": "main.identify_root_key"
+      },
+      {
+        "operation_id": "derive_registered_key_stream",
+        "public_callable": "main.key_schedule_sha256_counter"
+      },
+      {
+        "operation_id": "derive_wrong_key_stream",
+        "public_callable": "main.derive_wrong_key_stream"
+      },
+      {
+        "operation_id": "derive_public_noise",
+        "public_callable": "main.derive_public_noise_stream"
+      }
+    ],
+    "registry_version": "ceg_wm_internal_method_component_registry_v1"
+  },
+  "metric_registry": {
+    "analysis_unit": "analysis_unit_identity_case_id_source_cluster_id",
+    "forbidden_split": "held_out_evaluation",
+    "metric_ids": [
+      "fixed_fpr_detection",
+      "wrong_key_attribution",
+      "matched_budget_quality",
+      "routing_gain_non_degradation",
+      "lf_hf_complementarity",
+      "transform_error",
+      "reliability_accept_reject",
+      "rectification_same_detector_delta",
+      "rescue_global_fpr_safety"
+    ],
+    "registry_version": "ceg_wm_internal_metric_registry_v1"
+  },
+  "schema_version": "ceg_wm_internal_execution_components_v1"
+}

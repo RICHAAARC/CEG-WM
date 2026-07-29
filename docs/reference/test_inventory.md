@@ -23,6 +23,7 @@ conda run -n CEG-WM python -m pytest --collect-only -q -s
 | `tests/unit/test_joint_decision.py` | `unit` | yes | 近阈值门控、几何不直接阳性、同 detector/key/preprocess/threshold 回正重判和 raw/rescue 阳性路径。 |
 | `tests/unit/test_comparison_preflight.py` | `unit` | yes | 公平对比协议、切分隔离与 baseline 完整性。 |
 | `tests/unit/test_internal_scientific_validation_protocol.py` | `unit` | yes | 内部 unit/case/source-cluster identity、八 split 无泄漏、伪造 grant 与最终 held-out fail-closed、四类执行状态、精确 protocol/manifest dataclass trust anchors（拒绝 duck object/subclass）、全部 canonical 协议语义、实际 digest 与 assignment 绑定、所有非初始 outcome 的 retry lineage/stop 集合状态机、协议版本绑定、13 职责验证矩阵、同 detector/config/threshold 和内容证据阳性/阴性约束；仅 CPU schema/constraint，不宣称科学有效。 |
+| `tests/unit/test_internal_experiment_components.py` | `unit` | yes | A-2 顶层 `main` re-export 与 subpackage public object identity、adapter 顶层依赖 AST、真实 `main` 小张量内容链、四种 key public-callable provenance、Q/K 同步与 transform estimator、真实 reliability/rectifier/conditional recovery 适配调用及同 detector/threshold 约束、13 职责薄委托 spy、冻结组件 registry、确定性 identity/crop/scale/rotation/组合攻击、逐 case/聚合 fixed-FPR、wrong-key、质量、routing、LF/HF、几何、可靠性、回正与 rescue 指标，以及 held-out/非有限/身份漂移 fail-closed；不运行真实模型、GPU、runner 或科学验证。 |
 | `tests/functional/test_governed_artifact_structures.py` | `quick` | yes | records provenance 与 artifact manifest 结构。 |
 
 ## 后续测试等级

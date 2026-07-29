@@ -1,5 +1,16 @@
 # Attack Transformations
 
-CEG-WM 未来在此实现与方法正交的攻击、失真或编辑变换。首个设计范围至少覆盖 crop、scale、rotation 及非几何失真，但当前没有攻击实现。
+`geometric.py` 实现冻结的 `identity`、`crop`、`scale`、`rotation` 和至少两个
+活动变换的 `crop_scale_rotation`。每个攻击都绑定
+`AnalysisUnitIdentity`、源图像摘要、攻击配置摘要和攻击 registry 摘要。
 
-攻击实现应只依赖 `experiments/protocol/` 并返回协议对象，不直接写 governed records，也不得读取方法私有状态。
+几何攻击使用确定性的 output-to-input affine：
+
+- RGB8 输入和输出尺寸保持不变；
+- bilinear interpolation、zero padding、`align_corners=true`；
+- 输出执行 `[0,1]` clamp、乘 255、floor 后转回 uint8；
+- crop、scale、rotation 的范围由
+  `configs/experiments/internal_execution_components.json` 冻结并进入摘要。
+
+攻击只依赖 `experiments/protocol/`，不导入项目方法、runtime、metrics、runner 或
+治理代码，不读取任何方法私有状态，也不写 governed records。当前未实现非几何攻击。
