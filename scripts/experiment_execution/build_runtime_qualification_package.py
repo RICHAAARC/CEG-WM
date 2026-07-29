@@ -128,6 +128,65 @@ def _sha256(path: Path) -> str:
     return _sha256_bytes(path.read_bytes())
 
 
+def _validate_dependency_lock_pair(
+    blobs: tuple[tuple[str, bytes], ...],
+) -> None:
+    blobs_by_path = dict(blobs)
+    try:
+        configuration = json.loads(
+            blobs_by_path[
+                "configs/runtime/runtime_sd35_flowmatch.json"
+            ].decode("utf-8")
+        )
+        lock = configuration["dependency_lock"]
+    except (
+        KeyError,
+        TypeError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise PackageBuildError("runtime dependency lock is invalid") from exc
+    if (
+        not isinstance(lock, list)
+        or not lock
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"package_name", "version_specifier"}
+            or not isinstance(item["package_name"], str)
+            or not item["package_name"]
+            or not isinstance(item["version_specifier"], str)
+            or not item["version_specifier"]
+            for item in lock
+        )
+    ):
+        raise PackageBuildError("runtime dependency lock is invalid")
+    expected_requirements = tuple(
+        f"{item['package_name']}=={item['version_specifier']}"
+        for item in lock
+        if item["package_name"] != "python"
+    )
+    try:
+        requirement_lines = tuple(
+            line.strip()
+            for line in blobs_by_path[
+                "requirements_runtime_qualification.txt"
+            ].decode("utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    except (KeyError, UnicodeDecodeError) as exc:
+        raise PackageBuildError(
+            "runtime requirements lock is invalid"
+        ) from exc
+    if (
+        not expected_requirements
+        or not requirement_lines
+        or requirement_lines != expected_requirements
+    ):
+        raise PackageBuildError(
+            "runtime requirements do not exactly match dependency lock"
+        )
+
+
 def build_runtime_qualification_package(
     *,
     root: str | Path,
@@ -144,6 +203,7 @@ def build_runtime_qualification_package(
         raise PackageBuildError("execution package must be outside repository")
     if output_path.exists():
         raise PackageBuildError("package output target must not already exist")
+    _validate_dependency_lock_pair(blobs)
 
     copied: list[dict[str, object]] = []
     archive_blobs: dict[str, bytes] = {}

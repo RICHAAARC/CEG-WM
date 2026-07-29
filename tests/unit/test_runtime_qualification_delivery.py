@@ -836,6 +836,33 @@ def test_requirements_must_exactly_match_complete_dependency_lock(
         runner.verify_dependency_lock(package, _versions())
 
 
+def test_repository_requirements_match_frozen_dependency_lock() -> None:
+    root = Path(__file__).resolve().parents[2]
+    evidence = runner.verify_dependency_lock(root, _versions())
+    assert tuple(item["package_name"] for item in evidence) == tuple(
+        package_name for package_name, _version in runner.REGISTERED_DEPENDENCY_LOCK
+    )
+
+
+def test_requirements_reject_same_dependency_set_in_wrong_order(
+    tmp_path: Path,
+) -> None:
+    revision = "c" * 40
+    package = tmp_path / "package"
+    package.mkdir()
+    _package_manifest(package, revision)
+    requirements = package / "requirements_runtime_qualification.txt"
+    lines = requirements.read_text(encoding="utf-8").splitlines()
+    reordered = (lines[1], lines[0], *lines[2:])
+    assert set(reordered) == set(lines)
+    requirements.write_text("\n".join(reordered) + "\n", encoding="utf-8")
+    with pytest.raises(
+        runner.QualificationRunnerError,
+        match="requirements do not exactly match",
+    ):
+        runner.verify_dependency_lock(package, _versions())
+
+
 def test_dependency_lock_must_include_every_frozen_entry(
     tmp_path: Path,
 ) -> None:
@@ -1294,6 +1321,10 @@ def test_delivery_python_sources_have_no_scanned_local_absolute_path() -> None:
 
 
 def _write_package_fixture(repo: Path) -> None:
+    dependency_lock = [
+        {"package_name": package_name, "version_specifier": version}
+        for package_name, version in runner.REGISTERED_DEPENDENCY_LOCK
+    ]
     for relative in (
         "main/__init__.py",
         "runtime/__init__.py",
@@ -1306,7 +1337,23 @@ def _write_package_fixture(repo: Path) -> None:
     ):
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("{}\n" if path.suffix == ".json" else "# fixture\n")
+        if relative == "configs/runtime/runtime_sd35_flowmatch.json":
+            path.write_text(
+                json.dumps({"dependency_lock": dependency_lock}) + "\n",
+                encoding="utf-8",
+            )
+        elif relative == "requirements_runtime_qualification.txt":
+            path.write_text(
+                "\n".join(
+                    f"{package_name}=={version}"
+                    for package_name, version in runner.REGISTERED_DEPENDENCY_LOCK
+                    if package_name != "python"
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        else:
+            path.write_text("# fixture\n", encoding="utf-8")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -1346,6 +1393,7 @@ def test_package_builder_requires_clean_exact_revision(tmp_path: Path) -> None:
         output_zip=output,
         runtime_candidate_revision=revision,
     )
+    assert result["package_ready"] is True
     assert result["runtime_candidate_revision"] == revision
     with zipfile.ZipFile(output) as archive:
         manifest = json.loads(archive.read("runtime_execution_manifest.json"))
@@ -1374,6 +1422,44 @@ def test_package_builder_requires_clean_exact_revision(tmp_path: Path) -> None:
             output_zip=tmp_path / "dirty.zip",
             runtime_candidate_revision=revision,
         )
+
+
+def test_package_builder_rejects_wrong_requirement_order_without_output(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_package_fixture(repo)
+    requirements = repo / "requirements_runtime_qualification.txt"
+    lines = requirements.read_text(encoding="utf-8").splitlines()
+    reordered = (lines[1], lines[0], *lines[2:])
+    assert set(reordered) == set(lines)
+    requirements.write_text("\n".join(reordered) + "\n", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "add", ".")
+    _git(
+        repo,
+        "-c",
+        "user.name=CEG-WM Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-m",
+        "fixture",
+    )
+    revision = _git(repo, "rev-parse", "HEAD")
+    output = tmp_path / "delivery" / "package.zip"
+    with pytest.raises(
+        PackageBuildError,
+        match="requirements do not exactly match",
+    ):
+        build_runtime_qualification_package(
+            root=repo,
+            output_zip=output,
+            runtime_candidate_revision=revision,
+        )
+    assert not output.exists()
+    assert not output.parent.exists()
 
 
 def test_package_builder_rejects_local_absolute_path_blob(tmp_path: Path) -> None:
