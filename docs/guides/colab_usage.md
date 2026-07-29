@@ -6,8 +6,9 @@ Google Drive 结果包和独立审计流程见
 [Runtime And GPU Qualification Workflow](runtime_gpu_qualification_workflow.md)。
 
 1. 当前冻结入口固定绑定 candidate
-   `108b7fb4a8e07b58164e19079ec24456f730718a`、`PROFILE="smoke"`、`current`
-   execution package 路径、独立审核的 archive SHA-256 和
+   `8b2344756c4c247906ff0d4eab68e46a773e13f5`、`PROFILE="smoke"`、`current`
+   execution package 路径、独立审核的 archive SHA-256
+   `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38` 和
    `REPLAY_SOURCE=None`；用户只需 **Run all**，不编辑 Notebook cell。
 2. Notebook 对 Drive bootstrap 只读取一次，先核对完整 SHA-256，再以 `xb` 写入
    全新的 `/content` 快照并复核摘要；只执行该本地快照，摘要不符时不启动

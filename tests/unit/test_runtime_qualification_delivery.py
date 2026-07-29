@@ -1718,12 +1718,16 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     assert "/content/drive/MyDrive/CEG-WM/runtime_qualification" in sources
     assert 'PROFILE = "smoke"' in source_lines
     assert (
+        'EXPECTED_RUNTIME_CANDIDATE_REVISION = '
+        '"8b2344756c4c247906ff0d4eab68e46a773e13f5"'
+    ) in source_lines
+    assert (
         'PACKAGE_ZIP = "/content/drive/MyDrive/CEG-WM/runtime_qualification/'
         'execution_packages/current/ceg_wm_runtime_execution.zip"'
     ) in source_lines
     assert (
         'EXPECTED_PACKAGE_SHA256 = '
-        '"f20ee4e574cec20b99f1e5021a21baf8617d374337468059dbc88b213a2710a3"'
+        '"8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38"'
     ) in source_lines
     assert "REPLAY_SOURCE = None" in source_lines
     assert "input(" not in sources
@@ -1785,12 +1789,16 @@ def test_notebook_direct_run_snapshot_requires_no_manual_parameters() -> None:
     source_lines = sources.splitlines()
     assert 'PROFILE = "smoke"' in source_lines
     assert (
+        'EXPECTED_RUNTIME_CANDIDATE_REVISION = '
+        '"8b2344756c4c247906ff0d4eab68e46a773e13f5"'
+    ) in source_lines
+    assert (
         'PACKAGE_ZIP = "/content/drive/MyDrive/CEG-WM/runtime_qualification/'
         'execution_packages/current/ceg_wm_runtime_execution.zip"'
     ) in source_lines
     assert (
         'EXPECTED_PACKAGE_SHA256 = '
-        '"f20ee4e574cec20b99f1e5021a21baf8617d374337468059dbc88b213a2710a3"'
+        '"8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38"'
     ) in source_lines
     assert "REPLAY_SOURCE = None" in source_lines
     assert "input(" not in sources
@@ -1884,6 +1892,7 @@ def test_notebook_executes_verified_local_snapshot_after_drive_source_changes(
                     "artifact_kind": "qualification_result",
                     "profile": "smoke",
                     "run_status": "passed",
+                    "runtime_candidate_revision": "8" * 40,
                     "result_zip": "/persistent/result.zip",
                 }
             ),
@@ -1895,6 +1904,7 @@ def test_notebook_executes_verified_local_snapshot_after_drive_source_changes(
         {
             "PACKAGE_ZIP": "/persistent/package.zip",
             "EXPECTED_PACKAGE_SHA256": "1" * 64,
+            "EXPECTED_RUNTIME_CANDIDATE_REVISION": "8" * 40,
             "REPLAY_SOURCE": None,
             "DRIVE_ROOT": "/persistent",
         }
@@ -1903,3 +1913,99 @@ def test_notebook_executes_verified_local_snapshot_after_drive_source_changes(
     assert observed_commands[0][1] == str(trusted_snapshot)
     assert observed_commands[0][1] != str(drive_source)
     assert trusted_snapshot.read_bytes() == trusted_bytes
+
+
+def _execute_notebook_status(
+    monkeypatch,
+    payload: dict[str, object],
+    *,
+    returncode: int,
+) -> dict[str, object]:
+    def bootstrap_call(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            json.dumps(payload),
+            "",
+        )
+
+    monkeypatch.setattr(subprocess, "run", bootstrap_call)
+    namespace: dict[str, object] = {
+        "sys": sys,
+        "subprocess": subprocess,
+        "json": json,
+        "os": os,
+        "TRUSTED_BOOTSTRAP": Path("/content/trusted_bootstrap.py"),
+        "PROFILE": "smoke",
+        "PACKAGE_ZIP": "/persistent/package.zip",
+        "EXPECTED_PACKAGE_SHA256": "1" * 64,
+        "EXPECTED_RUNTIME_CANDIDATE_REVISION": "8" * 40,
+        "EPHEMERAL_ROOT": "/content/ceg_wm_runtime",
+        "DRIVE_ROOT": "/persistent",
+        "REPLAY_SOURCE": None,
+    }
+    exec(_notebook_cell_source("command = [sys.executable"), namespace)
+    return namespace
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "artifact_kind": "qualification_result",
+            "profile": "smoke",
+            "run_status": "passed",
+            "result_zip": "/persistent/result.zip",
+        },
+        {
+            "artifact_kind": "qualification_result",
+            "profile": "smoke",
+            "run_status": "passed",
+            "runtime_candidate_revision": "9" * 40,
+            "result_zip": "/persistent/result.zip",
+        },
+    ),
+    ids=("missing-revision", "revision-drift"),
+)
+def test_notebook_rejects_unbound_qualification_result(
+    monkeypatch,
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(RuntimeError, match="runtime candidate revision drifted"):
+        _execute_notebook_status(monkeypatch, payload, returncode=0)
+
+
+def test_notebook_preserves_bootstrap_failure_without_revision(
+    monkeypatch,
+    capsys,
+) -> None:
+    namespace = _execute_notebook_status(
+        monkeypatch,
+        {
+            "artifact_kind": "bootstrap_failure",
+            "profile": "smoke",
+            "run_status": "failed",
+            "diagnostic_zip": "/persistent/bootstrap_failure.zip",
+        },
+        returncode=3,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="artifact preserved at /persistent/bootstrap_failure.zip",
+    ):
+        exec(_notebook_cell_source("artifact_path ="), namespace)
+    assert namespace["artifact_path"] == "/persistent/bootstrap_failure.zip"
+    assert "/persistent/bootstrap_failure.zip" in capsys.readouterr().out
+
+
+def test_notebook_rejects_unknown_bootstrap_artifact_kind(monkeypatch) -> None:
+    with pytest.raises(RuntimeError, match="unknown bootstrap artifact kind"):
+        _execute_notebook_status(
+            monkeypatch,
+            {
+                "artifact_kind": "unknown",
+                "profile": "smoke",
+                "run_status": "failed",
+            },
+            returncode=3,
+        )
