@@ -759,6 +759,68 @@ def test_method_adapter_rejects_forged_component_binding(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mutation_kind", "message"),
+    (
+        ("component_responsibility", "canonical registry"),
+        ("component_callable", "canonical registry"),
+        ("component_result_identity", "canonical registry"),
+        ("key_operation_id", "key schedule operation"),
+        ("key_operation_callable", "key schedule operation"),
+        ("config_digest", "configuration digest mismatch"),
+    ),
+)
+def test_method_adapter_revalidates_post_init_configuration_mutation(
+    mutation_kind: str,
+    message: str,
+) -> None:
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    if mutation_kind == "component_responsibility":
+        object.__setattr__(
+            configuration.component_bindings[0],
+            "responsibility",
+            "forged_responsibility",
+        )
+    elif mutation_kind == "component_callable":
+        object.__setattr__(
+            configuration.component_bindings[0],
+            "public_callable",
+            "forged.module.call",
+        )
+    elif mutation_kind == "component_result_identity":
+        object.__setattr__(
+            configuration.component_bindings[0],
+            "result_identity_field",
+            "forged_identity",
+        )
+    elif mutation_kind == "key_operation_id":
+        object.__setattr__(
+            configuration.key_schedule_operations[0],
+            "operation_id",
+            "forged_operation",
+        )
+    elif mutation_kind == "key_operation_callable":
+        object.__setattr__(
+            configuration.key_schedule_operations[0],
+            "public_callable",
+            "forged.key.call",
+        )
+    elif mutation_kind == "config_digest":
+        object.__setattr__(
+            configuration,
+            "config_digest",
+            "0" * 64,
+        )
+    else:
+        raise AssertionError(f"unknown mutation kind: {mutation_kind}")
+
+    with pytest.raises(CegWmExperimentAdapterError, match=message):
+        CegWmExperimentAdapter(configuration)
+
+
+@pytest.mark.unit
 def test_registries_reject_forged_wrong_key_pipeline_and_metric_split(
     tmp_path: Path,
 ) -> None:
@@ -1582,6 +1644,54 @@ def test_rescue_safety_case_enforces_real_rescue_trajectory() -> None:
             True,
             True,
             False,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("raw_positive", True, "must not trigger rescue"),
+        ("rescue_triggered", False, "actual rescue trigger"),
+        ("rectified_positive", False, "trajectory"),
+        ("watermark_decision_positive", False, "trajectory"),
+        ("raw_positive", "true", "must be boolean"),
+        (
+            "rectified_detector_identity",
+            "forged_detector",
+            "detector identity mismatch",
+        ),
+        (
+            "rectified_threshold_identity",
+            "forged_threshold",
+            "threshold identity mismatch",
+        ),
+    ),
+)
+def test_rescue_aggregate_revalidates_post_init_case_mutation(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    case = RescueSafetyCase(
+        _unit(2110),
+        "end_to_end_check",
+        "detector",
+        "detector",
+        "threshold",
+        "threshold",
+        False,
+        True,
+        True,
+        True,
+    )
+    object.__setattr__(case, field, value)
+
+    with pytest.raises(InternalMetricError, match=message):
+        aggregate_rescue_fpr_safety(
+            (case,),
+            target_fpr=0.5,
+            registry=load_metric_registry(COMPONENT_CONFIG_PATH),
         )
 
 

@@ -1464,47 +1464,56 @@ class RescueSafetyCase:
     watermark_decision_positive: bool
 
     def __post_init__(self) -> None:
-        _validate_case_identity(self.analysis_unit_identity, self.split)
-        for name in (
-            "raw_detector_identity",
-            "rectified_detector_identity",
-            "raw_threshold_identity",
-            "rectified_threshold_identity",
-        ):
-            _require_nonempty_identity(getattr(self, name), name)
-        if self.raw_detector_identity != self.rectified_detector_identity:
-            raise InternalMetricError("rescue detector identity mismatch")
-        if self.raw_threshold_identity != self.rectified_threshold_identity:
-            raise InternalMetricError("rescue threshold identity mismatch")
-        if any(
-            type(value) is not bool
-            for value in (
-                self.raw_positive,
-                self.rescue_triggered,
-                self.rectified_positive,
-                self.watermark_decision_positive,
-            )
-        ):
-            raise InternalMetricError("rescue decisions must be boolean")
-        if self.raw_positive and self.rescue_triggered:
-            raise InternalMetricError(
-                "raw positive must not trigger rescue"
-            )
-        if self.rectified_positive and not self.rescue_triggered:
-            raise InternalMetricError(
-                "rectified positive requires an actual rescue trigger"
-            )
-        expected_watermark_decision_positive = self.raw_positive or (
-            self.rescue_triggered and self.rectified_positive
+        _validate_rescue_safety_case(self)
+
+
+def _validate_rescue_safety_case(
+    case: object,
+) -> RescueSafetyCase:
+    if type(case) is not RescueSafetyCase:
+        raise InternalMetricError("rescue case must be RescueSafetyCase")
+    _validate_case_identity(case.analysis_unit_identity, case.split)
+    for name in (
+        "raw_detector_identity",
+        "rectified_detector_identity",
+        "raw_threshold_identity",
+        "rectified_threshold_identity",
+    ):
+        _require_nonempty_identity(getattr(case, name), name)
+    if case.raw_detector_identity != case.rectified_detector_identity:
+        raise InternalMetricError("rescue detector identity mismatch")
+    if case.raw_threshold_identity != case.rectified_threshold_identity:
+        raise InternalMetricError("rescue threshold identity mismatch")
+    if any(
+        type(value) is not bool
+        for value in (
+            case.raw_positive,
+            case.rescue_triggered,
+            case.rectified_positive,
+            case.watermark_decision_positive,
         )
-        if (
-            self.watermark_decision_positive
-            != expected_watermark_decision_positive
-        ):
-            raise InternalMetricError(
-                "watermark_decision_positive does not match the "
-                "raw/rescue trajectory"
-            )
+    ):
+        raise InternalMetricError("rescue decisions must be boolean")
+    if case.raw_positive and case.rescue_triggered:
+        raise InternalMetricError(
+            "raw positive must not trigger rescue"
+        )
+    if case.rectified_positive and not case.rescue_triggered:
+        raise InternalMetricError(
+            "rectified positive requires an actual rescue trigger"
+        )
+    expected_watermark_decision_positive = case.raw_positive or (
+        case.rescue_triggered and case.rectified_positive
+    )
+    if (
+        case.watermark_decision_positive
+        != expected_watermark_decision_positive
+    ):
+        raise InternalMetricError(
+            "watermark_decision_positive does not match the "
+            "raw/rescue trajectory"
+        )
+    return case
 
 
 @dataclass(frozen=True, slots=True)
@@ -1547,6 +1556,8 @@ def aggregate_rescue_fpr_safety(
         type(case) is not RescueSafetyCase for case in cases
     ):
         raise InternalMetricError("rescue aggregation inputs are invalid")
+    for case in cases:
+        _validate_rescue_safety_case(case)
     _ensure_unique_units(cases)
     split = _require_uniform_metric_split(
         cases,

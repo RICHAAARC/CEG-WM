@@ -194,58 +194,102 @@ class CegWmExperimentAdapterConfiguration:
     config_digest: str = field(init=False)
 
     def __post_init__(self) -> None:
-        for value in (
-            self.schema_version,
-            self.registry_version,
-            self.adapter_id,
-            self.adapter_version,
-        ):
-            if type(value) is not str or not value:
-                raise CegWmExperimentAdapterError(
-                    "adapter configuration identities must be non-empty strings"
-                )
-        component_bindings = tuple(
-            (
-                binding.responsibility,
-                binding.public_callable,
-                binding.result_identity_field,
-            )
-            for binding in self.component_bindings
-        )
-        if component_bindings != REQUIRED_COMPONENT_BINDINGS:
-            raise CegWmExperimentAdapterError(
-                "adapter component bindings drifted from the canonical registry"
-            )
-        operations = tuple(
-            (binding.operation_id, binding.public_callable)
-            for binding in self.key_schedule_operations
-        )
-        if operations != REQUIRED_KEY_SCHEDULE_OPERATIONS:
-            raise CegWmExperimentAdapterError(
-                "key schedule operation bindings or order drifted"
-            )
-        payload = {
-            "adapter_id": self.adapter_id,
-            "adapter_version": self.adapter_version,
-            "component_bindings": [
-                {
-                    "public_callable": binding.public_callable,
-                    "responsibility": binding.responsibility,
-                    "result_identity_field": binding.result_identity_field,
-                }
-                for binding in self.component_bindings
-            ],
-            "key_schedule_operations": [
-                {
-                    "operation_id": binding.operation_id,
-                    "public_callable": binding.public_callable,
-                }
-                for binding in self.key_schedule_operations
-            ],
-            "registry_version": self.registry_version,
-            "schema_version": self.schema_version,
-        }
+        payload = _validated_adapter_configuration_payload(self)
         object.__setattr__(self, "config_digest", _canonical_digest(payload))
+
+
+def _validated_adapter_configuration_payload(
+    configuration: object,
+) -> dict[str, object]:
+    if type(configuration) is not CegWmExperimentAdapterConfiguration:
+        raise CegWmExperimentAdapterError(
+            "configuration must be CegWmExperimentAdapterConfiguration"
+        )
+    for value in (
+        configuration.schema_version,
+        configuration.registry_version,
+        configuration.adapter_id,
+        configuration.adapter_version,
+    ):
+        if type(value) is not str or not value:
+            raise CegWmExperimentAdapterError(
+                "adapter configuration identities must be non-empty strings"
+            )
+    if (
+        type(configuration.component_bindings) is not tuple
+        or any(
+            type(binding) is not MethodComponentBinding
+            for binding in configuration.component_bindings
+        )
+    ):
+        raise CegWmExperimentAdapterError(
+            "adapter component bindings drifted from the canonical registry"
+        )
+    component_bindings = tuple(
+        (
+            binding.responsibility,
+            binding.public_callable,
+            binding.result_identity_field,
+        )
+        for binding in configuration.component_bindings
+    )
+    if component_bindings != REQUIRED_COMPONENT_BINDINGS:
+        raise CegWmExperimentAdapterError(
+            "adapter component bindings drifted from the canonical registry"
+        )
+    if (
+        type(configuration.key_schedule_operations) is not tuple
+        or any(
+            type(binding) is not KeyScheduleOperationBinding
+            for binding in configuration.key_schedule_operations
+        )
+    ):
+        raise CegWmExperimentAdapterError(
+            "key schedule operation bindings or order drifted"
+        )
+    operations = tuple(
+        (binding.operation_id, binding.public_callable)
+        for binding in configuration.key_schedule_operations
+    )
+    if operations != REQUIRED_KEY_SCHEDULE_OPERATIONS:
+        raise CegWmExperimentAdapterError(
+            "key schedule operation bindings or order drifted"
+        )
+    return {
+        "adapter_id": configuration.adapter_id,
+        "adapter_version": configuration.adapter_version,
+        "component_bindings": [
+            {
+                "public_callable": binding.public_callable,
+                "responsibility": binding.responsibility,
+                "result_identity_field": binding.result_identity_field,
+            }
+            for binding in configuration.component_bindings
+        ],
+        "key_schedule_operations": [
+            {
+                "operation_id": binding.operation_id,
+                "public_callable": binding.public_callable,
+            }
+            for binding in configuration.key_schedule_operations
+        ],
+        "registry_version": configuration.registry_version,
+        "schema_version": configuration.schema_version,
+    }
+
+
+def _revalidate_adapter_configuration(
+    configuration: object,
+) -> CegWmExperimentAdapterConfiguration:
+    payload = _validated_adapter_configuration_payload(configuration)
+    if (
+        type(configuration.config_digest) is not str
+        or configuration.config_digest != _canonical_digest(payload)
+    ):
+        raise CegWmExperimentAdapterError(
+            "adapter configuration digest mismatch"
+        )
+    return configuration
 
 
 @dataclass(frozen=True, slots=True)
@@ -353,23 +397,22 @@ class CegWmExperimentAdapter:
         configuration: CegWmExperimentAdapterConfiguration,
         runtime_adapter: Sd35RuntimeAdapter | None = None,
     ) -> None:
-        if type(configuration) is not CegWmExperimentAdapterConfiguration:
-            raise CegWmExperimentAdapterError(
-                "configuration must be CegWmExperimentAdapterConfiguration"
-            )
+        validated_configuration = _revalidate_adapter_configuration(
+            configuration
+        )
         if runtime_adapter is not None and type(runtime_adapter) is not Sd35RuntimeAdapter:
             raise CegWmExperimentAdapterError(
                 "runtime_adapter must be Sd35RuntimeAdapter"
             )
-        self._configuration = configuration
+        self._configuration = validated_configuration
         self._runtime_adapter = runtime_adapter
         self._bindings = {
             binding.responsibility: binding
-            for binding in configuration.component_bindings
+            for binding in validated_configuration.component_bindings
         }
         self._key_schedule_operations = {
             binding.operation_id: binding
-            for binding in configuration.key_schedule_operations
+            for binding in validated_configuration.key_schedule_operations
         }
 
     @property
