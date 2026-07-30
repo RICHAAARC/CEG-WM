@@ -190,6 +190,8 @@ RESPONSIBILITY_VALIDATION_MATRIX = (
 PROMOTION_GATE_IDENTITIES = frozenset(
     {
         "candidate_selection_frozen",
+        "hf_reference_candidate_frozen",
+        "hf_only_tau_frozen",
         *(
             gate
             for specification in RESPONSIBILITY_VALIDATION_MATRIX
@@ -238,11 +240,12 @@ def validate_responsibility_matrix(
     return tuple(dict.fromkeys(violations))
 
 
-SPLIT_PREREQUISITE_GATES = {
+DETECTOR_MODES = ("hf_only", "combined")
+_COMMON_SPLIT_PREREQUISITE_GATES = {
     "development": (),
     "candidate_selection": (),
     "untouched_confirmation": ("candidate_selection_frozen",),
-    "content_threshold_fit": ("content_branch_promotion_gate_passed",),
+    "content_threshold_fit": (),
     "rescue_threshold_fit": ("content_threshold_gate_passed",),
     "reliability_fit": ("qk_sync_gate_passed", "transform_estimation_gate_passed"),
     "end_to_end_check": (
@@ -251,6 +254,28 @@ SPLIT_PREREQUISITE_GATES = {
         "geometry_reliability_gate_passed",
     ),
     "held_out_evaluation": ("end_to_end_gate_passed",),
+}
+SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE = {
+    detector_mode: {
+        split_name: (
+            (
+                "hf_reference_candidate_frozen",
+            )
+            if split_name == "content_threshold_fit" and detector_mode == "hf_only"
+            else (
+                "content_branch_promotion_gate_passed",
+            )
+            if split_name == "content_threshold_fit"
+            else (
+                "candidate_selection_frozen",
+                "hf_only_tau_frozen",
+            )
+            if split_name == "untouched_confirmation" and detector_mode == "hf_only"
+            else gates
+        )
+        for split_name, gates in _COMMON_SPLIT_PREREQUISITE_GATES.items()
+    }
+    for detector_mode in DETECTOR_MODES
 }
 
 
@@ -265,11 +290,16 @@ class PromotionDecision:
 def decide_split_promotion(
     requested_split: str,
     passed_gates: frozenset[str],
+    *,
+    detector_mode: str | None = None,
 ) -> PromotionDecision:
-    if requested_split not in SPLIT_PREREQUISITE_GATES:
+    if detector_mode not in DETECTOR_MODES:
+        raise ValueError("detector_mode_missing_or_invalid")
+    split_prerequisites = SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE[detector_mode]
+    if requested_split not in split_prerequisites:
         raise ValueError("requested_split_invalid")
     missing = tuple(
-        gate for gate in SPLIT_PREREQUISITE_GATES[requested_split] if gate not in passed_gates
+        gate for gate in split_prerequisites[requested_split] if gate not in passed_gates
     )
     if missing:
         stop_outcome = (

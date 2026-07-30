@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from experiments.protocol.internal_matrix import (
+    DETECTOR_MODES,
     REQUIRED_METHOD_RESPONSIBILITIES,
-    SPLIT_PREREQUISITE_GATES,
+    SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE,
 )
 from experiments.protocol.internal_records import (
     INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
@@ -24,6 +25,8 @@ from experiments.protocol.internal_splits import (
     INTERNAL_VALIDATION_PROTOCOL_ID,
     INTERNAL_VALIDATION_PROTOCOL_VERSION,
     INTERNAL_VALIDATION_SPLITS,
+    LEGACY_INTERNAL_VALIDATION_PROTOCOL_ID,
+    LEGACY_INTERNAL_VALIDATION_PROTOCOL_VERSION,
 )
 
 
@@ -50,6 +53,9 @@ PROMOTION_FAILURE_SEMANTICS = (
 SCIENTIFIC_CLAIM_BOUNDARY = (
     "schema_and_cpu_constraints_only_no_scientific_validity_claim"
 )
+LEGACY_PROTOCOL_COMPATIBILITY = (
+    "v1_structure_readable_but_semantically_incompatible_and_not_revalidatable_as_v2"
+)
 
 
 @dataclass(frozen=True)
@@ -70,7 +76,12 @@ class FrozenInternalValidationProtocol:
     held_out_evaluation_access: str
     execution_statuses: tuple[str, ...]
     method_responsibilities: tuple[str, ...]
-    split_prerequisite_gates: dict[str, tuple[str, ...]]
+    split_prerequisite_gates_by_detector_mode: dict[
+        str, dict[str, tuple[str, ...]]
+    ]
+    legacy_protocol_id: str
+    legacy_protocol_version: str
+    legacy_protocol_compatibility: str
     promotion_failure_semantics: str
     scientific_claim_boundary: str
 
@@ -127,8 +138,19 @@ class FrozenInternalValidationProtocol:
             violations.append("execution_statuses_invalid")
         if self.method_responsibilities != REQUIRED_METHOD_RESPONSIBILITIES:
             violations.append("method_responsibilities_invalid")
-        if self.split_prerequisite_gates != SPLIT_PREREQUISITE_GATES:
-            violations.append("split_prerequisite_gates_invalid")
+        if (
+            self.split_prerequisite_gates_by_detector_mode
+            != SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE
+        ):
+            violations.append("split_prerequisite_gates_by_detector_mode_invalid")
+        if tuple(self.split_prerequisite_gates_by_detector_mode) != DETECTOR_MODES:
+            violations.append("detector_mode_identity_or_order_invalid")
+        if self.legacy_protocol_id != LEGACY_INTERNAL_VALIDATION_PROTOCOL_ID:
+            violations.append("legacy_protocol_id_invalid")
+        if self.legacy_protocol_version != LEGACY_INTERNAL_VALIDATION_PROTOCOL_VERSION:
+            violations.append("legacy_protocol_version_invalid")
+        if self.legacy_protocol_compatibility != LEGACY_PROTOCOL_COMPATIBILITY:
+            violations.append("legacy_protocol_compatibility_invalid")
         if self.promotion_failure_semantics != PROMOTION_FAILURE_SEMANTICS:
             violations.append("promotion_failure_semantics_invalid")
         if self.scientific_claim_boundary != SCIENTIFIC_CLAIM_BOUNDARY:
@@ -151,9 +173,14 @@ def load_frozen_internal_validation_protocol(
     )
     raw["retryable_parent_statuses"] = tuple(raw["retryable_parent_statuses"])
     raw["method_responsibilities"] = tuple(raw["method_responsibilities"])
-    raw["split_prerequisite_gates"] = {
-        split_name: tuple(gates)
-        for split_name, gates in raw["split_prerequisite_gates"].items()
+    raw["split_prerequisite_gates_by_detector_mode"] = {
+        detector_mode: {
+            split_name: tuple(gates)
+            for split_name, gates in split_map.items()
+        }
+        for detector_mode, split_map in raw[
+            "split_prerequisite_gates_by_detector_mode"
+        ].items()
     }
     protocol = FrozenInternalValidationProtocol(**raw)
     violations = protocol.validate()

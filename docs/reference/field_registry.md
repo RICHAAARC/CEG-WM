@@ -513,6 +513,14 @@ Notebook 与 repository module 的跨边界数据
 | generation_seed | persisted_protocol | provenance | none | true | false | false | 分析单位用于 source-cluster 隔离的冻结生成 seed。 |
 | image_lineage_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定图像 lineage 的内容摘要。 |
 | registered_key_family_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定 registered-key family 的公共摘要。 |
+| detector_mode | persisted_protocol | method_identity | none | false | false | false | 内部协议选择前置门的正式 detector mode；当前仅 `hf_only` 与 `combined`，缺失或未知值 fail closed。 |
+| source_row | persisted_protocol | provenance | none | false | false | false | C1 pinned PartiPrompts snapshot 中从 1 开始的原始数据行身份。 |
+| prompt_text | persisted_protocol | protocol_input | none | false | false | false | C1 离线执行所需的冻结 prompt 明文；其 UTF-8 摘要必须逐行等于 `prompt_digest`，不得由网络重取替代。 |
+| roster_rows_digest | persisted_protocol | provenance | none | false | false | false | C1 prompt/category/challenge/source-row roster 的 canonical SHA-256。 |
+| candidate_binding_digest | persisted_protocol | method_identity | none | true | false | false | C1 HF reference 候选、完整 source bundle、method adapter、runtime config 与 qualification 事实的 canonical 摘要；不是结果门。 |
+| hf_only_tau_frozen | persisted_protocol | protocol | none | false | false | false | threshold-fit 回传经独立审计后形成的冻结 tau artifact gate；未绑定 artifact SHA/revision/APPROVE 时 confirmation fail closed。 |
+| run_phase_id | persisted_protocol | protocol | none | true | false | false | C1 threshold-fit 或 untouched-confirmation 的互斥执行阶段身份，禁止在同一 run 混跑。 |
+| metric_id | persisted_protocol | metric_identity | none | true | false | false | C1-M 必须实现并由 split binding 授权的预注册 metric 身份；C1-P 仅冻结公式身份。 |
 | case_id | persisted_protocol | protocol | none | true | false | false | 预登记内部科学问题、攻击和 control 组合的 case 身份。 |
 | record_sequence_index | persisted_protocol | protocol | none | true | false | false | 一个 run/case record collection 中从零开始且连续的序列索引。 |
 | record_attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case/source cluster 执行尝试的从零开始连续索引；retry 必须大于零。 |

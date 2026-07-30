@@ -4,6 +4,12 @@
 
 ## 当前实现
 
+- `c1_hf_reference.py`：加载 C1-P 的 HF-only reference spec、离线 PartiPrompts
+  snapshot/明文 roster 和两个 compact manifests，并确定性物化既有
+  `FrozenSplitManifest`。bundle loader 同时核对文件 SHA、权威 method/runtime
+  source bundle、稳定的 method-adapter 子配置摘要、key family、每 split 4096
+  source clusters、prompt 互斥并集和 `(category, challenge)` 分层平衡。该模块只
+  冻结公式身份、两阶段运行顺序与工作量，不实现 C1 metrics、不运行模型、不产生结果。
 - `internal_splits.py`：定义 unit/case/source-cluster identity、八个互斥职责 split、
   显式 frozen manifest 和当前执行访问门；授权对象必须匹配当前 access identity
   与精确允许集合，伪造或扩展 grant 失败，当前访问 `held_out_evaluation` 必须
@@ -32,6 +38,12 @@
   和 subclass，重算两者摘要并逐 record 核对 provenance 与 unit/split assignment。
 - `comparison.py`：定义外部 baseline 比较所需的 `ComparisonMethodSpec`、`ComparisonProtocol`、`PreflightApproval` 和运行前校验。
 - `records.py`：定义带完整 provenance 的 `ExperimentRecord` 及其轻量校验。
+
+内部协议已因 detector-mode-aware C1 前置门从 v1/1.0.0 显式升为 v2/2.0.0。
+v1 record 结构仍可由历史工具读取，但其语义不得在 v2 下重新验证或迁移冒充；
+HF-only `content_threshold_fit` 需要 `hf_reference_candidate_frozen`，combined
+模式仍需要 `content_branch_promotion_gate_passed`，缺失/未知 mode 一律拒绝。
+`hf_detector_reference_gate_passed` 是未来结果门，禁止作为 prerequisite。
 
 内部验证协议与外部 comparison 是两个不同表面，不得互相冒充。当前 A-1 只建立
 可执行的协议约束和冻结配置；没有访问 final held-out、没有执行 calibration 或

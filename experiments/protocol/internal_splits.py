@@ -11,9 +11,11 @@ from typing import Iterable
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
-INTERNAL_VALIDATION_PROTOCOL_ID = "ceg_wm_internal_scientific_validation_v1"
-INTERNAL_VALIDATION_PROTOCOL_VERSION = "1.0.0"
-CURRENT_EXECUTION_ACCESS_IDENTITY = "internal_scientific_validation_current_execution_v1"
+LEGACY_INTERNAL_VALIDATION_PROTOCOL_ID = "ceg_wm_internal_scientific_validation_v1"
+LEGACY_INTERNAL_VALIDATION_PROTOCOL_VERSION = "1.0.0"
+INTERNAL_VALIDATION_PROTOCOL_ID = "ceg_wm_internal_scientific_validation_v2"
+INTERNAL_VALIDATION_PROTOCOL_VERSION = "2.0.0"
+CURRENT_EXECUTION_ACCESS_IDENTITY = "internal_scientific_validation_current_execution_v2"
 
 INTERNAL_VALIDATION_SPLITS = (
     "development",

@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 
 from experiments.protocol.internal_matrix import (
+    DETECTOR_MODES,
     REQUIRED_METHOD_RESPONSIBILITIES,
     RESPONSIBILITY_VALIDATION_MATRIX,
+    SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE,
     decide_split_promotion,
     validate_responsibility_matrix,
 )
@@ -57,6 +59,7 @@ PROTOCOL_MODULES = (
     ROOT / "experiments/protocol/internal_matrix.py",
     ROOT / "experiments/protocol/internal_records.py",
     ROOT / "experiments/protocol/internal_validation.py",
+    ROOT / "experiments/protocol/c1_hf_reference.py",
 )
 FORBIDDEN_IMPORT_PREFIXES = (
     "main",
@@ -836,7 +839,11 @@ def test_responsibility_matrix_has_one_complete_row_per_method_responsibility() 
 
 @pytest.mark.unit
 def test_promotion_stops_when_prerequisite_gate_is_missing() -> None:
-    stopped = decide_split_promotion("content_threshold_fit", frozenset())
+    stopped = decide_split_promotion(
+        "content_threshold_fit",
+        frozenset(),
+        detector_mode="combined",
+    )
     assert not stopped.approved
     assert stopped.stop_outcome == "content_branch_research_question_closed_negative"
     approved = decide_split_promotion(
@@ -848,8 +855,39 @@ def test_promotion_stops_when_prerequisite_gate_is_missing() -> None:
                 "geometry_reliability_gate_passed",
             }
         ),
+        detector_mode="combined",
     )
     assert approved.approved
+
+
+@pytest.mark.unit
+def test_detector_mode_prerequisites_are_exact_and_fail_closed() -> None:
+    assert tuple(SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE) == DETECTOR_MODES
+    for gates in SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE.values():
+        assert tuple(gates) == INTERNAL_VALIDATION_SPLITS
+        assert "hf_detector_reference_gate_passed" not in {
+            gate for prerequisites in gates.values() for gate in prerequisites
+        }
+    assert SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE["hf_only"][
+        "content_threshold_fit"
+    ] == ("hf_reference_candidate_frozen",)
+    assert SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE["combined"][
+        "content_threshold_fit"
+    ] == ("content_branch_promotion_gate_passed",)
+    assert SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE["hf_only"][
+        "untouched_confirmation"
+    ] == ("candidate_selection_frozen", "hf_only_tau_frozen")
+    assert SPLIT_PREREQUISITE_GATES_BY_DETECTOR_MODE["combined"][
+        "untouched_confirmation"
+    ] == ("candidate_selection_frozen",)
+    with pytest.raises(ValueError, match="detector_mode_missing_or_invalid"):
+        decide_split_promotion("content_threshold_fit", frozenset())
+    with pytest.raises(ValueError, match="detector_mode_missing_or_invalid"):
+        decide_split_promotion(
+            "content_threshold_fit",
+            frozenset(),
+            detector_mode="unknown",
+        )
 
 
 @pytest.mark.unit

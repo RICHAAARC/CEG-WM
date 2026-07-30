@@ -1,0 +1,498 @@
+{
+  "schema_version": "ceg_wm_c1_hf_reference_run_v1",
+  "protocol_id": "ceg_wm_internal_scientific_validation_v2",
+  "protocol_version": "2.0.0",
+  "phase": "c1_protocol_and_budget_freeze_only",
+  "detector_mode": "hf_only",
+  "prerequisite_gate_id": "hf_reference_candidate_frozen",
+  "result_gate_id": "hf_detector_reference_gate_passed",
+  "result_gate_prerequisite_forbidden": true,
+  "claim_boundary": "protocol_budget_and_cpu_constraints_only_no_gpu_run_no_scientific_result",
+  "dataset": {
+    "dataset_id": "nateraw/parti-prompts",
+    "revision": "944b156abfdad7627c3221b5ec4f6a6fb060a197",
+    "file": "PartiPrompts.tsv",
+    "file_sha256": "fab29e41bb512a169b56acab4cf2a41dcb675e285df2efcde6640c7dd3c440eb",
+    "license": "Apache-2.0",
+    "prompt_count": 1632,
+    "duplicate_prompt_count": 0,
+    "category_count": 12,
+    "roster_path": "configs/experiments/c1_hf_prompt_roster.json",
+    "roster_file_sha256": "102f71bc3cf4021002dd4eb4763026c441084e5941e529d5909fca7ebf23e11a",
+    "roster_rows_digest": "9488cc26be1723bf40e1e7336c97a2b9c5307c1d4a8ac97f184855a832f12e69",
+    "dataset_snapshot_path": "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
+    "runtime_network_access": "forbidden_use_frozen_roster_only"
+  },
+  "candidate_binding": {
+    "method_candidate_id": "hf_sparse_tail",
+    "key_schedule_candidate_id": "key_schedule_sha256_counter",
+    "runtime_candidate_id": "runtime_sd35_flowmatch",
+    "candidate_specification_sha256": "7a9a2689e067ec85d39cc6e296ae4942da2b0fd2429f0ab88abcc1af2d7d89ea",
+    "method_reviewed_revision": "85fd04ffda1513d2779a2d7a6a807f7a2ef2d4f9",
+    "protocol_authorization_parent_revision": "8a557c076b79788405fe16f99e4acb6f43e89681",
+    "method_source_files": [
+      {
+        "path": "main/__init__.py",
+        "sha256": "3e2bec37293d957e56be067f39cdf80c8ed7bc4f1620e68d52194cfa224062bd"
+      },
+      {
+        "path": "main/shared/__init__.py",
+        "sha256": "00db8b808211ea0175e13b34afa32ab2cb76f294e3aa83e80e45491147467ec1"
+      },
+      {
+        "path": "main/shared/key_schedule.py",
+        "sha256": "d199e5fe1a99531cde9a0d5fbd433cec12fd92421f9f96c9248793bea684b038"
+      },
+      {
+        "path": "main/shared/rgb8.py",
+        "sha256": "4169042cf494af58717c2ddb87a11c0fddd8999d4783b051c066ca52b1c3a411"
+      },
+      {
+        "path": "main/content_chain/__init__.py",
+        "sha256": "4af1b900cf1721fecd2d9634df10a8b608bfd3e5fd5a113450cf7281b3c7a1de"
+      },
+      {
+        "path": "main/content_chain/routing.py",
+        "sha256": "2c2b7b5bc6219fb6885850ab8f9d956adba7b955a884d82ea854f986dc7896fa"
+      },
+      {
+        "path": "main/content_chain/lf_carrier.py",
+        "sha256": "c7b862e69a82589cfbaa5e9164942c8194a61187800374d1a9d9c0d620ba59ef"
+      },
+      {
+        "path": "main/content_chain/hf_carrier.py",
+        "sha256": "ff4c7e1a5c7107f07afd4a4f7f4ea5599ed3c0ed1cd22f2d08eb4fbebd60a921"
+      },
+      {
+        "path": "main/content_chain/embedder.py",
+        "sha256": "098995752b17071cb47120699ce69066fd24dba7c29a773844caf243c127ece2"
+      },
+      {
+        "path": "main/content_chain/lf_detector.py",
+        "sha256": "dedcf6573cb281fdd5463a41dd2e5efef34a0f9b350e5384e453e22166301e27"
+      },
+      {
+        "path": "main/content_chain/hf_detector.py",
+        "sha256": "2f718667682cb52565475a8995dec75fedaf5d3ebeb049e5098d42dc55a45a7a"
+      },
+      {
+        "path": "main/content_chain/detector.py",
+        "sha256": "067e444701bb0b1fc094ce27c24aaebf3327d16b90f653c07a2fbe984229110e"
+      },
+      {
+        "path": "experiments/methods/ceg_wm.py",
+        "sha256": "d5b934cc726f85667b28572aa3a6eed81317deb12b67d6dc23a0940d76976bdd"
+      },
+      {
+        "path": "runtime/__init__.py",
+        "sha256": "58457f91867e3a190014fefa0c34cc4787009b0ee42101df7accfd58407cb6ca"
+      },
+      {
+        "path": "runtime/adapter.py",
+        "sha256": "20157a119c54df7e9359749fcb146136dafe73245a9e74168316a0a4acae0e65"
+      },
+      {
+        "path": "runtime/backend.py",
+        "sha256": "0b7fc3184299e05a9abacdbf919bb6c29dff05c9f2185ce88265b8c8d9d0db1a"
+      },
+      {
+        "path": "runtime/configuration.py",
+        "sha256": "ff6af18a9177cd4983dbc39267e8424b49cd7c54637536ed04881a1cfc53c55a"
+      },
+      {
+        "path": "runtime/content_write.py",
+        "sha256": "91fd85762792267cc20e18d290499b40bfa8884b2ed9c3316b01eb0efcc95415"
+      },
+      {
+        "path": "runtime/qk_observation.py",
+        "sha256": "e700d9d35c0e919c4f4f43ab8f3e6a5526e47c4954654cc2813a4f16e57b2104"
+      },
+      {
+        "path": "runtime/sd35_backend.py",
+        "sha256": "77d99fa2453a0a337f876bf57df1fb6d0ab7a421566512ba53b1f8a3c477ecd6"
+      }
+    ],
+    "method_source_bundle_digest": "5b19b4479681baa87c06fc3b5ce1c1f957c0a6c83cf1138cad0a839e0d320090",
+    "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
+    "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
+    "hf_formal_component_identities": [
+      {
+        "responsibility": "hf_carrier",
+        "public_callable": "main.hf_carrier",
+        "result_identity_field": "carrier_config_digest"
+      },
+      {
+        "responsibility": "content_embedder",
+        "public_callable": "main.content_embedder",
+        "result_identity_field": "embedding_result_identity"
+      },
+      {
+        "responsibility": "hf_detector",
+        "public_callable": "main.hf_detector",
+        "result_identity_field": "detector_identity"
+      },
+      {
+        "responsibility": "content_detector",
+        "public_callable": "main.content_detector",
+        "result_identity_field": "content_config_digest"
+      },
+      {
+        "responsibility": "runtime_hf_content_materialization",
+        "public_callable": "runtime.Sd35RuntimeAdapter.execute_content_write_and_vae",
+        "result_identity_field": "runtime_config_digest_and_materialization_integrity"
+      }
+    ],
+    "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
+    "runtime_config_sha256": "a097e826551dfa74601defef406d027cd6428946894f85012d2c65268b0bff1f",
+    "runtime_qualification": {
+      "candidate_revision": "8b2344756c4c247906ff0d4eab68e46a773e13f5",
+      "execution_package_sha256": "8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38",
+      "profile": "qualification",
+      "status": "passed",
+      "run_id": "20260729T110628Z",
+      "result_zip_sha256": "d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37",
+      "evidence_semantics": "runtime_executability_and_identity_only_not_fixed_fpr_or_scientific_effect"
+    },
+    "required_execution_package_bindings": {
+      "required_fields": [
+        "exact_method_code_revision",
+        "adapter_config_digest",
+        "hf_template_digest",
+        "hf_detector_config_digest",
+        "formal_content_detector_config_digest",
+        "candidate_config_digest",
+        "execution_config_digest"
+      ],
+      "derivation_authority": "formal_execution_package_from_frozen_manifest_and_registered_key",
+      "absence_semantics": "c1_execution_preflight_fail_closed",
+      "c1_protocol_status": "not_yet_materialized_no_result_claim"
+    },
+    "candidate_binding_digest": "4d1c46f940f00f51535ae7625b6b1886f3b705beb95d46b8d12a0d45ae210a6d"
+  },
+  "method_execution": {
+    "write_identity": "hf_sparse_tail_registered_key_write",
+    "detect_identity": "hf_sparse_tail_direct_registered_or_control_key_score",
+    "latent_dtype": "float16",
+    "template_dtype": "float32",
+    "score_dtype": "float32",
+    "image_height": 512,
+    "image_width": 512,
+    "inference_steps": 20,
+    "guidance_scale": 4.5,
+    "callback_index": 18,
+    "content_relative_l2_nominal": "3/250",
+    "content_relative_l2_limit": "3/250",
+    "vae_encode_protocol": "posterior_mode_sub_shift_factor_mul_scaling_factor",
+    "fixed_fpr_target": 0.001
+  },
+  "key_controls": {
+    "registered_key_family_id": "ceg_wm_c1_hf_reference_registered_family_v1",
+    "registered_key_family_digest": "396ba6fca745169815faa732461e7460e9d4ec66eed406a9303c5ad6fe51801d",
+    "registered_key_secret_persistence": "forbidden",
+    "wrong_key_roster_id": "ceg_wm_c1_hf_wrong_key_roster_v1",
+    "wrong_key_derivation": "key_schedule_sha256_counter_wrong_key_domain",
+    "wrong_key_count_per_source_cluster": 1,
+    "public_noise_identity": "key_schedule_sha256_counter_public_noise",
+    "public_noise_secret_independence": "required",
+    "primary_null_identity": "unwatermarked_image_with_registered_detection_key",
+    "wrong_key_null_identity": "watermarked_image_with_preregistered_wrong_detection_key",
+    "nulls_must_remain_separate": true
+  },
+  "split_manifests": {
+    "content_threshold_fit": {
+      "path": "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
+      "file_sha256": "52af2c75bd0513c6eace971fb098c203154cee05ca27d811ece12ec85b8911b5",
+      "materialized_manifest_digest": "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9"
+    },
+    "untouched_confirmation": {
+      "path": "configs/experiments/c1_hf_untouched_confirmation_manifest.json",
+      "file_sha256": "0c3dc826f99e2728b1c9ea646ec36285929c4a8215f39b5dbce69ef5faea8199",
+      "materialized_manifest_digest": "4359f6edd4a249d1beab91d92c0c5159618622c8bc1581651b12b19f3f6c2307"
+    }
+  },
+  "run_phases": {
+    "threshold_fit": {
+      "run_phase_id": "c1_hf_threshold_fit_v1",
+      "accessible_split": "content_threshold_fit",
+      "package_scope": "threshold_fit_only",
+      "prerequisite_gates": [
+        "hf_reference_candidate_frozen"
+      ],
+      "forbidden_split_access": [
+        "untouched_confirmation"
+      ],
+      "same_run_confirmation": "forbidden",
+      "output_artifact_schema": "ceg_wm_hf_only_tau_frozen_v1",
+      "output_gate_id": "hf_only_tau_frozen",
+      "output_required_fields": [
+        "protocol_id",
+        "protocol_version",
+        "protocol_digest",
+        "fit_manifest_digest",
+        "candidate_binding_digest",
+        "threshold_rule",
+        "tau_float64_hex",
+        "fit_record_collection_sha256",
+        "artifact_sha256",
+        "independent_review_revision",
+        "independent_review_decision"
+      ],
+      "artifact_semantics": "frozen_tau_fact_only_not_hf_scientific_result"
+    },
+    "untouched_confirmation": {
+      "run_phase_id": "c1_hf_untouched_confirmation_v1",
+      "accessible_split": "untouched_confirmation",
+      "package_scope": "confirmation_only",
+      "prerequisite_gates": [
+        "candidate_selection_frozen",
+        "hf_only_tau_frozen"
+      ],
+      "package_authorization_status": "blocked_until_independently_reviewed_tau_artifact_bound",
+      "required_tau_binding_fields": [
+        "tau_float64_hex",
+        "artifact_sha256",
+        "independent_review_revision",
+        "independent_review_decision"
+      ],
+      "required_review_decision": "APPROVE",
+      "tau_refit": "forbidden",
+      "same_run_as_threshold_fit": "forbidden"
+    }
+  },
+  "execution_budget": {
+    "threshold_fit": {
+      "source_clusters": 4096,
+      "clean_image_generations": 4096,
+      "registered_watermarked_image_generations": 0,
+      "hf_write_materializations": 0,
+      "registered_key_detection_calls": 4096,
+      "wrong_key_detection_calls": 0,
+      "paired_quality_evaluations": 0,
+      "public_noise_identity_checks": 4096,
+      "total_detection_calls": 4096
+    },
+    "untouched_confirmation": {
+      "source_clusters": 4096,
+      "clean_image_generations": 4096,
+      "registered_watermarked_image_generations": 4096,
+      "hf_write_materializations": 4096,
+      "registered_key_detection_calls": 8192,
+      "wrong_key_detection_calls": 4096,
+      "paired_quality_evaluations": 4096,
+      "public_noise_identity_checks": 4096,
+      "total_detection_calls": 12288
+    },
+    "failure_and_denominator_policy": {
+      "planned_source_clusters_remain_denominator": true,
+      "failed_excluded_and_retry_records_retained": true,
+      "missing_required_outcome_fails_gate": true,
+      "early_stopping": "forbidden",
+      "maximum_record_attempts_per_unit": 3,
+      "post_result_budget_expansion": "forbidden_without_new_protocol_revision"
+    },
+    "shard_and_resource_boundary": {
+      "shard_count_per_phase": 16,
+      "source_clusters_per_shard": 256,
+      "shard_assignment": "ascending_materialized_assignment_index",
+      "cross_phase_shard_reuse": "forbidden",
+      "gpu_execution_authorized_by_c1_protocol": false,
+      "resource_class_and_walltime": "must_be_frozen_in_separately_authorized_execution_package",
+      "resource_expansion": "requires_new_protocol_revision_and_authorization"
+    }
+  },
+  "metric_plan": {
+    "metric_schema_version": "ceg_wm_c1_hf_metric_plan_v1",
+    "implementation_status": "formula_identities_frozen_c1_m_not_yet_implemented",
+    "held_out_evaluation_access": "forbidden",
+    "metric_split_bindings": [
+      {
+        "metric_id": "c1_hf_tau_fit",
+        "allowed_splits": [
+          "content_threshold_fit"
+        ]
+      },
+      {
+        "metric_id": "c1_hf_primary_null_fixed_fpr",
+        "allowed_splits": [
+          "untouched_confirmation"
+        ]
+      },
+      {
+        "metric_id": "c1_hf_registered_tpr",
+        "allowed_splits": [
+          "untouched_confirmation"
+        ]
+      },
+      {
+        "metric_id": "c1_hf_wrong_key_false_accept",
+        "allowed_splits": [
+          "untouched_confirmation"
+        ]
+      },
+      {
+        "metric_id": "c1_hf_paired_key_attribution",
+        "allowed_splits": [
+          "untouched_confirmation"
+        ]
+      },
+      {
+        "metric_id": "c1_hf_paired_final_image_quality",
+        "allowed_splits": [
+          "untouched_confirmation"
+        ]
+      },
+      {
+        "metric_id": "c1_hf_actual_dtype_integrity",
+        "allowed_splits": [
+          "untouched_confirmation"
+        ]
+      }
+    ],
+    "formula_identities": {
+      "threshold_fit": {
+        "input": "4096_finite_float64_primary_null_hf_scores",
+        "tau": "float64_nextafter(max(scores),positive_infinity)",
+        "decision": "score_greater_than_or_equal_to_tau",
+        "required_fit_false_positives": 0
+      },
+      "binomial_intervals": {
+        "family": "exact_clopper_pearson",
+        "confidence_level": 0.95,
+        "primary_null_direction": "one_sided_upper",
+        "registered_tpr_direction": "one_sided_lower",
+        "wrong_key_direction": "one_sided_upper",
+        "paired_attribution_direction": "one_sided_lower",
+        "primary_and_wrong_key_pooling": "forbidden"
+      },
+      "paired_attribution": {
+        "pairing_unit": "same_source_cluster_and_registered_watermarked_image",
+        "success": "registered_hf_score_strictly_greater_than_wrong_key_hf_score",
+        "tie": "failure",
+        "aggregate": "success_count_over_all_4096_planned_pairs"
+      },
+      "paired_quality": {
+        "reference": "final_clean_rgb8_image",
+        "candidate": "same_source_cluster_final_registered_watermarked_rgb8_image",
+        "normalization": "uint8_channel_value_divided_by_255",
+        "metrics": [
+          {
+            "metric_id": "paired_rgb8_relative_l2",
+            "formula": "l2(candidate-reference)/l2(reference)",
+            "numeric_domain": "[0,positive_infinity)",
+            "unit": "dimensionless",
+            "direction": "lower_is_less_distortion"
+          },
+          {
+            "metric_id": "paired_rgb8_mse",
+            "formula": "mean((candidate-reference)^2)_over_all_hwc_values",
+            "numeric_domain": "[0,1]",
+            "unit": "squared_normalized_rgb8_intensity",
+            "direction": "lower_is_less_distortion"
+          }
+        ],
+        "aggregate": "arithmetic_mean_and_two_sided_95_percent_student_t_interval_mean_plus_or_minus_t_0_975_n_minus_1_times_sample_sd_ddof_1_over_sqrt_n",
+        "interval_clipping": "forbidden",
+        "missing_or_non_finite": "scientific_failure_and_gate_failure",
+        "required_pair_count": 4096,
+        "pass_cutoff": null
+      }
+    }
+  },
+  "statistics": {
+    "threshold_fit": {
+      "split": "content_threshold_fit",
+      "primary_null_count": 4096,
+      "positive_count": 0,
+      "fit_quantity": "hf_only_tau",
+      "fit_rule": "float64_nextafter_above_fit_primary_null_maximum",
+      "decision_comparison": "score_greater_than_or_equal_to_tau",
+      "tail_target": 0.001,
+      "tail_failure_probability_formula": "(1-tail_target)^n",
+      "tail_failure_probability_upper_limit": 0.05,
+      "confirmation_data_access": "forbidden"
+    },
+    "untouched_confirmation": {
+      "split": "untouched_confirmation",
+      "frozen_tau_source": "content_threshold_fit_only",
+      "tau_refit": "forbidden",
+      "primary_null_count": 4096,
+      "registered_positive_count": 4096,
+      "wrong_key_count": 4096,
+      "paired_quality_count": 4096,
+      "primary_null_zero_false_positive_required": true,
+      "primary_null_one_sided_confidence_level": 0.95,
+      "primary_null_cp_upper_target": 0.001
+    },
+    "tpr": {
+      "sample_count": 4096,
+      "interval": "one_sided_95_percent_clopper_pearson_lower",
+      "minimum_lower_confidence_bound": 0.5,
+      "scientific_utility_rationale": "at_fpr_0_001_a_reference_detected_no_more_often_than_not_is_not_useful",
+      "power_precision_rationale": "n_4096_places_a_true_rate_0_55_more_than_six_worst_case_standard_errors_above_0_50",
+      "semantics": "preregistered_minimum_effect_gate_not_tuned_from_results"
+    },
+    "wrong_key": {
+      "sample_count": 4096,
+      "interval": "one_sided_95_percent_clopper_pearson_upper",
+      "reported_separately_from_primary_null": true,
+      "zero_wrong_key_positives_required": true,
+      "maximum_upper_confidence_bound": 0.001,
+      "scientific_utility_rationale": "wrong_key_false_acceptance_must_meet_the_same_0_001_ceiling_but_is_not_primary_fpr",
+      "semantics": "independent_attribution_null_gate_never_pooled_with_primary_null"
+    },
+    "paired_attribution": {
+      "sample_count": 4096,
+      "success_event": "registered_score_strictly_greater_than_paired_wrong_key_score",
+      "ties": "count_as_failures",
+      "interval": "one_sided_95_percent_clopper_pearson_lower",
+      "minimum_lower_confidence_bound": 0.5,
+      "scientific_utility_rationale": "registered_key_scores_must_beat_their_paired_wrong_key_controls_above_chance",
+      "power_precision_rationale": "n_4096_places_a_true_rate_0_55_more_than_six_worst_case_standard_errors_above_0_50"
+    },
+    "paired_quality": {
+      "sample_count": 4096,
+      "interval": "two_sided_95_percent_paired_mean_interval",
+      "standardized_standard_error_scale": 0.015625,
+      "pass_threshold": null,
+      "semantics": "paired_quality_characterization_no_preregistered_limit"
+    },
+    "actual_dtype_integrity": {
+      "registered_positive_count": 4096,
+      "required_for_every_registered_positive": true,
+      "required_runtime_dtype": "float16",
+      "measurement_dtype": "float32",
+      "content_relative_l2_limit": "3/250",
+      "required_checks": [
+        "materialization_integrity_passed",
+        "actual_dtype_matches_runtime",
+        "actual_relative_l2_finite",
+        "actual_relative_l2_at_most_hard_limit"
+      ],
+      "failure_semantics": "scientific_failure_and_c1_negative_closure"
+    },
+    "result_gate_semantics": {
+      "high_specificity_gate": "zero_primary_null_false_positives_and_one_sided_95_percent_cp_upper_at_most_0_001",
+      "identity_gate": "all_frozen_candidate_runtime_dtype_key_and_manifest_identities_match",
+      "tpr_gate": "one_sided_95_percent_lower_bound_at_least_0_50",
+      "wrong_key_gate": "zero_positive_and_separate_one_sided_95_percent_upper_bound_at_most_0_001",
+      "paired_attribution_gate": "registered_greater_than_wrong_key_one_sided_95_percent_lower_bound_above_0_50",
+      "actual_dtype_integrity_gate": "all_registered_positive_records_pass",
+      "paired_quality": "reported_as_characterization_without_pass_threshold",
+      "negative_closure": "failure_of_any_gate_closes_hf_reference_research_question_negative_and_forbids_c2",
+      "result_gate_id": "hf_detector_reference_gate_passed",
+      "result_gate_is_prerequisite": false
+    }
+  },
+  "forbidden_scope": [
+    "lf",
+    "routing",
+    "geometry",
+    "combined_detector",
+    "c2_or_later",
+    "held_out_evaluation",
+    "external_baseline",
+    "formal_evaluation",
+    "gpu_execution",
+    "scientific_result_claim"
+  ]
+}

@@ -32,9 +32,9 @@
   ],
   "maximum_record_attempts": 3,
   "promotion_failure_semantics": "stop_and_record_failed_or_closed_negative_without_advancing",
-  "protocol_id": "ceg_wm_internal_scientific_validation_v1",
+  "protocol_id": "ceg_wm_internal_scientific_validation_v2",
   "protocol_kind": "internal_scientific_validation",
-  "protocol_version": "1.0.0",
+  "protocol_version": "2.0.0",
   "record_collection_binding_fields": [
     "protocol_digest",
     "split_manifest_digest"
@@ -54,31 +54,62 @@
     "registered_key_family_digest"
   ],
   "split_assignment_mode": "explicit_source_cluster_manifest",
-  "split_prerequisite_gates": {
-    "candidate_selection": [],
-    "content_threshold_fit": [
-      "content_branch_promotion_gate_passed"
-    ],
-    "development": [],
-    "end_to_end_check": [
-      "content_threshold_gate_passed",
-      "rescue_threshold_gate_passed",
-      "geometry_reliability_gate_passed"
-    ],
-    "held_out_evaluation": [
-      "end_to_end_gate_passed"
-    ],
-    "reliability_fit": [
-      "qk_sync_gate_passed",
-      "transform_estimation_gate_passed"
-    ],
-    "rescue_threshold_fit": [
-      "content_threshold_gate_passed"
-    ],
-    "untouched_confirmation": [
-      "candidate_selection_frozen"
-    ]
+  "split_prerequisite_gates_by_detector_mode": {
+    "hf_only": {
+      "candidate_selection": [],
+      "content_threshold_fit": [
+        "hf_reference_candidate_frozen"
+      ],
+      "development": [],
+      "end_to_end_check": [
+        "content_threshold_gate_passed",
+        "rescue_threshold_gate_passed",
+        "geometry_reliability_gate_passed"
+      ],
+      "held_out_evaluation": [
+        "end_to_end_gate_passed"
+      ],
+      "reliability_fit": [
+        "qk_sync_gate_passed",
+        "transform_estimation_gate_passed"
+      ],
+      "rescue_threshold_fit": [
+        "content_threshold_gate_passed"
+      ],
+      "untouched_confirmation": [
+        "candidate_selection_frozen",
+        "hf_only_tau_frozen"
+      ]
+    },
+    "combined": {
+      "candidate_selection": [],
+      "content_threshold_fit": [
+        "content_branch_promotion_gate_passed"
+      ],
+      "development": [],
+      "end_to_end_check": [
+        "content_threshold_gate_passed",
+        "rescue_threshold_gate_passed",
+        "geometry_reliability_gate_passed"
+      ],
+      "held_out_evaluation": [
+        "end_to_end_gate_passed"
+      ],
+      "reliability_fit": [
+        "qk_sync_gate_passed",
+        "transform_estimation_gate_passed"
+      ],
+      "rescue_threshold_fit": [
+        "content_threshold_gate_passed"
+      ],
+      "untouched_confirmation": [
+        "candidate_selection_frozen"
+      ]
+    }
   },
+  "legacy_protocol_id": "ceg_wm_internal_scientific_validation_v1",
+  "legacy_protocol_version": "1.0.0",
+  "legacy_protocol_compatibility": "v1_structure_readable_but_semantically_incompatible_and_not_revalidatable_as_v2",
   "splits": [
     "development",
     "candidate_selection",

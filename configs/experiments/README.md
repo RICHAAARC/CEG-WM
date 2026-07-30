@@ -17,6 +17,18 @@ scientific claim boundary）；正式 collection validator 只接受精确冻结
 resource provenance，并逐 record 保存几何操作身份和 experiments 层可靠性配置摘要。该配置与 CPU schema tests
 不构成 calibration、正式运行或科学有效性证据。
 
+`c1_hf_reference_run.json` 是 C1-P 的 HF-only reference 预注册入口；它绑定
+`hf_sparse_tail` 的完整 write/embed/detect/formal-content/runtime source bundle、
+已通过的 runtime qualification 身份、稳定 method-adapter 子配置摘要、actual dtype/
+hard budget、独立 primary-null 与 wrong-key 统计门、paired attribution 和 final
+RGB8 paired-quality 公式。它把 threshold fit 与 untouched confirmation 固定为两个
+不可混跑阶段：前者只能读取 `content_threshold_fit`，后者必须等待独立审计的
+`hf_only_tau_frozen` artifact 且禁止 refit。两个 compact manifest 从提交的 pinned
+PartiPrompts TSV snapshot 和带明文 prompt 的 1632-row roster 离线物化，各含 4096
+source clusters，prompt 完全互斥、并集覆盖全部 roster，且每个
+`(category, challenge)` stratum 计数差不超过 1。当前文件只冻结 C1-P 协议和预算；
+不授权 C1-M、C1-E、GPU、held-out、baseline 或科学结果。
+
 `internal_execution_components.json` 冻结 A-2 内部执行组件 registry：
 
 - 项目方法薄适配器及 13 个职责、公开 callable、结果身份字段的 canonical
