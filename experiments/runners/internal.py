@@ -20,9 +20,9 @@ from experiments.attacks import (
 )
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics import (
-    DetectionMetricCase,
     MetricRegistry,
-    RescueSafetyCase,
+    RectificationMetricCase,
+    aggregate_rectification_delta,
     validate_metric_registry,
 )
 from experiments.protocol.internal_records import (
@@ -56,6 +56,7 @@ from experiments.runners.record_writer import (
     FrozenRecordBindings,
     GovernedRecordWriter,
     GovernedRecordWriterError,
+    canonical_record_digest,
 )
 from main import (
     ConditionalRecoveryResult,
@@ -192,6 +193,27 @@ class InternalCaseRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MetricCaseEvidence:
+    record_id: str
+    canonical_record_digest: str
+    unit_id: str
+    case_id: str
+    source_cluster_id: str
+    split: str
+    score_delta: float
+
+
+@dataclass(frozen=True, slots=True)
+class MetricAggregateEvidence:
+    case_count: int
+    split: str
+    mean_score_delta: float
+    improved_fraction: float
+    detector_identity: str
+    threshold_identity: str
+
+
+@dataclass(frozen=True, slots=True)
 class RecordReplayReport:
     run_id: str
     case_id: str
@@ -202,6 +224,13 @@ class RecordReplayReport:
     execution_failure_count: int
     excluded_count: int
     retry_count: int
+    metric_case_count: int
+    metric_registry_digest: str
+    metric_evaluator_identity: str | None
+    metric_aggregate_identity: str | None
+    metric_case_results: tuple[MetricCaseEvidence, ...]
+    metric_aggregate_values: MetricAggregateEvidence | None
+    metric_observation_digest: str
     replay_digest: str
 
 
@@ -523,44 +552,76 @@ def replay_internal_record_collection(
         persisted.to_dict()
     ):
         raise InternalRunnerError("replay collection differs from persisted records")
+    metric_cases: list[RectificationMetricCase] = []
+    metric_records: list[InternalValidationRecord] = []
     for record in persisted.records:
         if record.execution_status != "success":
             continue
         raw_score = record.detector_trace.raw_content_score
         if raw_score is None:
             raise InternalRunnerError("successful record has no raw metric score")
-        DetectionMetricCase(
-            analysis_unit_identity=record.analysis_unit_identity,
-            split=record.split,
-            detector_identity=record.detector_trace.raw_detector_identity,
-            key_role={
-                "registered": "registered_positive",
-                "wrong_key": "wrong_key",
-                "unwatermarked_primary_null": "unwatermarked_primary_null",
-            }[record.key_control_trace.key_role],
-            score=raw_score,
+        rectified_score = record.detector_trace.rectified_content_score
+        if rectified_score is None:
+            continue
+        metric_cases.append(
+            RectificationMetricCase(
+                analysis_unit_identity=record.analysis_unit_identity,
+                split=record.split,
+                raw_detector_identity=(
+                    record.detector_trace.raw_detector_identity
+                ),
+                rectified_detector_identity=(
+                    record.detector_trace.rectified_detector_identity
+                ),
+                raw_threshold_identity=(
+                    record.threshold_trace.raw_threshold_identity
+                ),
+                rectified_threshold_identity=(
+                    record.threshold_trace.rectified_threshold_identity
+                ),
+                raw_score=raw_score,
+                rectified_score=rectified_score,
+            )
         )
-        RescueSafetyCase(
-            analysis_unit_identity=record.analysis_unit_identity,
-            split=record.split,
-            raw_detector_identity=record.detector_trace.raw_detector_identity,
-            rectified_detector_identity=(
-                record.detector_trace.rectified_detector_identity
-            ),
-            raw_threshold_identity=record.threshold_trace.raw_threshold_identity,
-            rectified_threshold_identity=(
-                record.threshold_trace.rectified_threshold_identity
-            ),
-            raw_positive=raw_score >= record.threshold_trace.tau,
-            rescue_triggered=record.geometry_trace.geometry_triggered,
-            rectified_positive=(
-                record.detector_trace.rectified_content_score is not None
-                and record.detector_trace.rectified_content_score
-                >= record.threshold_trace.tau
-            ),
-            watermark_decision_positive=(
-                record.decision_trace.watermark_decision == "positive"
-            ),
+        metric_records.append(record)
+    metric_evaluator_identity: str | None = None
+    metric_aggregate_identity: str | None = None
+    metric_case_results: tuple[MetricCaseEvidence, ...] = ()
+    metric_aggregate_values: MetricAggregateEvidence | None = None
+    if metric_cases:
+        aggregate = aggregate_rectification_delta(
+            metric_cases,
+            registry=context.metric_registry,
+        )
+        metric_evaluator_identity = (
+            "experiments.metrics.aggregate_rectification_delta"
+        )
+        metric_aggregate_identity = (
+            "experiments.metrics.RectificationDeltaAggregate"
+        )
+        metric_case_results = tuple(
+            MetricCaseEvidence(
+                record_id=record.record_id,
+                canonical_record_digest=canonical_record_digest(record),
+                unit_id=result.unit_id,
+                case_id=result.case_id,
+                source_cluster_id=result.source_cluster_id,
+                split=result.split,
+                score_delta=result.score_delta,
+            )
+            for record, result in zip(
+                metric_records,
+                aggregate.cases,
+                strict=True,
+            )
+        )
+        metric_aggregate_values = MetricAggregateEvidence(
+            case_count=len(aggregate.cases),
+            split=aggregate.split,
+            mean_score_delta=aggregate.mean_score_delta,
+            improved_fraction=aggregate.improved_fraction,
+            detector_identity=aggregate.detector_identity,
+            threshold_identity=aggregate.threshold_identity,
         )
     counts = {
         "success": sum(record.execution_status == "success" for record in persisted.records),
@@ -583,6 +644,21 @@ def replay_internal_record_collection(
             "replay": "schema_decision_metric_consistency",
         }
     )
+    metric_observation_digest = _canonical_digest(
+        {
+            "metric_aggregate_identity": metric_aggregate_identity,
+            "metric_aggregate_values": (
+                None
+                if metric_aggregate_values is None
+                else asdict(metric_aggregate_values)
+            ),
+            "metric_case_results": [
+                asdict(result) for result in metric_case_results
+            ],
+            "metric_evaluator_identity": metric_evaluator_identity,
+            "metric_registry_digest": context.metric_registry.registry_digest,
+        }
+    )
     return RecordReplayReport(
         run_id=persisted.run_id,
         case_id=persisted.case_id,
@@ -593,6 +669,13 @@ def replay_internal_record_collection(
         execution_failure_count=counts["execution"],
         excluded_count=counts["excluded"],
         retry_count=counts["retry"],
+        metric_case_count=len(metric_cases),
+        metric_registry_digest=context.metric_registry.registry_digest,
+        metric_evaluator_identity=metric_evaluator_identity,
+        metric_aggregate_identity=metric_aggregate_identity,
+        metric_case_results=metric_case_results,
+        metric_aggregate_values=metric_aggregate_values,
+        metric_observation_digest=metric_observation_digest,
         replay_digest=replay_digest,
     )
 

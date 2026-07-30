@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+from math import exp, log, sqrt
 from pathlib import Path
 import re
 from typing import Sequence
@@ -53,16 +54,21 @@ from experiments.runners import (
     execute_internal_case,
     execution_config_digest,
     formal_operation_config_digest,
+    geometry_reliability_config_digest,
     replay_internal_record_collection,
 )
-from main import JointDecisionThresholds
-from runtime import Sd35PipelineBackend, create_runtime_adapter
+from experiments.runners.synthetic_runtime import (
+    SyntheticDelegatingGeometryOperation,
+    SyntheticQkBackend,
+)
+from main import GeometryReliabilityThresholds, JointDecisionThresholds
+from runtime import create_runtime_adapter
 
 
 ENTRYPOINT_IDENTITY = (
     "scripts.experiment_execution.experiment_execution_entrypoint:main"
 )
-ENTRYPOINT_SCHEMA_VERSION = 1
+ENTRYPOINT_SCHEMA_VERSION = 2
 EXECUTION_SCOPE = "cpu_synthetic_wiring_only"
 EVIDENCE_SCOPE = (
     "infrastructure_synthetic_wiring_not_scientific_experiment_evidence"
@@ -118,11 +124,14 @@ def _unit(index: int, *, case_id: str) -> AnalysisUnitIdentity:
 
 
 def _split_manifest(
-    primary: AnalysisUnitIdentity,
+    primary: tuple[AnalysisUnitIdentity, ...],
 ) -> FrozenSplitManifest:
-    assignments = [SplitAssignment(primary, "development")]
+    assignments = [
+        SplitAssignment(identity, "end_to_end_check")
+        for identity in primary
+    ]
     for index, split in enumerate(INTERNAL_VALIDATION_SPLITS):
-        if split == "development":
+        if split == "end_to_end_check":
             continue
         assignments.append(
             SplitAssignment(
@@ -140,20 +149,32 @@ def _split_manifest(
 
 
 def _synthetic_image() -> torch.Tensor:
-    return (
-        torch.arange(3 * 9 * 9, dtype=torch.int64)
-        .remainder(256)
-        .to(dtype=torch.uint8)
-        .reshape(1, 3, 9, 9)
+    axis = torch.linspace(64, 254, 512, dtype=torch.float32).floor().to(
+        dtype=torch.uint8
     )
+    horizontal = axis.unsqueeze(0).expand(512, 512)
+    vertical = axis.unsqueeze(1).expand(512, 512)
+    diagonal = (
+        horizontal.to(dtype=torch.int16)
+        + vertical.to(dtype=torch.int16)
+    ).remainder(256).to(dtype=torch.uint8)
+    return torch.stack((horizontal, vertical, diagonal), dim=0).unsqueeze(0)
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticWiringCase:
+    role: str
+    payload: InternalCaseExecutionPayload
+    execution_attempts: int
 
 
 @dataclass(frozen=True, slots=True)
 class SyntheticWiringPreparation:
-    """Prepared A3a objects and identities for one deterministic wiring run."""
+    """Prepared package-contained cases for one deterministic wiring run."""
 
     context: InternalRunnerContext
     payload: InternalCaseExecutionPayload
+    cases: tuple[SyntheticWiringCase, ...]
     candidate_config_digest: str
     execution_config_digest: str
     input_manifest_digest: str
@@ -167,7 +188,7 @@ def prepare_synthetic_wiring(
     committed_revision: str,
     run_id: str,
 ) -> SyntheticWiringPreparation:
-    """Construct the real A3a runner around a deterministic development fixture."""
+    """Construct real runner paths around deterministic development fixtures."""
 
     package = Path(package_root).resolve()
     records = Path(records_root).resolve()
@@ -213,86 +234,72 @@ def prepare_synthetic_wiring(
     attack_registry = load_attack_registry(component_path)
     metric_registry = load_metric_registry(component_path)
 
-    source_unit = _unit(0, case_id="synthetic_wiring_case")
-    split_manifest = _split_manifest(source_unit)
-    source_artifact = AttackArtifact(source_unit, _synthetic_image())
-    attack_specification = GeometricAttackSpec("identity")
+    case_id = "synthetic_wiring_case"
+    source_units = tuple(_unit(index, case_id=case_id) for index in range(3))
+    split_manifest = _split_manifest(source_units)
     content_operation = FormalHfContentDetectionOperation(adapter)
-    content_binding, raw_score = create_formal_content_detector_binding(
+    content_binding, _prototype_score = create_formal_content_detector_binding(
         content_operation,
-        prototype_image=source_artifact.image,
+        prototype_image=_synthetic_image(),
         detection_key=SYNTHETIC_ROOT_KEY,
     )
-    thresholds = JointDecisionThresholds(
-        tau=raw_score - 0.1,
-        tau_rescue=raw_score - 0.2,
-        detector_binding_digest=content_binding.detector_binding_digest,
-        calibration_identity=(
-            "synthetic_wiring_thresholds_not_calibration_evidence"
-        ),
-    )
-
-    runtime_backend = Sd35PipelineBackend(
-        cache_root=workspace / "model_cache",
-        persistent_root=records,
-        hf_token=None,
-        prompt="Synthetic wiring only; no model execution is authorized.",
-    )
     runtime_adapter = create_runtime_adapter(
-        runtime_backend,
+        SyntheticQkBackend(
+            root_key=SYNTHETIC_ROOT_KEY,
+            model_revision=SYNTHETIC_MODEL_REVISION,
+        ),
         runtime_config_path,
     )
+    runtime_adapter.initialize("cpu")
     geometry_operation = FormalRuntimeGeometryEstimationOperation(
         runtime_adapter=runtime_adapter,
         adapter_configuration=adapter_configuration,
         epsilon_inlier=0.8,
         execution_scope=EXECUTION_SCOPE,
     )
-    payload = InternalCaseExecutionPayload(
-        source_artifact=source_artifact,
-        attack_specification=attack_specification,
-        detection_key=SYNTHETIC_ROOT_KEY,
-        content_detector_binding=content_binding,
-        thresholds=thresholds,
-        geometry_estimation_operation=geometry_operation,
-        geometry_operation_identity=(
-            "formal_runtime_geometry_estimation_operation"
+    reliability_thresholds = GeometryReliabilityThresholds(
+        gamma_coverage=0.45,
+        gamma_uniqueness=0.0,
+        gamma_gap=0.0,
+        gamma_key=0.0,
+        gamma_inlier=0.0,
+        gamma_residual=1.0,
+        gamma_identity=0.0,
+        epsilon_inlier=0.8,
+        fit_identity="synthetic_wiring_reliability_not_scientific_evidence",
+    )
+    operation_cases = (
+        (
+            "geometry_non_identity_success",
+            geometry_operation,
+            GeometricAttackSpec(
+                "scale",
+                scale_factor=exp(-log(sqrt(2.0)) / 2.0),
+            ),
+            1,
         ),
-        geometry_reliability_thresholds=None,
+        (
+            "resource_retry_resume",
+            SyntheticDelegatingGeometryOperation(
+                geometry_operation,
+                failure_mode="resource_twice_then_qk_sync_failure",
+            ),
+            GeometricAttackSpec("crop", crop_fraction=0.9),
+            3,
+        ),
+        (
+            "execution_failure",
+            SyntheticDelegatingGeometryOperation(
+                geometry_operation,
+                failure_mode="execution_failure",
+            ),
+            GeometricAttackSpec("identity"),
+            1,
+        ),
     )
     key_digest = adapter.identify_key(
         SYNTHETIC_ROOT_KEY
     ).result.root_key_public_digest
-    execution_expectation = FrozenCaseExecutionExpectation(
-        content_detector_binding_digest=(
-            content_binding.detector_binding_digest
-        ),
-        content_operation_config_digest=formal_operation_config_digest(
-            content_operation,
-            operation_role="content_detection",
-        ),
-        raw_detector_identity=content_binding.detector_identity,
-        rectified_detector_identity=content_binding.detector_identity,
-        raw_detector_config_digest=content_binding.content_config_digest,
-        rectified_detector_config_digest=(
-            content_binding.content_config_digest
-        ),
-        raw_preprocessing_identity=content_binding.preprocessing_identity,
-        rectified_preprocessing_identity=(
-            content_binding.preprocessing_identity
-        ),
-        raw_threshold_identity=thresholds.threshold_identity,
-        rectified_threshold_identity=thresholds.threshold_identity,
-        calibration_identity=thresholds.calibration_identity,
-        tau=thresholds.tau,
-        tau_rescue=thresholds.tau_rescue,
-        geometry_operation_identity=payload.geometry_operation_identity,
-        geometry_operation_config_digest=formal_operation_config_digest(
-            geometry_operation,
-            operation_role="geometry_estimation",
-        ),
-        geometry_reliability_config_digest=None,
-    )
     routing_observation_digest = _canonical_digest(
         {
             "execution_scope": EXECUTION_SCOPE,
@@ -306,26 +313,114 @@ def prepare_synthetic_wiring(
             "routing_control": "uniform_disabled",
         }
     )
-    entry = InternalCaseManifestEntry(
-        analysis_unit_identity=source_unit,
-        split="development",
-        input_artifact_digest=source_artifact.image_digest,
-        attack_config_digest=attack_specification.attack_config_digest,
-        metric_set_digest=metric_registry.registry_digest,
-        routing_trace=RoutingTrace(
-            routing_identity="routing_uniform_control",
-            routing_control="uniform_disabled",
-            routing_observation_digest=routing_observation_digest,
-            routing_mask_digest=routing_mask_digest,
-        ),
-        key_control_trace=KeyControlTrace(
-            registered_key_public_digest=key_digest,
-            detection_key_public_digest=key_digest,
-            key_role="registered",
-            control_identity="registered_key_control",
-        ),
-        execution_expectation=execution_expectation,
+    cases: list[SyntheticWiringCase] = []
+    entries: list[InternalCaseManifestEntry] = []
+    reliability_digest = geometry_reliability_config_digest(
+        reliability_thresholds
     )
+    content_operation_digest = formal_operation_config_digest(
+        content_operation,
+        operation_role="content_detection",
+    )
+    for source_unit, case_definition in zip(
+        source_units,
+        operation_cases,
+        strict=True,
+    ):
+        role, case_geometry_operation, attack_specification, attempts = (
+            case_definition
+        )
+        source_artifact = AttackArtifact(
+            source_unit,
+            _synthetic_image(),
+        )
+        thresholds = JointDecisionThresholds(
+            tau=1.0e300,
+            tau_rescue=-1.0e300,
+            detector_binding_digest=(
+                content_binding.detector_binding_digest
+            ),
+            calibration_identity=(
+                f"synthetic_{role}_thresholds_not_calibration_evidence"
+            ),
+        )
+        geometry_operation_identity = (
+            f"synthetic_wiring_{role}_geometry_operation"
+        )
+        payload = InternalCaseExecutionPayload(
+            source_artifact=source_artifact,
+            attack_specification=attack_specification,
+            detection_key=SYNTHETIC_ROOT_KEY,
+            content_detector_binding=content_binding,
+            thresholds=thresholds,
+            geometry_estimation_operation=case_geometry_operation,
+            geometry_operation_identity=geometry_operation_identity,
+            geometry_reliability_thresholds=reliability_thresholds,
+        )
+        expectation = FrozenCaseExecutionExpectation(
+            content_detector_binding_digest=(
+                content_binding.detector_binding_digest
+            ),
+            content_operation_config_digest=content_operation_digest,
+            raw_detector_identity=content_binding.detector_identity,
+            rectified_detector_identity=content_binding.detector_identity,
+            raw_detector_config_digest=(
+                content_binding.content_config_digest
+            ),
+            rectified_detector_config_digest=(
+                content_binding.content_config_digest
+            ),
+            raw_preprocessing_identity=(
+                content_binding.preprocessing_identity
+            ),
+            rectified_preprocessing_identity=(
+                content_binding.preprocessing_identity
+            ),
+            raw_threshold_identity=thresholds.threshold_identity,
+            rectified_threshold_identity=thresholds.threshold_identity,
+            calibration_identity=thresholds.calibration_identity,
+            tau=thresholds.tau,
+            tau_rescue=thresholds.tau_rescue,
+            geometry_operation_identity=geometry_operation_identity,
+            geometry_operation_config_digest=formal_operation_config_digest(
+                case_geometry_operation,
+                operation_role="geometry_estimation",
+            ),
+            geometry_reliability_config_digest=reliability_digest,
+        )
+        entries.append(
+            InternalCaseManifestEntry(
+                analysis_unit_identity=source_unit,
+                split="end_to_end_check",
+                input_artifact_digest=source_artifact.image_digest,
+                attack_config_digest=(
+                    attack_specification.attack_config_digest
+                ),
+                metric_set_digest=metric_registry.registry_digest,
+                routing_trace=RoutingTrace(
+                    routing_identity="routing_uniform_control",
+                    routing_control="uniform_disabled",
+                    routing_observation_digest=(
+                        routing_observation_digest
+                    ),
+                    routing_mask_digest=routing_mask_digest,
+                ),
+                key_control_trace=KeyControlTrace(
+                    registered_key_public_digest=key_digest,
+                    detection_key_public_digest=key_digest,
+                    key_role="registered",
+                    control_identity="registered_key_control",
+                ),
+                execution_expectation=expectation,
+            )
+        )
+        cases.append(
+            SyntheticWiringCase(
+                role=role,
+                payload=payload,
+                execution_attempts=attempts,
+            )
+        )
     input_manifest = FrozenCaseInputManifest(
         manifest_schema_version=(
             "ceg_wm_internal_case_input_manifest_v3"
@@ -334,7 +429,7 @@ def prepare_synthetic_wiring(
         manifest_revision="synthetic_wiring_input_revision",
         protocol_digest=protocol.digest(),
         split_manifest_digest=split_manifest.digest(),
-        entries=(entry,),
+        entries=tuple(entries),
     )
     input_digest = input_manifest.digest()
     execution_digest = execution_config_digest(
@@ -350,7 +445,7 @@ def prepare_synthetic_wiring(
     )
     bindings = FrozenRecordBindings(
         run_id=run_id,
-        case_id=source_unit.case_id,
+        case_id=case_id,
         input_manifest_digest=input_digest,
         method_code_revision=committed_revision,
         candidate_config_digest=candidate_digest,
@@ -367,7 +462,7 @@ def prepare_synthetic_wiring(
         resource_identity_digest=_canonical_digest(
             {
                 "geometry_runtime_state": runtime_adapter.state.value,
-                "resource_mode": "no_model_execution",
+                "resource_mode": "deterministic_cpu_fake_runtime",
             }
         ),
     )
@@ -390,7 +485,8 @@ def prepare_synthetic_wiring(
     )
     return SyntheticWiringPreparation(
         context=context,
-        payload=payload,
+        payload=cases[0].payload,
+        cases=tuple(cases),
         candidate_config_digest=candidate_digest,
         execution_config_digest=execution_digest,
         input_manifest_digest=input_digest,
@@ -408,7 +504,7 @@ def run_synthetic_wiring(
     expected_input_manifest_digest: str,
     run_id: str,
 ) -> dict[str, object]:
-    """Execute one non-scientific development record through the A3a layer."""
+    """Execute package-contained non-scientific runner paths and replay them."""
 
     for role, digest in (
         (
@@ -455,17 +551,56 @@ def run_synthetic_wiring(
         raise ExperimentExecutionEntrypointError(
             "prepared A3a identities differ from package-bound digests"
         )
-    case_result = execute_internal_case(
-        preparation.context,
-        unit_id=(
-            preparation.payload.source_artifact.analysis_unit_identity.unit_id
-        ),
-        payload=preparation.payload,
-    )
+    terminal_record_collection = None
+    resumed_count = 0
+    for case in preparation.cases:
+        unit_id = (
+            case.payload.source_artifact.analysis_unit_identity.unit_id
+        )
+        for _attempt in range(case.execution_attempts):
+            case_result = execute_internal_case(
+                preparation.context,
+                unit_id=unit_id,
+                payload=case.payload,
+            )
+            terminal_record_collection = case_result.collection
+        resumed = execute_internal_case(
+            preparation.context,
+            unit_id=unit_id,
+            payload=case.payload,
+        )
+        if not resumed.resumed_without_execution:
+            raise ExperimentExecutionEntrypointError(
+                f"synthetic case did not resume without execution: {case.role}"
+            )
+        resumed_count += 1
+        terminal_record_collection = resumed.collection
+    if terminal_record_collection is None:
+        raise ExperimentExecutionEntrypointError(
+            "synthetic case plan is empty"
+        )
     replay = replay_internal_record_collection(
         preparation.context,
-        case_result.collection,
+        terminal_record_collection,
     )
+    if (
+        replay.metric_case_count != replay.success_count
+        or replay.metric_registry_digest
+        != preparation.context.metric_registry.registry_digest
+        or replay.metric_evaluator_identity
+        != "experiments.metrics.aggregate_rectification_delta"
+        or replay.metric_aggregate_identity
+        != "experiments.metrics.RectificationDeltaAggregate"
+        or replay.metric_aggregate_values is None
+        or replay.metric_aggregate_values.case_count
+        != replay.metric_case_count
+        or not DIGEST.fullmatch(replay.metric_observation_digest)
+        or replay.retry_count != 1
+        or resumed_count != len(preparation.cases)
+    ):
+        raise ExperimentExecutionEntrypointError(
+            "synthetic replay, metric, retry, or resume observation drifted"
+        )
     record_path = preparation.context.writer.path
     summary = {
         "entrypoint_schema_version": ENTRYPOINT_SCHEMA_VERSION,
@@ -494,6 +629,16 @@ def run_synthetic_wiring(
         "execution_failure_count": replay.execution_failure_count,
         "excluded_count": replay.excluded_count,
         "replay_digest": replay.replay_digest,
+        "metric_registry_digest": replay.metric_registry_digest,
+        "metric_evaluator_identity": replay.metric_evaluator_identity,
+        "metric_aggregate_identity": replay.metric_aggregate_identity,
+        "metric_case_results": [
+            asdict(result) for result in replay.metric_case_results
+        ],
+        "metric_aggregate_values": asdict(
+            replay.metric_aggregate_values
+        ),
+        "metric_evidence_digest": replay.metric_observation_digest,
         "scientific_claims_supported": False,
         "gpu_executed": False,
         "held_out_evaluation_accessed": False,

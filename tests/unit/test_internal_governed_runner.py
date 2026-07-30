@@ -658,6 +658,10 @@ def test_runner_composes_real_adapter_attack_and_metric_replay_once(tmp_path: Pa
     assert len(resumed.collection.records) == 1
     assert replay.success_count == 1
     assert replay.record_count == 1
+    assert replay.metric_case_count == 0
+    assert replay.metric_case_results == ()
+    assert replay.metric_aggregate_values is None
+    assert len(replay.metric_observation_digest) == 64
     assert context.writer.path.read_bytes().endswith(b"\n")
 
 
@@ -678,10 +682,16 @@ def test_identical_frozen_inputs_produce_identical_record_bytes(
         unit_id=second_payload.source_artifact.analysis_unit_identity.unit_id,
         payload=second_payload,
     )
+    first_replay = replay_internal_record_collection(first_context)
+    second_replay = replay_internal_record_collection(second_context)
 
     assert first.record.to_dict() == second.record.to_dict()
     assert first_context.writer.path.read_bytes() == (
         second_context.writer.path.read_bytes()
+    )
+    assert first_replay.metric_case_count == second_replay.metric_case_count == 0
+    assert first_replay.metric_observation_digest == (
+        second_replay.metric_observation_digest
     )
 
 

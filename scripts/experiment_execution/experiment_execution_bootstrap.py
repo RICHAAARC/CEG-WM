@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
+from math import isfinite
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -107,6 +108,12 @@ SUMMARY_FIELDS = {
     "gpu_executed",
     "held_out_evaluation_accessed",
     "input_manifest_digest",
+    "metric_aggregate_identity",
+    "metric_aggregate_values",
+    "metric_case_results",
+    "metric_evaluator_identity",
+    "metric_evidence_digest",
+    "metric_registry_digest",
     "record_collection_relative_path",
     "record_collection_sha256",
     "record_count",
@@ -148,6 +155,17 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _canonical_digest(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def _bootstrap_sha256() -> str:
@@ -496,7 +514,7 @@ def _validate_summary(
     if (
         not isinstance(summary, dict)
         or set(summary) != SUMMARY_FIELDS
-        or summary.get("entrypoint_schema_version") != 1
+        or summary.get("entrypoint_schema_version") != 2
         or summary.get("entrypoint_identity") != ENTRYPOINT_IDENTITY
         or summary.get("artifact_kind")
         != "experiment_execution_result"
@@ -512,6 +530,16 @@ def _validate_summary(
         or summary.get("scientific_claims_supported") is not False
         or summary.get("gpu_executed") is not False
         or summary.get("held_out_evaluation_accessed") is not False
+        or summary.get("metric_evaluator_identity")
+        != "experiments.metrics.aggregate_rectification_delta"
+        or summary.get("metric_aggregate_identity")
+        != "experiments.metrics.RectificationDeltaAggregate"
+        or not DIGEST.fullmatch(
+            summary.get("metric_registry_digest", "")
+        )
+        or not DIGEST.fullmatch(
+            summary.get("metric_evidence_digest", "")
+        )
     ):
         raise ExperimentEntrypointError(
             "entrypoint_result",
@@ -578,6 +606,169 @@ def _validate_summary(
         raise ExperimentEntrypointError(
             "entrypoint_result",
             "entrypoint result counts or replay digest drifted",
+        )
+    try:
+        record_collection = json.loads(
+            record_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ExperimentEntrypointError(
+            "entrypoint_result",
+            "record collection is invalid",
+        ) from exc
+    records = (
+        record_collection.get("records")
+        if isinstance(record_collection, dict)
+        else None
+    )
+    expected_replay_digest = _canonical_digest(
+        {
+            "collection": record_collection,
+            "metric_registry_digest": summary["metric_registry_digest"],
+            "replay": "schema_decision_metric_consistency",
+        }
+    )
+    if summary["replay_digest"] != expected_replay_digest:
+        raise ExperimentEntrypointError(
+            "entrypoint_result",
+            "entrypoint replay digest drifted",
+        )
+    metric_case_results = summary.get("metric_case_results")
+    metric_aggregate_values = summary.get("metric_aggregate_values")
+    if (
+        not isinstance(records, list)
+        or len(records) != summary["record_count"]
+        or not isinstance(metric_case_results, list)
+        or not isinstance(metric_aggregate_values, dict)
+        or set(metric_aggregate_values)
+        != {
+            "case_count",
+            "detector_identity",
+            "improved_fraction",
+            "mean_score_delta",
+            "split",
+            "threshold_identity",
+        }
+    ):
+        raise ExperimentEntrypointError(
+            "entrypoint_result",
+            "metric evidence structure is invalid",
+        )
+    successful_rectifications = []
+    for record in records:
+        if (
+            not isinstance(record, dict)
+            or record.get("execution_status") != "success"
+        ):
+            continue
+        detector = record.get("detector_trace")
+        threshold = record.get("threshold_trace")
+        identity = record.get("analysis_unit_identity")
+        if (
+            not isinstance(detector, dict)
+            or not isinstance(threshold, dict)
+            or not isinstance(identity, dict)
+            or detector.get("raw_content_score") is None
+            or detector.get("rectified_content_score") is None
+        ):
+            continue
+        successful_rectifications.append((record, detector, threshold, identity))
+    expected_metric_results = []
+    for record, detector, _threshold, identity in successful_rectifications:
+        raw_score = detector["raw_content_score"]
+        rectified_score = detector["rectified_content_score"]
+        if (
+            type(raw_score) not in {int, float}
+            or isinstance(raw_score, bool)
+            or type(rectified_score) not in {int, float}
+            or isinstance(rectified_score, bool)
+            or not isfinite(float(raw_score))
+            or not isfinite(float(rectified_score))
+        ):
+            raise ExperimentEntrypointError(
+                "entrypoint_result",
+                "metric record score is invalid",
+            )
+        expected_metric_results.append(
+            {
+                "canonical_record_digest": _canonical_digest(record),
+                "case_id": identity.get("case_id"),
+                "record_id": record.get("record_id"),
+                "score_delta": rectified_score - raw_score,
+                "source_cluster_id": identity.get("source_cluster_id"),
+                "split": record.get("split"),
+                "unit_id": identity.get("unit_id"),
+            }
+        )
+    if (
+        not expected_metric_results
+        or len(expected_metric_results) != summary["success_count"]
+        or metric_case_results != expected_metric_results
+        or metric_aggregate_values.get("case_count")
+        != len(expected_metric_results)
+    ):
+        raise ExperimentEntrypointError(
+            "entrypoint_result",
+            "metric case evidence differs from persisted records",
+        )
+    detector_identities = {
+        detector.get("raw_detector_identity")
+        for _record, detector, _threshold, _identity
+        in successful_rectifications
+    }
+    threshold_identities = {
+        threshold.get("raw_threshold_identity")
+        for _record, _detector, threshold, _identity
+        in successful_rectifications
+    }
+    splits = {result["split"] for result in expected_metric_results}
+    deltas = [result["score_delta"] for result in expected_metric_results]
+    aggregate_mean = metric_aggregate_values.get("mean_score_delta")
+    aggregate_improved = metric_aggregate_values.get("improved_fraction")
+    metric_set_digests = set()
+    for record, _detector, _threshold, _identity in successful_rectifications:
+        provenance = record.get("provenance_trace")
+        if not isinstance(provenance, dict):
+            raise ExperimentEntrypointError(
+                "entrypoint_result",
+                "metric record provenance is invalid",
+            )
+        metric_set_digests.add(provenance.get("metric_set_digest"))
+    if (
+        len(detector_identities) != 1
+        or len(threshold_identities) != 1
+        or len(splits) != 1
+        or type(aggregate_mean) not in {int, float}
+        or isinstance(aggregate_mean, bool)
+        or not isfinite(float(aggregate_mean))
+        or type(aggregate_improved) not in {int, float}
+        or isinstance(aggregate_improved, bool)
+        or not isfinite(float(aggregate_improved))
+        or metric_aggregate_values.get("detector_identity")
+        != next(iter(detector_identities))
+        or metric_aggregate_values.get("threshold_identity")
+        != next(iter(threshold_identities))
+        or metric_aggregate_values.get("split") != next(iter(splits))
+        or aggregate_mean != sum(deltas) / len(deltas)
+        or aggregate_improved
+        != sum(delta > 0.0 for delta in deltas) / len(deltas)
+        or metric_set_digests != {summary["metric_registry_digest"]}
+    ):
+        raise ExperimentEntrypointError(
+            "entrypoint_result",
+            "metric aggregate evidence differs from persisted records",
+        )
+    metric_evidence = {
+        "metric_aggregate_identity": summary["metric_aggregate_identity"],
+        "metric_aggregate_values": metric_aggregate_values,
+        "metric_case_results": metric_case_results,
+        "metric_evaluator_identity": summary["metric_evaluator_identity"],
+        "metric_registry_digest": summary["metric_registry_digest"],
+    }
+    if summary["metric_evidence_digest"] != _canonical_digest(metric_evidence):
+        raise ExperimentEntrypointError(
+            "entrypoint_result",
+            "metric evidence digest drifted",
         )
     return summary
 

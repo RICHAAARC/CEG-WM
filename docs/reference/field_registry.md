@@ -421,6 +421,12 @@ Notebook 与 repository module 的跨边界数据
 | held_out_evaluation_accessed | persisted_protocol | protocol | none | false | false | false | 当前 package entrypoint 是否访问 held-out evaluation；synthetic wiring 固定为 false。 |
 | bootstrap_identity | persisted_protocol | provenance | none | false | false | false | package 外 bootstrap 的固定实现身份，必须在读取 package 前由调用者核对。 |
 | entrypoint_schema_version | persisted_protocol | protocol | none | false | false | false | package-contained execution summary 的局部结构版本。 |
+| metric_registry_digest | persisted_protocol | provenance | none | false | false | false | execution summary 实际 metric registry 的 SHA-256，与成功 record 的 `metric_set_digest` 一致。 |
+| metric_evaluator_identity | persisted_protocol | provenance | none | false | false | false | replay 实际调用的已登记 metric evaluator 完整公开身份。 |
+| metric_aggregate_identity | persisted_protocol | provenance | none | false | false | false | replay 实际返回的 aggregate 类型完整公开身份。 |
+| metric_case_results | persisted_protocol | runtime_state | none | false | false | false | 从 replay 验证成功 records 实际求值得到的逐 case metric 结果，并绑定 record ID 与 canonical record digest。 |
+| metric_aggregate_values | persisted_protocol | runtime_state | none | false | false | false | 已登记 evaluator 对逐 case 结果计算的 count、split、均值、改善比例及 detector/threshold 身份。 |
+| metric_evidence_digest | persisted_protocol | provenance | none | false | false | false | 对 registry、evaluator/aggregate 身份、逐 case 结果及 aggregate values 的 canonical SHA-256。 |
 | diagnostic_schema_version | persisted_protocol | protocol | none | false | false | false | bootstrap 或 entrypoint failure diagnostic 的局部结构版本；不属于科学结果。 |
 | expected_archive_sha256 | cross_boundary | provenance | none | false | false | false | 调用者独立审核后交给 experiment bootstrap 的完整 archive SHA-256。 |
 | expected_bootstrap_identity | cross_boundary | provenance | none | false | false | false | Notebook/调用者要求 package 外 bootstrap 精确匹配的实现身份。 |

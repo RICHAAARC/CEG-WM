@@ -167,12 +167,57 @@ def test_verified_package_executes_real_a3a_synthetic_wiring(
             archive.read("execution_summary.json")
         )
     assert summary["execution_scope"] == "cpu_synthetic_wiring_only"
+    assert summary["entrypoint_schema_version"] == 2
     assert summary["scientific_claims_supported"] is False
     assert summary["gpu_executed"] is False
     assert summary["held_out_evaluation_accessed"] is False
     assert summary["success_count"] == 1
-    assert summary["record_count"] == 1
+    assert summary["resource_failure_count"] == 2
+    assert summary["scientific_failure_count"] == 1
+    assert summary["execution_failure_count"] == 1
+    assert summary["record_count"] == 5
+    assert summary["metric_evaluator_identity"] == (
+        "experiments.metrics.aggregate_rectification_delta"
+    )
+    assert summary["metric_aggregate_identity"] == (
+        "experiments.metrics.RectificationDeltaAggregate"
+    )
+    assert len(summary["metric_case_results"]) == 1
+    assert summary["metric_aggregate_values"]["case_count"] == 1
+    assert len(summary["metric_evidence_digest"]) == 64
     assert summary["record_collection_relative_path"] in result_names
+    replay_validation_root = tmp_path / "replay_validation"
+    with zipfile.ZipFile(result_zip) as archive:
+        archive.extractall(replay_validation_root)
+    validated_summary = experiment_execution_bootstrap._validate_summary(
+        replay_validation_root / "execution_summary.json",
+        result_root=replay_validation_root,
+        run_id="integration-package",
+        revision=revision,
+        candidate_digest=preparation.candidate_config_digest,
+        execution_digest=preparation.execution_config_digest,
+        input_digest=preparation.input_manifest_digest,
+    )
+    assert validated_summary["replay_digest"] == summary["replay_digest"]
+    tampered_summary = dict(validated_summary)
+    tampered_summary["replay_digest"] = "f" * 64
+    (replay_validation_root / "execution_summary.json").write_text(
+        json.dumps(tampered_summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        experiment_execution_bootstrap.ExperimentEntrypointError,
+        match="replay digest drifted",
+    ):
+        experiment_execution_bootstrap._validate_summary(
+            replay_validation_root / "execution_summary.json",
+            result_root=replay_validation_root,
+            run_id="integration-package",
+            revision=revision,
+            candidate_digest=preparation.candidate_config_digest,
+            execution_digest=preparation.execution_config_digest,
+            input_digest=preparation.input_manifest_digest,
+        )
 
     extracted_package = (
         tmp_path
@@ -200,4 +245,4 @@ def test_verified_package_executes_real_a3a_synthetic_wiring(
     assert contained.returncode == 0, (
         contained.stdout + "\n" + contained.stderr
     )
-    assert "2 passed" in contained.stdout
+    assert "3 passed" in contained.stdout
