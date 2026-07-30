@@ -530,6 +530,8 @@ Notebook 与 repository module 的跨边界数据
 | entries | persisted_protocol | protocol | none | false | false | false | input manifest 中按 unit 保存的公开 case entries；原始密钥不进入该集合。 |
 | execution_expectation | persisted_protocol | method_identity | none | false | false | false | 每个 unit 在执行前冻结的 detector、threshold、几何操作与可靠性阈值声明集合。 |
 | content_detector_binding_digest | persisted_protocol | method_identity | none | false | false | false | 冻结 content detector callable 公开声明、配置、预处理与 key role 的联合摘要。 |
+| content_operation_config_digest | persisted_protocol | method_identity | none | false | false | false | content callable 通过 formal runner semantic declaration 暴露并可重复重算的 experiments 配置摘要。 |
+| geometry_operation_config_digest | persisted_protocol | method_identity | none | false | false | false | geometry callable 通过 formal runner semantic declaration 暴露并可重复重算的 experiments 配置摘要。 |
 | input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
 | attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |
 

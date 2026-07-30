@@ -75,6 +75,12 @@ SCIENTIFIC_RESULT_FAILURE_STATUSES = frozenset(
         "raw_content_operation_failure",
     }
 )
+FORMAL_RUNNER_SEMANTIC_DECLARATION_METHOD = (
+    "formal_runner_semantic_declaration"
+)
+FORMAL_OPERATION_ROLES = frozenset(
+    {"content_detection", "geometry_estimation"}
+)
 
 
 class InternalRunnerError(ValueError):
@@ -240,6 +246,21 @@ def geometry_reliability_config_digest(
     return _geometry_reliability_declaration_digest(declaration)
 
 
+def formal_operation_config_digest(
+    operation: object,
+    *,
+    operation_role: str,
+) -> str:
+    """Digest one explicitly declared formal-runner callable configuration."""
+
+    return _canonical_digest(
+        _formal_operation_config_snapshot(
+            operation,
+            operation_role=operation_role,
+        )
+    )
+
+
 def _geometry_reliability_declaration_digest(
     declaration: Mapping[str, object],
 ) -> str:
@@ -345,6 +366,10 @@ def execute_internal_case(
         attempt_index=attempt_index,
     )
 
+    _validate_payload_execution_boundary(
+        payload,
+        entry.execution_expectation,
+    )
     try:
         attacked = apply_geometric_attack(
             payload.source_artifact,
@@ -421,6 +446,10 @@ def execute_internal_case(
             failure_class="execution_failure",
             failure_reason=_exception_identity(exc),
         )
+    _validate_payload_execution_boundary(
+        payload,
+        entry.execution_expectation,
+    )
     collection = context.writer.append_record(record)
     replay_internal_record_collection(context, collection)
     return InternalCaseRunResult(record, collection, False)
@@ -470,6 +499,10 @@ def record_excluded_case(
             entry.execution_expectation
         ),
         decision_trace=DecisionTrace("excluded", None, exclusion_reason),
+    )
+    _validate_payload_execution_boundary(
+        payload,
+        entry.execution_expectation,
     )
     collection = context.writer.append_record(record)
     replay_internal_record_collection(context, collection)
@@ -586,7 +619,10 @@ def _validated_case(
         (entry.split,),
         SplitAccessGrant.current_execution(),
     )
-    _validate_payload_construction_anchor(payload)
+    _validate_payload_execution_boundary(
+        payload,
+        entry.execution_expectation,
+    )
     if payload.source_artifact.analysis_unit_identity != entry.analysis_unit_identity:
         raise InternalRunnerError("source artifact analysis identity drifted")
     if payload.source_artifact.image_digest != entry.input_artifact_digest:
@@ -595,10 +631,6 @@ def _validated_case(
         raise InternalRunnerError("attack configuration digest drifted")
     if entry.metric_set_digest != context.metric_registry.registry_digest:
         raise InternalRunnerError("metric set digest drifted")
-    _validate_payload_against_expectation(
-        payload,
-        entry.execution_expectation,
-    )
     observed_key = context.adapter.identify_key(payload.detection_key).result
     if observed_key.root_key_public_digest != (
         entry.key_control_trace.detection_key_public_digest
@@ -665,6 +697,10 @@ def _payload_declaration_snapshot(
         rebuilt_binding.detector_binding_digest
     ):
         raise InternalRunnerError("content detector binding digest drifted")
+    content_operation_config = _formal_operation_config_snapshot(
+        binding.content_detection_operation,
+        operation_role="content_detection",
+    )
     thresholds = payload.thresholds
     if type(thresholds) is not JointDecisionThresholds:
         raise InternalRunnerError("joint thresholds exact type is required")
@@ -690,6 +726,10 @@ def _payload_declaration_snapshot(
         or not payload.geometry_operation_identity
     ):
         raise InternalRunnerError("geometry operation identity is required")
+    geometry_operation_config = _formal_operation_config_snapshot(
+        payload.geometry_estimation_operation,
+        operation_role="geometry_estimation",
+    )
     reliability = payload.geometry_reliability_thresholds
     reliability_digest: str | None = None
     reliability_declaration: dict[str, object] | None = None
@@ -720,10 +760,18 @@ def _payload_declaration_snapshot(
         "content_operation_type_identity": _callable_type_identity(
             binding.content_detection_operation
         ),
+        "content_operation_config": content_operation_config,
+        "content_operation_config_digest": _canonical_digest(
+            content_operation_config
+        ),
         "detection_key_digest": sha256(
             payload.detection_key.encode("utf-8")
         ).hexdigest(),
         "geometry_operation_identity": payload.geometry_operation_identity,
+        "geometry_operation_config": geometry_operation_config,
+        "geometry_operation_config_digest": _canonical_digest(
+            geometry_operation_config
+        ),
         "geometry_operation_type_identity": _callable_type_identity(
             payload.geometry_estimation_operation
         ),
@@ -773,6 +821,14 @@ def _validate_payload_construction_anchor(
         raise InternalRunnerError("case execution payload construction anchor drifted")
 
 
+def _validate_payload_execution_boundary(
+    payload: InternalCaseExecutionPayload,
+    expectation: FrozenCaseExecutionExpectation,
+) -> None:
+    _validate_payload_construction_anchor(payload)
+    _validate_payload_against_expectation(payload, expectation)
+
+
 def _validate_payload_against_expectation(
     payload: InternalCaseExecutionPayload,
     expectation: FrozenCaseExecutionExpectation,
@@ -790,7 +846,15 @@ def _validate_payload_against_expectation(
     observed = {
         "calibration_identity": thresholds.calibration_identity,
         "content_detector_binding_digest": binding.detector_binding_digest,
+        "content_operation_config_digest": formal_operation_config_digest(
+            binding.content_detection_operation,
+            operation_role="content_detection",
+        ),
         "geometry_operation_identity": payload.geometry_operation_identity,
+        "geometry_operation_config_digest": formal_operation_config_digest(
+            payload.geometry_estimation_operation,
+            operation_role="geometry_estimation",
+        ),
         "geometry_reliability_config_digest": reliability_digest,
         "raw_detector_config_digest": binding.content_config_digest,
         "raw_detector_identity": binding.detector_identity,
@@ -833,6 +897,77 @@ def _validated_geometry_reliability_declaration(
             "geometry reliability configuration declaration drifted"
         )
     return rebuilt_declaration
+
+
+def _formal_operation_config_snapshot(
+    operation: object,
+    *,
+    operation_role: str,
+) -> dict[str, object]:
+    if operation_role not in FORMAL_OPERATION_ROLES:
+        raise InternalRunnerError("formal operation role is invalid")
+    if not callable(operation):
+        raise InternalRunnerError("formal operation must be callable")
+    declaration_provider = getattr(
+        operation,
+        FORMAL_RUNNER_SEMANTIC_DECLARATION_METHOD,
+        None,
+    )
+    if not callable(declaration_provider):
+        raise InternalRunnerError(
+            "formal operation semantic declaration is required"
+        )
+    try:
+        declarations = (
+            declaration_provider(),
+            declaration_provider(),
+        )
+    except Exception as exc:
+        raise InternalRunnerError(
+            "formal operation semantic declaration failed"
+        ) from exc
+    canonical_declarations: list[dict[str, object]] = []
+    canonical_documents: list[str] = []
+    for declaration in declarations:
+        if (
+            type(declaration) is not dict
+            or not declaration
+            or any(type(key) is not str or not key for key in declaration)
+        ):
+            raise InternalRunnerError(
+                "formal operation semantic declaration must be a nonempty string-key mapping"
+            )
+        try:
+            canonical_document = json.dumps(
+                declaration,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            canonical_declaration = json.loads(canonical_document)
+        except (TypeError, ValueError) as exc:
+            raise InternalRunnerError(
+                "formal operation semantic declaration is not canonical JSON"
+            ) from exc
+        if canonical_declaration != declaration:
+            raise InternalRunnerError(
+                "formal operation semantic declaration is not stable JSON data"
+            )
+        canonical_declarations.append(canonical_declaration)
+        canonical_documents.append(canonical_document)
+    if canonical_documents[0] != canonical_documents[1]:
+        raise InternalRunnerError(
+            "formal operation semantic declaration changed during validation"
+        )
+    return {
+        "declaration_contract": (
+            "ceg_wm_formal_runner_semantic_declaration_v1"
+        ),
+        "operation_role": operation_role,
+        "operation_type_identity": _callable_type_identity(operation),
+        "semantic_declaration": canonical_declarations[0],
+    }
 
 
 def _callable_type_identity(value: object) -> str:

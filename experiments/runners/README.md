@@ -6,14 +6,18 @@
   `CegWmExperimentAdapter`、attack registry、metric registry 和公开方法对象；它调用
   真实 attack 与 joint-decision API，不复制方法、攻击或指标算法。artifact 当前
   像素与 attack specification 当前参数由 attacks 公共入口在 affine/grid 前重校验。
+  正式 content/geometry callable 必须显式实现
+  `formal_runner_semantic_declaration()`，返回稳定 canonical JSON 配置；runner 将
+  role、callable 类型和该声明摘要绑定到冻结 expectation，并在 attack 前和正式
+  write 前重新计算。任一原位语义漂移直接失败，不转写为 execution/resource record。
   当前执行仍拒绝
   `held_out_evaluation`。
 - `record_writer.py` 是内部正式 records 的唯一 writer。构造时必须同时接收冻结
   case input manifest；每次 load 或物化前，它都通过
   `validate_run_case_record_collection` 复验完整 collection，逐 record 核对
   确定性 ID/sequence/attempt/parent、逐 unit provenance、routing、key/control、
-  detector/config/preprocess、threshold/tau、几何操作和 experiments 层可靠性
-  配置摘要，以及
+  detector/config/preprocess、threshold/tau、content/geometry callable 配置、
+  几何操作和 experiments 层可靠性配置摘要，以及
   code/protocol/candidate/config/input/resource provenance，并检查所有序列化字段已在
   包内 `protocol/internal_record_registry.py` 的可执行 registry 中允许进入 records；
   运行时不读取 `docs/`。writer 在构造时深拷贝 protocol、split manifest 与 bindings

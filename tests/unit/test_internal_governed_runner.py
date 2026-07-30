@@ -51,6 +51,7 @@ from experiments.runners import (
     candidate_config_digest,
     execute_internal_case,
     execution_config_digest,
+    formal_operation_config_digest,
     geometry_reliability_config_digest,
     record_excluded_case,
     replay_internal_record_collection,
@@ -85,6 +86,14 @@ ROOT_KEY = "governed-runner-cpu-key"
 class _PublicImageContentOperation:
     def __init__(self) -> None:
         self.calls = 0
+        self.behavior_mode = "hf_only_public_image_detection"
+
+    def formal_runner_semantic_declaration(self):
+        return {
+            "behavior_mode": self.behavior_mode,
+            "image_encoding": "rgb8_public_image_float32_unit_interval",
+            "semantic_version": "cpu_synthetic_content_operation_v1",
+        }
 
     def _detect(self, image: torch.Tensor, detection_key: str):
         observation = HfDetectionObservation.from_public_image_encoding(
@@ -99,6 +108,8 @@ class _PublicImageContentOperation:
 
     def __call__(self, image: torch.Tensor, detection_key: str):
         self.calls += 1
+        if self.behavior_mode != "hf_only_public_image_detection":
+            raise ValueError("content operation behavior mode drifted")
         return self._detect(image, detection_key)
 
     def replay_validate_content_result(
@@ -119,24 +130,82 @@ class _PublicImageContentOperation:
 class _UnexpectedGeometryOperation:
     def __init__(self) -> None:
         self.calls = 0
+        self.mode = "must_not_execute"
+
+    def formal_runner_semantic_declaration(self):
+        return {
+            "mode": self.mode,
+            "semantic_version": "cpu_synthetic_geometry_operation_v1",
+        }
 
     def __call__(self, _image: torch.Tensor, _registered_key: str):
         self.calls += 1
         raise AssertionError("geometry must not be called")
 
 
+class _UndeclaredGeometryOperation:
+    def __call__(self, _image: torch.Tensor, _registered_key: str):
+        raise AssertionError("undeclared geometry must not be called")
+
+
+class _UndeclaredPublicImageContentOperation(
+    _PublicImageContentOperation
+):
+    formal_runner_semantic_declaration = None
+
+
+class _UnstableGeometryOperation(_UnexpectedGeometryOperation):
+    def __init__(self) -> None:
+        super().__init__()
+        self.declaration_reads = 0
+
+    def formal_runner_semantic_declaration(self):
+        self.declaration_reads += 1
+        return {
+            "declaration_read": self.declaration_reads,
+            "mode": self.mode,
+        }
+
+
 class _ResourceFailingGeometryOperation:
     def __init__(self) -> None:
         self.calls = 0
+        self.mode = "resource_failure"
+
+    def formal_runner_semantic_declaration(self):
+        return {
+            "mode": self.mode,
+            "semantic_version": "cpu_synthetic_geometry_operation_v1",
+        }
 
     def __call__(self, _image: torch.Tensor, _registered_key: str):
         self.calls += 1
         raise ResourceExecutionError("synthetic device unavailable")
 
 
+class _SelfMutatingResourceGeometryOperation(
+    _ResourceFailingGeometryOperation
+):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mode = "resource_failure_then_semantic_drift"
+
+    def __call__(self, _image: torch.Tensor, _registered_key: str):
+        self.calls += 1
+        self.mode = "mutated_during_geometry_call"
+        raise ResourceExecutionError("synthetic device unavailable")
+
+
 class _UnexpectedFailingGeometryOperation:
     def __init__(self) -> None:
         self.calls = 0
+        self.mode = "unexpected_failure"
+
+    def formal_runner_semantic_declaration(self):
+        return {
+            "mode": self.mode,
+            "semantic_version": "cpu_synthetic_geometry_operation_v1",
+        }
 
     def __call__(self, _image: torch.Tensor, _registered_key: str):
         self.calls += 1
@@ -146,6 +215,13 @@ class _UnexpectedFailingGeometryOperation:
 class _ExplicitScientificFailingGeometryOperation:
     def __init__(self) -> None:
         self.calls = 0
+        self.mode = "scientific_failure"
+
+    def formal_runner_semantic_declaration(self):
+        return {
+            "mode": self.mode,
+            "semantic_version": "cpu_synthetic_geometry_operation_v1",
+        }
 
     def __call__(self, _image: torch.Tensor, _registered_key: str):
         self.calls += 1
@@ -234,6 +310,30 @@ def test_experiments_reliability_config_digest_binds_declared_fields() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "invalid_operation_kind",
+    ("content_missing_declaration", "geometry_missing_declaration", "unstable"),
+)
+@pytest.mark.quick
+def test_payload_rejects_missing_or_unstable_formal_callable_declarations(
+    tmp_path: Path,
+    invalid_operation_kind: str,
+) -> None:
+    arguments = {}
+    if invalid_operation_kind == "content_missing_declaration":
+        arguments["content_operation"] = (
+            _UndeclaredPublicImageContentOperation()
+        )
+    elif invalid_operation_kind == "geometry_missing_declaration":
+        arguments["geometry_operation"] = _UndeclaredGeometryOperation()
+    else:
+        arguments["geometry_operation"] = _UnstableGeometryOperation()
+
+    with pytest.raises(InternalRunnerError, match="semantic declaration"):
+        _context(tmp_path, **arguments)
+    assert not tuple(tmp_path.rglob("*.json"))
+
+
 def _rewrite_record_document(
     path: Path,
     mutation,
@@ -285,6 +385,7 @@ def _context(
     force_rescue: bool = False,
     attack_specification: GeometricAttackSpec | None = None,
     geometry_reliability_thresholds: GeometryReliabilityThresholds | None = None,
+    content_operation: _PublicImageContentOperation | None = None,
 ) -> tuple[InternalRunnerContext, InternalCaseExecutionPayload, _PublicImageContentOperation]:
     protocol = load_frozen_internal_validation_protocol(PROTOCOL_PATH)
     unit = _unit(0)
@@ -300,7 +401,11 @@ def _context(
     )
     attack_registry = load_attack_registry(COMPONENT_PATH)
     metric_registry = load_metric_registry(COMPONENT_PATH)
-    operation = _PublicImageContentOperation()
+    operation = (
+        content_operation
+        if content_operation is not None
+        else _PublicImageContentOperation()
+    )
     binding, raw_score = _binding(operation, source.image)
     thresholds = JointDecisionThresholds(
         tau=raw_score + (0.1 if force_rescue else -0.1),
@@ -326,6 +431,10 @@ def _context(
     )
     execution_expectation = FrozenCaseExecutionExpectation(
         content_detector_binding_digest=binding.detector_binding_digest,
+        content_operation_config_digest=formal_operation_config_digest(
+            binding.content_detection_operation,
+            operation_role="content_detection",
+        ),
         raw_detector_identity=binding.detector_identity,
         rectified_detector_identity=binding.detector_identity,
         raw_detector_config_digest=binding.content_config_digest,
@@ -338,6 +447,10 @@ def _context(
         tau=thresholds.tau,
         tau_rescue=thresholds.tau_rescue,
         geometry_operation_identity=payload.geometry_operation_identity,
+        geometry_operation_config_digest=formal_operation_config_digest(
+            payload.geometry_estimation_operation,
+            operation_role="geometry_estimation",
+        ),
         geometry_reliability_config_digest=(
             None
             if geometry_reliability_thresholds is None
@@ -367,7 +480,7 @@ def _context(
         execution_expectation=execution_expectation,
     )
     input_manifest = FrozenCaseInputManifest(
-        manifest_schema_version="ceg_wm_internal_case_input_manifest_v2",
+        manifest_schema_version="ceg_wm_internal_case_input_manifest_v3",
         manifest_id="runner_input_manifest",
         manifest_revision="runner_input_revision",
         protocol_digest=protocol.digest(),
@@ -421,6 +534,20 @@ def _context(
 @pytest.mark.quick
 def test_runner_composes_real_adapter_attack_and_metric_replay_once(tmp_path: Path) -> None:
     context, payload, operation = _context(tmp_path)
+    expectation = context.input_manifest.entries[0].execution_expectation
+
+    assert expectation.content_operation_config_digest == (
+        formal_operation_config_digest(
+            payload.content_detector_binding.content_detection_operation,
+            operation_role="content_detection",
+        )
+    )
+    assert expectation.geometry_operation_config_digest == (
+        formal_operation_config_digest(
+            payload.geometry_estimation_operation,
+            operation_role="geometry_estimation",
+        )
+    )
 
     first = execute_internal_case(
         context,
@@ -869,6 +996,72 @@ def test_payload_post_construction_mutation_fails_before_attack_method_or_write(
         assert replacement_content.calls == 0
     if replacement_geometry is not None:
         assert replacement_geometry.calls == 0
+    assert not context.writer.path.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation_kind",
+    ("content_same_instance", "geometry_same_instance"),
+)
+@pytest.mark.quick
+def test_same_instance_callable_semantic_drift_fails_before_attack_method_or_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation_kind: str,
+) -> None:
+    geometry = _ResourceFailingGeometryOperation()
+    context, payload, content_operation = _context(
+        tmp_path,
+        geometry_operation=geometry,
+        force_rescue=True,
+    )
+    if mutation_kind == "content_same_instance":
+        content_operation.behavior_mode = "mutated_content_behavior"
+    else:
+        geometry.mode = "mutated_geometry_behavior"
+
+    attack_calls = 0
+
+    def forbidden_attack(*_args, **_kwargs):
+        nonlocal attack_calls
+        attack_calls += 1
+        raise AssertionError("attack must not execute after callable drift")
+
+    monkeypatch.setattr(
+        "experiments.runners.internal.apply_geometric_attack",
+        forbidden_attack,
+    )
+    with pytest.raises(InternalRunnerError, match="anchor drifted|differs"):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+    assert attack_calls == 0
+    assert content_operation.calls == 0
+    assert geometry.calls == 0
+    assert not context.writer.path.exists()
+
+
+@pytest.mark.quick
+def test_callable_semantic_drift_during_method_fails_before_formal_write(
+    tmp_path: Path,
+) -> None:
+    geometry = _SelfMutatingResourceGeometryOperation()
+    context, payload, content_operation = _context(
+        tmp_path,
+        geometry_operation=geometry,
+        force_rescue=True,
+    )
+
+    with pytest.raises(InternalRunnerError, match="anchor drifted|differs"):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+    assert content_operation.calls == 1
+    assert geometry.calls == 1
     assert not context.writer.path.exists()
 
 

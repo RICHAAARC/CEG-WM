@@ -23,7 +23,7 @@ from experiments.protocol.internal_validation import (
 )
 
 
-INPUT_MANIFEST_SCHEMA_VERSION = "ceg_wm_internal_case_input_manifest_v2"
+INPUT_MANIFEST_SCHEMA_VERSION = "ceg_wm_internal_case_input_manifest_v3"
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -47,6 +47,7 @@ class FrozenCaseExecutionExpectation:
     """Record-visible declarations fixed before one case is executed."""
 
     content_detector_binding_digest: str
+    content_operation_config_digest: str
     raw_detector_identity: str
     rectified_detector_identity: str
     raw_detector_config_digest: str
@@ -59,12 +60,15 @@ class FrozenCaseExecutionExpectation:
     tau: float
     tau_rescue: float
     geometry_operation_identity: str
+    geometry_operation_config_digest: str
     geometry_reliability_config_digest: str | None
 
     def validate(self) -> tuple[str, ...]:
         violations: list[str] = []
         for role in (
             "content_detector_binding_digest",
+            "content_operation_config_digest",
+            "geometry_operation_config_digest",
             "raw_detector_config_digest",
             "rectified_detector_config_digest",
         ):

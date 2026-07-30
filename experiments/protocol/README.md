@@ -19,8 +19,9 @@
   连续 attempt、冻结上限、结构化 promotion stop 和 stop 后禁止继续。
 - `internal_case.py`：保存写入器和 runner 共同消费的冻结逐 case 输入清单；
   每个 unit 在执行前固定 artifact/attack/metric、routing、key/control、detector
-  binding、raw/rectified detector 与 threshold、几何操作和 experiments 层可靠性
-  配置摘要，并从
+  binding、raw/rectified detector 与 threshold、content/geometry callable 的显式
+  formal-runner semantic declaration 摘要、几何操作和 experiments 层可靠性配置
+  摘要，并从
   run/case/manifest/unit/attempt 确定性派生 record ID。
 - `internal_record_registry.py`：保存随 execution package 分发的精确 record schema
   binding 与允许字段集合。开发侧 Markdown 只镜像登记，不是 runner 的运行时输入。
