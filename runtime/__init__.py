@@ -8,6 +8,7 @@ image-only registered-layer Q/K capture. Method semantics remain in ``main``.
 from .adapter import (
     RuntimeAdapterError,
     RuntimeAdapterState,
+    RuntimeExecutionIdentity,
     RuntimeSession,
     Sd35RuntimeAdapter,
     create_runtime_adapter,
@@ -75,6 +76,7 @@ __all__ = [
     "RuntimeDetectionScheduleStep",
     "RuntimeDependencyLock",
     "RuntimeDeviceCapabilities",
+    "RuntimeExecutionIdentity",
     "RuntimeQkBackend",
     "RuntimeQkForwardIdentity",
     "RuntimeQkObservationError",

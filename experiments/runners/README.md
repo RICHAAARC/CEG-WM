@@ -12,6 +12,15 @@
   write 前重新计算。任一原位语义漂移直接失败，不转写为 execution/resource record。
   当前执行仍拒绝
   `held_out_evaluation`。
+- `formal_operations.py` 提供 package-contained runner 使用的正式公共图像 callable：
+  content 路径调用真实 `CegWmExperimentAdapter.detect_hf` 与
+  `detect_content`，geometry 路径调用真实 runtime Q/K observation 与
+  一个无 runtime binding 的 method adapter 的 `synchronize_qk_observation`、
+  `geometric_transform_estimator`。三段公共调用的 class descriptor、bound method
+  与 main/module alias 均在调用前、段间和调用后复验；二者完整声明
+  方法/runtime 配置、公共 callable 身份与执行范围，不复制 detector、Q/K 或
+  estimator 算法。CPU synthetic wiring 的 raw-positive case 不执行未初始化的
+  模型 backend。
 - `record_writer.py` 是内部正式 records 的唯一 writer。构造时必须同时接收冻结
   case input manifest；每次 load 或物化前，它都通过
   `validate_run_case_record_collection` 复验完整 collection，逐 record 核对

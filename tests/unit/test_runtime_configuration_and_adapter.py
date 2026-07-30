@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from runtime import (
     RuntimeBackendIdentity,
     RuntimeConfigurationError,
     RuntimeDeviceCapabilities,
+    RuntimeExecutionIdentity,
+    Sd35RuntimeAdapter,
     create_runtime_adapter,
     load_runtime_configuration,
     parse_runtime_configuration,
@@ -93,6 +96,10 @@ class MockBackend:
         if self.reject_repeated_close and self.close_calls:
             raise RuntimeError("mock backend close is not idempotent")
         self.close_calls += 1
+
+
+class AlternateMockBackend(MockBackend):
+    pass
 
 
 @pytest.mark.unit
@@ -214,8 +221,19 @@ def test_mock_backend_initialization_preserves_frozen_identity() -> None:
     adapter = create_runtime_adapter(backend)
 
     session = adapter.initialize("auto")
+    execution_identity = adapter.revalidate_execution_identity()
 
     assert adapter.state is RuntimeAdapterState.READY
+    assert type(execution_identity) is RuntimeExecutionIdentity
+    assert execution_identity.runtime_state == "ready"
+    assert execution_identity.backend_resources_owned is True
+    assert execution_identity.qk_observation_callable_identity == (
+        "runtime.qk_observation.observe_detection_qk"
+    )
+    assert execution_identity.runtime_session_identity_digest
+    assert json.loads(
+        json.dumps(execution_identity.identity_mapping())
+    ) == execution_identity.identity_mapping()
     assert adapter.session is session
     assert session.runtime_config_digest == adapter.configuration.runtime_config_digest
     assert session.selected_device == "cpu"
@@ -239,6 +257,146 @@ def test_mock_backend_initialization_preserves_frozen_identity() -> None:
     assert backend.close_calls == 1
     adapter.close()
     assert backend.close_calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "replacement_factory",
+    (
+        lambda capabilities: MockBackend(capabilities),
+        lambda capabilities: AlternateMockBackend(capabilities),
+    ),
+)
+def test_runtime_execution_identity_rejects_backend_replacement(
+    replacement_factory,
+) -> None:
+    capabilities = RuntimeDeviceCapabilities(
+        cpu_available=True,
+        cuda_device_count=0,
+    )
+    adapter = create_runtime_adapter(MockBackend(capabilities))
+    adapter.initialize("cpu")
+    adapter._backend = replacement_factory(capabilities)
+
+    with pytest.raises(
+        RuntimeAdapterError,
+        match="backend object or exact type drifted",
+    ):
+        adapter.revalidate_execution_identity()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "session",
+        "session_content",
+        "configuration",
+        "state",
+        "resource_ownership",
+    ),
+)
+def test_runtime_execution_identity_rejects_lifecycle_drift(
+    mutation: str,
+) -> None:
+    backend = MockBackend(
+        RuntimeDeviceCapabilities(
+            cpu_available=True,
+            cuda_device_count=0,
+        )
+    )
+    adapter = create_runtime_adapter(backend)
+    adapter.initialize("cpu")
+    if mutation == "session":
+        adapter._session = replace(adapter.session)
+    elif mutation == "session_content":
+        object.__setattr__(
+            adapter.session,
+            "runtime_backend_name",
+            "drifted-backend-name",
+        )
+    elif mutation == "configuration":
+        object.__setattr__(
+            adapter.configuration,
+            "model_id",
+            "drifted/model",
+        )
+    elif mutation == "state":
+        adapter._state = RuntimeAdapterState.CREATED
+    else:
+        adapter._owns_backend_resources = False
+
+    with pytest.raises(RuntimeAdapterError, match="drifted|lost|differs"):
+        adapter.revalidate_execution_identity()
+
+
+@pytest.mark.unit
+def test_initialization_revalidation_failure_clears_session_and_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = MockBackend(
+        RuntimeDeviceCapabilities(
+            cpu_available=True,
+            cuda_device_count=0,
+        )
+    )
+    adapter = create_runtime_adapter(backend)
+    original_revalidate = (
+        Sd35RuntimeAdapter.revalidate_execution_identity
+    )
+
+    def _fail_revalidation(_adapter):
+        raise RuntimeAdapterError("forced post-session revalidation failure")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            Sd35RuntimeAdapter,
+            "revalidate_execution_identity",
+            _fail_revalidation,
+        )
+        with pytest.raises(
+            RuntimeAdapterError,
+            match="initialization failed closed",
+        ):
+            adapter.initialize("cpu")
+
+    assert adapter.state is RuntimeAdapterState.FAILED
+    assert backend.close_calls == 1
+    assert adapter._owns_backend_resources is False
+    assert adapter._session is None
+    assert adapter._session_anchor is None
+    assert adapter._session_identity_digest_anchor is None
+    assert original_revalidate(adapter).runtime_state == "failed"
+    adapter.close()
+    assert original_revalidate(adapter).runtime_state == "failed"
+
+
+@pytest.mark.unit
+def test_failed_runtime_residual_state_is_rejected_and_close_cleans_it(
+) -> None:
+    backend = MockBackend(
+        RuntimeDeviceCapabilities(
+            cpu_available=True,
+            cuda_device_count=0,
+        )
+    )
+    adapter = create_runtime_adapter(backend)
+    session = adapter.initialize("cpu")
+    adapter._state = RuntimeAdapterState.FAILED
+    adapter._owns_backend_resources = False
+    adapter._session = session
+
+    with pytest.raises(
+        RuntimeAdapterError,
+        match="residual execution state",
+    ):
+        adapter.revalidate_execution_identity()
+
+    adapter.close()
+    identity = adapter.revalidate_execution_identity()
+    assert identity.runtime_state == "failed"
+    assert identity.backend_resources_owned is False
+    assert identity.runtime_session_identity_digest is None
 
 
 @pytest.mark.unit

@@ -1701,9 +1701,17 @@ def test_built_package_unpacks_and_runs_independently(tmp_path: Path) -> None:
 
 def test_notebook_is_unique_thin_and_output_free() -> None:
     root = Path(__file__).resolve().parents[2]
-    notebooks = list((root / "notebooks").rglob("*.ipynb"))
-    assert notebooks == [root / "notebooks/colab/runtime_qualification.ipynb"]
-    document = json.loads(notebooks[0].read_text(encoding="utf-8"))
+    runtime_notebook = (
+        root / "notebooks/colab/runtime_qualification.ipynb"
+    )
+    notebooks = sorted((root / "notebooks").rglob("*.ipynb"))
+    assert notebooks == sorted(
+        [
+            runtime_notebook,
+            root / "notebooks/colab/experiment_execution.ipynb",
+        ]
+    )
+    document = json.loads(runtime_notebook.read_text(encoding="utf-8"))
     sources = "\n".join(
         "".join(cell.get("source", []))
         for cell in document["cells"]

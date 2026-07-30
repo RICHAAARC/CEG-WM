@@ -20,6 +20,16 @@ from .internal import (
     record_excluded_case,
     replay_internal_record_collection,
 )
+from .formal_operations import (
+    CONTENT_OPERATION_SEMANTIC_VERSION,
+    FORMAL_CONTENT_MODE,
+    GEOMETRY_OPERATION_SEMANTIC_VERSION,
+    PUBLIC_IMAGE_ENCODING,
+    FormalHfContentDetectionOperation,
+    FormalOperationError,
+    FormalRuntimeGeometryEstimationOperation,
+    create_formal_content_detector_binding,
+)
 from .record_writer import (
     FrozenRecordBindings,
     GovernedRecordWriter,
@@ -31,6 +41,13 @@ __all__ = [
     "FrozenCaseExecutionExpectation",
     "FrozenCaseInputManifest",
     "FrozenRecordBindings",
+    "CONTENT_OPERATION_SEMANTIC_VERSION",
+    "FORMAL_CONTENT_MODE",
+    "GEOMETRY_OPERATION_SEMANTIC_VERSION",
+    "PUBLIC_IMAGE_ENCODING",
+    "FormalHfContentDetectionOperation",
+    "FormalOperationError",
+    "FormalRuntimeGeometryEstimationOperation",
     "GovernedRecordWriter",
     "GovernedRecordWriterError",
     "InternalCaseExecutionPayload",
@@ -41,6 +58,7 @@ __all__ = [
     "RecordReplayReport",
     "ResourceExecutionError",
     "candidate_config_digest",
+    "create_formal_content_detector_binding",
     "canonical_record_digest",
     "execute_internal_case",
     "execution_config_digest",

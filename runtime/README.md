@@ -9,6 +9,15 @@ near-threshold、几何救援和最终判定仍属于 `main/`。
 - `runtime_sd35_flowmatch` 冻结配置的严格解析与稳定摘要；
 - CPU/CUDA 设备选择及不可用设备的 fail-closed 错误；
 - 后端协议、实际后端身份核验和单次初始化生命周期；
+- 构造时私有锚定原始 backend 对象及精确类型，并通过
+  `revalidate_execution_identity()` 公开返回不可变 canonical identity；每次调用
+  复验 backend 对象/类型、冻结配置 digest、state、资源所有权及原始 READY
+  session；构造期还惰性锚定 Batch-3 Q/K module 的精确公开函数，并在执行前后
+  复验 module/function 对象身份，identity 只公开稳定 qualified-name 字符串，不
+  暴露 callable、backend 或模型私有状态；
+- 任一初始化、content/QK execution 或 close 失败进入唯一 clean `FAILED`
+  不变量：不再拥有 backend 资源且清空 session、session anchor 与 digest；
+  公开 identity 发现任何 residual state 都 fail closed；
 - 不加载模型的 mock backend 控制流测试。
 
 Batch 2 的本地 CPU/mock 路径当前已实现：

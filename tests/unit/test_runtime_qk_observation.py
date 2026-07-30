@@ -5,6 +5,13 @@ from dataclasses import replace
 import pytest
 import torch
 
+import runtime.qk_observation as qk_observation_module
+from experiments.methods import (
+    load_ceg_wm_experiment_adapter_configuration,
+)
+from experiments.runners import (
+    FormalRuntimeGeometryEstimationOperation,
+)
 from main import QkLayerObservation, derive_public_noise_stream
 from runtime import (
     RuntimeAdapterError,
@@ -175,6 +182,7 @@ class FakeQkBackend:
         self.posterior: FakePosterior | None = None
         self.conditioning_calls = []
         self.scale_noise_inputs = []
+        self.execution_callback = None
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
         return RuntimeDeviceCapabilities(
@@ -225,6 +233,8 @@ class FakeQkBackend:
         return RuntimeVaeFactors(scaling_factor=2.0, shift_factor=0.25)
 
     def vae_encode(self, image: torch.Tensor) -> FakePosterior:
+        if self.execution_callback is not None:
+            self.execution_callback()
         image_mean = image.to(dtype=torch.float32).mean()
         mode = (
             torch.arange(32, dtype=torch.float32)
@@ -349,6 +359,100 @@ def _assert_projection_hooks_removed(backend: FakeQkBackend) -> None:
     for attention in backend.attentions.values():
         assert not attention.to_q._forward_hooks
         assert not attention.to_k._forward_hooks
+
+
+@pytest.mark.quick
+def test_formal_geometry_ready_public_call_chain_succeeds() -> None:
+    backend = FakeQkBackend()
+    runtime_adapter = create_runtime_adapter(backend)
+    runtime_adapter.initialize("cpu")
+    operation = FormalRuntimeGeometryEstimationOperation(
+        runtime_adapter=runtime_adapter,
+        adapter_configuration=(
+            load_ceg_wm_experiment_adapter_configuration(
+                "configs/experiments/internal_execution_components.json"
+            )
+        ),
+        epsilon_inlier=0.8,
+        execution_scope="cpu_synthetic_wiring_only",
+    )
+
+    result = operation(_image(), "formal-geometry-registered-key")
+
+    assert result.candidate_ids[1] == "qk_relation_similarity"
+    assert result.candidate_ids[2] == "rectification_similarity"
+    assert result.estimation_identity_digest
+    operation._method_adapter.require_no_runtime_binding()
+
+
+@pytest.mark.unit
+def test_qk_observation_rejects_preexisting_module_callable_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = FakeQkBackend()
+    adapter = create_runtime_adapter(backend)
+    adapter.initialize("cpu")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            qk_observation_module,
+            "observe_detection_qk",
+            lambda *_args, **_kwargs: None,
+        )
+        with pytest.raises(
+            RuntimeAdapterError,
+            match="Q/K observation failed closed",
+        ) as exc_info:
+            adapter.observe_detection_qk(_image())
+
+        assert exc_info.value.__cause__ is not None
+        assert "callable identity drifted" in str(
+            exc_info.value.__cause__
+        )
+        assert adapter.state is RuntimeAdapterState.FAILED
+        assert backend.close_calls == 1
+        assert backend.posterior is None
+
+    identity = adapter.revalidate_execution_identity()
+    assert identity.runtime_state == "failed"
+    assert identity.qk_observation_callable_identity == (
+        "runtime.qk_observation.observe_detection_qk"
+    )
+
+
+@pytest.mark.unit
+def test_qk_observation_rejects_mid_call_module_callable_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = FakeQkBackend()
+    adapter = create_runtime_adapter(backend)
+    adapter.initialize("cpu")
+
+    with monkeypatch.context() as scoped:
+        def _replace_module_callable() -> None:
+            scoped.setattr(
+                qk_observation_module,
+                "observe_detection_qk",
+                lambda *_args, **_kwargs: None,
+            )
+
+        backend.execution_callback = _replace_module_callable
+        with pytest.raises(
+            RuntimeAdapterError,
+            match="Q/K observation failed closed",
+        ) as exc_info:
+            adapter.observe_detection_qk(_image())
+
+        assert exc_info.value.__cause__ is not None
+        assert "callable identity drifted" in str(
+            exc_info.value.__cause__
+        )
+        assert adapter.state is RuntimeAdapterState.FAILED
+        assert backend.close_calls == 1
+        assert backend.posterior is not None
+
+    identity = adapter.revalidate_execution_identity()
+    assert identity.runtime_state == "failed"
 
 
 @pytest.mark.unit

@@ -440,6 +440,15 @@ class CegWmExperimentAdapter:
         return self._configuration
 
     @_revalidate_configuration_before_call
+    def require_no_runtime_binding(self) -> None:
+        """Fail closed unless this adapter owns no hidden runtime execution path."""
+
+        if self._runtime_adapter is not None:
+            raise CegWmExperimentAdapterError(
+                "method adapter must not retain a runtime binding"
+            )
+
+    @_revalidate_configuration_before_call
     def identify_key(self, root_key_text: str) -> ComponentCallObservation[RootKeyIdentity]:
         result = identify_root_key(root_key_text)
         return self._observe_key_schedule(

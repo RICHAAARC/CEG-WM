@@ -9,8 +9,12 @@
 
 提交的 Notebook 必须清空 cell outputs 和 execution count。运行输出写入未提交目录，正式 records 与 artifacts 通过 repository modules 生成。
 
-当前唯一入口是 `colab/runtime_qualification.ipynb`。它只收集运行时参数、挂载
-Drive、检查资源与 Secret、单次读取并核对独立 bootstrap 摘要、建立新的
-`/content` 可信快照并只调用该快照；execution
-package 的安全解包、身份校验、依赖安装、runner 调用和结果归档均不在 Notebook
-源中实现。
+当前有两个入口：
+
+- `colab/runtime_qualification.ipynb` 固定服务已审核 runtime qualification；
+- `colab/experiment_execution.ipynb` 只收集独立审核的 archive/revision/config/
+  input 摘要，单次读取并核对 package 外 bootstrap，建立新的 `/content` 可信
+  快照并只调用该快照。
+
+两者均不在 Notebook 源中实现 package 安全解包、manifest/allowlist、方法、
+records、runner 或结果判定。

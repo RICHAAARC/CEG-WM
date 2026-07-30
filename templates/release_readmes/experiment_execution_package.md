@@ -1,19 +1,18 @@
-# Experiment Execution Package Candidate
+# CEG-WM experiment-execution package
 
-This directory contains the repository modules and configurations needed for Colab or GPU-server execution. Notebook and governance control-plane implementations are intentionally excluded.
+This exact-revision package contains the implemented method, runtime adapters,
+governed experiment runner, frozen configurations, infrastructure definitions,
+and explicit integration/smoke checks needed by the package-contained
+entrypoint.
 
-Before consuming compute resources:
+The default entrypoint performs one deterministic CPU/synthetic development
+wiring check. It proves only that the packaged public method callables connect
+to the governed A3a runner and record/replay surfaces. It does not execute a
+model or GPU, access held-out evaluation data, calibrate thresholds, compare a
+baseline, or provide scientific-effect evidence.
 
-- load a completed experiment configuration;
-- validate the `ComparisonProtocol` and retain its `PreflightApproval`;
-- confirm required external baseline provenance and vendored sources;
-- run the package's integration or smoke tests explicitly;
-- confirm `extraction_manifest.json` has no safety violations or missing paths.
-
-Example test selection when such tests are present:
-
-```bash
-python -m pytest -q -m "integration or smoke"
-```
-
-An extraction candidate is not evidence that an experiment is ready or valid.
+Run the package only through the separately distributed schema-v1
+`ceg_wm_experiment_execution_bootstrap`. The bootstrap must be verified against
+an independently supplied identity, version, and full SHA-256 before it checks
+the independently supplied archive SHA-256 and expected revision/config/input
+digests. The bootstrap is deliberately absent from this archive.

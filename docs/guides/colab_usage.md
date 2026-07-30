@@ -1,6 +1,7 @@
 # Colab Usage Guide
 
-当前唯一入口是 `notebooks/colab/runtime_qualification.ipynb`。
+Runtime qualification 入口是
+`notebooks/colab/runtime_qualification.ipynb`。
 从 `method_implemented` 到 `runtime_verified` 的本地 CPU 优先、固定 Notebook、
 Google Drive 结果包和独立审计流程见
 [Runtime And GPU Qualification Workflow](runtime_gpu_qualification_workflow.md)。
@@ -39,3 +40,9 @@ Notebook trust anchor。
 package 时，不由用户临时编辑
 Notebook；必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成新的
 Notebook revision。
+
+独立的 `notebooks/colab/experiment_execution.ipynb` 服务 A3b package
+接线验证。它只核对并调用 package 外 bootstrap，要求 archive SHA、精确 revision
+及 candidate/execution/input digest 来自独立审核；当前占位值未冻结前不能执行。
+包内默认入口仅生成 CPU/synthetic development record 与 replay，不执行模型或
+GPU、不访问 held-out，也不支持 runtime 或科学效果 claim。

@@ -10,6 +10,9 @@ geometry reliability、image rectifier 和 conditional recovery decision，并�
 也不写 governed records。全部项目方法符号只从顶层 `main` public surface 导入；
 注册密钥、wrong-key 和 public-noise 分别调用其真实公开派生接口；Q/K 路径只消费
 `runtime.RuntimeQkObservationResult`，并校验 runtime/method model revision。
+`require_no_runtime_binding()` 为 formal geometry wrapper 提供公开 fail-closed
+检查，确认用于 Q/K 同步与 estimator 的 method adapter 没有隐藏 runtime 对象；
+它不暴露 runtime 对象或模型状态。
 四种 key schedule 操作各自冻结并记录实际 public callable；wrong-key 流显式记录
 `main.derive_wrong_key_material -> main.derive_wrong_key_stream` 两步 provenance，
 不能用共同 responsibility 或只记录第二步来替代。13 个 component binding 必须逐项

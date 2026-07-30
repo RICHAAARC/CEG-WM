@@ -9,6 +9,9 @@ from pathlib import Path
 import pytest
 import torch
 
+import experiments.methods.ceg_wm as method_adapter_module
+import main as main_public_module
+import runtime.qk_observation as runtime_qk_observation_module
 from experiments.attacks import (
     AttackArtifact,
     GeometricAttackError,
@@ -41,6 +44,7 @@ from experiments.runners import (
     FrozenCaseExecutionExpectation,
     FrozenCaseInputManifest,
     FrozenRecordBindings,
+    FormalRuntimeGeometryEstimationOperation,
     GovernedRecordWriter,
     GovernedRecordWriterError,
     InternalCaseExecutionPayload,
@@ -70,6 +74,8 @@ from main.content_chain import (
 )
 from main.geometry_chain import GeometricTransformEstimatorError
 from main.shared import rgb8_image_digest
+from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from tests.unit.test_runtime_qk_observation import FakeQkBackend
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,6 +87,86 @@ SYNTHETIC_MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 # Fixture identity only; this is deliberately not a CEG-WM repository revision.
 SYNTHETIC_METHOD_CODE_REVISION = "83e4d31b0fae9e91c35db600cd97b9ae1d5f3054"
 ROOT_KEY = "governed-runner-cpu-key"
+
+
+def _formal_ready_geometry():
+    backend = FakeQkBackend()
+    runtime_adapter = create_runtime_adapter(backend)
+    runtime_adapter.initialize("cpu")
+    operation = FormalRuntimeGeometryEstimationOperation(
+        runtime_adapter=runtime_adapter,
+        adapter_configuration=(
+            load_ceg_wm_experiment_adapter_configuration(COMPONENT_PATH)
+        ),
+        epsilon_inlier=0.8,
+        execution_scope="cpu_synthetic_wiring_only",
+    )
+    return backend, runtime_adapter, operation
+
+
+def _mutate_formal_geometry_dependency(
+    mutation_kind: str,
+    operation: FormalRuntimeGeometryEstimationOperation,
+    runtime_adapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if mutation_kind == "runtime_method":
+        monkeypatch.setattr(
+            Sd35RuntimeAdapter,
+            "observe_detection_qk",
+            lambda *_args, **_kwargs: None,
+        )
+    elif mutation_kind == "runtime_identity_method":
+        monkeypatch.setattr(
+            Sd35RuntimeAdapter,
+            "revalidate_execution_identity",
+            lambda *_args, **_kwargs: None,
+        )
+    elif mutation_kind == "runtime_qk_module_callable":
+        monkeypatch.setattr(
+            runtime_qk_observation_module,
+            "observe_detection_qk",
+            lambda *_args, **_kwargs: None,
+        )
+    elif mutation_kind == "synchronize_method":
+        operation._method_adapter.synchronize_qk_observation = (
+            lambda *_args, **_kwargs: None
+        )
+    elif mutation_kind == "estimate_method":
+        operation._method_adapter.estimate_geometric_transform = (
+            lambda *_args, **_kwargs: None
+        )
+    elif mutation_kind == "binding_validator_method":
+        operation._method_adapter.require_no_runtime_binding = (
+            lambda *_args, **_kwargs: None
+        )
+    elif mutation_kind == "runtime_rebinding":
+        operation._method_adapter._runtime_adapter = runtime_adapter
+    elif mutation_kind == "qk_alias":
+        monkeypatch.setattr(
+            method_adapter_module,
+            "qk_geometry_sync",
+            lambda *_args, **_kwargs: None,
+        )
+    elif mutation_kind == "main_qk_alias":
+        monkeypatch.setattr(
+            main_public_module,
+            "qk_geometry_sync",
+            lambda *_args, **_kwargs: None,
+        )
+    elif mutation_kind == "main_estimator_alias":
+        monkeypatch.setattr(
+            main_public_module,
+            "geometric_transform_estimator",
+            lambda *_args, **_kwargs: None,
+        )
+    else:
+        assert mutation_kind == "estimator_alias"
+        monkeypatch.setattr(
+            method_adapter_module,
+            "geometric_transform_estimator",
+            lambda *_args, **_kwargs: None,
+        )
 
 
 class _PublicImageContentOperation:
@@ -1062,6 +1148,111 @@ def test_callable_semantic_drift_during_method_fails_before_formal_write(
         )
     assert content_operation.calls == 1
     assert geometry.calls == 1
+    assert not context.writer.path.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation_kind",
+    (
+        "runtime_method",
+        "runtime_identity_method",
+        "runtime_qk_module_callable",
+        "synchronize_method",
+        "estimate_method",
+        "binding_validator_method",
+        "runtime_rebinding",
+        "qk_alias",
+        "estimator_alias",
+        "main_qk_alias",
+        "main_estimator_alias",
+    ),
+)
+@pytest.mark.quick
+def test_formal_geometry_dependency_drift_fails_before_rescue_or_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation_kind: str,
+) -> None:
+    _backend, runtime_adapter, geometry = _formal_ready_geometry()
+    context, payload, content_operation = _context(
+        tmp_path,
+        geometry_operation=geometry,
+        force_rescue=True,
+    )
+    _mutate_formal_geometry_dependency(
+        mutation_kind,
+        geometry,
+        runtime_adapter,
+        monkeypatch,
+    )
+
+    with pytest.raises(
+        InternalRunnerError,
+        match="semantic declaration|differs|drifted",
+    ):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+
+    assert content_operation.calls == 0
+    assert not context.writer.path.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation_kind",
+    (
+        "runtime_method",
+        "runtime_identity_method",
+        "runtime_qk_module_callable",
+        "synchronize_method",
+        "estimate_method",
+        "binding_validator_method",
+        "runtime_rebinding",
+        "qk_alias",
+        "estimator_alias",
+        "main_qk_alias",
+        "main_estimator_alias",
+    ),
+)
+@pytest.mark.quick
+def test_formal_geometry_mid_call_drift_fails_before_rescue_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation_kind: str,
+) -> None:
+    backend, runtime_adapter, geometry = _formal_ready_geometry()
+    context, payload, content_operation = _context(
+        tmp_path,
+        geometry_operation=geometry,
+        force_rescue=True,
+    )
+
+    def _mutate_during_runtime_execution() -> None:
+        _mutate_formal_geometry_dependency(
+            mutation_kind,
+            geometry,
+            runtime_adapter,
+            monkeypatch,
+        )
+
+    backend.execution_callback = _mutate_during_runtime_execution
+
+    with pytest.raises(
+        InternalRunnerError,
+        match="semantic declaration|differs|drifted",
+    ):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+
+    assert content_operation.calls == 1
+    if mutation_kind == "runtime_qk_module_callable":
+        assert runtime_adapter.state.value == "failed"
+        assert backend.close_calls == 1
     assert not context.writer.path.exists()
 
 

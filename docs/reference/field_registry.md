@@ -360,11 +360,11 @@ Notebook 与 repository module 的跨边界数据
 | qk_actual_dtype | cross_boundary | runtime_identity | none | true | false | false | 两登记 attention 层实际 `to_q`/`to_k` 捕获并经模块 normalization 后的 dtype。 |
 | qk_layer_observations | cross_boundary | method_state | none | false | false | false | runtime 按登记层序返回给 `main` 的真实 `QkLayerObservation` 集合；不得持久化原始 Q/K tensor。 |
 | runtime_candidate_revision | persisted_protocol | provenance | none | true | false | false | execution package 与 qualification result 共同绑定的精确 40 位 Git revision。 |
-| package_schema_version | persisted_protocol | protocol | none | false | false | false | runtime execution manifest 的结构版本；不创建新的治理 schema。 |
+| package_schema_version | persisted_protocol | protocol | none | false | false | false | runtime qualification 或 experiment-execution manifest 的局部结构版本；不创建新的治理 schema。 |
 | profile_name | persisted_protocol | protocol | none | false | false | false | execution manifest 固定的 `experiment_execution_package` 提取档位名。 |
 | package_ready | persisted_protocol | protocol | none | false | false | false | package builder 在精确 revision、干净树、allowlist 与安全检查全部通过后写入的布尔状态。 |
 | profile | persisted_protocol | protocol | none | true | false | false | runtime qualification 运行档位：`smoke`、`qualification` 或可选 `replay`。 |
-| run_status | persisted_protocol | runtime_state | none | true | false | false | runner 自动写入的 `passed` 或 `failed` 完成状态；不能表示 `runtime_verified`。 |
+| run_status | persisted_protocol | runtime_state | none | true | false | false | runner 自动写入的 `passed`、`failed` 或 synthetic entrypoint `completed` 状态；不能表示 `runtime_verified` 或科学验证。 |
 | callback_status | persisted_protocol | runtime_state | none | true | false | false | 当前 qualification record/summary 的 callback exactly-once 检查状态。 |
 | actual_dtype_status | persisted_protocol | runtime_state | none | true | false | false | actual-dtype 完整性及 main-owned hard-budget 闭环的聚合状态。 |
 | vae_status | persisted_protocol | runtime_state | none | true | false | false | VAE decode 与 detection-side posterior `mode()` encode 路径的完成状态。 |
@@ -396,7 +396,7 @@ Notebook 与 repository module 的跨边界数据
 | bootstrap_schema_version | persisted_protocol | protocol | none | false | false | false | package 外可信 bootstrap 的局部协议版本；当前只支持 package schema version 1。 |
 | bootstrap_failure_schema_version | persisted_protocol | protocol | none | false | false | false | runner 启动前失败诊断的局部结构版本；不属于 qualification result schema。 |
 | bootstrap_sha256 | persisted_protocol | provenance | none | false | false | false | 实际执行的 package 外 bootstrap 完整文件 SHA-256，由冻结 Notebook trust anchor 先行核对。 |
-| artifact_kind | persisted_protocol | runtime_state | none | false | false | false | bootstrap 输出的 `qualification_result` 或 `bootstrap_failure`，禁止把后者解释为正式 runtime 结果。 |
+| artifact_kind | persisted_protocol | runtime_state | none | false | false | false | bootstrap 输出的 qualification/experiment result、`bootstrap_failure` 或 `execution_entrypoint_failure`；任何 failure 与 synthetic result 均不得解释为 runtime/scientific evidence。 |
 | failure_stage | persisted_protocol | runtime_state | none | false | false | false | bootstrap 失败发生的 arguments、secrets、archive_digest、archive_safety、manifest、dependency_install、runner_start、runner_result 或 result_copy 控制面阶段。 |
 | bootstrap_exit_code | cross_boundary | runtime_state | none | false | false | false | bootstrap 自身预运行失败的退出码 3；与 runner 的 0/1/2 语义分离。 |
 | runner_exit_code | cross_boundary | runtime_state | none | false | false | false | bootstrap 独立核验并复制正式结果后原样返回的 runner 退出码 0、1 或 2。 |
@@ -405,7 +405,39 @@ Notebook 与 repository module 的跨边界数据
 | size_bytes | persisted_protocol | provenance | none | false | false | false | manifest 单文件条目的精确 byte size。 |
 | sha256 | persisted_protocol | provenance | none | false | false | false | manifest 单文件内容 bytes 的 SHA-256。 |
 | excluded_parts | persisted_protocol | protocol | none | false | false | false | execution package 明确禁止纳入的路径部分集合。 |
-| result_zip | persisted_protocol | provenance | none | false | false | false | runner 返回的结果 zip 基名；权威路径由 Notebook/调用方决定。 |
+| committed_revision | persisted_protocol | provenance | none | false | false | false | experiment-execution package、bootstrap trust input 与 synthetic result 共同绑定的精确 40 位 Git revision。 |
+| delivery_manifest_schema_version | persisted_protocol | protocol | none | false | false | false | package 外 delivery manifest 的局部结构版本。 |
+| archive_sha256 | persisted_protocol | provenance | none | false | false | false | 确定性 experiment-execution archive 的完整 SHA-256；由 package 外 trust input 提供给 bootstrap。 |
+| embedded_manifest_sha256 | persisted_protocol | provenance | none | false | false | false | delivery manifest 对 archive 内 experiment-execution manifest bytes 的 SHA-256 绑定。 |
+| entrypoint_identity | persisted_protocol | provenance | none | false | false | false | package manifest、bootstrap 与结果共同绑定的包内 CLI module/function 身份。 |
+| entrypoint_module | persisted_protocol | provenance | none | false | false | false | bootstrap 在全部 pre-run 检查通过后才可启动的包内 Python module。 |
+| entrypoint_path | persisted_protocol | provenance | none | false | false | false | allowlist 中 package-contained CLI 的精确相对路径。 |
+| evidence_scope | persisted_protocol | protocol | none | false | false | false | 明确结果只属于 infrastructure synthetic wiring、不能支撑科学 claim 的范围声明。 |
+| execution_scope | persisted_protocol | protocol | none | false | false | false | package entrypoint 实际执行范围；当前固定为 `cpu_synthetic_wiring_only`。 |
+| record_collection_relative_path | persisted_protocol | provenance | none | false | false | false | result root 内 governed record collection 的安全相对路径。 |
+| record_collection_sha256 | persisted_protocol | provenance | none | false | false | false | package result 对 governed record collection bytes 的完整 SHA-256。 |
+| scientific_claims_supported | persisted_protocol | protocol | none | false | false | false | result/diagnostic 明确是否支持科学 claim；当前 A3b synthetic 结果固定为 false。 |
+| gpu_executed | persisted_protocol | runtime_state | none | false | false | false | 当前 package entrypoint 是否实际执行 GPU；synthetic wiring 固定为 false。 |
+| held_out_evaluation_accessed | persisted_protocol | protocol | none | false | false | false | 当前 package entrypoint 是否访问 held-out evaluation；synthetic wiring 固定为 false。 |
+| bootstrap_identity | persisted_protocol | provenance | none | false | false | false | package 外 bootstrap 的固定实现身份，必须在读取 package 前由调用者核对。 |
+| entrypoint_schema_version | persisted_protocol | protocol | none | false | false | false | package-contained execution summary 的局部结构版本。 |
+| diagnostic_schema_version | persisted_protocol | protocol | none | false | false | false | bootstrap 或 entrypoint failure diagnostic 的局部结构版本；不属于科学结果。 |
+| expected_archive_sha256 | cross_boundary | provenance | none | false | false | false | 调用者独立审核后交给 experiment bootstrap 的完整 archive SHA-256。 |
+| expected_bootstrap_identity | cross_boundary | provenance | none | false | false | false | Notebook/调用者要求 package 外 bootstrap 精确匹配的实现身份。 |
+| expected_bootstrap_schema_version | cross_boundary | protocol | none | false | false | false | Notebook/调用者要求 package 外 bootstrap 精确匹配的局部 schema version。 |
+| expected_bootstrap_sha256 | cross_boundary | provenance | none | false | false | false | Notebook/调用者独立固定并在读取 package 前核对的 bootstrap 完整 SHA-256。 |
+| expected_revision | cross_boundary | provenance | none | false | false | false | experiment bootstrap 必须与 package manifest 及结果共同核对的精确 revision。 |
+| expected_candidate_config_digest | cross_boundary | method_identity | none | false | false | false | experiment bootstrap/entrypoint 必须与实际准备结果精确匹配的 candidate 摘要。 |
+| expected_execution_config_digest | cross_boundary | protocol | none | false | false | false | experiment bootstrap/entrypoint 必须与实际准备结果精确匹配的 execution 摘要。 |
+| expected_input_manifest_digest | cross_boundary | provenance | none | false | false | false | experiment bootstrap/entrypoint 必须与实际准备结果精确匹配的 frozen input manifest 摘要。 |
+| record_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中经 replay 验证的 governed record 总数。 |
+| success_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中成功记录数。 |
+| resource_failure_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中资源失败记录数。 |
+| scientific_failure_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中显式科学失败记录数；当前 wiring 通过不构成科学成功。 |
+| execution_failure_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中执行失败记录数。 |
+| excluded_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中预登记排除记录数。 |
+| replay_digest | persisted_protocol | provenance | none | false | false | false | A3a replay 对完整 record collection 形成的稳定摘要。 |
+| result_zip | persisted_protocol | provenance | none | false | false | false | runner/bootstrap 返回的结果 zip 路径或基名；权威归档位置由调用方边界决定。 |
 | result_zip_filename | persisted_protocol | provenance | none | true | false | false | 写入 run summary、且必须包含同一 run ID 的最小结果 zip 基名。 |
 | key_controls | persisted_protocol | runtime_identity | none | true | false | false | 当前结果按执行顺序记录的 `registered`/`negative_identity` key role 序列。 |
 | replay_source_run_id | persisted_protocol | provenance | none | true | false | false | replay 绑定的既有 passed qualification run ID。 |
@@ -438,6 +470,12 @@ Notebook 与 repository module 的跨边界数据
 | cuda_device_count | cross_boundary | runtime_identity | none | false | false | false | backend 在加载模型前报告的非负 CUDA 设备数量。 |
 | runtime_backend_name | cross_boundary | runtime_identity | none | false | false | false | 实际准备 runtime session 的 backend 实现身份。 |
 | selected_device | cross_boundary | runtime_identity | none | false | false | false | adapter 根据请求与可用设备确定的实际执行设备。 |
+| identity_schema_version | cross_boundary | protocol | none | false | false | false | runtime public execution identity 的局部 canonical mapping 版本。 |
+| backend_type_identity | cross_boundary | runtime_identity | none | false | false | false | runtime adapter 构造时锚定且每次公开重验证的 backend 精确类型身份；不暴露 backend 对象。 |
+| qk_observation_callable_identity | cross_boundary | runtime_identity | none | false | false | false | runtime adapter 构造时惰性锚定的 Batch-3 Q/K module 精确函数 qualified identity；公开值只含稳定字符串，不暴露 callable 对象。 |
+| backend_resources_owned | cross_boundary | runtime_state | none | false | false | false | runtime public identity 中与 lifecycle state 联合复验的资源所有权布尔值。 |
+| runtime_state | cross_boundary | runtime_state | none | false | false | false | runtime public execution identity 当前 `created`、`ready`、`failed` 或 `closed` 状态。 |
+| runtime_session_identity_digest | cross_boundary | provenance | none | false | false | false | READY session 全部公开配置/设备/backend identity 的 canonical SHA-256；不包含模型私有状态。 |
 | seed | persisted_protocol | protocol | none | true | false | false | 当前 record 实际使用的随机种子。 |
 | metric_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标名称。 |
 | metric_value | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标数值。 |

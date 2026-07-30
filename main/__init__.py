@@ -3,6 +3,7 @@
 from .content_chain import (
     BranchNullCalibration,
     ContentDetectionResult,
+    ContentDetectorError,
     ContentEmbeddingResult,
     ContentEmbedderError,
     ContentRoutingResult,
@@ -20,6 +21,7 @@ from .content_chain import (
     hf_detector,
     lf_carrier,
     lf_detector,
+    validate_content_detection_result,
 )
 from .content_chain.embedder import (
     ContentMaterializationObservation,
@@ -61,6 +63,7 @@ from .shared import (
     derive_wrong_key_stream,
     identify_root_key,
     key_schedule_sha256_counter,
+    rgb8_image_digest,
 )
 
 __all__ = [
@@ -68,6 +71,7 @@ __all__ = [
     "ConditionalRecoveryError",
     "ConditionalRecoveryResult",
     "ContentDetectionResult",
+    "ContentDetectorError",
     "ContentDetectorBinding",
     "ContentEmbeddingResult",
     "ContentEmbedderError",
@@ -114,6 +118,8 @@ __all__ = [
     "lf_detector",
     "qk_geometry_sync",
     "reconcile_content_materialization_budget",
+    "rgb8_image_digest",
     "scale_content_delta_binary32",
+    "validate_content_detection_result",
     "validate_conditional_recovery_result",
 ]
