@@ -440,6 +440,7 @@ def _validate_candidate_binding(raw: object) -> None:
             "method_candidate_id",
             "key_schedule_candidate_id",
             "runtime_candidate_id",
+            "candidate_specification_path",
             "candidate_specification_sha256",
             "method_reviewed_revision",
             "protocol_authorization_parent_revision",
@@ -460,6 +461,7 @@ def _validate_candidate_binding(raw: object) -> None:
         "method_candidate_id": "hf_sparse_tail",
         "key_schedule_candidate_id": "key_schedule_sha256_counter",
         "runtime_candidate_id": "runtime_sd35_flowmatch",
+        "candidate_specification_path": "docs/design/candidate_specifications.md",
         "candidate_specification_sha256": (
             "7a9a2689e067ec85d39cc6e296ae4942da2b0fd2429f0ab88abcc1af2d7d89ea"
         ),
@@ -1322,6 +1324,13 @@ def validate_bound_authority_files(
         return tuple(violations)
     root = Path(repository_root)
     binding = specification.raw["candidate_binding"]
+    candidate_specification_path = root / binding["candidate_specification_path"]
+    if (
+        not candidate_specification_path.is_file()
+        or _file_sha256(candidate_specification_path)
+        != binding["candidate_specification_sha256"]
+    ):
+        violations.append("candidate_specification_authority_mismatch")
     for entry in binding["method_source_files"]:
         path = root / entry["path"]
         if not path.is_file() or _file_sha256(path) != entry["sha256"]:

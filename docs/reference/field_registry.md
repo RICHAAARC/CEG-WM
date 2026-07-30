@@ -517,7 +517,9 @@ Notebook 与 repository module 的跨边界数据
 | source_row | persisted_protocol | provenance | none | false | false | false | C1 pinned PartiPrompts snapshot 中从 1 开始的原始数据行身份。 |
 | prompt_text | persisted_protocol | protocol_input | none | false | false | false | C1 离线执行所需的冻结 prompt 明文；其 UTF-8 摘要必须逐行等于 `prompt_digest`，不得由网络重取替代。 |
 | roster_rows_digest | persisted_protocol | provenance | none | false | false | false | C1 prompt/category/challenge/source-row roster 的 canonical SHA-256。 |
-| candidate_binding_digest | persisted_protocol | method_identity | none | true | false | false | C1 HF reference 候选、完整 source bundle、method adapter、runtime config 与 qualification 事实的 canonical 摘要；不是结果门。 |
+| candidate_specification_path | persisted_protocol | provenance | none | false | false | false | C1 候选绑定所指向的权威候选规格文件路径；bundle loader 必须按 `candidate_specification_sha256` 对其实际字节 fail closed。 |
+| candidate_specification_sha256 | persisted_protocol | provenance | none | false | false | false | `candidate_specification_path` 所指权威候选规格文件的原始字节 SHA-256。 |
+| candidate_binding_digest | persisted_protocol | method_identity | none | true | false | false | C1 HF reference 候选、权威候选规格、完整 source bundle、method adapter、runtime config 与 qualification 事实的 canonical 摘要；不是结果门。 |
 | hf_only_tau_frozen | persisted_protocol | protocol | none | false | false | false | threshold-fit 回传经独立审计后形成的冻结 tau artifact gate；未绑定 artifact SHA/revision/APPROVE 时 confirmation fail closed。 |
 | run_phase_id | persisted_protocol | protocol | none | true | false | false | C1 threshold-fit 或 untouched-confirmation 的互斥执行阶段身份，禁止在同一 run 混跑。 |
 | metric_id | persisted_protocol | metric_identity | none | true | false | false | C1-M 必须实现并由 split binding 授权的预注册 metric 身份；C1-P 仅冻结公式身份。 |

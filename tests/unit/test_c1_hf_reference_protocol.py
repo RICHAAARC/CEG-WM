@@ -8,6 +8,7 @@ from dataclasses import replace
 import hashlib
 import math
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -60,6 +61,42 @@ def test_c1_bundle_loads_exact_authorities_and_offline_prompt_snapshot() -> None
     )
     snapshot = ROOT / specification["dataset"]["dataset_snapshot_path"]
     assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == C1_HF_DATASET_SHA256
+
+
+@pytest.mark.unit
+def test_c1_bundle_rejects_candidate_specification_authority_tamper(tmp_path) -> None:
+    bundle = load_c1_hf_reference_bundle(ROOT)
+    specification = bundle.specification.raw
+    binding = specification["candidate_binding"]
+    temporary_root = tmp_path / "repository"
+    bound_paths = {
+        Path("configs/experiments/c1_hf_reference_run.json"),
+        Path(binding["candidate_specification_path"]),
+        Path(binding["formal_method_adapter_config_path"]),
+        Path(binding["runtime_config_path"]),
+        Path(specification["dataset"]["roster_path"]),
+        Path(specification["dataset"]["dataset_snapshot_path"]),
+        *(
+            Path(manifest["path"])
+            for manifest in specification["split_manifests"].values()
+        ),
+        *(Path(entry["path"]) for entry in binding["method_source_files"]),
+    }
+    for relative_path in bound_paths:
+        destination = temporary_root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative_path, destination)
+
+    candidate_specification = temporary_root / binding["candidate_specification_path"]
+    candidate_specification.write_bytes(
+        candidate_specification.read_bytes() + b"\nauthority tamper\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^candidate_specification_authority_mismatch$",
+    ):
+        load_c1_hf_reference_bundle(temporary_root)
 
 
 @pytest.mark.unit
