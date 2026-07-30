@@ -28,7 +28,7 @@ FAILURE_CLASSES = frozenset(
 KEY_ROLES = frozenset({"registered", "wrong_key", "unwatermarked_primary_null"})
 WATERMARK_DECISIONS = frozenset({"positive", "negative", "failed", "excluded", "retry"})
 POSITIVE_SOURCES = frozenset({"raw_content", "rectified_content"})
-INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION = "ceg_wm_internal_sample_record_v3"
+INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION = "ceg_wm_internal_sample_record_v4"
 INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION = (
     "ceg_wm_internal_run_case_record_collection_v1"
 )
@@ -82,6 +82,8 @@ class RoutingTrace:
 @dataclass(frozen=True)
 class GeometryTrace:
     geometry_triggered: bool
+    geometry_operation_identity: str
+    geometry_reliability_config_digest: str | None
     geometry_estimation_identity: str | None
     geometry_reliability_identity: str | None
     geometry_reliable: bool | None
@@ -349,6 +351,13 @@ def validate_routing_trace(trace: RoutingTrace) -> tuple[str, ...]:
 
 
 def _validate_geometry(trace: GeometryTrace, violations: list[str]) -> None:
+    if not _nonempty(trace.geometry_operation_identity):
+        violations.append("geometry_operation_identity_missing")
+    if (
+        trace.geometry_reliability_config_digest is not None
+        and not _digest_valid(trace.geometry_reliability_config_digest)
+    ):
+        violations.append("geometry_reliability_config_digest_invalid")
     if trace.rectification_status not in {"not_attempted", "succeeded", "failed"}:
         violations.append("rectification_status_invalid")
     if not trace.geometry_triggered:

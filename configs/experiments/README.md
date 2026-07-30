@@ -13,8 +13,8 @@ prerequisites。
 scientific claim boundary）；正式 collection validator 只接受精确冻结 dataclass
 作为 protocol/manifest trust anchors，不接受 duck object 或 subclass。
 它显式禁止当前执行访问 `held_out_evaluation`（最终 held-out 职责）。逐样本 schema
-现为 `ceg_wm_internal_sample_record_v3`，补充 candidate/input-manifest/execution/
-resource provenance。该配置与 CPU schema tests
+现为 `ceg_wm_internal_sample_record_v4`，补充 candidate/input-manifest/execution/
+resource provenance，并逐 record 保存几何操作身份和 experiments 层可靠性配置摘要。该配置与 CPU schema tests
 不构成 calibration、正式运行或科学有效性证据。
 
 `internal_execution_components.json` 冻结 A-2 内部执行组件 registry：

@@ -18,6 +18,11 @@ from experiments.protocol.internal_record_registry import (
     INTERNAL_RECORD_FIELD_NAMES,
     INTERNAL_RECORD_SCHEMA_BINDINGS,
 )
+from experiments.protocol.internal_case import (
+    FrozenCaseInputManifest,
+    InternalCaseManifestEntry,
+    derive_internal_record_id,
+)
 from experiments.protocol.internal_records import (
     BranchScoreTrace,
     DecisionTrace,
@@ -102,12 +107,15 @@ class GovernedRecordWriter:
         records_root: str | Path,
         frozen_protocol: FrozenInternalValidationProtocol,
         split_manifest: FrozenSplitManifest,
+        input_manifest: FrozenCaseInputManifest,
         bindings: FrozenRecordBindings,
     ) -> None:
         if type(frozen_protocol) is not FrozenInternalValidationProtocol:
             raise GovernedRecordWriterError("frozen protocol exact type is required")
         if type(split_manifest) is not FrozenSplitManifest:
             raise GovernedRecordWriterError("split manifest exact type is required")
+        if type(input_manifest) is not FrozenCaseInputManifest:
+            raise GovernedRecordWriterError("input manifest exact type is required")
         if type(bindings) is not FrozenRecordBindings:
             raise GovernedRecordWriterError("frozen record bindings exact type is required")
         protocol_violations = frozen_protocol.validate()
@@ -120,6 +128,28 @@ class GovernedRecordWriter:
             raise GovernedRecordWriterError(
                 f"split manifest invalid: {','.join(manifest_violations)}"
             )
+        input_manifest_violations = input_manifest.validate(
+            protocol=frozen_protocol,
+            split_manifest=split_manifest,
+        )
+        if input_manifest_violations:
+            raise GovernedRecordWriterError(
+                "input manifest invalid: "
+                f"{','.join(input_manifest_violations)}"
+            )
+        if input_manifest.digest() != bindings.input_manifest_digest:
+            raise GovernedRecordWriterError(
+                "input manifest digest differs from frozen record bindings"
+            )
+        case_entries = tuple(
+            entry
+            for entry in input_manifest.entries
+            if entry.analysis_unit_identity.case_id == bindings.case_id
+        )
+        if not case_entries:
+            raise GovernedRecordWriterError(
+                "input manifest has no entry for the bound case"
+            )
         root = Path(records_root)
         if not root.is_absolute():
             raise GovernedRecordWriterError("records_root must be absolute")
@@ -128,18 +158,23 @@ class GovernedRecordWriter:
         self._split_manifest_snapshot = _canonical_json_bytes(
             asdict(split_manifest)
         )
+        self._input_manifest_snapshot = _canonical_json_bytes(
+            asdict(input_manifest)
+        )
         self._bindings_snapshot = _canonical_json_bytes(asdict(bindings))
         self._construction_anchor_digest = sha256(
             b"\0".join(
                 (
                     self._protocol_snapshot,
                     self._split_manifest_snapshot,
+                    self._input_manifest_snapshot,
                     self._bindings_snapshot,
                 )
             )
         ).hexdigest()
         self._protocol = deepcopy(frozen_protocol)
         self._split_manifest = deepcopy(split_manifest)
+        self._input_manifest = deepcopy(input_manifest)
         self._bindings = deepcopy(bindings)
         self._registered_fields = INTERNAL_RECORD_FIELD_NAMES
         self._path = root / self._bindings.run_id / f"{self._bindings.case_id}.json"
@@ -153,6 +188,7 @@ class GovernedRecordWriter:
         *,
         frozen_protocol: FrozenInternalValidationProtocol,
         split_manifest: FrozenSplitManifest,
+        input_manifest: FrozenCaseInputManifest,
         bindings: FrozenRecordBindings,
     ) -> None:
         """Reject context objects that differ from construction-time anchors."""
@@ -163,16 +199,22 @@ class GovernedRecordWriter:
             raise GovernedRecordWriterError(
                 "context split manifest exact type is required"
             )
+        if type(input_manifest) is not FrozenCaseInputManifest:
+            raise GovernedRecordWriterError(
+                "context input manifest exact type is required"
+            )
         if type(bindings) is not FrozenRecordBindings:
             raise GovernedRecordWriterError("context bindings exact type is required")
         observed = (
             _canonical_json_bytes(asdict(frozen_protocol)),
             _canonical_json_bytes(asdict(split_manifest)),
+            _canonical_json_bytes(asdict(input_manifest)),
             _canonical_json_bytes(asdict(bindings)),
         )
         expected = (
             self._protocol_snapshot,
             self._split_manifest_snapshot,
+            self._input_manifest_snapshot,
             self._bindings_snapshot,
         )
         if observed != expected:
@@ -298,8 +340,32 @@ class GovernedRecordWriter:
             raise GovernedRecordWriterError("record collection run identity drifted")
         if collection.case_id != self._bindings.case_id:
             raise GovernedRecordWriterError("record collection case identity drifted")
-        for record in collection.records:
+        prior_record_by_unit: dict[str, InternalValidationRecord] = {}
+        terminal_units: set[str] = set()
+        trusted_case_entries = tuple(
+            entry
+            for entry in self._input_manifest.entries
+            if entry.analysis_unit_identity.case_id == self._bindings.case_id
+        )
+        for sequence_index, record in enumerate(collection.records):
             _validate_record_bindings(record, self._bindings)
+            entry = _resolve_trusted_entry(record, trusted_case_entries)
+            unit_id = record.analysis_unit_identity.unit_id
+            if unit_id in terminal_units:
+                raise GovernedRecordWriterError(
+                    "record continues after a terminal analysis-unit outcome"
+                )
+            prior_record = prior_record_by_unit.get(unit_id)
+            _validate_record_against_expectation(
+                record,
+                entry=entry,
+                bindings=self._bindings,
+                sequence_index=sequence_index,
+                prior_record=prior_record,
+            )
+            prior_record_by_unit[unit_id] = record
+            if _record_is_terminal(record):
+                terminal_units.add(unit_id)
         payload = collection.to_dict()
         unregistered = sorted(_mapping_keys(payload) - self._registered_fields)
         if unregistered:
@@ -350,6 +416,8 @@ class GovernedRecordWriter:
             != self._protocol_snapshot
             or _canonical_json_bytes(asdict(self._split_manifest))
             != self._split_manifest_snapshot
+            or _canonical_json_bytes(asdict(self._input_manifest))
+            != self._input_manifest_snapshot
             or _canonical_json_bytes(asdict(self._bindings))
             != self._bindings_snapshot
             or sha256(
@@ -357,6 +425,7 @@ class GovernedRecordWriter:
                     (
                         self._protocol_snapshot,
                         self._split_manifest_snapshot,
+                        self._input_manifest_snapshot,
                         self._bindings_snapshot,
                     )
                 )
@@ -395,6 +464,132 @@ def _validate_record_bindings(
     for role, value in expected.items():
         if getattr(provenance, role) != value:
             raise GovernedRecordWriterError(f"record {role} drifted")
+
+
+def _resolve_trusted_entry(
+    record: InternalValidationRecord,
+    entries: tuple[InternalCaseManifestEntry, ...],
+) -> InternalCaseManifestEntry:
+    matches = tuple(
+        entry
+        for entry in entries
+        if entry.analysis_unit_identity == record.analysis_unit_identity
+        and entry.split == record.split
+    )
+    if len(matches) != 1:
+        raise GovernedRecordWriterError(
+            "record must resolve to exactly one frozen input-manifest entry"
+        )
+    return matches[0]
+
+
+def _validate_record_against_expectation(
+    record: InternalValidationRecord,
+    *,
+    entry: InternalCaseManifestEntry,
+    bindings: FrozenRecordBindings,
+    sequence_index: int,
+    prior_record: InternalValidationRecord | None,
+) -> None:
+    if record.analysis_unit_identity != entry.analysis_unit_identity:
+        raise GovernedRecordWriterError(
+            "record analysis-unit identity drifted"
+        )
+    if record.split != entry.split:
+        raise GovernedRecordWriterError("record split drifted")
+    if record.record_sequence_index != sequence_index:
+        raise GovernedRecordWriterError("record sequence identity drifted")
+
+    expected_attempt_index = (
+        0 if prior_record is None else prior_record.record_attempt_index + 1
+    )
+    if record.record_attempt_index != expected_attempt_index:
+        raise GovernedRecordWriterError("record attempt identity drifted")
+    expected_record_id = derive_internal_record_id(
+        run_id=bindings.run_id,
+        case_id=bindings.case_id,
+        input_manifest_digest=bindings.input_manifest_digest,
+        analysis_unit_identity=entry.analysis_unit_identity,
+        attempt_index=expected_attempt_index,
+    )
+    if record.record_id != expected_record_id:
+        raise GovernedRecordWriterError("record deterministic identity drifted")
+    expected_parent = None if prior_record is None else prior_record.record_id
+    if record.retry_of_record_id != expected_parent:
+        raise GovernedRecordWriterError("record retry lineage drifted")
+
+    provenance = record.provenance_trace
+    per_unit_provenance = {
+        "input_artifact_digest": entry.input_artifact_digest,
+        "attack_config_digest": entry.attack_config_digest,
+        "metric_set_digest": entry.metric_set_digest,
+    }
+    for role, expected in per_unit_provenance.items():
+        if getattr(provenance, role) != expected:
+            raise GovernedRecordWriterError(f"record {role} drifted")
+
+    if record.routing_trace != entry.routing_trace:
+        raise GovernedRecordWriterError("record routing trace drifted")
+    if record.key_control_trace != entry.key_control_trace:
+        raise GovernedRecordWriterError("record key-control trace drifted")
+
+    expectation = entry.execution_expectation
+    detector = record.detector_trace
+    expected_detector = {
+        "raw_detector_identity": expectation.raw_detector_identity,
+        "rectified_detector_identity": expectation.rectified_detector_identity,
+        "raw_detector_config_digest": expectation.raw_detector_config_digest,
+        "rectified_detector_config_digest": (
+            expectation.rectified_detector_config_digest
+        ),
+        "raw_preprocessing_identity": expectation.raw_preprocessing_identity,
+        "rectified_preprocessing_identity": (
+            expectation.rectified_preprocessing_identity
+        ),
+    }
+    for role, expected in expected_detector.items():
+        if getattr(detector, role) != expected:
+            raise GovernedRecordWriterError(f"record {role} drifted")
+
+    threshold = record.threshold_trace
+    expected_threshold = {
+        "raw_threshold_identity": expectation.raw_threshold_identity,
+        "rectified_threshold_identity": (
+            expectation.rectified_threshold_identity
+        ),
+        "tau": expectation.tau,
+        "tau_rescue": expectation.tau_rescue,
+    }
+    for role, expected in expected_threshold.items():
+        if getattr(threshold, role) != expected:
+            raise GovernedRecordWriterError(f"record {role} drifted")
+
+    geometry = record.geometry_trace
+    if (
+        geometry.geometry_operation_identity
+        != expectation.geometry_operation_identity
+    ):
+        raise GovernedRecordWriterError(
+            "record geometry operation identity drifted"
+        )
+    if (
+        geometry.geometry_reliability_config_digest
+        != expectation.geometry_reliability_config_digest
+    ):
+        raise GovernedRecordWriterError(
+            "record geometry reliability configuration digest drifted"
+        )
+
+
+def _record_is_terminal(record: InternalValidationRecord) -> bool:
+    return (
+        record.execution_status in {"success", "excluded"}
+        or (
+            record.execution_status == "failed"
+            and record.failure_class
+            in {"execution_failure", "scientific_failure"}
+        )
+    )
 
 
 def _reject_completed_duplicate(

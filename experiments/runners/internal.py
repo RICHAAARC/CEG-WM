@@ -14,7 +14,9 @@ from experiments.attacks import (
     GeometricAttackError,
     GeometricAttackSpec,
     apply_geometric_attack,
+    validate_attack_artifact,
     validate_attack_registry,
+    validate_geometric_attack_spec,
 )
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics import (
@@ -34,8 +36,12 @@ from experiments.protocol.internal_records import (
     RoutingTrace,
     RunCaseRecordCollection,
     ThresholdTrace,
-    validate_key_control_trace,
-    validate_routing_trace,
+)
+from experiments.protocol.internal_case import (
+    FrozenCaseExecutionExpectation,
+    FrozenCaseInputManifest,
+    InternalCaseManifestEntry,
+    derive_internal_record_id,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
@@ -60,7 +66,6 @@ from main import (
 )
 
 
-INPUT_MANIFEST_SCHEMA_VERSION = "ceg_wm_internal_case_input_manifest_v1"
 SCIENTIFIC_RESULT_FAILURE_STATUSES = frozenset(
     {
         "negative_geometry_operation_failure",
@@ -81,81 +86,6 @@ class ResourceExecutionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class InternalCaseManifestEntry:
-    analysis_unit_identity: AnalysisUnitIdentity
-    split: str
-    input_artifact_digest: str
-    attack_config_digest: str
-    metric_set_digest: str
-    routing_trace: RoutingTrace
-    key_control_trace: KeyControlTrace
-
-    def validate(self) -> tuple[str, ...]:
-        if type(self.analysis_unit_identity) is not AnalysisUnitIdentity:
-            return ("analysis_unit_identity_exact_type_required",)
-        violations = list(self.analysis_unit_identity.validate())
-        for role in (
-            "input_artifact_digest",
-            "attack_config_digest",
-            "metric_set_digest",
-        ):
-            if not _digest_valid(getattr(self, role)):
-                violations.append(f"{role}_invalid")
-        violations.extend(validate_routing_trace(self.routing_trace))
-        violations.extend(validate_key_control_trace(self.key_control_trace))
-        return tuple(dict.fromkeys(violations))
-
-
-@dataclass(frozen=True, slots=True)
-class FrozenCaseInputManifest:
-    manifest_schema_version: str
-    manifest_id: str
-    manifest_revision: str
-    protocol_digest: str
-    split_manifest_digest: str
-    entries: tuple[InternalCaseManifestEntry, ...]
-
-    def digest(self) -> str:
-        return _canonical_digest(asdict(self))
-
-    def validate(
-        self,
-        *,
-        protocol: FrozenInternalValidationProtocol,
-        split_manifest: FrozenSplitManifest,
-    ) -> tuple[str, ...]:
-        violations: list[str] = []
-        if self.manifest_schema_version != INPUT_MANIFEST_SCHEMA_VERSION:
-            violations.append("input_manifest_schema_version_invalid")
-        for role in ("manifest_id", "manifest_revision"):
-            if type(getattr(self, role)) is not str or not getattr(self, role):
-                violations.append(f"{role}_missing")
-        if self.protocol_digest != protocol.digest():
-            violations.append("input_manifest_protocol_digest_mismatch")
-        if self.split_manifest_digest != split_manifest.digest():
-            violations.append("input_manifest_split_manifest_digest_mismatch")
-        if not self.entries:
-            violations.append("input_manifest_entries_missing")
-        assignment_pairs = {
-            (assignment.identity, assignment.split)
-            for assignment in split_manifest.assignments
-        }
-        seen_units: set[str] = set()
-        for entry in self.entries:
-            if type(entry) is not InternalCaseManifestEntry:
-                violations.append("input_manifest_entry_exact_type_required")
-                continue
-            violations.extend(entry.validate())
-            if (entry.analysis_unit_identity, entry.split) not in assignment_pairs:
-                violations.append("input_manifest_split_assignment_missing")
-            unit_id = entry.analysis_unit_identity.unit_id
-            if unit_id in seen_units:
-                violations.append("input_manifest_unit_duplicate")
-            seen_units.add(unit_id)
-        return tuple(dict.fromkeys(violations))
-
-
-@dataclass(frozen=True, slots=True)
 class InternalCaseExecutionPayload:
     source_artifact: AttackArtifact
     attack_specification: GeometricAttackSpec
@@ -165,6 +95,62 @@ class InternalCaseExecutionPayload:
     geometry_estimation_operation: GeometryEstimationOperation
     geometry_operation_identity: str
     geometry_reliability_thresholds: GeometryReliabilityThresholds | None
+    _content_operation_anchor: object = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _geometry_operation_anchor: object = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _content_operation_type_identity: str = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _geometry_operation_type_identity: str = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _construction_anchor_digest: str = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        declaration = _payload_declaration_snapshot(self)
+        content_operation = (
+            self.content_detector_binding.content_detection_operation
+        )
+        object.__setattr__(
+            self,
+            "_content_operation_anchor",
+            content_operation,
+        )
+        object.__setattr__(
+            self,
+            "_geometry_operation_anchor",
+            self.geometry_estimation_operation,
+        )
+        object.__setattr__(
+            self,
+            "_content_operation_type_identity",
+            _callable_type_identity(content_operation),
+        )
+        object.__setattr__(
+            self,
+            "_geometry_operation_type_identity",
+            _callable_type_identity(self.geometry_estimation_operation),
+        )
+        object.__setattr__(
+            self,
+            "_construction_anchor_digest",
+            _canonical_digest(declaration),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,18 +226,48 @@ def execution_config_digest(
     )
 
 
+def geometry_reliability_config_digest(
+    thresholds: GeometryReliabilityThresholds,
+) -> str:
+    """Digest an experiments-layer reliability configuration declaration.
+
+    This identity binds only the declared dataclass fields consumed by the
+    runner.  It is not the method-layer threshold_config_digest emitted by a
+    geometry reliability result.
+    """
+
+    declaration = _validated_geometry_reliability_declaration(thresholds)
+    return _geometry_reliability_declaration_digest(declaration)
+
+
+def _geometry_reliability_declaration_digest(
+    declaration: Mapping[str, object],
+) -> str:
+    return _canonical_digest(
+        {
+            "configuration_kind": (
+                "experiments_geometry_reliability_threshold_declaration"
+            ),
+            "thresholds": declaration,
+        }
+    )
+
+
 def candidate_config_digest(
     *,
     adapter: CegWmExperimentAdapter,
     input_manifest: FrozenCaseInputManifest,
-    payload: InternalCaseExecutionPayload,
+    method_code_revision: str,
 ) -> str:
     """Bind candidate-facing method and fitted decision identities without keys."""
 
-    if type(payload) is not InternalCaseExecutionPayload:
-        raise InternalRunnerError("case execution payload exact type is required")
     if type(input_manifest) is not FrozenCaseInputManifest:
         raise InternalRunnerError("frozen input manifest exact type is required")
+    if (
+        type(method_code_revision) is not str
+        or len(method_code_revision) != 40
+    ):
+        raise InternalRunnerError("method code revision must be exact")
     routing_candidate_policy = sorted(
         {
             (
@@ -265,17 +281,32 @@ def candidate_config_digest(
     )
     if not routing_candidate_policy:
         raise InternalRunnerError("routing candidate policy is missing")
-    reliability = payload.geometry_reliability_thresholds
+    execution_expectations = sorted(
+        (
+            (
+                entry.analysis_unit_identity.unit_id,
+                asdict(entry.execution_expectation),
+            )
+            for entry in input_manifest.entries
+            if type(entry) is InternalCaseManifestEntry
+            and type(entry.execution_expectation)
+            is FrozenCaseExecutionExpectation
+        ),
+        key=lambda item: item[0],
+    )
+    if len(execution_expectations) != len(input_manifest.entries):
+        raise InternalRunnerError("case execution expectation is missing")
     return _canonical_digest(
         {
             "adapter_config_digest": adapter.configuration.config_digest,
-            "content_detector_binding_digest": (
-                payload.content_detector_binding.detector_binding_digest
-            ),
-            "geometry_operation_identity": payload.geometry_operation_identity,
-            "geometry_reliability_thresholds": (
-                None if reliability is None else asdict(reliability)
-            ),
+            "case_execution_expectations": [
+                {
+                    "expectation": expectation,
+                    "unit_id": unit_id,
+                }
+                for unit_id, expectation in execution_expectations
+            ],
+            "method_code_revision": method_code_revision,
             "routing_candidate_policy": [
                 {
                     "routing_control": routing_control,
@@ -283,7 +314,6 @@ def candidate_config_digest(
                 }
                 for routing_identity, routing_control in routing_candidate_policy
             ],
-            "threshold_identity": payload.thresholds.threshold_identity,
         }
     )
 
@@ -307,10 +337,12 @@ def execute_internal_case(
         raise InternalRunnerError("maximum record attempts already exhausted")
     sequence_index = 0 if existing is None else len(existing.records)
     retry_parent = None if not prior else prior[-1].record_id
-    record_id = _record_id(
-        context.bindings,
-        entry.analysis_unit_identity,
-        attempt_index,
+    record_id = derive_internal_record_id(
+        run_id=context.bindings.run_id,
+        case_id=context.bindings.case_id,
+        input_manifest_digest=context.bindings.input_manifest_digest,
+        analysis_unit_identity=entry.analysis_unit_identity,
+        attempt_index=attempt_index,
     )
 
     try:
@@ -335,7 +367,6 @@ def execute_internal_case(
             record = _record_from_joint_result(
                 context,
                 entry,
-                payload,
                 joint_result,
                 record_id=record_id,
                 sequence_index=sequence_index,
@@ -348,7 +379,6 @@ def execute_internal_case(
             record = _record_from_joint_result(
                 context,
                 entry,
-                payload,
                 joint_result,
                 record_id=record_id,
                 sequence_index=sequence_index,
@@ -369,7 +399,6 @@ def execute_internal_case(
         record = _failure_record(
             context,
             entry,
-            payload,
             record_id=record_id,
             sequence_index=sequence_index,
             attempt_index=attempt_index,
@@ -384,7 +413,6 @@ def execute_internal_case(
         record = _failure_record(
             context,
             entry,
-            payload,
             record_id=record_id,
             sequence_index=sequence_index,
             attempt_index=attempt_index,
@@ -421,8 +449,13 @@ def record_excluded_case(
     record = _base_record(
         context,
         entry,
-        payload,
-        record_id=_record_id(context.bindings, entry.analysis_unit_identity, 0),
+        record_id=derive_internal_record_id(
+            run_id=context.bindings.run_id,
+            case_id=context.bindings.case_id,
+            input_manifest_digest=context.bindings.input_manifest_digest,
+            analysis_unit_identity=entry.analysis_unit_identity,
+            attempt_index=0,
+        ),
         sequence_index=0 if existing is None else len(existing.records),
         attempt_index=0,
         retry_parent=None,
@@ -431,9 +464,11 @@ def record_excluded_case(
         failure_reason=None,
         exclusion_reason=exclusion_reason,
         exclusion_rule_id=exclusion_rule_id,
-        detector_trace=_empty_detector_trace(payload),
+        detector_trace=_empty_detector_trace(entry.execution_expectation),
         branch_score_trace=BranchScoreTrace(None, None, None),
-        geometry_trace=_untriggered_geometry(),
+        geometry_trace=_untriggered_geometry(
+            entry.execution_expectation
+        ),
         decision_trace=DecisionTrace("excluded", None, exclusion_reason),
     )
     collection = context.writer.append_record(record)
@@ -551,36 +586,19 @@ def _validated_case(
         (entry.split,),
         SplitAccessGrant.current_execution(),
     )
-    if type(payload.source_artifact) is not AttackArtifact:
-        raise InternalRunnerError("source artifact exact type is required")
+    _validate_payload_construction_anchor(payload)
     if payload.source_artifact.analysis_unit_identity != entry.analysis_unit_identity:
         raise InternalRunnerError("source artifact analysis identity drifted")
     if payload.source_artifact.image_digest != entry.input_artifact_digest:
         raise InternalRunnerError("source artifact digest drifted")
-    if type(payload.attack_specification) is not GeometricAttackSpec:
-        raise InternalRunnerError("attack specification exact type is required")
     if payload.attack_specification.attack_config_digest != entry.attack_config_digest:
         raise InternalRunnerError("attack configuration digest drifted")
     if entry.metric_set_digest != context.metric_registry.registry_digest:
         raise InternalRunnerError("metric set digest drifted")
-    if type(payload.content_detector_binding) is not ContentDetectorBinding:
-        raise InternalRunnerError("content detector binding exact type is required")
-    if type(payload.thresholds) is not JointDecisionThresholds:
-        raise InternalRunnerError("joint thresholds exact type is required")
-    if payload.thresholds.detector_binding_digest != (
-        payload.content_detector_binding.detector_binding_digest
-    ):
-        raise InternalRunnerError("threshold detector binding drifted")
-    if not callable(payload.geometry_estimation_operation):
-        raise InternalRunnerError("geometry estimation operation must be callable")
-    if not payload.geometry_operation_identity:
-        raise InternalRunnerError("geometry operation identity is required")
-    if (
-        payload.geometry_reliability_thresholds is not None
-        and type(payload.geometry_reliability_thresholds)
-        is not GeometryReliabilityThresholds
-    ):
-        raise InternalRunnerError("geometry reliability thresholds exact type required")
+    _validate_payload_against_expectation(
+        payload,
+        entry.execution_expectation,
+    )
     observed_key = context.adapter.identify_key(payload.detection_key).result
     if observed_key.root_key_public_digest != (
         entry.key_control_trace.detection_key_public_digest
@@ -589,7 +607,7 @@ def _validated_case(
     if candidate_config_digest(
         adapter=context.adapter,
         input_manifest=context.input_manifest,
-        payload=payload,
+        method_code_revision=context.bindings.method_code_revision,
     ) != (
         context.bindings.candidate_config_digest
     ):
@@ -599,6 +617,227 @@ def _validated_case(
     ):
         raise InternalRunnerError("method configuration digest drifted")
     return entry
+
+
+def _payload_declaration_snapshot(
+    payload: InternalCaseExecutionPayload,
+) -> dict[str, object]:
+    if type(payload.source_artifact) is not AttackArtifact:
+        raise InternalRunnerError("source artifact exact type is required")
+    artifact_violations = validate_attack_artifact(payload.source_artifact)
+    if artifact_violations:
+        raise InternalRunnerError(
+            f"source artifact invalid: {','.join(artifact_violations)}"
+        )
+    if type(payload.attack_specification) is not GeometricAttackSpec:
+        raise InternalRunnerError("attack specification exact type is required")
+    attack_violations = validate_geometric_attack_spec(
+        payload.attack_specification
+    )
+    if attack_violations:
+        raise InternalRunnerError(
+            f"attack specification invalid: {','.join(attack_violations)}"
+        )
+    if type(payload.detection_key) is not str or not payload.detection_key:
+        raise InternalRunnerError("detection key is required")
+    binding = payload.content_detector_binding
+    if type(binding) is not ContentDetectorBinding:
+        raise InternalRunnerError("content detector binding exact type is required")
+    try:
+        rebuilt_binding = ContentDetectorBinding(
+            content_detection_operation=binding.content_detection_operation,
+            detector_identity=binding.detector_identity,
+            content_config_digest=binding.content_config_digest,
+            hf_detector_identity=binding.hf_detector_identity,
+            hf_detector_config_digest=binding.hf_detector_config_digest,
+            hf_template_digest=binding.hf_template_digest,
+            preprocessing_identity=binding.preprocessing_identity,
+            formal_mode=binding.formal_mode,
+            root_key_public_digest=binding.root_key_public_digest,
+            key_role=binding.key_role,
+            wrong_key_index=binding.wrong_key_index,
+        )
+    except Exception as exc:
+        raise InternalRunnerError(
+            "content detector binding declaration invalid"
+        ) from exc
+    if binding.detector_binding_digest != (
+        rebuilt_binding.detector_binding_digest
+    ):
+        raise InternalRunnerError("content detector binding digest drifted")
+    thresholds = payload.thresholds
+    if type(thresholds) is not JointDecisionThresholds:
+        raise InternalRunnerError("joint thresholds exact type is required")
+    try:
+        rebuilt_thresholds = JointDecisionThresholds(
+            tau=thresholds.tau,
+            tau_rescue=thresholds.tau_rescue,
+            detector_binding_digest=thresholds.detector_binding_digest,
+            calibration_identity=thresholds.calibration_identity,
+        )
+    except Exception as exc:
+        raise InternalRunnerError(
+            "joint threshold declaration invalid"
+        ) from exc
+    if thresholds.threshold_identity != rebuilt_thresholds.threshold_identity:
+        raise InternalRunnerError("joint threshold identity drifted")
+    if thresholds.detector_binding_digest != binding.detector_binding_digest:
+        raise InternalRunnerError("threshold detector binding drifted")
+    if not callable(payload.geometry_estimation_operation):
+        raise InternalRunnerError("geometry estimation operation must be callable")
+    if (
+        type(payload.geometry_operation_identity) is not str
+        or not payload.geometry_operation_identity
+    ):
+        raise InternalRunnerError("geometry operation identity is required")
+    reliability = payload.geometry_reliability_thresholds
+    reliability_digest: str | None = None
+    reliability_declaration: dict[str, object] | None = None
+    if reliability is not None:
+        reliability_declaration = (
+            _validated_geometry_reliability_declaration(reliability)
+        )
+        reliability_digest = _geometry_reliability_declaration_digest(
+            reliability_declaration
+        )
+    return {
+        "attack_config_digest": (
+            payload.attack_specification.attack_config_digest
+        ),
+        "content_detector_binding": {
+            "content_config_digest": binding.content_config_digest,
+            "detector_binding_digest": binding.detector_binding_digest,
+            "detector_identity": binding.detector_identity,
+            "formal_mode": binding.formal_mode,
+            "hf_detector_config_digest": binding.hf_detector_config_digest,
+            "hf_detector_identity": binding.hf_detector_identity,
+            "hf_template_digest": binding.hf_template_digest,
+            "key_role": binding.key_role,
+            "preprocessing_identity": binding.preprocessing_identity,
+            "root_key_public_digest": binding.root_key_public_digest,
+            "wrong_key_index": binding.wrong_key_index,
+        },
+        "content_operation_type_identity": _callable_type_identity(
+            binding.content_detection_operation
+        ),
+        "detection_key_digest": sha256(
+            payload.detection_key.encode("utf-8")
+        ).hexdigest(),
+        "geometry_operation_identity": payload.geometry_operation_identity,
+        "geometry_operation_type_identity": _callable_type_identity(
+            payload.geometry_estimation_operation
+        ),
+        "geometry_reliability_config_digest": reliability_digest,
+        "geometry_reliability_thresholds": reliability_declaration,
+        "input_artifact_digest": payload.source_artifact.image_digest,
+        "thresholds": {
+            "calibration_identity": thresholds.calibration_identity,
+            "detector_binding_digest": thresholds.detector_binding_digest,
+            "tau": thresholds.tau,
+            "tau_rescue": thresholds.tau_rescue,
+            "threshold_identity": thresholds.threshold_identity,
+        },
+    }
+
+
+def _validate_payload_construction_anchor(
+    payload: InternalCaseExecutionPayload,
+) -> None:
+    if type(payload) is not InternalCaseExecutionPayload:
+        raise InternalRunnerError("case execution payload exact type is required")
+    declaration = _payload_declaration_snapshot(payload)
+    content_operation = (
+        payload.content_detector_binding.content_detection_operation
+    )
+    if content_operation is not payload._content_operation_anchor:
+        raise InternalRunnerError("content operation object identity drifted")
+    if (
+        _callable_type_identity(content_operation)
+        != payload._content_operation_type_identity
+    ):
+        raise InternalRunnerError("content operation type identity drifted")
+    if (
+        payload.geometry_estimation_operation
+        is not payload._geometry_operation_anchor
+    ):
+        raise InternalRunnerError("geometry operation object identity drifted")
+    if (
+        _callable_type_identity(payload.geometry_estimation_operation)
+        != payload._geometry_operation_type_identity
+    ):
+        raise InternalRunnerError("geometry operation type identity drifted")
+    if (
+        _canonical_digest(declaration)
+        != payload._construction_anchor_digest
+    ):
+        raise InternalRunnerError("case execution payload construction anchor drifted")
+
+
+def _validate_payload_against_expectation(
+    payload: InternalCaseExecutionPayload,
+    expectation: FrozenCaseExecutionExpectation,
+) -> None:
+    if type(expectation) is not FrozenCaseExecutionExpectation:
+        raise InternalRunnerError("case execution expectation exact type required")
+    binding = payload.content_detector_binding
+    thresholds = payload.thresholds
+    reliability = payload.geometry_reliability_thresholds
+    reliability_digest = (
+        None
+        if reliability is None
+        else geometry_reliability_config_digest(reliability)
+    )
+    observed = {
+        "calibration_identity": thresholds.calibration_identity,
+        "content_detector_binding_digest": binding.detector_binding_digest,
+        "geometry_operation_identity": payload.geometry_operation_identity,
+        "geometry_reliability_config_digest": reliability_digest,
+        "raw_detector_config_digest": binding.content_config_digest,
+        "raw_detector_identity": binding.detector_identity,
+        "raw_preprocessing_identity": binding.preprocessing_identity,
+        "raw_threshold_identity": thresholds.threshold_identity,
+        "rectified_detector_config_digest": binding.content_config_digest,
+        "rectified_detector_identity": binding.detector_identity,
+        "rectified_preprocessing_identity": binding.preprocessing_identity,
+        "rectified_threshold_identity": thresholds.threshold_identity,
+        "tau": thresholds.tau,
+        "tau_rescue": thresholds.tau_rescue,
+    }
+    expected = asdict(expectation)
+    if observed != expected:
+        raise InternalRunnerError(
+            "case execution payload differs from frozen expectation"
+        )
+
+
+def _validated_geometry_reliability_declaration(
+    reliability: GeometryReliabilityThresholds,
+) -> dict[str, object]:
+    if type(reliability) is not GeometryReliabilityThresholds:
+        raise InternalRunnerError(
+            "geometry reliability thresholds exact type required"
+        )
+    try:
+        current_declaration = asdict(reliability)
+        rebuilt_reliability = GeometryReliabilityThresholds(
+            **current_declaration
+        )
+        rebuilt_declaration = asdict(rebuilt_reliability)
+        _geometry_reliability_declaration_digest(rebuilt_declaration)
+    except (TypeError, ValueError) as exc:
+        raise InternalRunnerError(
+            "geometry reliability configuration declaration invalid"
+        ) from exc
+    if rebuilt_declaration != current_declaration:
+        raise InternalRunnerError(
+            "geometry reliability configuration declaration drifted"
+        )
+    return rebuilt_declaration
+
+
+def _callable_type_identity(value: object) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
 
 
 def _validate_context(context: InternalRunnerContext) -> None:
@@ -626,6 +865,7 @@ def _validate_context_components(context: InternalRunnerContext) -> None:
     context.writer.assert_context_anchors(
         frozen_protocol=context.protocol,
         split_manifest=context.split_manifest,
+        input_manifest=context.input_manifest,
         bindings=context.bindings,
     )
     attack_violations = validate_attack_registry(context.attack_registry)
@@ -674,7 +914,6 @@ def _context_anchor_digest(context: InternalRunnerContext) -> str:
 def _record_from_joint_result(
     context: InternalRunnerContext,
     entry: InternalCaseManifestEntry,
-    payload: InternalCaseExecutionPayload,
     result: ConditionalRecoveryResult,
     *,
     record_id: str,
@@ -700,7 +939,7 @@ def _record_from_joint_result(
         raw_content_score=result.raw_content_score,
         rectified_content_score=result.rectified_content_score,
     )
-    geometry = _geometry_trace(result)
+    geometry = _geometry_trace(result, entry.execution_expectation)
     if execution_status == "success":
         decision = DecisionTrace(
             watermark_decision=(
@@ -716,7 +955,6 @@ def _record_from_joint_result(
     return _base_record(
         context,
         entry,
-        payload,
         record_id=record_id,
         sequence_index=sequence_index,
         attempt_index=attempt_index,
@@ -736,7 +974,6 @@ def _record_from_joint_result(
 def _failure_record(
     context: InternalRunnerContext,
     entry: InternalCaseManifestEntry,
-    payload: InternalCaseExecutionPayload,
     *,
     record_id: str,
     sequence_index: int,
@@ -749,7 +986,6 @@ def _failure_record(
     return _base_record(
         context,
         entry,
-        payload,
         record_id=record_id,
         sequence_index=sequence_index,
         attempt_index=attempt_index,
@@ -759,9 +995,11 @@ def _failure_record(
         failure_reason=failure_reason,
         exclusion_reason=None,
         exclusion_rule_id=None,
-        detector_trace=_empty_detector_trace(payload),
+        detector_trace=_empty_detector_trace(entry.execution_expectation),
         branch_score_trace=BranchScoreTrace(None, None, None),
-        geometry_trace=_untriggered_geometry(),
+        geometry_trace=_untriggered_geometry(
+            entry.execution_expectation
+        ),
         decision_trace=DecisionTrace(execution_status, None, failure_reason),
     )
 
@@ -769,7 +1007,6 @@ def _failure_record(
 def _base_record(
     context: InternalRunnerContext,
     entry: InternalCaseManifestEntry,
-    payload: InternalCaseExecutionPayload,
     *,
     record_id: str,
     sequence_index: int,
@@ -806,10 +1043,14 @@ def _base_record(
         routing_trace=entry.routing_trace,
         geometry_trace=geometry_trace,
         threshold_trace=ThresholdTrace(
-            raw_threshold_identity=payload.thresholds.threshold_identity,
-            rectified_threshold_identity=payload.thresholds.threshold_identity,
-            tau=payload.thresholds.tau,
-            tau_rescue=payload.thresholds.tau_rescue,
+            raw_threshold_identity=(
+                entry.execution_expectation.raw_threshold_identity
+            ),
+            rectified_threshold_identity=(
+                entry.execution_expectation.rectified_threshold_identity
+            ),
+            tau=entry.execution_expectation.tau,
+            tau_rescue=entry.execution_expectation.tau_rescue,
         ),
         key_control_trace=entry.key_control_trace,
         decision_trace=decision_trace,
@@ -832,24 +1073,33 @@ def _base_record(
 
 
 def _empty_detector_trace(
-    payload: InternalCaseExecutionPayload,
+    expectation: FrozenCaseExecutionExpectation,
 ) -> DetectorTrace:
-    binding = payload.content_detector_binding
     return DetectorTrace(
-        raw_detector_identity=binding.detector_identity,
-        rectified_detector_identity=binding.detector_identity,
-        raw_detector_config_digest=binding.content_config_digest,
-        rectified_detector_config_digest=binding.content_config_digest,
-        raw_preprocessing_identity=binding.preprocessing_identity,
-        rectified_preprocessing_identity=binding.preprocessing_identity,
+        raw_detector_identity=expectation.raw_detector_identity,
+        rectified_detector_identity=expectation.rectified_detector_identity,
+        raw_detector_config_digest=expectation.raw_detector_config_digest,
+        rectified_detector_config_digest=(
+            expectation.rectified_detector_config_digest
+        ),
+        raw_preprocessing_identity=expectation.raw_preprocessing_identity,
+        rectified_preprocessing_identity=(
+            expectation.rectified_preprocessing_identity
+        ),
         raw_content_score=None,
         rectified_content_score=None,
     )
 
 
-def _untriggered_geometry() -> GeometryTrace:
+def _untriggered_geometry(
+    expectation: FrozenCaseExecutionExpectation,
+) -> GeometryTrace:
     return GeometryTrace(
         geometry_triggered=False,
+        geometry_operation_identity=expectation.geometry_operation_identity,
+        geometry_reliability_config_digest=(
+            expectation.geometry_reliability_config_digest
+        ),
         geometry_estimation_identity=None,
         geometry_reliability_identity=None,
         geometry_reliable=None,
@@ -860,7 +1110,10 @@ def _untriggered_geometry() -> GeometryTrace:
     )
 
 
-def _geometry_trace(result: ConditionalRecoveryResult) -> GeometryTrace:
+def _geometry_trace(
+    result: ConditionalRecoveryResult,
+    expectation: FrozenCaseExecutionExpectation,
+) -> GeometryTrace:
     estimation = result.geometry_estimation
     reliability = result.geometry_reliability_result
     rectification = result.image_rectification_result
@@ -902,6 +1155,10 @@ def _geometry_trace(result: ConditionalRecoveryResult) -> GeometryTrace:
         rectification_status = "failed"
     return GeometryTrace(
         geometry_triggered=result.geometry_triggered,
+        geometry_operation_identity=expectation.geometry_operation_identity,
+        geometry_reliability_config_digest=(
+            expectation.geometry_reliability_config_digest
+        ),
         geometry_estimation_identity=(
             None if estimation is None else estimation.estimation_identity_digest
         ),
@@ -955,33 +1212,8 @@ def _record_is_complete(record: InternalValidationRecord) -> bool:
     )
 
 
-def _record_id(
-    bindings: FrozenRecordBindings,
-    identity: AnalysisUnitIdentity,
-    attempt_index: int,
-) -> str:
-    return _canonical_digest(
-        {
-            "attempt_index": attempt_index,
-            "case_id": bindings.case_id,
-            "input_manifest_digest": bindings.input_manifest_digest,
-            "run_id": bindings.run_id,
-            "source_cluster_id": identity.source_cluster_id,
-            "unit_id": identity.unit_id,
-        }
-    )
-
-
 def _exception_identity(exc: BaseException) -> str:
     return f"{type(exc).__module__}.{type(exc).__qualname__}"
-
-
-def _digest_valid(value: object) -> bool:
-    return (
-        type(value) is str
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
 
 
 def _canonical_digest(value: object) -> str:

@@ -17,6 +17,11 @@
   独立 input manifest、execution config 和 resource identity 摘要。其中只保留由正式入口调用的
   私有 collection 结构校验 helper，验证所有非初始 outcome 的可重试 parent、
   连续 attempt、冻结上限、结构化 promotion stop 和 stop 后禁止继续。
+- `internal_case.py`：保存写入器和 runner 共同消费的冻结逐 case 输入清单；
+  每个 unit 在执行前固定 artifact/attack/metric、routing、key/control、detector
+  binding、raw/rectified detector 与 threshold、几何操作和 experiments 层可靠性
+  配置摘要，并从
+  run/case/manifest/unit/attempt 确定性派生 record ID。
 - `internal_record_registry.py`：保存随 execution package 分发的精确 record schema
   binding 与允许字段集合。开发侧 Markdown 只镜像登记，不是 runner 的运行时输入。
 - `internal_validation.py`：加载并校验

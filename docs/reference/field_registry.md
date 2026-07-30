@@ -445,7 +445,7 @@ Notebook 与 repository module 的跨边界数据
 
 ## 内部科学验证协议字段
 
-以下字段属于 `ceg_wm_internal_sample_record_v3`，并由
+以下字段属于 `ceg_wm_internal_sample_record_v4`，并由
 `ceg_wm_internal_run_case_record_collection_v1` 聚合。可执行字段权威位于随执行包分发的
 `experiments/protocol/internal_record_registry.py`；本页由开发侧治理测试检查同步，
 不作为 runner 的运行时输入。既有的 `split`、
@@ -488,6 +488,8 @@ Notebook 与 repository module 的跨边界数据
 | routing_observation_digest | persisted_protocol | provenance | none | true | false | false | 本样本路由 observation 结构的内容摘要。 |
 | routing_mask_digest | persisted_protocol | provenance | none | true | false | false | 本样本实际 routing masks 的内容摘要。 |
 | geometry_trace | persisted_protocol | method_state | none | true | false | false | 几何触发、估计、原始指标、可靠性、变换、失败与回正状态的完整结构。 |
+| geometry_operation_identity | persisted_protocol | method_identity | none | true | false | false | 当前 record 执行前已冻结的公开几何估计 callable 声明身份。 |
+| geometry_reliability_config_digest | persisted_protocol | protocol | none | true | false | false | experiments 层对当前 record 执行前几何可靠性阈值声明计算的 canonical 配置摘要；无阈值时为空，不等同于 main 方法结果的 threshold config identity。 |
 | geometry_estimation_identity | persisted_protocol | method_identity | none | true | false | false | 实际几何估计结果及 search config 的绑定身份。 |
 | geometry_reliability_identity | persisted_protocol | method_identity | none | true | false | false | 独立 reliability fit 与合取结果的绑定身份。 |
 | geometry_reliable | persisted_protocol | method_state | none | true | false | false | 当前逐样本几何结果是否满足冻结独立可靠性门。 |
@@ -526,6 +528,8 @@ Notebook 与 repository module 的跨边界数据
 | manifest_id | persisted_protocol | protocol | none | false | false | false | 冻结 input manifest 的稳定身份。 |
 | manifest_revision | persisted_protocol | provenance | none | false | false | false | 冻结 input manifest 的修订身份。 |
 | entries | persisted_protocol | protocol | none | false | false | false | input manifest 中按 unit 保存的公开 case entries；原始密钥不进入该集合。 |
+| execution_expectation | persisted_protocol | method_identity | none | false | false | false | 每个 unit 在执行前冻结的 detector、threshold、几何操作与可靠性阈值声明集合。 |
+| content_detector_binding_digest | persisted_protocol | method_identity | none | false | false | false | 冻结 content detector callable 公开声明、配置、预处理与 key role 的联合摘要。 |
 | input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
 | attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |
 

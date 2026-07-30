@@ -8,12 +8,16 @@
   像素与 attack specification 当前参数由 attacks 公共入口在 affine/grid 前重校验。
   当前执行仍拒绝
   `held_out_evaluation`。
-- `record_writer.py` 是内部正式 records 的唯一 writer。每次物化前，它都通过
+- `record_writer.py` 是内部正式 records 的唯一 writer。构造时必须同时接收冻结
+  case input manifest；每次 load 或物化前，它都通过
   `validate_run_case_record_collection` 复验完整 collection，逐 record 核对
+  确定性 ID/sequence/attempt/parent、逐 unit provenance、routing、key/control、
+  detector/config/preprocess、threshold/tau、几何操作和 experiments 层可靠性
+  配置摘要，以及
   code/protocol/candidate/config/input/resource provenance，并检查所有序列化字段已在
   包内 `protocol/internal_record_registry.py` 的可执行 registry 中允许进入 records；
   运行时不读取 `docs/`。writer 在构造时深拷贝 protocol、split manifest 与 bindings
-  的 canonical primitive 快照，load/append/write 均复验锚点。写入使用 case 文件锁、临时文件 `fsync`、
+  以及 case input manifest 的 canonical primitive 快照，load/append/write 均复验锚点。写入使用 case 文件锁、临时文件 `fsync`、
   `os.replace` 和目录 `fsync`；既有 canonical records 必须先通过同样重放校验。
 - resume 不重复已完成 unit；资源失败按冻结 attempt 上限形成显式 parent lineage，
   `scientific_failure` 只来自显式 `ConditionalRecoveryResult` 科学失败语义，意外

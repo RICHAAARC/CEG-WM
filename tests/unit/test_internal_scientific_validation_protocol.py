@@ -149,6 +149,8 @@ def _record(**changes: object) -> InternalValidationRecord:
         ),
         "geometry_trace": GeometryTrace(
             geometry_triggered=False,
+            geometry_operation_identity="synthetic_geometry_operation",
+            geometry_reliability_config_digest=None,
             geometry_estimation_identity=None,
             geometry_reliability_identity=None,
             geometry_reliable=None,
@@ -495,6 +497,8 @@ def test_rescue_positive_requires_near_threshold_reliable_geometry_and_same_tau(
         ),
         geometry_trace=GeometryTrace(
             geometry_triggered=True,
+            geometry_operation_identity="synthetic_geometry_operation",
+            geometry_reliability_config_digest=None,
             geometry_estimation_identity="estimation_identity_1",
             geometry_reliability_identity="reliability_identity_1",
             geometry_reliable=True,
@@ -537,6 +541,8 @@ def test_successful_negative_cannot_hide_raw_or_valid_rectified_threshold_crossi
         ),
         geometry_trace=GeometryTrace(
             geometry_triggered=True,
+            geometry_operation_identity="synthetic_geometry_operation",
+            geometry_reliability_config_digest=None,
             geometry_estimation_identity="estimation_identity_1",
             geometry_reliability_identity="reliability_identity_1",
             geometry_reliable=True,

@@ -1,9 +1,12 @@
 """Governed experiment execution and the unique formal-record writer."""
 
-from .internal import (
+from experiments.protocol.internal_case import (
+    FrozenCaseExecutionExpectation,
     FrozenCaseInputManifest,
-    InternalCaseExecutionPayload,
     InternalCaseManifestEntry,
+)
+from .internal import (
+    InternalCaseExecutionPayload,
     InternalCaseRunResult,
     InternalRunnerContext,
     InternalRunnerError,
@@ -12,6 +15,7 @@ from .internal import (
     candidate_config_digest,
     execute_internal_case,
     execution_config_digest,
+    geometry_reliability_config_digest,
     record_excluded_case,
     replay_internal_record_collection,
 )
@@ -23,6 +27,7 @@ from .record_writer import (
 )
 
 __all__ = [
+    "FrozenCaseExecutionExpectation",
     "FrozenCaseInputManifest",
     "FrozenRecordBindings",
     "GovernedRecordWriter",
@@ -38,6 +43,7 @@ __all__ = [
     "canonical_record_digest",
     "execute_internal_case",
     "execution_config_digest",
+    "geometry_reliability_config_digest",
     "record_excluded_case",
     "replay_internal_record_collection",
 ]

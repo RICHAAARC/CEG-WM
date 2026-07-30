@@ -38,6 +38,7 @@ from experiments.protocol.internal_validation import (
     load_frozen_internal_validation_protocol,
 )
 from experiments.runners import (
+    FrozenCaseExecutionExpectation,
     FrozenCaseInputManifest,
     FrozenRecordBindings,
     GovernedRecordWriter,
@@ -50,11 +51,13 @@ from experiments.runners import (
     candidate_config_digest,
     execute_internal_case,
     execution_config_digest,
+    geometry_reliability_config_digest,
     record_excluded_case,
     replay_internal_record_collection,
 )
 from main import (
     ContentDetectorBinding,
+    GeometryReliabilityThresholds,
     HfDetectionObservation,
     JointDecisionThresholds,
     content_detector,
@@ -114,7 +117,11 @@ class _PublicImageContentOperation:
 
 
 class _UnexpectedGeometryOperation:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def __call__(self, _image: torch.Tensor, _registered_key: str):
+        self.calls += 1
         raise AssertionError("geometry must not be called")
 
 
@@ -197,6 +204,55 @@ def _image() -> torch.Tensor:
     )
 
 
+def _reliability_thresholds() -> GeometryReliabilityThresholds:
+    return GeometryReliabilityThresholds(
+        gamma_coverage=0.45,
+        gamma_uniqueness=0.0,
+        gamma_gap=0.0,
+        gamma_key=0.0,
+        gamma_inlier=0.0,
+        gamma_residual=1.0,
+        gamma_identity=0.0,
+        epsilon_inlier=0.8,
+        fit_identity="runner_geometry_reliability_fit",
+    )
+
+
+@pytest.mark.quick
+def test_experiments_reliability_config_digest_binds_declared_fields() -> None:
+    thresholds = _reliability_thresholds()
+    baseline = geometry_reliability_config_digest(thresholds)
+
+    assert len(baseline) == 64
+    assert baseline == geometry_reliability_config_digest(thresholds)
+    assert geometry_reliability_config_digest(
+        replace(thresholds, gamma_gap=0.125)
+    ) != baseline
+    with pytest.raises(InternalRunnerError, match="declaration invalid"):
+        geometry_reliability_config_digest(
+            replace(thresholds, gamma_gap=float("nan"))
+        )
+
+
+def _rewrite_record_document(
+    path: Path,
+    mutation,
+) -> None:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    mutation(document)
+    path.write_text(
+        json.dumps(
+            document,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _binding(
     operation: _PublicImageContentOperation,
     image: torch.Tensor,
@@ -228,6 +284,7 @@ def _context(
     geometry_operation=None,
     force_rescue: bool = False,
     attack_specification: GeometricAttackSpec | None = None,
+    geometry_reliability_thresholds: GeometryReliabilityThresholds | None = None,
 ) -> tuple[InternalRunnerContext, InternalCaseExecutionPayload, _PublicImageContentOperation]:
     protocol = load_frozen_internal_validation_protocol(PROTOCOL_PATH)
     unit = _unit(0)
@@ -252,6 +309,43 @@ def _context(
         calibration_identity="cpu_synthetic_runner_thresholds",
     )
     key_digest = adapter.identify_key(ROOT_KEY).result.root_key_public_digest
+    geometry = (
+        geometry_operation
+        if geometry_operation is not None
+        else _UnexpectedGeometryOperation()
+    )
+    payload = InternalCaseExecutionPayload(
+        source_artifact=source,
+        attack_specification=attack,
+        detection_key=ROOT_KEY,
+        content_detector_binding=binding,
+        thresholds=thresholds,
+        geometry_estimation_operation=geometry,
+        geometry_operation_identity="cpu_synthetic_geometry_operation",
+        geometry_reliability_thresholds=geometry_reliability_thresholds,
+    )
+    execution_expectation = FrozenCaseExecutionExpectation(
+        content_detector_binding_digest=binding.detector_binding_digest,
+        raw_detector_identity=binding.detector_identity,
+        rectified_detector_identity=binding.detector_identity,
+        raw_detector_config_digest=binding.content_config_digest,
+        rectified_detector_config_digest=binding.content_config_digest,
+        raw_preprocessing_identity=binding.preprocessing_identity,
+        rectified_preprocessing_identity=binding.preprocessing_identity,
+        raw_threshold_identity=thresholds.threshold_identity,
+        rectified_threshold_identity=thresholds.threshold_identity,
+        calibration_identity=thresholds.calibration_identity,
+        tau=thresholds.tau,
+        tau_rescue=thresholds.tau_rescue,
+        geometry_operation_identity=payload.geometry_operation_identity,
+        geometry_reliability_config_digest=(
+            None
+            if geometry_reliability_thresholds is None
+            else geometry_reliability_config_digest(
+                geometry_reliability_thresholds
+            )
+        ),
+    )
     entry = InternalCaseManifestEntry(
         analysis_unit_identity=unit,
         split=split,
@@ -270,28 +364,15 @@ def _context(
             key_role="registered",
             control_identity="registered_key_control",
         ),
+        execution_expectation=execution_expectation,
     )
     input_manifest = FrozenCaseInputManifest(
-        manifest_schema_version="ceg_wm_internal_case_input_manifest_v1",
+        manifest_schema_version="ceg_wm_internal_case_input_manifest_v2",
         manifest_id="runner_input_manifest",
         manifest_revision="runner_input_revision",
         protocol_digest=protocol.digest(),
         split_manifest_digest=split_manifest.digest(),
         entries=(entry,),
-    )
-    payload = InternalCaseExecutionPayload(
-        source_artifact=source,
-        attack_specification=attack,
-        detection_key=ROOT_KEY,
-        content_detector_binding=binding,
-        thresholds=thresholds,
-        geometry_estimation_operation=(
-            geometry_operation
-            if geometry_operation is not None
-            else _UnexpectedGeometryOperation()
-        ),
-        geometry_operation_identity="cpu_synthetic_geometry_operation",
-        geometry_reliability_thresholds=None,
     )
     bindings = FrozenRecordBindings(
         run_id="runner_run",
@@ -301,7 +382,7 @@ def _context(
         candidate_config_digest=candidate_config_digest(
             adapter=adapter,
             input_manifest=input_manifest,
-            payload=payload,
+            method_code_revision=SYNTHETIC_METHOD_CODE_REVISION,
         ),
         method_config_digest=binding.content_config_digest,
         execution_config_digest=execution_config_digest(
@@ -318,6 +399,7 @@ def _context(
         records_root=tmp_path.resolve(),
         frozen_protocol=protocol,
         split_manifest=split_manifest,
+        input_manifest=input_manifest,
         bindings=bindings,
     )
     return (
@@ -548,6 +630,248 @@ def test_writer_rejects_conflict_and_canonical_digest_drift(tmp_path: Path) -> N
         context.writer.load()
 
 
+@pytest.mark.parametrize(
+    "mutation_kind",
+    (
+        "record_id",
+        "per_unit_provenance",
+        "routing_trace",
+        "key_control_trace",
+        "detector_trace",
+        "threshold_trace",
+        "geometry_declarations",
+    ),
+)
+@pytest.mark.quick
+def test_persisted_record_fields_are_checked_against_frozen_expectations(
+    tmp_path: Path,
+    mutation_kind: str,
+) -> None:
+    context, payload, operation = _context(tmp_path)
+    execute_internal_case(
+        context,
+        unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+        payload=payload,
+    )
+    calls_before_tamper = operation.calls
+
+    def mutate(document) -> None:
+        record = document["records"][0]
+        if mutation_kind == "record_id":
+            record["record_id"] = "f" * 64
+        elif mutation_kind == "per_unit_provenance":
+            provenance = record["provenance_trace"]
+            provenance["input_artifact_digest"] = "d" * 64
+            provenance["attack_config_digest"] = "e" * 64
+            provenance["metric_set_digest"] = "f" * 64
+        elif mutation_kind == "routing_trace":
+            record["routing_trace"] = {
+                "routing_identity": "tampered_routing_candidate",
+                "routing_control": "tampered_uniform_control",
+                "routing_observation_digest": "d" * 64,
+                "routing_mask_digest": "e" * 64,
+            }
+        elif mutation_kind == "key_control_trace":
+            record["key_control_trace"] = {
+                "registered_key_public_digest": "d" * 64,
+                "detection_key_public_digest": "d" * 64,
+                "key_role": "registered",
+                "control_identity": "tampered_registered_key_control",
+            }
+        elif mutation_kind == "detector_trace":
+            detector = record["detector_trace"]
+            detector["raw_detector_identity"] = "tampered_detector"
+            detector["rectified_detector_identity"] = "tampered_detector"
+            detector["raw_detector_config_digest"] = "d" * 64
+            detector["rectified_detector_config_digest"] = "d" * 64
+            detector["raw_preprocessing_identity"] = "tampered_preprocess"
+            detector["rectified_preprocessing_identity"] = (
+                "tampered_preprocess"
+            )
+        elif mutation_kind == "threshold_trace":
+            threshold = record["threshold_trace"]
+            threshold["raw_threshold_identity"] = "tampered_threshold"
+            threshold["rectified_threshold_identity"] = "tampered_threshold"
+            threshold["tau"] -= 0.01
+            threshold["tau_rescue"] -= 0.01
+        else:
+            geometry = record["geometry_trace"]
+            geometry["geometry_operation_identity"] = (
+                "tampered_geometry_operation"
+            )
+            geometry["geometry_reliability_config_digest"] = "d" * 64
+
+    _rewrite_record_document(context.writer.path, mutate)
+
+    with pytest.raises(GovernedRecordWriterError, match="drift"):
+        context.writer.load()
+    with pytest.raises(GovernedRecordWriterError, match="drift"):
+        replay_internal_record_collection(context)
+    with pytest.raises(GovernedRecordWriterError, match="drift"):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+    assert operation.calls == calls_before_tamper
+
+
+@pytest.mark.quick
+def test_synchronized_retry_lineage_rewrite_cannot_replace_deterministic_ids(
+    tmp_path: Path,
+) -> None:
+    geometry = _ResourceFailingGeometryOperation()
+    context, payload, operation = _context(
+        tmp_path,
+        geometry_operation=geometry,
+        force_rescue=True,
+    )
+    for _ in range(3):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+    content_calls_before_tamper = operation.calls
+    geometry_calls_before_tamper = geometry.calls
+
+    def mutate(document) -> None:
+        forged_ids = ("d" * 64, "e" * 64, "f" * 64)
+        for index, record in enumerate(document["records"]):
+            record["record_id"] = forged_ids[index]
+            record["retry_of_record_id"] = (
+                None if index == 0 else forged_ids[index - 1]
+            )
+
+    _rewrite_record_document(context.writer.path, mutate)
+
+    with pytest.raises(
+        GovernedRecordWriterError,
+        match="deterministic identity drifted",
+    ):
+        context.writer.load()
+    with pytest.raises(GovernedRecordWriterError, match="identity drifted"):
+        replay_internal_record_collection(context)
+    with pytest.raises(GovernedRecordWriterError, match="identity drifted"):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+    assert operation.calls == content_calls_before_tamper
+    assert geometry.calls == geometry_calls_before_tamper
+
+
+@pytest.mark.parametrize(
+    "mutation_kind",
+    (
+        "content_callable",
+        "geometry_callable",
+        "geometry_operation_identity",
+        "threshold_tau",
+        "threshold_identity",
+        "reliability_threshold",
+        "binding_field",
+        "binding_digest",
+    ),
+)
+@pytest.mark.quick
+def test_payload_post_construction_mutation_fails_before_attack_method_or_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation_kind: str,
+) -> None:
+    reliability = (
+        _reliability_thresholds()
+        if mutation_kind == "reliability_threshold"
+        else None
+    )
+    context, payload, operation = _context(
+        tmp_path,
+        geometry_reliability_thresholds=reliability,
+    )
+    original_geometry = payload.geometry_estimation_operation
+    replacement_content = None
+    replacement_geometry = None
+    if mutation_kind == "content_callable":
+        replacement_content = _PublicImageContentOperation()
+        object.__setattr__(
+            payload.content_detector_binding,
+            "content_detection_operation",
+            replacement_content,
+        )
+    elif mutation_kind == "geometry_callable":
+        replacement_geometry = _UnexpectedGeometryOperation()
+        object.__setattr__(
+            payload,
+            "geometry_estimation_operation",
+            replacement_geometry,
+        )
+    elif mutation_kind == "geometry_operation_identity":
+        object.__setattr__(
+            payload,
+            "geometry_operation_identity",
+            "tampered_geometry_operation",
+        )
+    elif mutation_kind == "threshold_tau":
+        object.__setattr__(
+            payload.thresholds,
+            "tau",
+            payload.thresholds.tau + 0.01,
+        )
+    elif mutation_kind == "threshold_identity":
+        object.__setattr__(
+            payload.thresholds,
+            "threshold_identity",
+            "f" * 64,
+        )
+    elif mutation_kind == "reliability_threshold":
+        assert payload.geometry_reliability_thresholds is not None
+        object.__setattr__(
+            payload.geometry_reliability_thresholds,
+            "gamma_gap",
+            0.125,
+        )
+    elif mutation_kind == "binding_field":
+        object.__setattr__(
+            payload.content_detector_binding,
+            "preprocessing_identity",
+            "tampered_preprocessing_identity",
+        )
+    else:
+        object.__setattr__(
+            payload.content_detector_binding,
+            "detector_binding_digest",
+            "f" * 64,
+        )
+
+    attack_calls = 0
+
+    def forbidden_attack(*_args, **_kwargs):
+        nonlocal attack_calls
+        attack_calls += 1
+        raise AssertionError("attack must not execute after payload drift")
+
+    monkeypatch.setattr(
+        "experiments.runners.internal.apply_geometric_attack",
+        forbidden_attack,
+    )
+    with pytest.raises(InternalRunnerError, match="drift|invalid"):
+        execute_internal_case(
+            context,
+            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=payload,
+        )
+    assert attack_calls == 0
+    assert operation.calls == 0
+    assert original_geometry.calls == 0
+    if replacement_content is not None:
+        assert replacement_content.calls == 0
+    if replacement_geometry is not None:
+        assert replacement_geometry.calls == 0
+    assert not context.writer.path.exists()
+
+
 @pytest.mark.quick
 def test_atomic_failure_preserves_prior_record_bytes(
     tmp_path: Path,
@@ -580,12 +904,14 @@ def test_atomic_failure_preserves_prior_record_bytes(
 
 
 @pytest.mark.quick
-def test_candidate_digest_binds_stable_routing_policy_only(tmp_path: Path) -> None:
+def test_candidate_digest_binds_routing_method_revision_and_execution_declarations(
+    tmp_path: Path,
+) -> None:
     context, payload, _operation = _context(tmp_path)
     baseline = candidate_config_digest(
         adapter=context.adapter,
         input_manifest=context.input_manifest,
-        payload=payload,
+        method_code_revision=SYNTHETIC_METHOD_CODE_REVISION,
     )
     entry = context.input_manifest.entries[0]
     changed_candidate_manifest = replace(
@@ -613,17 +939,41 @@ def test_candidate_digest_binds_stable_routing_policy_only(tmp_path: Path) -> No
             ),
         ),
     )
+    changed_geometry_declaration_manifest = replace(
+        context.input_manifest,
+        entries=(
+            replace(
+                entry,
+                execution_expectation=replace(
+                    entry.execution_expectation,
+                    geometry_operation_identity=(
+                        "changed_geometry_operation"
+                    ),
+                ),
+            ),
+        ),
+    )
 
     assert candidate_config_digest(
         adapter=context.adapter,
         input_manifest=changed_candidate_manifest,
-        payload=payload,
+        method_code_revision=SYNTHETIC_METHOD_CODE_REVISION,
     ) != baseline
     assert candidate_config_digest(
         adapter=context.adapter,
         input_manifest=changed_random_observation_manifest,
-        payload=payload,
+        method_code_revision=SYNTHETIC_METHOD_CODE_REVISION,
     ) == baseline
+    assert candidate_config_digest(
+        adapter=context.adapter,
+        input_manifest=changed_geometry_declaration_manifest,
+        method_code_revision=SYNTHETIC_METHOD_CODE_REVISION,
+    ) != baseline
+    assert candidate_config_digest(
+        adapter=context.adapter,
+        input_manifest=context.input_manifest,
+        method_code_revision="f" * 40,
+    ) != baseline
 
 
 @pytest.mark.parametrize(
@@ -676,10 +1026,30 @@ def test_post_construction_anchor_drift_fails_before_execution_or_write(
     assert not context.writer.path.exists()
 
 
+@pytest.mark.parametrize(
+    ("private_target", "attribute", "mutated_value"),
+    (
+        ("_bindings", "run_id", "mutated_writer_run"),
+        (
+            "_input_manifest",
+            "manifest_revision",
+            "mutated_writer_input_revision",
+        ),
+    ),
+)
 @pytest.mark.quick
-def test_writer_rechecks_its_private_construction_snapshot(tmp_path: Path) -> None:
+def test_writer_rechecks_its_private_construction_snapshot(
+    tmp_path: Path,
+    private_target: str,
+    attribute: str,
+    mutated_value: str,
+) -> None:
     context, _payload, _operation = _context(tmp_path)
-    object.__setattr__(context.writer._bindings, "run_id", "mutated_writer_run")
+    object.__setattr__(
+        getattr(context.writer, private_target),
+        attribute,
+        mutated_value,
+    )
 
     with pytest.raises(GovernedRecordWriterError, match="anchor drift"):
         context.writer.load()
