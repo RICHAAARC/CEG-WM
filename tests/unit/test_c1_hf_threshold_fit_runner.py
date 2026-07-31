@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import FrozenInstanceError, asdict, replace
 from hashlib import sha256
 import inspect
 import json
 import math
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+import sys
 
 import pytest
 import torch
@@ -55,8 +56,12 @@ from experiments.runners.c1_hf_threshold_fit import (
     production_c1_hf_threshold_fit_session,
     run_c1_hf_threshold_fit_shard,
     run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard,
+    run_c1_hf_threshold_fit_verified_package_shard,
 )
 import experiments.runners.c1_hf_threshold_fit as threshold_fit_runner
+from scripts.experiment_execution import (
+    experiment_execution_bootstrap as threshold_fit_bootstrap,
+)
 from experiments.runners.formal_operations import (
     PUBLIC_IMAGE_ENCODING,
     FormalHfContentDetectionOperation,
@@ -416,6 +421,49 @@ def test_private_cores_reject_arbitrary_real_evidence_revision(
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize("suppress", (False, True))
+def test_recordable_session_preserves_exit_exception_protocol(
+    suppress: bool,
+) -> None:
+    failure = RuntimeError("session body failure")
+    exit_arguments: list[tuple[object, object, object]] = []
+
+    class Manager:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(
+            self,
+            exception_type: object,
+            exception: object,
+            traceback: object,
+        ) -> bool:
+            exit_arguments.append((exception_type, exception, traceback))
+            return suppress
+
+    def execute() -> None:
+        with threshold_fit_runner._recordable_threshold_fit_session(Manager()):
+            raise failure
+
+    if suppress:
+        execute()
+    else:
+        with pytest.raises(RuntimeError, match="session body failure") as captured:
+            execute()
+        assert captured.value is failure
+    assert len(exit_arguments) == 1
+    exception_type, exception, traceback = exit_arguments[0]
+    assert exception_type is RuntimeError
+    assert exception is failure
+    assert traceback is not None
+    frame_names = []
+    while traceback is not None:
+        frame_names.append(traceback.tb_frame.f_code.co_name)
+        traceback = traceback.tb_next
+    assert "execute" in frame_names
+
+
+@pytest.mark.quick
 def test_formal_revision_is_derived_from_clean_git_head(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -502,6 +550,195 @@ def _authority() -> C1HfThresholdFitAuthority:
         runtime_config_digest=runtime_configuration.runtime_config_digest,
         model_revision=runtime_configuration.model_revision,
     )
+
+
+def _issued_package_capability(
+    tmp_path: Path,
+) -> tuple[C1HfThresholdFitAuthority, object, Path]:
+    authority = replace(_authority(), repository_root=tmp_path.resolve())
+    entrypoint_relative = Path(
+        "scripts/experiment_execution/experiment_execution_entrypoint.py"
+    )
+    entrypoint = tmp_path / entrypoint_relative
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_bytes(
+        (ROOT / entrypoint_relative).read_bytes()
+    )
+    copied_files = [
+        {
+            "path": entrypoint_relative.as_posix(),
+            "sha256": sha256(entrypoint.read_bytes()).hexdigest(),
+            "size_bytes": entrypoint.stat().st_size,
+        }
+    ]
+    manifest = {"copied_files": copied_files}
+    manifest_path = tmp_path / "experiment_execution_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    capability = threshold_fit_bootstrap._issue_threshold_fit_package_capability(
+        package_root=tmp_path,
+        committed_revision=REVISION,
+        archive_sha256="1" * 64,
+        embedded_manifest_sha256=sha256(manifest_path.read_bytes()).hexdigest(),
+        copied_file_set_digest=sha256(
+            json.dumps(
+                copied_files,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest(),
+        entrypoint_sha256=sha256(entrypoint.read_bytes()).hexdigest(),
+        execution_config_digest=(
+            authority.configuration.execution_config_digest
+        ),
+        input_manifest_digest=authority.metric_binding.fit_manifest_digest,
+        candidate_config_digest=authority.candidate_config_digest,
+    )
+    return authority, capability, entrypoint
+
+
+@pytest.mark.quick
+def test_verified_package_capability_is_frozen_and_single_use(
+    tmp_path: Path,
+) -> None:
+    authority, capability, _entrypoint = _issued_package_capability(tmp_path)
+    with pytest.raises(FrozenInstanceError):
+        capability.committed_revision = "a" * 40
+    assert (
+        threshold_fit_runner._consume_verified_package_revision_authority(
+            capability,
+            authority,
+        )
+        == REVISION
+    )
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="consumption failed",
+    ):
+        threshold_fit_runner._consume_verified_package_revision_authority(
+            capability,
+            authority,
+        )
+
+
+@pytest.mark.quick
+def test_verified_package_capability_rejects_post_issue_file_tamper(
+    tmp_path: Path,
+) -> None:
+    authority, capability, entrypoint = _issued_package_capability(tmp_path)
+    entrypoint.write_text("tampered after verification\n", encoding="utf-8")
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="consumption failed",
+    ):
+        threshold_fit_runner._consume_verified_package_revision_authority(
+            capability,
+            authority,
+        )
+
+
+@pytest.mark.quick
+def test_verified_package_capability_rejects_post_issue_symlink(
+    tmp_path: Path,
+) -> None:
+    authority, capability, entrypoint = _issued_package_capability(tmp_path)
+    entrypoint.unlink()
+    entrypoint.symlink_to(
+        ROOT / "scripts/experiment_execution/experiment_execution_entrypoint.py"
+    )
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="consumption failed",
+    ):
+        threshold_fit_runner._consume_verified_package_revision_authority(
+            capability,
+            authority,
+        )
+
+
+@pytest.mark.quick
+def test_verified_package_capability_rejects_fake_alias_and_class(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority, capability, _entrypoint = _issued_package_capability(tmp_path)
+
+    consume_count = 0
+
+    class FakeCapability:
+        committed_revision = REVISION
+
+        def consume_for_threshold_fit_runner(self, **_kwargs: object) -> object:
+            nonlocal consume_count
+            consume_count += 1
+            return {
+                "archive_sha256": "1" * 64,
+                "bootstrap_sha256": sha256(
+                    Path(threshold_fit_bootstrap.__file__).read_bytes()
+                ).hexdigest(),
+                "candidate_config_digest": authority.candidate_config_digest,
+                "committed_revision": REVISION,
+                "copied_file_set_digest": "2" * 64,
+                "embedded_manifest_sha256": "3" * 64,
+                "entrypoint_path": threshold_fit_runner._PACKAGE_ENTRYPOINT_PATH,
+                "entrypoint_sha256": sha256(
+                    (
+                        tmp_path
+                        / threshold_fit_runner._PACKAGE_ENTRYPOINT_PATH
+                    ).read_bytes()
+                ).hexdigest(),
+                "execution_config_digest": (
+                    authority.configuration.execution_config_digest
+                ),
+                "input_manifest_digest": (
+                    authority.metric_binding.fit_manifest_digest
+                ),
+                "package_root": str(tmp_path.resolve()),
+            }
+
+    fake_module = ModuleType(
+        threshold_fit_runner._TRUSTED_BOOTSTRAP_MODULE_ALIAS
+    )
+    fake_module.BOOTSTRAP_IDENTITY = "ceg_wm_experiment_execution_bootstrap"
+    fake_module.BOOTSTRAP_SCHEMA_VERSION = 2
+    fake_module.VerifiedThresholdFitPackageCapability = FakeCapability
+    fake_module.__file__ = threshold_fit_bootstrap.__file__
+    FakeCapability.__module__ = fake_module.__name__
+    fake_capability = FakeCapability()
+    fake_capability._issuer_module = fake_module
+    monkeypatch.setitem(
+        sys.modules,
+        threshold_fit_runner._TRUSTED_BOOTSTRAP_MODULE_ALIAS,
+        fake_module,
+    )
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="exact type",
+    ):
+        threshold_fit_runner._consume_verified_package_revision_authority(
+            fake_capability,
+            authority,
+        )
+    assert consume_count == 0
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="exact type",
+    ):
+        run_c1_hf_threshold_fit_verified_package_shard(
+            authority=authority,
+            shard_index=0,
+            run_id="fake-package-authority",
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            resource_identity_digest=RESOURCE_A_DIGEST,
+            records_root=tmp_path / "records",
+            package_revision_authority=capability,
+        )
+    assert consume_count == 0
 
 
 class _FakeSession:
@@ -678,6 +915,58 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
             records_root=tmp_path,
             user_colab_run=False,
         )
+
+
+@pytest.mark.quick
+def test_preregistered_exclusion_prevents_threshold_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = _authority()
+    fit_called = False
+
+    def load_excluded(
+        writer: C1HfThresholdFitRecordWriter,
+    ) -> C1HfThresholdFitUnitRecordCollection:
+        identity = writer._identity  # type: ignore[attr-defined]
+        attempt = C1HfThresholdFitAttemptRecord(
+            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, 0),
+            attempt_index=0,
+            resource_identity_digest=RESOURCE_A_DIGEST,
+            status="excluded",
+            failure_class=None,
+            failure_type=None,
+            exclusion_rule_id="preregistered_input_exclusion",
+            retry_of_attempt_id=None,
+            fact=None,
+        )
+        return C1HfThresholdFitUnitRecordCollection(
+            schema_version=C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+            split=C1_HF_THRESHOLD_FIT_SPLIT,
+            identity=identity,
+            attempts=(attempt,),
+        )
+
+    def forbidden_fit(*_args: object, **_kwargs: object) -> object:
+        nonlocal fit_called
+        fit_called = True
+        raise AssertionError("tau fitting must not occur")
+
+    monkeypatch.setattr(C1HfThresholdFitRecordWriter, "load", load_excluded)
+    monkeypatch.setattr(threshold_fit_runner, "fit_c1_hf_tau", forbidden_fit)
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="preregistered exclusion prevents",
+    ):
+        finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
+            authority=authority,
+            run_id="excluded-fit-run",
+            fixture_revision=REVISION,
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            records_root=tmp_path,
+        )
+    assert fit_called is False
 
 
 @pytest.mark.quick

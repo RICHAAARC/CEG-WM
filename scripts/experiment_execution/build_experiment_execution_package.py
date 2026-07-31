@@ -13,11 +13,12 @@ from typing import Sequence
 import zipfile
 
 
-PACKAGE_SCHEMA_VERSION = 1
-DELIVERY_MANIFEST_SCHEMA_VERSION = 1
-PACKAGE_PROFILE = "experiment_execution_package"
+PACKAGE_SCHEMA_VERSION = 2
+DELIVERY_MANIFEST_SCHEMA_VERSION = 2
+PACKAGE_PROFILE = "c1_hf_threshold_fit_execution_package"
 ENTRYPOINT_IDENTITY = (
-    "scripts.experiment_execution.experiment_execution_entrypoint:main"
+    "scripts.experiment_execution.experiment_execution_entrypoint:"
+    "execute_verified_threshold_fit_shard"
 )
 ENTRYPOINT_MODULE = (
     "scripts.experiment_execution.experiment_execution_entrypoint"
@@ -25,36 +26,86 @@ ENTRYPOINT_MODULE = (
 ENTRYPOINT_PATH = (
     "scripts/experiment_execution/experiment_execution_entrypoint.py"
 )
-PACKAGE_TEST_FILES = frozenset(
-    {
-        "tests/integration/__init__.py",
-        "tests/integration/test_packaged_experiment_execution.py",
-        "tests/smoke/test_packaged_experiment_execution.py",
-    }
-)
 EVIDENCE_SCOPE = (
-    "infrastructure_synthetic_wiring_not_scientific_experiment_evidence"
+    "c1_hf_threshold_fit_execution_only_no_tau_approval_no_confirmation_access"
+)
+EXACT_FILES = frozenset(
+    {
+        "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
+        "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
+        "configs/experiments/c1_hf_metric_implementation.json",
+        "configs/experiments/c1_hf_prompt_roster.json",
+        "configs/experiments/c1_hf_reference_run.json",
+        "configs/experiments/c1_hf_threshold_fit_execution.json",
+        "configs/experiments/internal_execution_components.json",
+        "configs/runtime/runtime_sd35_flowmatch.json",
+        "experiments/__init__.py",
+        "experiments/attacks/__init__.py",
+        "experiments/attacks/geometric.py",
+        "experiments/methods/__init__.py",
+        "experiments/methods/ceg_wm.py",
+        "experiments/metrics/__init__.py",
+        "experiments/metrics/binomial.py",
+        "experiments/metrics/c1_hf_reference.py",
+        "experiments/metrics/internal.py",
+        "experiments/protocol/__init__.py",
+        "experiments/protocol/c1_hf_reference.py",
+        "experiments/protocol/c1_hf_threshold_fit_records.py",
+        "experiments/protocol/internal_case.py",
+        "experiments/protocol/internal_matrix.py",
+        "experiments/protocol/internal_record_registry.py",
+        "experiments/protocol/internal_records.py",
+        "experiments/protocol/internal_splits.py",
+        "experiments/protocol/internal_validation.py",
+        "experiments/runners/__init__.py",
+        "experiments/runners/c1_hf_threshold_fit.py",
+        "experiments/runners/formal_operations.py",
+        "experiments/runners/internal.py",
+        "experiments/runners/record_writer.py",
+        "main/__init__.py",
+        "main/content_chain/__init__.py",
+        "main/content_chain/detector.py",
+        "main/content_chain/embedder.py",
+        "main/content_chain/hf_carrier.py",
+        "main/content_chain/hf_detector.py",
+        "main/content_chain/lf_carrier.py",
+        "main/content_chain/lf_detector.py",
+        "main/content_chain/routing.py",
+        "main/geometry_chain/__init__.py",
+        "main/geometry_chain/qk_sync.py",
+        "main/geometry_chain/rectifier.py",
+        "main/geometry_chain/reliability.py",
+        "main/geometry_chain/transform_estimator.py",
+        "main/joint_decision/__init__.py",
+        "main/joint_decision/detector.py",
+        "main/shared/__init__.py",
+        "main/shared/key_schedule.py",
+        "main/shared/normal_quantile_table20_float32_be.txt",
+        "main/shared/rgb8.py",
+        "pyproject.toml",
+        "requirements_runtime_qualification.txt",
+        "runtime/__init__.py",
+        "runtime/adapter.py",
+        "runtime/backend.py",
+        "runtime/configuration.py",
+        "runtime/content_write.py",
+        "runtime/qk_observation.py",
+        "runtime/sd35_backend.py",
+        "scripts/experiment_execution/__init__.py",
+        ENTRYPOINT_PATH,
+    }
 )
 REQUIRED_FILES = {
     "README.md",
-    "pyproject.toml",
-    "scripts/experiment_execution/__init__.py",
-    ENTRYPOINT_PATH,
-    *PACKAGE_TEST_FILES,
+    *EXACT_FILES,
 }
 SOURCE_TO_ARCHIVE_PATH = {
     "templates/release_readmes/experiment_execution_package.md": "README.md",
 }
-INCLUDE_ROOTS = (
+REQUIRED_ROOTS = (
     "main/",
     "runtime/",
-    "experiments/",
-    "configs/",
-    "infrastructure/",
-    "tests/integration/",
-    "tests/smoke/",
 )
-REQUIRED_ROOTS = INCLUDE_ROOTS
 EXCLUDED_PARTS = {
     ".agents",
     ".codex",
@@ -177,17 +228,9 @@ def _safe_relative(path_text: str) -> PurePosixPath:
 
 
 def _included_source(path_text: str) -> bool:
-    if path_text.startswith(("tests/integration/", "tests/smoke/")):
-        return path_text in PACKAGE_TEST_FILES
     return (
         path_text in SOURCE_TO_ARCHIVE_PATH
-        or path_text == "pyproject.toml"
-        or path_text
-        in {
-            "scripts/experiment_execution/__init__.py",
-            ENTRYPOINT_PATH,
-        }
-        or path_text.startswith(INCLUDE_ROOTS[:5])
+        or path_text in EXACT_FILES
     )
 
 
@@ -301,6 +344,103 @@ def _canonical_json_bytes(value: object) -> bytes:
     ).encode("utf-8")
 
 
+def _committed_json(
+    root: Path,
+    revision: str,
+    path_text: str,
+) -> tuple[dict[str, object], bytes]:
+    blob = _git(root, "show", f"{revision}:{path_text}", text=False)
+    if not isinstance(blob, bytes):
+        raise ExperimentPackageBuildError(
+            f"authority blob is invalid: {path_text}"
+        )
+    try:
+        raw = json.loads(blob)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ExperimentPackageBuildError(
+            f"authority JSON is unreadable: {path_text}"
+        ) from exc
+    if type(raw) is not dict:
+        raise ExperimentPackageBuildError(
+            f"authority JSON must be an object: {path_text}"
+        )
+    return raw, blob
+
+
+def _derive_authority_digests(
+    root: Path,
+    revision: str,
+) -> dict[str, str]:
+    specification_path = "configs/experiments/c1_hf_reference_run.json"
+    execution_path = (
+        "configs/experiments/c1_hf_threshold_fit_execution.json"
+    )
+    fit_path = (
+        "configs/experiments/c1_hf_content_threshold_fit_manifest.json"
+    )
+    specification, _specification_blob = _committed_json(
+        root,
+        revision,
+        specification_path,
+    )
+    execution, _execution_blob = _committed_json(
+        root,
+        revision,
+        execution_path,
+    )
+    fit_manifest, fit_blob = _committed_json(root, revision, fit_path)
+    try:
+        candidate_digest = specification["candidate_binding"][
+            "candidate_binding_digest"
+        ]
+        split_binding = specification["split_manifests"][
+            "content_threshold_fit"
+        ]
+        execution_digest = execution["execution_config_digest"]
+        input_digest = execution["fit_manifest_digest"]
+        expected_input_digest = fit_manifest[
+            "expected_materialized_manifest_digest"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise ExperimentPackageBuildError(
+            "C1 threshold-fit authority fields are unavailable"
+        ) from exc
+    if type(split_binding) is not dict:
+        raise ExperimentPackageBuildError(
+            "C1 threshold-fit split binding is invalid"
+        )
+    for role, digest in (
+        ("candidate_config_digest", candidate_digest),
+        ("execution_config_digest", execution_digest),
+        ("input_manifest_digest", input_digest),
+    ):
+        if type(digest) is not str or DIGEST.fullmatch(digest) is None:
+            raise ExperimentPackageBuildError(
+                f"derived {role} is not a SHA-256 digest"
+            )
+    if (
+        execution.get("run_phase_id") != "c1_hf_threshold_fit_v1"
+        or execution.get("accessible_split") != "content_threshold_fit"
+        or execution.get("forbidden_splits") != ["untouched_confirmation"]
+        or execution.get("c1_specification_path") != specification_path
+        or execution.get("fit_manifest_path") != fit_path
+        or execution.get("fit_manifest_file_sha256")
+        != _sha256_bytes(fit_blob)
+        or split_binding.get("path") != fit_path
+        or split_binding.get("file_sha256") != _sha256_bytes(fit_blob)
+        or split_binding.get("materialized_manifest_digest") != input_digest
+        or expected_input_digest != input_digest
+    ):
+        raise ExperimentPackageBuildError(
+            "C1 threshold-fit authority bindings are inconsistent"
+        )
+    return {
+        "candidate_config_digest": candidate_digest,
+        "execution_config_digest": execution_digest,
+        "input_manifest_digest": input_digest,
+    }
+
+
 def _zip_info(path_text: str) -> zipfile.ZipInfo:
     info = zipfile.ZipInfo(
         path_text,
@@ -317,9 +457,6 @@ def build_experiment_execution_package(
     root: str | Path,
     output_zip: str | Path,
     committed_revision: str,
-    candidate_config_digest: str,
-    execution_config_digest: str,
-    input_manifest_digest: str,
 ) -> dict[str, object]:
     """Build a deterministic archive and adjacent delivery manifest."""
 
@@ -329,15 +466,13 @@ def build_experiment_execution_package(
         output_path.suffix + ".manifest.json"
     )
     _validate_revision(root_path, committed_revision)
-    for role, digest in (
-        ("candidate_config_digest", candidate_config_digest),
-        ("execution_config_digest", execution_config_digest),
-        ("input_manifest_digest", input_manifest_digest),
-    ):
-        if not DIGEST.fullmatch(digest):
-            raise ExperimentPackageBuildError(
-                f"{role} must be a SHA-256 digest"
-            )
+    authority_digests = _derive_authority_digests(
+        root_path,
+        committed_revision,
+    )
+    candidate_config_digest = authority_digests["candidate_config_digest"]
+    execution_config_digest = authority_digests["execution_config_digest"]
+    input_manifest_digest = authority_digests["input_manifest_digest"]
     if output_path == root_path or root_path in output_path.parents:
         raise ExperimentPackageBuildError(
             "execution package must be outside repository"
@@ -427,17 +562,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--root", default=".")
     parser.add_argument("--output-zip", required=True)
     parser.add_argument("--committed-revision", required=True)
-    parser.add_argument("--candidate-config-digest", required=True)
-    parser.add_argument("--execution-config-digest", required=True)
-    parser.add_argument("--input-manifest-digest", required=True)
     arguments = parser.parse_args(argv)
     result = build_experiment_execution_package(
         root=arguments.root,
         output_zip=arguments.output_zip,
         committed_revision=arguments.committed_revision,
-        candidate_config_digest=arguments.candidate_config_digest,
-        execution_config_digest=arguments.execution_config_digest,
-        input_manifest_digest=arguments.input_manifest_digest,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

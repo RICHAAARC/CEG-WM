@@ -1,66 +1,42 @@
-# Runtime qualification execution package
+# Experiment delivery and runtime qualification
 
-## A3b governed experiment-execution package
+## C1 HF threshold-fit execution package
 
-`build_experiment_execution_package.py` builds a deterministic ZIP from one
-clean exact committed revision. Its explicit profile contains `main/`,
-`runtime/`, `experiments/`, `configs/`, `infrastructure/`,
-`tests/integration/`, and `tests/smoke/`, plus only the package README,
-`pyproject.toml`, namespace initializer, and package-contained
-`experiment_execution_entrypoint.py`. It excludes `.agents`, `.codex`,
-governance, notebooks, checked-in outputs, paper artifacts, baseline results,
-the builder, and the package-external bootstrap.
+`build_experiment_execution_package.py` builds a deterministic schema-v2 C1
+threshold-fit ZIP from one clean exact committed revision. It derives the
+candidate, execution, and fit-manifest digests from committed governed JSON
+blobs; callers cannot inject those authority values.
 
-The two test roots are not broad copies: the profile names exactly
-`tests/integration/__init__.py`,
-`tests/integration/test_packaged_experiment_execution.py`, and
-`tests/smoke/test_packaged_experiment_execution.py`. Those tests use only the
-embedded manifest and included modules, require no Git checkout, and are run
-again from the extracted package by the repository-side delivery integration
-test. The external builder/bootstrap E2E test remains under `tests/unit/` and
-is excluded from the archive.
+The exact profile contains the threshold-fit entrypoint, its runner/import
+closure, `main/`, `runtime/`, and only the frozen C1 fit assets. It excludes
+the untouched-confirmation manifest, baselines, comparison protocol,
+synthetic runtime, old synthetic package tests, Notebook, governance tree,
+checked-in outputs, builder, and package-external bootstrap.
 
-The embedded manifest binds the committed revision, candidate/execution/input
-digests, entrypoint identity, exact allowlist, and every copied file's SHA-256
-and size. The adjacent delivery manifest binds the completed archive SHA-256
-and embedded-manifest SHA-256 without creating a circular self-hash. The
-builder reads committed Git blobs and rejects a dirty tree, revision mismatch,
-unsafe/sensitive/local paths, symlinks, missing roots, or an in-repository
-output.
-
-`experiment_execution_bootstrap.py` is distributed separately. It verifies
-its independently supplied identity, schema version, and complete file
-SHA-256 before it snapshots the archive and checks the independently supplied
-archive SHA-256, ZIP safety, exact manifest/revision/config/input identity,
-allowlist, complete file set, and every file hash. Only then may it start the
-package module. Pre-run failures produce `bootstrap_failure`; failures after a
-verified module starts produce `execution_entrypoint_failure`. Neither is a
-scientific result.
-
-The package-contained entrypoint invokes the real A3a governed runner, writer,
-and replay path with the implemented public content detector callable and the
-real runtime-Q/K-to-estimator geometry callable. Its default case is
-deliberately raw-positive, so the uninitialized model backend is not called.
-This is only CPU/synthetic development wiring: no model/GPU execution,
-held-out access, calibration, baseline comparison, runtime qualification, or
-scientific-effect claim.
-
-Build only after commit from a clean tree, and place the ZIP outside the
-repository:
+Build after independent review from a clean commit to a new external path:
 
 ```bash
 python scripts/experiment_execution/build_experiment_execution_package.py \
   --root . \
-  --output-zip '<outside-repository>/ceg_wm_experiment_execution.zip' \
-  --committed-revision '<exact 40-hex HEAD>' \
-  --candidate-config-digest '<independently checked SHA-256>' \
-  --execution-config-digest '<independently checked SHA-256>' \
-  --input-manifest-digest '<independently checked SHA-256>'
+  --output-zip '<outside-repository>/ceg_wm_c1_threshold_fit.zip' \
+  --committed-revision '<exact 40-hex HEAD>'
 ```
 
-`notebooks/colab/experiment_execution.ipynb` remains a thin, output-free
-bootstrap invoker. Its archive/revision/config/input placeholders must be
-replaced by independently audited values before use.
+The adjacent deterministic sidecar binds the completed archive, embedded
+manifest, exact revision, builder-derived authority digests, formal
+entrypoint, and evidence scope. Independently record the SHA-256 of the
+external bootstrap, archive, sidecar, and embedded manifest before upload.
+
+`experiment_execution_bootstrap.py` verifies those external trust inputs,
+the exact allowlist, and every copied file before package import. Each
+invocation runs one explicitly selected threshold-fit shard. Persistent
+attempt records bind exact revision/run/shard and can resume, while each
+result or diagnostic ZIP uses a unique name and cannot overwrite history.
+
+The output-free Colab Notebook only supplies trust hashes, exact revision,
+run ID, shard index, and Secrets. Neither a shard result nor this delivery
+surface approves tau, unlocks confirmation data, or supports a scientific
+claim.
 
 ---
 

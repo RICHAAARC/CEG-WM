@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
+import inspect
 import json
 import math
 from pathlib import Path
 import re
 import subprocess
+import sys
+from types import ModuleType
 from typing import Callable, Mapping, Protocol
 
 from experiments.methods import (
@@ -26,7 +29,11 @@ from experiments.metrics import (
 )
 from experiments.protocol.c1_hf_reference import (
     C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+    load_c1_hf_reference_specification,
+    load_compact_c1_split_manifest,
     load_c1_hf_reference_bundle,
+    load_frozen_prompt_roster,
+    materialize_c1_split_manifest,
 )
 from experiments.protocol.internal_splits import AnalysisUnitIdentity
 from experiments.protocol.c1_hf_threshold_fit_records import (
@@ -65,6 +72,10 @@ PRIMARY_NULL_ROLE = "unwatermarked_primary_null"
 PRIMARY_NULL_CONTROL = "unwatermarked_image_with_registered_detection_key"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
+_TRUSTED_BOOTSTRAP_MODULE_ALIAS = "ceg_wm_verified_experiment_bootstrap"
+_PACKAGE_ENTRYPOINT_PATH = (
+    "scripts/experiment_execution/experiment_execution_entrypoint.py"
+)
 
 
 class C1HfThresholdFitRunnerError(ValueError):
@@ -245,6 +256,154 @@ ThresholdFitSessionFactory = Callable[
     [C1HfThresholdFitAuthority],
     AbstractContextManager[C1HfThresholdFitSession],
 ]
+
+
+class _DeferredSessionPreparationFailure:
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def execute(
+        self,
+        _unit: AnalysisUnitIdentity,
+        _prompt_text: str,
+        _registered_detection_key: str,
+    ) -> C1HfThresholdFitExecutionFact:
+        raise self._error
+
+
+@contextmanager
+def _recordable_threshold_fit_session(
+    manager: AbstractContextManager[C1HfThresholdFitSession],
+):
+    """Turn session-preparation failure into the first governed attempt."""
+
+    try:
+        session = manager.__enter__()
+    except Exception as exc:
+        yield _DeferredSessionPreparationFailure(exc)
+        return
+    try:
+        yield session
+    except BaseException as exc:
+        if not manager.__exit__(type(exc), exc, exc.__traceback__):
+            raise
+    else:
+        manager.__exit__(None, None, None)
+
+
+def _consume_verified_package_revision_authority(
+    package_revision_authority: object,
+    authority: C1HfThresholdFitAuthority,
+) -> str:
+    """Consume the exact package-external single-use runner authority."""
+
+    bootstrap_module = sys.modules.get(_TRUSTED_BOOTSTRAP_MODULE_ALIAS)
+    capability_type = getattr(
+        bootstrap_module,
+        "VerifiedThresholdFitPackageCapability",
+        None,
+    )
+    bootstrap_path_value = getattr(bootstrap_module, "__file__", None)
+    bootstrap_path = (
+        Path(bootstrap_path_value).resolve()
+        if type(bootstrap_path_value) is str
+        else None
+    )
+    capability_source = (
+        inspect.getsourcefile(capability_type)
+        if isinstance(capability_type, type)
+        else None
+    )
+    consume_method = getattr(
+        capability_type,
+        "consume_for_threshold_fit_runner",
+        None,
+    )
+    consume_source = (
+        inspect.getsourcefile(consume_method)
+        if callable(consume_method)
+        else None
+    )
+    if (
+        type(bootstrap_module) is not ModuleType
+        or not isinstance(capability_type, type)
+        or sys.modules.get(capability_type.__module__) is not bootstrap_module
+        or bootstrap_path is None
+        or not bootstrap_path.is_file()
+        or capability_source is None
+        or Path(capability_source).resolve() != bootstrap_path
+        or consume_source is None
+        or Path(consume_source).resolve() != bootstrap_path
+        or type(package_revision_authority) is not capability_type
+        or getattr(
+            package_revision_authority,
+            "_issuer_module",
+            None,
+        ) is not bootstrap_module
+    ):
+        raise C1HfThresholdFitRunnerError(
+            "formal package revision authority exact type is required"
+        )
+    try:
+        payload = package_revision_authority.consume_for_threshold_fit_runner(
+            expected_package_root=authority.repository_root,
+            expected_entrypoint_path=_PACKAGE_ENTRYPOINT_PATH,
+        )
+    except Exception as exc:
+        raise C1HfThresholdFitRunnerError(
+            "formal package revision authority consumption failed"
+        ) from exc
+    expected_fields = {
+        "archive_sha256",
+        "bootstrap_sha256",
+        "candidate_config_digest",
+        "committed_revision",
+        "copied_file_set_digest",
+        "embedded_manifest_sha256",
+        "entrypoint_path",
+        "entrypoint_sha256",
+        "execution_config_digest",
+        "input_manifest_digest",
+        "package_root",
+    }
+    if type(payload) is not dict or set(payload) != expected_fields:
+        raise C1HfThresholdFitRunnerError(
+            "formal package revision authority fields drifted"
+        )
+    revision = payload["committed_revision"]
+    entrypoint = authority.repository_root / _PACKAGE_ENTRYPOINT_PATH
+    if (
+        type(revision) is not str
+        or _REVISION.fullmatch(revision) is None
+        or payload["package_root"] != str(authority.repository_root.resolve())
+        or payload["entrypoint_path"] != _PACKAGE_ENTRYPOINT_PATH
+        or not entrypoint.is_file()
+        or payload["entrypoint_sha256"] != _file_sha256(entrypoint)
+        or getattr(bootstrap_module, "BOOTSTRAP_IDENTITY", None)
+        != "ceg_wm_experiment_execution_bootstrap"
+        or getattr(bootstrap_module, "BOOTSTRAP_SCHEMA_VERSION", None) != 2
+        or payload["bootstrap_sha256"] != _file_sha256(bootstrap_path)
+        or payload["execution_config_digest"]
+        != authority.configuration.execution_config_digest
+        or payload["candidate_config_digest"]
+        != authority.candidate_config_digest
+        or payload["input_manifest_digest"]
+        != authority.metric_binding.fit_manifest_digest
+        or any(
+            type(payload[field]) is not str
+            or _DIGEST.fullmatch(payload[field]) is None
+            for field in (
+                "archive_sha256",
+                "bootstrap_sha256",
+                "copied_file_set_digest",
+                "embedded_manifest_sha256",
+            )
+        )
+    ):
+        raise C1HfThresholdFitRunnerError(
+            "formal package revision authority identity drifted"
+        )
+    return revision
 
 
 def load_c1_hf_threshold_fit_execution_configuration(
@@ -464,6 +623,108 @@ def load_c1_hf_threshold_fit_authority(
     )
 
 
+def load_c1_hf_threshold_fit_package_authority(
+    package_root: str | Path,
+) -> C1HfThresholdFitAuthority:
+    """Load only the frozen fit split from an externally verified package."""
+
+    root = Path(package_root).resolve()
+    configuration = load_c1_hf_threshold_fit_execution_configuration(
+        root / "configs/experiments/c1_hf_threshold_fit_execution.json"
+    )
+    raw = configuration.raw
+    specification = load_c1_hf_reference_specification(
+        root / str(raw["c1_specification_path"])
+    )
+    if specification.digest() != raw["c1_specification_digest"]:
+        raise C1HfThresholdFitRunnerError(
+            "package C1 specification digest drifted"
+        )
+    for path_field, digest_field in (
+        ("prompt_roster_path", "prompt_roster_file_sha256"),
+        ("dataset_snapshot_path", "dataset_snapshot_sha256"),
+        ("fit_manifest_path", "fit_manifest_file_sha256"),
+        ("runtime_config_path", "runtime_config_sha256"),
+    ):
+        candidate = root / str(raw[path_field])
+        if not candidate.is_file() or _file_sha256(candidate) != raw[digest_field]:
+            raise C1HfThresholdFitRunnerError(
+                f"package bound file drifted: {path_field}"
+            )
+    roster = load_frozen_prompt_roster(root / str(raw["prompt_roster_path"]))
+    compact = load_compact_c1_split_manifest(
+        root / str(raw["fit_manifest_path"])
+    )
+    manifest = materialize_c1_split_manifest(compact, roster)
+    assignments = tuple(item.identity for item in manifest.assignments)
+    if (
+        len(assignments) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or manifest.digest() != raw["fit_manifest_digest"]
+    ):
+        raise C1HfThresholdFitRunnerError("package fit manifest drifted")
+    adapter_configuration = load_ceg_wm_experiment_adapter_configuration(
+        root / str(raw["component_registry_path"])
+    )
+    if adapter_configuration.config_digest != raw["method_adapter_config_digest"]:
+        raise C1HfThresholdFitRunnerError("package method adapter drifted")
+    metric_path = root / str(raw["metric_implementation_path"])
+    metric_raw = json.loads(metric_path.read_text(encoding="utf-8"))
+    if (
+        _file_sha256(
+            root / "experiments/metrics/c1_hf_reference.py"
+        )
+        != raw["metric_implementation_source_sha256"]
+        or metric_raw["binding_digest"]
+        != raw["metric_implementation_binding_digest"]
+        or metric_raw["metric_registry_digest"] != raw["metric_registry_digest"]
+        or metric_raw["c1_specification_digest"]
+        != raw["c1_specification_digest"]
+        or metric_raw["split_manifest_digests"][FIT_SPLIT]
+        != manifest.digest()
+    ):
+        raise C1HfThresholdFitRunnerError("package metric binding drifted")
+    runtime_configuration = load_runtime_configuration(
+        root / str(raw["runtime_config_path"])
+    )
+    metric_binding = C1HfMetricImplementationBinding(
+        c1_specification_digest=metric_raw["c1_specification_digest"],
+        protocol_digest=metric_raw["protocol_digest"],
+        fit_manifest_digest=manifest.digest(),
+        confirmation_manifest_digest=metric_raw["split_manifest_digests"][
+            "untouched_confirmation"
+        ],
+        registered_key_family_digest=metric_raw[
+            "registered_key_family_digest"
+        ],
+        metric_registry_digest=metric_raw["metric_registry_digest"],
+        formula_identity_digest=metric_raw["formula_identity_digest"],
+        implementation_source_sha256=metric_raw[
+            "implementation_source_sha256"
+        ],
+        binding_digest=metric_raw["binding_digest"],
+        fit_analysis_units=frozenset(assignments),
+        confirmation_analysis_units=frozenset(),
+    )
+    return C1HfThresholdFitAuthority(
+        repository_root=root,
+        configuration=configuration,
+        assignments=assignments,
+        prompt_text_by_digest={
+            row.prompt_digest: row.prompt_text for row in roster.rows
+        },
+        metric_binding=metric_binding,
+        adapter=CegWmExperimentAdapter(adapter_configuration),
+        protocol_id=str(specification.raw["protocol_id"]),
+        protocol_version=str(specification.raw["protocol_version"]),
+        candidate_config_digest=str(
+            specification.raw["candidate_binding"]["candidate_binding_digest"]
+        ),
+        method_config_digest=adapter_configuration.config_digest,
+        runtime_config_digest=runtime_configuration.runtime_config_digest,
+        model_revision=runtime_configuration.model_revision,
+    )
+
+
 def c1_hf_threshold_fit_shard(
     authority: C1HfThresholdFitAuthority,
     shard_index: int,
@@ -492,6 +753,7 @@ def _run_c1_hf_threshold_fit_shard_core(
     resource_identity_digest: str,
     records_root: str | Path,
     session_factory: ThresholdFitSessionFactory,
+    package_revision_authority: object | None = None,
 ) -> Mapping[str, object]:
     """Private injected core; callers must choose an explicit evidence boundary."""
 
@@ -503,12 +765,23 @@ def _run_c1_hf_threshold_fit_shard_core(
     }:
         raise C1HfThresholdFitRunnerError("execution evidence kind is invalid")
     if execution_evidence_kind == C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE:
-        if committed_revision != _resolve_clean_repository_revision(
-            authority.repository_root
-        ):
-            raise C1HfThresholdFitRunnerError(
+        if package_revision_authority is None:
+            authorized_revision = _resolve_clean_repository_revision(
+                authority.repository_root
+            )
+            revision_error = (
                 "formal committed revision differs from clean repository HEAD"
             )
+        else:
+            authorized_revision = _consume_verified_package_revision_authority(
+                package_revision_authority,
+                authority,
+            )
+            revision_error = (
+                "formal committed revision differs from package authority"
+            )
+        if committed_revision != authorized_revision:
+            raise C1HfThresholdFitRunnerError(revision_error)
         if session_factory is not _validated_production_session_factory():
             raise C1HfThresholdFitRunnerError(
                 "formal execution requires the pinned production session factory"
@@ -603,7 +876,9 @@ def _run_c1_hf_threshold_fit_shard_core(
         }
 
     if any(not terminal(collection) for collection in collections):
-        with session_factory(authority) as session:
+        with _recordable_threshold_fit_session(
+            session_factory(authority)
+        ) as session:
             for offset, unit in enumerate(shard):
                 collection = collections[offset]
                 if terminal(collection):
@@ -730,6 +1005,10 @@ def _case_from_record(
             "threshold fit execution evidence kind is not authorized for this finalizer"
         )
     attempt = collection.attempts[-1]
+    if attempt.status == "excluded":
+        raise C1HfThresholdFitRunnerError(
+            "preregistered exclusion prevents threshold fit finalization"
+        )
     if attempt.status != "success" or attempt.fact is None:
         raise C1HfThresholdFitRunnerError("threshold fit has a missing required outcome")
     unit = collection.identity.analysis_unit_identity
@@ -1099,6 +1378,43 @@ def run_c1_hf_threshold_fit_shard(
     )
 
 
+def run_c1_hf_threshold_fit_verified_package_shard(
+    *,
+    authority: C1HfThresholdFitAuthority,
+    shard_index: int,
+    run_id: str,
+    registered_detection_key: str,
+    environment_digest: str,
+    resource_identity_digest: str,
+    records_root: str | Path,
+    package_revision_authority: object,
+) -> Mapping[str, object]:
+    """Run one package shard only under the external single-use capability."""
+
+    committed_revision = getattr(
+        package_revision_authority,
+        "committed_revision",
+        None,
+    )
+    if type(committed_revision) is not str:
+        raise C1HfThresholdFitRunnerError(
+            "formal package revision authority is incomplete"
+        )
+    return _run_c1_hf_threshold_fit_shard_core(
+        authority=authority,
+        shard_index=shard_index,
+        run_id=run_id,
+        committed_revision=committed_revision,
+        execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        registered_detection_key=registered_detection_key,
+        environment_digest=environment_digest,
+        resource_identity_digest=resource_identity_digest,
+        records_root=records_root,
+        session_factory=_validated_production_session_factory(),
+        package_revision_authority=package_revision_authority,
+    )
+
+
 def run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
     *,
     authority: C1HfThresholdFitAuthority,
@@ -1195,6 +1511,8 @@ __all__ = [
     "finalize_c1_hf_threshold_fit_synthetic_cpu_fixture",
     "load_c1_hf_threshold_fit_authority",
     "load_c1_hf_threshold_fit_execution_configuration",
+    "load_c1_hf_threshold_fit_package_authority",
     "run_c1_hf_threshold_fit_shard",
     "run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard",
+    "run_c1_hf_threshold_fit_verified_package_shard",
 ]

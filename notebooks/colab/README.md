@@ -26,9 +26,11 @@ schema version 1 的可信 bootstrap 和包内 runner 分开承担。
 时，必须由实施者形成新的 Notebook revision，并经独立审计者和 gatekeeper 审核。
 提交副本必须保持 outputs 为空、execution count 为 null。
 
-`experiment_execution.ipynb` 是独立的 A3b 薄入口。它要求调用者粘贴 package
-外独立审核的 archive SHA-256、精确 revision 及 candidate/execution/input
-摘要，核对并快照固定 SHA-256 的 package 外 bootstrap，然后只调用该快照并下载
-bootstrap 返回的 result 或 diagnostic zip。其 package-contained 默认入口只做
-CPU/synthetic development wiring，不运行模型或 GPU、不访问 held-out、不校准
-阈值，也不形成科学效果证据。当前占位 trust inputs 未替换前不可执行。
+`experiment_execution.ipynb` 是 C1 HF threshold-fit 的独立薄入口。它只接收
+package/bootstrap/sidecar/embedded-manifest 的独立审核 SHA-256、精确 revision、
+run ID、shard index 和 Colab Secrets；candidate/execution/fit 摘要由 clean exact
+revision 的 builder 派生并通过已独立校验的 sidecar 绑定，Notebook 不接受人工注入。
+它核对并快照 package 外 bootstrap，只调用该快照并下载 result 或 diagnostic ZIP。
+入口每次只运行一个 frozen fit shard，不访问 untouched confirmation、不运行 baseline、
+不批准 tau，也不形成科学效果声明。当前占位 trust inputs 未替换前不可执行，提交副本
+必须保持 outputs 为空、execution count 为 null。

@@ -1,18 +1,22 @@
-# CEG-WM experiment-execution package
+# CEG-WM C1 HF threshold-fit execution package
 
-This exact-revision package contains the implemented method, runtime adapters,
-governed experiment runner, frozen configurations, infrastructure definitions,
-and explicit integration/smoke checks needed by the package-contained
-entrypoint.
+This deterministic schema-v2 archive contains only the exact-revision C1
+threshold-fit entrypoint, its required runner/import closure, the implemented
+method/runtime code, and frozen fit-split assets.
 
-The default entrypoint performs one deterministic CPU/synthetic development
-wiring check. It proves only that the packaged public method callables connect
-to the governed A3a runner and record/replay surfaces. It does not execute a
-model or GPU, access held-out evaluation data, calibrate thresholds, compare a
-baseline, or provide scientific-effect evidence.
+It deliberately excludes the untouched-confirmation manifest, baseline and
+comparison implementations, synthetic runtime and package tests, governance,
+Notebook, checked-in outputs, builder, and package-external bootstrap. It has
+no tau-approval or confirmation-unlock capability.
 
-Run the package only through the separately distributed schema-v1
-`ceg_wm_experiment_execution_bootstrap`. The bootstrap must be verified against
-an independently supplied identity, version, and full SHA-256 before it checks
-the independently supplied archive SHA-256 and expected revision/config/input
-digests. The bootstrap is deliberately absent from this archive.
+Run this package only through the separately distributed schema-v2
+`ceg_wm_experiment_execution_bootstrap`. Independently verify the bootstrap,
+archive, adjacent delivery sidecar, embedded manifest, and exact revision. The
+trusted sidecar binds authority digests derived by the clean-revision builder;
+the Notebook does not supply or override them.
+
+One invocation runs exactly one explicitly selected frozen shard. Unit attempt
+records persist under exact revision/run/shard identity for resume, while each
+result or diagnostic ZIP is uniquely named. A resource or execution diagnostic
+is not method evidence, and a completed shard result still does not approve
+tau or support a scientific claim.
