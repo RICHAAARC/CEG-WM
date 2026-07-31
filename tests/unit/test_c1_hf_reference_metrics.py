@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
+from dataclasses import asdict, replace
 from functools import lru_cache
 import hashlib
 import json
@@ -19,6 +19,7 @@ from experiments.metrics import (
     C1HfMetricCaseIdentity,
     C1HfMetricError,
     C1HfQualityPair,
+    C1HfRawRgb8QualityArtifact,
     C1HfScoreCase,
     C1Rgb8Image,
     clopper_pearson_lower,
@@ -36,6 +37,7 @@ from experiments.metrics import (
     student_t_quantile_975,
     validate_c1_hf_confirmation_input_bundle,
     validate_c1_hf_confirmation_metric_results,
+    validate_c1_hf_quality_case_result,
     validate_c1_hf_threshold_result,
 )
 
@@ -63,6 +65,18 @@ QUALITY_MARKED_IMAGE = C1Rgb8Image(
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _canonical_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 @lru_cache(maxsize=1)
@@ -171,6 +185,31 @@ def _quality_pairs() -> tuple[C1HfQualityPair, ...]:
             registered_watermarked_image=QUALITY_MARKED_IMAGE,
             clean_image_digest=QUALITY_CLEAN_IMAGE.digest(),
             registered_watermarked_image_digest=QUALITY_MARKED_IMAGE.digest(),
+        )
+        for index in range(SOURCE_CLUSTER_COUNT)
+    )
+
+
+def _quality_artifacts(tmp_path: Path) -> tuple[C1HfRawRgb8QualityArtifact, ...]:
+    clean_path = tmp_path / "clean.rgb8"
+    marked_path = tmp_path / "marked.rgb8"
+    clean_path.write_bytes(QUALITY_CLEAN_IMAGE.values_hwc)
+    marked_path.write_bytes(QUALITY_MARKED_IMAGE.values_hwc)
+    return tuple(
+        C1HfRawRgb8QualityArtifact(
+            identity=_case_identity(index, "untouched_confirmation"),
+            height=QUALITY_CLEAN_IMAGE.height,
+            width=QUALITY_CLEAN_IMAGE.width,
+            channels=QUALITY_CLEAN_IMAGE.channels,
+            dtype=QUALITY_CLEAN_IMAGE.dtype,
+            clean_artifact_path=str(clean_path.resolve()),
+            clean_artifact_sha256=hashlib.sha256(
+                QUALITY_CLEAN_IMAGE.values_hwc
+            ).hexdigest(),
+            registered_watermarked_artifact_path=str(marked_path.resolve()),
+            registered_watermarked_artifact_sha256=hashlib.sha256(
+                QUALITY_MARKED_IMAGE.values_hwc
+            ).hexdigest(),
         )
         for index in range(SOURCE_CLUSTER_COUNT)
     )
@@ -430,10 +469,14 @@ def test_c1_actual_dtype_integrity_keeps_denominator_and_failure_counts() -> Non
 
 
 @pytest.mark.unit
-def test_c1_confirmation_cross_binds_score_quality_and_actual_dtype_tables() -> None:
+def test_c1_confirmation_replays_fit_and_raw_quality_authority(
+    tmp_path: Path,
+) -> None:
     binding = _binding()
-    threshold = fit_c1_hf_tau(_fit_cases(), binding=binding)
+    fit_cases = _fit_cases()
+    threshold = fit_c1_hf_tau(fit_cases, binding=binding)
     scores = _confirmation_cases(threshold.tau)
+    quality_artifacts = _quality_artifacts(tmp_path)
     quality_results = tuple(
         evaluate_c1_hf_rgb8_quality_pair(pair, binding=binding)
         for pair in _quality_pairs()
@@ -451,9 +494,10 @@ def test_c1_confirmation_cross_binds_score_quality_and_actual_dtype_tables() -> 
         for index in range(SOURCE_CLUSTER_COUNT)
     )
     inputs = C1HfConfirmationInputBundle(
+        fit_primary_null_cases=fit_cases,
         threshold=threshold,
         score_cases=scores,
-        quality_case_results=quality_results,
+        raw_rgb8_quality_artifacts=quality_artifacts,
         actual_dtype_cases=actual_cases,
     )
     validation = validate_c1_hf_confirmation_input_bundle(inputs, binding)
@@ -478,19 +522,64 @@ def test_c1_confirmation_cross_binds_score_quality_and_actual_dtype_tables() -> 
             binding,
         )
 
-    drifted_quality = (
-        replace(
-            quality_results[0],
-            clean_image_digest=_digest("different-clean"),
+    fake_quality_payload = {
+        "analysis_unit_identity": asdict(
+            quality_results[0].identity.analysis_unit_identity
         ),
-        *quality_results[1:],
+        "relative_l2": (0.0).hex(),
+        "normalized_rgb8_mse": (
+            quality_results[0].normalized_rgb8_mse.hex()
+        ),
+        "clean_image_digest": quality_results[0].clean_image_digest,
+        "registered_watermarked_image_digest": (
+            quality_results[0].registered_watermarked_image_digest
+        ),
+        "formula_identity_digest": quality_results[0].formula_identity_digest,
+    }
+    valid_self_rehashed_fake_quality = replace(
+        quality_results[0],
+        relative_l2=0.0,
+        result_identity=_canonical_digest(fake_quality_payload),
     )
-    with pytest.raises(C1HfMetricError, match="quality_case_result_identity"):
-        validate_c1_hf_confirmation_input_bundle(
-            replace(inputs, quality_case_results=drifted_quality),
-            binding,
+    validate_c1_hf_quality_case_result(valid_self_rehashed_fake_quality, binding)
+    with pytest.raises(C1HfMetricError, match="artifact_count_or_type"):
+        evaluate_c1_hf_confirmation_metrics(
+            replace(
+                inputs,
+                raw_rgb8_quality_artifacts=(
+                    valid_self_rehashed_fake_quality,
+                    *quality_artifacts[1:],
+                ),
+            ),
+            binding=binding,
         )
 
+    wrong_tau = math.nextafter(threshold.tau, math.inf)
+    wrong_threshold_without_identity = replace(
+        threshold,
+        tau=wrong_tau,
+        tau_float64_hex=wrong_tau.hex(),
+    )
+    wrong_threshold_payload = {
+        key: getattr(wrong_threshold_without_identity, key)
+        for key in wrong_threshold_without_identity.__dataclass_fields__
+        if key != "threshold_identity"
+    }
+    valid_self_rehashed_wrong_threshold = replace(
+        wrong_threshold_without_identity,
+        threshold_identity=_canonical_digest(wrong_threshold_payload),
+    )
+    validate_c1_hf_threshold_result(
+        valid_self_rehashed_wrong_threshold,
+        binding,
+    )
+    with pytest.raises(C1HfMetricError, match="threshold_fit_replay_mismatch"):
+        evaluate_c1_hf_confirmation_metrics(
+            replace(inputs, threshold=valid_self_rehashed_wrong_threshold),
+            binding=binding,
+        )
+
+    different_marked_path = tmp_path / "different-marked.rgb8"
     different_marked = C1Rgb8Image(
         height=1,
         width=1,
@@ -498,25 +587,24 @@ def test_c1_confirmation_cross_binds_score_quality_and_actual_dtype_tables() -> 
         dtype="uint8",
         values_hwc=bytes((12, 20, 30)),
     )
-    different_pair = C1HfQualityPair(
-        identity=quality_results[0].identity,
-        clean_image=QUALITY_CLEAN_IMAGE,
-        registered_watermarked_image=different_marked,
-        clean_image_digest=QUALITY_CLEAN_IMAGE.digest(),
-        registered_watermarked_image_digest=different_marked.digest(),
-    )
-    valid_but_cross_drifted_quality = (
-        evaluate_c1_hf_rgb8_quality_pair(
-            different_pair,
-            binding=binding,
+    different_marked_path.write_bytes(different_marked.values_hwc)
+    valid_but_cross_drifted_artifacts = (
+        replace(
+            quality_artifacts[0],
+            registered_watermarked_artifact_path=str(
+                different_marked_path.resolve()
+            ),
+            registered_watermarked_artifact_sha256=hashlib.sha256(
+                different_marked.values_hwc
+            ).hexdigest(),
         ),
-        *quality_results[1:],
+        *quality_artifacts[1:],
     )
     with pytest.raises(C1HfMetricError, match="cross_binding_mismatch"):
         validate_c1_hf_confirmation_input_bundle(
             replace(
                 inputs,
-                quality_case_results=valid_but_cross_drifted_quality,
+                raw_rgb8_quality_artifacts=valid_but_cross_drifted_artifacts,
             ),
             binding,
         )

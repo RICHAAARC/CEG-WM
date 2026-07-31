@@ -667,6 +667,10 @@ Notebook 与 repository module 的跨边界数据
 | confidence_bound | cross_boundary | method_statistic | none | false | false | false | C1 exact one-sided 95% Clopper-Pearson bound。 |
 | clean_image_digest | cross_boundary | provenance | none | false | false | false | paired-quality 原始 clean HWC RGB8 bytes 的稳定摘要。 |
 | registered_watermarked_image_digest | cross_boundary | provenance | none | false | false | false | paired-quality、registered/wrong score 与 actual-dtype facts 共同绑定的 marked RGB8 摘要。 |
+| clean_artifact_path | cross_boundary | provenance | none | false | false | false | 正式 C1 confirmation 用于逐 pair 只读重放 clean HWC RGB8 bytes 的绝对 artifact 路径；不进入科学结果身份。 |
+| clean_artifact_sha256 | cross_boundary | provenance | none | false | false | false | clean raw HWC RGB8 artifact 文件 bytes 的 SHA-256；正式入口读取后独立复核。 |
+| registered_watermarked_artifact_path | cross_boundary | provenance | none | false | false | false | 正式 C1 confirmation 用于逐 pair 只读重放 registered-watermarked HWC RGB8 bytes 的绝对 artifact 路径；不进入科学结果身份。 |
+| registered_watermarked_artifact_sha256 | cross_boundary | provenance | none | false | false | false | registered-watermarked raw HWC RGB8 artifact 文件 bytes 的 SHA-256；正式入口读取后独立复核。 |
 | normalized_rgb8_mse | cross_boundary | method_statistic | none | false | false | false | 原始 paired RGB8 channel values 除以 255 后的真实均方误差。 |
 | sample_standard_deviation | cross_boundary | method_statistic | none | false | false | false | C1 quality 4096 个真实 case values 的 `ddof=1` sample SD。 |
 | student_t_degrees_of_freedom | cross_boundary | method_statistic | none | false | false | false | C1 quality mean interval 的 Student-t 自由度，固定为 `n-1`。 |
@@ -681,7 +685,7 @@ Notebook 与 repository module 的跨边界数据
 | budget_exceeded_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 超过 `3/250` hard limit 的数量。 |
 | failed_case_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype 任一 integrity/dtype/finite/range/budget 条件失败的 case 并集数量。 |
 | case_facts | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype aggregate 保留的 4096 个轻量输入事实，用于结果 validator 重算失败计数与 case digest。 |
-| cross_input_digest | cross_boundary | provenance | none | false | false | false | C1 confirmation score、quality、actual-dtype 三表按 exact manifest unit 与 clean/marked image identities 交叉绑定后的摘要；正式入口强制消费。 |
+| cross_input_digest | cross_boundary | provenance | none | false | false | false | C1 confirmation 的重算 fit-case/threshold identity 及 score、raw-RGB8-replayed quality、actual-dtype 三表按 exact manifest unit 与 clean/marked image identities 交叉绑定后的摘要；正式入口强制消费。 |
 | decisions | cross_boundary | method_statistic | none | false | false | false | fixed-threshold evaluation 的逐 case 检测决定集合。 |
 | positive | cross_boundary | method_statistic | none | false | false | false | 单个检测 case 是否达到冻结阈值。 |
 | registered_tpr | cross_boundary | method_statistic | none | false | false | false | registered-positive cases 的真阳性率。 |

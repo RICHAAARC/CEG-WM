@@ -36,15 +36,20 @@ registered 与 wrong-key 三类各 4096、逐 cluster 同 detector/config/key/co
 
 paired quality 的单 pair 入口直接流式消费 HWC RGB8 bytes，计算 normalized MSE
 与 relative L2；它返回绑定完整 analysis unit、图像摘要、公式摘要和可重算
-result identity 的轻量 case result。正式 aggregate 只消费这些 metric 产出的
+result identity 的轻量 case result。独立 aggregate 可消费这些 metric 产出的
 4096 个轻量结果，计算 mean、sample SD (`ddof=1`) 与未裁剪的双侧 95% Student-t
-区间，避免把原始 512x512 图像同时驻留内存。Student-t CDF/quantile 与共享
-Clopper-Pearson 原语均为无额外依赖的数值实现并有 reference golden。
+区间。正式 confirmation 不信任调用方提交的轻量数值结果，而只接受 4096 个
+绝对路径 raw-RGB8 artifact descriptors；它逐 pair 校验 raw artifact SHA-256、
+读取精确 HWC byte count 并自行调用单 pair 公式，避免所有原始图像同时驻留内存。
+Student-t CDF/quantile 与共享 Clopper-Pearson 原语均为无额外依赖的数值实现并有
+reference golden。
 
-正式 confirmation 入口是 `evaluate_c1_hf_confirmation_metrics`。它强制先交叉验证
-score、paired-quality 与 actual-dtype 三表的 exact manifest unit、clean/marked
-image digests 和 registered-key identities，并把 `cross_input_digest` 纳入整体
-result identity；C1-E 不得绕过该入口。实现绑定由
+正式 confirmation 入口是 `evaluate_c1_hf_confirmation_metrics`。它必须同时消费
+content-threshold-fit 的精确 4096 条 primary-null score cases，自行重算
+`fit_c1_hf_tau` 并要求传入 threshold 与重算对象完全相等；随后逐 pair 重放 raw
+RGB8 artifacts，交叉验证 score、paired-quality 与 actual-dtype 三表的 exact
+manifest unit、clean/marked image digests 和 registered-key identities，并把 fit
+case/threshold identity 纳入 `cross_input_digest`；C1-E 不得绕过该入口。实现绑定由
 `configs/experiments/c1_hf_metric_implementation.json` 固定 C1 spec、完整 C1-P
 authority bundle、七项 split/formula、metric registry、实现 symbols 与源码
 SHA-256。该实现不写 records、不执行 promotion decision，也不产生科学结果。

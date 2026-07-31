@@ -1,5 +1,5 @@
 {
-  "schema_version": "ceg_wm_c1_hf_metric_implementation_binding_v1",
+  "schema_version": "ceg_wm_c1_hf_metric_implementation_binding_v2",
   "c1_specification_path": "configs/experiments/c1_hf_reference_run.json",
   "c1_specification_digest": "aa21c78233926049fe3cc1d0f8ec14469330fcaa33174558b45254153a10f3be",
   "protocol_digest": "e05cab6af8adf4413bd33d8fca8226103ac5ed617208cdb41e57c0f6cb0f984d",
@@ -67,15 +67,16 @@
   "formula_implementation_identities": {
     "actual_dtype_integrity": "per_registered_positive_integrity_and_exact_dtype_and_finite_nonnegative_actual_relative_l2_at_most_3_over_250",
     "binomial_intervals": "exact_one_sided_95_percent_clopper_pearson_upper_or_lower",
+    "formal_confirmation_authority": "recompute_tau_from_exact_fit_cases_and_replay_raw_rgb8_artifacts",
     "paired_attribution": "registered_score_strictly_greater_than_wrong_score_tie_is_failure",
     "paired_rgb8_mse": "mean_of_squared_uint8_channel_differences_after_division_by_255",
     "paired_rgb8_relative_l2": "l2_of_uint8_channel_difference_after_division_by_255_over_clean_image_l2_after_division_by_255",
     "quality_aggregation": "mean_sample_sd_ddof_1_and_two_sided_95_percent_student_t_interval",
     "threshold": "binary64_nextafter_above_primary_null_maximum_and_score_at_least_tau"
   },
-  "formula_identity_digest": "1d52d2f6f051ea1cce2813aed495089b2bfc468330d15df34694986fa478b209",
+  "formula_identity_digest": "07f0d846fc67f20f226de66b9c0fe1226abbeca6918d40013af107a97c5c3acd",
   "implementation_module_path": "experiments/metrics/c1_hf_reference.py",
-  "implementation_source_sha256": "46600ddfb6a621402e44ddaa0884eb6275965d4075721488b85c101e158e3b41",
+  "implementation_source_sha256": "debde265d0edb11efac127097c640c3328ea7dd867b5c5dd80ff4178c44edb6c",
   "implementation_symbols": [
     {
       "metric_id": "c1_hf_tau_fit",
@@ -107,6 +108,6 @@
     }
   ],
   "formal_confirmation_entrypoint": "evaluate_c1_hf_confirmation_metrics",
-  "confirmation_cross_input_validation": "required_before_all_confirmation_metric_results",
-  "binding_digest": "f6de7ad727885960edda864956d12cf0b5ef2d62dbfa8ae95b30f3444d6616d3"
+  "confirmation_cross_input_validation": "required_fit_tau_and_raw_rgb8_replay_before_confirmation_results",
+  "binding_digest": "948a3f4f43c2964a6c996e56744b39c1a933552bce3a947b01f0aa234e4290ef"
 }

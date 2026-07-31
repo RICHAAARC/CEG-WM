@@ -25,7 +25,7 @@ from .internal import MetricRegistry, load_metric_registry, validate_metric_regi
 
 
 C1_HF_METRIC_IMPLEMENTATION_SCHEMA_VERSION = (
-    "ceg_wm_c1_hf_metric_implementation_binding_v1"
+    "ceg_wm_c1_hf_metric_implementation_binding_v2"
 )
 C1_HF_METRIC_IDS = (
     "c1_hf_tau_fit",
@@ -92,6 +92,9 @@ C1_HF_FORMULA_IMPLEMENTATION_IDENTITIES = {
     ),
     "quality_aggregation": (
         "mean_sample_sd_ddof_1_and_two_sided_95_percent_student_t_interval"
+    ),
+    "formal_confirmation_authority": (
+        "recompute_tau_from_exact_fit_cases_and_replay_raw_rgb8_artifacts"
     ),
     "threshold": (
         "binary64_nextafter_above_primary_null_maximum_and_score_at_least_tau"
@@ -225,7 +228,7 @@ def load_c1_hf_metric_implementation_binding(
         or raw["formal_confirmation_entrypoint"]
         != "evaluate_c1_hf_confirmation_metrics"
         or raw["confirmation_cross_input_validation"]
-        != "required_before_all_confirmation_metric_results"
+        != "required_fit_tau_and_raw_rgb8_replay_before_confirmation_results"
     ):
         raise C1HfMetricError("c1_metric_identity_or_split_binding_mismatch")
     frozen_formula_digest = _canonical_digest(metric_plan["formula_identities"])
@@ -967,6 +970,149 @@ class C1HfQualityPair:
 
 
 @dataclass(frozen=True, slots=True)
+class C1HfRawRgb8QualityArtifact:
+    """Lightweight descriptor for independently replayable paired RGB8 bytes."""
+
+    identity: C1HfMetricCaseIdentity
+    height: int
+    width: int
+    channels: int
+    dtype: str
+    clean_artifact_path: str
+    clean_artifact_sha256: str
+    registered_watermarked_artifact_path: str
+    registered_watermarked_artifact_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.identity) is not C1HfMetricCaseIdentity
+            or type(self.height) is not int
+            or type(self.width) is not int
+            or self.height <= 0
+            or self.width <= 0
+            or self.channels != 3
+            or self.dtype != "uint8"
+        ):
+            raise C1HfMetricError("c1_quality_artifact_shape_or_dtype_invalid")
+        for value, role in (
+            (self.clean_artifact_path, "clean_artifact_path"),
+            (
+                self.registered_watermarked_artifact_path,
+                "registered_watermarked_artifact_path",
+            ),
+        ):
+            _require_identity(value, role)
+            if not Path(value).is_absolute():
+                raise C1HfMetricError(f"{role}_must_be_absolute")
+        _require_digest(self.clean_artifact_sha256, "clean_artifact_sha256")
+        _require_digest(
+            self.registered_watermarked_artifact_sha256,
+            "registered_watermarked_artifact_sha256",
+        )
+
+
+def _read_exact_rgb8_artifact(
+    artifact_path: str,
+    expected_sha256: str,
+    *,
+    height: int,
+    width: int,
+    channels: int,
+    dtype: str,
+) -> C1Rgb8Image:
+    expected_size = height * width * channels
+    try:
+        with Path(artifact_path).open("rb") as stream:
+            values_hwc = stream.read(expected_size + 1)
+    except OSError as exc:
+        raise C1HfMetricError("c1_quality_artifact_read_failed") from exc
+    if len(values_hwc) != expected_size:
+        raise C1HfMetricError("c1_quality_artifact_byte_count_mismatch")
+    if hashlib.sha256(values_hwc).hexdigest() != expected_sha256:
+        raise C1HfMetricError("c1_quality_artifact_sha256_mismatch")
+    return C1Rgb8Image(
+        height=height,
+        width=width,
+        channels=channels,
+        dtype=dtype,
+        values_hwc=values_hwc,
+    )
+
+
+def _read_cached_exact_rgb8_artifact(
+    artifact_cache: dict[tuple[object, ...], C1Rgb8Image],
+    artifact_path: str,
+    expected_sha256: str,
+    *,
+    height: int,
+    width: int,
+    channels: int,
+    dtype: str,
+) -> C1Rgb8Image:
+    cache_key = (
+        artifact_path,
+        expected_sha256,
+        height,
+        width,
+        channels,
+        dtype,
+    )
+    cached = artifact_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    image = _read_exact_rgb8_artifact(
+        artifact_path,
+        expected_sha256,
+        height=height,
+        width=width,
+        channels=channels,
+        dtype=dtype,
+    )
+    if len(artifact_cache) == 2:
+        artifact_cache.pop(next(iter(artifact_cache)))
+    artifact_cache[cache_key] = image
+    return image
+
+
+def _replay_c1_hf_raw_rgb8_quality_artifact(
+    artifact: C1HfRawRgb8QualityArtifact,
+    binding: C1HfMetricImplementationBinding,
+    artifact_cache: dict[tuple[object, ...], C1Rgb8Image],
+) -> C1HfQualityCaseResult:
+    if type(artifact) is not C1HfRawRgb8QualityArtifact:
+        raise C1HfMetricError("c1_quality_artifact_exact_type_required")
+    _validate_case_identity(artifact.identity, binding, "untouched_confirmation")
+    clean = _read_cached_exact_rgb8_artifact(
+        artifact_cache,
+        artifact.clean_artifact_path,
+        artifact.clean_artifact_sha256,
+        height=artifact.height,
+        width=artifact.width,
+        channels=artifact.channels,
+        dtype=artifact.dtype,
+    )
+    marked = _read_cached_exact_rgb8_artifact(
+        artifact_cache,
+        artifact.registered_watermarked_artifact_path,
+        artifact.registered_watermarked_artifact_sha256,
+        height=artifact.height,
+        width=artifact.width,
+        channels=artifact.channels,
+        dtype=artifact.dtype,
+    )
+    return evaluate_c1_hf_rgb8_quality_pair(
+        C1HfQualityPair(
+            identity=artifact.identity,
+            clean_image=clean,
+            registered_watermarked_image=marked,
+            clean_image_digest=clean.digest(),
+            registered_watermarked_image_digest=marked.digest(),
+        ),
+        binding=binding,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class C1HfQualityCaseResult:
     identity: C1HfMetricCaseIdentity
     relative_l2: float
@@ -1687,44 +1833,71 @@ def validate_c1_hf_actual_dtype_integrity_result(
 
 @dataclass(frozen=True, slots=True)
 class C1HfConfirmationInputBundle:
+    fit_primary_null_cases: tuple[C1HfScoreCase, ...]
     threshold: C1HfThresholdResult
     score_cases: tuple[C1HfScoreCase, ...]
-    quality_case_results: tuple[C1HfQualityCaseResult, ...]
+    raw_rgb8_quality_artifacts: tuple[C1HfRawRgb8QualityArtifact, ...]
     actual_dtype_cases: tuple[C1HfActualDtypeIntegrityCase, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class C1HfConfirmationInputValidation:
     source_cluster_count: int
+    fit_score_case_count: int
     score_case_count: int
-    quality_case_count: int
+    raw_rgb8_quality_artifact_count: int
     actual_dtype_case_count: int
     cross_input_digest: str
 
 
-def validate_c1_hf_confirmation_input_bundle(
+def _replay_c1_hf_confirmation_input_bundle(
     inputs: C1HfConfirmationInputBundle,
     binding: C1HfMetricImplementationBinding,
-) -> C1HfConfirmationInputValidation:
-    """Cross-bind score, raw-RGB8 metric, and actual-dtype facts by manifest unit."""
+) -> tuple[
+    C1HfConfirmationInputValidation,
+    tuple[C1HfQualityCaseResult, ...],
+]:
+    """Replay fit and raw RGB8 evidence, then cross-bind all confirmation facts."""
 
     if type(inputs) is not C1HfConfirmationInputBundle:
         raise C1HfMetricError("c1_confirmation_input_bundle_exact_type_required")
+    recomputed_threshold = fit_c1_hf_tau(
+        inputs.fit_primary_null_cases,
+        binding=binding,
+    )
+    if inputs.threshold != recomputed_threshold:
+        raise C1HfMetricError("c1_confirmation_threshold_fit_replay_mismatch")
     grouped_scores, _, _ = _prepare_confirmation_scores(
         inputs.score_cases,
-        inputs.threshold,
+        recomputed_threshold,
         binding,
     )
-    if len(inputs.quality_case_results) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT:
-        raise C1HfMetricError("c1_confirmation_quality_case_count_mismatch")
+    if (
+        len(inputs.raw_rgb8_quality_artifacts)
+        != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or any(
+            type(artifact) is not C1HfRawRgb8QualityArtifact
+            for artifact in inputs.raw_rgb8_quality_artifacts
+        )
+    ):
+        raise C1HfMetricError(
+            "c1_confirmation_raw_rgb8_quality_artifact_count_or_type_mismatch"
+        )
     if len(inputs.actual_dtype_cases) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT:
         raise C1HfMetricError("c1_confirmation_actual_dtype_case_count_mismatch")
-    for result in inputs.quality_case_results:
-        validate_c1_hf_quality_case_result(result, binding)
+    artifact_cache: dict[tuple[object, ...], C1Rgb8Image] = {}
+    quality_case_results = tuple(
+        _replay_c1_hf_raw_rgb8_quality_artifact(
+            artifact,
+            binding,
+            artifact_cache,
+        )
+        for artifact in inputs.raw_rgb8_quality_artifacts
+    )
     for case in inputs.actual_dtype_cases:
         _validate_case_identity(case.identity, binding, "untouched_confirmation")
     _validate_exact_analysis_unit_set(
-        [result.identity for result in inputs.quality_case_results],
+        [result.identity for result in quality_case_results],
         binding,
         "untouched_confirmation",
     )
@@ -1743,7 +1916,7 @@ def validate_c1_hf_confirmation_input_bundle(
     }
     quality_by_cluster = {
         result.identity.source_cluster_id: result
-        for result in inputs.quality_case_results
+        for result in quality_case_results
     }
     actual_by_cluster = {
         case.identity.source_cluster_id: case
@@ -1783,13 +1956,33 @@ def validate_c1_hf_confirmation_input_bundle(
                 "quality_result_identity": quality.result_identity,
             }
         )
-    return C1HfConfirmationInputValidation(
+    validation = C1HfConfirmationInputValidation(
         source_cluster_count=C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        fit_score_case_count=len(inputs.fit_primary_null_cases),
         score_case_count=len(inputs.score_cases),
-        quality_case_count=len(inputs.quality_case_results),
+        raw_rgb8_quality_artifact_count=len(
+            inputs.raw_rgb8_quality_artifacts
+        ),
         actual_dtype_case_count=len(inputs.actual_dtype_cases),
-        cross_input_digest=_canonical_digest(cross_payload),
+        cross_input_digest=_canonical_digest(
+            {
+                "fit_case_digest": recomputed_threshold.case_digest,
+                "threshold_identity": recomputed_threshold.threshold_identity,
+                "confirmation_cases": cross_payload,
+            }
+        ),
     )
+    return validation, quality_case_results
+
+
+def validate_c1_hf_confirmation_input_bundle(
+    inputs: C1HfConfirmationInputBundle,
+    binding: C1HfMetricImplementationBinding,
+) -> C1HfConfirmationInputValidation:
+    """Independently replay every authority-bearing formal input."""
+
+    validation, _ = _replay_c1_hf_confirmation_input_bundle(inputs, binding)
+    return validation
 
 
 @dataclass(frozen=True, slots=True)
@@ -1811,7 +2004,9 @@ def evaluate_c1_hf_confirmation_metrics(
 ) -> C1HfConfirmationMetricResults:
     """Formal confirmation entrypoint; cross-table validation is mandatory."""
 
-    cross_validation = validate_c1_hf_confirmation_input_bundle(inputs, binding)
+    cross_validation, quality_case_results = (
+        _replay_c1_hf_confirmation_input_bundle(inputs, binding)
+    )
     primary = evaluate_c1_hf_primary_null_fixed_fpr(
         inputs.score_cases,
         inputs.threshold,
@@ -1833,7 +2028,7 @@ def evaluate_c1_hf_confirmation_metrics(
         binding=binding,
     )
     quality = evaluate_c1_hf_paired_rgb8_quality(
-        inputs.quality_case_results,
+        quality_case_results,
         binding=binding,
     )
     actual = evaluate_c1_hf_actual_dtype_integrity(
@@ -1859,7 +2054,6 @@ def evaluate_c1_hf_confirmation_metrics(
         cross_input_digest=cross_validation.cross_input_digest,
         result_identity=_canonical_digest(identity_payload),
     )
-    validate_c1_hf_confirmation_metric_results(result, inputs, binding)
     return result
 
 
@@ -1872,7 +2066,9 @@ def validate_c1_hf_confirmation_metric_results(
 
     if type(result) is not C1HfConfirmationMetricResults:
         raise C1HfMetricError("c1_confirmation_metric_results_exact_type_required")
-    cross_validation = validate_c1_hf_confirmation_input_bundle(inputs, binding)
+    cross_validation, quality_case_results = (
+        _replay_c1_hf_confirmation_input_bundle(inputs, binding)
+    )
     expected_children = (
         evaluate_c1_hf_primary_null_fixed_fpr(
             inputs.score_cases,
@@ -1895,7 +2091,7 @@ def validate_c1_hf_confirmation_metric_results(
             binding=binding,
         ),
         evaluate_c1_hf_paired_rgb8_quality(
-            inputs.quality_case_results,
+            quality_case_results,
             binding=binding,
         ),
         evaluate_c1_hf_actual_dtype_integrity(
