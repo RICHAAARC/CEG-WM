@@ -23,6 +23,9 @@
   独立 input manifest、execution config 和 resource identity 摘要。其中只保留由正式入口调用的
   私有 collection 结构校验 helper，验证所有非初始 outcome 的可重试 parent、
   连续 attempt、冻结上限、结构化 promotion stop 和 stop 后禁止继续。
+- `c1_hf_threshold_fit_records.py`：C1 阈值拟合单元记录 v2 强制保存
+  `execution_evidence_kind`；历史 v1 记录不得恢复或汇总为 v2 正式结果，CPU 合成记录也不得由
+  正式 finalizer 接受。
 - `internal_case.py`：保存写入器和 runner 共同消费的冻结逐 case 输入清单；
   每个 unit 在执行前固定 artifact/attack/metric、routing、key/control、detector
   binding、raw/rectified detector 与 threshold、content/geometry callable 的显式

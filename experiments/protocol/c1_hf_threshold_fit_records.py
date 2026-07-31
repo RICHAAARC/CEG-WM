@@ -14,7 +14,7 @@ from .internal_splits import AnalysisUnitIdentity
 
 
 C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION = (
-    "ceg_wm_c1_hf_threshold_fit_unit_record_v1"
+    "ceg_wm_c1_hf_threshold_fit_unit_record_v2"
 )
 C1_HF_THRESHOLD_FIT_SPLIT = "content_threshold_fit"
 C1_HF_THRESHOLD_FIT_SHARD_COUNT = 16
@@ -23,6 +23,14 @@ C1_HF_THRESHOLD_FIT_UNIT_COUNT = 4096
 C1_HF_THRESHOLD_FIT_MAXIMUM_ATTEMPTS = 3
 C1_HF_THRESHOLD_FIT_FAILURE_CLASSES = frozenset(
     {"resource_failure", "execution_failure", "scientific_failure"}
+)
+C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE = "real_sd35_gpu"
+C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE = "synthetic_cpu_fixture"
+C1_HF_THRESHOLD_FIT_EXECUTION_EVIDENCE_KINDS = frozenset(
+    {
+        C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+    }
 )
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -174,6 +182,7 @@ class C1HfThresholdFitAttemptRecord:
 class C1HfThresholdFitRecordIdentity:
     run_id: str
     committed_revision: str
+    execution_evidence_kind: str
     c1_specification_digest: str
     protocol_id: str
     protocol_version: str
@@ -201,6 +210,8 @@ class C1HfThresholdFitRecordIdentity:
             raise C1HfThresholdFitRecordError("run_id is not a safe identity")
         if _REVISION.fullmatch(self.committed_revision) is None:
             raise C1HfThresholdFitRecordError("committed revision is invalid")
+        if self.execution_evidence_kind not in C1_HF_THRESHOLD_FIT_EXECUTION_EVIDENCE_KINDS:
+            raise C1HfThresholdFitRecordError("execution evidence kind is invalid")
         if (
             type(self.shard_index) is not int
             or not 0 <= self.shard_index < C1_HF_THRESHOLD_FIT_SHARD_COUNT
@@ -360,6 +371,7 @@ def parse_c1_hf_threshold_fit_record_collection(
         {
             "run_id",
             "committed_revision",
+            "execution_evidence_kind",
             "c1_specification_digest",
             "protocol_id",
             "protocol_version",
@@ -512,11 +524,14 @@ def _raise_non_finite(value: str) -> object:
 
 
 __all__ = [
+    "C1_HF_THRESHOLD_FIT_EXECUTION_EVIDENCE_KINDS",
     "C1_HF_THRESHOLD_FIT_FAILURE_CLASSES",
     "C1_HF_THRESHOLD_FIT_MAXIMUM_ATTEMPTS",
     "C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION",
+    "C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE",
     "C1_HF_THRESHOLD_FIT_SHARD_COUNT",
     "C1_HF_THRESHOLD_FIT_SPLIT",
+    "C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE",
     "C1_HF_THRESHOLD_FIT_UNIT_COUNT",
     "C1_HF_THRESHOLD_FIT_UNITS_PER_SHARD",
     "C1HfThresholdFitAttemptRecord",

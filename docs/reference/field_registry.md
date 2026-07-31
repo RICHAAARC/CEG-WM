@@ -486,6 +486,7 @@ Notebook 与 repository module 的跨边界数据
 | metric_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标名称。 |
 | metric_value | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标数值。 |
 | execution_status | persisted_protocol | protocol | none | true | false | false | 当前尝试成功、失败或被排除的显式状态。 |
+| execution_evidence_kind | persisted_protocol | provenance | none | true | false | false | C1 threshold-fit record 的执行证据边界；`real_sd35_gpu` 仅由固定正式会话入口写入，`synthetic_cpu_fixture` 只允许 CPU wiring fixture 且正式 finalizer 必须拒绝。 |
 
 ## 内部科学验证协议字段
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from hashlib import sha256
+import inspect
 import json
 import math
 from pathlib import Path
@@ -24,8 +25,10 @@ from experiments.protocol.c1_hf_reference import (
     materialize_c1_split_manifest,
 )
 from experiments.protocol.c1_hf_threshold_fit_records import (
+    C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
     C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
     C1_HF_THRESHOLD_FIT_SPLIT,
+    C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
     C1HfThresholdFitAttemptRecord,
     C1HfThresholdFitFactRecord,
     C1HfThresholdFitRecordError,
@@ -46,11 +49,14 @@ from experiments.runners.c1_hf_threshold_fit import (
     C1HfThresholdFitRunnerError,
     c1_hf_threshold_fit_shard,
     finalize_c1_hf_threshold_fit,
+    finalize_c1_hf_threshold_fit_synthetic_cpu_fixture,
     load_c1_hf_threshold_fit_authority,
     load_c1_hf_threshold_fit_execution_configuration,
     production_c1_hf_threshold_fit_session,
     run_c1_hf_threshold_fit_shard,
+    run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard,
 )
+import experiments.runners.c1_hf_threshold_fit as threshold_fit_runner
 from experiments.runners.formal_operations import (
     PUBLIC_IMAGE_ENCODING,
     FormalHfContentDetectionOperation,
@@ -88,11 +94,14 @@ def _analysis_unit() -> AnalysisUnitIdentity:
     )
 
 
-def _record_identity() -> C1HfThresholdFitRecordIdentity:
+def _record_identity(
+    execution_evidence_kind: str = C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+) -> C1HfThresholdFitRecordIdentity:
     unit = _analysis_unit()
     return C1HfThresholdFitRecordIdentity(
         run_id="run-1",
         committed_revision=REVISION,
+        execution_evidence_kind=execution_evidence_kind,
         c1_specification_digest="a" * 64,
         protocol_id="ceg_wm_internal_scientific_validation_v2",
         protocol_version="2.0.0",
@@ -230,6 +239,10 @@ def test_production_authority_loader_replays_full_c1_p_and_c1_m() -> None:
     (
         ("prompt_roster_path", "configs/experiments/c1_hf_metric_implementation.json"),
         ("runtime_qualification_revision", "0" * 40),
+        ("run_phase_id", "rehash_accepted_phase"),
+        ("authorization_base_revision", "9" * 40),
+        ("claim_boundary", "rehash_accepted_claim"),
+        ("shard_count", 8),
     ),
 )
 def test_production_authority_loader_rejects_rehashed_decorative_field_tamper(
@@ -257,9 +270,181 @@ def test_production_authority_loader_rejects_rehashed_decorative_field_tamper(
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(
         C1HfThresholdFitRunnerError,
-        match="authority path or identity drifted",
+        match="frozen authority",
     ):
         load_c1_hf_threshold_fit_authority(ROOT, path)
+
+
+@pytest.mark.quick
+def test_formal_public_api_rejects_injected_factory_and_revision_keywords(
+    tmp_path: Path,
+) -> None:
+    run_parameters = inspect.signature(run_c1_hf_threshold_fit_shard).parameters
+    finalize_parameters = inspect.signature(finalize_c1_hf_threshold_fit).parameters
+    assert "session_factory" not in run_parameters
+    assert "committed_revision" not in run_parameters
+    assert "committed_revision" not in finalize_parameters
+    authority = _authority()
+    with pytest.raises(TypeError, match="committed_revision"):
+        run_c1_hf_threshold_fit_shard(
+            authority=authority,
+            shard_index=0,
+            run_id="formal-run",
+            committed_revision=REVISION,  # type: ignore[call-arg]
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            resource_identity_digest=RESOURCE_A_DIGEST,
+            records_root=tmp_path,
+            user_colab_run=True,
+        )
+    with pytest.raises(TypeError, match="committed_revision"):
+        finalize_c1_hf_threshold_fit(
+            authority=authority,
+            run_id="formal-run",
+            committed_revision=REVISION,  # type: ignore[call-arg]
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            records_root=tmp_path,
+        )
+
+
+@pytest.mark.quick
+def test_formal_runner_rejects_shadowed_production_session_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = _authority()
+    fake_factory = _FakeFactory(authority)
+    monkeypatch.setattr(
+        threshold_fit_runner,
+        "production_c1_hf_threshold_fit_session",
+        fake_factory,
+    )
+    monkeypatch.setattr(
+        threshold_fit_runner,
+        "_resolve_clean_repository_revision",
+        lambda _root: REVISION,
+    )
+    with pytest.raises(C1HfThresholdFitRunnerError, match="factory identity drifted"):
+        run_c1_hf_threshold_fit_shard(
+            authority=authority,
+            shard_index=0,
+            run_id="formal-run",
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            resource_identity_digest=RESOURCE_A_DIGEST,
+            records_root=tmp_path,
+            user_colab_run=True,
+        )
+    assert fake_factory.enter_count == fake_factory.execute_count == 0
+
+
+@pytest.mark.quick
+def test_private_core_rejects_real_evidence_with_fake_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = _authority()
+    fake_factory = _FakeFactory(authority)
+    monkeypatch.setattr(
+        threshold_fit_runner,
+        "_resolve_clean_repository_revision",
+        lambda _root: REVISION,
+    )
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="pinned production session factory",
+    ):
+        threshold_fit_runner._run_c1_hf_threshold_fit_shard_core(
+            authority=authority,
+            shard_index=0,
+            run_id="formal-run",
+            committed_revision=REVISION,
+            execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            resource_identity_digest=RESOURCE_A_DIGEST,
+            records_root=tmp_path,
+            session_factory=fake_factory,
+        )
+    assert fake_factory.enter_count == fake_factory.execute_count == 0
+
+
+@pytest.mark.quick
+def test_private_cores_reject_arbitrary_real_evidence_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = _authority()
+    clean_head = "a" * 40
+    monkeypatch.setattr(
+        threshold_fit_runner,
+        "_resolve_clean_repository_revision",
+        lambda _root: clean_head,
+    )
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="differs from clean repository HEAD",
+    ):
+        threshold_fit_runner._run_c1_hf_threshold_fit_shard_core(
+            authority=authority,
+            shard_index=0,
+            run_id="formal-run",
+            committed_revision=REVISION,
+            execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            resource_identity_digest=RESOURCE_A_DIGEST,
+            records_root=tmp_path,
+            session_factory=_FakeFactory(authority),
+        )
+    with pytest.raises(
+        C1HfThresholdFitRunnerError,
+        match="differs from clean repository HEAD",
+    ):
+        threshold_fit_runner._finalize_c1_hf_threshold_fit_core(
+            authority=authority,
+            run_id="formal-run",
+            committed_revision=REVISION,
+            expected_execution_evidence_kind=(
+                C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
+            ),
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            records_root=tmp_path,
+        )
+
+
+@pytest.mark.quick
+def test_formal_revision_is_derived_from_clean_git_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = iter(
+        (
+            SimpleNamespace(stdout=f"{REVISION}\n"),
+            SimpleNamespace(stdout=""),
+        )
+    )
+    monkeypatch.setattr(
+        threshold_fit_runner.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(completed),
+    )
+    assert threshold_fit_runner._resolve_clean_repository_revision(ROOT) == REVISION
+
+    dirty = iter(
+        (
+            SimpleNamespace(stdout=f"{REVISION}\n"),
+            SimpleNamespace(stdout=" M experiments/runners/c1_hf_threshold_fit.py\n"),
+        )
+    )
+    monkeypatch.setattr(
+        threshold_fit_runner.subprocess,
+        "run",
+        lambda *_args, **_kwargs: next(dirty),
+    )
+    with pytest.raises(C1HfThresholdFitRunnerError, match="source drift"):
+        threshold_fit_runner._resolve_clean_repository_revision(ROOT)
 
 
 def _authority() -> C1HfThresholdFitAuthority:
@@ -414,16 +599,15 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
         lambda: (_ for _ in ()).throw(AssertionError("CUDA touched by CPU test")),
     )
     factory = _FakeFactory(authority, resource_retry_unit=first_shard[0].unit_id)
-    summary = run_c1_hf_threshold_fit_shard(
+    summary = run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
         authority=authority,
         shard_index=0,
         run_id="fit-run",
-        committed_revision=REVISION,
+        fixture_revision=REVISION,
         registered_detection_key=REGISTERED_KEY,
         environment_digest=ENVIRONMENT_DIGEST,
         resource_identity_digest=RESOURCE_A_DIGEST,
         records_root=tmp_path,
-        user_colab_run=True,
         session_factory=factory,
     )
     assert summary["success_count"] == 0
@@ -434,20 +618,22 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
     first_record = load_c1_hf_threshold_fit_record_collection(
         tmp_path / "fit-run/threshold_fit/shard_00/unit_0000.json"
     )
+    assert first_record.identity.execution_evidence_kind == (
+        C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
+    )
     assert tuple(item.status for item in first_record.attempts) == ("retry",)
     assert first_record.attempts[0].resource_identity_digest == RESOURCE_A_DIGEST
 
     resume_factory = _FakeFactory(authority)
-    resumed = run_c1_hf_threshold_fit_shard(
+    resumed = run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
         authority=authority,
         shard_index=0,
         run_id="fit-run",
-        committed_revision=REVISION,
+        fixture_revision=REVISION,
         registered_detection_key=REGISTERED_KEY,
         environment_digest=ENVIRONMENT_DIGEST,
         resource_identity_digest=RESOURCE_B_DIGEST,
         records_root=tmp_path,
-        user_colab_run=True,
         session_factory=resume_factory,
     )
     assert resumed["success_count"] == 256
@@ -468,16 +654,15 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
         == resumed_first.attempts[0].attempt_id
     )
     completed_factory = _FakeFactory(authority)
-    completed = run_c1_hf_threshold_fit_shard(
+    completed = run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
         authority=authority,
         shard_index=0,
         run_id="fit-run",
-        committed_revision=REVISION,
+        fixture_revision=REVISION,
         registered_detection_key=REGISTERED_KEY,
         environment_digest=ENVIRONMENT_DIGEST,
         resource_identity_digest=RESOURCE_B_DIGEST,
         records_root=tmp_path,
-        user_colab_run=True,
         session_factory=completed_factory,
     )
     assert completed["success_count"] == 256
@@ -487,23 +672,22 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
             authority=authority,
             shard_index=1,
             run_id="blocked-run",
-            committed_revision=REVISION,
             registered_detection_key=REGISTERED_KEY,
             environment_digest=ENVIRONMENT_DIGEST,
             resource_identity_digest=RESOURCE_A_DIGEST,
             records_root=tmp_path,
             user_colab_run=False,
-            session_factory=resume_factory,
         )
 
 
 @pytest.mark.quick
-def test_finalize_replays_all_typed_units_into_exact_c1_m_fit(
+def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     authority = _authority()
     replayed_resources: set[str] = set()
+    synthetic_collections: dict[int, C1HfThresholdFitUnitRecordCollection] = {}
 
     def load_typed(
         writer: C1HfThresholdFitRecordWriter,
@@ -538,24 +722,58 @@ def test_finalize_replays_all_typed_units_into_exact_c1_m_fit(
             ),
         )
         replayed_resources.add(attempt.resource_identity_digest)
-        return C1HfThresholdFitUnitRecordCollection(
+        collection = C1HfThresholdFitUnitRecordCollection(
             schema_version=C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
             split=C1_HF_THRESHOLD_FIT_SPLIT,
             identity=identity,
             attempts=(attempt,),
         )
+        synthetic_collections[index] = collection
+        return collection
 
     monkeypatch.setattr(C1HfThresholdFitRecordWriter, "load", load_typed)
-    threshold = finalize_c1_hf_threshold_fit(
+    summary = finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
         authority=authority,
         run_id="full-fit-run",
-        committed_revision=REVISION,
+        fixture_revision=REVISION,
         registered_detection_key=REGISTERED_KEY,
         environment_digest=ENVIRONMENT_DIGEST,
         records_root=tmp_path,
     )
-    assert threshold.tau == math.nextafter(4095.0 / 8192.0, math.inf)
+    assert summary == {
+        "run_id": "full-fit-run",
+        "execution_evidence_kind": (
+            C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
+        ),
+        "tau_float64_hex": math.nextafter(4095.0 / 8192.0, math.inf).hex(),
+        "scientific_claims_supported": False,
+    }
     assert replayed_resources == {RESOURCE_A_DIGEST, RESOURCE_B_DIGEST}
+
+    def load_synthetic_collection(
+        writer: C1HfThresholdFitRecordWriter,
+    ) -> C1HfThresholdFitUnitRecordCollection:
+        identity = writer._identity  # type: ignore[attr-defined]
+        return synthetic_collections[identity.unit_index]
+
+    monkeypatch.setattr(
+        C1HfThresholdFitRecordWriter,
+        "load",
+        load_synthetic_collection,
+    )
+    monkeypatch.setattr(
+        threshold_fit_runner,
+        "_resolve_clean_repository_revision",
+        lambda _root: REVISION,
+    )
+    with pytest.raises(C1HfThresholdFitRunnerError, match="evidence kind"):
+        finalize_c1_hf_threshold_fit(
+            authority=authority,
+            run_id="full-fit-run",
+            registered_detection_key=REGISTERED_KEY,
+            environment_digest=ENVIRONMENT_DIGEST,
+            records_root=tmp_path,
+        )
 
 
 class _PromptPipeline:

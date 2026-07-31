@@ -1,6 +1,8 @@
 """实验 case、artifact、record、切分和接口契约。"""
 
 from .c1_hf_threshold_fit_records import (
+    C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+    C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
     C1HfThresholdFitAttemptRecord,
     C1HfThresholdFitFactRecord,
     C1HfThresholdFitRecordError,
@@ -13,6 +15,8 @@ from .c1_hf_threshold_fit_records import (
 )
 
 __all__ = [
+    "C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE",
+    "C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE",
     "C1HfThresholdFitAttemptRecord",
     "C1HfThresholdFitFactRecord",
     "C1HfThresholdFitRecordError",
