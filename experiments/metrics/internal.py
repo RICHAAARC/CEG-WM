@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import sha256
 import json
-from math import exp, isfinite, lgamma, log, log1p, nextafter, sqrt
+from math import isfinite, nextafter, sqrt
 from pathlib import Path
 import re
 from typing import Sequence
@@ -14,6 +14,7 @@ from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
     INTERNAL_VALIDATION_SPLITS,
 )
+from .binomial import clopper_pearson_upper
 
 
 DEFAULT_COMPONENT_CONFIG_PATH = (
@@ -39,6 +40,13 @@ REQUIRED_METRIC_IDS = (
     "reliability_accept_reject",
     "rectification_same_detector_delta",
     "rescue_global_fpr_safety",
+    "c1_hf_tau_fit",
+    "c1_hf_primary_null_fixed_fpr",
+    "c1_hf_registered_tpr",
+    "c1_hf_wrong_key_false_accept",
+    "c1_hf_paired_key_attribution",
+    "c1_hf_paired_final_image_quality",
+    "c1_hf_actual_dtype_integrity",
 )
 REQUIRED_METRIC_SPLIT_BINDINGS = (
     (
@@ -75,6 +83,13 @@ REQUIRED_METRIC_SPLIT_BINDINGS = (
         "rescue_global_fpr_safety",
         ("rescue_threshold_fit", "end_to_end_check"),
     ),
+    ("c1_hf_tau_fit", ("content_threshold_fit",)),
+    ("c1_hf_primary_null_fixed_fpr", ("untouched_confirmation",)),
+    ("c1_hf_registered_tpr", ("untouched_confirmation",)),
+    ("c1_hf_wrong_key_false_accept", ("untouched_confirmation",)),
+    ("c1_hf_paired_key_attribution", ("untouched_confirmation",)),
+    ("c1_hf_paired_final_image_quality", ("untouched_confirmation",)),
+    ("c1_hf_actual_dtype_integrity", ("untouched_confirmation",)),
 )
 
 
@@ -158,23 +173,6 @@ def _ensure_unique_units(cases: Sequence[object]) -> None:
         )
 
 
-def _binomial_cdf(successes: int, trials: int, probability: float) -> float:
-    if probability <= 0.0:
-        return 1.0
-    if probability >= 1.0:
-        return 1.0 if successes == trials else 0.0
-    log_terms = tuple(
-        lgamma(trials + 1)
-        - lgamma(index + 1)
-        - lgamma(trials - index + 1)
-        + index * log(probability)
-        + (trials - index) * log1p(-probability)
-        for index in range(successes + 1)
-    )
-    maximum = max(log_terms)
-    return exp(maximum) * sum(exp(value - maximum) for value in log_terms)
-
-
 def _binomial_upper_confidence_bound(
     successes: int,
     trials: int,
@@ -194,18 +192,11 @@ def _binomial_upper_confidence_bound(
     confidence = _finite(confidence_level, "confidence_level")
     if not 0.0 < confidence < 1.0:
         raise InternalMetricError("confidence_level must be in (0,1)")
-    if successes == trials:
-        return 1.0
-    tail_probability = 1.0 - confidence
-    lower = successes / trials
-    upper = 1.0
-    for _ in range(80):
-        midpoint = (lower + upper) / 2.0
-        if _binomial_cdf(successes, trials, midpoint) > tail_probability:
-            lower = midpoint
-        else:
-            upper = midpoint
-    return upper
+    return clopper_pearson_upper(
+        successes,
+        trials,
+        confidence_level=confidence,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,7 +266,7 @@ def _metric_registry_semantic_violations(
     violations: list[str] = []
     if (
         registry.schema_version != "ceg_wm_internal_execution_components_v1"
-        or registry.registry_version != "ceg_wm_internal_metric_registry_v1"
+        or registry.registry_version != "ceg_wm_internal_metric_registry_v2"
         or registry.analysis_unit
         != "analysis_unit_identity_case_id_source_cluster_id"
         or registry.forbidden_split != FORBIDDEN_SPLIT

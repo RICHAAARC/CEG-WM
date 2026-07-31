@@ -653,6 +653,35 @@ Notebook 与 repository module 的跨边界数据
 | fpr_upper_confidence_bound | cross_boundary | method_statistic | none | false | false | false | threshold-fit FPR 的单侧 Clopper-Pearson 上界。 |
 | source_cluster_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 source-cluster 身份有序集合的摘要。 |
 | calibration_case_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 split、unit、case、source-cluster、key-role 与 score 规范序列的摘要。 |
+| c1_specification_digest | cross_boundary | provenance | none | false | false | false | C1 metric 输入与实现绑定所消费的 exact C1-P run specification canonical 摘要。 |
+| formula_identity_digest | cross_boundary | metric_identity | none | false | false | false | C1-M 七项可执行公式身份的 canonical 摘要；implementation binding 与逐 pair quality result 必须一致。 |
+| case_digest | cross_boundary | provenance | none | false | false | false | C1 metric 实际消费的完整 analysis-unit、role、score、image 或 materialization case 序列摘要。 |
+| tau_float64_hex | cross_boundary | method_statistic | none | false | false | false | C1 threshold 的 Python binary64 hexadecimal identity；必须与 `tau.hex()` 完全一致。 |
+| threshold_rule | persisted_protocol | metric_identity | none | false | false | false | C1 threshold 固定为 primary-null maximum 上方的 binary64 `nextafter`。 |
+| decision_comparison | persisted_protocol | metric_identity | none | false | false | false | C1 threshold 判定固定为 `score >= tau`。 |
+| fit_false_positive_count | cross_boundary | method_statistic | none | false | false | false | C1 threshold-fit 在同一 4096 primary-null cases 上的假阳性数量，冻结要求为零。 |
+| event_count | cross_boundary | method_statistic | none | false | false | false | C1 独立 binomial metric 的成功或阳性事件数量。 |
+| trial_count | cross_boundary | method_statistic | none | false | false | false | C1 独立 binomial metric 的固定分母；confirmation 为 4096。 |
+| empirical_rate | cross_boundary | method_statistic | none | false | false | false | `event_count / trial_count`，wrong-key 与 primary null 分开计算。 |
+| confidence_direction | persisted_protocol | metric_identity | none | false | false | false | C1 Clopper-Pearson interval 的 `one_sided_upper` 或 `one_sided_lower`。 |
+| confidence_bound | cross_boundary | method_statistic | none | false | false | false | C1 exact one-sided 95% Clopper-Pearson bound。 |
+| clean_image_digest | cross_boundary | provenance | none | false | false | false | paired-quality 原始 clean HWC RGB8 bytes 的稳定摘要。 |
+| registered_watermarked_image_digest | cross_boundary | provenance | none | false | false | false | paired-quality、registered/wrong score 与 actual-dtype facts 共同绑定的 marked RGB8 摘要。 |
+| normalized_rgb8_mse | cross_boundary | method_statistic | none | false | false | false | 原始 paired RGB8 channel values 除以 255 后的真实均方误差。 |
+| sample_standard_deviation | cross_boundary | method_statistic | none | false | false | false | C1 quality 4096 个真实 case values 的 `ddof=1` sample SD。 |
+| student_t_degrees_of_freedom | cross_boundary | method_statistic | none | false | false | false | C1 quality mean interval 的 Student-t 自由度，固定为 `n-1`。 |
+| student_t_critical_975 | cross_boundary | method_statistic | none | false | false | false | 数值反解 Student-t CDF 得到的 0.975 quantile，不使用 1.96 代理。 |
+| confidence_interval_lower | cross_boundary | method_statistic | none | false | false | false | 未裁剪的双侧 95% Student-t mean interval 下界。 |
+| confidence_interval_upper | cross_boundary | method_statistic | none | false | false | false | 未裁剪的双侧 95% Student-t mean interval 上界。 |
+| materialization_integrity_failure_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype registered positives 中 materialization integrity 失败数量。 |
+| runtime_dtype_failure_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype cases 中 runtime dtype 不等于 float16 的数量。 |
+| measurement_dtype_failure_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype cases 中 measurement dtype 不等于 float32 的数量。 |
+| non_finite_relative_l2_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 非有限的数量；仍保留在 4096 分母。 |
+| negative_relative_l2_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 小于零的无效事实数量。 |
+| budget_exceeded_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 超过 `3/250` hard limit 的数量。 |
+| failed_case_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype 任一 integrity/dtype/finite/range/budget 条件失败的 case 并集数量。 |
+| case_facts | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype aggregate 保留的 4096 个轻量输入事实，用于结果 validator 重算失败计数与 case digest。 |
+| cross_input_digest | cross_boundary | provenance | none | false | false | false | C1 confirmation score、quality、actual-dtype 三表按 exact manifest unit 与 clean/marked image identities 交叉绑定后的摘要；正式入口强制消费。 |
 | decisions | cross_boundary | method_statistic | none | false | false | false | fixed-threshold evaluation 的逐 case 检测决定集合。 |
 | positive | cross_boundary | method_statistic | none | false | false | false | 单个检测 case 是否达到冻结阈值。 |
 | registered_tpr | cross_boundary | method_statistic | none | false | false | false | registered-positive cases 的真阳性率。 |

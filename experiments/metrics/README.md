@@ -26,3 +26,25 @@ detector 和 threshold。
 所有 case 拒绝非有限数值、空集合、重复 unit/case/source-cluster role、身份漂移和
 `held_out_evaluation`。指标不选择候选、不拟合 LF/HF 权重、不写 records，也不导入
 runtime、methods、attacks、runner 或治理代码；CPU 结果不构成科学有效性证明。
+
+`c1_hf_reference.py` 实现 C1-P 冻结的七个 HF-reference metric identities。
+`c1_hf_tau_fit` 只接受 content-threshold-fit manifest 的完整 4096 个
+`AnalysisUnitIdentity`，以 binary64 `nextafter(max,+inf)` 得到零 fit-FP 的唯一
+threshold identity。confirmation 必须消费该 threshold，且 primary null、
+registered 与 wrong-key 三类各 4096、逐 cluster 同 detector/config/key/control
+身份完整，wrong-key 不与 primary null 混池。
+
+paired quality 的单 pair 入口直接流式消费 HWC RGB8 bytes，计算 normalized MSE
+与 relative L2；它返回绑定完整 analysis unit、图像摘要、公式摘要和可重算
+result identity 的轻量 case result。正式 aggregate 只消费这些 metric 产出的
+4096 个轻量结果，计算 mean、sample SD (`ddof=1`) 与未裁剪的双侧 95% Student-t
+区间，避免把原始 512x512 图像同时驻留内存。Student-t CDF/quantile 与共享
+Clopper-Pearson 原语均为无额外依赖的数值实现并有 reference golden。
+
+正式 confirmation 入口是 `evaluate_c1_hf_confirmation_metrics`。它强制先交叉验证
+score、paired-quality 与 actual-dtype 三表的 exact manifest unit、clean/marked
+image digests 和 registered-key identities，并把 `cross_input_digest` 纳入整体
+result identity；C1-E 不得绕过该入口。实现绑定由
+`configs/experiments/c1_hf_metric_implementation.json` 固定 C1 spec、完整 C1-P
+authority bundle、七项 split/formula、metric registry、实现 symbols 与源码
+SHA-256。该实现不写 records、不执行 promotion decision，也不产生科学结果。

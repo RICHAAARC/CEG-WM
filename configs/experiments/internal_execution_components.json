@@ -130,7 +130,14 @@
       "transform_error",
       "reliability_accept_reject",
       "rectification_same_detector_delta",
-      "rescue_global_fpr_safety"
+      "rescue_global_fpr_safety",
+      "c1_hf_tau_fit",
+      "c1_hf_primary_null_fixed_fpr",
+      "c1_hf_registered_tpr",
+      "c1_hf_wrong_key_false_accept",
+      "c1_hf_paired_key_attribution",
+      "c1_hf_paired_final_image_quality",
+      "c1_hf_actual_dtype_integrity"
     ],
     "metric_split_bindings": [
       {
@@ -195,9 +202,51 @@
           "end_to_end_check"
         ],
         "metric_id": "rescue_global_fpr_safety"
+      },
+      {
+        "allowed_splits": [
+          "content_threshold_fit"
+        ],
+        "metric_id": "c1_hf_tau_fit"
+      },
+      {
+        "allowed_splits": [
+          "untouched_confirmation"
+        ],
+        "metric_id": "c1_hf_primary_null_fixed_fpr"
+      },
+      {
+        "allowed_splits": [
+          "untouched_confirmation"
+        ],
+        "metric_id": "c1_hf_registered_tpr"
+      },
+      {
+        "allowed_splits": [
+          "untouched_confirmation"
+        ],
+        "metric_id": "c1_hf_wrong_key_false_accept"
+      },
+      {
+        "allowed_splits": [
+          "untouched_confirmation"
+        ],
+        "metric_id": "c1_hf_paired_key_attribution"
+      },
+      {
+        "allowed_splits": [
+          "untouched_confirmation"
+        ],
+        "metric_id": "c1_hf_paired_final_image_quality"
+      },
+      {
+        "allowed_splits": [
+          "untouched_confirmation"
+        ],
+        "metric_id": "c1_hf_actual_dtype_integrity"
       }
     ],
-    "registry_version": "ceg_wm_internal_metric_registry_v1"
+    "registry_version": "ceg_wm_internal_metric_registry_v2"
   },
   "schema_version": "ceg_wm_internal_execution_components_v1"
 }
