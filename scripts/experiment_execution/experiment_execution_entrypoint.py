@@ -45,6 +45,10 @@ THRESHOLD_FIT_FAILURE_CLASSES = frozenset(
     }
 )
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+C1_DEPENDENCY_LOCK_PATH = "requirements_c1_threshold_fit.txt"
+C1_DEPENDENCY_LOCK_SHA256 = (
+    "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
+)
 
 
 class ExperimentExecutionEntrypointError(ValueError):
@@ -100,22 +104,44 @@ def _load_and_replay_threshold_fit_record(source: Path) -> tuple[object, object,
 
 
 def _verified_dependency_versions(package_root: Path) -> tuple[dict[str, str], str]:
-    lock_path = package_root / "requirements_runtime_qualification.txt"
+    lock_path = package_root / C1_DEPENDENCY_LOCK_PATH
     try:
+        blob = lock_path.read_bytes()
         requirements = [
             line.split("==", 1)
-            for line in lock_path.read_text(encoding="utf-8").splitlines()
+            for line in blob.decode("utf-8").splitlines()
         ]
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise ExperimentExecutionEntrypointError(
             "verified dependency lock is unreadable"
         ) from exc
-    if any(len(item) != 2 for item in requirements):
+    if (
+        sha256(blob).hexdigest() != C1_DEPENDENCY_LOCK_SHA256
+        or len(requirements) != 62
+        or any(len(item) != 2 for item in requirements)
+    ):
         raise ExperimentExecutionEntrypointError(
-            "verified dependency lock is not exact"
+            "verified C1 dependency lock identity or closure drifted"
         )
     dependency_versions: dict[str, str] = {}
     for distribution, expected_version in requirements:
+        normalized = re.sub(r"[-_.]+", "-", distribution).lower()
+        if (
+            re.fullmatch(
+                r"[a-z0-9][a-z0-9-]*",
+                distribution,
+            )
+            is None
+            or re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9.+_-]*",
+                expected_version,
+            )
+            is None
+            or normalized in dependency_versions
+        ):
+            raise ExperimentExecutionEntrypointError(
+                "verified C1 dependency lock is not exact and unique"
+            )
         try:
             observed_version = metadata.version(distribution)
         except metadata.PackageNotFoundError as exc:
@@ -126,22 +152,13 @@ def _verified_dependency_versions(package_root: Path) -> tuple[dict[str, str], s
             raise ExperimentExecutionEntrypointError(
                 f"verified dependency version drifted: {distribution}"
             )
-        dependency_versions[distribution] = observed_version
-    if set(dependency_versions) != {
-        "accelerate",
-        "diffusers",
-        "huggingface-hub",
-        "numpy",
-        "Pillow",
-        "safetensors",
-        "torch",
-        "transformers",
-    }:
+        dependency_versions[normalized] = observed_version
+    if dependency_versions.get("torch") != "2.11.0+cu128":
         raise ExperimentExecutionEntrypointError(
-            "verified dependency distribution set drifted"
+            "verified C1 torch dependency drifted"
         )
     torch_import_version = str(torch.__version__)
-    if torch_import_version.split("+", 1)[0] != dependency_versions["torch"]:
+    if torch_import_version != dependency_versions["torch"]:
         raise ExperimentExecutionEntrypointError(
             "imported torch version differs from package metadata"
         )

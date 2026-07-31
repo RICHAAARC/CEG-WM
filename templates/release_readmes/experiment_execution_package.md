@@ -15,6 +15,13 @@ archive, adjacent delivery sidecar, embedded manifest, and exact revision. The
 trusted sidecar binds authority digests derived by the clean-revision builder;
 the Notebook does not supply or override them.
 
+The C1-specific `requirements_c1_threshold_fit.txt` is a complete 62-item
+Linux x86_64 / CPython 3.12 transitive lock for the frozen SD3.5 candidate.
+The bootstrap verifies the frozen lock identity before package import, reuses
+global packages only when every locked version is exact, otherwise installs
+the lock with dependency resolution disabled, and requires exact target
+distribution-set and version equality before importing torch or this package.
+
 One invocation runs exactly one explicitly selected frozen shard. Unit attempt
 records persist under exact revision/run/shard identity for resume, while each
 result or diagnostic ZIP is uniquely named. A resource or execution diagnostic

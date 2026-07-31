@@ -31,7 +31,7 @@ PACKAGE_ROOTS = (
 )
 PACKAGE_EXTRAS = (
     "pyproject.toml",
-    "requirements_runtime_qualification.txt",
+    "requirements_c1_threshold_fit.txt",
     "templates/release_readmes/experiment_execution_package.md",
     "scripts/experiment_execution/__init__.py",
     "scripts/experiment_execution/experiment_execution_entrypoint.py",
@@ -146,8 +146,10 @@ def test_builder_uses_exact_threshold_fit_allowlist_and_is_deterministic(
         "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
         "configs/experiments/c1_hf_threshold_fit_execution.json",
         "experiments/runners/c1_hf_threshold_fit.py",
+        "requirements_c1_threshold_fit.txt",
         "scripts/experiment_execution/experiment_execution_entrypoint.py",
     } <= names
+    assert "requirements_runtime_qualification.txt" not in names
     assert names == {
         *EXACT_FILES,
         "README.md",
@@ -235,7 +237,7 @@ def _bootstrap_command(
     fake_site = ephemeral_root.parent / "verified_dependency_metadata"
     fake_site.mkdir(exist_ok=True)
     for requirement in (
-        ROOT / "requirements_runtime_qualification.txt"
+        ROOT / "requirements_c1_threshold_fit.txt"
     ).read_text(encoding="utf-8").splitlines():
         distribution, version = requirement.split("==", 1)
         metadata_root = fake_site / (
@@ -249,8 +251,15 @@ def _bootstrap_command(
     environment["PYTHONPATH"] = os.pathsep.join(
         filter(None, (str(fake_site), environment.get("PYTHONPATH")))
     )
+    expected_torch = next(
+        requirement.split("==", 1)[1]
+        for requirement in (
+            ROOT / "requirements_c1_threshold_fit.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        if requirement.startswith("torch==")
+    )
     (fake_site / "sitecustomize.py").write_text(
-        "import torch\ntorch.__version__ = '2.11.0'\n",
+        f"import torch\ntorch.__version__ = {expected_torch!r}\n",
         encoding="utf-8",
     )
     completed = subprocess.run(
@@ -367,14 +376,12 @@ def test_resource_failure_and_second_resume_produce_distinct_artifacts(
     expected_dependencies = dict(
         line.split("==", 1)
         for line in (
-            ROOT / "requirements_runtime_qualification.txt"
+            ROOT / "requirements_c1_threshold_fit.txt"
         ).read_text(encoding="utf-8").splitlines()
     )
     environment_facts = outcome["execution_facts"]["environment"]
     assert environment_facts["dependency_versions"] == expected_dependencies
-    assert environment_facts["torch_import_version"].split("+", 1)[0] == (
-        expected_dependencies["torch"]
-    )
+    assert environment_facts["torch_import_version"] == expected_dependencies["torch"]
     record_root = (
         persistent
         / "threshold_fit_records"
@@ -567,6 +574,7 @@ def test_dependency_install_failure_precedes_package_import(
         environment={
             "CEG_WM_ROOT_KEY": "must-not-reach-pip",
             "HF_TOKEN": "must-not-reach-pip",
+            "PIP_EXTRA_INDEX_URL": "https://untrusted.invalid/simple",
         },
     )
     assert code == 3
@@ -584,8 +592,82 @@ def test_dependency_install_failure_precedes_package_import(
     assert "--requirement" in command
     assert "--target" in command
     assert "--cache-dir" in command
+    assert "--no-deps" in command
+    assert bootstrap.C1_PYPI_INDEX_URL in command
+    assert bootstrap.C1_PYTORCH_INDEX_URL in command
+    assert bootstrap.C1_NVIDIA_INDEX_URL in command
     assert "CEG_WM_ROOT_KEY" not in pip_environment
     assert "HF_TOKEN" not in pip_environment
+    assert "PIP_EXTRA_INDEX_URL" not in pip_environment
+    assert pip_environment["PIP_CONFIG_FILE"] == os.devnull
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("tamper_kind", ("missing", "extra", "version_drift"))
+def test_c1_dependency_lock_rejects_incomplete_or_drifted_closure(
+    tmp_path: Path,
+    tamper_kind: str,
+) -> None:
+    lines = (
+        ROOT / "requirements_c1_threshold_fit.txt"
+    ).read_text(encoding="utf-8").splitlines()
+    if tamper_kind == "missing":
+        lines.pop()
+    elif tamper_kind == "extra":
+        lines.append("unexpected-distribution==1.0.0")
+    else:
+        lines[0] = "accelerate==1.14.1"
+    lock_path = tmp_path / "requirements_c1_threshold_fit.txt"
+    lock_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(
+        bootstrap.ExperimentBootstrapError,
+        match="lock identity drifted",
+    ):
+        bootstrap._load_verified_dependency_lock(lock_path)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("tamper_kind", ("missing", "extra", "version_drift"))
+def test_dependency_target_requires_exact_distribution_set_and_versions(
+    tamper_kind: str,
+) -> None:
+    expected = {"alpha": "1.0", "beta": "2.0"}
+    observed = dict(expected)
+    if tamper_kind == "missing":
+        observed.pop("beta")
+    elif tamper_kind == "extra":
+        observed["gamma"] = "3.0"
+    else:
+        observed["beta"] = "2.1"
+    with pytest.raises(
+        bootstrap.ExperimentBootstrapError,
+        match="distribution set or versions differ",
+    ):
+        bootstrap._require_exact_target_distribution_versions(
+            observed,
+            expected,
+            target_kind="test",
+        )
+
+
+@pytest.mark.quick
+def test_experiment_execution_readme_excludes_non_c1_execution_routes() -> None:
+    readme = (
+        ROOT / "scripts/experiment_execution/README.md"
+    ).read_text(encoding="utf-8")
+    assert "C1 HF threshold-fit" in readme
+    assert "schema-v2" in readme
+    assert "requirements_c1_threshold_fit.txt" in readme
+    assert "complete transitive" in readme
+    assert "--no-deps" in readme
+    for forbidden in (
+        "schema-v1",
+        "runtime_qualification_bootstrap.py",
+        "build_runtime_qualification_package.py",
+        "python -m pip",
+        "runtime_qualification_runner",
+    ):
+        assert forbidden not in readme
 
 
 @pytest.mark.quick

@@ -42,6 +42,13 @@ ENTRYPOINT_PATH = (
 EVIDENCE_SCOPE = (
     "c1_hf_threshold_fit_execution_only_no_tau_approval_no_confirmation_access"
 )
+C1_DEPENDENCY_LOCK_PATH = "requirements_c1_threshold_fit.txt"
+C1_DEPENDENCY_LOCK_SHA256 = (
+    "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
+)
+C1_PYPI_INDEX_URL = "https://pypi.org/simple"
+C1_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+C1_NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
 EXACT_FILES = frozenset(
     {
         "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
@@ -96,7 +103,7 @@ EXACT_FILES = frozenset(
         "main/shared/normal_quantile_table20_float32_be.txt",
         "main/shared/rgb8.py",
         "pyproject.toml",
-        "requirements_runtime_qualification.txt",
+        C1_DEPENDENCY_LOCK_PATH,
         "runtime/__init__.py",
         "runtime/adapter.py",
         "runtime/backend.py",
@@ -766,12 +773,18 @@ def _normalized_distribution_name(value: str) -> str:
 
 def _load_verified_dependency_lock(path: Path) -> dict[str, tuple[str, str]]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        blob = path.read_bytes()
+        lines = blob.decode("utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as exc:
         raise ExperimentBootstrapError(
             "dependency_install",
             "verified dependency lock is unreadable",
         ) from exc
+    if sha256(blob).hexdigest() != C1_DEPENDENCY_LOCK_SHA256:
+        raise ExperimentBootstrapError(
+            "dependency_install",
+            "verified C1 dependency lock identity drifted",
+        )
     requirements: dict[str, tuple[str, str]] = {}
     for line in lines:
         match = re.fullmatch(
@@ -791,19 +804,13 @@ def _load_verified_dependency_lock(path: Path) -> dict[str, tuple[str, str]]:
                 "verified dependency lock contains a duplicate distribution",
             )
         requirements[normalized] = (distribution, version)
-    if set(requirements) != {
-        "accelerate",
-        "diffusers",
-        "huggingface-hub",
-        "numpy",
-        "pillow",
-        "safetensors",
+    if len(requirements) != 62 or requirements.get("torch") != (
         "torch",
-        "transformers",
-    }:
+        "2.11.0+cu128",
+    ):
         raise ExperimentBootstrapError(
             "dependency_install",
-            "verified dependency lock distribution set drifted",
+            "verified C1 dependency lock closure drifted",
         )
     return requirements
 
@@ -813,8 +820,28 @@ def _target_distribution_versions(target: Path) -> dict[str, str]:
     for distribution in metadata.distributions(path=[str(target)]):
         name = distribution.metadata.get("Name")
         if type(name) is str:
-            versions[_normalized_distribution_name(name)] = distribution.version
+            normalized = _normalized_distribution_name(name)
+            if normalized in versions:
+                raise ExperimentBootstrapError(
+                    "dependency_install",
+                    "dependency target contains duplicate distribution metadata",
+                )
+            versions[normalized] = distribution.version
     return versions
+
+
+def _require_exact_target_distribution_versions(
+    observed: Mapping[str, str],
+    expected: Mapping[str, str],
+    *,
+    target_kind: str,
+) -> None:
+    if dict(observed) != dict(expected):
+        raise ExperimentBootstrapError(
+            "dependency_install",
+            f"{target_kind} dependency distribution set or versions differ "
+            "from the verified lock",
+        )
 
 
 def _verify_imported_torch_version(expected_version: str) -> None:
@@ -825,7 +852,7 @@ def _verify_imported_torch_version(expected_version: str) -> None:
             "dependency_install",
             "verified torch runtime cannot be imported",
         ) from exc
-    imported_version = str(getattr(torch, "__version__", "")).split("+", 1)[0]
+    imported_version = str(getattr(torch, "__version__", ""))
     if imported_version != expected_version:
         raise ExperimentBootstrapError(
             "dependency_install",
@@ -841,8 +868,12 @@ def _prepare_verified_dependencies(
 ) -> Path | None:
     """Strictly reuse the lock or install it into ephemeral storage."""
 
-    lock_path = package_root / "requirements_runtime_qualification.txt"
+    lock_path = package_root / C1_DEPENDENCY_LOCK_PATH
     requirements = _load_verified_dependency_lock(lock_path)
+    expected_versions = {
+        normalized: version
+        for normalized, (_distribution, version) in requirements.items()
+    }
     reusable = True
     for distribution, version in requirements.values():
         try:
@@ -864,14 +895,11 @@ def _prepare_verified_dependencies(
     dependency_root = dependency_cache_root / lock_digest
     if dependency_root.exists():
         installed = _target_distribution_versions(dependency_root)
-        if any(
-            installed.get(normalized) != version
-            for normalized, (_distribution, version) in requirements.items()
-        ):
-            raise ExperimentBootstrapError(
-                "dependency_install",
-                "cached dependency versions differ from the verified lock",
-            )
+        _require_exact_target_distribution_versions(
+            installed,
+            expected_versions,
+            target_kind="cached",
+        )
         sys.path.insert(0, str(dependency_root))
         try:
             _verify_imported_torch_version(requirements["torch"][1])
@@ -886,6 +914,13 @@ def _prepare_verified_dependencies(
         "install",
         "--disable-pip-version-check",
         "--no-input",
+        "--no-deps",
+        "--index-url",
+        C1_PYPI_INDEX_URL,
+        "--extra-index-url",
+        C1_PYTORCH_INDEX_URL,
+        "--extra-index-url",
+        C1_NVIDIA_INDEX_URL,
         "--requirement",
         str(lock_path),
         "--target",
@@ -897,8 +932,10 @@ def _prepare_verified_dependencies(
         key: value
         for key, value in environment.items()
         if key not in {"CEG_WM_ROOT_KEY", "HF_TOKEN"}
+        and (not key.startswith("PIP_") or key == "PIP_NO_INDEX")
     }
     pip_environment["PIP_CACHE_DIR"] = str(cache_root)
+    pip_environment["PIP_CONFIG_FILE"] = os.devnull
     try:
         completed = subprocess.run(
             command,
@@ -918,14 +955,11 @@ def _prepare_verified_dependencies(
             "verified dependency installation failed",
         )
     installed = _target_distribution_versions(dependency_root)
-    if any(
-        installed.get(normalized) != version
-        for normalized, (_distribution, version) in requirements.items()
-    ):
-        raise ExperimentBootstrapError(
-            "dependency_install",
-            "installed dependency versions differ from the verified lock",
-        )
+    _require_exact_target_distribution_versions(
+        installed,
+        expected_versions,
+        target_kind="installed",
+    )
     sys.path.insert(0, str(dependency_root))
     try:
         _verify_imported_torch_version(requirements["torch"][1])

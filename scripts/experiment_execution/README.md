@@ -1,19 +1,44 @@
-# Experiment delivery and runtime qualification
+# C1 HF threshold-fit experiment execution
 
-## C1 HF threshold-fit execution package
+This directory's active delivery path is the schema-v2 C1 HF threshold-fit
+package. It executes one preregistered fit shard at an exact committed
+revision. It cannot approve tau, unlock untouched-confirmation data, or support
+a scientific claim by itself.
 
-`build_experiment_execution_package.py` builds a deterministic schema-v2 C1
-threshold-fit ZIP from one clean exact committed revision. It derives the
-candidate, execution, and fit-manifest digests from committed governed JSON
-blobs; callers cannot inject those authority values.
+## Frozen dependency closure
 
-The exact profile contains the threshold-fit entrypoint, its runner/import
-closure, `main/`, `runtime/`, and only the frozen C1 fit assets. It excludes
-the untouched-confirmation manifest, baselines, comparison protocol,
-synthetic runtime, old synthetic package tests, Notebook, governance tree,
-checked-in outputs, builder, and package-external bootstrap.
+`requirements_c1_threshold_fit.txt` is the C1-specific complete transitive
+dependency lock for Linux x86_64, CPython 3.12, and the frozen SD3.5 Colab GPU
+candidate. It contains 62 exact distributions, including
+`torch==2.11.0+cu128`, and has SHA-256
+`07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de`.
 
-Build after independent review from a clean commit to a new external path:
+The lock was generated from the eight frozen top-level requirements with pip's
+resolver in dry-run report mode. Resolution used PyPI, the official PyTorch
+cu128 index, and the official NVIDIA index, with CPython 3.12 ABI and explicit
+Linux wheel tags `manylinux_2_28_x86_64`, `manylinux_2_27_x86_64`,
+`manylinux_2_18_x86_64`, and `manylinux2014_x86_64`. The lock entries are the
+normalized, sorted name/version pairs from all 62 `install` records in that
+resolver report, not only the eight requested distributions.
+
+Before package import, the package-external bootstrap verifies the lock digest
+and exact syntax. It reuses the global environment only when every lock entry
+has the exact version. Otherwise it installs every locked distribution into
+ephemeral storage with `--no-deps`, then requires exact equality of the target
+distribution set and all versions. The entrypoint repeats the frozen-lock and
+installed-version checks and records all 62 versions plus the exact imported
+torch local version in the execution facts.
+
+## Build and execute
+
+`build_experiment_execution_package.py` reads only tracked blobs from one clean
+exact commit and writes a deterministic external ZIP plus adjacent delivery
+sidecar. Its exact allowlist includes the C1 lock and excludes the shared
+runtime-qualification lock, untouched-confirmation manifest, baselines,
+comparison protocol, synthetic runtime, governance, Notebook, checked-in
+outputs, builder, and package-external bootstrap.
+
+After independent review, build to a new path outside the repository:
 
 ```bash
 python scripts/experiment_execution/build_experiment_execution_package.py \
@@ -22,184 +47,18 @@ python scripts/experiment_execution/build_experiment_execution_package.py \
   --committed-revision '<exact 40-hex HEAD>'
 ```
 
-The adjacent deterministic sidecar binds the completed archive, embedded
-manifest, exact revision, builder-derived authority digests, formal
-entrypoint, and evidence scope. Independently record the SHA-256 of the
-external bootstrap, archive, sidecar, and embedded manifest before upload.
+Independently record the SHA-256 of the external bootstrap, archive, sidecar,
+and embedded manifest before upload. The thin output-free Colab Notebook passes
+those trust values, the exact revision, run ID, shard index, and Secrets to the
+separately distributed schema-v2 bootstrap. It does not install dependencies,
+unpack the archive, import the package, or validate its own result.
 
-`experiment_execution_bootstrap.py` verifies those external trust inputs,
-the exact allowlist, and every copied file before package import. Each
-invocation runs one explicitly selected threshold-fit shard. Persistent
-attempt records bind exact revision/run/shard and can resume, while each
-result or diagnostic ZIP uses a unique name and cannot overwrite history.
+Each invocation runs one frozen shard. Persistent attempt records bind exact
+revision, run, and shard identities for resume; every result or diagnostic ZIP
+uses a unique name. A bootstrap, resource, execution, exclusion, incomplete, or
+scientific diagnostic is not a successful shard and cannot be promoted into
+method evidence.
 
-The output-free Colab Notebook only supplies trust hashes, exact revision,
-run ID, shard index, and Secrets. Neither a shard result nor this delivery
-surface approves tau, unlocks confirmation data, or supports a scientific
-claim.
-
----
-
-This package is a revision-bound execution surface for the frozen SD3.5
-runtime candidate. It is not runtime/GPU evidence until the included runner
-finishes on a real supported GPU and the returned result zip is independently
-audited. Replay remains optional when the qualification evidence is not
-ambiguous and an independent audit identifies no concrete replay gap.
-
-Candidate `8b2344756c4c247906ff0d4eab68e46a773e13f5` has one independently
-audited `qualification / passed` result (`20260729T110628Z`). That result
-supports only the frozen SD3.5 runtime boundary; it is not LF/routing
-promotion, FPR, robustness, or scientific-effect evidence.
-
-Run only through the included qualification runner. The first run profile is
-`smoke`; `qualification` follows only after smoke succeeds. `replay` is
-optional. Model and package caches, temporary tensors, and uncompressed
-results must stay in the caller-supplied ephemeral root. Never persist an HF
-token, method key, model cache, or raw tensor in the result directory.
-
-The Colab entrypoint does not unpack or trust this archive directly. A
-separately reviewed, package-external
-`runtime_qualification_bootstrap.py`, bound to package schema version 1,
-must receive the full independently audited archive SHA-256 at run time.
-The bootstrap streams the Drive archive once into a unique ephemeral `xb`
-snapshot while computing that digest. A mismatch removes the snapshot without
-unpacking; a match causes all ZIP/manifest/file checks to use only the local
-snapshot before installing requirements or starting this package's runner. The
-bootstrap is deliberately excluded from this execution package, avoiding a
-self-verification loop.
-
-The runner catches ordinary Python/backend failures after it can resolve the
-requested result path and writes a minimal failure zip. A Python interpreter
-crash, an OS kill (including hard OOM), or an unwritable result filesystem is
-outside any in-process guarantee; report that case as incomplete/resource
-failure and do not manufacture a success archive in the Notebook.
-
-## Build from the final runtime candidate
-
-Run the builder only after the Batch-4 revision has been committed and the
-repository is clean. The builder rejects a non-HEAD revision, a dirty tree,
-untracked delivery files, unsafe paths, and missing allowlisted files. It reads
-tracked blobs from the exact commit rather than copying the working tree.
-
-```bash
-RUNTIME_CANDIDATE_REVISION="$(git rev-parse HEAD)"
-test -z "$(git status --porcelain)"
-PYTHONDONTWRITEBYTECODE=1 python \
-  scripts/experiment_execution/build_runtime_qualification_package.py \
-  --root . \
-  --runtime-candidate-revision "${RUNTIME_CANDIDATE_REVISION}" \
-  --output-zip \
-  "<outside-repository>/ceg_wm_runtime_execution_${RUNTIME_CANDIDATE_REVISION}.zip"
-```
-
-The final archive path is outside the repository. Upload that one archive to
-the revision-specific Google Drive `execution_packages/<revision>/` directory;
-do not rebuild it in Colab.
-
-Use the following fixed archive and Notebook-ingress rules:
-
-1. The sole authoritative immutable archive is
-   `execution_packages/<runtime_candidate_revision>/ceg_wm_runtime_execution_<runtime_candidate_revision>.zip`.
-   Never overwrite or modify a frozen revision-specific archive.
-2. `execution_packages/current/ceg_wm_runtime_execution.zip` is only the fixed
-   Notebook ingress alias. It is not revision or evidence authority.
-3. Create the alias by copying the authoritative archive byte for byte. Do not
-   rebuild, repack, recompress, or otherwise modify the zip for the alias.
-4. After the copy, compute SHA-256 for both files and require the digests to be
-   identical.
-5. The `current` path supplies no runtime identity. After extraction and
-   verification, only `runtime_execution_manifest.json` field
-   `runtime_candidate_revision` identifies the run.
-6. The Notebook writes results under
-   `runs/<runtime_candidate_revision>/<run_id>/`, using the verified manifest
-   revision. To change candidates, overwrite only the alias with a byte-for-byte
-   copy of another frozen authoritative archive and recheck equal SHA-256
-   digests. Never overwrite an existing authoritative archive or historical
-   results.
-
-## Run through the package-external bootstrap
-
-The repository copy of the schema-v1 bootstrap is:
-
-```text
-scripts/experiment_execution/runtime_qualification_bootstrap.py
-```
-
-Freeze and distribute that file separately, record its full SHA-256, and make
-the Notebook read it once, verify those bytes, write them with `xb` to a new
-`/content` snapshot, verify the snapshot again, and invoke only that snapshot.
-The expected package SHA-256 is pasted at run time from the independent
-delivery audit; do not read it from a replaceable sidecar stored beside the
-package.
-
-The bootstrap CLI accepts `--profile`, `--package-zip`,
-`--expected-package-sha256`, `--ephemeral-root`, `--persistent-root`, and an
-optional `--replay-source`. It reads `HF_TOKEN` and `CEG_WM_ROOT_KEY` only from
-the process environment. It writes neither value to an archive, log, Drive
-file, nor unpacked package.
-
-Before any pip invocation, package import, or runner launch, the bootstrap
-checks the complete archive SHA-256, ZIP path/member/size/symlink safety,
-manifest schema/profile/readiness/revision, allowlist, complete file set,
-per-file size/hash, and exact frozen requirements. Only then does it install
-the dependencies into ephemeral cache space and start the runner.
-
-Runner exit `0`, `1`, or `2` retains a validated formal result under
-`runs/<runtime_candidate_revision>/<run_id>/`. An ingress, unpacking,
-manifest, pip, or pre-runner failure instead produces exactly one independent
-`bootstrap_failure.json` inside
-`bootstrap_failures/<run_id>/ceg_wm_runtime_bootstrap_failure_<run_id>.zip`.
-That diagnostic schema is not a qualification result and cannot support a
-runtime-stage claim.
-
-## Direct runner contract inside an independently unpacked package
-
-Unpack into a new ephemeral directory. Set `PYTHONDONTWRITEBYTECODE=1` before
-starting Python so package verification does not see interpreter cache files.
-Model and pip caches must also remain on ephemeral storage, never Google Drive.
-
-```bash
-export PYTHONDONTWRITEBYTECODE=1
-export HF_HOME=/content/hf_cache
-export PIP_CACHE_DIR=/content/pip_cache
-python -m pip install --cache-dir "${PIP_CACHE_DIR}" \
-  --requirement requirements_runtime_qualification.txt
-export HF_TOKEN='<read from Colab Secret>'
-export CEG_WM_ROOT_KEY='<read from Colab Secret>'
-python -m scripts.experiment_execution.runtime_qualification_runner \
-  --profile smoke \
-  --run-id '<UTC run id>' \
-  --package-root . \
-  --runtime-candidate-revision '<40 hex revision from manifest>' \
-  --result-zip /content/ceg_wm_runtime/result.zip \
-  --ephemeral-root /content/ceg_wm_runtime \
-  --persistent-root /content/drive/MyDrive/CEG-WM/runtime_qualification
-```
-
-`--result-zip`, `--ephemeral-root`, and `--persistent-root` are explicit
-required arguments and have no runner defaults. The result target must be
-strictly inside the ephemeral root; the ephemeral and persistent roots must
-be disjoint in both ancestor directions. Only `replay` accepts
-`--replay-source`, and that source must be strictly inside the persistent
-root. Smoke and qualification must omit it. The backend receives the same
-persistent root and independently rejects a model-cache root that equals,
-contains, or is contained by it. The Notebook therefore produces the runner
-zip under ephemeral storage first and only then copies it into the
-manifest-revision/run-ID Drive directory.
-
-The runner independently re-verifies the complete manifest file set, file hashes/sizes,
-revision, requirements lock, and every installed dependency version before
-importing `main` or `runtime`. Exit `0` means the requested profile passed;
-exit `1` means a completed runtime/resource/integrity/budget/Q/K/determinism
-failure; exit `2` means incomplete/preflight failure. Both nonzero exits should
-still produce a failure result zip when the Python process and result storage
-remain usable. Never reinterpret a missing archive, a nonzero exit, or a
-`failed` summary as success.
-
-The result zip contains only `run_summary.json`,
-`environment_summary.json`, `runtime_checks.jsonl`, and `failures.jsonl`.
-`run_id`, profile, runtime candidate revision, seed, prompt digest, and key
-control role are recorded in the result. The optional `replay` profile also
-requires an existing passed qualification zip for the same revision,
-seed/prompt identity, and record digests; it independently reruns the complete
-qualification path.
+Historical non-C1 runtime-qualification materials remain in their explicitly
+named repository files. They are not part of this C1 schema-v2 entrypoint or
+its authority; this README intentionally provides no historical commands.

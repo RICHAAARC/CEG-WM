@@ -83,7 +83,7 @@ EXACT_FILES = frozenset(
         "main/shared/normal_quantile_table20_float32_be.txt",
         "main/shared/rgb8.py",
         "pyproject.toml",
-        "requirements_runtime_qualification.txt",
+        "requirements_c1_threshold_fit.txt",
         "runtime/__init__.py",
         "runtime/adapter.py",
         "runtime/backend.py",
