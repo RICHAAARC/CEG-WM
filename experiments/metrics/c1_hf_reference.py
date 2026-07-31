@@ -101,7 +101,7 @@ C1_HF_FORMULA_IMPLEMENTATION_IDENTITIES = {
     ),
 }
 C1_HF_EXPECTED_SPECIFICATION_DIGEST = (
-    "aa21c78233926049fe3cc1d0f8ec14469330fcaa33174558b45254153a10f3be"
+    "4a76e8b9aa9535a865f212a109b140332e05c9fa7eb57fca4ddca8671f98add9"
 )
 C1_HF_THRESHOLD_RULE = "float64_nextafter_above_fit_primary_null_maximum"
 C1_HF_DECISION_COMPARISON = "score_greater_than_or_equal_to_tau"

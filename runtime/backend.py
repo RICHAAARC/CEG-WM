@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from math import isfinite
 from typing import Callable, Protocol, runtime_checkable
 
@@ -16,6 +17,29 @@ class RuntimeBackendError(RuntimeError):
 
 
 GenerationCallback = Callable[[int, torch.Tensor], torch.Tensor]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeGenerationPromptIdentity:
+    """UTF-8 identity of the exact prompts snapshotted for one generation."""
+
+    prompt_digest: str
+    negative_prompt_digest: str
+
+    @classmethod
+    def from_prompts(
+        cls,
+        prompt: str,
+        negative_prompt: str,
+    ) -> "RuntimeGenerationPromptIdentity":
+        if type(prompt) is not str or type(negative_prompt) is not str:
+            raise RuntimeBackendError("generation prompts must be text")
+        return cls(
+            prompt_digest=sha256(prompt.encode("utf-8")).hexdigest(),
+            negative_prompt_digest=sha256(
+                negative_prompt.encode("utf-8")
+            ).hexdigest(),
+        )
 
 
 @dataclass(frozen=True, slots=True)

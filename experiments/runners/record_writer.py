@@ -44,6 +44,18 @@ from experiments.protocol.internal_validation import (
     FrozenInternalValidationProtocol,
     validate_run_case_record_collection,
 )
+from experiments.protocol.c1_hf_threshold_fit_records import (
+    C1_HF_THRESHOLD_FIT_MAXIMUM_ATTEMPTS,
+    C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+    C1_HF_THRESHOLD_FIT_SPLIT,
+    C1HfThresholdFitAttemptRecord,
+    C1HfThresholdFitRecordIdentity,
+    C1HfThresholdFitUnitRecordCollection,
+    canonical_c1_hf_threshold_fit_record_bytes,
+    derive_c1_hf_threshold_fit_attempt_id,
+    load_c1_hf_threshold_fit_record_collection,
+    validate_c1_hf_threshold_fit_record_collection,
+)
 
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -53,6 +65,140 @@ _SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 class GovernedRecordWriterError(ValueError):
     """A record write, resume, or replay boundary failed closed."""
+
+
+class C1HfThresholdFitRecordWriter:
+    """Typed, incremental, atomic writer for exactly one pre-tau C1 unit."""
+
+    def __init__(
+        self,
+        *,
+        records_root: str | Path,
+        identity: C1HfThresholdFitRecordIdentity,
+    ) -> None:
+        if type(identity) is not C1HfThresholdFitRecordIdentity:
+            raise GovernedRecordWriterError("C1 record identity exact type is required")
+        identity.validate()
+        root = Path(records_root)
+        if not root.is_absolute():
+            raise GovernedRecordWriterError("records_root must be absolute")
+        self._identity = deepcopy(identity)
+        self._path = (
+            root
+            / identity.run_id
+            / "threshold_fit"
+            / f"shard_{identity.shard_index:02d}"
+            / f"unit_{identity.unit_index:04d}.json"
+        )
+        self._lock_path = self._path.parent / f".{self._path.name}.lock"
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def load(self) -> C1HfThresholdFitUnitRecordCollection | None:
+        with self._locked():
+            if not self._path.exists():
+                return None
+            return self._load_unlocked()
+
+    def append_attempt(
+        self,
+        attempt: C1HfThresholdFitAttemptRecord,
+    ) -> C1HfThresholdFitUnitRecordCollection:
+        if type(attempt) is not C1HfThresholdFitAttemptRecord:
+            raise GovernedRecordWriterError("C1 attempt exact type is required")
+        attempt.validate()
+        with self._locked():
+            existing = self._load_unlocked() if self._path.exists() else None
+            prior = existing.attempts if existing is not None else ()
+            for persisted in prior:
+                if persisted.attempt_id != attempt.attempt_id:
+                    continue
+                if persisted == attempt:
+                    return existing  # type: ignore[return-value]
+                raise GovernedRecordWriterError("C1 attempt identity conflict")
+            if prior:
+                terminal = prior[-1].status in {"success", "excluded"} or (
+                    prior[-1].failure_class
+                    in {"execution_failure", "scientific_failure"}
+                )
+                if len(prior) >= C1_HF_THRESHOLD_FIT_MAXIMUM_ATTEMPTS or terminal:
+                    raise GovernedRecordWriterError(
+                        "C1 attempt continues after terminal outcome"
+                    )
+            expected_index = len(prior)
+            if (
+                attempt.attempt_index != expected_index
+                or attempt.attempt_id
+                != derive_c1_hf_threshold_fit_attempt_id(
+                    self._identity,
+                    expected_index,
+                )
+            ):
+                raise GovernedRecordWriterError("C1 attempt sequence identity drifted")
+            collection = C1HfThresholdFitUnitRecordCollection(
+                schema_version=C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+                split=C1_HF_THRESHOLD_FIT_SPLIT,
+                identity=deepcopy(self._identity),
+                attempts=(*prior, attempt),
+            )
+            validate_c1_hf_threshold_fit_record_collection(
+                collection,
+                expected_identity=self._identity,
+            )
+            self._write_atomic(collection)
+            return collection
+
+    def _load_unlocked(self) -> C1HfThresholdFitUnitRecordCollection:
+        if not self._path.is_file() or self._path.is_symlink():
+            raise GovernedRecordWriterError("C1 record path must be a regular file")
+        try:
+            return load_c1_hf_threshold_fit_record_collection(
+                self._path,
+                expected_identity=self._identity,
+            )
+        except ValueError as exc:
+            raise GovernedRecordWriterError("C1 record replay failed closed") from exc
+
+    def _write_atomic(
+        self,
+        collection: C1HfThresholdFitUnitRecordCollection,
+    ) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        payload = canonical_c1_hf_threshold_fit_record_bytes(collection)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix=f".{self._path.name}.",
+                suffix=".tmp",
+                dir=self._path.parent,
+                delete=False,
+            ) as handle:
+                temporary_path = Path(handle.name)
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, self._path)
+            directory_fd = os.open(self._path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            if temporary_path is not None and temporary_path.exists():
+                temporary_path.unlink()
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock_path.open("a+b") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass(frozen=True, slots=True)

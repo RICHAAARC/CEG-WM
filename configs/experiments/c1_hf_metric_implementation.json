@@ -1,7 +1,7 @@
 {
   "schema_version": "ceg_wm_c1_hf_metric_implementation_binding_v2",
   "c1_specification_path": "configs/experiments/c1_hf_reference_run.json",
-  "c1_specification_digest": "aa21c78233926049fe3cc1d0f8ec14469330fcaa33174558b45254153a10f3be",
+  "c1_specification_digest": "4a76e8b9aa9535a865f212a109b140332e05c9fa7eb57fca4ddca8671f98add9",
   "protocol_digest": "e05cab6af8adf4413bd33d8fca8226103ac5ed617208cdb41e57c0f6cb0f984d",
   "split_manifest_digests": {
     "content_threshold_fit": "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9",
@@ -76,7 +76,7 @@
   },
   "formula_identity_digest": "07f0d846fc67f20f226de66b9c0fe1226abbeca6918d40013af107a97c5c3acd",
   "implementation_module_path": "experiments/metrics/c1_hf_reference.py",
-  "implementation_source_sha256": "debde265d0edb11efac127097c640c3328ea7dd867b5c5dd80ff4178c44edb6c",
+  "implementation_source_sha256": "bf3b56a3e2becfef0301c36a15f0690e52c7bc03008ca76faec0e6c5340af394",
   "implementation_symbols": [
     {
       "metric_id": "c1_hf_tau_fit",
@@ -109,5 +109,5 @@
   ],
   "formal_confirmation_entrypoint": "evaluate_c1_hf_confirmation_metrics",
   "confirmation_cross_input_validation": "required_fit_tau_and_raw_rgb8_replay_before_confirmation_results",
-  "binding_digest": "948a3f4f43c2964a6c996e56744b39c1a933552bce3a947b01f0aa234e4290ef"
+  "binding_digest": "87ebffaf28ba54b90299c5ba1b1f74319cb65c690bbf5f1457cb8c0c2507b0fc"
 }

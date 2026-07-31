@@ -220,7 +220,7 @@ def test_c1_metric_binding_binds_formula_registry_source_and_safe_dependencies()
     binding = _binding()
     assert (
         binding.c1_specification_digest
-        == "aa21c78233926049fe3cc1d0f8ec14469330fcaa33174558b45254153a10f3be"
+        == "4a76e8b9aa9535a865f212a109b140332e05c9fa7eb57fca4ddca8671f98add9"
     )
     assert binding.implementation_source_sha256 == hashlib.sha256(
         C1_METRIC_MODULE.read_bytes()

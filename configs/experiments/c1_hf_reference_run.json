@@ -86,7 +86,7 @@
       },
       {
         "path": "runtime/__init__.py",
-        "sha256": "58457f91867e3a190014fefa0c34cc4787009b0ee42101df7accfd58407cb6ca"
+        "sha256": "ba885b3a6c1f4e02dcd1960f443025f2683b1c79ee846fbea9db3f963f4069b7"
       },
       {
         "path": "runtime/adapter.py",
@@ -94,7 +94,7 @@
       },
       {
         "path": "runtime/backend.py",
-        "sha256": "0b7fc3184299e05a9abacdbf919bb6c29dff05c9f2185ce88265b8c8d9d0db1a"
+        "sha256": "d174a342450af4c31269fe68744f0c19f9cef0b8a3b6e1f20ce3c7cc4b5392f7"
       },
       {
         "path": "runtime/configuration.py",
@@ -110,10 +110,10 @@
       },
       {
         "path": "runtime/sd35_backend.py",
-        "sha256": "77d99fa2453a0a337f876bf57df1fb6d0ab7a421566512ba53b1f8a3c477ecd6"
+        "sha256": "5c74dc3fcad2afd040fdd0a94e27cda4db506710c14b79c920756a7cabb3183b"
       }
     ],
-    "method_source_bundle_digest": "5b19b4479681baa87c06fc3b5ce1c1f957c0a6c83cf1138cad0a839e0d320090",
+    "method_source_bundle_digest": "42c52c4b1cc3fdbc673e610e254b0a39d570e9a96b24bd16d9b634ca32144391",
     "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
     "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
     "hf_formal_component_identities": [
@@ -168,7 +168,7 @@
       "absence_semantics": "c1_execution_preflight_fail_closed",
       "c1_protocol_status": "not_yet_materialized_no_result_claim"
     },
-    "candidate_binding_digest": "cd1a5f206b1d7ace344505e263e6f73a40775762fc333cb836bfbc1d4b3fd4d3"
+    "candidate_binding_digest": "0962b8a2915c1d9c0b083bd86629b5ec0f337cb0951eeafe1a751ee84d275f5e"
   },
   "method_execution": {
     "write_identity": "hf_sparse_tail_registered_key_write",

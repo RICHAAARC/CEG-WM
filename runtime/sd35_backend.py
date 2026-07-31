@@ -20,6 +20,7 @@ from .backend import (
     RuntimeDetectionConditioning,
     RuntimeDetectionScheduleStep,
     RuntimeDeviceCapabilities,
+    RuntimeGenerationPromptIdentity,
     RuntimeQkForwardIdentity,
     RuntimeVaeFactors,
     RuntimeVaePosterior,
@@ -81,6 +82,10 @@ class Sd35PipelineBackend:
         self._pipeline: Any | None = None
         self._scheduler_type: type[Any] | None = None
         self._detection_scheduler: Any | None = None
+        self._generation_running = False
+        self._generation_prompt_identity: RuntimeGenerationPromptIdentity | None = None
+        self._clear_prompt_after_generation = False
+        self._requires_generation_prompt_selection = False
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
         return RuntimeDeviceCapabilities(
@@ -178,12 +183,66 @@ class Sd35PipelineBackend:
             raise Sd35BackendError("SD3.5 backend is not prepared")
         return self._configuration, self._device, self._pipeline
 
+    def set_generation_prompts(
+        self,
+        prompt: str,
+        negative_prompt: str = "",
+    ) -> RuntimeGenerationPromptIdentity:
+        """Bind one C1 prompt after preparation without reloading the model."""
+
+        self._prepared()
+        if self._generation_running:
+            raise Sd35BackendError("generation prompts cannot change while running")
+        if type(prompt) is not str or not prompt or negative_prompt != "":
+            raise Sd35BackendError(
+                "C1 generation requires nonempty prompt and exact empty negative prompt"
+            )
+        try:
+            identity = RuntimeGenerationPromptIdentity.from_prompts(
+                prompt,
+                negative_prompt,
+            )
+        except RuntimeBackendError as exc:
+            raise Sd35BackendError("generation prompt identity is invalid") from exc
+        self._prompt = prompt
+        self._negative_prompt = negative_prompt
+        self._generation_prompt_identity = identity
+        self._clear_prompt_after_generation = True
+        self._requires_generation_prompt_selection = False
+        return identity
+
     def run_generation(
         self,
         initial_latent: torch.Tensor,
         callback: GenerationCallback,
     ) -> torch.Tensor:
         configuration, _device, pipeline = self._prepared()
+        if self._generation_running:
+            raise Sd35BackendError("overlapping generation is forbidden")
+        if (
+            self._requires_generation_prompt_selection
+            and self._generation_prompt_identity is None
+        ):
+            raise Sd35BackendError(
+                "next C1 generation requires an explicit per-unit prompt"
+            )
+        try:
+            prompt_identity = self._generation_prompt_identity or (
+                RuntimeGenerationPromptIdentity.from_prompts(
+                    self._prompt,
+                    self._negative_prompt,
+                )
+            )
+        except RuntimeBackendError as exc:
+            raise Sd35BackendError("generation prompt snapshot is invalid") from exc
+        prompt_snapshot = self._prompt
+        negative_prompt_snapshot = self._negative_prompt
+        if prompt_identity != RuntimeGenerationPromptIdentity.from_prompts(
+            prompt_snapshot,
+            negative_prompt_snapshot,
+        ):
+            raise Sd35BackendError("generation prompt snapshot identity drifted")
+        self._generation_running = True
 
         def on_step_end(
             _pipeline: Any,
@@ -200,8 +259,8 @@ class Sd35PipelineBackend:
         try:
             with torch.inference_mode():
                 output = pipeline(
-                    prompt=self._prompt,
-                    negative_prompt=self._negative_prompt,
+                    prompt=prompt_snapshot,
+                    negative_prompt=negative_prompt_snapshot,
                     latents=initial_latent,
                     num_inference_steps=configuration.inference_steps,
                     guidance_scale=configuration.guidance_scale,
@@ -214,6 +273,14 @@ class Sd35PipelineBackend:
                 )
         except Exception as exc:
             raise Sd35BackendError("SD3.5 generation failed") from exc
+        finally:
+            self._generation_running = False
+            if self._clear_prompt_after_generation:
+                self._prompt = ""
+                self._negative_prompt = ""
+                self._generation_prompt_identity = None
+                self._clear_prompt_after_generation = False
+                self._requires_generation_prompt_selection = True
         latent = getattr(output, "images", None)
         if not isinstance(latent, torch.Tensor):
             raise Sd35BackendError("SD3.5 generation did not return a latent tensor")
@@ -402,9 +469,16 @@ class Sd35PipelineBackend:
         )
 
     def close(self) -> None:
+        if self._generation_running:
+            raise Sd35BackendError("backend cannot close during generation")
         self._detection_scheduler = None
         self._pipeline = None
         self._configuration = None
         self._device = None
+        self._prompt = ""
+        self._negative_prompt = ""
+        self._generation_prompt_identity = None
+        self._clear_prompt_after_generation = False
+        self._requires_generation_prompt_selection = False
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

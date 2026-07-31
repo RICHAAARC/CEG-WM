@@ -1,0 +1,60 @@
+{
+  "schema_version": "ceg_wm_c1_hf_threshold_fit_execution_v1",
+  "run_phase_id": "c1_hf_threshold_fit_v1",
+  "accessible_split": "content_threshold_fit",
+  "forbidden_splits": [
+    "untouched_confirmation"
+  ],
+  "authorization_base_revision": "309b3be549409e3d1e16ea9c1ee9c2c9e33c0bf7",
+  "c1_specification_path": "configs/experiments/c1_hf_reference_run.json",
+  "c1_specification_digest": "4a76e8b9aa9535a865f212a109b140332e05c9fa7eb57fca4ddca8671f98add9",
+  "prompt_roster_path": "configs/experiments/c1_hf_prompt_roster.json",
+  "prompt_roster_file_sha256": "102f71bc3cf4021002dd4eb4763026c441084e5941e529d5909fca7ebf23e11a",
+  "dataset_snapshot_path": "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
+  "dataset_snapshot_sha256": "fab29e41bb512a169b56acab4cf2a41dcb675e285df2efcde6640c7dd3c440eb",
+  "fit_manifest_path": "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
+  "fit_manifest_file_sha256": "52af2c75bd0513c6eace971fb098c203154cee05ca27d811ece12ec85b8911b5",
+  "fit_manifest_digest": "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9",
+  "component_registry_path": "configs/experiments/internal_execution_components.json",
+  "method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
+  "metric_registry_digest": "9bfe31e8b163f4aa20a8ed058726ebad2a7b0ee3f0e4ee7d2566f1854beebb61",
+  "metric_implementation_path": "configs/experiments/c1_hf_metric_implementation.json",
+  "metric_implementation_binding_digest": "87ebffaf28ba54b90299c5ba1b1f74319cb65c690bbf5f1457cb8c0c2507b0fc",
+  "metric_implementation_source_sha256": "bf3b56a3e2becfef0301c36a15f0690e52c7bc03008ca76faec0e6c5340af394",
+  "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
+  "runtime_config_sha256": "a097e826551dfa74601defef406d027cd6428946894f85012d2c65268b0bff1f",
+  "runtime_qualification_revision": "8b2344756c4c247906ff0d4eab68e46a773e13f5",
+  "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+  "detector_mode": "hf_only",
+  "source_cluster_count": 4096,
+  "shard_count": 16,
+  "source_clusters_per_shard": 256,
+  "shard_assignment": "ascending_materialized_assignment_index",
+  "maximum_record_attempts_per_unit": 3,
+  "early_stopping": "forbidden",
+  "resource_plan": {
+    "accelerator_count": 1,
+    "selected_device": "cuda:0",
+    "accelerator_model_policy": "model_agnostic_no_exact_gpu_identity_gate",
+    "minimum_vram_bytes": 23622320128,
+    "minimum_vram_basis": "22_gib_floor_below_recorded_colab_l4_23034_mib_reference",
+    "per_shard_walltime_planning_cap_seconds": 86400,
+    "walltime_semantics": "planning_cap_only_not_observed_runtime"
+  },
+  "failure_classes": [
+    "resource_failure",
+    "execution_failure",
+    "scientific_failure"
+  ],
+  "invocation_policy": {
+    "mode": "explicit_user_colab_run_only",
+    "required_flag": "user_colab_run",
+    "local_or_task_agent_invocation": "prohibited"
+  },
+  "resume_policy": {
+    "explicit_shard_index_required": true,
+    "incremental_unit_attempt_persistence_required": true
+  },
+  "claim_boundary": "execution_preparation_only_no_gpu_run_no_scientific_result",
+  "execution_config_digest": "a5d1c48bffcd95b9530afd056e2e5559e0334024253dc94c4cade52924e836fa"
+}
