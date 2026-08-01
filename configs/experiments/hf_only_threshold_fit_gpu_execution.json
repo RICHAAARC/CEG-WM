@@ -7,7 +7,7 @@
   ],
   "authorization_base_revision": "309b3be549409e3d1e16ea9c1ee9c2c9e33c0bf7",
   "hf_only_reference_specification_path": "configs/experiments/hf_only_reference_validation.json",
-  "hf_only_reference_specification_digest": "f5f8dc60ff88ca9f13e74342047e9f503a3454d3c5c82c785e6d23585f7728bb",
+  "hf_only_reference_specification_digest": "dce7479c5969567a118db250f81de6790590ecf416c2cca9ce68ddd6d325b483",
   "prompt_roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
   "prompt_roster_file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f",
   "dataset_snapshot_path": "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
@@ -19,8 +19,8 @@
   "method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
   "metric_registry_digest": "f6f6cf5914f27bdf26ac0c6fb8bc3930adb502ba80dd8b698dfea82555efe855",
   "metric_implementation_path": "configs/experiments/hf_only_reference_metrics.json",
-  "metric_implementation_binding_digest": "560e517b7645fbf5cc1f8915bab2c8aa4e32b4b58bf31de02f9b592e3b7b7bdc",
-  "metric_implementation_source_sha256": "c2449b98faf7025224f6a4a167ee17ee7bb732e7e8bf2674364c066f8fefe4fe",
+  "metric_implementation_binding_digest": "990a8bbc039581bcfc4dcbebb5d25ad5b5e1496340b72a8657080b6987dafc52",
+  "metric_implementation_source_sha256": "8c3900d4b49474f4b43dac7677f73c85cd6326ba814e549be983bbe9811c5675",
   "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
   "runtime_config_sha256": "a097e826551dfa74601defef406d027cd6428946894f85012d2c65268b0bff1f",
   "runtime_qualification_revision": "8b2344756c4c247906ff0d4eab68e46a773e13f5",
@@ -56,5 +56,5 @@
     "incremental_unit_attempt_persistence_required": true
   },
   "claim_boundary": "execution_preparation_only_no_gpu_run_no_scientific_result",
-  "execution_config_digest": "5567445a625a40c8e33fe69a45d4eb297fc102b31e964f6fd7c7ad36876212af"
+  "execution_config_digest": "8f07441b793853714df90e410f8041cd6cd0da6227cb35d598352130e0fa8538"
 }

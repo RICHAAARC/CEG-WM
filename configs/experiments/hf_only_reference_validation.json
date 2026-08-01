@@ -110,10 +110,10 @@
       },
       {
         "path": "runtime/sd35_backend.py",
-        "sha256": "418321e16a669f7ee47cd202209f4ef23e34d149df4bf216cdeb3aa0bddb87e4"
+        "sha256": "85a2e33600f9aa4dc974a35fc1d02c4f266c1fb2590b03c1851259c806129108"
       }
     ],
-    "method_source_bundle_digest": "94564d9bc894cd398d3a2f1147e85bd5ba50c207648e6fabd00b2b263227e999",
+    "method_source_bundle_digest": "d51cc9f5f9e4177068e05a795a59e4d04f5d724a3e3b5cf36acca672f2633ef8",
     "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
     "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
     "hf_formal_component_identities": [
@@ -168,7 +168,7 @@
       "absence_semantics": "hf_only_threshold_fit_gpu_execution_preflight_fail_closed",
       "hf_only_reference_protocol_status": "not_yet_materialized_no_result_claim"
     },
-    "candidate_binding_digest": "2f062edf332425e8b7e05e4ff0e0f9b97606ca4a48e44f22b532383d16813a61"
+    "candidate_binding_digest": "8b3c8aee65e51e2f45a274c93b4c0147ca9d87f89bf239ce844fb1f20fd90299"
   },
   "method_execution": {
     "write_identity": "hf_sparse_tail_registered_key_write",
