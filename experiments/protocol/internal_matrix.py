@@ -122,7 +122,7 @@ RESPONSIBILITY_VALIDATION_MATRIX = (
             "end_to_end_check",
         ),
         ("combined_tpr", "combined_primary_null_fpr", "hf_non_degradation", "wrong_key_rate"),
-        ("hf_only_c0", "wrong_key", "unwatermarked"),
+        ("hf_only_standardized_score_control", "wrong_key", "unwatermarked"),
         ("content_branch_promotion_gate_passed", "content_threshold_gate_passed"),
         (
             "detector_trace",

@@ -15,9 +15,10 @@ FORBIDDEN_WEAK_TEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 FORBIDDEN_ORDINAL_IDENTITY_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:[acrs](?:[-_]?\d+)[a-z]?(?:[-_][a-z0-9]+)?|"
-    r"(?:runtime[-_ ]*)?batch[-_ ]?\d+|stage[-_ ]?\d+)(?![A-Za-z0-9_])|"
-    r"(?<![A-Za-z0-9_])c\d+_[a-z0-9_]+",
+    r"(?<![A-Za-z0-9])(?:[ap](?:[-_]?\d+)[a-z]?(?:[-_][a-z0-9]+)*|"
+    r"[crs](?:[-_]?\d+)[a-z]?(?:[-_][a-z0-9]+)*|"
+    r"(?:runtime[-_ ]*)?batch[-_ ]?\d+|stage[-_ ]?\d+)"
+    r"(?![A-Za-z0-9_])",
     re.IGNORECASE,
 )
 _LOCAL_MATH_NOTATION_PATTERN = re.compile(
@@ -99,6 +100,12 @@ def has_weak_semantic_token(name: str) -> bool:
 def has_weak_semantic_text(text: str) -> bool:
     """判断注释、docstring 或 Notebook source 是否包含独立弱语义词。"""
     return bool(FORBIDDEN_WEAK_TEXT_PATTERN.search(_scrub_allowed_literals(text)))
+
+
+def has_weak_semantic_identity_value(text: str) -> bool:
+    """Reject a weak token only when it is the complete formal identity value."""
+    scrubbed = _scrub_allowed_literals(text).strip()
+    return bool(scrubbed and FORBIDDEN_WEAK_TEXT_PATTERN.fullmatch(scrubbed))
 
 
 def has_ordinal_identity_text(text: str) -> bool:

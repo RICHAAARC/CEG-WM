@@ -42,7 +42,7 @@ Notebook 与 repository module 的跨边界数据
 | `persisted_protocol` | 进入配置、records、manifests 或稳定序列化接口的字段。 |
 | `evidence_bearing` | 可以直接参与 governed artifact 或 supported claim 证据链的字段。 |
 
-等级使用语义名称，不使用 `level_1`、`p1` 或数字阶段名。每个登记字段必须有非空说明。
+等级使用语义名称，不使用机械等级编号、弱序号缩写或数字阶段名。每个登记字段必须有非空说明。
 
 ## 字段登记表
 

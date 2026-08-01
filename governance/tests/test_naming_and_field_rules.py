@@ -48,20 +48,48 @@ def test_ordinal_work_package_identities_are_rejected() -> None:
         "A-2",
         "A3a",
         "A3b",
+        "a3b_metric",
+        "A3b-metric",
         "C0",
         "C1-P",
         "C1-M",
         "C1-E",
         "c1_specification_digest",
         "Runtime Batch 4",
+        "Batch 3",
+        "Batch_3",
+        "Batch-3",
+        "RuntimeBatch3",
+        "stage_3",
         "A_1",
         "C_1",
         "R_1",
         "S_1",
+        "P_1",
+        "P-2",
+        "p_1_metrics",
+        "S1_metrics",
+        "S-2-gate",
+        "r1_candidate_semantics_revision",
+        "c1_threshold_fit_metrics",
         "batch_12",
         "stage_8",
+        "business_a2_candidate",
+        "metrics_c1_threshold_fit",
+        "pipeline_r1_revision",
+        "gate_s2_candidate",
+        "prefix_a3b_metric",
+        "prefix_p_1_metric",
+        "test_a2_candidate_behavior",
     )
     assert all(has_ordinal_identity_text(value) for value in forbidden)
+
+
+@pytest.mark.unit
+def test_batch_identity_boundary_does_not_capture_semantic_fixture_suffix() -> None:
+    assert has_ordinal_identity_text("fixture_batch3")
+    assert not has_ordinal_identity_text("BATCH3_ROOT")
+    assert not has_ordinal_identity_text("BATCH3_SHAPE")
 
 
 @pytest.mark.unit
@@ -130,6 +158,38 @@ def test_cross_boundary_ordinal_field_identity_is_rejected() -> None:
             required_suffix="none",
             allowed_in_claims="false",
             description="旧序号字段身份测试。",
+        )
+    }
+    reasons = {violation["reason"] for violation in validate_registry_rows(rows)}
+    assert "ordinal_identity_field_name" in reasons
+
+
+@pytest.mark.unit
+def test_p_underscore_ordinal_field_identity_is_rejected() -> None:
+    rows = {
+        "p_1_metric": FieldRegistryRow(
+            field_name="p_1_metric",
+            governance_level="cross_boundary",
+            category="provenance",
+            required_suffix="none",
+            allowed_in_claims="false",
+            description="序号字段身份测试。",
+        )
+    }
+    reasons = {violation["reason"] for violation in validate_registry_rows(rows)}
+    assert "ordinal_identity_field_name" in reasons
+
+
+@pytest.mark.unit
+def test_prefixed_ordinal_field_identity_is_rejected() -> None:
+    rows = {
+        "gate_s2_candidate": FieldRegistryRow(
+            field_name="gate_s2_candidate",
+            governance_level="cross_boundary",
+            category="provenance",
+            required_suffix="none",
+            allowed_in_claims="false",
+            description="带前缀的序号字段身份测试。",
         )
     }
     reasons = {violation["reason"] for violation in validate_registry_rows(rows)}

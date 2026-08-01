@@ -835,6 +835,14 @@ def test_responsibility_matrix_has_one_complete_row_per_method_responsibility() 
         assert spec.negative_controls
         assert spec.promotion_gates
         assert spec.record_fields
+    content_detector_specification = next(
+        spec
+        for spec in RESPONSIBILITY_VALIDATION_MATRIX
+        if spec.responsibility == "content_detector"
+    )
+    assert content_detector_specification.negative_controls[0] == (
+        "hf_only_standardized_score_control"
+    )
 
 
 @pytest.mark.unit

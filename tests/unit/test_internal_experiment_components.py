@@ -249,7 +249,7 @@ def _reliability_thresholds() -> GeometryReliabilityThresholds:
         gamma_residual=0.5,
         gamma_identity=0.05,
         epsilon_inlier=0.8,
-        fit_identity="a2_adapter_geometry_reliability_cpu_synthetic",
+        fit_identity="adapter_geometry_reliability_fit_cpu_synthetic",
     )
 
 
@@ -266,7 +266,7 @@ def _content_binding(
         hf_detector_identity=prototype.hf_result.detector_identity,
         hf_detector_config_digest=prototype.hf_result.detector_config_digest,
         hf_template_digest=prototype.hf_result.template_digest,
-        preprocessing_identity="a2_cpu_rgb8_public_image_encoding",
+        preprocessing_identity="public_image_rgb8_preprocessing_cpu_synthetic",
         formal_mode=prototype.formal_mode,
         root_key_public_digest=prototype.hf_result.root_key_public_digest,
         key_role=prototype.hf_result.key_role,
@@ -517,7 +517,7 @@ def test_adapter_runs_actual_reliability_rectifier_and_conditional_recovery() ->
         tau=raw_score + 0.1,
         tau_rescue=raw_score,
         detector_binding_digest=binding.detector_binding_digest,
-        calibration_identity="a2_adapter_same_detector_threshold",
+        calibration_identity="same_detector_threshold_calibration_cpu_synthetic",
     )
     decision_call = adapter.decide_conditional_recovery(
         image,
