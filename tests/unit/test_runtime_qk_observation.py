@@ -196,7 +196,7 @@ class FakeQkBackend:
         return RuntimeBackendIdentity(
             candidate_id=configuration.candidate_id,
             runtime_config_digest=configuration.runtime_config_digest,
-            runtime_backend_name="fake-qk-backend",
+            runtime_backend_name="synthetic_qk_backend",
             selected_device=selected_device,
             model_id=configuration.model_id,
             model_revision=configuration.model_revision,

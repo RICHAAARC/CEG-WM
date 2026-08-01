@@ -6,19 +6,34 @@ code/Markdown、Markdown、SVG、Drawio 和登记字段。正式名称使用语�
 `snake_case`，表达真实职责、机制、数据含义或版本角色；任一表面通过 snake_case
 并不免除 weak 与 ordinal identity 检查。
 
-不得用 `v1`、`v1v2`、`p1`、数字阶段名、`proxy`、`new`、`old`、`best` 或 `final`
-承担正式语义。不得以 `A1`、`A-2`、`A3a`、`A3b`、`C0`、`C1-P/M/E`、`c1_*`、
-`R1/R2`、`S1/S2`、`P1/P2`、`P_1`、`P-2`、`a3b_metric`、`Runtime Batch N`、
-`Batch N`、`stage_N` 及其下划线、连字符、紧凑变体、前置或后续语义 token
-代替语义身份。下划线可以作为 identity token 的前置边界，不是全局前缀屏障；
-Batch/Stage 分支仍要求完整 token 边界，不把带明确 fixture 后缀的维度名称截断为
-工作包身份。唯一上下文例外是物理位于
-任一名为 `tests` 的目录下、AST 节点本身为 FunctionDef/AsyncFunctionDef 且以 `test_` 开头的测试
-函数名；同文件 basename、函数体标识符、字符串和配置仍受审计。正式字符串值同时接受 weak 与 ordinal 两条独立审计，
-并产生可区分 reason；不得把任一规则的通过当成另一规则的替代。
+不得用单字母加数字的内部工作身份代替职责名称；该规则不是固定字母清单，覆盖
+`B1`、`D-2`、`M_3`、`candidate_x1_gate` 等紧凑、下划线、连字符及语义前后缀
+形式。职责词加数字也属于序号身份：`phase`、`step`、`stage`、`batch`、`tier`、
+`level`、`group`、`track`、`route`、`gate`、`case`、`option`、`variant`、
+`module`、`component`、`method`、`model`、`baseline`、`run`、`experiment`、
+`trial` 与数字形成的紧凑或分隔变体都必须拒绝。真实 `test_*` 节点与其他 Python
+函数同样受审计，不存在 tests 目录通用豁免。仅非正式的测试 fixture 局部变量可以
+描述 fixture 维度或 synthetic 对象；它们不得成为 persisted/public/registered identity、
+测试节点或兼容 alias。正式绑定、路径、函数/class 节点、注释和 docstring 不共享该例外。
+
+正式身份、持久化/公开身份、项目业务路径、artifact 与 evidence identity 不得使用
+`tmp`、`temp`、`misc`、`other`、`todo`、`tbd`、`dummy`、`fake`、`mock`、
+`proxy`、`new`、`old`、`latest`、`best`、`final`、`backup`、`copy`、`foo`、
+`bar` 作为临时或不明语义。测试中明确非正式的 synthetic fixture 可以使用
+`fake_gpu`、`mock_backend`，但这些值一旦绑定正式 identity 字段仍必须失败；不得以
+blanket tests exemption 放行。所有无明确版本职责的机械数字后缀按类别禁止，而非
+只检查固定名词；`detector2`、`metric_3`、`config_2`、`result4`、`router2`、
+`artifact_3`、`candidate4`、`protocol_7`、`method_v2` 都必须失败。明确 dtype
+literal 属于科学职责，不是身份编号。
+
+`docs/reference/field_registry.md` 中 category 为 `method_identity` 或
+`runtime_identity` 的全部字段值都执行 weak 与 ordinal 两条检查；未登记但显然承担
+identity/name/label/path 职责的键继续使用语义 token fallback。字段登记表不得为了
+迁就审计而删改类别。两条检查产生可区分 reason，不得互相替代。
 
 窄例外仅包括 `relative_l2`、`F32`、`RGB8`、`P95`、`x86_64`、`L4`、
-`SHA-256`、`SHA256`，以及立即定义或用反引号标出的局部数学记号 `C_0`、
+`SHA-256`、`SHA256`、实际使用的外部模型 literal `SD3.5`，以及
+`realized_total_l2` 这类明确表达 L2 norm 职责的语义标识符和立即定义或用反引号标出的局部数学记号 `C_0`、
 `C_1(w)`、`S_0`。`schema_version`、`model_revision` 与 `upstream_commit` 等明确角色
 可以使用；外部资产通过 adapter 或登记表保留原名。不得扩张为通用 allowlist，
 也不得保留两个可充当权威的 alias。

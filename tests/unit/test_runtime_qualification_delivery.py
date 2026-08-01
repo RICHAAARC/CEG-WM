@@ -380,7 +380,7 @@ def _record(
         "run_id": run_id,
         "runtime_candidate_revision": revision,
         "runtime_config_digest": "0" * 64,
-        "runtime_backend_name": "fake",
+        "runtime_backend_name": "synthetic_backend",
         "cuda_available": True,
         "cuda_runtime": "12.8",
         "gpu_name": "Fake GPU",
@@ -416,7 +416,7 @@ def _record(
         "qk_actual_dtype": "float16",
         "qk_status": "passed",
         "qk_layer_names": list(runner.REGISTERED_QK_LAYERS),
-        "qk_operator_identities": ["operator-0", "operator-23"],
+        "qk_operator_identities": ["registered_query_operator", "registered_key_operator"],
         "qk_layer_value_digests": [
             {
                 "layer_name": runner.REGISTERED_QK_LAYERS[0],

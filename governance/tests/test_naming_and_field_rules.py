@@ -12,11 +12,15 @@ from experiments.protocol.internal_record_registry import (
 )
 from governance.harness.lib.field_rules import FieldRegistryRow, validate_registry_rows
 from governance.harness.lib.naming_rules import (
+    has_generic_mechanical_numeric_suffix,
     ALLOWED_NARROW_SEMANTIC_LITERALS,
     has_malformed_semantic_numeric_suffix,
     has_ordinal_identity_text,
     has_ordinal_identity_polysemy,
+    has_weak_semantic_identity_value,
     has_weak_semantic_token,
+    is_allowed_registered_numeric_field_role,
+    is_scientific_l2_identifier,
 )
 
 
@@ -25,19 +29,48 @@ def test_weak_semantic_identifiers_are_rejected() -> None:
     forbidden_names = (
         "method_v1",
         "method_v1v2",
-        "stage_1_detector",
-        "stage-1-detector",
         "p1_score",
-        "proxy_metric",
-        "new_detector",
-        "final_result",
+        "detector2",
+        "metric_3",
+        "config_2",
+        "result4",
+        "method_v2",
+        "router2",
+        "artifact_3",
+        "candidate4",
+        "protocol_7",
     )
-    assert all(has_weak_semantic_token(name) for name in forbidden_names)
+    assert all(
+        has_weak_semantic_token(name) or has_weak_semantic_identity_value(name)
+        for name in forbidden_names
+    )
+
+
+@pytest.mark.unit
+def test_registered_numeric_field_role_exceptions_are_exact() -> None:
+    assert is_allowed_registered_numeric_field_role("prompt_2")
+    assert is_allowed_registered_numeric_field_role("prompt_3")
+    assert is_allowed_registered_numeric_field_role("student_t_critical_975")
+    assert not is_allowed_registered_numeric_field_role("prompt_4")
+    assert not is_allowed_registered_numeric_field_role("router2")
+    assert not has_generic_mechanical_numeric_suffix("stable_json_utf8")
+    assert not has_generic_mechanical_numeric_suffix("normal_quantile_table_sha256")
+    assert not has_generic_mechanical_numeric_suffix("student_t_quantile_975")
 
 
 @pytest.mark.unit
 def test_explicit_version_semantics_are_allowed() -> None:
-    allowed_names = ("schema_version", "api_version", "model_revision", "upstream_commit")
+    allowed_names = (
+        "schema_version",
+        "api_version",
+        "model_revision",
+        "upstream_commit",
+        "proxy_metric",
+        "new_detector",
+        "final_result",
+        "fake_gpu",
+        "mock_backend",
+    )
     assert all(not has_weak_semantic_token(name) for name in allowed_names)
 
 
@@ -88,8 +121,8 @@ def test_ordinal_work_package_identities_are_rejected() -> None:
 @pytest.mark.unit
 def test_batch_identity_boundary_does_not_capture_semantic_fixture_suffix() -> None:
     assert has_ordinal_identity_text("fixture_batch3")
-    assert not has_ordinal_identity_text("BATCH3_ROOT")
-    assert not has_ordinal_identity_text("BATCH3_SHAPE")
+    assert has_ordinal_identity_text("BATCH3_ROOT")
+    assert has_ordinal_identity_text("BATCH3_SHAPE")
 
 
 @pytest.mark.unit
@@ -103,11 +136,13 @@ def test_narrow_scientific_and_platform_literals_remain_allowed() -> None:
         "L4",
         "SHA-256",
         "SHA256",
+        "SD3.5",
     }
     assert all(
         not has_ordinal_identity_text(value)
         for value in ALLOWED_NARROW_SEMANTIC_LITERALS
     )
+    assert is_scientific_l2_identifier("realized_total_l2")
 
 
 @pytest.mark.unit

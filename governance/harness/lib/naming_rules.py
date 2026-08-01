@@ -6,19 +6,98 @@ import re
 from pathlib import Path
 
 SNAKE_CASE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-FORBIDDEN_WEAK_TOKEN_PATTERN = re.compile(
-    r"(?:^|[_-])(?:new|old|best|final|proxy|v\d+(?:v\d+)*|p\d+|stage[_-]?\d+)(?:$|[_-])",
+UNKNOWN_OR_TEMPORARY_IDENTITY_WORDS = frozenset(
+    {
+        "tmp",
+        "temp",
+        "misc",
+        "other",
+        "todo",
+        "tbd",
+        "dummy",
+        "fake",
+        "mock",
+        "proxy",
+        "new",
+        "old",
+        "latest",
+        "best",
+        "final",
+        "backup",
+        "copy",
+        "foo",
+        "bar",
+    }
+)
+NUMBERED_RESPONSIBILITY_WORDS = frozenset(
+    {
+        "phase",
+        "step",
+        "stage",
+        "batch",
+        "tier",
+        "level",
+        "group",
+        "track",
+        "route",
+        "gate",
+        "case",
+        "option",
+        "variant",
+        "module",
+        "component",
+        "method",
+        "model",
+        "baseline",
+        "run",
+        "experiment",
+        "trial",
+    }
+)
+_NUMBERED_RESPONSIBILITY_ALTERNATION = "|".join(
+    sorted(NUMBERED_RESPONSIBILITY_WORDS, key=len, reverse=True)
+)
+_UNKNOWN_IDENTITY_ALTERNATION = "|".join(
+    sorted(UNKNOWN_OR_TEMPORARY_IDENTITY_WORDS, key=len, reverse=True)
+)
+FORBIDDEN_VERSION_SHORTHAND_PATTERN = re.compile(
+    r"(?:^|[_-])(?:v\d+(?:v\d+)*|p\d+)(?:$|[_-])",
     re.IGNORECASE,
 )
-FORBIDDEN_WEAK_TEXT_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])(?:new|old|best|final|proxy|v\d+(?:v\d+)*|p\d+|stage[_-]?\d+)(?![A-Za-z0-9])",
+FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])(?:detector|metric|config|result|method)"
+    r"(?:[-_]?v?[-_]?\d+)(?:[-_][a-z0-9]+)*(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+GENERIC_MECHANICAL_NUMERIC_SUFFIX_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z_-]{1,})\d+"
+    r"(?![A-Za-z0-9_])",
+)
+SCIENTIFIC_NUMERIC_LITERAL_PATTERN = re.compile(
+    r"(?:binary|float|bfloat|u?int|utf)\d+",
+    re.IGNORECASE,
+)
+FORBIDDEN_UNKNOWN_IDENTITY_PATTERN = re.compile(
+    rf"(?:^|[_-])(?:{_UNKNOWN_IDENTITY_ALTERNATION})(?:$|[_-])",
     re.IGNORECASE,
 )
 FORBIDDEN_ORDINAL_IDENTITY_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])(?:[ap](?:[-_]?\d+)[a-z]?(?:[-_][a-z0-9]+)*|"
-    r"[crs](?:[-_]?\d+)[a-z]?(?:[-_][a-z0-9]+)*|"
-    r"(?:runtime[-_ ]*)?batch[-_ ]?\d+|stage[-_ ]?\d+)"
+    rf"(?<![A-Za-z0-9])(?:[a-uw-z](?:[-_]?\d+)[a-z]?(?:[-_][a-z0-9]+)*|"
+    rf"(?-i:[A-UW-Z](?:[-_]?\d+)[A-Za-z0-9_]*)|"
+    rf"(?-i:[A-Za-z0-9_]*[a-z][A-UW-Z](?:[-_]?\d+)[A-Za-z]?(?:[A-Z_][A-Za-z0-9_]*)*)|"
+    rf"[a-z0-9_-]*(?:{_NUMBERED_RESPONSIBILITY_ALTERNATION})[-_ ]*\d+"
+    r"(?:[-_][a-z0-9]+)*)"
     r"(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+RESPONSIBILITY_IDENTITY_CORE_PATTERN = re.compile(
+    rf"(?:{_NUMBERED_RESPONSIBILITY_ALTERNATION})[-_ ]*\d+",
+    re.IGNORECASE,
+)
+ORDINAL_IDENTITY_CORE_PATTERN = re.compile(
+    rf"(?<![A-Za-z0-9])(?:[a-uw-z](?:[-_]?\d+)[a-z]?|"
+    rf"(?:{_NUMBERED_RESPONSIBILITY_ALTERNATION})[-_ ]*\d+)"
+    r"(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 _LOCAL_MATH_NOTATION_PATTERN = re.compile(
@@ -28,6 +107,10 @@ _LOCAL_MATH_NOTATION_PATTERN = re.compile(
 MALFORMED_SEMANTIC_NUMERIC_SUFFIX_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(?:[a-z][a-z0-9]*_)+[a-z][a-z0-9]*/\d+"
     r"(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+SCIENTIFIC_L2_IDENTIFIER_PATTERN = re.compile(
+    r"(?:^|_)l2(?:_|$)",
     re.IGNORECASE,
 )
 
@@ -42,6 +125,17 @@ ALLOWED_NARROW_SEMANTIC_LITERALS = frozenset(
         "L4",
         "SHA-256",
         "SHA256",
+        "SD3.5",
+    }
+)
+# These registered field names carry an explicit numeric role in the field
+# registry: two positional runtime prompt inputs and one statistical quantile.
+# Keep this exact so it cannot become a general numeric-suffix exemption.
+ALLOWED_REGISTERED_NUMERIC_FIELD_ROLES = frozenset(
+    {
+        "prompt_2",
+        "prompt_3",
+        "student_t_critical_975",
     }
 )
 _ALLOWED_NARROW_LITERAL_PATTERN = re.compile(
@@ -94,18 +188,45 @@ def is_allowed_file_name(name: str) -> bool:
 
 def has_weak_semantic_token(name: str) -> bool:
     """判断名称是否包含弱语义词。"""
-    return bool(FORBIDDEN_WEAK_TOKEN_PATTERN.search(_scrub_allowed_literals(name)))
+    scrubbed = _scrub_allowed_literals(name)
+    return bool(
+        FORBIDDEN_VERSION_SHORTHAND_PATTERN.search(scrubbed)
+        or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
+    )
 
 
 def has_weak_semantic_text(text: str) -> bool:
     """判断注释、docstring 或 Notebook source 是否包含独立弱语义词。"""
-    return bool(FORBIDDEN_WEAK_TEXT_PATTERN.search(_scrub_allowed_literals(text)))
+    scrubbed = _scrub_allowed_literals(text)
+    return bool(
+        FORBIDDEN_VERSION_SHORTHAND_PATTERN.search(scrubbed)
+        or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
+    )
 
 
 def has_weak_semantic_identity_value(text: str) -> bool:
-    """Reject a weak token only when it is the complete formal identity value."""
-    scrubbed = _scrub_allowed_literals(text).strip()
-    return bool(scrubbed and FORBIDDEN_WEAK_TEXT_PATTERN.fullmatch(scrubbed))
+    """Reject shorthand or unknown tokens only in a formal identity value."""
+    scrubbed = _scrub_contextual_semantic_roles(_scrub_allowed_literals(text)).strip()
+    return bool(
+        scrubbed
+        and (
+            FORBIDDEN_VERSION_SHORTHAND_PATTERN.fullmatch(scrubbed)
+            or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
+            or has_generic_mechanical_numeric_suffix(scrubbed)
+            or FORBIDDEN_UNKNOWN_IDENTITY_PATTERN.search(scrubbed)
+        )
+    )
+
+
+def has_weak_semantic_path_name(name: str) -> bool:
+    """Reject weak shorthand or unknown tokens in a business path basename."""
+    scrubbed = _scrub_contextual_semantic_roles(_scrub_allowed_literals(name))
+    return bool(
+        FORBIDDEN_VERSION_SHORTHAND_PATTERN.search(scrubbed)
+        or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
+        or has_generic_mechanical_numeric_suffix(scrubbed)
+        or FORBIDDEN_UNKNOWN_IDENTITY_PATTERN.search(scrubbed)
+    )
 
 
 def has_ordinal_identity_text(text: str) -> bool:
@@ -118,10 +239,61 @@ def has_malformed_semantic_numeric_suffix(text: str) -> bool:
     return bool(MALFORMED_SEMANTIC_NUMERIC_SUFFIX_PATTERN.search(text))
 
 
+def has_generic_mechanical_numeric_suffix(text: str) -> bool:
+    """Reject unexplained numeric suffixes while preserving explicit versions and dtypes."""
+    candidate_text = _scrub_allowed_literals(text).strip().strip("_-")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", candidate_text):
+        return False
+    if is_allowed_registered_numeric_field_role(candidate_text):
+        return False
+    if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", candidate_text, re.IGNORECASE):
+        return False
+    if re.search(
+        r"(?:^|[_-])(?:binary|float|bfloat|u?int|utf)\d+(?:$|[_-])",
+        candidate_text,
+        re.IGNORECASE,
+    ):
+        return False
+    if is_scientific_l2_identifier(candidate_text):
+        return False
+    if re.search(
+        r"(?:^|[_-])(?:quantile|critical)[-_]?\d{2,4}$",
+        candidate_text,
+        re.IGNORECASE,
+    ):
+        return False
+    for match in GENERIC_MECHANICAL_NUMERIC_SUFFIX_PATTERN.finditer(candidate_text):
+        candidate = match.group(0)
+        if re.search(r"(?:^|[_-])v\d+$", candidate, re.IGNORECASE):
+            continue
+        if SCIENTIFIC_NUMERIC_LITERAL_PATTERN.fullmatch(candidate):
+            continue
+        return True
+    return False
+
+
+def is_scientific_l2_identifier(text: str) -> bool:
+    """Recognize an explicit L2 norm role inside a semantic identifier."""
+    return bool(SCIENTIFIC_L2_IDENTIFIER_PATTERN.search(text))
+
+
+def is_allowed_registered_numeric_field_role(text: str) -> bool:
+    """Recognize an exact registered positional or statistical numeric role."""
+    return text in ALLOWED_REGISTERED_NUMERIC_FIELD_ROLES
+
+
 def ordinal_identity_tokens(text: str) -> tuple[str, ...]:
     """Return normalized legacy ordinal identities found in one value."""
     scrubbed = _scrub_semantics(text)
-    return tuple(match.group(0).lower() for match in FORBIDDEN_ORDINAL_IDENTITY_PATTERN.finditer(scrubbed))
+    tokens = {
+        match.group(0).lower()
+        for match in ORDINAL_IDENTITY_CORE_PATTERN.finditer(scrubbed)
+    }
+    tokens.update(
+        match.group(0).lower()
+        for match in RESPONSIBILITY_IDENTITY_CORE_PATTERN.finditer(scrubbed)
+    )
+    return tuple(sorted(tokens))
 
 
 def has_ordinal_identity_polysemy(
@@ -137,6 +309,15 @@ def has_ordinal_identity_polysemy(
 
 def _scrub_allowed_literals(text: str) -> str:
     return _ALLOWED_NARROW_LITERAL_PATTERN.sub("", text)
+
+
+def _scrub_contextual_semantic_roles(text: str) -> str:
+    """Preserve exact domain/action roles that are not placeholder identities."""
+    return re.sub(
+        r"(?i)(?:^|[_-])(?:final_image|copy_gate|result_copy)(?=$|[_-])",
+        "_",
+        text,
+    )
 
 
 def _scrub_semantics(text: str) -> str:

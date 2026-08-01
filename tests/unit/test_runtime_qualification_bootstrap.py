@@ -27,15 +27,15 @@ def _digest(payload: bytes) -> str:
 def _package_payloads() -> dict[str, bytes]:
     dependency_lock = [
         {"package_name": "python", "version_specifier": ">=3.12"},
-        {"package_name": "fake-runtime", "version_specifier": "1.2.3"},
+        {"package_name": "synthetic-runtime", "version_specifier": "1.2.3"},
     ]
     return {
         "README.md": b"execution package\n",
         "configs/runtime/runtime_sd35_flowmatch.json": (
             json.dumps({"dependency_lock": dependency_lock}) + "\n"
         ).encode(),
-        "pyproject.toml": b"[project]\nname='fake-runtime'\n",
-        "requirements_runtime_qualification.txt": b"fake-runtime==1.2.3\n",
+        "pyproject.toml": b"[project]\nname='synthetic-runtime'\n",
+        "requirements_runtime_qualification.txt": b"synthetic-runtime==1.2.3\n",
         "scripts/experiment_execution/__init__.py": b"",
         "scripts/experiment_execution/runtime_qualification_runner.py": b"# fake\n",
         "main/__init__.py": b"# method\n",

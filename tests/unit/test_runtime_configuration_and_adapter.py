@@ -57,7 +57,7 @@ class MockBackend:
         values = {
             "candidate_id": configuration.candidate_id,
             "runtime_config_digest": configuration.runtime_config_digest,
-            "runtime_backend_name": "mock-sd35-backend",
+            "runtime_backend_name": "synthetic_sd35_backend",
             "selected_device": selected_device,
             "model_id": configuration.model_id,
             "model_revision": configuration.model_revision,
@@ -237,7 +237,7 @@ def test_mock_backend_initialization_preserves_frozen_identity() -> None:
     assert adapter.session is session
     assert session.runtime_config_digest == adapter.configuration.runtime_config_digest
     assert session.selected_device == "cpu"
-    assert session.runtime_backend_name == "mock-sd35-backend"
+    assert session.runtime_backend_name == "synthetic_sd35_backend"
     assert session.model_revision == adapter.configuration.model_revision
     assert session.inference_steps == adapter.configuration.inference_steps
     assert session.callback_index == adapter.configuration.callback_index

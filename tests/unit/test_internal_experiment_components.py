@@ -1045,7 +1045,7 @@ def _detection_case(
     return DetectionMetricCase(
         analysis_unit_identity=_unit(index),
         split=split,
-        detector_identity="detector_identity_1",
+        detector_identity="synthetic_content_detector",
         key_role=key_role,
         score=score,
     )
@@ -1883,7 +1883,7 @@ def test_experiment_method_adapter_imports_only_top_level_project_surfaces() -> 
 
 
 @pytest.mark.unit
-def test_a2_layers_keep_project_dependencies_orthogonal() -> None:
+def test_experiment_method_attack_and_metric_layers_keep_project_dependencies_orthogonal() -> None:
     allowed_project_prefixes = {
         ROOT / "experiments/methods/ceg_wm.py": (
             "main",

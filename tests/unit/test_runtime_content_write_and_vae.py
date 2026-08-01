@@ -32,7 +32,7 @@ def _identity(configuration, selected_device: str) -> RuntimeBackendIdentity:
     return RuntimeBackendIdentity(
         candidate_id=configuration.candidate_id,
         runtime_config_digest=configuration.runtime_config_digest,
-        runtime_backend_name="cpu-fake-content-backend",
+        runtime_backend_name="synthetic_cpu_content_backend",
         selected_device=selected_device,
         model_id=configuration.model_id,
         model_revision=configuration.model_revision,
@@ -555,7 +555,7 @@ def test_half_delta_method_result_never_reaches_runtime_acceptance() -> None:
 
 
 @pytest.mark.unit
-def test_zero_l2_baseline_fails_closed() -> None:
+def test_zero_relative_l2_baseline_fails_closed() -> None:
     backend = FakeContentBackend()
     adapter = _initialized_adapter(backend)
 

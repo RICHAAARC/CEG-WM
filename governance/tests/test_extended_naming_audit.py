@@ -30,6 +30,18 @@ def _write_minimal_audit_fixture(
     )
     for root in roots:
         (tmp_path / root).mkdir()
+    registry_target = tmp_path / "docs" / "reference" / "field_registry.md"
+    registry_target.parent.mkdir(parents=True, exist_ok=True)
+    registry_source = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "reference"
+        / "field_registry.md"
+    )
+    registry_target.write_text(
+        registry_source.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
 
 def _has_violation(
@@ -93,12 +105,11 @@ def test_code_comments_identifiers_and_config_keys_are_audited(tmp_path: Path) -
 
     reasons = {violation["reason"] for violation in report["violations"]}
     assert "weak_semantic_identifier" in reasons
-    assert "weak_semantic_comment" in reasons
-    assert "weak_semantic_config_key" in reasons
+    assert "ordinal_identity_config_key" in reasons
 
 
 @pytest.mark.unit
-def test_a1_python_basename_is_rejected_by_ordinal_path_rule(
+def test_single_letter_number_python_basename_is_rejected_by_ordinal_path_rule(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -115,7 +126,7 @@ def test_a1_python_basename_is_rejected_by_ordinal_path_rule(
 
 
 @pytest.mark.unit
-def test_c1_metrics_python_basename_is_rejected_by_ordinal_path_rule(
+def test_prefixed_letter_number_python_basename_is_rejected_by_ordinal_path_rule(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -133,7 +144,7 @@ def test_c1_metrics_python_basename_is_rejected_by_ordinal_path_rule(
 
 
 @pytest.mark.unit
-def test_c1_python_docstring_is_rejected_by_ordinal_text_rule(
+def test_letter_number_python_docstring_is_rejected_by_ordinal_text_rule(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -151,7 +162,7 @@ def test_c1_python_docstring_is_rejected_by_ordinal_text_rule(
 
 
 @pytest.mark.unit
-def test_r1_python_comment_is_rejected_by_ordinal_text_rule(
+def test_letter_number_python_comment_is_rejected_by_ordinal_text_rule(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -186,16 +197,13 @@ def test_docstring_and_comment_report_distinct_weak_and_ordinal_reasons(
         for violation in report["violations"]
         if violation["path"] == "main/method.py"
     }
-    assert {
-        "weak_semantic_docstring",
-        "ordinal_identity_docstring",
-        "weak_semantic_comment",
-        "ordinal_identity_comment",
-    } <= reasons
+    assert {"ordinal_identity_docstring", "ordinal_identity_comment"} <= reasons
+    assert "weak_semantic_docstring" not in reasons
+    assert "weak_semantic_comment" not in reasons
 
 
 @pytest.mark.unit
-def test_python_label_a1_is_rejected_as_formal_identity_value(
+def test_python_label_letter_number_is_rejected_as_formal_identity_value(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -213,7 +221,7 @@ def test_python_label_a1_is_rejected_as_formal_identity_value(
 
 
 @pytest.mark.unit
-def test_python_dictionary_name_c1_is_rejected_as_formal_identity_value(
+def test_python_dictionary_letter_number_is_rejected_as_formal_identity_value(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -388,7 +396,7 @@ def test_p_underscore_path_and_identifier_are_rejected(
 
 
 @pytest.mark.unit
-def test_a3b_semantic_suffix_is_rejected_across_python_identity_surfaces(
+def test_letter_number_variant_suffix_is_rejected_across_python_identity_surfaces(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -483,7 +491,7 @@ def test_prefixed_ordinal_token_is_rejected_in_path_basename(
 
 
 @pytest.mark.unit
-def test_project_test_function_name_has_contextual_ordinal_exception(
+def test_project_test_function_ordinal_identity_is_rejected(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "tests")
@@ -498,8 +506,8 @@ def test_project_test_function_name_has_contextual_ordinal_exception(
 
     report = run_audit(tmp_path)
 
-    assert report["decision"] == "pass"
-    assert not _has_violation(
+    assert report["decision"] == "fail"
+    assert _has_violation(
         report,
         path="tests/unit/test_candidate.py",
         reason="ordinal_identity_identifier",
@@ -507,29 +515,69 @@ def test_project_test_function_name_has_contextual_ordinal_exception(
 
 
 @pytest.mark.unit
-def test_governance_test_function_name_has_contextual_ordinal_exception(
+def test_project_test_class_compact_ordinal_identity_is_rejected(
     tmp_path: Path,
 ) -> None:
-    _write_minimal_audit_fixture(tmp_path, "governance/tests")
-    path = tmp_path / "governance" / "tests" / "test_candidate.py"
-    path.write_text(
-        "async def test_a2_candidate_behavior():\n"
-        "    return None\n",
-        encoding="utf-8",
-    )
+    _write_minimal_audit_fixture(tmp_path, "tests")
+    unit_root = tmp_path / "tests" / "unit"
+    unit_root.mkdir()
+    path = unit_root / "test_candidate.py"
+    path.write_text("class CandidateA2:\n    pass\n", encoding="utf-8")
 
     report = run_audit(tmp_path)
 
-    assert report["decision"] == "pass"
-    assert not _has_violation(
+    assert report["decision"] == "fail"
+    assert _has_violation(
         report,
-        path="governance/tests/test_candidate.py",
+        path="tests/unit/test_candidate.py",
         reason="ordinal_identity_identifier",
     )
 
 
 @pytest.mark.unit
-def test_test_function_ordinal_exception_does_not_suppress_weak_rule(
+def test_project_test_class_prefixed_ordinal_identity_is_rejected(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "tests")
+    unit_root = tmp_path / "tests" / "unit"
+    unit_root.mkdir()
+    path = unit_root / "test_candidate.py"
+    path.write_text("class A2Candidate:\n    pass\n", encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="tests/unit/test_candidate.py",
+        reason="ordinal_identity_identifier",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source", ("def router2():\n    pass\n", "class Artifact3:\n    pass\n"))
+def test_python_callable_mechanical_numeric_identity_is_rejected(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "tests")
+    unit_root = tmp_path / "tests" / "unit"
+    unit_root.mkdir()
+    path = unit_root / "test_candidate.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="tests/unit/test_candidate.py",
+        reason="weak_semantic_identifier",
+    )
+
+
+@pytest.mark.unit
+def test_test_function_ordinal_rule_does_not_suppress_weak_rule(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "tests")
@@ -553,7 +601,7 @@ def test_test_function_ordinal_exception_does_not_suppress_weak_rule(
 
 
 @pytest.mark.unit
-def test_project_test_path_does_not_share_function_name_exception(
+def test_project_test_path_is_checked_for_ordinal_identity(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "tests")
@@ -577,7 +625,7 @@ def test_project_test_path_does_not_share_function_name_exception(
 
 
 @pytest.mark.unit
-def test_project_test_body_does_not_share_function_name_exception(
+def test_project_test_body_is_checked_for_ordinal_identity(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "tests")
@@ -608,7 +656,7 @@ def test_project_test_body_does_not_share_function_name_exception(
 
 
 @pytest.mark.unit
-def test_non_project_test_function_has_no_ordinal_exception(
+def test_non_project_test_function_is_checked_for_ordinal_identity(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
@@ -630,7 +678,7 @@ def test_non_project_test_function_has_no_ordinal_exception(
 
 
 @pytest.mark.unit
-def test_config_label_a1_is_rejected_as_formal_identity_value(
+def test_config_label_letter_number_is_rejected_as_formal_identity_value(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "configs")
@@ -648,7 +696,7 @@ def test_config_label_a1_is_rejected_as_formal_identity_value(
 
 
 @pytest.mark.unit
-def test_config_name_c1_is_rejected_as_formal_identity_value(
+def test_config_name_letter_number_is_rejected_as_formal_identity_value(
     tmp_path: Path,
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "configs")
@@ -666,8 +714,240 @@ def test_config_name_c1_is_rejected_as_formal_identity_value(
 
 
 @pytest.mark.unit
+def test_registered_python_formal_mode_rejects_ordinal_identity_value(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text('formal_mode = "A1"\n', encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="main/method.py",
+        reason="ordinal_identity_python_string",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field_name", "legacy_value"),
+    (("formal_mode", "A1"), ("mode", "C1")),
+)
+def test_registered_config_identity_field_rejects_ordinal_value(
+    tmp_path: Path,
+    field_name: str,
+    legacy_value: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "configs")
+    path = tmp_path / "configs" / "identity.json"
+    path.write_text(
+        json.dumps({field_name: legacy_value}),
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="configs/identity.json",
+        reason="ordinal_identity_config_value",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ordinal_identity",
+    (
+        "B1",
+        "D-2",
+        "E_3",
+        "F1",
+        "G2",
+        "H3",
+        "M1",
+        "N2",
+        "T3",
+        "X1",
+        "Y2",
+        "Z3",
+        "candidate_x1_gate",
+    ),
+)
+def test_general_single_letter_number_identity_fails_closed(
+    tmp_path: Path,
+    ordinal_identity: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "configs")
+    path = tmp_path / "configs" / "identity.json"
+    path.write_text(json.dumps({"label": ordinal_identity}), encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="configs/identity.json",
+        reason="ordinal_identity_config_value",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "responsibility_word",
+    (
+        "phase",
+        "step",
+        "stage",
+        "batch",
+        "tier",
+        "level",
+        "group",
+        "track",
+        "route",
+        "gate",
+        "case",
+        "option",
+        "variant",
+        "module",
+        "component",
+        "method",
+        "model",
+        "baseline",
+        "run",
+        "experiment",
+        "trial",
+    ),
+)
+def test_numbered_responsibility_identity_fails_closed(
+    tmp_path: Path,
+    responsibility_word: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "configs")
+    path = tmp_path / "configs" / "identity.json"
+    path.write_text(
+        json.dumps({"label": f"candidate_{responsibility_word}-1_output"}),
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="configs/identity.json",
+        reason="ordinal_identity_config_value",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "unknown_identity",
+    (
+        "tmp",
+        "temp",
+        "misc",
+        "other",
+        "todo",
+        "tbd",
+        "dummy",
+        "fake",
+        "mock",
+        "proxy",
+        "new",
+        "old",
+        "latest",
+        "best",
+        "final",
+        "backup",
+        "copy",
+        "foo",
+        "bar",
+    ),
+)
+def test_registered_formal_identity_rejects_unknown_or_temporary_value(
+    tmp_path: Path,
+    unknown_identity: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(f"formal_mode = {unknown_identity!r}\n", encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="main/method.py",
+        reason="weak_semantic_python_string",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mechanical_identity",
+    (
+        "detector2",
+        "metric_3",
+        "config_2",
+        "result4",
+        "method_v2",
+        "router2",
+        "artifact_3",
+        "candidate4",
+        "protocol_7",
+    ),
+)
+def test_mechanical_numeric_identity_fails_closed(
+    tmp_path: Path,
+    mechanical_identity: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "configs")
+    path = tmp_path / "configs" / "identity.json"
+    path.write_text(json.dumps({"label": mechanical_identity}), encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "fail"
+    assert _has_violation(
+        report,
+        path="configs/identity.json",
+        reason="weak_semantic_config_value",
+    )
+
+
+@pytest.mark.unit
+def test_non_formal_synthetic_fixture_and_real_version_roles_are_allowed(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "tests", "configs")
+    unit_root = tmp_path / "tests" / "unit"
+    unit_root.mkdir()
+    (unit_root / "test_synthetic_fixture.py").write_text(
+        'fake_gpu = "fake_gpu"\nmock_backend = "mock_backend"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "configs" / "versions.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2026-08-01",
+                "model_revision": "stabilityai/stable-diffusion-3.5-medium",
+                "upstream_commit": "a" * 40,
+                "platform_identity": "SD3.5",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("surface", ("python", "config"))
-def test_formal_p1_label_is_rejected_by_weak_value_rule(
+def test_formal_letter_number_label_is_rejected_by_weak_value_rule(
     tmp_path: Path,
     surface: str,
 ) -> None:
@@ -846,7 +1126,6 @@ def test_cross_surface_ordinal_identities_are_audited(tmp_path: Path) -> None:
         "ordinal_identity_notebook_markdown",
         "ordinal_identity_notebook_code",
         "weak_semantic_notebook_markdown",
-        "weak_semantic_notebook_code",
         "ordinal_identity_polysemy",
     } <= reasons
 
@@ -871,7 +1150,7 @@ def test_narrow_literals_pass_full_cross_surface_audit(tmp_path: Path) -> None:
     )
     literals = (
         "relative_l2 F32 RGB8 P95 x86_64 L4 SHA-256 SHA256 "
-        "3/250 0.70/0.30 content_relative_l2_nominal = 3/250"
+        "SD3.5 3/250 0.70/0.30 content_relative_l2_nominal = 3/250"
     )
     (tmp_path / "main").mkdir()
     (tmp_path / "main" / "method.py").write_text(

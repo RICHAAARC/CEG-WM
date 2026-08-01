@@ -7,7 +7,11 @@ from pathlib import Path
 
 from governance.harness.lib.naming_rules import (
     has_ordinal_identity_text,
+    has_weak_semantic_identity_value,
+    has_weak_semantic_path_name,
     has_weak_semantic_token,
+    is_allowed_registered_numeric_field_role,
+    is_scientific_l2_identifier,
 )
 
 
@@ -59,9 +63,18 @@ def validate_registry_rows(rows: dict[str, FieldRegistryRow]) -> list[dict[str, 
     """校验字段登记表中的 placeholder、random、中间状态和 claim 规则。"""
     violations: list[dict[str, str]] = []
     for row in rows.values():
-        if has_weak_semantic_token(row.field_name):
+        if (
+            not is_allowed_registered_numeric_field_role(row.field_name)
+            and (
+                has_weak_semantic_token(row.field_name)
+                or has_weak_semantic_identity_value(row.field_name)
+                or has_weak_semantic_path_name(row.field_name)
+            )
+        ):
             violations.append({"field_name": row.field_name, "reason": "weak_semantic_field_name"})
-        if has_ordinal_identity_text(row.field_name):
+        if has_ordinal_identity_text(row.field_name) and not is_scientific_l2_identifier(
+            row.field_name
+        ):
             violations.append(
                 {
                     "field_name": row.field_name,
