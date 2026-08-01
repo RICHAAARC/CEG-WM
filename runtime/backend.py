@@ -94,7 +94,7 @@ class RuntimeBackendIdentity:
 
 @runtime_checkable
 class RuntimeBackend(Protocol):
-    """Minimal Batch-1 backend protocol; model execution is added later."""
+    """Minimal runtime_configuration_and_adapter backend protocol; model execution is added later."""
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
         """Return device availability without loading a model."""
@@ -195,7 +195,7 @@ class RuntimeVaeBackend(Protocol):
 
 @runtime_checkable
 class RuntimeContentBackend(RuntimeVaeBackend, Protocol):
-    """Batch-2 tensor execution boundary for a prepared model backend."""
+    """content_write_and_vae tensor execution boundary for a prepared model backend."""
 
     def run_generation(
         self,
@@ -210,7 +210,7 @@ class RuntimeContentBackend(RuntimeVaeBackend, Protocol):
 
 @runtime_checkable
 class RuntimeQkBackend(RuntimeVaeBackend, Protocol):
-    """Batch-3 image-only Q/K execution boundary for a prepared model."""
+    """qk_observation image-only Q/K execution boundary for a prepared model."""
 
     def create_detection_schedule(
         self,

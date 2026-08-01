@@ -1,5 +1,9 @@
 # CEG-WM Method Mechanism
 
+方法实现、内部运行与交付边界分别使用 `internal_execution_components`、
+`governed_internal_runner`、`experiment_execution_delivery`，禁止以治理包装替代
+真实 content/geometry/joint 方法调用。
+
 ## Purpose
 
 本文档把 [algorithm_primitives.md](algorithm_primitives.md) 中的算法原语和

@@ -1,13 +1,13 @@
-# C1 HF threshold-fit experiment execution
+# HF-only threshold-fit GPU execution experiment execution
 
-This directory's active delivery path is the schema-v2 C1 HF threshold-fit
+This directory's active delivery path is the schema-v2 HF-only threshold-fit GPU execution
 package. It executes one preregistered fit shard at an exact committed
 revision. It cannot approve tau, unlock untouched-confirmation data, or support
 a scientific claim by itself.
 
 ## Frozen dependency closure
 
-`requirements_c1_threshold_fit.txt` is the C1-specific complete transitive
+`requirements_hf_only_threshold_fit_gpu_execution.txt` is the hf_only_reference_validation-specific complete transitive
 dependency lock for Linux x86_64, CPython 3.12, and the frozen SD3.5 Colab GPU
 candidate. It contains 62 exact distributions, including
 `torch==2.11.0+cu128`, and has SHA-256
@@ -33,7 +33,7 @@ torch local version in the execution facts.
 
 `build_experiment_execution_package.py` reads only tracked blobs from one clean
 exact commit and writes a deterministic external ZIP plus adjacent delivery
-sidecar. Its exact allowlist includes the C1 lock and excludes the shared
+sidecar. Its exact allowlist includes the hf_only_reference_validation lock and excludes the shared
 runtime-qualification lock, untouched-confirmation manifest, baselines,
 comparison protocol, synthetic runtime, governance, Notebook, checked-in
 outputs, builder, and package-external bootstrap.
@@ -43,7 +43,7 @@ After independent review, build to a new path outside the repository:
 ```bash
 python scripts/experiment_execution/build_experiment_execution_package.py \
   --root . \
-  --output-zip '<outside-repository>/ceg_wm_c1_threshold_fit.zip' \
+  --output-zip '<outside-repository>/ceg_wm_hf_only_threshold_fit.zip' \
   --committed-revision '<exact 40-hex HEAD>'
 ```
 
@@ -59,6 +59,6 @@ uses a unique name. A bootstrap, resource, execution, exclusion, incomplete, or
 scientific diagnostic is not a successful shard and cannot be promoted into
 method evidence.
 
-Historical non-C1 runtime-qualification materials remain in their explicitly
-named repository files. They are not part of this C1 schema-v2 entrypoint or
+Historical non-hf_only_reference_validation runtime-qualification materials remain in their explicitly
+named repository files. They are not part of this hf_only_reference_validation schema-v2 entrypoint or
 its authority; this README intentionally provides no historical commands.

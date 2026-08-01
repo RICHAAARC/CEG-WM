@@ -1,4 +1,4 @@
-"""Fail-closed Batch-1 control flow for the SD3.5 runtime adapter."""
+"""Fail-closed runtime_configuration_and_adapter control flow for the SD3.5 runtime adapter."""
 
 from __future__ import annotations
 
@@ -418,15 +418,15 @@ class Sd35RuntimeAdapter:
             ContentEmbeddingResult,
         ],
     ) -> ContentWriteVaeResult:
-        """Run Batch 2 while leaving actual-budget semantics in ``main``."""
+        """Run content_write_and_vae while leaving actual-budget semantics in ``main``."""
 
         if self._state is not RuntimeAdapterState.READY:
             raise RuntimeAdapterError(
-                "runtime adapter must be ready before Batch-2 execution"
+                "runtime adapter must be ready before content_write_and_vae execution"
             )
         if not isinstance(self._backend, RuntimeContentBackend):
             raise RuntimeAdapterError(
-                "runtime backend lacks the Batch-2 execution protocol"
+                "runtime backend lacks the content_write_and_vae execution protocol"
             )
         from .content_write import (
             RuntimeContentExecutionError,
@@ -444,27 +444,27 @@ class Sd35RuntimeAdapter:
         except RuntimeContentExecutionError as exc:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
-                "runtime Batch-2 execution failed closed"
+                "runtime content_write_and_vae execution failed closed"
             ) from exc
         except Exception as exc:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
-                "runtime backend raised an unexpected Batch-2 error"
+                "runtime backend raised an unexpected content_write_and_vae error"
             ) from exc
 
     def observe_detection_qk(
         self,
         detection_image: torch.Tensor,
     ) -> RuntimeQkObservationResult:
-        """Run the frozen image-only Batch-3 observation path."""
+        """Run the frozen image-only qk_observation observation path."""
 
         if self._state is not RuntimeAdapterState.READY:
             raise RuntimeAdapterError(
-                "runtime adapter must be ready before Batch-3 execution"
+                "runtime adapter must be ready before qk_observation execution"
             )
         if not isinstance(self._backend, RuntimeQkBackend):
             raise RuntimeAdapterError(
-                "runtime backend lacks the Batch-3 Q/K execution protocol"
+                "runtime backend lacks the qk_observation Q/K execution protocol"
             )
         from .qk_observation import RuntimeQkObservationError
 
@@ -481,12 +481,12 @@ class Sd35RuntimeAdapter:
         except (RuntimeAdapterError, RuntimeQkObservationError) as exc:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
-                "runtime Batch-3 Q/K observation failed closed"
+                "runtime qk_observation Q/K observation failed closed"
             ) from exc
         except Exception as exc:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
-                "runtime backend raised an unexpected Batch-3 error"
+                "runtime backend raised an unexpected qk_observation error"
             ) from exc
 
     def _release_backend_resources(self) -> None:

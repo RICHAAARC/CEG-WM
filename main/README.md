@@ -14,7 +14,7 @@
 stage-only revision 均不修改方法机制。
 
 内容链已经实现 S/T/R/Q 数值路由、LF/HF carrier、blind detector、共同总预算写入组合
-及 C0/C1/C2 诊断，但正式内容判定仍保持 `hf_only`。LF、routing 和组合行为尚未获得
+及 hf_only_standardized_score/weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score 诊断，但正式内容判定仍保持 `hf_only`。LF、routing 和组合行为尚未获得
 实验晋升，不能据此选择或宣称正式 `a`、组合函数或阈值。组合写入要求两个 carrier
 绑定同一个经重算验证的 route；routed result 保留不可变 S/T/R/Q 观测，并据此重演
 插值与路由公式；组合诊断只接受同一普通图像编码观测。

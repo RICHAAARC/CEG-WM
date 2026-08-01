@@ -1,5 +1,9 @@
 # Joint Decision Design
 
+联合判定只消费三条已登记语义组合身份：`hf_only_standardized_score`、
+`weighted_hf_lf_standardized_score`、
+`maximum_hf_lf_standardized_score`；局部推导可写 `C_0`、`C_1(w)`、`C_2`。
+
 ## Decision Authority
 
 内容检测器拥有阳性判定权。几何链只能决定是否有足够依据执行坐标恢复。

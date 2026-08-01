@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from governance.harness.lib.naming_rules import has_weak_semantic_token
+from governance.harness.lib.naming_rules import (
+    has_ordinal_identity_text,
+    has_weak_semantic_token,
+)
 
 
 ALLOWED_GOVERNANCE_LEVELS = {
@@ -58,6 +61,13 @@ def validate_registry_rows(rows: dict[str, FieldRegistryRow]) -> list[dict[str, 
     for row in rows.values():
         if has_weak_semantic_token(row.field_name):
             violations.append({"field_name": row.field_name, "reason": "weak_semantic_field_name"})
+        if has_ordinal_identity_text(row.field_name):
+            violations.append(
+                {
+                    "field_name": row.field_name,
+                    "reason": "ordinal_identity_field_name",
+                }
+            )
         if row.governance_level not in ALLOWED_GOVERNANCE_LEVELS:
             violations.append({"field_name": row.field_name, "reason": "invalid_governance_level"})
         if not row.description or row.description.lower() in {"none", "n/a"}:

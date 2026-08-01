@@ -1,4 +1,4 @@
-"""CPU checks for the A-2 method adapter, attacks, and metrics."""
+"""CPU checks for the internal_execution_components method adapter, attacks, and metrics."""
 
 from __future__ import annotations
 
@@ -181,12 +181,12 @@ class _ActualContentOperation:
     ):
         if not isinstance(input_image, torch.Tensor):
             raise ContentDetectorError(
-                "A-2 content replay requires an RGB8 tensor"
+                "internal_execution_components content replay requires an RGB8 tensor"
             )
         expected = self._detect(input_image, detection_key)
         validate_content_detection_result(expected)
         if result != expected:
-            raise ContentDetectorError("A-2 content replay mismatch")
+            raise ContentDetectorError("internal_execution_components content replay mismatch")
         return result
 
 
@@ -305,7 +305,7 @@ def test_adapter_runs_actual_main_small_tensor_content_chain() -> None:
         COMPONENT_CONFIG_PATH
     )
     adapter = CegWmExperimentAdapter(configuration)
-    root_key = "a2-actual-main-small-tensor-key"
+    root_key = "internal-components-actual-main-small-tensor-key"
     shape = (1, 1, 5, 5)
 
     key_call = adapter.identify_key(root_key)
@@ -494,7 +494,7 @@ def test_adapter_runs_actual_reliability_rectifier_and_conditional_recovery() ->
         COMPONENT_CONFIG_PATH
     )
     adapter = CegWmExperimentAdapter(configuration)
-    root_key = "a2-actual-joint-adapter-key"
+    root_key = "internal-components-actual-joint-adapter-key"
     estimation = _identity_estimation_record(root_key)
     reliability_call = adapter.assess_geometry_reliability(
         estimation,

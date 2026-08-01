@@ -1,26 +1,26 @@
 {
-  "schema_version": "ceg_wm_c1_hf_threshold_fit_execution_v1",
-  "run_phase_id": "c1_hf_threshold_fit_v1",
+  "schema_version": "ceg_wm_hf_only_threshold_fit_execution_v1",
+  "run_phase_id": "hf_only_threshold_fit_v1",
   "accessible_split": "content_threshold_fit",
   "forbidden_splits": [
     "untouched_confirmation"
   ],
   "authorization_base_revision": "309b3be549409e3d1e16ea9c1ee9c2c9e33c0bf7",
-  "c1_specification_path": "configs/experiments/c1_hf_reference_run.json",
-  "c1_specification_digest": "4a76e8b9aa9535a865f212a109b140332e05c9fa7eb57fca4ddca8671f98add9",
-  "prompt_roster_path": "configs/experiments/c1_hf_prompt_roster.json",
-  "prompt_roster_file_sha256": "102f71bc3cf4021002dd4eb4763026c441084e5941e529d5909fca7ebf23e11a",
+  "hf_only_reference_specification_path": "configs/experiments/hf_only_reference_validation.json",
+  "hf_only_reference_specification_digest": "f5f8dc60ff88ca9f13e74342047e9f503a3454d3c5c82c785e6d23585f7728bb",
+  "prompt_roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
+  "prompt_roster_file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f",
   "dataset_snapshot_path": "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
   "dataset_snapshot_sha256": "fab29e41bb512a169b56acab4cf2a41dcb675e285df2efcde6640c7dd3c440eb",
-  "fit_manifest_path": "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
-  "fit_manifest_file_sha256": "52af2c75bd0513c6eace971fb098c203154cee05ca27d811ece12ec85b8911b5",
-  "fit_manifest_digest": "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9",
+  "fit_manifest_path": "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+  "fit_manifest_file_sha256": "554d1f488dadc433dba57a2b4e9435a8f55eeecef77929c76161076753b2886a",
+  "fit_manifest_digest": "1150c89cc11db5d6bbe9cb17f032c0a5934f9189db0feb4e5de3998e5302719b",
   "component_registry_path": "configs/experiments/internal_execution_components.json",
   "method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
-  "metric_registry_digest": "9bfe31e8b163f4aa20a8ed058726ebad2a7b0ee3f0e4ee7d2566f1854beebb61",
-  "metric_implementation_path": "configs/experiments/c1_hf_metric_implementation.json",
-  "metric_implementation_binding_digest": "87ebffaf28ba54b90299c5ba1b1f74319cb65c690bbf5f1457cb8c0c2507b0fc",
-  "metric_implementation_source_sha256": "bf3b56a3e2becfef0301c36a15f0690e52c7bc03008ca76faec0e6c5340af394",
+  "metric_registry_digest": "f6f6cf5914f27bdf26ac0c6fb8bc3930adb502ba80dd8b698dfea82555efe855",
+  "metric_implementation_path": "configs/experiments/hf_only_reference_metrics.json",
+  "metric_implementation_binding_digest": "560e517b7645fbf5cc1f8915bab2c8aa4e32b4b58bf31de02f9b592e3b7b7bdc",
+  "metric_implementation_source_sha256": "c2449b98faf7025224f6a4a167ee17ee7bb732e7e8bf2674364c066f8fefe4fe",
   "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
   "runtime_config_sha256": "a097e826551dfa74601defef406d027cd6428946894f85012d2c65268b0bff1f",
   "runtime_qualification_revision": "8b2344756c4c247906ff0d4eab68e46a773e13f5",
@@ -56,5 +56,5 @@
     "incremental_unit_attempt_persistence_required": true
   },
   "claim_boundary": "execution_preparation_only_no_gpu_run_no_scientific_result",
-  "execution_config_digest": "a5d1c48bffcd95b9530afd056e2e5559e0334024253dc94c4cade52924e836fa"
+  "execution_config_digest": "5567445a625a40c8e33fe69a45d4eb297fc102b31e964f6fd7c7ad36876212af"
 }

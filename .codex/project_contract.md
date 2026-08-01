@@ -22,7 +22,7 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   合法进入构建准入阶段。随后独立 revisions 已完成固定 13 项真实职责、27 个
   方法特异性 CPU/synthetic 行为节点和唯一 `method_readiness.yaml`，并通过
   revision-bound 独立语义审计。
-- 用户已基于 A1-A7 全部完成、冻结实验协议和可追溯执行入口明确授权本次独立
+- 用户已基于 experiment_ready_infrastructure_closure 全部完成、冻结实验协议和可追溯执行入口明确授权本次独立
   阶段迁移。本 revision 只把实际阶段同步为 `experiment_ready / implemented`，
   不修改方法、runtime、Notebook、登记测试、候选规格或 readiness 语义。
 - 已独立核验的 runtime 边界精确绑定 candidate
@@ -33,8 +33,8 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   该结果证明冻结 SD3.5 runtime 的 callback 18、actual dtype/integrity/budget、
   VAE、两层真实 Q/K、registered-key 重复确定性和 negative-key identity control
   可执行；Optional Replay 在没有具体缺口时不强制。
-- 当前 `experiment_ready` 只表示 A1-A7 已完成且冻结协议与可追溯执行入口可用；
-  不授权 calibration、C1 晋升、GPU 高成本运行、正式攻击矩阵或论文实验，也不构成
+- 当前 `experiment_ready` 只表示 experiment_ready_infrastructure_closure 已完成且冻结协议与可追溯执行入口可用；
+  不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行、正式攻击矩阵或论文实验，也不构成
   科学效果结论。
 - root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
@@ -154,8 +154,8 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 
 1. 本轮阻断关闭后，治理平面进入冻结状态。
 2. 本次独立 revision 只同步 `experiment_ready` 阶段，保留 `implemented` 状态；
-   A1-A7 已完成，冻结协议与可追溯执行入口可用。本次迁移不授权 calibration、
-   C1 晋升、GPU 高成本运行、正式攻击矩阵或论文实验。
+   experiment_ready_infrastructure_closure 已完成，冻结协议与可追溯执行入口可用。本次迁移不授权 calibration、
+   hf_only_reference_validation 晋升、GPU 高成本运行、正式攻击矩阵或论文实验。
 3. 除非真实方法、runtime、实验或证据工作暴露一个具体且可复现的缺口，不得新增通用 policy、skill、schema、harness 或治理目录。
 4. 发现具体缺口时，优先最小修改现有规则与测试；不得以治理文件数量、机械审计通过或元数据规模替代研究推进。
 

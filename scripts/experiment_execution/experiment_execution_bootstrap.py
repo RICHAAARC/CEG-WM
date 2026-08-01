@@ -1,4 +1,4 @@
-"""Package-external trust anchor for the C1 threshold-fit package."""
+"""Package-external trust anchor for the HF-only threshold-fit GPU execution package."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ BOOTSTRAP_IDENTITY = "ceg_wm_experiment_execution_bootstrap"
 BOOTSTRAP_SCHEMA_VERSION = 2
 PACKAGE_SCHEMA_VERSION = 2
 DELIVERY_MANIFEST_SCHEMA_VERSION = 2
-PACKAGE_PROFILE = "c1_hf_threshold_fit_execution_package"
+PACKAGE_PROFILE = "hf_only_threshold_fit_execution_package"
 ENTRYPOINT_IDENTITY = (
     "scripts.experiment_execution.experiment_execution_entrypoint:"
     "execute_verified_threshold_fit_shard"
@@ -40,23 +40,23 @@ ENTRYPOINT_PATH = (
     "scripts/experiment_execution/experiment_execution_entrypoint.py"
 )
 EVIDENCE_SCOPE = (
-    "c1_hf_threshold_fit_execution_only_no_tau_approval_no_confirmation_access"
+    "hf_only_threshold_fit_execution_only_no_tau_approval_no_confirmation_access"
 )
-C1_DEPENDENCY_LOCK_PATH = "requirements_c1_threshold_fit.txt"
-C1_DEPENDENCY_LOCK_SHA256 = (
+HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_PATH = "requirements_hf_only_threshold_fit_gpu_execution.txt"
+HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_SHA256 = (
     "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
 )
-C1_PYPI_INDEX_URL = "https://pypi.org/simple"
-C1_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-C1_NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
+HF_ONLY_THRESHOLD_FIT_PYPI_INDEX_URL = "https://pypi.org/simple"
+HF_ONLY_THRESHOLD_FIT_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+HF_ONLY_THRESHOLD_FIT_NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
 EXACT_FILES = frozenset(
     {
         "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
-        "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
-        "configs/experiments/c1_hf_metric_implementation.json",
-        "configs/experiments/c1_hf_prompt_roster.json",
-        "configs/experiments/c1_hf_reference_run.json",
-        "configs/experiments/c1_hf_threshold_fit_execution.json",
+        "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+        "configs/experiments/hf_only_reference_metrics.json",
+        "configs/experiments/hf_only_reference_prompt_roster.json",
+        "configs/experiments/hf_only_reference_validation.json",
+        "configs/experiments/hf_only_threshold_fit_gpu_execution.json",
         "configs/experiments/internal_execution_components.json",
         "configs/runtime/runtime_sd35_flowmatch.json",
         "experiments/__init__.py",
@@ -66,11 +66,11 @@ EXACT_FILES = frozenset(
         "experiments/methods/ceg_wm.py",
         "experiments/metrics/__init__.py",
         "experiments/metrics/binomial.py",
-        "experiments/metrics/c1_hf_reference.py",
+        "experiments/metrics/hf_only_reference_metrics.py",
         "experiments/metrics/internal.py",
         "experiments/protocol/__init__.py",
-        "experiments/protocol/c1_hf_reference.py",
-        "experiments/protocol/c1_hf_threshold_fit_records.py",
+        "experiments/protocol/hf_only_reference_protocol.py",
+        "experiments/protocol/hf_only_threshold_fit_records.py",
         "experiments/protocol/internal_case.py",
         "experiments/protocol/internal_matrix.py",
         "experiments/protocol/internal_record_registry.py",
@@ -78,7 +78,7 @@ EXACT_FILES = frozenset(
         "experiments/protocol/internal_splits.py",
         "experiments/protocol/internal_validation.py",
         "experiments/runners/__init__.py",
-        "experiments/runners/c1_hf_threshold_fit.py",
+        "experiments/runners/hf_only_threshold_fit_gpu_execution.py",
         "experiments/runners/formal_operations.py",
         "experiments/runners/internal.py",
         "experiments/runners/record_writer.py",
@@ -103,7 +103,7 @@ EXACT_FILES = frozenset(
         "main/shared/normal_quantile_table20_float32_be.txt",
         "main/shared/rgb8.py",
         "pyproject.toml",
-        C1_DEPENDENCY_LOCK_PATH,
+        HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_PATH,
         "runtime/__init__.py",
         "runtime/adapter.py",
         "runtime/backend.py",
@@ -780,10 +780,10 @@ def _load_verified_dependency_lock(path: Path) -> dict[str, tuple[str, str]]:
             "dependency_install",
             "verified dependency lock is unreadable",
         ) from exc
-    if sha256(blob).hexdigest() != C1_DEPENDENCY_LOCK_SHA256:
+    if sha256(blob).hexdigest() != HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_SHA256:
         raise ExperimentBootstrapError(
             "dependency_install",
-            "verified C1 dependency lock identity drifted",
+            "verified hf_only_reference_validation dependency lock identity drifted",
         )
     requirements: dict[str, tuple[str, str]] = {}
     for line in lines:
@@ -810,7 +810,7 @@ def _load_verified_dependency_lock(path: Path) -> dict[str, tuple[str, str]]:
     ):
         raise ExperimentBootstrapError(
             "dependency_install",
-            "verified C1 dependency lock closure drifted",
+            "verified hf_only_reference_validation dependency lock closure drifted",
         )
     return requirements
 
@@ -868,7 +868,7 @@ def _prepare_verified_dependencies(
 ) -> Path | None:
     """Strictly reuse the lock or install it into ephemeral storage."""
 
-    lock_path = package_root / C1_DEPENDENCY_LOCK_PATH
+    lock_path = package_root / HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_PATH
     requirements = _load_verified_dependency_lock(lock_path)
     expected_versions = {
         normalized: version
@@ -916,11 +916,11 @@ def _prepare_verified_dependencies(
         "--no-input",
         "--no-deps",
         "--index-url",
-        C1_PYPI_INDEX_URL,
+        HF_ONLY_THRESHOLD_FIT_PYPI_INDEX_URL,
         "--extra-index-url",
-        C1_PYTORCH_INDEX_URL,
+        HF_ONLY_THRESHOLD_FIT_PYTORCH_INDEX_URL,
         "--extra-index-url",
-        C1_NVIDIA_INDEX_URL,
+        HF_ONLY_THRESHOLD_FIT_NVIDIA_INDEX_URL,
         "--requirement",
         str(lock_path),
         "--target",
@@ -1143,10 +1143,10 @@ def _validate_threshold_fit_outcome(
         or set(outcome) != required
         or outcome["artifact_kind"]
         not in {
-            "c1_threshold_fit_shard_result",
-            "c1_threshold_fit_shard_diagnostic",
+            "hf_only_threshold_fit_shard_result",
+            "hf_only_threshold_fit_shard_diagnostic",
         }
-        or outcome["execution_scope"] != "c1_hf_threshold_fit_only"
+        or outcome["execution_scope"] != "hf_only_threshold_fit_only"
         or outcome["run_id"] != run_id
         or outcome["committed_revision"] != revision
         or outcome["shard_index"] != shard_index
@@ -1164,10 +1164,10 @@ def _validate_threshold_fit_outcome(
             "threshold-fit outcome identity drifted",
         )
     if (
-        outcome["artifact_kind"] == "c1_threshold_fit_shard_result"
+        outcome["artifact_kind"] == "hf_only_threshold_fit_shard_result"
         and outcome["failure_class"] is not None
     ) or (
-        outcome["artifact_kind"] == "c1_threshold_fit_shard_diagnostic"
+        outcome["artifact_kind"] == "hf_only_threshold_fit_shard_diagnostic"
         and outcome["failure_class"]
         not in {
             "resource_failure",

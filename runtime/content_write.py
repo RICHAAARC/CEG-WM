@@ -1,4 +1,4 @@
-"""Paired content materialization and VAE execution for runtime Batch 2."""
+"""Paired content materialization and VAE execution for runtime content_write_and_vae."""
 
 from __future__ import annotations
 
@@ -520,7 +520,7 @@ def execute_content_write_and_vae(
 
     if not isinstance(backend, RuntimeContentBackend):
         raise RuntimeContentExecutionError(
-            "prepared backend lacks the Batch-2 execution protocol"
+            "prepared backend lacks the content_write_and_vae execution protocol"
         )
     if type(configuration) is not Sd35RuntimeConfiguration:
         raise RuntimeContentExecutionError(

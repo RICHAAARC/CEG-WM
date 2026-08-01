@@ -4,12 +4,12 @@
 
 ## 当前实现
 
-- `c1_hf_reference.py`：加载 C1-P 的 HF-only reference spec、离线 PartiPrompts
+- `hf_only_reference.py`：加载 hf_only_reference_protocol 的 HF-only reference spec、离线 PartiPrompts
   snapshot/明文 roster 和两个 compact manifests，并确定性物化既有
   `FrozenSplitManifest`。bundle loader 同时核对文件 SHA、权威 method/runtime
   source bundle、稳定的 method-adapter 子配置摘要、key family、每 split 4096
   source clusters、prompt 互斥并集和 `(category, challenge)` 分层平衡。该模块只
-  冻结公式身份、两阶段运行顺序与工作量，不实现 C1 metrics、不运行模型、不产生结果。
+  冻结公式身份、两阶段运行顺序与工作量，不实现 hf_only_reference_validation metrics、不运行模型、不产生结果。
 - `internal_splits.py`：定义 unit/case/source-cluster identity、八个互斥职责 split、
   显式 frozen manifest 和当前执行访问门；授权对象必须匹配当前 access identity
   与精确允许集合，伪造或扩展 grant 失败，当前访问 `held_out_evaluation` 必须
@@ -23,7 +23,7 @@
   独立 input manifest、execution config 和 resource identity 摘要。其中只保留由正式入口调用的
   私有 collection 结构校验 helper，验证所有非初始 outcome 的可重试 parent、
   连续 attempt、冻结上限、结构化 promotion stop 和 stop 后禁止继续。
-- `c1_hf_threshold_fit_records.py`：C1 阈值拟合单元记录 v2 强制保存
+- `hf_only_threshold_fit_records.py`：hf_only_reference_validation 阈值拟合单元记录 v2 强制保存
   `execution_evidence_kind`；历史 v1 记录不得恢复或汇总为 v2 正式结果，CPU 合成记录也不得由
   正式 finalizer 接受。
 - `internal_case.py`：保存写入器和 runner 共同消费的冻结逐 case 输入清单；
@@ -42,13 +42,13 @@
 - `comparison.py`：定义外部 baseline 比较所需的 `ComparisonMethodSpec`、`ComparisonProtocol`、`PreflightApproval` 和运行前校验。
 - `records.py`：定义带完整 provenance 的 `ExperimentRecord` 及其轻量校验。
 
-内部协议已因 detector-mode-aware C1 前置门从 v1/1.0.0 显式升为 v2/2.0.0。
+内部协议已因 detector-mode-aware hf_only_reference_validation 前置门从 v1/1.0.0 显式升为 v2/2.0.0。
 v1 record 结构仍可由历史工具读取，但其语义不得在 v2 下重新验证或迁移冒充；
 HF-only `content_threshold_fit` 需要 `hf_reference_candidate_frozen`，combined
 模式仍需要 `content_branch_promotion_gate_passed`，缺失/未知 mode 一律拒绝。
 `hf_detector_reference_gate_passed` 是未来结果门，禁止作为 prerequisite。
 
-内部验证协议与外部 comparison 是两个不同表面，不得互相冒充。当前 A-1 只建立
+内部验证协议与外部 comparison 是两个不同表面，不得互相冒充。当前 internal_validation_protocol 只建立
 可执行的协议约束和冻结配置；没有访问 final held-out、没有执行 calibration 或
 攻击矩阵，也没有产生科学 records。外部 baseline 与项目方法进入高成本运行前，
 仍必须共同固定样本与切分 manifests、生成条件、随机策略、输出规格、攻击与指标集合、

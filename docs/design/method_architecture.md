@@ -1,5 +1,8 @@
 # CEG-WM Method Architecture
 
+本架构的实验侧方法接线统一使用 `internal_execution_components`，内部受治理
+runner 统一使用 `governed_internal_runner`；两者都不得成为弱实现或替代真实方法。
+
 ## Authority
 
 CEG-WM 由内容链、几何链和联合判定组成。内容链拥有水印证据；几何链只恢复坐标；联合判定只执行门控和重判。

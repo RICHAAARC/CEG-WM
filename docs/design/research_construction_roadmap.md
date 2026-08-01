@@ -1,5 +1,10 @@
 # CEG-WM Research Construction Roadmap
 
+`experiment_ready_infrastructure_closure` 的七项职责为：研究范围与阶段治理、方法架构
+与证据边界、内容/几何/联合判定设计、算法与候选冻结、真实方法实现、runtime
+qualification、实验协议与可追溯交付。后续参考验证统一称为
+`hf_only_reference_validation`。
+
 ## Roadmap Authority
 
 本文档定义从当前 `runtime_verified` 到论文全部数据、可重建产物和

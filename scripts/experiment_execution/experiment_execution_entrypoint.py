@@ -1,4 +1,4 @@
-"""Verified package entrypoint for one C1 HF threshold-fit shard."""
+"""Verified package entrypoint for one HF-only threshold-fit GPU execution shard."""
 
 from __future__ import annotations
 
@@ -13,15 +13,15 @@ from typing import Mapping, Sequence
 
 import torch
 
-from experiments.protocol.c1_hf_threshold_fit_records import (
-    C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
-    canonical_c1_hf_threshold_fit_record_bytes,
-    load_c1_hf_threshold_fit_record_collection,
-    replay_c1_hf_threshold_fit_record_collection,
+from experiments.protocol.hf_only_threshold_fit_records import (
+    HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+    canonical_hf_only_threshold_fit_record_bytes,
+    load_hf_only_threshold_fit_record_collection,
+    replay_hf_only_threshold_fit_record_collection,
 )
-from experiments.runners.c1_hf_threshold_fit import (
-    load_c1_hf_threshold_fit_package_authority,
-    run_c1_hf_threshold_fit_verified_package_shard,
+from experiments.runners.hf_only_threshold_fit_gpu_execution import (
+    load_hf_only_threshold_fit_package_authority,
+    run_hf_only_threshold_fit_verified_package_shard,
 )
 from experiments.runners.formal_operations import (
     FormalHfContentDetectionOperation,
@@ -34,7 +34,7 @@ THRESHOLD_FIT_ENTRYPOINT_IDENTITY = (
     "execute_verified_threshold_fit_shard"
 )
 THRESHOLD_FIT_ENTRYPOINT_SCHEMA_VERSION = 1
-THRESHOLD_FIT_EXECUTION_SCOPE = "c1_hf_threshold_fit_only"
+THRESHOLD_FIT_EXECUTION_SCOPE = "hf_only_threshold_fit_only"
 THRESHOLD_FIT_FAILURE_CLASSES = frozenset(
     {
         "resource_failure",
@@ -45,8 +45,8 @@ THRESHOLD_FIT_FAILURE_CLASSES = frozenset(
     }
 )
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
-C1_DEPENDENCY_LOCK_PATH = "requirements_c1_threshold_fit.txt"
-C1_DEPENDENCY_LOCK_SHA256 = (
+HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_PATH = "requirements_hf_only_threshold_fit_gpu_execution.txt"
+HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_SHA256 = (
     "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
 )
 
@@ -88,13 +88,13 @@ def _classify_threshold_fit_failure(
 
 def _load_and_replay_threshold_fit_record(source: Path) -> tuple[object, object, bytes]:
     try:
-        collection = load_c1_hf_threshold_fit_record_collection(source)
-        last = replay_c1_hf_threshold_fit_record_collection(
+        collection = load_hf_only_threshold_fit_record_collection(source)
+        last = replay_hf_only_threshold_fit_record_collection(
             collection,
             expected_identity=collection.identity,
         )
         blob = source.read_bytes()
-        if blob != canonical_c1_hf_threshold_fit_record_bytes(collection):
+        if blob != canonical_hf_only_threshold_fit_record_bytes(collection):
             raise ValueError("record changed after typed validation")
     except Exception as exc:
         raise ExperimentExecutionEntrypointError(
@@ -104,7 +104,7 @@ def _load_and_replay_threshold_fit_record(source: Path) -> tuple[object, object,
 
 
 def _verified_dependency_versions(package_root: Path) -> tuple[dict[str, str], str]:
-    lock_path = package_root / C1_DEPENDENCY_LOCK_PATH
+    lock_path = package_root / HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_PATH
     try:
         blob = lock_path.read_bytes()
         requirements = [
@@ -116,12 +116,12 @@ def _verified_dependency_versions(package_root: Path) -> tuple[dict[str, str], s
             "verified dependency lock is unreadable"
         ) from exc
     if (
-        sha256(blob).hexdigest() != C1_DEPENDENCY_LOCK_SHA256
+        sha256(blob).hexdigest() != HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_SHA256
         or len(requirements) != 62
         or any(len(item) != 2 for item in requirements)
     ):
         raise ExperimentExecutionEntrypointError(
-            "verified C1 dependency lock identity or closure drifted"
+            "verified hf_only_reference_validation dependency lock identity or closure drifted"
         )
     dependency_versions: dict[str, str] = {}
     for distribution, expected_version in requirements:
@@ -140,7 +140,7 @@ def _verified_dependency_versions(package_root: Path) -> tuple[dict[str, str], s
             or normalized in dependency_versions
         ):
             raise ExperimentExecutionEntrypointError(
-                "verified C1 dependency lock is not exact and unique"
+                "verified hf_only_reference_validation dependency lock is not exact and unique"
             )
         try:
             observed_version = metadata.version(distribution)
@@ -155,7 +155,7 @@ def _verified_dependency_versions(package_root: Path) -> tuple[dict[str, str], s
         dependency_versions[normalized] = observed_version
     if dependency_versions.get("torch") != "2.11.0+cu128":
         raise ExperimentExecutionEntrypointError(
-            "verified C1 torch dependency drifted"
+            "verified hf_only_reference_validation torch dependency drifted"
         )
     torch_import_version = str(torch.__version__)
     if torch_import_version != dependency_versions["torch"]:
@@ -193,7 +193,7 @@ def execute_verified_threshold_fit_shard(
             "threshold-fit package invocation is invalid"
         )
     output.mkdir(parents=True)
-    authority = load_c1_hf_threshold_fit_package_authority(root)
+    authority = load_hf_only_threshold_fit_package_authority(root)
     detector_binding, _ = create_formal_content_detector_binding(
         FormalHfContentDetectionOperation(authority.adapter),
         prototype_image=torch.arange(12, dtype=torch.uint8).reshape(1, 3, 2, 2),
@@ -205,7 +205,7 @@ def execute_verified_threshold_fit_shard(
             authority=authority,
         )
     )
-    runner_summary = run_c1_hf_threshold_fit_verified_package_shard(
+    runner_summary = run_hf_only_threshold_fit_verified_package_shard(
         authority=authority,
         shard_index=shard_index,
         run_id=run_id,
@@ -251,9 +251,9 @@ def execute_verified_threshold_fit_shard(
             or identity.committed_revision
             != package_revision_authority.committed_revision
             or identity.execution_evidence_kind
-            != C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
-            or identity.c1_specification_digest
-            != authority.metric_binding.c1_specification_digest
+            != HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
+            or identity.hf_only_reference_specification_digest
+            != authority.metric_binding.hf_only_reference_specification_digest
             or identity.protocol_id != authority.protocol_id
             or identity.protocol_version != authority.protocol_version
             or identity.protocol_digest != authority.metric_binding.protocol_digest
@@ -338,9 +338,9 @@ def execute_verified_threshold_fit_shard(
     records_digest = _canonical_digest(record_files)
     outcome = {
         "artifact_kind": (
-            "c1_threshold_fit_shard_result"
+            "hf_only_threshold_fit_shard_result"
             if failure_class is None
-            else "c1_threshold_fit_shard_diagnostic"
+            else "hf_only_threshold_fit_shard_diagnostic"
         ),
         "entrypoint_identity": THRESHOLD_FIT_ENTRYPOINT_IDENTITY,
         "entrypoint_schema_version": THRESHOLD_FIT_ENTRYPOINT_SCHEMA_VERSION,

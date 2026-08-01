@@ -48,7 +48,7 @@ def _roots_overlap(first: Path, second: Path) -> bool:
 
 
 class Sd35PipelineBackend:
-    """Diffusers SD3.5 backend connected to the Batch-2/3 protocols."""
+    """Diffusers SD3.5 backend connected to the content_write_and_vae/3 protocols."""
 
     def __init__(
         self,
@@ -188,14 +188,14 @@ class Sd35PipelineBackend:
         prompt: str,
         negative_prompt: str = "",
     ) -> RuntimeGenerationPromptIdentity:
-        """Bind one C1 prompt after preparation without reloading the model."""
+        """Bind one hf_only_reference_validation prompt after preparation without reloading the model."""
 
         self._prepared()
         if self._generation_running:
             raise Sd35BackendError("generation prompts cannot change while running")
         if type(prompt) is not str or not prompt or negative_prompt != "":
             raise Sd35BackendError(
-                "C1 generation requires nonempty prompt and exact empty negative prompt"
+                "hf_only_reference_validation generation requires nonempty prompt and exact empty negative prompt"
             )
         try:
             identity = RuntimeGenerationPromptIdentity.from_prompts(
@@ -224,7 +224,7 @@ class Sd35PipelineBackend:
             and self._generation_prompt_identity is None
         ):
             raise Sd35BackendError(
-                "next C1 generation requires an explicit per-unit prompt"
+                "next hf_only_reference_validation generation requires an explicit per-unit prompt"
             )
         try:
             prompt_identity = self._generation_prompt_identity or (

@@ -14,6 +14,6 @@
 `protocol.internal_validation.validate_run_case_record_collection` 这一正式入口；
 不得直接调用 `internal_records` 的私有结构 helper。
 
-内部协议、A-2 组件与当前 runner 只关闭 schema、切分隔离、访问、真实 API 编排、
+内部协议、internal_execution_components 组件与当前 runner 只关闭 schema、切分隔离、访问、真实 API 编排、
 唯一写入、resume/replay 和失败分类语义，不表示任何候选已经晋升，也不表示
 calibration、正式运行、GPU qualification 或科学有效性已经完成。

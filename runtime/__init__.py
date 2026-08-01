@@ -1,7 +1,7 @@
 """CEG-WM model runtime boundary.
 
-Batch 1 exposes frozen identity/lifecycle control. Batch 2 adds paired content
-materialization measurements and deterministic VAE boundaries. Batch 3 adds
+runtime_configuration_and_adapter exposes frozen identity/lifecycle control. content_write_and_vae adds paired content
+materialization measurements and deterministic VAE boundaries. qk_observation adds
 image-only registered-layer Q/K capture. Method semantics remain in ``main``.
 """
 

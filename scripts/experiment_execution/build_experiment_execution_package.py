@@ -15,7 +15,7 @@ import zipfile
 
 PACKAGE_SCHEMA_VERSION = 2
 DELIVERY_MANIFEST_SCHEMA_VERSION = 2
-PACKAGE_PROFILE = "c1_hf_threshold_fit_execution_package"
+PACKAGE_PROFILE = "hf_only_threshold_fit_execution_package"
 ENTRYPOINT_IDENTITY = (
     "scripts.experiment_execution.experiment_execution_entrypoint:"
     "execute_verified_threshold_fit_shard"
@@ -27,16 +27,16 @@ ENTRYPOINT_PATH = (
     "scripts/experiment_execution/experiment_execution_entrypoint.py"
 )
 EVIDENCE_SCOPE = (
-    "c1_hf_threshold_fit_execution_only_no_tau_approval_no_confirmation_access"
+    "hf_only_threshold_fit_execution_only_no_tau_approval_no_confirmation_access"
 )
 EXACT_FILES = frozenset(
     {
         "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
-        "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
-        "configs/experiments/c1_hf_metric_implementation.json",
-        "configs/experiments/c1_hf_prompt_roster.json",
-        "configs/experiments/c1_hf_reference_run.json",
-        "configs/experiments/c1_hf_threshold_fit_execution.json",
+        "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+        "configs/experiments/hf_only_reference_metrics.json",
+        "configs/experiments/hf_only_reference_prompt_roster.json",
+        "configs/experiments/hf_only_reference_validation.json",
+        "configs/experiments/hf_only_threshold_fit_gpu_execution.json",
         "configs/experiments/internal_execution_components.json",
         "configs/runtime/runtime_sd35_flowmatch.json",
         "experiments/__init__.py",
@@ -46,11 +46,11 @@ EXACT_FILES = frozenset(
         "experiments/methods/ceg_wm.py",
         "experiments/metrics/__init__.py",
         "experiments/metrics/binomial.py",
-        "experiments/metrics/c1_hf_reference.py",
+        "experiments/metrics/hf_only_reference_metrics.py",
         "experiments/metrics/internal.py",
         "experiments/protocol/__init__.py",
-        "experiments/protocol/c1_hf_reference.py",
-        "experiments/protocol/c1_hf_threshold_fit_records.py",
+        "experiments/protocol/hf_only_reference_protocol.py",
+        "experiments/protocol/hf_only_threshold_fit_records.py",
         "experiments/protocol/internal_case.py",
         "experiments/protocol/internal_matrix.py",
         "experiments/protocol/internal_record_registry.py",
@@ -58,7 +58,7 @@ EXACT_FILES = frozenset(
         "experiments/protocol/internal_splits.py",
         "experiments/protocol/internal_validation.py",
         "experiments/runners/__init__.py",
-        "experiments/runners/c1_hf_threshold_fit.py",
+        "experiments/runners/hf_only_threshold_fit_gpu_execution.py",
         "experiments/runners/formal_operations.py",
         "experiments/runners/internal.py",
         "experiments/runners/record_writer.py",
@@ -83,7 +83,7 @@ EXACT_FILES = frozenset(
         "main/shared/normal_quantile_table20_float32_be.txt",
         "main/shared/rgb8.py",
         "pyproject.toml",
-        "requirements_c1_threshold_fit.txt",
+        "requirements_hf_only_threshold_fit_gpu_execution.txt",
         "runtime/__init__.py",
         "runtime/adapter.py",
         "runtime/backend.py",
@@ -371,12 +371,12 @@ def _derive_authority_digests(
     root: Path,
     revision: str,
 ) -> dict[str, str]:
-    specification_path = "configs/experiments/c1_hf_reference_run.json"
+    specification_path = "configs/experiments/hf_only_reference_validation.json"
     execution_path = (
-        "configs/experiments/c1_hf_threshold_fit_execution.json"
+        "configs/experiments/hf_only_threshold_fit_gpu_execution.json"
     )
     fit_path = (
-        "configs/experiments/c1_hf_content_threshold_fit_manifest.json"
+        "configs/experiments/hf_only_content_threshold_fit_manifest.json"
     )
     specification, _specification_blob = _committed_json(
         root,
@@ -403,11 +403,11 @@ def _derive_authority_digests(
         ]
     except (KeyError, TypeError) as exc:
         raise ExperimentPackageBuildError(
-            "C1 threshold-fit authority fields are unavailable"
+            "HF-only threshold-fit GPU execution authority fields are unavailable"
         ) from exc
     if type(split_binding) is not dict:
         raise ExperimentPackageBuildError(
-            "C1 threshold-fit split binding is invalid"
+            "HF-only threshold-fit GPU execution split binding is invalid"
         )
     for role, digest in (
         ("candidate_config_digest", candidate_digest),
@@ -419,10 +419,10 @@ def _derive_authority_digests(
                 f"derived {role} is not a SHA-256 digest"
             )
     if (
-        execution.get("run_phase_id") != "c1_hf_threshold_fit_v1"
+        execution.get("run_phase_id") != "hf_only_threshold_fit_v1"
         or execution.get("accessible_split") != "content_threshold_fit"
         or execution.get("forbidden_splits") != ["untouched_confirmation"]
-        or execution.get("c1_specification_path") != specification_path
+        or execution.get("hf_only_reference_specification_path") != specification_path
         or execution.get("fit_manifest_path") != fit_path
         or execution.get("fit_manifest_file_sha256")
         != _sha256_bytes(fit_blob)
@@ -432,7 +432,7 @@ def _derive_authority_digests(
         or expected_input_digest != input_digest
     ):
         raise ExperimentPackageBuildError(
-            "C1 threshold-fit authority bindings are inconsistent"
+            "HF-only threshold-fit GPU execution authority bindings are inconsistent"
         )
     return {
         "candidate_config_digest": candidate_digest,

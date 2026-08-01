@@ -131,13 +131,13 @@
       "reliability_accept_reject",
       "rectification_same_detector_delta",
       "rescue_global_fpr_safety",
-      "c1_hf_tau_fit",
-      "c1_hf_primary_null_fixed_fpr",
-      "c1_hf_registered_tpr",
-      "c1_hf_wrong_key_false_accept",
-      "c1_hf_paired_key_attribution",
-      "c1_hf_paired_final_image_quality",
-      "c1_hf_actual_dtype_integrity"
+      "hf_only_reference_tau_fit",
+      "hf_only_reference_primary_null_fixed_fpr",
+      "hf_only_reference_registered_tpr",
+      "hf_only_reference_wrong_key_false_accept",
+      "hf_only_reference_paired_key_attribution",
+      "hf_only_reference_paired_final_image_quality",
+      "hf_only_reference_actual_dtype_integrity"
     ],
     "metric_split_bindings": [
       {
@@ -207,43 +207,43 @@
         "allowed_splits": [
           "content_threshold_fit"
         ],
-        "metric_id": "c1_hf_tau_fit"
+        "metric_id": "hf_only_reference_tau_fit"
       },
       {
         "allowed_splits": [
           "untouched_confirmation"
         ],
-        "metric_id": "c1_hf_primary_null_fixed_fpr"
+        "metric_id": "hf_only_reference_primary_null_fixed_fpr"
       },
       {
         "allowed_splits": [
           "untouched_confirmation"
         ],
-        "metric_id": "c1_hf_registered_tpr"
+        "metric_id": "hf_only_reference_registered_tpr"
       },
       {
         "allowed_splits": [
           "untouched_confirmation"
         ],
-        "metric_id": "c1_hf_wrong_key_false_accept"
+        "metric_id": "hf_only_reference_wrong_key_false_accept"
       },
       {
         "allowed_splits": [
           "untouched_confirmation"
         ],
-        "metric_id": "c1_hf_paired_key_attribution"
+        "metric_id": "hf_only_reference_paired_key_attribution"
       },
       {
         "allowed_splits": [
           "untouched_confirmation"
         ],
-        "metric_id": "c1_hf_paired_final_image_quality"
+        "metric_id": "hf_only_reference_paired_final_image_quality"
       },
       {
         "allowed_splits": [
           "untouched_confirmation"
         ],
-        "metric_id": "c1_hf_actual_dtype_integrity"
+        "metric_id": "hf_only_reference_actual_dtype_integrity"
       }
     ],
     "registry_version": "ceg_wm_internal_metric_registry_v2"

@@ -1,4 +1,4 @@
-"""Smoke regression for the C1-only experiment package entrypoint."""
+"""Smoke regression for the hf_only_reference_validation-only experiment package entrypoint."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from scripts.experiment_execution import experiment_execution_entrypoint
 def test_package_entrypoint_exposes_only_verified_threshold_fit() -> None:
     assert (
         experiment_execution_entrypoint.THRESHOLD_FIT_EXECUTION_SCOPE
-        == "c1_hf_threshold_fit_only"
+        == "hf_only_threshold_fit_only"
     )
     assert callable(
         experiment_execution_entrypoint.execute_verified_threshold_fit_shard

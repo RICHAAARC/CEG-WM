@@ -39,7 +39,7 @@
 
 `FrozenRecordBindings` 是 runner 构造前已经验证的外部输入。本层只保证 execution
 context、writer 和逐 record provenance 在内部全生命周期一致；正式 code/package/
-bootstrap revision 权威由后续 A3b 外部信任链绑定，不由 A3a 自我声明。
+bootstrap revision 权威由后续 experiment_execution_delivery 外部信任链绑定，不由 governed_internal_runner 自我声明。
 
 包含外部 baseline 的高成本运行仍必须先接收
 `experiments.protocol.comparison.PreflightApproval`，重新计算当前

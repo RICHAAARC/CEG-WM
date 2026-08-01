@@ -1,5 +1,9 @@
 # Content Chain Design
 
+未晋升组合函数的正式身份仅为 `hf_only_standardized_score`、
+`weighted_hf_lf_standardized_score` 和
+`maximum_hf_lf_standardized_score`；冻结权重保存在独立 `weight` 字段中。
+
 ## Frozen Responsibility
 
 内容链是唯一水印证据来源。几何可靠性、配准质量或变换估计不得直接加入内容阳性分数。

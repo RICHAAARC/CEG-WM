@@ -40,13 +40,13 @@ REQUIRED_METRIC_IDS = (
     "reliability_accept_reject",
     "rectification_same_detector_delta",
     "rescue_global_fpr_safety",
-    "c1_hf_tau_fit",
-    "c1_hf_primary_null_fixed_fpr",
-    "c1_hf_registered_tpr",
-    "c1_hf_wrong_key_false_accept",
-    "c1_hf_paired_key_attribution",
-    "c1_hf_paired_final_image_quality",
-    "c1_hf_actual_dtype_integrity",
+    "hf_only_reference_tau_fit",
+    "hf_only_reference_primary_null_fixed_fpr",
+    "hf_only_reference_registered_tpr",
+    "hf_only_reference_wrong_key_false_accept",
+    "hf_only_reference_paired_key_attribution",
+    "hf_only_reference_paired_final_image_quality",
+    "hf_only_reference_actual_dtype_integrity",
 )
 REQUIRED_METRIC_SPLIT_BINDINGS = (
     (
@@ -83,13 +83,13 @@ REQUIRED_METRIC_SPLIT_BINDINGS = (
         "rescue_global_fpr_safety",
         ("rescue_threshold_fit", "end_to_end_check"),
     ),
-    ("c1_hf_tau_fit", ("content_threshold_fit",)),
-    ("c1_hf_primary_null_fixed_fpr", ("untouched_confirmation",)),
-    ("c1_hf_registered_tpr", ("untouched_confirmation",)),
-    ("c1_hf_wrong_key_false_accept", ("untouched_confirmation",)),
-    ("c1_hf_paired_key_attribution", ("untouched_confirmation",)),
-    ("c1_hf_paired_final_image_quality", ("untouched_confirmation",)),
-    ("c1_hf_actual_dtype_integrity", ("untouched_confirmation",)),
+    ("hf_only_reference_tau_fit", ("content_threshold_fit",)),
+    ("hf_only_reference_primary_null_fixed_fpr", ("untouched_confirmation",)),
+    ("hf_only_reference_registered_tpr", ("untouched_confirmation",)),
+    ("hf_only_reference_wrong_key_false_accept", ("untouched_confirmation",)),
+    ("hf_only_reference_paired_key_attribution", ("untouched_confirmation",)),
+    ("hf_only_reference_paired_final_image_quality", ("untouched_confirmation",)),
+    ("hf_only_reference_actual_dtype_integrity", ("untouched_confirmation",)),
 )
 
 

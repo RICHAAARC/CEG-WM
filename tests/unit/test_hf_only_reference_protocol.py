@@ -1,4 +1,4 @@
-"""C1 HF-only reference protocol, frozen roster, and budget constraints."""
+"""hf_only_reference_validation reference protocol, frozen roster, and budget constraints."""
 
 from __future__ import annotations
 
@@ -12,19 +12,19 @@ import shutil
 
 import pytest
 
-from experiments.protocol.c1_hf_reference import (
-    C1_HF_CONFIDENCE_LEVEL,
-    C1_HF_DATASET_SHA256,
-    C1_HF_MANIFEST_IDENTITIES,
-    C1_HF_PRIMARY_NULL_TARGET_FPR,
-    C1_HF_PROMPT_COUNT,
-    C1_HF_PROMPTS_PER_SPLIT,
-    C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-    C1_HF_THRESHOLD_TAIL_FAILURE_PROBABILITY,
-    C1_HF_ZERO_FAILURE_CP_UPPER_95,
-    load_c1_hf_reference_bundle,
-    materialize_c1_split_manifest,
-    validate_c1_manifest_pair,
+from experiments.protocol.hf_only_reference_protocol import (
+    HF_ONLY_REFERENCE_CONFIDENCE_LEVEL,
+    HF_ONLY_REFERENCE_DATASET_SHA256,
+    HF_ONLY_REFERENCE_MANIFEST_IDENTITIES,
+    HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR,
+    HF_ONLY_REFERENCE_PROMPT_COUNT,
+    HF_ONLY_REFERENCE_PROMPTS_PER_SPLIT,
+    HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+    HF_ONLY_REFERENCE_THRESHOLD_TAIL_FAILURE_PROBABILITY,
+    HF_ONLY_REFERENCE_ZERO_FAILURE_CP_UPPER_95,
+    load_hf_only_reference_bundle,
+    materialize_hf_only_reference_split_manifest,
+    validate_hf_only_reference_manifest_pair,
 )
 from experiments.protocol.internal_splits import (
     INTERNAL_VALIDATION_PROTOCOL_ID,
@@ -36,23 +36,23 @@ from experiments.protocol.internal_validation import LEGACY_PROTOCOL_COMPATIBILI
 
 
 ROOT = Path(__file__).resolve().parents[2]
-C1_MODULE = ROOT / "experiments/protocol/c1_hf_reference.py"
+HF_ONLY_REFERENCE_PROTOCOL_MODULE = ROOT / "experiments/protocol/hf_only_reference_protocol.py"
 
 
 @pytest.mark.unit
-def test_c1_bundle_loads_exact_authorities_and_offline_prompt_snapshot() -> None:
-    bundle = load_c1_hf_reference_bundle(ROOT)
+def test_hf_only_reference_bundle_loads_exact_authorities_and_offline_prompt_snapshot() -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
     specification = bundle.specification.raw
     assert specification["protocol_id"] == INTERNAL_VALIDATION_PROTOCOL_ID
     assert specification["protocol_version"] == INTERNAL_VALIDATION_PROTOCOL_VERSION
     assert specification["dataset"]["runtime_network_access"] == (
         "forbidden_use_frozen_roster_only"
     )
-    assert len(bundle.roster.rows) == C1_HF_PROMPT_COUNT
-    assert len({row.prompt_text for row in bundle.roster.rows}) == C1_HF_PROMPT_COUNT
-    assert len({row.prompt_digest for row in bundle.roster.rows}) == C1_HF_PROMPT_COUNT
+    assert len(bundle.roster.rows) == HF_ONLY_REFERENCE_PROMPT_COUNT
+    assert len({row.prompt_text for row in bundle.roster.rows}) == HF_ONLY_REFERENCE_PROMPT_COUNT
+    assert len({row.prompt_digest for row in bundle.roster.rows}) == HF_ONLY_REFERENCE_PROMPT_COUNT
     assert {row.source_row for row in bundle.roster.rows} == set(
-        range(1, C1_HF_PROMPT_COUNT + 1)
+        range(1, HF_ONLY_REFERENCE_PROMPT_COUNT + 1)
     )
     assert all(
         hashlib.sha256(row.prompt_text.encode("utf-8")).hexdigest()
@@ -60,17 +60,17 @@ def test_c1_bundle_loads_exact_authorities_and_offline_prompt_snapshot() -> None
         for row in bundle.roster.rows
     )
     snapshot = ROOT / specification["dataset"]["dataset_snapshot_path"]
-    assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == C1_HF_DATASET_SHA256
+    assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == HF_ONLY_REFERENCE_DATASET_SHA256
 
 
 @pytest.mark.unit
-def test_c1_bundle_rejects_candidate_specification_authority_tamper(tmp_path) -> None:
-    bundle = load_c1_hf_reference_bundle(ROOT)
+def test_hf_only_reference_bundle_rejects_candidate_specification_authority_tamper(tmp_path) -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
     specification = bundle.specification.raw
     binding = specification["candidate_binding"]
     temporary_root = tmp_path / "repository"
     bound_paths = {
-        Path("configs/experiments/c1_hf_reference_run.json"),
+        Path("configs/experiments/hf_only_reference_validation.json"),
         Path(binding["candidate_specification_path"]),
         Path(binding["formal_method_adapter_config_path"]),
         Path(binding["runtime_config_path"]),
@@ -96,28 +96,28 @@ def test_c1_bundle_rejects_candidate_specification_authority_tamper(tmp_path) ->
         ValueError,
         match="^candidate_specification_authority_mismatch$",
     ):
-        load_c1_hf_reference_bundle(temporary_root)
+        load_hf_only_reference_bundle(temporary_root)
 
 
 @pytest.mark.unit
-def test_c1_compact_manifests_materialize_deterministically_and_are_disjoint() -> None:
-    bundle = load_c1_hf_reference_bundle(ROOT)
+def test_hf_only_reference_compact_manifests_materialize_deterministically_and_are_disjoint() -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
     threshold_fit, confirmation = bundle.materialized_manifests
     assert tuple(len(manifest.assignments) for manifest in bundle.materialized_manifests) == (
-        C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-        C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+        HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
     )
     assert tuple(manifest.digest() for manifest in bundle.materialized_manifests) == (
-        C1_HF_MANIFEST_IDENTITIES["content_threshold_fit"][2],
-        C1_HF_MANIFEST_IDENTITIES["untouched_confirmation"][2],
+        HF_ONLY_REFERENCE_MANIFEST_IDENTITIES["content_threshold_fit"][2],
+        HF_ONLY_REFERENCE_MANIFEST_IDENTITIES["untouched_confirmation"][2],
     )
     assert tuple(
-        materialize_c1_split_manifest(compact, bundle.roster).digest()
+        materialize_hf_only_reference_split_manifest(compact, bundle.roster).digest()
         for compact in bundle.compact_manifests
     ) == tuple(
         manifest.digest() for manifest in bundle.materialized_manifests
     )
-    assert validate_c1_manifest_pair(
+    assert validate_hf_only_reference_manifest_pair(
         threshold_fit,
         confirmation,
         bundle.roster,
@@ -129,7 +129,7 @@ def test_c1_compact_manifests_materialize_deterministically_and_are_disjoint() -
     confirmation_prompts = {
         assignment.identity.prompt_digest for assignment in confirmation.assignments
     }
-    assert len(threshold_prompts) == len(confirmation_prompts) == C1_HF_PROMPTS_PER_SPLIT
+    assert len(threshold_prompts) == len(confirmation_prompts) == HF_ONLY_REFERENCE_PROMPTS_PER_SPLIT
     assert not threshold_prompts & confirmation_prompts
     assert threshold_prompts | confirmation_prompts == {
         row.prompt_digest for row in bundle.roster.rows
@@ -137,8 +137,8 @@ def test_c1_compact_manifests_materialize_deterministically_and_are_disjoint() -
 
 
 @pytest.mark.unit
-def test_c1_prompt_split_is_balanced_within_every_category_challenge_stratum() -> None:
-    bundle = load_c1_hf_reference_bundle(ROOT)
+def test_hf_only_reference_prompt_split_is_balanced_within_every_category_challenge_stratum() -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
     threshold_fit, confirmation = bundle.materialized_manifests
     roster_by_digest = {row.prompt_digest: row for row in bundle.roster.rows}
 
@@ -166,8 +166,8 @@ def test_c1_prompt_split_is_balanced_within_every_category_challenge_stratum() -
 
 
 @pytest.mark.unit
-def test_c1_compact_manifest_identity_and_materialized_digest_fail_closed() -> None:
-    bundle = load_c1_hf_reference_bundle(ROOT)
+def test_hf_only_reference_compact_manifest_identity_and_materialized_digest_fail_closed() -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
     compact = bundle.compact_manifests[0]
     assert "manifest_id_frozen_value_mismatch" in replace(
         compact,
@@ -184,8 +184,8 @@ def test_c1_compact_manifest_identity_and_materialized_digest_fail_closed() -> N
 
 
 @pytest.mark.unit
-def test_c1_reference_freeze_is_authority_fact_not_result_gate() -> None:
-    bundle = load_c1_hf_reference_bundle(ROOT)
+def test_hf_only_reference_freeze_is_authority_fact_not_result_gate() -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
     frozen = bundle.specification.freeze_reference_candidate()
     assert frozen.gate_id == "hf_reference_candidate_frozen"
     assert frozen.detector_mode == "hf_only"
@@ -193,13 +193,13 @@ def test_c1_reference_freeze_is_authority_fact_not_result_gate() -> None:
     required = bundle.specification.raw["candidate_binding"][
         "required_execution_package_bindings"
     ]
-    assert required["absence_semantics"] == "c1_execution_preflight_fail_closed"
-    assert required["c1_protocol_status"] == "not_yet_materialized_no_result_claim"
+    assert required["absence_semantics"] == "hf_only_threshold_fit_gpu_execution_preflight_fail_closed"
+    assert required["hf_only_reference_protocol_status"] == "not_yet_materialized_no_result_claim"
 
 
 @pytest.mark.unit
-def test_c1_run_phases_cannot_mix_fit_and_confirmation() -> None:
-    specification = load_c1_hf_reference_bundle(ROOT).specification.raw
+def test_hf_only_reference_run_phases_cannot_mix_fit_and_confirmation() -> None:
+    specification = load_hf_only_reference_bundle(ROOT).specification.raw
     phases = specification["run_phases"]
     assert phases["threshold_fit"]["accessible_split"] == "content_threshold_fit"
     assert phases["threshold_fit"]["forbidden_split_access"] == [
@@ -217,19 +217,19 @@ def test_c1_run_phases_cannot_mix_fit_and_confirmation() -> None:
 
 
 @pytest.mark.unit
-def test_c1_statistics_and_workload_are_independent_and_falsifiable() -> None:
-    specification = load_c1_hf_reference_bundle(ROOT).specification.raw
+def test_hf_only_reference_statistics_and_workload_are_independent_and_falsifiable() -> None:
+    specification = load_hf_only_reference_bundle(ROOT).specification.raw
     statistics = specification["statistics"]
-    assert C1_HF_THRESHOLD_TAIL_FAILURE_PROBABILITY == pytest.approx(
-        (1.0 - C1_HF_PRIMARY_NULL_TARGET_FPR) ** C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+    assert HF_ONLY_REFERENCE_THRESHOLD_TAIL_FAILURE_PROBABILITY == pytest.approx(
+        (1.0 - HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR) ** HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
     )
-    assert C1_HF_THRESHOLD_TAIL_FAILURE_PROBABILITY < 0.05
-    assert C1_HF_ZERO_FAILURE_CP_UPPER_95 == pytest.approx(
+    assert HF_ONLY_REFERENCE_THRESHOLD_TAIL_FAILURE_PROBABILITY < 0.05
+    assert HF_ONLY_REFERENCE_ZERO_FAILURE_CP_UPPER_95 == pytest.approx(
         1.0
-        - (1.0 - C1_HF_CONFIDENCE_LEVEL)
-        ** (1.0 / C1_HF_SOURCE_CLUSTERS_PER_SPLIT)
+        - (1.0 - HF_ONLY_REFERENCE_CONFIDENCE_LEVEL)
+        ** (1.0 / HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT)
     )
-    assert C1_HF_ZERO_FAILURE_CP_UPPER_95 <= C1_HF_PRIMARY_NULL_TARGET_FPR
+    assert HF_ONLY_REFERENCE_ZERO_FAILURE_CP_UPPER_95 <= HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR
     assert statistics["threshold_fit"]["fit_rule"].startswith("float64_nextafter")
     assert statistics["threshold_fit"]["confirmation_data_access"] == "forbidden"
     assert statistics["untouched_confirmation"]["tau_refit"] == "forbidden"
@@ -239,7 +239,7 @@ def test_c1_statistics_and_workload_are_independent_and_falsifiable() -> None:
     assert statistics["paired_attribution"]["ties"] == "count_as_failures"
     result_gate = statistics["result_gate_semantics"]
     assert result_gate["result_gate_is_prerequisite"] is False
-    assert "forbids_c2" in result_gate["negative_closure"]
+    assert "forbids_unapproved_follow_on_validation" in result_gate["negative_closure"]
 
     budget = specification["execution_budget"]
     assert budget["threshold_fit"]["total_detection_calls"] == 4096
@@ -249,23 +249,23 @@ def test_c1_statistics_and_workload_are_independent_and_falsifiable() -> None:
         budget["shard_and_resource_boundary"]["source_clusters_per_shard"]
     ) == 4096
     assert not budget["shard_and_resource_boundary"][
-        "gpu_execution_authorized_by_c1_protocol"
+        "gpu_execution_authorized_by_hf_only_reference_protocol"
     ]
 
 
 @pytest.mark.unit
-def test_c1_metric_identities_are_split_bound_without_protocol_implementation() -> None:
-    specification = load_c1_hf_reference_bundle(ROOT).specification.raw
+def test_hf_only_reference_metric_identities_are_split_bound_without_protocol_implementation() -> None:
+    specification = load_hf_only_reference_bundle(ROOT).specification.raw
     metric_plan = specification["metric_plan"]
     bindings = {
         item["metric_id"]: item["allowed_splits"]
         for item in metric_plan["metric_split_bindings"]
     }
-    assert bindings["c1_hf_tau_fit"] == ["content_threshold_fit"]
+    assert bindings["hf_only_reference_tau_fit"] == ["content_threshold_fit"]
     assert all(
         splits == ["untouched_confirmation"]
         for metric_id, splits in bindings.items()
-        if metric_id != "c1_hf_tau_fit"
+        if metric_id != "hf_only_reference_tau_fit"
     )
     assert all("held_out_evaluation" not in splits for splits in bindings.values())
     quality = metric_plan["formula_identities"]["paired_quality"]
@@ -275,7 +275,7 @@ def test_c1_metric_identities_are_split_bound_without_protocol_implementation() 
     assert quality["pass_cutoff"] is None
     assert quality["missing_or_non_finite"].endswith("gate_failure")
 
-    module_tree = ast.parse(C1_MODULE.read_text(encoding="utf-8"))
+    module_tree = ast.parse(HF_ONLY_REFERENCE_PROTOCOL_MODULE.read_text(encoding="utf-8"))
     function_names = {
         node.name for node in ast.walk(module_tree) if isinstance(node, ast.FunctionDef)
     }

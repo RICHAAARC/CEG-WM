@@ -1,5 +1,9 @@
 # CEG-WM Research Definition
 
+本研究定义将实验准备基础设施整体登记为
+`experiment_ready_infrastructure_closure`；该身份描述职责闭环，不替代
+`project_stage`，也不自动形成科学证据。
+
 ## Research Objective
 
 CEG-WM 研究生成式图像中的密钥归属水印。目标是在常规内容失真和 crop、scale、rotation 等几何变换后，以受校准的内容检测统计判断水印是否属于给定密钥，并在必要时通过独立几何链恢复检测坐标。

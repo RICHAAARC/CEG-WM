@@ -1,4 +1,4 @@
-"""CPU checks for the A3b package, bootstrap, and formal operations."""
+"""CPU checks for the experiment_execution_delivery package, bootstrap, and formal operations."""
 
 from __future__ import annotations
 

@@ -1,0 +1,113 @@
+{
+  "schema_version": "ceg_wm_hf_only_reference_metric_implementation_binding_v2",
+  "hf_only_reference_specification_path": "configs/experiments/hf_only_reference_validation.json",
+  "hf_only_reference_specification_digest": "f5f8dc60ff88ca9f13e74342047e9f503a3454d3c5c82c785e6d23585f7728bb",
+  "protocol_digest": "e05cab6af8adf4413bd33d8fca8226103ac5ed617208cdb41e57c0f6cb0f984d",
+  "split_manifest_digests": {
+    "content_threshold_fit": "1150c89cc11db5d6bbe9cb17f032c0a5934f9189db0feb4e5de3998e5302719b",
+    "untouched_confirmation": "35a23a03927fd1a48a54926c33ba9f32f63f58a3d4707dab17d0cec6ce8528cf"
+  },
+  "registered_key_family_digest": "4e8781942cf442f2689153fe22ca67f11ec2ec8aa3d16b78d60121b213cc2305",
+  "metric_registry_path": "configs/experiments/internal_execution_components.json",
+  "metric_registry_digest": "f6f6cf5914f27bdf26ac0c6fb8bc3930adb502ba80dd8b698dfea82555efe855",
+  "metric_ids": [
+    "hf_only_reference_tau_fit",
+    "hf_only_reference_primary_null_fixed_fpr",
+    "hf_only_reference_registered_tpr",
+    "hf_only_reference_wrong_key_false_accept",
+    "hf_only_reference_paired_key_attribution",
+    "hf_only_reference_paired_final_image_quality",
+    "hf_only_reference_actual_dtype_integrity"
+  ],
+  "metric_split_bindings": [
+    {
+      "metric_id": "hf_only_reference_tau_fit",
+      "allowed_splits": [
+        "content_threshold_fit"
+      ]
+    },
+    {
+      "metric_id": "hf_only_reference_primary_null_fixed_fpr",
+      "allowed_splits": [
+        "untouched_confirmation"
+      ]
+    },
+    {
+      "metric_id": "hf_only_reference_registered_tpr",
+      "allowed_splits": [
+        "untouched_confirmation"
+      ]
+    },
+    {
+      "metric_id": "hf_only_reference_wrong_key_false_accept",
+      "allowed_splits": [
+        "untouched_confirmation"
+      ]
+    },
+    {
+      "metric_id": "hf_only_reference_paired_key_attribution",
+      "allowed_splits": [
+        "untouched_confirmation"
+      ]
+    },
+    {
+      "metric_id": "hf_only_reference_paired_final_image_quality",
+      "allowed_splits": [
+        "untouched_confirmation"
+      ]
+    },
+    {
+      "metric_id": "hf_only_reference_actual_dtype_integrity",
+      "allowed_splits": [
+        "untouched_confirmation"
+      ]
+    }
+  ],
+  "frozen_formula_identity_digest": "a8c005be17f4e880dd2eaeebba78ae28f6ff3b65e5eea4fb5bca04beb094ab65",
+  "formula_implementation_identities": {
+    "actual_dtype_integrity": "per_registered_positive_integrity_and_exact_dtype_and_finite_nonnegative_actual_relative_l2_at_most_3_over_250",
+    "binomial_intervals": "exact_one_sided_95_percent_clopper_pearson_upper_or_lower",
+    "formal_confirmation_authority": "recompute_tau_from_exact_fit_cases_and_replay_raw_rgb8_artifacts",
+    "paired_attribution": "registered_score_strictly_greater_than_wrong_score_tie_is_failure",
+    "paired_rgb8_mse": "mean_of_squared_uint8_channel_differences_after_division_by_255",
+    "paired_rgb8_relative_l2": "l2_of_uint8_channel_difference_after_division_by_255_over_clean_image_l2_after_division_by_255",
+    "quality_aggregation": "mean_sample_sd_ddof_1_and_two_sided_95_percent_student_t_interval",
+    "threshold": "binary64_nextafter_above_primary_null_maximum_and_score_at_least_tau"
+  },
+  "formula_identity_digest": "07f0d846fc67f20f226de66b9c0fe1226abbeca6918d40013af107a97c5c3acd",
+  "implementation_module_path": "experiments/metrics/hf_only_reference_metrics.py",
+  "implementation_source_sha256": "c2449b98faf7025224f6a4a167ee17ee7bb732e7e8bf2674364c066f8fefe4fe",
+  "implementation_symbols": [
+    {
+      "metric_id": "hf_only_reference_tau_fit",
+      "public_callable": "fit_hf_only_reference_tau"
+    },
+    {
+      "metric_id": "hf_only_reference_primary_null_fixed_fpr",
+      "public_callable": "evaluate_hf_only_reference_primary_null_fixed_fpr"
+    },
+    {
+      "metric_id": "hf_only_reference_registered_tpr",
+      "public_callable": "evaluate_hf_only_reference_registered_tpr"
+    },
+    {
+      "metric_id": "hf_only_reference_wrong_key_false_accept",
+      "public_callable": "evaluate_hf_only_reference_wrong_key_false_accept"
+    },
+    {
+      "metric_id": "hf_only_reference_paired_key_attribution",
+      "public_callable": "evaluate_hf_only_reference_paired_key_attribution"
+    },
+    {
+      "metric_id": "hf_only_reference_paired_final_image_quality",
+      "public_callable": "evaluate_hf_only_reference_paired_rgb8_quality"
+    },
+    {
+      "metric_id": "hf_only_reference_actual_dtype_integrity",
+      "public_callable": "evaluate_hf_only_reference_actual_dtype_integrity"
+    }
+  ],
+  "formal_confirmation_entrypoint": "evaluate_hf_only_reference_confirmation_metrics",
+  "confirmation_cross_input_validation": "required_fit_tau_and_raw_rgb8_replay_before_confirmation_results",
+  "binding_digest": "560e517b7645fbf5cc1f8915bab2c8aa4e32b4b58bf31de02f9b592e3b7b7bdc"
+}

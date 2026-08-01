@@ -1,4 +1,4 @@
-"""Threshold-fit-only C1 HF runner over the frozen 4096-unit manifest."""
+"""Threshold-fit-only hf_only_reference_validation runner over the frozen 4096-unit manifest."""
 
 from __future__ import annotations
 
@@ -20,30 +20,30 @@ from experiments.methods import (
     load_ceg_wm_experiment_adapter_configuration,
 )
 from experiments.metrics import (
-    C1HfMetricCaseIdentity,
-    C1HfMetricImplementationBinding,
-    C1HfScoreCase,
-    C1HfThresholdResult,
-    fit_c1_hf_tau,
-    load_c1_hf_metric_implementation_binding,
+    HfOnlyReferenceMetricCaseIdentity,
+    HfOnlyReferenceMetricImplementationBinding,
+    HfOnlyReferenceScoreCase,
+    HfOnlyReferenceThresholdResult,
+    fit_hf_only_reference_tau,
+    load_hf_only_reference_metric_implementation_binding,
 )
-from experiments.protocol.c1_hf_reference import (
-    C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-    load_c1_hf_reference_specification,
-    load_compact_c1_split_manifest,
-    load_c1_hf_reference_bundle,
+from experiments.protocol.hf_only_reference_protocol import (
+    HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+    load_hf_only_reference_specification,
+    load_compact_hf_only_reference_split_manifest,
+    load_hf_only_reference_bundle,
     load_frozen_prompt_roster,
-    materialize_c1_split_manifest,
+    materialize_hf_only_reference_split_manifest,
 )
 from experiments.protocol.internal_splits import AnalysisUnitIdentity
-from experiments.protocol.c1_hf_threshold_fit_records import (
-    C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
-    C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
-    C1HfThresholdFitAttemptRecord,
-    C1HfThresholdFitFactRecord,
-    C1HfThresholdFitRecordIdentity,
-    C1HfThresholdFitUnitRecordCollection,
-    derive_c1_hf_threshold_fit_attempt_id,
+from experiments.protocol.hf_only_threshold_fit_records import (
+    HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+    HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+    HfOnlyThresholdFitAttemptRecord,
+    HfOnlyThresholdFitFactRecord,
+    HfOnlyThresholdFitRecordIdentity,
+    HfOnlyThresholdFitUnitRecordCollection,
+    derive_hf_only_threshold_fit_attempt_id,
 )
 from runtime import load_runtime_configuration
 
@@ -52,17 +52,17 @@ from .formal_operations import (
     FormalHfContentDetectionOperation,
     create_formal_content_detector_binding,
 )
-from .record_writer import C1HfThresholdFitRecordWriter
+from .record_writer import HfOnlyThresholdFitRecordWriter
 
-DEFAULT_C1_HF_THRESHOLD_FIT_EXECUTION_PATH = (
+DEFAULT_HF_ONLY_THRESHOLD_FIT_EXECUTION_PATH = (
     Path(__file__).resolve().parents[2]
-    / "configs/experiments/c1_hf_threshold_fit_execution.json"
+    / "configs/experiments/hf_only_threshold_fit_gpu_execution.json"
 )
-EXECUTION_SCHEMA_VERSION = "ceg_wm_c1_hf_threshold_fit_execution_v1"
+EXECUTION_SCHEMA_VERSION = "ceg_wm_hf_only_threshold_fit_execution_v1"
 EXPECTED_EXECUTION_CONFIG_DIGEST = (
-    "a5d1c48bffcd95b9530afd056e2e5559e0334024253dc94c4cade52924e836fa"
+    "5567445a625a40c8e33fe69a45d4eb297fc102b31e964f6fd7c7ad36876212af"
 )
-EXPECTED_RUN_PHASE_ID = "c1_hf_threshold_fit_v1"
+EXPECTED_RUN_PHASE_ID = "hf_only_threshold_fit_v1"
 EXPECTED_AUTHORIZATION_BASE_REVISION = (
     "309b3be549409e3d1e16ea9c1ee9c2c9e33c0bf7"
 )
@@ -78,28 +78,28 @@ _PACKAGE_ENTRYPOINT_PATH = (
 )
 
 
-class C1HfThresholdFitRunnerError(ValueError):
+class HfOnlyThresholdFitRunnerError(ValueError):
     """Frozen authority, shard, record, or fit identity failed closed."""
 
 
-class C1HfThresholdFitResourceFailure(RuntimeError):
+class HfOnlyThresholdFitResourceFailure(RuntimeError):
     """Retryable accelerator or memory failure, never method science."""
 
 
-class C1HfThresholdFitExecutionFailure(RuntimeError):
+class HfOnlyThresholdFitExecutionFailure(RuntimeError):
     """Non-resource runtime or orchestration failure."""
 
 
-class C1HfThresholdFitScientificFailure(RuntimeError):
+class HfOnlyThresholdFitScientificFailure(RuntimeError):
     """A completed operation produced an invalid required scientific fact."""
 
 
-class C1HfThresholdFitExcluded(RuntimeError):
+class HfOnlyThresholdFitExcluded(RuntimeError):
     """A preregistered exclusion that remains in the planned denominator."""
 
     def __init__(self, rule_id: str) -> None:
         if type(rule_id) is not str or not rule_id:
-            raise C1HfThresholdFitRunnerError("exclusion rule identity is required")
+            raise HfOnlyThresholdFitRunnerError("exclusion rule identity is required")
         self.rule_id = rule_id
         super().__init__(rule_id)
 
@@ -126,7 +126,7 @@ def _file_sha256(path: Path) -> str:
 
 def _require_digest(value: object, role: str) -> str:
     if type(value) is not str or _DIGEST.fullmatch(value) is None:
-        raise C1HfThresholdFitRunnerError(f"{role} must be SHA-256")
+        raise HfOnlyThresholdFitRunnerError(f"{role} must be SHA-256")
     return value
 
 
@@ -155,20 +155,20 @@ def _resolve_clean_repository_revision(repository_root: Path) -> str:
             text=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal repository revision is unavailable"
         ) from exc
     if _REVISION.fullmatch(head) is None:
-        raise C1HfThresholdFitRunnerError("formal repository HEAD is not exact")
+        raise HfOnlyThresholdFitRunnerError("formal repository HEAD is not exact")
     if worktree_status:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal repository worktree has uncommitted source drift"
         )
     return head
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfThresholdFitExecutionConfiguration:
+class HfOnlyThresholdFitExecutionConfiguration:
     raw: Mapping[str, object]
     execution_config_digest: str
 
@@ -186,12 +186,12 @@ class C1HfThresholdFitExecutionConfiguration:
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfThresholdFitAuthority:
+class HfOnlyThresholdFitAuthority:
     repository_root: Path
-    configuration: C1HfThresholdFitExecutionConfiguration
+    configuration: HfOnlyThresholdFitExecutionConfiguration
     assignments: tuple[AnalysisUnitIdentity, ...]
     prompt_text_by_digest: Mapping[str, str]
-    metric_binding: C1HfMetricImplementationBinding
+    metric_binding: HfOnlyReferenceMetricImplementationBinding
     adapter: CegWmExperimentAdapter
     protocol_id: str
     protocol_version: str
@@ -202,7 +202,7 @@ class C1HfThresholdFitAuthority:
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfThresholdFitExecutionFact:
+class HfOnlyThresholdFitExecutionFact:
     score: float
     image_digest: str
     detector_identity: str
@@ -215,7 +215,7 @@ class C1HfThresholdFitExecutionFact:
 
     def __post_init__(self) -> None:
         if type(self.score) is not float or not math.isfinite(self.score):
-            raise C1HfThresholdFitScientificFailure(
+            raise HfOnlyThresholdFitScientificFailure(
                 "HF score must be a finite binary64 fact"
             )
         for role in (
@@ -226,7 +226,7 @@ class C1HfThresholdFitExecutionFact:
         ):
             _require_digest(getattr(self, role), role)
         if not _REVISION.fullmatch(self.model_revision):
-            raise C1HfThresholdFitScientificFailure(
+            raise HfOnlyThresholdFitScientificFailure(
                 "model revision identity drifted"
             )
         if (
@@ -235,12 +235,12 @@ class C1HfThresholdFitExecutionFact:
             or self.selected_device != "cuda:0"
             or self.preprocessing_identity != PUBLIC_IMAGE_ENCODING
         ):
-            raise C1HfThresholdFitScientificFailure(
+            raise HfOnlyThresholdFitScientificFailure(
                 "detector or selected-device identity drifted"
             )
 
 
-class C1HfThresholdFitSession(Protocol):
+class HfOnlyThresholdFitSession(Protocol):
     """One already-prepared shard session; model preparation is never per-unit."""
 
     def execute(
@@ -248,13 +248,13 @@ class C1HfThresholdFitSession(Protocol):
         unit: AnalysisUnitIdentity,
         prompt_text: str,
         registered_detection_key: str,
-    ) -> C1HfThresholdFitExecutionFact:
+    ) -> HfOnlyThresholdFitExecutionFact:
         """Execute one fit unit without taking ownership of the registered secret."""
 
 
 ThresholdFitSessionFactory = Callable[
-    [C1HfThresholdFitAuthority],
-    AbstractContextManager[C1HfThresholdFitSession],
+    [HfOnlyThresholdFitAuthority],
+    AbstractContextManager[HfOnlyThresholdFitSession],
 ]
 
 
@@ -267,13 +267,13 @@ class _DeferredSessionPreparationFailure:
         _unit: AnalysisUnitIdentity,
         _prompt_text: str,
         _registered_detection_key: str,
-    ) -> C1HfThresholdFitExecutionFact:
+    ) -> HfOnlyThresholdFitExecutionFact:
         raise self._error
 
 
 @contextmanager
 def _recordable_threshold_fit_session(
-    manager: AbstractContextManager[C1HfThresholdFitSession],
+    manager: AbstractContextManager[HfOnlyThresholdFitSession],
 ):
     """Turn session-preparation failure into the first governed attempt."""
 
@@ -293,7 +293,7 @@ def _recordable_threshold_fit_session(
 
 def _consume_verified_package_revision_authority(
     package_revision_authority: object,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
 ) -> str:
     """Consume the exact package-external single-use runner authority."""
 
@@ -341,7 +341,7 @@ def _consume_verified_package_revision_authority(
             None,
         ) is not bootstrap_module
     ):
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal package revision authority exact type is required"
         )
     try:
@@ -350,7 +350,7 @@ def _consume_verified_package_revision_authority(
             expected_entrypoint_path=_PACKAGE_ENTRYPOINT_PATH,
         )
     except Exception as exc:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal package revision authority consumption failed"
         ) from exc
     expected_fields = {
@@ -367,7 +367,7 @@ def _consume_verified_package_revision_authority(
         "package_root",
     }
     if type(payload) is not dict or set(payload) != expected_fields:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal package revision authority fields drifted"
         )
     revision = payload["committed_revision"]
@@ -400,15 +400,15 @@ def _consume_verified_package_revision_authority(
             )
         )
     ):
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal package revision authority identity drifted"
         )
     return revision
 
 
-def load_c1_hf_threshold_fit_execution_configuration(
-    path: str | Path = DEFAULT_C1_HF_THRESHOLD_FIT_EXECUTION_PATH,
-) -> C1HfThresholdFitExecutionConfiguration:
+def load_hf_only_threshold_fit_execution_configuration(
+    path: str | Path = DEFAULT_HF_ONLY_THRESHOLD_FIT_EXECUTION_PATH,
+) -> HfOnlyThresholdFitExecutionConfiguration:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     expected_fields = {
         "schema_version",
@@ -416,8 +416,8 @@ def load_c1_hf_threshold_fit_execution_configuration(
         "accessible_split",
         "forbidden_splits",
         "authorization_base_revision",
-        "c1_specification_path",
-        "c1_specification_digest",
+        "hf_only_reference_specification_path",
+        "hf_only_reference_specification_digest",
         "prompt_roster_path",
         "prompt_roster_file_sha256",
         "dataset_snapshot_path",
@@ -450,15 +450,15 @@ def load_c1_hf_threshold_fit_execution_configuration(
         "execution_config_digest",
     }
     if type(raw) is not dict or set(raw) != expected_fields:
-        raise C1HfThresholdFitRunnerError("execution configuration fields drifted")
+        raise HfOnlyThresholdFitRunnerError("execution configuration fields drifted")
     supplied_digest = _require_digest(
         raw["execution_config_digest"], "execution_config_digest"
     )
     payload = {key: value for key, value in raw.items() if key != "execution_config_digest"}
     if supplied_digest != _canonical_digest(payload):
-        raise C1HfThresholdFitRunnerError("execution configuration digest drifted")
+        raise HfOnlyThresholdFitRunnerError("execution configuration digest drifted")
     if supplied_digest != EXPECTED_EXECUTION_CONFIG_DIGEST:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "execution configuration differs from the frozen authority"
         )
     resource_plan = raw["resource_plan"]
@@ -471,7 +471,7 @@ def load_c1_hf_threshold_fit_execution_configuration(
         or raw["accessible_split"] != FIT_SPLIT
         or raw["forbidden_splits"] != ["untouched_confirmation"]
         or raw["detector_mode"] != "hf_only"
-        or raw["source_cluster_count"] != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or raw["source_cluster_count"] != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or raw["shard_count"] != 16
         or raw["source_clusters_per_shard"] != 256
         or raw["shard_assignment"]
@@ -503,38 +503,38 @@ def load_c1_hf_threshold_fit_execution_configuration(
             "incremental_unit_attempt_persistence_required": True,
         }
     ):
-        raise C1HfThresholdFitRunnerError("execution configuration semantics drifted")
+        raise HfOnlyThresholdFitRunnerError("execution configuration semantics drifted")
     if (
         not _REVISION.fullmatch(str(raw["authorization_base_revision"]))
         or not _REVISION.fullmatch(str(raw["runtime_qualification_revision"]))
         or not _REVISION.fullmatch(str(raw["model_revision"]))
     ):
-        raise C1HfThresholdFitRunnerError("authorization base revision is invalid")
-    return C1HfThresholdFitExecutionConfiguration(raw, supplied_digest)
+        raise HfOnlyThresholdFitRunnerError("authorization base revision is invalid")
+    return HfOnlyThresholdFitExecutionConfiguration(raw, supplied_digest)
 
 
-def load_c1_hf_threshold_fit_authority(
+def load_hf_only_threshold_fit_authority(
     repository_root: str | Path,
-    execution_config_path: str | Path = DEFAULT_C1_HF_THRESHOLD_FIT_EXECUTION_PATH,
-) -> C1HfThresholdFitAuthority:
+    execution_config_path: str | Path = DEFAULT_HF_ONLY_THRESHOLD_FIT_EXECUTION_PATH,
+) -> HfOnlyThresholdFitAuthority:
     root = Path(repository_root).resolve()
     config_path = Path(execution_config_path)
     if not config_path.is_absolute():
         config_path = root / config_path
-    configuration = load_c1_hf_threshold_fit_execution_configuration(config_path)
+    configuration = load_hf_only_threshold_fit_execution_configuration(config_path)
     raw = configuration.raw
     bound_files = (("runtime_config_path", "runtime_config_sha256"),)
     for path_field, digest_field in bound_files:
         candidate = root / str(raw[path_field])
         if not candidate.is_file() or _file_sha256(candidate) != raw[digest_field]:
-            raise C1HfThresholdFitRunnerError(f"bound file drifted: {path_field}")
-    reference_bundle = load_c1_hf_reference_bundle(root)
+            raise HfOnlyThresholdFitRunnerError(f"bound file drifted: {path_field}")
+    reference_bundle = load_hf_only_reference_bundle(root)
     specification = reference_bundle.specification
     dataset_binding = specification.raw["dataset"]
     split_binding = specification.raw["split_manifests"][FIT_SPLIT]
     candidate_binding = specification.raw["candidate_binding"]
     exact_authority_fields = {
-        "c1_specification_path": "configs/experiments/c1_hf_reference_run.json",
+        "hf_only_reference_specification_path": "configs/experiments/hf_only_reference_validation.json",
         "prompt_roster_path": dataset_binding["roster_path"],
         "prompt_roster_file_sha256": dataset_binding["roster_file_sha256"],
         "dataset_snapshot_path": dataset_binding["dataset_snapshot_path"],
@@ -555,20 +555,20 @@ def load_c1_hf_threshold_fit_authority(
         ]["candidate_revision"],
     }
     if any(raw[field] != expected for field, expected in exact_authority_fields.items()):
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "execution configuration authority path or identity drifted"
         )
-    if specification.digest() != raw["c1_specification_digest"]:
-        raise C1HfThresholdFitRunnerError("C1 specification digest drifted")
+    if specification.digest() != raw["hf_only_reference_specification_digest"]:
+        raise HfOnlyThresholdFitRunnerError("hf_only_reference_validation specification digest drifted")
     phase = specification.raw["run_phases"]["threshold_fit"]
     if (
         phase["accessible_split"] != FIT_SPLIT
         or phase["forbidden_split_access"] != ["untouched_confirmation"]
         or specification.raw["execution_budget"]["threshold_fit"]
         ["source_clusters"]
-        != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
     ):
-        raise C1HfThresholdFitRunnerError("C1 threshold phase identity drifted")
+        raise HfOnlyThresholdFitRunnerError("hf_only_reference_validation threshold phase identity drifted")
     roster = reference_bundle.roster
     manifest = next(
         candidate
@@ -577,15 +577,15 @@ def load_c1_hf_threshold_fit_authority(
     )
     assignments = tuple(assignment.identity for assignment in manifest.assignments)
     if (
-        len(assignments) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        len(assignments) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or manifest.digest() != raw["fit_manifest_digest"]
     ):
-        raise C1HfThresholdFitRunnerError("materialized fit manifest drifted")
+        raise HfOnlyThresholdFitRunnerError("materialized fit manifest drifted")
     component_path = root / str(raw["component_registry_path"])
     adapter_configuration = load_ceg_wm_experiment_adapter_configuration(component_path)
     if adapter_configuration.config_digest != raw["method_adapter_config_digest"]:
-        raise C1HfThresholdFitRunnerError("component registry identity drifted")
-    metric_binding = load_c1_hf_metric_implementation_binding(
+        raise HfOnlyThresholdFitRunnerError("component registry identity drifted")
+    metric_binding = load_hf_only_reference_metric_implementation_binding(
         root / str(raw["metric_implementation_path"])
     )
     if (
@@ -596,16 +596,16 @@ def load_c1_hf_threshold_fit_authority(
         or metric_binding.fit_manifest_digest != manifest.digest()
         or metric_binding.fit_analysis_units != frozenset(assignments)
     ):
-        raise C1HfThresholdFitRunnerError("C1-M threshold binding drifted")
+        raise HfOnlyThresholdFitRunnerError("hf_only_reference_metrics threshold binding drifted")
     runtime_configuration = load_runtime_configuration(
         root / str(raw["runtime_config_path"])
     )
     if runtime_configuration.model_revision != raw["model_revision"]:
-        raise C1HfThresholdFitRunnerError("runtime candidate revision drifted")
+        raise HfOnlyThresholdFitRunnerError("runtime candidate revision drifted")
     prompt_text_by_digest = {row.prompt_digest: row.prompt_text for row in roster.rows}
     if any(identity.prompt_digest not in prompt_text_by_digest for identity in assignments):
-        raise C1HfThresholdFitRunnerError("fit assignment prompt is absent from roster")
-    return C1HfThresholdFitAuthority(
+        raise HfOnlyThresholdFitRunnerError("fit assignment prompt is absent from roster")
+    return HfOnlyThresholdFitAuthority(
         repository_root=root,
         configuration=configuration,
         assignments=assignments,
@@ -623,22 +623,22 @@ def load_c1_hf_threshold_fit_authority(
     )
 
 
-def load_c1_hf_threshold_fit_package_authority(
+def load_hf_only_threshold_fit_package_authority(
     package_root: str | Path,
-) -> C1HfThresholdFitAuthority:
+) -> HfOnlyThresholdFitAuthority:
     """Load only the frozen fit split from an externally verified package."""
 
     root = Path(package_root).resolve()
-    configuration = load_c1_hf_threshold_fit_execution_configuration(
-        root / "configs/experiments/c1_hf_threshold_fit_execution.json"
+    configuration = load_hf_only_threshold_fit_execution_configuration(
+        root / "configs/experiments/hf_only_threshold_fit_gpu_execution.json"
     )
     raw = configuration.raw
-    specification = load_c1_hf_reference_specification(
-        root / str(raw["c1_specification_path"])
+    specification = load_hf_only_reference_specification(
+        root / str(raw["hf_only_reference_specification_path"])
     )
-    if specification.digest() != raw["c1_specification_digest"]:
-        raise C1HfThresholdFitRunnerError(
-            "package C1 specification digest drifted"
+    if specification.digest() != raw["hf_only_reference_specification_digest"]:
+        raise HfOnlyThresholdFitRunnerError(
+            "package hf_only_reference_validation specification digest drifted"
         )
     for path_field, digest_field in (
         ("prompt_roster_path", "prompt_roster_file_sha256"),
@@ -648,46 +648,46 @@ def load_c1_hf_threshold_fit_package_authority(
     ):
         candidate = root / str(raw[path_field])
         if not candidate.is_file() or _file_sha256(candidate) != raw[digest_field]:
-            raise C1HfThresholdFitRunnerError(
+            raise HfOnlyThresholdFitRunnerError(
                 f"package bound file drifted: {path_field}"
             )
     roster = load_frozen_prompt_roster(root / str(raw["prompt_roster_path"]))
-    compact = load_compact_c1_split_manifest(
+    compact = load_compact_hf_only_reference_split_manifest(
         root / str(raw["fit_manifest_path"])
     )
-    manifest = materialize_c1_split_manifest(compact, roster)
+    manifest = materialize_hf_only_reference_split_manifest(compact, roster)
     assignments = tuple(item.identity for item in manifest.assignments)
     if (
-        len(assignments) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        len(assignments) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or manifest.digest() != raw["fit_manifest_digest"]
     ):
-        raise C1HfThresholdFitRunnerError("package fit manifest drifted")
+        raise HfOnlyThresholdFitRunnerError("package fit manifest drifted")
     adapter_configuration = load_ceg_wm_experiment_adapter_configuration(
         root / str(raw["component_registry_path"])
     )
     if adapter_configuration.config_digest != raw["method_adapter_config_digest"]:
-        raise C1HfThresholdFitRunnerError("package method adapter drifted")
+        raise HfOnlyThresholdFitRunnerError("package method adapter drifted")
     metric_path = root / str(raw["metric_implementation_path"])
     metric_raw = json.loads(metric_path.read_text(encoding="utf-8"))
     if (
         _file_sha256(
-            root / "experiments/metrics/c1_hf_reference.py"
+            root / "experiments/metrics/hf_only_reference_metrics.py"
         )
         != raw["metric_implementation_source_sha256"]
         or metric_raw["binding_digest"]
         != raw["metric_implementation_binding_digest"]
         or metric_raw["metric_registry_digest"] != raw["metric_registry_digest"]
-        or metric_raw["c1_specification_digest"]
-        != raw["c1_specification_digest"]
+        or metric_raw["hf_only_reference_specification_digest"]
+        != raw["hf_only_reference_specification_digest"]
         or metric_raw["split_manifest_digests"][FIT_SPLIT]
         != manifest.digest()
     ):
-        raise C1HfThresholdFitRunnerError("package metric binding drifted")
+        raise HfOnlyThresholdFitRunnerError("package metric binding drifted")
     runtime_configuration = load_runtime_configuration(
         root / str(raw["runtime_config_path"])
     )
-    metric_binding = C1HfMetricImplementationBinding(
-        c1_specification_digest=metric_raw["c1_specification_digest"],
+    metric_binding = HfOnlyReferenceMetricImplementationBinding(
+        hf_only_reference_specification_digest=metric_raw["hf_only_reference_specification_digest"],
         protocol_digest=metric_raw["protocol_digest"],
         fit_manifest_digest=manifest.digest(),
         confirmation_manifest_digest=metric_raw["split_manifest_digests"][
@@ -705,7 +705,7 @@ def load_c1_hf_threshold_fit_package_authority(
         fit_analysis_units=frozenset(assignments),
         confirmation_analysis_units=frozenset(),
     )
-    return C1HfThresholdFitAuthority(
+    return HfOnlyThresholdFitAuthority(
         repository_root=root,
         configuration=configuration,
         assignments=assignments,
@@ -725,25 +725,25 @@ def load_c1_hf_threshold_fit_package_authority(
     )
 
 
-def c1_hf_threshold_fit_shard(
-    authority: C1HfThresholdFitAuthority,
+def hf_only_threshold_fit_shard(
+    authority: HfOnlyThresholdFitAuthority,
     shard_index: int,
 ) -> tuple[AnalysisUnitIdentity, ...]:
-    if type(authority) is not C1HfThresholdFitAuthority:
-        raise C1HfThresholdFitRunnerError("threshold authority exact type is required")
+    if type(authority) is not HfOnlyThresholdFitAuthority:
+        raise HfOnlyThresholdFitRunnerError("threshold authority exact type is required")
     if type(shard_index) is not int or not 0 <= shard_index < authority.configuration.shard_count:
-        raise C1HfThresholdFitRunnerError("threshold shard index is invalid")
+        raise HfOnlyThresholdFitRunnerError("threshold shard index is invalid")
     size = authority.configuration.source_clusters_per_shard
     start = shard_index * size
     shard = authority.assignments[start : start + size]
     if len(shard) != size:
-        raise C1HfThresholdFitRunnerError("threshold shard is incomplete")
+        raise HfOnlyThresholdFitRunnerError("threshold shard is incomplete")
     return shard
 
 
-def _run_c1_hf_threshold_fit_shard_core(
+def _run_hf_only_threshold_fit_shard_core(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     shard_index: int,
     run_id: str,
     committed_revision: str,
@@ -758,13 +758,13 @@ def _run_c1_hf_threshold_fit_shard_core(
     """Private injected core; callers must choose an explicit evidence boundary."""
 
     if not _REVISION.fullmatch(committed_revision):
-        raise C1HfThresholdFitRunnerError("committed revision must be exact")
+        raise HfOnlyThresholdFitRunnerError("committed revision must be exact")
     if execution_evidence_kind not in {
-        C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
-        C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+        HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
     }:
-        raise C1HfThresholdFitRunnerError("execution evidence kind is invalid")
-    if execution_evidence_kind == C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE:
+        raise HfOnlyThresholdFitRunnerError("execution evidence kind is invalid")
+    if execution_evidence_kind == HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE:
         if package_revision_authority is None:
             authorized_revision = _resolve_clean_repository_revision(
                 authority.repository_root
@@ -781,23 +781,23 @@ def _run_c1_hf_threshold_fit_shard_core(
                 "formal committed revision differs from package authority"
             )
         if committed_revision != authorized_revision:
-            raise C1HfThresholdFitRunnerError(revision_error)
+            raise HfOnlyThresholdFitRunnerError(revision_error)
         if session_factory is not _validated_production_session_factory():
-            raise C1HfThresholdFitRunnerError(
+            raise HfOnlyThresholdFitRunnerError(
                 "formal execution requires the pinned production session factory"
             )
     if type(run_id) is not str or not run_id or not registered_detection_key:
-        raise C1HfThresholdFitRunnerError("run and registered-key inputs are required")
+        raise HfOnlyThresholdFitRunnerError("run and registered-key inputs are required")
     _require_digest(environment_digest, "environment_digest")
     _require_digest(resource_identity_digest, "resource_identity_digest")
     root = Path(records_root)
     if not root.is_absolute():
-        raise C1HfThresholdFitRunnerError("records root must be absolute")
-    shard = c1_hf_threshold_fit_shard(authority, shard_index)
+        raise HfOnlyThresholdFitRunnerError("records root must be absolute")
+    shard = hf_only_threshold_fit_shard(authority, shard_index)
     try:
         import torch
     except ImportError as exc:
-        raise C1HfThresholdFitExecutionFailure(
+        raise HfOnlyThresholdFitExecutionFailure(
             "PyTorch is required for detector binding preflight"
         ) from exc
     operation = FormalHfContentDetectionOperation(authority.adapter)
@@ -807,16 +807,16 @@ def _run_c1_hf_threshold_fit_shard_core(
         detection_key=registered_detection_key,
     )
     identities_and_writers: list[
-        tuple[C1HfThresholdFitRecordIdentity, C1HfThresholdFitRecordWriter]
+        tuple[HfOnlyThresholdFitRecordIdentity, HfOnlyThresholdFitRecordWriter]
     ] = []
-    collections: list[C1HfThresholdFitUnitRecordCollection | None] = []
+    collections: list[HfOnlyThresholdFitUnitRecordCollection | None] = []
     shard_start = shard_index * authority.configuration.source_clusters_per_shard
     for local_index, unit in enumerate(shard):
-        identity = C1HfThresholdFitRecordIdentity(
+        identity = HfOnlyThresholdFitRecordIdentity(
             run_id=run_id,
             committed_revision=committed_revision,
             execution_evidence_kind=execution_evidence_kind,
-            c1_specification_digest=authority.metric_binding.c1_specification_digest,
+            hf_only_reference_specification_digest=authority.metric_binding.hf_only_reference_specification_digest,
             protocol_id=authority.protocol_id,
             protocol_version=authority.protocol_version,
             protocol_digest=authority.metric_binding.protocol_digest,
@@ -840,11 +840,11 @@ def _run_c1_hf_threshold_fit_shard_core(
             environment_digest=environment_digest,
             analysis_unit_identity=unit,
         )
-        writer = C1HfThresholdFitRecordWriter(records_root=root, identity=identity)
+        writer = HfOnlyThresholdFitRecordWriter(records_root=root, identity=identity)
         identities_and_writers.append((identity, writer))
         collections.append(writer.load())
 
-    def terminal(collection: C1HfThresholdFitUnitRecordCollection | None) -> bool:
+    def terminal(collection: HfOnlyThresholdFitUnitRecordCollection | None) -> bool:
         if collection is None:
             return False
         last = collection.attempts[-1]
@@ -896,8 +896,8 @@ def _run_c1_hf_threshold_fit_shard_core(
                             prompt_text,
                             registered_detection_key,
                         )
-                        if type(fact) is not C1HfThresholdFitExecutionFact:
-                            raise C1HfThresholdFitScientificFailure(
+                        if type(fact) is not HfOnlyThresholdFitExecutionFact:
+                            raise HfOnlyThresholdFitScientificFailure(
                                 "session returned a non-fact result"
                             )
                         if (
@@ -909,11 +909,11 @@ def _run_c1_hf_threshold_fit_shard_core(
                             or fact.detection_key_public_digest
                             != identity.registered_key_public_digest
                         ):
-                            raise C1HfThresholdFitScientificFailure(
+                            raise HfOnlyThresholdFitScientificFailure(
                                 "execution fact differs from frozen authority"
                             )
-                        attempt = C1HfThresholdFitAttemptRecord(
-                            attempt_id=derive_c1_hf_threshold_fit_attempt_id(
+                        attempt = HfOnlyThresholdFitAttemptRecord(
+                            attempt_id=derive_hf_only_threshold_fit_attempt_id(
                                 identity, attempt_index
                             ),
                             attempt_index=attempt_index,
@@ -923,7 +923,7 @@ def _run_c1_hf_threshold_fit_shard_core(
                             failure_type=None,
                             exclusion_rule_id=None,
                             retry_of_attempt_id=retry_parent,
-                            fact=C1HfThresholdFitFactRecord(
+                            fact=HfOnlyThresholdFitFactRecord(
                                 score_float64_hex=fact.score.hex(),
                                 image_digest=fact.image_digest,
                                 input_artifact_digest=fact.image_digest,
@@ -935,9 +935,9 @@ def _run_c1_hf_threshold_fit_shard_core(
                                 selected_device=fact.selected_device,
                             ),
                         )
-                    except C1HfThresholdFitExcluded as exc:
-                        attempt = C1HfThresholdFitAttemptRecord(
-                            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, attempt_index),
+                    except HfOnlyThresholdFitExcluded as exc:
+                        attempt = HfOnlyThresholdFitAttemptRecord(
+                            attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, attempt_index),
                             attempt_index=attempt_index,
                             resource_identity_digest=resource_identity_digest,
                             status="excluded",
@@ -947,13 +947,13 @@ def _run_c1_hf_threshold_fit_shard_core(
                             retry_of_attempt_id=retry_parent,
                             fact=None,
                         )
-                    except C1HfThresholdFitResourceFailure as exc:
+                    except HfOnlyThresholdFitResourceFailure as exc:
                         attempt_budget_exhausted = (
                             attempt_index + 1
                             >= authority.configuration.maximum_record_attempts_per_unit
                         )
-                        attempt = C1HfThresholdFitAttemptRecord(
-                            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, attempt_index),
+                        attempt = HfOnlyThresholdFitAttemptRecord(
+                            attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, attempt_index),
                             attempt_index=attempt_index,
                             resource_identity_digest=resource_identity_digest,
                             status="failed" if attempt_budget_exhausted else "retry",
@@ -963,9 +963,9 @@ def _run_c1_hf_threshold_fit_shard_core(
                             retry_of_attempt_id=retry_parent,
                             fact=None,
                         )
-                    except C1HfThresholdFitScientificFailure as exc:
-                        attempt = C1HfThresholdFitAttemptRecord(
-                            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, attempt_index),
+                    except HfOnlyThresholdFitScientificFailure as exc:
+                        attempt = HfOnlyThresholdFitAttemptRecord(
+                            attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, attempt_index),
                             attempt_index=attempt_index,
                             resource_identity_digest=resource_identity_digest,
                             status="failed",
@@ -976,8 +976,8 @@ def _run_c1_hf_threshold_fit_shard_core(
                             fact=None,
                         )
                     except Exception as exc:
-                        attempt = C1HfThresholdFitAttemptRecord(
-                            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, attempt_index),
+                        attempt = HfOnlyThresholdFitAttemptRecord(
+                            attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, attempt_index),
                             attempt_index=attempt_index,
                             resource_identity_digest=resource_identity_digest,
                             status="failed",
@@ -996,25 +996,25 @@ def _run_c1_hf_threshold_fit_shard_core(
 
 
 def _case_from_record(
-    collection: C1HfThresholdFitUnitRecordCollection,
-    authority: C1HfThresholdFitAuthority,
+    collection: HfOnlyThresholdFitUnitRecordCollection,
+    authority: HfOnlyThresholdFitAuthority,
     expected_execution_evidence_kind: str,
-) -> C1HfScoreCase:
+) -> HfOnlyReferenceScoreCase:
     if collection.identity.execution_evidence_kind != expected_execution_evidence_kind:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "threshold fit execution evidence kind is not authorized for this finalizer"
         )
     attempt = collection.attempts[-1]
     if attempt.status == "excluded":
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "preregistered exclusion prevents threshold fit finalization"
         )
     if attempt.status != "success" or attempt.fact is None:
-        raise C1HfThresholdFitRunnerError("threshold fit has a missing required outcome")
+        raise HfOnlyThresholdFitRunnerError("threshold fit has a missing required outcome")
     unit = collection.identity.analysis_unit_identity
     fact = attempt.fact
-    return C1HfScoreCase(
-        identity=C1HfMetricCaseIdentity(
+    return HfOnlyReferenceScoreCase(
+        identity=HfOnlyReferenceMetricCaseIdentity(
             analysis_unit_identity=unit,
             split=FIT_SPLIT,
             detector_identity=collection.identity.detector_identity,
@@ -1022,7 +1022,7 @@ def _case_from_record(
             protocol_id=authority.protocol_id,
             protocol_version=authority.protocol_version,
             protocol_digest=authority.metric_binding.protocol_digest,
-            c1_specification_digest=authority.metric_binding.c1_specification_digest,
+            hf_only_reference_specification_digest=authority.metric_binding.hf_only_reference_specification_digest,
             manifest_digest=authority.metric_binding.fit_manifest_digest,
             metric_registry_digest=authority.metric_binding.metric_registry_digest,
             registered_key_family_digest=(
@@ -1040,55 +1040,55 @@ def _case_from_record(
     )
 
 
-def _finalize_c1_hf_threshold_fit_core(
+def _finalize_hf_only_threshold_fit_core(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     run_id: str,
     committed_revision: str,
     expected_execution_evidence_kind: str,
     registered_detection_key: str,
     environment_digest: str,
     records_root: str | Path,
-) -> C1HfThresholdResult:
+) -> HfOnlyReferenceThresholdResult:
     """Private replay core with an explicit execution-evidence boundary."""
 
     root = Path(records_root)
     if not root.is_absolute():
-        raise C1HfThresholdFitRunnerError("records root must be absolute")
+        raise HfOnlyThresholdFitRunnerError("records root must be absolute")
     if not _REVISION.fullmatch(committed_revision):
-        raise C1HfThresholdFitRunnerError("committed revision must be exact")
+        raise HfOnlyThresholdFitRunnerError("committed revision must be exact")
     if expected_execution_evidence_kind not in {
-        C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
-        C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+        HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
     }:
-        raise C1HfThresholdFitRunnerError("execution evidence kind is invalid")
+        raise HfOnlyThresholdFitRunnerError("execution evidence kind is invalid")
     if (
         expected_execution_evidence_kind
-        == C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
+        == HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
         and committed_revision
         != _resolve_clean_repository_revision(authority.repository_root)
     ):
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal committed revision differs from clean repository HEAD"
         )
     _require_digest(environment_digest, "environment_digest")
     try:
         import torch
     except ImportError as exc:
-        raise C1HfThresholdFitExecutionFailure("PyTorch is required") from exc
+        raise HfOnlyThresholdFitExecutionFailure("PyTorch is required") from exc
     detector_binding, _ = create_formal_content_detector_binding(
         FormalHfContentDetectionOperation(authority.adapter),
         prototype_image=torch.arange(12, dtype=torch.uint8).reshape(1, 3, 2, 2),
         detection_key=registered_detection_key,
     )
-    cases: list[C1HfScoreCase] = []
+    cases: list[HfOnlyReferenceScoreCase] = []
     for unit_index, unit in enumerate(authority.assignments):
         shard_index = unit_index // authority.configuration.source_clusters_per_shard
-        identity = C1HfThresholdFitRecordIdentity(
+        identity = HfOnlyThresholdFitRecordIdentity(
             run_id=run_id,
             committed_revision=committed_revision,
             execution_evidence_kind=expected_execution_evidence_kind,
-            c1_specification_digest=authority.metric_binding.c1_specification_digest,
+            hf_only_reference_specification_digest=authority.metric_binding.hf_only_reference_specification_digest,
             protocol_id=authority.protocol_id,
             protocol_version=authority.protocol_version,
             protocol_digest=authority.metric_binding.protocol_digest,
@@ -1110,12 +1110,12 @@ def _finalize_c1_hf_threshold_fit_core(
             environment_digest=environment_digest,
             analysis_unit_identity=unit,
         )
-        collection = C1HfThresholdFitRecordWriter(
+        collection = HfOnlyThresholdFitRecordWriter(
             records_root=root,
             identity=identity,
         ).load()
         if collection is None:
-            raise C1HfThresholdFitRunnerError("threshold unit record is unavailable")
+            raise HfOnlyThresholdFitRunnerError("threshold unit record is unavailable")
         cases.append(
             _case_from_record(
                 collection,
@@ -1123,7 +1123,7 @@ def _finalize_c1_hf_threshold_fit_core(
                 expected_execution_evidence_kind,
             )
         )
-    return fit_c1_hf_tau(tuple(cases), binding=authority.metric_binding)
+    return fit_hf_only_reference_tau(tuple(cases), binding=authority.metric_binding)
 
 
 def _is_oom(error: BaseException, torch_module: object) -> bool:
@@ -1136,8 +1136,8 @@ def _is_oom(error: BaseException, torch_module: object) -> bool:
     return False
 
 
-class _ProductionC1HfThresholdFitSession:
-    def __init__(self, authority: C1HfThresholdFitAuthority) -> None:
+class _ProductionHfOnlyThresholdFitSession:
+    def __init__(self, authority: HfOnlyThresholdFitAuthority) -> None:
         self._authority = authority
         self._torch: object | None = None
         self._backend: object | None = None
@@ -1145,7 +1145,7 @@ class _ProductionC1HfThresholdFitSession:
         self._runtime_session: object | None = None
         self._operation = FormalHfContentDetectionOperation(authority.adapter)
 
-    def __enter__(self) -> "_ProductionC1HfThresholdFitSession":
+    def __enter__(self) -> "_ProductionHfOnlyThresholdFitSession":
         runtime_adapter_for_cleanup: object | None = None
         try:
             import os
@@ -1153,7 +1153,7 @@ class _ProductionC1HfThresholdFitSession:
             from runtime import Sd35PipelineBackend, create_runtime_adapter
 
             if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
-                raise C1HfThresholdFitResourceFailure("cuda:0 is unavailable")
+                raise HfOnlyThresholdFitResourceFailure("cuda:0 is unavailable")
             total_memory = int(torch.cuda.get_device_properties(0).total_memory)
             minimum = int(
                 self._authority.configuration.raw["resource_plan"][
@@ -1161,7 +1161,7 @@ class _ProductionC1HfThresholdFitSession:
                 ]
             )
             if total_memory < minimum:
-                raise C1HfThresholdFitResourceFailure(
+                raise HfOnlyThresholdFitResourceFailure(
                     "cuda:0 is below the frozen model-agnostic VRAM floor"
                 )
             cache_root = Path(os.environ["CEG_WM_EPHEMERAL_ROOT"]).resolve()
@@ -1184,22 +1184,22 @@ class _ProductionC1HfThresholdFitSession:
             self._runtime_adapter = runtime_adapter
             self._runtime_session = runtime_session
             return self
-        except C1HfThresholdFitResourceFailure:
+        except HfOnlyThresholdFitResourceFailure:
             self._close_partially_initialized_runtime(runtime_adapter_for_cleanup)
             raise
         except (KeyError, OSError) as exc:
             self._close_partially_initialized_runtime(runtime_adapter_for_cleanup)
-            raise C1HfThresholdFitExecutionFailure(
+            raise HfOnlyThresholdFitExecutionFailure(
                 "threshold execution environment is incomplete"
             ) from exc
         except Exception as exc:
             self._close_partially_initialized_runtime(runtime_adapter_for_cleanup)
             torch_module = locals().get("torch")
             if torch_module is not None and _is_oom(exc, torch_module):
-                raise C1HfThresholdFitResourceFailure(
+                raise HfOnlyThresholdFitResourceFailure(
                     "threshold session preparation exhausted CUDA memory"
                 ) from exc
-            raise C1HfThresholdFitExecutionFailure(
+            raise HfOnlyThresholdFitExecutionFailure(
                 "threshold session preparation failed"
             ) from exc
 
@@ -1217,7 +1217,7 @@ class _ProductionC1HfThresholdFitSession:
         unit: AnalysisUnitIdentity,
         prompt_text: str,
         registered_detection_key: str,
-    ) -> C1HfThresholdFitExecutionFact:
+    ) -> HfOnlyThresholdFitExecutionFact:
         if any(
             value is None
             for value in (
@@ -1227,7 +1227,7 @@ class _ProductionC1HfThresholdFitSession:
                 self._runtime_session,
             )
         ):
-            raise C1HfThresholdFitExecutionFailure("threshold session is not prepared")
+            raise HfOnlyThresholdFitExecutionFailure("threshold session is not prepared")
         torch = self._torch
         backend = self._backend
         runtime_adapter = self._runtime_adapter
@@ -1235,7 +1235,7 @@ class _ProductionC1HfThresholdFitSession:
         try:
             prompt_identity = backend.set_generation_prompts(prompt_text, "")
             if prompt_identity.prompt_digest != unit.prompt_digest:
-                raise C1HfThresholdFitScientificFailure(
+                raise HfOnlyThresholdFitScientificFailure(
                     "runtime prompt digest differs from frozen manifest unit"
                 )
             configuration = runtime_adapter.configuration
@@ -1263,10 +1263,10 @@ class _ProductionC1HfThresholdFitSession:
             rgb8 = torch.floor(decoded.clamp(0.0, 1.0) * 255.0).to(torch.uint8)
             content_result = self._operation(rgb8, registered_detection_key)
             if content_result.content_input_image_digest is None:
-                raise C1HfThresholdFitScientificFailure(
+                raise HfOnlyThresholdFitScientificFailure(
                     "formal detector omitted public image digest"
                 )
-            return C1HfThresholdFitExecutionFact(
+            return HfOnlyThresholdFitExecutionFact(
                 score=float(content_result.content_score),
                 image_digest=content_result.content_input_image_digest,
                 detector_identity=content_result.detector_identity,
@@ -1279,14 +1279,14 @@ class _ProductionC1HfThresholdFitSession:
                 selected_device=runtime_session.selected_device,
                 preprocessing_identity=self._operation.preprocessing_identity,
             )
-        except C1HfThresholdFitScientificFailure:
+        except HfOnlyThresholdFitScientificFailure:
             raise
         except Exception as exc:
             if _is_oom(exc, torch):
-                raise C1HfThresholdFitResourceFailure(
+                raise HfOnlyThresholdFitResourceFailure(
                     "threshold unit exhausted CUDA memory"
                 ) from exc
-            raise C1HfThresholdFitExecutionFailure(
+            raise HfOnlyThresholdFitExecutionFailure(
                 "threshold unit execution failed"
             ) from exc
 
@@ -1296,7 +1296,7 @@ class _ProductionC1HfThresholdFitSession:
                 self._runtime_adapter.close()
             except Exception as close_error:
                 if exc is None:
-                    raise C1HfThresholdFitExecutionFailure(
+                    raise HfOnlyThresholdFitExecutionFailure(
                         "threshold session close failed"
                     ) from close_error
         self._runtime_adapter = None
@@ -1306,29 +1306,29 @@ class _ProductionC1HfThresholdFitSession:
         return False
 
 
-def production_c1_hf_threshold_fit_session(
-    authority: C1HfThresholdFitAuthority,
-) -> AbstractContextManager[C1HfThresholdFitSession]:
+def production_hf_only_threshold_fit_session(
+    authority: HfOnlyThresholdFitAuthority,
+) -> AbstractContextManager[HfOnlyThresholdFitSession]:
     """Create one lazy real-model session; CPU tests never call this factory."""
 
-    return _ProductionC1HfThresholdFitSession(authority)
+    return _ProductionHfOnlyThresholdFitSession(authority)
 
 
-_PINNED_PRODUCTION_SESSION_FACTORY = production_c1_hf_threshold_fit_session
-_PINNED_PRODUCTION_SESSION_TYPE = _ProductionC1HfThresholdFitSession
+_PINNED_PRODUCTION_SESSION_FACTORY = production_hf_only_threshold_fit_session
+_PINNED_PRODUCTION_SESSION_TYPE = _ProductionHfOnlyThresholdFitSession
 _PRODUCTION_SESSION_FACTORY_DESCRIPTOR = (
     __name__,
-    "production_c1_hf_threshold_fit_session",
+    "production_hf_only_threshold_fit_session",
 )
 _PRODUCTION_SESSION_TYPE_DESCRIPTOR = (
     __name__,
-    "_ProductionC1HfThresholdFitSession",
+    "_ProductionHfOnlyThresholdFitSession",
 )
 
 
 def _validated_production_session_factory() -> ThresholdFitSessionFactory:
-    factory = globals().get("production_c1_hf_threshold_fit_session")
-    session_type = globals().get("_ProductionC1HfThresholdFitSession")
+    factory = globals().get("production_hf_only_threshold_fit_session")
+    session_type = globals().get("_ProductionHfOnlyThresholdFitSession")
     if (
         factory is not _PINNED_PRODUCTION_SESSION_FACTORY
         or session_type is not _PINNED_PRODUCTION_SESSION_TYPE
@@ -1340,15 +1340,15 @@ def _validated_production_session_factory() -> ThresholdFitSessionFactory:
         )
         != _PRODUCTION_SESSION_TYPE_DESCRIPTOR
     ):
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal production session factory identity drifted"
         )
     return _PINNED_PRODUCTION_SESSION_FACTORY
 
 
-def run_c1_hf_threshold_fit_shard(
+def run_hf_only_threshold_fit_shard(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     shard_index: int,
     run_id: str,
     registered_detection_key: str,
@@ -1360,16 +1360,16 @@ def run_c1_hf_threshold_fit_shard(
     """Run one formal shard with the pinned real SD3.5 GPU session only."""
 
     if user_colab_run is not True:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "explicit user Colab run flag is required; task-agent invocation is prohibited"
         )
     committed_revision = _resolve_clean_repository_revision(authority.repository_root)
-    return _run_c1_hf_threshold_fit_shard_core(
+    return _run_hf_only_threshold_fit_shard_core(
         authority=authority,
         shard_index=shard_index,
         run_id=run_id,
         committed_revision=committed_revision,
-        execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        execution_evidence_kind=HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
         registered_detection_key=registered_detection_key,
         environment_digest=environment_digest,
         resource_identity_digest=resource_identity_digest,
@@ -1378,9 +1378,9 @@ def run_c1_hf_threshold_fit_shard(
     )
 
 
-def run_c1_hf_threshold_fit_verified_package_shard(
+def run_hf_only_threshold_fit_verified_package_shard(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     shard_index: int,
     run_id: str,
     registered_detection_key: str,
@@ -1397,15 +1397,15 @@ def run_c1_hf_threshold_fit_verified_package_shard(
         None,
     )
     if type(committed_revision) is not str:
-        raise C1HfThresholdFitRunnerError(
+        raise HfOnlyThresholdFitRunnerError(
             "formal package revision authority is incomplete"
         )
-    return _run_c1_hf_threshold_fit_shard_core(
+    return _run_hf_only_threshold_fit_shard_core(
         authority=authority,
         shard_index=shard_index,
         run_id=run_id,
         committed_revision=committed_revision,
-        execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        execution_evidence_kind=HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
         registered_detection_key=registered_detection_key,
         environment_digest=environment_digest,
         resource_identity_digest=resource_identity_digest,
@@ -1415,9 +1415,9 @@ def run_c1_hf_threshold_fit_verified_package_shard(
     )
 
 
-def run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
+def run_hf_only_threshold_fit_synthetic_cpu_fixture_shard(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     shard_index: int,
     run_id: str,
     fixture_revision: str,
@@ -1429,12 +1429,12 @@ def run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
 ) -> Mapping[str, object]:
     """Exercise resumable CPU wiring without producing formal evidence."""
 
-    return _run_c1_hf_threshold_fit_shard_core(
+    return _run_hf_only_threshold_fit_shard_core(
         authority=authority,
         shard_index=shard_index,
         run_id=run_id,
         committed_revision=fixture_revision,
-        execution_evidence_kind=C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+        execution_evidence_kind=HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
         registered_detection_key=registered_detection_key,
         environment_digest=environment_digest,
         resource_identity_digest=resource_identity_digest,
@@ -1443,45 +1443,45 @@ def run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
     )
 
 
-def finalize_c1_hf_threshold_fit(
+def finalize_hf_only_threshold_fit(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     run_id: str,
     registered_detection_key: str,
     environment_digest: str,
     records_root: str | Path,
-) -> C1HfThresholdResult:
+) -> HfOnlyReferenceThresholdResult:
     """Fit formal tau only from real SD3.5 GPU records at the clean repo HEAD."""
 
     committed_revision = _resolve_clean_repository_revision(authority.repository_root)
-    return _finalize_c1_hf_threshold_fit_core(
+    return _finalize_hf_only_threshold_fit_core(
         authority=authority,
         run_id=run_id,
         committed_revision=committed_revision,
-        expected_execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+        expected_execution_evidence_kind=HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
         registered_detection_key=registered_detection_key,
         environment_digest=environment_digest,
         records_root=records_root,
     )
 
 
-def finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
+def finalize_hf_only_threshold_fit_synthetic_cpu_fixture(
     *,
-    authority: C1HfThresholdFitAuthority,
+    authority: HfOnlyThresholdFitAuthority,
     run_id: str,
     fixture_revision: str,
     registered_detection_key: str,
     environment_digest: str,
     records_root: str | Path,
 ) -> Mapping[str, object]:
-    """Exercise C1-M wiring while returning no formal threshold result type."""
+    """Exercise hf_only_reference_metrics wiring while returning no formal threshold result type."""
 
-    result = _finalize_c1_hf_threshold_fit_core(
+    result = _finalize_hf_only_threshold_fit_core(
         authority=authority,
         run_id=run_id,
         committed_revision=fixture_revision,
         expected_execution_evidence_kind=(
-            C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
+            HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
         ),
         registered_detection_key=registered_detection_key,
         environment_digest=environment_digest,
@@ -1490,7 +1490,7 @@ def finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
     return {
         "run_id": run_id,
         "execution_evidence_kind": (
-            C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
+            HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
         ),
         "tau_float64_hex": result.tau.hex(),
         "scientific_claims_supported": False,
@@ -1498,21 +1498,21 @@ def finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
 
 
 __all__ = [
-    "C1HfThresholdFitAuthority",
-    "C1HfThresholdFitExecutionConfiguration",
-    "C1HfThresholdFitExecutionFact",
-    "C1HfThresholdFitExecutionFailure",
-    "C1HfThresholdFitExcluded",
-    "C1HfThresholdFitResourceFailure",
-    "C1HfThresholdFitRunnerError",
-    "C1HfThresholdFitScientificFailure",
-    "c1_hf_threshold_fit_shard",
-    "finalize_c1_hf_threshold_fit",
-    "finalize_c1_hf_threshold_fit_synthetic_cpu_fixture",
-    "load_c1_hf_threshold_fit_authority",
-    "load_c1_hf_threshold_fit_execution_configuration",
-    "load_c1_hf_threshold_fit_package_authority",
-    "run_c1_hf_threshold_fit_shard",
-    "run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard",
-    "run_c1_hf_threshold_fit_verified_package_shard",
+    "HfOnlyThresholdFitAuthority",
+    "HfOnlyThresholdFitExecutionConfiguration",
+    "HfOnlyThresholdFitExecutionFact",
+    "HfOnlyThresholdFitExecutionFailure",
+    "HfOnlyThresholdFitExcluded",
+    "HfOnlyThresholdFitResourceFailure",
+    "HfOnlyThresholdFitRunnerError",
+    "HfOnlyThresholdFitScientificFailure",
+    "hf_only_threshold_fit_shard",
+    "finalize_hf_only_threshold_fit",
+    "finalize_hf_only_threshold_fit_synthetic_cpu_fixture",
+    "load_hf_only_threshold_fit_authority",
+    "load_hf_only_threshold_fit_execution_configuration",
+    "load_hf_only_threshold_fit_package_authority",
+    "run_hf_only_threshold_fit_shard",
+    "run_hf_only_threshold_fit_synthetic_cpu_fixture_shard",
+    "run_hf_only_threshold_fit_verified_package_shard",
 ]

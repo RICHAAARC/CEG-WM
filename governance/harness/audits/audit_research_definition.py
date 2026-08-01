@@ -278,6 +278,55 @@ def _append_forbidden_implementation_violations(
             )
 
 
+CURRENT_STATUS_HEADING_PATTERN = re.compile(
+    r"(?mi)^##\s+(?:Current(?:\s+[A-Za-z]+)*\s+Status|当前检查点)\s*$"
+)
+CURRENT_CLAIM_PATTERN = re.compile(
+    r"实际\s*(?:stage|阶段)/status|当前项目登记为|(?m:^当前检查点：)"
+)
+STATUS_PAIR_PATTERN = re.compile(
+    r"`(?P<stage>[a-z][a-z0-9_]*)\s*/\s*"
+    r"(?P<status>[a-z][a-z0-9_]*)`"
+)
+
+
+def _explicit_current_status_segments(text: str) -> tuple[str, ...]:
+    starts = [match.end() for match in CURRENT_STATUS_HEADING_PATTERN.finditer(text)]
+    starts.extend(match.start() for match in CURRENT_CLAIM_PATTERN.finditer(text))
+    segments: list[str] = []
+    for start in sorted(set(starts)):
+        following_heading = re.search(r"(?m)^##\s+", text[start:])
+        end = start + following_heading.start() if following_heading else len(text)
+        segments.append(text[start:end])
+    return tuple(segments)
+
+
+def _append_design_current_status_violations(
+    path: Path,
+    relative: Path,
+    project_stage: str,
+    implementation_status: str,
+    violations: list[dict],
+) -> None:
+    text = path.read_text(encoding="utf-8")
+    for segment in _explicit_current_status_segments(text):
+        pairs = tuple(STATUS_PAIR_PATTERN.finditer(segment))
+        if not pairs or any(
+            match.group("stage") != project_stage
+            or match.group("status") != implementation_status
+            for match in pairs
+        ):
+            violations.append(
+                {
+                    "path": relative.as_posix(),
+                    "reason": "registered_design_current_status_mismatch",
+                    "expected_project_stage": project_stage,
+                    "expected_implementation_status": implementation_status,
+                }
+            )
+            return
+
+
 def run_audit(root: str | Path) -> dict:
     root_path = Path(root)
     policy_path = root_path / "governance" / "policies" / "method_readiness_rules.yaml"
@@ -411,6 +460,14 @@ def run_audit(root: str | Path) -> dict:
                     "reason": "research_design_not_substantive",
                     "role": role,
                 }
+            )
+        else:
+            _append_design_current_status_violations(
+                path,
+                relative,
+                project_stage,
+                str(manifest["implementation_status"]),
+                violations,
             )
 
     invariants = (

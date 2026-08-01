@@ -27,8 +27,8 @@ detector 和 threshold。
 `held_out_evaluation`。指标不选择候选、不拟合 LF/HF 权重、不写 records，也不导入
 runtime、methods、attacks、runner 或治理代码；CPU 结果不构成科学有效性证明。
 
-`c1_hf_reference.py` 实现 C1-P 冻结的七个 HF-reference metric identities。
-`c1_hf_tau_fit` 只接受 content-threshold-fit manifest 的完整 4096 个
+`hf_only_reference.py` 实现 hf_only_reference_protocol 冻结的七个 HF-reference metric identities。
+`hf_only_reference_tau_fit` 只接受 content-threshold-fit manifest 的完整 4096 个
 `AnalysisUnitIdentity`，以 binary64 `nextafter(max,+inf)` 得到零 fit-FP 的唯一
 threshold identity。confirmation 必须消费该 threshold，且 primary null、
 registered 与 wrong-key 三类各 4096、逐 cluster 同 detector/config/key/control
@@ -44,12 +44,12 @@ result identity 的轻量 case result。独立 aggregate 可消费这些 metric 
 Student-t CDF/quantile 与共享 Clopper-Pearson 原语均为无额外依赖的数值实现并有
 reference golden。
 
-正式 confirmation 入口是 `evaluate_c1_hf_confirmation_metrics`。它必须同时消费
+正式 confirmation 入口是 `evaluate_hf_only_reference_confirmation_metrics`。它必须同时消费
 content-threshold-fit 的精确 4096 条 primary-null score cases，自行重算
-`fit_c1_hf_tau` 并要求传入 threshold 与重算对象完全相等；随后逐 pair 重放 raw
+`fit_hf_only_reference_tau` 并要求传入 threshold 与重算对象完全相等；随后逐 pair 重放 raw
 RGB8 artifacts，交叉验证 score、paired-quality 与 actual-dtype 三表的 exact
 manifest unit、clean/marked image digests 和 registered-key identities，并把 fit
-case/threshold identity 纳入 `cross_input_digest`；C1-E 不得绕过该入口。实现绑定由
-`configs/experiments/c1_hf_metric_implementation.json` 固定 C1 spec、完整 C1-P
+case/threshold identity 纳入 `cross_input_digest`；hf_only_threshold_fit_gpu_execution 不得绕过该入口。实现绑定由
+`configs/experiments/hf_only_reference_metrics.json` 固定 hf_only_reference_validation spec、完整 hf_only_reference_protocol
 authority bundle、七项 split/formula、metric registry、实现 symbols 与源码
 SHA-256。该实现不写 records、不执行 promotion decision，也不产生科学结果。

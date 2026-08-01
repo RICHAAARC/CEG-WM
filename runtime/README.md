@@ -4,7 +4,7 @@
 能力，只允许依赖 `main/` 公开接口。模型后端、设备选择和推理流程放在此层；
 near-threshold、几何救援和最终判定仍属于 `main/`。
 
-当前 Batch 1 已实现：
+当前 runtime_configuration_and_adapter 已实现：
 
 - `runtime_sd35_flowmatch` 冻结配置的严格解析与稳定摘要；
 - CPU/CUDA 设备选择及不可用设备的 fail-closed 错误；
@@ -12,7 +12,7 @@ near-threshold、几何救援和最终判定仍属于 `main/`。
 - 构造时私有锚定原始 backend 对象及精确类型，并通过
   `revalidate_execution_identity()` 公开返回不可变 canonical identity；每次调用
   复验 backend 对象/类型、冻结配置 digest、state、资源所有权及原始 READY
-  session；构造期还惰性锚定 Batch-3 Q/K module 的精确公开函数，并在执行前后
+  session；构造期还惰性锚定 qk_observation Q/K module 的精确公开函数，并在执行前后
   复验 module/function 对象身份，identity 只公开稳定 qualified-name 字符串，不
   暴露 callable、backend 或模型私有状态；
 - 任一初始化、content/QK execution 或 close 失败进入唯一 clean `FAILED`
@@ -20,7 +20,7 @@ near-threshold、几何救援和最终判定仍属于 `main/`。
   公开 identity 发现任何 residual state 都 fail closed；
 - 不加载模型的 mock backend 控制流测试。
 
-Batch 2 的本地 CPU/mock 路径当前已实现：
+content_write_and_vae 的本地 CPU/mock 路径当前已实现：
 
 - clean/watermarked 同基础 float16 latent 的防共享配对与 callback 全序列绑定；
 - callback index 18 exactly-once 内容写入、binary16 RNE 独立重放和 actual tensor /
@@ -39,7 +39,7 @@ finite/bitwise/nonzero 完整性检查。权威 gate 是 `main` 对 row-major bi
 combined content delta；nominal LF/HF directions 不构成 actual branch
 decomposition，geometry budget 独立。
 
-Batch 3 的本地 CPU/mock 路径当前已实现：
+qk_observation 的本地 CPU/mock 路径当前已实现：
 
 - 普通 `512 x 512` RGB 检测图像经同一 VAE posterior `mode()` 重建 detection
   latent，禁止 posterior sampling；
@@ -53,10 +53,10 @@ Batch 3 的本地 CPU/mock 路径当前已实现：
 - 该入口只消费普通待检图像，不接受 generation cache、embed record、参考图或
   私有嵌入状态，也不计算 relation、可靠性或最终判定。
 
-Batch 4 的本地交付代码当前提供：
+runtime_qualification_delivery 的本地交付代码当前提供：
 
 - 只在 `prepare()` 时导入 diffusers、加载固定 model revision 并要求 `cuda:0`
-  的 `Sd35PipelineBackend`，真实连接 Batch 2 callback/VAE 与 Batch 3
+  的 `Sd35PipelineBackend`，真实连接 content_write_and_vae callback/VAE 与 qk_observation
   schedule/attention/QK 接口；
 - `smoke`、`qualification` 和可选 `replay` runner；qualification 对登记 key
   重复执行并另跑一个确定性 negative-key identity control，结果 zip 区分

@@ -1,5 +1,9 @@
 # CEG-WM Algorithm Primitives
 
+runtime 原语按 `runtime_configuration_and_adapter`、`content_write_and_vae`、
+`qk_observation`、`runtime_qualification_delivery` 登记；这些语义身份不改变公式、
+数值或真实模型验证要求。
+
 ## Document Authority
 
 本文档定义 CEG-WM 在进入方法实现前必须冻结或通过设计验证关闭的算法原语。它规定数学职责、输入输出语义、身份绑定、候选选择边界和失败规则，不表示任何原语已经实现、通过真实模型验证或能够支撑论文结论。
@@ -257,7 +261,7 @@ router 不返回 `budget_lf`、`budget_hf` 或其他标量预算。首轮必须�
 每个分支按 `content_combination_calibrated` 的有限样本 mid-rank empirical CDF、
 `1/(2n)` 双尾 clipping 和冻结 `2^20` midpoint float32 normal-quantile table
 转换为方向一致的 `z_hf` 与
-`z_lf`。候选组合限制为该规格登记的 `C0/C1/C2`，不再允许实现者添加其他
+`z_lf`。候选组合限制为该规格登记的 `hf_only_standardized_score/weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score`，不再允许实现者添加其他
 “单调概率或尾部证据组合”：
 
 ```text

@@ -1,6 +1,6 @@
-# CEG-WM C1 HF threshold-fit execution package
+# CEG-WM HF-only threshold-fit GPU execution execution package
 
-This deterministic schema-v2 archive contains only the exact-revision C1
+This deterministic schema-v2 archive contains only the exact-revision hf_only_reference_validation
 threshold-fit entrypoint, its required runner/import closure, the implemented
 method/runtime code, and frozen fit-split assets.
 
@@ -15,7 +15,7 @@ archive, adjacent delivery sidecar, embedded manifest, and exact revision. The
 trusted sidecar binds authority digests derived by the clean-revision builder;
 the Notebook does not supply or override them.
 
-The C1-specific `requirements_c1_threshold_fit.txt` is a complete 62-item
+The hf_only_reference_validation-specific `requirements_hf_only_threshold_fit_gpu_execution.txt` is a complete 62-item
 Linux x86_64 / CPython 3.12 transitive lock for the frozen SD3.5 candidate.
 The bootstrap verifies the frozen lock identity before package import, reuses
 global packages only when every locked version is exact, otherwise installs

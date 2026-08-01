@@ -41,7 +41,7 @@ package 时，不由用户临时编辑
 Notebook；必须由实施者修改固定快照，经独立审计者和 gatekeeper 审核后形成新的
 Notebook revision。
 
-独立的 `notebooks/colab/experiment_execution.ipynb` 服务 A3b package
+独立的 `notebooks/colab/experiment_execution.ipynb` 服务 experiment_execution_delivery package
 接线验证。它只核对并调用 package 外 bootstrap，要求 archive SHA、精确 revision
 及 candidate/execution/input digest 来自独立审核；当前占位值未冻结前不能执行。
 包内默认入口仅生成 CPU/synthetic development record 与 replay，不执行模型或

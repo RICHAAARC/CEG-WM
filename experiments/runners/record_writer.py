@@ -44,17 +44,17 @@ from experiments.protocol.internal_validation import (
     FrozenInternalValidationProtocol,
     validate_run_case_record_collection,
 )
-from experiments.protocol.c1_hf_threshold_fit_records import (
-    C1_HF_THRESHOLD_FIT_MAXIMUM_ATTEMPTS,
-    C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
-    C1_HF_THRESHOLD_FIT_SPLIT,
-    C1HfThresholdFitAttemptRecord,
-    C1HfThresholdFitRecordIdentity,
-    C1HfThresholdFitUnitRecordCollection,
-    canonical_c1_hf_threshold_fit_record_bytes,
-    derive_c1_hf_threshold_fit_attempt_id,
-    load_c1_hf_threshold_fit_record_collection,
-    validate_c1_hf_threshold_fit_record_collection,
+from experiments.protocol.hf_only_threshold_fit_records import (
+    HF_ONLY_THRESHOLD_FIT_MAXIMUM_ATTEMPTS,
+    HF_ONLY_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+    HF_ONLY_THRESHOLD_FIT_SPLIT,
+    HfOnlyThresholdFitAttemptRecord,
+    HfOnlyThresholdFitRecordIdentity,
+    HfOnlyThresholdFitUnitRecordCollection,
+    canonical_hf_only_threshold_fit_record_bytes,
+    derive_hf_only_threshold_fit_attempt_id,
+    load_hf_only_threshold_fit_record_collection,
+    validate_hf_only_threshold_fit_record_collection,
 )
 
 
@@ -67,17 +67,17 @@ class GovernedRecordWriterError(ValueError):
     """A record write, resume, or replay boundary failed closed."""
 
 
-class C1HfThresholdFitRecordWriter:
-    """Typed, incremental, atomic writer for exactly one pre-tau C1 unit."""
+class HfOnlyThresholdFitRecordWriter:
+    """Typed, incremental, atomic writer for exactly one pre-tau hf_only_reference_validation unit."""
 
     def __init__(
         self,
         *,
         records_root: str | Path,
-        identity: C1HfThresholdFitRecordIdentity,
+        identity: HfOnlyThresholdFitRecordIdentity,
     ) -> None:
-        if type(identity) is not C1HfThresholdFitRecordIdentity:
-            raise GovernedRecordWriterError("C1 record identity exact type is required")
+        if type(identity) is not HfOnlyThresholdFitRecordIdentity:
+            raise GovernedRecordWriterError("hf_only_reference_validation record identity exact type is required")
         identity.validate()
         root = Path(records_root)
         if not root.is_absolute():
@@ -96,7 +96,7 @@ class C1HfThresholdFitRecordWriter:
     def path(self) -> Path:
         return self._path
 
-    def load(self) -> C1HfThresholdFitUnitRecordCollection | None:
+    def load(self) -> HfOnlyThresholdFitUnitRecordCollection | None:
         with self._locked():
             if not self._path.exists():
                 return None
@@ -104,10 +104,10 @@ class C1HfThresholdFitRecordWriter:
 
     def append_attempt(
         self,
-        attempt: C1HfThresholdFitAttemptRecord,
-    ) -> C1HfThresholdFitUnitRecordCollection:
-        if type(attempt) is not C1HfThresholdFitAttemptRecord:
-            raise GovernedRecordWriterError("C1 attempt exact type is required")
+        attempt: HfOnlyThresholdFitAttemptRecord,
+    ) -> HfOnlyThresholdFitUnitRecordCollection:
+        if type(attempt) is not HfOnlyThresholdFitAttemptRecord:
+            raise GovernedRecordWriterError("hf_only_reference_validation attempt exact type is required")
         attempt.validate()
         with self._locked():
             existing = self._load_unlocked() if self._path.exists() else None
@@ -117,56 +117,56 @@ class C1HfThresholdFitRecordWriter:
                     continue
                 if persisted == attempt:
                     return existing  # type: ignore[return-value]
-                raise GovernedRecordWriterError("C1 attempt identity conflict")
+                raise GovernedRecordWriterError("hf_only_reference_validation attempt identity conflict")
             if prior:
                 terminal = prior[-1].status in {"success", "excluded"} or (
                     prior[-1].failure_class
                     in {"execution_failure", "scientific_failure"}
                 )
-                if len(prior) >= C1_HF_THRESHOLD_FIT_MAXIMUM_ATTEMPTS or terminal:
+                if len(prior) >= HF_ONLY_THRESHOLD_FIT_MAXIMUM_ATTEMPTS or terminal:
                     raise GovernedRecordWriterError(
-                        "C1 attempt continues after terminal outcome"
+                        "hf_only_reference_validation attempt continues after terminal outcome"
                     )
             expected_index = len(prior)
             if (
                 attempt.attempt_index != expected_index
                 or attempt.attempt_id
-                != derive_c1_hf_threshold_fit_attempt_id(
+                != derive_hf_only_threshold_fit_attempt_id(
                     self._identity,
                     expected_index,
                 )
             ):
-                raise GovernedRecordWriterError("C1 attempt sequence identity drifted")
-            collection = C1HfThresholdFitUnitRecordCollection(
-                schema_version=C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
-                split=C1_HF_THRESHOLD_FIT_SPLIT,
+                raise GovernedRecordWriterError("hf_only_reference_validation attempt sequence identity drifted")
+            collection = HfOnlyThresholdFitUnitRecordCollection(
+                schema_version=HF_ONLY_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+                split=HF_ONLY_THRESHOLD_FIT_SPLIT,
                 identity=deepcopy(self._identity),
                 attempts=(*prior, attempt),
             )
-            validate_c1_hf_threshold_fit_record_collection(
+            validate_hf_only_threshold_fit_record_collection(
                 collection,
                 expected_identity=self._identity,
             )
             self._write_atomic(collection)
             return collection
 
-    def _load_unlocked(self) -> C1HfThresholdFitUnitRecordCollection:
+    def _load_unlocked(self) -> HfOnlyThresholdFitUnitRecordCollection:
         if not self._path.is_file() or self._path.is_symlink():
-            raise GovernedRecordWriterError("C1 record path must be a regular file")
+            raise GovernedRecordWriterError("hf_only_reference_validation record path must be a regular file")
         try:
-            return load_c1_hf_threshold_fit_record_collection(
+            return load_hf_only_threshold_fit_record_collection(
                 self._path,
                 expected_identity=self._identity,
             )
         except ValueError as exc:
-            raise GovernedRecordWriterError("C1 record replay failed closed") from exc
+            raise GovernedRecordWriterError("hf_only_reference_validation record replay failed closed") from exc
 
     def _write_atomic(
         self,
-        collection: C1HfThresholdFitUnitRecordCollection,
+        collection: HfOnlyThresholdFitUnitRecordCollection,
     ) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = canonical_c1_hf_threshold_fit_record_bytes(collection)
+        payload = canonical_hf_only_threshold_fit_record_bytes(collection)
         temporary_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(

@@ -59,7 +59,7 @@ PROTOCOL_MODULES = (
     ROOT / "experiments/protocol/internal_matrix.py",
     ROOT / "experiments/protocol/internal_records.py",
     ROOT / "experiments/protocol/internal_validation.py",
-    ROOT / "experiments/protocol/c1_hf_reference.py",
+    ROOT / "experiments/protocol/hf_only_reference_protocol.py",
 )
 FORBIDDEN_IMPORT_PREFIXES = (
     "main",

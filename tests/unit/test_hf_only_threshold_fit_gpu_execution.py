@@ -1,4 +1,4 @@
-"""CPU-only tests for typed C1 threshold-fit records and shard execution."""
+"""CPU-only tests for typed HF-only threshold-fit GPU execution records and shard execution."""
 
 from __future__ import annotations
 
@@ -18,47 +18,47 @@ from experiments.methods import (
     CegWmExperimentAdapter,
     load_ceg_wm_experiment_adapter_configuration,
 )
-from experiments.metrics import C1HfMetricImplementationBinding
-from experiments.protocol.c1_hf_reference import (
-    load_c1_hf_reference_specification,
-    load_compact_c1_split_manifest,
+from experiments.metrics import HfOnlyReferenceMetricImplementationBinding
+from experiments.protocol.hf_only_reference_protocol import (
+    load_hf_only_reference_specification,
+    load_compact_hf_only_reference_split_manifest,
     load_frozen_prompt_roster,
-    materialize_c1_split_manifest,
+    materialize_hf_only_reference_split_manifest,
 )
-from experiments.protocol.c1_hf_threshold_fit_records import (
-    C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
-    C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
-    C1_HF_THRESHOLD_FIT_SPLIT,
-    C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
-    C1HfThresholdFitAttemptRecord,
-    C1HfThresholdFitFactRecord,
-    C1HfThresholdFitRecordError,
-    C1HfThresholdFitRecordIdentity,
-    C1HfThresholdFitUnitRecordCollection,
-    derive_c1_hf_threshold_fit_attempt_id,
-    load_c1_hf_threshold_fit_record_collection,
+from experiments.protocol.hf_only_threshold_fit_records import (
+    HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+    HF_ONLY_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+    HF_ONLY_THRESHOLD_FIT_SPLIT,
+    HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+    HfOnlyThresholdFitAttemptRecord,
+    HfOnlyThresholdFitFactRecord,
+    HfOnlyThresholdFitRecordError,
+    HfOnlyThresholdFitRecordIdentity,
+    HfOnlyThresholdFitUnitRecordCollection,
+    derive_hf_only_threshold_fit_attempt_id,
+    load_hf_only_threshold_fit_record_collection,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
     derive_source_cluster_id,
 )
-from experiments.runners.c1_hf_threshold_fit import (
-    C1HfThresholdFitAuthority,
-    C1HfThresholdFitExecutionFact,
-    C1HfThresholdFitExecutionFailure,
-    C1HfThresholdFitResourceFailure,
-    C1HfThresholdFitRunnerError,
-    c1_hf_threshold_fit_shard,
-    finalize_c1_hf_threshold_fit,
-    finalize_c1_hf_threshold_fit_synthetic_cpu_fixture,
-    load_c1_hf_threshold_fit_authority,
-    load_c1_hf_threshold_fit_execution_configuration,
-    production_c1_hf_threshold_fit_session,
-    run_c1_hf_threshold_fit_shard,
-    run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard,
-    run_c1_hf_threshold_fit_verified_package_shard,
+from experiments.runners.hf_only_threshold_fit_gpu_execution import (
+    HfOnlyThresholdFitAuthority,
+    HfOnlyThresholdFitExecutionFact,
+    HfOnlyThresholdFitExecutionFailure,
+    HfOnlyThresholdFitResourceFailure,
+    HfOnlyThresholdFitRunnerError,
+    hf_only_threshold_fit_shard,
+    finalize_hf_only_threshold_fit,
+    finalize_hf_only_threshold_fit_synthetic_cpu_fixture,
+    load_hf_only_threshold_fit_authority,
+    load_hf_only_threshold_fit_execution_configuration,
+    production_hf_only_threshold_fit_session,
+    run_hf_only_threshold_fit_shard,
+    run_hf_only_threshold_fit_synthetic_cpu_fixture_shard,
+    run_hf_only_threshold_fit_verified_package_shard,
 )
-import experiments.runners.c1_hf_threshold_fit as threshold_fit_runner
+import experiments.runners.hf_only_threshold_fit_gpu_execution as threshold_fit_runner
 from scripts.experiment_execution import (
     experiment_execution_bootstrap as threshold_fit_bootstrap,
 )
@@ -66,7 +66,7 @@ from experiments.runners.formal_operations import (
     PUBLIC_IMAGE_ENCODING,
     FormalHfContentDetectionOperation,
 )
-from experiments.runners.record_writer import C1HfThresholdFitRecordWriter
+from experiments.runners.record_writer import HfOnlyThresholdFitRecordWriter
 from runtime import Sd35BackendError, Sd35PipelineBackend, load_runtime_configuration
 
 
@@ -85,7 +85,7 @@ def _analysis_unit() -> AnalysisUnitIdentity:
     seed = 7
     return AnalysisUnitIdentity(
         unit_id="unit-0",
-        case_id="C1-HF",
+        case_id="hf_only_reference_validation",
         source_cluster_id=derive_source_cluster_id(
             prompt_digest=prompt_digest,
             generation_seed=seed,
@@ -100,14 +100,14 @@ def _analysis_unit() -> AnalysisUnitIdentity:
 
 
 def _record_identity(
-    execution_evidence_kind: str = C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
-) -> C1HfThresholdFitRecordIdentity:
+    execution_evidence_kind: str = HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE,
+) -> HfOnlyThresholdFitRecordIdentity:
     unit = _analysis_unit()
-    return C1HfThresholdFitRecordIdentity(
+    return HfOnlyThresholdFitRecordIdentity(
         run_id="run-1",
         committed_revision=REVISION,
         execution_evidence_kind=execution_evidence_kind,
-        c1_specification_digest="a" * 64,
+        hf_only_reference_specification_digest="a" * 64,
         protocol_id="ceg_wm_internal_scientific_validation_v2",
         protocol_version="2.0.0",
         protocol_digest="b" * 64,
@@ -132,17 +132,17 @@ def _record_identity(
 
 
 def _attempt(
-    identity: C1HfThresholdFitRecordIdentity,
+    identity: HfOnlyThresholdFitRecordIdentity,
     index: int,
     *,
     status: str,
     failure_class: str | None = None,
     parent: str | None = None,
     resource_identity_digest: str = RESOURCE_A_DIGEST,
-) -> C1HfThresholdFitAttemptRecord:
+) -> HfOnlyThresholdFitAttemptRecord:
     success = status == "success"
-    return C1HfThresholdFitAttemptRecord(
-        attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, index),
+    return HfOnlyThresholdFitAttemptRecord(
+        attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, index),
         attempt_index=index,
         resource_identity_digest=resource_identity_digest,
         status=status,
@@ -151,7 +151,7 @@ def _attempt(
         exclusion_rule_id=None,
         retry_of_attempt_id=parent,
         fact=(
-            C1HfThresholdFitFactRecord(
+            HfOnlyThresholdFitFactRecord(
                 score_float64_hex=(0.25).hex(),
                 image_digest="9" * 64,
                 input_artifact_digest="9" * 64,
@@ -171,7 +171,7 @@ def test_typed_record_writer_replays_retry_lineage_and_rejects_drift(
     tmp_path: Path,
 ) -> None:
     identity = _record_identity()
-    writer = C1HfThresholdFitRecordWriter(records_root=tmp_path, identity=identity)
+    writer = HfOnlyThresholdFitRecordWriter(records_root=tmp_path, identity=identity)
     retry = _attempt(identity, 0, status="retry", failure_class="resource_failure")
     first = writer.append_attempt(retry)
     assert first.attempts == (retry,)
@@ -184,7 +184,7 @@ def test_typed_record_writer_replays_retry_lineage_and_rejects_drift(
     complete = writer.append_attempt(success)
     assert complete.attempts == (retry, success)
     assert writer.append_attempt(success) == complete
-    assert load_c1_hf_threshold_fit_record_collection(
+    assert load_hf_only_threshold_fit_record_collection(
         writer.path,
         expected_identity=identity,
     ) == complete
@@ -192,8 +192,8 @@ def test_typed_record_writer_replays_retry_lineage_and_rejects_drift(
     raw = json.loads(writer.path.read_text(encoding="utf-8"))
     raw["extra"] = True
     writer.path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(C1HfThresholdFitRecordError, match="fields drifted"):
-        load_c1_hf_threshold_fit_record_collection(writer.path)
+    with pytest.raises(HfOnlyThresholdFitRecordError, match="fields drifted"):
+        load_hf_only_threshold_fit_record_collection(writer.path)
 
     tampered = asdict(complete)
     tampered["attempts"][1]["fact"]["detector_config_digest"] = "0" * 64
@@ -208,8 +208,8 @@ def test_typed_record_writer_replays_retry_lineage_and_rejects_drift(
         + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(C1HfThresholdFitRecordError, match="binding identity"):
-        load_c1_hf_threshold_fit_record_collection(writer.path)
+    with pytest.raises(HfOnlyThresholdFitRecordError, match="binding identity"):
+        load_hf_only_threshold_fit_record_collection(writer.path)
 
 
 @pytest.mark.quick
@@ -218,13 +218,13 @@ def test_typed_record_parser_rejects_nonfinite_json_as_custom_error(
 ) -> None:
     path = tmp_path / "nan.json"
     path.write_text('{"generation_seed":NaN}', encoding="utf-8")
-    with pytest.raises(C1HfThresholdFitRecordError):
-        load_c1_hf_threshold_fit_record_collection(path)
+    with pytest.raises(HfOnlyThresholdFitRecordError):
+        load_hf_only_threshold_fit_record_collection(path)
 
 
 @pytest.mark.quick
-def test_production_authority_loader_replays_full_c1_p_and_c1_m() -> None:
-    authority = load_c1_hf_threshold_fit_authority(ROOT)
+def test_production_authority_loader_replays_full_protocol_and_metrics() -> None:
+    authority = load_hf_only_threshold_fit_authority(ROOT)
     assert len(authority.assignments) == 4096
     assert authority.metric_binding.fit_analysis_units == frozenset(
         authority.assignments
@@ -242,7 +242,7 @@ def test_production_authority_loader_replays_full_c1_p_and_c1_m() -> None:
 @pytest.mark.parametrize(
     ("field", "tampered_value"),
     (
-        ("prompt_roster_path", "configs/experiments/c1_hf_metric_implementation.json"),
+        ("prompt_roster_path", "configs/experiments/hf_only_reference_metrics.json"),
         ("runtime_qualification_revision", "0" * 40),
         ("run_phase_id", "rehash_accepted_phase"),
         ("authorization_base_revision", "9" * 40),
@@ -256,7 +256,7 @@ def test_production_authority_loader_rejects_rehashed_decorative_field_tamper(
     tampered_value: str,
 ) -> None:
     raw = json.loads(
-        (ROOT / "configs/experiments/c1_hf_threshold_fit_execution.json").read_text(
+        (ROOT / "configs/experiments/hf_only_threshold_fit_gpu_execution.json").read_text(
             encoding="utf-8"
         )
     )
@@ -274,24 +274,24 @@ def test_production_authority_loader_rejects_rehashed_decorative_field_tamper(
     path = tmp_path / "tampered.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="frozen authority",
     ):
-        load_c1_hf_threshold_fit_authority(ROOT, path)
+        load_hf_only_threshold_fit_authority(ROOT, path)
 
 
 @pytest.mark.quick
 def test_formal_public_api_rejects_injected_factory_and_revision_keywords(
     tmp_path: Path,
 ) -> None:
-    run_parameters = inspect.signature(run_c1_hf_threshold_fit_shard).parameters
-    finalize_parameters = inspect.signature(finalize_c1_hf_threshold_fit).parameters
+    run_parameters = inspect.signature(run_hf_only_threshold_fit_shard).parameters
+    finalize_parameters = inspect.signature(finalize_hf_only_threshold_fit).parameters
     assert "session_factory" not in run_parameters
     assert "committed_revision" not in run_parameters
     assert "committed_revision" not in finalize_parameters
     authority = _authority()
     with pytest.raises(TypeError, match="committed_revision"):
-        run_c1_hf_threshold_fit_shard(
+        run_hf_only_threshold_fit_shard(
             authority=authority,
             shard_index=0,
             run_id="formal-run",
@@ -303,7 +303,7 @@ def test_formal_public_api_rejects_injected_factory_and_revision_keywords(
             user_colab_run=True,
         )
     with pytest.raises(TypeError, match="committed_revision"):
-        finalize_c1_hf_threshold_fit(
+        finalize_hf_only_threshold_fit(
             authority=authority,
             run_id="formal-run",
             committed_revision=REVISION,  # type: ignore[call-arg]
@@ -322,7 +322,7 @@ def test_formal_runner_rejects_shadowed_production_session_factory(
     fake_factory = _FakeFactory(authority)
     monkeypatch.setattr(
         threshold_fit_runner,
-        "production_c1_hf_threshold_fit_session",
+        "production_hf_only_threshold_fit_session",
         fake_factory,
     )
     monkeypatch.setattr(
@@ -330,8 +330,8 @@ def test_formal_runner_rejects_shadowed_production_session_factory(
         "_resolve_clean_repository_revision",
         lambda _root: REVISION,
     )
-    with pytest.raises(C1HfThresholdFitRunnerError, match="factory identity drifted"):
-        run_c1_hf_threshold_fit_shard(
+    with pytest.raises(HfOnlyThresholdFitRunnerError, match="factory identity drifted"):
+        run_hf_only_threshold_fit_shard(
             authority=authority,
             shard_index=0,
             run_id="formal-run",
@@ -357,15 +357,15 @@ def test_private_core_rejects_real_evidence_with_fake_factory(
         lambda _root: REVISION,
     )
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="pinned production session factory",
     ):
-        threshold_fit_runner._run_c1_hf_threshold_fit_shard_core(
+        threshold_fit_runner._run_hf_only_threshold_fit_shard_core(
             authority=authority,
             shard_index=0,
             run_id="formal-run",
             committed_revision=REVISION,
-            execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+            execution_evidence_kind=HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
             registered_detection_key=REGISTERED_KEY,
             environment_digest=ENVIRONMENT_DIGEST,
             resource_identity_digest=RESOURCE_A_DIGEST,
@@ -388,15 +388,15 @@ def test_private_cores_reject_arbitrary_real_evidence_revision(
         lambda _root: clean_head,
     )
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="differs from clean repository HEAD",
     ):
-        threshold_fit_runner._run_c1_hf_threshold_fit_shard_core(
+        threshold_fit_runner._run_hf_only_threshold_fit_shard_core(
             authority=authority,
             shard_index=0,
             run_id="formal-run",
             committed_revision=REVISION,
-            execution_evidence_kind=C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
+            execution_evidence_kind=HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE,
             registered_detection_key=REGISTERED_KEY,
             environment_digest=ENVIRONMENT_DIGEST,
             resource_identity_digest=RESOURCE_A_DIGEST,
@@ -404,15 +404,15 @@ def test_private_cores_reject_arbitrary_real_evidence_revision(
             session_factory=_FakeFactory(authority),
         )
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="differs from clean repository HEAD",
     ):
-        threshold_fit_runner._finalize_c1_hf_threshold_fit_core(
+        threshold_fit_runner._finalize_hf_only_threshold_fit_core(
             authority=authority,
             run_id="formal-run",
             committed_revision=REVISION,
             expected_execution_evidence_kind=(
-                C1_HF_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
+                HF_ONLY_THRESHOLD_FIT_REAL_EXECUTION_EVIDENCE
             ),
             registered_detection_key=REGISTERED_KEY,
             environment_digest=ENVIRONMENT_DIGEST,
@@ -483,7 +483,7 @@ def test_formal_revision_is_derived_from_clean_git_head(
     dirty = iter(
         (
             SimpleNamespace(stdout=f"{REVISION}\n"),
-            SimpleNamespace(stdout=" M experiments/runners/c1_hf_threshold_fit.py\n"),
+            SimpleNamespace(stdout=" M experiments/runners/hf_only_threshold_fit_gpu_execution.py\n"),
         )
     )
     monkeypatch.setattr(
@@ -491,25 +491,25 @@ def test_formal_revision_is_derived_from_clean_git_head(
         "run",
         lambda *_args, **_kwargs: next(dirty),
     )
-    with pytest.raises(C1HfThresholdFitRunnerError, match="source drift"):
+    with pytest.raises(HfOnlyThresholdFitRunnerError, match="source drift"):
         threshold_fit_runner._resolve_clean_repository_revision(ROOT)
 
 
-def _authority() -> C1HfThresholdFitAuthority:
-    configuration = load_c1_hf_threshold_fit_execution_configuration()
-    specification = load_c1_hf_reference_specification(
-        ROOT / "configs/experiments/c1_hf_reference_run.json"
+def _authority() -> HfOnlyThresholdFitAuthority:
+    configuration = load_hf_only_threshold_fit_execution_configuration()
+    specification = load_hf_only_reference_specification(
+        ROOT / "configs/experiments/hf_only_reference_validation.json"
     )
     roster = load_frozen_prompt_roster(
-        ROOT / "configs/experiments/c1_hf_prompt_roster.json"
+        ROOT / "configs/experiments/hf_only_reference_prompt_roster.json"
     )
-    compact = load_compact_c1_split_manifest(
-        ROOT / "configs/experiments/c1_hf_content_threshold_fit_manifest.json"
+    compact = load_compact_hf_only_reference_split_manifest(
+        ROOT / "configs/experiments/hf_only_content_threshold_fit_manifest.json"
     )
-    manifest = materialize_c1_split_manifest(compact, roster)
+    manifest = materialize_hf_only_reference_split_manifest(compact, roster)
     assignments = tuple(item.identity for item in manifest.assignments)
     metric_raw = json.loads(
-        (ROOT / "configs/experiments/c1_hf_metric_implementation.json").read_text(
+        (ROOT / "configs/experiments/hf_only_reference_metrics.json").read_text(
             encoding="utf-8"
         )
     )
@@ -519,8 +519,8 @@ def _authority() -> C1HfThresholdFitAuthority:
     runtime_configuration = load_runtime_configuration(
         ROOT / "configs/runtime/runtime_sd35_flowmatch.json"
     )
-    metric_binding = C1HfMetricImplementationBinding(
-        c1_specification_digest=metric_raw["c1_specification_digest"],
+    metric_binding = HfOnlyReferenceMetricImplementationBinding(
+        hf_only_reference_specification_digest=metric_raw["hf_only_reference_specification_digest"],
         protocol_digest=metric_raw["protocol_digest"],
         fit_manifest_digest=manifest.digest(),
         confirmation_manifest_digest=(
@@ -534,7 +534,7 @@ def _authority() -> C1HfThresholdFitAuthority:
         fit_analysis_units=frozenset(assignments),
         confirmation_analysis_units=frozenset(),
     )
-    return C1HfThresholdFitAuthority(
+    return HfOnlyThresholdFitAuthority(
         repository_root=ROOT,
         configuration=configuration,
         assignments=assignments,
@@ -554,7 +554,7 @@ def _authority() -> C1HfThresholdFitAuthority:
 
 def _issued_package_capability(
     tmp_path: Path,
-) -> tuple[C1HfThresholdFitAuthority, object, Path]:
+) -> tuple[HfOnlyThresholdFitAuthority, object, Path]:
     authority = replace(_authority(), repository_root=tmp_path.resolve())
     entrypoint_relative = Path(
         "scripts/experiment_execution/experiment_execution_entrypoint.py"
@@ -616,7 +616,7 @@ def test_verified_package_capability_is_frozen_and_single_use(
         == REVISION
     )
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="consumption failed",
     ):
         threshold_fit_runner._consume_verified_package_revision_authority(
@@ -632,7 +632,7 @@ def test_verified_package_capability_rejects_post_issue_file_tamper(
     authority, capability, entrypoint = _issued_package_capability(tmp_path)
     entrypoint.write_text("tampered after verification\n", encoding="utf-8")
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="consumption failed",
     ):
         threshold_fit_runner._consume_verified_package_revision_authority(
@@ -651,7 +651,7 @@ def test_verified_package_capability_rejects_post_issue_symlink(
         ROOT / "scripts/experiment_execution/experiment_execution_entrypoint.py"
     )
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="consumption failed",
     ):
         threshold_fit_runner._consume_verified_package_revision_authority(
@@ -716,7 +716,7 @@ def test_verified_package_capability_rejects_fake_alias_and_class(
         fake_module,
     )
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="exact type",
     ):
         threshold_fit_runner._consume_verified_package_revision_authority(
@@ -725,10 +725,10 @@ def test_verified_package_capability_rejects_fake_alias_and_class(
         )
     assert consume_count == 0
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="exact type",
     ):
-        run_c1_hf_threshold_fit_verified_package_shard(
+        run_hf_only_threshold_fit_verified_package_shard(
             authority=authority,
             shard_index=0,
             run_id="fake-package-authority",
@@ -742,7 +742,7 @@ def test_verified_package_capability_rejects_fake_alias_and_class(
 
 
 class _FakeSession:
-    def __init__(self, authority: C1HfThresholdFitAuthority, owner: "_FakeFactory") -> None:
+    def __init__(self, authority: HfOnlyThresholdFitAuthority, owner: "_FakeFactory") -> None:
         self.authority = authority
         self.owner = owner
         self.operation = FormalHfContentDetectionOperation(authority.adapter)
@@ -761,18 +761,18 @@ class _FakeSession:
         unit: AnalysisUnitIdentity,
         prompt_text: str,
         registered_detection_key: str,
-    ) -> C1HfThresholdFitExecutionFact:
+    ) -> HfOnlyThresholdFitExecutionFact:
         self.owner.execute_count += 1
         if self.owner.resource_retry_unit == unit.unit_id and unit.unit_id not in self.owner.retried:
             self.owner.retried.add(unit.unit_id)
-            raise C1HfThresholdFitResourceFailure("synthetic OOM")
+            raise HfOnlyThresholdFitResourceFailure("synthetic OOM")
         if self.prototype is None:
             self.prototype = self.operation(
                 torch.arange(12, dtype=torch.uint8).reshape(1, 3, 2, 2),
                 registered_detection_key,
             )
         index = self.owner.index_by_unit[unit.unit_id]
-        return C1HfThresholdFitExecutionFact(
+        return HfOnlyThresholdFitExecutionFact(
             score=float(index) / 8192.0,
             image_digest=sha256(unit.unit_id.encode("utf-8")).hexdigest(),
             detector_identity=self.prototype.detector_identity,
@@ -790,7 +790,7 @@ class _FakeSession:
 class _FakeFactory:
     def __init__(
         self,
-        authority: C1HfThresholdFitAuthority,
+        authority: HfOnlyThresholdFitAuthority,
         *,
         resource_retry_unit: str | None = None,
     ) -> None:
@@ -803,7 +803,7 @@ class _FakeFactory:
         self.exit_count = 0
         self.execute_count = 0
 
-    def __call__(self, authority: C1HfThresholdFitAuthority) -> _FakeSession:
+    def __call__(self, authority: HfOnlyThresholdFitAuthority) -> _FakeSession:
         return _FakeSession(authority, self)
 
 
@@ -819,16 +819,16 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
         "model_agnostic"
     )
     assert config["invocation_policy"]["mode"] == "explicit_user_colab_run_only"
-    first_shard = c1_hf_threshold_fit_shard(authority, 0)
-    last_shard = c1_hf_threshold_fit_shard(authority, 15)
+    first_shard = hf_only_threshold_fit_shard(authority, 0)
+    last_shard = hf_only_threshold_fit_shard(authority, 15)
     assert len(first_shard) == len(last_shard) == 256
     assert first_shard + tuple(
         unit
         for shard_index in range(1, 15)
-        for unit in c1_hf_threshold_fit_shard(authority, shard_index)
+        for unit in hf_only_threshold_fit_shard(authority, shard_index)
     ) + last_shard == authority.assignments
-    with pytest.raises(C1HfThresholdFitRunnerError):
-        c1_hf_threshold_fit_shard(authority, 16)
+    with pytest.raises(HfOnlyThresholdFitRunnerError):
+        hf_only_threshold_fit_shard(authority, 16)
 
     monkeypatch.setattr(
         torch.cuda,
@@ -836,7 +836,7 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
         lambda: (_ for _ in ()).throw(AssertionError("CUDA touched by CPU test")),
     )
     factory = _FakeFactory(authority, resource_retry_unit=first_shard[0].unit_id)
-    summary = run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
+    summary = run_hf_only_threshold_fit_synthetic_cpu_fixture_shard(
         authority=authority,
         shard_index=0,
         run_id="fit-run",
@@ -852,17 +852,17 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
     assert summary["recorded_unit_count"] == 1
     assert factory.enter_count == factory.exit_count == 1
     assert factory.execute_count == 1
-    first_record = load_c1_hf_threshold_fit_record_collection(
+    first_record = load_hf_only_threshold_fit_record_collection(
         tmp_path / "fit-run/threshold_fit/shard_00/unit_0000.json"
     )
     assert first_record.identity.execution_evidence_kind == (
-        C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
+        HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
     )
     assert tuple(item.status for item in first_record.attempts) == ("retry",)
     assert first_record.attempts[0].resource_identity_digest == RESOURCE_A_DIGEST
 
     resume_factory = _FakeFactory(authority)
-    resumed = run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
+    resumed = run_hf_only_threshold_fit_synthetic_cpu_fixture_shard(
         authority=authority,
         shard_index=0,
         run_id="fit-run",
@@ -876,7 +876,7 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
     assert resumed["success_count"] == 256
     assert resume_factory.enter_count == resume_factory.exit_count == 1
     assert resume_factory.execute_count == 256
-    resumed_first = load_c1_hf_threshold_fit_record_collection(
+    resumed_first = load_hf_only_threshold_fit_record_collection(
         tmp_path / "fit-run/threshold_fit/shard_00/unit_0000.json"
     )
     assert tuple(item.status for item in resumed_first.attempts) == (
@@ -891,7 +891,7 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
         == resumed_first.attempts[0].attempt_id
     )
     completed_factory = _FakeFactory(authority)
-    completed = run_c1_hf_threshold_fit_synthetic_cpu_fixture_shard(
+    completed = run_hf_only_threshold_fit_synthetic_cpu_fixture_shard(
         authority=authority,
         shard_index=0,
         run_id="fit-run",
@@ -904,8 +904,8 @@ def test_threshold_fit_config_shards_and_resumable_single_session(
     )
     assert completed["success_count"] == 256
     assert completed_factory.enter_count == completed_factory.execute_count == 0
-    with pytest.raises(C1HfThresholdFitRunnerError, match="explicit user Colab"):
-        run_c1_hf_threshold_fit_shard(
+    with pytest.raises(HfOnlyThresholdFitRunnerError, match="explicit user Colab"):
+        run_hf_only_threshold_fit_shard(
             authority=authority,
             shard_index=1,
             run_id="blocked-run",
@@ -926,11 +926,11 @@ def test_preregistered_exclusion_prevents_threshold_finalization(
     fit_called = False
 
     def load_excluded(
-        writer: C1HfThresholdFitRecordWriter,
-    ) -> C1HfThresholdFitUnitRecordCollection:
+        writer: HfOnlyThresholdFitRecordWriter,
+    ) -> HfOnlyThresholdFitUnitRecordCollection:
         identity = writer._identity  # type: ignore[attr-defined]
-        attempt = C1HfThresholdFitAttemptRecord(
-            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, 0),
+        attempt = HfOnlyThresholdFitAttemptRecord(
+            attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, 0),
             attempt_index=0,
             resource_identity_digest=RESOURCE_A_DIGEST,
             status="excluded",
@@ -940,9 +940,9 @@ def test_preregistered_exclusion_prevents_threshold_finalization(
             retry_of_attempt_id=None,
             fact=None,
         )
-        return C1HfThresholdFitUnitRecordCollection(
-            schema_version=C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
-            split=C1_HF_THRESHOLD_FIT_SPLIT,
+        return HfOnlyThresholdFitUnitRecordCollection(
+            schema_version=HF_ONLY_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+            split=HF_ONLY_THRESHOLD_FIT_SPLIT,
             identity=identity,
             attempts=(attempt,),
         )
@@ -952,13 +952,13 @@ def test_preregistered_exclusion_prevents_threshold_finalization(
         fit_called = True
         raise AssertionError("tau fitting must not occur")
 
-    monkeypatch.setattr(C1HfThresholdFitRecordWriter, "load", load_excluded)
-    monkeypatch.setattr(threshold_fit_runner, "fit_c1_hf_tau", forbidden_fit)
+    monkeypatch.setattr(HfOnlyThresholdFitRecordWriter, "load", load_excluded)
+    monkeypatch.setattr(threshold_fit_runner, "fit_hf_only_reference_tau", forbidden_fit)
     with pytest.raises(
-        C1HfThresholdFitRunnerError,
+        HfOnlyThresholdFitRunnerError,
         match="preregistered exclusion prevents",
     ):
-        finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
+        finalize_hf_only_threshold_fit_synthetic_cpu_fixture(
             authority=authority,
             run_id="excluded-fit-run",
             fixture_revision=REVISION,
@@ -976,15 +976,15 @@ def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
 ) -> None:
     authority = _authority()
     replayed_resources: set[str] = set()
-    synthetic_collections: dict[int, C1HfThresholdFitUnitRecordCollection] = {}
+    synthetic_collections: dict[int, HfOnlyThresholdFitUnitRecordCollection] = {}
 
     def load_typed(
-        writer: C1HfThresholdFitRecordWriter,
-    ) -> C1HfThresholdFitUnitRecordCollection:
+        writer: HfOnlyThresholdFitRecordWriter,
+    ) -> HfOnlyThresholdFitUnitRecordCollection:
         identity = writer._identity  # type: ignore[attr-defined]
         index = identity.unit_index
-        attempt = C1HfThresholdFitAttemptRecord(
-            attempt_id=derive_c1_hf_threshold_fit_attempt_id(identity, 0),
+        attempt = HfOnlyThresholdFitAttemptRecord(
+            attempt_id=derive_hf_only_threshold_fit_attempt_id(identity, 0),
             attempt_index=0,
             resource_identity_digest=(
                 RESOURCE_A_DIGEST
@@ -996,7 +996,7 @@ def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
             failure_type=None,
             exclusion_rule_id=None,
             retry_of_attempt_id=None,
-            fact=C1HfThresholdFitFactRecord(
+            fact=HfOnlyThresholdFitFactRecord(
                 score_float64_hex=(float(index) / 8192.0).hex(),
                 image_digest=sha256(
                     identity.analysis_unit_identity.unit_id.encode("utf-8")
@@ -1011,17 +1011,17 @@ def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
             ),
         )
         replayed_resources.add(attempt.resource_identity_digest)
-        collection = C1HfThresholdFitUnitRecordCollection(
-            schema_version=C1_HF_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
-            split=C1_HF_THRESHOLD_FIT_SPLIT,
+        collection = HfOnlyThresholdFitUnitRecordCollection(
+            schema_version=HF_ONLY_THRESHOLD_FIT_RECORD_SCHEMA_VERSION,
+            split=HF_ONLY_THRESHOLD_FIT_SPLIT,
             identity=identity,
             attempts=(attempt,),
         )
         synthetic_collections[index] = collection
         return collection
 
-    monkeypatch.setattr(C1HfThresholdFitRecordWriter, "load", load_typed)
-    summary = finalize_c1_hf_threshold_fit_synthetic_cpu_fixture(
+    monkeypatch.setattr(HfOnlyThresholdFitRecordWriter, "load", load_typed)
+    summary = finalize_hf_only_threshold_fit_synthetic_cpu_fixture(
         authority=authority,
         run_id="full-fit-run",
         fixture_revision=REVISION,
@@ -1032,7 +1032,7 @@ def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
     assert summary == {
         "run_id": "full-fit-run",
         "execution_evidence_kind": (
-            C1_HF_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
+            HF_ONLY_THRESHOLD_FIT_SYNTHETIC_EXECUTION_EVIDENCE
         ),
         "tau_float64_hex": math.nextafter(4095.0 / 8192.0, math.inf).hex(),
         "scientific_claims_supported": False,
@@ -1040,13 +1040,13 @@ def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
     assert replayed_resources == {RESOURCE_A_DIGEST, RESOURCE_B_DIGEST}
 
     def load_synthetic_collection(
-        writer: C1HfThresholdFitRecordWriter,
-    ) -> C1HfThresholdFitUnitRecordCollection:
+        writer: HfOnlyThresholdFitRecordWriter,
+    ) -> HfOnlyThresholdFitUnitRecordCollection:
         identity = writer._identity  # type: ignore[attr-defined]
         return synthetic_collections[identity.unit_index]
 
     monkeypatch.setattr(
-        C1HfThresholdFitRecordWriter,
+        HfOnlyThresholdFitRecordWriter,
         "load",
         load_synthetic_collection,
     )
@@ -1055,8 +1055,8 @@ def test_synthetic_finalize_is_non_scientific_and_formal_finalize_rejects_it(
         "_resolve_clean_repository_revision",
         lambda _root: REVISION,
     )
-    with pytest.raises(C1HfThresholdFitRunnerError, match="evidence kind"):
-        finalize_c1_hf_threshold_fit(
+    with pytest.raises(HfOnlyThresholdFitRunnerError, match="evidence kind"):
+        finalize_hf_only_threshold_fit(
             authority=authority,
             run_id="full-fit-run",
             registered_detection_key=REGISTERED_KEY,
@@ -1100,7 +1100,7 @@ def test_sd35_prompt_selection_is_one_generation_and_preserves_legacy_constructo
         ("legacy prompt", "legacy negative"),
     ]
 
-    prompt = "每个 C1 unit 的提示词"
+    prompt = "每个 hf_only_reference_validation unit 的提示词"
     identity = backend.set_generation_prompts(prompt, "")
     assert identity.prompt_digest == sha256(prompt.encode("utf-8")).hexdigest()
     backend.run_generation(latent, lambda _index, value: value)
@@ -1151,7 +1151,7 @@ def test_production_session_closes_partial_runtime_after_initialize_failure(
         "create_runtime_adapter",
         lambda _backend, _path: FakeRuntimeAdapter(),
     )
-    with pytest.raises(C1HfThresholdFitExecutionFailure):
-        with production_c1_hf_threshold_fit_session(authority):
+    with pytest.raises(HfOnlyThresholdFitExecutionFailure):
+        with production_hf_only_threshold_fit_session(authority):
             raise AssertionError("unreachable")
     assert close_count == 1

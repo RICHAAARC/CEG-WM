@@ -200,11 +200,11 @@ class ContentDetectorBinding:
                 )
         if self.formal_mode != "hf_only":
             raise ConditionalRecoveryError(
-                "batch-5 content binding must preserve formal_mode='hf_only'"
+                "joint_decision content binding must preserve formal_mode='hf_only'"
             )
         if self.key_role != "registered" or self.wrong_key_index is not None:
             raise ConditionalRecoveryError(
-                "batch-5 detector binding requires registered root-key semantics"
+                "joint_decision detector binding requires registered root-key semantics"
             )
         object.__setattr__(
             self,

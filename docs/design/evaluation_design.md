@@ -1,5 +1,9 @@
 # Evaluation Design
 
+HF-only 参考验证依次由 `hf_only_reference_protocol`、
+`hf_only_reference_metrics` 和 `hf_only_threshold_fit_gpu_execution` 组成；整体科学门
+统一称为 `hf_only_reference_validation`，三者完成度不得互相替代。
+
 ## Separation Of Purposes
 
 CEG-WM 使用两个不同实验表面：

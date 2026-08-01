@@ -1,4 +1,4 @@
-"""C1 HF-only reference specification and deterministic frozen split materialization."""
+"""hf_only_reference_validation reference specification and deterministic frozen split materialization."""
 
 from __future__ import annotations
 
@@ -22,47 +22,47 @@ from experiments.protocol.internal_splits import (
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-C1_HF_REFERENCE_SCHEMA_VERSION = "ceg_wm_c1_hf_reference_run_v1"
-C1_HF_PROMPT_ROSTER_SCHEMA_VERSION = "ceg_wm_c1_hf_prompt_roster_v1"
-C1_HF_COMPACT_MANIFEST_SCHEMA_VERSION = "ceg_wm_c1_hf_compact_manifest_v1"
-C1_HF_REFERENCE_GATE_ID = "hf_reference_candidate_frozen"
-C1_HF_RESULT_GATE_ID = "hf_detector_reference_gate_passed"
-C1_HF_DETECTOR_MODE = "hf_only"
-C1_HF_SPLITS = ("content_threshold_fit", "untouched_confirmation")
-C1_HF_DATASET_ID = "nateraw/parti-prompts"
-C1_HF_DATASET_REVISION = "944b156abfdad7627c3221b5ec4f6a6fb060a197"
-C1_HF_DATASET_FILE = "PartiPrompts.tsv"
-C1_HF_DATASET_SHA256 = (
+HF_ONLY_REFERENCE_SCHEMA_VERSION = "ceg_wm_hf_only_reference_run_v1"
+HF_ONLY_REFERENCE_PROMPT_ROSTER_SCHEMA_VERSION = "ceg_wm_hf_only_reference_prompt_roster_v1"
+HF_ONLY_REFERENCE_COMPACT_MANIFEST_SCHEMA_VERSION = "ceg_wm_hf_only_reference_compact_manifest_v1"
+HF_ONLY_REFERENCE_GATE_ID = "hf_reference_candidate_frozen"
+HF_ONLY_REFERENCE_RESULT_GATE_ID = "hf_detector_reference_gate_passed"
+HF_ONLY_REFERENCE_DETECTOR_MODE = "hf_only"
+HF_ONLY_REFERENCE_SPLITS = ("content_threshold_fit", "untouched_confirmation")
+HF_ONLY_REFERENCE_DATASET_ID = "nateraw/parti-prompts"
+HF_ONLY_REFERENCE_DATASET_REVISION = "944b156abfdad7627c3221b5ec4f6a6fb060a197"
+HF_ONLY_REFERENCE_DATASET_FILE = "PartiPrompts.tsv"
+HF_ONLY_REFERENCE_DATASET_SHA256 = (
     "fab29e41bb512a169b56acab4cf2a41dcb675e285df2efcde6640c7dd3c440eb"
 )
-C1_HF_DATASET_LICENSE = "Apache-2.0"
-C1_HF_PROMPT_COUNT = 1632
-C1_HF_CATEGORY_COUNT = 12
-C1_HF_PROMPTS_PER_SPLIT = 816
-C1_HF_SOURCE_CLUSTERS_PER_SPLIT = 4096
-C1_HF_MANIFEST_IDENTITIES = {
+HF_ONLY_REFERENCE_DATASET_LICENSE = "Apache-2.0"
+HF_ONLY_REFERENCE_PROMPT_COUNT = 1632
+HF_ONLY_REFERENCE_CATEGORY_COUNT = 12
+HF_ONLY_REFERENCE_PROMPTS_PER_SPLIT = 816
+HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT = 4096
+HF_ONLY_REFERENCE_MANIFEST_IDENTITIES = {
     "content_threshold_fit": (
-        "ceg_wm_c1_hf_content_threshold_fit_manifest_v1",
+        "ceg_wm_hf_only_reference_content_threshold_fit_manifest_v1",
         "1",
-        "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9",
+        "1150c89cc11db5d6bbe9cb17f032c0a5934f9189db0feb4e5de3998e5302719b",
     ),
     "untouched_confirmation": (
-        "ceg_wm_c1_hf_untouched_confirmation_manifest_v1",
+        "ceg_wm_hf_only_reference_untouched_confirmation_manifest_v1",
         "1",
-        "4359f6edd4a249d1beab91d92c0c5159618622c8bc1581651b12b19f3f6c2307",
+        "35a23a03927fd1a48a54926c33ba9f32f63f58a3d4707dab17d0cec6ce8528cf",
     ),
 }
-C1_HF_PRIMARY_NULL_TARGET_FPR = 0.001
-C1_HF_CONFIDENCE_LEVEL = 0.95
-C1_HF_THRESHOLD_TAIL_FAILURE_PROBABILITY = (
-    1.0 - C1_HF_PRIMARY_NULL_TARGET_FPR
-) ** C1_HF_SOURCE_CLUSTERS_PER_SPLIT
-C1_HF_ZERO_FAILURE_CP_UPPER_95 = 1.0 - (
-    1.0 - C1_HF_CONFIDENCE_LEVEL
-) ** (1.0 / C1_HF_SOURCE_CLUSTERS_PER_SPLIT)
-C1_HF_THRESHOLD_RULE = "float64_nextafter_above_fit_primary_null_maximum"
-C1_HF_THRESHOLD_COMPARISON = "score_greater_than_or_equal_to_tau"
-C1_HF_CLAIM_BOUNDARY = (
+HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR = 0.001
+HF_ONLY_REFERENCE_CONFIDENCE_LEVEL = 0.95
+HF_ONLY_REFERENCE_THRESHOLD_TAIL_FAILURE_PROBABILITY = (
+    1.0 - HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR
+) ** HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
+HF_ONLY_REFERENCE_ZERO_FAILURE_CP_UPPER_95 = 1.0 - (
+    1.0 - HF_ONLY_REFERENCE_CONFIDENCE_LEVEL
+) ** (1.0 / HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT)
+HF_ONLY_REFERENCE_THRESHOLD_RULE = "float64_nextafter_above_fit_primary_null_maximum"
+HF_ONLY_REFERENCE_THRESHOLD_COMPARISON = "score_greater_than_or_equal_to_tau"
+HF_ONLY_REFERENCE_CLAIM_BOUNDARY = (
     "protocol_budget_and_cpu_constraints_only_no_gpu_run_no_scientific_result"
 )
 
@@ -165,29 +165,29 @@ class FrozenPromptRoster:
     def validate(self) -> tuple[str, ...]:
         violations: list[str] = []
         expected_scalars = (
-            ("schema_version", C1_HF_PROMPT_ROSTER_SCHEMA_VERSION),
-            ("dataset_id", C1_HF_DATASET_ID),
-            ("dataset_revision", C1_HF_DATASET_REVISION),
-            ("dataset_file", C1_HF_DATASET_FILE),
-            ("dataset_file_sha256", C1_HF_DATASET_SHA256),
-            ("license", C1_HF_DATASET_LICENSE),
+            ("schema_version", HF_ONLY_REFERENCE_PROMPT_ROSTER_SCHEMA_VERSION),
+            ("dataset_id", HF_ONLY_REFERENCE_DATASET_ID),
+            ("dataset_revision", HF_ONLY_REFERENCE_DATASET_REVISION),
+            ("dataset_file", HF_ONLY_REFERENCE_DATASET_FILE),
+            ("dataset_file_sha256", HF_ONLY_REFERENCE_DATASET_SHA256),
+            ("license", HF_ONLY_REFERENCE_DATASET_LICENSE),
             ("prompt_text_normalization", "exact_utf8_decoded_tsv_prompt_field"),
-            ("expected_prompt_count", C1_HF_PROMPT_COUNT),
+            ("expected_prompt_count", HF_ONLY_REFERENCE_PROMPT_COUNT),
             ("expected_duplicate_prompt_count", 0),
-            ("expected_category_count", C1_HF_CATEGORY_COUNT),
+            ("expected_category_count", HF_ONLY_REFERENCE_CATEGORY_COUNT),
         )
         for name, expected in expected_scalars:
             if getattr(self, name) != expected:
                 violations.append(f"{name}_frozen_value_mismatch")
-        if len(self.rows) != C1_HF_PROMPT_COUNT:
+        if len(self.rows) != HF_ONLY_REFERENCE_PROMPT_COUNT:
             violations.append("prompt_count_mismatch")
         source_rows = tuple(row.source_row for row in self.rows)
-        if source_rows != tuple(range(1, C1_HF_PROMPT_COUNT + 1)):
+        if source_rows != tuple(range(1, HF_ONLY_REFERENCE_PROMPT_COUNT + 1)):
             violations.append("source_row_order_or_coverage_mismatch")
         prompt_digests = tuple(row.prompt_digest for row in self.rows)
         if len(set(prompt_digests)) != len(prompt_digests):
             violations.append("prompt_digest_duplicate")
-        if len({row.category for row in self.rows}) != C1_HF_CATEGORY_COUNT:
+        if len({row.category for row in self.rows}) != HF_ONLY_REFERENCE_CATEGORY_COUNT:
             violations.append("category_count_mismatch")
         for row in self.rows:
             violations.extend(row.validate())
@@ -199,7 +199,7 @@ class FrozenPromptRoster:
 
 
 @dataclass(frozen=True)
-class CompactC1SplitManifest:
+class CompactHfOnlyReferenceSplitManifest:
     schema_version: str
     protocol_id: str
     protocol_version: str
@@ -229,14 +229,14 @@ class CompactC1SplitManifest:
             ),
         }
         expected_seed_namespace = {
-            "content_threshold_fit": "ceg_wm_c1_hf_threshold_fit_seed_v1",
-            "untouched_confirmation": "ceg_wm_c1_hf_confirmation_seed_v1",
+            "content_threshold_fit": "ceg_wm_hf_only_threshold_fit_seed_v1",
+            "untouched_confirmation": "ceg_wm_hf_only_reference_confirmation_seed_v1",
         }
         expected_scalars = (
-            ("schema_version", C1_HF_COMPACT_MANIFEST_SCHEMA_VERSION),
+            ("schema_version", HF_ONLY_REFERENCE_COMPACT_MANIFEST_SCHEMA_VERSION),
             ("protocol_id", INTERNAL_VALIDATION_PROTOCOL_ID),
             ("protocol_version", INTERNAL_VALIDATION_PROTOCOL_VERSION),
-            ("expected_prompt_count", C1_HF_PROMPTS_PER_SPLIT),
+            ("expected_prompt_count", HF_ONLY_REFERENCE_PROMPTS_PER_SPLIT),
             ("seed_derivation", "sha256_canonical_json_low_63_bits"),
             ("base_replicates_per_prompt", 5),
             ("extra_replicates_for_first_selected_prompts", 16),
@@ -244,12 +244,12 @@ class CompactC1SplitManifest:
                 "image_lineage_derivation",
                 "sha256_canonical_json_dataset_row_category_challenge_seed_replication",
             ),
-            ("expected_assignment_count", C1_HF_SOURCE_CLUSTERS_PER_SPLIT),
+            ("expected_assignment_count", HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT),
         )
         for name, expected in expected_scalars:
             if getattr(self, name) != expected:
                 violations.append(f"{name}_frozen_value_mismatch")
-        if self.split not in C1_HF_SPLITS:
+        if self.split not in HF_ONLY_REFERENCE_SPLITS:
             violations.append("split_invalid")
         else:
             if self.source_row_selector != expected_selector[self.split]:
@@ -257,7 +257,7 @@ class CompactC1SplitManifest:
             if self.seed_namespace != expected_seed_namespace[self.split]:
                 violations.append("seed_namespace_invalid")
             manifest_id, revision, materialized_digest = (
-                C1_HF_MANIFEST_IDENTITIES[self.split]
+                HF_ONLY_REFERENCE_MANIFEST_IDENTITIES[self.split]
             )
             if self.manifest_id != manifest_id:
                 violations.append("manifest_id_frozen_value_mismatch")
@@ -286,7 +286,7 @@ class HfReferenceCandidateFreeze:
 
 
 @dataclass(frozen=True)
-class C1HfReferenceSpecification:
+class HfOnlyReferenceSpecification:
     raw: dict[str, Any]
 
     def digest(self) -> str:
@@ -295,7 +295,7 @@ class C1HfReferenceSpecification:
     def validate(self) -> tuple[str, ...]:
         violations: list[str] = []
         try:
-            _validate_c1_specification_raw(self.raw)
+            _validate_hf_only_reference_specification_raw(self.raw)
         except ValueError as error:
             violations.append(str(error))
         return tuple(violations)
@@ -306,22 +306,22 @@ class C1HfReferenceSpecification:
             raise ValueError(", ".join(violations))
         binding = self.raw["candidate_binding"]
         return HfReferenceCandidateFreeze(
-            gate_id=C1_HF_REFERENCE_GATE_ID,
-            detector_mode=C1_HF_DETECTOR_MODE,
+            gate_id=HF_ONLY_REFERENCE_GATE_ID,
+            detector_mode=HF_ONLY_REFERENCE_DETECTOR_MODE,
             candidate_binding_digest=binding["candidate_binding_digest"],
             freeze_semantics="identity_and_runtime_qualification_fact_only_not_result_gate",
         )
 
 
 @dataclass(frozen=True)
-class C1HfReferenceBundle:
-    specification: C1HfReferenceSpecification
+class HfOnlyReferenceBundle:
+    specification: HfOnlyReferenceSpecification
     roster: FrozenPromptRoster
-    compact_manifests: tuple[CompactC1SplitManifest, ...]
+    compact_manifests: tuple[CompactHfOnlyReferenceSplitManifest, ...]
     materialized_manifests: tuple[FrozenSplitManifest, ...]
 
 
-def _validate_c1_specification_raw(raw: dict[str, Any]) -> None:
+def _validate_hf_only_reference_specification_raw(raw: dict[str, Any]) -> None:
     _require_exact_keys(
         raw,
         (
@@ -345,18 +345,18 @@ def _validate_c1_specification_raw(raw: dict[str, Any]) -> None:
             "statistics",
             "forbidden_scope",
         ),
-        context="c1_specification",
+        context="hf_only_reference_specification",
     )
     expected_scalars = (
-        ("schema_version", C1_HF_REFERENCE_SCHEMA_VERSION),
+        ("schema_version", HF_ONLY_REFERENCE_SCHEMA_VERSION),
         ("protocol_id", INTERNAL_VALIDATION_PROTOCOL_ID),
         ("protocol_version", INTERNAL_VALIDATION_PROTOCOL_VERSION),
-        ("phase", "c1_protocol_and_budget_freeze_only"),
-        ("detector_mode", C1_HF_DETECTOR_MODE),
-        ("prerequisite_gate_id", C1_HF_REFERENCE_GATE_ID),
-        ("result_gate_id", C1_HF_RESULT_GATE_ID),
+        ("phase", "hf_only_reference_protocol_and_budget_freeze_only"),
+        ("detector_mode", HF_ONLY_REFERENCE_DETECTOR_MODE),
+        ("prerequisite_gate_id", HF_ONLY_REFERENCE_GATE_ID),
+        ("result_gate_id", HF_ONLY_REFERENCE_RESULT_GATE_ID),
         ("result_gate_prerequisite_forbidden", True),
-        ("claim_boundary", C1_HF_CLAIM_BOUNDARY),
+        ("claim_boundary", HF_ONLY_REFERENCE_CLAIM_BOUNDARY),
     )
     for name, expected in expected_scalars:
         if raw[name] != expected:
@@ -376,7 +376,7 @@ def _validate_c1_specification_raw(raw: dict[str, Any]) -> None:
         "routing",
         "geometry",
         "combined_detector",
-        "c2_or_later",
+        "post_hf_only_reference_validation",
         "held_out_evaluation",
         "external_baseline",
         "formal_evaluation",
@@ -409,15 +409,15 @@ def _validate_dataset(raw: object) -> None:
         context="dataset",
     )
     expected = {
-        "dataset_id": C1_HF_DATASET_ID,
-        "revision": C1_HF_DATASET_REVISION,
-        "file": C1_HF_DATASET_FILE,
-        "file_sha256": C1_HF_DATASET_SHA256,
-        "license": C1_HF_DATASET_LICENSE,
-        "prompt_count": C1_HF_PROMPT_COUNT,
+        "dataset_id": HF_ONLY_REFERENCE_DATASET_ID,
+        "revision": HF_ONLY_REFERENCE_DATASET_REVISION,
+        "file": HF_ONLY_REFERENCE_DATASET_FILE,
+        "file_sha256": HF_ONLY_REFERENCE_DATASET_SHA256,
+        "license": HF_ONLY_REFERENCE_DATASET_LICENSE,
+        "prompt_count": HF_ONLY_REFERENCE_PROMPT_COUNT,
         "duplicate_prompt_count": 0,
-        "category_count": C1_HF_CATEGORY_COUNT,
-        "roster_path": "configs/experiments/c1_hf_prompt_roster.json",
+        "category_count": HF_ONLY_REFERENCE_CATEGORY_COUNT,
+        "roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
         "dataset_snapshot_path": (
             "configs/experiments/assets/"
             "parti_prompts_dataset_snapshot.txt"
@@ -463,7 +463,7 @@ def _validate_candidate_binding(raw: object) -> None:
         "runtime_candidate_id": "runtime_sd35_flowmatch",
         "candidate_specification_path": "docs/design/candidate_specifications.md",
         "candidate_specification_sha256": (
-            "7a9a2689e067ec85d39cc6e296ae4942da2b0fd2429f0ab88abcc1af2d7d89ea"
+            "30fb94b981e2cfeb58cb4856a7fc4958626decf99d1cca397c4a5ae204021386"
         ),
         "method_reviewed_revision": "85fd04ffda1513d2779a2d7a6a807f7a2ef2d4f9",
         "protocol_authorization_parent_revision": (
@@ -559,8 +559,8 @@ def _validate_candidate_binding(raw: object) -> None:
         "derivation_authority": (
             "formal_execution_package_from_frozen_manifest_and_registered_key"
         ),
-        "absence_semantics": "c1_execution_preflight_fail_closed",
-        "c1_protocol_status": "not_yet_materialized_no_result_claim",
+        "absence_semantics": "hf_only_threshold_fit_gpu_execution_preflight_fail_closed",
+        "hf_only_reference_protocol_status": "not_yet_materialized_no_result_claim",
     }:
         raise ValueError("required_execution_package_bindings_invalid")
     qualification = raw["runtime_qualification"]
@@ -620,7 +620,7 @@ def _validate_method_execution(raw: object) -> None:
         "content_relative_l2_nominal": "3/250",
         "content_relative_l2_limit": "3/250",
         "vae_encode_protocol": "posterior_mode_sub_shift_factor_mul_scaling_factor",
-        "fixed_fpr_target": C1_HF_PRIMARY_NULL_TARGET_FPR,
+        "fixed_fpr_target": HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR,
     }
     _require_exact_keys(raw, expected, context="method_execution")
     if raw != expected:
@@ -648,9 +648,9 @@ def _validate_key_controls(raw: object) -> None:
         context="key_controls",
     )
     expected_except_digest = {
-        "registered_key_family_id": "ceg_wm_c1_hf_reference_registered_family_v1",
+        "registered_key_family_id": "ceg_wm_hf_only_reference_registered_family_v1",
         "registered_key_secret_persistence": "forbidden",
-        "wrong_key_roster_id": "ceg_wm_c1_hf_wrong_key_roster_v1",
+        "wrong_key_roster_id": "ceg_wm_hf_only_reference_wrong_key_roster_v1",
         "wrong_key_derivation": "key_schedule_sha256_counter_wrong_key_domain",
         "wrong_key_count_per_source_cluster": 1,
         "public_noise_identity": "key_schedule_sha256_counter_public_noise",
@@ -674,27 +674,27 @@ def _validate_key_controls(raw: object) -> None:
 
 
 def _validate_split_manifests(raw: object) -> None:
-    if type(raw) is not dict or tuple(raw) != C1_HF_SPLITS:
+    if type(raw) is not dict or tuple(raw) != HF_ONLY_REFERENCE_SPLITS:
         raise ValueError("split_manifests_identity_or_order_invalid")
     expected = {
         "content_threshold_fit": {
-            "path": "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
+            "path": "configs/experiments/hf_only_content_threshold_fit_manifest.json",
             "file_sha256": (
-                "52af2c75bd0513c6eace971fb098c203154cee05ca27d811ece12ec85b8911b5"
+                "554d1f488dadc433dba57a2b4e9435a8f55eeecef77929c76161076753b2886a"
             ),
             "materialized_manifest_digest": (
-                "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9"
+                "1150c89cc11db5d6bbe9cb17f032c0a5934f9189db0feb4e5de3998e5302719b"
             ),
         },
         "untouched_confirmation": {
             "path": (
-                "configs/experiments/c1_hf_untouched_confirmation_manifest.json"
+                "configs/experiments/hf_only_untouched_confirmation_manifest.json"
             ),
             "file_sha256": (
-                "0c3dc826f99e2728b1c9ea646ec36285929c4a8215f39b5dbce69ef5faea8199"
+                "43d7d6d81f827348655f6bd0caa4b808f401cf20b1153923d14c5cc86270e6cd"
             ),
             "materialized_manifest_digest": (
-                "4359f6edd4a249d1beab91d92c0c5159618622c8bc1581651b12b19f3f6c2307"
+                "35a23a03927fd1a48a54926c33ba9f32f63f58a3d4707dab17d0cec6ce8528cf"
             ),
         },
     }
@@ -709,10 +709,10 @@ def _validate_run_phases(raw: object) -> None:
     ):
         raise ValueError("run_phases_identity_or_order_invalid")
     if raw["threshold_fit"] != {
-        "run_phase_id": "c1_hf_threshold_fit_v1",
+        "run_phase_id": "hf_only_threshold_fit_v1",
         "accessible_split": "content_threshold_fit",
         "package_scope": "threshold_fit_only",
-        "prerequisite_gates": [C1_HF_REFERENCE_GATE_ID],
+        "prerequisite_gates": [HF_ONLY_REFERENCE_GATE_ID],
         "forbidden_split_access": ["untouched_confirmation"],
         "same_run_confirmation": "forbidden",
         "output_artifact_schema": "ceg_wm_hf_only_tau_frozen_v1",
@@ -734,7 +734,7 @@ def _validate_run_phases(raw: object) -> None:
     }:
         raise ValueError("threshold_fit_run_phase_invalid")
     if raw["untouched_confirmation"] != {
-        "run_phase_id": "c1_hf_untouched_confirmation_v1",
+        "run_phase_id": "hf_only_reference_untouched_confirmation_v1",
         "accessible_split": "untouched_confirmation",
         "package_scope": "confirmation_only",
         "prerequisite_gates": [
@@ -808,7 +808,7 @@ def _validate_execution_budget(raw: object) -> None:
         "source_clusters_per_shard": 256,
         "shard_assignment": "ascending_materialized_assignment_index",
         "cross_phase_shard_reuse": "forbidden",
-        "gpu_execution_authorized_by_c1_protocol": False,
+        "gpu_execution_authorized_by_hf_only_reference_protocol": False,
         "resource_class_and_walltime": (
             "must_be_frozen_in_separately_authorized_execution_package"
         ),
@@ -819,36 +819,36 @@ def _validate_execution_budget(raw: object) -> None:
 
 def _validate_metric_plan(raw: object) -> None:
     expected = {
-        "metric_schema_version": "ceg_wm_c1_hf_metric_plan_v1",
-        "implementation_status": "formula_identities_frozen_c1_m_not_yet_implemented",
+        "metric_schema_version": "ceg_wm_hf_only_reference_metric_plan_v1",
+        "implementation_status": "formula_identities_frozen_metrics_not_yet_implemented",
         "held_out_evaluation_access": "forbidden",
         "metric_split_bindings": [
             {
-                "metric_id": "c1_hf_tau_fit",
+                "metric_id": "hf_only_reference_tau_fit",
                 "allowed_splits": ["content_threshold_fit"],
             },
             {
-                "metric_id": "c1_hf_primary_null_fixed_fpr",
+                "metric_id": "hf_only_reference_primary_null_fixed_fpr",
                 "allowed_splits": ["untouched_confirmation"],
             },
             {
-                "metric_id": "c1_hf_registered_tpr",
+                "metric_id": "hf_only_reference_registered_tpr",
                 "allowed_splits": ["untouched_confirmation"],
             },
             {
-                "metric_id": "c1_hf_wrong_key_false_accept",
+                "metric_id": "hf_only_reference_wrong_key_false_accept",
                 "allowed_splits": ["untouched_confirmation"],
             },
             {
-                "metric_id": "c1_hf_paired_key_attribution",
+                "metric_id": "hf_only_reference_paired_key_attribution",
                 "allowed_splits": ["untouched_confirmation"],
             },
             {
-                "metric_id": "c1_hf_paired_final_image_quality",
+                "metric_id": "hf_only_reference_paired_final_image_quality",
                 "allowed_splits": ["untouched_confirmation"],
             },
             {
-                "metric_id": "c1_hf_actual_dtype_integrity",
+                "metric_id": "hf_only_reference_actual_dtype_integrity",
                 "allowed_splits": ["untouched_confirmation"],
             },
         ],
@@ -929,40 +929,40 @@ def _validate_statistics(raw: object) -> None:
     threshold_fit = raw["threshold_fit"]
     expected_threshold = {
         "split": "content_threshold_fit",
-        "primary_null_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "primary_null_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "positive_count": 0,
         "fit_quantity": "hf_only_tau",
-        "fit_rule": C1_HF_THRESHOLD_RULE,
-        "decision_comparison": C1_HF_THRESHOLD_COMPARISON,
-        "tail_target": C1_HF_PRIMARY_NULL_TARGET_FPR,
+        "fit_rule": HF_ONLY_REFERENCE_THRESHOLD_RULE,
+        "decision_comparison": HF_ONLY_REFERENCE_THRESHOLD_COMPARISON,
+        "tail_target": HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR,
         "tail_failure_probability_formula": "(1-tail_target)^n",
         "tail_failure_probability_upper_limit": 0.05,
         "confirmation_data_access": "forbidden",
     }
     if threshold_fit != expected_threshold:
         raise ValueError("threshold_fit_plan_invalid")
-    if C1_HF_THRESHOLD_TAIL_FAILURE_PROBABILITY >= 0.05:
+    if HF_ONLY_REFERENCE_THRESHOLD_TAIL_FAILURE_PROBABILITY >= 0.05:
         raise ValueError("threshold_fit_tail_budget_insufficient")
     confirmation = raw["untouched_confirmation"]
     expected_confirmation = {
         "split": "untouched_confirmation",
         "frozen_tau_source": "content_threshold_fit_only",
         "tau_refit": "forbidden",
-        "primary_null_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-        "registered_positive_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-        "wrong_key_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-        "paired_quality_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "primary_null_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+        "registered_positive_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+        "wrong_key_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+        "paired_quality_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "primary_null_zero_false_positive_required": True,
-        "primary_null_one_sided_confidence_level": C1_HF_CONFIDENCE_LEVEL,
-        "primary_null_cp_upper_target": C1_HF_PRIMARY_NULL_TARGET_FPR,
+        "primary_null_one_sided_confidence_level": HF_ONLY_REFERENCE_CONFIDENCE_LEVEL,
+        "primary_null_cp_upper_target": HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR,
     }
     if confirmation != expected_confirmation:
         raise ValueError("untouched_confirmation_plan_invalid")
-    if C1_HF_ZERO_FAILURE_CP_UPPER_95 > C1_HF_PRIMARY_NULL_TARGET_FPR:
+    if HF_ONLY_REFERENCE_ZERO_FAILURE_CP_UPPER_95 > HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR:
         raise ValueError("confirmation_primary_null_budget_insufficient")
     tpr = raw["tpr"]
     if tpr != {
-        "sample_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "sample_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "interval": "one_sided_95_percent_clopper_pearson_lower",
         "minimum_lower_confidence_bound": 0.5,
         "scientific_utility_rationale": (
@@ -976,11 +976,11 @@ def _validate_statistics(raw: object) -> None:
         raise ValueError("tpr_plan_invalid")
     wrong_key = raw["wrong_key"]
     if wrong_key != {
-        "sample_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "sample_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "interval": "one_sided_95_percent_clopper_pearson_upper",
         "reported_separately_from_primary_null": True,
         "zero_wrong_key_positives_required": True,
-        "maximum_upper_confidence_bound": C1_HF_PRIMARY_NULL_TARGET_FPR,
+        "maximum_upper_confidence_bound": HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR,
         "scientific_utility_rationale": (
             "wrong_key_false_acceptance_must_meet_the_same_0_001_ceiling_but_is_not_primary_fpr"
         ),
@@ -989,7 +989,7 @@ def _validate_statistics(raw: object) -> None:
         raise ValueError("wrong_key_plan_invalid")
     paired_attribution = raw["paired_attribution"]
     if paired_attribution != {
-        "sample_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "sample_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "success_event": "registered_score_strictly_greater_than_paired_wrong_key_score",
         "ties": "count_as_failures",
         "interval": "one_sided_95_percent_clopper_pearson_lower",
@@ -1004,7 +1004,7 @@ def _validate_statistics(raw: object) -> None:
         raise ValueError("paired_attribution_plan_invalid")
     paired_quality = raw["paired_quality"]
     if paired_quality != {
-        "sample_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "sample_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "interval": "two_sided_95_percent_paired_mean_interval",
         "standardized_standard_error_scale": 0.015625,
         "pass_threshold": None,
@@ -1012,7 +1012,7 @@ def _validate_statistics(raw: object) -> None:
     }:
         raise ValueError("paired_quality_plan_invalid")
     if raw["actual_dtype_integrity"] != {
-        "registered_positive_count": C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+        "registered_positive_count": HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         "required_for_every_registered_positive": True,
         "required_runtime_dtype": "float16",
         "measurement_dtype": "float32",
@@ -1023,7 +1023,7 @@ def _validate_statistics(raw: object) -> None:
             "actual_relative_l2_finite",
             "actual_relative_l2_at_most_hard_limit",
         ],
-        "failure_semantics": "scientific_failure_and_c1_negative_closure",
+        "failure_semantics": "scientific_failure_and_hf_only_reference_negative_closure",
     }:
         raise ValueError("actual_dtype_integrity_plan_invalid")
     result_gate = raw["result_gate_semantics"]
@@ -1044,9 +1044,9 @@ def _validate_statistics(raw: object) -> None:
         "actual_dtype_integrity_gate": "all_registered_positive_records_pass",
         "paired_quality": "reported_as_characterization_without_pass_threshold",
         "negative_closure": (
-            "failure_of_any_gate_closes_hf_reference_research_question_negative_and_forbids_c2"
+            "failure_of_any_gate_closes_hf_reference_research_question_negative_and_forbids_unapproved_follow_on_validation"
         ),
-        "result_gate_id": C1_HF_RESULT_GATE_ID,
+        "result_gate_id": HF_ONLY_REFERENCE_RESULT_GATE_ID,
         "result_gate_is_prerequisite": False,
     }:
         raise ValueError("result_gate_semantics_invalid")
@@ -1091,27 +1091,27 @@ def load_frozen_prompt_roster(path: str | Path) -> FrozenPromptRoster:
     return roster
 
 
-def load_compact_c1_split_manifest(path: str | Path) -> CompactC1SplitManifest:
+def load_compact_hf_only_reference_split_manifest(path: str | Path) -> CompactHfOnlyReferenceSplitManifest:
     with Path(path).open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
     _require_exact_keys(
         raw,
-        tuple(CompactC1SplitManifest.__dataclass_fields__),
+        tuple(CompactHfOnlyReferenceSplitManifest.__dataclass_fields__),
         context="compact_manifest",
     )
-    specification = CompactC1SplitManifest(**raw)
+    specification = CompactHfOnlyReferenceSplitManifest(**raw)
     violations = specification.validate()
     if violations:
         raise ValueError(", ".join(violations))
     return specification
 
 
-def load_c1_hf_reference_specification(
+def load_hf_only_reference_specification(
     path: str | Path,
-) -> C1HfReferenceSpecification:
+) -> HfOnlyReferenceSpecification:
     with Path(path).open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
-    specification = C1HfReferenceSpecification(raw=raw)
+    specification = HfOnlyReferenceSpecification(raw=raw)
     violations = specification.validate()
     if violations:
         raise ValueError(", ".join(violations))
@@ -1120,7 +1120,7 @@ def load_c1_hf_reference_specification(
 
 def _selected_roster_rows(
     roster: FrozenPromptRoster,
-    compact: CompactC1SplitManifest,
+    compact: CompactHfOnlyReferenceSplitManifest,
 ) -> tuple[FrozenPromptRosterEntry, ...]:
     strata: dict[tuple[str, str], list[FrozenPromptRosterEntry]] = {}
     for row in roster.rows:
@@ -1146,7 +1146,7 @@ def _selected_roster_rows(
 
 
 def _generation_seed(
-    compact: CompactC1SplitManifest,
+    compact: CompactHfOnlyReferenceSplitManifest,
     row: FrozenPromptRosterEntry,
     replication_index: int,
 ) -> int:
@@ -1161,7 +1161,7 @@ def _generation_seed(
 
 
 def _image_lineage_digest(
-    compact: CompactC1SplitManifest,
+    compact: CompactHfOnlyReferenceSplitManifest,
     row: FrozenPromptRosterEntry,
     *,
     generation_seed: int,
@@ -1171,8 +1171,8 @@ def _image_lineage_digest(
         {
             "category": row.category,
             "challenge": row.challenge,
-            "dataset_file_sha256": C1_HF_DATASET_SHA256,
-            "dataset_revision": C1_HF_DATASET_REVISION,
+            "dataset_file_sha256": HF_ONLY_REFERENCE_DATASET_SHA256,
+            "dataset_revision": HF_ONLY_REFERENCE_DATASET_REVISION,
             "generation_seed": generation_seed,
             "replication_index": replication_index,
             "source_row": row.source_row,
@@ -1180,8 +1180,8 @@ def _image_lineage_digest(
     )
 
 
-def materialize_c1_split_manifest(
-    compact: CompactC1SplitManifest,
+def materialize_hf_only_reference_split_manifest(
+    compact: CompactHfOnlyReferenceSplitManifest,
     roster: FrozenPromptRoster,
 ) -> FrozenSplitManifest:
     compact_violations = compact.validate()
@@ -1215,10 +1215,10 @@ def materialize_c1_split_manifest(
             )
             identity = AnalysisUnitIdentity(
                 unit_id=(
-                    f"c1_hf_{compact.split}_row_{row.source_row:04d}_"
+                    f"hf_only_reference_{compact.split}_row_{row.source_row:04d}_"
                     f"rep_{replication_index:02d}"
                 ),
-                case_id=f"c1_hf_{compact.split}",
+                case_id=f"hf_only_reference_{compact.split}",
                 source_cluster_id=cluster_id,
                 prompt_digest=row.prompt_digest,
                 generation_seed=generation_seed,
@@ -1243,7 +1243,7 @@ def materialize_c1_split_manifest(
     return manifest
 
 
-def validate_c1_manifest_pair(
+def validate_hf_only_reference_manifest_pair(
     threshold_fit: FrozenSplitManifest,
     untouched_confirmation: FrozenSplitManifest,
     roster: FrozenPromptRoster,
@@ -1276,15 +1276,15 @@ def validate_c1_manifest_pair(
     }
     if threshold_prompts & confirmation_prompts:
         violations.append("prompt_split_leakage")
-    if len(threshold_prompts | confirmation_prompts) != C1_HF_PROMPT_COUNT:
+    if len(threshold_prompts | confirmation_prompts) != HF_ONLY_REFERENCE_PROMPT_COUNT:
         violations.append("prompt_roster_union_incomplete")
     if len(threshold_clusters) != len(threshold_fit.assignments):
         violations.append("threshold_fit_source_cluster_duplicate")
     if len(confirmation_clusters) != len(untouched_confirmation.assignments):
         violations.append("untouched_confirmation_source_cluster_duplicate")
-    if len(threshold_prompts) != C1_HF_PROMPTS_PER_SPLIT:
+    if len(threshold_prompts) != HF_ONLY_REFERENCE_PROMPTS_PER_SPLIT:
         violations.append("threshold_fit_prompt_count_mismatch")
-    if len(confirmation_prompts) != C1_HF_PROMPTS_PER_SPLIT:
+    if len(confirmation_prompts) != HF_ONLY_REFERENCE_PROMPTS_PER_SPLIT:
         violations.append("untouched_confirmation_prompt_count_mismatch")
     roster_by_digest = {row.prompt_digest: row for row in roster.rows}
     if set(roster_by_digest) != threshold_prompts | confirmation_prompts:
@@ -1315,7 +1315,7 @@ def validate_c1_manifest_pair(
 
 
 def validate_bound_authority_files(
-    specification: C1HfReferenceSpecification,
+    specification: HfOnlyReferenceSpecification,
     repository_root: str | Path,
 ) -> tuple[str, ...]:
     """Build-time check only; runtime uses the already frozen public digests."""
@@ -1370,12 +1370,12 @@ def validate_bound_authority_files(
     return tuple(violations)
 
 
-def load_c1_hf_reference_bundle(
+def load_hf_only_reference_bundle(
     repository_root: str | Path,
-) -> C1HfReferenceBundle:
+) -> HfOnlyReferenceBundle:
     root = Path(repository_root)
-    specification = load_c1_hf_reference_specification(
-        root / "configs/experiments/c1_hf_reference_run.json"
+    specification = load_hf_only_reference_specification(
+        root / "configs/experiments/hf_only_reference_validation.json"
     )
     authority_violations = validate_bound_authority_files(specification, root)
     if authority_violations:
@@ -1403,26 +1403,26 @@ def load_c1_hf_reference_bundle(
     key_family_digest = specification.raw["key_controls"][
         "registered_key_family_digest"
     ]
-    compact_manifests: list[CompactC1SplitManifest] = []
+    compact_manifests: list[CompactHfOnlyReferenceSplitManifest] = []
     materialized_manifests: list[FrozenSplitManifest] = []
-    for split in C1_HF_SPLITS:
+    for split in HF_ONLY_REFERENCE_SPLITS:
         binding = specification.raw["split_manifests"][split]
         compact_path = root / binding["path"]
         if _file_sha256(compact_path) != binding["file_sha256"]:
             raise ValueError(f"bundle_compact_manifest_file_sha256_mismatch:{split}")
-        compact = load_compact_c1_split_manifest(compact_path)
+        compact = load_compact_hf_only_reference_split_manifest(compact_path)
         if (
             compact.split != split
             or compact.roster_rows_digest != roster.rows_digest
             or compact.registered_key_family_digest != key_family_digest
         ):
             raise ValueError(f"bundle_compact_manifest_binding_mismatch:{split}")
-        materialized = materialize_c1_split_manifest(compact, roster)
+        materialized = materialize_hf_only_reference_split_manifest(compact, roster)
         if materialized.digest() != binding["materialized_manifest_digest"]:
             raise ValueError(f"bundle_materialized_manifest_digest_mismatch:{split}")
         compact_manifests.append(compact)
         materialized_manifests.append(materialized)
-    pair_violations = validate_c1_manifest_pair(
+    pair_violations = validate_hf_only_reference_manifest_pair(
         materialized_manifests[0],
         materialized_manifests[1],
         roster,
@@ -1430,7 +1430,7 @@ def load_c1_hf_reference_bundle(
     if pair_violations:
         raise ValueError(", ".join(pair_violations))
     specification.freeze_reference_candidate()
-    return C1HfReferenceBundle(
+    return HfOnlyReferenceBundle(
         specification=specification,
         roster=roster,
         compact_manifests=tuple(compact_manifests),

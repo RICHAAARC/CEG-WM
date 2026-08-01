@@ -11,9 +11,9 @@
 - 唯一 `method_readiness.yaml` 已从模板实例化，逐项连接固定路径、候选 ID、
   责任、唯一实现 symbol、27 个非同构行为节点、候选摘要和 revision-bound
   独立语义复核。10 个候选 ID 与 13 项职责不是同一计数。
-- readiness 只记录方法构建闭合，不是阶段文件。A1-A7 已完成，冻结实验协议与
+- readiness 只记录方法构建闭合，不是阶段文件。experiment_ready_infrastructure_closure 已完成，冻结实验协议与
   可追溯执行入口可用；这只满足 `experiment_ready` 的执行准备边界，不授权
-  calibration、C1 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定
+  calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定
   candidate `8b2344756c4c247906ff0d4eab68e46a773e13f5`、package SHA-256
   `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`、
   qualification run `20260729T110628Z` 和 result ZIP SHA-256

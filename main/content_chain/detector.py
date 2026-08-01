@@ -29,7 +29,11 @@ CONTENT_DETECTOR_CANDIDATE_IDS = (
 )
 FROZEN_COMBINATION_WEIGHTS = (0.25, 0.50, 0.75)
 BranchName = Literal["hf", "lf"]
-CombinationFunction = Literal["C0", "C1", "C2"]
+CombinationFunction = Literal[
+    "hf_only_standardized_score",
+    "weighted_hf_lf_standardized_score",
+    "maximum_hf_lf_standardized_score",
+]
 
 
 class ContentDetectorError(ValueError):
@@ -168,7 +172,7 @@ class BranchStandardizationResult:
 
 @dataclass(frozen=True, slots=True)
 class CalibratedCombinationResult:
-    """未晋升的 C0/C1/C2 诊断统计及冻结公式身份。"""
+    """未晋升的三种诊断统计及冻结语义公式身份。"""
 
     candidate_id: str
     function_id: str
@@ -396,8 +400,14 @@ def _combine_diagnostic(
     function: CombinationFunction,
     weight: float | None,
 ) -> CalibratedCombinationResult:
-    if function not in {"C0", "C1", "C2"}:
-        raise ContentDetectorError("combination function must be C0, C1, or C2")
+    if function not in {
+        "hf_only_standardized_score",
+        "weighted_hf_lf_standardized_score",
+        "maximum_hf_lf_standardized_score",
+    }:
+        raise ContentDetectorError(
+            "combination function must be a registered semantic identity"
+        )
     hf_standardization = _standardize_branch(
         branch="hf",
         score=hf_result.hf_score,
@@ -405,7 +415,10 @@ def _combine_diagnostic(
         calibration=hf_null,
     )
     lf_standardization: BranchStandardizationResult | None = None
-    if function in {"C1", "C2"}:
+    if function in {
+        "weighted_hf_lf_standardized_score",
+        "maximum_hf_lf_standardized_score",
+    }:
         if lf_result is None or lf_null is None:
             raise ContentDetectorError(
                 f"{function} requires independent LF score and LF CDF"
@@ -422,21 +435,24 @@ def _combine_diagnostic(
         )
 
     z_hf = hf_standardization.z_score
-    if function == "C0":
+    if function == "hf_only_standardized_score":
         if weight is not None:
-            raise ContentDetectorError("C0 does not accept a weight")
+            raise ContentDetectorError(
+                "hf_only_standardized_score does not accept a weight"
+            )
         combined_score = z_hf
-        function_id = "C0"
+        function_id = "hf_only_standardized_score"
         formula = "z_hf"
         normalized_weight = None
-    elif function == "C1":
+    elif function == "weighted_hf_lf_standardized_score":
         if (
             isinstance(weight, bool)
             or not isinstance(weight, (int, float))
             or float(weight) not in FROZEN_COMBINATION_WEIGHTS
         ):
             raise ContentDetectorError(
-                "C1 weight must be one of 0.25, 0.50, 0.75"
+                "weighted_hf_lf_standardized_score weight must be one of "
+                "0.25, 0.50, 0.75"
             )
         normalized_weight = float(weight)
         z_lf = lf_standardization.z_score
@@ -444,15 +460,17 @@ def _combine_diagnostic(
             normalized_weight * z_hf
             + sqrt(1.0 - normalized_weight * normalized_weight) * z_lf
         )
-        function_id = f"C1_w{int(normalized_weight * 100):03d}"
+        function_id = "weighted_hf_lf_standardized_score"
         formula = "w*z_hf+sqrt(1-w^2)*z_lf"
     else:
         if weight is not None:
-            raise ContentDetectorError("C2 does not accept a weight")
+            raise ContentDetectorError(
+                "maximum_hf_lf_standardized_score does not accept a weight"
+            )
         normalized_weight = None
         z_lf = lf_standardization.z_score
         combined_score = max(z_hf, z_lf)
-        function_id = "C2"
+        function_id = "maximum_hf_lf_standardized_score"
         formula = "max(z_hf,z_lf)"
     if not isfinite(combined_score):
         raise ContentDetectorError("combined diagnostic score must be finite")
@@ -653,38 +671,31 @@ def _validate_diagnostic_result(
     formula: str
     expected_score: float
     normalized_weight: float | None
-    if diagnostic.function_id == "C0":
+    if diagnostic.function_id == "hf_only_standardized_score":
         if (
             diagnostic.weight is not None
             or diagnostic.lf_standardization is not None
         ):
             raise ContentDetectorError(
-                "C0 diagnostic accepts neither weight nor LF standardization"
+                "hf_only_standardized_score accepts neither weight nor LF "
+                "standardization"
             )
         lf_standardization = None
         formula = "z_hf"
         expected_score = hf_standardization.z_score
         normalized_weight = None
-    elif diagnostic.function_id in {
-        "C1_w025",
-        "C1_w050",
-        "C1_w075",
-    }:
-        expected_weight = {
-            "C1_w025": 0.25,
-            "C1_w050": 0.50,
-            "C1_w075": 0.75,
-        }[diagnostic.function_id]
+    elif diagnostic.function_id == "weighted_hf_lf_standardized_score":
         if (
             isinstance(diagnostic.weight, bool)
             or not isinstance(diagnostic.weight, (int, float))
-            or float(diagnostic.weight) != expected_weight
+            or float(diagnostic.weight) not in FROZEN_COMBINATION_WEIGHTS
             or lf_result is None
             or type(diagnostic.lf_standardization)
             is not BranchStandardizationResult
         ):
             raise ContentDetectorError(
-                "C1 diagnostic requires its frozen weight and LF result"
+                "weighted_hf_lf_standardized_score requires its frozen "
+                "weight and LF result"
             )
         normalized_weight = float(diagnostic.weight)
         lf_standardization = _validate_standardization_result(
@@ -698,7 +709,7 @@ def _validate_diagnostic_result(
             + sqrt(1.0 - normalized_weight * normalized_weight)
             * lf_standardization.z_score
         )
-    elif diagnostic.function_id == "C2":
+    elif diagnostic.function_id == "maximum_hf_lf_standardized_score":
         if (
             diagnostic.weight is not None
             or lf_result is None
@@ -706,7 +717,8 @@ def _validate_diagnostic_result(
             is not BranchStandardizationResult
         ):
             raise ContentDetectorError(
-                "C2 diagnostic requires LF standardization without a weight"
+                "maximum_hf_lf_standardized_score requires LF "
+                "standardization without a weight"
             )
         lf_standardization = _validate_standardization_result(
             diagnostic.lf_standardization,
@@ -721,7 +733,7 @@ def _validate_diagnostic_result(
         normalized_weight = None
     else:
         raise ContentDetectorError(
-            "diagnostic function identity must be frozen C0, C1, or C2"
+            "diagnostic function identity must be a frozen semantic identity"
         )
     if diagnostic.combined_score != expected_score:
         raise ContentDetectorError(
@@ -788,7 +800,7 @@ def content_detector(
             "CDFs and weight require an explicit diagnostic function"
         )
 
-    # This is deliberately byte-for-byte the batch-2 formal HF-only identity.
+    # This is deliberately byte-for-byte the content_detection formal HF-only identity.
     content_config_digest, detector_identity = _formal_content_identity(
         hf_result
     )

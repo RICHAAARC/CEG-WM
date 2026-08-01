@@ -1,4 +1,4 @@
-"""CPU trust-chain tests for the C1 threshold-fit delivery path."""
+"""CPU trust-chain tests for the HF-only threshold-fit GPU execution delivery path."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ PACKAGE_ROOTS = (
 )
 PACKAGE_EXTRAS = (
     "pyproject.toml",
-    "requirements_c1_threshold_fit.txt",
+    "requirements_hf_only_threshold_fit_gpu_execution.txt",
     "templates/release_readmes/experiment_execution_package.md",
     "scripts/experiment_execution/__init__.py",
     "scripts/experiment_execution/experiment_execution_entrypoint.py",
@@ -72,14 +72,14 @@ def _copy_package_repository(destination: Path) -> str:
 
 def _authority_digests(repository: Path) -> dict[str, str]:
     specification = json.loads(
-        (repository / "configs/experiments/c1_hf_reference_run.json").read_text(
+        (repository / "configs/experiments/hf_only_reference_validation.json").read_text(
             encoding="utf-8"
         )
     )
     execution = json.loads(
         (
             repository
-            / "configs/experiments/c1_hf_threshold_fit_execution.json"
+            / "configs/experiments/hf_only_threshold_fit_gpu_execution.json"
         ).read_text(encoding="utf-8")
     )
     return {
@@ -143,10 +143,10 @@ def test_builder_uses_exact_threshold_fit_allowlist_and_is_deterministic(
             "scripts/experiment_execution/experiment_execution_entrypoint.py"
         ).decode("utf-8")
     assert {
-        "configs/experiments/c1_hf_content_threshold_fit_manifest.json",
-        "configs/experiments/c1_hf_threshold_fit_execution.json",
-        "experiments/runners/c1_hf_threshold_fit.py",
-        "requirements_c1_threshold_fit.txt",
+        "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+        "configs/experiments/hf_only_threshold_fit_gpu_execution.json",
+        "experiments/runners/hf_only_threshold_fit_gpu_execution.py",
+        "requirements_hf_only_threshold_fit_gpu_execution.txt",
         "scripts/experiment_execution/experiment_execution_entrypoint.py",
     } <= names
     assert "requirements_runtime_qualification.txt" not in names
@@ -177,7 +177,7 @@ def test_builder_uses_exact_threshold_fit_allowlist_and_is_deterministic(
     assert manifest["input_manifest_digest"] == threshold_package["digests"][
         "input_manifest_digest"
     ]
-    assert "C1 HF threshold-fit execution package" in package_readme
+    assert "HF-only threshold-fit GPU execution execution package" in package_readme
     assert "untouched-confirmation manifest" in package_readme
     assert "CPU/synthetic development wiring" not in package_readme
     assert "prepare_synthetic_wiring" not in entrypoint_source
@@ -237,7 +237,7 @@ def _bootstrap_command(
     fake_site = ephemeral_root.parent / "verified_dependency_metadata"
     fake_site.mkdir(exist_ok=True)
     for requirement in (
-        ROOT / "requirements_c1_threshold_fit.txt"
+        ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
     ).read_text(encoding="utf-8").splitlines():
         distribution, version = requirement.split("==", 1)
         metadata_root = fake_site / (
@@ -254,7 +254,7 @@ def _bootstrap_command(
     expected_torch = next(
         requirement.split("==", 1)[1]
         for requirement in (
-            ROOT / "requirements_c1_threshold_fit.txt"
+            ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
         ).read_text(encoding="utf-8").splitlines()
         if requirement.startswith("torch==")
     )
@@ -349,7 +349,7 @@ def test_resource_failure_and_second_resume_produce_distinct_artifacts(
         run_id="resource-resume",
     )
     assert first_code == 0, first_process.stderr
-    assert first["artifact_kind"] == "c1_threshold_fit_shard_diagnostic"
+    assert first["artifact_kind"] == "hf_only_threshold_fit_shard_diagnostic"
     assert first["run_status"] == "diagnostic"
     assert first["failure_class"] == "resource_failure"
     assert first["scientific_claims_supported"] is False
@@ -376,7 +376,7 @@ def test_resource_failure_and_second_resume_produce_distinct_artifacts(
     expected_dependencies = dict(
         line.split("==", 1)
         for line in (
-            ROOT / "requirements_c1_threshold_fit.txt"
+            ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
         ).read_text(encoding="utf-8").splitlines()
     )
     environment_facts = outcome["execution_facts"]["environment"]
@@ -593,9 +593,9 @@ def test_dependency_install_failure_precedes_package_import(
     assert "--target" in command
     assert "--cache-dir" in command
     assert "--no-deps" in command
-    assert bootstrap.C1_PYPI_INDEX_URL in command
-    assert bootstrap.C1_PYTORCH_INDEX_URL in command
-    assert bootstrap.C1_NVIDIA_INDEX_URL in command
+    assert bootstrap.HF_ONLY_THRESHOLD_FIT_PYPI_INDEX_URL in command
+    assert bootstrap.HF_ONLY_THRESHOLD_FIT_PYTORCH_INDEX_URL in command
+    assert bootstrap.HF_ONLY_THRESHOLD_FIT_NVIDIA_INDEX_URL in command
     assert "CEG_WM_ROOT_KEY" not in pip_environment
     assert "HF_TOKEN" not in pip_environment
     assert "PIP_EXTRA_INDEX_URL" not in pip_environment
@@ -604,12 +604,12 @@ def test_dependency_install_failure_precedes_package_import(
 
 @pytest.mark.quick
 @pytest.mark.parametrize("tamper_kind", ("missing", "extra", "version_drift"))
-def test_c1_dependency_lock_rejects_incomplete_or_drifted_closure(
+def test_hf_only_reference_dependency_lock_rejects_incomplete_or_drifted_closure(
     tmp_path: Path,
     tamper_kind: str,
 ) -> None:
     lines = (
-        ROOT / "requirements_c1_threshold_fit.txt"
+        ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
     ).read_text(encoding="utf-8").splitlines()
     if tamper_kind == "missing":
         lines.pop()
@@ -617,7 +617,7 @@ def test_c1_dependency_lock_rejects_incomplete_or_drifted_closure(
         lines.append("unexpected-distribution==1.0.0")
     else:
         lines[0] = "accelerate==1.14.1"
-    lock_path = tmp_path / "requirements_c1_threshold_fit.txt"
+    lock_path = tmp_path / "requirements_hf_only_threshold_fit_gpu_execution.txt"
     lock_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with pytest.raises(
         bootstrap.ExperimentBootstrapError,
@@ -651,13 +651,13 @@ def test_dependency_target_requires_exact_distribution_set_and_versions(
 
 
 @pytest.mark.quick
-def test_experiment_execution_readme_excludes_non_c1_execution_routes() -> None:
+def test_experiment_execution_readme_excludes_non_hf_only_threshold_fit_gpu_execution_routes() -> None:
     readme = (
         ROOT / "scripts/experiment_execution/README.md"
     ).read_text(encoding="utf-8")
-    assert "C1 HF threshold-fit" in readme
+    assert "HF-only threshold-fit GPU execution" in readme
     assert "schema-v2" in readme
-    assert "requirements_c1_threshold_fit.txt" in readme
+    assert "requirements_hf_only_threshold_fit_gpu_execution.txt" in readme
     assert "complete transitive" in readme
     assert "--no-deps" in readme
     for forbidden in (
@@ -695,7 +695,7 @@ def test_threshold_fit_notebook_is_thin_and_output_free() -> None:
     assert "--expected-candidate-config-digest" not in source
     assert "--expected-execution-config-digest" not in source
     assert "--expected-input-manifest-digest" not in source
-    assert "c1_hf_untouched_confirmation_manifest.json" not in source
+    assert "hf_only_reference_untouched_confirmation_manifest.json" not in source
     assert "prepare_synthetic_wiring" not in source
 
 

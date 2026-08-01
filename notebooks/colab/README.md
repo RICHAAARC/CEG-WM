@@ -26,7 +26,7 @@ schema version 1 的可信 bootstrap 和包内 runner 分开承担。
 时，必须由实施者形成新的 Notebook revision，并经独立审计者和 gatekeeper 审核。
 提交副本必须保持 outputs 为空、execution count 为 null。
 
-`experiment_execution.ipynb` 是 C1 HF threshold-fit 的独立薄入口。它只接收
+`experiment_execution.ipynb` 是 HF-only threshold-fit GPU execution 的独立薄入口。它只接收
 package/bootstrap/sidecar/embedded-manifest 的独立审核 SHA-256、精确 revision、
 run ID、shard index 和 Colab Secrets；candidate/execution/fit 摘要由 clean exact
 revision 的 builder 派生并通过已独立校验的 sidecar 绑定，Notebook 不接受人工注入。

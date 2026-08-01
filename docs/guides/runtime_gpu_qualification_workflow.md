@@ -123,7 +123,7 @@ Colab 重启重放时，才形成固定 `replay` profile 的新 Notebook revisio
 
 ## Local CPU-First Construction
 
-### Batch 1: Runtime Configuration And Adapter Skeleton
+### runtime_configuration_and_adapter: Runtime Configuration And Adapter Skeleton
 
 - 固定 SD3.5 model ID/revision、pipeline、scheduler、steps、guidance、resolution；
 - 固定 callback index、VAE 路径、latent/template dtype 和 Q/K 登记层；
@@ -132,7 +132,7 @@ Colab 重启重放时，才形成固定 `replay` profile 的新 Notebook revisio
 - 使用 mock backend 完成导入和控制流测试；
 - 不下载模型，不调用 GPU。
 
-### Batch 2: Content Write And VAE Path
+### content_write_and_vae: Content Write And VAE Path
 
 - 建立 clean/watermarked 同基础 latent 配对；
 - 在 callback index 18 按 `main` 请求的 binary32 scale 物化 nominal content delta；
@@ -151,10 +151,10 @@ Colab 重启重放时，才形成固定 `replay` profile 的新 Notebook revisio
 - 不设置 `tau_actual_budget`、`q_budget` 接近门、经验 tolerance 或 actual 强度
   下限；ratio/utilization 只作诊断，低 utilization 不得结果后筛除。
 
-Batch 2 的本地实现与测试通过本身不表示本批完成；当前精确 candidate 的真实
+content_write_and_vae 的本地实现与测试通过本身不表示本批完成；当前精确 candidate 的真实
 SD3.5 callback、actual float16、VAE 路径已经由后续 GPU qualification 闭合。
 
-### Batch 3: Q/K Observation Path
+### qk_observation: Q/K Observation Path
 
 - 从普通待检图像重新建立检测 latent；
 - 使用冻结检测 schedule、公开确定性噪声和登记 Q/K 层；
@@ -168,7 +168,7 @@ SD3.5 callback、actual float16、VAE 路径已经由后续 GPU qualification �
 fail-closed 路径；精确 candidate 的两登记层真实 Q/K 已由后续 Colab GPU
 qualification 捕获并核验。
 
-### Batch 4: Runner, Result Zip And Thin Notebook
+### runtime_qualification_delivery: Runner, Result Zip And Thin Notebook
 
 - 建立一个可从命令行运行的 runtime qualification runner；
 - runner 提供 `smoke`、`qualification`，必要时提供 `replay`；
@@ -186,7 +186,7 @@ runner 可捕获普通 Python/runtime 失败并写出最小 failure zip；若解
 进程被系统直接杀死或结果存储不可写，进程内打包不可能完成，必须诚实登记为
 `incomplete` 或 `resource_failure`，不得由 Notebook 伪造通过记录。
 
-Batch 4 最终 revision 提交且工作树干净后，只能从 exact HEAD 的 tracked blobs
+runtime_qualification_delivery 最终 revision 提交且工作树干净后，只能从 exact HEAD 的 tracked blobs
 构建 execution package。`<输出目录>` 必须在仓库外：
 
 ```bash
@@ -276,19 +276,19 @@ CPU 通过只表示可以申请 Colab/GPU 检查，不表示 runtime 已验证�
 actual-dtype 预算语义属于 registered design 与 readiness 受保护实现，必须使用两个
 独立 revisions 闭合：
 
-1. R1 同步 registered design、`main/content_chain/embedder.py`、runtime handshake
+1. candidate_semantics_revision 同步 registered design、`main/content_chain/embedder.py`、runtime handshake
    和真实行为/property tests；只运行定向 CPU/static 检查。旧
-   `method_readiness.yaml` 在 R1 后暂时 stale 是预期事实，不得运行 completion
+   `method_readiness.yaml` 在 candidate_semantics_revision 后暂时 stale 是预期事实，不得运行 completion
    profile 或声称 readiness 闭合。
-2. 独立语义审计必须绑定 R1 exact revision、新 candidate SHA 和全部受影响
+2. 独立语义审计必须绑定 candidate_semantics_revision exact revision、新 candidate SHA 和全部受影响
    方法/测试路径，给出 `APPROVE` 或 `REQUEST CHANGES`。
-3. 仅在 `APPROVE` 后创建 R2；R2 只更新 readiness 的 candidate SHA、reviewed
+3. 仅在 `APPROVE` 后创建 readiness_rebinding_revision；readiness_rebinding_revision 只更新 readiness 的 candidate SHA、reviewed
    revision、真实审核引用及必要纯状态绑定，不夹带方法/runtime 修复。
-4. R2 在登记 `CEG-WM` Conda 环境运行唯一 `full` profile，再由独立 gatekeeper
-   核对 R1→R2、candidate digest、protected paths、工作树和 stage 仍为
-   `method_implemented`。未通过不得进入 Batch 3。
+4. readiness_rebinding_revision 在登记 `CEG-WM` Conda 环境运行唯一 `full` profile，再由独立 gatekeeper
+   核对 candidate_semantics_revision→readiness_rebinding_revision、candidate digest、protected paths、工作树和 stage 仍为
+   `method_implemented`。未通过不得进入 qk_observation。
 
-该两-revision 闭环不等于 Batch 2、GPU qualification 或 `runtime_verified` 完成。
+该两-revision 闭环不等于 content_write_and_vae、GPU qualification 或 `runtime_verified` 完成。
 
 ## Runtime Method Flow
 

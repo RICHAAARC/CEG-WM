@@ -1141,7 +1141,7 @@ def test_content_combination_branch_consumption() -> None:
         lf_low,
         hf_null=hf_null,
         lf_null=lf_null,
-        combination="C1",
+        combination="weighted_hf_lf_standardized_score",
         weight=0.50,
     )
     high = content_detector(
@@ -1149,23 +1149,23 @@ def test_content_combination_branch_consumption() -> None:
         lf_high,
         hf_null=hf_null,
         lf_null=lf_null,
-        combination="C1",
+        combination="weighted_hf_lf_standardized_score",
         weight=0.50,
     )
-    c0_low = content_detector(
+    hf_only_score_low = content_detector(
         hf_query,
         lf_low,
         hf_null=hf_null,
-        combination="C0",
+        combination="hf_only_standardized_score",
     )
-    c0_high = content_detector(
+    hf_only_score_high = content_detector(
         hf_query,
         lf_high,
         hf_null=hf_null,
-        combination="C0",
+        combination="hf_only_standardized_score",
     )
     assert low.combined_score < high.combined_score
-    assert c0_low.combined_score == c0_high.combined_score
+    assert hf_only_score_low.combined_score == hf_only_score_high.combined_score
     assert low.hf_score == high.hf_score == 0.0
     assert low.lf_score == -0.75
     assert high.lf_score == 0.75
@@ -1211,17 +1211,17 @@ def test_content_combination_frozen_formula_identity() -> None:
     lf_null = _null_calibration("lf", lf_result.detector_identity, scores)
 
     assert hf_null.calibration_identity == hf_permuted.calibration_identity
-    c0_result = content_detector(
+    hf_only_score_result = content_detector(
         hf_query,
         hf_null=hf_null,
-        combination="C0",
+        combination="hf_only_standardized_score",
     )
-    c0 = c0_result.diagnostic_combination
-    assert c0.hf_standardization.less_count == 1
-    assert c0.hf_standardization.equal_count == 2
-    assert c0.hf_standardization.u_raw == 0.5
-    assert c0.hf_standardization.quantile_index == 524288
-    assert pack(">f", c0.hf_standardization.z_score).hex() == "35a06c99"
+    hf_only_score = hf_only_score_result.diagnostic_combination
+    assert hf_only_score.hf_standardization.less_count == 1
+    assert hf_only_score.hf_standardization.equal_count == 2
+    assert hf_only_score.hf_standardization.u_raw == 0.5
+    assert hf_only_score.hf_standardization.quantile_index == 524288
+    assert pack(">f", hf_only_score.hf_standardization.z_score).hex() == "35a06c99"
     assert pack(">f", normal_quantile_table_lookup(524288)).hex() == "35a06c99"
 
     combination_results = [
@@ -1230,7 +1230,7 @@ def test_content_combination_frozen_formula_identity() -> None:
             lf_query,
             hf_null=hf_null,
             lf_null=lf_null,
-            combination="C1",
+            combination="weighted_hf_lf_standardized_score",
             weight=weight,
         )
         for weight in (0.25, 0.50, 0.75)
@@ -1238,14 +1238,14 @@ def test_content_combination_frozen_formula_identity() -> None:
     combinations = [
         result.diagnostic_combination for result in combination_results
     ]
-    c2_result = content_detector(
+    maximum_score_result = content_detector(
         hf_query,
         lf_query,
         hf_null=hf_null,
         lf_null=lf_null,
-        combination="C2",
+        combination="maximum_hf_lf_standardized_score",
     )
-    c2 = c2_result.diagnostic_combination
+    maximum_score = maximum_score_result.diagnostic_combination
     for result in combinations:
         expected = (
             result.weight * result.hf_standardization.z_score
@@ -1256,76 +1256,85 @@ def test_content_combination_frozen_formula_identity() -> None:
         assert result.diagnostic_only is True
         assert result.promoted is False
     assert len({result.formula_identity for result in combinations}) == 3
-    assert c2.combined_score == max(
-        c2.hf_standardization.z_score,
-        c2.lf_standardization.z_score,
+    assert maximum_score.combined_score == max(
+        maximum_score.hf_standardization.z_score,
+        maximum_score.lf_standardization.z_score,
     )
-    c1_result = combination_results[1]
-    c1 = c1_result.diagnostic_combination
-    tampered_score = c1.combined_score + 0.25
+    weighted_score_result = combination_results[1]
+    weighted_score = weighted_score_result.diagnostic_combination
+    tampered_score = weighted_score.combined_score + 0.25
     coordinated_score_tamper = replace(
-        c1_result,
+        weighted_score_result,
         combined_score=tampered_score,
         diagnostic_combination=replace(
-            c1,
+            weighted_score,
             combined_score=tampered_score,
         ),
     )
     with pytest.raises(ContentDetectorError, match="score replay"):
         validate_content_detection_result(coordinated_score_tamper)
     formula_identity_tamper = replace(
-        c1_result,
+        weighted_score_result,
         diagnostic_combination=replace(
-            c1,
+            weighted_score,
             formula_identity="f" * 64,
         ),
     )
     with pytest.raises(ContentDetectorError, match="formula"):
         validate_content_detection_result(formula_identity_tamper)
     standardization_tamper = replace(
-        c1_result,
+        weighted_score_result,
         diagnostic_combination=replace(
-            c1,
+            weighted_score,
             hf_standardization=replace(
-                c1.hf_standardization,
-                less_count=c1.hf_standardization.less_count + 1,
+                weighted_score.hf_standardization,
+                less_count=weighted_score.hf_standardization.less_count + 1,
             ),
         ),
     )
     with pytest.raises(ContentDetectorError, match="standardization"):
         validate_content_detection_result(standardization_tamper)
-    with pytest.raises(ContentDetectorError, match="C0"):
+    with pytest.raises(ContentDetectorError, match="hf_only_standardized_score"):
         validate_content_detection_result(
             replace(
-                c0_result,
-                diagnostic_combination=replace(c0, weight=0.25),
+                hf_only_score_result,
+                diagnostic_combination=replace(hf_only_score, weight=0.25),
             )
         )
-    with pytest.raises(ContentDetectorError, match="C1"):
+    with pytest.raises(
+        ContentDetectorError,
+        match="weighted_hf_lf_standardized_score",
+    ):
         validate_content_detection_result(
             replace(
-                c1_result,
+                weighted_score_result,
                 diagnostic_combination=replace(
-                    c1,
+                    weighted_score,
                     lf_standardization=None,
                 ),
             )
         )
-    with pytest.raises(ContentDetectorError, match="C2"):
+    with pytest.raises(
+        ContentDetectorError,
+        match="maximum_hf_lf_standardized_score",
+    ):
         validate_content_detection_result(
             replace(
-                c2_result,
-                diagnostic_combination=replace(c2, weight=0.25),
+                maximum_score_result,
+                diagnostic_combination=replace(maximum_score, weight=0.25),
             )
         )
 
-    with pytest.raises(ContentDetectorError, match="C1 weight"):
+    with pytest.raises(
+        ContentDetectorError,
+        match="weighted_hf_lf_standardized_score weight",
+    ):
         content_detector(
             hf_query,
             lf_query,
             hf_null=hf_null,
             lf_null=lf_null,
-            combination="C1",
+            combination="weighted_hf_lf_standardized_score",
             weight=0.70,
         )
     with pytest.raises(ContentDetectorError, match="at least two"):
@@ -1383,7 +1392,7 @@ def test_content_combination_wrong_key_not_masked() -> None:
         exaggerated_lf_wrong,
         hf_null=hf_null,
         lf_null=lf_null,
-        combination="C2",
+        combination="maximum_hf_lf_standardized_score",
     )
     assert result.hf_result.key_role == "wrong"
     assert result.lf_result.key_role == "wrong"

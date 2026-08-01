@@ -1,5 +1,8 @@
 # Geometry Chain Design
 
+真实 runtime 的几何观测边界登记为 `qk_observation`。该语义身份不改变几何链
+“只恢复坐标、不得直接产生阳性”的权限边界。
+
 ## Objective
 
 几何链利用待检图像中的 Q/K 观测估计 crop、scale 和 rotation，必要时恢复图像坐标，使内容检测器能够在与原图相同的统计语义下重判。

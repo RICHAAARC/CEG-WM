@@ -1,4 +1,4 @@
-"""Executable C1 HF-reference metrics frozen by the C1-P run specification."""
+"""Executable hf_only_reference_validation-reference metrics frozen by the hf_only_reference_protocol run specification."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from pathlib import Path
 import re
 from typing import Sequence
 
-from experiments.protocol.c1_hf_reference import (
-    C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
-    load_c1_hf_reference_bundle,
+from experiments.protocol.hf_only_reference_protocol import (
+    HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
+    load_hf_only_reference_bundle,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
@@ -24,55 +24,55 @@ from .binomial import clopper_pearson_lower, clopper_pearson_upper
 from .internal import MetricRegistry, load_metric_registry, validate_metric_registry
 
 
-C1_HF_METRIC_IMPLEMENTATION_SCHEMA_VERSION = (
-    "ceg_wm_c1_hf_metric_implementation_binding_v2"
+HF_ONLY_REFERENCE_METRIC_IMPLEMENTATION_SCHEMA_VERSION = (
+    "ceg_wm_hf_only_reference_metric_implementation_binding_v2"
 )
-C1_HF_METRIC_IDS = (
-    "c1_hf_tau_fit",
-    "c1_hf_primary_null_fixed_fpr",
-    "c1_hf_registered_tpr",
-    "c1_hf_wrong_key_false_accept",
-    "c1_hf_paired_key_attribution",
-    "c1_hf_paired_final_image_quality",
-    "c1_hf_actual_dtype_integrity",
+HF_ONLY_REFERENCE_METRIC_IDS = (
+    "hf_only_reference_tau_fit",
+    "hf_only_reference_primary_null_fixed_fpr",
+    "hf_only_reference_registered_tpr",
+    "hf_only_reference_wrong_key_false_accept",
+    "hf_only_reference_paired_key_attribution",
+    "hf_only_reference_paired_final_image_quality",
+    "hf_only_reference_actual_dtype_integrity",
 )
-C1_HF_METRIC_SPLIT_BINDINGS = (
-    ("c1_hf_tau_fit", ("content_threshold_fit",)),
-    ("c1_hf_primary_null_fixed_fpr", ("untouched_confirmation",)),
-    ("c1_hf_registered_tpr", ("untouched_confirmation",)),
-    ("c1_hf_wrong_key_false_accept", ("untouched_confirmation",)),
-    ("c1_hf_paired_key_attribution", ("untouched_confirmation",)),
-    ("c1_hf_paired_final_image_quality", ("untouched_confirmation",)),
-    ("c1_hf_actual_dtype_integrity", ("untouched_confirmation",)),
+HF_ONLY_REFERENCE_METRIC_SPLIT_BINDINGS = (
+    ("hf_only_reference_tau_fit", ("content_threshold_fit",)),
+    ("hf_only_reference_primary_null_fixed_fpr", ("untouched_confirmation",)),
+    ("hf_only_reference_registered_tpr", ("untouched_confirmation",)),
+    ("hf_only_reference_wrong_key_false_accept", ("untouched_confirmation",)),
+    ("hf_only_reference_paired_key_attribution", ("untouched_confirmation",)),
+    ("hf_only_reference_paired_final_image_quality", ("untouched_confirmation",)),
+    ("hf_only_reference_actual_dtype_integrity", ("untouched_confirmation",)),
 )
-C1_HF_IMPLEMENTATION_SYMBOLS = [
-    {"metric_id": "c1_hf_tau_fit", "public_callable": "fit_c1_hf_tau"},
+HF_ONLY_REFERENCE_IMPLEMENTATION_SYMBOLS = [
+    {"metric_id": "hf_only_reference_tau_fit", "public_callable": "fit_hf_only_reference_tau"},
     {
-        "metric_id": "c1_hf_primary_null_fixed_fpr",
-        "public_callable": "evaluate_c1_hf_primary_null_fixed_fpr",
+        "metric_id": "hf_only_reference_primary_null_fixed_fpr",
+        "public_callable": "evaluate_hf_only_reference_primary_null_fixed_fpr",
     },
     {
-        "metric_id": "c1_hf_registered_tpr",
-        "public_callable": "evaluate_c1_hf_registered_tpr",
+        "metric_id": "hf_only_reference_registered_tpr",
+        "public_callable": "evaluate_hf_only_reference_registered_tpr",
     },
     {
-        "metric_id": "c1_hf_wrong_key_false_accept",
-        "public_callable": "evaluate_c1_hf_wrong_key_false_accept",
+        "metric_id": "hf_only_reference_wrong_key_false_accept",
+        "public_callable": "evaluate_hf_only_reference_wrong_key_false_accept",
     },
     {
-        "metric_id": "c1_hf_paired_key_attribution",
-        "public_callable": "evaluate_c1_hf_paired_key_attribution",
+        "metric_id": "hf_only_reference_paired_key_attribution",
+        "public_callable": "evaluate_hf_only_reference_paired_key_attribution",
     },
     {
-        "metric_id": "c1_hf_paired_final_image_quality",
-        "public_callable": "evaluate_c1_hf_paired_rgb8_quality",
+        "metric_id": "hf_only_reference_paired_final_image_quality",
+        "public_callable": "evaluate_hf_only_reference_paired_rgb8_quality",
     },
     {
-        "metric_id": "c1_hf_actual_dtype_integrity",
-        "public_callable": "evaluate_c1_hf_actual_dtype_integrity",
+        "metric_id": "hf_only_reference_actual_dtype_integrity",
+        "public_callable": "evaluate_hf_only_reference_actual_dtype_integrity",
     },
 ]
-C1_HF_FORMULA_IMPLEMENTATION_IDENTITIES = {
+HF_ONLY_REFERENCE_FORMULA_IMPLEMENTATION_IDENTITIES = {
     "actual_dtype_integrity": (
         "per_registered_positive_integrity_and_exact_dtype_and_finite_"
         "nonnegative_actual_relative_l2_at_most_3_over_250"
@@ -100,31 +100,31 @@ C1_HF_FORMULA_IMPLEMENTATION_IDENTITIES = {
         "binary64_nextafter_above_primary_null_maximum_and_score_at_least_tau"
     ),
 }
-C1_HF_EXPECTED_SPECIFICATION_DIGEST = (
-    "4a76e8b9aa9535a865f212a109b140332e05c9fa7eb57fca4ddca8671f98add9"
+HF_ONLY_REFERENCE_EXPECTED_SPECIFICATION_DIGEST = (
+    "f5f8dc60ff88ca9f13e74342047e9f503a3454d3c5c82c785e6d23585f7728bb"
 )
-C1_HF_THRESHOLD_RULE = "float64_nextafter_above_fit_primary_null_maximum"
-C1_HF_DECISION_COMPARISON = "score_greater_than_or_equal_to_tau"
-C1_HF_PRIMARY_NULL_ROLE = "unwatermarked_primary_null"
-C1_HF_REGISTERED_ROLE = "registered_positive"
-C1_HF_WRONG_KEY_ROLE = "wrong_key"
-C1_HF_PRIMARY_NULL_CONTROL = "unwatermarked_image_with_registered_detection_key"
-C1_HF_REGISTERED_CONTROL = "registered_watermarked_image_with_registered_detection_key"
-C1_HF_WRONG_KEY_CONTROL = (
+HF_ONLY_REFERENCE_THRESHOLD_RULE = "float64_nextafter_above_fit_primary_null_maximum"
+HF_ONLY_REFERENCE_DECISION_COMPARISON = "score_greater_than_or_equal_to_tau"
+HF_ONLY_REFERENCE_PRIMARY_NULL_ROLE = "unwatermarked_primary_null"
+HF_ONLY_REFERENCE_REGISTERED_ROLE = "registered_positive"
+HF_ONLY_REFERENCE_WRONG_KEY_ROLE = "wrong_key"
+HF_ONLY_REFERENCE_PRIMARY_NULL_CONTROL = "unwatermarked_image_with_registered_detection_key"
+HF_ONLY_REFERENCE_REGISTERED_CONTROL = "registered_watermarked_image_with_registered_detection_key"
+HF_ONLY_REFERENCE_WRONG_KEY_CONTROL = (
     "watermarked_image_with_preregistered_wrong_detection_key"
 )
-C1_HF_CONTENT_RELATIVE_L2_LIMIT = 3.0 / 250.0
-DEFAULT_C1_HF_METRIC_IMPLEMENTATION_PATH = (
+HF_ONLY_REFERENCE_CONTENT_RELATIVE_L2_LIMIT = 3.0 / 250.0
+DEFAULT_HF_ONLY_REFERENCE_METRIC_IMPLEMENTATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "configs"
     / "experiments"
-    / "c1_hf_metric_implementation.json"
+    / "hf_only_reference_metrics.json"
 )
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
-class C1HfMetricError(ValueError):
-    """C1 metric input, authority, or frozen identity failed closed."""
+class HfOnlyReferenceMetricError(ValueError):
+    """hf_only_reference_validation metric input, authority, or frozen identity failed closed."""
 
 
 def _canonical_digest(value: object) -> str:
@@ -144,25 +144,25 @@ def _file_sha256(path: Path) -> str:
 
 def _require_digest(value: object, role: str) -> str:
     if type(value) is not str or _DIGEST_PATTERN.fullmatch(value) is None:
-        raise C1HfMetricError(f"{role}_invalid")
+        raise HfOnlyReferenceMetricError(f"{role}_invalid")
     return value
 
 
 def _require_identity(value: object, role: str) -> str:
     if type(value) is not str or not value:
-        raise C1HfMetricError(f"{role}_invalid")
+        raise HfOnlyReferenceMetricError(f"{role}_invalid")
     return value
 
 
 def _finite_float64(value: object, role: str) -> float:
     if type(value) is not float or not math.isfinite(value):
-        raise C1HfMetricError(f"{role}_must_be_finite_float64")
+        raise HfOnlyReferenceMetricError(f"{role}_must_be_finite_float64")
     return value
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfMetricImplementationBinding:
-    c1_specification_digest: str
+class HfOnlyReferenceMetricImplementationBinding:
+    hf_only_reference_specification_digest: str
     protocol_digest: str
     fit_manifest_digest: str
     confirmation_manifest_digest: str
@@ -175,15 +175,15 @@ class C1HfMetricImplementationBinding:
     confirmation_analysis_units: frozenset[AnalysisUnitIdentity]
 
 
-def load_c1_hf_metric_implementation_binding(
-    path: str | Path = DEFAULT_C1_HF_METRIC_IMPLEMENTATION_PATH,
-) -> C1HfMetricImplementationBinding:
+def load_hf_only_reference_metric_implementation_binding(
+    path: str | Path = DEFAULT_HF_ONLY_REFERENCE_METRIC_IMPLEMENTATION_PATH,
+) -> HfOnlyReferenceMetricImplementationBinding:
     binding_path = Path(path)
     raw = json.loads(binding_path.read_text(encoding="utf-8"))
     expected_keys = {
         "schema_version",
-        "c1_specification_path",
-        "c1_specification_digest",
+        "hf_only_reference_specification_path",
+        "hf_only_reference_specification_digest",
         "protocol_digest",
         "split_manifest_digests",
         "registered_key_family_digest",
@@ -202,72 +202,72 @@ def load_c1_hf_metric_implementation_binding(
         "binding_digest",
     }
     if type(raw) is not dict or set(raw) != expected_keys:
-        raise C1HfMetricError("c1_metric_implementation_binding_fields_invalid")
-    if raw["schema_version"] != C1_HF_METRIC_IMPLEMENTATION_SCHEMA_VERSION:
-        raise C1HfMetricError("c1_metric_implementation_schema_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_implementation_binding_fields_invalid")
+    if raw["schema_version"] != HF_ONLY_REFERENCE_METRIC_IMPLEMENTATION_SCHEMA_VERSION:
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_implementation_schema_mismatch")
     repository_root = binding_path.resolve().parents[2]
-    reference_bundle = load_c1_hf_reference_bundle(repository_root)
+    reference_bundle = load_hf_only_reference_bundle(repository_root)
     specification = reference_bundle.specification
     if (
-        raw["c1_specification_path"]
-        != "configs/experiments/c1_hf_reference_run.json"
-        or specification.digest() != C1_HF_EXPECTED_SPECIFICATION_DIGEST
-        or raw["c1_specification_digest"] != specification.digest()
+        raw["hf_only_reference_specification_path"]
+        != "configs/experiments/hf_only_reference_validation.json"
+        or specification.digest() != HF_ONLY_REFERENCE_EXPECTED_SPECIFICATION_DIGEST
+        or raw["hf_only_reference_specification_digest"] != specification.digest()
     ):
-        raise C1HfMetricError("c1_metric_specification_binding_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_specification_binding_mismatch")
     metric_plan = specification.raw["metric_plan"]
     expected_split_bindings = [
         {"metric_id": metric_id, "allowed_splits": list(splits)}
-        for metric_id, splits in C1_HF_METRIC_SPLIT_BINDINGS
+        for metric_id, splits in HF_ONLY_REFERENCE_METRIC_SPLIT_BINDINGS
     ]
     if (
-        raw["metric_ids"] != list(C1_HF_METRIC_IDS)
+        raw["metric_ids"] != list(HF_ONLY_REFERENCE_METRIC_IDS)
         or raw["metric_split_bindings"] != expected_split_bindings
         or metric_plan["metric_split_bindings"] != expected_split_bindings
-        or raw["implementation_symbols"] != C1_HF_IMPLEMENTATION_SYMBOLS
+        or raw["implementation_symbols"] != HF_ONLY_REFERENCE_IMPLEMENTATION_SYMBOLS
         or raw["formal_confirmation_entrypoint"]
-        != "evaluate_c1_hf_confirmation_metrics"
+        != "evaluate_hf_only_reference_confirmation_metrics"
         or raw["confirmation_cross_input_validation"]
         != "required_fit_tau_and_raw_rgb8_replay_before_confirmation_results"
     ):
-        raise C1HfMetricError("c1_metric_identity_or_split_binding_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_identity_or_split_binding_mismatch")
     frozen_formula_digest = _canonical_digest(metric_plan["formula_identities"])
     implementation_formula_digest = _canonical_digest(
-        C1_HF_FORMULA_IMPLEMENTATION_IDENTITIES
+        HF_ONLY_REFERENCE_FORMULA_IMPLEMENTATION_IDENTITIES
     )
     if (
         raw["frozen_formula_identity_digest"] != frozen_formula_digest
         or raw["formula_implementation_identities"]
-        != C1_HF_FORMULA_IMPLEMENTATION_IDENTITIES
+        != HF_ONLY_REFERENCE_FORMULA_IMPLEMENTATION_IDENTITIES
         or raw["formula_identity_digest"] != implementation_formula_digest
     ):
-        raise C1HfMetricError("c1_metric_formula_binding_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_formula_binding_mismatch")
     registry_path = repository_root / raw["metric_registry_path"]
     registry = load_metric_registry(registry_path)
     if validate_metric_registry(registry):
-        raise C1HfMetricError("c1_metric_registry_invalid")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_registry_invalid")
     if (
         raw["metric_registry_path"]
         != "configs/experiments/internal_execution_components.json"
         or raw["metric_registry_digest"] != registry.registry_digest
-        or any(metric_id not in registry.metric_ids for metric_id in C1_HF_METRIC_IDS)
+        or any(metric_id not in registry.metric_ids for metric_id in HF_ONLY_REFERENCE_METRIC_IDS)
     ):
-        raise C1HfMetricError("c1_metric_registry_binding_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_registry_binding_mismatch")
     implementation_path = repository_root / raw["implementation_module_path"]
     if (
         raw["implementation_module_path"]
-        != "experiments/metrics/c1_hf_reference.py"
+        != "experiments/metrics/hf_only_reference_metrics.py"
         or not implementation_path.is_file()
         or raw["implementation_source_sha256"] != _file_sha256(implementation_path)
     ):
-        raise C1HfMetricError("c1_metric_implementation_source_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_implementation_source_mismatch")
     split_digests = raw["split_manifest_digests"]
     expected_split_digests = {
         name: value["materialized_manifest_digest"]
         for name, value in specification.raw["split_manifests"].items()
     }
     if split_digests != expected_split_digests:
-        raise C1HfMetricError("c1_metric_manifest_binding_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_manifest_binding_mismatch")
     materialized_manifests = {
         manifest.assignments[0].split: manifest
         for manifest in reference_bundle.materialized_manifests
@@ -276,7 +276,7 @@ def load_c1_hf_metric_implementation_binding(
         split: manifest.digest()
         for split, manifest in materialized_manifests.items()
     } != split_digests:
-        raise C1HfMetricError("c1_metric_materialized_manifest_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_materialized_manifest_mismatch")
     expected_protocol_digest = specification.raw["protocol_id"]
     if (
         expected_protocol_digest != INTERNAL_VALIDATION_PROTOCOL_ID
@@ -287,12 +287,12 @@ def load_c1_hf_metric_implementation_binding(
         or raw["registered_key_family_digest"]
         != specification.raw["key_controls"]["registered_key_family_digest"]
     ):
-        raise C1HfMetricError("c1_metric_protocol_or_key_binding_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_protocol_or_key_binding_mismatch")
     payload = {key: value for key, value in raw.items() if key != "binding_digest"}
     if raw["binding_digest"] != _canonical_digest(payload):
-        raise C1HfMetricError("c1_metric_implementation_binding_digest_mismatch")
-    return C1HfMetricImplementationBinding(
-        c1_specification_digest=raw["c1_specification_digest"],
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_implementation_binding_digest_mismatch")
+    return HfOnlyReferenceMetricImplementationBinding(
+        hf_only_reference_specification_digest=raw["hf_only_reference_specification_digest"],
         protocol_digest=raw["protocol_digest"],
         fit_manifest_digest=split_digests["content_threshold_fit"],
         confirmation_manifest_digest=split_digests["untouched_confirmation"],
@@ -317,7 +317,7 @@ def load_c1_hf_metric_implementation_binding(
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfMetricCaseIdentity:
+class HfOnlyReferenceMetricCaseIdentity:
     analysis_unit_identity: AnalysisUnitIdentity
     split: str
     detector_identity: str
@@ -325,7 +325,7 @@ class C1HfMetricCaseIdentity:
     protocol_id: str
     protocol_version: str
     protocol_digest: str
-    c1_specification_digest: str
+    hf_only_reference_specification_digest: str
     manifest_digest: str
     metric_registry_digest: str
     registered_key_family_digest: str
@@ -335,12 +335,12 @@ class C1HfMetricCaseIdentity:
             type(self.analysis_unit_identity) is not AnalysisUnitIdentity
             or self.analysis_unit_identity.validate()
         ):
-            raise C1HfMetricError("analysis_unit_identity_invalid")
+            raise HfOnlyReferenceMetricError("analysis_unit_identity_invalid")
         _require_identity(self.detector_identity, "detector_identity")
         for name in (
             "detector_config_digest",
             "protocol_digest",
-            "c1_specification_digest",
+            "hf_only_reference_specification_digest",
             "manifest_digest",
             "metric_registry_digest",
             "registered_key_family_digest",
@@ -361,12 +361,12 @@ class C1HfMetricCaseIdentity:
 
 
 def _validate_case_identity(
-    identity: C1HfMetricCaseIdentity,
-    binding: C1HfMetricImplementationBinding,
+    identity: HfOnlyReferenceMetricCaseIdentity,
+    binding: HfOnlyReferenceMetricImplementationBinding,
     required_split: str,
 ) -> None:
-    if type(identity) is not C1HfMetricCaseIdentity:
-        raise C1HfMetricError("c1_metric_case_identity_exact_type_required")
+    if type(identity) is not HfOnlyReferenceMetricCaseIdentity:
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_case_identity_exact_type_required")
     expected_manifest = (
         binding.fit_manifest_digest
         if required_split == "content_threshold_fit"
@@ -384,18 +384,18 @@ def _validate_case_identity(
         or identity.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID
         or identity.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION
         or identity.protocol_digest != binding.protocol_digest
-        or identity.c1_specification_digest != binding.c1_specification_digest
+        or identity.hf_only_reference_specification_digest != binding.hf_only_reference_specification_digest
         or identity.manifest_digest != expected_manifest
         or identity.metric_registry_digest != binding.metric_registry_digest
         or identity.registered_key_family_digest
         != binding.registered_key_family_digest
     ):
-        raise C1HfMetricError("c1_metric_case_authority_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_case_authority_identity_mismatch")
 
 
 def _validate_exact_analysis_unit_set(
-    identities: Sequence[C1HfMetricCaseIdentity],
-    binding: C1HfMetricImplementationBinding,
+    identities: Sequence[HfOnlyReferenceMetricCaseIdentity],
+    binding: HfOnlyReferenceMetricImplementationBinding,
     required_split: str,
 ) -> None:
     actual = {identity.analysis_unit_identity for identity in identities}
@@ -405,12 +405,12 @@ def _validate_exact_analysis_unit_set(
         else binding.confirmation_analysis_units
     )
     if len(actual) != len(identities) or actual != expected:
-        raise C1HfMetricError("c1_metric_analysis_unit_manifest_set_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_metric_analysis_unit_manifest_set_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfScoreCase:
-    identity: C1HfMetricCaseIdentity
+class HfOnlyReferenceScoreCase:
+    identity: HfOnlyReferenceMetricCaseIdentity
     key_role: str
     score: float
     registered_detection_key_public_digest: str
@@ -419,12 +419,12 @@ class C1HfScoreCase:
     image_digest: str
 
     def __post_init__(self) -> None:
-        if type(self.identity) is not C1HfMetricCaseIdentity:
-            raise C1HfMetricError("c1_score_case_identity_invalid")
+        if type(self.identity) is not HfOnlyReferenceMetricCaseIdentity:
+            raise HfOnlyReferenceMetricError("hf_only_reference_score_case_identity_invalid")
         object.__setattr__(
             self,
             "score",
-            _finite_float64(self.score, "c1_hf_score"),
+            _finite_float64(self.score, "hf_only_reference_score"),
         )
         _require_digest(
             self.registered_detection_key_public_digest,
@@ -438,7 +438,7 @@ class C1HfScoreCase:
         _require_digest(self.image_digest, "image_digest")
 
 
-def _ordered_score_case_payload(cases: Sequence[C1HfScoreCase]) -> list[dict[str, object]]:
+def _ordered_score_case_payload(cases: Sequence[HfOnlyReferenceScoreCase]) -> list[dict[str, object]]:
     return [
         {
             "case_id": case.identity.case_id,
@@ -466,7 +466,7 @@ def _ordered_score_case_payload(cases: Sequence[C1HfScoreCase]) -> list[dict[str
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfThresholdResult:
+class HfOnlyReferenceThresholdResult:
     metric_id: str
     split: str
     threshold_rule: str
@@ -480,7 +480,7 @@ class C1HfThresholdResult:
     protocol_id: str
     protocol_version: str
     protocol_digest: str
-    c1_specification_digest: str
+    hf_only_reference_specification_digest: str
     fit_manifest_digest: str
     metric_registry_digest: str
     case_digest: str
@@ -488,7 +488,7 @@ class C1HfThresholdResult:
     threshold_identity: str
 
 
-def _threshold_payload(result: C1HfThresholdResult) -> dict[str, object]:
+def _threshold_payload(result: HfOnlyReferenceThresholdResult) -> dict[str, object]:
     return {
         key: getattr(result, key)
         for key in result.__dataclass_fields__
@@ -496,30 +496,30 @@ def _threshold_payload(result: C1HfThresholdResult) -> dict[str, object]:
     }
 
 
-def validate_c1_hf_threshold_result(
-    result: C1HfThresholdResult,
-    binding: C1HfMetricImplementationBinding,
+def validate_hf_only_reference_threshold_result(
+    result: HfOnlyReferenceThresholdResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> None:
-    if type(result) is not C1HfThresholdResult:
-        raise C1HfMetricError("c1_threshold_exact_type_required")
+    if type(result) is not HfOnlyReferenceThresholdResult:
+        raise HfOnlyReferenceMetricError("hf_only_reference_threshold_exact_type_required")
     if (
-        result.metric_id != C1_HF_METRIC_IDS[0]
+        result.metric_id != HF_ONLY_REFERENCE_METRIC_IDS[0]
         or result.split != "content_threshold_fit"
-        or result.threshold_rule != C1_HF_THRESHOLD_RULE
-        or result.decision_comparison != C1_HF_DECISION_COMPARISON
+        or result.threshold_rule != HF_ONLY_REFERENCE_THRESHOLD_RULE
+        or result.decision_comparison != HF_ONLY_REFERENCE_DECISION_COMPARISON
         or type(result.tau) is not float
         or not math.isfinite(result.tau)
         or result.tau_float64_hex != result.tau.hex()
         or result.fit_false_positive_count != 0
-        or result.source_cluster_count != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or result.source_cluster_count != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or result.protocol_id != INTERNAL_VALIDATION_PROTOCOL_ID
         or result.protocol_version != INTERNAL_VALIDATION_PROTOCOL_VERSION
         or result.protocol_digest != binding.protocol_digest
-        or result.c1_specification_digest != binding.c1_specification_digest
+        or result.hf_only_reference_specification_digest != binding.hf_only_reference_specification_digest
         or result.fit_manifest_digest != binding.fit_manifest_digest
         or result.metric_registry_digest != binding.metric_registry_digest
     ):
-        raise C1HfMetricError("c1_threshold_frozen_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_threshold_frozen_identity_mismatch")
     for value, role in (
         (result.detector_config_digest, "detector_config_digest"),
         (result.case_digest, "case_digest"),
@@ -529,32 +529,32 @@ def validate_c1_hf_threshold_result(
         _require_digest(value, role)
     _require_identity(result.detector_identity, "detector_identity")
     if result.threshold_identity != _canonical_digest(_threshold_payload(result)):
-        raise C1HfMetricError("c1_threshold_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_threshold_identity_mismatch")
 
 
-def fit_c1_hf_tau(
-    primary_null_cases: Sequence[C1HfScoreCase],
+def fit_hf_only_reference_tau(
+    primary_null_cases: Sequence[HfOnlyReferenceScoreCase],
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfThresholdResult:
-    """Fit the exact C1 threshold from all 4096 frozen primary-null clusters."""
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceThresholdResult:
+    """Fit the exact hf_only_reference_validation threshold from all 4096 frozen primary-null clusters."""
 
     if (
         isinstance(primary_null_cases, (str, bytes))
         or not isinstance(primary_null_cases, Sequence)
-        or len(primary_null_cases) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
-        or any(type(case) is not C1HfScoreCase for case in primary_null_cases)
+        or len(primary_null_cases) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
+        or any(type(case) is not HfOnlyReferenceScoreCase for case in primary_null_cases)
     ):
-        raise C1HfMetricError("c1_tau_fit_requires_exact_4096_score_cases")
+        raise HfOnlyReferenceMetricError("hf_only_reference_tau_fit_requires_exact_4096_score_cases")
     for case in primary_null_cases:
         _validate_case_identity(case.identity, binding, "content_threshold_fit")
         if (
-            case.key_role != C1_HF_PRIMARY_NULL_ROLE
-            or case.control_identity != C1_HF_PRIMARY_NULL_CONTROL
+            case.key_role != HF_ONLY_REFERENCE_PRIMARY_NULL_ROLE
+            or case.control_identity != HF_ONLY_REFERENCE_PRIMARY_NULL_CONTROL
             or case.detection_key_public_digest
             != case.registered_detection_key_public_digest
         ):
-            raise C1HfMetricError("c1_tau_fit_primary_null_identity_mismatch")
+            raise HfOnlyReferenceMetricError("hf_only_reference_tau_fit_primary_null_identity_mismatch")
     _validate_exact_analysis_unit_set(
         [case.identity for case in primary_null_cases],
         binding,
@@ -562,7 +562,7 @@ def fit_c1_hf_tau(
     )
     cluster_ids = [case.identity.source_cluster_id for case in primary_null_cases]
     if len(cluster_ids) != len(set(cluster_ids)):
-        raise C1HfMetricError("c1_tau_fit_source_cluster_duplicate")
+        raise HfOnlyReferenceMetricError("hf_only_reference_tau_fit_source_cluster_duplicate")
     uniform = {
         (
             case.identity.detector_identity,
@@ -570,29 +570,29 @@ def fit_c1_hf_tau(
             case.identity.protocol_id,
             case.identity.protocol_version,
             case.identity.protocol_digest,
-            case.identity.c1_specification_digest,
+            case.identity.hf_only_reference_specification_digest,
             case.identity.manifest_digest,
             case.identity.metric_registry_digest,
         )
         for case in primary_null_cases
     }
     if len(uniform) != 1:
-        raise C1HfMetricError("c1_tau_fit_authority_identity_drift")
+        raise HfOnlyReferenceMetricError("hf_only_reference_tau_fit_authority_identity_drift")
     tau = math.nextafter(
         max(case.score for case in primary_null_cases),
         math.inf,
     )
     if not math.isfinite(tau):
-        raise C1HfMetricError("c1_tau_fit_no_finite_nextafter_threshold")
+        raise HfOnlyReferenceMetricError("hf_only_reference_tau_fit_no_finite_nextafter_threshold")
     false_positive_count = sum(case.score >= tau for case in primary_null_cases)
     if false_positive_count != 0:
-        raise C1HfMetricError("c1_tau_fit_false_positive_count_nonzero")
+        raise HfOnlyReferenceMetricError("hf_only_reference_tau_fit_false_positive_count_nonzero")
     first = primary_null_cases[0].identity
     result_payload = {
-        "metric_id": C1_HF_METRIC_IDS[0],
+        "metric_id": HF_ONLY_REFERENCE_METRIC_IDS[0],
         "split": "content_threshold_fit",
-        "threshold_rule": C1_HF_THRESHOLD_RULE,
-        "decision_comparison": C1_HF_DECISION_COMPARISON,
+        "threshold_rule": HF_ONLY_REFERENCE_THRESHOLD_RULE,
+        "decision_comparison": HF_ONLY_REFERENCE_DECISION_COMPARISON,
         "tau": tau,
         "tau_float64_hex": tau.hex(),
         "fit_false_positive_count": false_positive_count,
@@ -602,7 +602,7 @@ def fit_c1_hf_tau(
         "protocol_id": first.protocol_id,
         "protocol_version": first.protocol_version,
         "protocol_digest": first.protocol_digest,
-        "c1_specification_digest": first.c1_specification_digest,
+        "hf_only_reference_specification_digest": first.hf_only_reference_specification_digest,
         "fit_manifest_digest": first.manifest_digest,
         "metric_registry_digest": first.metric_registry_digest,
         "case_digest": _canonical_digest(
@@ -610,16 +610,16 @@ def fit_c1_hf_tau(
         ),
         "source_cluster_digest": _canonical_digest(sorted(cluster_ids)),
     }
-    result = C1HfThresholdResult(
+    result = HfOnlyReferenceThresholdResult(
         **result_payload,
         threshold_identity=_canonical_digest(result_payload),
     )
-    validate_c1_hf_threshold_result(result, binding)
+    validate_hf_only_reference_threshold_result(result, binding)
     return result
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfBinomialMetricResult:
+class HfOnlyReferenceBinomialMetricResult:
     metric_id: str
     split: str
     event_count: int
@@ -637,44 +637,44 @@ class C1HfBinomialMetricResult:
 
 
 def _prepare_confirmation_scores(
-    cases: Sequence[C1HfScoreCase],
-    threshold: C1HfThresholdResult,
-    binding: C1HfMetricImplementationBinding,
-) -> tuple[dict[str, list[C1HfScoreCase]], str, str]:
-    validate_c1_hf_threshold_result(threshold, binding)
-    required_total = 3 * C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+    cases: Sequence[HfOnlyReferenceScoreCase],
+    threshold: HfOnlyReferenceThresholdResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> tuple[dict[str, list[HfOnlyReferenceScoreCase]], str, str]:
+    validate_hf_only_reference_threshold_result(threshold, binding)
+    required_total = 3 * HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
     if (
         isinstance(cases, (str, bytes))
         or not isinstance(cases, Sequence)
         or len(cases) != required_total
-        or any(type(case) is not C1HfScoreCase for case in cases)
+        or any(type(case) is not HfOnlyReferenceScoreCase for case in cases)
     ):
-        raise C1HfMetricError("c1_confirmation_requires_exact_three_roles_per_4096")
-    grouped_by_cluster: dict[str, list[C1HfScoreCase]] = {}
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_requires_exact_three_roles_per_4096")
+    grouped_by_cluster: dict[str, list[HfOnlyReferenceScoreCase]] = {}
     for case in cases:
         _validate_case_identity(case.identity, binding, "untouched_confirmation")
         grouped_by_cluster.setdefault(case.identity.source_cluster_id, []).append(case)
-    if len(grouped_by_cluster) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT:
-        raise C1HfMetricError("c1_confirmation_source_cluster_count_mismatch")
+    if len(grouped_by_cluster) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT:
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_source_cluster_count_mismatch")
     grouped_by_role = {
         role: [] for role in (
-            C1_HF_PRIMARY_NULL_ROLE,
-            C1_HF_REGISTERED_ROLE,
-            C1_HF_WRONG_KEY_ROLE,
+            HF_ONLY_REFERENCE_PRIMARY_NULL_ROLE,
+            HF_ONLY_REFERENCE_REGISTERED_ROLE,
+            HF_ONLY_REFERENCE_WRONG_KEY_ROLE,
         )
     }
     for cluster_cases in grouped_by_cluster.values():
         roles = [case.key_role for case in cluster_cases]
         if sorted(roles) != sorted(grouped_by_role):
-            raise C1HfMetricError("c1_confirmation_role_multiplicity_mismatch")
+            raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_role_multiplicity_mismatch")
         by_role = {case.key_role: case for case in cluster_cases}
-        primary = by_role[C1_HF_PRIMARY_NULL_ROLE]
-        registered = by_role[C1_HF_REGISTERED_ROLE]
-        wrong = by_role[C1_HF_WRONG_KEY_ROLE]
+        primary = by_role[HF_ONLY_REFERENCE_PRIMARY_NULL_ROLE]
+        registered = by_role[HF_ONLY_REFERENCE_REGISTERED_ROLE]
+        wrong = by_role[HF_ONLY_REFERENCE_WRONG_KEY_ROLE]
         if (
-            primary.control_identity != C1_HF_PRIMARY_NULL_CONTROL
-            or registered.control_identity != C1_HF_REGISTERED_CONTROL
-            or wrong.control_identity != C1_HF_WRONG_KEY_CONTROL
+            primary.control_identity != HF_ONLY_REFERENCE_PRIMARY_NULL_CONTROL
+            or registered.control_identity != HF_ONLY_REFERENCE_REGISTERED_CONTROL
+            or wrong.control_identity != HF_ONLY_REFERENCE_WRONG_KEY_CONTROL
             or primary.detection_key_public_digest
             != primary.registered_detection_key_public_digest
             or registered.detection_key_public_digest
@@ -687,16 +687,16 @@ def _prepare_confirmation_scores(
             != registered.registered_detection_key_public_digest
             or registered.image_digest != wrong.image_digest
         ):
-            raise C1HfMetricError("c1_confirmation_key_control_or_pair_identity_mismatch")
+            raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_key_control_or_pair_identity_mismatch")
         if primary.image_digest == registered.image_digest:
-            raise C1HfMetricError("c1_confirmation_clean_and_marked_image_identity_collision")
+            raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_clean_and_marked_image_identity_collision")
         for role, case in by_role.items():
             if (
                 case.identity.detector_identity != threshold.detector_identity
                 or case.identity.detector_config_digest
                 != threshold.detector_config_digest
             ):
-                raise C1HfMetricError("c1_confirmation_detector_identity_mismatch")
+                raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_detector_identity_mismatch")
             grouped_by_role[role].append(case)
     _validate_exact_analysis_unit_set(
         [cluster_cases[0].identity for cluster_cases in grouped_by_cluster.values()],
@@ -713,12 +713,12 @@ def _binomial_result(
     metric_id: str,
     event_count: int,
     confidence_direction: str,
-    threshold: C1HfThresholdResult,
-    binding: C1HfMetricImplementationBinding,
+    threshold: HfOnlyReferenceThresholdResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
     case_digest: str,
     source_cluster_digest: str,
-) -> C1HfBinomialMetricResult:
-    trial_count = C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+) -> HfOnlyReferenceBinomialMetricResult:
+    trial_count = HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
     confidence_bound = (
         clopper_pearson_upper(event_count, trial_count)
         if confidence_direction == "one_sided_upper"
@@ -739,7 +739,7 @@ def _binomial_result(
         "case_digest": case_digest,
         "source_cluster_digest": source_cluster_digest,
     }
-    result = C1HfBinomialMetricResult(
+    result = HfOnlyReferenceBinomialMetricResult(
         **payload,
         result_identity=_canonical_digest(
             {
@@ -748,27 +748,27 @@ def _binomial_result(
             }
         ),
     )
-    validate_c1_hf_binomial_metric_result(result, binding)
+    validate_hf_only_reference_binomial_metric_result(result, binding)
     return result
 
 
-def validate_c1_hf_binomial_metric_result(
-    result: C1HfBinomialMetricResult,
-    binding: C1HfMetricImplementationBinding,
+def validate_hf_only_reference_binomial_metric_result(
+    result: HfOnlyReferenceBinomialMetricResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> None:
-    if type(result) is not C1HfBinomialMetricResult:
-        raise C1HfMetricError("c1_binomial_result_exact_type_required")
+    if type(result) is not HfOnlyReferenceBinomialMetricResult:
+        raise HfOnlyReferenceMetricError("hf_only_reference_binomial_result_exact_type_required")
     expected_direction = {
-        "c1_hf_primary_null_fixed_fpr": "one_sided_upper",
-        "c1_hf_registered_tpr": "one_sided_lower",
-        "c1_hf_wrong_key_false_accept": "one_sided_upper",
-        "c1_hf_paired_key_attribution": "one_sided_lower",
+        "hf_only_reference_primary_null_fixed_fpr": "one_sided_upper",
+        "hf_only_reference_registered_tpr": "one_sided_lower",
+        "hf_only_reference_wrong_key_false_accept": "one_sided_upper",
+        "hf_only_reference_paired_key_attribution": "one_sided_lower",
     }.get(result.metric_id)
     if (
-        result.metric_id not in C1_HF_METRIC_IDS[1:5]
+        result.metric_id not in HF_ONLY_REFERENCE_METRIC_IDS[1:5]
         or result.split != "untouched_confirmation"
         or type(result.event_count) is not int
-        or result.trial_count != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or result.trial_count != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or not 0 <= result.event_count <= result.trial_count
         or result.empirical_rate != result.event_count / result.trial_count
         or result.confidence_level != 0.95
@@ -778,14 +778,14 @@ def validate_c1_hf_binomial_metric_result(
         or result.manifest_digest != binding.confirmation_manifest_digest
         or result.metric_registry_digest != binding.metric_registry_digest
     ):
-        raise C1HfMetricError("c1_binomial_result_identity_or_count_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_binomial_result_identity_or_count_mismatch")
     expected_bound = (
         clopper_pearson_upper(result.event_count, result.trial_count)
         if result.confidence_direction == "one_sided_upper"
         else clopper_pearson_lower(result.event_count, result.trial_count)
     )
     if result.confidence_bound != expected_bound:
-        raise C1HfMetricError("c1_binomial_confidence_bound_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_binomial_confidence_bound_mismatch")
     for value, role in (
         (result.threshold_identity, "threshold_identity"),
         (result.case_digest, "case_digest"),
@@ -805,46 +805,46 @@ def validate_c1_hf_binomial_metric_result(
         }
     )
     if result.result_identity != expected_identity:
-        raise C1HfMetricError("c1_binomial_result_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_binomial_result_identity_mismatch")
 
 
 def _confirmation_metric(
-    cases: Sequence[C1HfScoreCase],
-    threshold: C1HfThresholdResult,
-    binding: C1HfMetricImplementationBinding,
+    cases: Sequence[HfOnlyReferenceScoreCase],
+    threshold: HfOnlyReferenceThresholdResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
     metric_id: str,
-) -> C1HfBinomialMetricResult:
+) -> HfOnlyReferenceBinomialMetricResult:
     grouped, case_digest, cluster_digest = _prepare_confirmation_scores(
         cases,
         threshold,
         binding,
     )
-    if metric_id == "c1_hf_primary_null_fixed_fpr":
+    if metric_id == "hf_only_reference_primary_null_fixed_fpr":
         events = sum(
             case.score >= threshold.tau
-            for case in grouped[C1_HF_PRIMARY_NULL_ROLE]
+            for case in grouped[HF_ONLY_REFERENCE_PRIMARY_NULL_ROLE]
         )
         direction = "one_sided_upper"
-    elif metric_id == "c1_hf_registered_tpr":
+    elif metric_id == "hf_only_reference_registered_tpr":
         events = sum(
             case.score >= threshold.tau
-            for case in grouped[C1_HF_REGISTERED_ROLE]
+            for case in grouped[HF_ONLY_REFERENCE_REGISTERED_ROLE]
         )
         direction = "one_sided_lower"
-    elif metric_id == "c1_hf_wrong_key_false_accept":
+    elif metric_id == "hf_only_reference_wrong_key_false_accept":
         events = sum(
             case.score >= threshold.tau
-            for case in grouped[C1_HF_WRONG_KEY_ROLE]
+            for case in grouped[HF_ONLY_REFERENCE_WRONG_KEY_ROLE]
         )
         direction = "one_sided_upper"
-    elif metric_id == "c1_hf_paired_key_attribution":
+    elif metric_id == "hf_only_reference_paired_key_attribution":
         registered = {
             case.identity.source_cluster_id: case
-            for case in grouped[C1_HF_REGISTERED_ROLE]
+            for case in grouped[HF_ONLY_REFERENCE_REGISTERED_ROLE]
         }
         wrong = {
             case.identity.source_cluster_id: case
-            for case in grouped[C1_HF_WRONG_KEY_ROLE]
+            for case in grouped[HF_ONLY_REFERENCE_WRONG_KEY_ROLE]
         }
         events = sum(
             registered[cluster].score > wrong[cluster].score
@@ -852,7 +852,7 @@ def _confirmation_metric(
         )
         direction = "one_sided_lower"
     else:
-        raise C1HfMetricError("c1_confirmation_metric_id_invalid")
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_metric_id_invalid")
     return _binomial_result(
         metric_id=metric_id,
         event_count=events,
@@ -864,64 +864,64 @@ def _confirmation_metric(
     )
 
 
-def evaluate_c1_hf_primary_null_fixed_fpr(
-    cases: Sequence[C1HfScoreCase],
-    threshold: C1HfThresholdResult,
+def evaluate_hf_only_reference_primary_null_fixed_fpr(
+    cases: Sequence[HfOnlyReferenceScoreCase],
+    threshold: HfOnlyReferenceThresholdResult,
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfBinomialMetricResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceBinomialMetricResult:
     return _confirmation_metric(
         cases,
         threshold,
         binding,
-        "c1_hf_primary_null_fixed_fpr",
+        "hf_only_reference_primary_null_fixed_fpr",
     )
 
 
-def evaluate_c1_hf_registered_tpr(
-    cases: Sequence[C1HfScoreCase],
-    threshold: C1HfThresholdResult,
+def evaluate_hf_only_reference_registered_tpr(
+    cases: Sequence[HfOnlyReferenceScoreCase],
+    threshold: HfOnlyReferenceThresholdResult,
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfBinomialMetricResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceBinomialMetricResult:
     return _confirmation_metric(
         cases,
         threshold,
         binding,
-        "c1_hf_registered_tpr",
+        "hf_only_reference_registered_tpr",
     )
 
 
-def evaluate_c1_hf_wrong_key_false_accept(
-    cases: Sequence[C1HfScoreCase],
-    threshold: C1HfThresholdResult,
+def evaluate_hf_only_reference_wrong_key_false_accept(
+    cases: Sequence[HfOnlyReferenceScoreCase],
+    threshold: HfOnlyReferenceThresholdResult,
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfBinomialMetricResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceBinomialMetricResult:
     return _confirmation_metric(
         cases,
         threshold,
         binding,
-        "c1_hf_wrong_key_false_accept",
+        "hf_only_reference_wrong_key_false_accept",
     )
 
 
-def evaluate_c1_hf_paired_key_attribution(
-    cases: Sequence[C1HfScoreCase],
-    threshold: C1HfThresholdResult,
+def evaluate_hf_only_reference_paired_key_attribution(
+    cases: Sequence[HfOnlyReferenceScoreCase],
+    threshold: HfOnlyReferenceThresholdResult,
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfBinomialMetricResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceBinomialMetricResult:
     return _confirmation_metric(
         cases,
         threshold,
         binding,
-        "c1_hf_paired_key_attribution",
+        "hf_only_reference_paired_key_attribution",
     )
 
 
 @dataclass(frozen=True, slots=True)
-class C1Rgb8Image:
+class HfOnlyReferenceRgb8Image:
     height: int
     width: int
     channels: int
@@ -939,7 +939,7 @@ class C1Rgb8Image:
             or type(self.values_hwc) is not bytes
             or len(self.values_hwc) != self.height * self.width * self.channels
         ):
-            raise C1HfMetricError("c1_rgb8_image_hwc_dtype_or_shape_invalid")
+            raise HfOnlyReferenceMetricError("hf_only_reference_rgb8_image_hwc_dtype_or_shape_invalid")
 
     def digest(self) -> str:
         return hashlib.sha256(
@@ -951,29 +951,29 @@ class C1Rgb8Image:
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfQualityPair:
-    identity: C1HfMetricCaseIdentity
-    clean_image: C1Rgb8Image
-    registered_watermarked_image: C1Rgb8Image
+class HfOnlyReferenceQualityPair:
+    identity: HfOnlyReferenceMetricCaseIdentity
+    clean_image: HfOnlyReferenceRgb8Image
+    registered_watermarked_image: HfOnlyReferenceRgb8Image
     clean_image_digest: str
     registered_watermarked_image_digest: str
 
     def __post_init__(self) -> None:
         if (
-            type(self.clean_image) is not C1Rgb8Image
-            or type(self.registered_watermarked_image) is not C1Rgb8Image
+            type(self.clean_image) is not HfOnlyReferenceRgb8Image
+            or type(self.registered_watermarked_image) is not HfOnlyReferenceRgb8Image
             or self.clean_image.digest() != self.clean_image_digest
             or self.registered_watermarked_image.digest()
             != self.registered_watermarked_image_digest
         ):
-            raise C1HfMetricError("c1_quality_image_digest_or_type_mismatch")
+            raise HfOnlyReferenceMetricError("hf_only_reference_quality_image_digest_or_type_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfRawRgb8QualityArtifact:
+class HfOnlyReferenceRawRgb8QualityArtifact:
     """Lightweight descriptor for independently replayable paired RGB8 bytes."""
 
-    identity: C1HfMetricCaseIdentity
+    identity: HfOnlyReferenceMetricCaseIdentity
     height: int
     width: int
     channels: int
@@ -985,7 +985,7 @@ class C1HfRawRgb8QualityArtifact:
 
     def __post_init__(self) -> None:
         if (
-            type(self.identity) is not C1HfMetricCaseIdentity
+            type(self.identity) is not HfOnlyReferenceMetricCaseIdentity
             or type(self.height) is not int
             or type(self.width) is not int
             or self.height <= 0
@@ -993,7 +993,7 @@ class C1HfRawRgb8QualityArtifact:
             or self.channels != 3
             or self.dtype != "uint8"
         ):
-            raise C1HfMetricError("c1_quality_artifact_shape_or_dtype_invalid")
+            raise HfOnlyReferenceMetricError("hf_only_reference_quality_artifact_shape_or_dtype_invalid")
         for value, role in (
             (self.clean_artifact_path, "clean_artifact_path"),
             (
@@ -1003,7 +1003,7 @@ class C1HfRawRgb8QualityArtifact:
         ):
             _require_identity(value, role)
             if not Path(value).is_absolute():
-                raise C1HfMetricError(f"{role}_must_be_absolute")
+                raise HfOnlyReferenceMetricError(f"{role}_must_be_absolute")
         _require_digest(self.clean_artifact_sha256, "clean_artifact_sha256")
         _require_digest(
             self.registered_watermarked_artifact_sha256,
@@ -1019,18 +1019,18 @@ def _read_exact_rgb8_artifact(
     width: int,
     channels: int,
     dtype: str,
-) -> C1Rgb8Image:
+) -> HfOnlyReferenceRgb8Image:
     expected_size = height * width * channels
     try:
         with Path(artifact_path).open("rb") as stream:
             values_hwc = stream.read(expected_size + 1)
     except OSError as exc:
-        raise C1HfMetricError("c1_quality_artifact_read_failed") from exc
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_artifact_read_failed") from exc
     if len(values_hwc) != expected_size:
-        raise C1HfMetricError("c1_quality_artifact_byte_count_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_artifact_byte_count_mismatch")
     if hashlib.sha256(values_hwc).hexdigest() != expected_sha256:
-        raise C1HfMetricError("c1_quality_artifact_sha256_mismatch")
-    return C1Rgb8Image(
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_artifact_sha256_mismatch")
+    return HfOnlyReferenceRgb8Image(
         height=height,
         width=width,
         channels=channels,
@@ -1040,7 +1040,7 @@ def _read_exact_rgb8_artifact(
 
 
 def _read_cached_exact_rgb8_artifact(
-    artifact_cache: dict[tuple[object, ...], C1Rgb8Image],
+    artifact_cache: dict[tuple[object, ...], HfOnlyReferenceRgb8Image],
     artifact_path: str,
     expected_sha256: str,
     *,
@@ -1048,7 +1048,7 @@ def _read_cached_exact_rgb8_artifact(
     width: int,
     channels: int,
     dtype: str,
-) -> C1Rgb8Image:
+) -> HfOnlyReferenceRgb8Image:
     cache_key = (
         artifact_path,
         expected_sha256,
@@ -1074,13 +1074,13 @@ def _read_cached_exact_rgb8_artifact(
     return image
 
 
-def _replay_c1_hf_raw_rgb8_quality_artifact(
-    artifact: C1HfRawRgb8QualityArtifact,
-    binding: C1HfMetricImplementationBinding,
-    artifact_cache: dict[tuple[object, ...], C1Rgb8Image],
-) -> C1HfQualityCaseResult:
-    if type(artifact) is not C1HfRawRgb8QualityArtifact:
-        raise C1HfMetricError("c1_quality_artifact_exact_type_required")
+def _replay_hf_only_reference_raw_rgb8_quality_artifact(
+    artifact: HfOnlyReferenceRawRgb8QualityArtifact,
+    binding: HfOnlyReferenceMetricImplementationBinding,
+    artifact_cache: dict[tuple[object, ...], HfOnlyReferenceRgb8Image],
+) -> HfOnlyReferenceQualityCaseResult:
+    if type(artifact) is not HfOnlyReferenceRawRgb8QualityArtifact:
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_artifact_exact_type_required")
     _validate_case_identity(artifact.identity, binding, "untouched_confirmation")
     clean = _read_cached_exact_rgb8_artifact(
         artifact_cache,
@@ -1100,8 +1100,8 @@ def _replay_c1_hf_raw_rgb8_quality_artifact(
         channels=artifact.channels,
         dtype=artifact.dtype,
     )
-    return evaluate_c1_hf_rgb8_quality_pair(
-        C1HfQualityPair(
+    return evaluate_hf_only_reference_rgb8_quality_pair(
+        HfOnlyReferenceQualityPair(
             identity=artifact.identity,
             clean_image=clean,
             registered_watermarked_image=marked,
@@ -1113,8 +1113,8 @@ def _replay_c1_hf_raw_rgb8_quality_artifact(
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfQualityCaseResult:
-    identity: C1HfMetricCaseIdentity
+class HfOnlyReferenceQualityCaseResult:
+    identity: HfOnlyReferenceMetricCaseIdentity
     relative_l2: float
     normalized_rgb8_mse: float
     clean_image_digest: str
@@ -1124,7 +1124,7 @@ class C1HfQualityCaseResult:
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfQualitySummary:
+class HfOnlyReferenceQualitySummary:
     metric_id: str
     sample_count: int
     mean: float
@@ -1136,13 +1136,13 @@ class C1HfQualitySummary:
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfPairedRgb8QualityResult:
+class HfOnlyReferencePairedRgb8QualityResult:
     metric_id: str
     split: str
     pair_count: int
-    case_results: tuple[C1HfQualityCaseResult, ...]
-    relative_l2: C1HfQualitySummary
-    normalized_rgb8_mse: C1HfQualitySummary
+    case_results: tuple[HfOnlyReferenceQualityCaseResult, ...]
+    relative_l2: HfOnlyReferenceQualitySummary
+    normalized_rgb8_mse: HfOnlyReferenceQualitySummary
     manifest_digest: str
     metric_registry_digest: str
     case_digest: str
@@ -1150,15 +1150,15 @@ class C1HfPairedRgb8QualityResult:
     result_identity: str
 
 
-def evaluate_c1_hf_rgb8_quality_pair(
-    pair: C1HfQualityPair,
+def evaluate_hf_only_reference_rgb8_quality_pair(
+    pair: HfOnlyReferenceQualityPair,
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfQualityCaseResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceQualityCaseResult:
     """Compute both frozen quality formulas from the actual paired RGB8 bytes."""
 
-    if type(pair) is not C1HfQualityPair:
-        raise C1HfMetricError("c1_quality_pair_exact_type_required")
+    if type(pair) is not HfOnlyReferenceQualityPair:
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_pair_exact_type_required")
     _validate_case_identity(pair.identity, binding, "untouched_confirmation")
     clean = pair.clean_image
     marked = pair.registered_watermarked_image
@@ -1168,10 +1168,10 @@ def evaluate_c1_hf_rgb8_quality_pair(
         or clean.channels != marked.channels
         or clean.dtype != marked.dtype
     ):
-        raise C1HfMetricError("c1_quality_pair_shape_or_dtype_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_pair_shape_or_dtype_mismatch")
     clean_square_sum = math.fsum((value / 255.0) ** 2 for value in clean.values_hwc)
     if clean_square_sum == 0.0:
-        raise C1HfMetricError("c1_quality_clean_l2_zero")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_clean_l2_zero")
     difference_square_sum = math.fsum(
         ((candidate - reference) / 255.0) ** 2
         for reference, candidate in zip(
@@ -1183,7 +1183,7 @@ def evaluate_c1_hf_rgb8_quality_pair(
     relative_l2 = math.sqrt(difference_square_sum) / math.sqrt(clean_square_sum)
     mse = difference_square_sum / len(clean.values_hwc)
     if not math.isfinite(relative_l2) or not math.isfinite(mse):
-        raise C1HfMetricError("c1_quality_non_finite_result")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_non_finite_result")
     payload = {
         "analysis_unit_identity": asdict(pair.identity.analysis_unit_identity),
         "relative_l2": relative_l2.hex(),
@@ -1194,7 +1194,7 @@ def evaluate_c1_hf_rgb8_quality_pair(
         ),
         "formula_identity_digest": binding.formula_identity_digest,
     }
-    result = C1HfQualityCaseResult(
+    result = HfOnlyReferenceQualityCaseResult(
         identity=pair.identity,
         relative_l2=relative_l2,
         normalized_rgb8_mse=mse,
@@ -1205,21 +1205,21 @@ def evaluate_c1_hf_rgb8_quality_pair(
         formula_identity_digest=binding.formula_identity_digest,
         result_identity=_canonical_digest(payload),
     )
-    validate_c1_hf_quality_case_result(result, binding)
+    validate_hf_only_reference_quality_case_result(result, binding)
     return result
 
 
-def validate_c1_hf_quality_case_result(
-    result: C1HfQualityCaseResult,
-    binding: C1HfMetricImplementationBinding,
+def validate_hf_only_reference_quality_case_result(
+    result: HfOnlyReferenceQualityCaseResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> None:
-    if type(result) is not C1HfQualityCaseResult:
-        raise C1HfMetricError("c1_quality_case_result_exact_type_required")
+    if type(result) is not HfOnlyReferenceQualityCaseResult:
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_case_result_exact_type_required")
     _validate_case_identity(result.identity, binding, "untouched_confirmation")
     relative_l2 = _finite_float64(result.relative_l2, "relative_l2")
     mse = _finite_float64(result.normalized_rgb8_mse, "normalized_rgb8_mse")
     if relative_l2 < 0.0 or not 0.0 <= mse <= 1.0:
-        raise C1HfMetricError("c1_quality_case_result_range_invalid")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_case_result_range_invalid")
     for value, role in (
         (result.clean_image_digest, "clean_image_digest"),
         (
@@ -1231,7 +1231,7 @@ def validate_c1_hf_quality_case_result(
     ):
         _require_digest(value, role)
     if result.formula_identity_digest != binding.formula_identity_digest:
-        raise C1HfMetricError("c1_quality_formula_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_formula_identity_mismatch")
     payload = {
         "analysis_unit_identity": asdict(result.identity.analysis_unit_identity),
         "relative_l2": relative_l2.hex(),
@@ -1243,7 +1243,7 @@ def validate_c1_hf_quality_case_result(
         "formula_identity_digest": result.formula_identity_digest,
     }
     if result.result_identity != _canonical_digest(payload):
-        raise C1HfMetricError("c1_quality_case_result_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_case_result_identity_mismatch")
 
 
 def _continued_beta_fraction(a: float, b: float, x: float) -> float:
@@ -1292,7 +1292,7 @@ def _continued_beta_fraction(a: float, b: float, x: float) -> float:
         result *= delta
         if abs(delta - 1.0) <= epsilon:
             return result
-    raise C1HfMetricError("student_t_regularized_beta_did_not_converge")
+    raise HfOnlyReferenceMetricError("student_t_regularized_beta_did_not_converge")
 
 
 def _regularized_beta(a: float, b: float, x: float) -> float:
@@ -1319,7 +1319,7 @@ def student_t_cdf(value: float, degrees_of_freedom: int) -> float:
         or type(degrees_of_freedom) is not int
         or degrees_of_freedom <= 0
     ):
-        raise C1HfMetricError("student_t_input_invalid")
+        raise HfOnlyReferenceMetricError("student_t_input_invalid")
     if value == 0.0:
         return 0.5
     ratio = degrees_of_freedom / (
@@ -1337,7 +1337,7 @@ def student_t_quantile_975(degrees_of_freedom: int) -> float:
     """Numerically invert the exact Student-t CDF; no normal approximation."""
 
     if type(degrees_of_freedom) is not int or degrees_of_freedom <= 0:
-        raise C1HfMetricError("student_t_degrees_of_freedom_invalid")
+        raise HfOnlyReferenceMetricError("student_t_degrees_of_freedom_invalid")
     lower = 0.0
     upper = 1.0
     while student_t_cdf(float(upper), degrees_of_freedom) < 0.975:
@@ -1354,7 +1354,7 @@ def student_t_quantile_975(degrees_of_freedom: int) -> float:
 def _quality_summary(
     metric_id: str,
     values: Sequence[float],
-) -> C1HfQualitySummary:
+) -> HfOnlyReferenceQualitySummary:
     sample_count = len(values)
     mean = math.fsum(values) / sample_count
     variance = math.fsum((value - mean) ** 2 for value in values) / (
@@ -1364,7 +1364,7 @@ def _quality_summary(
     degrees_of_freedom = sample_count - 1
     critical = student_t_quantile_975(degrees_of_freedom)
     half_width = critical * sample_standard_deviation / math.sqrt(sample_count)
-    return C1HfQualitySummary(
+    return HfOnlyReferenceQualitySummary(
         metric_id=metric_id,
         sample_count=sample_count,
         mean=mean,
@@ -1379,8 +1379,8 @@ def _quality_summary(
 def _quality_aggregate_identity_payload(
     *,
     pair_count: int,
-    relative_l2: C1HfQualitySummary,
-    normalized_rgb8_mse: C1HfQualitySummary,
+    relative_l2: HfOnlyReferenceQualitySummary,
+    normalized_rgb8_mse: HfOnlyReferenceQualitySummary,
     manifest_digest: str,
     metric_registry_digest: str,
     case_digest: str,
@@ -1389,7 +1389,7 @@ def _quality_aggregate_identity_payload(
     payload: dict[str, object] = {
         "case_digest": case_digest,
         "manifest_digest": manifest_digest,
-        "metric_id": "c1_hf_paired_final_image_quality",
+        "metric_id": "hf_only_reference_paired_final_image_quality",
         "metric_registry_digest": metric_registry_digest,
         "normalized_rgb8_mse": {
             field: getattr(normalized_rgb8_mse, field)
@@ -1414,7 +1414,7 @@ def _quality_aggregate_identity_payload(
 
 
 def _quality_case_digest(
-    case_results: Sequence[C1HfQualityCaseResult],
+    case_results: Sequence[HfOnlyReferenceQualityCaseResult],
 ) -> str:
     return _canonical_digest(
         [
@@ -1438,23 +1438,23 @@ def _quality_case_digest(
     )
 
 
-def evaluate_c1_hf_paired_rgb8_quality(
-    case_results: Sequence[C1HfQualityCaseResult],
+def evaluate_hf_only_reference_paired_rgb8_quality(
+    case_results: Sequence[HfOnlyReferenceQualityCaseResult],
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfPairedRgb8QualityResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferencePairedRgb8QualityResult:
     if (
         isinstance(case_results, (str, bytes))
         or not isinstance(case_results, Sequence)
-        or len(case_results) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or len(case_results) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or any(
-            type(result) is not C1HfQualityCaseResult
+            type(result) is not HfOnlyReferenceQualityCaseResult
             for result in case_results
         )
     ):
-        raise C1HfMetricError("c1_quality_requires_exact_4096_case_results")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_requires_exact_4096_case_results")
     for result in case_results:
-        validate_c1_hf_quality_case_result(result, binding)
+        validate_hf_only_reference_quality_case_result(result, binding)
     _validate_exact_analysis_unit_set(
         [result.identity for result in case_results],
         binding,
@@ -1479,8 +1479,8 @@ def evaluate_c1_hf_paired_rgb8_quality(
     )
     case_digest = _quality_case_digest(ordered_results)
     cluster_digest = _canonical_digest(sorted(cluster_ids))
-    result = C1HfPairedRgb8QualityResult(
-        metric_id="c1_hf_paired_final_image_quality",
+    result = HfOnlyReferencePairedRgb8QualityResult(
+        metric_id="hf_only_reference_paired_final_image_quality",
         split="untouched_confirmation",
         pair_count=len(case_results),
         case_results=ordered_results,
@@ -1502,27 +1502,27 @@ def evaluate_c1_hf_paired_rgb8_quality(
             )
         ),
     )
-    validate_c1_hf_paired_rgb8_quality_result(result, binding)
+    validate_hf_only_reference_paired_rgb8_quality_result(result, binding)
     return result
 
 
-def validate_c1_hf_paired_rgb8_quality_result(
-    result: C1HfPairedRgb8QualityResult,
-    binding: C1HfMetricImplementationBinding,
+def validate_hf_only_reference_paired_rgb8_quality_result(
+    result: HfOnlyReferencePairedRgb8QualityResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> None:
-    if type(result) is not C1HfPairedRgb8QualityResult:
-        raise C1HfMetricError("c1_quality_aggregate_exact_type_required")
+    if type(result) is not HfOnlyReferencePairedRgb8QualityResult:
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_aggregate_exact_type_required")
     if (
-        result.metric_id != "c1_hf_paired_final_image_quality"
+        result.metric_id != "hf_only_reference_paired_final_image_quality"
         or result.split != "untouched_confirmation"
-        or result.pair_count != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or result.pair_count != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or len(result.case_results) != result.pair_count
         or result.manifest_digest != binding.confirmation_manifest_digest
         or result.metric_registry_digest != binding.metric_registry_digest
     ):
-        raise C1HfMetricError("c1_quality_aggregate_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_aggregate_identity_mismatch")
     for case_result in result.case_results:
-        validate_c1_hf_quality_case_result(case_result, binding)
+        validate_hf_only_reference_quality_case_result(case_result, binding)
     _validate_exact_analysis_unit_set(
         [case_result.identity for case_result in result.case_results],
         binding,
@@ -1552,7 +1552,7 @@ def validate_c1_hf_paired_rgb8_quality_result(
         or result.relative_l2 != expected_relative
         or result.normalized_rgb8_mse != expected_mse
     ):
-        raise C1HfMetricError("c1_quality_aggregate_formula_or_case_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_aggregate_formula_or_case_mismatch")
     expected = _canonical_digest(
         _quality_aggregate_identity_payload(
             pair_count=result.pair_count,
@@ -1565,12 +1565,12 @@ def validate_c1_hf_paired_rgb8_quality_result(
         )
     )
     if result.result_identity != expected:
-        raise C1HfMetricError("c1_quality_aggregate_result_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_quality_aggregate_result_identity_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfActualDtypeIntegrityCase:
-    identity: C1HfMetricCaseIdentity
+class HfOnlyReferenceActualDtypeIntegrityCase:
+    identity: HfOnlyReferenceMetricCaseIdentity
     registered_watermarked_image_digest: str
     materialization_identity_digest: str
     materialization_integrity_passed: bool
@@ -1588,19 +1588,19 @@ class C1HfActualDtypeIntegrityCase:
             "materialization_identity_digest",
         )
         if type(self.materialization_integrity_passed) is not bool:
-            raise C1HfMetricError("materialization_integrity_passed_invalid")
+            raise HfOnlyReferenceMetricError("materialization_integrity_passed_invalid")
         _require_identity(self.runtime_dtype, "runtime_dtype")
         _require_identity(self.measurement_dtype, "measurement_dtype")
         if type(self.actual_relative_l2) is not float:
-            raise C1HfMetricError("actual_relative_l2_must_be_float64_fact")
+            raise HfOnlyReferenceMetricError("actual_relative_l2_must_be_float64_fact")
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfActualDtypeIntegrityResult:
+class HfOnlyReferenceActualDtypeIntegrityResult:
     metric_id: str
     split: str
     registered_positive_count: int
-    case_facts: tuple[C1HfActualDtypeIntegrityCase, ...]
+    case_facts: tuple[HfOnlyReferenceActualDtypeIntegrityCase, ...]
     materialization_integrity_failure_count: int
     runtime_dtype_failure_count: int
     measurement_dtype_failure_count: int
@@ -1615,18 +1615,18 @@ class C1HfActualDtypeIntegrityResult:
     result_identity: str
 
 
-def evaluate_c1_hf_actual_dtype_integrity(
-    cases: Sequence[C1HfActualDtypeIntegrityCase],
+def evaluate_hf_only_reference_actual_dtype_integrity(
+    cases: Sequence[HfOnlyReferenceActualDtypeIntegrityCase],
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfActualDtypeIntegrityResult:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceActualDtypeIntegrityResult:
     if (
         isinstance(cases, (str, bytes))
         or not isinstance(cases, Sequence)
-        or len(cases) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
-        or any(type(case) is not C1HfActualDtypeIntegrityCase for case in cases)
+        or len(cases) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
+        or any(type(case) is not HfOnlyReferenceActualDtypeIntegrityCase for case in cases)
     ):
-        raise C1HfMetricError("c1_actual_dtype_requires_exact_4096_cases")
+        raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_requires_exact_4096_cases")
     for case in cases:
         _validate_case_identity(case.identity, binding, "untouched_confirmation")
     _validate_exact_analysis_unit_set(
@@ -1652,7 +1652,7 @@ def evaluate_c1_hf_actual_dtype_integrity(
     )
     budget_exceeded = sum(
         math.isfinite(case.actual_relative_l2)
-        and case.actual_relative_l2 > C1_HF_CONTENT_RELATIVE_L2_LIMIT
+        and case.actual_relative_l2 > HF_ONLY_REFERENCE_CONTENT_RELATIVE_L2_LIMIT
         for case in cases
     )
     failed_cases = sum(
@@ -1662,7 +1662,7 @@ def evaluate_c1_hf_actual_dtype_integrity(
             or case.measurement_dtype != "float32"
             or not math.isfinite(case.actual_relative_l2)
             or case.actual_relative_l2 < 0.0
-            or case.actual_relative_l2 > C1_HF_CONTENT_RELATIVE_L2_LIMIT
+            or case.actual_relative_l2 > HF_ONLY_REFERENCE_CONTENT_RELATIVE_L2_LIMIT
         )
         for case in cases
     )
@@ -1689,7 +1689,7 @@ def evaluate_c1_hf_actual_dtype_integrity(
         for case in sorted(cases, key=lambda item: item.identity.source_cluster_id)
     ]
     payload = {
-        "metric_id": "c1_hf_actual_dtype_integrity",
+        "metric_id": "hf_only_reference_actual_dtype_integrity",
         "split": "untouched_confirmation",
         "registered_positive_count": len(cases),
         "materialization_integrity_failure_count": integrity_failures,
@@ -1707,21 +1707,21 @@ def evaluate_c1_hf_actual_dtype_integrity(
     ordered_cases = tuple(
         sorted(cases, key=lambda item: item.identity.source_cluster_id)
     )
-    result = C1HfActualDtypeIntegrityResult(
+    result = HfOnlyReferenceActualDtypeIntegrityResult(
         **payload,
         case_facts=ordered_cases,
         result_identity=_canonical_digest(payload),
     )
-    validate_c1_hf_actual_dtype_integrity_result(result, binding)
+    validate_hf_only_reference_actual_dtype_integrity_result(result, binding)
     return result
 
 
-def validate_c1_hf_actual_dtype_integrity_result(
-    result: C1HfActualDtypeIntegrityResult,
-    binding: C1HfMetricImplementationBinding,
+def validate_hf_only_reference_actual_dtype_integrity_result(
+    result: HfOnlyReferenceActualDtypeIntegrityResult,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> None:
-    if type(result) is not C1HfActualDtypeIntegrityResult:
-        raise C1HfMetricError("c1_actual_dtype_result_exact_type_required")
+    if type(result) is not HfOnlyReferenceActualDtypeIntegrityResult:
+        raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_result_exact_type_required")
     counts = (
         result.materialization_integrity_failure_count,
         result.runtime_dtype_failure_count,
@@ -1732,18 +1732,18 @@ def validate_c1_hf_actual_dtype_integrity_result(
         result.failed_case_count,
     )
     if (
-        result.metric_id != "c1_hf_actual_dtype_integrity"
+        result.metric_id != "hf_only_reference_actual_dtype_integrity"
         or result.split != "untouched_confirmation"
-        or result.registered_positive_count != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        or result.registered_positive_count != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or len(result.case_facts) != result.registered_positive_count
         or any(type(count) is not int or not 0 <= count <= result.registered_positive_count for count in counts)
         or result.manifest_digest != binding.confirmation_manifest_digest
         or result.metric_registry_digest != binding.metric_registry_digest
     ):
-        raise C1HfMetricError("c1_actual_dtype_result_identity_or_count_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_result_identity_or_count_mismatch")
     for case in result.case_facts:
-        if type(case) is not C1HfActualDtypeIntegrityCase:
-            raise C1HfMetricError("c1_actual_dtype_result_case_type_invalid")
+        if type(case) is not HfOnlyReferenceActualDtypeIntegrityCase:
+            raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_result_case_type_invalid")
         _validate_case_identity(case.identity, binding, "untouched_confirmation")
     _validate_exact_analysis_unit_set(
         [case.identity for case in result.case_facts],
@@ -1765,7 +1765,7 @@ def validate_c1_hf_actual_dtype_integrity_result(
         ),
         sum(
             math.isfinite(case.actual_relative_l2)
-            and case.actual_relative_l2 > C1_HF_CONTENT_RELATIVE_L2_LIMIT
+            and case.actual_relative_l2 > HF_ONLY_REFERENCE_CONTENT_RELATIVE_L2_LIMIT
             for case in result.case_facts
         ),
         sum(
@@ -1776,13 +1776,13 @@ def validate_c1_hf_actual_dtype_integrity_result(
                 or not math.isfinite(case.actual_relative_l2)
                 or case.actual_relative_l2 < 0.0
                 or case.actual_relative_l2
-                > C1_HF_CONTENT_RELATIVE_L2_LIMIT
+                > HF_ONLY_REFERENCE_CONTENT_RELATIVE_L2_LIMIT
             )
             for case in result.case_facts
         ),
     )
     if counts != recomputed_counts:
-        raise C1HfMetricError("c1_actual_dtype_result_counts_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_result_counts_mismatch")
     recomputed_case_payload = [
         {
             "actual_relative_l2": (
@@ -1815,7 +1815,7 @@ def validate_c1_hf_actual_dtype_integrity_result(
             sorted(case.identity.source_cluster_id for case in result.case_facts)
         )
     ):
-        raise C1HfMetricError("c1_actual_dtype_result_case_digest_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_result_case_digest_mismatch")
     for value, role in (
         (result.case_digest, "case_digest"),
         (result.source_cluster_digest, "source_cluster_digest"),
@@ -1828,20 +1828,20 @@ def validate_c1_hf_actual_dtype_integrity_result(
         if key not in {"case_facts", "result_identity"}
     }
     if result.result_identity != _canonical_digest(payload):
-        raise C1HfMetricError("c1_actual_dtype_result_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_actual_dtype_result_identity_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfConfirmationInputBundle:
-    fit_primary_null_cases: tuple[C1HfScoreCase, ...]
-    threshold: C1HfThresholdResult
-    score_cases: tuple[C1HfScoreCase, ...]
-    raw_rgb8_quality_artifacts: tuple[C1HfRawRgb8QualityArtifact, ...]
-    actual_dtype_cases: tuple[C1HfActualDtypeIntegrityCase, ...]
+class HfOnlyReferenceConfirmationInputBundle:
+    fit_primary_null_cases: tuple[HfOnlyReferenceScoreCase, ...]
+    threshold: HfOnlyReferenceThresholdResult
+    score_cases: tuple[HfOnlyReferenceScoreCase, ...]
+    raw_rgb8_quality_artifacts: tuple[HfOnlyReferenceRawRgb8QualityArtifact, ...]
+    actual_dtype_cases: tuple[HfOnlyReferenceActualDtypeIntegrityCase, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfConfirmationInputValidation:
+class HfOnlyReferenceConfirmationInputValidation:
     source_cluster_count: int
     fit_score_case_count: int
     score_case_count: int
@@ -1850,23 +1850,23 @@ class C1HfConfirmationInputValidation:
     cross_input_digest: str
 
 
-def _replay_c1_hf_confirmation_input_bundle(
-    inputs: C1HfConfirmationInputBundle,
-    binding: C1HfMetricImplementationBinding,
+def _replay_hf_only_reference_confirmation_input_bundle(
+    inputs: HfOnlyReferenceConfirmationInputBundle,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> tuple[
-    C1HfConfirmationInputValidation,
-    tuple[C1HfQualityCaseResult, ...],
+    HfOnlyReferenceConfirmationInputValidation,
+    tuple[HfOnlyReferenceQualityCaseResult, ...],
 ]:
     """Replay fit and raw RGB8 evidence, then cross-bind all confirmation facts."""
 
-    if type(inputs) is not C1HfConfirmationInputBundle:
-        raise C1HfMetricError("c1_confirmation_input_bundle_exact_type_required")
-    recomputed_threshold = fit_c1_hf_tau(
+    if type(inputs) is not HfOnlyReferenceConfirmationInputBundle:
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_input_bundle_exact_type_required")
+    recomputed_threshold = fit_hf_only_reference_tau(
         inputs.fit_primary_null_cases,
         binding=binding,
     )
     if inputs.threshold != recomputed_threshold:
-        raise C1HfMetricError("c1_confirmation_threshold_fit_replay_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_threshold_fit_replay_mismatch")
     grouped_scores, _, _ = _prepare_confirmation_scores(
         inputs.score_cases,
         recomputed_threshold,
@@ -1874,20 +1874,20 @@ def _replay_c1_hf_confirmation_input_bundle(
     )
     if (
         len(inputs.raw_rgb8_quality_artifacts)
-        != C1_HF_SOURCE_CLUSTERS_PER_SPLIT
+        != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT
         or any(
-            type(artifact) is not C1HfRawRgb8QualityArtifact
+            type(artifact) is not HfOnlyReferenceRawRgb8QualityArtifact
             for artifact in inputs.raw_rgb8_quality_artifacts
         )
     ):
-        raise C1HfMetricError(
-            "c1_confirmation_raw_rgb8_quality_artifact_count_or_type_mismatch"
+        raise HfOnlyReferenceMetricError(
+            "hf_only_reference_confirmation_raw_rgb8_quality_artifact_count_or_type_mismatch"
         )
-    if len(inputs.actual_dtype_cases) != C1_HF_SOURCE_CLUSTERS_PER_SPLIT:
-        raise C1HfMetricError("c1_confirmation_actual_dtype_case_count_mismatch")
-    artifact_cache: dict[tuple[object, ...], C1Rgb8Image] = {}
+    if len(inputs.actual_dtype_cases) != HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT:
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_actual_dtype_case_count_mismatch")
+    artifact_cache: dict[tuple[object, ...], HfOnlyReferenceRgb8Image] = {}
     quality_case_results = tuple(
-        _replay_c1_hf_raw_rgb8_quality_artifact(
+        _replay_hf_only_reference_raw_rgb8_quality_artifact(
             artifact,
             binding,
             artifact_cache,
@@ -1908,11 +1908,11 @@ def _replay_c1_hf_confirmation_input_bundle(
     )
     primary_by_cluster = {
         case.identity.source_cluster_id: case
-        for case in grouped_scores[C1_HF_PRIMARY_NULL_ROLE]
+        for case in grouped_scores[HF_ONLY_REFERENCE_PRIMARY_NULL_ROLE]
     }
     registered_by_cluster = {
         case.identity.source_cluster_id: case
-        for case in grouped_scores[C1_HF_REGISTERED_ROLE]
+        for case in grouped_scores[HF_ONLY_REFERENCE_REGISTERED_ROLE]
     }
     quality_by_cluster = {
         result.identity.source_cluster_id: result
@@ -1938,8 +1938,8 @@ def _replay_c1_hf_confirmation_input_bundle(
             or actual.registered_watermarked_image_digest
             != quality.registered_watermarked_image_digest
         ):
-            raise C1HfMetricError(
-                "c1_confirmation_score_quality_actual_cross_binding_mismatch"
+            raise HfOnlyReferenceMetricError(
+                "hf_only_reference_confirmation_score_quality_actual_cross_binding_mismatch"
             )
         cross_payload.append(
             {
@@ -1956,8 +1956,8 @@ def _replay_c1_hf_confirmation_input_bundle(
                 "quality_result_identity": quality.result_identity,
             }
         )
-    validation = C1HfConfirmationInputValidation(
-        source_cluster_count=C1_HF_SOURCE_CLUSTERS_PER_SPLIT,
+    validation = HfOnlyReferenceConfirmationInputValidation(
+        source_cluster_count=HF_ONLY_REFERENCE_SOURCE_CLUSTERS_PER_SPLIT,
         fit_score_case_count=len(inputs.fit_primary_null_cases),
         score_case_count=len(inputs.score_cases),
         raw_rgb8_quality_artifact_count=len(
@@ -1975,63 +1975,63 @@ def _replay_c1_hf_confirmation_input_bundle(
     return validation, quality_case_results
 
 
-def validate_c1_hf_confirmation_input_bundle(
-    inputs: C1HfConfirmationInputBundle,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfConfirmationInputValidation:
+def validate_hf_only_reference_confirmation_input_bundle(
+    inputs: HfOnlyReferenceConfirmationInputBundle,
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceConfirmationInputValidation:
     """Independently replay every authority-bearing formal input."""
 
-    validation, _ = _replay_c1_hf_confirmation_input_bundle(inputs, binding)
+    validation, _ = _replay_hf_only_reference_confirmation_input_bundle(inputs, binding)
     return validation
 
 
 @dataclass(frozen=True, slots=True)
-class C1HfConfirmationMetricResults:
-    primary_null_fixed_fpr: C1HfBinomialMetricResult
-    registered_tpr: C1HfBinomialMetricResult
-    wrong_key_false_accept: C1HfBinomialMetricResult
-    paired_key_attribution: C1HfBinomialMetricResult
-    paired_rgb8_quality: C1HfPairedRgb8QualityResult
-    actual_dtype_integrity: C1HfActualDtypeIntegrityResult
+class HfOnlyReferenceConfirmationMetricResults:
+    primary_null_fixed_fpr: HfOnlyReferenceBinomialMetricResult
+    registered_tpr: HfOnlyReferenceBinomialMetricResult
+    wrong_key_false_accept: HfOnlyReferenceBinomialMetricResult
+    paired_key_attribution: HfOnlyReferenceBinomialMetricResult
+    paired_rgb8_quality: HfOnlyReferencePairedRgb8QualityResult
+    actual_dtype_integrity: HfOnlyReferenceActualDtypeIntegrityResult
     cross_input_digest: str
     result_identity: str
 
 
-def evaluate_c1_hf_confirmation_metrics(
-    inputs: C1HfConfirmationInputBundle,
+def evaluate_hf_only_reference_confirmation_metrics(
+    inputs: HfOnlyReferenceConfirmationInputBundle,
     *,
-    binding: C1HfMetricImplementationBinding,
-) -> C1HfConfirmationMetricResults:
+    binding: HfOnlyReferenceMetricImplementationBinding,
+) -> HfOnlyReferenceConfirmationMetricResults:
     """Formal confirmation entrypoint; cross-table validation is mandatory."""
 
     cross_validation, quality_case_results = (
-        _replay_c1_hf_confirmation_input_bundle(inputs, binding)
+        _replay_hf_only_reference_confirmation_input_bundle(inputs, binding)
     )
-    primary = evaluate_c1_hf_primary_null_fixed_fpr(
+    primary = evaluate_hf_only_reference_primary_null_fixed_fpr(
         inputs.score_cases,
         inputs.threshold,
         binding=binding,
     )
-    registered = evaluate_c1_hf_registered_tpr(
+    registered = evaluate_hf_only_reference_registered_tpr(
         inputs.score_cases,
         inputs.threshold,
         binding=binding,
     )
-    wrong = evaluate_c1_hf_wrong_key_false_accept(
+    wrong = evaluate_hf_only_reference_wrong_key_false_accept(
         inputs.score_cases,
         inputs.threshold,
         binding=binding,
     )
-    attribution = evaluate_c1_hf_paired_key_attribution(
+    attribution = evaluate_hf_only_reference_paired_key_attribution(
         inputs.score_cases,
         inputs.threshold,
         binding=binding,
     )
-    quality = evaluate_c1_hf_paired_rgb8_quality(
+    quality = evaluate_hf_only_reference_paired_rgb8_quality(
         quality_case_results,
         binding=binding,
     )
-    actual = evaluate_c1_hf_actual_dtype_integrity(
+    actual = evaluate_hf_only_reference_actual_dtype_integrity(
         inputs.actual_dtype_cases,
         binding=binding,
     )
@@ -2044,7 +2044,7 @@ def evaluate_c1_hf_confirmation_metrics(
         "registered_tpr": registered.result_identity,
         "wrong_key_false_accept": wrong.result_identity,
     }
-    result = C1HfConfirmationMetricResults(
+    result = HfOnlyReferenceConfirmationMetricResults(
         primary_null_fixed_fpr=primary,
         registered_tpr=registered,
         wrong_key_false_accept=wrong,
@@ -2057,44 +2057,44 @@ def evaluate_c1_hf_confirmation_metrics(
     return result
 
 
-def validate_c1_hf_confirmation_metric_results(
-    result: C1HfConfirmationMetricResults,
-    inputs: C1HfConfirmationInputBundle,
-    binding: C1HfMetricImplementationBinding,
+def validate_hf_only_reference_confirmation_metric_results(
+    result: HfOnlyReferenceConfirmationMetricResults,
+    inputs: HfOnlyReferenceConfirmationInputBundle,
+    binding: HfOnlyReferenceMetricImplementationBinding,
 ) -> None:
     """Recompute the formal composite from its bound cross-table inputs."""
 
-    if type(result) is not C1HfConfirmationMetricResults:
-        raise C1HfMetricError("c1_confirmation_metric_results_exact_type_required")
+    if type(result) is not HfOnlyReferenceConfirmationMetricResults:
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_metric_results_exact_type_required")
     cross_validation, quality_case_results = (
-        _replay_c1_hf_confirmation_input_bundle(inputs, binding)
+        _replay_hf_only_reference_confirmation_input_bundle(inputs, binding)
     )
     expected_children = (
-        evaluate_c1_hf_primary_null_fixed_fpr(
+        evaluate_hf_only_reference_primary_null_fixed_fpr(
             inputs.score_cases,
             inputs.threshold,
             binding=binding,
         ),
-        evaluate_c1_hf_registered_tpr(
+        evaluate_hf_only_reference_registered_tpr(
             inputs.score_cases,
             inputs.threshold,
             binding=binding,
         ),
-        evaluate_c1_hf_wrong_key_false_accept(
+        evaluate_hf_only_reference_wrong_key_false_accept(
             inputs.score_cases,
             inputs.threshold,
             binding=binding,
         ),
-        evaluate_c1_hf_paired_key_attribution(
+        evaluate_hf_only_reference_paired_key_attribution(
             inputs.score_cases,
             inputs.threshold,
             binding=binding,
         ),
-        evaluate_c1_hf_paired_rgb8_quality(
+        evaluate_hf_only_reference_paired_rgb8_quality(
             quality_case_results,
             binding=binding,
         ),
-        evaluate_c1_hf_actual_dtype_integrity(
+        evaluate_hf_only_reference_actual_dtype_integrity(
             inputs.actual_dtype_cases,
             binding=binding,
         ),
@@ -2111,7 +2111,7 @@ def validate_c1_hf_confirmation_metric_results(
         actual_children != expected_children
         or result.cross_input_digest != cross_validation.cross_input_digest
     ):
-        raise C1HfMetricError("c1_confirmation_metric_results_input_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_metric_results_input_mismatch")
     identity_payload = {
         "actual_dtype_integrity": result.actual_dtype_integrity.result_identity,
         "cross_input_digest": result.cross_input_digest,
@@ -2124,4 +2124,4 @@ def validate_c1_hf_confirmation_metric_results(
         "wrong_key_false_accept": result.wrong_key_false_accept.result_identity,
     }
     if result.result_identity != _canonical_digest(identity_payload):
-        raise C1HfMetricError("c1_confirmation_metric_results_identity_mismatch")
+        raise HfOnlyReferenceMetricError("hf_only_reference_confirmation_metric_results_identity_mismatch")

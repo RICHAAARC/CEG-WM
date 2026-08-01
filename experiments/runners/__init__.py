@@ -31,7 +31,7 @@ from .formal_operations import (
     create_formal_content_detector_binding,
 )
 from .record_writer import (
-    C1HfThresholdFitRecordWriter,
+    HfOnlyThresholdFitRecordWriter,
     FrozenRecordBindings,
     GovernedRecordWriter,
     GovernedRecordWriterError,
@@ -49,7 +49,7 @@ __all__ = [
     "FormalHfContentDetectionOperation",
     "FormalOperationError",
     "FormalRuntimeGeometryEstimationOperation",
-    "C1HfThresholdFitRecordWriter",
+    "HfOnlyThresholdFitRecordWriter",
     "GovernedRecordWriter",
     "GovernedRecordWriterError",
     "InternalCaseExecutionPayload",

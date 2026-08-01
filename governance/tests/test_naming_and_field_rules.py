@@ -11,7 +11,12 @@ from experiments.protocol.internal_record_registry import (
     INTERNAL_RECORD_SCHEMA_BINDINGS,
 )
 from governance.harness.lib.field_rules import FieldRegistryRow, validate_registry_rows
-from governance.harness.lib.naming_rules import has_weak_semantic_token
+from governance.harness.lib.naming_rules import (
+    ALLOWED_NARROW_SEMANTIC_LITERALS,
+    has_ordinal_identity_text,
+    has_ordinal_identity_polysemy,
+    has_weak_semantic_token,
+)
 
 
 @pytest.mark.unit
@@ -36,6 +41,65 @@ def test_explicit_version_semantics_are_allowed() -> None:
 
 
 @pytest.mark.unit
+def test_ordinal_work_package_identities_are_rejected() -> None:
+    forbidden = (
+        "A1",
+        "A-2",
+        "A3a",
+        "A3b",
+        "C0",
+        "C1-P",
+        "C1-M",
+        "C1-E",
+        "c1_specification_digest",
+        "Runtime Batch 4",
+        "A_1",
+        "C_1",
+        "R_1",
+        "S_1",
+        "batch_12",
+        "stage_8",
+    )
+    assert all(has_ordinal_identity_text(value) for value in forbidden)
+
+
+@pytest.mark.unit
+def test_narrow_scientific_and_platform_literals_remain_allowed() -> None:
+    assert ALLOWED_NARROW_SEMANTIC_LITERALS == {
+        "relative_l2",
+        "F32",
+        "RGB8",
+        "P95",
+        "x86_64",
+        "L4",
+        "SHA-256",
+        "SHA256",
+    }
+    assert all(
+        not has_ordinal_identity_text(value)
+        for value in ALLOWED_NARROW_SEMANTIC_LITERALS
+    )
+
+
+@pytest.mark.unit
+def test_immediately_defined_local_math_notation_is_allowed() -> None:
+    assert not has_ordinal_identity_text("C_0 = z_hf")
+    assert not has_ordinal_identity_text("`C_1(w)` is local notation")
+    assert not has_ordinal_identity_text("S_0 = f32(0)")
+    assert has_ordinal_identity_text('function_id = "C_1"')
+
+
+@pytest.mark.unit
+def test_one_ordinal_token_cannot_name_two_formal_identities() -> None:
+    assert has_ordinal_identity_polysemy(
+        [("S1", "score_schema"), ("S1", "selection_protocol")]
+    )
+    assert not has_ordinal_identity_polysemy(
+        [("R1", "candidate_semantics_revision"), ("R1", "candidate_semantics_revision")]
+    )
+
+
+@pytest.mark.unit
 def test_field_registry_requires_semantic_level_and_description() -> None:
     rows = {
         "proxy_score": FieldRegistryRow(
@@ -53,6 +117,22 @@ def test_field_registry_requires_semantic_level_and_description() -> None:
         "invalid_governance_level",
         "field_description_required",
     }
+
+
+@pytest.mark.unit
+def test_cross_boundary_ordinal_field_identity_is_rejected() -> None:
+    rows = {
+        "c1_specification_digest": FieldRegistryRow(
+            field_name="c1_specification_digest",
+            governance_level="cross_boundary",
+            category="provenance",
+            required_suffix="none",
+            allowed_in_claims="false",
+            description="旧序号字段身份测试。",
+        )
+    }
+    reasons = {violation["reason"] for violation in validate_registry_rows(rows)}
+    assert "ordinal_identity_field_name" in reasons
 
 
 @pytest.mark.unit

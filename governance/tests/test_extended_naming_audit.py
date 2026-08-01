@@ -62,3 +62,117 @@ def test_code_comments_identifiers_and_config_keys_are_audited(tmp_path: Path) -
     assert "weak_semantic_identifier" in reasons
     assert "weak_semantic_comment" in reasons
     assert "weak_semantic_config_key" in reasons
+
+
+@pytest.mark.unit
+def test_cross_surface_ordinal_identities_are_audited(tmp_path: Path) -> None:
+    policy_root = tmp_path / "governance" / "policies"
+    policy_root.mkdir(parents=True)
+    (policy_root / "project_roots.yaml").write_text(
+        json.dumps(
+            {
+                "root_registry": {
+                    "main": {"audited": True},
+                    "configs": {"audited": True},
+                    "docs": {"audited": True},
+                    "notebooks": {"audited": True},
+                },
+                "governed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "main").mkdir()
+    (tmp_path / "main" / "method.py").write_text(
+        'c1_specification_digest = "C1-P"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "method.json").write_text(
+        json.dumps(
+            {
+                "function_id": "C0",
+                "c1_specification_digest": "x",
+                "artifact_path": "results/stage2/output.json",
+                "protocol_id": "S1",
+                "artifact_id": "S1",
+                "design_paths": ["stages/stage3/design.md"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "method.md").write_text(
+        "Runtime Batch 2\n",
+        encoding="utf-8",
+    )
+    notebook_root = tmp_path / "notebooks"
+    notebook_root.mkdir()
+    (notebook_root / "entrypoint.ipynb").write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {"cell_type": "markdown", "source": ["A3b"]},
+                    {"cell_type": "code", "source": ["phase = 'C1-E'"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+    reasons = {violation["reason"] for violation in report["violations"]}
+    assert {
+        "ordinal_identity_identifier",
+        "ordinal_identity_python_string",
+        "ordinal_identity_config_key",
+        "ordinal_identity_config_value",
+        "ordinal_identity_markdown",
+        "ordinal_identity_notebook_markdown",
+        "ordinal_identity_notebook_code",
+        "ordinal_identity_polysemy",
+    } <= reasons
+
+
+@pytest.mark.unit
+def test_narrow_literals_pass_full_cross_surface_audit(tmp_path: Path) -> None:
+    policy_root = tmp_path / "governance" / "policies"
+    policy_root.mkdir(parents=True)
+    (policy_root / "project_roots.yaml").write_text(
+        json.dumps(
+            {
+                "root_registry": {
+                    "main": {"audited": True},
+                    "configs": {"audited": True},
+                    "docs": {"audited": True},
+                    "notebooks": {"audited": True},
+                },
+                "governed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    literals = "relative_l2 F32 RGB8 P95 x86_64 L4 SHA-256 SHA256"
+    (tmp_path / "main").mkdir()
+    (tmp_path / "main" / "method.py").write_text(
+        f'ARTIFACT_IDENTITY = "{literals}"\n', encoding="utf-8"
+    )
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "method.json").write_text(
+        json.dumps({"artifact_identity": literals}), encoding="utf-8"
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "method.md").write_text(literals, encoding="utf-8")
+    (tmp_path / "notebooks").mkdir()
+    (tmp_path / "notebooks" / "entrypoint.ipynb").write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {"cell_type": "markdown", "source": [literals]},
+                    {"cell_type": "code", "source": [f'identity = "{literals}"']},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert run_audit(tmp_path)["decision"] == "pass"

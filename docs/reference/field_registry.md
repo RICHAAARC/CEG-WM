@@ -162,7 +162,7 @@ Notebook 与 repository module 的跨边界数据
 | observation_digest | cross_boundary | provenance | none | false | false | false | 普通检测图像侧 LF/HF 编码观测的 float32 字节摘要；两分支组合时必须相同。 |
 | hf_score | cross_boundary | method_statistic | none | true | false | false | HF detector 独立产生的 blind direct score。 |
 | lf_score | cross_boundary | method_statistic | none | true | false | false | LF detector 独立产生的 blind low-pass score。 |
-| combined_score | cross_boundary | method_statistic | none | true | false | false | 由冻结 C0/C1/C2 公式产生且当前仅用于未晋升候选诊断的组合统计。 |
+| combined_score | cross_boundary | method_statistic | none | true | false | false | 由冻结 hf_only_standardized_score/weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score 公式产生且当前仅用于未晋升候选诊断的组合统计。 |
 | detector_identity | cross_boundary | method_identity | none | true | false | false | 分支或 content detector 的完整算法身份摘要。 |
 | detector_config_digest | cross_boundary | method_identity | none | false | false | false | LF 或 HF 分支 detector 的配置身份摘要。 |
 | content_score | cross_boundary | method_statistic | none | true | false | false | 当前正式 content detector 输出的 `D_M` 分数。 |
@@ -170,7 +170,7 @@ Notebook 与 repository module 的跨边界数据
 | hf_result | cross_boundary | method_state | none | false | false | false | content detector 原样保留的独立 HF 分支结果。 |
 | lf_result | cross_boundary | method_state | none | false | false | false | content detector 原样保留的独立 LF 分支结果；未执行 LF 时为空。 |
 | formal_mode | cross_boundary | method_identity | none | true | false | false | 当前拥有正式 `D_M` 解释权的 content detector 模式；批次 3 保持 `hf_only`。 |
-| diagnostic_combination | cross_boundary | method_state | none | false | false | false | 未晋升 C0/C1/C2 的完整标准化与组合诊断；不存在时为空。 |
+| diagnostic_combination | cross_boundary | method_state | none | false | false | false | 未晋升 hf_only_standardized_score/weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score 的完整标准化与组合诊断；不存在时为空。 |
 | diagnostic_identity | cross_boundary | method_identity | none | false | false | false | 连接正式 HF-only detector 与未晋升组合诊断的不可变摘要。 |
 | routing_observations | cross_boundary | method_state | none | false | false | false | routed result 保留的实际不可变 S/T/R/Q_sens 观测集合，供公式重演验证；uniform control 时为空。 |
 | routing_map | cross_boundary | method_state | none | false | false | false | `routing_stqr` 输出并按 latent channels 广播的空间权威图 `A`。 |
@@ -205,11 +205,11 @@ Notebook 与 repository module 的跨边界数据
 | u_clipped | cross_boundary | method_statistic | none | true | false | false | 限制到 `[epsilon_n,1-epsilon_n]` 的 empirical CDF 值。 |
 | quantile_index | cross_boundary | method_state | none | true | false | false | `u_clipped` 映射到共享冻结 `2^20` normal table 的索引。 |
 | z_score | cross_boundary | method_statistic | none | true | false | false | 从共享冻结 midpoint float32 normal table 恢复并提升为 float64 的分支统计。 |
-| function_id | cross_boundary | method_identity | none | true | false | false | 未晋升诊断使用的冻结 C0、C1 weight 或 C2 公式身份。 |
-| weight | cross_boundary | method_identity | none | true | false | false | C1 诊断公式的冻结有限权重；C0/C2 时为空。 |
+| function_id | cross_boundary | method_identity | none | true | false | false | 未晋升诊断使用的冻结 hf_only_standardized_score、weighted_hf_lf_standardized_score weight 或 maximum_hf_lf_standardized_score 公式身份。 |
+| weight | cross_boundary | method_identity | none | true | false | false | weighted_hf_lf_standardized_score 诊断公式的冻结有限权重；hf_only_standardized_score/maximum_hf_lf_standardized_score 时为空。 |
 | hf_standardization | cross_boundary | method_state | none | false | false | false | 组合诊断保留的完整 HF empirical-CDF 标准化结果。 |
-| lf_standardization | cross_boundary | method_state | none | false | false | false | C1/C2 组合诊断保留的完整 LF 标准化结果；C0 时为空。 |
-| formula_identity | cross_boundary | method_identity | none | true | false | false | C0/C1/C2 公式、weight 与共享 quantile-table 摘要形成的身份。 |
+| lf_standardization | cross_boundary | method_state | none | false | false | false | weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score 组合诊断保留的完整 LF 标准化结果；hf_only_standardized_score 时为空。 |
+| formula_identity | cross_boundary | method_identity | none | true | false | false | hf_only_standardized_score/weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score 公式、weight 与共享 quantile-table 摘要形成的身份。 |
 | combination_identity | cross_boundary | method_identity | none | true | false | false | 公式与两分支 calibration identity 共同形成的未晋升组合身份。 |
 | diagnostic_only | cross_boundary | method_state | none | true | false | false | 明确组合输出只具诊断语义、不能替代当前正式 `D_M`。 |
 | promoted | cross_boundary | method_state | none | true | false | false | 组合候选是否已通过独立晋升门；批次 3 固定为 false 且不提供晋升权。 |
@@ -416,7 +416,7 @@ Notebook 与 repository module 的跨边界数据
 | execution_scope | persisted_protocol | protocol | none | false | false | false | package entrypoint 实际执行范围；当前固定为 `cpu_synthetic_wiring_only`。 |
 | record_collection_relative_path | persisted_protocol | provenance | none | false | false | false | result root 内 governed record collection 的安全相对路径。 |
 | record_collection_sha256 | persisted_protocol | provenance | none | false | false | false | package result 对 governed record collection bytes 的完整 SHA-256。 |
-| scientific_claims_supported | persisted_protocol | protocol | none | false | false | false | result/diagnostic 明确是否支持科学 claim；当前 A3b synthetic 结果固定为 false。 |
+| scientific_claims_supported | persisted_protocol | protocol | none | false | false | false | result/diagnostic 明确是否支持科学 claim；当前 experiment_execution_delivery synthetic 结果固定为 false。 |
 | gpu_executed | persisted_protocol | runtime_state | none | false | false | false | 当前 package entrypoint 是否实际执行 GPU；synthetic wiring 固定为 false。 |
 | held_out_evaluation_accessed | persisted_protocol | protocol | none | false | false | false | 当前 package entrypoint 是否访问 held-out evaluation；synthetic wiring 固定为 false。 |
 | bootstrap_identity | persisted_protocol | provenance | none | false | false | false | package 外 bootstrap 的固定实现身份，必须在读取 package 前由调用者核对。 |
@@ -442,7 +442,7 @@ Notebook 与 repository module 的跨边界数据
 | scientific_failure_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中显式科学失败记录数；当前 wiring 通过不构成科学成功。 |
 | execution_failure_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中执行失败记录数。 |
 | excluded_count | persisted_protocol | runtime_state | none | false | false | false | synthetic execution result 中预登记排除记录数。 |
-| replay_digest | persisted_protocol | provenance | none | false | false | false | A3a replay 对完整 record collection 形成的稳定摘要。 |
+| replay_digest | persisted_protocol | provenance | none | false | false | false | governed_internal_runner replay 对完整 record collection 形成的稳定摘要。 |
 | result_zip | persisted_protocol | provenance | none | false | false | false | runner/bootstrap 返回的结果 zip 路径或基名；权威归档位置由调用方边界决定。 |
 | result_zip_filename | persisted_protocol | provenance | none | true | false | false | 写入 run summary、且必须包含同一 run ID 的最小结果 zip 基名。 |
 | key_controls | persisted_protocol | runtime_identity | none | true | false | false | 当前结果按执行顺序记录的 `registered`/`negative_identity` key role 序列。 |
@@ -478,7 +478,7 @@ Notebook 与 repository module 的跨边界数据
 | selected_device | cross_boundary | runtime_identity | none | false | false | false | adapter 根据请求与可用设备确定的实际执行设备。 |
 | identity_schema_version | cross_boundary | protocol | none | false | false | false | runtime public execution identity 的局部 canonical mapping 版本。 |
 | backend_type_identity | cross_boundary | runtime_identity | none | false | false | false | runtime adapter 构造时锚定且每次公开重验证的 backend 精确类型身份；不暴露 backend 对象。 |
-| qk_observation_callable_identity | cross_boundary | runtime_identity | none | false | false | false | runtime adapter 构造时惰性锚定的 Batch-3 Q/K module 精确函数 qualified identity；公开值只含稳定字符串，不暴露 callable 对象。 |
+| qk_observation_callable_identity | cross_boundary | runtime_identity | none | false | false | false | runtime adapter 构造时惰性锚定的 qk_observation Q/K module 精确函数 qualified identity；公开值只含稳定字符串，不暴露 callable 对象。 |
 | backend_resources_owned | cross_boundary | runtime_state | none | false | false | false | runtime public identity 中与 lifecycle state 联合复验的资源所有权布尔值。 |
 | runtime_state | cross_boundary | runtime_state | none | false | false | false | runtime public execution identity 当前 `created`、`ready`、`failed` 或 `closed` 状态。 |
 | runtime_session_identity_digest | cross_boundary | provenance | none | false | false | false | READY session 全部公开配置/设备/backend identity 的 canonical SHA-256；不包含模型私有状态。 |
@@ -486,7 +486,7 @@ Notebook 与 repository module 的跨边界数据
 | metric_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标名称。 |
 | metric_value | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标数值。 |
 | execution_status | persisted_protocol | protocol | none | true | false | false | 当前尝试成功、失败或被排除的显式状态。 |
-| execution_evidence_kind | persisted_protocol | provenance | none | true | false | false | C1 threshold-fit record 的执行证据边界；`real_sd35_gpu` 仅由固定正式会话入口写入，`synthetic_cpu_fixture` 只允许 CPU wiring fixture 且正式 finalizer 必须拒绝。 |
+| execution_evidence_kind | persisted_protocol | provenance | none | true | false | false | HF-only threshold-fit GPU execution record 的执行证据边界；`real_sd35_gpu` 仅由固定正式会话入口写入，`synthetic_cpu_fixture` 只允许 CPU wiring fixture 且正式 finalizer 必须拒绝。 |
 
 ## 内部科学验证协议字段
 
@@ -515,15 +515,15 @@ Notebook 与 repository module 的跨边界数据
 | image_lineage_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定图像 lineage 的内容摘要。 |
 | registered_key_family_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定 registered-key family 的公共摘要。 |
 | detector_mode | persisted_protocol | method_identity | none | false | false | false | 内部协议选择前置门的正式 detector mode；当前仅 `hf_only` 与 `combined`，缺失或未知值 fail closed。 |
-| source_row | persisted_protocol | provenance | none | false | false | false | C1 pinned PartiPrompts snapshot 中从 1 开始的原始数据行身份。 |
-| prompt_text | persisted_protocol | protocol_input | none | false | false | false | C1 离线执行所需的冻结 prompt 明文；其 UTF-8 摘要必须逐行等于 `prompt_digest`，不得由网络重取替代。 |
-| roster_rows_digest | persisted_protocol | provenance | none | false | false | false | C1 prompt/category/challenge/source-row roster 的 canonical SHA-256。 |
-| candidate_specification_path | persisted_protocol | provenance | none | false | false | false | C1 候选绑定所指向的权威候选规格文件路径；bundle loader 必须按 `candidate_specification_sha256` 对其实际字节 fail closed。 |
+| source_row | persisted_protocol | provenance | none | false | false | false | hf_only_reference_validation pinned PartiPrompts snapshot 中从 1 开始的原始数据行身份。 |
+| prompt_text | persisted_protocol | protocol_input | none | false | false | false | hf_only_reference_validation 离线执行所需的冻结 prompt 明文；其 UTF-8 摘要必须逐行等于 `prompt_digest`，不得由网络重取替代。 |
+| roster_rows_digest | persisted_protocol | provenance | none | false | false | false | hf_only_reference_validation prompt/category/challenge/source-row roster 的 canonical SHA-256。 |
+| candidate_specification_path | persisted_protocol | provenance | none | false | false | false | hf_only_reference_validation 候选绑定所指向的权威候选规格文件路径；bundle loader 必须按 `candidate_specification_sha256` 对其实际字节 fail closed。 |
 | candidate_specification_sha256 | persisted_protocol | provenance | none | false | false | false | `candidate_specification_path` 所指权威候选规格文件的原始字节 SHA-256。 |
-| candidate_binding_digest | persisted_protocol | method_identity | none | true | false | false | C1 HF reference 候选、权威候选规格、完整 source bundle、method adapter、runtime config 与 qualification 事实的 canonical 摘要；不是结果门。 |
+| candidate_binding_digest | persisted_protocol | method_identity | none | true | false | false | hf_only_reference_validation reference 候选、权威候选规格、完整 source bundle、method adapter、runtime config 与 qualification 事实的 canonical 摘要；不是结果门。 |
 | hf_only_tau_frozen | persisted_protocol | protocol | none | false | false | false | threshold-fit 回传经独立审计后形成的冻结 tau artifact gate；未绑定 artifact SHA/revision/APPROVE 时 confirmation fail closed。 |
-| run_phase_id | persisted_protocol | protocol | none | true | false | false | C1 threshold-fit 或 untouched-confirmation 的互斥执行阶段身份，禁止在同一 run 混跑。 |
-| metric_id | persisted_protocol | metric_identity | none | true | false | false | C1-M 必须实现并由 split binding 授权的预注册 metric 身份；C1-P 仅冻结公式身份。 |
+| run_phase_id | persisted_protocol | protocol | none | true | false | false | HF-only threshold-fit GPU execution 或 untouched-confirmation 的互斥执行阶段身份，禁止在同一 run 混跑。 |
+| metric_id | persisted_protocol | metric_identity | none | true | false | false | hf_only_reference_metrics 必须实现并由 split binding 授权的预注册 metric 身份；hf_only_reference_protocol 仅冻结公式身份。 |
 | case_id | persisted_protocol | protocol | none | true | false | false | 预登记内部科学问题、攻击和 control 组合的 case 身份。 |
 | record_sequence_index | persisted_protocol | protocol | none | true | false | false | 一个 run/case record collection 中从零开始且连续的序列索引。 |
 | record_attempt_index | persisted_protocol | protocol | none | true | false | false | 同一 unit/case/source cluster 执行尝试的从零开始连续索引；retry 必须大于零。 |
@@ -590,7 +590,7 @@ Notebook 与 repository module 的跨边界数据
 | input_artifact_digest | persisted_protocol | provenance | none | true | false | false | 当前普通输入或生成产物的稳定内容摘要。 |
 | attack_config_digest | persisted_protocol | provenance | none | true | false | false | 当前 case 实际绑定的预登记攻击配置摘要。 |
 
-## A-2 内部执行组件字段
+## internal_execution_components 内部执行组件字段
 
 以下字段属于 `internal_execution_components.json` 及 methods、attacks、metrics
 公开 dataclass 表面。它们只支持内部组件执行与分析；进入 governed records 时仍须
@@ -598,7 +598,7 @@ Notebook 与 repository module 的跨边界数据
 
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| schema_version | persisted_protocol | protocol | none | false | false | false | A-2 内部执行组件 JSON 的冻结 schema 身份。 |
+| schema_version | persisted_protocol | protocol | none | false | false | false | internal_execution_components 内部执行组件 JSON 的冻结 schema 身份。 |
 | registry_version | persisted_protocol | protocol | none | false | false | false | method、attack 或 metric registry 的冻结版本身份。 |
 | method_adapter | persisted_protocol | method_identity | none | false | false | false | 方法薄适配器配置段。 |
 | attack_registry | persisted_protocol | protocol | none | false | false | false | 几何攻击 registry 配置段。 |
@@ -654,39 +654,39 @@ Notebook 与 repository module 的跨边界数据
 | fpr_upper_confidence_bound | cross_boundary | method_statistic | none | false | false | false | threshold-fit FPR 的单侧 Clopper-Pearson 上界。 |
 | source_cluster_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 source-cluster 身份有序集合的摘要。 |
 | calibration_case_digest | cross_boundary | provenance | none | false | false | false | threshold fit 所消费 split、unit、case、source-cluster、key-role 与 score 规范序列的摘要。 |
-| c1_specification_digest | cross_boundary | provenance | none | false | false | false | C1 metric 输入与实现绑定所消费的 exact C1-P run specification canonical 摘要。 |
-| formula_identity_digest | cross_boundary | metric_identity | none | false | false | false | C1-M 七项可执行公式身份的 canonical 摘要；implementation binding 与逐 pair quality result 必须一致。 |
-| case_digest | cross_boundary | provenance | none | false | false | false | C1 metric 实际消费的完整 analysis-unit、role、score、image 或 materialization case 序列摘要。 |
-| tau_float64_hex | cross_boundary | method_statistic | none | false | false | false | C1 threshold 的 Python binary64 hexadecimal identity；必须与 `tau.hex()` 完全一致。 |
-| threshold_rule | persisted_protocol | metric_identity | none | false | false | false | C1 threshold 固定为 primary-null maximum 上方的 binary64 `nextafter`。 |
-| decision_comparison | persisted_protocol | metric_identity | none | false | false | false | C1 threshold 判定固定为 `score >= tau`。 |
-| fit_false_positive_count | cross_boundary | method_statistic | none | false | false | false | C1 threshold-fit 在同一 4096 primary-null cases 上的假阳性数量，冻结要求为零。 |
-| event_count | cross_boundary | method_statistic | none | false | false | false | C1 独立 binomial metric 的成功或阳性事件数量。 |
-| trial_count | cross_boundary | method_statistic | none | false | false | false | C1 独立 binomial metric 的固定分母；confirmation 为 4096。 |
+| hf_only_reference_specification_digest | cross_boundary | provenance | none | false | false | false | hf_only_reference_validation metric 输入与实现绑定所消费的 exact hf_only_reference_protocol run specification canonical 摘要。 |
+| formula_identity_digest | cross_boundary | metric_identity | none | false | false | false | hf_only_reference_metrics 七项可执行公式身份的 canonical 摘要；implementation binding 与逐 pair quality result 必须一致。 |
+| case_digest | cross_boundary | provenance | none | false | false | false | hf_only_reference_validation metric 实际消费的完整 analysis-unit、role、score、image 或 materialization case 序列摘要。 |
+| tau_float64_hex | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation threshold 的 Python binary64 hexadecimal identity；必须与 `tau.hex()` 完全一致。 |
+| threshold_rule | persisted_protocol | metric_identity | none | false | false | false | hf_only_reference_validation threshold 固定为 primary-null maximum 上方的 binary64 `nextafter`。 |
+| decision_comparison | persisted_protocol | metric_identity | none | false | false | false | hf_only_reference_validation threshold 判定固定为 `score >= tau`。 |
+| fit_false_positive_count | cross_boundary | method_statistic | none | false | false | false | HF-only threshold-fit GPU execution 在同一 4096 primary-null cases 上的假阳性数量，冻结要求为零。 |
+| event_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation 独立 binomial metric 的成功或阳性事件数量。 |
+| trial_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation 独立 binomial metric 的固定分母；confirmation 为 4096。 |
 | empirical_rate | cross_boundary | method_statistic | none | false | false | false | `event_count / trial_count`，wrong-key 与 primary null 分开计算。 |
-| confidence_direction | persisted_protocol | metric_identity | none | false | false | false | C1 Clopper-Pearson interval 的 `one_sided_upper` 或 `one_sided_lower`。 |
-| confidence_bound | cross_boundary | method_statistic | none | false | false | false | C1 exact one-sided 95% Clopper-Pearson bound。 |
+| confidence_direction | persisted_protocol | metric_identity | none | false | false | false | hf_only_reference_validation Clopper-Pearson interval 的 `one_sided_upper` 或 `one_sided_lower`。 |
+| confidence_bound | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation exact one-sided 95% Clopper-Pearson bound。 |
 | clean_image_digest | cross_boundary | provenance | none | false | false | false | paired-quality 原始 clean HWC RGB8 bytes 的稳定摘要。 |
 | registered_watermarked_image_digest | cross_boundary | provenance | none | false | false | false | paired-quality、registered/wrong score 与 actual-dtype facts 共同绑定的 marked RGB8 摘要。 |
-| clean_artifact_path | cross_boundary | provenance | none | false | false | false | 正式 C1 confirmation 用于逐 pair 只读重放 clean HWC RGB8 bytes 的绝对 artifact 路径；不进入科学结果身份。 |
+| clean_artifact_path | cross_boundary | provenance | none | false | false | false | 正式 hf_only_reference_validation confirmation 用于逐 pair 只读重放 clean HWC RGB8 bytes 的绝对 artifact 路径；不进入科学结果身份。 |
 | clean_artifact_sha256 | cross_boundary | provenance | none | false | false | false | clean raw HWC RGB8 artifact 文件 bytes 的 SHA-256；正式入口读取后独立复核。 |
-| registered_watermarked_artifact_path | cross_boundary | provenance | none | false | false | false | 正式 C1 confirmation 用于逐 pair 只读重放 registered-watermarked HWC RGB8 bytes 的绝对 artifact 路径；不进入科学结果身份。 |
+| registered_watermarked_artifact_path | cross_boundary | provenance | none | false | false | false | 正式 hf_only_reference_validation confirmation 用于逐 pair 只读重放 registered-watermarked HWC RGB8 bytes 的绝对 artifact 路径；不进入科学结果身份。 |
 | registered_watermarked_artifact_sha256 | cross_boundary | provenance | none | false | false | false | registered-watermarked raw HWC RGB8 artifact 文件 bytes 的 SHA-256；正式入口读取后独立复核。 |
 | normalized_rgb8_mse | cross_boundary | method_statistic | none | false | false | false | 原始 paired RGB8 channel values 除以 255 后的真实均方误差。 |
-| sample_standard_deviation | cross_boundary | method_statistic | none | false | false | false | C1 quality 4096 个真实 case values 的 `ddof=1` sample SD。 |
-| student_t_degrees_of_freedom | cross_boundary | method_statistic | none | false | false | false | C1 quality mean interval 的 Student-t 自由度，固定为 `n-1`。 |
+| sample_standard_deviation | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation quality 4096 个真实 case values 的 `ddof=1` sample SD。 |
+| student_t_degrees_of_freedom | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation quality mean interval 的 Student-t 自由度，固定为 `n-1`。 |
 | student_t_critical_975 | cross_boundary | method_statistic | none | false | false | false | 数值反解 Student-t CDF 得到的 0.975 quantile，不使用 1.96 代理。 |
 | confidence_interval_lower | cross_boundary | method_statistic | none | false | false | false | 未裁剪的双侧 95% Student-t mean interval 下界。 |
 | confidence_interval_upper | cross_boundary | method_statistic | none | false | false | false | 未裁剪的双侧 95% Student-t mean interval 上界。 |
-| materialization_integrity_failure_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype registered positives 中 materialization integrity 失败数量。 |
-| runtime_dtype_failure_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype cases 中 runtime dtype 不等于 float16 的数量。 |
-| measurement_dtype_failure_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype cases 中 measurement dtype 不等于 float32 的数量。 |
-| non_finite_relative_l2_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 非有限的数量；仍保留在 4096 分母。 |
-| negative_relative_l2_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 小于零的无效事实数量。 |
-| budget_exceeded_count | cross_boundary | method_statistic | none | false | false | false | C1 actual relative L2 超过 `3/250` hard limit 的数量。 |
-| failed_case_count | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype 任一 integrity/dtype/finite/range/budget 条件失败的 case 并集数量。 |
-| case_facts | cross_boundary | method_statistic | none | false | false | false | C1 actual-dtype aggregate 保留的 4096 个轻量输入事实，用于结果 validator 重算失败计数与 case digest。 |
-| cross_input_digest | cross_boundary | provenance | none | false | false | false | C1 confirmation 的重算 fit-case/threshold identity 及 score、raw-RGB8-replayed quality、actual-dtype 三表按 exact manifest unit 与 clean/marked image identities 交叉绑定后的摘要；正式入口强制消费。 |
+| materialization_integrity_failure_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual-dtype registered positives 中 materialization integrity 失败数量。 |
+| runtime_dtype_failure_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual-dtype cases 中 runtime dtype 不等于 float16 的数量。 |
+| measurement_dtype_failure_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual-dtype cases 中 measurement dtype 不等于 float32 的数量。 |
+| non_finite_relative_l2_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual relative L2 非有限的数量；仍保留在 4096 分母。 |
+| negative_relative_l2_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual relative L2 小于零的无效事实数量。 |
+| budget_exceeded_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual relative L2 超过 `3/250` hard limit 的数量。 |
+| failed_case_count | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual-dtype 任一 integrity/dtype/finite/range/budget 条件失败的 case 并集数量。 |
+| case_facts | cross_boundary | method_statistic | none | false | false | false | hf_only_reference_validation actual-dtype aggregate 保留的 4096 个轻量输入事实，用于结果 validator 重算失败计数与 case digest。 |
+| cross_input_digest | cross_boundary | provenance | none | false | false | false | hf_only_reference_validation confirmation 的重算 fit-case/threshold identity 及 score、raw-RGB8-replayed quality、actual-dtype 三表按 exact manifest unit 与 clean/marked image identities 交叉绑定后的摘要；正式入口强制消费。 |
 | decisions | cross_boundary | method_statistic | none | false | false | false | fixed-threshold evaluation 的逐 case 检测决定集合。 |
 | positive | cross_boundary | method_statistic | none | false | false | false | 单个检测 case 是否达到冻结阈值。 |
 | registered_tpr | cross_boundary | method_statistic | none | false | false | false | registered-positive cases 的真阳性率。 |

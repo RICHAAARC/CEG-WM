@@ -1,5 +1,9 @@
 # CEG-WM Candidate Specifications
 
+候选规格中的组合身份只使用 `hf_only_standardized_score`、
+`weighted_hf_lf_standardized_score`、`maximum_hf_lf_standardized_score`；
+`C_0`、`C_1(w)`、`C_2` 仅保留为本地数学记号。
+
 ## Authority And Status
 
 本文关闭“实现时由 Codex 自行发明算法”的空白。这里登记的是可实施、可证伪的候选规格，不是已验证项目参数、有效性结论或实施授权。
@@ -653,15 +657,17 @@ tie 计数。`frozen_normal_table_float32` 与 `key_schedule_sha256_counter` 使
 只比较以下冻结函数：
 
 ```text
-C0 = z_hf
-C1(w) = w*z_hf + sqrt(1-w^2)*z_lf, w in {0.25, 0.50, 0.75}
-C2 = max(z_hf, z_lf)
+C_0 = z_hf
+C_1(w) = w*z_hf + sqrt(1-w^2)*z_lf, w in {0.25, 0.50, 0.75}
+C_2 = max(z_hf, z_lf)
 ```
 
 候选选择职责内部进一步预登记为 selection/confirmation：
 
 1. 只在 candidate-selection selection primary null 上为每个分支拟合 provisional CDF；
-2. 对每个 `C0/C1/C2` 只在同一 selection partition 上按预登记
+2. 对每个 `hf_only_standardized_score`、
+   `weighted_hf_lf_standardized_score` 与
+   `maximum_hf_lf_standardized_score` 只在同一 selection partition 上按预登记
    `alpha_selection` 拟合 `tau_provisional`；
 3. 用固定 provisional CDF、函数和 `tau_provisional` 在 untouched confirmation
    上执行晋升比较；
@@ -1043,11 +1049,11 @@ routing observations、backbone/runtime、搜索、可靠性指标、回正和�
 现在已成为候选规格值的是：key encoding/KDF/PRG 与 golden bits；SD3.5 revision 和
 runtime protocol；HF sparse-tail/filter/write/score 顺序与候选强度；LF
 filter/write/score 与有限 `a` 集；S/T/R/Q observations；empirical-CDF/tie/clip/table
-规则与 `C0/C1/C2`；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
+规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
 rectification；conditional recovery 控制流。
 
-仍只能由预登记 calibration/实证晋升决定的是：哪个 `a`、哪个 `C0/C1/C2`、
+仍只能由预登记 calibration/实证晋升决定的是：哪个 `a`、哪条语义化组合函数、
 `alpha_selection`、formal branch CDF、`tau`、`tau_rescue`、七个 geometry reliability
 `gamma` 与 `epsilon_inlier`、各职责样本量、候选是否晋升/淘汰、runtime 是否可复现，
 以及 FPR/TPR、鲁棒性、质量、成本和完整/负结果/reduced-scope outcome。文档中的历史

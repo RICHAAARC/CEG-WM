@@ -1,5 +1,5 @@
 {
-  "schema_version": "ceg_wm_c1_hf_prompt_roster_v1",
+  "schema_version": "ceg_wm_hf_only_reference_prompt_roster_v1",
   "dataset_id": "nateraw/parti-prompts",
   "dataset_revision": "944b156abfdad7627c3221b5ec4f6a6fb060a197",
   "dataset_file": "PartiPrompts.tsv",

@@ -1,19 +1,19 @@
 {
-  "schema_version": "ceg_wm_c1_hf_compact_manifest_v1",
+  "schema_version": "ceg_wm_hf_only_reference_compact_manifest_v1",
   "protocol_id": "ceg_wm_internal_scientific_validation_v2",
   "protocol_version": "2.0.0",
-  "manifest_id": "ceg_wm_c1_hf_content_threshold_fit_manifest_v1",
+  "manifest_id": "ceg_wm_hf_only_reference_content_threshold_fit_manifest_v1",
   "manifest_revision": "1",
   "split": "content_threshold_fit",
   "roster_rows_digest": "9488cc26be1723bf40e1e7336c97a2b9c5307c1d4a8ac97f184855a832f12e69",
   "source_row_selector": "stratified_alternating_v1_fit_gets_first_26_odd_strata_extras",
   "expected_prompt_count": 816,
-  "seed_namespace": "ceg_wm_c1_hf_threshold_fit_seed_v1",
+  "seed_namespace": "ceg_wm_hf_only_threshold_fit_seed_v1",
   "seed_derivation": "sha256_canonical_json_low_63_bits",
   "base_replicates_per_prompt": 5,
   "extra_replicates_for_first_selected_prompts": 16,
   "image_lineage_derivation": "sha256_canonical_json_dataset_row_category_challenge_seed_replication",
-  "registered_key_family_digest": "396ba6fca745169815faa732461e7460e9d4ec66eed406a9303c5ad6fe51801d",
+  "registered_key_family_digest": "4e8781942cf442f2689153fe22ca67f11ec2ec8aa3d16b78d60121b213cc2305",
   "expected_assignment_count": 4096,
-  "expected_materialized_manifest_digest": "dfd943da2cbf245067d3c075e93abde0f4de532f85c87c3ed3ec177028d49ee9"
+  "expected_materialized_manifest_digest": "1150c89cc11db5d6bbe9cb17f032c0a5934f9189db0feb4e5de3998e5302719b"
 }

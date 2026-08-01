@@ -11,7 +11,18 @@ import pytest
 from governance.harness.audits.audit_research_definition import run_audit
 
 
-REQUIRED_ROLES = ("research_definition", "method_architecture")
+REQUIRED_ROLES = (
+    "research_definition",
+    "method_architecture",
+    "content_chain",
+    "geometry_chain",
+    "joint_decision",
+    "evaluation_design",
+    "candidate_specification",
+    "algorithm_primitives",
+    "method_mechanism",
+    "research_construction_roadmap",
+)
 REQUIRED_INVARIANTS = (
     "content_evidence_primary",
     "geometry_no_direct_positive",
@@ -162,6 +173,76 @@ def test_research_stage_accepts_substantive_design_and_invariants(tmp_path: Path
     _write_authority(tmp_path, "research_defined")
     _write_valid_definition(tmp_path)
     assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_registered_design_rejects_explicit_stale_current_status(tmp_path: Path) -> None:
+    _write_authority(tmp_path, "research_defined")
+    _write_valid_definition(tmp_path)
+    design_path = tmp_path / "docs" / "design" / "method_architecture.md"
+    design_path.write_text(
+        design_path.read_text(encoding="utf-8")
+        + "\n\n## Current Status\n\n`runtime_verified / implemented`\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+    assert report["decision"] == "fail"
+    assert any(
+        violation["reason"] == "registered_design_current_status_mismatch"
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "current_claim",
+    (
+        "## Current Implementation Status\n\n`runtime_verified / implemented`\n",
+        "实际 stage/status 已同步为 `runtime_verified / implemented`。\n",
+        "实际阶段/status 已同步为 `runtime_verified / implemented`。\n",
+        "当前项目登记为\n`runtime_verified / implemented`。\n",
+        "当前检查点：实际 stage/status 为 `runtime_verified / implemented`。\n",
+    ),
+)
+def test_explicit_current_claim_formats_fail_closed(
+    tmp_path: Path,
+    current_claim: str,
+) -> None:
+    _write_authority(tmp_path, "research_defined")
+    _write_valid_definition(tmp_path)
+    design_path = tmp_path / "docs" / "design" / "method_architecture.md"
+    design_path.write_text(
+        design_path.read_text(encoding="utf-8") + "\n\n" + current_claim,
+        encoding="utf-8",
+    )
+    report = run_audit(tmp_path)
+    assert any(
+        violation["reason"] == "registered_design_current_status_mismatch"
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_historical_runtime_stage_text_is_not_current_status(tmp_path: Path) -> None:
+    _write_authority(tmp_path, "research_defined")
+    _write_valid_definition(tmp_path)
+    design_path = tmp_path / "docs" / "design" / "method_architecture.md"
+    design_path.write_text(
+        design_path.read_text(encoding="utf-8")
+        + "\n\n## Historical Route\n\nThe earlier route mentioned runtime_verified.\n",
+        encoding="utf-8",
+    )
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_all_ten_registered_designs_enter_checked_paths(tmp_path: Path) -> None:
+    _write_authority(tmp_path, "research_defined")
+    _write_valid_definition(tmp_path)
+    report = run_audit(tmp_path)
+    expected = {f"docs/design/{role}.md" for role in REQUIRED_ROLES}
+    assert expected <= set(report["checked_paths"])
 
 
 @pytest.mark.unit

@@ -345,7 +345,7 @@ def observe_detection_qk(
 
     if not isinstance(backend, RuntimeQkBackend):
         raise RuntimeQkObservationError(
-            "prepared backend lacks the Batch-3 Q/K execution protocol"
+            "prepared backend lacks the qk_observation Q/K execution protocol"
         )
     _validate_session(configuration, session)
     image = _tensor(detection_image, role="detection_image")
