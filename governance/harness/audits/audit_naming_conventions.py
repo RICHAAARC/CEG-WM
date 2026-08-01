@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from governance.harness.lib.file_scanner import iter_governed_paths
 from governance.harness.lib.json_report import build_report, exit_with_report
 from governance.harness.lib.naming_rules import (
+    has_malformed_semantic_numeric_suffix,
     has_ordinal_identity_text,
     has_ordinal_identity_polysemy,
     has_weak_semantic_text,
@@ -131,6 +132,15 @@ def _python_semantic_violations(path: Path, relative: Path) -> list[dict]:
                 violations.append({"path": str(relative), "reason": "weak_semantic_comment", "line": token.start[0]})
     except tokenize.TokenError as error:
         violations.append({"path": str(relative), "reason": "python_tokens_unreadable", "detail": str(error)})
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if has_malformed_semantic_numeric_suffix(line):
+            violations.append(
+                {
+                    "path": str(relative),
+                    "reason": "malformed_semantic_numeric_suffix",
+                    "line": line_number,
+                }
+            )
     return violations
 
 
@@ -255,6 +265,15 @@ def _config_semantic_violations(path: Path, relative: Path) -> list[dict]:
                     "line": 1,
                 }
             )
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if has_malformed_semantic_numeric_suffix(line):
+            violations.append(
+                {
+                    "path": str(relative),
+                    "reason": "malformed_semantic_numeric_suffix",
+                    "line": line_number,
+                }
+            )
     return violations
 
 
@@ -278,6 +297,14 @@ def _text_semantic_violations(path: Path, relative: Path) -> list[dict]:
                             "line": 1,
                         }
                     )
+                if has_malformed_semantic_numeric_suffix(source):
+                    violations.append(
+                        {
+                            "path": str(relative),
+                            "reason": "malformed_semantic_numeric_suffix",
+                            "line": 1,
+                        }
+                    )
             return violations
         except (json.JSONDecodeError, TypeError):
             return [
@@ -287,15 +314,25 @@ def _text_semantic_violations(path: Path, relative: Path) -> list[dict]:
                     "line": 0,
                 }
             ]
+    violations = []
     if has_ordinal_identity_text(text):
-        return [
+        violations.append(
             {
                 "path": str(relative),
                 "reason": "ordinal_identity_markdown",
                 "line": 1,
             }
-        ]
-    return []
+        )
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if has_malformed_semantic_numeric_suffix(line):
+            violations.append(
+                {
+                    "path": str(relative),
+                    "reason": "malformed_semantic_numeric_suffix",
+                    "line": line_number,
+                }
+            )
+    return violations
 
 
 def run_audit(root: str | Path) -> dict:

@@ -48,7 +48,7 @@ def _roots_overlap(first: Path, second: Path) -> bool:
 
 
 class Sd35PipelineBackend:
-    """Diffusers SD3.5 backend connected to the content_write_and_vae/3 protocols."""
+    """Diffusers SD3.5 backend connected to content_write_and_vae and qk_observation."""
 
     def __init__(
         self,

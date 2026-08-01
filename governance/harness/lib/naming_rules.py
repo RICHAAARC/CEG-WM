@@ -24,6 +24,11 @@ _LOCAL_MATH_NOTATION_PATTERN = re.compile(
     r"`[cs]_\d+(?:\(w\))?`|(?<![A-Za-z0-9_])[cs]_\d+(?:\(w\))?(?=\s*=)",
     re.IGNORECASE,
 )
+MALFORMED_SEMANTIC_NUMERIC_SUFFIX_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])(?:[a-z][a-z0-9]*_)+[a-z][a-z0-9]*/\d+"
+    r"(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
 
 # These are exact scientific/platform tokens, not ordinal work-package identities.
 ALLOWED_NARROW_SEMANTIC_LITERALS = frozenset(
@@ -99,6 +104,11 @@ def has_weak_semantic_text(text: str) -> bool:
 def has_ordinal_identity_text(text: str) -> bool:
     """Reject legacy ordinal identities while preserving narrow literal terms."""
     return bool(FORBIDDEN_ORDINAL_IDENTITY_PATTERN.search(_scrub_semantics(text)))
+
+
+def has_malformed_semantic_numeric_suffix(text: str) -> bool:
+    """Reject a semantic snake-case label mechanically suffixed with ``/number``."""
+    return bool(MALFORMED_SEMANTIC_NUMERIC_SUFFIX_PATTERN.search(text))
 
 
 def ordinal_identity_tokens(text: str) -> tuple[str, ...]:

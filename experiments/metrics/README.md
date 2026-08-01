@@ -27,7 +27,7 @@ detector 和 threshold。
 `held_out_evaluation`。指标不选择候选、不拟合 LF/HF 权重、不写 records，也不导入
 runtime、methods、attacks、runner 或治理代码；CPU 结果不构成科学有效性证明。
 
-`hf_only_reference.py` 实现 hf_only_reference_protocol 冻结的七个 HF-reference metric identities。
+`hf_only_reference_metrics.py` 实现 hf_only_reference_protocol 冻结的七个 HF-reference metric identities。
 `hf_only_reference_tau_fit` 只接受 content-threshold-fit manifest 的完整 4096 个
 `AnalysisUnitIdentity`，以 binary64 `nextafter(max,+inf)` 得到零 fit-FP 的唯一
 threshold identity。confirmation 必须消费该 threshold，且 primary null、

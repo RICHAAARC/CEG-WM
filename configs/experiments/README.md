@@ -17,7 +17,7 @@ scientific claim boundary）；正式 collection validator 只接受精确冻结
 resource provenance，并逐 record 保存几何操作身份和 experiments 层可靠性配置摘要。该配置与 CPU schema tests
 不构成 calibration、正式运行或科学有效性证据。
 
-`hf_only_reference_run.json` 是 hf_only_reference_protocol 的 HF-only reference 预注册入口；它绑定
+`hf_only_reference_validation.json` 是 hf_only_reference_protocol 的 HF-only reference 预注册入口；它绑定
 `hf_sparse_tail` 的完整 write/embed/detect/formal-content/runtime source bundle、
 已通过的 runtime qualification 身份、稳定 method-adapter 子配置摘要、actual dtype/
 hard budget、独立 primary-null 与 wrong-key 统计门、paired attribution 和 final

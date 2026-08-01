@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-- `hf_only_reference.py`：加载 hf_only_reference_protocol 的 HF-only reference spec、离线 PartiPrompts
+- `hf_only_reference_protocol.py`：加载 hf_only_reference_protocol 的 HF-only reference spec、离线 PartiPrompts
   snapshot/明文 roster 和两个 compact manifests，并确定性物化既有
   `FrozenSplitManifest`。bundle loader 同时核对文件 SHA、权威 method/runtime
   source bundle、稳定的 method-adapter 子配置摘要、key family、每 split 4096

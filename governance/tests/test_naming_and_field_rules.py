@@ -13,6 +13,7 @@ from experiments.protocol.internal_record_registry import (
 from governance.harness.lib.field_rules import FieldRegistryRow, validate_registry_rows
 from governance.harness.lib.naming_rules import (
     ALLOWED_NARROW_SEMANTIC_LITERALS,
+    has_malformed_semantic_numeric_suffix,
     has_ordinal_identity_text,
     has_ordinal_identity_polysemy,
     has_weak_semantic_token,
@@ -215,3 +216,13 @@ def test_cross_boundary_field_categories_accept_semantic_suffixes(
         )
     }
     assert validate_registry_rows(rows) == []
+
+
+@pytest.mark.unit
+def test_malformed_semantic_numeric_suffix_is_narrowly_rejected() -> None:
+    assert has_malformed_semantic_numeric_suffix("content_write_and_vae/3")
+    assert not has_malformed_semantic_numeric_suffix("3/250")
+    assert not has_malformed_semantic_numeric_suffix("0.70/0.30")
+    assert not has_malformed_semantic_numeric_suffix(
+        "content_relative_l2_nominal = 3/250"
+    )

@@ -152,7 +152,10 @@ def test_narrow_literals_pass_full_cross_surface_audit(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    literals = "relative_l2 F32 RGB8 P95 x86_64 L4 SHA-256 SHA256"
+    literals = (
+        "relative_l2 F32 RGB8 P95 x86_64 L4 SHA-256 SHA256 "
+        "3/250 0.70/0.30 content_relative_l2_nominal = 3/250"
+    )
     (tmp_path / "main").mkdir()
     (tmp_path / "main" / "method.py").write_text(
         f'ARTIFACT_IDENTITY = "{literals}"\n', encoding="utf-8"
@@ -176,3 +179,29 @@ def test_narrow_literals_pass_full_cross_surface_audit(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_malformed_semantic_numeric_suffix_is_audited(tmp_path: Path) -> None:
+    policy_root = tmp_path / "governance" / "policies"
+    policy_root.mkdir(parents=True)
+    (policy_root / "project_roots.yaml").write_text(
+        json.dumps(
+            {
+                "root_registry": {"main": {"audited": True}},
+                "governed_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "main").mkdir()
+    (tmp_path / "main" / "runtime_backend.py").write_text(
+        '"""Backend connected to content_write_and_vae/3 protocols."""\n',
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    assert "malformed_semantic_numeric_suffix" in {
+        violation["reason"] for violation in report["violations"]
+    }
