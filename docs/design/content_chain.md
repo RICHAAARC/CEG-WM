@@ -116,4 +116,6 @@ HF carrier、HF direct score、LF、路由、组合写入与分支检测已完�
 写入、完整性和 hard-budget 路径已在冻结 SD3.5 candidate 的真实 GPU
 qualification 中通过；这不构成 LF/routing/组合晋升。当前仍没有正式 calibration、
 完整联合 FPR 或科学效果证据；实际阶段/status 已由独立 revisions 同步为
-`runtime_verified / implemented`。
+`experiment_ready / implemented`。该阶段只登记冻结协议与可追溯执行交付的基础设施
+闭环，不提供 `tau`、confirmation 结果、Calibration Locked 或正式 evaluation，也不
+晋升 LF/routing/组合/geometry。

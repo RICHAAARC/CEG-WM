@@ -80,4 +80,6 @@ synthetic crop/scale/rotation、wrong-key、低可靠性拒绝及 inverse-warp �
 登记 SD3.5 的两层真实 `to_q`/`to_k` observation 已通过 GPU qualification；
 该 runtime 事实不证明 crop/scale/rotation 估计、可靠性或回正的真实图像科学效果，
 也不产生水印阳性或正式 FPR。实际阶段/status 已由独立 revisions 同步为
-`runtime_verified / implemented`。
+`experiment_ready / implemented`；该阶段只登记冻结实验协议与可追溯执行交付，
+不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation 或科学证据，
+也不晋升 geometry 或任何内容分支。

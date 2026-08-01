@@ -60,4 +60,6 @@ CPU/synthetic 实现和行为验证。正式 detector 仍为 HF-only，LF/routin
 `full_ceg_wm_eligible=false`；`tau`、`tau_rescue` 与 reliability 尚未正式 calibration，
 真实 GPU qualification 只关闭 SD3.5 runtime、VAE 和 Q/K observation 边界，没有
 执行或证明完整 raw+rescue FPR 与联合恢复效果。实际阶段/status 已由独立 revisions
-同步为 `runtime_verified / implemented`，科学效果仍无证据。
+同步为 `experiment_ready / implemented`。该阶段只登记冻结实验协议与可追溯执行交付；
+当前没有 `tau`、confirmation 结果、Calibration Locked、正式 evaluation 或科学证据，
+也没有 LF/routing/组合/geometry 晋升。

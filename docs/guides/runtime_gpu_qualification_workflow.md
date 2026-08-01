@@ -28,7 +28,8 @@
 
 当前已闭合的 runtime 检查点为：
 
-- `project_stage: runtime_verified`；
+- 当前项目 `project_stage: experiment_ready`，本节 runtime 检查点自身在
+  `runtime_verified` 时已闭合；
 - `implementation_status: implemented`；
 - 13 项职责、27 个 CPU/synthetic 行为节点和 method readiness 仍有效；
 - runtime candidate
@@ -39,7 +40,8 @@
 - 正式 detector 仍为 HF-only；
 - LF/routing/组合尚未实验晋升，`full_ceg_wm_eligible=false`；
 - `negative_identity` 只证明 runtime/key identity control，不是 wrong-key FPR；
-- 当前阶段不开始候选选择、正式 calibration、攻击矩阵、baseline 或论文实验。
+- 当前阶段的实验准备基础设施闭环不等于开始候选选择、confirmation、正式
+  calibration、攻击矩阵、baseline 或论文实验。
 
 ## Reference Colab Environments
 

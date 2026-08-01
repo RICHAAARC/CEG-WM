@@ -92,19 +92,19 @@ CANDIDATE_IDS = {
     "conditional_recovery_decision": ["joint_conditional_recovery"],
 }
 SYMBOLS = {
-    "key_schedule": "derive_key_stream",
-    "content_router": "route_content_masks",
-    "lf_carrier": "build_lf_template",
-    "hf_carrier": "build_hf_template",
-    "content_embedder": "embed_content_branches",
-    "lf_detector": "score_lf_blind",
-    "hf_detector": "score_hf_direct",
-    "content_detector": "combine_content_scores",
-    "qk_geometry_sync": "build_qk_relation",
-    "geometric_transform_estimator": "estimate_similarity_transform",
-    "geometry_reliability": "assess_geometry_reliability",
-    "image_rectifier": "rectify_image_coordinates",
-    "conditional_recovery_decision": "decide_conditional_recovery",
+    "key_schedule": "key_schedule_sha256_counter",
+    "content_router": "content_router",
+    "lf_carrier": "lf_carrier",
+    "hf_carrier": "hf_carrier",
+    "content_embedder": "content_embedder",
+    "lf_detector": "lf_detector",
+    "hf_detector": "hf_detector",
+    "content_detector": "content_detector",
+    "qk_geometry_sync": "qk_geometry_sync",
+    "geometric_transform_estimator": "geometric_transform_estimator",
+    "geometry_reliability": "geometry_reliability",
+    "image_rectifier": "image_rectifier",
+    "conditional_recovery_decision": "conditional_recovery_decision",
 }
 BEHAVIOR_BINDINGS = {
     "key_schedule_root_and_domain_separation": ["key_schedule"],
@@ -219,7 +219,7 @@ def _method_sources() -> dict[str, str]:
         "main/shared/key_schedule.py": (
             "import hashlib\n"
             "import json\n"
-            "def derive_key_stream(root_key, domain_fields, shape, count):\n"
+            "def key_schedule_sha256_counter(root_key, domain_fields, shape, count):\n"
             "    if type(root_key) is not str or not root_key:\n"
             "        raise ValueError('non-empty text key required')\n"
             "    payload = {'keyed_prg_version': 'sha256_counter_normal_icdf_table20_float32', 'key_material': root_key, 'domain_fields': domain_fields, 'shape': list(shape)}\n"
@@ -232,7 +232,7 @@ def _method_sources() -> dict[str, str]:
             "    return domain.hex(), indices\n"
         ),
         "main/content_chain/routing.py": (
-            "def route_content_masks(observations, size, enabled=True):\n"
+            "def content_router(observations, size, enabled=True):\n"
             "    if not enabled:\n"
             "        ones = (1.0,) * size\n"
             "        return {'A': ones, 'mask_lf': ones, 'mask_hf': ones, 'route_identity': 'routing_uniform_control'}\n"
@@ -248,7 +248,7 @@ def _method_sources() -> dict[str, str]:
             "    return {'A': attention, 'mask_lf': mask_lf, 'mask_hf': mask_hf, 'route_identity': 'routing_stqr'}\n"
         ),
         "main/content_chain/lf_carrier.py": (
-            "def build_lf_template(values, key_signs, mask=None):\n"
+            "def lf_carrier(values, key_signs, mask=None):\n"
             "    low = [(value + sum(values) / len(values)) / 2 for value in values]\n"
             "    mean = sum(low) / len(low)\n"
             "    keyed = [(value - mean) * sign for value, sign in zip(low, key_signs)]\n"
@@ -259,7 +259,7 @@ def _method_sources() -> dict[str, str]:
             "    return tuple(value / norm for value in masked)\n"
         ),
         "main/content_chain/lf_detector.py": (
-            "def score_lf_blind(observed, template):\n"
+            "def lf_detector(observed, template):\n"
             "    observed_mean = sum(observed) / len(observed)\n"
             "    template_mean = sum(template) / len(template)\n"
             "    left = [value - observed_mean for value in observed]\n"
@@ -271,7 +271,7 @@ def _method_sources() -> dict[str, str]:
             "    return numerator / denominator\n"
         ),
         "main/content_chain/hf_carrier.py": (
-            "def build_hf_template(tail_values, key_signs, keep, mask=None):\n"
+            "def hf_carrier(tail_values, key_signs, keep, mask=None):\n"
             "    ranked = sorted(range(len(tail_values)), key=lambda i: (-abs(tail_values[i]), i))\n"
             "    support = set(ranked[:keep])\n"
             "    sparse = [tail_values[i] * key_signs[i] if i in support else 0.0 for i in range(len(tail_values))]\n"
@@ -282,7 +282,7 @@ def _method_sources() -> dict[str, str]:
             "    return tuple(value / norm for value in masked)\n"
         ),
         "main/content_chain/embedder.py": (
-            "def embed_content_branches(lf_direction, hf_direction, allocation, target_total_l2, mode='combined'):\n"
+            "def content_embedder(lf_direction, hf_direction, allocation, target_total_l2, mode='combined'):\n"
             "    if allocation not in {0.25, 0.50, 0.75}:\n"
             "        raise ValueError('unregistered allocation')\n"
             "    lf_norm = sum(value * value for value in lf_direction) ** 0.5\n"
@@ -307,7 +307,7 @@ def _method_sources() -> dict[str, str]:
             "    return {'delta': delta, 'allocation': allocation, 'mode': mode, 'target_total_l2': target_total_l2, 'combined_pre_norm': combined_norm, 'direction_cosine': direction_cosine}\n"
         ),
         "main/content_chain/hf_detector.py": (
-            "def score_hf_direct(observed, template):\n"
+            "def hf_detector(observed, template):\n"
             "    observed_mean = sum(observed) / len(observed)\n"
             "    template_mean = sum(template) / len(template)\n"
             "    left = [value - observed_mean for value in observed]\n"
@@ -327,31 +327,29 @@ def _method_sources() -> dict[str, str]:
             "    clipped = min(1.0 - epsilon, max(epsilon, raw))\n"
             "    index = min(len(normal_table) - 1, int(clipped * len(normal_table)))\n"
             "    return float(normal_table[index])\n"
-            "def combine_content_scores(lf_score, hf_score, lf_null, hf_null, combination, normal_table):\n"
+            "def content_detector(lf_score, hf_score, lf_null, hf_null, combination, normal_table):\n"
             "    z_lf = _midrank_normal_score(lf_score, lf_null, normal_table)\n"
             "    z_hf = _midrank_normal_score(hf_score, hf_null, normal_table)\n"
-            "    if combination == 'C0':\n"
+            "    if combination == 'hf_only_standardized_score':\n"
             "        combined = z_hf\n"
-            "    elif combination.startswith('C1:'):\n"
-            "        weight = float(combination.split(':', 1)[1])\n"
-            "        if weight not in {0.25, 0.50, 0.75}:\n"
-            "            raise ValueError('unregistered combination weight')\n"
+            "    elif combination == 'weighted_hf_lf_standardized_score':\n"
+            "        weight = 0.50\n"
             "        combined = weight * z_hf + (1.0 - weight * weight) ** 0.5 * z_lf\n"
-            "    elif combination == 'C2':\n"
+            "    elif combination == 'maximum_hf_lf_standardized_score':\n"
             "        combined = max(z_hf, z_lf)\n"
             "    else:\n"
             "        raise ValueError('unregistered combination')\n"
             "    return {'lf': lf_score, 'hf': hf_score, 'combined': combined, 'z_lf': z_lf, 'z_hf': z_hf}\n"
         ),
         "main/geometry_chain/qk_sync.py": (
-            "def build_qk_relation(query, key):\n"
+            "def qk_geometry_sync(query, key):\n"
             "    logits = tuple(q * k for q, k in zip(query, key))\n"
             "    scale = sum(abs(value) for value in logits) or 1.0\n"
             "    probabilities = tuple(abs(value) / scale for value in logits)\n"
             "    return {'logits': logits, 'probabilities': probabilities}\n"
         ),
         "main/geometry_chain/transform_estimator.py": (
-            "def estimate_similarity_transform(scored_candidates):\n"
+            "def geometric_transform_estimator(scored_candidates):\n"
             "    ordered = sorted(scored_candidates, key=lambda item: item[1], reverse=True)\n"
             "    best_transform, best_score = ordered[0]\n"
             "    second_score = ordered[1][1]\n"
@@ -359,7 +357,7 @@ def _method_sources() -> dict[str, str]:
         ),
         "main/geometry_chain/reliability.py": (
             "import math\n"
-            "def assess_geometry_reliability(metrics, limits):\n"
+            "def geometry_reliability(metrics, limits):\n"
             "    required = ('score', 'gap', 'coverage', 'uniqueness', 'key_margin', 'inlier_ratio', 'residual', 'identity_margin')\n"
             "    if any(name not in metrics or not math.isfinite(metrics[name]) for name in required):\n"
             "        return False, 'missing_or_nonfinite', metrics.get('score')\n"
@@ -369,12 +367,12 @@ def _method_sources() -> dict[str, str]:
             "    return True, 'reliable', metrics['score']\n"
         ),
         "main/geometry_chain/rectifier.py": (
-            "def rectify_image_coordinates(values, shift):\n"
+            "def image_rectifier(values, shift):\n"
             "    size = len(values)\n"
             "    return tuple(values[(index + shift) % size] for index in range(size))\n"
         ),
         "main/joint_decision/detector.py": (
-            "def decide_conditional_recovery(raw_score, rectified_score, threshold, near_threshold, reliable):\n"
+            "def conditional_recovery_decision(raw_score, rectified_score, threshold, near_threshold, reliable):\n"
             "    if raw_score >= threshold:\n"
             "        return True, raw_score, False\n"
             "    if not near_threshold or not reliable:\n"
@@ -386,83 +384,83 @@ def _method_sources() -> dict[str, str]:
 
 def _behavior_test_source() -> str:
     return """import pytest
-from main.shared.key_schedule import derive_key_stream
-from main.content_chain.detector import combine_content_scores
-from main.content_chain.embedder import embed_content_branches
-from main.content_chain.hf_carrier import build_hf_template
-from main.content_chain.hf_detector import score_hf_direct
-from main.content_chain.lf_carrier import build_lf_template
-from main.content_chain.lf_detector import score_lf_blind
-from main.content_chain.routing import route_content_masks
-from main.geometry_chain.qk_sync import build_qk_relation
-from main.geometry_chain.reliability import assess_geometry_reliability
-from main.geometry_chain.rectifier import rectify_image_coordinates
-from main.geometry_chain.transform_estimator import estimate_similarity_transform
-from main.joint_decision.detector import decide_conditional_recovery
+from main.shared.key_schedule import key_schedule_sha256_counter
+from main.content_chain.detector import content_detector
+from main.content_chain.embedder import content_embedder
+from main.content_chain.hf_carrier import hf_carrier
+from main.content_chain.hf_detector import hf_detector
+from main.content_chain.lf_carrier import lf_carrier
+from main.content_chain.lf_detector import lf_detector
+from main.content_chain.routing import content_router
+from main.geometry_chain.qk_sync import qk_geometry_sync
+from main.geometry_chain.reliability import geometry_reliability
+from main.geometry_chain.rectifier import image_rectifier
+from main.geometry_chain.transform_estimator import geometric_transform_estimator
+from main.joint_decision.detector import conditional_recovery_decision
 
 @pytest.mark.unit
 def test_key_schedule_root_and_domain_separation():
-    left = derive_key_stream("registered", {"role": "hf"}, (2, 2), 4)
-    right = derive_key_stream("registered", {"role": "lf"}, (2, 2), 4)
-    other = derive_key_stream("wrong", {"role": "hf"}, (2, 2), 4)
+    left = key_schedule_sha256_counter("registered", {"role": "hf"}, (2, 2), 4)
+    right = key_schedule_sha256_counter("registered", {"role": "lf"}, (2, 2), 4)
+    other = key_schedule_sha256_counter("wrong", {"role": "hf"}, (2, 2), 4)
     assert left != right
     assert left != other
 
 @pytest.mark.unit
 def test_key_schedule_counter_quantile_golden():
     fields = {"candidate_id": "key_schedule_sha256_counter", "operator": "golden_vector", "responsibility_domain": "key_schedule_test", "tensor_role": "gaussian"}
-    result = derive_key_stream("ceg-wm-golden-root-π", fields, (2, 3), 6)
+    result = key_schedule_sha256_counter("ceg-wm-golden-root-π", fields, (2, 3), 6)
     assert result[0] == "e5b8e35d13815c1d23a09286da0bfe661e0330e38eda19e239f19224f7b1998f"
     assert result[1] == (172059, 964892, 707530, 322430, 968250, 915318)
 
 @pytest.mark.unit
 def test_key_schedule_wrong_key_and_public_noise():
-    registered = derive_key_stream("registered", {"role": "geometry"}, (2, 2), 4)
-    wrong = derive_key_stream("ceg-wm-wrong-key:0", {"role": "geometry"}, (2, 2), 4)
-    public = derive_key_stream("ceg-wm-public-noise:key-schedule-sha256-counter", {"role": "public_noise"}, (2, 2), 4)
+    registered = key_schedule_sha256_counter("registered", {"role": "geometry"}, (2, 2), 4)
+    wrong = key_schedule_sha256_counter("ceg-wm-wrong-key:0", {"role": "geometry"}, (2, 2), 4)
+    public = key_schedule_sha256_counter("ceg-wm-public-noise:key-schedule-sha256-counter", {"role": "public_noise"}, (2, 2), 4)
     assert registered != wrong
     assert public != registered and public != wrong
 
 @pytest.mark.unit
 def test_hf_sparse_support():
-    template = build_hf_template((0.2, -4.0, 3.0, 0.1), (1, 1, 1, 1), 2)
+    template = hf_carrier((0.2, -4.0, 3.0, 0.1), (1, 1, 1, 1), 2)
     support = [index for index, value in enumerate(template) if value]
     assert support == [1, 2]
 
 @pytest.mark.unit
 def test_hf_template_normalization_order_and_unit_l2():
-    template = build_hf_template((0.0, 4.0, -3.0, 0.0), (1, 1, 1, 1), 2)
+    template = hf_carrier((0.0, 4.0, -3.0, 0.0), (1, 1, 1, 1), 2)
     unit_l2 = sum(value * value for value in template)
     assert abs(unit_l2 - 1.0) < 1e-12 and template[0] == template[3] == 0.0
 
 @pytest.mark.unit
 def test_hf_direct_score_time_centering():
-    base_score = score_hf_direct((2.0, 4.0, 6.0), (1.0, 2.0, 3.0))
-    shifted_score = score_hf_direct((12.0, 14.0, 16.0), (6.0, 7.0, 8.0))
+    base_score = hf_detector((2.0, 4.0, 6.0), (1.0, 2.0, 3.0))
+    shifted_score = hf_detector((12.0, 14.0, 16.0), (6.0, 7.0, 8.0))
     assert base_score == pytest.approx(1.0)
     assert shifted_score == pytest.approx(base_score)
 
 @pytest.mark.unit
 def test_lf_domain_and_independent_key():
-    registered = build_lf_template((1.0, 2.0, 4.0, 8.0), (1, -1, 1, -1))
-    wrong = build_lf_template((1.0, 2.0, 4.0, 8.0), (-1, 1, -1, 1))
+    registered = lf_carrier((1.0, 2.0, 4.0, 8.0), (1, -1, 1, -1))
+    wrong = lf_carrier((1.0, 2.0, 4.0, 8.0), (-1, 1, -1, 1))
     assert len(registered) == 4
     assert registered != wrong
 
 @pytest.mark.unit
 def test_lf_blind_score_time_centering():
-    base = score_lf_blind((2.0, 4.0, 6.0), (1.0, 2.0, 3.0))
-    shifted = score_lf_blind((12.0, 14.0, 16.0), (6.0, 7.0, 8.0))
+    base = lf_detector((2.0, 4.0, 6.0), (1.0, 2.0, 3.0))
+    shifted = lf_detector((12.0, 14.0, 16.0), (6.0, 7.0, 8.0))
     assert base == pytest.approx(1.0)
     assert shifted == pytest.approx(base)
     assert isinstance(shifted, float)
 
 @pytest.mark.unit
 def test_lf_wrong_key_rejection():
-    registered = build_lf_template((1.0, 2.0, 4.0, 8.0), (1, -1, 1, -1))
-    wrong = build_lf_template((1.0, 2.0, 4.0, 8.0), (-1, 1, -1, 1))
-    registered_score = score_lf_blind(registered, registered)
-    wrong_score = score_lf_blind(registered, wrong)
+    registered = lf_carrier((1.0, 2.0, 4.0, 8.0), (1, -1, 1, -1))
+    wrong = lf_carrier((1.0, 2.0, 4.0, 8.0), (-1, 1, -1, 1))
+    registered_score = lf_detector(registered, registered)
+    wrong_score = lf_detector(registered, wrong)
     assert registered_score > wrong_score
 
 @pytest.mark.unit
@@ -473,7 +471,7 @@ def test_routing_mask_partition_and_range():
         "response": (0.1, 0.2, 0.3, 0.1),
         "sensitivity": (0.3, 0.2, 0.1, 0.4),
     }
-    routed = route_content_masks(observations, 4, True)
+    routed = content_router(observations, 4, True)
     partitions = tuple(
         lf + hf for lf, hf in zip(routed["mask_lf"], routed["mask_hf"])
     )
@@ -487,7 +485,7 @@ def test_routing_mask_partition_and_range():
 
 @pytest.mark.unit
 def test_routing_disabled_uniform_control():
-    disabled = route_content_masks(None, 4, False)
+    disabled = content_router(None, 4, False)
     assert disabled == {
         "A": (1.0, 1.0, 1.0, 1.0),
         "mask_lf": (1.0, 1.0, 1.0, 1.0),
@@ -503,31 +501,31 @@ def test_content_embedding_branch_consumption():
         "response": (0.1, 0.2, 0.3, 0.1),
         "sensitivity": (0.3, 0.2, 0.1, 0.4),
     }
-    route = route_content_masks(observations, 4, True)
-    lf = build_lf_template(
+    route = content_router(observations, 4, True)
+    lf = lf_carrier(
         (1.0, 2.0, 4.0, 8.0),
         (1, -1, 1, -1),
         route["mask_lf"],
     )
-    hf = build_hf_template(
+    hf = hf_carrier(
         (4.0, -3.0, 0.2, 0.1),
         (1, 1, 1, 1),
         2,
         route["mask_hf"],
     )
-    mixed = embed_content_branches(lf, hf, 0.50, 0.012)
-    uniform = route_content_masks(None, 4, False)
-    uniform_lf = build_lf_template(
+    mixed = content_embedder(lf, hf, 0.50, 0.012)
+    uniform = content_router(None, 4, False)
+    uniform_lf = lf_carrier(
         (1.0, 2.0, 4.0, 8.0),
         (1, -1, 1, -1),
         uniform["mask_lf"],
     )
-    changed_lf = build_lf_template(
+    changed_lf = lf_carrier(
         (1.0, 2.0, 4.0, 8.0),
         (-1, 1, -1, 1),
         route["mask_lf"],
     )
-    changed = embed_content_branches(changed_lf, hf, 0.50, 0.012)
+    changed = content_embedder(changed_lf, hf, 0.50, 0.012)
     assert route["mask_lf"] != uniform["mask_lf"] and lf != uniform_lf
     assert mixed["delta"] != changed["delta"]
 
@@ -536,7 +534,7 @@ def test_content_embedding_total_budget_and_frozen_allocation():
     lf_direction = (1.0, 0.0)
     hf_direction = (0.6, 0.8)
     results = [
-        embed_content_branches(
+        content_embedder(
             lf_direction,
             hf_direction,
             allocation,
@@ -551,7 +549,7 @@ def test_content_embedding_total_budget_and_frozen_allocation():
         for result in results
     ]
     with pytest.raises(ValueError, match="unregistered allocation"):
-        embed_content_branches(lf_direction, hf_direction, 0.40, 0.012)
+        content_embedder(lf_direction, hf_direction, 0.40, 0.012)
     combined = results[6]
     expected_pre_norm = (
         0.25**2 + 0.75**2 + 2 * 0.25 * 0.75 * 0.6
@@ -582,76 +580,76 @@ def test_content_embedding_total_budget_and_frozen_allocation():
 
 @pytest.mark.unit
 def test_content_embedding_active_zero_direction_fail_closed():
-    valid = embed_content_branches((1.0, -1.0), (1.0, 1.0), 0.50, 0.012)
+    valid = content_embedder((1.0, -1.0), (1.0, 1.0), 0.50, 0.012)
     with pytest.raises(ValueError, match="active zero direction"):
-        embed_content_branches((0.0, 0.0), (1.0, -1.0), 0.50, 0.012)
+        content_embedder((0.0, 0.0), (1.0, -1.0), 0.50, 0.012)
     assert valid["target_total_l2"] == pytest.approx(0.012)
 
 @pytest.mark.unit
 def test_content_wrong_key_rejection():
-    registered_hf = build_hf_template((4.0, -3.0, 0.1), (1, 1, 1), 2)
-    wrong_hf = build_hf_template((4.0, -3.0, 0.1), (-1, 1, -1), 2)
-    registered_lf = build_lf_template((1.0, 2.0, 4.0), (1, -1, 1))
-    wrong_lf = build_lf_template((1.0, 2.0, 4.0), (-1, 1, -1))
-    hf_margin = score_hf_direct(registered_hf, registered_hf) - score_hf_direct(registered_hf, wrong_hf)
-    lf_margin = score_lf_blind(registered_lf, registered_lf) - score_lf_blind(registered_lf, wrong_lf)
+    registered_hf = hf_carrier((4.0, -3.0, 0.1), (1, 1, 1), 2)
+    wrong_hf = hf_carrier((4.0, -3.0, 0.1), (-1, 1, -1), 2)
+    registered_lf = lf_carrier((1.0, 2.0, 4.0), (1, -1, 1))
+    wrong_lf = lf_carrier((1.0, 2.0, 4.0), (-1, 1, -1))
+    hf_margin = hf_detector(registered_hf, registered_hf) - hf_detector(registered_hf, wrong_hf)
+    lf_margin = lf_detector(registered_lf, registered_lf) - lf_detector(registered_lf, wrong_lf)
     assert hf_margin > 0 and lf_margin > 0
 
 @pytest.mark.unit
 def test_content_scores_independently_observable():
-    lf_score = score_lf_blind((1.0, 2.0, 4.0), (1.0, 2.0, 4.0))
-    hf_score = score_hf_direct((1.0, -1.0, 2.0), (1.0, -1.0, 2.0))
-    result = combine_content_scores(lf_score, hf_score, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "C0", (-2.0, -1.0, 0.0, 1.0, 2.0))
+    lf_score = lf_detector((1.0, 2.0, 4.0), (1.0, 2.0, 4.0))
+    hf_score = hf_detector((1.0, -1.0, 2.0), (1.0, -1.0, 2.0))
+    result = content_detector(lf_score, hf_score, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "hf_only_standardized_score", (-2.0, -1.0, 0.0, 1.0, 2.0))
     assert result["lf"] == lf_score and result["hf"] == hf_score
     assert set(result) == {"lf", "hf", "combined", "z_lf", "z_hf"}
 
 @pytest.mark.unit
 def test_content_combination_branch_consumption():
-    lf_a = score_lf_blind((1.0, 2.0, 4.0), (1.0, 2.0, 4.0))
-    lf_b = score_lf_blind((1.0, 2.0, 4.0), (4.0, 2.0, 1.0))
-    hf_a = score_hf_direct((1.0, -1.0, 2.0), (1.0, -1.0, 2.0))
-    hf_b = score_hf_direct((1.0, -1.0, 2.0), (2.0, -1.0, 1.0))
+    lf_a = lf_detector((1.0, 2.0, 4.0), (1.0, 2.0, 4.0))
+    lf_b = lf_detector((1.0, 2.0, 4.0), (4.0, 2.0, 1.0))
+    hf_a = hf_detector((1.0, -1.0, 2.0), (1.0, -1.0, 2.0))
+    hf_b = hf_detector((1.0, -1.0, 2.0), (2.0, -1.0, 1.0))
     table = (-2.0, -1.0, 0.0, 1.0, 2.0)
-    first = combine_content_scores(lf_a, hf_a, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "C1:0.50", table)
-    second = combine_content_scores(lf_b, hf_b, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "C1:0.50", table)
+    first = content_detector(lf_a, hf_a, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "weighted_hf_lf_standardized_score", table)
+    second = content_detector(lf_b, hf_b, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "weighted_hf_lf_standardized_score", table)
     assert first["combined"] != second["combined"]
 
 @pytest.mark.unit
 def test_content_combination_frozen_formula_identity():
     table = (-2.0, -1.0, 0.0, 1.0, 2.0)
-    result = combine_content_scores(0.0, 0.5, (-1.0, 0.0, 1.0), (-1.0, 0.0, 0.5), "C1:0.50", table)
+    result = content_detector(0.0, 0.5, (-1.0, 0.0, 1.0), (-1.0, 0.0, 0.5), "weighted_hf_lf_standardized_score", table)
     expected = 0.50 * result["z_hf"] + (1.0 - 0.50 ** 2) ** 0.5 * result["z_lf"]
     assert result["combined"] == pytest.approx(expected)
     assert result["z_lf"] == 0.0 and result["z_hf"] == 2.0
 
 @pytest.mark.unit
 def test_content_combination_wrong_key_not_masked():
-    lf_registered = score_lf_blind((1.0, 2.0, 4.0), (1.0, 2.0, 4.0))
-    lf_wrong = score_lf_blind((1.0, 2.0, 4.0), (4.0, 2.0, 1.0))
-    hf_registered = score_hf_direct((1.0, -1.0, 2.0), (1.0, -1.0, 2.0))
-    hf_wrong = score_hf_direct((1.0, -1.0, 2.0), (-1.0, 1.0, -2.0))
+    lf_registered = lf_detector((1.0, 2.0, 4.0), (1.0, 2.0, 4.0))
+    lf_wrong = lf_detector((1.0, 2.0, 4.0), (4.0, 2.0, 1.0))
+    hf_registered = hf_detector((1.0, -1.0, 2.0), (1.0, -1.0, 2.0))
+    hf_wrong = hf_detector((1.0, -1.0, 2.0), (-1.0, 1.0, -2.0))
     table = (-2.0, -1.0, 0.0, 1.0, 2.0)
-    registered = combine_content_scores(lf_registered, hf_registered, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "C1:0.50", table)
-    wrong = combine_content_scores(lf_wrong, hf_wrong, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "C1:0.50", table)
+    registered = content_detector(lf_registered, hf_registered, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "weighted_hf_lf_standardized_score", table)
+    wrong = content_detector(lf_wrong, hf_wrong, (-1.0, 0.0, 0.5), (-1.0, 0.0, 0.5), "weighted_hf_lf_standardized_score", table)
     assert registered["lf"] != wrong["lf"] and registered["hf"] != wrong["hf"]
     assert registered["combined"] > wrong["combined"]
 
 @pytest.mark.unit
 def test_qk_relation_consumption():
-    relation = build_qk_relation((2.0, 1.0), (3.0, -4.0))
+    relation = qk_geometry_sync((2.0, 1.0), (3.0, -4.0))
     assert set(relation) == {"logits", "probabilities"}
     assert relation["logits"] == (6.0, -4.0)
 
 @pytest.mark.unit
 def test_qk_similarity_transform_identifiability():
-    relation = build_qk_relation((1.0, 2.0), (1.0, 2.0))
-    estimate = estimate_similarity_transform([(("identity",), sum(relation["probabilities"])), (("rotated",), 0.1)])
+    relation = qk_geometry_sync((1.0, 2.0), (1.0, 2.0))
+    estimate = geometric_transform_estimator([(("identity",), sum(relation["probabilities"])), (("rotated",), 0.1)])
     assert estimate["transform"] == ("identity",)
     assert estimate["gap"] > 0
 
 @pytest.mark.unit
 def test_geometry_reliability_fail_closed():
-    estimate = estimate_similarity_transform([(("a",), 0.5), (("b",), 0.49)])
+    estimate = geometric_transform_estimator([(("a",), 0.5), (("b",), 0.49)])
     limits = {"coverage": 0.5, "uniqueness": 0.5, "gap": 0.05, "key_margin": 0.5, "inlier_ratio": 0.5, "residual": 0.1, "identity_margin": 0.1}
     cases = [
         estimate,
@@ -660,30 +658,30 @@ def test_geometry_reliability_fail_closed():
         dict(estimate, residual=0.9, gap=0.2),
         dict(estimate, boundary=True, gap=0.2),
     ]
-    decisions = [assess_geometry_reliability(case, limits) for case in cases]
+    decisions = [geometry_reliability(case, limits) for case in cases]
     assert estimate["transform"] == ("a",)
     assert all(decision[:2] == (False, "conjunction_failed") for decision in decisions)
 
 @pytest.mark.unit
 def test_geometry_reliability_wrong_key_and_raw_metrics():
-    estimate = estimate_similarity_transform([(("identity",), 0.9), (("other",), 0.1)])
+    estimate = geometric_transform_estimator([(("identity",), 0.9), (("other",), 0.1)])
     wrong_key_metrics = dict(estimate, key_margin=-0.1)
     limits = {"coverage": 0.5, "uniqueness": 0.5, "gap": 0.05, "key_margin": 0.5, "inlier_ratio": 0.5, "residual": 0.1, "identity_margin": 0.1}
-    wrong_key = assess_geometry_reliability(wrong_key_metrics, limits)
-    nonfinite = assess_geometry_reliability(dict(estimate, residual=float("nan")), limits)
+    wrong_key = geometry_reliability(wrong_key_metrics, limits)
+    nonfinite = geometry_reliability(dict(estimate, residual=float("nan")), limits)
     assert wrong_key[:2] == (False, "conjunction_failed")
     assert nonfinite[:2] == (False, "missing_or_nonfinite")
 
 @pytest.mark.unit
 def test_rectification_coordinate_protocol():
-    rectified = rectify_image_coordinates(("a", "b", "c", "d"), 1)
+    rectified = image_rectifier(("a", "b", "c", "d"), 1)
     expected = ("b", "c", "d", "a")
     assert tuple(rectified) == expected
 
 @pytest.mark.unit
 def test_near_threshold_recovery_gate():
-    blocked = decide_conditional_recovery(0.4, 0.9, 0.8, False, True)
-    rescued = decide_conditional_recovery(0.4, 0.9, 0.8, True, True)
+    blocked = conditional_recovery_decision(0.4, 0.9, 0.8, False, True)
+    rescued = conditional_recovery_decision(0.4, 0.9, 0.8, True, True)
     assert blocked[2] is False
     assert rescued == (True, 0.9, True)
 
@@ -691,8 +689,8 @@ def test_near_threshold_recovery_gate():
 def test_geometry_no_direct_positive():
     metrics = {"score": 2.0, "gap": 1.0, "coverage": 1.0, "uniqueness": 1.0, "key_margin": -1.0, "inlier_ratio": 1.0, "residual": 0.0, "boundary": False, "identity_margin": 1.0}
     limits = {"coverage": 0.5, "uniqueness": 0.5, "gap": 0.05, "key_margin": 0.5, "inlier_ratio": 0.5, "residual": 0.1, "identity_margin": 0.1}
-    reliable = assess_geometry_reliability(metrics, limits)
-    decision = decide_conditional_recovery(0.1, 2.0, 0.8, True, reliable[0])
+    reliable = geometry_reliability(metrics, limits)
+    decision = conditional_recovery_decision(0.1, 2.0, 0.8, True, reliable[0])
     assert reliable[0] is False
     assert decision[0] is False
     assert decision[1:] == (0.1, False)
@@ -702,12 +700,12 @@ def test_joint_same_detector_threshold():
     template = (1.0, -1.0, 1.0, -1.0)
     null = (-1.0, 0.0, 0.5)
     table = (-2.0, -1.0, 0.0, 1.0, 2.0)
-    raw_hf = score_hf_direct((1.0, 1.0, -1.0, -1.0), template)
-    raw_score = combine_content_scores(-1.0, raw_hf, null, null, "C0", table)["combined"]
-    rectified = rectify_image_coordinates((1.0, 1.0, -1.0, -1.0), 1)
-    rectified_hf = score_hf_direct(rectified, template)
-    rectified_score = combine_content_scores(-1.0, rectified_hf, null, null, "C0", table)["combined"]
-    final = decide_conditional_recovery(raw_score, rectified_score, 0.8, True, True)
+    raw_hf = hf_detector((1.0, 1.0, -1.0, -1.0), template)
+    raw_score = content_detector(-1.0, raw_hf, null, null, "hf_only_standardized_score", table)["combined"]
+    rectified = image_rectifier((1.0, 1.0, -1.0, -1.0), 1)
+    rectified_hf = hf_detector(rectified, template)
+    rectified_score = content_detector(-1.0, rectified_hf, null, null, "hf_only_standardized_score", table)["combined"]
+    final = conditional_recovery_decision(raw_score, rectified_score, 0.8, True, True)
     assert final[1] == rectified_score
     assert raw_score < 0.8
 """
@@ -809,9 +807,9 @@ def _write_legacy_arithmetic_proxy_fixture(root: Path) -> None:
         "    return query - key\n"
         "def estimate_geometric_transform(observation, reference):\n"
         "    return observation / reference\n"
-        "def rectify_image_coordinates(values, trim):\n"
+        "def image_rectifier(values, trim):\n"
         "    return values[trim:]\n"
-        "def decide_conditional_recovery(raw_score, rectified_score, eligible):\n"
+        "def conditional_recovery_decision(raw_score, rectified_score, eligible):\n"
         "    return rectified_score if eligible else raw_score\n",
     )
     legacy_test_relative = "tests/unit/test_dual_chain.py"
@@ -819,9 +817,9 @@ def _write_legacy_arithmetic_proxy_fixture(root: Path) -> None:
         root / legacy_test_relative,
         """import pytest
 from main.dual_chain import (
-    decide_conditional_recovery,
+    conditional_recovery_decision,
     estimate_geometric_transform,
-    rectify_image_coordinates,
+    image_rectifier,
     route_content,
     score_hf_evidence,
     synchronize_qk_geometry,
@@ -851,15 +849,15 @@ def test_geometry_unreliable_control():
 
 @pytest.mark.unit
 def test_near_threshold_recovery_gate():
-    assert decide_conditional_recovery(4, 9, False) == 4
+    assert conditional_recovery_decision(4, 9, False) == 4
 
 @pytest.mark.unit
 def test_geometry_no_direct_positive():
-    assert decide_conditional_recovery(-2, 8, False) < 0
+    assert conditional_recovery_decision(-2, 8, False) < 0
 
 @pytest.mark.unit
 def test_same_detector_same_threshold():
-    assert score_hf_evidence(0, rectify_image_coordinates((1, 8), 1)[0]) == 8
+    assert score_hf_evidence(0, image_rectifier((1, 8), 1)[0]) == 8
 """,
     )
     manifest_path, manifest = _manifest(root)
@@ -871,8 +869,8 @@ def test_same_detector_same_threshold():
         "content_detector": "score_hf_evidence",
         "qk_geometry_sync": "synchronize_qk_geometry",
         "geometric_transform_estimator": "estimate_geometric_transform",
-        "image_rectifier": "rectify_image_coordinates",
-        "conditional_recovery_decision": "decide_conditional_recovery",
+        "image_rectifier": "image_rectifier",
+        "conditional_recovery_decision": "conditional_recovery_decision",
     }
     for component in manifest["components"].values():
         component["implementation_path"] = "main/dual_chain.py"
@@ -1155,9 +1153,9 @@ def test_component_alias_only_symbol_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / COMPONENT_PATHS["content_embedder"]
     _write(
         path,
-        "from main.content_chain.hf_carrier import build_hf_template\n"
-        "def embed_content_branches(values, signs, keep, target_total_l2):\n"
-        "    return build_hf_template(values, signs, keep)\n",
+        "from main.content_chain.hf_carrier import hf_carrier\n"
+        "def content_embedder(values, signs, keep, target_total_l2):\n"
+        "    return hf_carrier(values, signs, keep)\n",
     )
     _commit_fixture_change_and_refresh_review(tmp_path)
     report = run_audit(tmp_path)
@@ -1173,7 +1171,7 @@ def test_input_independent_component_is_rejected(tmp_path: Path) -> None:
     _write_authority(tmp_path, "method_implemented")
     _write_schema_complete_method_fixture(tmp_path)
     path = tmp_path / COMPONENT_PATHS["lf_carrier"]
-    _write(path, "def build_lf_template(values, key_signs):\n    return (1.0,)\n")
+    _write(path, "def lf_carrier(values, key_signs):\n    return (1.0,)\n")
     report = run_audit(tmp_path)
     assert any(
         violation["reason"] == "method_component_implementation_input_independent"
@@ -1190,7 +1188,7 @@ def test_embedder_that_ignores_lf_branch_fails_candidate_behavior(
     path = tmp_path / COMPONENT_PATHS["content_embedder"]
     _write(
         path,
-        "def embed_content_branches(lf_direction, hf_direction, allocation, target_total_l2):\n"
+        "def content_embedder(lf_direction, hf_direction, allocation, target_total_l2):\n"
         "    hf_norm = sum(value * value for value in hf_direction) ** 0.5\n"
         "    if hf_norm == 0:\n"
         "        raise ValueError('active zero direction')\n"
@@ -1216,7 +1214,7 @@ def test_wrong_content_combination_formula_fails_candidate_behavior(
     path = tmp_path / COMPONENT_PATHS["content_detector"]
     _write(
         path,
-        "def combine_content_scores(lf_score, hf_score, lf_null, hf_null, combination, normal_table):\n"
+        "def content_detector(lf_score, hf_score, lf_null, hf_null, combination, normal_table):\n"
         "    combined = (lf_score + hf_score) / 2.0\n"
         "    observed = {'lf': lf_score, 'hf': hf_score, 'combined': combined}\n"
         "    return observed\n",

@@ -1,5 +1,5 @@
 {
-  "policy_version": 8,
+  "policy_version": 9,
   "project_name": "ceg_wm",
   "stage_order": [
     "project_constraint_framework",

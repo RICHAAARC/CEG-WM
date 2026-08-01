@@ -7,7 +7,7 @@ qualification、实验协议与可追溯交付。后续参考验证统一称为
 
 ## Roadmap Authority
 
-本文档定义从当前 `runtime_verified` 到论文全部数据、可重建产物和
+本文档定义从当前 `experiment_ready` 到论文全部数据、可重建产物和
 受支持结论的构建路线。它是研究与工程准入顺序，不是完成状态报告。
 
 文中的语义化名称是证据门，不是新的 `project_stage`。正式阶段仍以 `governance/policies/method_readiness_rules.yaml` 登记的顺序为准：
@@ -30,10 +30,12 @@ formal_evidence_available
 
 当前检查点：13 项职责、27 个 CPU/synthetic 方法行为节点、唯一 readiness 和真实
 SD3.5 runtime qualification 已分别完成并审计；实际 stage/status 已由独立
-revisions 同步为 `runtime_verified / implemented`。runtime 证据精确绑定 candidate
+revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑定 candidate
 `8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 qualification run
 `20260729T110628Z`。正式 detector 仍为 HF-only，LF/routing 未实验晋升，
-`full_ceg_wm_eligible=false`；尚无完整联合 FPR、正式 records 或科学效果证据。
+`full_ceg_wm_eligible=false`。实验准备基础设施已冻结协议与可追溯执行交付，但没有
+`tau`、confirmation 结果、Calibration Locked、正式 evaluation、完整联合 FPR、
+正式 records 或科学效果证据，也没有 LF/routing/组合/geometry 晋升。
 
 ## Paper Research Target
 
@@ -642,9 +644,10 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 
 ## Governance Freeze And Extension Rule
 
-方法 readiness、真实 runtime qualification 和独立 `runtime_verified` 阶段迁移完成
-后，通用治理平面继续冻结。下一步实验协议冻结、calibration、攻击矩阵和进入
-`experiment_ready` 必须另行获得明确授权；本段不授权这些工作。后续主线仍须按
+方法 readiness、真实 runtime qualification、实验协议与可追溯执行交付以及独立
+`experiment_ready` 阶段迁移完成后，通用治理平面继续冻结。下一步真实运行、
+candidate-selection、confirmation、calibration、Calibration Locked 和正式
+evaluation 必须按冻结协议及后续授权执行；本段不授权这些工作。后续主线仍须按
 既定门序进入 experiment 和 evidence 工作。
 除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、
 skill、schema 或 harness；存在缺口时优先对现有规则做最小、可测试的增量修订。

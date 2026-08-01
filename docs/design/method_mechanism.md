@@ -8,7 +8,7 @@
 
 本文档把 [algorithm_primitives.md](algorithm_primitives.md) 中的算法原语和
 [candidate_specifications.md](candidate_specifications.md) 中已关闭的有限候选组织为
-可实现、可验证且不越过当前 `runtime_verified` 阶段的端到端机制。
+可实现、可验证且不越过当前 `experiment_ready` 阶段的端到端机制。
 当前 13 项职责已按它实现并经 CPU/synthetic readiness 审核；本文档自身、
 admission、readiness 和阶段转换本身都不提供 runtime 或科学效果证据；当前
 runtime 结论只来自独立 qualification。
@@ -404,13 +404,16 @@ CPU/synthetic 验证与 readiness 审核；独立阶段迁移已经完成。
 ## Current Status
 
 当前项目登记为
-`runtime_verified / implemented`：
+`experiment_ready / implemented`：
 
 - 13 项职责、27 个 CPU/synthetic 行为节点和唯一 method readiness 已完成并审计；
 - 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
   `full_ceg_wm_eligible=false`；
 - 冻结 SD3.5 candidate 的真实 callback、actual dtype、VAE、两层 Q/K 和基本
   确定性 runtime 边界已经 qualification；
+- 实验准备基础设施闭环仅登记冻结协议与可追溯执行交付，不构成
+  `hf_only_reference_validation` 晋升；
 - 没有本项目 calibration 阈值；
+- 没有 confirmation 结果或 Calibration Locked；
 - 没有正式实验或论文 records；
 - 没有 FPR、鲁棒性或比较优势结论。

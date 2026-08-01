@@ -10,7 +10,7 @@
 
 当前该文件已在 13 项职责、27 个 CPU/synthetic 方法行为节点和 revision-bound
 独立语义复核完成后从模板唯一实例化。实际 stage/status 已由独立 revision 同步为
-`runtime_verified / implemented`；readiness 本身未自动修改任何阶段。外层权威
+`experiment_ready / implemented`；readiness 本身未自动修改任何阶段。外层权威
 `governance/templates/method_readiness.yaml` 和
 `governance/policies/method_readiness_rules.yaml` 仍分别定义结构与规则，不是第二份
 完成记录。

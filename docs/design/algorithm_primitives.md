@@ -436,6 +436,8 @@ candidate-selection、calibration 和 formal evaluation 门，以及由互斥 ca
 
 13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
 审计。实际 stage/status 已由独立 revisions 同步为
-`runtime_verified / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
+`experiment_ready / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
 qualification；正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
-`full_ceg_wm_eligible=false`，仍无正式 FPR 或效果证据。
+`full_ceg_wm_eligible=false`。实验准备基础设施闭环不提供 `tau`、confirmation
+结果、Calibration Locked、正式 evaluation、正式 FPR 或效果证据，也不晋升
+LF/routing/组合/geometry。

@@ -7,12 +7,14 @@ CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印�
 27 个 CPU/synthetic 方法行为节点和唯一 readiness，并经独立语义审计。
 
 阶段实施路径继续为
-`research_defined → method_construction_authorized → method_implemented → runtime_verified`。
-实际阶段/status 已由独立 revisions 同步为 `runtime_verified / implemented`。
+`research_defined → method_construction_authorized → method_implemented → runtime_verified → experiment_ready`。
+实际阶段/status 已由独立 revisions 同步为 `experiment_ready / implemented`。
 CPU/synthetic readiness 本身不证明 runtime；当前另有独立真实 GPU qualification
 支持冻结 SD3.5 runtime 边界，但不证明正式 FPR 或科学效果；
 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
-`full_ceg_wm_eligible=false`。
+`full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
+已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation
+或科学证据，也不晋升 LF/routing/组合/geometry。
 
 `method_implemented` 的 readiness AST 审计只承担候选绑定、固定模块路径、symbol 调用和断言接线检查；它不能单独证明非代理实现。该阶段还必须有绑定候选规格摘要、实现路径、方法特异性测试节点和 repository revision 的独立语义复核 `approve`，且复核后这些受保护路径没有变化。
 

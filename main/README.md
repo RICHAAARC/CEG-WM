@@ -7,11 +7,13 @@
 
 此层不得导入 runtime、experiments、paper artifacts、notebooks、infrastructure、tests 或任何外层控制平面，也不得保存实验 records、论文构建或模型后端适配。
 
-当前项目处于 `runtime_verified / implemented`。六个方法构建批次已完成
+当前项目处于 `experiment_ready / implemented`。六个方法构建批次已完成
 13 项职责实现、CPU/synthetic 行为验证、readiness 收口及绑定实现 revision 的独立语义
 审核；唯一 `method_readiness.yaml` 已在第 6 批完成后创建并记录 `approve`。这些事实此前
-构成独立方法阶段迁移的前置证据；后续真实 runtime qualification 和本次
-stage-only revision 均不修改方法机制。
+构成独立方法阶段迁移的前置证据；后续真实 runtime qualification、实验准备基础设施
+闭环和 stage-only revisions 均不修改方法机制。`experiment_ready` 只表示冻结协议与
+可追溯执行交付已经就位；当前没有 `tau`、confirmation 结果、Calibration Locked、
+正式 evaluation 或科学证据，也没有 LF/routing/组合/geometry 晋升。
 
 内容链已经实现 S/T/R/Q 数值路由、LF/HF carrier、blind detector、共同总预算写入组合
 及 hf_only_standardized_score/weighted_hf_lf_standardized_score/maximum_hf_lf_standardized_score 诊断，但正式内容判定仍保持 `hf_only`。LF、routing 和组合行为尚未获得
