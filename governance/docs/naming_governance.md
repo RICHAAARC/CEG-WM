@@ -24,12 +24,19 @@ code/Markdown、Markdown、SVG、Drawio 和登记字段。正式名称使用语�
 blanket tests exemption 放行。所有无明确版本职责的机械数字后缀按类别禁止，而非
 只检查固定名词；`detector2`、`metric_3`、`config_2`、`result4`、`router2`、
 `artifact_3`、`candidate4`、`protocol_7`、`method_v2` 都必须失败。明确 dtype
-literal 属于科学职责，不是身份编号。
+literal 属于科学职责，不是身份编号。业务生产路径中的普通变量、attribute、参数与
+keyword 也执行该检查，不因尚未成为函数/class 或手写 formal token 而豁免。业务
+代码注释与 docstring 中以代码 token 形式出现的机械身份同样失败；普通数值、tensor
+shape 和明确统计/版本职责不因此进入身份审计。
 
 `docs/reference/field_registry.md` 中 category 为 `method_identity` 或
 `runtime_identity` 的全部字段值都执行 weak 与 ordinal 两条检查；未登记但显然承担
 identity/name/label/path 职责的键继续使用语义 token fallback。字段登记表不得为了
-迁就审计而删改类别。两条检查产生可区分 reason，不得互相替代。
+迁就审计而删改类别。外层治理保存当前 identity 字段类别的非降级契约；登记字段缺失、
+类别降级或 identity 字段重复登记必须在 naming 与 field 两个独立审计中失败。登记表
+缺失、为空或相关行不可可靠解析时，naming audit 不得退回手写 regex 后继续通过。
+JSON、YAML 或 TOML 解析失败必须产生明确 `config_unreadable`。这些约束只属于可拆卸
+governance，不进入项目 schema 或运行对象。两条身份检查产生可区分 reason，不得互相替代。
 
 窄例外仅包括 `relative_l2`、`F32`、`RGB8`、`P95`、`x86_64`、`L4`、
 `SHA-256`、`SHA256`、实际使用的外部模型 literal `SD3.5`，以及

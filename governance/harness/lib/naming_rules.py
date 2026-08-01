@@ -70,8 +70,8 @@ FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN = re.compile(
     re.IGNORECASE,
 )
 GENERIC_MECHANICAL_NUMERIC_SUFFIX_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z_-]{1,})\d+"
-    r"(?![A-Za-z0-9_])",
+    r"(?<![A-Za-z0-9])(?P<core>[A-Za-z](?:[A-Za-z_-]+?\d+|\d{2,}))"
+    r"(?=$|[_-]?[A-Za-z])",
 )
 SCIENTIFIC_NUMERIC_LITERAL_PATTERN = re.compile(
     r"(?:binary|float|bfloat|u?int|utf)\d+",
@@ -138,6 +138,75 @@ ALLOWED_REGISTERED_NUMERIC_FIELD_ROLES = frozenset(
         "student_t_critical_975",
     }
 )
+EXACT_VERSION_CONTEXTS = frozenset(
+    {
+        "access_identity",
+        "bootstrap_failure_schema_version",
+        "bootstrap_schema_version",
+        "content_operation_semantic_version",
+        "current_execution_access_identity",
+        "declaration_contract",
+        "delivery_manifest_schema_version",
+        "diagnostic_schema_version",
+        "entrypoint_schema_version",
+        "execution_identity",
+        "execution_schema_version",
+        "expected_run_phase_id",
+        "expected_bootstrap_schema_version",
+        "frozen_protocol_id",
+        "frozen_record_collection_schema_version",
+        "frozen_record_schema_version",
+        "geometry_operation_identity",
+        "geometry_operation_semantic_version",
+        "hf_only_reference_compact_manifest_schema_version",
+        "hf_only_reference_metric_implementation_schema_version",
+        "hf_only_reference_prompt_roster_schema_version",
+        "hf_only_reference_schema_version",
+        "hf_only_threshold_fit_record_schema_version",
+        "identity_schema_version",
+        "input_manifest_schema_version",
+        "internal_record_field_registry_version",
+        "internal_validation_protocol_id",
+        "internal_validation_record_collection_schema_version",
+        "internal_validation_record_schema_version",
+        "legacy_internal_validation_protocol_id",
+        "legacy_protocol_compatibility",
+        "legacy_protocol_id",
+        "manifest_id",
+        "manifest_schema_version",
+        "metric_schema_version",
+        "model_revision",
+        "operation_identity",
+        "output_artifact_schema",
+        "package_schema_version",
+        "prompt_identity",
+        "protocol_id",
+        "record_collection_schema_version",
+        "record_schema_version",
+        "registered_key_family_id",
+        "registry_version",
+        "result_schema_version",
+        "run_phase_id",
+        "runtime_schema_version",
+        "schema_version",
+        "semantic_version",
+        "split_manifest_protocol_id",
+        "synthetic_model_revision",
+        "upstream_commit",
+        "wrong_key_roster_id",
+    }
+)
+_COMPACT_VERSION_CONTEXTS = tuple(
+    sorted(
+        ((context, context.replace("_", "")) for context in EXACT_VERSION_CONTEXTS),
+        key=lambda item: len(item[1]),
+        reverse=True,
+    )
+)
+_COMPACT_CONTEXT_MORPHOLOGICAL_CONTINUATIONS = {
+    "_id": ("entity", "entifier"),
+    "_version": ("ing", "ingpolicy"),
+}
 _ALLOWED_NARROW_LITERAL_PATTERN = re.compile(
     r"(?<![A-Za-z0-9])(?:"
     + "|".join(
@@ -197,22 +266,40 @@ def has_weak_semantic_token(name: str) -> bool:
 
 def has_weak_semantic_text(text: str) -> bool:
     """判断注释、docstring 或 Notebook source 是否包含独立弱语义词。"""
-    scrubbed = _scrub_allowed_literals(text)
+    scrubbed = _scrub_semantics(text)
     return bool(
         FORBIDDEN_VERSION_SHORTHAND_PATTERN.search(scrubbed)
         or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
     )
 
 
-def has_weak_semantic_identity_value(text: str) -> bool:
+def has_mechanical_identity_token_in_text(text: str) -> bool:
+    """Detect identifier-shaped mechanical suffixes inside code prose."""
+    scrubbed = _scrub_allowed_literals(text)
+    for token in re.findall(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_-]*(?![A-Za-z0-9_])", scrubbed):
+        if has_generic_mechanical_numeric_suffix(token):
+            return True
+    return False
+
+
+def has_weak_semantic_identity_value(
+    text: str,
+    *,
+    version_context: str | None = None,
+) -> bool:
     """Reject shorthand or unknown tokens only in a formal identity value."""
-    scrubbed = _scrub_contextual_semantic_roles(_scrub_allowed_literals(text)).strip()
+    scrubbed = _scrub_contextual_semantic_roles(
+        _normalize_identity_boundaries(_scrub_allowed_literals(text))
+    ).strip()
     return bool(
         scrubbed
         and (
             FORBIDDEN_VERSION_SHORTHAND_PATTERN.fullmatch(scrubbed)
             or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
-            or has_generic_mechanical_numeric_suffix(scrubbed)
+            or has_generic_mechanical_numeric_suffix(
+                scrubbed,
+                version_context=version_context,
+            )
             or FORBIDDEN_UNKNOWN_IDENTITY_PATTERN.search(scrubbed)
         )
     )
@@ -220,7 +307,9 @@ def has_weak_semantic_identity_value(text: str) -> bool:
 
 def has_weak_semantic_path_name(name: str) -> bool:
     """Reject weak shorthand or unknown tokens in a business path basename."""
-    scrubbed = _scrub_contextual_semantic_roles(_scrub_allowed_literals(name))
+    scrubbed = _scrub_contextual_semantic_roles(
+        _normalize_identity_boundaries(_scrub_allowed_literals(name))
+    )
     return bool(
         FORBIDDEN_VERSION_SHORTHAND_PATTERN.search(scrubbed)
         or FORBIDDEN_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(scrubbed)
@@ -239,11 +328,21 @@ def has_malformed_semantic_numeric_suffix(text: str) -> bool:
     return bool(MALFORMED_SEMANTIC_NUMERIC_SUFFIX_PATTERN.search(text))
 
 
-def has_generic_mechanical_numeric_suffix(text: str) -> bool:
+def has_generic_mechanical_numeric_suffix(
+    text: str,
+    *,
+    version_context: str | None = None,
+) -> bool:
     """Reject unexplained numeric suffixes while preserving explicit versions and dtypes."""
     candidate_text = _scrub_allowed_literals(text).strip().strip("_-")
+    candidate_text = _scrub_compact_numeric_domain_roles(
+        candidate_text,
+        version_context=version_context,
+    )
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", candidate_text):
         return False
+    if re.search(r"(?:^|[_-])v\d+(?=[_-])", candidate_text, re.IGNORECASE):
+        return True
     if is_allowed_registered_numeric_field_role(candidate_text):
         return False
     if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", candidate_text, re.IGNORECASE):
@@ -256,19 +355,137 @@ def has_generic_mechanical_numeric_suffix(text: str) -> bool:
         return False
     if is_scientific_l2_identifier(candidate_text):
         return False
+    if candidate_text.lower() in {"log1p", "adaptive_avg_pool2d"}:
+        return False
+    if re.search(
+        r"(?:^|[_-])(?:average|kernel)[_-]\d+x\d+(?:$|[_-])",
+        candidate_text,
+        re.IGNORECASE,
+    ):
+        return False
     if re.search(
         r"(?:^|[_-])(?:quantile|critical)[-_]?\d{2,4}$",
         candidate_text,
         re.IGNORECASE,
     ):
         return False
-    for match in GENERIC_MECHANICAL_NUMERIC_SUFFIX_PATTERN.finditer(candidate_text):
-        candidate = match.group(0)
-        if re.search(r"(?:^|[_-])v\d+$", candidate, re.IGNORECASE):
-            continue
-        if SCIENTIFIC_NUMERIC_LITERAL_PATTERN.fullmatch(candidate):
-            continue
+    if re.search(r"(?:^|[_-])cp_upper_95$", candidate_text, re.IGNORECASE):
+        return False
+    if re.fullmatch(r"(?:utf[-_]?8|ieee[-_]?754)", candidate_text, re.IGNORECASE):
+        return False
+    return GENERIC_MECHANICAL_NUMERIC_SUFFIX_PATTERN.search(candidate_text) is not None
+
+
+def _scrub_compact_numeric_domain_roles(
+    text: str,
+    *,
+    version_context: str | None = None,
+) -> str:
+    """Scrub compact numeric tokens only when the full name proves a real domain role."""
+    if re.fullmatch(r"(?:b64(?:encode|decode)|Base64Error)", text):
+        return re.sub(r"(?:b64|Base64)", "encoding", text, count=1)
+    if re.fullmatch(r"StableDiffusion3Pipeline", text):
+        return "StableDiffusionPipeline"
+
+    normalized = _normalize_identity_boundaries(text)
+    if re.fullmatch(r"Stable_Diffusion3_Pipeline", normalized):
+        return "Stable_Diffusion_Pipeline"
+    normalized = re.sub(
+        r"(?:^|(?<=_))one_sided_95(?=_|$)",
+        "one_sided_confidence",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if is_explicit_version_context(version_context):
+        normalized_context = canonical_version_context(version_context or "")
+        if normalized_context == "legacy_protocol_compatibility" and re.fullmatch(
+            r"v\d+_structure_readable_but_semantically_incompatible_and_not_revalidatable_as_v\d+",
+            normalized,
+            re.IGNORECASE,
+        ):
+            normalized = re.sub(r"v\d+", "version", normalized, flags=re.IGNORECASE)
+        else:
+            normalized = re.sub(
+                r"(?:^|(?<=[_-]))v\d+$",
+                "version",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            if (
+                normalized_context == "model_revision"
+                and normalized == "model_revision_1"
+            ):
+                normalized = "registered_model_revision"
+    if re.search(r"(?:^|_)sd(?:3|35)(?:_|$)", normalized, re.IGNORECASE) and (
+        re.search(
+            r"(?:^|_)(?:runtime|backend|configuration|adapter|pipeline|flowmatch|gpu|prompt|conditioning)(?:_|$)",
+            normalized,
+            re.IGNORECASE,
+        )
+        or re.search(r"(?:^|_)empty_text(?:_|$)", normalized, re.IGNORECASE)
+        or re.search(r"(?:^|_)real_to_q_to_k(?:_|$)", normalized, re.IGNORECASE)
+    ):
+        normalized = re.sub(
+            r"(?:^|(?<=_))sd(?:3|35)(?=_|$)",
+            "sd_model",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    normalized = re.sub(
+        r"(?:^|(?<=_))Rgb8(?=_(?:Image|Quality)(?:_|$))",
+        "rgb",
+        normalized,
+    )
+    return normalized
+
+
+def canonical_version_context(context: str) -> str:
+    """Canonicalize a possible version context for exact outer-audit matching."""
+    normalized = _normalize_identity_boundaries(context).strip("_-").lower()
+    return re.sub(r"-+", "_", normalized)
+
+
+def is_explicit_version_context(context: str | None) -> bool:
+    """Recognize outer-audit contexts that explicitly own a persisted revision."""
+    if context is None:
+        return False
+    return canonical_version_context(context) in EXACT_VERSION_CONTEXTS
+
+
+def is_noncanonical_version_context(
+    context: str | None,
+    *,
+    surface: str = "python",
+) -> bool:
+    """Detect compact aliases or wrappers around any exact version context."""
+    if context is None:
+        return False
+    canonical = canonical_version_context(context)
+    if canonical in EXACT_VERSION_CONTEXTS:
+        allowed_spellings = {canonical}
+        if surface == "python":
+            allowed_spellings.add(canonical.upper())
+        return context not in allowed_spellings
+    if any(
+        re.search(rf"(?:^|_){re.escape(exact_context)}(?:_|$)", canonical)
+        for exact_context in EXACT_VERSION_CONTEXTS
+    ):
         return True
+    compact = re.sub(r"[_-]+", "", context).lower()
+    for exact_context, compact_exact in _COMPACT_VERSION_CONTEXTS:
+        start = compact.find(compact_exact)
+        while start >= 0:
+            continuation = compact[start + len(compact_exact) :]
+            is_word_continuation = any(
+                exact_context.endswith(role)
+                and continuation in allowed_continuations
+                for role, allowed_continuations in (
+                    _COMPACT_CONTEXT_MORPHOLOGICAL_CONTINUATIONS.items()
+                )
+            )
+            if not is_word_continuation:
+                return True
+            start = compact.find(compact_exact, start + 1)
     return False
 
 
@@ -311,10 +528,15 @@ def _scrub_allowed_literals(text: str) -> str:
     return _ALLOWED_NARROW_LITERAL_PATTERN.sub("", text)
 
 
+def _normalize_identity_boundaries(text: str) -> str:
+    """Expose CamelCase word boundaries without changing the governed value."""
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", text)
+
+
 def _scrub_contextual_semantic_roles(text: str) -> str:
     """Preserve exact domain/action roles that are not placeholder identities."""
     return re.sub(
-        r"(?i)(?:^|[_-])(?:final_image|copy_gate|result_copy)(?=$|[_-])",
+        r"(?i)(?:^|[_-])(?:final_image|copy_gate|result_copy|atomic_copy|fail_closed_for_copy)(?=$|[_-])",
         "_",
         text,
     )

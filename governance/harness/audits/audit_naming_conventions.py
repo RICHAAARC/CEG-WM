@@ -11,17 +11,20 @@ import sys
 import tokenize
 import tomllib
 import xml.etree.ElementTree as ET
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from governance.harness.lib.file_scanner import iter_governed_paths
-from governance.harness.lib.field_rules import load_field_registry
+from governance.harness.lib.field_rules import inspect_field_registry
 from governance.harness.lib.json_report import build_report, exit_with_report
 from governance.harness.lib.naming_rules import (
     NUMBERED_RESPONSIBILITY_WORDS,
+    canonical_version_context,
     has_generic_mechanical_numeric_suffix,
+    has_mechanical_identity_token_in_text,
     has_malformed_semantic_numeric_suffix,
     has_ordinal_identity_text,
     has_ordinal_identity_polysemy,
@@ -33,6 +36,8 @@ from governance.harness.lib.naming_rules import (
     is_allowed_file_name,
     is_allowed_registered_numeric_field_role,
     is_scientific_l2_identifier,
+    is_explicit_version_context,
+    is_noncanonical_version_context,
 )
 
 
@@ -60,12 +65,33 @@ RESPONSIBILITY_CONTEXT_PATTERN = re.compile(
 )
 
 
+def _is_business_production_path(relative: Path) -> bool:
+    return bool(relative.parts and relative.parts[0] in BUSINESS_PATH_ROOTS)
+
+
+TEST_BEHAVIOR_SEMANTIC_PATTERN = re.compile(
+    r"(?:^|_)(?:rejects?|preserves?|fails?|failure|raises?|returns?|accepts?|"
+    r"prevents?|detects?|reports?|produces?|releases?|explicit)(?:_|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_weak_test_node_without_behavior(name: str) -> bool:
+    """Reject weak test identities that state no observable behavioral outcome."""
+    if not name.startswith("test_") or not has_weak_semantic_identity_value(name):
+        return False
+    tokens = tuple(part for part in name.split("_") if part)
+    return len(tokens) < 5 or not TEST_BEHAVIOR_SEMANTIC_PATTERN.search(name)
+
+
 def _is_formal_identity_context(
     name: str,
     registered_identity_fields: frozenset[str],
     registered_fields: frozenset[str],
 ) -> bool:
     """Prefer registered identity fields, with explicit identity tokens as fallback."""
+    if is_explicit_version_context(name) or is_noncanonical_version_context(name):
+        return True
     if name in registered_fields:
         return name in registered_identity_fields
     return (
@@ -227,15 +253,27 @@ def _python_semantic_violations(
         set(names),
         key=lambda item: (item[1], item[0], item[2]),
     ):
-        if has_weak_semantic_token(name) or (
-            has_generic_mechanical_numeric_suffix(name)
-            and not is_allowed_registered_numeric_field_role(name)
-            and (
-                node_kind in {"FunctionDef", "AsyncFunctionDef", "ClassDef"}
-                or _is_formal_identity_context(
-                    name,
-                    registered_identity_fields,
-                    registered_fields,
+        is_callable_or_class = node_kind in {"FunctionDef", "AsyncFunctionDef", "ClassDef"}
+        if (
+            has_weak_semantic_token(name)
+            or (
+                is_callable_or_class
+                and (
+                    (_is_business_production_path(relative) and has_weak_semantic_identity_value(name))
+                    or _is_weak_test_node_without_behavior(name)
+                )
+            )
+            or (
+                has_generic_mechanical_numeric_suffix(name)
+                and not is_allowed_registered_numeric_field_role(name)
+                and (
+                    _is_business_production_path(relative)
+                    or is_callable_or_class
+                    or _is_formal_identity_context(
+                        name,
+                        registered_identity_fields,
+                        registered_fields,
+                    )
                 )
             )
         ):
@@ -350,15 +388,26 @@ def _python_semantic_violations(
                             (literal, line, formal_name)
                             for literal, line in _python_string_literals(comparator)
                         )
-    for value, line, _ in sorted(
+    for value, line, context in sorted(
         set(identity_strings),
         key=lambda item: (item[1], item[0], item[2]),
     ):
-        if has_weak_semantic_identity_value(value):
+        if is_noncanonical_version_context(context):
+            violations.append(
+                {
+                    "path": str(relative),
+                    "reason": "version_context_identifier_not_canonical",
+                    "identifier": context,
+                    "canonical_context": canonical_version_context(context),
+                    "line": line,
+                }
+            )
+        if has_weak_semantic_identity_value(value, version_context=context):
             violations.append(
                 {
                     "path": str(relative),
                     "reason": "weak_semantic_python_string",
+                    "context": context,
                     "line": line,
                 }
             )
@@ -384,7 +433,13 @@ def _python_semantic_violations(
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             docstring = ast.get_docstring(node, clean=False)
-            if docstring and has_weak_semantic_text(docstring):
+            if docstring and (
+                has_weak_semantic_text(docstring)
+                or (
+                    _is_business_production_path(relative)
+                    and has_mechanical_identity_token_in_text(docstring)
+                )
+            ):
                 violations.append({"path": str(relative), "reason": "weak_semantic_docstring", "line": getattr(node, "lineno", 1)})
             if docstring and has_ordinal_identity_text(docstring):
                 violations.append(
@@ -398,7 +453,13 @@ def _python_semantic_violations(
     try:
         tokens = tokenize.generate_tokens(io.StringIO(text).readline)
         for token in tokens:
-            if token.type == tokenize.COMMENT and has_weak_semantic_text(token.string):
+            if token.type == tokenize.COMMENT and (
+                has_weak_semantic_text(token.string)
+                or (
+                    _is_business_production_path(relative)
+                    and has_mechanical_identity_token_in_text(token.string)
+                )
+            ):
                 violations.append({"path": str(relative), "reason": "weak_semantic_comment", "line": token.start[0]})
             if token.type == tokenize.COMMENT and has_ordinal_identity_text(token.string):
                 violations.append(
@@ -438,9 +499,9 @@ def _identity_and_path_values(
     value: object,
     registered_identity_fields: frozenset[str],
     registered_fields: frozenset[str],
-    inherited_context: bool = False,
-) -> list[str]:
-    values: list[str] = []
+    inherited_context: str | None = None,
+) -> list[tuple[str, str]]:
+    values: list[tuple[str, str]] = []
     if isinstance(value, dict):
         for key, child in value.items():
             key_text = str(key)
@@ -452,19 +513,19 @@ def _identity_and_path_values(
                 )
             )
             if isinstance(child, str) and child_context:
-                values.append(child)
+                values.append((child, key_text))
             values.extend(
                 _identity_and_path_values(
                     child,
                     registered_identity_fields,
                     registered_fields,
-                    child_context if isinstance(child, list) else False,
+                    key_text if child_context and isinstance(child, list) else None,
                 )
             )
     elif isinstance(value, list):
         for child in value:
-            if isinstance(child, str) and inherited_context:
-                values.append(child)
+            if isinstance(child, str) and inherited_context is not None:
+                values.append((child, inherited_context))
             values.extend(
                 _identity_and_path_values(
                 child,
@@ -474,6 +535,17 @@ def _identity_and_path_values(
                 )
             )
     return values
+
+
+def _is_narrow_historical_source_literal(value: str, context: str) -> bool:
+    """Preserve only the already registered external historical source spelling."""
+    if context not in {"source_id", "project_name", "read_only_path"}:
+        return False
+    return value in {
+        "ceg_wm_old_main",
+        "CEG-WM-OLD-main",
+        "/home/richar/projects/CEG-WM-OLD-main/CEG-WM-OLD-main",
+    }
 
 
 def _ordinal_bindings(
@@ -531,39 +603,59 @@ def _config_semantic_violations(
     registered_identity_fields: frozenset[str],
     registered_fields: frozenset[str],
 ) -> list[dict]:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return [{"path": str(relative), "reason": "config_unreadable"}]
     keyed_lines: list[tuple[str, int]] = []
     document: object | None = None
     try:
         if path.suffix.lower() == ".toml":
             document = tomllib.loads(text)
         elif path.suffix.lower() in {".yaml", ".yml"}:
-            from governance.harness.lib.project_policy import load_json_compatible_yaml
-
-            document = load_json_compatible_yaml(path)
+            document = yaml.safe_load(text)
         else:
             document = json.loads(text)
-    except (json.JSONDecodeError, ValueError, tomllib.TOMLDecodeError):
+    except (json.JSONDecodeError, ValueError, tomllib.TOMLDecodeError, yaml.YAMLError):
+        violations = [
+            {
+                "path": str(relative),
+                "reason": "config_unreadable",
+            }
+        ]
         for line_number, line in enumerate(text.splitlines(), start=1):
             match = CONFIG_KEY_PATTERN.match(line)
             if match:
                 keyed_lines.append((match.group("key"), line_number))
     else:
         keyed_lines.extend((key, 1) for key in _nested_mapping_keys(document))
-    violations = [
-        {"path": str(relative), "reason": "weak_semantic_config_key", "key": key, "line": line}
-        for key, line in keyed_lines
-        if has_weak_semantic_token(key)
-        or (
-            _is_formal_identity_context(
-                key,
-                registered_identity_fields,
-                registered_fields,
+        violations = []
+    violations.extend(
+        [
+            {"path": str(relative), "reason": "weak_semantic_config_key", "key": key, "line": line}
+            for key, line in keyed_lines
+            if has_weak_semantic_token(key)
+            or (
+                _is_formal_identity_context(
+                    key,
+                    registered_identity_fields,
+                    registered_fields,
+                )
+                and has_weak_semantic_identity_value(key)
             )
-            and has_weak_semantic_identity_value(key)
-        )
-    ]
+        ]
+    )
     for key, line in keyed_lines:
+        if is_noncanonical_version_context(key, surface="config"):
+            violations.append(
+                {
+                    "path": str(relative),
+                    "reason": "version_context_key_not_canonical",
+                    "key": key,
+                    "canonical_context": canonical_version_context(key),
+                    "line": line,
+                }
+            )
         if (
             _is_formal_identity_context(
                 key,
@@ -581,26 +673,33 @@ def _config_semantic_violations(
                 }
             )
     if document is not None:
-        for value in _identity_and_path_values(
+        for value, context in _identity_and_path_values(
             document,
             registered_identity_fields,
             registered_fields,
         ):
-            if has_weak_semantic_identity_value(value):
+            if has_weak_semantic_identity_value(
+                value,
+                version_context=context,
+            ) and not _is_narrow_historical_source_literal(
+                value, context
+            ):
                 violations.append(
                     {
                         "path": str(relative),
                         "reason": "weak_semantic_config_value",
                         "value": value,
+                        "context": context,
                         "line": 1,
                     }
                 )
-            if has_ordinal_identity_text(value):
+            if has_ordinal_identity_text(value) and not is_scientific_l2_identifier(value):
                 violations.append(
                     {
                         "path": str(relative),
                         "reason": "ordinal_identity_config_value",
                         "value": value,
+                        "context": context,
                         "line": 1,
                     }
                 )
@@ -746,14 +845,15 @@ def _text_semantic_violations(path: Path, relative: Path) -> list[dict]:
 
 def run_audit(root: str | Path) -> dict:
     root_path = Path(root)
-    field_registry = load_field_registry(root_path)
+    registry_inspection = inspect_field_registry(root_path)
+    field_registry = registry_inspection.rows
     registered_fields = frozenset(field_registry)
     registered_identity_fields = frozenset(
         row.field_name
         for row in field_registry.values()
         if row.category in {"method_identity", "runtime_identity"}
     )
-    violations = []
+    violations = list(registry_inspection.violations)
     checked_paths = []
     for path in iter_governed_paths(root_path):
         relative = path.relative_to(root_path)
