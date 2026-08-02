@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from typing import Mapping, Sequence
+import zipfile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +38,18 @@ EXECUTION_CONFIG_PATH = Path(
 class HfOnlyThresholdFitServerError(RuntimeError):
     """The direct execution preflight or receipt boundary failed closed."""
 
+    def __init__(
+        self,
+        stage: str,
+        message: str,
+        *,
+        failure_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.safe_message = message
+        self.failure_type = failure_type or type(self).__name__
+
 
 def _sha256_file(path: Path) -> str:
     digest = sha256()
@@ -56,7 +70,9 @@ def _git(root: Path, *arguments: str) -> str:
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise HfOnlyThresholdFitServerError(
-            "repository identity is unavailable"
+            "repository",
+            "repository identity is unavailable",
+            failure_type=type(exc).__name__,
         ) from exc
     return completed.stdout.strip()
 
@@ -64,7 +80,10 @@ def _git(root: Path, *arguments: str) -> str:
 def _absolute_root(value: str | Path, role: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
-        raise HfOnlyThresholdFitServerError(f"{role} must be absolute")
+        raise HfOnlyThresholdFitServerError(
+            "arguments",
+            f"{role} must be absolute",
+        )
     return path.resolve()
 
 
@@ -75,15 +94,18 @@ def _overlap(first: Path, second: Path) -> bool:
 def _verify_repository(root: Path, expected_revision: str) -> None:
     if not root.is_dir() or REVISION.fullmatch(expected_revision) is None:
         raise HfOnlyThresholdFitServerError(
-            "repository root or exact revision is invalid"
+            "repository",
+            "repository root or exact revision is invalid",
         )
     if _git(root, "rev-parse", "HEAD") != expected_revision:
         raise HfOnlyThresholdFitServerError(
-            "repository HEAD differs from expected_revision"
+            "repository",
+            "repository HEAD differs from expected_revision",
         )
     if _git(root, "status", "--porcelain"):
         raise HfOnlyThresholdFitServerError(
-            "repository worktree must be clean"
+            "repository",
+            "repository worktree must be clean",
         )
 
 
@@ -96,7 +118,9 @@ def _load_execution_bindings(root: Path) -> tuple[str, str, int]:
         minimum_vram_bytes = execution["resource_plan"]["minimum_vram_bytes"]
     except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise HfOnlyThresholdFitServerError(
-            "frozen runtime or execution configuration is unreadable"
+            "configuration",
+            "frozen runtime or execution configuration is unreadable",
+            failure_type=type(exc).__name__,
         ) from exc
     if (
         type(model_id) is not str
@@ -108,7 +132,8 @@ def _load_execution_bindings(root: Path) -> tuple[str, str, int]:
         or minimum_vram_bytes <= 0
     ):
         raise HfOnlyThresholdFitServerError(
-            "frozen runtime or execution configuration is invalid"
+            "configuration",
+            "frozen runtime or execution configuration is invalid",
         )
     return model_id, model_revision, minimum_vram_bytes
 
@@ -119,14 +144,24 @@ def _probe_resources(
     minimum_vram_bytes: int,
 ) -> dict[str, object]:
     free_bytes: dict[str, int] = {}
-    for root in roots:
-        root.mkdir(parents=True, exist_ok=True)
-        observed = int(shutil.disk_usage(root).free)
-        if observed <= 0:
-            raise HfOnlyThresholdFitServerError(
-                "execution storage has no available space"
-            )
-        free_bytes[str(root)] = observed
+    try:
+        for root in roots:
+            root.mkdir(parents=True, exist_ok=True)
+            observed = int(shutil.disk_usage(root).free)
+            if observed <= 0:
+                raise HfOnlyThresholdFitServerError(
+                    "resource_preflight",
+                    "execution storage has no available space",
+                )
+            free_bytes[str(root)] = observed
+    except HfOnlyThresholdFitServerError:
+        raise
+    except OSError as exc:
+        raise HfOnlyThresholdFitServerError(
+            "resource_preflight",
+            "execution storage identity is unavailable",
+            failure_type=type(exc).__name__,
+        ) from exc
     try:
         completed = subprocess.run(
             (
@@ -143,11 +178,14 @@ def _probe_resources(
         total_memory_bytes = int(memory_mib) * 1024 * 1024
     except (OSError, subprocess.CalledProcessError, IndexError, ValueError) as exc:
         raise HfOnlyThresholdFitServerError(
-            "cuda device identity is unavailable"
+            "resource_preflight",
+            "cuda device identity is unavailable",
+            failure_type=type(exc).__name__,
         ) from exc
     if total_memory_bytes < minimum_vram_bytes:
         raise HfOnlyThresholdFitServerError(
-            "cuda:0 is below the frozen model-agnostic VRAM floor"
+            "resource_preflight",
+            "cuda:0 is below the frozen model-agnostic VRAM floor",
         )
     return {
         "cuda_device_name": name,
@@ -176,6 +214,78 @@ def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
             temporary.unlink()
 
 
+def _safe_path_identity(value: str, role: str) -> str:
+    if SAFE_ID.fullmatch(value):
+        return value
+    return f"invalid-{role}-{sha256(value.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _preflight_failure_receipt(
+    *,
+    output_root: str | Path,
+    expected_revision: str,
+    run_id: str,
+    shard_index: int,
+    error: HfOnlyThresholdFitServerError,
+) -> dict[str, object]:
+    output = Path(output_root).resolve()
+    safe_revision = (
+        expected_revision
+        if REVISION.fullmatch(expected_revision)
+        else _safe_path_identity(expected_revision, "revision")
+    )
+    safe_run_id = _safe_path_identity(run_id, "run")
+    safe_shard = shard_index if isinstance(shard_index, int) else -1
+    finished = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    diagnostic_path = (
+        output
+        / "server_preflight_failures"
+        / safe_revision
+        / safe_run_id
+        / f"shard_{safe_shard:02d}"
+        / f"ceg_wm_server_preflight_failure_{safe_run_id}_{finished}.zip"
+    )
+    diagnostic_path.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic = {
+        "artifact_kind": "server_preflight_failure",
+        "committed_revision": expected_revision,
+        "failure_message": error.safe_message,
+        "failure_stage": error.stage,
+        "failure_type": error.failure_type,
+        "run_id": run_id,
+        "shard_index": shard_index,
+        "scientific_claims_supported": False,
+        "tau_approval": False,
+        "confirmation_unlock": False,
+    }
+    with zipfile.ZipFile(
+        diagnostic_path,
+        mode="x",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as archive:
+        archive.writestr(
+            "server_preflight_diagnostic.json",
+            json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+        )
+    receipt_path = (
+        output
+        / "execution_receipts"
+        / safe_revision
+        / safe_run_id
+        / f"shard_{safe_shard:02d}"
+        / "execution_receipt.json"
+    )
+    receipt = {
+        **diagnostic,
+        "artifact_path": str(diagnostic_path),
+        "artifact_sha256": _sha256_file(diagnostic_path),
+        "bootstrap_exit_code": 3,
+        "receipt_path": str(receipt_path),
+    }
+    _atomic_json(receipt_path, receipt)
+    return receipt
+
+
 def execute_server_threshold_fit_shard(
     *,
     repository_root: str | Path,
@@ -200,10 +310,14 @@ def execute_server_threshold_fit_shard(
         for second in roots[index + 1 :]
     ) or any(_overlap(repository, root) for root in roots):
         raise HfOnlyThresholdFitServerError(
-            "repository, scratch, cache, and output roots must be disjoint"
+            "arguments",
+            "repository, scratch, cache, and output roots must be disjoint",
         )
     if SAFE_ID.fullmatch(run_id) is None or not 0 <= shard_index < 16:
-        raise HfOnlyThresholdFitServerError("run_id or shard_index is invalid")
+        raise HfOnlyThresholdFitServerError(
+            "arguments",
+            "run_id or shard_index is invalid",
+        )
     _verify_repository(repository, expected_revision)
     model_id, model_revision, minimum_vram_bytes = _load_execution_bindings(
         repository
@@ -213,7 +327,8 @@ def execute_server_threshold_fit_shard(
         "CEG_WM_ROOT_KEY"
     ):
         raise HfOnlyThresholdFitServerError(
-            "HF_TOKEN and CEG_WM_ROOT_KEY are required"
+            "secrets",
+            "HF_TOKEN and CEG_WM_ROOT_KEY are required",
         )
     resource_facts = _probe_resources(
         roots=roots,
@@ -223,11 +338,18 @@ def execute_server_threshold_fit_shard(
         tempfile.mkdtemp(dir=scratch, prefix="hf_only_threshold_fit_build_")
     )
     package_zip = build_root / "ceg_wm_hf_only_threshold_fit.zip"
-    build = build_experiment_execution_package(
-        root=repository,
-        output_zip=package_zip,
-        committed_revision=expected_revision,
-    )
+    try:
+        build = build_experiment_execution_package(
+            root=repository,
+            output_zip=package_zip,
+            committed_revision=expected_revision,
+        )
+    except Exception as exc:
+        raise HfOnlyThresholdFitServerError(
+            "package_build",
+            "dedicated execution package build failed",
+            failure_type=type(exc).__name__,
+        ) from exc
     sidecar = Path(str(build["delivery_manifest_path"]))
     bootstrap_path = (
         repository
@@ -257,12 +379,14 @@ def execute_server_threshold_fit_shard(
     )
     if type(artifact_value) is not str:
         raise HfOnlyThresholdFitServerError(
-            "bootstrap did not return a result or diagnostic ZIP"
+            "bootstrap_result",
+            "bootstrap did not return a result or diagnostic ZIP",
         )
     artifact_path = Path(artifact_value).resolve()
     if not artifact_path.is_file() or output not in artifact_path.parents:
         raise HfOnlyThresholdFitServerError(
-            "bootstrap artifact is unavailable or outside output_root"
+            "bootstrap_result",
+            "bootstrap artifact is unavailable or outside output_root",
         )
     receipt_path = (
         output
@@ -309,15 +433,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--shard-index", required=True, type=int)
     arguments = parser.parse_args(argv)
-    exit_code, receipt = execute_server_threshold_fit_shard(
-        repository_root=arguments.repository_root,
-        expected_revision=arguments.expected_revision,
-        scratch_root=arguments.scratch_root,
-        cache_root=arguments.cache_root,
-        output_root=arguments.output_root,
-        run_id=arguments.run_id,
-        shard_index=arguments.shard_index,
-    )
+    try:
+        exit_code, receipt = execute_server_threshold_fit_shard(
+            repository_root=arguments.repository_root,
+            expected_revision=arguments.expected_revision,
+            scratch_root=arguments.scratch_root,
+            cache_root=arguments.cache_root,
+            output_root=arguments.output_root,
+            run_id=arguments.run_id,
+            shard_index=arguments.shard_index,
+        )
+    except HfOnlyThresholdFitServerError as error:
+        receipt = _preflight_failure_receipt(
+            output_root=arguments.output_root,
+            expected_revision=arguments.expected_revision,
+            run_id=arguments.run_id,
+            shard_index=arguments.shard_index,
+            error=error,
+        )
+        exit_code = 3
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return exit_code
 

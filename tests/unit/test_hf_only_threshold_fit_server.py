@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 from types import ModuleType
 import sys
+import zipfile
 
 import pytest
 
@@ -26,6 +29,105 @@ def _git(root: Path, *arguments: str) -> str:
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def _repository_with_basic_execution_configs(tmp_path: Path) -> tuple[Path, str]:
+    repository = tmp_path / "repository"
+    runtime_path = repository / server.RUNTIME_CONFIG_PATH
+    execution_path = repository / server.EXECUTION_CONFIG_PATH
+    runtime_path.parent.mkdir(parents=True)
+    execution_path.parent.mkdir(parents=True)
+    runtime_path.write_text(
+        json.dumps(
+            {
+                "model_id": "owner/frozen-model",
+                "model_revision": "1" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    execution_path.write_text(
+        json.dumps(
+            {"resource_plan": {"minimum_vram_bytes": 22 * 1024**3}}
+        ),
+        encoding="utf-8",
+    )
+    _git(repository, "init")
+    _git(repository, "config", "user.email", "test@example.invalid")
+    _git(repository, "config", "user.name", "Server CLI Test")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "fixture")
+    return repository, _git(repository, "rev-parse", "HEAD")
+
+
+def _command_path(tmp_path: Path, *, vram_mib: int | None) -> str:
+    command_root = tmp_path / "command-bin"
+    command_root.mkdir()
+    git_path = shutil.which("git")
+    assert git_path
+    (command_root / "git").symlink_to(git_path)
+    if vram_mib is not None:
+        nvidia_smi = command_root / "nvidia-smi"
+        nvidia_smi.write_text(
+            "#!/bin/sh\n" f"echo 'Fake GPU, {vram_mib}'\n",
+            encoding="utf-8",
+        )
+        nvidia_smi.chmod(0o755)
+    return str(command_root)
+
+
+def _run_cli_failure(
+    *,
+    tmp_path: Path,
+    repository: Path,
+    expected_revision: str,
+    environment: dict[str, str],
+) -> tuple[dict[str, object], subprocess.CompletedProcess[str]]:
+    scratch = tmp_path / "scratch"
+    cache = tmp_path / "cache"
+    output = tmp_path / "output"
+    command = (
+        sys.executable,
+        str(Path(server.__file__)),
+        "--repository-root",
+        str(repository),
+        "--expected-revision",
+        expected_revision,
+        "--scratch-root",
+        str(scratch),
+        "--cache-root",
+        str(cache),
+        "--output-root",
+        str(output),
+        "--run-id",
+        "cli-preflight",
+        "--shard-index",
+        "0",
+    )
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert completed.returncode == 3
+    receipt = json.loads(completed.stdout)
+    artifact = Path(str(receipt["artifact_path"]))
+    persisted_receipt = Path(str(receipt["receipt_path"]))
+    assert artifact.is_file() and persisted_receipt.is_file()
+    assert receipt["artifact_sha256"] == sha256(artifact.read_bytes()).hexdigest()
+    with zipfile.ZipFile(artifact) as archive:
+        diagnostic = json.loads(
+            archive.read("server_preflight_diagnostic.json")
+        )
+    assert diagnostic["failure_stage"] == receipt["failure_stage"]
+    assert diagnostic["failure_type"] == receipt["failure_type"]
+    combined = completed.stdout + completed.stderr + json.dumps(diagnostic)
+    assert "Traceback" not in combined
+    assert "private-hf-token" not in combined
+    assert "private-root-key" not in combined
+    return receipt, completed
 
 
 @pytest.mark.quick
@@ -205,3 +307,128 @@ def test_server_delegates_to_bootstrap_and_emits_complete_secret_free_receipt(
     persisted_text = persisted.read_text(encoding="utf-8")
     assert "do-not-persist" not in persisted_text
     assert "artifact_sha256" in persisted_text
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("repository_state", ("wrong_revision", "dirty"))
+def test_real_cli_repository_failures_emit_diagnostic_receipt(
+    tmp_path: Path,
+    repository_state: str,
+) -> None:
+    repository, revision = _repository_with_basic_execution_configs(tmp_path)
+    expected = revision
+    if repository_state == "wrong_revision":
+        expected = "f" * 40
+    else:
+        (repository / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "HF_TOKEN": "private-hf-token",
+            "CEG_WM_ROOT_KEY": "private-root-key",
+        }
+    )
+    receipt, _completed = _run_cli_failure(
+        tmp_path=tmp_path,
+        repository=repository,
+        expected_revision=expected,
+        environment=environment,
+    )
+    assert receipt["failure_stage"] == "repository"
+
+
+@pytest.mark.quick
+def test_real_cli_configuration_and_secret_failures_emit_diagnostics(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+    _git(repository, "init")
+    _git(repository, "config", "user.email", "test@example.invalid")
+    _git(repository, "config", "user.name", "Server CLI Test")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "fixture")
+    revision = _git(repository, "rev-parse", "HEAD")
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "HF_TOKEN": "private-hf-token",
+            "CEG_WM_ROOT_KEY": "private-root-key",
+        }
+    )
+    receipt, _completed = _run_cli_failure(
+        tmp_path=tmp_path,
+        repository=repository,
+        expected_revision=revision,
+        environment=environment,
+    )
+    assert receipt["failure_stage"] == "configuration"
+
+    separate = tmp_path / "secret-case"
+    separate.mkdir()
+    secret_repository, secret_revision = _repository_with_basic_execution_configs(
+        separate
+    )
+    receipt, _completed = _run_cli_failure(
+        tmp_path=separate,
+        repository=secret_repository,
+        expected_revision=secret_revision,
+        environment=dict(os.environ),
+    )
+    assert receipt["failure_stage"] == "secrets"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("vram_mib", "expected_message"),
+    (
+        (None, "cuda device identity is unavailable"),
+        (1024, "below the frozen model-agnostic VRAM floor"),
+    ),
+)
+def test_real_cli_resource_failures_emit_diagnostic_receipt(
+    tmp_path: Path,
+    vram_mib: int | None,
+    expected_message: str,
+) -> None:
+    repository, revision = _repository_with_basic_execution_configs(tmp_path)
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "PATH": _command_path(tmp_path, vram_mib=vram_mib),
+            "HF_TOKEN": "private-hf-token",
+            "CEG_WM_ROOT_KEY": "private-root-key",
+        }
+    )
+    receipt, _completed = _run_cli_failure(
+        tmp_path=tmp_path,
+        repository=repository,
+        expected_revision=revision,
+        environment=environment,
+    )
+    assert receipt["failure_stage"] == "resource_preflight"
+    assert expected_message in str(receipt["failure_message"])
+
+
+@pytest.mark.quick
+def test_real_cli_package_build_failure_emits_diagnostic_receipt(
+    tmp_path: Path,
+) -> None:
+    repository, revision = _repository_with_basic_execution_configs(tmp_path)
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "PATH": _command_path(tmp_path, vram_mib=24576),
+            "HF_TOKEN": "private-hf-token",
+            "CEG_WM_ROOT_KEY": "private-root-key",
+        }
+    )
+    receipt, _completed = _run_cli_failure(
+        tmp_path=tmp_path,
+        repository=repository,
+        expected_revision=revision,
+        environment=environment,
+    )
+    assert receipt["failure_stage"] == "package_build"
+    assert receipt["failure_type"] == "ExperimentPackageBuildError"
