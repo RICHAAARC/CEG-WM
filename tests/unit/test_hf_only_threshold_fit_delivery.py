@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import ast
 import json
 import os
 from pathlib import Path
@@ -744,16 +745,79 @@ def test_threshold_fit_notebook_is_thin_and_output_free() -> None:
         "".join(cell["source"]) for cell in notebook["cells"]
     )
     assert notebook["metadata"]["accelerator"] == "GPU"
+    assert "https://github.com/RICHAAARC/CEG-WM.git" in source
+    assert "b957e5bd7996ef3f1ed365316fc381a424074ffb" in source
     assert "userdata.get('HF_TOKEN')" in source
     assert "userdata.get('CEG_WM_ROOT_KEY')" in source
+    assert "git', 'clone'" in source
+    assert "rev-parse" in source
+    assert "status', '--porcelain'" in source
+    assert "hf_only_threshold_fit_server.py" in source
     assert "--shard-index" in source
-    assert "--expected-delivery-manifest-sha256" in source
-    assert "--expected-embedded-manifest-sha256" in source
+    assert "atomic_copy_verified" in source
+    assert "temporary.replace(destination)" in source
+    assert "files.download" in source
+    for forbidden in (
+        "pip install",
+        "snapshot_download",
+        "from_pretrained",
+        "build_experiment_execution_package",
+        "experiment_execution_bootstrap.py",
+        "experiments.runners",
+        "record_writer",
+        "records_root",
+    ):
+        assert forbidden not in source
     assert "--expected-candidate-config-digest" not in source
     assert "--expected-execution-config-digest" not in source
     assert "--expected-input-manifest-digest" not in source
     assert "hf_only_reference_untouched_confirmation_manifest.json" not in source
     assert "prepare_synthetic_wiring" not in source
+
+
+@pytest.mark.quick
+def test_threshold_fit_notebook_drive_copy_fails_closed_on_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    notebook = json.loads(
+        (
+            ROOT / "notebooks/colab/experiment_execution.ipynb"
+        ).read_text(encoding="utf-8")
+    )
+    source = "\n".join(
+        "".join(cell["source"])
+        for cell in notebook["cells"]
+        if cell["cell_type"] == "code"
+    )
+    tree = ast.parse(source)
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"file_sha256", "atomic_copy_verified"}
+    ]
+    assert {node.name for node in functions} == {
+        "file_sha256",
+        "atomic_copy_verified",
+    }
+    namespace = {
+        "Path": Path,
+        "sha256": sha256,
+        "tempfile": __import__("tempfile"),
+        "shutil": shutil,
+        "os": os,
+    }
+    exec(compile(ast.Module(body=functions, type_ignores=[]), "notebook", "exec"), namespace)
+    source_path = tmp_path / "result.zip"
+    destination = tmp_path / "drive/result.zip"
+    source_path.write_bytes(b"result")
+    with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+        namespace["atomic_copy_verified"](
+            source_path,
+            destination,
+            "0" * 64,
+        )
+    assert not destination.exists()
 
 
 @pytest.mark.quick
