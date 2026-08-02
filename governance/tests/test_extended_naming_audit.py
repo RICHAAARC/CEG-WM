@@ -1814,6 +1814,1843 @@ def test_same_line_completed_mathematical_binding_precedes_read_in_real_audit(
 
 
 @pytest.mark.unit
+def test_mathematical_and_tensor_expressions_bind_local_notation_in_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "import torch\n"
+        "\n"
+        "def combine_scores(input_tensor, weight):\n"
+        "    C_0 = 1.0 + weight * 2.0\n"
+        "    C_1: float = (C_0 ** 2.0) / weight\n"
+        "    S_0 = input_tensor.mean(dim=0) + torch.sqrt(C_1)\n"
+        "    tensor_value = torch.tensor([C_0, C_1], dtype=torch.float32)\n"
+        "    return S_0 + tensor_value.sum()\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_parameter_tensor_and_local_math_function_sources_pass_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "import math\n"
+        "import numpy as np\n"
+        "import torch\n"
+        "\n"
+        "def square_value(value):\n"
+        "    return value * value\n"
+        "\n"
+        "def combine_scores(input_tensor, scale):\n"
+        "    C_0 = input_tensor[0].sum() * scale\n"
+        "    C_1 = square_value(C_0) + torch.sqrt(scale)\n"
+        "    S_0 = np.mean(input_tensor) + math.sqrt(C_1)\n"
+        "    return C_0 + C_1 + S_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def derive(value):\n"
+            "    C_0 = square_value(value)\n"
+            "    return C_0\n"
+            "\n"
+            "def square_value(value):\n"
+            "    return value * value\n"
+            "\n"
+            "result = derive(2.0)\n"
+        ),
+        (
+            "def outer(value):\n"
+            "    def derive():\n"
+            "        S_0 = square_value(value)\n"
+            "        return S_0\n"
+            "\n"
+            "    def square_value(value):\n"
+            "        return value * value\n"
+            "\n"
+            "    return derive()\n"
+        ),
+    ),
+)
+def test_unique_later_mathematical_helper_binding_passes_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def outer():\n"
+            "    def derive():\n"
+            "        C_0 = scale * 2.0\n"
+            "        return C_0\n"
+            "    scale = 3.0\n"
+            "    return derive()\n"
+        ),
+        (
+            "def square_value(number):\n"
+            "    return number * number\n"
+            "def derive(value):\n"
+            "    S_0 = square_value(value)\n"
+            "    return S_0\n"
+            "result = derive(2.0)\n"
+        ),
+        (
+            "def derive():\n"
+            "    C_1 = square_value(2.0)\n"
+            "    return C_1\n"
+            "def square_value(number):\n"
+            "    return number * number\n"
+            "alias = derive\n"
+            "result = alias()\n"
+        ),
+        (
+            "def square(number=2.0):\n"
+            "    return number * number\n"
+            "S_0 = square()\n"
+            "value = S_0\n"
+        ),
+        (
+            "def square(*, number=2.0):\n"
+            "    return number * number\n"
+            "C_0 = square()\n"
+            "value = C_0\n"
+        ),
+    ),
+)
+def test_runtime_ordered_closure_and_argument_provenance_pass_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "notation"),
+    (
+        (
+            "def derive():\n"
+            "    C_0 = build_value()\n"
+            "    return C_0\n"
+            "\n"
+            "def build_value():\n"
+            '    return "R2"\n'
+            "\n"
+            "result = derive()\n",
+            "C_0",
+        ),
+        (
+            "def square_value(value):\n"
+            "    return value * value\n"
+            "\n"
+            "def derive(value):\n"
+            "    C_1 = square_value(value)\n"
+            "    return C_1\n"
+            "\n"
+            "square_value = str\n",
+            "C_1",
+        ),
+        (
+            "def square_value(value):\n"
+            "    return value * value\n"
+            "\n"
+            "def derive(value):\n"
+            "    S_0 = square_value(value)\n"
+            "    return S_0\n"
+            "\n"
+            "class square_value:\n"
+            "    pass\n",
+            "S_0",
+        ),
+        (
+            "def square_value(value):\n"
+            "    return value * value\n"
+            "\n"
+            "def derive(value):\n"
+            "    C_0 = square_value(value)\n"
+            "    return C_0\n"
+            "\n"
+            "def square_value(value):\n"
+            "    return value + value\n",
+            "C_0",
+        ),
+        (
+            "def derive(value):\n"
+            "    C_0 = square_value(value)\n"
+            "    return C_0\n"
+            "result = derive(2.0)\n"
+            "def square_value(number):\n"
+            "    return number * number\n",
+            "C_0",
+        ),
+        (
+            "def outer(value):\n"
+            "    def derive():\n"
+            "        C_1 = square_value(value)\n"
+            "        return C_1\n"
+            "    result = derive()\n"
+            "    def square_value(number):\n"
+            "        return number * number\n"
+            "    return result\n",
+            "C_1",
+        ),
+        (
+            "async def square_value(number):\n"
+            "    return number * number\n"
+            "def derive(value):\n"
+            "    S_0 = square_value(value)\n"
+            "    return S_0\n",
+            "S_0",
+        ),
+        (
+            "def outer():\n"
+            "    def derive():\n"
+            "        C_0 = scale * 2.0\n"
+            "        return C_0\n"
+            "    result = derive()\n"
+            "    scale = 3.0\n"
+            "    return result\n",
+            "C_0",
+        ),
+        (
+            "def derive():\n"
+            "    C_0 = square_value(2.0)\n"
+            "    return C_0\n"
+            "alias = derive\n"
+            "result = alias()\n"
+            "def square_value(number):\n"
+            "    return number * number\n",
+            "C_0",
+        ),
+        (
+            "def outer():\n"
+            "    def derive():\n"
+            "        C_1 = square_value(2.0)\n"
+            "        return C_1\n"
+            "    alias = derive\n"
+            "    result = alias()\n"
+            "    def square_value(number):\n"
+            "        return number * number\n"
+            "    return result\n",
+            "C_1",
+        ),
+        (
+            "def square(number=\"R2\"):\n"
+            "    return number * number\n"
+            "S_0 = square()\n"
+            "value = S_0\n",
+            "S_0",
+        ),
+        (
+            "def derive():\n"
+            "    C_0 = square_value(2.0)\n"
+            "    return C_0\n"
+            "alias = derive\n"
+            "alias = other_callable\n"
+            "result = alias()\n"
+            "def square_value(number):\n"
+            "    return number * number\n",
+            "C_0",
+        ),
+    ),
+)
+def test_later_nonmath_or_competing_helper_binding_fails_real_audit(
+    tmp_path: Path,
+    source: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == notation
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reference_statement",
+    (
+        "reference = derive if flag else fallback",
+        "reference = (derive, fallback)",
+        "reference = [derive]",
+        'reference = {"callback": derive}',
+        "register_callback(derive)",
+        "register_callback(callback=derive)",
+        "def invoke_callback(callback=derive):\n    return callback",
+    ),
+)
+def test_indirect_caller_reference_before_helper_definition_fails_real_audit(
+    tmp_path: Path,
+    reference_statement: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        f"{reference_statement}\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_nested_indirect_caller_reference_before_helper_fails_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def outer():\n"
+        "    def derive():\n"
+        "        C_0 = square_value(2.0)\n"
+        "        return C_0\n"
+        "    callbacks = [derive]\n"
+        "    def square_value(number):\n"
+        "        return number * number\n"
+        "    return callbacks\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_indirect_caller_reference_after_helper_definition_passes_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "def square_value(number):\n"
+        "    return number * number\n"
+        "callbacks = [derive]\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reference_statement",
+    (
+        "reference = alias if flag else fallback",
+        "reference = (alias, fallback)",
+        "reference = [alias]",
+        'reference = {"callbacks": [[alias]]}',
+        "register_callback(alias)",
+        "register_callback(callback=alias)",
+        "def invoke_callback(callback=alias):\n    return callback",
+        "@register_callback(alias)\ndef registered():\n    return 1.0",
+        "def registered(callback: alias):\n    return 1.0",
+    ),
+)
+def test_aliased_indirect_reference_before_helper_definition_fails_real_audit(
+    tmp_path: Path,
+    reference_statement: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        "alias = derive\n"
+        f"{reference_statement}\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_nested_aliased_reference_before_helper_definition_fails_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def outer():\n"
+        "    def derive():\n"
+        "        C_1 = square_value(2.0)\n"
+        "        return C_1\n"
+        "    alias = derive\n"
+        "    callbacks = [[alias]]\n"
+        "    def square_value(number):\n"
+        "        return number * number\n"
+        "    return callbacks\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_1"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_aliased_indirect_reference_after_helper_definition_passes_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "alias = derive\n"
+        "def square_value(number):\n"
+        "    return number * number\n"
+        "callbacks = [alias]\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "alias_statement",
+    ("return derive()", "return alias()"),
+)
+def test_nested_caller_executed_before_helper_definition_fails_real_audit(
+    tmp_path: Path,
+    alias_statement: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        "alias = derive\n"
+        "def expose():\n"
+        f"    {alias_statement}\n"
+        "result = expose()\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "alias_statement",
+    ("return derive()", "return alias()"),
+)
+def test_nested_caller_executed_after_helper_definition_passes_real_audit(
+    tmp_path: Path,
+    alias_statement: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "alias = derive\n"
+        "def expose():\n"
+        f"    {alias_statement}\n"
+        "def square_value(number):\n"
+        "    return number * number\n"
+        "result = expose()\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("caller_setup", "caller_invocation"),
+    (
+        (
+            "def expose():\n"
+            "    return alias\n",
+            "result = expose()()\n",
+        ),
+        ("callback = lambda: alias()\n", "result = callback()\n"),
+        (
+            "def expose(callback=lambda: alias()):\n"
+            "    return callback()\n",
+            "result = expose()\n",
+        ),
+    ),
+)
+def test_executed_callable_exposure_before_helper_definition_fails_real_audit(
+    tmp_path: Path,
+    caller_setup: str,
+    caller_invocation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        "alias = derive\n"
+        f"{caller_setup}"
+        f"{caller_invocation}"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("caller_setup", "caller_invocation"),
+    (
+        (
+            "def expose():\n"
+            "    return alias\n",
+            "result = expose()()\n",
+        ),
+        ("callback = lambda: alias()\n", "result = callback()\n"),
+        (
+            "def expose(callback=lambda: alias()):\n"
+            "    return callback()\n",
+            "result = expose()\n",
+        ),
+    ),
+)
+def test_callable_definition_without_pre_helper_execution_passes_real_audit(
+    tmp_path: Path,
+    caller_setup: str,
+    caller_invocation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "alias = derive\n"
+        f"{caller_setup}"
+        "def square_value(number):\n"
+        "    return number * number\n"
+        f"{caller_invocation}",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("caller_setup", "caller_invocation"),
+    (
+        (
+            "def expose():\n"
+            "    local_callback = alias\n"
+            "    return local_callback\n",
+            "result = expose()()\n",
+        ),
+        (
+            "def fallback():\n"
+            "    return 0.0\n"
+            "def expose(flag):\n"
+            "    if flag:\n"
+            "        local_callback = alias\n"
+            "    else:\n"
+            "        local_callback = fallback\n"
+            "    return local_callback\n",
+            "result = expose(flag)()\n",
+        ),
+        (
+            "def expose():\n"
+            "    return alias\n"
+            "def outer():\n"
+            "    return expose\n",
+            "result = outer()()()\n",
+        ),
+        (
+            "callback = lambda: alias()\n"
+            "callback_alias = callback\n",
+            "result = callback_alias()\n",
+        ),
+        ("", "result = (lambda: (lambda: alias()))()()\n"),
+    ),
+)
+def test_chained_callable_execution_before_helper_definition_fails_real_audit(
+    tmp_path: Path,
+    caller_setup: str,
+    caller_invocation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        "alias = derive\n"
+        f"{caller_setup}"
+        f"{caller_invocation}"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("caller_setup", "caller_invocation"),
+    (
+        (
+            "def expose():\n"
+            "    local_callback = alias\n"
+            "    return local_callback\n",
+            "result = expose()()\n",
+        ),
+        (
+            "def expose():\n"
+            "    return alias\n"
+            "def outer():\n"
+            "    return expose\n",
+            "result = outer()()()\n",
+        ),
+        (
+            "callback = lambda: alias()\n"
+            "callback_alias = callback\n",
+            "result = callback_alias()\n",
+        ),
+        ("", "result = (lambda: (lambda: alias()))()()\n"),
+    ),
+)
+def test_chained_callable_execution_after_helper_definition_passes_real_audit(
+    tmp_path: Path,
+    caller_setup: str,
+    caller_invocation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "alias = derive\n"
+        f"{caller_setup}"
+        "def square_value(number):\n"
+        "    return number * number\n"
+        f"{caller_invocation}",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_exhaustive_safe_conditional_callable_does_not_expose_derive_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_1 = square_value(2.0)\n"
+        "    return C_1\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "alias = derive\n"
+        "def expose(flag):\n"
+        "    if flag:\n"
+        "        local_callback = fallback\n"
+        "    else:\n"
+        "        local_callback = fallback\n"
+        "    return local_callback\n"
+        "result = expose(flag)()\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_rebound_alias_indirect_reference_resolves_current_binding_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_1 = square_value(2.0)\n"
+        "    return C_1\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "alias = derive\n"
+        "alias = fallback\n"
+        "callbacks = [alias]\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_exhaustive_fallback_alias_rebinding_does_not_expose_old_target(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_1 = square_value(2.0)\n"
+        "    return C_1\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "alias = derive\n"
+        "if flag:\n"
+        "    alias = fallback\n"
+        "else:\n"
+        "    alias = fallback\n"
+        "callbacks = [alias]\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "safe_control",
+    (
+        (
+            "match flag:\n"
+            "    case 0:\n"
+            "        alias = fallback\n"
+            "    case _:\n"
+            "        alias = fallback\n"
+        ),
+        (
+            "if False:\n"
+            "    alias = derive\n"
+            "else:\n"
+            "    alias = fallback\n"
+        ),
+    ),
+)
+def test_exhaustive_or_unreachable_alias_branch_keeps_safe_target_real_audit(
+    tmp_path: Path,
+    safe_control: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_1 = square_value(2.0)\n"
+        "    return C_1\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "alias = derive\n"
+        f"{safe_control}"
+        "callbacks = [alias]\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "conditional_rebinding",
+    (
+        "if flag:\n    alias = fallback",
+        (
+            "alias = fallback\n"
+            "if flag:\n"
+            "    alias = derive\n"
+            "else:\n"
+            "    alias = fallback"
+        ),
+    ),
+)
+def test_nonexhaustive_or_derive_alias_branch_remains_exposed_real_audit(
+    tmp_path: Path,
+    conditional_rebinding: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "alias = derive\n"
+        f"{conditional_rebinding}\n"
+        "callbacks = [alias]\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "alias_setup",
+    (
+        "alias = derive\nforwarded_alias = alias\ncallbacks = [forwarded_alias]",
+        (
+            "def fallback():\n"
+            "    return 0.0\n"
+            "alias = derive\n"
+            "forwarded_alias = alias\n"
+            "alias = fallback\n"
+            "callbacks = [forwarded_alias]"
+        ),
+        (
+            "def fallback():\n"
+            "    return 0.0\n"
+            "alias = derive\n"
+            "if flag:\n"
+            "    alias = fallback\n"
+            "callbacks = [alias]"
+        ),
+    ),
+)
+def test_multihop_or_conditional_alias_exposure_before_helper_fails_real_audit(
+    tmp_path: Path,
+    alias_setup: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        f"{alias_setup}\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("future_import", (True, False))
+@pytest.mark.parametrize("annotation_expression", ("alias", "alias()"))
+def test_annotation_exposure_respects_runtime_annotation_evaluation_real_audit(
+    tmp_path: Path,
+    future_import: bool,
+    annotation_expression: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        ("from __future__ import annotations\n" if future_import else "")
+        + "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "alias = derive\n"
+        f"def expose(callback: {annotation_expression}):\n"
+        "    return callback\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "S_0"
+    }
+    if future_import:
+        assert report["decision"] == "pass"
+    else:
+        assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_numeric_keyword_argument_keeps_local_helper_mathematical(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def square(*, number):\n"
+        "    return number * number\n"
+        "C_1 = square(number=2.0)\n"
+        "value = C_1\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_keyword_container_is_not_a_mathematical_parameter_value(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def collect_values(**values):\n"
+        "    return values\n"
+        "C_1 = collect_values(score=2.0)\n"
+        "value = C_1\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_1"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def total_values(**values):\n"
+            "    return sum(values.values())\n"
+            "C_0 = total_values(left=1.0, right=2.0)\n"
+            "value = C_0\n"
+        ),
+        (
+            "def count_values(**values):\n"
+            "    return len(values)\n"
+            "S_0 = count_values(left=1.0)\n"
+            "value = S_0\n"
+        ),
+    ),
+)
+def test_narrow_keyword_container_math_consumption_passes_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("return_expression", "notation"),
+    (
+        ("sum(values.keys())", "C_0"),
+        ("sum(values.items())", "C_1"),
+        ("values.values()", "S_0"),
+        ("len(values, 1)", "C_0"),
+    ),
+)
+def test_keyword_container_nonmathematical_consumption_fails_real_audit(
+    tmp_path: Path,
+    return_expression: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def collect_values(**values):\n"
+        f"    return {return_expression}\n"
+        f"{notation} = collect_values(score=2.0)\n"
+        f"value = {notation}\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == notation
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "rebind_statement",
+    (
+        'values = {"identity": "R1"}',
+        'if flag:\n        values = {"identity": "R1"}',
+    ),
+)
+def test_rebound_keyword_container_cannot_supply_local_mathematics_real_audit(
+    tmp_path: Path,
+    rebind_statement: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def total_values(**values):\n"
+        f"    {rebind_statement}\n"
+        "    return sum(values.values())\n"
+        "C_1 = total_values(score=2.0)\n"
+        "value = C_1\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_1"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mutation_statement", "consumer_expression"),
+    (
+        ('(values := {"identity": "R1"})', "sum(values.values())"),
+        ('values.update({"identity": "R1"})', "sum(values.values())"),
+        ("values.clear()", "sum(values.values())"),
+        ('values.update({"identity": "R1"})', "len(values)"),
+    ),
+)
+def test_nonassign_keyword_container_mutation_invalidates_math_real_audit(
+    tmp_path: Path,
+    mutation_statement: str,
+    consumer_expression: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def total_values(**values):\n"
+        f"    {mutation_statement}\n"
+        f"    return {consumer_expression}\n"
+        "C_0 = total_values(score=2.0)\n"
+        "value = C_0\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "escape_statement",
+    (
+        (
+            "mapping = values\n"
+            '    mapping.update({"identity": "R1"})'
+        ),
+        'dict.update(values, {"identity": "R1"})',
+        "mutate_mapping(values)",
+        "mapping = values\n    mutate_mapping(mapping)",
+        (
+            "def mutate_mapping(mapping):\n"
+            '        mapping.update({"identity": "R1"})\n'
+            "    mutate_mapping(values)"
+        ),
+    ),
+)
+def test_escaped_keyword_container_cannot_supply_math_real_audit(
+    tmp_path: Path,
+    escape_statement: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def total_values(**values):\n"
+        f"    {escape_statement}\n"
+        "    return sum(values.values())\n"
+        "C_0 = total_values(score=2.0)\n"
+        "value = C_0\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_annotated_tensor_parameter_supports_narrow_math_method(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive(loader: Tensor, scale):\n"
+        "    C_0 = loader.sum() * scale\n"
+        "    return C_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("scope_prefix", "scope_suffix"),
+    (
+        ("", ""),
+        ("def derive(flag):\n", "    return C_0\n"),
+    ),
+)
+def test_identity_branch_cannot_bind_local_mathematical_notation_real_audit(
+    tmp_path: Path,
+    scope_prefix: str,
+    scope_suffix: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    indent = "    " if scope_prefix else ""
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        scope_prefix
+        + f"{indent}if flag:\n"
+        f'{indent}    candidate_value = "R1"\n'
+        f"{indent}else:\n"
+        f"{indent}    candidate_value = 2.0\n"
+        f"{indent}C_0 = candidate_value\n"
+        + scope_suffix,
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("scope_prefix", "scope_suffix", "notation"),
+    (
+        ("", "", "S_0"),
+        ("def derive(flag):\n", "    return S_0\n", "S_0"),
+    ),
+)
+def test_two_mathematical_branches_bind_local_notation_real_audit(
+    tmp_path: Path,
+    scope_prefix: str,
+    scope_suffix: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    indent = "    " if scope_prefix else ""
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        scope_prefix
+        + f"{indent}if flag:\n"
+        f"{indent}    candidate_value = 1.0\n"
+        f"{indent}else:\n"
+        f"{indent}    candidate_value = 2.0\n"
+        f"{indent}{notation} = candidate_value\n"
+        + scope_suffix,
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def derive(flag, items):\n"
+            "    try:\n"
+            "        candidate_value = 1.0\n"
+            "    except Exception:\n"
+            '        candidate_value = "R1"\n'
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    candidate_value = 1.0\n"
+            "    try:\n"
+            "        pass\n"
+            "    finally:\n"
+            '        candidate_value = "R1"\n'
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    match flag:\n"
+            "        case 0:\n"
+            "            candidate_value = 1.0\n"
+            "        case _:\n"
+            '            candidate_value = "R1"\n'
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    match flag:\n"
+            "        case 0:\n"
+            "            candidate_value = 1.0\n"
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    for item in items:\n"
+            "        candidate_value = 1.0\n"
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    candidate_value = 1.0\n"
+            "    for item in items:\n"
+            '        candidate_value = "R1"\n'
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    while False:\n"
+            "        candidate_value = 1.0\n"
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    candidate_value = 1.0\n"
+            "    while flag:\n"
+            '        candidate_value = "R1"\n'
+            "    C_0 = candidate_value\n"
+            "    return C_0\n"
+        ),
+    ),
+)
+def test_optional_control_flow_identity_source_fails_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def derive(flag, items):\n"
+            "    try:\n"
+            "        candidate_value = 1.0\n"
+            "    except Exception:\n"
+            "        candidate_value = 2.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    try:\n"
+            '        candidate_value = "R1"\n'
+            "    finally:\n"
+            "        candidate_value = 2.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    match flag:\n"
+            "        case 0:\n"
+            "            candidate_value = 1.0\n"
+            "        case _:\n"
+            "            candidate_value = 2.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    candidate_value = 1.0\n"
+            "    for item in items:\n"
+            "        candidate_value = 2.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    candidate_value = 1.0\n"
+            "    while False:\n"
+            '        candidate_value = "R1"\n'
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag, items):\n"
+            "    candidate_value = 1.0\n"
+            "    while flag:\n"
+            "        candidate_value = 2.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+    ),
+)
+def test_inevitable_mathematical_control_flow_source_passes_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def derive(flag):\n"
+            "    if flag:\n"
+            "        raise RuntimeError\n"
+            '        candidate_value = "R1"\n'
+            "    else:\n"
+            "        candidate_value = 1.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag):\n"
+            "    if flag:\n"
+            "        return 0.0\n"
+            '        candidate_value = "R1"\n'
+            "    else:\n"
+            "        candidate_value = 1.0\n"
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag):\n"
+            "    candidate_value = 1.0\n"
+            "    for item in (1,):\n"
+            "        continue\n"
+            '        candidate_value = "R1"\n'
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag):\n"
+            "    candidate_value = 1.0\n"
+            "    for item in (1,):\n"
+            "        break\n"
+            '        candidate_value = "R1"\n'
+            "    else:\n"
+            '        candidate_value = "R1"\n'
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+        (
+            "def derive(flag):\n"
+            "    candidate_value = 1.0\n"
+            "    if False:\n"
+            '        candidate_value = "R1"\n'
+            "    S_0 = candidate_value\n"
+            "    return S_0\n"
+        ),
+    ),
+)
+def test_terminated_or_unreachable_identity_path_does_not_pollute_math(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def derive():\n"
+            "    raise RuntimeError\n"
+            "    candidate_value = 1.0\n"
+            "    C_0 = candidate_value\n"
+        ),
+        (
+            "def derive():\n"
+            "    return 0.0\n"
+            "    candidate_value = 1.0\n"
+            "    C_0 = candidate_value\n"
+        ),
+        (
+            "def derive(items):\n"
+            "    for item in items:\n"
+            "        continue\n"
+            "        candidate_value = 1.0\n"
+            "        C_0 = candidate_value\n"
+        ),
+        (
+            "def derive(items):\n"
+            "    for item in items:\n"
+            "        break\n"
+            "        candidate_value = 1.0\n"
+            "        C_0 = candidate_value\n"
+        ),
+    ),
+)
+def test_dead_mathematical_assignment_after_terminator_fails_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        (
+            "def choose_value(flag):\n"
+            "    if flag:\n"
+            "        return 1.0\n"
+            "    return 2.0\n"
+            "C_0 = choose_value(1)\n"
+            "value = C_0\n"
+        ),
+        (
+            "def choose_value(flag):\n"
+            "    if flag:\n"
+            "        return 1.0\n"
+            "    else:\n"
+            "        return 2.0\n"
+            "S_0 = choose_value(0)\n"
+            "value = S_0\n"
+        ),
+    ),
+)
+def test_complete_local_function_return_paths_bind_local_notation(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "notation"),
+    (
+        (
+            "def maybe_value(flag):\n"
+            "    if flag:\n"
+            "        return 1.0\n"
+            "C_0 = maybe_value(1)\n"
+            "value = C_0\n",
+            "C_0",
+        ),
+        (
+            "def maybe_value(flag):\n"
+            "    if flag:\n"
+            "        return 1.0\n"
+            "S_0 = maybe_value(0)\n"
+            "value = S_0\n",
+            "S_0",
+        ),
+        (
+            "def maybe_value(values):\n"
+            "    for value in values:\n"
+            "        return value\n"
+            "    return 2.0\n"
+            "C_0 = maybe_value([1.0])\n"
+            "value = C_0\n",
+            "C_0",
+        ),
+        (
+            'values = ["hello"]\n'
+            "torch = values\n"
+            "C_0 = torch.pop()\n"
+            "value = C_0\n",
+            "C_0",
+        ),
+        (
+            "def derive(torch):\n"
+            "    C_1 = torch.pop()\n"
+            "    return C_1\n",
+            "C_1",
+        ),
+        ('math = "hello"\nS_0 = math.sqrt()\nvalue = S_0\n', "S_0"),
+        ("sum = str\nC_0 = sum()\nvalue = C_0\n", "C_0"),
+        ("float = str\nC_1 = float()\nvalue = C_1\n", "C_1"),
+    ),
+)
+def test_incomplete_returns_or_shadowed_math_sources_do_not_bind_notation(
+    tmp_path: Path,
+    source: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == notation
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "notation"),
+    (
+        (
+            "import json as torch\n"
+            "C_0 = torch.sqrt(1.0)\n"
+            "value = C_0\n",
+            "C_0",
+        ),
+        (
+            "import json as np\n"
+            "C_1 = np.mean([1.0])\n"
+            "value = C_1\n",
+            "C_1",
+        ),
+        (
+            "from json import loads as sum\n"
+            "S_0 = sum(1.0)\n"
+            "value = S_0\n",
+            "S_0",
+        ),
+        (
+            "import torch\n"
+            "def derive(scale):\n"
+            "    C_0 = torch.sqrt(scale)\n"
+            "    return C_0\n"
+            'values = ["hello"]\n'
+            "torch = values\n"
+            "value = derive(1.0)\n",
+            "C_0",
+        ),
+        (
+            "import torch\n"
+            "def outer(scale):\n"
+            "    def derive():\n"
+            "        C_1 = torch.sqrt(scale)\n"
+            "        return C_1\n"
+            '    torch = "hello"\n'
+            "    return derive()\n",
+            "C_1",
+        ),
+        (
+            "def derive(values):\n"
+            "    S_0 = sum(values)\n"
+            "    return S_0\n"
+            "sum = str\n",
+            "S_0",
+        ),
+        (
+            "import torch\n"
+            "def derive(scale):\n"
+            "    C_0 = torch.sqrt(scale)\n"
+            "    return C_0\n"
+            "class torch:\n"
+            "    pass\n",
+            "C_0",
+        ),
+        (
+            "import torch\n"
+            "def derive(scale):\n"
+            "    C_1 = torch.sqrt(scale)\n"
+            "    return C_1\n"
+            "def torch():\n"
+            "    return 1.0\n",
+            "C_1",
+        ),
+        (
+            "def derive(loader):\n"
+            "    C_0 = loader.sum()\n"
+            "    return C_0\n",
+            "C_0",
+        ),
+    ),
+)
+def test_unproven_import_shadow_or_parameter_sources_do_not_bind_notation(
+    tmp_path: Path,
+    source: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == notation
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "notation"),
+    (
+        ('alias = "B7"\nC_0 = alias\nvalue = C_0\n', "C_0"),
+        (
+            "class Source:\n"
+            "    pass\n"
+            "source = Source()\n"
+            'source.alias = "route9"\n'
+            "S_0 = source.alias\n"
+            "value = S_0\n",
+            "S_0",
+        ),
+        ('values = ["mock"]\nC_1 = values[0]\nvalue = C_1\n', "C_1"),
+        (
+            "def build_value():\n"
+            '    return "R2"\n'
+            "C_0 = build_value()\n"
+            "value = C_0\n",
+            "C_0",
+        ),
+    ),
+)
+def test_indirect_nonmathematical_sources_do_not_bind_local_notation(
+    tmp_path: Path,
+    source: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == notation
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "notation"),
+    (
+        ('C_0 = "A1"; result = C_0\n', "C_0"),
+        ('C_1: str = "A1"; result = C_1\n', "C_1"),
+        ('S_0 = "candidate1"; result = S_0\n', "S_0"),
+        ('C_0 = 1.0; C_0 = "A1"; result = C_0\n', "C_0"),
+        ("C_0 = identity_label; result = C_0\n", "C_0"),
+        ("S_0 = mock_backend; result = S_0\n", "S_0"),
+        ("C_1: str = 1.0; result = C_1\n", "C_1"),
+    ),
+)
+def test_nonmathematical_rhs_does_not_bind_local_notation_in_real_audit(
+    tmp_path: Path,
+    source: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == notation
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "source",
     (
@@ -2267,3 +4104,358 @@ def test_non_utf8_config_fails_closed_with_explicit_reason(
     report = run_audit(tmp_path)
 
     assert _has_violation(report, path=relative, reason="config_unreadable")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("helper_before_call", (False, True))
+def test_immediately_executed_nested_lambda_respects_helper_definition_order(
+    tmp_path: Path,
+    helper_before_call: bool,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    helper = "def square_value(number):\n    return number * number\n"
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_0 = square_value(2.0)\n"
+        "    return C_0\n"
+        "callback = lambda: (lambda: derive())()\n"
+        + (helper if helper_before_call else "")
+        + "result = callback()\n"
+        + ("" if helper_before_call else helper),
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    if helper_before_call:
+        assert report["decision"] == "pass"
+    else:
+        reasons = {
+            violation["reason"]
+            for violation in report["violations"]
+            if violation["path"] == "main/method.py"
+            and violation.get("identifier") == "C_0"
+        }
+        assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("returned_expression", "helper_before_call", "should_pass"),
+    (
+        ("(lambda: derive()) if flag else (lambda: fallback())", False, False),
+        ("(lambda: fallback()) if flag else (lambda: fallback())", False, True),
+        ("(lambda: derive()) if flag else (lambda: fallback())", True, True),
+        ("(lambda: derive()) if False else (lambda: fallback())", False, True),
+        ("(lambda: derive()) if True else (lambda: fallback())", False, False),
+    ),
+)
+def test_immediately_invoked_returned_lambda_respects_possible_call_targets(
+    tmp_path: Path,
+    returned_expression: str,
+    helper_before_call: bool,
+    should_pass: bool,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    helper = "def square_value(number):\n    return number * number\n"
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    S_0 = square_value(2.0)\n"
+        "    return S_0\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "def expose(flag):\n"
+        f"    return {returned_expression}\n"
+        + (helper if helper_before_call else "")
+        + "result = expose(flag)()\n"
+        + ("" if helper_before_call else helper),
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    if should_pass:
+        assert report["decision"] == "pass"
+    else:
+        reasons = {
+            violation["reason"]
+            for violation in report["violations"]
+            if violation["path"] == "main/method.py"
+            and violation.get("identifier") == "S_0"
+        }
+        assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("guard", "should_pass"),
+    (("False", True), ("True", False), ("dynamic_guard", False)),
+)
+def test_match_guard_reachability_controls_local_mathematical_binding(
+    tmp_path: Path,
+    guard: str,
+    should_pass: bool,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive(flag, dynamic_guard):\n"
+        "    match flag:\n"
+        f"        case _ if {guard}:\n"
+        '            candidate_value = "R1"\n'
+        "        case _:\n"
+        "            candidate_value = 1.0\n"
+        "    C_0 = candidate_value\n"
+        "    return C_0\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    if should_pass:
+        assert report["decision"] == "pass"
+    else:
+        reasons = {
+            violation["reason"]
+            for violation in report["violations"]
+            if violation["path"] == "main/method.py"
+            and violation.get("identifier") == "C_0"
+        }
+        assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("final_assignment", "should_pass"),
+    (
+        ("alias = fallback", True),
+        ("alias = derive", False),
+        (
+            "if flag:\n"
+            "        alias = fallback\n"
+            "    else:\n"
+            "        alias = derive",
+            False,
+        ),
+    ),
+)
+def test_finally_alias_overwrite_controls_pre_helper_indirect_exposure(
+    tmp_path: Path,
+    final_assignment: str,
+    should_pass: bool,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def derive():\n"
+        "    C_1 = square_value(2.0)\n"
+        "    return C_1\n"
+        "def fallback():\n"
+        "    return 0.0\n"
+        "alias = derive\n"
+        "try:\n"
+        "    alias = derive\n"
+        "finally:\n"
+        f"    {final_assignment}\n"
+        "callbacks = [alias]\n"
+        "def square_value(number):\n"
+        "    return number * number\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    if should_pass:
+        assert report["decision"] == "pass"
+    else:
+        reasons = {
+            violation["reason"]
+            for violation in report["violations"]
+            if violation["path"] == "main/method.py"
+            and violation.get("identifier") == "C_1"
+        }
+        assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_exact_readonly_len_helper_can_consume_keyword_container(tmp_path: Path) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def count(mapping):\n"
+        "    return len(mapping)\n"
+        "def count_values(**values):\n"
+        "    return count(values)\n"
+        "S_0 = count_values(left=1.0)\n"
+        "value = S_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_exact_readonly_len_helper_accepts_exact_keyword_binding(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def count(mapping):\n"
+        "    return len(mapping)\n"
+        "def count_values(**values):\n"
+        "    return count(mapping=values)\n"
+        "C_0 = count_values(left=1.0)\n"
+        "value = C_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("helper", "call_expression"),
+    (
+        ("def count(mapping):\n    return len(mapping)\n", "count(container=values)"),
+        (
+            "def count(mapping):\n    return len(mapping)\n",
+            "count(values, mapping=values)",
+        ),
+        (
+            "def count(mapping):\n    return len(mapping)\n",
+            "count(mapping=values, extra=1.0)",
+        ),
+        (
+            "def count(mapping):\n    return len(mapping)\n",
+            'count(**{"mapping": values})',
+        ),
+        (
+            "def inspect(mapping):\n    return mapping\n",
+            "inspect(mapping=values)",
+        ),
+    ),
+)
+def test_keyword_container_helper_binding_remains_exact_and_fail_closed(
+    tmp_path: Path,
+    helper: str,
+    call_expression: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        helper
+        + "def count_values(**values):\n"
+        + f"    return {call_expression}\n"
+        + "C_0 = count_values(left=1.0)\n"
+        + "value = C_0\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "helper_body",
+    (
+        "inspect_mapping(mapping)\n    return len(mapping)",
+        'mapping.update({"identity": "R1"})\n    return len(mapping)',
+        "return mapping",
+    ),
+)
+def test_non_readonly_helper_cannot_consume_keyword_container(
+    tmp_path: Path,
+    helper_body: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def inspect(mapping):\n"
+        f"    {helper_body}\n"
+        "def count_values(**values):\n"
+        "    return inspect(values)\n"
+        "S_0 = count_values(left=1.0)\n"
+        "value = S_0\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "S_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "expression",
+    (
+        '1.0 if True else "A1"',
+        '"A1" if False else 1.0',
+    ),
+)
+def test_constant_conditional_math_ignores_unreachable_identity_branch(
+    tmp_path: Path,
+    expression: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        f"C_0 = {expression}\n"
+        "value = C_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_dynamic_conditional_with_two_math_branches_passes_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def choose(flag):\n"
+        "    S_0 = 1.0 if flag else 2.0\n"
+        "    return S_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_dynamic_conditional_identity_branch_blocks_local_math_notation(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def choose(flag):\n"
+        '    C_1 = 1.0 if flag else "A1"\n'
+        "    return C_1\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_1"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
