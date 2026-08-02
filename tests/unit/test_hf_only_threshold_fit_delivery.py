@@ -603,6 +603,63 @@ def test_dependency_install_failure_precedes_package_import(
 
 
 @pytest.mark.quick
+def test_frozen_model_download_failure_produces_bootstrap_diagnostic(
+    threshold_package: dict[str, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        bootstrap,
+        "_prepare_verified_dependencies",
+        lambda **_kwargs: None,
+    )
+
+    def fail_download(**_kwargs: object) -> object:
+        raise bootstrap.ExperimentBootstrapError(
+            "model_download",
+            "offline",
+        )
+
+    monkeypatch.setattr(
+        bootstrap,
+        "_prepare_frozen_model_snapshot",
+        fail_download,
+    )
+    persistent = (tmp_path / "persistent").resolve()
+    code, outcome = bootstrap.run_bootstrap(
+        package_zip=threshold_package["package"],
+        delivery_manifest_path=threshold_package["sidecar"],
+        expected_archive_sha256=threshold_package["build"]["archive_sha256"],
+        expected_delivery_manifest_sha256=sha256(
+            Path(threshold_package["sidecar"]).read_bytes()
+        ).hexdigest(),
+        expected_embedded_manifest_sha256=threshold_package["build"][
+            "embedded_manifest_sha256"
+        ],
+        expected_bootstrap_identity=bootstrap.BOOTSTRAP_IDENTITY,
+        expected_bootstrap_schema_version=bootstrap.BOOTSTRAP_SCHEMA_VERSION,
+        expected_bootstrap_sha256=sha256(
+            Path(bootstrap.__file__).read_bytes()
+        ).hexdigest(),
+        expected_revision=threshold_package["revision"],
+        ephemeral_root=(tmp_path / "ephemeral").resolve(),
+        persistent_root=persistent,
+        model_cache_root=(tmp_path / "cache").resolve(),
+        prepare_frozen_model=True,
+        run_id="model-download-failure",
+        shard_index=0,
+        environment={
+            "CEG_WM_ROOT_KEY": "test-root-key",
+            "HF_TOKEN": "test-hf-token",
+        },
+    )
+    assert code == 3
+    assert outcome["artifact_kind"] == "bootstrap_failure"
+    assert outcome["failure_stage"] == "model_download"
+    assert Path(outcome["diagnostic_zip"]).is_file()
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize("tamper_kind", ("missing", "extra", "version_drift"))
 def test_hf_only_reference_dependency_lock_rejects_incomplete_or_drifted_closure(
     tmp_path: Path,

@@ -62,3 +62,35 @@ method evidence.
 Historical non-hf_only_reference_validation runtime-qualification materials remain in their explicitly
 named repository files. They are not part of this hf_only_reference_validation schema-v2 entrypoint or
 its authority; this README intentionally provides no historical commands.
+
+## Unified server entrypoint
+
+`hf_only_threshold_fit_server.py` is the complete Colab-neutral and
+server-direct orchestration entrypoint for one frozen threshold-fit shard. It
+requires a clean checkout at an explicit 40-hex revision plus disjoint absolute
+scratch, cache, and output roots. It checks the registered GPU/VRAM floor and
+available storage, builds the dedicated schema-v2 package from that exact Git
+tree, delegates the frozen dependency installation and package trust boundary
+to `experiment_execution_bootstrap.py`, downloads the runtime configuration's
+exact `model_id` and `model_revision` into the supplied cache, and then invokes
+the existing package entrypoint and formal runner. The runner remains the only
+records writer.
+
+Both `HF_TOKEN` and `CEG_WM_ROOT_KEY` are read from the process environment and
+are never included in the machine-readable receipt. A server invocation is:
+
+```bash
+python scripts/experiment_execution/hf_only_threshold_fit_server.py \
+  --repository-root /absolute/clean/CEG-WM \
+  --expected-revision 0123456789abcdef0123456789abcdef01234567 \
+  --scratch-root /absolute/scratch \
+  --cache-root /absolute/cache \
+  --output-root /absolute/output \
+  --run-id hf-only-content-threshold-fit \
+  --shard-index 0
+```
+
+The stdout JSON receipt identifies the result or diagnostic ZIP, its SHA-256,
+the revision/run/shard, the package trust digests, and the frozen model
+identity. This entrypoint does not fit or approve tau, unlock confirmation,
+access held-out evaluation, or support scientific claims.

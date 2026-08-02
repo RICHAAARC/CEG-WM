@@ -49,6 +49,9 @@ HF_ONLY_THRESHOLD_FIT_DEPENDENCY_LOCK_SHA256 = (
 HF_ONLY_THRESHOLD_FIT_PYPI_INDEX_URL = "https://pypi.org/simple"
 HF_ONLY_THRESHOLD_FIT_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 HF_ONLY_THRESHOLD_FIT_NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
+HF_ONLY_THRESHOLD_FIT_RUNTIME_CONFIG_PATH = (
+    "configs/runtime/runtime_sd35_flowmatch.json"
+)
 EXACT_FILES = frozenset(
     {
         "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
@@ -968,6 +971,71 @@ def _prepare_verified_dependencies(
     return dependency_root
 
 
+def _prepare_frozen_model_snapshot(
+    *,
+    package_root: Path,
+    model_cache_root: Path,
+    environment: Mapping[str, str],
+) -> tuple[str, str, Path]:
+    """Download the exact configured model revision into the runtime cache."""
+
+    config_path = package_root / HF_ONLY_THRESHOLD_FIT_RUNTIME_CONFIG_PATH
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        model_id = raw["model_id"]
+        model_revision = raw["model_revision"]
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ExperimentBootstrapError(
+            "model_download",
+            "frozen runtime model identity is unavailable",
+        ) from exc
+    if (
+        type(model_id) is not str
+        or not model_id
+        or type(model_revision) is not str
+        or REVISION.fullmatch(model_revision) is None
+    ):
+        raise ExperimentBootstrapError(
+            "model_download",
+            "frozen runtime model identity is invalid",
+        )
+    hf_token = environment.get("HF_TOKEN")
+    if not hf_token:
+        raise ExperimentBootstrapError(
+            "secrets",
+            "HF_TOKEN is unavailable",
+        )
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        raise ExperimentBootstrapError(
+            "model_download",
+            "verified Hugging Face downloader is unavailable",
+        ) from exc
+    huggingface_cache = model_cache_root / "hf_cache" / "huggingface"
+    huggingface_cache.mkdir(parents=True, exist_ok=True)
+    try:
+        downloaded = Path(
+            snapshot_download(
+                repo_id=model_id,
+                revision=model_revision,
+                cache_dir=str(huggingface_cache),
+                token=hf_token,
+            )
+        ).resolve()
+    except Exception as exc:
+        raise ExperimentBootstrapError(
+            "model_download",
+            "frozen runtime model download failed",
+        ) from exc
+    if not downloaded.is_dir():
+        raise ExperimentBootstrapError(
+            "model_download",
+            "frozen runtime model snapshot is unavailable after download",
+        )
+    return model_id, model_revision, downloaded
+
+
 def _load_verified_threshold_fit_entrypoint(
     package_root: Path,
     manifest: dict[str, Any],
@@ -1328,6 +1396,8 @@ def run_bootstrap(
     persistent_root: str | Path,
     run_id: str,
     shard_index: int,
+    model_cache_root: str | Path | None = None,
+    prepare_frozen_model: bool = False,
     environment: dict[str, str] | None = None,
 ) -> tuple[int, dict[str, object]]:
     """Verify external trust inputs before importing or running package code."""
@@ -1427,11 +1497,33 @@ def run_bootstrap(
         runtime_environment["PYTHONDONTWRITEBYTECODE"] = "1"
         runtime_workspace = workspace / "runtime_workspace"
         runtime_workspace.mkdir()
-        model_cache_root = runtime_workspace / "ephemeral"
+        default_model_cache_root = runtime_workspace / "ephemeral"
         model_persistent_root = persistent / "model_runtime"
-        model_cache_root.mkdir()
+        if prepare_frozen_model:
+            if model_cache_root is None:
+                raise ExperimentBootstrapError(
+                    "arguments",
+                    "model_cache_root is required for frozen model preparation",
+                )
+            selected_model_cache_root = _absolute(
+                model_cache_root,
+                "model_cache_root",
+            )
+            if _overlap(selected_model_cache_root, ephemeral) or _overlap(
+                selected_model_cache_root,
+                persistent,
+            ):
+                raise ExperimentBootstrapError(
+                    "arguments",
+                    "model cache, ephemeral, and persistent roots must be disjoint",
+                )
+        else:
+            selected_model_cache_root = default_model_cache_root
+        selected_model_cache_root.mkdir(parents=True, exist_ok=True)
         model_persistent_root.mkdir(parents=True, exist_ok=True)
-        runtime_environment["CEG_WM_EPHEMERAL_ROOT"] = str(model_cache_root)
+        runtime_environment["CEG_WM_EPHEMERAL_ROOT"] = str(
+            selected_model_cache_root
+        )
         runtime_environment["CEG_WM_PERSISTENT_ROOT"] = str(
             model_persistent_root
         )
@@ -1448,6 +1540,22 @@ def run_bootstrap(
         )
         if dependency_root is not None:
             sys.path.insert(0, str(dependency_root))
+        if prepare_frozen_model:
+            try:
+                _prepare_frozen_model_snapshot(
+                    package_root=package_root,
+                    model_cache_root=selected_model_cache_root,
+                    environment=runtime_environment,
+                )
+            except Exception:
+                if dependency_root is not None:
+                    dependency_path = str(dependency_root)
+                    if dependency_path in sys.path:
+                        sys.path.remove(dependency_path)
+                raise
+            runtime_environment["HF_HUB_OFFLINE"] = "1"
+            runtime_environment["TRANSFORMERS_OFFLINE"] = "1"
+            runtime_environment["DIFFUSERS_OFFLINE"] = "1"
         callable_entrypoint, entrypoint_sha256 = (
             _load_verified_threshold_fit_entrypoint(package_root, manifest)
         )
@@ -1474,6 +1582,9 @@ def run_bootstrap(
             "CEG_WM_EPHEMERAL_ROOT",
             "CEG_WM_PERSISTENT_ROOT",
             "HF_TOKEN",
+            "HF_HUB_OFFLINE",
+            "TRANSFORMERS_OFFLINE",
+            "DIFFUSERS_OFFLINE",
         )
         prior_environment = {
             key: os.environ.get(key) for key in scoped_environment_keys
@@ -1616,6 +1727,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--persistent-root", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--shard-index", required=True, type=int)
+    parser.add_argument("--model-cache-root")
+    parser.add_argument("--prepare-frozen-model", action="store_true")
     arguments = parser.parse_args(argv)
     exit_code, result = run_bootstrap(
         package_zip=arguments.package_zip,
@@ -1637,6 +1750,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         persistent_root=arguments.persistent_root,
         run_id=arguments.run_id,
         shard_index=arguments.shard_index,
+        model_cache_root=arguments.model_cache_root,
+        prepare_frozen_model=arguments.prepare_frozen_model,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return exit_code
