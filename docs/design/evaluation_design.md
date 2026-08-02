@@ -29,20 +29,37 @@ CEG-WM 使用两个不同实验表面：
 
 ## Development Preliminary Exploration
 
-13 项方法职责的首轮科学探索只能读取 `development`，不得
-读取或书写 candidate-selection、untouched confirmation、五类 calibration
-职责或 final held-out evaluation。每项职责必须有独立科学问题、
-source-cluster 规模、negative controls、records 组和唯一的未来
-candidate-selection case 映射；前置职责未观测到 development signal 时，
-依赖职责 fail closed，不得以后续复杂度掩盖。
+13 项方法职责的首轮科学探索只能读取 `development`。每项职责必须冻结
+`responsibility_id`、独立 scientific question/case/candidate/paired-ablation
+身份、可重算 candidate config digest、negative controls、metrics、record
+fields、dependency stop rule、四项 module outcome 和独立的两项 candidate
+recommendation。outcome 只描述 mechanism signal、implementation block 或
+resource block；recommendation 不等于晋升，也不授权 candidate-selection。
 
-8 个 source clusters 只能验证 wiring，不计入科学覆盖。初探的预登记
-规模边界只能取 `16/32/64` source clusters，并在 development 内按
-source cluster 做四折 cross-fit：每折只用其他折拟合 provisional threshold，
-仅用本折评分。该阈值在进入 candidate-selection 前强制作废，不是
-formal `tau`，不能支持候选晋升、fixed-FPR 或科学 claim。有限内容
-分支、mixing coefficients、组合函数和 crop/scale/rotation 几何网格由
-`development_module_exploration.json` 与对应可执行协议对象共同冻结。
+先执行 2-cluster 环境、身份和吞吐 preflight；8-cluster wiring smoke 也不计入
+科学覆盖。科学 roster 按 breadth-first 固定：先让全部 13 个职责各覆盖 16 个
+source clusters，再扩展 Q/K 同步与 estimator 关键 pair 到 32；只有三个廉价
+content detector 职责可确定性扩展到 64。roster、branch-unit 总数、每 unit
+三次 attempt、单 unit 900 秒和总 attempt 均有 digest/硬上限，禁止按观测分数
+增删或重排。
+
+内容只含 clean、HF-only、LF-only、disabled-uniform LF/HF control 和 routed
+LF/HF combination 五个分支。几何只含一个 identity、crop、scale、rotation 和
+compound case，另冻结 ambiguous、boundary、extreme-crop 三个 negative-control
+case；不展开无约束笛卡尔积。
+
+development provisional threshold 的角色固定为 `development_exploratory`。
+四折 cross-fit 只接收 development primary-null 与 wrong-key control，显式绑定
+input manifest、detector identity/config、threshold rule 和 fold；产阈值 clusters
+不得评分同折 recovery probes。阈值在 candidate-selection 前强制作废，不是
+formal `tau`，不能支持 fixed-FPR、候选晋升或科学 claim。
+
+prompt、source cluster、seed namespace、key family 和 image lineage 五维 roster
+对 development、candidate-selection、两类 confirmation、未来 calibration/check
+与 held-out evaluation 分别摘要且不得复用。本阶段只允许 development role；
+`candidate_selection_selection` 唯一映射 candidate-selection，content candidate
+confirmation 映射 untouched-confirmation/combined，HF-only reference confirmation
+映射 untouched-confirmation/HF-only 且要求冻结 HF-only tau，三者本批均不执行。
 
 ## Content Validation Matrix
 

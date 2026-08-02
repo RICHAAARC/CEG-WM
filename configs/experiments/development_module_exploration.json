@@ -1,7 +1,7 @@
 {
-  "schema_version": "ceg_wm_development_module_exploration_protocol_schema",
+  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v2",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "1.0.0",
+  "protocol_version": "2.0.0",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -15,27 +15,120 @@
     ],
     "candidate_selection_mapping": "one_unique_case_per_responsibility"
   },
-  "study_budget": {
-    "wiring_source_cluster_count": 8,
-    "scientific_source_cluster_scales": [16, 32, 64],
-    "maximum_module_cluster_assignments": 560,
-    "maximum_record_attempts_per_unit": 3,
-    "maximum_total_record_attempts": 1680,
-    "unit_order": [
-      "module_dependency_order",
+  "split_isolation": {
+    "isolation_dimensions": [
+      "prompt_digest",
       "source_cluster_id",
-      "content_branch_id",
-      "geometry_grid_index",
-      "key_control_identity",
-      "record_attempt_index"
+      "seed_namespace",
+      "registered_key_family_digest",
+      "image_lineage_digest"
+    ],
+    "role_bindings": [
+      {
+        "role_id": "development_exploration",
+        "registered_split": "development",
+        "detector_mode": "candidate_configured",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": true
+      },
+      {
+        "role_id": "candidate_selection_selection",
+        "registered_split": "candidate_selection",
+        "detector_mode": "candidate_configured",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "content_candidate_confirmation",
+        "registered_split": "untouched_confirmation",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "hf_only_reference_confirmation",
+        "registered_split": "untouched_confirmation",
+        "detector_mode": "hf_only",
+        "requires_frozen_hf_only_tau": true,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "content_threshold_calibration",
+        "registered_split": "content_threshold_fit",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "rescue_threshold_calibration",
+        "registered_split": "rescue_threshold_fit",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "geometry_reliability_calibration",
+        "registered_split": "reliability_fit",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "end_to_end_safety_check",
+        "registered_split": "end_to_end_check",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false
+      },
+      {
+        "role_id": "formal_held_out_evaluation",
+        "registered_split": "held_out_evaluation",
+        "detector_mode": "frozen_candidate",
+        "requires_frozen_hf_only_tau": true,
+        "execution_allowed_in_development": false
+      }
     ]
+  },
+  "preflight": {
+    "source_cluster_count": 2,
+    "case_ids": [
+      "environment_identity_preflight",
+      "runtime_identity_preflight",
+      "throughput_preflight"
+    ],
+    "purpose": "environment_identity_and_throughput_only",
+    "counts_as_scientific_coverage": false
+  },
+  "study_budget": {
+    "preflight_source_cluster_count": 2,
+    "wiring_source_cluster_count": 8,
+    "wiring_counts_as_scientific_coverage": false,
+    "scientific_source_cluster_scales": [16, 32, 64],
+    "maximum_scientific_units": 384,
+    "maximum_total_branch_units": 1280,
+    "maximum_record_attempts_per_unit": 3,
+    "maximum_total_record_attempts": 3840,
+    "maximum_duration_seconds_per_unit": 900,
+    "unit_order": [
+      "scientific_breadth_source_cluster_ordinal",
+      "module_dependency_order",
+      "critical_pair_extension_source_cluster_ordinal",
+      "cheap_detection_extension_source_cluster_ordinal"
+    ],
+    "score_adaptive_unit_changes_forbidden": true,
+    "unit_roster_digest": "51105bba7550fc151e683873bbe61cfd16d4574f3c8c6ba17fa5369362574c74"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",
     "fold_count": 4,
-    "fit_role": "all_other_source_cluster_folds",
-    "score_role": "one_held_out_source_cluster_fold",
-    "threshold_role": "development_provisional_cross_fit",
+    "fit_role": "development_primary_null_and_key_control_fit",
+    "score_role": "development_recovery_probe_score",
+    "threshold_role": "development_exploratory",
+    "allowed_input_roles": ["primary_null", "wrong_key_control"],
+    "input_manifest_binding_required": true,
+    "detector_binding_required": true,
+    "threshold_rule_binding_required": true,
+    "recovery_probe_cluster_exclusion_required": true,
     "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
     "invalid_for_splits": [
       "candidate_selection",
@@ -49,10 +142,11 @@
   },
   "content_study": {
     "branch_ids": [
+      "clean_control",
       "hf_only",
       "lf_only",
-      "lf_hf_uniform_control",
-      "lf_hf_content_adaptive"
+      "lf_hf_disabled_uniform_control",
+      "lf_hf_routed_combination"
     ],
     "mixing_coefficients": [0.25, 0.5, 0.75],
     "combination_function_ids": [
@@ -63,184 +157,310 @@
     "matched_total_budget_required": true,
     "attack_condition_switching_forbidden": true
   },
-  "geometry_grid": {
-    "crop_fractions": [1.0, 0.75, 0.45],
-    "scale_factors": [1.0, 0.7071067811865476, 1.4142135623730951],
-    "rotation_degrees": [0.0, -16.0, 16.0, -32.0, 32.0]
+  "geometry_study": {
+    "operation_cases": [
+      {
+        "case_id": "identity_transform",
+        "operation_family": "identity",
+        "crop_fraction": 1.0,
+        "scale_factor": 1.0,
+        "rotation_degrees": 0.0
+      },
+      {
+        "case_id": "bounded_crop_transform",
+        "operation_family": "crop",
+        "crop_fraction": 0.75,
+        "scale_factor": 1.0,
+        "rotation_degrees": 0.0
+      },
+      {
+        "case_id": "bounded_scale_transform",
+        "operation_family": "scale",
+        "crop_fraction": 1.0,
+        "scale_factor": 0.7071067811865476,
+        "rotation_degrees": 0.0
+      },
+      {
+        "case_id": "bounded_rotation_transform",
+        "operation_family": "rotation",
+        "crop_fraction": 1.0,
+        "scale_factor": 1.0,
+        "rotation_degrees": 16.0
+      },
+      {
+        "case_id": "single_compound_transform",
+        "operation_family": "compound",
+        "crop_fraction": 0.75,
+        "scale_factor": 0.7071067811865476,
+        "rotation_degrees": 16.0
+      }
+    ],
+    "negative_control_case_ids": [
+      "ambiguous_transform_control",
+      "boundary_transform_control",
+      "extreme_crop_control"
+    ]
   },
   "module_matrix": [
     {
-      "responsibility": "key_schedule",
-      "scientific_question": "Registered, wrong-key and public-noise identities remain separated and replayable across development units.",
-      "development_case_id": "development_key_schedule_identity_separation",
-      "candidate_selection_case_id": "candidate_selection_key_schedule_identity_separation",
-      "prerequisite_responsibilities": [],
+      "responsibility_id": "key_schedule",
+      "scientific_question_id": "registered_wrong_and_public_key_identity_separation",
+      "development_case_id": "development_key_identity_separation",
+      "candidate_selection_case_id": "candidate_selection_key_identity_separation",
+      "candidate_identity": "registered_key_identity_candidate",
+      "candidate_config_digest": "b0c4aa804674846a310527bfeb9f3cd88ad75821cfe1e5da986764fb99f9fc83",
+      "paired_ablation_identity": "wrong_and_public_key_identity_ablation",
+      "negative_control_case_ids": ["wrong_key_control", "public_noise_control"],
+      "metric_ids": ["key_identity_separation_rate", "key_replay_consistency"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": [],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": ["clean_control"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "content_router",
+      "scientific_question_id": "matched_budget_routing_gain_and_non_degradation",
+      "development_case_id": "development_content_routing",
+      "candidate_selection_case_id": "candidate_selection_content_routing",
+      "candidate_identity": "content_adaptive_router_candidate",
+      "candidate_config_digest": "d116eb07a2855848fd11ae59b58375f9d583da6718a75a0a7d4bab0cd258bdb6",
+      "paired_ablation_identity": "disabled_uniform_routing_ablation",
+      "negative_control_case_ids": ["disabled_uniform_routing_control", "attack_label_blindness_control"],
+      "metric_ids": ["matched_budget_routing_gain", "routing_non_degradation_rate"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["key_schedule"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": ["clean_control", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "lf_carrier",
+      "scientific_question_id": "key_attributed_low_frequency_write_direction",
+      "development_case_id": "development_low_frequency_carrier",
+      "candidate_selection_case_id": "candidate_selection_low_frequency_carrier",
+      "candidate_identity": "low_frequency_carrier_candidate",
+      "candidate_config_digest": "ef0b64af08899843a6e5a89bbd8d7c32676d21228c360658ce86e716142ba71d",
+      "paired_ablation_identity": "low_frequency_write_disabled_ablation",
+      "negative_control_case_ids": ["wrong_key_control", "clean_control"],
+      "metric_ids": ["low_frequency_key_margin", "paired_quality_delta"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["key_schedule"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": ["clean_control", "lf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "hf_carrier",
+      "scientific_question_id": "key_attributed_high_frequency_write_direction",
+      "development_case_id": "development_high_frequency_carrier",
+      "candidate_selection_case_id": "candidate_selection_high_frequency_carrier",
+      "candidate_identity": "high_frequency_carrier_candidate",
+      "candidate_config_digest": "eccea6b5689f10e92e8751c82cf24ce19f44c354fc78933ff78a81c8e46c972d",
+      "paired_ablation_identity": "high_frequency_write_disabled_ablation",
+      "negative_control_case_ids": ["wrong_key_control", "clean_control"],
+      "metric_ids": ["high_frequency_key_margin", "paired_quality_delta"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["key_schedule"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": ["clean_control", "hf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "content_embedder",
+      "scientific_question_id": "actual_dtype_joint_content_budget",
+      "development_case_id": "development_content_embedding",
+      "candidate_selection_case_id": "candidate_selection_content_embedding",
+      "candidate_identity": "matched_budget_content_embedder_candidate",
+      "candidate_config_digest": "f955aad142c60cf964ef4e25fc50265e597f5445b0c3acb42b802b850022ee00",
+      "paired_ablation_identity": "single_branch_embedding_ablation",
+      "negative_control_case_ids": ["clean_control", "single_branch_control"],
+      "metric_ids": ["actual_dtype_total_budget", "paired_quality_delta"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["content_router", "lf_carrier", "hf_carrier"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": ["clean_control", "hf_only", "lf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "lf_detector",
+      "scientific_question_id": "blind_low_frequency_key_attribution",
+      "development_case_id": "development_low_frequency_detection",
+      "candidate_selection_case_id": "candidate_selection_low_frequency_detection",
+      "candidate_identity": "blind_low_frequency_detector_candidate",
+      "candidate_config_digest": "87ffe54130cb06890686abda640e2796b049d1460a373d21c932a5ff475a9cb3",
+      "paired_ablation_identity": "low_frequency_detector_disabled_ablation",
+      "negative_control_case_ids": ["primary_null", "wrong_key_control"],
+      "metric_ids": ["registered_wrong_key_margin", "development_primary_null_rate"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["key_schedule", "lf_carrier"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["clean_control", "lf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "hf_detector",
+      "scientific_question_id": "blind_high_frequency_key_attribution",
+      "development_case_id": "development_high_frequency_detection",
+      "candidate_selection_case_id": "candidate_selection_high_frequency_detection",
+      "candidate_identity": "blind_high_frequency_detector_candidate",
+      "candidate_config_digest": "f04918abd01cdcd11f350be3aeba4f0a74d5d1aaa91beea74c907f0a2c0c58cf",
+      "paired_ablation_identity": "high_frequency_detector_disabled_ablation",
+      "negative_control_case_ids": ["primary_null", "wrong_key_control"],
+      "metric_ids": ["registered_wrong_key_margin", "development_primary_null_rate"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["key_schedule", "hf_carrier"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["clean_control", "hf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "content_detector",
+      "scientific_question_id": "standardized_content_combination_non_degradation",
+      "development_case_id": "development_content_detection",
+      "candidate_selection_case_id": "candidate_selection_content_detection",
+      "candidate_identity": "standardized_content_combination_candidate",
+      "candidate_config_digest": "97460c94500ab1fa8e32fe7b59c917b9be7780222b11c6bdcfff2b7c39692dd3",
+      "paired_ablation_identity": "high_frequency_only_detector_ablation",
+      "negative_control_case_ids": ["primary_null", "wrong_key_control", "high_frequency_only_control"],
+      "metric_ids": ["combination_gain", "high_frequency_non_degradation"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["content_embedder", "lf_detector", "hf_detector"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["clean_control", "hf_only", "lf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "qk_geometry_sync",
+      "scientific_question_id": "keyed_query_key_transform_distinguishability",
+      "development_case_id": "development_query_key_geometry_sync",
+      "candidate_selection_case_id": "candidate_selection_query_key_geometry_sync",
+      "candidate_identity": "keyed_query_key_sync_candidate",
+      "candidate_config_digest": "6508afd705820f753386d8dc227520ebdc47515f502ccff63b0d02bc9d870583",
+      "paired_ablation_identity": "wrong_geometry_key_sync_ablation",
+      "negative_control_case_ids": ["wrong_geometry_key_control", "ambiguous_transform_control"],
+      "metric_ids": ["keyed_relation_margin", "transform_distinguishability"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["key_schedule"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_case_ids": ["identity_transform", "bounded_crop_transform", "bounded_scale_transform", "bounded_rotation_transform", "single_compound_transform", "ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"]
+    },
+    {
+      "responsibility_id": "geometric_transform_estimator",
+      "scientific_question_id": "blind_bounded_transform_estimation",
+      "development_case_id": "development_transform_estimation",
+      "candidate_selection_case_id": "candidate_selection_transform_estimation",
+      "candidate_identity": "blind_transform_estimator_candidate",
+      "candidate_config_digest": "4c7eeb7e160a4df05a8d0305864778cb847c4521c1acf9bda9db3dd874aa1349",
+      "paired_ablation_identity": "oracle_transform_input_ablation",
+      "negative_control_case_ids": ["ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"],
+      "metric_ids": ["transform_parameter_error", "estimator_coverage_and_residual"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "key_control_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["qk_geometry_sync"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_case_ids": ["identity_transform", "bounded_crop_transform", "bounded_scale_transform", "bounded_rotation_transform", "single_compound_transform", "ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"]
+    },
+    {
+      "responsibility_id": "geometry_reliability",
+      "scientific_question_id": "fail_closed_geometry_reliability",
+      "development_case_id": "development_geometry_reliability",
+      "candidate_selection_case_id": "candidate_selection_geometry_reliability",
+      "candidate_identity": "fail_closed_geometry_reliability_candidate",
+      "candidate_config_digest": "1edf9b7d6d1b00cfc318567cc19c2aa4b666f2bd674531e620817340346a82bb",
+      "paired_ablation_identity": "geometry_reliability_disabled_ablation",
+      "negative_control_case_ids": ["ambiguous_transform_control", "boundary_transform_control", "wrong_geometry_key_control"],
+      "metric_ids": ["reliable_unreliable_separation", "wrong_key_rejection_rate"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "decision_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["geometric_transform_estimator"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
       "scientific_source_cluster_scale": 16,
       "content_branch_ids": [],
-      "geometry_grid_required": false,
-      "negative_controls": ["wrong_key_roster", "public_noise_secret_independence"],
-      "record_field_groups": ["key_control_trace", "provenance_trace"]
+      "geometry_case_ids": ["identity_transform", "bounded_crop_transform", "bounded_scale_transform", "bounded_rotation_transform", "single_compound_transform", "ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"]
     },
     {
-      "responsibility": "content_router",
-      "scientific_question": "Content-adaptive routing provides a development signal relative to the matched-budget uniform control without attack-label access.",
-      "development_case_id": "development_content_adaptive_routing",
-      "candidate_selection_case_id": "candidate_selection_content_adaptive_routing",
-      "prerequisite_responsibilities": ["key_schedule"],
-      "scientific_source_cluster_scale": 32,
-      "content_branch_ids": ["lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["routing_uniform_control", "attack_label_blindness"],
-      "record_field_groups": ["routing_trace", "branch_score_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "lf_carrier",
-      "scientific_question": "The LF write direction yields a key-specific development signal rather than a generic low-frequency shift.",
-      "development_case_id": "development_low_frequency_carrier_signal",
-      "candidate_selection_case_id": "candidate_selection_low_frequency_carrier_signal",
-      "prerequisite_responsibilities": ["key_schedule"],
-      "scientific_source_cluster_scale": 32,
-      "content_branch_ids": ["lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["wrong_key", "unwatermarked_primary_null", "hf_only"],
-      "record_field_groups": ["branch_score_trace", "key_control_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "hf_carrier",
-      "scientific_question": "The frozen HF carrier retains its registered write identity and paired-quality boundary in development.",
-      "development_case_id": "development_high_frequency_carrier_identity",
-      "candidate_selection_case_id": "candidate_selection_high_frequency_carrier_identity",
-      "prerequisite_responsibilities": ["key_schedule"],
-      "scientific_source_cluster_scale": 32,
-      "content_branch_ids": ["hf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["wrong_key", "unwatermarked_primary_null", "clean_pair"],
-      "record_field_groups": ["branch_score_trace", "key_control_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "content_embedder",
-      "scientific_question": "HF-only, LF-only, uniform and adaptive writes remain comparable under the same realized total-content budget.",
-      "development_case_id": "development_content_embedding_matched_budget",
-      "candidate_selection_case_id": "candidate_selection_content_embedding_matched_budget",
-      "prerequisite_responsibilities": ["content_router", "lf_carrier", "hf_carrier"],
-      "scientific_source_cluster_scale": 32,
-      "content_branch_ids": ["hf_only", "lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["hf_only", "lf_only", "routing_uniform_control"],
-      "record_field_groups": ["branch_score_trace", "routing_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "lf_detector",
-      "scientific_question": "Blind LF scoring retains registered-key attribution on ordinary images under development-only provisional thresholds.",
-      "development_case_id": "development_low_frequency_blind_detection",
-      "candidate_selection_case_id": "candidate_selection_low_frequency_blind_detection",
-      "prerequisite_responsibilities": ["key_schedule", "lf_carrier"],
-      "scientific_source_cluster_scale": 64,
-      "content_branch_ids": ["lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["wrong_key", "unwatermarked_primary_null", "content_disabled"],
-      "record_field_groups": ["detector_trace", "branch_score_trace", "key_control_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "hf_detector",
-      "scientific_question": "Blind HF direct scoring preserves the frozen HF-only reference identity in development without claiming formal fixed-FPR performance.",
-      "development_case_id": "development_high_frequency_blind_detection",
-      "candidate_selection_case_id": "candidate_selection_high_frequency_blind_detection",
-      "prerequisite_responsibilities": ["key_schedule", "hf_carrier"],
-      "scientific_source_cluster_scale": 64,
-      "content_branch_ids": ["hf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["wrong_key", "unwatermarked_primary_null"],
-      "record_field_groups": ["detector_trace", "branch_score_trace", "key_control_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "content_detector",
-      "scientific_question": "Finite LF/HF combination candidates show a development signal without masking HF-only or wrong-key failures.",
-      "development_case_id": "development_content_detector_combination",
-      "candidate_selection_case_id": "candidate_selection_content_detector_combination",
-      "prerequisite_responsibilities": ["content_embedder", "lf_detector", "hf_detector"],
-      "scientific_source_cluster_scale": 64,
-      "content_branch_ids": ["hf_only", "lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": false,
-      "negative_controls": ["hf_only_standardized_score", "wrong_key", "unwatermarked_primary_null"],
-      "record_field_groups": ["detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "qk_geometry_sync",
-      "scientific_question": "Registered-key Q/K synchronization is observable across the bounded geometry grid and rejects wrong-key controls.",
-      "development_case_id": "development_keyed_qk_synchronization",
-      "candidate_selection_case_id": "candidate_selection_keyed_qk_synchronization",
-      "prerequisite_responsibilities": ["key_schedule"],
-      "scientific_source_cluster_scale": 32,
+      "responsibility_id": "image_rectifier",
+      "scientific_question_id": "coordinate_preserving_rectification_gain",
+      "development_case_id": "development_image_rectification",
+      "candidate_selection_case_id": "candidate_selection_image_rectification",
+      "candidate_identity": "coordinate_preserving_rectifier_candidate",
+      "candidate_config_digest": "449c4050330c2577a3bb091c48c59c1c7b170d1343dab21ee393260bf7d5daac",
+      "paired_ablation_identity": "rectification_disabled_ablation",
+      "negative_control_case_ids": ["identity_transform", "extreme_crop_control"],
+      "metric_ids": ["rectification_coordinate_error", "same_detector_recovery_delta"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "detector_trace", "decision_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["geometric_transform_estimator", "geometry_reliability"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
       "content_branch_ids": [],
-      "geometry_grid_required": true,
-      "negative_controls": ["wrong_geometry_key", "geometry_disabled"],
-      "record_field_groups": ["geometry_trace", "key_control_trace", "provenance_trace"]
+      "geometry_case_ids": ["identity_transform", "bounded_crop_transform", "bounded_scale_transform", "bounded_rotation_transform", "single_compound_transform", "ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"]
     },
     {
-      "responsibility": "geometric_transform_estimator",
-      "scientific_question": "Blind estimation produces bounded crop, scale and rotation development signals without oracle attack inputs.",
-      "development_case_id": "development_bounded_transform_estimation",
-      "candidate_selection_case_id": "candidate_selection_bounded_transform_estimation",
-      "prerequisite_responsibilities": ["qk_geometry_sync"],
-      "scientific_source_cluster_scale": 32,
-      "content_branch_ids": [],
-      "geometry_grid_required": true,
-      "negative_controls": ["identity", "wrong_geometry_key", "ambiguous_transform", "oracle_diagnostic_only"],
-      "record_field_groups": ["geometry_trace", "key_control_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "geometry_reliability",
-      "scientific_question": "The independent reliability conjunction rejects ambiguous, unsupported and wrong-key estimates across development folds.",
-      "development_case_id": "development_geometry_reliability_rejection",
-      "candidate_selection_case_id": "candidate_selection_geometry_reliability_rejection",
-      "prerequisite_responsibilities": ["geometric_transform_estimator"],
-      "scientific_source_cluster_scale": 64,
-      "content_branch_ids": [],
-      "geometry_grid_required": true,
-      "negative_controls": ["wrong_geometry_key", "low_coverage", "boundary_solution", "non_finite_metric"],
-      "record_field_groups": ["geometry_trace", "key_control_trace", "decision_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "image_rectifier",
-      "scientific_question": "Blind rectification improves the same detector on valid support without claiming recovery of deleted crop content.",
-      "development_case_id": "development_image_rectification_recovery",
-      "candidate_selection_case_id": "candidate_selection_image_rectification_recovery",
-      "prerequisite_responsibilities": ["geometric_transform_estimator", "geometry_reliability"],
-      "scientific_source_cluster_scale": 32,
-      "content_branch_ids": [],
-      "geometry_grid_required": true,
-      "negative_controls": ["identity_warp", "rectification_disabled", "oracle_diagnostic_only"],
-      "record_field_groups": ["detector_trace", "geometry_trace", "decision_trace", "provenance_trace"]
-    },
-    {
-      "responsibility": "conditional_recovery_decision",
-      "scientific_question": "Development-only near-threshold recovery preserves the same detector, key, preprocessing and threshold while geometry never directly creates a positive.",
-      "development_case_id": "development_conditional_same_detector_recovery",
-      "candidate_selection_case_id": "candidate_selection_conditional_same_detector_recovery",
-      "prerequisite_responsibilities": ["content_detector", "qk_geometry_sync", "geometric_transform_estimator", "geometry_reliability", "image_rectifier"],
-      "scientific_source_cluster_scale": 64,
-      "content_branch_ids": ["hf_only", "lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
-      "geometry_grid_required": true,
-      "negative_controls": ["raw_only", "geometry_always", "geometry_disabled", "oracle_diagnostic_only"],
-      "record_field_groups": ["detector_trace", "branch_score_trace", "geometry_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"]
+      "responsibility_id": "conditional_recovery_decision",
+      "scientific_question_id": "same_detector_conditional_recovery_fpr_safety",
+      "development_case_id": "development_conditional_recovery",
+      "candidate_selection_case_id": "candidate_selection_conditional_recovery",
+      "candidate_identity": "same_detector_conditional_recovery_candidate",
+      "candidate_config_digest": "18d69b4cb1429293717664f1617276182c37402e15a29e94c6ca702e5fb2fd76",
+      "paired_ablation_identity": "raw_content_decision_ablation",
+      "negative_control_case_ids": ["primary_null", "far_negative_control", "geometry_positive_authority_forbidden"],
+      "metric_ids": ["near_threshold_recovery_delta", "development_primary_null_rate"],
+      "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "geometry_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"],
+      "prerequisite_responsibility_ids": ["content_detector", "qk_geometry_sync", "geometric_transform_estimator", "geometry_reliability", "image_rectifier"],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": ["clean_control", "hf_only", "lf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "geometry_case_ids": ["identity_transform", "bounded_crop_transform", "bounded_scale_transform", "bounded_rotation_transform", "single_compound_transform", "ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"]
     }
   ],
   "module_outcomes": {
     "allowed": [
-      "development_signal_observed",
-      "development_signal_not_observed",
-      "development_execution_inconclusive",
-      "development_resource_inconclusive",
-      "development_dependency_blocked"
+      "mechanism_signal_observed",
+      "mechanism_signal_not_observed",
+      "implementation_blocked",
+      "resource_blocked"
     ],
-    "recommendation_by_outcome": {
-      "development_signal_observed": "proceed_to_candidate_selection",
-      "development_signal_not_observed": "record_closed_negative_and_stop_dependent_modules",
-      "development_execution_inconclusive": "repair_execution_before_budget_bounded_repeat",
-      "development_resource_inconclusive": "revise_resource_plan_before_budget_bounded_repeat",
-      "development_dependency_blocked": "do_not_execute_until_prerequisite_is_reopened"
-    }
+    "candidate_recommendations": [
+      "candidate_worth_further_selection",
+      "candidate_not_recommended_for_selection"
+    ]
   },
   "scientific_claim_boundary": "preliminary_development_signal_only_no_promotion_or_scientific_claim"
 }

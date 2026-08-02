@@ -514,7 +514,7 @@ Notebook 与 repository module 的跨边界数据
 | generation_seed | persisted_protocol | provenance | none | true | false | false | 分析单位用于 source-cluster 隔离的冻结生成 seed。 |
 | image_lineage_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定图像 lineage 的内容摘要。 |
 | registered_key_family_digest | persisted_protocol | provenance | none | true | false | false | 分析单位所绑定 registered-key family 的公共摘要。 |
-| detector_mode | persisted_protocol | method_identity | none | false | false | false | 内部协议选择前置门的正式 detector mode；当前仅 `hf_only` 与 `combined`，缺失或未知值 fail closed。 |
+| detector_mode | persisted_protocol | method_identity | none | false | false | false | 内部协议或研究 role 的正式 detector mode；按具体协议冻结为 `hf_only`、`combined`、`candidate_configured` 或 `frozen_candidate`，缺失或未知值 fail closed。 |
 | source_row | persisted_protocol | provenance | none | false | false | false | hf_only_reference_validation pinned PartiPrompts snapshot 中从 1 开始的原始数据行身份。 |
 | prompt_text | persisted_protocol | protocol_input | none | false | false | false | hf_only_reference_validation 离线执行所需的冻结 prompt 明文；其 UTF-8 摘要必须逐行等于 `prompt_digest`，不得由网络重取替代。 |
 | roster_rows_digest | persisted_protocol | provenance | none | false | false | false | hf_only_reference_validation prompt/category/challenge/source-row roster 的 canonical SHA-256。 |
@@ -584,41 +584,59 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| development_case_id | persisted_protocol | protocol | none | true | false | false | 13 项职责中某一项 development 科学问题的唯一 case 身份。 |
-| candidate_selection_case_id | persisted_protocol | protocol | none | true | false | false | 某职责观测到 development signal 后唯一可推荐的未来 candidate-selection case；不是当前访问授权。 |
-| prerequisite_responsibilities | persisted_protocol | protocol | none | false | false | false | 某职责执行前必须已观测到 development signal 的有序前置职责。 |
-| scientific_source_cluster_scale | persisted_protocol | protocol | none | true | false | false | 某职责预登记的 development 科学 source-cluster 规模，只能为 16、32 或 64。 |
-| content_branch_ids | persisted_protocol | method_identity | none | true | false | false | 某职责初探被授权的有限 HF-only、LF-only、uniform-control 或 content-adaptive 分支集合。 |
-| geometry_grid_required | persisted_protocol | protocol | none | true | false | false | 某职责是否必须覆盖冻结 crop/scale/rotation 网格。 |
-| geometry_grid_index | persisted_protocol | protocol | none | true | false | false | 几何网格按冻结笛卡尔顺序的从零开始索引。 |
-| formal_later_split_deny_list | persisted_protocol | protocol | none | false | false | false | development 初探明确禁止读写的 candidate-selection、confirmation、calibration、check 和 held-out splits。 |
-| wiring_source_cluster_count | persisted_protocol | protocol | none | false | false | false | 只验证接线的 8-cluster fixture 规模；明确不计入科学覆盖。 |
-| scientific_source_cluster_scales | persisted_protocol | protocol | none | false | false | false | development 初探允许的完整规模边界 `16/32/64`。 |
-| maximum_module_cluster_assignments | persisted_protocol | protocol | none | false | false | false | 13 职责预登记规模之和，用于拒绝超出研究预算的 module-cluster assignments。 |
-| maximum_total_record_attempts | persisted_protocol | protocol | none | false | false | false | `maximum_module_cluster_assignments * maximum_record_attempts_per_unit` 的全局硬上限。 |
-| maximum_record_attempts_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 development unit 复用现有 internal record writer 的三次 attempt 上限。 |
-| unit_order | persisted_protocol | protocol | none | false | false | false | module dependency、source cluster、content branch、geometry grid、key control 和 attempt 的冻结执行顺序。 |
-| fold_count | persisted_protocol | protocol | none | false | false | false | development provisional threshold 按 source cluster 使用的四折 cross-fit 数量。 |
-| fit_role | persisted_protocol | protocol | none | false | false | false | 某 development fold 仅使用其他 source-cluster folds 拟合 provisional threshold 的角色。 |
-| score_role | persisted_protocol | protocol | none | false | false | false | 某 provisional threshold 仅评分本 held-out source-cluster fold 的角色。 |
-| threshold_role | persisted_protocol | method_identity | none | true | false | false | 阈值是 `development_provisional_cross_fit`，不是 formal `tau`。 |
-| invalidation_semantics | persisted_protocol | protocol | none | false | false | false | provisional threshold 在 candidate-selection 与所有后续 split 前作废的冻结语义。 |
-| invalid_for_splits | persisted_protocol | protocol | none | true | false | false | 某 provisional threshold 明确禁止消费的全部后续 split 集合。 |
-| source_cluster_count | persisted_protocol | protocol | none | true | false | false | development cross-fit plan 中唯一 source clusters 的数量。 |
-| folds | persisted_protocol | protocol | none | true | false | false | development cross-fit 的四个有序 fit/score 结构。 |
-| fold_index | persisted_protocol | protocol | none | true | false | false | development cross-fit 中从零开始的 fold 索引。 |
-| fit_source_cluster_ids | persisted_protocol | provenance | none | true | false | false | 某 fold 拟合 provisional threshold 的有序 source-cluster identities。 |
-| score_source_cluster_ids | persisted_protocol | provenance | none | true | false | false | 某 fold 仅用于评分的 held-out source-cluster identities。 |
-| fit_source_cluster_digest | persisted_protocol | provenance | none | true | false | false | `fit_source_cluster_ids` 的 canonical SHA-256。 |
-| score_source_cluster_digest | persisted_protocol | provenance | none | true | false | false | `score_source_cluster_ids` 的 canonical SHA-256。 |
-| module_outcomes | persisted_protocol | protocol | none | false | false | false | 五种互斥的 development module outcome 集合。 |
-| module_outcome | persisted_protocol | method_state | none | true | false | false | 单一模块的 signal-observed、signal-not-observed、execution/resource-inconclusive 或 dependency-blocked 状态。 |
-| recommended_next_action | persisted_protocol | protocol | none | true | false | false | 由 `module_outcome` 唯一决定的下一行动，不允许实施者自由选择。 |
-| recommendation_reason | persisted_protocol | provenance | none | true | false | false | 基于已写入 evidence records 的非空建议理由。 |
-| blocking_responsibilities | persisted_protocol | protocol | none | true | false | false | dependency-blocked outcome 中实际阻断下游的前置职责；其他 outcome 必须为空。 |
-| provisional_threshold_identities | persisted_protocol | method_identity | none | true | false | false | module outcome 引用的 development-only provisional threshold SHA-256 identities。 |
-| source_record_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的现有 internal sample record schema 精确版本。 |
-| source_record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的现有 internal run/case collection schema 精确版本。 |
+| responsibility_id | persisted_protocol | method_identity | none | true | false | false | 13 项方法职责之一的精确身份。 |
+| scientific_question_id | persisted_protocol | protocol | none | true | false | false | 每项职责独立且不可复用的 development 科学问题身份。 |
+| development_case_id | persisted_protocol | protocol | none | true | false | false | 每项职责唯一的 development case 身份。 |
+| candidate_selection_case_id | persisted_protocol | protocol | none | false | false | false | 每项职责唯一的未来 candidate-selection case 映射；不表示当前授权。 |
+| candidate_identity | persisted_protocol | method_identity | none | true | false | false | 当前职责被探索的候选身份，不代表已晋升。 |
+| paired_ablation_identity | persisted_protocol | method_identity | none | true | false | false | 当前职责必须同预算配对执行的 ablation 身份。 |
+| negative_control_case_ids | persisted_protocol | protocol | none | true | false | false | 当前职责冻结的非空 negative-control case 集合。 |
+| record_field_names | persisted_protocol | protocol | none | false | false | false | 当前职责必须由 records 提供的实际登记字段名集合。 |
+| prerequisite_responsibility_ids | persisted_protocol | protocol | none | false | false | false | 当前职责之前必须已有 mechanism signal 的有序前置职责。 |
+| dependency_stop_rule | persisted_protocol | protocol | none | false | false | false | 任一前置职责缺少 `mechanism_signal_observed` 时停止依赖职责。 |
+| module_outcome_rule | persisted_protocol | protocol | none | false | false | false | mechanism outcome 与 candidate recommendation 必须独立分类的规则身份。 |
+| allowed_module_outcomes | persisted_protocol | protocol | none | false | false | false | 恰好四项 mechanism/implementation/resource outcome。 |
+| scientific_source_cluster_scale | persisted_protocol | protocol | none | true | false | false | 普通职责 16、关键 pair 32、仅廉价 detection 职责可到 64。 |
+| content_branch_ids | persisted_protocol | method_identity | none | true | false | false | clean、HF-only、LF-only、disabled-uniform 和 routed-combination 的有限子集。 |
+| geometry_case_ids | persisted_protocol | protocol | none | true | false | false | 五个冻结操作 case 与三个几何 negative-control case 的有限子集。 |
+| formal_later_split_deny_list | persisted_protocol | protocol | none | false | false | false | development 初探明确禁止读写的全部后续 splits。 |
+| isolation_dimensions | persisted_protocol | protocol | none | false | false | false | prompt、source cluster、seed namespace、key family 和 image lineage 五项隔离维度。 |
+| role_bindings | persisted_protocol | protocol | none | false | false | false | development、selection、confirmation、calibration/check/evaluation 到登记 split 的唯一映射。 |
+| role_id | persisted_protocol | protocol | none | false | false | false | 一个研究数据职责的语义身份。 |
+| registered_split | persisted_protocol | protocol | none | false | false | false | 研究数据职责唯一绑定的登记 split。 |
+| requires_frozen_hf_only_tau | persisted_protocol | protocol | none | false | false | false | HF-only confirmation 或 held-out role 是否必须已有冻结 HF-only tau。 |
+| execution_allowed_in_development | persisted_protocol | protocol | none | false | false | false | 仅 development exploration role 为 true。 |
+| identity_dimension_digests | persisted_protocol | provenance | none | false | false | false | 每个 role 的五项隔离维度独立 canonical 摘要。 |
+| roster_digest | persisted_protocol | provenance | none | false | false | false | 某研究 role 的 split、detector 与隔离维度联合摘要。 |
+| formal_later_deny_roster_digest | persisted_protocol | provenance | none | false | false | false | development 禁止访问的全部后续 role roster 摘要。 |
+| preflight_source_cluster_count | persisted_protocol | protocol | none | false | false | false | 环境、身份和吞吐 preflight 固定的 2 个 source clusters。 |
+| wiring_source_cluster_count | persisted_protocol | protocol | none | false | false | false | 仅接线 smoke 的 8 个 source clusters，不计科学覆盖。 |
+| wiring_counts_as_scientific_coverage | persisted_protocol | protocol | none | false | false | false | 固定为 false。 |
+| maximum_scientific_units | persisted_protocol | protocol | none | false | false | false | breadth-first 可枚举 scientific unit roster 的硬上限。 |
+| maximum_total_branch_units | persisted_protocol | protocol | none | false | false | false | roster 展开有限内容 branches 后的硬上限。 |
+| maximum_record_attempts_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 development unit 复用现有 record writer 的三次 attempt 上限。 |
+| maximum_total_record_attempts | persisted_protocol | protocol | none | false | false | false | scientific roster 乘每 unit attempt 上限的全局硬上限。 |
+| maximum_duration_seconds_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 scientific unit 的最大执行时长。 |
+| unit_order | persisted_protocol | protocol | none | false | false | false | 先 13 职责 breadth、再关键 pair、最后廉价 detection 扩展的冻结顺序。 |
+| unit_roster_digest | persisted_protocol | provenance | none | false | false | false | 全部 immutable development study-unit descriptors 的 canonical 摘要。 |
+| score_adaptive_unit_changes_forbidden | persisted_protocol | protocol | none | false | false | false | 禁止按已观测分数增删或重排 unit。 |
+| threshold_role | persisted_protocol | method_identity | none | true | false | false | 固定为 `development_exploratory`，不是 formal tau。 |
+| allowed_input_roles | persisted_protocol | protocol | none | false | false | false | 阈值拟合只允许 development primary-null 与 wrong-key control。 |
+| fit_inputs | persisted_protocol | protocol | none | true | false | false | 绑定 split、case role 与 source clusters 的 threshold-fit 输入集合。 |
+| threshold_rule_digest | persisted_protocol | provenance | none | true | false | false | development threshold 规则的冻结摘要。 |
+| recovery_probe_source_cluster_ids | persisted_protocol | provenance | none | true | false | false | 当前 fold 只评分且不得产阈值的 source clusters。 |
+| recovery_probe_source_cluster_digest | persisted_protocol | provenance | none | true | false | false | recovery-probe source-cluster roster 的 canonical 摘要。 |
+| fit_source_cluster_ids | persisted_protocol | provenance | none | true | false | false | 当前 fold 只用于拟合的 source clusters。 |
+| fit_source_cluster_digest | persisted_protocol | provenance | none | true | false | false | fit source-cluster roster 的 canonical 摘要。 |
+| module_outcomes | persisted_protocol | protocol | none | false | false | false | `mechanism_signal_observed/not_observed`、`implementation_blocked`、`resource_blocked` 四项。 |
+| module_outcome | persisted_protocol | method_state | none | true | false | false | 单一职责的四选一 development outcome。 |
+| candidate_recommendations | persisted_protocol | protocol | none | false | false | false | `candidate_worth_further_selection` 与 `candidate_not_recommended_for_selection` 两项。 |
+| candidate_recommendation | persisted_protocol | method_state | none | true | false | false | 与 module outcome 分离的二选一建议；不授权 selection 或晋升。 |
+| recommendation_reason | persisted_protocol | provenance | none | true | false | false | 基于既有 evidence records 的非空建议理由。 |
+| blocking_responsibilities | persisted_protocol | protocol | none | true | false | false | `implementation_blocked` 时实际阻断当前职责的前置职责。 |
+| provisional_threshold_identities | persisted_protocol | method_identity | none | true | false | false | outcome 引用的 development-only provisional threshold identities。 |
+| source_record_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的现有 internal sample record schema 版本。 |
+| source_record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的现有 internal collection schema 版本。 |
 | outcome_record_id | persisted_protocol | provenance | none | true | false | false | module outcome 除自身 ID 外全部字段的 canonical SHA-256。 |
 
 以下 input-manifest 字段只描述 runner 的冻结输入边界，不直接支撑 claim：
