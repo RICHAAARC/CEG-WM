@@ -1805,6 +1805,196 @@ def build_development_cross_fit_plan(
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentPrimaryNullKeyBinding:
+    source_cluster_id: str
+    registered_key_family_digest: str
+    registered_key_public_digest: str
+    detection_key_public_digest: str
+
+    def validate(self) -> tuple[str, ...]:
+        violations: list[str] = []
+        for field_name in (
+            "source_cluster_id",
+            "registered_key_family_digest",
+            "registered_key_public_digest",
+            "detection_key_public_digest",
+        ):
+            if _DIGEST_PATTERN.fullmatch(getattr(self, field_name)) is None:
+                violations.append(f"primary_null_{field_name}_invalid")
+        return tuple(violations)
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenDevelopmentThresholdDetectorBinding:
+    binding_identity: str
+    detector_identity: str
+    preprocessing_identity: str
+    public_key_relation: str
+    primary_null_key_bindings: tuple[DevelopmentPrimaryNullKeyBinding, ...]
+    primary_null_key_roster_digest: str
+    detector_base_config_payload_json: str
+    detector_config_payload_json: str
+    detector_config_digest: str
+
+    def payload_without_identity(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload.pop("binding_identity")
+        return payload
+
+    def validate(
+        self,
+        plan: FrozenDevelopmentCrossFitPlan,
+        manifest: FrozenSplitManifest,
+        fold_index: int,
+    ) -> tuple[str, ...]:
+        violations: list[str] = []
+        if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
+            return ("development_cross_fit_plan_invalid",)
+        if fold_index not in range(len(plan.folds)):
+            return ("threshold_detector_binding_fold_invalid",)
+        if _IDENTITY_PATTERN.fullmatch(self.detector_identity) is None:
+            violations.append("threshold_detector_binding_identity_invalid")
+        if _IDENTITY_PATTERN.fullmatch(self.preprocessing_identity) is None:
+            violations.append("threshold_preprocessing_identity_invalid")
+        if self.public_key_relation != "registered_detection_public_digests_distinct":
+            violations.append("primary_null_public_key_relation_invalid")
+        for item in self.primary_null_key_bindings:
+            if type(item) is not DevelopmentPrimaryNullKeyBinding:
+                violations.append("primary_null_key_binding_exact_type_required")
+            else:
+                violations.extend(item.validate())
+                if item.registered_key_public_digest == item.detection_key_public_digest:
+                    violations.append("primary_null_public_key_relation_mismatch")
+        cluster_ids = tuple(
+            item.source_cluster_id for item in self.primary_null_key_bindings
+        )
+        if len(cluster_ids) != len(set(cluster_ids)):
+            violations.append("primary_null_key_binding_cluster_duplicate")
+        expected_clusters = set(plan.folds[fold_index].fit_source_cluster_ids)
+        if set(cluster_ids) != expected_clusters:
+            violations.append("primary_null_key_binding_fold_coverage_invalid")
+        manifest_families = {
+            assignment.identity.source_cluster_id: (
+                assignment.identity.registered_key_family_digest
+            )
+            for assignment in manifest.assignments
+            if assignment.identity.source_cluster_id in expected_clusters
+        }
+        if {
+            item.source_cluster_id: item.registered_key_family_digest
+            for item in self.primary_null_key_bindings
+        } != manifest_families:
+            violations.append("primary_null_key_family_manifest_mapping_invalid")
+        if self.primary_null_key_roster_digest != _canonical_digest(
+            tuple(asdict(item) for item in self.primary_null_key_bindings)
+        ):
+            violations.append("primary_null_key_roster_digest_invalid")
+        try:
+            base_payload = json.loads(self.detector_base_config_payload_json)
+            config_payload = json.loads(self.detector_config_payload_json)
+        except (TypeError, json.JSONDecodeError):
+            violations.append("threshold_detector_config_payload_unreadable")
+        else:
+            expected_base_json = json.dumps(
+                base_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+            if type(base_payload) is not dict or not base_payload:
+                violations.append("threshold_detector_base_config_missing")
+            elif self.detector_base_config_payload_json != expected_base_json:
+                violations.append("threshold_detector_base_config_not_canonical")
+            expected_config = {
+                "detector_base_config": base_payload,
+                "detector_identity": self.detector_identity,
+                "preprocessing_identity": self.preprocessing_identity,
+                "primary_null_key_roster_digest": self.primary_null_key_roster_digest,
+                "public_key_relation": self.public_key_relation,
+            }
+            if config_payload != expected_config:
+                violations.append("threshold_detector_config_payload_binding_invalid")
+            expected_config_json = json.dumps(
+                expected_config,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+            if self.detector_config_payload_json != expected_config_json:
+                violations.append("threshold_detector_config_payload_not_canonical")
+            if self.detector_config_digest != _canonical_digest(expected_config):
+                violations.append("threshold_detector_config_digest_invalid")
+        if self.binding_identity != _canonical_digest(self.payload_without_identity()):
+            violations.append("threshold_detector_binding_identity_invalid")
+        return tuple(dict.fromkeys(violations))
+
+
+def create_development_threshold_detector_binding(
+    plan: FrozenDevelopmentCrossFitPlan,
+    *,
+    fold_index: int,
+    input_manifest: FrozenSplitManifest,
+    detector_identity: str,
+    preprocessing_identity: str,
+    public_key_relation: str,
+    primary_null_key_bindings: Sequence[DevelopmentPrimaryNullKeyBinding],
+    detector_base_config_payload: Mapping[str, object],
+) -> FrozenDevelopmentThresholdDetectorBinding:
+    if type(detector_base_config_payload) is not dict or not detector_base_config_payload:
+        raise ValueError("threshold_detector_base_config_missing")
+    key_bindings = tuple(primary_null_key_bindings)
+    key_roster_digest = _canonical_digest(tuple(asdict(item) for item in key_bindings))
+    base_json = json.dumps(
+        detector_base_config_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+    config_payload = {
+        "detector_base_config": detector_base_config_payload,
+        "detector_identity": detector_identity,
+        "preprocessing_identity": preprocessing_identity,
+        "primary_null_key_roster_digest": key_roster_digest,
+        "public_key_relation": public_key_relation,
+    }
+    config_json = json.dumps(
+        config_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+    payload = {
+        "detector_identity": detector_identity,
+        "preprocessing_identity": preprocessing_identity,
+        "public_key_relation": public_key_relation,
+        "primary_null_key_bindings": key_bindings,
+        "primary_null_key_roster_digest": key_roster_digest,
+        "detector_base_config_payload_json": base_json,
+        "detector_config_payload_json": config_json,
+        "detector_config_digest": _canonical_digest(config_payload),
+    }
+    binding = FrozenDevelopmentThresholdDetectorBinding(
+        binding_identity=_canonical_digest(
+            {
+                key: tuple(asdict(item) for item in value)
+                if key == "primary_null_key_bindings"
+                else value
+                for key, value in payload.items()
+            }
+        ),
+        **payload,
+    )
+    violations = binding.validate(plan, input_manifest, fold_index)
+    if violations:
+        raise ValueError(",".join(violations))
+    return binding
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentThresholdFitInput:
     source_record: InternalValidationRecord
     case_role: str
@@ -1819,8 +2009,7 @@ class DevelopmentThresholdFitInput:
         self,
         fold: DevelopmentCrossFitFold,
         manifest: FrozenSplitManifest,
-        detector_identity: str,
-        detector_config_digest: str,
+        detector_binding: FrozenDevelopmentThresholdDetectorBinding,
     ) -> tuple[str, ...]:
         violations: list[str] = []
         if type(self.source_record) is not InternalValidationRecord:
@@ -1844,14 +2033,51 @@ class DevelopmentThresholdFitInput:
             violations.append("threshold_fit_input_not_in_bound_manifest")
         if record.provenance_trace.split_manifest_digest != manifest.digest():
             violations.append("threshold_fit_source_record_manifest_digest_mismatch")
-        if record.detector_trace.raw_detector_identity != detector_identity:
+        detector = record.detector_trace
+        if (
+            detector.raw_detector_identity != detector_binding.detector_identity
+            or detector.rectified_detector_identity
+            != detector_binding.detector_identity
+        ):
             violations.append("threshold_fit_input_detector_identity_mismatch")
-        if record.detector_trace.raw_detector_config_digest != detector_config_digest:
+        if (
+            detector.raw_detector_config_digest
+            != detector_binding.detector_config_digest
+            or detector.rectified_detector_config_digest
+            != detector_binding.detector_config_digest
+        ):
             violations.append("threshold_fit_input_detector_config_mismatch")
+        if (
+            detector.raw_preprocessing_identity
+            != detector_binding.preprocessing_identity
+            or detector.rectified_preprocessing_identity
+            != detector_binding.preprocessing_identity
+        ):
+            violations.append("threshold_fit_input_preprocessing_identity_mismatch")
         if record.key_control_trace.key_role != "unwatermarked_primary_null":
             violations.append("threshold_fit_input_key_role_invalid")
         if record.key_control_trace.control_identity != "primary_null":
             violations.append("threshold_fit_input_control_identity_invalid")
+        key_by_cluster = {
+            item.source_cluster_id: item
+            for item in detector_binding.primary_null_key_bindings
+        }
+        expected_key = key_by_cluster.get(identity.source_cluster_id)
+        if expected_key is None:
+            violations.append("threshold_fit_input_key_binding_missing")
+        else:
+            if (
+                identity.registered_key_family_digest
+                != expected_key.registered_key_family_digest
+            ):
+                violations.append("threshold_fit_input_key_family_mismatch")
+            if (
+                record.key_control_trace.registered_key_public_digest
+                != expected_key.registered_key_public_digest
+                or record.key_control_trace.detection_key_public_digest
+                != expected_key.detection_key_public_digest
+            ):
+                violations.append("threshold_fit_input_public_key_mapping_mismatch")
         if record.execution_status != "success":
             violations.append("threshold_fit_input_success_record_required")
         score = record.detector_trace.raw_content_score
@@ -1890,6 +2116,7 @@ class DevelopmentProvisionalThreshold:
     threshold: float
     input_manifest: FrozenSplitManifest
     input_manifest_digest: str
+    detector_binding: FrozenDevelopmentThresholdDetectorBinding
     detector_identity: str
     detector_config_payload_json: str
     detector_config_digest: str
@@ -1918,16 +2145,25 @@ class DevelopmentProvisionalThreshold:
             violations.append("provisional_threshold_fold_index_invalid")
             return tuple(violations)
         fold = plan.folds[self.fold_index]
+        if type(self.detector_binding) is not FrozenDevelopmentThresholdDetectorBinding:
+            violations.append("threshold_detector_binding_exact_type_required")
+        else:
+            violations.extend(
+                self.detector_binding.validate(
+                    plan,
+                    self.input_manifest,
+                    self.fold_index,
+                )
+            )
         for fit_input in self.fit_inputs:
             if type(fit_input) is not DevelopmentThresholdFitInput:
                 violations.append("threshold_fit_input_exact_type_required")
-            else:
+            elif type(self.detector_binding) is FrozenDevelopmentThresholdDetectorBinding:
                 violations.extend(
                     fit_input.validate(
                         fold,
                         self.input_manifest,
-                        self.detector_identity,
-                        self.detector_config_digest,
+                        self.detector_binding,
                     )
                 )
         if {item.case_role for item in self.fit_inputs} != set(
@@ -2005,6 +2241,16 @@ class DevelopmentProvisionalThreshold:
             allow_nan=False,
         ):
             violations.append("provisional_threshold_rule_unregistered")
+        if type(self.detector_binding) is FrozenDevelopmentThresholdDetectorBinding:
+            if self.detector_identity != self.detector_binding.detector_identity:
+                violations.append("provisional_threshold_detector_binding_mismatch")
+            if (
+                self.detector_config_payload_json
+                != self.detector_binding.detector_config_payload_json
+                or self.detector_config_digest
+                != self.detector_binding.detector_config_digest
+            ):
+                violations.append("provisional_threshold_detector_config_binding_mismatch")
         if _IDENTITY_PATTERN.fullmatch(self.detector_identity) is None:
             violations.append("provisional_threshold_detector_identity_invalid")
         if isinstance(self.threshold, bool) or not isinstance(self.threshold, (int, float)):
@@ -2035,8 +2281,7 @@ def create_development_provisional_threshold(
     *,
     fold_index: int,
     input_manifest: FrozenSplitManifest,
-    detector_identity: str,
-    detector_config_payload: Mapping[str, object],
+    detector_binding: FrozenDevelopmentThresholdDetectorBinding,
     fit_inputs: Sequence[DevelopmentThresholdFitInput],
 ) -> DevelopmentProvisionalThreshold:
     if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
@@ -2045,17 +2290,10 @@ def create_development_provisional_threshold(
         raise ValueError("provisional_threshold_fold_index_invalid")
     if type(input_manifest) is not FrozenSplitManifest:
         raise TypeError("development_threshold_manifest_exact_type_required")
-    if type(detector_config_payload) is not dict or not detector_config_payload:
-        raise ValueError("detector_config_payload_missing")
+    if type(detector_binding) is not FrozenDevelopmentThresholdDetectorBinding:
+        raise TypeError("threshold_detector_binding_exact_type_required")
     if not fit_inputs:
         raise ValueError("development_threshold_fit_inputs_missing")
-    detector_config_payload_json = json.dumps(
-        detector_config_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-        allow_nan=False,
-    )
     threshold_rule_payload_json = json.dumps(
         DEVELOPMENT_THRESHOLD_RULE_PAYLOAD,
         ensure_ascii=False,
@@ -2073,9 +2311,12 @@ def create_development_provisional_threshold(
         ),
         "input_manifest": input_manifest,
         "input_manifest_digest": input_manifest.digest(),
-        "detector_identity": detector_identity,
-        "detector_config_payload_json": detector_config_payload_json,
-        "detector_config_digest": _canonical_digest(detector_config_payload),
+        "detector_binding": detector_binding,
+        "detector_identity": detector_binding.detector_identity,
+        "detector_config_payload_json": (
+            detector_binding.detector_config_payload_json
+        ),
+        "detector_config_digest": detector_binding.detector_config_digest,
         "threshold_rule_payload_json": threshold_rule_payload_json,
         "threshold_rule_digest": _canonical_digest(
             DEVELOPMENT_THRESHOLD_RULE_PAYLOAD
@@ -2097,7 +2338,7 @@ def create_development_provisional_threshold(
                     tuple(asdict(item) for item in value)
                     if key == "fit_inputs"
                     else asdict(value)
-                    if key == "input_manifest"
+                    if key in {"input_manifest", "detector_binding"}
                     else value
                 )
                 for key, value in payload.items()

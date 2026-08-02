@@ -52,8 +52,10 @@ case；不展开无约束笛卡尔积。
 development provisional threshold 的角色固定为 `development_exploratory`。
 四折 cross-fit 只接收 manifest 中 case identity 精确匹配的 development
 primary-null score payload；wrong-key 只作独立 attribution control，不参与拟合。
-input manifest、detector identity/config、冻结 maximum order-statistic rule 和 fold
-均由真实 payload 重算摘要，产阈值 clusters 不得评分同折 recovery probes。阈值
+input manifest、detector identity、raw/rectified 共用 preprocessing identity、
+primary-null 的 registered/detection public-key roster、冻结 maximum order-statistic
+rule 和 fold 均由真实 payload 重算摘要并共同进入 detector config binding；产阈值
+clusters 不得评分同折 recovery probes。阈值
 在 candidate-selection 前强制作废，不是 formal `tau`，不能支持 fixed-FPR、候选
 晋升或科学 claim。
 

@@ -32,6 +32,7 @@ from experiments.protocol.development_exploration import (
     PREFLIGHT_SOURCE_CLUSTER_COUNT,
     REGISTERED_STUDY_ROLE_BINDINGS,
     WIRING_SOURCE_CLUSTER_COUNT,
+    DevelopmentPrimaryNullKeyBinding,
     DevelopmentThresholdFitInput,
     assert_study_role_manifests_isolated,
     authorize_development_provisional_threshold,
@@ -39,6 +40,7 @@ from experiments.protocol.development_exploration import (
     build_development_cross_fit_plan,
     create_development_module_outcome_record,
     create_development_provisional_threshold,
+    create_development_threshold_detector_binding,
     create_development_threshold_fit_input,
     decide_development_module_execution,
     development_assignments_only,
@@ -109,6 +111,22 @@ def _recompute_candidate_config_digest(entry: dict[str, object]) -> None:
     )
 
 
+def _redigest_fit_input(
+    fit_input: DevelopmentThresholdFitInput,
+    source_record: InternalValidationRecord,
+) -> DevelopmentThresholdFitInput:
+    return replace(
+        fit_input,
+        source_record=source_record,
+        source_record_digest=_digest(
+            {
+                "case_role": fit_input.case_role,
+                "source_record": asdict(source_record),
+            }
+        ),
+    )
+
+
 def _unit(
     index: int,
     *,
@@ -164,9 +182,12 @@ def _primary_null_record(
     index: int,
     score: float,
     split_manifest_digest: str,
+    detector_binding,
 ) -> InternalValidationRecord:
-    detector_config_digest = _digest(
-        {"detector_mode": "hf_only", "preprocess": "frozen"}
+    key_binding = next(
+        item
+        for item in detector_binding.primary_null_key_bindings
+        if item.source_cluster_id == assignment.identity.source_cluster_id
     )
     return InternalValidationRecord(
         record_id=f"primary_null_score_record_{index}",
@@ -187,10 +208,10 @@ def _primary_null_record(
         detector_trace=DetectorTrace(
             raw_detector_identity="development_blind_high_frequency_detector",
             rectified_detector_identity="development_blind_high_frequency_detector",
-            raw_detector_config_digest=detector_config_digest,
-            rectified_detector_config_digest=detector_config_digest,
-            raw_preprocessing_identity="frozen_public_preprocess",
-            rectified_preprocessing_identity="frozen_public_preprocess",
+            raw_detector_config_digest=detector_binding.detector_config_digest,
+            rectified_detector_config_digest=detector_binding.detector_config_digest,
+            raw_preprocessing_identity=detector_binding.preprocessing_identity,
+            rectified_preprocessing_identity=detector_binding.preprocessing_identity,
             raw_content_score=score,
             rectified_content_score=None,
         ),
@@ -224,8 +245,8 @@ def _primary_null_record(
             tau_rescue=9.0,
         ),
         key_control_trace=KeyControlTrace(
-            registered_key_public_digest="3" * 64,
-            detection_key_public_digest="4" * 64,
+            registered_key_public_digest=key_binding.registered_key_public_digest,
+            detection_key_public_digest=key_binding.detection_key_public_digest,
             key_role="unwatermarked_primary_null",
             control_identity="primary_null",
         ),
@@ -266,34 +287,73 @@ def _cross_fit_plan(cluster_count: int = 16):
     )
 
 
-def _valid_fit_inputs(plan, fold_index: int = 0):
-    manifest = _development_manifest(plan.source_cluster_count)
+def _threshold_material(plan, fold_index: int = 0, manifest=None):
+    manifest = (
+        _development_manifest(plan.source_cluster_count)
+        if manifest is None
+        else manifest
+    )
     fit = set(plan.folds[fold_index].fit_source_cluster_ids)
-    return tuple(
+    key_bindings = tuple(
+        DevelopmentPrimaryNullKeyBinding(
+            source_cluster_id=assignment.identity.source_cluster_id,
+            registered_key_family_digest=(
+                assignment.identity.registered_key_family_digest
+            ),
+            registered_key_public_digest=_digest(
+                {
+                    "key_family": assignment.identity.registered_key_family_digest,
+                    "role": "registered_public_key",
+                }
+            ),
+            detection_key_public_digest=_digest(
+                {
+                    "key_family": assignment.identity.registered_key_family_digest,
+                    "role": "development_primary_null_detection_key",
+                }
+            ),
+        )
+        for assignment in manifest.assignments
+        if assignment.identity.source_cluster_id in fit
+    )
+    detector_binding = create_development_threshold_detector_binding(
+        plan,
+        fold_index=fold_index,
+        input_manifest=manifest,
+        detector_identity="development_blind_high_frequency_detector",
+        preprocessing_identity="frozen_public_preprocess",
+        public_key_relation="registered_detection_public_digests_distinct",
+        primary_null_key_bindings=key_bindings,
+        detector_base_config_payload={"detector_mode": "hf_only"},
+    )
+    fit_inputs = tuple(
         create_development_threshold_fit_input(
             source_record=_primary_null_record(
                 assignment,
                 index=index,
                 score=float(index) / 100.0,
                 split_manifest_digest=manifest.digest(),
+                detector_binding=detector_binding,
             ),
         )
         for index, assignment in enumerate(manifest.assignments)
         if assignment.identity.source_cluster_id in fit
     )
+    return manifest, detector_binding, fit_inputs
+
+
+def _valid_fit_inputs(plan, fold_index: int = 0):
+    return _threshold_material(plan, fold_index)[2]
 
 
 def _create_threshold(plan, fit_inputs=None):
+    manifest, detector_binding, default_fit_inputs = _threshold_material(plan)
     return create_development_provisional_threshold(
         plan,
         fold_index=0,
-        input_manifest=_development_manifest(plan.source_cluster_count),
-        detector_identity="development_blind_high_frequency_detector",
-        detector_config_payload={
-            "detector_mode": "hf_only",
-            "preprocess": "frozen",
-        },
-        fit_inputs=_valid_fit_inputs(plan) if fit_inputs is None else fit_inputs,
+        input_manifest=manifest,
+        detector_binding=detector_binding,
+        fit_inputs=default_fit_inputs if fit_inputs is None else fit_inputs,
     )
 
 
@@ -651,29 +711,16 @@ def test_registered_positive_manifest_cannot_be_relabelled_as_primary_null() -> 
         assignments=assignments,
         expected_source_cluster_count=16,
     )
-    fit_clusters = set(plan.folds[0].fit_source_cluster_ids)
-    forged_inputs = tuple(
-        create_development_threshold_fit_input(
-            source_record=_primary_null_record(
-                assignment,
-                index=index,
-                score=float(index) / 100.0,
-                split_manifest_digest=manifest.digest(),
-            )
-        )
-        for index, assignment in enumerate(assignments)
-        if assignment.identity.source_cluster_id in fit_clusters
+    _, detector_binding, forged_inputs = _threshold_material(
+        plan,
+        manifest=manifest,
     )
     with pytest.raises(ValueError, match="threshold_fit_input_case_identity_invalid"):
         create_development_provisional_threshold(
             plan,
             fold_index=0,
             input_manifest=manifest,
-            detector_identity="development_blind_high_frequency_detector",
-            detector_config_payload={
-                "detector_mode": "hf_only",
-                "preprocess": "frozen",
-            },
+            detector_binding=detector_binding,
             fit_inputs=forged_inputs,
         )
 
@@ -683,6 +730,14 @@ def test_threshold_binds_manifest_detector_rule_and_fold() -> None:
     plan = _cross_fit_plan()
     threshold = _create_threshold(plan)
     assert threshold.validate(plan) == ()
+    detector_payload = json.loads(threshold.detector_config_payload_json)
+    assert detector_payload["preprocessing_identity"] == "frozen_public_preprocess"
+    assert detector_payload["public_key_relation"] == (
+        "registered_detection_public_digests_distinct"
+    )
+    assert detector_payload["primary_null_key_roster_digest"] == (
+        threshold.detector_binding.primary_null_key_roster_digest
+    )
     for field_name, reason in (
         ("input_manifest_digest", "manifest_digest_invalid"),
         ("detector_config_digest", "detector_config_digest_invalid"),
@@ -700,6 +755,106 @@ def test_threshold_binds_manifest_detector_rule_and_fold() -> None:
         threshold_identity=_digest(forged.payload_without_identity()),
     )
     assert "provisional_threshold_value_not_rule_derived" in forged.validate(plan)
+
+
+@pytest.mark.unit
+def test_threshold_rejects_preprocessing_drift_after_source_redigest() -> None:
+    plan = _cross_fit_plan()
+    valid = _valid_fit_inputs(plan)
+    source = valid[0].source_record
+    detector = replace(
+        source.detector_trace,
+        raw_preprocessing_identity="alternate_public_preprocess",
+        rectified_preprocessing_identity="alternate_public_preprocess",
+    )
+    forged = _redigest_fit_input(
+        valid[0],
+        replace(source, detector_trace=detector),
+    )
+    with pytest.raises(
+        ValueError,
+        match="threshold_fit_input_preprocessing_identity_mismatch",
+    ):
+        _create_threshold(plan, (forged, *valid[1:]))
+
+
+@pytest.mark.unit
+def test_threshold_rejects_public_key_remap_after_all_record_redigests() -> None:
+    plan = _cross_fit_plan()
+    threshold = _create_threshold(plan)
+    forged_inputs = []
+    for index, fit_input in enumerate(threshold.fit_inputs):
+        source = fit_input.source_record
+        key_trace = replace(
+            source.key_control_trace,
+            registered_key_public_digest=f"{index + 40:064x}",
+            detection_key_public_digest=f"{index + 80:064x}",
+        )
+        forged_inputs.append(
+            _redigest_fit_input(
+                fit_input,
+                replace(source, key_control_trace=key_trace),
+            )
+        )
+    forged = replace(threshold, fit_inputs=tuple(forged_inputs))
+    forged = replace(
+        forged,
+        threshold_identity=_digest(forged.payload_without_identity()),
+    )
+    violations = forged.validate(plan)
+    assert "threshold_fit_input_public_key_mapping_mismatch" in violations
+
+
+@pytest.mark.unit
+def test_threshold_rejects_cross_fit_preprocess_and_key_mismatch() -> None:
+    plan = _cross_fit_plan()
+    valid = _valid_fit_inputs(plan)
+    source = valid[-1].source_record
+    forged_source = replace(
+        source,
+        detector_trace=replace(
+            source.detector_trace,
+            raw_preprocessing_identity="alternate_public_preprocess",
+            rectified_preprocessing_identity="alternate_public_preprocess",
+        ),
+        key_control_trace=replace(
+            source.key_control_trace,
+            registered_key_public_digest="a" * 64,
+            detection_key_public_digest="b" * 64,
+        ),
+    )
+    forged = _redigest_fit_input(valid[-1], forged_source)
+    with pytest.raises(ValueError) as captured:
+        _create_threshold(plan, (*valid[:-1], forged))
+    message = str(captured.value)
+    assert "threshold_fit_input_preprocessing_identity_mismatch" in message
+    assert "threshold_fit_input_public_key_mapping_mismatch" in message
+
+
+@pytest.mark.unit
+def test_threshold_detector_payload_tamper_fails_after_redigest() -> None:
+    plan = _cross_fit_plan()
+    threshold = _create_threshold(plan)
+    altered_payload = json.loads(threshold.detector_config_payload_json)
+    altered_payload["preprocessing_identity"] = "alternate_public_preprocess"
+    altered_json = json.dumps(
+        altered_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+    forged = replace(
+        threshold,
+        detector_config_payload_json=altered_json,
+        detector_config_digest=_digest(altered_payload),
+    )
+    forged = replace(
+        forged,
+        threshold_identity=_digest(forged.payload_without_identity()),
+    )
+    violations = forged.validate(plan)
+    assert "provisional_threshold_detector_config_binding_mismatch" in violations
 
 
 @pytest.mark.unit

@@ -629,6 +629,12 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | fit_inputs | persisted_protocol | protocol | none | true | false | false | 绑定真实 manifest assignment、primary-null case、detector 与 score payload 的 threshold-fit 输入集合。 |
 | source_record | persisted_protocol | provenance | none | true | false | false | threshold-fit 输入绑定的 exact `InternalValidationRecord`；必须是 runner 正式 records 类型。 |
 | source_record_digest | persisted_protocol | provenance | none | true | false | false | 完整 primary-null source record 与 case role 的重算摘要。 |
+| detector_binding | persisted_protocol | method_identity | none | true | false | false | development threshold 对 detector、preprocessing 与 primary-null public-key roster 的不可变绑定结构。 |
+| binding_identity | persisted_protocol | method_identity | none | true | false | false | development threshold detector binding 全部字段的 canonical 摘要。 |
+| public_key_relation | persisted_protocol | method_identity | none | true | false | false | primary-null 注册公钥与检测公钥必须为不同公开摘要的冻结关系。 |
+| primary_null_key_bindings | persisted_protocol | provenance | none | true | false | false | 当前 cross-fit fold 中每个 source cluster 到 registered key family、registered public key 与 detection public key 的精确有序映射。 |
+| primary_null_key_roster_digest | persisted_protocol | provenance | none | true | false | false | 全部 primary-null source-cluster/key 映射的 canonical 摘要，并进入 detector config digest。 |
+| detector_base_config_payload_json | persisted_protocol | method_identity | none | true | false | false | 不含 preprocessing/key roster 注入项的 canonical detector 基础配置；完整 detector config 由绑定对象唯一派生。 |
 | detector_config_payload_json | persisted_protocol | method_identity | none | true | false | false | canonical detector config payload；其摘要不得由调用者单独自报。 |
 | threshold_rule_payload_json | persisted_protocol | protocol | none | true | false | false | canonical development maximum order-statistic rule payload。 |
 | threshold_rule_digest | persisted_protocol | provenance | none | true | false | false | development threshold 规则的冻结摘要。 |
