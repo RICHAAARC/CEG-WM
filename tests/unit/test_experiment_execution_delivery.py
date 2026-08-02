@@ -394,7 +394,7 @@ def test_retired_synthetic_entrypoint_helpers_are_removed() -> None:
 
 
 @pytest.mark.quick
-def test_experiment_notebook_is_thin_clean_and_external_bootstrap_only() -> None:
+def test_experiment_notebook_is_thin_clean_and_calls_unified_server_only() -> None:
     notebook = ROOT / "notebooks/colab/experiment_execution.ipynb"
     document = json.loads(notebook.read_text(encoding="utf-8"))
     code_cells = [
@@ -407,11 +407,14 @@ def test_experiment_notebook_is_thin_clean_and_external_bootstrap_only() -> None
     assert 4 <= len(code_cells) <= 6
     assert all(cell.get("execution_count") is None for cell in code_cells)
     assert all(cell.get("outputs", []) == [] for cell in document["cells"])
-    assert "experiment_execution_bootstrap.py" in sources
-    assert "--expected-archive-sha256" in sources
-    assert "--expected-bootstrap-sha256" in sources
+    assert "hf_only_threshold_fit_server.py" in sources
     assert "files.download" in sources
     for forbidden in (
+        "experiment_execution_bootstrap.py",
+        "experiment_execution_entrypoint.py",
+        "pip install",
+        "StableDiffusion3Pipeline",
+        "from diffusers",
         "experiment_execution_manifest.json",
         "FrozenCaseInputManifest",
         "execute_internal_case",
