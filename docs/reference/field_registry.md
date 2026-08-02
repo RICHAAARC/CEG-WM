@@ -589,6 +589,7 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | development_case_id | persisted_protocol | protocol | none | true | false | false | 每项职责唯一的 development case 身份。 |
 | candidate_selection_case_id | persisted_protocol | protocol | none | false | false | false | 每项职责唯一的未来 candidate-selection case 映射；不表示当前授权。 |
 | candidate_identity | persisted_protocol | method_identity | none | true | false | false | 当前职责被探索的候选身份，不代表已晋升。 |
+| candidate_parameter_bindings | persisted_protocol | method_identity | none | true | false | false | 当前职责对登记候选参数名及有限值 roster 的精确绑定。 |
 | paired_ablation_identity | persisted_protocol | method_identity | none | true | false | false | 当前职责必须同预算配对执行的 ablation 身份。 |
 | negative_control_case_ids | persisted_protocol | protocol | none | true | false | false | 当前职责冻结的非空 negative-control case 集合。 |
 | record_field_names | persisted_protocol | protocol | none | false | false | false | 当前职责必须由 records 提供的实际登记字段名集合。 |
@@ -599,6 +600,8 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | scientific_source_cluster_scale | persisted_protocol | protocol | none | true | false | false | 普通职责 16、关键 pair 32、仅廉价 detection 职责可到 64。 |
 | content_branch_ids | persisted_protocol | method_identity | none | true | false | false | clean、HF-only、LF-only、disabled-uniform 和 routed-combination 的有限子集。 |
 | geometry_case_ids | persisted_protocol | protocol | none | true | false | false | 五个冻结操作 case 与三个几何 negative-control case 的有限子集。 |
+| content_branch_id | persisted_protocol | method_identity | none | true | false | false | 单个原子 scientific unit 绑定的唯一内容 branch，或明确 not-applicable 身份。 |
+| geometry_case_id | persisted_protocol | protocol | none | true | false | false | 单个原子 scientific unit 绑定的唯一几何 case，或明确 not-applicable 身份。 |
 | formal_later_split_deny_list | persisted_protocol | protocol | none | false | false | false | development 初探明确禁止读写的全部后续 splits。 |
 | isolation_dimensions | persisted_protocol | protocol | none | false | false | false | prompt、source cluster、seed namespace、key family 和 image lineage 五项隔离维度。 |
 | role_bindings | persisted_protocol | protocol | none | false | false | false | development、selection、confirmation、calibration/check/evaluation 到登记 split 的唯一映射。 |
@@ -606,14 +609,15 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | registered_split | persisted_protocol | protocol | none | false | false | false | 研究数据职责唯一绑定的登记 split。 |
 | requires_frozen_hf_only_tau | persisted_protocol | protocol | none | false | false | false | HF-only confirmation 或 held-out role 是否必须已有冻结 HF-only tau。 |
 | execution_allowed_in_development | persisted_protocol | protocol | none | false | false | false | 仅 development exploration role 为 true。 |
-| identity_dimension_digests | persisted_protocol | provenance | none | false | false | false | 每个 role 的五项隔离维度独立 canonical 摘要。 |
-| roster_digest | persisted_protocol | provenance | none | false | false | false | 某研究 role 的 split、detector 与隔离维度联合摘要。 |
-| formal_later_deny_roster_digest | persisted_protocol | provenance | none | false | false | false | development 禁止访问的全部后续 role roster 摘要。 |
+| manifest_reference | persisted_protocol | provenance | none | false | false | false | role 对真实 split manifest 的运行期绑定引用；未授权未来 role 使用明确 unavailable 身份。 |
+| manifest_availability | persisted_protocol | protocol | none | false | false | false | role manifest 是执行时必需还是在获授权前不可用。 |
+| frozen_manifest_digest | persisted_protocol | provenance | none | true | false | false | 只有真实 manifest 已冻结时才允许存在的重算摘要；本批 role registry 均为空。 |
+| cross_role_identity_overlap_forbidden | persisted_protocol | protocol | none | false | false | false | 已提供 role manifests 在五个隔离维度任一交集均 fail closed。 |
+| formal_later_deny_policy_digest | persisted_protocol | provenance | none | false | false | false | 未授权后续 role 的 split/reference/availability deny policy 摘要，不冒充数据 roster。 |
 | preflight_source_cluster_count | persisted_protocol | protocol | none | false | false | false | 环境、身份和吞吐 preflight 固定的 2 个 source clusters。 |
 | wiring_source_cluster_count | persisted_protocol | protocol | none | false | false | false | 仅接线 smoke 的 8 个 source clusters，不计科学覆盖。 |
 | wiring_counts_as_scientific_coverage | persisted_protocol | protocol | none | false | false | false | 固定为 false。 |
-| maximum_scientific_units | persisted_protocol | protocol | none | false | false | false | breadth-first 可枚举 scientific unit roster 的硬上限。 |
-| maximum_total_branch_units | persisted_protocol | protocol | none | false | false | false | roster 展开有限内容 branches 后的硬上限。 |
+| maximum_scientific_units | persisted_protocol | protocol | none | false | false | false | breadth-first 原子 branch×geometry scientific unit roster 的硬上限。 |
 | maximum_record_attempts_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 development unit 复用现有 record writer 的三次 attempt 上限。 |
 | maximum_total_record_attempts | persisted_protocol | protocol | none | false | false | false | scientific roster 乘每 unit attempt 上限的全局硬上限。 |
 | maximum_duration_seconds_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 scientific unit 的最大执行时长。 |
@@ -621,8 +625,12 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | unit_roster_digest | persisted_protocol | provenance | none | false | false | false | 全部 immutable development study-unit descriptors 的 canonical 摘要。 |
 | score_adaptive_unit_changes_forbidden | persisted_protocol | protocol | none | false | false | false | 禁止按已观测分数增删或重排 unit。 |
 | threshold_role | persisted_protocol | method_identity | none | true | false | false | 固定为 `development_exploratory`，不是 formal tau。 |
-| allowed_input_roles | persisted_protocol | protocol | none | false | false | false | 阈值拟合只允许 development primary-null 与 wrong-key control。 |
-| fit_inputs | persisted_protocol | protocol | none | true | false | false | 绑定 split、case role 与 source clusters 的 threshold-fit 输入集合。 |
+| allowed_input_roles | persisted_protocol | protocol | none | false | false | false | 阈值拟合只允许 development primary-null；wrong-key 作为独立 control 不参与拟合。 |
+| fit_inputs | persisted_protocol | protocol | none | true | false | false | 绑定真实 manifest assignment、primary-null case、detector 与 score payload 的 threshold-fit 输入集合。 |
+| source_record | persisted_protocol | provenance | none | true | false | false | threshold-fit 输入绑定的 exact `InternalValidationRecord`；必须是 runner 正式 records 类型。 |
+| source_record_digest | persisted_protocol | provenance | none | true | false | false | 完整 primary-null source record 与 case role 的重算摘要。 |
+| detector_config_payload_json | persisted_protocol | method_identity | none | true | false | false | canonical detector config payload；其摘要不得由调用者单独自报。 |
+| threshold_rule_payload_json | persisted_protocol | protocol | none | true | false | false | canonical development maximum order-statistic rule payload。 |
 | threshold_rule_digest | persisted_protocol | provenance | none | true | false | false | development threshold 规则的冻结摘要。 |
 | recovery_probe_source_cluster_ids | persisted_protocol | provenance | none | true | false | false | 当前 fold 只评分且不得产阈值的 source clusters。 |
 | recovery_probe_source_cluster_digest | persisted_protocol | provenance | none | true | false | false | recovery-probe source-cluster roster 的 canonical 摘要。 |

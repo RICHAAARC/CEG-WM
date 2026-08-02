@@ -23,69 +23,97 @@
       "registered_key_family_digest",
       "image_lineage_digest"
     ],
+    "cross_role_identity_overlap_forbidden": true,
     "role_bindings": [
       {
         "role_id": "development_exploration",
         "registered_split": "development",
         "detector_mode": "candidate_configured",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": true
+        "execution_allowed_in_development": true,
+        "manifest_reference": "development_split_manifest_runtime_binding",
+        "manifest_availability": "required_at_execution",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "candidate_selection_selection",
         "registered_split": "candidate_selection",
         "detector_mode": "candidate_configured",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "candidate_selection_selection_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "content_candidate_confirmation",
         "registered_split": "untouched_confirmation",
         "detector_mode": "combined",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "content_candidate_confirmation_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "hf_only_reference_confirmation",
         "registered_split": "untouched_confirmation",
         "detector_mode": "hf_only",
         "requires_frozen_hf_only_tau": true,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "hf_only_reference_confirmation_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "content_threshold_calibration",
         "registered_split": "content_threshold_fit",
         "detector_mode": "combined",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "content_threshold_calibration_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "rescue_threshold_calibration",
         "registered_split": "rescue_threshold_fit",
         "detector_mode": "combined",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "rescue_threshold_calibration_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "geometry_reliability_calibration",
         "registered_split": "reliability_fit",
         "detector_mode": "combined",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "geometry_reliability_calibration_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "end_to_end_safety_check",
         "registered_split": "end_to_end_check",
         "detector_mode": "combined",
         "requires_frozen_hf_only_tau": false,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "end_to_end_safety_check_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       },
       {
         "role_id": "formal_held_out_evaluation",
         "registered_split": "held_out_evaluation",
         "detector_mode": "frozen_candidate",
         "requires_frozen_hf_only_tau": true,
-        "execution_allowed_in_development": false
+        "execution_allowed_in_development": false,
+        "manifest_reference": "formal_held_out_evaluation_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
       }
     ]
   },
@@ -104,10 +132,9 @@
     "wiring_source_cluster_count": 8,
     "wiring_counts_as_scientific_coverage": false,
     "scientific_source_cluster_scales": [16, 32, 64],
-    "maximum_scientific_units": 384,
-    "maximum_total_branch_units": 1280,
+    "maximum_scientific_units": 2512,
     "maximum_record_attempts_per_unit": 3,
-    "maximum_total_record_attempts": 3840,
+    "maximum_total_record_attempts": 7536,
     "maximum_duration_seconds_per_unit": 900,
     "unit_order": [
       "scientific_breadth_source_cluster_ordinal",
@@ -116,15 +143,15 @@
       "cheap_detection_extension_source_cluster_ordinal"
     ],
     "score_adaptive_unit_changes_forbidden": true,
-    "unit_roster_digest": "51105bba7550fc151e683873bbe61cfd16d4574f3c8c6ba17fa5369362574c74"
+    "unit_roster_digest": "9c558c279aa416cf7390998f6d63ffe6ac3b3131ed26aa1efb695da02c706a28"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",
     "fold_count": 4,
-    "fit_role": "development_primary_null_and_key_control_fit",
+    "fit_role": "development_primary_null_fit",
     "score_role": "development_recovery_probe_score",
     "threshold_role": "development_exploratory",
-    "allowed_input_roles": ["primary_null", "wrong_key_control"],
+    "allowed_input_roles": ["primary_null"],
     "input_manifest_binding_required": true,
     "detector_binding_required": true,
     "threshold_rule_binding_required": true,
@@ -208,10 +235,14 @@
       "development_case_id": "development_key_identity_separation",
       "candidate_selection_case_id": "candidate_selection_key_identity_separation",
       "candidate_identity": "registered_key_identity_candidate",
-      "candidate_config_digest": "b0c4aa804674846a310527bfeb9f3cd88ad75821cfe1e5da986764fb99f9fc83",
+      "candidate_ids": ["key_schedule_sha256_counter"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "key_stream_candidate", "values": ["key_schedule_sha256_counter"]}
+      ],
+      "candidate_config_digest": "551fa191f481c2318b778ea9f3e113c6db0586e3fba746e8c34202173ccbc558",
       "paired_ablation_identity": "wrong_and_public_key_identity_ablation",
-      "negative_control_case_ids": ["wrong_key_control", "public_noise_control"],
-      "metric_ids": ["key_identity_separation_rate", "key_replay_consistency"],
+      "negative_control_case_ids": ["wrong_key_roster", "public_noise_secret_independence"],
+      "metric_ids": ["key_attribution_separation", "domain_collision_count"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": [],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -227,10 +258,15 @@
       "development_case_id": "development_content_routing",
       "candidate_selection_case_id": "candidate_selection_content_routing",
       "candidate_identity": "content_adaptive_router_candidate",
-      "candidate_config_digest": "d116eb07a2855848fd11ae59b58375f9d583da6718a75a0a7d4bab0cd258bdb6",
+      "candidate_ids": ["key_schedule_sha256_counter", "routing_stqr", "routing_uniform_control"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "adaptive_router_candidate", "values": ["routing_stqr"]},
+        {"parameter_id": "disabled_uniform_control_candidate", "values": ["routing_uniform_control"]}
+      ],
+      "candidate_config_digest": "fe3d26cbdc328ce2f8798c21d65ee022deaf2d47ff11b7077b0207bdc88f893d",
       "paired_ablation_identity": "disabled_uniform_routing_ablation",
-      "negative_control_case_ids": ["disabled_uniform_routing_control", "attack_label_blindness_control"],
-      "metric_ids": ["matched_budget_routing_gain", "routing_non_degradation_rate"],
+      "negative_control_case_ids": ["routing_uniform_control", "attack_label_blindness"],
+      "metric_ids": ["matched_budget_incremental_tpr", "routing_coverage", "quality_delta"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -246,10 +282,14 @@
       "development_case_id": "development_low_frequency_carrier",
       "candidate_selection_case_id": "candidate_selection_low_frequency_carrier",
       "candidate_identity": "low_frequency_carrier_candidate",
-      "candidate_config_digest": "ef0b64af08899843a6e5a89bbd8d7c32676d21228c360658ce86e716142ba71d",
+      "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "carrier_candidate", "values": ["lf_low_pass"]}
+      ],
+      "candidate_config_digest": "3d8be98e37aada2eaa98da1db0095e24911093f994a256a39ab1f70f40660e23",
       "paired_ablation_identity": "low_frequency_write_disabled_ablation",
-      "negative_control_case_ids": ["wrong_key_control", "clean_control"],
-      "metric_ids": ["low_frequency_key_margin", "paired_quality_delta"],
+      "negative_control_case_ids": ["wrong_key", "unwatermarked", "hf_only"],
+      "metric_ids": ["lf_attribution_tpr", "lf_primary_null_fpr", "quality_delta"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -265,10 +305,14 @@
       "development_case_id": "development_high_frequency_carrier",
       "candidate_selection_case_id": "candidate_selection_high_frequency_carrier",
       "candidate_identity": "high_frequency_carrier_candidate",
-      "candidate_config_digest": "eccea6b5689f10e92e8751c82cf24ce19f44c354fc78933ff78a81c8e46c972d",
+      "candidate_ids": ["key_schedule_sha256_counter", "runtime_sd35_flowmatch", "hf_sparse_tail"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "carrier_candidate", "values": ["hf_sparse_tail"]}
+      ],
+      "candidate_config_digest": "9f9cfec2e5a8c2c84c60806a47031ca818b0fac0b5fa9edb35f8ed665ca326f5",
       "paired_ablation_identity": "high_frequency_write_disabled_ablation",
-      "negative_control_case_ids": ["wrong_key_control", "clean_control"],
-      "metric_ids": ["high_frequency_key_margin", "paired_quality_delta"],
+      "negative_control_case_ids": ["wrong_key", "unwatermarked", "clean_pair"],
+      "metric_ids": ["hf_attribution_tpr", "hf_primary_null_fpr", "quality_delta"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -284,10 +328,19 @@
       "development_case_id": "development_content_embedding",
       "candidate_selection_case_id": "candidate_selection_content_embedding",
       "candidate_identity": "matched_budget_content_embedder_candidate",
-      "candidate_config_digest": "f955aad142c60cf964ef4e25fc50265e597f5445b0c3acb42b802b850022ee00",
+      "candidate_ids": ["runtime_sd35_flowmatch", "hf_sparse_tail", "lf_low_pass", "routing_stqr", "routing_uniform_control"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "high_frequency_candidate", "values": ["hf_sparse_tail"]},
+        {"parameter_id": "low_frequency_candidate", "values": ["lf_low_pass"]},
+        {"parameter_id": "adaptive_router_candidate", "values": ["routing_stqr"]},
+        {"parameter_id": "disabled_uniform_control_candidate", "values": ["routing_uniform_control"]},
+        {"parameter_id": "content_relative_l2", "values": ["3/250"]},
+        {"parameter_id": "mixing_coefficients", "values": ["1/4", "1/2", "3/4"]}
+      ],
+      "candidate_config_digest": "0b5f6f75e339e172ab54709f610390dfa44d4fafdfa339f150b9068bdd6a5312",
       "paired_ablation_identity": "single_branch_embedding_ablation",
-      "negative_control_case_ids": ["clean_control", "single_branch_control"],
-      "metric_ids": ["actual_dtype_total_budget", "paired_quality_delta"],
+      "negative_control_case_ids": ["hf_only", "lf_only", "routing_uniform_control"],
+      "metric_ids": ["realized_total_relative_l2", "matched_budget_quality_delta"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["content_router", "lf_carrier", "hf_carrier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -303,10 +356,14 @@
       "development_case_id": "development_low_frequency_detection",
       "candidate_selection_case_id": "candidate_selection_low_frequency_detection",
       "candidate_identity": "blind_low_frequency_detector_candidate",
-      "candidate_config_digest": "87ffe54130cb06890686abda640e2796b049d1460a373d21c932a5ff475a9cb3",
+      "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "detector_candidate", "values": ["lf_low_pass"]}
+      ],
+      "candidate_config_digest": "1b40d6a3cc71dbebf4ce1b87b985c81bc2059f81d0077f3857542fcd99e92a63",
       "paired_ablation_identity": "low_frequency_detector_disabled_ablation",
-      "negative_control_case_ids": ["primary_null", "wrong_key_control"],
-      "metric_ids": ["registered_wrong_key_margin", "development_primary_null_rate"],
+      "negative_control_case_ids": ["wrong_key", "unwatermarked", "content_disabled"],
+      "metric_ids": ["lf_tpr_at_selection_fpr", "lf_wrong_key_rate"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule", "lf_carrier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -322,10 +379,14 @@
       "development_case_id": "development_high_frequency_detection",
       "candidate_selection_case_id": "candidate_selection_high_frequency_detection",
       "candidate_identity": "blind_high_frequency_detector_candidate",
-      "candidate_config_digest": "f04918abd01cdcd11f350be3aeba4f0a74d5d1aaa91beea74c907f0a2c0c58cf",
+      "candidate_ids": ["key_schedule_sha256_counter", "hf_sparse_tail"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "detector_candidate", "values": ["hf_sparse_tail"]}
+      ],
+      "candidate_config_digest": "8dd40b84d23fbeaa602bb45e106681e22f1a7253c4fcb959c87af9f56d54ee98",
       "paired_ablation_identity": "high_frequency_detector_disabled_ablation",
-      "negative_control_case_ids": ["primary_null", "wrong_key_control"],
-      "metric_ids": ["registered_wrong_key_margin", "development_primary_null_rate"],
+      "negative_control_case_ids": ["wrong_key", "unwatermarked"],
+      "metric_ids": ["hf_tpr_at_frozen_fpr", "hf_wrong_key_rate"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule", "hf_carrier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -341,10 +402,16 @@
       "development_case_id": "development_content_detection",
       "candidate_selection_case_id": "candidate_selection_content_detection",
       "candidate_identity": "standardized_content_combination_candidate",
-      "candidate_config_digest": "97460c94500ab1fa8e32fe7b59c917b9be7780222b11c6bdcfff2b7c39692dd3",
+      "candidate_ids": ["hf_sparse_tail", "lf_low_pass", "content_combination_calibrated"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "combination_candidate", "values": ["content_combination_calibrated"]},
+        {"parameter_id": "combination_functions", "values": ["hf_only_standardized_score", "weighted_hf_lf_standardized_score", "maximum_hf_lf_standardized_score"]},
+        {"parameter_id": "mixing_coefficients", "values": ["1/4", "1/2", "3/4"]}
+      ],
+      "candidate_config_digest": "842b3a31c512849ccfc14d1ed9175949220d1fdfe2040ca9165e7e916e050539",
       "paired_ablation_identity": "high_frequency_only_detector_ablation",
-      "negative_control_case_ids": ["primary_null", "wrong_key_control", "high_frequency_only_control"],
-      "metric_ids": ["combination_gain", "high_frequency_non_degradation"],
+      "negative_control_case_ids": ["hf_only_standardized_score_control", "wrong_key", "unwatermarked"],
+      "metric_ids": ["combined_tpr", "combined_primary_null_fpr", "hf_non_degradation", "wrong_key_rate"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["content_embedder", "lf_detector", "hf_detector"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -360,10 +427,15 @@
       "development_case_id": "development_query_key_geometry_sync",
       "candidate_selection_case_id": "candidate_selection_query_key_geometry_sync",
       "candidate_identity": "keyed_query_key_sync_candidate",
-      "candidate_config_digest": "6508afd705820f753386d8dc227520ebdc47515f502ccff63b0d02bc9d870583",
+      "candidate_ids": ["key_schedule_sha256_counter", "runtime_sd35_flowmatch", "qk_relation_similarity"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "relation_candidate", "values": ["qk_relation_similarity"]},
+        {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
+      ],
+      "candidate_config_digest": "751e99dbc4665def92db67ed74c4b76ae2afe444ea5228762f4c0d68d4eec470",
       "paired_ablation_identity": "wrong_geometry_key_sync_ablation",
-      "negative_control_case_ids": ["wrong_geometry_key_control", "ambiguous_transform_control"],
-      "metric_ids": ["keyed_relation_margin", "transform_distinguishability"],
+      "negative_control_case_ids": ["wrong_geometry_key", "geometry_disabled"],
+      "metric_ids": ["relation_score_gain", "wrong_key_relation_margin", "quality_delta"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -379,10 +451,16 @@
       "development_case_id": "development_transform_estimation",
       "candidate_selection_case_id": "candidate_selection_transform_estimation",
       "candidate_identity": "blind_transform_estimator_candidate",
-      "candidate_config_digest": "4c7eeb7e160a4df05a8d0305864778cb847c4521c1acf9bda9db3dd874aa1349",
+      "candidate_ids": ["key_schedule_sha256_counter", "qk_relation_similarity", "rectification_similarity"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "relation_candidate", "values": ["qk_relation_similarity"]},
+        {"parameter_id": "estimator_candidate", "values": ["rectification_similarity"]},
+        {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
+      ],
+      "candidate_config_digest": "cc83616b4ab76b1374f76a218682d34203be58652a022e195d3366cb83f09900",
       "paired_ablation_identity": "oracle_transform_input_ablation",
-      "negative_control_case_ids": ["ambiguous_transform_control", "boundary_transform_control", "extreme_crop_control"],
-      "metric_ids": ["transform_parameter_error", "estimator_coverage_and_residual"],
+      "negative_control_case_ids": ["identity", "wrong_geometry_key", "ambiguous_transform", "oracle_diagnostic_only"],
+      "metric_ids": ["rotation_error", "scale_error", "translation_error", "coverage", "residual"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["qk_geometry_sync"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -398,10 +476,16 @@
       "development_case_id": "development_geometry_reliability",
       "candidate_selection_case_id": "candidate_selection_geometry_reliability",
       "candidate_identity": "fail_closed_geometry_reliability_candidate",
-      "candidate_config_digest": "1edf9b7d6d1b00cfc318567cc19c2aa4b666f2bd674531e620817340346a82bb",
+      "candidate_ids": ["key_schedule_sha256_counter", "qk_relation_similarity", "rectification_similarity"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "relation_candidate", "values": ["qk_relation_similarity"]},
+        {"parameter_id": "reliability_candidate", "values": ["rectification_similarity"]},
+        {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
+      ],
+      "candidate_config_digest": "7081aab30d606122c6513e48b39d1f5c60bd8fbeaaf24fcd7c63553fc4e2dbd0",
       "paired_ablation_identity": "geometry_reliability_disabled_ablation",
-      "negative_control_case_ids": ["ambiguous_transform_control", "boundary_transform_control", "wrong_geometry_key_control"],
-      "metric_ids": ["reliable_unreliable_separation", "wrong_key_rejection_rate"],
+      "negative_control_case_ids": ["wrong_geometry_key", "low_coverage", "boundary_solution", "non_finite_metric"],
+      "metric_ids": ["reliable_accept_rate", "unreliable_reject_rate", "false_reliable_rate"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["geometric_transform_estimator"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -417,10 +501,15 @@
       "development_case_id": "development_image_rectification",
       "candidate_selection_case_id": "candidate_selection_image_rectification",
       "candidate_identity": "coordinate_preserving_rectifier_candidate",
-      "candidate_config_digest": "449c4050330c2577a3bb091c48c59c1c7b170d1343dab21ee393260bf7d5daac",
+      "candidate_ids": ["rectification_similarity"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "rectifier_candidate", "values": ["rectification_similarity"]},
+        {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
+      ],
+      "candidate_config_digest": "65ad381b572e5092aa2bfca0153551702e9c39920ebbcc73d0882960e29b6b6e",
       "paired_ablation_identity": "rectification_disabled_ablation",
-      "negative_control_case_ids": ["identity_transform", "extreme_crop_control"],
-      "metric_ids": ["rectification_coordinate_error", "same_detector_recovery_delta"],
+      "negative_control_case_ids": ["identity_warp", "rectification_disabled", "oracle_diagnostic_only"],
+      "metric_ids": ["rectification_quality", "same_detector_score_delta", "valid_support"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "detector_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["geometric_transform_estimator", "geometry_reliability"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -436,10 +525,15 @@
       "development_case_id": "development_conditional_recovery",
       "candidate_selection_case_id": "candidate_selection_conditional_recovery",
       "candidate_identity": "same_detector_conditional_recovery_candidate",
-      "candidate_config_digest": "18d69b4cb1429293717664f1617276182c37402e15a29e94c6ca702e5fb2fd76",
+      "candidate_ids": ["joint_conditional_recovery"],
+      "candidate_parameter_bindings": [
+        {"parameter_id": "joint_candidate", "values": ["joint_conditional_recovery"]},
+        {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
+      ],
+      "candidate_config_digest": "50d0593df67f6b962f5ebb53f2e225157e72eefb5fe5e85e2ee74a6022063b89",
       "paired_ablation_identity": "raw_content_decision_ablation",
-      "negative_control_case_ids": ["primary_null", "far_negative_control", "geometry_positive_authority_forbidden"],
-      "metric_ids": ["near_threshold_recovery_delta", "development_primary_null_rate"],
+      "negative_control_case_ids": ["raw_only", "geometry_always", "geometry_disabled", "oracle_diagnostic_only"],
+      "metric_ids": ["incremental_tpr", "end_to_end_fpr", "trigger_rate", "false_rescue_rate"],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "geometry_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["content_detector", "qk_geometry_sync", "geometric_transform_estimator", "geometry_reliability", "image_rectifier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",

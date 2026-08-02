@@ -39,9 +39,10 @@ resource block；recommendation 不等于晋升，也不授权 candidate-selecti
 先执行 2-cluster 环境、身份和吞吐 preflight；8-cluster wiring smoke 也不计入
 科学覆盖。科学 roster 按 breadth-first 固定：先让全部 13 个职责各覆盖 16 个
 source clusters，再扩展 Q/K 同步与 estimator 关键 pair 到 32；只有三个廉价
-content detector 职责可确定性扩展到 64。roster、branch-unit 总数、每 unit
-三次 attempt、单 unit 900 秒和总 attempt 均有 digest/硬上限，禁止按观测分数
-增删或重排。
+content detector 职责可确定性扩展到 64。每个 scientific unit 只绑定一个
+`responsibility × source cluster × content branch × geometry case` 原子身份；冻结
+roster 共 2512 个原子 unit、每 unit 三次 attempt、单 unit 900 秒、总计 7536 次
+attempt，且整体有 digest/硬上限，禁止按观测分数增删或重排。
 
 内容只含 clean、HF-only、LF-only、disabled-uniform LF/HF control 和 routed
 LF/HF combination 五个分支。几何只含一个 identity、crop、scale、rotation 和
@@ -49,14 +50,17 @@ compound case，另冻结 ambiguous、boundary、extreme-crop 三个 negative-co
 case；不展开无约束笛卡尔积。
 
 development provisional threshold 的角色固定为 `development_exploratory`。
-四折 cross-fit 只接收 development primary-null 与 wrong-key control，显式绑定
-input manifest、detector identity/config、threshold rule 和 fold；产阈值 clusters
-不得评分同折 recovery probes。阈值在 candidate-selection 前强制作废，不是
-formal `tau`，不能支持 fixed-FPR、候选晋升或科学 claim。
+四折 cross-fit 只接收 manifest 中 case identity 精确匹配的 development
+primary-null score payload；wrong-key 只作独立 attribution control，不参与拟合。
+input manifest、detector identity/config、冻结 maximum order-statistic rule 和 fold
+均由真实 payload 重算摘要，产阈值 clusters 不得评分同折 recovery probes。阈值
+在 candidate-selection 前强制作废，不是 formal `tau`，不能支持 fixed-FPR、候选
+晋升或科学 claim。
 
-prompt、source cluster、seed namespace、key family 和 image lineage 五维 roster
-对 development、candidate-selection、两类 confirmation、未来 calibration/check
-与 held-out evaluation 分别摘要且不得复用。本阶段只允许 development role；
+prompt、source cluster、seed namespace、key family 和 image lineage 五维身份从
+各 role 的真实 `FrozenSplitManifest` 与 seed namespace 绑定；任意两个已提供 role
+在任一维度有交集即 fail closed。未来 role manifest 在获授权并真实冻结前明确标记
+unavailable，不能用 role metadata 的摘要冒充 roster。本阶段只允许 development role；
 `candidate_selection_selection` 唯一映射 candidate-selection，content candidate
 confirmation 映射 untouched-confirmation/combined，HF-only reference confirmation
 映射 untouched-confirmation/HF-only 且要求冻结 HF-only tau，三者本批均不执行。

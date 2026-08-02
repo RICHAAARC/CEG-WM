@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
+from dataclasses import asdict, replace
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -23,15 +24,22 @@ from experiments.protocol.development_exploration import (
     GEOMETRY_NEGATIVE_CONTROL_CASE_IDS,
     GEOMETRY_OPERATION_FAMILIES,
     ISOLATION_DIMENSIONS,
+    MODULE_CANDIDATE_IDS,
+    MODULE_CANDIDATE_PARAMETERS,
+    MODULE_METRIC_IDS,
+    MODULE_NEGATIVE_CONTROL_CASE_IDS,
     MODULE_OUTCOMES,
     PREFLIGHT_SOURCE_CLUSTER_COUNT,
     REGISTERED_STUDY_ROLE_BINDINGS,
     WIRING_SOURCE_CLUSTER_COUNT,
     DevelopmentThresholdFitInput,
+    assert_study_role_manifests_isolated,
     authorize_development_provisional_threshold,
+    bind_study_role_manifest,
     build_development_cross_fit_plan,
     create_development_module_outcome_record,
     create_development_provisional_threshold,
+    create_development_threshold_fit_input,
     decide_development_module_execution,
     development_assignments_only,
     enumerate_development_study_units,
@@ -42,6 +50,15 @@ from experiments.protocol.internal_records import (
     INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
     INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
     MAXIMUM_RECORD_ATTEMPTS,
+    BranchScoreTrace,
+    DecisionTrace,
+    DetectorTrace,
+    GeometryTrace,
+    InternalValidationRecord,
+    KeyControlTrace,
+    ProvenanceTrace,
+    RoutingTrace,
+    ThresholdTrace,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
@@ -58,13 +75,52 @@ CONFIG_PATH = ROOT / "configs/experiments/development_module_exploration.json"
 PROTOCOL_PATH = ROOT / "experiments/protocol/development_exploration.py"
 
 
-def _unit(index: int, *, split: str = DEVELOPMENT_SPLIT) -> SplitAssignment:
+def _digest(value: object) -> str:
+    return sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _recompute_candidate_config_digest(entry: dict[str, object]) -> None:
+    entry["candidate_config_digest"] = _digest(
+        {
+            "candidate_identity": entry["candidate_identity"],
+            "candidate_ids": entry["candidate_ids"],
+            "candidate_parameter_bindings": tuple(
+                (
+                    item["parameter_id"],
+                    tuple(item["values"]),
+                )
+                for item in entry["candidate_parameter_bindings"]
+            ),
+            "content_branch_ids": entry["content_branch_ids"],
+            "geometry_case_ids": entry["geometry_case_ids"],
+            "metric_ids": entry["metric_ids"],
+            "negative_control_case_ids": entry["negative_control_case_ids"],
+            "paired_ablation_identity": entry["paired_ablation_identity"],
+            "responsibility_id": entry["responsibility_id"],
+        }
+    )
+
+
+def _unit(
+    index: int,
+    *,
+    split: str = DEVELOPMENT_SPLIT,
+    case_id: str = "development_primary_null_threshold_fit",
+) -> SplitAssignment:
     prompt_digest = f"{index + 1:064x}"
     lineage_digest = f"{index + 1001:064x}"
     key_family_digest = f"{index + 2001:064x}"
     identity = AnalysisUnitIdentity(
         unit_id=f"development_unit_{index}",
-        case_id="development_protocol_constraint_case",
+        case_id=case_id,
         source_cluster_id=derive_source_cluster_id(
             prompt_digest=prompt_digest,
             generation_seed=index,
@@ -79,40 +135,151 @@ def _unit(index: int, *, split: str = DEVELOPMENT_SPLIT) -> SplitAssignment:
     return SplitAssignment(identity=identity, split=split)
 
 
-def _development_manifest(count: int) -> FrozenSplitManifest:
+def _manifest(
+    count: int,
+    *,
+    split: str = DEVELOPMENT_SPLIT,
+    start: int = 0,
+    case_id: str = "development_primary_null_threshold_fit",
+) -> FrozenSplitManifest:
     return FrozenSplitManifest(
         protocol_id=INTERNAL_VALIDATION_PROTOCOL_ID,
         protocol_version=INTERNAL_VALIDATION_PROTOCOL_VERSION,
-        manifest_id="development_module_exploration_fixture",
+        manifest_id=f"{split}_module_exploration_fixture",
         manifest_revision="fixture_revision",
-        assignments=tuple(_unit(index) for index in range(count)),
+        assignments=tuple(
+            _unit(index, split=split, case_id=case_id)
+            for index in range(start, start + count)
+        ),
+    )
+
+
+def _development_manifest(count: int) -> FrozenSplitManifest:
+    return _manifest(count)
+
+
+def _primary_null_record(
+    assignment: SplitAssignment,
+    *,
+    index: int,
+    score: float,
+    split_manifest_digest: str,
+) -> InternalValidationRecord:
+    detector_config_digest = _digest(
+        {"detector_mode": "hf_only", "preprocess": "frozen"}
+    )
+    return InternalValidationRecord(
+        record_id=f"primary_null_score_record_{index}",
+        run_id="development_threshold_fit_run",
+        protocol_id=INTERNAL_VALIDATION_PROTOCOL_ID,
+        protocol_version=INTERNAL_VALIDATION_PROTOCOL_VERSION,
+        record_schema_version=INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
+        analysis_unit_identity=assignment.identity,
+        split=assignment.split,
+        record_sequence_index=index,
+        record_attempt_index=0,
+        execution_status="success",
+        failure_class=None,
+        failure_reason=None,
+        exclusion_reason=None,
+        exclusion_rule_id=None,
+        retry_of_record_id=None,
+        detector_trace=DetectorTrace(
+            raw_detector_identity="development_blind_high_frequency_detector",
+            rectified_detector_identity="development_blind_high_frequency_detector",
+            raw_detector_config_digest=detector_config_digest,
+            rectified_detector_config_digest=detector_config_digest,
+            raw_preprocessing_identity="frozen_public_preprocess",
+            rectified_preprocessing_identity="frozen_public_preprocess",
+            raw_content_score=score,
+            rectified_content_score=None,
+        ),
+        branch_score_trace=BranchScoreTrace(
+            lf_score=None,
+            hf_score=score,
+            combined_score=None,
+        ),
+        routing_trace=RoutingTrace(
+            routing_identity="routing_not_applicable",
+            routing_control="primary_null",
+            routing_observation_digest="1" * 64,
+            routing_mask_digest="2" * 64,
+        ),
+        geometry_trace=GeometryTrace(
+            geometry_triggered=False,
+            geometry_operation_identity="geometry_not_attempted",
+            geometry_reliability_config_digest=None,
+            geometry_estimation_identity=None,
+            geometry_reliability_identity=None,
+            geometry_reliable=None,
+            geometry_transform=None,
+            geometry_raw_metrics=None,
+            geometry_failure_reason=None,
+            rectification_status="not_attempted",
+        ),
+        threshold_trace=ThresholdTrace(
+            raw_threshold_identity="development_record_collection_threshold",
+            rectified_threshold_identity="development_record_collection_threshold",
+            tau=10.0,
+            tau_rescue=9.0,
+        ),
+        key_control_trace=KeyControlTrace(
+            registered_key_public_digest="3" * 64,
+            detection_key_public_digest="4" * 64,
+            key_role="unwatermarked_primary_null",
+            control_identity="primary_null",
+        ),
+        decision_trace=DecisionTrace(
+            watermark_decision="negative",
+            positive_source=None,
+            decision_reason="primary_null_below_development_record_threshold",
+        ),
+        provenance_trace=ProvenanceTrace(
+            protocol_digest="5" * 64,
+            split_manifest_digest=split_manifest_digest,
+            input_manifest_digest="6" * 64,
+            method_code_revision="development_method_revision",
+            candidate_config_digest="7" * 64,
+            method_config_digest="8" * 64,
+            execution_config_digest="9" * 64,
+            model_revision="frozen_model_revision",
+            environment_digest="a" * 64,
+            resource_identity_digest="b" * 64,
+            input_artifact_digest="c" * 64,
+            attack_config_digest="d" * 64,
+            metric_set_digest="e" * 64,
+        ),
     )
 
 
 def _cross_fit_plan(cluster_count: int = 16):
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
+    manifest = _development_manifest(cluster_count)
     return build_development_cross_fit_plan(
         responsibility_id="hf_detector",
         assignments=development_assignments_only(
-            _development_manifest(cluster_count)
+            manifest,
+            protocol=protocol,
+            seed_namespace="development_exploration_seed_namespace",
         ),
         expected_source_cluster_count=cluster_count,
     )
 
 
 def _valid_fit_inputs(plan, fold_index: int = 0):
-    fit = plan.folds[fold_index].fit_source_cluster_ids
-    midpoint = len(fit) // 2
-    return (
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role="primary_null",
-            source_cluster_ids=fit[:midpoint],
-        ),
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role="wrong_key_control",
-            source_cluster_ids=fit[midpoint:],
-        ),
+    manifest = _development_manifest(plan.source_cluster_count)
+    fit = set(plan.folds[fold_index].fit_source_cluster_ids)
+    return tuple(
+        create_development_threshold_fit_input(
+            source_record=_primary_null_record(
+                assignment,
+                index=index,
+                score=float(index) / 100.0,
+                split_manifest_digest=manifest.digest(),
+            ),
+        )
+        for index, assignment in enumerate(manifest.assignments)
+        if assignment.identity.source_cluster_id in fit
     )
 
 
@@ -120,11 +287,12 @@ def _create_threshold(plan, fit_inputs=None):
     return create_development_provisional_threshold(
         plan,
         fold_index=0,
-        threshold=0.25,
-        input_manifest_digest="1" * 64,
+        input_manifest=_development_manifest(plan.source_cluster_count),
         detector_identity="development_blind_high_frequency_detector",
-        detector_config_digest="2" * 64,
-        threshold_rule_digest="3" * 64,
+        detector_config_payload={
+            "detector_mode": "hf_only",
+            "preprocess": "frozen",
+        },
         fit_inputs=_valid_fit_inputs(plan) if fit_inputs is None else fit_inputs,
     )
 
@@ -148,8 +316,14 @@ def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
         assert all(values)
         assert len(values) == len(set(values)) == 13
     for item in protocol.module_matrix:
-        assert item.negative_control_case_ids
-        assert item.metric_ids
+        assert item.candidate_ids == MODULE_CANDIDATE_IDS[item.responsibility_id]
+        assert item.candidate_parameter_bindings == MODULE_CANDIDATE_PARAMETERS[
+            item.responsibility_id
+        ]
+        assert item.negative_control_case_ids == MODULE_NEGATIVE_CONTROL_CASE_IDS[
+            item.responsibility_id
+        ]
+        assert item.metric_ids == MODULE_METRIC_IDS[item.responsibility_id]
         assert item.record_field_names
         assert item.dependency_stop_rule == DEPENDENCY_STOP_RULE
         assert item.allowed_module_outcomes == MODULE_OUTCOMES
@@ -196,7 +370,9 @@ def test_preflight_and_wiring_counts_are_not_scientific_coverage() -> None:
         build_development_cross_fit_plan(
             responsibility_id="key_schedule",
             assignments=development_assignments_only(
-                _development_manifest(WIRING_SOURCE_CLUSTER_COUNT)
+                _development_manifest(WIRING_SOURCE_CLUSTER_COUNT),
+                protocol=protocol,
+                seed_namespace="development_exploration_seed_namespace",
             ),
             expected_source_cluster_count=WIRING_SOURCE_CLUSTER_COUNT,
         )
@@ -207,15 +383,21 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     roster = enumerate_development_study_units(protocol)
     budget = protocol.study_budget
-    assert len(roster) == budget.maximum_scientific_units == 384
-    assert sum(max(1, len(unit.content_branch_ids)) for unit in roster) == (
-        budget.maximum_total_branch_units
-    )
-    assert budget.maximum_total_record_attempts == (
-        budget.maximum_total_branch_units
-    ) * (
-        MAXIMUM_RECORD_ATTEMPTS
-    )
+    assert len(roster) == budget.maximum_scientific_units == 2512
+    assert budget.maximum_total_record_attempts == sum(
+        unit.maximum_record_attempts for unit in roster
+    ) == 7536
+    assert len(
+        {
+            (
+                unit.responsibility_id,
+                unit.source_cluster_ordinal,
+                unit.content_branch_id,
+                unit.geometry_case_id,
+            )
+            for unit in roster
+        }
+    ) == len(roster)
     assert tuple(
         unit.responsibility_id for unit in roster[:13]
     ) == REQUIRED_METHOD_RESPONSIBILITIES
@@ -224,8 +406,12 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
         for unit in roster[: 13 * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT]
     )
     counts = {
-        responsibility: sum(
-            unit.responsibility_id == responsibility for unit in roster
+        responsibility: len(
+            {
+                unit.source_cluster_ordinal
+                for unit in roster
+                if unit.responsibility_id == responsibility
+            }
         )
         for responsibility in REQUIRED_METHOD_RESPONSIBILITIES
     }
@@ -241,7 +427,7 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
 
 
 @pytest.mark.unit
-def test_split_isolation_has_unique_dimension_rosters_and_exact_role_mapping() -> None:
+def test_split_isolation_binds_real_manifests_and_exact_role_mapping() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     isolation = protocol.split_isolation
     assert isolation.isolation_dimensions == ISOLATION_DIMENSIONS
@@ -255,12 +441,7 @@ def test_split_isolation_has_unique_dimension_rosters_and_exact_role_mapping() -
         for item in isolation.role_bindings
     )
     assert observed == REGISTERED_STUDY_ROLE_BINDINGS
-    for dimension in ISOLATION_DIMENSIONS:
-        digests = {
-            dict(item.identity_dimension_digests)[dimension]
-            for item in isolation.role_bindings
-        }
-        assert len(digests) == len(isolation.role_bindings)
+    assert isolation.cross_role_identity_overlap_forbidden is True
     by_role = {item.role_id: item for item in isolation.role_bindings}
     assert by_role["candidate_selection_selection"].registered_split == (
         "candidate_selection"
@@ -274,12 +455,71 @@ def test_split_isolation_has_unique_dimension_rosters_and_exact_role_mapping() -
         not item.execution_allowed_in_development
         for item in isolation.role_bindings[1:]
     )
+    development = bind_study_role_manifest(
+        protocol,
+        role_id="development_exploration",
+        seed_namespace="development_exploration_seed_namespace",
+        manifest=_manifest(16),
+    )
+    candidate_selection = bind_study_role_manifest(
+        protocol,
+        role_id="candidate_selection_selection",
+        seed_namespace="candidate_selection_seed_namespace",
+        manifest=_manifest(16, split="candidate_selection", start=100),
+    )
+    assert_study_role_manifests_isolated(
+        protocol,
+        (development, candidate_selection),
+    )
+
+
+@pytest.mark.unit
+def test_split_isolation_rejects_reused_real_identity_across_roles() -> None:
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
+    development_manifest = _manifest(16)
+    reused_manifest = replace(
+        development_manifest,
+        manifest_id="candidate_selection_reused_identity_fixture",
+        assignments=tuple(
+            replace(assignment, split="candidate_selection")
+            for assignment in development_manifest.assignments
+        ),
+    )
+    development = bind_study_role_manifest(
+        protocol,
+        role_id="development_exploration",
+        seed_namespace="development_exploration_seed_namespace",
+        manifest=development_manifest,
+    )
+    candidate_selection = bind_study_role_manifest(
+        protocol,
+        role_id="candidate_selection_selection",
+        seed_namespace="candidate_selection_seed_namespace",
+        manifest=reused_manifest,
+    )
+    with pytest.raises(PermissionError, match="study_manifest_identity_overlap"):
+        assert_study_role_manifests_isolated(
+            protocol,
+            (development, candidate_selection),
+        )
+    with pytest.raises(PermissionError, match="study_manifest_identity_overlap"):
+        development_assignments_only(
+            development_manifest,
+            protocol=protocol,
+            seed_namespace="development_exploration_seed_namespace",
+            known_role_manifest_bindings=(candidate_selection,),
+        )
 
 
 @pytest.mark.unit
 def test_development_split_surface_denies_every_formal_later_split() -> None:
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     development = _development_manifest(16)
-    assert development_assignments_only(development) == development.assignments
+    assert development_assignments_only(
+        development,
+        protocol=protocol,
+        seed_namespace="development_exploration_seed_namespace",
+    ) == development.assignments
     for forbidden_split in FORMAL_LATER_SPLIT_DENY_LIST:
         contaminated = replace(
             development,
@@ -288,11 +528,12 @@ def test_development_split_surface_denies_every_formal_later_split() -> None:
                 _unit(100, split=forbidden_split),
             ),
         )
-        with pytest.raises(
-            PermissionError,
-            match="development_exploration_split_forbidden",
-        ):
-            development_assignments_only(contaminated)
+        with pytest.raises(ValueError, match="study_manifest_contains_wrong_split"):
+            development_assignments_only(
+                contaminated,
+                protocol=protocol,
+                seed_namespace="development_exploration_seed_namespace",
+            )
 
 
 @pytest.mark.unit
@@ -330,23 +571,12 @@ def test_threshold_cross_fit_excludes_fit_clusters_from_recovery_probes(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("invalid_role", ("registered_positive", "clean_non_null"))
-def test_threshold_rejects_non_primary_null_or_key_control_inputs(
+def test_threshold_rejects_non_primary_null_inputs(
     invalid_role: str,
 ) -> None:
     plan = _cross_fit_plan()
-    fit = plan.folds[0].fit_source_cluster_ids
-    invalid = (
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role="primary_null",
-            source_cluster_ids=fit[:6],
-        ),
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role=invalid_role,
-            source_cluster_ids=fit[6:],
-        ),
-    )
+    valid = _valid_fit_inputs(plan)
+    invalid = (replace(valid[0], case_role=invalid_role), *valid[1:])
     with pytest.raises(ValueError, match="threshold_fit_input_role_invalid"):
         _create_threshold(plan, invalid)
 
@@ -355,34 +585,97 @@ def test_threshold_rejects_non_primary_null_or_key_control_inputs(
 def test_threshold_rejects_non_development_input_and_probe_leakage() -> None:
     plan = _cross_fit_plan()
     fold = plan.folds[0]
+    valid = _valid_fit_inputs(plan)
     invalid_split = (
-        DevelopmentThresholdFitInput(
-            source_split="candidate_selection",
-            case_role="primary_null",
-            source_cluster_ids=fold.fit_source_cluster_ids[:6],
+        replace(
+            valid[0],
+            source_record=replace(
+                valid[0].source_record,
+                split="candidate_selection",
+            ),
         ),
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role="wrong_key_control",
-            source_cluster_ids=fold.fit_source_cluster_ids[6:],
-        ),
+        *valid[1:],
     )
     with pytest.raises(ValueError, match="threshold_fit_input_split_invalid"):
         _create_threshold(plan, invalid_split)
+    probe_assignment = next(
+        assignment
+        for assignment in _development_manifest(plan.source_cluster_count).assignments
+        if assignment.identity.source_cluster_id
+        == fold.recovery_probe_source_cluster_ids[0]
+    )
     leaked = (
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role="primary_null",
-            source_cluster_ids=(fold.recovery_probe_source_cluster_ids[0],),
+        replace(
+            valid[0],
+            source_record=replace(
+                valid[0].source_record,
+                analysis_unit_identity=probe_assignment.identity,
+            ),
         ),
-        DevelopmentThresholdFitInput(
-            source_split=DEVELOPMENT_SPLIT,
-            case_role="wrong_key_control",
-            source_cluster_ids=fold.fit_source_cluster_ids,
-        ),
+        *valid[1:],
     )
     with pytest.raises(ValueError, match="recovery_probe_leakage"):
         _create_threshold(plan, leaked)
+
+
+@pytest.mark.unit
+def test_threshold_rejects_manifest_case_role_spoof_and_wrong_key_fit() -> None:
+    plan = _cross_fit_plan()
+    valid = _valid_fit_inputs(plan)
+    spoofed_record = replace(
+        valid[0].source_record,
+        analysis_unit_identity=replace(
+            valid[0].source_record.analysis_unit_identity,
+            case_id="registered_positive_case",
+        ),
+    )
+    spoofed = (replace(valid[0], source_record=spoofed_record), *valid[1:])
+    with pytest.raises(ValueError, match="threshold_fit_input_case_identity_invalid"):
+        _create_threshold(plan, spoofed)
+    wrong_key = (replace(valid[0], case_role="wrong_key_control"), *valid[1:])
+    with pytest.raises(ValueError, match="threshold_fit_input_role_invalid"):
+        _create_threshold(plan, wrong_key)
+
+
+@pytest.mark.unit
+def test_registered_positive_manifest_cannot_be_relabelled_as_primary_null() -> None:
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
+    manifest = _manifest(16, case_id="registered_positive_case")
+    assignments = development_assignments_only(
+        manifest,
+        protocol=protocol,
+        seed_namespace="development_exploration_seed_namespace",
+    )
+    plan = build_development_cross_fit_plan(
+        responsibility_id="hf_detector",
+        assignments=assignments,
+        expected_source_cluster_count=16,
+    )
+    fit_clusters = set(plan.folds[0].fit_source_cluster_ids)
+    forged_inputs = tuple(
+        create_development_threshold_fit_input(
+            source_record=_primary_null_record(
+                assignment,
+                index=index,
+                score=float(index) / 100.0,
+                split_manifest_digest=manifest.digest(),
+            )
+        )
+        for index, assignment in enumerate(assignments)
+        if assignment.identity.source_cluster_id in fit_clusters
+    )
+    with pytest.raises(ValueError, match="threshold_fit_input_case_identity_invalid"):
+        create_development_provisional_threshold(
+            plan,
+            fold_index=0,
+            input_manifest=manifest,
+            detector_identity="development_blind_high_frequency_detector",
+            detector_config_payload={
+                "detector_mode": "hf_only",
+                "preprocess": "frozen",
+            },
+            fit_inputs=forged_inputs,
+        )
 
 
 @pytest.mark.unit
@@ -401,6 +694,12 @@ def test_threshold_binds_manifest_detector_rule_and_fold() -> None:
         threshold,
         detector_identity="",
     ).validate(plan)
+    forged = replace(threshold, threshold=threshold.threshold + 1.0)
+    forged = replace(
+        forged,
+        threshold_identity=_digest(forged.payload_without_identity()),
+    )
+    assert "provisional_threshold_value_not_rule_derived" in forged.validate(plan)
 
 
 @pytest.mark.unit
@@ -513,6 +812,16 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
             recommendation_reason="forged recommendation",
             evidence_record_ids=("record",),
         )
+    own_block = create_development_module_outcome_record(
+        protocol,
+        responsibility_id="key_schedule",
+        module_outcome="implementation_blocked",
+        candidate_recommendation="candidate_not_recommended_for_selection",
+        recommendation_reason="key schedule implementation could not execute",
+        blocking_responsibilities=("key_schedule",),
+        evidence_record_ids=("key_schedule_implementation_failure_record",),
+    )
+    assert own_block.validate(protocol) == ()
     with pytest.raises(
         ValueError,
         match="implementation_blocking_responsibility_missing",
@@ -532,6 +841,10 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
     "mutation,expected_reason",
     (
         ("candidate_digest", "candidate_config_digest_invalid"),
+        ("unregistered_candidate", "candidate_ids_unregistered"),
+        ("unregistered_metric", "metric_ids_unregistered"),
+        ("unregistered_control", "negative_controls_unregistered"),
+        ("ratio_roster_drift", "candidate_parameters_unregistered"),
         ("missing_metric", "metric_ids_missing"),
         ("expanded_split", "development_allowed_split_invalid"),
         ("changed_budget", "maximum_scientific_units_invalid"),
@@ -551,6 +864,22 @@ def test_config_loader_rejects_per_module_and_protocol_drift(
     document = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     if mutation == "candidate_digest":
         document["module_matrix"][0]["candidate_config_digest"] = "0" * 64
+    elif mutation == "unregistered_candidate":
+        entry = document["module_matrix"][0]
+        entry["candidate_ids"] = ["unregistered_key_candidate"]
+        _recompute_candidate_config_digest(entry)
+    elif mutation == "unregistered_metric":
+        entry = document["module_matrix"][0]
+        entry["metric_ids"] = ["unregistered_key_metric"]
+        _recompute_candidate_config_digest(entry)
+    elif mutation == "unregistered_control":
+        entry = document["module_matrix"][0]
+        entry["negative_control_case_ids"] = ["unregistered_key_control"]
+        _recompute_candidate_config_digest(entry)
+    elif mutation == "ratio_roster_drift":
+        entry = document["module_matrix"][8]
+        entry["candidate_parameter_bindings"][-1]["values"] = ["1/8"]
+        _recompute_candidate_config_digest(entry)
     elif mutation == "missing_metric":
         document["module_matrix"][0]["metric_ids"] = []
     elif mutation == "expanded_split":

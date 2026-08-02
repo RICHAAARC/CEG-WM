@@ -15,11 +15,16 @@ from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
-from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
+from experiments.protocol.internal_matrix import (
+    REQUIRED_METHOD_RESPONSIBILITIES,
+    RESPONSIBILITY_VALIDATION_MATRIX,
+)
 from experiments.protocol.internal_records import (
     INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
     INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
     MAXIMUM_RECORD_ATTEMPTS,
+    InternalValidationRecord,
+    validate_internal_record,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
@@ -54,12 +59,19 @@ MAXIMUM_UNIT_DURATION_SECONDS = 900
 
 DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT = 4
 DEVELOPMENT_THRESHOLD_ROLE = "development_exploratory"
-DEVELOPMENT_THRESHOLD_FIT_ROLE = "development_primary_null_and_key_control_fit"
+DEVELOPMENT_THRESHOLD_FIT_ROLE = "development_primary_null_fit"
 DEVELOPMENT_THRESHOLD_SCORE_ROLE = "development_recovery_probe_score"
 DEVELOPMENT_THRESHOLD_INPUT_ROLES = (
     "primary_null",
-    "wrong_key_control",
 )
+DEVELOPMENT_PRIMARY_NULL_CASE_ID = "development_primary_null_threshold_fit"
+DEVELOPMENT_WRONG_KEY_CONTROL_CASE_ID = (
+    "development_wrong_key_threshold_control"
+)
+DEVELOPMENT_THRESHOLD_RULE_PAYLOAD = {
+    "order_statistic": "maximum",
+    "rule_id": "development_primary_null_maximum_score",
+}
 DEVELOPMENT_THRESHOLD_INVALIDATION = (
     "invalidate_before_candidate_selection_and_all_later_splits"
 )
@@ -181,6 +193,117 @@ PREFLIGHT_CASE_IDS = (
     "runtime_identity_preflight",
     "throughput_preflight",
 )
+NOT_APPLICABLE_CONTENT_BRANCH_ID = "content_branch_not_applicable"
+NOT_APPLICABLE_GEOMETRY_CASE_ID = "geometry_case_not_applicable"
+
+REGISTERED_CANDIDATE_IDS = frozenset(
+    {
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "routing_stqr",
+        "routing_uniform_control",
+        "content_combination_calibrated",
+        "qk_relation_similarity",
+        "rectification_similarity",
+        "joint_conditional_recovery",
+    }
+)
+CONTENT_RELATIVE_L2 = "3/250"
+GEOMETRY_CONTENT_RATIO_CANDIDATES = ("1/16", "1/8", "1/4")
+COMBINATION_WEIGHT_IDENTITIES = ("1/4", "1/2", "3/4")
+MODULE_CANDIDATE_IDS = {
+    "key_schedule": ("key_schedule_sha256_counter",),
+    "content_router": (
+        "key_schedule_sha256_counter",
+        "routing_stqr",
+        "routing_uniform_control",
+    ),
+    "lf_carrier": ("key_schedule_sha256_counter", "lf_low_pass"),
+    "hf_carrier": (
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail",
+    ),
+    "content_embedder": (
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "routing_stqr",
+        "routing_uniform_control",
+    ),
+    "lf_detector": ("key_schedule_sha256_counter", "lf_low_pass"),
+    "hf_detector": ("key_schedule_sha256_counter", "hf_sparse_tail"),
+    "content_detector": (
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "content_combination_calibrated",
+    ),
+    "qk_geometry_sync": (
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "qk_relation_similarity",
+    ),
+    "geometric_transform_estimator": (
+        "key_schedule_sha256_counter",
+        "qk_relation_similarity",
+        "rectification_similarity",
+    ),
+    "geometry_reliability": (
+        "key_schedule_sha256_counter",
+        "qk_relation_similarity",
+        "rectification_similarity",
+    ),
+    "image_rectifier": ("rectification_similarity",),
+    "conditional_recovery_decision": ("joint_conditional_recovery",),
+}
+MODULE_CANDIDATE_PARAMETERS = {
+    "key_schedule": (("key_stream_candidate", ("key_schedule_sha256_counter",)),),
+    "content_router": (
+        ("adaptive_router_candidate", ("routing_stqr",)),
+        ("disabled_uniform_control_candidate", ("routing_uniform_control",)),
+    ),
+    "lf_carrier": (("carrier_candidate", ("lf_low_pass",)),),
+    "hf_carrier": (("carrier_candidate", ("hf_sparse_tail",)),),
+    "content_embedder": (
+        ("high_frequency_candidate", ("hf_sparse_tail",)),
+        ("low_frequency_candidate", ("lf_low_pass",)),
+        ("adaptive_router_candidate", ("routing_stqr",)),
+        ("disabled_uniform_control_candidate", ("routing_uniform_control",)),
+        ("content_relative_l2", (CONTENT_RELATIVE_L2,)),
+        ("mixing_coefficients", COMBINATION_WEIGHT_IDENTITIES),
+    ),
+    "lf_detector": (("detector_candidate", ("lf_low_pass",)),),
+    "hf_detector": (("detector_candidate", ("hf_sparse_tail",)),),
+    "content_detector": (
+        ("combination_candidate", ("content_combination_calibrated",)),
+        ("combination_functions", CONTENT_COMBINATION_FUNCTION_IDS),
+        ("mixing_coefficients", COMBINATION_WEIGHT_IDENTITIES),
+    ),
+    "qk_geometry_sync": (
+        ("relation_candidate", ("qk_relation_similarity",)),
+        ("geometry_content_ratio_candidates", GEOMETRY_CONTENT_RATIO_CANDIDATES),
+    ),
+    "geometric_transform_estimator": (
+        ("relation_candidate", ("qk_relation_similarity",)),
+        ("estimator_candidate", ("rectification_similarity",)),
+        ("geometry_content_ratio_candidates", GEOMETRY_CONTENT_RATIO_CANDIDATES),
+    ),
+    "geometry_reliability": (
+        ("relation_candidate", ("qk_relation_similarity",)),
+        ("reliability_candidate", ("rectification_similarity",)),
+        ("geometry_content_ratio_candidates", GEOMETRY_CONTENT_RATIO_CANDIDATES),
+    ),
+    "image_rectifier": (
+        ("rectifier_candidate", ("rectification_similarity",)),
+        ("geometry_content_ratio_candidates", GEOMETRY_CONTENT_RATIO_CANDIDATES),
+    ),
+    "conditional_recovery_decision": (
+        ("joint_candidate", ("joint_conditional_recovery",)),
+        ("geometry_content_ratio_candidates", GEOMETRY_CONTENT_RATIO_CANDIDATES),
+    ),
+}
 COMMON_MODULE_RECORD_FIELDS = frozenset(
     {
         "responsibility_id",
@@ -204,6 +327,43 @@ REGISTERED_DEVELOPMENT_RECORD_FIELDS = COMMON_MODULE_RECORD_FIELDS | {
     "provenance_trace",
     "routing_trace",
     "threshold_trace",
+}
+MODULE_CANDIDATE_IDENTITIES = {
+    "key_schedule": "registered_key_identity_candidate",
+    "content_router": "content_adaptive_router_candidate",
+    "lf_carrier": "low_frequency_carrier_candidate",
+    "hf_carrier": "high_frequency_carrier_candidate",
+    "content_embedder": "matched_budget_content_embedder_candidate",
+    "lf_detector": "blind_low_frequency_detector_candidate",
+    "hf_detector": "blind_high_frequency_detector_candidate",
+    "content_detector": "standardized_content_combination_candidate",
+    "qk_geometry_sync": "keyed_query_key_sync_candidate",
+    "geometric_transform_estimator": "blind_transform_estimator_candidate",
+    "geometry_reliability": "fail_closed_geometry_reliability_candidate",
+    "image_rectifier": "coordinate_preserving_rectifier_candidate",
+    "conditional_recovery_decision": "same_detector_conditional_recovery_candidate",
+}
+MODULE_PAIRED_ABLATION_IDENTITIES = {
+    "key_schedule": "wrong_and_public_key_identity_ablation",
+    "content_router": "disabled_uniform_routing_ablation",
+    "lf_carrier": "low_frequency_write_disabled_ablation",
+    "hf_carrier": "high_frequency_write_disabled_ablation",
+    "content_embedder": "single_branch_embedding_ablation",
+    "lf_detector": "low_frequency_detector_disabled_ablation",
+    "hf_detector": "high_frequency_detector_disabled_ablation",
+    "content_detector": "high_frequency_only_detector_ablation",
+    "qk_geometry_sync": "wrong_geometry_key_sync_ablation",
+    "geometric_transform_estimator": "oracle_transform_input_ablation",
+    "geometry_reliability": "geometry_reliability_disabled_ablation",
+    "image_rectifier": "rectification_disabled_ablation",
+    "conditional_recovery_decision": "raw_content_decision_ablation",
+}
+MODULE_NEGATIVE_CONTROL_CASE_IDS = {
+    item.responsibility: item.negative_controls
+    for item in RESPONSIBILITY_VALIDATION_MATRIX
+}
+MODULE_METRIC_IDS = {
+    item.responsibility: item.metrics for item in RESPONSIBILITY_VALIDATION_MATRIX
 }
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -302,13 +462,9 @@ class RegisteredStudyRole:
     detector_mode: str
     requires_frozen_hf_only_tau: bool
     execution_allowed_in_development: bool
-    identity_dimension_digests: tuple[tuple[str, str], ...]
-    roster_digest: str
-
-    def payload_without_roster_digest(self) -> dict[str, object]:
-        payload = asdict(self)
-        payload.pop("roster_digest")
-        return payload
+    manifest_reference: str
+    manifest_availability: str
+    frozen_manifest_digest: str | None
 
     def validate(self) -> tuple[str, ...]:
         violations: list[str] = []
@@ -331,24 +487,20 @@ class RegisteredStudyRole:
             self.role_id == "development_exploration"
         ):
             violations.append("study_role_development_access_invalid")
-        if tuple(name for name, _ in self.identity_dimension_digests) != (
-            ISOLATION_DIMENSIONS
-        ):
-            violations.append("study_role_isolation_dimensions_invalid")
-        for dimension, digest in self.identity_dimension_digests:
-            expected_digest = _canonical_digest(
-                {
-                    "dimension": dimension,
-                    "registered_split": self.registered_split,
-                    "role_id": self.role_id,
-                }
-            )
-            if digest != expected_digest:
-                violations.append("study_role_isolation_digest_invalid")
-        if self.roster_digest != _canonical_digest(
-            self.payload_without_roster_digest()
-        ):
-            violations.append("study_role_roster_digest_invalid")
+        if self.role_id == "development_exploration":
+            if self.manifest_availability != "required_at_execution":
+                violations.append("development_manifest_availability_invalid")
+            if self.manifest_reference != "development_split_manifest_runtime_binding":
+                violations.append("development_manifest_reference_invalid")
+        else:
+            if self.manifest_availability != "unavailable_until_role_authorized":
+                violations.append("later_manifest_availability_invalid")
+            if self.manifest_reference != (
+                f"{self.role_id}_manifest_unavailable_until_authorized"
+            ):
+                violations.append("later_manifest_reference_invalid")
+        if self.frozen_manifest_digest is not None:
+            violations.append("unprovided_manifest_digest_must_be_null")
         return tuple(dict.fromkeys(violations))
 
 
@@ -356,7 +508,8 @@ class RegisteredStudyRole:
 class DevelopmentSplitIsolation:
     isolation_dimensions: tuple[str, ...]
     role_bindings: tuple[RegisteredStudyRole, ...]
-    formal_later_deny_roster_digest: str
+    cross_role_identity_overlap_forbidden: bool
+    formal_later_deny_policy_digest: str
 
     def validate(self) -> tuple[str, ...]:
         violations: list[str] = []
@@ -368,18 +521,162 @@ class DevelopmentSplitIsolation:
             violations.append("study_role_order_or_identity_invalid")
         for binding in self.role_bindings:
             violations.extend(binding.validate())
-        for dimension in ISOLATION_DIMENSIONS:
-            digests = [dict(item.identity_dimension_digests)[dimension] for item in self.role_bindings]
-            if len(digests) != len(set(digests)):
-                violations.append(f"split_isolation_{dimension}_digest_reused")
-        later_rosters = tuple(
-            item.roster_digest
+        if self.cross_role_identity_overlap_forbidden is not True:
+            violations.append("cross_role_identity_overlap_must_be_forbidden")
+        later_policy = tuple(
+            (
+                item.role_id,
+                item.registered_split,
+                item.manifest_reference,
+                item.manifest_availability,
+            )
             for item in self.role_bindings
             if not item.execution_allowed_in_development
         )
-        if self.formal_later_deny_roster_digest != _digest_sequence(later_rosters):
-            violations.append("formal_later_deny_roster_digest_invalid")
+        if self.formal_later_deny_policy_digest != _canonical_digest(later_policy):
+            violations.append("formal_later_deny_policy_digest_invalid")
         return tuple(dict.fromkeys(violations))
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenStudyRoleManifestBinding:
+    role_id: str
+    registered_split: str
+    seed_namespace: str
+    manifest: FrozenSplitManifest
+    manifest_digest: str
+    prompt_digests: tuple[str, ...]
+    source_cluster_ids: tuple[str, ...]
+    registered_key_family_digests: tuple[str, ...]
+    image_lineage_digests: tuple[str, ...]
+
+    def dimension_values(self) -> dict[str, frozenset[str]]:
+        return {
+            "prompt_digest": frozenset(self.prompt_digests),
+            "source_cluster_id": frozenset(self.source_cluster_ids),
+            "seed_namespace": frozenset((self.seed_namespace,)),
+            "registered_key_family_digest": frozenset(
+                self.registered_key_family_digests
+            ),
+            "image_lineage_digest": frozenset(self.image_lineage_digests),
+        }
+
+    def validate(
+        self,
+        protocol: FrozenDevelopmentExplorationProtocol,
+    ) -> tuple[str, ...]:
+        violations: list[str] = []
+        if type(protocol) is not FrozenDevelopmentExplorationProtocol:
+            return ("development_protocol_exact_type_required",)
+        role_by_id = {
+            item.role_id: item for item in protocol.split_isolation.role_bindings
+        }
+        if self.role_id not in role_by_id:
+            return ("study_manifest_role_unregistered",)
+        role = role_by_id[self.role_id]
+        if self.registered_split != role.registered_split:
+            violations.append("study_manifest_registered_split_mismatch")
+        if _IDENTITY_PATTERN.fullmatch(self.seed_namespace) is None:
+            violations.append("study_manifest_seed_namespace_invalid")
+        if type(self.manifest) is not FrozenSplitManifest:
+            return (*violations, "study_manifest_exact_type_required")
+        violations.extend(self.manifest.validate(require_all_splits=False))
+        if not self.manifest.assignments:
+            violations.append("study_manifest_assignments_missing")
+        if any(
+            assignment.split != self.registered_split
+            for assignment in self.manifest.assignments
+        ):
+            violations.append("study_manifest_contains_wrong_split")
+        identities = tuple(assignment.identity for assignment in self.manifest.assignments)
+        expected_values = {
+            "prompt_digests": tuple(sorted({item.prompt_digest for item in identities})),
+            "source_cluster_ids": tuple(
+                sorted({item.source_cluster_id for item in identities})
+            ),
+            "registered_key_family_digests": tuple(
+                sorted({item.registered_key_family_digest for item in identities})
+            ),
+            "image_lineage_digests": tuple(
+                sorted({item.image_lineage_digest for item in identities})
+            ),
+        }
+        for field_name, expected in expected_values.items():
+            if getattr(self, field_name) != expected:
+                violations.append(f"study_manifest_{field_name}_binding_invalid")
+        if self.manifest_digest != self.manifest.digest():
+            violations.append("study_manifest_digest_binding_invalid")
+        return tuple(dict.fromkeys(violations))
+
+
+def bind_study_role_manifest(
+    protocol: FrozenDevelopmentExplorationProtocol,
+    *,
+    role_id: str,
+    seed_namespace: str,
+    manifest: FrozenSplitManifest,
+) -> FrozenStudyRoleManifestBinding:
+    if type(protocol) is not FrozenDevelopmentExplorationProtocol or protocol.validate():
+        raise ValueError("development_protocol_invalid")
+    role_by_id = {
+        item.role_id: item for item in protocol.split_isolation.role_bindings
+    }
+    if role_id not in role_by_id:
+        raise ValueError("study_manifest_role_unregistered")
+    if type(manifest) is not FrozenSplitManifest:
+        raise TypeError("study_manifest_exact_type_required")
+    identities = tuple(assignment.identity for assignment in manifest.assignments)
+    binding = FrozenStudyRoleManifestBinding(
+        role_id=role_id,
+        registered_split=role_by_id[role_id].registered_split,
+        seed_namespace=seed_namespace,
+        manifest=manifest,
+        manifest_digest=manifest.digest(),
+        prompt_digests=tuple(sorted({item.prompt_digest for item in identities})),
+        source_cluster_ids=tuple(sorted({item.source_cluster_id for item in identities})),
+        registered_key_family_digests=tuple(
+            sorted({item.registered_key_family_digest for item in identities})
+        ),
+        image_lineage_digests=tuple(
+            sorted({item.image_lineage_digest for item in identities})
+        ),
+    )
+    violations = binding.validate(protocol)
+    if violations:
+        raise ValueError(",".join(violations))
+    return binding
+
+
+def assert_study_role_manifests_isolated(
+    protocol: FrozenDevelopmentExplorationProtocol,
+    bindings: Sequence[FrozenStudyRoleManifestBinding],
+) -> None:
+    if type(protocol) is not FrozenDevelopmentExplorationProtocol or protocol.validate():
+        raise ValueError("development_protocol_invalid")
+    if not bindings:
+        raise ValueError("study_manifest_bindings_missing")
+    seen_roles: set[str] = set()
+    validated: list[FrozenStudyRoleManifestBinding] = []
+    for binding in bindings:
+        if type(binding) is not FrozenStudyRoleManifestBinding:
+            raise TypeError("study_manifest_binding_exact_type_required")
+        violations = binding.validate(protocol)
+        if violations:
+            raise ValueError(",".join(violations))
+        if binding.role_id in seen_roles:
+            raise ValueError("study_manifest_role_duplicate")
+        seen_roles.add(binding.role_id)
+        validated.append(binding)
+    for left_index, left in enumerate(validated):
+        for right in validated[left_index + 1 :]:
+            left_values = left.dimension_values()
+            right_values = right.dimension_values()
+            for dimension in ISOLATION_DIMENSIONS:
+                if left_values[dimension] & right_values[dimension]:
+                    raise PermissionError(
+                        "study_manifest_identity_overlap:"
+                        f"{dimension}:{left.role_id}:{right.role_id}"
+                    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,6 +775,8 @@ class DevelopmentModuleStudy:
     development_case_id: str
     candidate_selection_case_id: str
     candidate_identity: str
+    candidate_ids: tuple[str, ...]
+    candidate_parameter_bindings: tuple[tuple[str, tuple[str, ...]], ...]
     candidate_config_digest: str
     paired_ablation_identity: str
     negative_control_case_ids: tuple[str, ...]
@@ -494,8 +793,12 @@ class DevelopmentModuleStudy:
     def candidate_config_payload(self) -> dict[str, object]:
         return {
             "candidate_identity": self.candidate_identity,
+            "candidate_ids": self.candidate_ids,
+            "candidate_parameter_bindings": self.candidate_parameter_bindings,
             "content_branch_ids": self.content_branch_ids,
             "geometry_case_ids": self.geometry_case_ids,
+            "metric_ids": self.metric_ids,
+            "negative_control_case_ids": self.negative_control_case_ids,
             "paired_ablation_identity": self.paired_ablation_identity,
             "responsibility_id": self.responsibility_id,
         }
@@ -539,6 +842,20 @@ def validate_development_module_matrix(
     geometry_responsibilities = set(REQUIRED_METHOD_RESPONSIBILITIES[8:])
     for item in matrix:
         prefix = item.responsibility_id
+        if item.candidate_identity != MODULE_CANDIDATE_IDENTITIES.get(prefix):
+            violations.append(f"{prefix}:candidate_identity_unregistered")
+        if item.candidate_ids != MODULE_CANDIDATE_IDS.get(prefix):
+            violations.append(f"{prefix}:candidate_ids_unregistered")
+        if set(item.candidate_ids) - REGISTERED_CANDIDATE_IDS:
+            violations.append(f"{prefix}:candidate_id_unknown")
+        if item.candidate_parameter_bindings != MODULE_CANDIDATE_PARAMETERS.get(prefix):
+            violations.append(f"{prefix}:candidate_parameters_unregistered")
+        if item.paired_ablation_identity != MODULE_PAIRED_ABLATION_IDENTITIES.get(prefix):
+            violations.append(f"{prefix}:paired_ablation_unregistered")
+        if item.negative_control_case_ids != MODULE_NEGATIVE_CONTROL_CASE_IDS.get(prefix):
+            violations.append(f"{prefix}:negative_controls_unregistered")
+        if item.metric_ids != MODULE_METRIC_IDS.get(prefix):
+            violations.append(f"{prefix}:metric_ids_unregistered")
         if item.candidate_config_digest != _canonical_digest(
             item.candidate_config_payload()
         ):
@@ -600,8 +917,8 @@ class DevelopmentStudyUnit:
     phase: str
     responsibility_id: str
     source_cluster_ordinal: int
-    content_branch_ids: tuple[str, ...]
-    geometry_case_ids: tuple[str, ...]
+    content_branch_id: str
+    geometry_case_id: str
     maximum_record_attempts: int
     maximum_duration_seconds: int
 
@@ -632,18 +949,58 @@ def _build_study_unit_roster(
             ("cheap_detection_extension", responsibility_id, cluster_ordinal)
             for responsibility_id in CHEAP_DETECTION_RESPONSIBILITIES
         )
+    atomic_descriptors: list[tuple[str, str, int, str, str]] = []
+    grouped: dict[tuple[str, int], list[str]] = {}
+    phase_by_group: dict[tuple[str, int], str] = {}
+    for phase, responsibility_id, cluster_ordinal in ordered:
+        group = (phase, cluster_ordinal)
+        grouped.setdefault(group, []).append(responsibility_id)
+        phase_by_group[group] = phase
+    for group, responsibility_ids in grouped.items():
+        phase = phase_by_group[group]
+        cluster_ordinal = group[1]
+        variants_by_responsibility: dict[str, tuple[tuple[str, str], ...]] = {}
+        for responsibility_id in responsibility_ids:
+            study = by_responsibility[responsibility_id]
+            branches = study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
+            geometries = study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
+            variants_by_responsibility[responsibility_id] = tuple(
+                (branch_id, geometry_case_id)
+                for branch_id in branches
+                for geometry_case_id in geometries
+            )
+        # Each cluster first reaches every responsibility once; remaining frozen
+        # branch x geometry variants follow without score-adaptive reordering.
+        for responsibility_id in responsibility_ids:
+            branch_id, geometry_case_id = variants_by_responsibility[responsibility_id][0]
+            atomic_descriptors.append(
+                (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
+            )
+        for responsibility_id in responsibility_ids:
+            for branch_id, geometry_case_id in variants_by_responsibility[
+                responsibility_id
+            ][1:]:
+                atomic_descriptors.append(
+                    (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
+                )
     return tuple(
         DevelopmentStudyUnit(
             unit_index=index,
             phase=phase,
             responsibility_id=responsibility_id,
             source_cluster_ordinal=cluster_ordinal,
-            content_branch_ids=by_responsibility[responsibility_id].content_branch_ids,
-            geometry_case_ids=by_responsibility[responsibility_id].geometry_case_ids,
+            content_branch_id=content_branch_id,
+            geometry_case_id=geometry_case_id,
             maximum_record_attempts=MAXIMUM_RECORD_ATTEMPTS,
             maximum_duration_seconds=MAXIMUM_UNIT_DURATION_SECONDS,
         )
-        for index, (phase, responsibility_id, cluster_ordinal) in enumerate(ordered)
+        for index, (
+            phase,
+            responsibility_id,
+            cluster_ordinal,
+            content_branch_id,
+            geometry_case_id,
+        ) in enumerate(atomic_descriptors)
     )
 
 
@@ -654,7 +1011,6 @@ class DevelopmentStudyBudget:
     wiring_counts_as_scientific_coverage: bool
     scientific_source_cluster_scales: tuple[int, ...]
     maximum_scientific_units: int
-    maximum_total_branch_units: int
     maximum_record_attempts_per_unit: int
     maximum_total_record_attempts: int
     maximum_duration_seconds_per_unit: int
@@ -686,10 +1042,9 @@ class DevelopmentStudyBudget:
             violations.append("score_adaptive_unit_changes_must_be_forbidden")
         if self.maximum_scientific_units != len(roster):
             violations.append("maximum_scientific_units_invalid")
-        branch_units = sum(max(1, len(unit.content_branch_ids)) for unit in roster)
-        if self.maximum_total_branch_units != branch_units:
-            violations.append("maximum_total_branch_units_invalid")
-        if self.maximum_total_record_attempts != branch_units * MAXIMUM_RECORD_ATTEMPTS:
+        if self.maximum_total_record_attempts != sum(
+            unit.maximum_record_attempts for unit in roster
+        ):
             violations.append("maximum_total_record_attempts_invalid")
         if self.unit_roster_digest != _canonical_digest(
             tuple(asdict(unit) for unit in roster)
@@ -702,18 +1057,34 @@ class DevelopmentStudyBudget:
             REQUIRED_METHOD_RESPONSIBILITIES
         ):
             violations.append("unit_roster_breadth_first_invalid")
-        observed_counts = {
-            responsibility_id: sum(
-                unit.responsibility_id == responsibility_id for unit in roster
-            )
+        observed_clusters = {
+            responsibility_id: {
+                unit.source_cluster_ordinal
+                for unit in roster
+                if unit.responsibility_id == responsibility_id
+            }
             for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
         }
-        expected_counts = {
+        expected_cluster_counts = {
             item.responsibility_id: item.scientific_source_cluster_scale
             for item in matrix
         }
-        if observed_counts != expected_counts:
-            violations.append("unit_roster_module_scale_mismatch")
+        if {
+            responsibility_id: len(cluster_ids)
+            for responsibility_id, cluster_ids in observed_clusters.items()
+        } != expected_cluster_counts:
+            violations.append("unit_roster_module_cluster_scale_mismatch")
+        observed_atomic = {
+            (
+                unit.responsibility_id,
+                unit.source_cluster_ordinal,
+                unit.content_branch_id,
+                unit.geometry_case_id,
+            )
+            for unit in roster
+        }
+        if len(observed_atomic) != len(roster):
+            violations.append("unit_roster_atomic_identity_duplicate")
         return tuple(dict.fromkeys(violations))
 
 
@@ -821,6 +1192,9 @@ def _load_study_roles(raw_roles: object) -> tuple[RegisteredStudyRole, ...]:
                     "detector_mode",
                     "requires_frozen_hf_only_tau",
                     "execution_allowed_in_development",
+                    "manifest_reference",
+                    "manifest_availability",
+                    "frozen_manifest_digest",
                 }
             ),
             f"study_role_binding:{index}",
@@ -829,38 +1203,64 @@ def _load_study_roles(raw_roles: object) -> tuple[RegisteredStudyRole, ...]:
         registered_split = _require_identity(
             item["registered_split"], "study_role_registered_split"
         )
-        dimensions = tuple(
-            (
-                dimension,
-                _canonical_digest(
-                    {
-                        "dimension": dimension,
-                        "registered_split": registered_split,
-                        "role_id": role_id,
-                    }
-                ),
-            )
-            for dimension in ISOLATION_DIMENSIONS
-        )
-        payload = {
-            "role_id": role_id,
-            "registered_split": registered_split,
-            "detector_mode": _require_identity(
-                item["detector_mode"], "study_role_detector_mode"
-            ),
-            "requires_frozen_hf_only_tau": item["requires_frozen_hf_only_tau"],
-            "execution_allowed_in_development": item[
-                "execution_allowed_in_development"
-            ],
-            "identity_dimension_digests": dimensions,
-        }
         roles.append(
             RegisteredStudyRole(
-                **payload,
-                roster_digest=_canonical_digest(payload),
+                role_id=role_id,
+                registered_split=registered_split,
+                detector_mode=_require_identity(
+                    item["detector_mode"], "study_role_detector_mode"
+                ),
+                requires_frozen_hf_only_tau=item["requires_frozen_hf_only_tau"],
+                execution_allowed_in_development=item[
+                    "execution_allowed_in_development"
+                ],
+                manifest_reference=_require_identity(
+                    item["manifest_reference"], "study_role_manifest_reference"
+                ),
+                manifest_availability=_require_identity(
+                    item["manifest_availability"], "study_role_manifest_availability"
+                ),
+                frozen_manifest_digest=(
+                    None
+                    if item["frozen_manifest_digest"] is None
+                    else _require_digest(
+                        item["frozen_manifest_digest"],
+                        "study_role_frozen_manifest_digest",
+                    )
+                ),
             )
         )
     return tuple(roles)
+
+
+def _load_candidate_parameter_bindings(
+    raw_bindings: object,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    bindings: list[tuple[str, tuple[str, ...]]] = []
+    for index, raw_binding in enumerate(
+        _require_sequence(raw_bindings, "candidate_parameter_bindings")
+    ):
+        item = _require_mapping(
+            raw_binding,
+            f"candidate_parameter_binding:{index}",
+        )
+        _require_exact_keys(
+            item,
+            frozenset({"parameter_id", "values"}),
+            f"candidate_parameter_binding:{index}",
+        )
+        values = tuple(
+            _require_sequence(item["values"], "candidate_parameter_values")
+        )
+        if not values or any(not isinstance(value, str) or not value for value in values):
+            raise ValueError("candidate_parameter_values_invalid")
+        bindings.append(
+            (
+                _require_identity(item["parameter_id"], "candidate_parameter_id"),
+                values,
+            )
+        )
+    return tuple(bindings)
 
 
 def load_frozen_development_exploration_protocol(
@@ -898,7 +1298,13 @@ def load_frozen_development_exploration_protocol(
     isolation_raw = _require_mapping(raw["split_isolation"], "split_isolation")
     _require_exact_keys(
         isolation_raw,
-        frozenset({"isolation_dimensions", "role_bindings"}),
+        frozenset(
+            {
+                "isolation_dimensions",
+                "role_bindings",
+                "cross_role_identity_overlap_forbidden",
+            }
+        ),
         "split_isolation",
     )
     role_bindings = _load_study_roles(isolation_raw["role_bindings"])
@@ -909,9 +1315,17 @@ def load_frozen_development_exploration_protocol(
             )
         ),
         role_bindings=role_bindings,
-        formal_later_deny_roster_digest=_digest_sequence(
+        cross_role_identity_overlap_forbidden=isolation_raw[
+            "cross_role_identity_overlap_forbidden"
+        ],
+        formal_later_deny_policy_digest=_canonical_digest(
             tuple(
-                item.roster_digest
+                (
+                    item.role_id,
+                    item.registered_split,
+                    item.manifest_reference,
+                    item.manifest_availability,
+                )
                 for item in role_bindings
                 if not item.execution_allowed_in_development
             )
@@ -1015,6 +1429,8 @@ def load_frozen_development_exploration_protocol(
             "development_case_id",
             "candidate_selection_case_id",
             "candidate_identity",
+            "candidate_ids",
+            "candidate_parameter_bindings",
             "candidate_config_digest",
             "paired_ablation_identity",
             "negative_control_case_ids",
@@ -1049,6 +1465,12 @@ def load_frozen_development_exploration_protocol(
                 ),
                 candidate_identity=_require_identity(
                     item["candidate_identity"], "candidate_identity"
+                ),
+                candidate_ids=tuple(
+                    _require_sequence(item["candidate_ids"], "candidate_ids")
+                ),
+                candidate_parameter_bindings=_load_candidate_parameter_bindings(
+                    item["candidate_parameter_bindings"]
                 ),
                 candidate_config_digest=_require_digest(
                     item["candidate_config_digest"], "candidate_config_digest"
@@ -1101,7 +1523,6 @@ def load_frozen_development_exploration_protocol(
             "wiring_counts_as_scientific_coverage",
             "scientific_source_cluster_scales",
             "maximum_scientific_units",
-            "maximum_total_branch_units",
             "maximum_record_attempts_per_unit",
             "maximum_total_record_attempts",
             "maximum_duration_seconds_per_unit",
@@ -1124,7 +1545,6 @@ def load_frozen_development_exploration_protocol(
             )
         ),
         maximum_scientific_units=budget_raw["maximum_scientific_units"],
-        maximum_total_branch_units=budget_raw["maximum_total_branch_units"],
         maximum_record_attempts_per_unit=budget_raw[
             "maximum_record_attempts_per_unit"
         ],
@@ -1233,18 +1653,23 @@ def enumerate_development_study_units(
 
 def development_assignments_only(
     manifest: FrozenSplitManifest,
+    *,
+    protocol: FrozenDevelopmentExplorationProtocol,
+    seed_namespace: str,
+    known_role_manifest_bindings: Sequence[
+        FrozenStudyRoleManifestBinding
+    ] = (),
 ) -> tuple[SplitAssignment, ...]:
-    if type(manifest) is not FrozenSplitManifest:
-        raise TypeError("development_split_manifest_exact_type_required")
-    violations = manifest.validate(require_all_splits=False)
-    if violations:
-        raise ValueError(",".join(violations))
-    observed = {assignment.split for assignment in manifest.assignments}
-    if observed != {DEVELOPMENT_SPLIT}:
-        forbidden = sorted(observed - {DEVELOPMENT_SPLIT})
-        raise PermissionError(
-            f"development_exploration_split_forbidden:{','.join(forbidden)}"
-        )
+    binding = bind_study_role_manifest(
+        protocol,
+        role_id="development_exploration",
+        seed_namespace=seed_namespace,
+        manifest=manifest,
+    )
+    assert_study_role_manifests_isolated(
+        protocol,
+        (binding, *known_role_manifest_bindings),
+    )
     return manifest.assignments
 
 
@@ -1381,26 +1806,80 @@ def build_development_cross_fit_plan(
 
 @dataclass(frozen=True, slots=True)
 class DevelopmentThresholdFitInput:
-    source_split: str
+    source_record: InternalValidationRecord
     case_role: str
-    source_cluster_ids: tuple[str, ...]
+    source_record_digest: str
+
+    def payload_without_digest(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload.pop("source_record_digest")
+        return payload
 
     def validate(
         self,
         fold: DevelopmentCrossFitFold,
+        manifest: FrozenSplitManifest,
+        detector_identity: str,
+        detector_config_digest: str,
     ) -> tuple[str, ...]:
         violations: list[str] = []
-        if self.source_split != DEVELOPMENT_SPLIT:
+        if type(self.source_record) is not InternalValidationRecord:
+            return ("threshold_fit_source_record_exact_type_required",)
+        record = self.source_record
+        identity = record.analysis_unit_identity
+        record_violations = validate_internal_record(record)
+        if record_violations:
+            violations.append("threshold_fit_source_record_invalid")
+        if record.split != DEVELOPMENT_SPLIT:
             violations.append("threshold_fit_input_split_invalid")
-        if self.case_role not in DEVELOPMENT_THRESHOLD_INPUT_ROLES:
+        if self.case_role != "primary_null":
             violations.append("threshold_fit_input_role_invalid")
-        if not self.source_cluster_ids:
-            violations.append("threshold_fit_input_clusters_missing")
-        if not set(self.source_cluster_ids).issubset(set(fold.fit_source_cluster_ids)):
+        if identity.case_id != DEVELOPMENT_PRIMARY_NULL_CASE_ID:
+            violations.append("threshold_fit_input_case_identity_invalid")
+        if identity.source_cluster_id not in set(fold.fit_source_cluster_ids):
             violations.append("threshold_fit_input_cluster_not_in_fit_fold")
-        if set(self.source_cluster_ids) & set(fold.recovery_probe_source_cluster_ids):
+        if identity.source_cluster_id in set(fold.recovery_probe_source_cluster_ids):
             violations.append("threshold_fit_input_recovery_probe_leakage")
+        if SplitAssignment(identity=identity, split=record.split) not in manifest.assignments:
+            violations.append("threshold_fit_input_not_in_bound_manifest")
+        if record.provenance_trace.split_manifest_digest != manifest.digest():
+            violations.append("threshold_fit_source_record_manifest_digest_mismatch")
+        if record.detector_trace.raw_detector_identity != detector_identity:
+            violations.append("threshold_fit_input_detector_identity_mismatch")
+        if record.detector_trace.raw_detector_config_digest != detector_config_digest:
+            violations.append("threshold_fit_input_detector_config_mismatch")
+        if record.key_control_trace.key_role != "unwatermarked_primary_null":
+            violations.append("threshold_fit_input_key_role_invalid")
+        if record.key_control_trace.control_identity != "primary_null":
+            violations.append("threshold_fit_input_control_identity_invalid")
+        if record.execution_status != "success":
+            violations.append("threshold_fit_input_success_record_required")
+        score = record.detector_trace.raw_content_score
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            violations.append("threshold_fit_input_score_invalid")
+        elif not isfinite(float(score)):
+            violations.append("threshold_fit_input_score_non_finite")
+        if self.source_record_digest != _canonical_digest(
+            self.payload_without_digest()
+        ):
+            violations.append("threshold_fit_source_record_digest_invalid")
         return tuple(dict.fromkeys(violations))
+
+
+def create_development_threshold_fit_input(
+    *,
+    source_record: InternalValidationRecord,
+) -> DevelopmentThresholdFitInput:
+    payload = {
+        "source_record": source_record,
+        "case_role": "primary_null",
+    }
+    return DevelopmentThresholdFitInput(
+        **payload,
+        source_record_digest=_canonical_digest(
+            {"source_record": asdict(source_record), "case_role": "primary_null"}
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1409,9 +1888,12 @@ class DevelopmentProvisionalThreshold:
     responsibility_id: str
     fold_index: int
     threshold: float
+    input_manifest: FrozenSplitManifest
     input_manifest_digest: str
     detector_identity: str
+    detector_config_payload_json: str
     detector_config_digest: str
+    threshold_rule_payload_json: str
     threshold_rule_digest: str
     fit_inputs: tuple[DevelopmentThresholdFitInput, ...]
     fit_source_cluster_digest: str
@@ -1440,14 +1922,34 @@ class DevelopmentProvisionalThreshold:
             if type(fit_input) is not DevelopmentThresholdFitInput:
                 violations.append("threshold_fit_input_exact_type_required")
             else:
-                violations.extend(fit_input.validate(fold))
+                violations.extend(
+                    fit_input.validate(
+                        fold,
+                        self.input_manifest,
+                        self.detector_identity,
+                        self.detector_config_digest,
+                    )
+                )
         if {item.case_role for item in self.fit_inputs} != set(
             DEVELOPMENT_THRESHOLD_INPUT_ROLES
         ):
             violations.append("threshold_fit_input_roles_incomplete")
         covered_fit_clusters = {
-            cluster for item in self.fit_inputs for cluster in item.source_cluster_ids
+            item.source_record.analysis_unit_identity.source_cluster_id
+            for item in self.fit_inputs
+            if type(item) is DevelopmentThresholdFitInput
+            and type(item.source_record) is InternalValidationRecord
         }
+        observed_record_ids = tuple(
+            item.source_record.record_id
+            for item in self.fit_inputs
+            if type(item) is DevelopmentThresholdFitInput
+            and type(item.source_record) is InternalValidationRecord
+        )
+        if len(observed_record_ids) != len(set(observed_record_ids)):
+            violations.append("threshold_fit_source_record_id_duplicate")
+        if len(covered_fit_clusters) != len(self.fit_inputs):
+            violations.append("threshold_fit_source_cluster_duplicate")
         if covered_fit_clusters != set(fold.fit_source_cluster_ids):
             violations.append("threshold_fit_input_cluster_coverage_invalid")
         if self.fit_source_cluster_digest != fold.fit_source_cluster_digest:
@@ -1456,19 +1958,65 @@ class DevelopmentProvisionalThreshold:
             fold.recovery_probe_source_cluster_digest
         ):
             violations.append("provisional_threshold_recovery_probe_digest_mismatch")
-        for value, reason in (
-            (self.input_manifest_digest, "provisional_threshold_manifest_digest_invalid"),
-            (self.detector_config_digest, "provisional_threshold_detector_config_digest_invalid"),
-            (self.threshold_rule_digest, "provisional_threshold_rule_digest_invalid"),
+        if type(self.input_manifest) is not FrozenSplitManifest:
+            violations.append("provisional_threshold_manifest_exact_type_required")
+        else:
+            manifest_violations = self.input_manifest.validate(
+                require_all_splits=False
+            )
+            if manifest_violations:
+                violations.append("provisional_threshold_manifest_invalid")
+            if self.input_manifest_digest != self.input_manifest.digest():
+                violations.append("provisional_threshold_manifest_digest_invalid")
+        for payload_json, digest, reason in (
+            (
+                self.detector_config_payload_json,
+                self.detector_config_digest,
+                "provisional_threshold_detector_config_digest_invalid",
+            ),
+            (
+                self.threshold_rule_payload_json,
+                self.threshold_rule_digest,
+                "provisional_threshold_rule_digest_invalid",
+            ),
         ):
-            if _DIGEST_PATTERN.fullmatch(value) is None:
+            try:
+                payload = json.loads(payload_json)
+            except (TypeError, json.JSONDecodeError):
                 violations.append(reason)
+            else:
+                if type(payload) is not dict or not payload:
+                    violations.append(reason)
+                elif payload_json != json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    allow_nan=False,
+                ):
+                    violations.append(reason)
+                elif digest != _canonical_digest(payload):
+                    violations.append(reason)
+        if self.threshold_rule_payload_json != json.dumps(
+            DEVELOPMENT_THRESHOLD_RULE_PAYLOAD,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ):
+            violations.append("provisional_threshold_rule_unregistered")
         if _IDENTITY_PATTERN.fullmatch(self.detector_identity) is None:
             violations.append("provisional_threshold_detector_identity_invalid")
         if isinstance(self.threshold, bool) or not isinstance(self.threshold, (int, float)):
             violations.append("provisional_threshold_value_invalid")
         elif not isfinite(float(self.threshold)):
             violations.append("provisional_threshold_value_non_finite")
+        elif self.fit_inputs and self.threshold != max(
+            float(item.source_record.detector_trace.raw_content_score)
+            for item in self.fit_inputs
+            if type(item) is DevelopmentThresholdFitInput
+        ):
+            violations.append("provisional_threshold_value_not_rule_derived")
         if self.source_split != DEVELOPMENT_SPLIT:
             violations.append("provisional_threshold_source_split_invalid")
         if self.threshold_role != DEVELOPMENT_THRESHOLD_ROLE:
@@ -1486,26 +2034,52 @@ def create_development_provisional_threshold(
     plan: FrozenDevelopmentCrossFitPlan,
     *,
     fold_index: int,
-    threshold: float,
-    input_manifest_digest: str,
+    input_manifest: FrozenSplitManifest,
     detector_identity: str,
-    detector_config_digest: str,
-    threshold_rule_digest: str,
+    detector_config_payload: Mapping[str, object],
     fit_inputs: Sequence[DevelopmentThresholdFitInput],
 ) -> DevelopmentProvisionalThreshold:
     if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
         raise ValueError("development_cross_fit_plan_invalid")
     if fold_index not in range(len(plan.folds)):
         raise ValueError("provisional_threshold_fold_index_invalid")
+    if type(input_manifest) is not FrozenSplitManifest:
+        raise TypeError("development_threshold_manifest_exact_type_required")
+    if type(detector_config_payload) is not dict or not detector_config_payload:
+        raise ValueError("detector_config_payload_missing")
+    if not fit_inputs:
+        raise ValueError("development_threshold_fit_inputs_missing")
+    detector_config_payload_json = json.dumps(
+        detector_config_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+    threshold_rule_payload_json = json.dumps(
+        DEVELOPMENT_THRESHOLD_RULE_PAYLOAD,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
     fold = plan.folds[fold_index]
     payload = {
         "responsibility_id": plan.responsibility_id,
         "fold_index": fold_index,
-        "threshold": threshold,
-        "input_manifest_digest": input_manifest_digest,
+        "threshold": max(
+            float(item.source_record.detector_trace.raw_content_score)
+            for item in fit_inputs
+        ),
+        "input_manifest": input_manifest,
+        "input_manifest_digest": input_manifest.digest(),
         "detector_identity": detector_identity,
-        "detector_config_digest": detector_config_digest,
-        "threshold_rule_digest": threshold_rule_digest,
+        "detector_config_payload_json": detector_config_payload_json,
+        "detector_config_digest": _canonical_digest(detector_config_payload),
+        "threshold_rule_payload_json": threshold_rule_payload_json,
+        "threshold_rule_digest": _canonical_digest(
+            DEVELOPMENT_THRESHOLD_RULE_PAYLOAD
+        ),
         "fit_inputs": tuple(fit_inputs),
         "fit_source_cluster_digest": fold.fit_source_cluster_digest,
         "recovery_probe_source_cluster_digest": (
@@ -1519,9 +2093,13 @@ def create_development_provisional_threshold(
     provisional = DevelopmentProvisionalThreshold(
         threshold_identity=_canonical_digest(
             {
-                key: tuple(asdict(item) for item in value)
-                if key == "fit_inputs"
-                else value
+                key: (
+                    tuple(asdict(item) for item in value)
+                    if key == "fit_inputs"
+                    else asdict(value)
+                    if key == "input_manifest"
+                    else value
+                )
                 for key, value in payload.items()
             }
         ),
@@ -1661,7 +2239,12 @@ class DevelopmentModuleOutcomeRecord:
             elif self.responsibility_id in studies and not set(
                 self.blocking_responsibilities
             ).issubset(
-                set(studies[self.responsibility_id].prerequisite_responsibility_ids)
+                {
+                    self.responsibility_id,
+                    *studies[
+                        self.responsibility_id
+                    ].prerequisite_responsibility_ids,
+                }
             ):
                 violations.append("implementation_blocking_responsibility_invalid")
         elif self.blocking_responsibilities:
