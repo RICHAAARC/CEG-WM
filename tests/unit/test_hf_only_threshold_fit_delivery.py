@@ -746,7 +746,7 @@ def test_threshold_fit_notebook_is_thin_and_output_free() -> None:
     )
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert "https://github.com/RICHAAARC/CEG-WM.git" in source
-    assert "b957e5bd7996ef3f1ed365316fc381a424074ffb" in source
+    assert "7797e78a4da11ee39d5554772b299821ea0019b3" in source
     assert "userdata.get('HF_TOKEN')" in source
     assert "userdata.get('CEG_WM_ROOT_KEY')" in source
     assert "git', 'clone'" in source

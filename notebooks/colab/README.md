@@ -33,7 +33,7 @@ schema version 1 的可信 bootstrap 和包内 runner 分开承担。
 正式 runner、records 和 ZIP 打包均不在 Notebook 中实现。
 
 当前入口冻结为 source revision
-`b957e5bd7996ef3f1ed365316fc381a424074ffb` 的 fit shard zero。服务器入口在本地
+`7797e78a4da11ee39d5554772b299821ea0019b3` 的 fit shard zero。服务器入口在本地
 `/content` 生成 result 或 diagnostic ZIP 与机器 receipt；Notebook 核对 artifact
 SHA-256 后，将 ZIP 与 receipt 原子复制到
 `MyDrive/CEG-WM/hf_only_threshold_fit_results/<revision>/<run-id>/shard_00/`，并在复制后
