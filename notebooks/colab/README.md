@@ -32,5 +32,9 @@ run ID、shard index 和 Colab Secrets；candidate/execution/fit 摘要由 clean
 revision 的 builder 派生并通过已独立校验的 sidecar 绑定，Notebook 不接受人工注入。
 它核对并快照 package 外 bootstrap，只调用该快照并下载 result 或 diagnostic ZIP。
 入口每次只运行一个 frozen fit shard，不访问 untouched confirmation、不运行 baseline、
-不批准 tau，也不形成科学效果声明。当前占位 trust inputs 未替换前不可执行，提交副本
-必须保持 outputs 为空、execution count 为 null。
+不批准 tau，也不形成科学效果声明。当前入口已冻结为 source revision
+`93215a966bb501ca56578957ebebf408ac38e21f` 的 fit shard zero，并绑定该 revision
+生成的外部 archive、sidecar、embedded manifest 与 package-external bootstrap 摘要。
+本次 Notebook 提交只固定外部包信任输入，不改变包的 source revision，不授权 tau、
+untouched confirmation、候选晋升或科学 claim。提交副本必须保持 outputs 为空、
+execution count 为 null。
