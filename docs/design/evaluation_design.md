@@ -59,6 +59,16 @@ clusters 不得评分同折 recovery probes。阈值
 在 candidate-selection 前强制作废，不是 formal `tau`，不能支持 fixed-FPR、候选
 晋升或科学 claim。
 
+其中 threshold detector authority 由 checked-in development protocol 唯一提供：
+职责固定为 HF detector、模式固定为 HF-only、公开预处理固定为
+`rgb8_public_image_float32_unit_interval`，并回绑登记的 HF detector candidate/config
+和 `main_shared_key_schedule_identify_root_key` key-schedule identity。结果调用者不得
+替换 base config 或预处理。每个 primary-null public-key mapping 以 authority、
+registered/detection public digests 和 key-schedule config 计算 canonical key-family
+digest，并必须逐 cluster 等于 split manifest 已冻结的 registered key-family digest；
+不保存 raw secret。protocol、authority、manifest 或 public roster 任一变化都会形成
+不同摘要，不能在 threshold 结果侧同源重绑后冒充原实验身份。
+
 prompt、source cluster、seed namespace、key family 和 image lineage 五维身份从
 各 role 的真实 `FrozenSplitManifest` 与 seed namespace 绑定；任意两个已提供 role
 在任一维度有交集即 fail closed。未来 role manifest 在获授权并真实冻结前明确标记

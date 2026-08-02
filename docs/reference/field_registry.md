@@ -630,7 +630,20 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | source_record | persisted_protocol | provenance | none | true | false | false | threshold-fit 输入绑定的 exact `InternalValidationRecord`；必须是 runner 正式 records 类型。 |
 | source_record_digest | persisted_protocol | provenance | none | true | false | false | 完整 primary-null source record 与 case role 的重算摘要。 |
 | detector_binding | persisted_protocol | method_identity | none | true | false | false | development threshold 对 detector、preprocessing 与 primary-null public-key roster 的不可变绑定结构。 |
+| protocol | persisted_protocol | protocol | none | true | false | false | development threshold binding 内嵌的 exact frozen exploration protocol trust anchor；只支持自校验，不是科学结果。 |
 | binding_identity | persisted_protocol | method_identity | none | true | false | false | development threshold detector binding 全部字段的 canonical 摘要。 |
+| threshold_detector_authority | persisted_protocol | method_identity | none | true | false | false | checked-in development protocol 唯一登记的 HF-only threshold detector、preprocessing、candidate 与 key-schedule trust anchor。 |
+| authority_id | persisted_protocol | method_identity | none | true | false | false | development threshold detector authority 的固定语义身份。 |
+| authority_digest | persisted_protocol | provenance | none | true | false | false | binding 内完整 threshold detector authority 的 canonical 摘要。 |
+| threshold_detector_authority_digest | persisted_protocol | provenance | none | true | false | false | provisional threshold 对 checked-in detector authority 的显式摘要绑定。 |
+| raw_rectified_preprocessing_same | persisted_protocol | protocol | none | true | false | false | development threshold authority 要求 raw/rectified 共用精确公共预处理身份。 |
+| registered_candidate_identity | persisted_protocol | method_identity | none | true | false | false | threshold authority 回绑 HF detector module matrix 的登记候选身份。 |
+| registered_candidate_ids | persisted_protocol | method_identity | none | true | false | false | threshold authority 回绑 HF detector module matrix 的完整候选 ID roster。 |
+| registered_candidate_parameter_bindings | persisted_protocol | method_identity | none | true | false | false | threshold authority 回绑 HF detector module matrix 的候选参数和值。 |
+| registered_candidate_config_digest | persisted_protocol | method_identity | none | true | false | false | threshold authority 回绑 HF detector module matrix candidate config 的摘要。 |
+| registered_key_schedule_candidate_id | persisted_protocol | method_identity | none | true | false | false | threshold authority 使用的登记 key-schedule candidate。 |
+| registered_key_schedule_derivation_identity | persisted_protocol | method_identity | none | true | false | false | 只引用 `main.shared.key_schedule.identify_root_key` 公共身份职责、不复制算法的冻结 derivation identity。 |
+| registered_key_schedule_config_digest | persisted_protocol | method_identity | none | true | false | false | checked-in key-schedule candidate 完整配置身份摘要。 |
 | public_key_relation | persisted_protocol | method_identity | none | true | false | false | primary-null 注册公钥与检测公钥必须为不同公开摘要的冻结关系。 |
 | primary_null_key_bindings | persisted_protocol | provenance | none | true | false | false | 当前 cross-fit fold 中每个 source cluster 到 registered key family、registered public key 与 detection public key 的精确有序映射。 |
 | primary_null_key_roster_digest | persisted_protocol | provenance | none | true | false | false | 全部 primary-null source-cluster/key 映射的 canonical 摘要，并进入 detector config digest。 |

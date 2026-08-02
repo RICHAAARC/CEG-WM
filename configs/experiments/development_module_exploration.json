@@ -1,7 +1,7 @@
 {
-  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v2",
+  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v3",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "2.0.0",
+  "protocol_version": "3.0.0",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -166,6 +166,30 @@
       "end_to_end_check",
       "held_out_evaluation"
     ]
+  },
+  "threshold_detector_authority": {
+    "authority_id": "development_high_frequency_detector_threshold_authority",
+    "responsibility_id": "hf_detector",
+    "detector_identity": "development_blind_high_frequency_detector",
+    "detector_mode": "hf_only",
+    "preprocessing_identity": "rgb8_public_image_float32_unit_interval",
+    "raw_rectified_preprocessing_same": true,
+    "registered_candidate_identity": "blind_high_frequency_detector_candidate",
+    "registered_candidate_ids": [
+      "key_schedule_sha256_counter",
+      "hf_sparse_tail"
+    ],
+    "registered_candidate_parameter_bindings": [
+      {
+        "parameter_id": "detector_candidate",
+        "values": ["hf_sparse_tail"]
+      }
+    ],
+    "registered_candidate_config_digest": "8dd40b84d23fbeaa602bb45e106681e22f1a7253c4fcb959c87af9f56d54ee98",
+    "registered_key_schedule_candidate_id": "key_schedule_sha256_counter",
+    "registered_key_schedule_derivation_identity": "main_shared_key_schedule_identify_root_key",
+    "registered_key_schedule_config_digest": "8696a3fbaabb39149a3b7b30f08cdcd12b64d45bebd14658d08c09805f5b33c0",
+    "public_key_relation": "registered_detection_public_digests_distinct"
   },
   "content_study": {
     "branch_ids": [

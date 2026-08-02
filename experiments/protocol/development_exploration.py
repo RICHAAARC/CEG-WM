@@ -35,8 +35,8 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "2.0.0"
-SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v2"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "3.0.0"
+SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v3"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
 
@@ -77,6 +77,26 @@ DEVELOPMENT_THRESHOLD_INVALIDATION = (
 )
 DEVELOPMENT_CLAIM_BOUNDARY = (
     "preliminary_development_signal_only_no_promotion_or_scientific_claim"
+)
+DEVELOPMENT_THRESHOLD_AUTHORITY_ID = (
+    "development_high_frequency_detector_threshold_authority"
+)
+DEVELOPMENT_THRESHOLD_RESPONSIBILITY_ID = "hf_detector"
+DEVELOPMENT_THRESHOLD_DETECTOR_IDENTITY = (
+    "development_blind_high_frequency_detector"
+)
+DEVELOPMENT_THRESHOLD_DETECTOR_MODE = "hf_only"
+DEVELOPMENT_THRESHOLD_PREPROCESSING_IDENTITY = (
+    "rgb8_public_image_float32_unit_interval"
+)
+DEVELOPMENT_THRESHOLD_PUBLIC_KEY_RELATION = (
+    "registered_detection_public_digests_distinct"
+)
+REGISTERED_KEY_SCHEDULE_DERIVATION_IDENTITY = (
+    "main_shared_key_schedule_identify_root_key"
+)
+REGISTERED_KEY_SCHEDULE_CONFIG_DIGEST = (
+    "8696a3fbaabb39149a3b7b30f08cdcd12b64d45bebd14658d08c09805f5b33c0"
 )
 
 CONTENT_BRANCH_IDS = (
@@ -378,6 +398,7 @@ _EXACT_TOP_LEVEL_KEYS = frozenset(
         "preflight",
         "study_budget",
         "provisional_threshold_cross_fit",
+        "threshold_detector_authority",
         "content_study",
         "geometry_study",
         "module_matrix",
@@ -912,6 +933,180 @@ def validate_development_module_matrix(
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentThresholdDetectorAuthority:
+    authority_id: str
+    responsibility_id: str
+    detector_identity: str
+    detector_mode: str
+    preprocessing_identity: str
+    raw_rectified_preprocessing_same: bool
+    registered_candidate_identity: str
+    registered_candidate_ids: tuple[str, ...]
+    registered_candidate_parameter_bindings: tuple[
+        tuple[str, tuple[str, ...]], ...
+    ]
+    registered_candidate_config_digest: str
+    registered_key_schedule_candidate_id: str
+    registered_key_schedule_derivation_identity: str
+    registered_key_schedule_config_digest: str
+    public_key_relation: str
+
+    def digest(self) -> str:
+        return _canonical_digest(asdict(self))
+
+    def detector_base_config_payload(self) -> dict[str, object]:
+        return {
+            "detector_mode": self.detector_mode,
+            "registered_candidate_config_digest": (
+                self.registered_candidate_config_digest
+            ),
+            "registered_candidate_identity": self.registered_candidate_identity,
+            "registered_candidate_ids": self.registered_candidate_ids,
+            "registered_candidate_parameter_bindings": (
+                self.registered_candidate_parameter_bindings
+            ),
+            "registered_key_schedule_candidate_id": (
+                self.registered_key_schedule_candidate_id
+            ),
+            "registered_key_schedule_config_digest": (
+                self.registered_key_schedule_config_digest
+            ),
+            "registered_key_schedule_derivation_identity": (
+                self.registered_key_schedule_derivation_identity
+            ),
+        }
+
+    def validate(
+        self,
+        module_matrix: Sequence[DevelopmentModuleStudy],
+    ) -> tuple[str, ...]:
+        violations: list[str] = []
+        expected_scalars = (
+            (
+                self.authority_id,
+                DEVELOPMENT_THRESHOLD_AUTHORITY_ID,
+                "threshold_authority_id_invalid",
+            ),
+            (
+                self.responsibility_id,
+                DEVELOPMENT_THRESHOLD_RESPONSIBILITY_ID,
+                "threshold_authority_responsibility_invalid",
+            ),
+            (
+                self.detector_identity,
+                DEVELOPMENT_THRESHOLD_DETECTOR_IDENTITY,
+                "threshold_authority_detector_identity_invalid",
+            ),
+            (
+                self.detector_mode,
+                DEVELOPMENT_THRESHOLD_DETECTOR_MODE,
+                "threshold_authority_detector_mode_invalid",
+            ),
+            (
+                self.preprocessing_identity,
+                DEVELOPMENT_THRESHOLD_PREPROCESSING_IDENTITY,
+                "threshold_authority_preprocessing_identity_invalid",
+            ),
+            (
+                self.registered_key_schedule_candidate_id,
+                MODULE_CANDIDATE_IDS["key_schedule"][0],
+                "threshold_authority_key_schedule_candidate_invalid",
+            ),
+            (
+                self.registered_key_schedule_derivation_identity,
+                REGISTERED_KEY_SCHEDULE_DERIVATION_IDENTITY,
+                "threshold_authority_key_schedule_derivation_invalid",
+            ),
+            (
+                self.registered_key_schedule_config_digest,
+                REGISTERED_KEY_SCHEDULE_CONFIG_DIGEST,
+                "threshold_authority_key_schedule_config_invalid",
+            ),
+            (
+                self.public_key_relation,
+                DEVELOPMENT_THRESHOLD_PUBLIC_KEY_RELATION,
+                "threshold_authority_public_key_relation_invalid",
+            ),
+        )
+        violations.extend(
+            reason for observed, expected, reason in expected_scalars
+            if observed != expected
+        )
+        if self.raw_rectified_preprocessing_same is not True:
+            violations.append("threshold_authority_same_preprocessing_required")
+        if self.registered_candidate_identity != MODULE_CANDIDATE_IDENTITIES[
+            DEVELOPMENT_THRESHOLD_RESPONSIBILITY_ID
+        ]:
+            violations.append("threshold_authority_candidate_identity_unregistered")
+        if self.registered_candidate_ids != MODULE_CANDIDATE_IDS[
+            DEVELOPMENT_THRESHOLD_RESPONSIBILITY_ID
+        ]:
+            violations.append("threshold_authority_candidate_ids_unregistered")
+        if self.registered_candidate_parameter_bindings != (
+            MODULE_CANDIDATE_PARAMETERS[DEVELOPMENT_THRESHOLD_RESPONSIBILITY_ID]
+        ):
+            violations.append("threshold_authority_candidate_parameters_unregistered")
+        registered_studies = {
+            item.responsibility_id: item for item in module_matrix
+        }
+        study = registered_studies.get(DEVELOPMENT_THRESHOLD_RESPONSIBILITY_ID)
+        if study is None:
+            violations.append("threshold_authority_module_study_missing")
+        else:
+            if self.registered_candidate_identity != study.candidate_identity:
+                violations.append("threshold_authority_candidate_identity_mismatch")
+            if self.registered_candidate_ids != study.candidate_ids:
+                violations.append("threshold_authority_candidate_ids_mismatch")
+            if (
+                self.registered_candidate_parameter_bindings
+                != study.candidate_parameter_bindings
+            ):
+                violations.append("threshold_authority_candidate_parameters_mismatch")
+            if self.registered_candidate_config_digest != study.candidate_config_digest:
+                violations.append("threshold_authority_candidate_config_mismatch")
+        if self.registered_key_schedule_candidate_id not in (
+            self.registered_candidate_ids
+        ):
+            violations.append("threshold_authority_key_schedule_not_in_candidate_roster")
+        return tuple(dict.fromkeys(violations))
+
+
+def derive_development_primary_null_key_family_digest(
+    authority: DevelopmentThresholdDetectorAuthority,
+    *,
+    registered_key_public_digest: str,
+    detection_key_public_digest: str,
+) -> str:
+    if type(authority) is not DevelopmentThresholdDetectorAuthority:
+        raise TypeError("threshold_detector_authority_exact_type_required")
+    for field_name, value in (
+        ("registered_key_public_digest", registered_key_public_digest),
+        ("detection_key_public_digest", detection_key_public_digest),
+    ):
+        if _DIGEST_PATTERN.fullmatch(value) is None:
+            raise ValueError(f"primary_null_{field_name}_invalid")
+    if registered_key_public_digest == detection_key_public_digest:
+        raise ValueError("primary_null_public_key_relation_mismatch")
+    return _canonical_digest(
+        {
+            "authority_digest": authority.digest(),
+            "detection_key_public_digest": detection_key_public_digest,
+            "public_key_relation": authority.public_key_relation,
+            "registered_key_public_digest": registered_key_public_digest,
+            "registered_key_schedule_candidate_id": (
+                authority.registered_key_schedule_candidate_id
+            ),
+            "registered_key_schedule_config_digest": (
+                authority.registered_key_schedule_config_digest
+            ),
+            "registered_key_schedule_derivation_identity": (
+                authority.registered_key_schedule_derivation_identity
+            ),
+        }
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentStudyUnit:
     unit_index: int
     phase: str
@@ -1140,6 +1335,7 @@ class FrozenDevelopmentExplorationProtocol:
     preflight: DevelopmentPreflight
     study_budget: DevelopmentStudyBudget
     provisional_threshold_cross_fit: DevelopmentThresholdCrossFitPolicy
+    threshold_detector_authority: DevelopmentThresholdDetectorAuthority
     content_study: DevelopmentContentStudy
     geometry_study: DevelopmentGeometryStudy
     module_matrix: tuple[DevelopmentModuleStudy, ...]
@@ -1163,6 +1359,9 @@ class FrozenDevelopmentExplorationProtocol:
         violations.extend(self.split_isolation.validate())
         violations.extend(self.preflight.validate())
         violations.extend(self.provisional_threshold_cross_fit.validate())
+        violations.extend(
+            self.threshold_detector_authority.validate(self.module_matrix)
+        )
         violations.extend(self.content_study.validate())
         violations.extend(self.geometry_study.validate())
         geometry_ids = frozenset(
@@ -1513,6 +1712,91 @@ def load_frozen_development_exploration_protocol(
             )
         )
     matrix_tuple = tuple(matrix)
+    authority_raw = _require_mapping(
+        raw["threshold_detector_authority"],
+        "threshold_detector_authority",
+    )
+    authority_keys = frozenset(
+        {
+            "authority_id",
+            "responsibility_id",
+            "detector_identity",
+            "detector_mode",
+            "preprocessing_identity",
+            "raw_rectified_preprocessing_same",
+            "registered_candidate_identity",
+            "registered_candidate_ids",
+            "registered_candidate_parameter_bindings",
+            "registered_candidate_config_digest",
+            "registered_key_schedule_candidate_id",
+            "registered_key_schedule_derivation_identity",
+            "registered_key_schedule_config_digest",
+            "public_key_relation",
+        }
+    )
+    _require_exact_keys(
+        authority_raw,
+        authority_keys,
+        "threshold_detector_authority",
+    )
+    threshold_detector_authority = DevelopmentThresholdDetectorAuthority(
+        authority_id=_require_identity(
+            authority_raw["authority_id"], "threshold_authority_id"
+        ),
+        responsibility_id=_require_identity(
+            authority_raw["responsibility_id"],
+            "threshold_authority_responsibility_id",
+        ),
+        detector_identity=_require_identity(
+            authority_raw["detector_identity"],
+            "threshold_authority_detector_identity",
+        ),
+        detector_mode=_require_identity(
+            authority_raw["detector_mode"], "threshold_authority_detector_mode"
+        ),
+        preprocessing_identity=_require_identity(
+            authority_raw["preprocessing_identity"],
+            "threshold_authority_preprocessing_identity",
+        ),
+        raw_rectified_preprocessing_same=authority_raw[
+            "raw_rectified_preprocessing_same"
+        ],
+        registered_candidate_identity=_require_identity(
+            authority_raw["registered_candidate_identity"],
+            "threshold_authority_candidate_identity",
+        ),
+        registered_candidate_ids=tuple(
+            _require_sequence(
+                authority_raw["registered_candidate_ids"],
+                "threshold_authority_candidate_ids",
+            )
+        ),
+        registered_candidate_parameter_bindings=(
+            _load_candidate_parameter_bindings(
+                authority_raw["registered_candidate_parameter_bindings"]
+            )
+        ),
+        registered_candidate_config_digest=_require_digest(
+            authority_raw["registered_candidate_config_digest"],
+            "threshold_authority_candidate_config_digest",
+        ),
+        registered_key_schedule_candidate_id=_require_identity(
+            authority_raw["registered_key_schedule_candidate_id"],
+            "threshold_authority_key_schedule_candidate_id",
+        ),
+        registered_key_schedule_derivation_identity=_require_identity(
+            authority_raw["registered_key_schedule_derivation_identity"],
+            "threshold_authority_key_schedule_derivation_identity",
+        ),
+        registered_key_schedule_config_digest=_require_digest(
+            authority_raw["registered_key_schedule_config_digest"],
+            "threshold_authority_key_schedule_config_digest",
+        ),
+        public_key_relation=_require_identity(
+            authority_raw["public_key_relation"],
+            "threshold_authority_public_key_relation",
+        ),
+    )
     unit_roster = _build_study_unit_roster(matrix_tuple)
 
     budget_raw = _require_mapping(raw["study_budget"], "study_budget")
@@ -1622,6 +1906,7 @@ def load_frozen_development_exploration_protocol(
         preflight=preflight,
         study_budget=study_budget,
         provisional_threshold_cross_fit=threshold_policy,
+        threshold_detector_authority=threshold_detector_authority,
         content_study=content_study,
         geometry_study=geometry_study,
         module_matrix=matrix_tuple,
@@ -1827,6 +2112,9 @@ class DevelopmentPrimaryNullKeyBinding:
 @dataclass(frozen=True, slots=True)
 class FrozenDevelopmentThresholdDetectorBinding:
     binding_identity: str
+    protocol: FrozenDevelopmentExplorationProtocol
+    protocol_digest: str
+    authority_digest: str
     detector_identity: str
     preprocessing_identity: str
     public_key_relation: str
@@ -1850,14 +2138,26 @@ class FrozenDevelopmentThresholdDetectorBinding:
         violations: list[str] = []
         if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
             return ("development_cross_fit_plan_invalid",)
+        if type(self.protocol) is not FrozenDevelopmentExplorationProtocol:
+            return ("threshold_detector_protocol_exact_type_required",)
+        protocol_violations = self.protocol.validate()
+        if protocol_violations:
+            violations.append("threshold_detector_protocol_invalid")
+        if self.protocol_digest != self.protocol.digest():
+            violations.append("threshold_detector_protocol_digest_invalid")
+        authority = self.protocol.threshold_detector_authority
+        if self.authority_digest != authority.digest():
+            violations.append("threshold_detector_authority_digest_invalid")
+        if plan.responsibility_id != authority.responsibility_id:
+            violations.append("threshold_detector_responsibility_authority_mismatch")
         if fold_index not in range(len(plan.folds)):
             return ("threshold_detector_binding_fold_invalid",)
-        if _IDENTITY_PATTERN.fullmatch(self.detector_identity) is None:
-            violations.append("threshold_detector_binding_identity_invalid")
-        if _IDENTITY_PATTERN.fullmatch(self.preprocessing_identity) is None:
-            violations.append("threshold_preprocessing_identity_invalid")
-        if self.public_key_relation != "registered_detection_public_digests_distinct":
-            violations.append("primary_null_public_key_relation_invalid")
+        if self.detector_identity != authority.detector_identity:
+            violations.append("threshold_detector_identity_authority_mismatch")
+        if self.preprocessing_identity != authority.preprocessing_identity:
+            violations.append("threshold_preprocessing_identity_authority_mismatch")
+        if self.public_key_relation != authority.public_key_relation:
+            violations.append("primary_null_public_key_relation_authority_mismatch")
         for item in self.primary_null_key_bindings:
             if type(item) is not DevelopmentPrimaryNullKeyBinding:
                 violations.append("primary_null_key_binding_exact_type_required")
@@ -1865,6 +2165,18 @@ class FrozenDevelopmentThresholdDetectorBinding:
                 violations.extend(item.validate())
                 if item.registered_key_public_digest == item.detection_key_public_digest:
                     violations.append("primary_null_public_key_relation_mismatch")
+                elif item.registered_key_family_digest != (
+                    derive_development_primary_null_key_family_digest(
+                        authority,
+                        registered_key_public_digest=(
+                            item.registered_key_public_digest
+                        ),
+                        detection_key_public_digest=(
+                            item.detection_key_public_digest
+                        ),
+                    )
+                ):
+                    violations.append("primary_null_key_family_public_roster_mismatch")
         cluster_ids = tuple(
             item.source_cluster_id for item in self.primary_null_key_bindings
         )
@@ -1912,7 +2224,20 @@ class FrozenDevelopmentThresholdDetectorBinding:
                 "preprocessing_identity": self.preprocessing_identity,
                 "primary_null_key_roster_digest": self.primary_null_key_roster_digest,
                 "public_key_relation": self.public_key_relation,
+                "protocol_digest": self.protocol_digest,
+                "threshold_detector_authority_digest": self.authority_digest,
             }
+            authority_base_payload = json.loads(
+                json.dumps(
+                    authority.detector_base_config_payload(),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+            if base_payload != authority_base_payload:
+                violations.append("threshold_detector_base_config_authority_mismatch")
             if config_payload != expected_config:
                 violations.append("threshold_detector_config_payload_binding_invalid")
             expected_config_json = json.dumps(
@@ -1932,18 +2257,20 @@ class FrozenDevelopmentThresholdDetectorBinding:
 
 
 def create_development_threshold_detector_binding(
+    protocol: FrozenDevelopmentExplorationProtocol,
     plan: FrozenDevelopmentCrossFitPlan,
     *,
     fold_index: int,
     input_manifest: FrozenSplitManifest,
-    detector_identity: str,
-    preprocessing_identity: str,
-    public_key_relation: str,
     primary_null_key_bindings: Sequence[DevelopmentPrimaryNullKeyBinding],
-    detector_base_config_payload: Mapping[str, object],
 ) -> FrozenDevelopmentThresholdDetectorBinding:
-    if type(detector_base_config_payload) is not dict or not detector_base_config_payload:
-        raise ValueError("threshold_detector_base_config_missing")
+    if type(protocol) is not FrozenDevelopmentExplorationProtocol:
+        raise TypeError("threshold_detector_protocol_exact_type_required")
+    protocol_violations = protocol.validate()
+    if protocol_violations:
+        raise ValueError(",".join(protocol_violations))
+    authority = protocol.threshold_detector_authority
+    detector_base_config_payload = authority.detector_base_config_payload()
     key_bindings = tuple(primary_null_key_bindings)
     key_roster_digest = _canonical_digest(tuple(asdict(item) for item in key_bindings))
     base_json = json.dumps(
@@ -1955,10 +2282,12 @@ def create_development_threshold_detector_binding(
     )
     config_payload = {
         "detector_base_config": detector_base_config_payload,
-        "detector_identity": detector_identity,
-        "preprocessing_identity": preprocessing_identity,
+        "detector_identity": authority.detector_identity,
+        "preprocessing_identity": authority.preprocessing_identity,
         "primary_null_key_roster_digest": key_roster_digest,
-        "public_key_relation": public_key_relation,
+        "protocol_digest": protocol.digest(),
+        "public_key_relation": authority.public_key_relation,
+        "threshold_detector_authority_digest": authority.digest(),
     }
     config_json = json.dumps(
         config_payload,
@@ -1968,9 +2297,12 @@ def create_development_threshold_detector_binding(
         allow_nan=False,
     )
     payload = {
-        "detector_identity": detector_identity,
-        "preprocessing_identity": preprocessing_identity,
-        "public_key_relation": public_key_relation,
+        "protocol": protocol,
+        "protocol_digest": protocol.digest(),
+        "authority_digest": authority.digest(),
+        "detector_identity": authority.detector_identity,
+        "preprocessing_identity": authority.preprocessing_identity,
+        "public_key_relation": authority.public_key_relation,
         "primary_null_key_bindings": key_bindings,
         "primary_null_key_roster_digest": key_roster_digest,
         "detector_base_config_payload_json": base_json,
@@ -1982,6 +2314,8 @@ def create_development_threshold_detector_binding(
             {
                 key: tuple(asdict(item) for item in value)
                 if key == "primary_null_key_bindings"
+                else asdict(value)
+                if key == "protocol"
                 else value
                 for key, value in payload.items()
             }
@@ -2117,6 +2451,8 @@ class DevelopmentProvisionalThreshold:
     input_manifest: FrozenSplitManifest
     input_manifest_digest: str
     detector_binding: FrozenDevelopmentThresholdDetectorBinding
+    protocol_digest: str
+    threshold_detector_authority_digest: str
     detector_identity: str
     detector_config_payload_json: str
     detector_config_digest: str
@@ -2242,6 +2578,12 @@ class DevelopmentProvisionalThreshold:
         ):
             violations.append("provisional_threshold_rule_unregistered")
         if type(self.detector_binding) is FrozenDevelopmentThresholdDetectorBinding:
+            if self.protocol_digest != self.detector_binding.protocol_digest:
+                violations.append("provisional_threshold_protocol_digest_mismatch")
+            if self.threshold_detector_authority_digest != (
+                self.detector_binding.authority_digest
+            ):
+                violations.append("provisional_threshold_authority_digest_mismatch")
             if self.detector_identity != self.detector_binding.detector_identity:
                 violations.append("provisional_threshold_detector_binding_mismatch")
             if (
@@ -2312,6 +2654,8 @@ def create_development_provisional_threshold(
         "input_manifest": input_manifest,
         "input_manifest_digest": input_manifest.digest(),
         "detector_binding": detector_binding,
+        "protocol_digest": detector_binding.protocol_digest,
+        "threshold_detector_authority_digest": detector_binding.authority_digest,
         "detector_identity": detector_binding.detector_identity,
         "detector_config_payload_json": (
             detector_binding.detector_config_payload_json

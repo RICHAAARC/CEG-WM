@@ -44,6 +44,7 @@ from experiments.protocol.development_exploration import (
     create_development_threshold_fit_input,
     decide_development_module_execution,
     development_assignments_only,
+    derive_development_primary_null_key_family_digest,
     enumerate_development_study_units,
     load_frozen_development_exploration_protocol,
 )
@@ -130,12 +131,18 @@ def _redigest_fit_input(
 def _unit(
     index: int,
     *,
+    threshold_authority,
     split: str = DEVELOPMENT_SPLIT,
     case_id: str = "development_primary_null_threshold_fit",
 ) -> SplitAssignment:
     prompt_digest = f"{index + 1:064x}"
     lineage_digest = f"{index + 1001:064x}"
-    key_family_digest = f"{index + 2001:064x}"
+    registered_public, detection_public = _fixture_public_key_digests(prompt_digest)
+    key_family_digest = derive_development_primary_null_key_family_digest(
+        threshold_authority,
+        registered_key_public_digest=registered_public,
+        detection_key_public_digest=detection_public,
+    )
     identity = AnalysisUnitIdentity(
         unit_id=f"development_unit_{index}",
         case_id=case_id,
@@ -160,13 +167,19 @@ def _manifest(
     start: int = 0,
     case_id: str = "development_primary_null_threshold_fit",
 ) -> FrozenSplitManifest:
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     return FrozenSplitManifest(
         protocol_id=INTERNAL_VALIDATION_PROTOCOL_ID,
         protocol_version=INTERNAL_VALIDATION_PROTOCOL_VERSION,
         manifest_id=f"{split}_module_exploration_fixture",
         manifest_revision="fixture_revision",
         assignments=tuple(
-            _unit(index, split=split, case_id=case_id)
+            _unit(
+                index,
+                threshold_authority=protocol.threshold_detector_authority,
+                split=split,
+                case_id=case_id,
+            )
             for index in range(start, start + count)
         ),
     )
@@ -174,6 +187,23 @@ def _manifest(
 
 def _development_manifest(count: int) -> FrozenSplitManifest:
     return _manifest(count)
+
+
+def _fixture_public_key_digests(prompt_digest: str) -> tuple[str, str]:
+    return (
+        _digest(
+            {
+                "prompt_digest": prompt_digest,
+                "role": "registered_public_key",
+            }
+        ),
+        _digest(
+            {
+                "prompt_digest": prompt_digest,
+                "role": "development_primary_null_detection_key",
+            }
+        ),
+    )
 
 
 def _primary_null_record(
@@ -288,6 +318,7 @@ def _cross_fit_plan(cluster_count: int = 16):
 
 
 def _threshold_material(plan, fold_index: int = 0, manifest=None):
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     manifest = (
         _development_manifest(plan.source_cluster_count)
         if manifest is None
@@ -300,31 +331,22 @@ def _threshold_material(plan, fold_index: int = 0, manifest=None):
             registered_key_family_digest=(
                 assignment.identity.registered_key_family_digest
             ),
-            registered_key_public_digest=_digest(
-                {
-                    "key_family": assignment.identity.registered_key_family_digest,
-                    "role": "registered_public_key",
-                }
-            ),
-            detection_key_public_digest=_digest(
-                {
-                    "key_family": assignment.identity.registered_key_family_digest,
-                    "role": "development_primary_null_detection_key",
-                }
-            ),
+            registered_key_public_digest=_fixture_public_key_digests(
+                assignment.identity.prompt_digest
+            )[0],
+            detection_key_public_digest=_fixture_public_key_digests(
+                assignment.identity.prompt_digest
+            )[1],
         )
         for assignment in manifest.assignments
         if assignment.identity.source_cluster_id in fit
     )
     detector_binding = create_development_threshold_detector_binding(
+        protocol,
         plan,
         fold_index=fold_index,
         input_manifest=manifest,
-        detector_identity="development_blind_high_frequency_detector",
-        preprocessing_identity="frozen_public_preprocess",
-        public_key_relation="registered_detection_public_digests_distinct",
         primary_null_key_bindings=key_bindings,
-        detector_base_config_payload={"detector_mode": "hf_only"},
     )
     fit_inputs = tuple(
         create_development_threshold_fit_input(
@@ -361,6 +383,16 @@ def _create_threshold(plan, fit_inputs=None):
 def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     assert protocol.validate() == ()
+    authority = protocol.threshold_detector_authority
+    assert authority.responsibility_id == "hf_detector"
+    assert authority.detector_mode == "hf_only"
+    assert authority.preprocessing_identity == (
+        "rgb8_public_image_float32_unit_interval"
+    )
+    assert authority.registered_candidate_ids == MODULE_CANDIDATE_IDS["hf_detector"]
+    assert authority.registered_candidate_parameter_bindings == (
+        MODULE_CANDIDATE_PARAMETERS["hf_detector"]
+    )
     assert tuple(item.responsibility_id for item in protocol.module_matrix) == (
         REQUIRED_METHOD_RESPONSIBILITIES
     )
@@ -582,11 +614,15 @@ def test_development_split_surface_denies_every_formal_later_split() -> None:
     ) == development.assignments
     for forbidden_split in FORMAL_LATER_SPLIT_DENY_LIST:
         contaminated = replace(
-            development,
-            assignments=(
-                *development.assignments[:-1],
-                _unit(100, split=forbidden_split),
-            ),
+                development,
+                assignments=(
+                    *development.assignments[:-1],
+                    _unit(
+                        100,
+                        threshold_authority=protocol.threshold_detector_authority,
+                        split=forbidden_split,
+                    ),
+                ),
         )
         with pytest.raises(ValueError, match="study_manifest_contains_wrong_split"):
             development_assignments_only(
@@ -731,7 +767,9 @@ def test_threshold_binds_manifest_detector_rule_and_fold() -> None:
     threshold = _create_threshold(plan)
     assert threshold.validate(plan) == ()
     detector_payload = json.loads(threshold.detector_config_payload_json)
-    assert detector_payload["preprocessing_identity"] == "frozen_public_preprocess"
+    assert detector_payload["preprocessing_identity"] == (
+        "rgb8_public_image_float32_unit_interval"
+    )
     assert detector_payload["public_key_relation"] == (
         "registered_detection_public_digests_distinct"
     )
@@ -855,6 +893,109 @@ def test_threshold_detector_payload_tamper_fails_after_redigest() -> None:
     )
     violations = forged.validate(plan)
     assert "provisional_threshold_detector_config_binding_mismatch" in violations
+
+
+@pytest.mark.unit
+def test_threshold_authority_rejects_full_chain_preprocess_rebinding() -> None:
+    plan = _cross_fit_plan()
+    manifest, binding, _ = _threshold_material(plan)
+    forged_authority = replace(
+        binding.protocol.threshold_detector_authority,
+        preprocessing_identity="alternate_public_preprocess",
+    )
+    forged_protocol = replace(
+        binding.protocol,
+        threshold_detector_authority=forged_authority,
+    )
+    assert forged_protocol.digest() != binding.protocol_digest
+    with pytest.raises(
+        ValueError,
+        match="threshold_authority_preprocessing_identity_invalid",
+    ):
+        create_development_threshold_detector_binding(
+            forged_protocol,
+            plan,
+            fold_index=0,
+            input_manifest=manifest,
+            primary_null_key_bindings=binding.primary_null_key_bindings,
+        )
+
+
+@pytest.mark.unit
+def test_threshold_authority_rejects_full_public_roster_replacement() -> None:
+    plan = _cross_fit_plan()
+    manifest, binding, _ = _threshold_material(plan)
+    replaced_roster = tuple(
+        replace(
+            item,
+            registered_key_public_digest=f"{index + 400:064x}",
+            detection_key_public_digest=f"{index + 800:064x}",
+        )
+        for index, item in enumerate(binding.primary_null_key_bindings)
+    )
+    with pytest.raises(
+        ValueError,
+        match="primary_null_key_family_public_roster_mismatch",
+    ):
+        create_development_threshold_detector_binding(
+            binding.protocol,
+            plan,
+            fold_index=0,
+            input_manifest=manifest,
+            primary_null_key_bindings=replaced_roster,
+        )
+
+
+@pytest.mark.unit
+def test_threshold_authority_rejects_full_chain_detector_mode_rebinding() -> None:
+    plan = _cross_fit_plan()
+    manifest, binding, _ = _threshold_material(plan)
+    forged_authority = replace(
+        binding.protocol.threshold_detector_authority,
+        detector_mode="combined",
+    )
+    forged_protocol = replace(
+        binding.protocol,
+        threshold_detector_authority=forged_authority,
+    )
+    assert forged_protocol.digest() != binding.protocol_digest
+    with pytest.raises(
+        ValueError,
+        match="threshold_authority_detector_mode_invalid",
+    ):
+        create_development_threshold_detector_binding(
+            forged_protocol,
+            plan,
+            fold_index=0,
+            input_manifest=manifest,
+            primary_null_key_bindings=binding.primary_null_key_bindings,
+        )
+
+
+@pytest.mark.unit
+def test_threshold_authority_payload_tamper_fails_after_protocol_redigest() -> None:
+    plan = _cross_fit_plan()
+    manifest, binding, _ = _threshold_material(plan)
+    forged_authority = replace(
+        binding.protocol.threshold_detector_authority,
+        registered_candidate_config_digest="f" * 64,
+    )
+    forged_protocol = replace(
+        binding.protocol,
+        threshold_detector_authority=forged_authority,
+    )
+    assert forged_protocol.digest() != binding.protocol_digest
+    with pytest.raises(
+        ValueError,
+        match="threshold_authority_candidate_config_mismatch",
+    ):
+        create_development_threshold_detector_binding(
+            forged_protocol,
+            plan,
+            fold_index=0,
+            input_manifest=manifest,
+            primary_null_key_bindings=binding.primary_null_key_bindings,
+        )
 
 
 @pytest.mark.unit
@@ -1007,6 +1148,9 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
         ("missing_clean_branch", "clean_control_missing"),
         ("incomplete_geometry", "geometry_case_coverage_invalid"),
         ("role_split_rebound", "study_role_registered_binding_invalid"),
+        ("authority_preprocess_rebound", "threshold_authority_preprocessing_identity_invalid"),
+        ("authority_mode_rebound", "threshold_authority_detector_mode_invalid"),
+        ("authority_candidate_rebound", "threshold_authority_candidate_config_mismatch"),
         ("outcome_expanded", "development_module_outcomes_invalid"),
         ("unknown_field", "keys_invalid"),
     ),
@@ -1051,6 +1195,16 @@ def test_config_loader_rejects_per_module_and_protocol_drift(
         document["split_isolation"]["role_bindings"][1]["registered_split"] = (
             "development"
         )
+    elif mutation == "authority_preprocess_rebound":
+        document["threshold_detector_authority"]["preprocessing_identity"] = (
+            "alternate_public_preprocess"
+        )
+    elif mutation == "authority_mode_rebound":
+        document["threshold_detector_authority"]["detector_mode"] = "combined"
+    elif mutation == "authority_candidate_rebound":
+        document["threshold_detector_authority"][
+            "registered_candidate_config_digest"
+        ] = "f" * 64
     elif mutation == "outcome_expanded":
         document["module_outcomes"]["allowed"].append("development_closed_negative")
     else:
