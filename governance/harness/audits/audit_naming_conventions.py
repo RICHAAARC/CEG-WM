@@ -21,6 +21,7 @@ from governance.harness.lib.file_scanner import iter_governed_paths
 from governance.harness.lib.field_rules import inspect_field_registry
 from governance.harness.lib.json_report import build_report, exit_with_report
 from governance.harness.lib.naming_rules import (
+    LOCAL_MATH_BINDING_NAMES,
     NUMBERED_RESPONSIBILITY_WORDS,
     canonical_version_context,
     has_generic_mechanical_numeric_suffix,
@@ -224,6 +225,75 @@ def _python_local_class_fields(tree: ast.AST) -> dict[str, tuple[str, ...]]:
     }
 
 
+def _python_local_math_name_node_ids(tree: ast.AST) -> frozenset[int]:
+    """Prove narrow local math bindings without executing the inspected module."""
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    lexical_scopes = (
+        ast.Module,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.Lambda,
+        ast.ClassDef,
+    )
+
+    def lexical_scope(node: ast.AST) -> ast.AST | None:
+        current = parents.get(node)
+        while current is not None and not isinstance(current, lexical_scopes):
+            current = parents.get(current)
+        return current
+
+    binding_completion_positions: dict[tuple[int, str], list[tuple[int, int]]] = {}
+    allowed_node_ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        if isinstance(node, ast.AnnAssign) and node.value is None:
+            # A bare annotation declares a name but does not bind a value.
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if not isinstance(target, ast.Name) or target.id not in LOCAL_MATH_BINDING_NAMES:
+                continue
+            scope = lexical_scope(target)
+            # A class-body assignment creates an attribute-like public identity,
+            # not a local mathematical variable.
+            if scope is None or isinstance(scope, ast.ClassDef):
+                continue
+            key = (id(scope), target.id)
+            binding_completion_positions.setdefault(key, []).append(
+                (
+                    getattr(node, "end_lineno", node.lineno),
+                    getattr(node, "end_col_offset", target.col_offset),
+                )
+            )
+            allowed_node_ids.add(id(target))
+
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Name)
+            or not isinstance(node.ctx, ast.Load)
+            or node.id not in LOCAL_MATH_BINDING_NAMES
+        ):
+            continue
+        scope = lexical_scope(node)
+        if scope is None or isinstance(scope, ast.ClassDef):
+            continue
+        binding_positions = binding_completion_positions.get((id(scope), node.id), ())
+        # A read is local only after an earlier source position completed the
+        # exact binding in this same lexical scope.  Using the assignment end
+        # also prevents its own RHS from being mistaken for a subsequent read.
+        if any(
+            binding_position < (node.lineno, node.col_offset)
+            for binding_position in binding_positions
+        ):
+            allowed_node_ids.add(id(node))
+    return frozenset(allowed_node_ids)
+
+
 def _python_semantic_violations(
     path: Path,
     relative: Path,
@@ -237,22 +307,27 @@ def _python_semantic_violations(
     except SyntaxError as error:
         return [{"path": str(relative), "reason": "python_ast_unreadable", "line": error.lineno or 0}]
 
-    names: list[tuple[str, int, str]] = []
+    local_math_name_node_ids = _python_local_math_name_node_ids(tree)
+    names: list[tuple[str, int, str, bool]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.append((node.name, node.lineno, type(node).__name__))
+            names.append((node.name, node.lineno, type(node).__name__, False))
         elif isinstance(node, ast.Name):
-            names.append((node.id, node.lineno, "Name"))
+            names.append(
+                (node.id, node.lineno, "Name", id(node) in local_math_name_node_ids)
+            )
         elif isinstance(node, ast.Attribute):
-            names.append((node.attr, node.lineno, "Attribute"))
+            names.append((node.attr, node.lineno, "Attribute", False))
         elif isinstance(node, ast.arg):
-            names.append((node.arg, node.lineno, "arg"))
+            names.append((node.arg, node.lineno, "arg", False))
         elif isinstance(node, ast.keyword) and node.arg:
-            names.append((node.arg, node.lineno, "keyword"))
-    for name, line, node_kind in sorted(
+            names.append((node.arg, node.lineno, "keyword", False))
+    for name, line, node_kind, is_local_math_name in sorted(
         set(names),
         key=lambda item: (item[1], item[0], item[2]),
     ):
+        if is_local_math_name:
+            continue
         is_callable_or_class = node_kind in {"FunctionDef", "AsyncFunctionDef", "ClassDef"}
         if (
             has_weak_semantic_token(name)

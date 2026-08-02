@@ -1778,6 +1778,311 @@ def test_business_code_prose_mechanical_identity_is_rejected_by_real_audit(
 
 
 @pytest.mark.unit
+def test_immediately_bound_local_mathematical_names_pass_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "C_0 = 1\n"
+        "module_score = C_0 + 1\n"
+        "\n"
+        "def combine_scores():\n"
+        "    C_0 = 1\n"
+        "    C_1: float = 2\n"
+        "    S_0 = 3\n"
+        "    return C_0 + C_1 + S_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_same_line_completed_mathematical_binding_precedes_read_in_real_audit(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(
+        "def score_value():\n"
+        "    C_0 = 1; return C_0\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        "C_0: float\nvalue = C_0\n",
+        "def score_value():\n    C_0: float\n    return C_0\n",
+    ),
+)
+def test_annotation_without_value_does_not_bind_local_mathematical_name(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        "value = C_0; C_0 = 1\n",
+        "C_0 = C_0 + 1\n",
+        "value = (C_0 := 1)\n",
+        "class Scores:\n    C_0 = 1\n    value = C_0\n",
+    ),
+)
+def test_nonpreceding_or_nonassignment_mathematical_binding_fails_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py"
+        and violation.get("identifier") == "C_0"
+    }
+    assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    (
+        "# C_0 = zero state\nvalue = 1\n",
+        "# S_0 = synchronization origin\nvalue = 1\n",
+        "# C_1(w) = weighted content score\nvalue = 1\n",
+        'def describe_score():\n    """C_0 = zero state."""\n    return 1\n',
+        'def describe_sync():\n    """S_0 = synchronization origin."""\n    return 1\n',
+        'def describe_weighting():\n    """C_1(w) = weighted content score."""\n    return 1\n',
+        '# The expression `C_1(w)` is local notation.\nvalue = 1\n',
+        'def describe_expression():\n    """Use `C_1(w)` in this derivation."""\n    return 1\n',
+    ),
+)
+def test_structurally_local_mathematical_prose_passes_real_audit(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    (tmp_path / "main" / "method.py").write_text(source, encoding="utf-8")
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_existing_narrow_scientific_literals_pass_with_local_mathematics(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    (tmp_path / "main" / "method.py").write_text(
+        "C_0 = 1\n"
+        "relative_l2 = C_0\n"
+        "F32 = relative_l2\n"
+        "RGB8 = F32\n"
+        "P95 = RGB8\n"
+        "L4 = P95\n",
+        encoding="utf-8",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "reason", "identifier"),
+    (
+        ("class C_0:\n    pass\n", "ordinal_identity_identifier", "C_0"),
+        ("def C_0():\n    pass\n", "ordinal_identity_identifier", "C_0"),
+        (
+            "def score_value(C_0):\n    return C_0\n",
+            "ordinal_identity_identifier",
+            "C_0",
+        ),
+        ("value = object().C_0\n", "ordinal_identity_identifier", "C_0"),
+        ("value = select_score(C_0=1)\n", "ordinal_identity_identifier", "C_0"),
+        ("c_0 = 1\n", "ordinal_identity_identifier", "c_0"),
+        ("C_0_candidate = 1\n", "ordinal_identity_identifier", "C_0_candidate"),
+        ("C_2 = 1\n", "ordinal_identity_identifier", "C_2"),
+        (
+            "def outer():\n"
+            "    C_0 = 1\n"
+            "    def inner():\n"
+            "        return C_0\n"
+            "    return inner()\n",
+            "ordinal_identity_identifier",
+            "C_0",
+        ),
+    ),
+)
+def test_nonlocal_or_identity_mathematical_names_fail_real_audit(
+    tmp_path: Path,
+    source: str,
+    reason: str,
+    identifier: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(report, path="main/method.py", reason=reason)
+    assert any(
+        violation.get("identifier") == identifier
+        for violation in report["violations"]
+        if violation["path"] == "main/method.py" and violation["reason"] == reason
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("formal_binding", ("function_id", "label"))
+def test_formal_string_mathematical_name_fails_real_audit(
+    tmp_path: Path,
+    formal_binding: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(f'{formal_binding} = "C_1"\n', encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="main/method.py",
+        reason="ordinal_identity_python_string",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("formal_binding", "notation"),
+    (("function_id", "C_1"), ("label", "C_0")),
+)
+def test_config_formal_identity_mathematical_name_fails_real_audit(
+    tmp_path: Path,
+    formal_binding: str,
+    notation: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "configs")
+    path = tmp_path / "configs" / "identity.json"
+    path.write_text(
+        json.dumps({formal_binding: notation}),
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="configs/identity.json",
+        reason="ordinal_identity_config_value",
+    )
+
+
+@pytest.mark.unit
+def test_mathematical_name_path_fails_real_audit(tmp_path: Path) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "c_0.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="main/c_0.py",
+        reason="ordinal_identity_path_component",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("directory_name", ("C_0", "c_0"))
+def test_mathematical_name_directory_path_fails_real_audit(
+    tmp_path: Path,
+    directory_name: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    directory = tmp_path / "main" / directory_name
+    directory.mkdir()
+    (directory / "method.py").write_text("value = 1\n", encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path=f"main/{directory_name}",
+        reason="ordinal_identity_path_component",
+    )
+
+
+@pytest.mark.unit
+def test_mathematical_name_test_node_fails_real_audit(tmp_path: Path) -> None:
+    _write_minimal_audit_fixture(tmp_path, "tests")
+    unit_root = tmp_path / "tests" / "unit"
+    unit_root.mkdir()
+    path = unit_root / "test_candidate.py"
+    path.write_text("def test_c_0_candidate():\n    pass\n", encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="tests/unit/test_candidate.py",
+        reason="ordinal_identity_identifier",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source", "reason"),
+    (
+        ("# use C_0 candidate\nvalue = 1\n", "ordinal_identity_comment"),
+        (
+            'def describe_score():\n    """Use C_0 candidate."""\n    return 1\n',
+            "ordinal_identity_docstring",
+        ),
+        ("# use c_0 candidate\nvalue = 1\n", "ordinal_identity_comment"),
+        ("# C_0_candidate = label\nvalue = 1\n", "ordinal_identity_comment"),
+    ),
+)
+def test_nondefinition_mathematical_prose_fails_real_audit(
+    tmp_path: Path,
+    source: str,
+    reason: str,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "main")
+    path = tmp_path / "main" / "method.py"
+    path.write_text(source, encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(report, path="main/method.py", reason=reason)
+
+
+@pytest.mark.unit
 def test_semantic_negative_test_nodes_and_local_fake_fixtures_remain_allowed(
     tmp_path: Path,
 ) -> None:

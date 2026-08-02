@@ -100,9 +100,12 @@ ORDINAL_IDENTITY_CORE_PATTERN = re.compile(
     r"(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
-_LOCAL_MATH_NOTATION_PATTERN = re.compile(
-    r"`[cs]_\d+(?:\(w\))?`|(?<![A-Za-z0-9_])[cs]_\d+(?:\(w\))?(?=\s*=)",
-    re.IGNORECASE,
+LOCAL_MATH_BINDING_NAMES = frozenset({"C_0", "C_1", "S_0"})
+_BACKTICKED_LOCAL_MATH_NOTATION_PATTERN = re.compile(
+    r"`(?:C_0|C_1(?:\(w\))?|S_0)`"
+)
+_IMMEDIATELY_DEFINED_LOCAL_MATH_NOTATION_PATTERN = re.compile(
+    r"(?m)^(?P<prefix>[ \t]*(?:\#[ \t]*)?)(?:C_0|C_1(?:\(w\))?|S_0)(?=[ \t]*=)"
 )
 MALFORMED_SEMANTIC_NUMERIC_SUFFIX_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(?:[a-z][a-z0-9]*_)+[a-z][a-z0-9]*/\d+"
@@ -275,7 +278,7 @@ def has_weak_semantic_text(text: str) -> bool:
 
 def has_mechanical_identity_token_in_text(text: str) -> bool:
     """Detect identifier-shaped mechanical suffixes inside code prose."""
-    scrubbed = _scrub_allowed_literals(text)
+    scrubbed = _scrub_semantics(text)
     for token in re.findall(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_-]*(?![A-Za-z0-9_])", scrubbed):
         if has_generic_mechanical_numeric_suffix(token):
             return True
@@ -544,4 +547,11 @@ def _scrub_contextual_semantic_roles(text: str) -> str:
 
 def _scrub_semantics(text: str) -> str:
     without_literals = _scrub_allowed_literals(text)
-    return _LOCAL_MATH_NOTATION_PATTERN.sub("", without_literals)
+    without_backticked_math = _BACKTICKED_LOCAL_MATH_NOTATION_PATTERN.sub(
+        "",
+        without_literals,
+    )
+    return _IMMEDIATELY_DEFINED_LOCAL_MATH_NOTATION_PATTERN.sub(
+        lambda match: match.group("prefix"),
+        without_backticked_math,
+    )
