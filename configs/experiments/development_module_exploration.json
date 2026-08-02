@@ -1,0 +1,246 @@
+{
+  "schema_version": "ceg_wm_development_module_exploration_protocol_schema",
+  "protocol_id": "ceg_wm_development_module_exploration",
+  "protocol_version": "1.0.0",
+  "split_policy": {
+    "allowed_split": "development",
+    "formal_later_split_deny_list": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ],
+    "candidate_selection_mapping": "one_unique_case_per_responsibility"
+  },
+  "study_budget": {
+    "wiring_source_cluster_count": 8,
+    "scientific_source_cluster_scales": [16, 32, 64],
+    "maximum_module_cluster_assignments": 560,
+    "maximum_record_attempts_per_unit": 3,
+    "maximum_total_record_attempts": 1680,
+    "unit_order": [
+      "module_dependency_order",
+      "source_cluster_id",
+      "content_branch_id",
+      "geometry_grid_index",
+      "key_control_identity",
+      "record_attempt_index"
+    ]
+  },
+  "provisional_threshold_cross_fit": {
+    "source_split": "development",
+    "fold_count": 4,
+    "fit_role": "all_other_source_cluster_folds",
+    "score_role": "one_held_out_source_cluster_fold",
+    "threshold_role": "development_provisional_cross_fit",
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "content_study": {
+    "branch_ids": [
+      "hf_only",
+      "lf_only",
+      "lf_hf_uniform_control",
+      "lf_hf_content_adaptive"
+    ],
+    "mixing_coefficients": [0.25, 0.5, 0.75],
+    "combination_function_ids": [
+      "hf_only_standardized_score",
+      "weighted_hf_lf_standardized_score",
+      "maximum_hf_lf_standardized_score"
+    ],
+    "matched_total_budget_required": true,
+    "attack_condition_switching_forbidden": true
+  },
+  "geometry_grid": {
+    "crop_fractions": [1.0, 0.75, 0.45],
+    "scale_factors": [1.0, 0.7071067811865476, 1.4142135623730951],
+    "rotation_degrees": [0.0, -16.0, 16.0, -32.0, 32.0]
+  },
+  "module_matrix": [
+    {
+      "responsibility": "key_schedule",
+      "scientific_question": "Registered, wrong-key and public-noise identities remain separated and replayable across development units.",
+      "development_case_id": "development_key_schedule_identity_separation",
+      "candidate_selection_case_id": "candidate_selection_key_schedule_identity_separation",
+      "prerequisite_responsibilities": [],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [],
+      "geometry_grid_required": false,
+      "negative_controls": ["wrong_key_roster", "public_noise_secret_independence"],
+      "record_field_groups": ["key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "content_router",
+      "scientific_question": "Content-adaptive routing provides a development signal relative to the matched-budget uniform control without attack-label access.",
+      "development_case_id": "development_content_adaptive_routing",
+      "candidate_selection_case_id": "candidate_selection_content_adaptive_routing",
+      "prerequisite_responsibilities": ["key_schedule"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": ["lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["routing_uniform_control", "attack_label_blindness"],
+      "record_field_groups": ["routing_trace", "branch_score_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "lf_carrier",
+      "scientific_question": "The LF write direction yields a key-specific development signal rather than a generic low-frequency shift.",
+      "development_case_id": "development_low_frequency_carrier_signal",
+      "candidate_selection_case_id": "candidate_selection_low_frequency_carrier_signal",
+      "prerequisite_responsibilities": ["key_schedule"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": ["lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["wrong_key", "unwatermarked_primary_null", "hf_only"],
+      "record_field_groups": ["branch_score_trace", "key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "hf_carrier",
+      "scientific_question": "The frozen HF carrier retains its registered write identity and paired-quality boundary in development.",
+      "development_case_id": "development_high_frequency_carrier_identity",
+      "candidate_selection_case_id": "candidate_selection_high_frequency_carrier_identity",
+      "prerequisite_responsibilities": ["key_schedule"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": ["hf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["wrong_key", "unwatermarked_primary_null", "clean_pair"],
+      "record_field_groups": ["branch_score_trace", "key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "content_embedder",
+      "scientific_question": "HF-only, LF-only, uniform and adaptive writes remain comparable under the same realized total-content budget.",
+      "development_case_id": "development_content_embedding_matched_budget",
+      "candidate_selection_case_id": "candidate_selection_content_embedding_matched_budget",
+      "prerequisite_responsibilities": ["content_router", "lf_carrier", "hf_carrier"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": ["hf_only", "lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["hf_only", "lf_only", "routing_uniform_control"],
+      "record_field_groups": ["branch_score_trace", "routing_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "lf_detector",
+      "scientific_question": "Blind LF scoring retains registered-key attribution on ordinary images under development-only provisional thresholds.",
+      "development_case_id": "development_low_frequency_blind_detection",
+      "candidate_selection_case_id": "candidate_selection_low_frequency_blind_detection",
+      "prerequisite_responsibilities": ["key_schedule", "lf_carrier"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["wrong_key", "unwatermarked_primary_null", "content_disabled"],
+      "record_field_groups": ["detector_trace", "branch_score_trace", "key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "hf_detector",
+      "scientific_question": "Blind HF direct scoring preserves the frozen HF-only reference identity in development without claiming formal fixed-FPR performance.",
+      "development_case_id": "development_high_frequency_blind_detection",
+      "candidate_selection_case_id": "candidate_selection_high_frequency_blind_detection",
+      "prerequisite_responsibilities": ["key_schedule", "hf_carrier"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["hf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["wrong_key", "unwatermarked_primary_null"],
+      "record_field_groups": ["detector_trace", "branch_score_trace", "key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "content_detector",
+      "scientific_question": "Finite LF/HF combination candidates show a development signal without masking HF-only or wrong-key failures.",
+      "development_case_id": "development_content_detector_combination",
+      "candidate_selection_case_id": "candidate_selection_content_detector_combination",
+      "prerequisite_responsibilities": ["content_embedder", "lf_detector", "hf_detector"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["hf_only", "lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": false,
+      "negative_controls": ["hf_only_standardized_score", "wrong_key", "unwatermarked_primary_null"],
+      "record_field_groups": ["detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "qk_geometry_sync",
+      "scientific_question": "Registered-key Q/K synchronization is observable across the bounded geometry grid and rejects wrong-key controls.",
+      "development_case_id": "development_keyed_qk_synchronization",
+      "candidate_selection_case_id": "candidate_selection_keyed_qk_synchronization",
+      "prerequisite_responsibilities": ["key_schedule"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_grid_required": true,
+      "negative_controls": ["wrong_geometry_key", "geometry_disabled"],
+      "record_field_groups": ["geometry_trace", "key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "geometric_transform_estimator",
+      "scientific_question": "Blind estimation produces bounded crop, scale and rotation development signals without oracle attack inputs.",
+      "development_case_id": "development_bounded_transform_estimation",
+      "candidate_selection_case_id": "candidate_selection_bounded_transform_estimation",
+      "prerequisite_responsibilities": ["qk_geometry_sync"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_grid_required": true,
+      "negative_controls": ["identity", "wrong_geometry_key", "ambiguous_transform", "oracle_diagnostic_only"],
+      "record_field_groups": ["geometry_trace", "key_control_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "geometry_reliability",
+      "scientific_question": "The independent reliability conjunction rejects ambiguous, unsupported and wrong-key estimates across development folds.",
+      "development_case_id": "development_geometry_reliability_rejection",
+      "candidate_selection_case_id": "candidate_selection_geometry_reliability_rejection",
+      "prerequisite_responsibilities": ["geometric_transform_estimator"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": [],
+      "geometry_grid_required": true,
+      "negative_controls": ["wrong_geometry_key", "low_coverage", "boundary_solution", "non_finite_metric"],
+      "record_field_groups": ["geometry_trace", "key_control_trace", "decision_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "image_rectifier",
+      "scientific_question": "Blind rectification improves the same detector on valid support without claiming recovery of deleted crop content.",
+      "development_case_id": "development_image_rectification_recovery",
+      "candidate_selection_case_id": "candidate_selection_image_rectification_recovery",
+      "prerequisite_responsibilities": ["geometric_transform_estimator", "geometry_reliability"],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_grid_required": true,
+      "negative_controls": ["identity_warp", "rectification_disabled", "oracle_diagnostic_only"],
+      "record_field_groups": ["detector_trace", "geometry_trace", "decision_trace", "provenance_trace"]
+    },
+    {
+      "responsibility": "conditional_recovery_decision",
+      "scientific_question": "Development-only near-threshold recovery preserves the same detector, key, preprocessing and threshold while geometry never directly creates a positive.",
+      "development_case_id": "development_conditional_same_detector_recovery",
+      "candidate_selection_case_id": "candidate_selection_conditional_same_detector_recovery",
+      "prerequisite_responsibilities": ["content_detector", "qk_geometry_sync", "geometric_transform_estimator", "geometry_reliability", "image_rectifier"],
+      "scientific_source_cluster_scale": 64,
+      "content_branch_ids": ["hf_only", "lf_only", "lf_hf_uniform_control", "lf_hf_content_adaptive"],
+      "geometry_grid_required": true,
+      "negative_controls": ["raw_only", "geometry_always", "geometry_disabled", "oracle_diagnostic_only"],
+      "record_field_groups": ["detector_trace", "branch_score_trace", "geometry_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"]
+    }
+  ],
+  "module_outcomes": {
+    "allowed": [
+      "development_signal_observed",
+      "development_signal_not_observed",
+      "development_execution_inconclusive",
+      "development_resource_inconclusive",
+      "development_dependency_blocked"
+    ],
+    "recommendation_by_outcome": {
+      "development_signal_observed": "proceed_to_candidate_selection",
+      "development_signal_not_observed": "record_closed_negative_and_stop_dependent_modules",
+      "development_execution_inconclusive": "repair_execution_before_budget_bounded_repeat",
+      "development_resource_inconclusive": "revise_resource_plan_before_budget_bounded_repeat",
+      "development_dependency_blocked": "do_not_execute_until_prerequisite_is_reopened"
+    }
+  },
+  "scientific_claim_boundary": "preliminary_development_signal_only_no_promotion_or_scientific_claim"
+}

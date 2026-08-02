@@ -27,6 +27,23 @@ CEG-WM 使用两个不同实验表面：
 
 聚类单位由 Prompt、seed、生成图像 lineage 和注册 key family 共同定义；同一 source cluster 的所有攻击、回正、多 key 派生样本或近重复内容必须留在同一职责 manifest。候选选择、阈值、rescue、geometry reliability、end-to-end check 和 evaluation 之间不得泄漏。
 
+## Development Preliminary Exploration
+
+13 项方法职责的首轮科学探索只能读取 `development`，不得
+读取或书写 candidate-selection、untouched confirmation、五类 calibration
+职责或 final held-out evaluation。每项职责必须有独立科学问题、
+source-cluster 规模、negative controls、records 组和唯一的未来
+candidate-selection case 映射；前置职责未观测到 development signal 时，
+依赖职责 fail closed，不得以后续复杂度掩盖。
+
+8 个 source clusters 只能验证 wiring，不计入科学覆盖。初探的预登记
+规模边界只能取 `16/32/64` source clusters，并在 development 内按
+source cluster 做四折 cross-fit：每折只用其他折拟合 provisional threshold，
+仅用本折评分。该阈值在进入 candidate-selection 前强制作废，不是
+formal `tau`，不能支持候选晋升、fixed-FPR 或科学 claim。有限内容
+分支、mixing coefficients、组合函数和 crop/scale/rotation 几何网格由
+`development_module_exploration.json` 与对应可执行协议对象共同冻结。
+
 ## Content Validation Matrix
 
 - HF-only；
