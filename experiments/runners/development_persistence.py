@@ -16,8 +16,12 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import time
 from typing import Mapping, Sequence
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.internal_splits import AnalysisUnitIdentity
 
 
 SCHEMA_VERSION = "ceg_wm_development_worker_persistence_v1"
@@ -37,7 +41,19 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _IDENTITY = re.compile(r"^[a-z][a-z0-9_]*$")
 _EXECUTABLE_DESERIALIZATION_SUFFIXES = frozenset(
-    {".dill", ".joblib", ".pickle", ".pkl", ".pt", ".pth"}
+    {
+        ".dill",
+        ".exe",
+        ".joblib",
+        ".pickle",
+        ".pkl",
+        ".pt",
+        ".pth",
+        ".py",
+        ".pyc",
+        ".sh",
+        ".so",
+    }
 )
 
 
@@ -65,6 +81,14 @@ def canonical_digest(value: object) -> str:
     return sha256(canonical_json_bytes(value)).hexdigest()
 
 
+def development_unit_roster_digest(
+    units: Sequence[DevelopmentStudyUnit],
+) -> str:
+    if not units or any(type(item) is not DevelopmentStudyUnit for item in units):
+        raise DevelopmentPersistenceError("development unit roster is invalid")
+    return _protocol_payload_digest(tuple(asdict(item) for item in units))
+
+
 def file_sha256(path: Path) -> str:
     digest = sha256()
     with path.open("rb") as handle:
@@ -73,8 +97,48 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _source_artifact_path(path: Path, role: str) -> Path:
+    candidate = Path(path)
+    if candidate.is_symlink():
+        raise DevelopmentPersistenceError(f"{role} cannot be a symlink")
+    resolved = candidate.resolve()
+    if not resolved.is_file():
+        raise DevelopmentPersistenceError(f"{role} must be a regular file")
+    return resolved
+
+
+def _utc_from_epoch(epoch_seconds: int) -> str:
+    if type(epoch_seconds) is not int or epoch_seconds < 0:
+        raise DevelopmentPersistenceError("epoch time is invalid")
+    return datetime.fromtimestamp(epoch_seconds, timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+
+
+def _parse_strict_utc(value: object, role: str) -> datetime:
+    if type(value) is not str or not value.endswith("Z"):
+        raise DevelopmentPersistenceError(f"{role} is not strict UTC")
+    try:
+        parsed = datetime.fromisoformat(f"{value[:-1]}+00:00")
+    except ValueError as exc:
+        raise DevelopmentPersistenceError(f"{role} is not strict UTC") from exc
+    if parsed.tzinfo != timezone.utc or parsed.isoformat().replace("+00:00", "Z") != value:
+        raise DevelopmentPersistenceError(f"{role} is not canonical strict UTC")
+    return parsed
+
+
+def _protocol_payload_digest(value: object) -> str:
+    try:
+        payload = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise DevelopmentPersistenceError("protocol payload is not canonical JSON data") from exc
+    return sha256(payload).hexdigest()
 
 
 def _identity(value: object, role: str) -> str:
@@ -109,7 +173,7 @@ def _safe_member_path(value: object) -> str:
         raise DevelopmentPersistenceError("bundle member path is unsafe")
     if path.parts[0].startswith("~"):
         raise DevelopmentPersistenceError("bundle member path is unsafe")
-    if path.suffix.lower() in _EXECUTABLE_DESERIALIZATION_SUFFIXES:
+    if path.suffix.casefold() in _EXECUTABLE_DESERIALIZATION_SUFFIXES:
         raise DevelopmentPersistenceError(
             "bundle member uses executable deserialization format"
         )
@@ -159,6 +223,46 @@ def _reject_secrets(payloads: Sequence[bytes], raw_secret_values: Sequence[str])
             raise DevelopmentPersistenceError("raw secret material reached persisted bytes")
 
 
+def _registered_unit_id(unit_index: int) -> str:
+    return f"development_scientific_unit_{unit_index:04d}"
+
+
+def _study_unit_payload(unit: DevelopmentStudyUnit) -> dict[str, object]:
+    return {
+        "unit_id": _registered_unit_id(unit.unit_index),
+        "unit_index": unit.unit_index,
+        "shard_id": unit.phase,
+        "phase": unit.phase,
+        "responsibility_id": unit.responsibility_id,
+        "source_cluster_ordinal": unit.source_cluster_ordinal,
+        "content_branch_id": unit.content_branch_id,
+        "geometry_case_id": unit.geometry_case_id,
+        "maximum_record_attempts": unit.maximum_record_attempts,
+        "maximum_duration_seconds": unit.maximum_duration_seconds,
+    }
+
+
+def _unit_intent_binding_payload(intent: "UnitIntent") -> dict[str, object]:
+    return {
+        "unit_id": intent.unit_id,
+        "unit_index": intent.unit_index,
+        "shard_id": intent.shard_id,
+        "phase": intent.phase,
+        "responsibility_id": intent.responsibility_id,
+        "source_cluster_ordinal": intent.source_cluster_ordinal,
+        "content_branch_id": intent.content_branch_id,
+        "geometry_case_id": intent.geometry_case_id,
+        "maximum_record_attempts": intent.maximum_record_attempts,
+        "maximum_duration_seconds": intent.maximum_duration_seconds,
+        "analysis_unit_identity": intent.analysis_unit_identity,
+        "analysis_unit_identity_digest": intent.analysis_unit_identity_digest,
+        "scientific_question_id": intent.scientific_question_id,
+        "development_case_id": intent.development_case_id,
+        "candidate_identity": intent.candidate_identity,
+        "candidate_config_digest": intent.candidate_config_digest,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class FrozenWorkerIdentity:
     revision: str
@@ -166,6 +270,7 @@ class FrozenWorkerIdentity:
     execution_intent_authority_digest: str
     input_manifest_digest: str
     candidate_config_digest: str
+    unit_roster_digest: str
     package_sha256: str
     bootstrap_sha256: str
 
@@ -177,6 +282,7 @@ class FrozenWorkerIdentity:
             "execution_intent_authority_digest",
             "input_manifest_digest",
             "candidate_config_digest",
+            "unit_roster_digest",
             "package_sha256",
             "bootstrap_sha256",
         ):
@@ -185,6 +291,147 @@ class FrozenWorkerIdentity:
     def digest(self) -> str:
         self.validate()
         return canonical_digest(asdict(self))
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenDevelopmentUnitBinding:
+    unit_id: str
+    unit_index: int
+    phase: str
+    responsibility_id: str
+    source_cluster_ordinal: int
+    content_branch_id: str
+    geometry_case_id: str
+    maximum_record_attempts: int
+    maximum_duration_seconds: int
+    analysis_unit_identity: AnalysisUnitIdentity
+    analysis_unit_identity_digest: str
+    scientific_question_id: str
+    development_case_id: str
+    candidate_identity: str
+    candidate_config_digest: str
+    unit_descriptor_digest: str
+
+    def descriptor_payload(self) -> dict[str, object]:
+        return {
+            "unit_id": self.unit_id,
+            "unit_index": self.unit_index,
+            "shard_id": self.phase,
+            "phase": self.phase,
+            "responsibility_id": self.responsibility_id,
+            "source_cluster_ordinal": self.source_cluster_ordinal,
+            "content_branch_id": self.content_branch_id,
+            "geometry_case_id": self.geometry_case_id,
+            "maximum_record_attempts": self.maximum_record_attempts,
+            "maximum_duration_seconds": self.maximum_duration_seconds,
+            "analysis_unit_identity": asdict(self.analysis_unit_identity),
+            "analysis_unit_identity_digest": self.analysis_unit_identity_digest,
+            "scientific_question_id": self.scientific_question_id,
+            "development_case_id": self.development_case_id,
+            "candidate_identity": self.candidate_identity,
+            "candidate_config_digest": self.candidate_config_digest,
+        }
+
+    def study_unit(self) -> DevelopmentStudyUnit:
+        return DevelopmentStudyUnit(
+            unit_index=self.unit_index,
+            phase=self.phase,
+            responsibility_id=self.responsibility_id,
+            source_cluster_ordinal=self.source_cluster_ordinal,
+            content_branch_id=self.content_branch_id,
+            geometry_case_id=self.geometry_case_id,
+            maximum_record_attempts=self.maximum_record_attempts,
+            maximum_duration_seconds=self.maximum_duration_seconds,
+        )
+
+    def validate(self) -> None:
+        for role, value in (
+            ("registered unit_id", self.unit_id),
+            ("registered phase", self.phase),
+            ("registered responsibility_id", self.responsibility_id),
+            ("registered content_branch_id", self.content_branch_id),
+            ("registered geometry_case_id", self.geometry_case_id),
+            ("registered scientific_question_id", self.scientific_question_id),
+            ("registered development_case_id", self.development_case_id),
+            ("registered candidate_identity", self.candidate_identity),
+        ):
+            _identity(value, role)
+        if type(self.unit_index) is not int or self.unit_index < 0:
+            raise DevelopmentPersistenceError("registered unit index is invalid")
+        if self.unit_id != _registered_unit_id(self.unit_index):
+            raise DevelopmentPersistenceError("registered unit identity drifted")
+        if type(self.source_cluster_ordinal) is not int or self.source_cluster_ordinal < 0:
+            raise DevelopmentPersistenceError("registered source cluster ordinal is invalid")
+        if type(self.maximum_record_attempts) is not int or not 1 <= self.maximum_record_attempts <= MAXIMUM_ATTEMPTS:
+            raise DevelopmentPersistenceError("registered attempt limit is invalid")
+        if type(self.maximum_duration_seconds) is not int or self.maximum_duration_seconds < 1:
+            raise DevelopmentPersistenceError("registered duration limit is invalid")
+        if type(self.analysis_unit_identity) is not AnalysisUnitIdentity:
+            raise DevelopmentPersistenceError("analysis unit identity exact type is required")
+        if self.analysis_unit_identity.validate():
+            raise DevelopmentPersistenceError("analysis unit identity is invalid")
+        _digest(self.analysis_unit_identity_digest, "analysis unit identity")
+        if self.analysis_unit_identity_digest != canonical_digest(
+            asdict(self.analysis_unit_identity)
+        ):
+            raise DevelopmentPersistenceError("analysis unit identity digest drifted")
+        _digest(self.candidate_config_digest, "registered candidate config")
+        _digest(self.unit_descriptor_digest, "registered unit descriptor")
+        if self.unit_descriptor_digest != canonical_digest(self.descriptor_payload()):
+            raise DevelopmentPersistenceError("registered unit descriptor digest drifted")
+
+
+def create_frozen_development_unit_binding(
+    unit: DevelopmentStudyUnit,
+    *,
+    analysis_unit_identity: AnalysisUnitIdentity,
+    scientific_question_id: str,
+    development_case_id: str,
+    candidate_identity: str,
+    candidate_config_digest: str,
+) -> FrozenDevelopmentUnitBinding:
+    if type(unit) is not DevelopmentStudyUnit:
+        raise DevelopmentPersistenceError("development study unit exact type is required")
+    if type(analysis_unit_identity) is not AnalysisUnitIdentity:
+        raise DevelopmentPersistenceError("analysis unit identity exact type is required")
+    payload = {
+        **_study_unit_payload(unit),
+        "analysis_unit_identity": asdict(analysis_unit_identity),
+        "analysis_unit_identity_digest": canonical_digest(
+            asdict(analysis_unit_identity)
+        ),
+        "scientific_question_id": scientific_question_id,
+        "development_case_id": development_case_id,
+        "candidate_identity": candidate_identity,
+        "candidate_config_digest": candidate_config_digest,
+    }
+    binding = FrozenDevelopmentUnitBinding(
+        unit_id=payload["unit_id"],
+        unit_index=payload["unit_index"],
+        phase=payload["shard_id"],
+        responsibility_id=payload["responsibility_id"],
+        source_cluster_ordinal=payload["source_cluster_ordinal"],
+        content_branch_id=payload["content_branch_id"],
+        geometry_case_id=payload["geometry_case_id"],
+        maximum_record_attempts=payload["maximum_record_attempts"],
+        maximum_duration_seconds=payload["maximum_duration_seconds"],
+        analysis_unit_identity=analysis_unit_identity,
+        analysis_unit_identity_digest=payload["analysis_unit_identity_digest"],
+        scientific_question_id=scientific_question_id,
+        development_case_id=development_case_id,
+        candidate_identity=candidate_identity,
+        candidate_config_digest=candidate_config_digest,
+        unit_descriptor_digest="0" * 64,
+    )
+    binding = FrozenDevelopmentUnitBinding(
+        **{
+            **asdict(binding),
+            "analysis_unit_identity": analysis_unit_identity,
+            "unit_descriptor_digest": canonical_digest(binding.descriptor_payload()),
+        }
+    )
+    binding.validate()
+    return binding
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,8 +451,18 @@ class PersistentLease:
         _identity(self.session_id, "lease session_id")
         if type(self.fencing_token) is not int or self.fencing_token < 1:
             raise DevelopmentPersistenceError("fencing token is invalid")
+        started_at_epoch_seconds = int(
+            _parse_strict_utc(self.acquired_at_utc, "lease acquired_at_utc").timestamp()
+        )
+        if self.acquired_at_utc != _utc_from_epoch(started_at_epoch_seconds):
+            raise DevelopmentPersistenceError("lease session start UTC drifted")
         if type(self.expires_at_epoch_seconds) is not int:
             raise DevelopmentPersistenceError("lease expiry is invalid")
+        if not (
+            started_at_epoch_seconds < self.expires_at_epoch_seconds
+            < started_at_epoch_seconds + HARD_SESSION_CAP_SECONDS
+        ):
+            raise DevelopmentPersistenceError("lease duration violates session cap")
         _digest(self.worker_identity_digest, "lease worker identity")
 
 
@@ -218,6 +475,21 @@ class UnitIntent:
     shard_id: str
     unit_id: str
     unit_index: int
+    phase: str
+    responsibility_id: str
+    source_cluster_ordinal: int
+    content_branch_id: str
+    geometry_case_id: str
+    maximum_record_attempts: int
+    maximum_duration_seconds: int
+    unit_roster_digest: str
+    analysis_unit_identity: dict[str, object]
+    analysis_unit_identity_digest: str
+    scientific_question_id: str
+    development_case_id: str
+    candidate_identity: str
+    candidate_config_digest: str
+    unit_descriptor_digest: str
     attempt_index: int
     session_id: str
     fencing_token: int
@@ -243,21 +515,59 @@ class UnitIntent:
             ("intent shard_id", self.shard_id),
             ("intent unit_id", self.unit_id),
             ("intent session_id", self.session_id),
+            ("intent phase", self.phase),
+            ("intent responsibility_id", self.responsibility_id),
+            ("intent content_branch_id", self.content_branch_id),
+            ("intent geometry_case_id", self.geometry_case_id),
+            ("intent scientific_question_id", self.scientific_question_id),
+            ("intent development_case_id", self.development_case_id),
+            ("intent candidate_identity", self.candidate_identity),
         ):
             _identity(value, role)
         if type(self.unit_index) is not int or self.unit_index < 0:
             raise DevelopmentPersistenceError("unit intent index is invalid")
+        if type(self.source_cluster_ordinal) is not int or self.source_cluster_ordinal < 0:
+            raise DevelopmentPersistenceError("unit intent source cluster is invalid")
+        if type(self.maximum_record_attempts) is not int or self.maximum_record_attempts < 1:
+            raise DevelopmentPersistenceError("unit intent record attempt limit is invalid")
+        if type(self.maximum_duration_seconds) is not int or self.maximum_duration_seconds < 1:
+            raise DevelopmentPersistenceError("unit intent duration limit is invalid")
         if type(self.attempt_index) is not int or not 0 <= self.attempt_index < MAXIMUM_ATTEMPTS:
             raise DevelopmentPersistenceError("unit intent attempt is invalid")
+        if self.attempt_index >= self.maximum_record_attempts:
+            raise DevelopmentPersistenceError("unit intent exceeds registered attempt limit")
         if type(self.fencing_token) is not int or self.fencing_token < 1:
             raise DevelopmentPersistenceError("unit intent fencing token is invalid")
         _digest(self.worker_identity_digest, "unit intent worker identity")
+        _digest(self.unit_roster_digest, "unit intent roster")
+        _digest(self.analysis_unit_identity_digest, "unit intent analysis identity")
+        _digest(self.candidate_config_digest, "unit intent candidate config")
+        _digest(self.unit_descriptor_digest, "unit intent descriptor")
+        if self.unit_roster_digest != worker_identity.unit_roster_digest:
+            raise DevelopmentPersistenceError("unit intent roster drifted")
+        if type(self.analysis_unit_identity) is not dict:
+            raise DevelopmentPersistenceError("unit intent analysis identity is invalid")
+        try:
+            analysis_identity = AnalysisUnitIdentity(**self.analysis_unit_identity)
+        except TypeError as exc:
+            raise DevelopmentPersistenceError("unit intent analysis identity schema is invalid") from exc
+        if analysis_identity.validate():
+            raise DevelopmentPersistenceError("unit intent analysis identity is invalid")
+        if self.analysis_unit_identity_digest != canonical_digest(
+            asdict(analysis_identity)
+        ):
+            raise DevelopmentPersistenceError("unit intent analysis identity digest drifted")
+        if self.unit_descriptor_digest != canonical_digest(
+            _unit_intent_binding_payload(self)
+        ):
+            raise DevelopmentPersistenceError("unit intent descriptor digest drifted")
         if self.worker_identity_digest != worker_identity.digest():
             raise DevelopmentPersistenceError("unit intent worker identity drifted")
         if self.attempt_index == 0 and self.parent_attempt_intent_digest is not None:
             raise DevelopmentPersistenceError("initial attempt cannot have a parent")
         if self.attempt_index > 0:
             _digest(self.parent_attempt_intent_digest, "parent attempt intent")
+        _parse_strict_utc(self.created_at_utc, "unit intent created_at_utc")
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,10 +667,19 @@ class DevelopmentPersistentStore:
         *,
         run_id: str,
         worker_identity: FrozenWorkerIdentity,
+        package_path: Path,
+        bootstrap_path: Path,
+        registered_unit_bindings: Sequence[FrozenDevelopmentUnitBinding],
     ) -> None:
         self.run_id = _identity(run_id, "run_id")
         worker_identity.validate()
         self.worker_identity = worker_identity
+        self.package_path = _source_artifact_path(package_path, "execution package")
+        self.bootstrap_path = _source_artifact_path(bootstrap_path, "bootstrap")
+        self._registered_unit_bindings = self._validate_registered_unit_bindings(
+            registered_unit_bindings
+        )
+        self._validate_source_artifacts()
         root = _regular_directory(Path(persistent_root), "persistent_root")
         self.run_root = _regular_directory(root / self.run_id, "run_root")
         for name in ("leases", "intents", "bundles", "markers", "receipts"):
@@ -373,6 +692,62 @@ class DevelopmentPersistentStore:
         else:
             _create_only(identity_path, identity_bytes)
 
+    def _validate_registered_unit_bindings(
+        self,
+        registered_unit_bindings: Sequence[FrozenDevelopmentUnitBinding],
+    ) -> dict[int, FrozenDevelopmentUnitBinding]:
+        if isinstance(registered_unit_bindings, (str, bytes)) or not isinstance(
+            registered_unit_bindings, Sequence
+        ):
+            raise DevelopmentPersistenceError("registered unit roster is invalid")
+        bindings = tuple(registered_unit_bindings)
+        if not bindings:
+            raise DevelopmentPersistenceError("registered unit roster cannot be empty")
+        if any(type(item) is not FrozenDevelopmentUnitBinding for item in bindings):
+            raise DevelopmentPersistenceError("registered unit binding exact type is required")
+        for item in bindings:
+            item.validate()
+        if tuple(item.unit_index for item in bindings) != tuple(range(len(bindings))):
+            raise DevelopmentPersistenceError("registered unit indexes are not contiguous")
+        units = tuple(item.study_unit() for item in bindings)
+        payload = tuple(asdict(item) for item in units)
+        if _protocol_payload_digest(payload) != self.worker_identity.unit_roster_digest:
+            raise DevelopmentPersistenceError("registered unit roster digest drifted")
+        if len({item.unit_id for item in bindings}) != len(bindings):
+            raise DevelopmentPersistenceError("registered unit identities collide")
+        if len({item.unit_descriptor_digest for item in bindings}) != len(bindings):
+            raise DevelopmentPersistenceError("registered unit descriptors collide")
+        return {item.unit_index: item for item in bindings}
+
+    @property
+    def registered_unit_bindings(self) -> tuple[FrozenDevelopmentUnitBinding, ...]:
+        return tuple(
+            self._registered_unit_bindings[index]
+            for index in range(len(self._registered_unit_bindings))
+        )
+
+    def _validate_source_artifacts(self) -> None:
+        for path, expected, role in (
+            (self.package_path, self.worker_identity.package_sha256, "execution package"),
+            (self.bootstrap_path, self.worker_identity.bootstrap_sha256, "bootstrap"),
+        ):
+            if not path.is_file() or path.is_symlink():
+                raise DevelopmentPersistenceError(f"{role} must be a regular file")
+            if file_sha256(path) != expected:
+                raise DevelopmentPersistenceError(f"{role} SHA-256 drifted")
+
+    def _verify_intent_registered_binding(self, intent: UnitIntent) -> None:
+        if intent.run_id != self.run_id:
+            raise DevelopmentPersistenceError("unit intent run identity drifted")
+        registered = self._registered_unit_bindings.get(intent.unit_index)
+        if registered is None:
+            raise DevelopmentPersistenceError("unit intent is outside frozen roster")
+        expected = registered.descriptor_payload()
+        if _unit_intent_binding_payload(intent) != expected:
+            raise DevelopmentPersistenceError("unit intent registered binding drifted")
+        if intent.unit_descriptor_digest != registered.unit_descriptor_digest:
+            raise DevelopmentPersistenceError("unit intent descriptor digest drifted")
+
     def acquire_lease(
         self,
         *,
@@ -380,6 +755,7 @@ class DevelopmentPersistentStore:
         now_epoch_seconds: int,
         lease_duration_seconds: int,
     ) -> PersistentLease:
+        self._validate_source_artifacts()
         _identity(session_id, "session_id")
         if type(now_epoch_seconds) is not int or type(lease_duration_seconds) is not int:
             raise DevelopmentPersistenceError("lease time values must be integers")
@@ -398,7 +774,7 @@ class DevelopmentPersistentStore:
             run_id=self.run_id,
             session_id=session_id,
             fencing_token=token,
-            acquired_at_utc=_utc_now(),
+            acquired_at_utc=_utc_from_epoch(now_epoch_seconds),
             expires_at_epoch_seconds=now_epoch_seconds + lease_duration_seconds,
             worker_identity_digest=self.worker_identity.digest(),
         )
@@ -415,7 +791,6 @@ class DevelopmentPersistentStore:
         self,
         lease: PersistentLease,
         *,
-        shard_id: str,
         unit_id: str,
         unit_index: int,
         attempt_index: int,
@@ -423,7 +798,12 @@ class DevelopmentPersistentStore:
         now_epoch_seconds: int,
     ) -> UnitIntent:
         self._require_active_lease(lease, now_epoch_seconds)
-        _identity(shard_id, "shard_id")
+        self._validate_source_artifacts()
+        lease_start_epoch = int(
+            _parse_strict_utc(lease.acquired_at_utc, "lease acquired_at_utc").timestamp()
+        )
+        if now_epoch_seconds - lease_start_epoch >= SOFT_STOP_SECONDS:
+            raise DevelopmentPersistenceError("session soft stop forbids claiming a new unit")
         _identity(unit_id, "unit_id")
         if type(unit_index) is not int or unit_index < 0:
             raise DevelopmentPersistenceError("unit index is invalid")
@@ -431,6 +811,13 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError("attempt index exceeds frozen limit")
         if parent_attempt_intent_digest is not None:
             _digest(parent_attempt_intent_digest, "parent attempt intent")
+        registered = self._registered_unit_bindings.get(unit_index)
+        if registered is None:
+            raise DevelopmentPersistenceError("unit index is outside frozen roster")
+        if attempt_index >= registered.maximum_record_attempts:
+            raise DevelopmentPersistenceError("attempt index exceeds registered unit limit")
+        if unit_id != registered.unit_id:
+            raise DevelopmentPersistenceError("unit identity is outside frozen roster")
         if self._committed_marker_paths(unit_id):
             raise DevelopmentPersistenceError("committed unit cannot be rerun")
         expected = self.next_attempt_index(unit_id)
@@ -446,6 +833,7 @@ class DevelopmentPersistentStore:
                 )
             )
             prior.validate(self.worker_identity)
+            self._verify_intent_registered_binding(prior)
             if parent_attempt_intent_digest != prior.digest():
                 raise DevelopmentPersistenceError("retry parent intent drifted")
         intent = UnitIntent(
@@ -453,17 +841,33 @@ class DevelopmentPersistentStore:
             protocol_digest=self.worker_identity.protocol_digest,
             revision=self.worker_identity.revision,
             run_id=self.run_id,
-            shard_id=shard_id,
+            shard_id=registered.phase,
             unit_id=unit_id,
             unit_index=unit_index,
+            phase=registered.phase,
+            responsibility_id=registered.responsibility_id,
+            source_cluster_ordinal=registered.source_cluster_ordinal,
+            content_branch_id=registered.content_branch_id,
+            geometry_case_id=registered.geometry_case_id,
+            maximum_record_attempts=registered.maximum_record_attempts,
+            maximum_duration_seconds=registered.maximum_duration_seconds,
+            unit_roster_digest=self.worker_identity.unit_roster_digest,
+            analysis_unit_identity=asdict(registered.analysis_unit_identity),
+            analysis_unit_identity_digest=registered.analysis_unit_identity_digest,
+            scientific_question_id=registered.scientific_question_id,
+            development_case_id=registered.development_case_id,
+            candidate_identity=registered.candidate_identity,
+            candidate_config_digest=registered.candidate_config_digest,
+            unit_descriptor_digest=registered.unit_descriptor_digest,
             attempt_index=attempt_index,
             session_id=lease.session_id,
             fencing_token=lease.fencing_token,
             worker_identity_digest=self.worker_identity.digest(),
             parent_attempt_intent_digest=parent_attempt_intent_digest,
-            created_at_utc=_utc_now(),
+            created_at_utc=_utc_from_epoch(now_epoch_seconds),
         )
         intent.validate(self.worker_identity)
+        self._verify_intent_registered_binding(intent)
         _create_only(self._intent_path(unit_id, attempt_index), canonical_json_bytes(intent.payload()))
         return intent
 
@@ -477,21 +881,28 @@ class DevelopmentPersistentStore:
         now_epoch_seconds: int,
     ) -> CommittedUnit:
         self._require_active_lease(lease, now_epoch_seconds)
+        self._validate_source_artifacts()
         if intent.fencing_token != lease.fencing_token or intent.session_id != lease.session_id:
             raise DevelopmentPersistenceError("intent does not belong to active lease")
         intent_path = self._intent_path(intent.unit_id, intent.attempt_index)
         if _read_canonical_json(intent_path, "unit intent") != intent.payload():
             raise DevelopmentPersistenceError("unit intent bytes drifted")
+        self._verify_intent_registered_binding(intent)
         if not members:
             raise DevelopmentPersistenceError("unit bundle cannot be empty")
         normalized: dict[str, bytes] = {}
+        normalized_casefold: set[str] = set()
         for name, payload in members.items():
             safe_name = _safe_member_path(name)
-            if safe_name == "artifact_manifest.json":
+            folded_name = safe_name.casefold()
+            if folded_name == "artifact_manifest.json":
                 raise DevelopmentPersistenceError("artifact manifest name is reserved")
+            if folded_name in normalized_casefold:
+                raise DevelopmentPersistenceError("bundle member casefold identity collision")
             if type(payload) is not bytes:
                 raise DevelopmentPersistenceError("bundle members must be bytes")
             normalized[safe_name] = payload
+            normalized_casefold.add(folded_name)
         if len(normalized) != len(members):
             raise DevelopmentPersistenceError("bundle member identity collision")
         _reject_secrets(tuple(normalized.values()), raw_secret_values)
@@ -525,7 +936,7 @@ class DevelopmentPersistentStore:
             artifact_manifest_digest=artifact_manifest.digest(),
             worker_identity_digest=self.worker_identity.digest(),
             parent_attempt_intent_digest=intent.parent_attempt_intent_digest,
-            committed_at_utc=_utc_now(),
+            committed_at_utc=_utc_from_epoch(now_epoch_seconds),
         )
         marker_bytes = canonical_json_bytes(marker.payload())
         _reject_secrets((marker_bytes,), raw_secret_values)
@@ -533,27 +944,64 @@ class DevelopmentPersistentStore:
         self._verify_committed(marker)
         return marker
 
-    def recover(self) -> RecoveryReport:
-        commits = tuple(self._verified_commits())
+    def recover(self, *, now_epoch_seconds: int | None = None) -> RecoveryReport:
+        self._validate_source_artifacts()
+        if now_epoch_seconds is None:
+            now_epoch_seconds = int(time.time())
+        if type(now_epoch_seconds) is not int or now_epoch_seconds < 0:
+            raise DevelopmentPersistenceError("recovery time is invalid")
+        leases = self._load_leases()
+        commits = tuple(self._verified_commits(leases=leases))
+        receipts = self._load_receipts(commits=commits, leases=leases)
+        receipts_by_session = {item.session_id: item for item in receipts}
         committed_ids = {item.unit_id for item in commits}
-        committed_retry_parents = {
+        retry_parents = {
             item.parent_attempt_intent_digest
             for item in commits
             if item.parent_attempt_intent_digest is not None
         }
-        interrupted: list[InterruptedAttempt] = []
-        next_attempts: dict[str, int] = {}
+        intents: list[UnitIntent] = []
         for path in sorted((self.run_root / "intents").glob("*.json")):
             payload = _read_canonical_json(path, "unit intent")
-            intent = UnitIntent(**payload)
+            try:
+                intent = UnitIntent(**payload)
+            except TypeError as exc:
+                raise DevelopmentPersistenceError("unit intent schema is invalid") from exc
             intent.validate(self.worker_identity)
+            self._verify_intent_registered_binding(intent)
+            if path != self._intent_path(intent.unit_id, intent.attempt_index):
+                raise DevelopmentPersistenceError("unit intent path identity drifted")
+            self._lease_for_lineage(
+                leases,
+                session_id=intent.session_id,
+                fencing_token=intent.fencing_token,
+                role="unit intent",
+            )
+            intents.append(intent)
+            if intent.parent_attempt_intent_digest is not None:
+                retry_parents.add(intent.parent_attempt_intent_digest)
+        self._validate_intent_attempt_lineage(intents)
+        interrupted: list[InterruptedAttempt] = []
+        next_attempts: dict[str, int] = {}
+        for intent in intents:
             marker_path = self._marker_path(intent.unit_id, intent.attempt_index)
             if marker_path.exists():
                 continue
             if intent.unit_id in committed_ids:
-                if intent.digest() in committed_retry_parents:
+                if intent.digest() in retry_parents:
                     continue
                 raise DevelopmentPersistenceError("unbound dangling intent exists after a committed attempt")
+            if intent.digest() in retry_parents:
+                continue
+            lease = self._lease_for_lineage(
+                leases,
+                session_id=intent.session_id,
+                fencing_token=intent.fencing_token,
+                role="dangling intent",
+            )
+            session_closed = intent.session_id in receipts_by_session
+            if not session_closed and lease.expires_at_epoch_seconds > now_epoch_seconds:
+                continue
             interrupted.append(
                 InterruptedAttempt(
                     unit_id=intent.unit_id,
@@ -576,8 +1024,33 @@ class DevelopmentPersistentStore:
             ledger_digest=canonical_digest(ledger_payload),
         )
 
+    def _validate_intent_attempt_lineage(
+        self,
+        intents: Sequence[UnitIntent],
+    ) -> None:
+        by_unit: dict[str, list[UnitIntent]] = {}
+        for intent in intents:
+            by_unit.setdefault(intent.unit_id, []).append(intent)
+        for unit_intents in by_unit.values():
+            ordered = sorted(unit_intents, key=lambda item: item.attempt_index)
+            if [item.attempt_index for item in ordered] != list(range(len(ordered))):
+                raise DevelopmentPersistenceError("attempt history is not contiguous")
+            for prior, current in zip(ordered, ordered[1:]):
+                if current.parent_attempt_intent_digest != prior.digest():
+                    raise DevelopmentPersistenceError("retry parent intent drifted")
+
     def next_attempt_index(self, unit_id: str) -> int:
         _identity(unit_id, "unit_id")
+        registered = next(
+            (
+                item
+                for item in self._registered_unit_bindings.values()
+                if item.unit_id == unit_id
+            ),
+            None,
+        )
+        if registered is None:
+            raise DevelopmentPersistenceError("unit identity is outside frozen roster")
         if self._committed_marker_paths(unit_id):
             raise DevelopmentPersistenceError("committed unit has no next attempt")
         attempts = []
@@ -590,7 +1063,7 @@ class DevelopmentPersistentStore:
         if ordered != list(range(ordered[-1] + 1)):
             raise DevelopmentPersistenceError("attempt history is not contiguous")
         next_index = ordered[-1] + 1
-        if next_index >= MAXIMUM_ATTEMPTS:
+        if next_index >= registered.maximum_record_attempts:
             raise DevelopmentPersistenceError("frozen attempt budget exhausted")
         return next_index
 
@@ -600,30 +1073,119 @@ class DevelopmentPersistentStore:
         *,
         raw_secret_values: Sequence[str] = (),
     ) -> Path:
+        self._validate_source_artifacts()
+        leases = self._load_leases()
+        commits = tuple(self._verified_commits(leases=leases))
+        self._validate_session_receipt(receipt, commits=commits, leases=leases)
+        payload = canonical_json_bytes(asdict(receipt))
+        _reject_secrets((payload,), raw_secret_values)
+        path = self.run_root / "receipts" / f"{_identity(receipt.session_id, 'session_id')}.json"
+        _create_only(path, payload)
+        return path
+
+    def _validate_session_receipt(
+        self,
+        receipt: SessionReceipt,
+        *,
+        commits: Sequence[CommittedUnit],
+        leases: Sequence[PersistentLease],
+    ) -> None:
+        if type(receipt) is not SessionReceipt:
+            raise DevelopmentPersistenceError("session receipt exact type is required")
         if receipt.schema_version != DIAGNOSTIC_SCHEMA_VERSION:
             raise DevelopmentPersistenceError("session receipt schema drifted")
         if receipt.run_id != self.run_id or receipt.revision != self.worker_identity.revision:
             raise DevelopmentPersistenceError("session receipt frozen identity drifted")
         if receipt.package_sha256 != self.worker_identity.package_sha256:
             raise DevelopmentPersistenceError("session receipt package identity drifted")
+        lease = self._lease_for_session(leases, receipt.session_id)
+        started = _parse_strict_utc(receipt.started_at_utc, "session started_at_utc")
+        ended = _parse_strict_utc(receipt.ended_at_utc, "session ended_at_utc")
+        if receipt.started_at_utc != lease.acquired_at_utc:
+            raise DevelopmentPersistenceError("session receipt start does not match lease")
+        elapsed = (ended - started).total_seconds()
+        if elapsed < 0.0:
+            raise DevelopmentPersistenceError("session UTC order is invalid")
+        if ended > datetime.fromtimestamp(lease.expires_at_epoch_seconds, timezone.utc):
+            raise DevelopmentPersistenceError("session receipt exceeds lease expiry")
         if (
             isinstance(receipt.walltime_seconds, bool)
             or not isinstance(receipt.walltime_seconds, (int, float))
             or not 0.0 <= float(receipt.walltime_seconds) < HARD_SESSION_CAP_SECONDS
         ):
             raise DevelopmentPersistenceError("session walltime violates hard cap")
+        if abs(float(receipt.walltime_seconds) - elapsed) > 1e-6:
+            raise DevelopmentPersistenceError("session walltime and UTC interval differ")
         if receipt.soft_stop_seconds != SOFT_STOP_SECONDS or receipt.hard_session_cap_seconds != HARD_SESSION_CAP_SECONDS:
             raise DevelopmentPersistenceError("session stop policy drifted")
         if receipt.gpu_mix_policy != GPU_MIX_POLICY:
             raise DevelopmentPersistenceError("GPU mix policy drifted")
+        _identity(receipt.session_id, "session receipt session_id")
+        _identity(receipt.gpu_model, "session GPU model")
+        _identity(receipt.cuda_identity, "session CUDA identity")
+        _identity(receipt.termination_reason, "session termination reason")
         _digest(receipt.environment_digest, "session environment")
+        if type(receipt.peak_vram_bytes) is not int or receipt.peak_vram_bytes < 1:
+            raise DevelopmentPersistenceError("session peak VRAM is invalid")
+        if type(receipt.committed_unit_ids) is not tuple or any(
+            type(value) is not str for value in receipt.committed_unit_ids
+        ):
+            raise DevelopmentPersistenceError("session committed unit identities are invalid")
+        if len(receipt.committed_unit_ids) != len(set(receipt.committed_unit_ids)):
+            raise DevelopmentPersistenceError("session committed unit identities collide")
+        expected_units = tuple(
+            item.unit_id
+            for item in sorted(commits, key=lambda item: item.unit_index)
+            if item.session_id == receipt.session_id
+        )
+        if receipt.committed_unit_ids != expected_units:
+            raise DevelopmentPersistenceError("session committed unit identities differ from markers")
+        if any(
+            not started
+            <= _parse_strict_utc(item.committed_at_utc, "marker committed_at_utc")
+            <= ended
+            for item in commits
+            if item.session_id == receipt.session_id
+        ):
+            raise DevelopmentPersistenceError(
+                "session receipt ends before a committed marker"
+            )
+        if type(receipt.public_secret_identity_digests) is not tuple:
+            raise DevelopmentPersistenceError("public secret identity digest roster is invalid")
         for value in receipt.public_secret_identity_digests:
             _digest(value, "public secret identity")
-        payload = canonical_json_bytes(asdict(receipt))
-        _reject_secrets((payload,), raw_secret_values)
-        path = self.run_root / "receipts" / f"{_identity(receipt.session_id, 'session_id')}.json"
-        _create_only(path, payload)
-        return path
+
+    def _load_receipts(
+        self,
+        *,
+        commits: Sequence[CommittedUnit],
+        leases: Sequence[PersistentLease],
+    ) -> tuple[SessionReceipt, ...]:
+        receipts: list[SessionReceipt] = []
+        seen_sessions: set[str] = set()
+        for path in sorted((self.run_root / "receipts").glob("*.json")):
+            payload = _read_canonical_json(path, "session receipt")
+            for field_name in (
+                "committed_unit_ids",
+                "public_secret_identity_digests",
+            ):
+                if type(payload.get(field_name)) is not list:
+                    raise DevelopmentPersistenceError(
+                        "session receipt tuple field is invalid"
+                    )
+                payload[field_name] = tuple(payload[field_name])
+            try:
+                receipt = SessionReceipt(**payload)
+            except TypeError as exc:
+                raise DevelopmentPersistenceError("session receipt schema is invalid") from exc
+            self._validate_session_receipt(receipt, commits=commits, leases=leases)
+            if receipt.session_id in seen_sessions:
+                raise DevelopmentPersistenceError("multiple receipts exist for one session")
+            if path.name != f"{receipt.session_id}.json":
+                raise DevelopmentPersistenceError("session receipt path identity drifted")
+            seen_sessions.add(receipt.session_id)
+            receipts.append(receipt)
+        return tuple(receipts)
 
     def _build_bundle(self, members: Mapping[str, bytes], manifest_bytes: bytes) -> bytes:
         buffer = BytesIO()
@@ -663,21 +1225,39 @@ class DevelopmentPersistentStore:
             _digest(marker.parent_attempt_intent_digest, "marker parent attempt intent")
         if marker.worker_identity_digest != self.worker_identity.digest():
             raise DevelopmentPersistenceError("marker worker identity drifted")
+        _parse_strict_utc(marker.committed_at_utc, "marker committed_at_utc")
         for role in ("protocol_digest", "intent_digest", "bundle_sha256", "artifact_manifest_digest", "worker_identity_digest"):
             _digest(getattr(marker, role), f"marker {role}")
         bundle_path = self.run_root / "bundles" / f"sha256_{marker.bundle_sha256}.zip"
-        if file_sha256(bundle_path) != marker.bundle_sha256 or bundle_path.stat().st_size != marker.bundle_bytes:
+        if (
+            not bundle_path.is_file()
+            or bundle_path.is_symlink()
+            or file_sha256(bundle_path) != marker.bundle_sha256
+            or bundle_path.stat().st_size != marker.bundle_bytes
+        ):
             raise DevelopmentPersistenceError("committed bundle digest or size drifted")
         with ZipFile(bundle_path, "r") as archive:
             infos = archive.infolist()
             names = [info.filename for info in infos]
-            if len(names) != len(set(names)) or "artifact_manifest.json" not in names:
+            folded_names = [name.casefold() for name in names]
+            if (
+                len(folded_names) != len(set(folded_names))
+                or folded_names.count("artifact_manifest.json") != 1
+                or "artifact_manifest.json" not in names
+            ):
                 raise DevelopmentPersistenceError("bundle member identities are invalid")
             for info in infos:
                 _safe_member_path(info.filename)
                 mode = info.external_attr >> 16
-                if stat.S_ISLNK(mode) or info.is_dir():
-                    raise DevelopmentPersistenceError("bundle links and directories are forbidden")
+                if (
+                    not stat.S_ISREG(mode)
+                    or stat.S_ISLNK(mode)
+                    or info.is_dir()
+                    or mode & 0o111
+                ):
+                    raise DevelopmentPersistenceError(
+                        "bundle members must be non-executable regular files"
+                    )
             manifest_raw = archive.read("artifact_manifest.json")
             try:
                 manifest_value = json.loads(manifest_raw.decode("utf-8"))
@@ -692,13 +1272,23 @@ class DevelopmentPersistentStore:
             if type(manifest_value["members"]) is not list or any(
                 type(item) is not dict
                 or set(item) != {"path", "size_bytes", "sha256"}
+                or type(item["path"]) is not str
                 or type(item["size_bytes"]) is not int
                 or item["size_bytes"] < 0
+                or type(item["sha256"]) is not str
                 or _DIGEST.fullmatch(item["sha256"]) is None
                 for item in manifest_value["members"]
             ):
                 raise DevelopmentPersistenceError("artifact manifest members are invalid")
-            expected = {item["path"]: item for item in manifest_value.get("members", [])}
+            manifest_members = manifest_value.get("members", [])
+            manifest_paths = [item["path"] for item in manifest_members]
+            if len({path.casefold() for path in manifest_paths}) != len(manifest_paths):
+                raise DevelopmentPersistenceError("artifact manifest paths collide by casefold")
+            for path in manifest_paths:
+                _safe_member_path(path)
+                if path.casefold() == "artifact_manifest.json":
+                    raise DevelopmentPersistenceError("artifact manifest recursively lists itself")
+            expected = {item["path"]: item for item in manifest_members}
             if set(expected) != set(names) - {"artifact_manifest.json"}:
                 raise DevelopmentPersistenceError("artifact manifest coverage drifted")
             for name, item in expected.items():
@@ -706,12 +1296,21 @@ class DevelopmentPersistentStore:
                 if len(payload) != item["size_bytes"] or sha256(payload).hexdigest() != item["sha256"]:
                     raise DevelopmentPersistenceError("bundle member digest drifted")
 
-    def _verified_commits(self) -> list[CommittedUnit]:
+    def _verified_commits(
+        self,
+        *,
+        leases: Sequence[PersistentLease] | None = None,
+    ) -> list[CommittedUnit]:
+        if leases is None:
+            leases = self._load_leases()
         commits: list[CommittedUnit] = []
         seen_units: set[str] = set()
         for path in sorted((self.run_root / "markers").glob("*.COMMITTED.json")):
             payload = _read_canonical_json(path, "COMMITTED marker")
-            marker = CommittedUnit(**payload)
+            try:
+                marker = CommittedUnit(**payload)
+            except TypeError as exc:
+                raise DevelopmentPersistenceError("COMMITTED marker schema is invalid") from exc
             if marker.unit_id in seen_units:
                 raise DevelopmentPersistenceError("multiple committed attempts exist for one unit")
             self._verify_committed(marker)
@@ -720,6 +1319,29 @@ class DevelopmentPersistentStore:
             )
             intent_object = UnitIntent(**intent)
             intent_object.validate(self.worker_identity)
+            self._verify_intent_registered_binding(intent_object)
+            lease = self._lease_for_lineage(
+                leases,
+                session_id=marker.session_id,
+                fencing_token=marker.fencing_token,
+                role="COMMITTED marker",
+            )
+            lease_start = _parse_strict_utc(
+                lease.acquired_at_utc, "lease acquired_at_utc"
+            )
+            intent_time = _parse_strict_utc(
+                intent_object.created_at_utc, "unit intent created_at_utc"
+            )
+            marker_time = _parse_strict_utc(
+                marker.committed_at_utc, "marker committed_at_utc"
+            )
+            lease_expiry = datetime.fromtimestamp(
+                lease.expires_at_epoch_seconds, timezone.utc
+            )
+            if not lease_start <= intent_time <= marker_time < lease_expiry:
+                raise DevelopmentPersistenceError(
+                    "marker intent time is outside session lease"
+                )
             if canonical_digest(intent) != marker.intent_digest:
                 raise DevelopmentPersistenceError("marker intent digest drifted")
             if (
@@ -738,18 +1360,58 @@ class DevelopmentPersistentStore:
     def _load_leases(self) -> list[PersistentLease]:
         leases: list[PersistentLease] = []
         for path in sorted((self.run_root / "leases").glob("fence_*.json")):
-            lease = PersistentLease(**_read_canonical_json(path, "lease"))
+            try:
+                lease = PersistentLease(**_read_canonical_json(path, "lease"))
+            except TypeError as exc:
+                raise DevelopmentPersistenceError("lease schema is invalid") from exc
             lease.validate()
             if lease.run_id != self.run_id or lease.worker_identity_digest != self.worker_identity.digest():
                 raise DevelopmentPersistenceError("lease frozen identity drifted")
+            if path.name != f"fence_{lease.fencing_token:08d}.json":
+                raise DevelopmentPersistenceError("lease path identity drifted")
             leases.append(lease)
         tokens = [item.fencing_token for item in leases]
         if tokens != list(range(1, len(tokens) + 1)):
             raise DevelopmentPersistenceError("lease fencing history is not contiguous")
+        if len({item.session_id for item in leases}) != len(leases):
+            raise DevelopmentPersistenceError("session identity is reused across leases")
         return leases
+
+    def _lease_for_lineage(
+        self,
+        leases: Sequence[PersistentLease],
+        *,
+        session_id: str,
+        fencing_token: int,
+        role: str,
+    ) -> PersistentLease:
+        matches = [
+            item
+            for item in leases
+            if item.session_id == session_id and item.fencing_token == fencing_token
+        ]
+        if len(matches) != 1:
+            raise DevelopmentPersistenceError(f"{role} lease/session/fence lineage is missing")
+        return matches[0]
+
+    def _lease_for_session(
+        self,
+        leases: Sequence[PersistentLease],
+        session_id: str,
+    ) -> PersistentLease:
+        _identity(session_id, "session_id")
+        matches = [item for item in leases if item.session_id == session_id]
+        if len(matches) != 1:
+            raise DevelopmentPersistenceError("session lease lineage is missing or ambiguous")
+        return matches[0]
 
     def _require_active_lease(self, lease: PersistentLease, now_epoch_seconds: int) -> None:
         lease.validate()
+        lease_start_epoch = int(
+            _parse_strict_utc(lease.acquired_at_utc, "lease acquired_at_utc").timestamp()
+        )
+        if type(now_epoch_seconds) is not int or now_epoch_seconds < lease_start_epoch:
+            raise DevelopmentPersistenceError("session operation time is invalid")
         leases = self._load_leases()
         if not leases or leases[-1] != lease:
             raise DevelopmentPersistenceError("stale fencing token")
