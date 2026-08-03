@@ -854,7 +854,7 @@ def test_runner_replay_rejects_private_store_proxy_and_anchor_drift(
     )
     with pytest.raises(
         DevelopmentRunnerError,
-        match="persistence authority object drifted",
+        match="runner callable instance shadow is forbidden:_guard_persistence_authority",
     ):
         guard_shadow_runner._execute_unit(0, _input())
 
@@ -959,6 +959,113 @@ def test_runner_rejects_every_persistence_callable_instance_shadow_category(
     with pytest.raises(
         DevelopmentRunnerError,
         match=f"persistence callable instance shadow is forbidden:{shadowed_method_name}",
+    ):
+        runner._execute_unit(0, _input())
+
+
+@pytest.mark.quick
+def test_runner_rejects_foreign_never_committed_unit_execution_shadow(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path / "target")
+    foreign_runner = _runner()
+    foreign_record = foreign_runner._execute_unit(0, _input()).record
+    object.__setattr__(
+        runner,
+        "_execute_unit",
+        lambda *_args, **_kwargs: development_runner_module.DevelopmentUnitRunResult(
+            record=foreign_record,
+            intent=None,
+            committed=None,
+        ),
+    )
+    lease = store.acquire_lease(
+        session_id="foreign_record_shadow_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=100,
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="runner callable instance shadow is forbidden:_execute_unit",
+    ):
+        runner.execute_and_commit_next_unit(
+            lease,
+            _input(),
+            now_epoch_seconds=101,
+            raw_secret_values=("development-runner-cpu-wiring-key",),
+        )
+    assert store.recover(now_epoch_seconds=102).committed_units == ()
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "shadowed_runner_callable",
+    ("_execute_real_operation", "_record", "_failure_record"),
+)
+def test_runner_rejects_each_execution_record_callable_shadow_category(
+    tmp_path: Path,
+    shadowed_runner_callable: str,
+) -> None:
+    runner, _store = _persistent_runner(tmp_path)
+    object.__setattr__(
+        runner,
+        shadowed_runner_callable,
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match=(
+            "runner callable instance shadow is forbidden:"
+            f"{shadowed_runner_callable}"
+        ),
+    ):
+        runner._execute_unit(0, _input())
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "drifted_runner_callable",
+    ("_execute_unit", "_execute_real_operation", "_record", "_failure_record"),
+)
+def test_runner_rejects_each_critical_callable_class_descriptor_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    drifted_runner_callable: str,
+) -> None:
+    runner = _runner()
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        drifted_runner_callable,
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match=(
+            "runner callable class descriptor drifted:"
+            f"{drifted_runner_callable}"
+        ),
+    ):
+        getattr(runner, drifted_runner_callable)
+
+
+@pytest.mark.quick
+def test_runner_rejects_store_replacement_combined_with_critical_shadow(
+    tmp_path: Path,
+) -> None:
+    runner, _store = _persistent_runner(tmp_path / "target")
+    _foreign_runner, foreign_store = _persistent_runner(tmp_path / "foreign")
+    object.__setattr__(runner, "_persistence_store", foreign_store)
+    object.__setattr__(
+        runner,
+        "_record",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="runner callable instance shadow is forbidden:_record",
     ):
         runner._execute_unit(0, _input())
 

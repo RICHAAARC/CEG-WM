@@ -497,6 +497,37 @@ def _call_exact_persistence_method(
 class DevelopmentExplorationRunner:
     """Execute a frozen roster without result-provider or module-result proxies."""
 
+    def __getattribute__(self, name: str) -> object:
+        expected_descriptors = globals().get(
+            "_EXPECTED_RUNNER_CALLABLE_DESCRIPTORS"
+        )
+        if expected_descriptors is not None:
+            instance_attributes = object.__getattribute__(self, "__dict__")
+            shadowed_names = (
+                expected_descriptors.keys() & instance_attributes.keys()
+            )
+            if shadowed_names:
+                shadowed_name = min(shadowed_names)
+                raise DevelopmentRunnerError(
+                    f"runner callable instance shadow is forbidden:{shadowed_name}"
+                )
+            expected_descriptor = expected_descriptors.get(name)
+            if expected_descriptor is not None:
+                try:
+                    observed_descriptor = getattr_static(
+                        DevelopmentExplorationRunner,
+                        name,
+                    )
+                except AttributeError as exc:
+                    raise DevelopmentRunnerError(
+                        f"runner callable class descriptor drifted:{name}"
+                    ) from exc
+                if observed_descriptor is not expected_descriptor:
+                    raise DevelopmentRunnerError(
+                        f"runner callable class descriptor drifted:{name}"
+                    )
+        return object.__getattribute__(self, name)
+
     def __setattr__(self, name: str, value: object) -> None:
         if name == "_persistence_store" and hasattr(self, name):
             raise AttributeError("persistence authority is immutable after construction")
@@ -2777,3 +2808,9 @@ _EXPECTED_PERSISTENCE_GUARD = (
 _EXPECTED_PERSISTENCE_REQUIRE = (
     DevelopmentExplorationRunner._require_persistence_store
 )
+_EXPECTED_RUNNER_CALLABLE_DESCRIPTORS = {
+    name: descriptor
+    for name, descriptor in vars(DevelopmentExplorationRunner).items()
+    if callable(descriptor)
+    or isinstance(descriptor, (classmethod, staticmethod))
+}
