@@ -7,13 +7,14 @@ created by the CEG-WM adapter or runtime in the governed runner.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
 from math import exp, isfinite, sqrt
 from statistics import median
 from typing import Mapping, Sequence
 
+from experiments.protocol.development_exploration import FrozenDevelopmentCrossFitPlan
 from experiments.protocol.internal_records import InternalValidationRecord
 
 
@@ -54,7 +55,12 @@ class DevelopmentMetricObservation:
     metric_role: str
     responsibility_id: str
     source_cluster_id: str
-    metric_values: tuple[tuple[str, float], ...]
+    registered_metric_ids: tuple[str, ...]
+    candidate_config_digest: str
+    paired_ablation_identity: str
+    content_branch_id: str
+    geometry_case_id: str
+    sufficient_statistics: tuple[tuple[str, float], ...]
     result_identity_digests: tuple[str, ...]
     threshold_role: str | None
     threshold_identity: str | None
@@ -73,10 +79,18 @@ class DevelopmentMetricObservation:
             raise DevelopmentMetricError("development metric role drifted")
         if not self.responsibility_id or not self.source_cluster_id:
             raise DevelopmentMetricError("metric identities are missing")
-        names = [name for name, _ in self.metric_values]
+        if not self.registered_metric_ids or len(set(self.registered_metric_ids)) != len(
+            self.registered_metric_ids
+        ):
+            raise DevelopmentMetricError("registered metric identities are invalid")
+        if len(self.candidate_config_digest) != 64 or not self.paired_ablation_identity:
+            raise DevelopmentMetricError("metric candidate or paired identity is invalid")
+        if not self.content_branch_id or not self.geometry_case_id:
+            raise DevelopmentMetricError("metric case variant identity is missing")
+        names = [name for name, _ in self.sufficient_statistics]
         if not names or len(names) != len(set(names)):
             raise DevelopmentMetricError("metric value identities are invalid")
-        for name, value in self.metric_values:
+        for name, value in self.sufficient_statistics:
             if not name:
                 raise DevelopmentMetricError("metric name is empty")
             _finite(value, name)
@@ -114,7 +128,12 @@ def _observation(
         "metric_role": DEVELOPMENT_METRIC_ROLE,
         "responsibility_id": responsibility_id,
         "source_cluster_id": source_cluster_id,
-        "metric_values": tuple(sorted((name, _finite(value, name)) for name, value in metric_values.items())),
+        "registered_metric_ids": tuple(sorted(metric_values)),
+        "candidate_config_digest": "0" * 64,
+        "paired_ablation_identity": "unbound_paired_ablation",
+        "content_branch_id": "not_applicable",
+        "geometry_case_id": "not_applicable",
+        "sufficient_statistics": tuple(sorted((name, _finite(value, name)) for name, value in metric_values.items())),
         "result_identity_digests": tuple(result_identity_digests),
         "threshold_role": threshold_role,
         "threshold_identity": threshold_identity,
@@ -126,6 +145,40 @@ def _observation(
     )
     observation.validate()
     return observation
+
+
+def bind_development_metric_observation(
+    observation: DevelopmentMetricObservation,
+    *,
+    registered_metric_ids: Sequence[str],
+    candidate_config_digest: str,
+    paired_ablation_identity: str,
+    content_branch_id: str,
+    geometry_case_id: str,
+) -> DevelopmentMetricObservation:
+    """Bind raw sufficient statistics to the frozen scientific case registry."""
+
+    if type(observation) is not DevelopmentMetricObservation:
+        raise DevelopmentMetricError("metric observation exact type is required")
+    payload = observation.payload_without_digest()
+    payload.update(
+        registered_metric_ids=tuple(registered_metric_ids),
+        candidate_config_digest=candidate_config_digest,
+        paired_ablation_identity=paired_ablation_identity,
+        content_branch_id=content_branch_id,
+        geometry_case_id=geometry_case_id,
+    )
+    bound = replace(
+        observation,
+        registered_metric_ids=tuple(registered_metric_ids),
+        candidate_config_digest=candidate_config_digest,
+        paired_ablation_identity=paired_ablation_identity,
+        content_branch_id=content_branch_id,
+        geometry_case_id=geometry_case_id,
+        observation_digest=_canonical_digest(payload),
+    )
+    bound.validate()
+    return bound
 
 
 def metric_key_schedule(
@@ -150,10 +203,15 @@ def metric_key_schedule(
         responsibility_id="key_schedule",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "registered_identity_replay_match": float(registered_identity_digest == replayed_identity_digest),
-            "registered_wrong_domain_separated": float(registered_stream_digest != wrong_stream_digest),
-            "registered_public_noise_domain_separated": float(registered_stream_digest != public_noise_digest),
-            "wrong_public_noise_domain_separated": float(wrong_stream_digest != public_noise_digest),
+            "key_attribution_separation": float(
+                registered_identity_digest == replayed_identity_digest
+                and registered_stream_digest != wrong_stream_digest
+                and registered_stream_digest != public_noise_digest
+            ),
+            "domain_collision_count": float(
+                3
+                - len({registered_stream_digest, wrong_stream_digest, public_noise_digest})
+            ),
         },
         result_identity_digests=digests,
     )
@@ -162,36 +220,23 @@ def metric_key_schedule(
 def metric_content_router(
     source_cluster_id: str,
     *,
-    adaptive_latent_shape: Sequence[int],
-    uniform_latent_shape: Sequence[int],
-    adaptive_routing_map: Sequence[float],
-    uniform_routing_map: Sequence[float],
-    adaptive_mean_mask_lf: float,
-    adaptive_mean_mask_hf: float,
-    uniform_mean_mask_lf: float,
-    uniform_mean_mask_hf: float,
+    matched_budget_registered_score: float,
+    uniform_control_registered_score: float,
+    routing_coverage: float,
+    matched_budget_quality_delta: float,
     adaptive_route_identity: str,
     uniform_route_identity: str,
 ) -> DevelopmentMetricObservation:
-    if tuple(adaptive_latent_shape) != tuple(uniform_latent_shape):
-        raise DevelopmentMetricError("routing metric is not matched-budget")
-    if not adaptive_routing_map or len(adaptive_routing_map) != len(uniform_routing_map):
-        raise DevelopmentMetricError("routing maps are not aligned")
-    mean_absolute_difference = sum(
-        abs(_finite(left, "adaptive route") - _finite(right, "uniform route"))
-        for left, right in zip(adaptive_routing_map, uniform_routing_map)
-    ) / len(adaptive_routing_map)
     return _observation(
         responsibility_id="content_router",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "routing_map_mean_absolute_difference": mean_absolute_difference,
-            "adaptive_low_frequency_allocation": adaptive_mean_mask_lf,
-            "uniform_low_frequency_allocation": uniform_mean_mask_lf,
-            "allocation_budget_difference": abs(
-                adaptive_mean_mask_lf + adaptive_mean_mask_hf
-                - uniform_mean_mask_lf - uniform_mean_mask_hf
+            "matched_budget_incremental_tpr": float(
+                _finite(matched_budget_registered_score, "routed score")
+                > _finite(uniform_control_registered_score, "uniform score")
             ),
+            "routing_coverage": _finite(routing_coverage, "routing coverage"),
+            "quality_delta": _finite(matched_budget_quality_delta, "quality delta"),
         },
         result_identity_digests=(adaptive_route_identity, uniform_route_identity),
     )
@@ -201,25 +246,27 @@ def _carrier_metric(
     responsibility_id: str,
     source_cluster_id: str,
     *,
-    direction: Sequence[float],
-    template: Sequence[float],
-    active_support_count: int,
+    registered_score: float,
+    primary_null_score: float,
+    quality_delta: float,
     direction_digest: str,
     template_digest: str,
     carrier_config_digest: str,
 ) -> DevelopmentMetricObservation:
-    if not direction or len(direction) != len(template):
-        raise DevelopmentMetricError("carrier vectors are invalid")
-    if type(active_support_count) is not int or not 0 <= active_support_count <= len(direction):
-        raise DevelopmentMetricError("carrier support count is invalid")
-    support_fraction = active_support_count / len(direction)
+    prefix = "lf" if responsibility_id == "lf_carrier" else "hf"
     return _observation(
         responsibility_id=responsibility_id,
         source_cluster_id=source_cluster_id,
         metric_values={
-            "direction_l2": _l2(direction),
-            "template_l2": _l2(template),
-            "active_support_fraction": support_fraction,
+            f"{prefix}_attribution_tpr": float(
+                _finite(registered_score, "registered carrier score")
+                > _finite(primary_null_score, "primary null carrier score")
+            ),
+            f"{prefix}_primary_null_fpr": float(
+                _finite(primary_null_score, "primary null carrier score")
+                >= _finite(registered_score, "registered carrier score")
+            ),
+            "quality_delta": _finite(quality_delta, "carrier quality delta"),
         },
         result_identity_digests=(direction_digest, template_digest, carrier_config_digest),
     )
@@ -247,10 +294,8 @@ def metric_content_embedder(
         responsibility_id="content_embedder",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "nominal_relative_l2": nominal_relative_l2,
-            "realized_relative_l2": realized_relative_l2,
-            "actual_budget_excess": max(0.0, realized_relative_l2 - nominal_relative_l2),
-            "clean_watermarked_image_relative_l2": clean_watermarked_image_relative_l2,
+            "realized_total_relative_l2": realized_relative_l2,
+            "matched_budget_quality_delta": clean_watermarked_image_relative_l2,
         },
         result_identity_digests=(
             embedding_result_identity,
@@ -340,14 +385,15 @@ def metric_qk_geometry_sync(
     registered_descriptor_digest: str,
     registered_projection_digest: str,
     wrong_projection_digest: str,
+    quality_delta: float,
 ) -> DevelopmentMetricObservation:
     return _observation(
         responsibility_id="qk_geometry_sync",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "registered_relation_score": registered_relation_score,
-            "wrong_key_relation_score": wrong_key_relation_score,
-            "registered_wrong_relation_margin": registered_relation_score - wrong_key_relation_score,
+            "relation_score_gain": registered_relation_score,
+            "wrong_key_relation_margin": registered_relation_score - wrong_key_relation_score,
+            "quality_delta": _finite(quality_delta, "QK attack quality delta"),
         },
         result_identity_digests=(registered_descriptor_digest, registered_projection_digest, wrong_projection_digest),
     )
@@ -366,19 +412,22 @@ def metric_geometric_transform_estimator(
     truth_crop_fraction: float,
     truth_scale: float,
     truth_rotation_degrees: float,
+    estimated_translation_x: float,
+    estimated_translation_y: float,
+    truth_translation_x: float,
+    truth_translation_y: float,
 ) -> DevelopmentMetricObservation:
     estimated_scale = exp(_finite(estimated_log_scale, "estimated log scale"))
-    estimated_crop = 1.0 - _finite(estimated_coverage, "estimated coverage")
     metric_values = {
-        "crop_fraction_absolute_error": abs(estimated_crop - _finite(truth_crop_fraction, "truth crop")),
-        "scale_absolute_error": abs(estimated_scale - _finite(truth_scale, "truth scale")),
-        "rotation_absolute_error_degrees": abs(_finite(estimated_rotation_degrees, "estimated rotation") - _finite(truth_rotation_degrees, "truth rotation")),
+        "rotation_error": abs(_finite(estimated_rotation_degrees, "estimated rotation") - _finite(truth_rotation_degrees, "truth rotation")),
+        "scale_error": abs(estimated_scale - _finite(truth_scale, "truth scale")),
+        "translation_error": sqrt(
+            (_finite(estimated_translation_x, "estimated translation x") - _finite(truth_translation_x, "truth translation x")) ** 2
+            + (_finite(estimated_translation_y, "estimated translation y") - _finite(truth_translation_y, "truth translation y")) ** 2
+        ),
         "coverage": estimated_coverage,
-        "mean_residual_finite": float(isfinite(mean_residual)),
-        "key_margin": key_margin,
+        "residual": mean_residual if isfinite(mean_residual) else 1.0e30,
     }
-    if isfinite(mean_residual):
-        metric_values["mean_residual"] = mean_residual
     return _observation(
         responsibility_id="geometric_transform_estimator",
         source_cluster_id=source_cluster_id,
@@ -401,9 +450,9 @@ def metric_geometry_reliability(
         responsibility_id="geometry_reliability",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "reliable_case_accepted": float(reliable_case_accepted),
-            "unreliable_control_rejected": float(not unreliable_control_accepted),
-            "reliability_separation": float(reliable_case_accepted) - float(unreliable_control_accepted),
+            "reliable_accept_rate": float(reliable_case_accepted),
+            "unreliable_reject_rate": float(not unreliable_control_accepted),
+            "false_reliable_rate": float(unreliable_control_accepted),
         },
         result_identity_digests=(reliable_identity_digest, unreliable_identity_digest),
     )
@@ -418,14 +467,18 @@ def metric_image_rectifier(
     pixel_crop_support: float,
     rectified_image_digest: str,
     rectification_config_digest: str,
+    rectification_quality: float,
 ) -> DevelopmentMetricObservation:
     return _observation(
         responsibility_id="image_rectifier",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "content_score_recovery_delta": _finite(rectified_content_score, "rectified score") - _finite(attacked_content_score, "attacked score"),
-            "token_crop_support": token_crop_support,
-            "pixel_crop_support": pixel_crop_support,
+            "rectification_quality": _finite(rectification_quality, "rectification quality"),
+            "same_detector_score_delta": _finite(rectified_content_score, "rectified score") - _finite(attacked_content_score, "attacked score"),
+            "valid_support": min(
+                _finite(token_crop_support, "token support"),
+                _finite(pixel_crop_support, "pixel support"),
+            ),
         },
         result_identity_digests=(rectified_image_digest, rectification_config_digest),
     )
@@ -464,11 +517,14 @@ def metric_conditional_recovery_record(
         responsibility_id="conditional_recovery_decision",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "geometry_triggered": float(record.geometry_trace.geometry_triggered),
-            "rectified_content_score_delta": effective_rectified - raw_score,
-            "content_positive": float(positive),
-            "geometry_direct_positive_violation": geometry_positive_violation,
-            "same_detector_binding_preserved": same_detector,
+            "incremental_tpr": float(
+                record.decision_trace.positive_source == "rectified_content"
+            ),
+            "end_to_end_fpr": float(
+                positive and record.key_control_trace.key_role != "registered"
+            ),
+            "trigger_rate": float(record.geometry_trace.geometry_triggered),
+            "false_rescue_rate": max(geometry_positive_violation, 1.0 - same_detector),
         },
         result_identity_digests=(
             record.record_id,
@@ -502,6 +558,13 @@ class DevelopmentCrossFitDetectionAggregate:
     registered_accept_rate: float
     wrong_key_accept_rate: float
     fold_assignment_digest: str
+    plan_digest: str
+    execution_intent_authority_digest: str
+    input_manifest_digest: str
+    candidate_config_digest: str
+    paired_ablation_identity: str
+    registered_metric_ids: tuple[str, ...]
+    evidence_observation_digest: str
     aggregate_digest: str
 
 
@@ -509,24 +572,52 @@ def cross_fit_development_detection_metrics(
     responsibility_id: str,
     observations: Sequence[DevelopmentMetricObservation],
     *,
-    folds: Sequence[tuple[Sequence[str], Sequence[str]]],
+    plan: FrozenDevelopmentCrossFitPlan,
 ) -> DevelopmentCrossFitDetectionAggregate:
-    """Fit only on each fold's primary-null clusters and score held clusters."""
+    """Replay the exact frozen plan; arbitrary caller fold partitions are forbidden."""
 
     if not observations or any(type(item) is not DevelopmentMetricObservation for item in observations):
         raise DevelopmentMetricError("cross-fit requires development metric observations")
+    if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
+        raise DevelopmentMetricError("cross-fit requires a valid frozen Batch-1 plan")
+    if plan.responsibility_id != responsibility_id:
+        raise DevelopmentMetricError("cross-fit plan responsibility drifted")
     for item in observations:
         item.validate()
-    by_cluster = {item.source_cluster_id: item for item in observations}
-    if len(by_cluster) != len(observations) or len(by_cluster) < 16:
-        raise DevelopmentMetricError("cross-fit cluster coverage is insufficient or duplicated")
     if any(item.responsibility_id != responsibility_id for item in observations):
         raise DevelopmentMetricError("cross-fit responsibility drifted")
-    normalized_folds = tuple(
-        (tuple(fit_ids), tuple(probe_ids)) for fit_ids, probe_ids in folds
+    candidate_config_digest = observations[0].candidate_config_digest
+    paired_ablation_identity = observations[0].paired_ablation_identity
+    registered_metric_ids = observations[0].registered_metric_ids
+    if any(
+        item.candidate_config_digest != candidate_config_digest
+        or item.paired_ablation_identity != paired_ablation_identity
+        or item.registered_metric_ids != registered_metric_ids
+        for item in observations
+    ):
+        raise DevelopmentMetricError(
+            "cross-fit metric registry, candidate, or paired identity drifted"
+        )
+    primary_branch = {
+        "lf_detector": "lf_only",
+        "hf_detector": "hf_only",
+        "content_detector": "lf_hf_routed_combination",
+    }.get(responsibility_id)
+    if primary_branch is None:
+        raise DevelopmentMetricError("cross-fit responsibility is not a detector")
+    selected = tuple(
+        item for item in observations if item.content_branch_id == primary_branch
     )
-    if len(normalized_folds) < 2:
-        raise DevelopmentMetricError("cross-fit requires at least two folds")
+    by_cluster = {item.source_cluster_id: item for item in selected}
+    if (
+        len(by_cluster) != len(selected)
+        or tuple(sorted(by_cluster)) != tuple(sorted(plan.source_cluster_ids))
+    ):
+        raise DevelopmentMetricError("cross-fit observations do not bind the frozen cluster roster")
+    normalized_folds = tuple(
+        (fold.fit_source_cluster_ids, fold.recovery_probe_source_cluster_ids)
+        for fold in plan.folds
+    )
     covered_probes: list[str] = []
     thresholds: list[tuple[int, float]] = []
     null_accepts = registered_accepts = wrong_accepts = 0
@@ -535,11 +626,11 @@ def cross_fit_development_detection_metrics(
             raise DevelopmentMetricError("cross-fit fit/probe clusters overlap or are empty")
         if not set((*fit_ids, *probe_ids)).issubset(by_cluster):
             raise DevelopmentMetricError("cross-fit fold references unknown clusters")
-        threshold = max(dict(by_cluster[cluster].metric_values)["primary_null_score"] for cluster in fit_ids)
+        threshold = max(dict(by_cluster[cluster].sufficient_statistics)["primary_null_score"] for cluster in fit_ids)
         thresholds.append((fold_index, threshold))
         covered_probes.extend(probe_ids)
         for cluster in probe_ids:
-            values = dict(by_cluster[cluster].metric_values)
+            values = dict(by_cluster[cluster].sufficient_statistics)
             null_accepts += int(values["primary_null_score"] >= threshold)
             registered_accepts += int(
                 values.get("registered_score", values.get("candidate_score")) >= threshold
@@ -558,6 +649,17 @@ def cross_fit_development_detection_metrics(
         "registered_accept_rate": registered_accepts / count,
         "wrong_key_accept_rate": wrong_accepts / count,
         "fold_assignment_digest": _canonical_digest(normalized_folds),
+        "plan_digest": plan.digest(),
+        "execution_intent_authority_digest": (
+            plan.expected_execution_intent_authority_digest
+        ),
+        "input_manifest_digest": plan.input_manifest_digest,
+        "candidate_config_digest": candidate_config_digest,
+        "paired_ablation_identity": paired_ablation_identity,
+        "registered_metric_ids": registered_metric_ids,
+        "evidence_observation_digest": _canonical_digest(
+            tuple(sorted(item.observation_digest for item in observations))
+        ),
     }
     return DevelopmentCrossFitDetectionAggregate(
         **payload,
@@ -570,6 +672,11 @@ def aggregate_development_cluster_metrics(
     observations: Sequence[DevelopmentMetricObservation],
     *,
     minimum_source_clusters: int,
+    expected_metric_ids: Sequence[str] | None = None,
+    expected_candidate_config_digest: str | None = None,
+    expected_paired_ablation_identity: str | None = None,
+    expected_content_branch_ids: Sequence[str] = (),
+    expected_geometry_case_ids: Sequence[str] = (),
 ) -> DevelopmentClusterAggregate:
     if not observations or any(type(item) is not DevelopmentMetricObservation for item in observations):
         raise DevelopmentMetricError("cluster aggregation requires metric observations")
@@ -577,21 +684,59 @@ def aggregate_development_cluster_metrics(
         item.validate()
     if any(item.responsibility_id != responsibility_id for item in observations):
         raise DevelopmentMetricError("cluster aggregation responsibility drifted")
-    cluster_ids = [item.source_cluster_id for item in observations]
-    if len(cluster_ids) != len(set(cluster_ids)) or len(cluster_ids) < minimum_source_clusters:
-        raise DevelopmentMetricError("cluster aggregation coverage is insufficient or duplicated")
-    metric_names = tuple(name for name, _ in observations[0].metric_values)
-    if any(tuple(name for name, _ in item.metric_values) != metric_names for item in observations):
+    registered = tuple(expected_metric_ids or observations[0].registered_metric_ids)
+    candidate_digest = expected_candidate_config_digest or observations[0].candidate_config_digest
+    paired_identity = expected_paired_ablation_identity or observations[0].paired_ablation_identity
+    if any(
+        item.registered_metric_ids != registered
+        or item.candidate_config_digest != candidate_digest
+        or item.paired_ablation_identity != paired_identity
+        for item in observations
+    ):
+        raise DevelopmentMetricError("cluster metric registry or paired identity drifted")
+    branches = tuple(expected_content_branch_ids) or tuple(
+        sorted({item.content_branch_id for item in observations})
+    )
+    geometries = tuple(expected_geometry_case_ids) or tuple(
+        sorted({item.geometry_case_id for item in observations})
+    )
+    expected_variants = {
+        (branch, geometry)
+        for branch in branches
+        for geometry in geometries
+    }
+    grouped: dict[str, dict[tuple[str, str], DevelopmentMetricObservation]] = {}
+    for item in observations:
+        key = (item.content_branch_id, item.geometry_case_id)
+        cluster = grouped.setdefault(item.source_cluster_id, {})
+        if key in cluster:
+            raise DevelopmentMetricError("paired cluster variant is duplicated")
+        cluster[key] = item
+    if len(grouped) < minimum_source_clusters or any(
+        set(variants) != expected_variants for variants in grouped.values()
+    ):
+        raise DevelopmentMetricError("paired cluster aggregate is incomplete")
+    metric_names = tuple(name for name, _ in observations[0].sufficient_statistics)
+    if any(tuple(name for name, _ in item.sufficient_statistics) != metric_names for item in observations):
         raise DevelopmentMetricError("cluster metric identities drifted")
     values_by_name = {
-        name: [dict(item.metric_values)[name] for item in observations]
+        name: [dict(item.sufficient_statistics)[name] for item in observations]
         for name in metric_names
     }
+    raw_means = {name: sum(values) / len(values) for name, values in values_by_name.items()}
+    raw_medians = {name: median(values) for name, values in values_by_name.items()}
+    if len(registered) == len(metric_names) and set(registered) == set(metric_names):
+        registered_means = {name: raw_means[name] for name in registered}
+        registered_medians = {name: raw_medians[name] for name in registered}
+    else:
+        raise DevelopmentMetricError(
+            "per-unit sufficient statistics were not reduced to exact registered metric ids"
+        )
     payload = {
         "responsibility_id": responsibility_id,
-        "source_cluster_count": len(cluster_ids),
-        "metric_medians": tuple((name, median(values)) for name, values in values_by_name.items()),
-        "metric_means": tuple((name, sum(values) / len(values)) for name, values in values_by_name.items()),
-        "source_cluster_digest": _canonical_digest(tuple(sorted(cluster_ids))),
+        "source_cluster_count": len(grouped),
+        "metric_medians": tuple((name, registered_medians[name]) for name in registered),
+        "metric_means": tuple((name, registered_means[name]) for name in registered),
+        "source_cluster_digest": _canonical_digest(tuple(sorted(grouped))),
     }
     return DevelopmentClusterAggregate(**payload, aggregate_digest=_canonical_digest(payload))

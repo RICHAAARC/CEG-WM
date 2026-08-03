@@ -15,10 +15,17 @@ from experiments.methods import (
     CegWmExperimentAdapter,
     load_ceg_wm_experiment_adapter_configuration,
 )
+from experiments.metrics.development_exploration import DevelopmentMetricError
 from experiments.runners.development_exploration import (
     DevelopmentExplorationRunner,
     DevelopmentRunnerError,
+    DevelopmentUnitExcluded,
     DevelopmentUnitInput,
+)
+from experiments.runners.development_persistence import (
+    DevelopmentPersistentStore,
+    FrozenWorkerIdentity,
+    development_unit_roster_digest,
 )
 from experiments.protocol.development_exploration import (
     build_development_cross_fit_plan,
@@ -138,7 +145,10 @@ class _CombinedCpuWiringBackend:
         )
 
 
-def _runner(intent_authority=None) -> DevelopmentExplorationRunner:
+def _runner(
+    intent_authority=None,
+    persistence_store: DevelopmentPersistentStore | None = None,
+) -> DevelopmentExplorationRunner:
     runtime_adapter = create_runtime_adapter(_CombinedCpuWiringBackend())
     runtime_adapter.initialize("cpu")
     adapter = CegWmExperimentAdapter(
@@ -158,7 +168,35 @@ def _runner(intent_authority=None) -> DevelopmentExplorationRunner:
         method_code_revision="a" * 40,
         environment_digest="b" * 64,
         resource_identity_digest="c" * 64,
+        persistence_store=persistence_store,
     )
+
+
+def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, DevelopmentPersistentStore]:
+    initial = _runner()
+    package = tmp_path / "development_package.zip"
+    bootstrap = tmp_path / "development_bootstrap.py"
+    package.write_bytes(b"frozen package")
+    bootstrap.write_bytes(b"frozen bootstrap")
+    worker = FrozenWorkerIdentity(
+        revision="a" * 40,
+        protocol_digest=initial.intent_authority.protocol_digest,
+        execution_intent_authority_digest=initial.intent_authority.authority_digest,
+        input_manifest_digest=initial.intent_authority.input_manifest_digest,
+        candidate_config_digest="d" * 64,
+        unit_roster_digest=development_unit_roster_digest(initial.protocol.unit_roster),
+        package_sha256=sha256(package.read_bytes()).hexdigest(),
+        bootstrap_sha256=sha256(bootstrap.read_bytes()).hexdigest(),
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path / "persistent",
+        run_id=initial.intent_authority.run_id,
+        worker_identity=worker,
+        package_path=package,
+        bootstrap_path=bootstrap,
+        registered_unit_bindings=initial.create_persistence_unit_bindings(),
+    )
+    return _runner(initial.intent_authority, store), store
 
 
 def _input() -> DevelopmentUnitInput:
@@ -209,20 +247,14 @@ def _input() -> DevelopmentUnitInput:
 @pytest.mark.quick
 def test_first_breadth_units_call_real_key_router_and_carrier_methods() -> None:
     runner = _runner()
-    key = runner.execute_unit(0, _input(), prerequisite_outcomes={})
-    router = runner.execute_unit(
-        1, _input(), prerequisite_outcomes={"key_schedule": "mechanism_signal_observed"}
-    )
-    low_frequency = runner.execute_unit(
-        2, _input(), prerequisite_outcomes={"key_schedule": "mechanism_signal_observed"}
-    )
-    high_frequency = runner.execute_unit(
-        3, _input(), prerequisite_outcomes={"key_schedule": "mechanism_signal_observed"}
-    )
+    key = runner._execute_unit(0, _input())
+    router = runner._execute_unit(1, _input())
+    low_frequency = _runner()._execute_unit(2, _input())
+    high_frequency = _runner()._execute_unit(3, _input())
 
     assert key.record.responsibility_id == "key_schedule"
-    assert dict(key.record.metric_observation["metric_values"])[
-        "registered_wrong_domain_separated"
+    assert dict(key.record.metric_observation["sufficient_statistics"])[
+        "key_attribution_separation"
     ] == 1.0
     assert router.record.routing_trace["routing_identity"]
     assert low_frequency.record.operation_result_payload["candidate_id"] == "lf_low_pass"
@@ -231,35 +263,21 @@ def test_first_breadth_units_call_real_key_router_and_carrier_methods() -> None:
 
 
 @pytest.mark.quick
-def test_dependency_stop_is_separate_from_resource_or_mechanism_outcome() -> None:
-    runner = _runner()
-    with pytest.raises(DevelopmentRunnerError, match="module dependency stop"):
-        runner.execute_unit(
-            1,
-            _input(),
-            prerequisite_outcomes={"key_schedule": "mechanism_signal_not_observed"},
-        )
+def test_public_runner_does_not_accept_caller_prerequisite_outcomes() -> None:
+    assert not hasattr(DevelopmentExplorationRunner, "execute_unit")
 
 
 @pytest.mark.quick
 def test_content_embedding_unit_uses_actual_runtime_write_and_vae() -> None:
     runner = _runner()
-    result = runner.execute_unit(
-        4,
-        _input(),
-        prerequisite_outcomes={
-            "content_router": "mechanism_signal_observed",
-            "lf_carrier": "mechanism_signal_observed",
-            "hf_carrier": "mechanism_signal_observed",
-        },
-    )
+    result = runner._execute_unit(4, _input())
 
     assert result.record.responsibility_id == "content_embedder"
     assert result.record.provenance_trace["runtime_config_digest"] == (
         runner.runtime_adapter.session.runtime_config_digest
     )
-    values = dict(result.record.metric_observation["metric_values"])
-    assert values["realized_relative_l2"] >= 0.0
+    values = dict(result.record.metric_observation["sufficient_statistics"])
+    assert values["realized_total_relative_l2"] >= 0.0
     assert runner.runtime_adapter._backend.run_calls == 2
 
 
@@ -279,31 +297,36 @@ def test_preflight_calls_real_runtime_without_scientific_coverage() -> None:
 
 @pytest.mark.quick
 @pytest.mark.parametrize(
-    ("unit_index", "prerequisite_outcomes", "responsibility_id"),
+    ("unit_index", "responsibility_id"),
     (
-        (5, {"key_schedule": "mechanism_signal_observed", "lf_carrier": "mechanism_signal_observed"}, "lf_detector"),
-        (6, {"key_schedule": "mechanism_signal_observed", "hf_carrier": "mechanism_signal_observed"}, "hf_detector"),
-        (7, {"content_embedder": "mechanism_signal_observed", "lf_detector": "mechanism_signal_observed", "hf_detector": "mechanism_signal_observed"}, "content_detector"),
-        (8, {"key_schedule": "mechanism_signal_observed"}, "qk_geometry_sync"),
-        (9, {"qk_geometry_sync": "mechanism_signal_observed"}, "geometric_transform_estimator"),
-        (10, {"geometric_transform_estimator": "mechanism_signal_observed"}, "geometry_reliability"),
-        (11, {"geometric_transform_estimator": "mechanism_signal_observed", "geometry_reliability": "mechanism_signal_observed"}, "image_rectifier"),
+        (5, "lf_detector"),
+        (6, "hf_detector"),
+        (7, "content_detector"),
+        (8, "qk_geometry_sync"),
+        (9, "geometric_transform_estimator"),
+        (10, "geometry_reliability"),
     ),
 )
 def test_remaining_non_joint_responsibilities_use_real_public_calls(
     unit_index: int,
-    prerequisite_outcomes: dict[str, str],
     responsibility_id: str,
 ) -> None:
-    result = _runner().execute_unit(
-        unit_index,
-        _input(),
-        prerequisite_outcomes=prerequisite_outcomes,
-    )
+    result = _runner()._execute_unit(unit_index, _input())
 
     assert result.record.responsibility_id == responsibility_id
     assert result.record.metric_observation["responsibility_id"] == responsibility_id
     assert result.record.operation_result_digest
+    if responsibility_id == "content_detector":
+        assert result.record.branch_score_trace["function_id"] == (
+            "weighted_hf_lf_standardized_score"
+        )
+        assert result.record.branch_score_trace["mixing_coefficient"] == 0.5
+
+
+@pytest.mark.quick
+def test_rectifier_fail_closed_is_classified_as_scientific_exclusion() -> None:
+    with pytest.raises(DevelopmentUnitExcluded, match="fail-closed reliability"):
+        _runner()._execute_unit(11, _input())
 
 
 @pytest.mark.quick
@@ -368,17 +391,7 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
         internal_case_payload=payload,
     )
 
-    result = _runner(intent).execute_unit(
-        12,
-        joint_input,
-        prerequisite_outcomes={
-            "content_detector": "mechanism_signal_observed",
-            "qk_geometry_sync": "mechanism_signal_observed",
-            "geometric_transform_estimator": "mechanism_signal_observed",
-            "geometry_reliability": "mechanism_signal_observed",
-            "image_rectifier": "mechanism_signal_observed",
-        },
-    )
+    result = _runner(intent)._execute_unit(12, joint_input)
 
     assert result.record.responsibility_id == "conditional_recovery_decision"
     assert result.record.decision_trace["internal_validation_record_id"]
@@ -389,7 +402,7 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
 @pytest.mark.quick
 def test_production_runner_has_no_result_provider_or_module_result_surface() -> None:
     source = inspect.getsource(DevelopmentExplorationRunner)
-    signature = inspect.signature(DevelopmentExplorationRunner.execute_unit)
+    signature = inspect.signature(DevelopmentExplorationRunner._execute_unit)
 
     assert "result_provider" not in source
     assert "module_results" not in source
@@ -399,3 +412,114 @@ def test_production_runner_has_no_result_provider_or_module_result_surface() -> 
     assert "observe_detection_qk" in source
     assert "apply_geometric_attack" in source
     assert "execute_internal_case" in source
+
+
+@pytest.mark.quick
+def test_runner_rejects_per_instance_method_proxy_before_record() -> None:
+    runner = _runner()
+    runner.adapter.detect_hf = lambda *_args, **_kwargs: None
+
+    with pytest.raises(DevelopmentRunnerError, match="instance shadow"):
+        runner._execute_unit(6, _input())
+
+
+@pytest.mark.quick
+def test_persistent_runner_claims_only_next_breadth_first_unit(tmp_path: Path) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    lease = store.acquire_lease(
+        session_id="runner_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=100,
+    )
+
+    result = runner.execute_and_commit_next_unit(
+        lease,
+        _input(),
+        now_epoch_seconds=101,
+        raw_secret_values=("development-runner-cpu-wiring-key",),
+    )
+
+    assert result.record.unit_index == 0
+    assert result.record.responsibility_id == "key_schedule"
+    assert result.record.execution_status == "success"
+    assert result.intent is not None and result.intent.unit_descriptor_digest
+    assert result.committed is not None
+    assert store.recover(now_epoch_seconds=102).committed_units == (result.committed,)
+
+
+@pytest.mark.quick
+def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    lease = store.acquire_lease(
+        session_id="failure_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=100,
+    )
+    runner.adapter.identify_key = lambda *_args, **_kwargs: None
+
+    result = runner.execute_and_commit_next_unit(
+        lease,
+        _input(),
+        now_epoch_seconds=101,
+        raw_secret_values=("development-runner-cpu-wiring-key",),
+    )
+    recovery = store.recover(now_epoch_seconds=102)
+
+    assert result.record.execution_status == "failed"
+    assert result.record.failure_class == "implementation_failure"
+    assert "instance shadow" in result.record.failure_reason
+    assert recovery.interrupted_attempts == ()
+    assert recovery.committed_units == (result.committed,)
+
+
+@pytest.mark.quick
+def test_module_outcome_is_automatic_and_requires_complete_cluster_coverage() -> None:
+    runner = _runner()
+    records = tuple(
+        runner._execute_unit(
+            runner._representative_unit("key_schedule", cluster).unit_index,
+            _input(),
+        ).record
+        for cluster in range(16)
+    )
+
+    outcome = runner.build_module_outcome_record(
+        records,
+        responsibility_id="key_schedule",
+    )
+
+    assert outcome.module_outcome == "mechanism_signal_observed"
+    assert outcome.candidate_recommendation == "candidate_worth_further_selection"
+    signature = inspect.signature(runner.build_module_outcome_record)
+    assert "module_outcome" not in signature.parameters
+    assert "candidate_recommendation" not in signature.parameters
+    assert all(
+        tuple(item.metric_observation["registered_metric_ids"]) == item.metric_ids
+        for item in records
+    )
+
+
+@pytest.mark.quick
+def test_module_outcome_rejects_incomplete_paired_cluster_variants() -> None:
+    runner = _runner()
+    one_router_record = runner._execute_unit(1, _input()).record
+
+    with pytest.raises(DevelopmentMetricError, match="paired cluster aggregate"):
+        runner.build_module_outcome_record(
+            (one_router_record,),
+            responsibility_id="content_router",
+            prerequisite_outcome_records=(
+                runner.build_module_outcome_record(
+                    tuple(
+                        runner._execute_unit(
+                            runner._representative_unit("key_schedule", cluster).unit_index,
+                            _input(),
+                        ).record
+                        for cluster in range(16)
+                    ),
+                    responsibility_id="key_schedule",
+                ),
+            ),
+        )

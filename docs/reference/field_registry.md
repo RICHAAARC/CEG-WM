@@ -591,6 +591,9 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | candidate_identity | persisted_protocol | method_identity | none | true | false | false | 当前职责被探索的候选身份，不代表已晋升。 |
 | candidate_parameter_bindings | persisted_protocol | method_identity | none | true | false | false | 当前职责对登记候选参数名及有限值 roster 的精确绑定。 |
 | paired_ablation_identity | persisted_protocol | method_identity | none | true | false | false | 当前职责必须同预算配对执行的 ablation 身份。 |
+| registered_metric_ids | persisted_protocol | protocol | none | true | false | false | 当前职责登记科学指标的精确有序身份；不得由原始分数名称代行。 |
+| evidence_observation_digest | persisted_protocol | provenance | none | true | false | false | development cross-fit 聚合所消费逐单元 metric observation 摘要集合的规范摘要。 |
+| sufficient_statistics | persisted_protocol | metric | none | true | false | false | 由真实方法/runtime结果计算、供完整 paired-cluster 聚合与 cross-fit 重放的逐单元充分统计；本身不是最终登记指标结果。 |
 | negative_control_case_ids | persisted_protocol | protocol | none | true | false | false | 当前职责冻结的非空 negative-control case 集合。 |
 | record_field_names | persisted_protocol | protocol | none | false | false | false | 当前职责必须由 records 提供的实际登记字段名集合。 |
 | prerequisite_responsibility_ids | persisted_protocol | protocol | none | false | false | false | 当前职责之前必须已有 mechanism signal 的有序前置职责。 |
