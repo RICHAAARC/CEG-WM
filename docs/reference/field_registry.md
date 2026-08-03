@@ -947,3 +947,38 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | adapter_path | persisted_protocol | baseline | none | false | false | false | Baseline 实验适配器路径。 |
 | config_path | persisted_protocol | baseline | none | false | false | false | Baseline 固定配置路径。 |
 | deviations | persisted_protocol | baseline | none | false | false | false | 相对上游 baseline 的所有已声明语义偏差。 |
+
+## Development exploration 精确记录与控制字段
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| actual_elapsed_seconds | persisted_protocol | resource_statistic | none | true | false | false | 单次 unit attempt 的实测墙钟时长；不得用预算时长代替。 |
+| maximum_duration_seconds | persisted_protocol | resource_budget | none | true | false | false | 冻结 execution intent 对单 unit 的最大时长。 |
+| duration_limit_exceeded | persisted_protocol | resource_status | none | true | false | false | 实测时长是否越过冻结单 unit 上限。 |
+| attempt_disposition | persisted_protocol | protocol | none | true | false | false | COMMITTED attempt 的 success、final failure 或可重试资源失败处置。 |
+| scientific_record_digest | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 绑定的精确 development scientific record 摘要。 |
+| scientific_record_bytes | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 绑定的精确 development scientific record 字节数。 |
+| evidence_record_digests | persisted_protocol | provenance | none | true | false | false | module outcome 逐项绑定已验证 COMMITTED records 的摘要序列。 |
+| signal_criteria | persisted_protocol | protocol | none | false | false | false | 读取 development 数据前冻结、且逐项覆盖全部登记 metric 的信号判据。 |
+| comparison | persisted_protocol | protocol | none | false | false | false | 信号判据的冻结比较运算。 |
+| score_role | persisted_protocol | protocol | none | true | false | false | threshold-fit 输入分数的明确职责，本阶段仅允许 development primary-null score。 |
+| primary_null_score | persisted_protocol | method_statistic | none | true | false | false | 由正式 HF detector record 提供的 development primary-null 分数。 |
+| method_detector_identity | persisted_protocol | method_identity | none | true | false | false | development threshold authority 绑定的真实公共 detector 身份。 |
+| method_detector_config_digest | persisted_protocol | provenance | none | true | false | false | development threshold authority 绑定的真实公共 detector 配置摘要。 |
+| primary_null_detector_identity | persisted_protocol | method_identity | none | true | false | false | 产生 primary-null score 的 detector 身份。 |
+| primary_null_detector_config_digest | persisted_protocol | provenance | none | true | false | false | 产生 primary-null score 的 detector 配置摘要。 |
+| primary_null_preprocessing_identity | persisted_protocol | method_identity | none | true | false | false | 产生 primary-null score 的公共预处理身份。 |
+| primary_null_detection_key_public_digest | persisted_protocol | provenance | none | true | false | false | primary-null 检测 key 的不可逆公开摘要。 |
+| primary_null_control_identity | persisted_protocol | protocol | none | true | false | false | primary-null 使用 unwatermarked wrong-key control 的冻结身份。 |
+| routing_comparison_eligible | persisted_protocol | protocol | none | true | false | false | 当前 record 是否承载同预算 adaptive 与 uniform 实跑配对比较。 |
+| adaptive_registered_score | persisted_protocol | method_statistic | none | true | false | false | adaptive routing 实跑臂的 registered content score。 |
+| uniform_control_registered_score | persisted_protocol | method_statistic | none | true | false | false | disabled-uniform 实跑控制臂的 registered content score。 |
+| adaptive_quality_delta | persisted_protocol | method_statistic | none | true | false | false | adaptive routing 实跑臂的质量预算偏移。 |
+| uniform_control_quality_delta | persisted_protocol | method_statistic | none | true | false | false | disabled-uniform 实跑控制臂的质量预算偏移。 |
+| adaptive_detector_identity | persisted_protocol | method_identity | none | true | false | false | adaptive routing 配对臂复用的 content detector 身份。 |
+| uniform_control_detector_identity | persisted_protocol | method_identity | none | true | false | false | disabled-uniform 配对臂复用的 content detector 身份。 |
+| adaptive_detector_config_digest | persisted_protocol | provenance | none | true | false | false | adaptive routing 配对臂 detector 配置摘要。 |
+| uniform_control_detector_config_digest | persisted_protocol | provenance | none | true | false | false | disabled-uniform 配对臂 detector 配置摘要。 |
+| geometry_reliability_status | persisted_protocol | method_status | none | true | false | false | 正式 reliability 模块的 fail-closed 状态。 |
+| geometry_reliability_failure_reasons | persisted_protocol | method_status | none | true | false | false | 正式 reliability 模块拒绝当前估计的完整原因序列。 |
+| estimator_wrong_key_objectives | persisted_protocol | method_statistic | none | true | false | false | transform estimator 保存的真实 wrong-key objective 控制值。 |

@@ -10,6 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from experiments.metrics.development_exploration import (
+    DEVELOPMENT_METRIC_ROLE,
+    METRIC_SCHEMA_VERSION,
+)
+
 from experiments.protocol.development_exploration import (
     BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
     CANDIDATE_RECOMMENDATIONS,
@@ -52,19 +57,12 @@ from experiments.protocol.development_exploration import (
     load_frozen_development_exploration_protocol,
 )
 from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
-from experiments.protocol.internal_records import (
-    INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
-    INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
-    MAXIMUM_RECORD_ATTEMPTS,
-    BranchScoreTrace,
-    DecisionTrace,
-    DetectorTrace,
-    GeometryTrace,
-    InternalValidationRecord,
-    KeyControlTrace,
-    ProvenanceTrace,
-    RoutingTrace,
-    ThresholdTrace,
+from experiments.protocol.development_records import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
+    DEVELOPMENT_RECORD_COLLECTION_ROLE,
+    RECORD_SCHEMA_VERSION as SCIENTIFIC_RECORD_SCHEMA_VERSION,
+    DevelopmentScientificRecord,
+    canonical_development_value_digest,
 )
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
@@ -117,7 +115,7 @@ def _recompute_candidate_config_digest(entry: dict[str, object]) -> None:
 
 def _redigest_fit_input(
     fit_input: DevelopmentThresholdFitInput,
-    source_record: InternalValidationRecord,
+    source_record: DevelopmentScientificRecord,
 ) -> DevelopmentThresholdFitInput:
     return replace(
         fit_input,
@@ -131,6 +129,17 @@ def _redigest_fit_input(
                 "source_record": asdict(source_record),
             }
         ),
+    )
+
+
+def _redigest_scientific_record(
+    record: DevelopmentScientificRecord,
+    **changes: object,
+) -> DevelopmentScientificRecord:
+    changed = replace(record, **changes)
+    return replace(
+        changed,
+        record_id=canonical_development_value_digest(changed.payload_without_record_id()),
     )
 
 
@@ -219,93 +228,118 @@ def _primary_null_record(
     score: float,
     split_manifest_digest: str,
     detector_binding,
-) -> InternalValidationRecord:
+) -> DevelopmentScientificRecord:
     key_binding = next(
         item
         for item in detector_binding.primary_null_key_bindings
         if item.source_cluster_id == assignment.identity.source_cluster_id
     )
-    return InternalValidationRecord(
-        record_id=f"primary_null_score_record_{index}",
+    protocol = detector_binding.protocol
+    study = next(
+        item
+        for item in protocol.module_matrix
+        if item.responsibility_id == "hf_detector"
+    )
+    operation_payload = {"primary_null_score": score}
+    metric_payload = {
+        "schema_version": METRIC_SCHEMA_VERSION,
+        "metric_role": DEVELOPMENT_METRIC_ROLE,
+        "responsibility_id": "hf_detector",
+        "source_cluster_id": assignment.identity.source_cluster_id,
+        "registered_metric_ids": study.metric_ids,
+        "candidate_config_digest": study.candidate_config_digest,
+        "paired_ablation_identity": study.paired_ablation_identity,
+        "content_branch_id": "hf_only",
+        "geometry_case_id": "content_geometry_not_applicable",
+        "sufficient_statistics": (
+            ("primary_null_score", score),
+            ("registered_score", score + 1.0),
+            ("wrong_key_score", score - 1.0),
+        ),
+        "result_identity_digests": ("b" * 64,),
+        "threshold_role": None,
+        "threshold_identity": None,
+        "threshold_fit_source_cluster_digest": None,
+    }
+    metric_payload["observation_digest"] = canonical_development_value_digest(
+        metric_payload
+    )
+    record = DevelopmentScientificRecord(
+        schema_version=SCIENTIFIC_RECORD_SCHEMA_VERSION,
+        collection_role=DEVELOPMENT_RECORD_COLLECTION_ROLE,
+        record_id="0" * 64,
         run_id=detector_binding.execution_intent_authority.run_id,
-        protocol_id=INTERNAL_VALIDATION_PROTOCOL_ID,
-        protocol_version=INTERNAL_VALIDATION_PROTOCOL_VERSION,
-        record_schema_version=INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
-        analysis_unit_identity=assignment.identity,
-        split=assignment.split,
-        record_sequence_index=index,
-        record_attempt_index=0,
+        protocol_id=protocol.protocol_id,
+        protocol_version=protocol.protocol_version,
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest=(
+            detector_binding.expected_execution_intent_authority_digest
+        ),
+        method_code_revision="a" * 40,
+        unit_index=index,
+        phase="scientific_coverage",
+        analysis_unit_identity=asdict(assignment.identity),
+        responsibility_id="hf_detector",
+        scientific_question_id=study.scientific_question_id,
+        development_case_id=study.development_case_id,
+        candidate_identity=study.candidate_identity,
+        candidate_config_digest=study.candidate_config_digest,
+        paired_ablation_identity=study.paired_ablation_identity,
+        negative_control_case_ids=study.negative_control_case_ids,
+        metric_ids=study.metric_ids,
+        content_branch_id="hf_only",
+        geometry_case_id="content_geometry_not_applicable",
+        attempt_index=0,
         execution_status="success",
         failure_class=None,
         failure_reason=None,
-        exclusion_reason=None,
-        exclusion_rule_id=None,
-        retry_of_record_id=None,
-        detector_trace=DetectorTrace(
-            raw_detector_identity="development_blind_high_frequency_detector",
-            rectified_detector_identity="development_blind_high_frequency_detector",
-            raw_detector_config_digest=detector_binding.detector_config_digest,
-            rectified_detector_config_digest=detector_binding.detector_config_digest,
-            raw_preprocessing_identity=detector_binding.preprocessing_identity,
-            rectified_preprocessing_identity=detector_binding.preprocessing_identity,
-            raw_content_score=score,
-            rectified_content_score=None,
-        ),
-        branch_score_trace=BranchScoreTrace(
-            lf_score=None,
-            hf_score=score,
-            combined_score=None,
-        ),
-        routing_trace=RoutingTrace(
-            routing_identity="routing_not_applicable",
-            routing_control="primary_null",
-            routing_observation_digest="1" * 64,
-            routing_mask_digest="2" * 64,
-        ),
-        geometry_trace=GeometryTrace(
-            geometry_triggered=False,
-            geometry_operation_identity="geometry_not_attempted",
-            geometry_reliability_config_digest=None,
-            geometry_estimation_identity=None,
-            geometry_reliability_identity=None,
-            geometry_reliable=None,
-            geometry_transform=None,
-            geometry_raw_metrics=None,
-            geometry_failure_reason=None,
-            rectification_status="not_attempted",
-        ),
-        threshold_trace=ThresholdTrace(
-            raw_threshold_identity="development_record_collection_threshold",
-            rectified_threshold_identity="development_record_collection_threshold",
-            tau=10.0,
-            tau_rescue=9.0,
-        ),
-        key_control_trace=KeyControlTrace(
-            registered_key_public_digest=key_binding.registered_key_public_digest,
-            detection_key_public_digest=key_binding.detection_key_public_digest,
-            key_role="unwatermarked_primary_null",
-            control_identity="primary_null",
-        ),
-        decision_trace=DecisionTrace(
-            watermark_decision="negative",
-            positive_source=None,
-            decision_reason="primary_null_below_development_record_threshold",
-        ),
-        provenance_trace=ProvenanceTrace(
-            protocol_digest="5" * 64,
-            split_manifest_digest=split_manifest_digest,
-            input_manifest_digest="6" * 64,
-            method_code_revision="development_method_revision",
-            candidate_config_digest="7" * 64,
-            method_config_digest="8" * 64,
-            execution_config_digest="9" * 64,
-            model_revision="frozen_model_revision",
-            environment_digest="a" * 64,
-            resource_identity_digest="b" * 64,
-            input_artifact_digest="c" * 64,
-            attack_config_digest="d" * 64,
-            metric_set_digest="e" * 64,
-        ),
+        retry_parent_intent_digest=None,
+        actual_elapsed_seconds=1.0,
+        maximum_duration_seconds=3600,
+        duration_limit_exceeded=False,
+        operation_result_payload=operation_payload,
+        operation_result_digest=canonical_development_value_digest(operation_payload),
+        metric_observation=metric_payload,
+        routing_trace={},
+        branch_score_trace={"hf_score": score},
+        detector_trace={
+            "raw_detector_identity": protocol.threshold_detector_authority.method_detector_identity,
+            "rectified_detector_identity": protocol.threshold_detector_authority.method_detector_identity,
+            "primary_null_detector_identity": protocol.threshold_detector_authority.method_detector_identity,
+            "raw_detector_config_digest": protocol.threshold_detector_authority.method_detector_config_digest,
+            "rectified_detector_config_digest": protocol.threshold_detector_authority.method_detector_config_digest,
+            "primary_null_detector_config_digest": protocol.threshold_detector_authority.method_detector_config_digest,
+            "raw_preprocessing_identity": detector_binding.preprocessing_identity,
+            "rectified_preprocessing_identity": detector_binding.preprocessing_identity,
+            "primary_null_preprocessing_identity": detector_binding.preprocessing_identity,
+        },
+        geometry_trace={},
+        threshold_trace={
+            "raw_threshold_identity": "development_exploratory_threshold",
+            "rectified_threshold_identity": "development_exploratory_threshold",
+        },
+        key_control_trace={
+            "registered_key_public_digest": key_binding.registered_key_public_digest,
+            "primary_null_detection_key_public_digest": key_binding.detection_key_public_digest,
+            "primary_null_control_identity": "unwatermarked_wrong_key_primary_null",
+        },
+        decision_trace={"positive_source": None},
+        provenance_trace={
+            "protocol_digest": protocol.digest(),
+            "input_manifest_digest": split_manifest_digest,
+            "execution_intent_authority_digest": (
+                detector_binding.expected_execution_intent_authority_digest
+            ),
+            "method_code_revision": "a" * 40,
+            "candidate_config_digest": study.candidate_config_digest,
+        },
+        module_outcome=None,
+        candidate_recommendation=None,
+        scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+    )
+    return replace(
+        record,
+        record_id=canonical_development_value_digest(record.payload_without_record_id()),
     )
 
 
@@ -489,7 +523,7 @@ def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
     assert authority.responsibility_id == "hf_detector"
     assert authority.detector_mode == "hf_only"
     assert authority.preprocessing_identity == (
-        "rgb8_public_image_float32_unit_interval"
+        "final_image_vae_posterior_mode"
     )
     assert authority.registered_candidate_ids == MODULE_CANDIDATE_IDS["hf_detector"]
     assert authority.registered_candidate_parameter_bindings == (
@@ -529,6 +563,28 @@ def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
         assert item.dependency_stop_rule == DEPENDENCY_STOP_RULE
         assert item.allowed_module_outcomes == MODULE_OUTCOMES
         assert len(item.candidate_config_digest) == 64
+
+
+@pytest.mark.unit
+def test_every_module_signal_criterion_exactly_covers_registered_metrics() -> None:
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
+    assert all(
+        tuple(criterion.metric_id for criterion in study.signal_criteria)
+        == study.metric_ids
+        for study in protocol.module_matrix
+    )
+    first = protocol.module_matrix[0]
+    drifted = replace(
+        protocol,
+        module_matrix=(
+            replace(first, signal_criteria=first.signal_criteria[:-1]),
+            *protocol.module_matrix[1:],
+        ),
+    )
+    assert any(
+        "signal_criteria_metric_coverage_invalid" in violation
+        for violation in drifted.validate()
+    )
 
 
 @pytest.mark.unit
@@ -801,32 +857,38 @@ def test_threshold_rejects_non_development_input_and_probe_leakage() -> None:
     plan = _cross_fit_plan()
     fold = plan.folds[0]
     valid = _valid_fit_inputs(plan)
-    invalid_split = (
-        replace(
-            valid[0],
-            source_record=replace(
-                valid[0].source_record,
-                split="candidate_selection",
-            ),
-        ),
+    outside_provenance = dict(valid[0].source_record.provenance_trace)
+    outside_provenance["input_manifest_digest"] = "f" * 64
+    outside_manifest_record = _redigest_scientific_record(
+        valid[0].source_record,
+        provenance_trace=outside_provenance,
+    )
+    outside_manifest = (
+        _redigest_fit_input(valid[0], outside_manifest_record),
         *valid[1:],
     )
-    with pytest.raises(ValueError, match="threshold_fit_input_split_invalid"):
-        _create_threshold(plan, invalid_split)
+    with pytest.raises(ValueError, match="manifest_digest_mismatch"):
+        _create_threshold(plan, outside_manifest)
     probe_assignment = next(
         assignment
         for assignment in _development_manifest(plan.source_cluster_count).assignments
         if assignment.identity.source_cluster_id
         == fold.recovery_probe_source_cluster_ids[0]
     )
+    leaked_metric = dict(valid[0].source_record.metric_observation)
+    leaked_metric["source_cluster_id"] = probe_assignment.identity.source_cluster_id
+    leaked_metric_without_digest = dict(leaked_metric)
+    leaked_metric_without_digest.pop("observation_digest")
+    leaked_metric["observation_digest"] = canonical_development_value_digest(
+        leaked_metric_without_digest
+    )
+    leaked_record = _redigest_scientific_record(
+        valid[0].source_record,
+        analysis_unit_identity=asdict(probe_assignment.identity),
+        metric_observation=leaked_metric,
+    )
     leaked = (
-        replace(
-            valid[0],
-            source_record=replace(
-                valid[0].source_record,
-                analysis_unit_identity=probe_assignment.identity,
-            ),
-        ),
+        _redigest_fit_input(valid[0], leaked_record),
         *valid[1:],
     )
     with pytest.raises(ValueError, match="recovery_probe_leakage"):
@@ -837,19 +899,49 @@ def test_threshold_rejects_non_development_input_and_probe_leakage() -> None:
 def test_threshold_rejects_manifest_case_role_spoof_and_wrong_key_fit() -> None:
     plan = _cross_fit_plan()
     valid = _valid_fit_inputs(plan)
-    spoofed_record = replace(
+    spoofed_identity = dict(valid[0].source_record.analysis_unit_identity)
+    spoofed_identity["case_id"] = "registered_positive_case"
+    spoofed_record = _redigest_scientific_record(
         valid[0].source_record,
-        analysis_unit_identity=replace(
-            valid[0].source_record.analysis_unit_identity,
-            case_id="registered_positive_case",
-        ),
+        analysis_unit_identity=spoofed_identity,
     )
-    spoofed = (replace(valid[0], source_record=spoofed_record), *valid[1:])
+    spoofed = (_redigest_fit_input(valid[0], spoofed_record), *valid[1:])
     with pytest.raises(ValueError, match="threshold_fit_input_case_identity_invalid"):
         _create_threshold(plan, spoofed)
     wrong_key = (replace(valid[0], case_role="wrong_key_control"), *valid[1:])
     with pytest.raises(ValueError, match="threshold_fit_input_role_invalid"):
         _create_threshold(plan, wrong_key)
+
+
+@pytest.mark.unit
+def test_threshold_bridge_rejects_registered_branch_and_wrong_null_identity() -> None:
+    plan = _cross_fit_plan()
+    valid = _valid_fit_inputs(plan)
+    registered_metric = dict(valid[0].source_record.metric_observation)
+    registered_metric["content_branch_id"] = "clean_control"
+    registered_metric_without_digest = dict(registered_metric)
+    registered_metric_without_digest.pop("observation_digest")
+    registered_metric["observation_digest"] = canonical_development_value_digest(
+        registered_metric_without_digest
+    )
+    registered_record = _redigest_scientific_record(
+        valid[0].source_record,
+        content_branch_id="clean_control",
+        metric_observation=registered_metric,
+    )
+    registered_input = _redigest_fit_input(valid[0], registered_record)
+    with pytest.raises(ValueError, match="threshold_fit_input_case_identity_invalid"):
+        _create_threshold(plan, (registered_input, *valid[1:]))
+
+    key_trace = dict(valid[0].source_record.key_control_trace)
+    key_trace["primary_null_control_identity"] = "registered_key_control"
+    wrong_identity_record = _redigest_scientific_record(
+        valid[0].source_record,
+        key_control_trace=key_trace,
+    )
+    wrong_identity_input = _redigest_fit_input(valid[0], wrong_identity_record)
+    with pytest.raises(ValueError, match="threshold_fit_input_control_identity_invalid"):
+        _create_threshold(plan, (wrong_identity_input, *valid[1:]))
 
 
 @pytest.mark.unit
@@ -886,7 +978,7 @@ def test_threshold_binds_manifest_detector_rule_and_fold() -> None:
     assert threshold.validate(plan) == ()
     detector_payload = json.loads(threshold.detector_config_payload_json)
     assert detector_payload["preprocessing_identity"] == (
-        "rgb8_public_image_float32_unit_interval"
+        "final_image_vae_posterior_mode"
     )
     assert detector_payload["public_key_relation"] == (
         "registered_detection_public_digests_distinct"
@@ -918,14 +1010,15 @@ def test_threshold_rejects_preprocessing_drift_after_source_redigest() -> None:
     plan = _cross_fit_plan()
     valid = _valid_fit_inputs(plan)
     source = valid[0].source_record
-    detector = replace(
-        source.detector_trace,
+    detector = dict(source.detector_trace)
+    detector.update(
         raw_preprocessing_identity="alternate_public_preprocess",
         rectified_preprocessing_identity="alternate_public_preprocess",
+        primary_null_preprocessing_identity="alternate_public_preprocess",
     )
     forged = _redigest_fit_input(
         valid[0],
-        replace(source, detector_trace=detector),
+        _redigest_scientific_record(source, detector_trace=detector),
     )
     with pytest.raises(
         ValueError,
@@ -941,15 +1034,15 @@ def test_threshold_rejects_public_key_remap_after_all_record_redigests() -> None
     forged_inputs = []
     for index, fit_input in enumerate(threshold.fit_inputs):
         source = fit_input.source_record
-        key_trace = replace(
-            source.key_control_trace,
+        key_trace = dict(source.key_control_trace)
+        key_trace.update(
             registered_key_public_digest=f"{index + 40:064x}",
-            detection_key_public_digest=f"{index + 80:064x}",
+            primary_null_detection_key_public_digest=f"{index + 80:064x}",
         )
         forged_inputs.append(
             _redigest_fit_input(
                 fit_input,
-                replace(source, key_control_trace=key_trace),
+                _redigest_scientific_record(source, key_control_trace=key_trace),
             )
         )
     forged = replace(threshold, fit_inputs=tuple(forged_inputs))
@@ -966,18 +1059,21 @@ def test_threshold_rejects_cross_fit_preprocess_and_key_mismatch() -> None:
     plan = _cross_fit_plan()
     valid = _valid_fit_inputs(plan)
     source = valid[-1].source_record
-    forged_source = replace(
+    detector_trace = dict(source.detector_trace)
+    detector_trace.update(
+        raw_preprocessing_identity="alternate_public_preprocess",
+        rectified_preprocessing_identity="alternate_public_preprocess",
+        primary_null_preprocessing_identity="alternate_public_preprocess",
+    )
+    key_control_trace = dict(source.key_control_trace)
+    key_control_trace.update(
+        registered_key_public_digest="a" * 64,
+        primary_null_detection_key_public_digest="b" * 64,
+    )
+    forged_source = _redigest_scientific_record(
         source,
-        detector_trace=replace(
-            source.detector_trace,
-            raw_preprocessing_identity="alternate_public_preprocess",
-            rectified_preprocessing_identity="alternate_public_preprocess",
-        ),
-        key_control_trace=replace(
-            source.key_control_trace,
-            registered_key_public_digest="a" * 64,
-            detection_key_public_digest="b" * 64,
-        ),
+        detector_trace=detector_trace,
+        key_control_trace=key_control_trace,
     )
     forged = _redigest_fit_input(valid[-1], forged_source)
     with pytest.raises(ValueError) as captured:
@@ -1320,6 +1416,7 @@ def test_observed_signal_allows_independent_candidate_recommendation(
         candidate_recommendation=recommendation,
         recommendation_reason="development records support this separate recommendation",
         evidence_record_ids=("record_for_high_frequency_detector",),
+        evidence_record_digests=("1" * 64,),
     )
     assert outcome.validate(protocol) == ()
     assert outcome.source_record_schema_version == RECORD_SCHEMA_VERSION
@@ -1343,6 +1440,7 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
             candidate_recommendation="candidate_worth_further_selection",
             recommendation_reason="forged recommendation",
             evidence_record_ids=("record",),
+            evidence_record_digests=("1" * 64,),
         )
     own_block = create_development_module_outcome_record(
         protocol,
@@ -1352,6 +1450,7 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
         recommendation_reason="key schedule implementation could not execute",
         blocking_responsibilities=("key_schedule",),
         evidence_record_ids=("key_schedule_implementation_failure_record",),
+        evidence_record_digests=("2" * 64,),
     )
     assert own_block.validate(protocol) == ()
     with pytest.raises(
@@ -1365,6 +1464,7 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
             candidate_recommendation="candidate_not_recommended_for_selection",
             recommendation_reason="dependency did not pass its development rule",
             evidence_record_ids=("record",),
+            evidence_record_digests=("3" * 64,),
         )
 
 

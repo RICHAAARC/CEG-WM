@@ -15,17 +15,17 @@ from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
+from experiments.protocol.development_records import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
+    RECORD_SCHEMA_VERSION,
+    DevelopmentRecordError,
+    DevelopmentScientificRecord,
+)
 from experiments.protocol.internal_matrix import (
     REQUIRED_METHOD_RESPONSIBILITIES,
     RESPONSIBILITY_VALIDATION_MATRIX,
 )
-from experiments.protocol.internal_records import (
-    INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION,
-    INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
-    MAXIMUM_RECORD_ATTEMPTS,
-    InternalValidationRecord,
-    validate_internal_record,
-)
+from experiments.protocol.internal_records import MAXIMUM_RECORD_ATTEMPTS
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
     FrozenSplitManifest,
@@ -75,9 +75,6 @@ DEVELOPMENT_THRESHOLD_RULE_PAYLOAD = {
 DEVELOPMENT_THRESHOLD_INVALIDATION = (
     "invalidate_before_candidate_selection_and_all_later_splits"
 )
-DEVELOPMENT_CLAIM_BOUNDARY = (
-    "preliminary_development_signal_only_no_promotion_or_scientific_claim"
-)
 DEVELOPMENT_THRESHOLD_AUTHORITY_ID = (
     "development_high_frequency_detector_threshold_authority"
 )
@@ -87,7 +84,13 @@ DEVELOPMENT_THRESHOLD_DETECTOR_IDENTITY = (
 )
 DEVELOPMENT_THRESHOLD_DETECTOR_MODE = "hf_only"
 DEVELOPMENT_THRESHOLD_PREPROCESSING_IDENTITY = (
-    "rgb8_public_image_float32_unit_interval"
+    "final_image_vae_posterior_mode"
+)
+DEVELOPMENT_THRESHOLD_METHOD_DETECTOR_IDENTITY = (
+    "0d4ece9d74c97ecc4f32a1c1ef27d984ae7bbe815a75e9a7a182225568cf80d3"
+)
+DEVELOPMENT_THRESHOLD_METHOD_DETECTOR_CONFIG_DIGEST = (
+    "8d033b8e71905931a193800adb106037ea87ed32cc16ffcb54ab2e4c354782e1"
 )
 DEVELOPMENT_THRESHOLD_PUBLIC_KEY_RELATION = (
     "registered_detection_public_digests_distinct"
@@ -100,9 +103,6 @@ REGISTERED_KEY_SCHEDULE_CONFIG_DIGEST = (
 )
 DEVELOPMENT_EXECUTION_INTENT_ROLE = "create_only_before_scientific_records"
 DEVELOPMENT_EXECUTION_INTENT_RAW_SECRET_POLICY = "raw_secret_prohibited"
-RECORD_SCHEMA_VERSION = (
-    "ceg_wm_development_scientific_record_v1"
-)
 RECORD_COLLECTION_SCHEMA_VERSION = (
     "ceg_wm_development_scientific_record_collection_v1"
 )
@@ -764,7 +764,21 @@ class GeometryOperationCase:
 @dataclass(frozen=True, slots=True)
 class DevelopmentGeometryStudy:
     operation_cases: tuple[GeometryOperationCase, ...]
-    negative_control_case_ids: tuple[str, ...]
+    negative_control_cases: tuple[GeometryOperationCase, ...]
+
+    @property
+    def negative_control_case_ids(self) -> tuple[str, ...]:
+        return tuple(item.case_id for item in self.negative_control_cases)
+
+    def case(self, case_id: str) -> GeometryOperationCase:
+        matches = tuple(
+            item
+            for item in (*self.operation_cases, *self.negative_control_cases)
+            if item.case_id == case_id
+        )
+        if len(matches) != 1:
+            raise ValueError("geometry_case_identity_not_frozen")
+        return matches[0]
 
     def validate(self) -> tuple[str, ...]:
         violations: list[str] = []
@@ -795,7 +809,65 @@ class DevelopmentGeometryStudy:
             violations.append("geometry_operation_parameters_invalid")
         if self.negative_control_case_ids != GEOMETRY_NEGATIVE_CONTROL_CASE_IDS:
             violations.append("geometry_negative_control_case_ids_invalid")
+        expected_control_parameters = (
+            ("compound", 0.75, 1.0, -32.0),
+            ("compound", 0.45, 1.4142135623730951, 32.0),
+            ("crop", 0.45, 1.0, 0.0),
+        )
+        observed_control_parameters = tuple(
+            (
+                item.operation_family,
+                item.crop_fraction,
+                item.scale_factor,
+                item.rotation_degrees,
+            )
+            for item in self.negative_control_cases
+        )
+        if observed_control_parameters != expected_control_parameters:
+            violations.append("geometry_negative_control_parameters_invalid")
         return tuple(violations)
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopmentSignalCriterion:
+    metric_id: str
+    comparison: str
+    threshold: float
+
+    def validate(self) -> tuple[str, ...]:
+        violations: list[str] = []
+        if _IDENTITY_PATTERN.fullmatch(self.metric_id) is None:
+            violations.append("development_signal_metric_identity_invalid")
+        if self.comparison not in {
+            "equal",
+            "greater_than",
+            "greater_or_equal",
+            "less_than",
+            "less_or_equal",
+        }:
+            violations.append("development_signal_comparison_invalid")
+        if (
+            isinstance(self.threshold, bool)
+            or not isinstance(self.threshold, (int, float))
+            or not isfinite(float(self.threshold))
+        ):
+            violations.append("development_signal_threshold_invalid")
+        return tuple(violations)
+
+    def satisfied_by(self, value: float) -> bool:
+        if self.validate() or isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        observed = float(value)
+        if not isfinite(observed):
+            return False
+        threshold = float(self.threshold)
+        return {
+            "equal": observed == threshold,
+            "greater_than": observed > threshold,
+            "greater_or_equal": observed >= threshold,
+            "less_than": observed < threshold,
+            "less_or_equal": observed <= threshold,
+        }[self.comparison]
 
 
 @dataclass(frozen=True, slots=True)
@@ -811,6 +883,7 @@ class DevelopmentModuleStudy:
     paired_ablation_identity: str
     negative_control_case_ids: tuple[str, ...]
     metric_ids: tuple[str, ...]
+    signal_criteria: tuple[DevelopmentSignalCriterion, ...]
     record_field_names: tuple[str, ...]
     prerequisite_responsibility_ids: tuple[str, ...]
     dependency_stop_rule: str
@@ -886,6 +959,10 @@ def validate_development_module_matrix(
             violations.append(f"{prefix}:negative_controls_unregistered")
         if item.metric_ids != MODULE_METRIC_IDS.get(prefix):
             violations.append(f"{prefix}:metric_ids_unregistered")
+        if any(criterion.validate() for criterion in item.signal_criteria):
+            violations.append(f"{prefix}:signal_criteria_invalid")
+        if tuple(criterion.metric_id for criterion in item.signal_criteria) != item.metric_ids:
+            violations.append(f"{prefix}:signal_criteria_metric_coverage_invalid")
         if item.candidate_config_digest != _canonical_digest(
             item.candidate_config_payload()
         ):
@@ -946,6 +1023,8 @@ class DevelopmentThresholdDetectorAuthority:
     authority_id: str
     responsibility_id: str
     detector_identity: str
+    method_detector_identity: str
+    method_detector_config_digest: str
     detector_mode: str
     preprocessing_identity: str
     raw_rectified_preprocessing_same: bool
@@ -966,6 +1045,8 @@ class DevelopmentThresholdDetectorAuthority:
     def detector_base_config_payload(self) -> dict[str, object]:
         return {
             "detector_mode": self.detector_mode,
+            "method_detector_identity": self.method_detector_identity,
+            "method_detector_config_digest": self.method_detector_config_digest,
             "registered_candidate_config_digest": (
                 self.registered_candidate_config_digest
             ),
@@ -1010,6 +1091,16 @@ class DevelopmentThresholdDetectorAuthority:
                 self.detector_mode,
                 DEVELOPMENT_THRESHOLD_DETECTOR_MODE,
                 "threshold_authority_detector_mode_invalid",
+            ),
+            (
+                self.method_detector_identity,
+                DEVELOPMENT_THRESHOLD_METHOD_DETECTOR_IDENTITY,
+                "threshold_authority_method_detector_identity_invalid",
+            ),
+            (
+                self.method_detector_config_digest,
+                DEVELOPMENT_THRESHOLD_METHOD_DETECTOR_CONFIG_DIGEST,
+                "threshold_authority_method_detector_config_invalid",
             ),
             (
                 self.preprocessing_identity,
@@ -1633,7 +1724,7 @@ def load_frozen_development_exploration_protocol(
     geometry_raw = _require_mapping(raw["geometry_study"], "geometry_study")
     _require_exact_keys(
         geometry_raw,
-        frozenset({"operation_cases", "negative_control_case_ids"}),
+        frozenset({"operation_cases", "negative_control_cases"}),
         "geometry_study",
     )
     operation_cases: list[GeometryOperationCase] = []
@@ -1655,14 +1746,31 @@ def load_frozen_development_exploration_protocol(
             f"geometry_operation_case:{index}",
         )
         operation_cases.append(GeometryOperationCase(**item))
+    negative_control_cases: list[GeometryOperationCase] = []
+    for index, raw_value in enumerate(
+        _require_sequence(
+            geometry_raw["negative_control_cases"],
+            "geometry_negative_control_cases",
+        )
+    ):
+        item = _require_mapping(raw_value, f"geometry_negative_control_case:{index}")
+        _require_exact_keys(
+            item,
+            frozenset(
+                {
+                    "case_id",
+                    "operation_family",
+                    "crop_fraction",
+                    "scale_factor",
+                    "rotation_degrees",
+                }
+            ),
+            f"geometry_negative_control_case:{index}",
+        )
+        negative_control_cases.append(GeometryOperationCase(**item))
     geometry_study = DevelopmentGeometryStudy(
         operation_cases=tuple(operation_cases),
-        negative_control_case_ids=tuple(
-            _require_sequence(
-                geometry_raw["negative_control_case_ids"],
-                "geometry_negative_control_case_ids",
-            )
-        ),
+        negative_control_cases=tuple(negative_control_cases),
     )
 
     matrix_raw = _require_sequence(raw["module_matrix"], "module_matrix")
@@ -1680,6 +1788,7 @@ def load_frozen_development_exploration_protocol(
             "paired_ablation_identity",
             "negative_control_case_ids",
             "metric_ids",
+            "signal_criteria",
             "record_field_names",
             "prerequisite_responsibility_ids",
             "dependency_stop_rule",
@@ -1730,6 +1839,28 @@ def load_frozen_development_exploration_protocol(
                     )
                 ),
                 metric_ids=tuple(_require_sequence(item["metric_ids"], "metric_ids")),
+                signal_criteria=tuple(
+                    DevelopmentSignalCriterion(
+                        metric_id=_require_identity(
+                            criterion["metric_id"], "signal_criterion_metric_id"
+                        ),
+                        comparison=criterion["comparison"],
+                        threshold=criterion["threshold"],
+                    )
+                    for criterion_value in _require_sequence(
+                        item["signal_criteria"], "signal_criteria"
+                    )
+                    for criterion in (
+                        _require_mapping(
+                            criterion_value, "signal_criterion"
+                        ),
+                    )
+                    if not _require_exact_keys(
+                        criterion,
+                        frozenset({"metric_id", "comparison", "threshold"}),
+                        "signal_criterion",
+                    )
+                ),
                 record_field_names=tuple(
                     _require_sequence(item["record_field_names"], "record_field_names")
                 ),
@@ -1767,6 +1898,8 @@ def load_frozen_development_exploration_protocol(
             "authority_id",
             "responsibility_id",
             "detector_identity",
+            "method_detector_identity",
+            "method_detector_config_digest",
             "detector_mode",
             "preprocessing_identity",
             "raw_rectified_preprocessing_same",
@@ -1796,6 +1929,14 @@ def load_frozen_development_exploration_protocol(
         detector_identity=_require_identity(
             authority_raw["detector_identity"],
             "threshold_authority_detector_identity",
+        ),
+        method_detector_identity=_require_digest(
+            authority_raw["method_detector_identity"],
+            "threshold_authority_method_detector_identity",
+        ),
+        method_detector_config_digest=_require_digest(
+            authority_raw["method_detector_config_digest"],
+            "threshold_authority_method_detector_config_digest",
         ),
         detector_mode=_require_identity(
             authority_raw["detector_mode"], "threshold_authority_detector_mode"
@@ -2756,8 +2897,10 @@ def create_development_threshold_detector_binding(
 
 @dataclass(frozen=True, slots=True)
 class DevelopmentThresholdFitInput:
-    source_record: InternalValidationRecord
+    source_record: DevelopmentScientificRecord
     case_role: str
+    score_role: str
+    primary_null_score: float
     expected_execution_intent_authority_digest: str
     source_record_digest: str
 
@@ -2773,15 +2916,15 @@ class DevelopmentThresholdFitInput:
         detector_binding: FrozenDevelopmentThresholdDetectorBinding,
     ) -> tuple[str, ...]:
         violations: list[str] = []
-        if type(self.source_record) is not InternalValidationRecord:
+        if type(self.source_record) is not DevelopmentScientificRecord:
             return ("threshold_fit_source_record_exact_type_required",)
         record = self.source_record
-        identity = record.analysis_unit_identity
-        record_violations = validate_internal_record(record)
-        if record_violations:
+        try:
+            record.validate()
+            identity = AnalysisUnitIdentity(**record.analysis_unit_identity)
+        except (DevelopmentRecordError, TypeError):
             violations.append("threshold_fit_source_record_invalid")
-        if record.split != DEVELOPMENT_SPLIT:
-            violations.append("threshold_fit_input_split_invalid")
+            return tuple(violations)
         if self.expected_execution_intent_authority_digest != (
             detector_binding.expected_execution_intent_authority_digest
         ):
@@ -2790,40 +2933,41 @@ class DevelopmentThresholdFitInput:
             violations.append("threshold_fit_input_run_identity_mismatch")
         if self.case_role != "primary_null":
             violations.append("threshold_fit_input_role_invalid")
-        if identity.case_id != DEVELOPMENT_PRIMARY_NULL_CASE_ID:
+        if self.score_role != "primary_null_score":
+            violations.append("threshold_fit_input_score_role_invalid")
+        if record.responsibility_id != detector_binding.protocol.threshold_detector_authority.responsibility_id:
+            violations.append("threshold_fit_input_responsibility_invalid")
+        if record.content_branch_id != "hf_only":
+            violations.append("threshold_fit_input_case_identity_invalid")
+        if identity.case_id != "development_primary_null_threshold_fit":
             violations.append("threshold_fit_input_case_identity_invalid")
         if identity.source_cluster_id not in set(fold.fit_source_cluster_ids):
             violations.append("threshold_fit_input_cluster_not_in_fit_fold")
         if identity.source_cluster_id in set(fold.recovery_probe_source_cluster_ids):
             violations.append("threshold_fit_input_recovery_probe_leakage")
-        if SplitAssignment(identity=identity, split=record.split) not in manifest.assignments:
+        if SplitAssignment(identity=identity, split=DEVELOPMENT_SPLIT) not in manifest.assignments:
             violations.append("threshold_fit_input_not_in_bound_manifest")
-        if record.provenance_trace.split_manifest_digest != manifest.digest():
+        if record.provenance_trace.get("input_manifest_digest") != manifest.digest():
             violations.append("threshold_fit_source_record_manifest_digest_mismatch")
         detector = record.detector_trace
         if (
-            detector.raw_detector_identity != detector_binding.detector_identity
-            or detector.rectified_detector_identity
-            != detector_binding.detector_identity
+            detector.get("primary_null_detector_identity")
+            != detector_binding.protocol.threshold_detector_authority.method_detector_identity
         ):
             violations.append("threshold_fit_input_detector_identity_mismatch")
         if (
-            detector.raw_detector_config_digest
-            != detector_binding.detector_config_digest
-            or detector.rectified_detector_config_digest
-            != detector_binding.detector_config_digest
+            detector.get("primary_null_detector_config_digest")
+            != detector_binding.protocol.threshold_detector_authority.method_detector_config_digest
         ):
             violations.append("threshold_fit_input_detector_config_mismatch")
         if (
-            detector.raw_preprocessing_identity
-            != detector_binding.preprocessing_identity
-            or detector.rectified_preprocessing_identity
+            detector.get("primary_null_preprocessing_identity")
             != detector_binding.preprocessing_identity
         ):
             violations.append("threshold_fit_input_preprocessing_identity_mismatch")
-        if record.key_control_trace.key_role != "unwatermarked_primary_null":
-            violations.append("threshold_fit_input_key_role_invalid")
-        if record.key_control_trace.control_identity != "primary_null":
+        if record.key_control_trace.get("primary_null_control_identity") != (
+            "unwatermarked_wrong_key_primary_null"
+        ):
             violations.append("threshold_fit_input_control_identity_invalid")
         key_by_cluster = {
             item.source_cluster_id: item
@@ -2839,19 +2983,24 @@ class DevelopmentThresholdFitInput:
             ):
                 violations.append("threshold_fit_input_key_family_mismatch")
             if (
-                record.key_control_trace.registered_key_public_digest
+                record.key_control_trace.get("registered_key_public_digest")
                 != expected_key.registered_key_public_digest
-                or record.key_control_trace.detection_key_public_digest
+                or record.key_control_trace.get("primary_null_detection_key_public_digest")
                 != expected_key.detection_key_public_digest
             ):
                 violations.append("threshold_fit_input_public_key_mapping_mismatch")
         if record.execution_status != "success":
             violations.append("threshold_fit_input_success_record_required")
-        score = record.detector_trace.raw_content_score
+        sufficient_statistics = dict(
+            record.metric_observation.get("sufficient_statistics", ())
+        )
+        score = sufficient_statistics.get("primary_null_score")
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             violations.append("threshold_fit_input_score_invalid")
         elif not isfinite(float(score)):
             violations.append("threshold_fit_input_score_non_finite")
+        elif float(score) != float(self.primary_null_score):
+            violations.append("threshold_fit_input_score_binding_invalid")
         if self.source_record_digest != _canonical_digest(
             self.payload_without_digest()
         ):
@@ -2862,11 +3011,22 @@ class DevelopmentThresholdFitInput:
 def create_development_threshold_fit_input(
     *,
     expected_execution_intent_authority_digest: str,
-    source_record: InternalValidationRecord,
+    source_record: DevelopmentScientificRecord,
 ) -> DevelopmentThresholdFitInput:
+    if type(source_record) is not DevelopmentScientificRecord:
+        raise TypeError("threshold_fit_source_record_exact_type_required")
+    try:
+        source_record.validate()
+        score = dict(
+            source_record.metric_observation.get("sufficient_statistics", ())
+        )["primary_null_score"]
+    except (DevelopmentRecordError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("threshold_fit_source_record_invalid") from exc
     payload = {
         "source_record": source_record,
         "case_role": "primary_null",
+        "score_role": "primary_null_score",
+        "primary_null_score": float(score),
         "expected_execution_intent_authority_digest": (
             expected_execution_intent_authority_digest
         ),
@@ -2877,6 +3037,8 @@ def create_development_threshold_fit_input(
             {
                 "source_record": asdict(source_record),
                 "case_role": "primary_null",
+                "score_role": "primary_null_score",
+                "primary_null_score": float(score),
                 "expected_execution_intent_authority_digest": (
                     expected_execution_intent_authority_digest
                 ),
@@ -2955,16 +3117,18 @@ class DevelopmentProvisionalThreshold:
         ):
             violations.append("threshold_fit_input_roles_incomplete")
         covered_fit_clusters = {
-            item.source_record.analysis_unit_identity.source_cluster_id
+            AnalysisUnitIdentity(
+                **item.source_record.analysis_unit_identity
+            ).source_cluster_id
             for item in self.fit_inputs
             if type(item) is DevelopmentThresholdFitInput
-            and type(item.source_record) is InternalValidationRecord
+            and type(item.source_record) is DevelopmentScientificRecord
         }
         observed_record_ids = tuple(
             item.source_record.record_id
             for item in self.fit_inputs
             if type(item) is DevelopmentThresholdFitInput
-            and type(item.source_record) is InternalValidationRecord
+            and type(item.source_record) is DevelopmentScientificRecord
         )
         if len(observed_record_ids) != len(set(observed_record_ids)):
             violations.append("threshold_fit_source_record_id_duplicate")
@@ -3058,7 +3222,7 @@ class DevelopmentProvisionalThreshold:
         elif not isfinite(float(self.threshold)):
             violations.append("provisional_threshold_value_non_finite")
         elif self.fit_inputs and self.threshold != max(
-            float(item.source_record.detector_trace.raw_content_score)
+            float(item.primary_null_score)
             for item in self.fit_inputs
             if type(item) is DevelopmentThresholdFitInput
         ):
@@ -3111,7 +3275,7 @@ def create_development_provisional_threshold(
         "responsibility_id": plan.responsibility_id,
         "fold_index": fold_index,
         "threshold": max(
-            float(item.source_record.detector_trace.raw_content_score)
+            float(item.primary_null_score)
             for item in fit_inputs
         ),
         "input_manifest": input_manifest,
@@ -3281,6 +3445,7 @@ class DevelopmentModuleOutcomeRecord:
     recommendation_reason: str
     blocking_responsibilities: tuple[str, ...]
     evidence_record_ids: tuple[str, ...]
+    evidence_record_digests: tuple[str, ...]
     provisional_threshold_identities: tuple[str, ...]
     source_record_schema_version: str
     source_record_collection_schema_version: str
@@ -3332,6 +3497,14 @@ class DevelopmentModuleOutcomeRecord:
             violations.append("module_outcome_evidence_record_ids_invalid")
         if len(set(self.evidence_record_ids)) != len(self.evidence_record_ids):
             violations.append("module_outcome_evidence_record_id_duplicate")
+        if (
+            len(self.evidence_record_digests) != len(self.evidence_record_ids)
+            or any(
+                _DIGEST_PATTERN.fullmatch(value) is None
+                for value in self.evidence_record_digests
+            )
+        ):
+            violations.append("module_outcome_evidence_record_digests_invalid")
         if any(
             _DIGEST_PATTERN.fullmatch(value) is None
             for value in self.provisional_threshold_identities
@@ -3358,6 +3531,7 @@ def create_development_module_outcome_record(
     candidate_recommendation: str,
     recommendation_reason: str,
     evidence_record_ids: Sequence[str],
+    evidence_record_digests: Sequence[str],
     blocking_responsibilities: Sequence[str] = (),
     provisional_threshold_identities: Sequence[str] = (),
 ) -> DevelopmentModuleOutcomeRecord:
@@ -3371,6 +3545,7 @@ def create_development_module_outcome_record(
         "recommendation_reason": recommendation_reason,
         "blocking_responsibilities": tuple(blocking_responsibilities),
         "evidence_record_ids": tuple(evidence_record_ids),
+        "evidence_record_digests": tuple(evidence_record_digests),
         "provisional_threshold_identities": tuple(provisional_threshold_identities),
         "source_record_schema_version": RECORD_SCHEMA_VERSION,
         "source_record_collection_schema_version": (

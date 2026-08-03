@@ -226,7 +226,13 @@ def metric_content_router(
     matched_budget_quality_delta: float,
     adaptive_route_identity: str,
     uniform_route_identity: str,
+    adaptive_detector_config_digest: str,
+    uniform_detector_config_digest: str,
+    adaptive_runtime_result_digest: str,
+    uniform_runtime_result_digest: str,
 ) -> DevelopmentMetricObservation:
+    if adaptive_detector_config_digest != uniform_detector_config_digest:
+        raise DevelopmentMetricError("routing pair detector configuration drifted")
     return _observation(
         responsibility_id="content_router",
         source_cluster_id=source_cluster_id,
@@ -238,7 +244,13 @@ def metric_content_router(
             "routing_coverage": _finite(routing_coverage, "routing coverage"),
             "quality_delta": _finite(matched_budget_quality_delta, "quality delta"),
         },
-        result_identity_digests=(adaptive_route_identity, uniform_route_identity),
+        result_identity_digests=(
+            adaptive_route_identity,
+            uniform_route_identity,
+            adaptive_detector_config_digest,
+            adaptive_runtime_result_digest,
+            uniform_runtime_result_digest,
+        ),
     )
 
 
@@ -439,22 +451,31 @@ def metric_geometric_transform_estimator(
 def metric_geometry_reliability(
     source_cluster_id: str,
     *,
-    reliable_case_accepted: bool,
-    unreliable_control_accepted: bool,
-    reliable_identity_digest: str,
-    unreliable_identity_digest: str,
+    reliability_accepted: bool,
+    is_unreliable_control: bool,
+    reliability_identity_digest: str,
+    estimation_identity_digest: str,
 ) -> DevelopmentMetricObservation:
-    if type(reliable_case_accepted) is not bool or type(unreliable_control_accepted) is not bool:
+    if type(reliability_accepted) is not bool or type(is_unreliable_control) is not bool:
         raise DevelopmentMetricError("reliability decisions must be booleans")
     return _observation(
         responsibility_id="geometry_reliability",
         source_cluster_id=source_cluster_id,
         metric_values={
-            "reliable_accept_rate": float(reliable_case_accepted),
-            "unreliable_reject_rate": float(not unreliable_control_accepted),
-            "false_reliable_rate": float(unreliable_control_accepted),
+            "reliable_accept_rate": float(
+                reliability_accepted and not is_unreliable_control
+            ),
+            "unreliable_reject_rate": float(
+                not reliability_accepted and is_unreliable_control
+            ),
+            "false_reliable_rate": float(
+                reliability_accepted and is_unreliable_control
+            ),
         },
-        result_identity_digests=(reliable_identity_digest, unreliable_identity_digest),
+        result_identity_digests=(
+            reliability_identity_digest,
+            estimation_identity_digest,
+        ),
     )
 
 
@@ -579,7 +600,7 @@ def cross_fit_development_detection_metrics(
     if not observations or any(type(item) is not DevelopmentMetricObservation for item in observations):
         raise DevelopmentMetricError("cross-fit requires development metric observations")
     if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
-        raise DevelopmentMetricError("cross-fit requires a valid frozen Batch-1 plan")
+        raise DevelopmentMetricError("cross-fit requires a valid frozen development plan")
     if plan.responsibility_id != responsibility_id:
         raise DevelopmentMetricError("cross-fit plan responsibility drifted")
     for item in observations:

@@ -171,8 +171,10 @@
     "authority_id": "development_high_frequency_detector_threshold_authority",
     "responsibility_id": "hf_detector",
     "detector_identity": "development_blind_high_frequency_detector",
+    "method_detector_identity": "0d4ece9d74c97ecc4f32a1c1ef27d984ae7bbe815a75e9a7a182225568cf80d3",
+    "method_detector_config_digest": "8d033b8e71905931a193800adb106037ea87ed32cc16ffcb54ab2e4c354782e1",
     "detector_mode": "hf_only",
-    "preprocessing_identity": "rgb8_public_image_float32_unit_interval",
+    "preprocessing_identity": "final_image_vae_posterior_mode",
     "raw_rectified_preprocessing_same": true,
     "registered_candidate_identity": "blind_high_frequency_detector_candidate",
     "registered_candidate_ids": [
@@ -254,10 +256,28 @@
         "rotation_degrees": 16.0
       }
     ],
-    "negative_control_case_ids": [
-      "ambiguous_transform_control",
-      "boundary_transform_control",
-      "extreme_crop_control"
+    "negative_control_cases": [
+      {
+        "case_id": "ambiguous_transform_control",
+        "operation_family": "compound",
+        "crop_fraction": 0.75,
+        "scale_factor": 1.0,
+        "rotation_degrees": -32.0
+      },
+      {
+        "case_id": "boundary_transform_control",
+        "operation_family": "compound",
+        "crop_fraction": 0.45,
+        "scale_factor": 1.4142135623730951,
+        "rotation_degrees": 32.0
+      },
+      {
+        "case_id": "extreme_crop_control",
+        "operation_family": "crop",
+        "crop_fraction": 0.45,
+        "scale_factor": 1.0,
+        "rotation_degrees": 0.0
+      }
     ]
   },
   "module_matrix": [
@@ -275,6 +295,10 @@
       "paired_ablation_identity": "wrong_and_public_key_identity_ablation",
       "negative_control_case_ids": ["wrong_key_roster", "public_noise_secret_independence"],
       "metric_ids": ["key_attribution_separation", "domain_collision_count"],
+      "signal_criteria": [
+        {"metric_id": "key_attribution_separation", "comparison": "equal", "threshold": 1.0},
+        {"metric_id": "domain_collision_count", "comparison": "equal", "threshold": 0.0}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": [],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -299,6 +323,11 @@
       "paired_ablation_identity": "disabled_uniform_routing_ablation",
       "negative_control_case_ids": ["routing_uniform_control", "attack_label_blindness"],
       "metric_ids": ["matched_budget_incremental_tpr", "routing_coverage", "quality_delta"],
+      "signal_criteria": [
+        {"metric_id": "matched_budget_incremental_tpr", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "routing_coverage", "comparison": "greater_than", "threshold": 0.0},
+        {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -322,6 +351,11 @@
       "paired_ablation_identity": "low_frequency_write_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked", "hf_only"],
       "metric_ids": ["lf_attribution_tpr", "lf_primary_null_fpr", "quality_delta"],
+      "signal_criteria": [
+        {"metric_id": "lf_attribution_tpr", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "lf_primary_null_fpr", "comparison": "less_than", "threshold": 0.5},
+        {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -345,6 +379,11 @@
       "paired_ablation_identity": "high_frequency_write_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked", "clean_pair"],
       "metric_ids": ["hf_attribution_tpr", "hf_primary_null_fpr", "quality_delta"],
+      "signal_criteria": [
+        {"metric_id": "hf_attribution_tpr", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "hf_primary_null_fpr", "comparison": "less_than", "threshold": 0.5},
+        {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -373,6 +412,10 @@
       "paired_ablation_identity": "single_branch_embedding_ablation",
       "negative_control_case_ids": ["hf_only", "lf_only", "routing_uniform_control"],
       "metric_ids": ["realized_total_relative_l2", "matched_budget_quality_delta"],
+      "signal_criteria": [
+        {"metric_id": "realized_total_relative_l2", "comparison": "less_or_equal", "threshold": 0.012},
+        {"metric_id": "matched_budget_quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["content_router", "lf_carrier", "hf_carrier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -396,6 +439,10 @@
       "paired_ablation_identity": "low_frequency_detector_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked", "content_disabled"],
       "metric_ids": ["lf_tpr_at_selection_fpr", "lf_wrong_key_rate"],
+      "signal_criteria": [
+        {"metric_id": "lf_tpr_at_selection_fpr", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "lf_wrong_key_rate", "comparison": "less_than", "threshold": 0.5}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule", "lf_carrier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -419,6 +466,10 @@
       "paired_ablation_identity": "high_frequency_detector_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked"],
       "metric_ids": ["hf_tpr_at_frozen_fpr", "hf_wrong_key_rate"],
+      "signal_criteria": [
+        {"metric_id": "hf_tpr_at_frozen_fpr", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "hf_wrong_key_rate", "comparison": "less_than", "threshold": 0.5}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule", "hf_carrier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -444,6 +495,12 @@
       "paired_ablation_identity": "high_frequency_only_detector_ablation",
       "negative_control_case_ids": ["hf_only_standardized_score_control", "wrong_key", "unwatermarked"],
       "metric_ids": ["combined_tpr", "combined_primary_null_fpr", "hf_non_degradation", "wrong_key_rate"],
+      "signal_criteria": [
+        {"metric_id": "combined_tpr", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "combined_primary_null_fpr", "comparison": "less_than", "threshold": 0.5},
+        {"metric_id": "hf_non_degradation", "comparison": "greater_or_equal", "threshold": 0.5},
+        {"metric_id": "wrong_key_rate", "comparison": "less_than", "threshold": 0.5}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["content_embedder", "lf_detector", "hf_detector"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -468,6 +525,11 @@
       "paired_ablation_identity": "wrong_geometry_key_sync_ablation",
       "negative_control_case_ids": ["wrong_geometry_key", "geometry_disabled"],
       "metric_ids": ["relation_score_gain", "wrong_key_relation_margin", "quality_delta"],
+      "signal_criteria": [
+        {"metric_id": "relation_score_gain", "comparison": "greater_than", "threshold": 0.0},
+        {"metric_id": "wrong_key_relation_margin", "comparison": "greater_than", "threshold": 0.0},
+        {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -493,6 +555,13 @@
       "paired_ablation_identity": "oracle_transform_input_ablation",
       "negative_control_case_ids": ["identity", "wrong_geometry_key", "ambiguous_transform", "oracle_diagnostic_only"],
       "metric_ids": ["rotation_error", "scale_error", "translation_error", "coverage", "residual"],
+      "signal_criteria": [
+        {"metric_id": "rotation_error", "comparison": "less_or_equal", "threshold": 16.0},
+        {"metric_id": "scale_error", "comparison": "less_or_equal", "threshold": 0.35},
+        {"metric_id": "translation_error", "comparison": "less_or_equal", "threshold": 0.28},
+        {"metric_id": "coverage", "comparison": "greater_or_equal", "threshold": 0.45},
+        {"metric_id": "residual", "comparison": "less_or_equal", "threshold": 1.0}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "key_control_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["qk_geometry_sync"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -518,6 +587,11 @@
       "paired_ablation_identity": "geometry_reliability_disabled_ablation",
       "negative_control_case_ids": ["wrong_geometry_key", "low_coverage", "boundary_solution", "non_finite_metric"],
       "metric_ids": ["reliable_accept_rate", "unreliable_reject_rate", "false_reliable_rate"],
+      "signal_criteria": [
+        {"metric_id": "reliable_accept_rate", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "unreliable_reject_rate", "comparison": "greater_than", "threshold": 0.5},
+        {"metric_id": "false_reliable_rate", "comparison": "less_than", "threshold": 0.5}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["geometric_transform_estimator"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -542,6 +616,11 @@
       "paired_ablation_identity": "rectification_disabled_ablation",
       "negative_control_case_ids": ["identity_warp", "rectification_disabled", "oracle_diagnostic_only"],
       "metric_ids": ["rectification_quality", "same_detector_score_delta", "valid_support"],
+      "signal_criteria": [
+        {"metric_id": "rectification_quality", "comparison": "less_or_equal", "threshold": 1.0},
+        {"metric_id": "same_detector_score_delta", "comparison": "greater_than", "threshold": 0.0},
+        {"metric_id": "valid_support", "comparison": "greater_than", "threshold": 0.0}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "geometry_trace", "detector_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["geometric_transform_estimator", "geometry_reliability"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
@@ -566,6 +645,12 @@
       "paired_ablation_identity": "raw_content_decision_ablation",
       "negative_control_case_ids": ["raw_only", "geometry_always", "geometry_disabled", "oracle_diagnostic_only"],
       "metric_ids": ["incremental_tpr", "end_to_end_fpr", "trigger_rate", "false_rescue_rate"],
+      "signal_criteria": [
+        {"metric_id": "incremental_tpr", "comparison": "greater_than", "threshold": 0.0},
+        {"metric_id": "end_to_end_fpr", "comparison": "equal", "threshold": 0.0},
+        {"metric_id": "trigger_rate", "comparison": "greater_than", "threshold": 0.0},
+        {"metric_id": "false_rescue_rate", "comparison": "equal", "threshold": 0.0}
+      ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "geometry_trace", "threshold_trace", "key_control_trace", "decision_trace", "provenance_trace"],
       "prerequisite_responsibility_ids": ["content_detector", "qk_geometry_sync", "geometric_transform_estimator", "geometry_reliability", "image_rectifier"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",

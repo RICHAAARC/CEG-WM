@@ -10,12 +10,11 @@ from pathlib import Path
 import pytest
 import torch
 
-from experiments.attacks import GeometricAttackSpec, load_attack_registry
+from experiments.attacks import load_attack_registry
 from experiments.methods import (
     CegWmExperimentAdapter,
     load_ceg_wm_experiment_adapter_configuration,
 )
-from experiments.metrics.development_exploration import DevelopmentMetricError
 from experiments.runners.development_exploration import (
     DevelopmentExplorationRunner,
     DevelopmentRunnerError,
@@ -32,6 +31,7 @@ from experiments.protocol.development_exploration import (
     create_development_provisional_threshold,
     create_development_threshold_fit_input,
 )
+from experiments.protocol.development_records import canonical_development_value_digest
 from main import (
     BranchNullCalibration,
     GeometryReliabilityThresholds,
@@ -47,6 +47,7 @@ from runtime import create_runtime_adapter
 from tests.unit.test_development_module_exploration import (
     _development_manifest,
     _execution_intent,
+    _redigest_scientific_record,
     _threshold_material,
 )
 from tests.unit.test_internal_governed_runner import _context as _internal_context
@@ -95,7 +96,10 @@ def _reliability_thresholds() -> GeometryReliabilityThresholds:
 
 class _CombinedCpuWiringBackend:
     def __init__(self) -> None:
-        self.content = FakeContentBackend()
+        callback_sequence = tuple(range(20))
+        self.content = FakeContentBackend(
+            callback_sequences=tuple(callback_sequence for _ in range(128))
+        )
         self.geometry = FakeQkBackend()
 
     @property
@@ -235,7 +239,6 @@ def _input() -> DevelopmentUnitInput:
                 NullScoreRecord(lf_result.lf_score + 0.2, "null_cluster_b", "null_sample_b"),
             ),
         ),
-        attack_specification=GeometricAttackSpec("identity"),
         epsilon_inlier=0.8,
         geometry_reliability_thresholds=_reliability_thresholds(),
         provisional_threshold=None,
@@ -257,6 +260,7 @@ def test_first_breadth_units_call_real_key_router_and_carrier_methods() -> None:
         "key_attribution_separation"
     ] == 1.0
     assert router.record.routing_trace["routing_identity"]
+    assert router.record.routing_trace["routing_comparison_eligible"] is False
     assert low_frequency.record.operation_result_payload["candidate_id"] == "lf_low_pass"
     assert high_frequency.record.operation_result_payload["candidate_id"] == "hf_sparse_tail"
     assert all(result.record.module_outcome is None for result in (key, router, low_frequency, high_frequency))
@@ -279,6 +283,29 @@ def test_content_embedding_unit_uses_actual_runtime_write_and_vae() -> None:
     values = dict(result.record.metric_observation["sufficient_statistics"])
     assert values["realized_total_relative_l2"] >= 0.0
     assert runner.runtime_adapter._backend.run_calls == 2
+
+
+@pytest.mark.quick
+def test_router_comparison_executes_both_frozen_runtime_arms() -> None:
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "content_router"
+        and item.source_cluster_ordinal == 0
+        and item.content_branch_id == "lf_hf_routed_combination"
+    )
+
+    result = runner._execute_unit(unit.unit_index, _input())
+
+    assert runner.runtime_adapter._backend.run_calls == 4
+    assert result.record.routing_trace["routing_comparison_eligible"] is True
+    assert result.record.routing_trace["adaptive_detector_identity"] == (
+        result.record.routing_trace["uniform_control_detector_identity"]
+    )
+    assert result.record.routing_trace["adaptive_detector_config_digest"] == (
+        result.record.routing_trace["uniform_control_detector_config_digest"]
+    )
 
 
 @pytest.mark.quick
@@ -330,6 +357,33 @@ def test_rectifier_fail_closed_is_classified_as_scientific_exclusion() -> None:
 
 
 @pytest.mark.quick
+def test_geometry_control_uses_frozen_attack_and_official_reliability() -> None:
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "geometry_reliability"
+        and item.source_cluster_ordinal == 0
+        and item.geometry_case_id == "extreme_crop_control"
+    )
+
+    result = runner._execute_unit(unit.unit_index, _input())
+    statistics = dict(result.record.metric_observation["sufficient_statistics"])
+
+    assert result.record.geometry_case_id == "extreme_crop_control"
+    assert result.record.geometry_trace["geometry_operation_identity"] == "crop"
+    assert result.record.geometry_trace["geometry_reliability_status"] in {
+        "reliable",
+        "unreliable",
+    }
+    assert statistics["reliable_accept_rate"] == 0.0
+    assert (
+        statistics["unreliable_reject_rate"]
+        + statistics["false_reliable_rate"]
+    ) == 1.0
+
+
+@pytest.mark.quick
 def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -355,32 +409,49 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
     )
     threshold_manifest, detector_binding, fit_inputs = _threshold_material(plan)
     desired_tau = payload.thresholds.tau
-    adjusted_inputs = tuple(
-        create_development_threshold_fit_input(
-            expected_execution_intent_authority_digest=intent.authority_digest,
-            source_record=replace(
-                item.source_record,
-                detector_trace=replace(
-                    item.source_record.detector_trace,
-                    raw_content_score=(
-                        desired_tau if index == 0 else desired_tau - 1.0
-                    ),
-                ),
-                branch_score_trace=replace(
-                    item.source_record.branch_score_trace,
-                    hf_score=(desired_tau if index == 0 else desired_tau - 1.0),
-                ),
+    adjusted_inputs = []
+    for index, item in enumerate(fit_inputs):
+        score = desired_tau if index == 0 else desired_tau - 1.0
+        operation_payload = {"primary_null_score": score}
+        metric_observation = dict(item.source_record.metric_observation)
+        statistics = dict(metric_observation["sufficient_statistics"])
+        statistics.update(
+            primary_null_score=score,
+            registered_score=score + 1.0,
+            wrong_key_score=score - 1.0,
+        )
+        metric_observation["sufficient_statistics"] = tuple(
+            statistics.items()
+        )
+        metric_without_digest = dict(metric_observation)
+        metric_without_digest.pop("observation_digest")
+        metric_observation["observation_digest"] = (
+            canonical_development_value_digest(metric_without_digest)
+        )
+        branch_score_trace = dict(item.source_record.branch_score_trace)
+        branch_score_trace["hf_score"] = score
+        source_record = _redigest_scientific_record(
+            item.source_record,
+            operation_result_payload=operation_payload,
+            operation_result_digest=canonical_development_value_digest(
+                operation_payload
+            ),
+            metric_observation=metric_observation,
+            branch_score_trace=branch_score_trace,
+        )
+        adjusted_inputs.append(
+            create_development_threshold_fit_input(
+                expected_execution_intent_authority_digest=intent.authority_digest,
+                source_record=source_record,
             )
         )
-        for index, item in enumerate(fit_inputs)
-    )
     threshold = create_development_provisional_threshold(
         plan,
         expected_execution_intent_authority_digest=intent.authority_digest,
         fold_index=0,
         input_manifest=threshold_manifest,
         detector_binding=detector_binding,
-        fit_inputs=adjusted_inputs,
+        fit_inputs=tuple(adjusted_inputs),
     )
     joint_input = replace(
         _input(),
@@ -475,51 +546,63 @@ def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
 
 
 @pytest.mark.quick
-def test_module_outcome_is_automatic_and_requires_complete_cluster_coverage() -> None:
+def test_module_outcome_public_surface_accepts_no_caller_records_or_outcomes() -> None:
     runner = _runner()
-    records = tuple(
-        runner._execute_unit(
-            runner._representative_unit("key_schedule", cluster).unit_index,
-            _input(),
-        ).record
-        for cluster in range(16)
-    )
-
-    outcome = runner.build_module_outcome_record(
-        records,
-        responsibility_id="key_schedule",
-    )
-
-    assert outcome.module_outcome == "mechanism_signal_observed"
-    assert outcome.candidate_recommendation == "candidate_worth_further_selection"
-    signature = inspect.signature(runner.build_module_outcome_record)
-    assert "module_outcome" not in signature.parameters
-    assert "candidate_recommendation" not in signature.parameters
-    assert all(
-        tuple(item.metric_observation["registered_metric_ids"]) == item.metric_ids
-        for item in records
-    )
+    assert not hasattr(runner, "build_module_outcome_record")
+    signature = inspect.signature(runner.build_verified_module_outcome_record)
+    assert "records" not in signature.parameters
+    assert "prerequisite_outcome_records" not in signature.parameters
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence-verified records",
+    ):
+        runner._build_module_outcome_record(
+            (runner._execute_unit(0, _input()).record,),
+            responsibility_id="key_schedule",
+            _verified_build_token=object(),
+        )
 
 
 @pytest.mark.quick
-def test_module_outcome_rejects_incomplete_paired_cluster_variants() -> None:
+@pytest.mark.parametrize(
+    ("responsibility_id", "bad_values"),
+    (
+        (
+            "qk_geometry_sync",
+            {
+                "relation_score_gain": 1.0,
+                "wrong_key_relation_margin": 1.0,
+                "quality_delta": 999.0,
+            },
+        ),
+        (
+            "image_rectifier",
+            {
+                "rectification_quality": 999.0,
+                "same_detector_score_delta": 1.0,
+                "valid_support": 1.0,
+            },
+        ),
+        (
+            "conditional_recovery_decision",
+            {
+                "incremental_tpr": 1.0,
+                "end_to_end_fpr": 1.0,
+                "trigger_rate": 1.0,
+                "false_rescue_rate": 0.0,
+            },
+        ),
+    ),
+)
+def test_frozen_module_signal_criteria_reject_bad_scientific_values(
+    responsibility_id: str,
+    bad_values: dict[str, float],
+) -> None:
     runner = _runner()
-    one_router_record = runner._execute_unit(1, _input()).record
+    study = next(
+        item
+        for item in runner.protocol.module_matrix
+        if item.responsibility_id == responsibility_id
+    )
 
-    with pytest.raises(DevelopmentMetricError, match="paired cluster aggregate"):
-        runner.build_module_outcome_record(
-            (one_router_record,),
-            responsibility_id="content_router",
-            prerequisite_outcome_records=(
-                runner.build_module_outcome_record(
-                    tuple(
-                        runner._execute_unit(
-                            runner._representative_unit("key_schedule", cluster).unit_index,
-                            _input(),
-                        ).record
-                        for cluster in range(16)
-                    ),
-                    responsibility_id="key_schedule",
-                ),
-            ),
-        )
+    assert runner._scientific_signal_observed(study, bad_values) is False

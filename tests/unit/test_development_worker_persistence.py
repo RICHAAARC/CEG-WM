@@ -7,10 +7,26 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
+from experiments.metrics.development_exploration import (
+    DEVELOPMENT_METRIC_ROLE,
+    METRIC_SCHEMA_VERSION,
+)
+
 from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.development_exploration import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
+    RECORD_SCHEMA_VERSION,
+)
+from experiments.protocol.development_records import (
+    DEVELOPMENT_RECORD_COLLECTION_ROLE,
+    DEVELOPMENT_RECORD_MEMBER_PATH,
+    DevelopmentScientificRecord,
+    canonical_development_value_digest,
+)
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
     derive_source_cluster_id,
@@ -150,8 +166,119 @@ def _commit(store: DevelopmentPersistentStore, lease, intent, *, now: int = 102)
     return store.commit_unit(
         lease,
         intent,
-        members={"records/scientific.json": b'{"status":"success"}\n'},
+        record=_record(store, intent),
         now_epoch_seconds=now,
+    )
+
+
+def _record(
+    store: DevelopmentPersistentStore,
+    intent,
+    *,
+    execution_status: str = "success",
+    failure_class: str | None = None,
+    failure_reason: str | None = None,
+    actual_elapsed_seconds: float = 1.0,
+) -> DevelopmentScientificRecord:
+    operation_result = {"observation": "registered"} if execution_status == "success" else {}
+    success_trace = {
+        "raw_detector_identity": "development_detector",
+        "rectified_detector_identity": "development_detector",
+        "raw_detector_config_digest": "a" * 64,
+        "rectified_detector_config_digest": "a" * 64,
+        "raw_preprocessing_identity": "rgb8_public_preprocessing",
+        "rectified_preprocessing_identity": "rgb8_public_preprocessing",
+    }
+    metric_payload = {
+        "schema_version": METRIC_SCHEMA_VERSION,
+        "metric_role": DEVELOPMENT_METRIC_ROLE,
+        "responsibility_id": intent.responsibility_id,
+        "source_cluster_id": intent.analysis_unit_identity["source_cluster_id"],
+        "registered_metric_ids": ("registered_identity_separation_metric",),
+        "candidate_config_digest": intent.candidate_config_digest,
+        "paired_ablation_identity": "registered_wrong_key_ablation",
+        "content_branch_id": intent.content_branch_id,
+        "geometry_case_id": intent.geometry_case_id,
+        "sufficient_statistics": (
+            ("registered_identity_separation_metric", 1.0),
+        ),
+        "result_identity_digests": ("f" * 64,),
+        "threshold_role": None,
+        "threshold_identity": None,
+        "threshold_fit_source_cluster_digest": None,
+    }
+    metric_payload["observation_digest"] = canonical_development_value_digest(
+        metric_payload
+    )
+    record = DevelopmentScientificRecord(
+        schema_version=RECORD_SCHEMA_VERSION,
+        collection_role=DEVELOPMENT_RECORD_COLLECTION_ROLE,
+        record_id=f"{intent.unit_index + intent.attempt_index + 120:064x}",
+        run_id=store.run_id,
+        protocol_id="development_module_exploration",
+        protocol_version="development_module_exploration_version",
+        protocol_digest=store.worker_identity.protocol_digest,
+        execution_intent_authority_digest=(
+            store.worker_identity.execution_intent_authority_digest
+        ),
+        method_code_revision=store.worker_identity.revision,
+        unit_index=intent.unit_index,
+        phase=intent.phase,
+        analysis_unit_identity=intent.analysis_unit_identity,
+        responsibility_id=intent.responsibility_id,
+        scientific_question_id=intent.scientific_question_id,
+        development_case_id=intent.development_case_id,
+        candidate_identity=intent.candidate_identity,
+        candidate_config_digest=intent.candidate_config_digest,
+        paired_ablation_identity="registered_wrong_key_ablation",
+        negative_control_case_ids=("wrong_key_control",),
+        metric_ids=("registered_identity_separation_metric",),
+        content_branch_id=intent.content_branch_id,
+        geometry_case_id=intent.geometry_case_id,
+        attempt_index=intent.attempt_index,
+        execution_status=execution_status,
+        failure_class=failure_class,
+        failure_reason=failure_reason,
+        retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+        actual_elapsed_seconds=actual_elapsed_seconds,
+        maximum_duration_seconds=intent.maximum_duration_seconds,
+        duration_limit_exceeded=(
+            actual_elapsed_seconds > intent.maximum_duration_seconds
+        ),
+        operation_result_payload=operation_result,
+        operation_result_digest=canonical_development_value_digest(operation_result),
+        metric_observation={} if execution_status != "success" else metric_payload,
+        routing_trace={},
+        branch_score_trace={},
+        detector_trace=success_trace if execution_status == "success" else {},
+        geometry_trace={},
+        threshold_trace=(
+            {
+                "raw_threshold_identity": "development_threshold",
+                "rectified_threshold_identity": "development_threshold",
+            }
+            if execution_status == "success"
+            else {}
+        ),
+        key_control_trace={},
+        decision_trace={"positive_source": None},
+        provenance_trace={
+            "protocol_digest": store.worker_identity.protocol_digest,
+            "execution_intent_authority_digest": (
+                store.worker_identity.execution_intent_authority_digest
+            ),
+            "method_code_revision": store.worker_identity.revision,
+            "candidate_config_digest": intent.candidate_config_digest,
+        },
+        module_outcome=None,
+        candidate_recommendation=None,
+        scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+    )
+    return replace(
+        record,
+        record_id=canonical_development_value_digest(
+            record.payload_without_record_id()
+        ),
     )
 
 
@@ -314,6 +441,217 @@ def test_create_only_commit_rebuilds_ledger_from_verified_markers(tmp_path: Path
 
 
 @pytest.mark.quick
+def test_commit_writes_only_exact_formal_record_at_fixed_member_path(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store)
+    intent = _intent(store, lease)
+    marker = _commit(store, lease, intent)
+    bundle = store.run_root / "bundles" / f"sha256_{marker.bundle_sha256}.zip"
+    with ZipFile(bundle, "r") as archive:
+        assert DEVELOPMENT_RECORD_MEMBER_PATH in archive.namelist()
+        payload = json.loads(archive.read(DEVELOPMENT_RECORD_MEMBER_PATH))
+    assert payload["unit_index"] == intent.unit_index
+    assert marker.scientific_record_digest == sha256(
+        canonical_json_bytes(payload)
+    ).hexdigest()
+    assert marker.attempt_disposition == "success"
+    verified_records = store.verified_terminal_scientific_records(
+        now_epoch_seconds=201
+    )
+    assert len(verified_records) == 1
+    assert verified_records[0].record_id == payload["record_id"]
+
+
+@pytest.mark.quick
+def test_commit_rejects_pseudo_json_and_record_identity_drift(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store)
+    intent = _intent(store, lease)
+    with pytest.raises(DevelopmentPersistenceError, match="exact type"):
+        store.commit_unit(
+            lease,
+            intent,
+            record={"execution_status": "success"},  # type: ignore[arg-type]
+            now_epoch_seconds=102,
+        )
+    with pytest.raises(DevelopmentPersistenceError, match="identity drifted"):
+        store.commit_unit(
+            lease,
+            intent,
+            record=replace(_record(store, intent), unit_index=1),
+            now_epoch_seconds=102,
+        )
+    empty_metric_record = replace(
+        _record(store, intent),
+        metric_observation={},
+    )
+    empty_metric_record = replace(
+        empty_metric_record,
+        record_id=canonical_development_value_digest(
+            empty_metric_record.payload_without_record_id()
+        ),
+    )
+    with pytest.raises(DevelopmentPersistenceError, match="metric observation"):
+        store.commit_unit(
+            lease,
+            intent,
+            record=empty_metric_record,
+            now_epoch_seconds=102,
+        )
+    with pytest.raises(DevelopmentPersistenceError, match="reserved"):
+        store.commit_unit(
+            lease,
+            intent,
+            record=_record(store, intent),
+            diagnostic_members={DEVELOPMENT_RECORD_MEMBER_PATH: b"{}\n"},
+            now_epoch_seconds=102,
+        )
+
+
+@pytest.mark.quick
+def test_retryable_failure_and_success_commit_contiguous_attempt_lineage(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first_lease = _lease(store, session_id="resource_session", duration=10)
+    first_intent = _intent(store, first_lease, index=1)
+    retry_marker = store.commit_unit(
+        first_lease,
+        first_intent,
+        record=_record(
+            store,
+            first_intent,
+            execution_status="retry",
+            failure_class="resource_failure",
+            failure_reason="gpu_memory_pressure",
+        ),
+        now_epoch_seconds=102,
+    )
+    assert retry_marker.attempt_disposition == "retryable_resource_failure"
+    assert store.next_attempt_index(first_intent.unit_id) == 1
+    assert store.recover(now_epoch_seconds=111).next_attempt_by_unit == (
+        (first_intent.unit_id, 1),
+    )
+
+    resumed = _lease(store, session_id="recovery_session", start=111, duration=20)
+    second_intent = _intent(
+        store,
+        resumed,
+        index=1,
+        now=112,
+        attempt=1,
+        parent=first_intent.digest(),
+    )
+    success_marker = _commit(store, resumed, second_intent, now=113)
+    recovered = store.recover(now_epoch_seconds=132)
+    assert recovered.committed_units == (retry_marker, success_marker)
+    assert recovered.next_attempt_by_unit == ()
+    with pytest.raises(DevelopmentPersistenceError, match="terminal"):
+        store.next_attempt_index(first_intent.unit_id)
+
+
+@pytest.mark.quick
+def test_final_failure_is_committed_and_cannot_be_rerun(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store)
+    intent = _intent(store, lease, index=2)
+    marker = store.commit_unit(
+        lease,
+        intent,
+        record=_record(
+            store,
+            intent,
+            execution_status="failed",
+            failure_class="implementation_failure",
+            failure_reason="registered_operation_failed",
+        ),
+        now_epoch_seconds=102,
+    )
+    assert marker.attempt_disposition == "final_failure"
+    with pytest.raises(DevelopmentPersistenceError, match="terminal"):
+        _intent(store, lease, index=2, now=103, attempt=1, parent=intent.digest())
+
+
+@pytest.mark.quick
+def test_third_attempt_cannot_remain_retryable(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store, duration=100)
+    parent = None
+    latest_intent = None
+    for attempt in (0, 1):
+        latest_intent = _intent(
+            store,
+            lease,
+            index=4,
+            now=101 + attempt * 2,
+            attempt=attempt,
+            parent=parent,
+        )
+        store.commit_unit(
+            lease,
+            latest_intent,
+            record=_record(
+                store,
+                latest_intent,
+                execution_status="retry",
+                failure_class="resource_failure",
+                failure_reason="transient_resource_failure",
+            ),
+            now_epoch_seconds=102 + attempt * 2,
+        )
+        parent = latest_intent.digest()
+    assert latest_intent is not None
+    last = _intent(
+        store,
+        lease,
+        index=4,
+        now=105,
+        attempt=2,
+        parent=latest_intent.digest(),
+    )
+    with pytest.raises(DevelopmentPersistenceError, match="cannot remain retryable"):
+        store.commit_unit(
+            lease,
+            last,
+            record=_record(
+                store,
+                last,
+                execution_status="retry",
+                failure_class="resource_failure",
+                failure_reason="resource_budget_exhausted",
+            ),
+            now_epoch_seconds=106,
+        )
+
+
+@pytest.mark.quick
+def test_recovery_rejects_orphan_bundle_not_uniquely_referenced(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store)
+    _commit(store, lease, _intent(store, lease))
+    orphan = store.run_root / "bundles" / f"sha256_{'f' * 64}.zip"
+    orphan.write_bytes(b"orphan")
+    with pytest.raises(DevelopmentPersistenceError, match="orphan|unreferenced"):
+        store.recover(now_epoch_seconds=201)
+
+
+@pytest.mark.quick
+def test_record_elapsed_time_and_frozen_duration_are_validated(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store)
+    intent = _intent(store, lease, index=3)
+    with pytest.raises(DevelopmentPersistenceError, match="duration limit status"):
+        store.commit_unit(
+            lease,
+            intent,
+            record=replace(
+                _record(store, intent),
+                actual_elapsed_seconds=901.0,
+                duration_limit_exceeded=False,
+            ),
+            now_epoch_seconds=102,
+        )
+
+
+@pytest.mark.quick
 def test_only_expired_or_closed_leaf_intent_becomes_interrupted(tmp_path: Path) -> None:
     store = _store(tmp_path)
     first_lease = _lease(store, session_id="lost_session", duration=10)
@@ -384,7 +722,8 @@ def test_unsafe_or_executable_bundle_members_are_rejected(tmp_path: Path, member
         store.commit_unit(
             lease,
             intent,
-            members={member_path: b"payload"},
+            record=_record(store, intent),
+            diagnostic_members={member_path: b"payload"},
             now_epoch_seconds=102,
         )
 
@@ -398,7 +737,11 @@ def test_bundle_member_identities_are_unique_under_casefold(tmp_path: Path) -> N
         store.commit_unit(
             lease,
             intent,
-            members={"records/Result.json": b"one", "records/result.JSON": b"two"},
+            record=_record(store, intent),
+            diagnostic_members={
+                "records/Result.json": b"one",
+                "records/result.JSON": b"two",
+            },
             now_epoch_seconds=102,
         )
 
@@ -412,7 +755,10 @@ def test_secret_sentinel_never_reaches_bundle_or_receipt(tmp_path: Path) -> None
         store.commit_unit(
             lease,
             intent,
-            members={"records/scientific.json": b'{"token":"raw-secret-sentinel"}\n'},
+            record=_record(store, intent),
+            diagnostic_members={
+                "diagnostics/secret.json": b'{"token":"raw-secret-sentinel"}\n'
+            },
             raw_secret_values=("raw-secret-sentinel",),
             now_epoch_seconds=102,
         )

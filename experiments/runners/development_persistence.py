@@ -21,12 +21,19 @@ from typing import Mapping, Sequence
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.development_records import (
+    ATTEMPT_DISPOSITIONS,
+    DEVELOPMENT_RECORD_MEMBER_PATH,
+    DevelopmentRecordError,
+    DevelopmentScientificRecord,
+    validate_record_against_intent,
+)
 from experiments.protocol.internal_splits import AnalysisUnitIdentity
 
 
 SCHEMA_VERSION = "ceg_wm_development_worker_persistence_v1"
 MANIFEST_SCHEMA_VERSION = "ceg_wm_development_artifact_manifest_v1"
-RESULT_SCHEMA_VERSION = "ceg_wm_development_committed_marker_v1"
+RESULT_SCHEMA_VERSION = "ceg_wm_development_committed_marker_v2"
 DIAGNOSTIC_SCHEMA_VERSION = "ceg_wm_development_session_receipt_v1"
 IDENTITY_SCHEMA_VERSION = "ceg_wm_development_single_writer_lease_v1"
 MAXIMUM_ATTEMPTS = 3
@@ -605,6 +612,11 @@ class CommittedUnit:
     session_id: str
     fencing_token: int
     intent_digest: str
+    attempt_disposition: str
+    scientific_record_digest: str
+    scientific_record_bytes: int
+    actual_elapsed_seconds: float
+    maximum_duration_seconds: int
     bundle_sha256: str
     bundle_bytes: int
     artifact_manifest_digest: str
@@ -818,8 +830,18 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError("attempt index exceeds registered unit limit")
         if unit_id != registered.unit_id:
             raise DevelopmentPersistenceError("unit identity is outside frozen roster")
-        if self._committed_marker_paths(unit_id):
-            raise DevelopmentPersistenceError("committed unit cannot be rerun")
+        unit_commits = sorted(
+            (
+                item
+                for item in self._verified_commits()
+                if item.unit_id == unit_id
+            ),
+            key=lambda item: item.attempt_index,
+        )
+        if unit_commits and unit_commits[-1].attempt_disposition != (
+            "retryable_resource_failure"
+        ):
+            raise DevelopmentPersistenceError("terminal committed unit cannot be rerun")
         expected = self.next_attempt_index(unit_id)
         if attempt_index != expected:
             raise DevelopmentPersistenceError("attempt sequence is not contiguous")
@@ -876,7 +898,8 @@ class DevelopmentPersistentStore:
         lease: PersistentLease,
         intent: UnitIntent,
         *,
-        members: Mapping[str, bytes],
+        record: DevelopmentScientificRecord,
+        diagnostic_members: Mapping[str, bytes] | None = None,
         raw_secret_values: Sequence[str] = (),
         now_epoch_seconds: int,
     ) -> CommittedUnit:
@@ -888,22 +911,47 @@ class DevelopmentPersistentStore:
         if _read_canonical_json(intent_path, "unit intent") != intent.payload():
             raise DevelopmentPersistenceError("unit intent bytes drifted")
         self._verify_intent_registered_binding(intent)
-        if not members:
-            raise DevelopmentPersistenceError("unit bundle cannot be empty")
-        normalized: dict[str, bytes] = {}
+        if type(record) is not DevelopmentScientificRecord:
+            raise DevelopmentPersistenceError(
+                "formal development scientific record exact type is required"
+            )
+        try:
+            validate_record_against_intent(record, intent)
+        except DevelopmentRecordError as exc:
+            raise DevelopmentPersistenceError(str(exc)) from exc
+        disposition = record.attempt_disposition()
+        if (
+            disposition == "retryable_resource_failure"
+            and intent.attempt_index + 1 >= intent.maximum_record_attempts
+        ):
+            raise DevelopmentPersistenceError(
+                "last registered attempt cannot remain retryable"
+            )
+        record_bytes = canonical_json_bytes(record.payload())
+        if diagnostic_members is None:
+            diagnostic_members = {}
+        if not isinstance(diagnostic_members, Mapping):
+            raise DevelopmentPersistenceError("diagnostic members mapping is invalid")
+        normalized: dict[str, bytes] = {
+            DEVELOPMENT_RECORD_MEMBER_PATH: record_bytes
+        }
         normalized_casefold: set[str] = set()
-        for name, payload in members.items():
+        for name, payload in diagnostic_members.items():
             safe_name = _safe_member_path(name)
             folded_name = safe_name.casefold()
-            if folded_name == "artifact_manifest.json":
-                raise DevelopmentPersistenceError("artifact manifest name is reserved")
+            if folded_name in {
+                "artifact_manifest.json",
+                DEVELOPMENT_RECORD_MEMBER_PATH.casefold(),
+            }:
+                raise DevelopmentPersistenceError("bundle member name is reserved")
             if folded_name in normalized_casefold:
                 raise DevelopmentPersistenceError("bundle member casefold identity collision")
             if type(payload) is not bytes:
                 raise DevelopmentPersistenceError("bundle members must be bytes")
             normalized[safe_name] = payload
             normalized_casefold.add(folded_name)
-        if len(normalized) != len(members):
+        normalized_casefold.add(DEVELOPMENT_RECORD_MEMBER_PATH.casefold())
+        if len(normalized) != len(diagnostic_members) + 1:
             raise DevelopmentPersistenceError("bundle member identity collision")
         _reject_secrets(tuple(normalized.values()), raw_secret_values)
         artifact_manifest = ArtifactManifest(
@@ -931,6 +979,11 @@ class DevelopmentPersistentStore:
             session_id=intent.session_id,
             fencing_token=intent.fencing_token,
             intent_digest=intent.digest(),
+            attempt_disposition=disposition,
+            scientific_record_digest=sha256(record_bytes).hexdigest(),
+            scientific_record_bytes=len(record_bytes),
+            actual_elapsed_seconds=float(record.actual_elapsed_seconds),
+            maximum_duration_seconds=record.maximum_duration_seconds,
             bundle_sha256=bundle_digest,
             bundle_bytes=len(archive_bytes),
             artifact_manifest_digest=artifact_manifest.digest(),
@@ -954,7 +1007,9 @@ class DevelopmentPersistentStore:
         commits = tuple(self._verified_commits(leases=leases))
         receipts = self._load_receipts(commits=commits, leases=leases)
         receipts_by_session = {item.session_id: item for item in receipts}
-        committed_ids = {item.unit_id for item in commits}
+        commits_by_unit: dict[str, list[CommittedUnit]] = {}
+        for marker in commits:
+            commits_by_unit.setdefault(marker.unit_id, []).append(marker)
         retry_parents = {
             item.parent_attempt_intent_digest
             for item in commits
@@ -987,12 +1042,22 @@ class DevelopmentPersistentStore:
             marker_path = self._marker_path(intent.unit_id, intent.attempt_index)
             if marker_path.exists():
                 continue
-            if intent.unit_id in committed_ids:
-                if intent.digest() in retry_parents:
-                    continue
-                raise DevelopmentPersistenceError("unbound dangling intent exists after a committed attempt")
             if intent.digest() in retry_parents:
                 continue
+            prior_commits = sorted(
+                commits_by_unit.get(intent.unit_id, ()),
+                key=lambda item: item.attempt_index,
+            )
+            if prior_commits:
+                latest = prior_commits[-1]
+                if (
+                    latest.attempt_disposition != "retryable_resource_failure"
+                    or intent.attempt_index != latest.attempt_index + 1
+                    or intent.parent_attempt_intent_digest != latest.intent_digest
+                ):
+                    raise DevelopmentPersistenceError(
+                        "dangling intent is not a retryable committed successor"
+                    )
             lease = self._lease_for_lineage(
                 leases,
                 session_id=intent.session_id,
@@ -1012,13 +1077,38 @@ class DevelopmentPersistentStore:
                 )
             )
             next_attempts[intent.unit_id] = intent.attempt_index + 1
-        for marker in commits:
-            next_attempts.pop(marker.unit_id, None)
-        if any(value >= MAXIMUM_ATTEMPTS for value in next_attempts.values()):
-            raise DevelopmentPersistenceError("interrupted unit exhausted frozen attempts")
-        ledger_payload = [item.payload() for item in sorted(commits, key=lambda item: item.unit_index)]
+        for unit_id, unit_commits in commits_by_unit.items():
+            latest = max(unit_commits, key=lambda item: item.attempt_index)
+            successor_claimed = any(
+                item.unit_id == unit_id
+                and item.attempt_index == latest.attempt_index + 1
+                for item in intents
+            )
+            if (
+                latest.attempt_disposition == "retryable_resource_failure"
+                and not successor_claimed
+            ):
+                next_attempts[unit_id] = latest.attempt_index + 1
+        for unit_id, value in next_attempts.items():
+            registered = next(
+                item
+                for item in self._registered_unit_bindings.values()
+                if item.unit_id == unit_id
+            )
+            if value >= registered.maximum_record_attempts:
+                raise DevelopmentPersistenceError(
+                    "interrupted unit exhausted frozen attempts"
+                )
+        ledger_payload = [
+            item.payload()
+            for item in sorted(
+                commits, key=lambda item: (item.unit_index, item.attempt_index)
+            )
+        ]
         return RecoveryReport(
-            committed_units=tuple(sorted(commits, key=lambda item: item.unit_index)),
+            committed_units=tuple(
+                sorted(commits, key=lambda item: (item.unit_index, item.attempt_index))
+            ),
             interrupted_attempts=tuple(interrupted),
             next_attempt_by_unit=tuple(sorted(next_attempts.items())),
             ledger_digest=canonical_digest(ledger_payload),
@@ -1051,8 +1141,18 @@ class DevelopmentPersistentStore:
         )
         if registered is None:
             raise DevelopmentPersistenceError("unit identity is outside frozen roster")
-        if self._committed_marker_paths(unit_id):
-            raise DevelopmentPersistenceError("committed unit has no next attempt")
+        unit_commits = sorted(
+            (
+                item
+                for item in self._verified_commits()
+                if item.unit_id == unit_id
+            ),
+            key=lambda item: item.attempt_index,
+        )
+        if unit_commits and unit_commits[-1].attempt_disposition != (
+            "retryable_resource_failure"
+        ):
+            raise DevelopmentPersistenceError("terminal committed unit has no next attempt")
         attempts = []
         for path in (self.run_root / "intents").glob(f"{unit_id}__attempt_*.json"):
             payload = _read_canonical_json(path, "unit intent")
@@ -1066,6 +1166,38 @@ class DevelopmentPersistentStore:
         if next_index >= registered.maximum_record_attempts:
             raise DevelopmentPersistenceError("frozen attempt budget exhausted")
         return next_index
+
+    def verified_terminal_scientific_records(
+        self,
+        *,
+        now_epoch_seconds: int,
+    ) -> tuple[DevelopmentScientificRecord, ...]:
+        """Return only exact terminal records after full store recovery checks."""
+
+        recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
+        latest_by_unit: dict[str, CommittedUnit] = {}
+        for marker in recovery.committed_units:
+            latest_by_unit[marker.unit_id] = marker
+        if any(
+            marker.attempt_disposition == "retryable_resource_failure"
+            for marker in latest_by_unit.values()
+        ):
+            raise DevelopmentPersistenceError(
+                "retryable scientific unit has no terminal record"
+            )
+        records = tuple(
+            self._verify_committed(marker)
+            for marker in sorted(
+                latest_by_unit.values(), key=lambda item: item.unit_index
+            )
+        )
+        if tuple(record.unit_index for record in records) != tuple(
+            range(len(records))
+        ):
+            raise DevelopmentPersistenceError(
+                "terminal scientific records are not a frozen roster prefix"
+            )
+        return records
 
     def write_session_receipt(
         self,
@@ -1198,7 +1330,7 @@ class DevelopmentPersistentStore:
                 archive.writestr(info, payload, compress_type=ZIP_DEFLATED, compresslevel=6)
         return buffer.getvalue()
 
-    def _verify_committed(self, marker: CommittedUnit) -> None:
+    def _verify_committed(self, marker: CommittedUnit) -> DevelopmentScientificRecord:
         if marker.schema_version != RESULT_SCHEMA_VERSION:
             raise DevelopmentPersistenceError("COMMITTED marker schema drifted")
         if (
@@ -1225,6 +1357,19 @@ class DevelopmentPersistentStore:
             _digest(marker.parent_attempt_intent_digest, "marker parent attempt intent")
         if marker.worker_identity_digest != self.worker_identity.digest():
             raise DevelopmentPersistenceError("marker worker identity drifted")
+        if marker.attempt_disposition not in ATTEMPT_DISPOSITIONS:
+            raise DevelopmentPersistenceError("marker attempt disposition is invalid")
+        _digest(marker.scientific_record_digest, "marker scientific record")
+        if type(marker.scientific_record_bytes) is not int or marker.scientific_record_bytes < 1:
+            raise DevelopmentPersistenceError("marker scientific record size is invalid")
+        if (
+            isinstance(marker.actual_elapsed_seconds, bool)
+            or not isinstance(marker.actual_elapsed_seconds, (int, float))
+            or float(marker.actual_elapsed_seconds) < 0.0
+        ):
+            raise DevelopmentPersistenceError("marker actual elapsed time is invalid")
+        if type(marker.maximum_duration_seconds) is not int or marker.maximum_duration_seconds < 1:
+            raise DevelopmentPersistenceError("marker duration limit is invalid")
         _parse_strict_utc(marker.committed_at_utc, "marker committed_at_utc")
         for role in ("protocol_digest", "intent_digest", "bundle_sha256", "artifact_manifest_digest", "worker_identity_digest"):
             _digest(getattr(marker, role), f"marker {role}")
@@ -1246,6 +1391,10 @@ class DevelopmentPersistentStore:
                 or "artifact_manifest.json" not in names
             ):
                 raise DevelopmentPersistenceError("bundle member identities are invalid")
+            if DEVELOPMENT_RECORD_MEMBER_PATH not in names:
+                raise DevelopmentPersistenceError(
+                    "bundle lacks formal development scientific record"
+                )
             for info in infos:
                 _safe_member_path(info.filename)
                 mode = info.external_attr >> 16
@@ -1295,6 +1444,39 @@ class DevelopmentPersistentStore:
                 payload = archive.read(name)
                 if len(payload) != item["size_bytes"] or sha256(payload).hexdigest() != item["sha256"]:
                     raise DevelopmentPersistenceError("bundle member digest drifted")
+            record_raw = archive.read(DEVELOPMENT_RECORD_MEMBER_PATH)
+            if (
+                len(record_raw) != marker.scientific_record_bytes
+                or sha256(record_raw).hexdigest() != marker.scientific_record_digest
+            ):
+                raise DevelopmentPersistenceError(
+                    "marker scientific record digest or size drifted"
+                )
+            try:
+                record_payload = json.loads(record_raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise DevelopmentPersistenceError(
+                    "formal development scientific record is unreadable"
+                ) from exc
+            if type(record_payload) is not dict or canonical_json_bytes(record_payload) != record_raw:
+                raise DevelopmentPersistenceError(
+                    "formal development scientific record is not canonical JSON"
+                )
+            try:
+                record = DevelopmentScientificRecord.from_payload(record_payload)
+            except DevelopmentRecordError as exc:
+                raise DevelopmentPersistenceError(str(exc)) from exc
+            if (
+                record.attempt_disposition() != marker.attempt_disposition
+                or float(record.actual_elapsed_seconds)
+                != float(marker.actual_elapsed_seconds)
+                or record.maximum_duration_seconds
+                != marker.maximum_duration_seconds
+            ):
+                raise DevelopmentPersistenceError(
+                    "marker disposition or duration differs from scientific record"
+                )
+            return record
 
     def _verified_commits(
         self,
@@ -1304,22 +1486,29 @@ class DevelopmentPersistentStore:
         if leases is None:
             leases = self._load_leases()
         commits: list[CommittedUnit] = []
-        seen_units: set[str] = set()
+        seen_attempts: set[tuple[str, int]] = set()
         for path in sorted((self.run_root / "markers").glob("*.COMMITTED.json")):
             payload = _read_canonical_json(path, "COMMITTED marker")
             try:
                 marker = CommittedUnit(**payload)
             except TypeError as exc:
                 raise DevelopmentPersistenceError("COMMITTED marker schema is invalid") from exc
-            if marker.unit_id in seen_units:
-                raise DevelopmentPersistenceError("multiple committed attempts exist for one unit")
-            self._verify_committed(marker)
+            attempt_identity = (marker.unit_id, marker.attempt_index)
+            if attempt_identity in seen_attempts:
+                raise DevelopmentPersistenceError("duplicate committed attempt exists")
+            if path != self._marker_path(marker.unit_id, marker.attempt_index):
+                raise DevelopmentPersistenceError("COMMITTED marker path identity drifted")
+            record = self._verify_committed(marker)
             intent = _read_canonical_json(
                 self._intent_path(marker.unit_id, marker.attempt_index), "unit intent"
             )
             intent_object = UnitIntent(**intent)
             intent_object.validate(self.worker_identity)
             self._verify_intent_registered_binding(intent_object)
+            try:
+                validate_record_against_intent(record, intent_object)
+            except DevelopmentRecordError as exc:
+                raise DevelopmentPersistenceError(str(exc)) from exc
             lease = self._lease_for_lineage(
                 leases,
                 session_id=marker.session_id,
@@ -1353,9 +1542,91 @@ class DevelopmentPersistentStore:
                 != intent_object.parent_attempt_intent_digest
             ):
                 raise DevelopmentPersistenceError("marker and intent identities differ")
-            seen_units.add(marker.unit_id)
+            seen_attempts.add(attempt_identity)
             commits.append(marker)
+        self._validate_committed_attempt_lineage(commits)
+        self._verify_bundle_reference_completeness(commits)
         return commits
+
+    def _validate_committed_attempt_lineage(
+        self,
+        commits: Sequence[CommittedUnit],
+    ) -> None:
+        by_unit: dict[str, list[CommittedUnit]] = {}
+        for marker in commits:
+            by_unit.setdefault(marker.unit_id, []).append(marker)
+        for unit_id, unit_commits in by_unit.items():
+            ordered = sorted(unit_commits, key=lambda item: item.attempt_index)
+            registered = next(
+                item
+                for item in self._registered_unit_bindings.values()
+                if item.unit_id == unit_id
+            )
+            if len(ordered) > registered.maximum_record_attempts:
+                raise DevelopmentPersistenceError(
+                    "committed attempt history exceeds frozen limit"
+                )
+            by_attempt = {item.attempt_index: item for item in ordered}
+            for current in ordered:
+                if current.attempt_index == 0:
+                    continue
+                previous = by_attempt.get(current.attempt_index - 1)
+                if previous is not None and previous.attempt_disposition != (
+                    "retryable_resource_failure"
+                ):
+                    raise DevelopmentPersistenceError(
+                        "terminal committed attempt cannot have a successor"
+                    )
+                expected_parent = (
+                    previous.intent_digest
+                    if previous is not None
+                    else canonical_digest(
+                        _read_canonical_json(
+                            self._intent_path(
+                                current.unit_id, current.attempt_index - 1
+                            ),
+                            "interrupted parent unit intent",
+                        )
+                    )
+                )
+                if current.parent_attempt_intent_digest != expected_parent:
+                    raise DevelopmentPersistenceError(
+                        "committed retry parent lineage drifted"
+                    )
+            for previous, current in zip(ordered, ordered[1:]):
+                if (
+                    previous.attempt_disposition != "retryable_resource_failure"
+                    and current.attempt_index > previous.attempt_index
+                ):
+                    raise DevelopmentPersistenceError(
+                        "terminal committed attempt cannot have a successor"
+                    )
+            latest = ordered[-1]
+            if (
+                latest.attempt_disposition == "retryable_resource_failure"
+                and latest.attempt_index + 1 >= registered.maximum_record_attempts
+            ):
+                raise DevelopmentPersistenceError(
+                    "last registered attempt cannot remain retryable"
+                )
+
+    def _verify_bundle_reference_completeness(
+        self,
+        commits: Sequence[CommittedUnit],
+    ) -> None:
+        expected = [
+            self.run_root / "bundles" / f"sha256_{item.bundle_sha256}.zip"
+            for item in commits
+        ]
+        if len(expected) != len(set(expected)):
+            raise DevelopmentPersistenceError(
+                "content-addressed bundle is referenced by multiple markers"
+            )
+        observed = set((self.run_root / "bundles").glob("*"))
+        if observed != set(expected):
+            raise DevelopmentPersistenceError(
+                "orphan or unreferenced bundle exists"
+            )
 
     def _load_leases(self) -> list[PersistentLease]:
         leases: list[PersistentLease] = []

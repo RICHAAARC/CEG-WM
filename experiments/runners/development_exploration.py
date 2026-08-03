@@ -7,7 +7,7 @@ it never accepts precomputed module results or a result-provider callback.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from hashlib import sha256
 from inspect import getattr_static, ismethod
 import json
@@ -53,6 +53,7 @@ from experiments.protocol.development_exploration import (
     DEVELOPMENT_CLAIM_BOUNDARY,
     RECORD_SCHEMA_VERSION,
     DEVELOPMENT_SPLIT,
+    GEOMETRY_NEGATIVE_CONTROL_CASE_IDS,
     MODULE_OUTCOMES,
     DevelopmentProvisionalThreshold,
     DevelopmentModuleOutcomeRecord,
@@ -61,7 +62,15 @@ from experiments.protocol.development_exploration import (
     FrozenDevelopmentExecutionIntentAuthority,
     FrozenDevelopmentExplorationProtocol,
     authorize_development_provisional_threshold,
+    create_development_provisional_threshold,
+    create_development_threshold_detector_binding,
+    create_development_threshold_fit_input,
     create_development_module_outcome_record,
+)
+from experiments.protocol.development_records import (
+    DEVELOPMENT_RECORD_COLLECTION_ROLE,
+    DevelopmentRecordError,
+    DevelopmentScientificRecord,
 )
 from experiments.protocol.internal_records import InternalValidationRecord
 from experiments.protocol.internal_splits import AnalysisUnitIdentity
@@ -71,7 +80,6 @@ from experiments.runners.development_persistence import (
     FrozenDevelopmentUnitBinding,
     PersistentLease,
     UnitIntent,
-    canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
 from experiments.runners.formal_operations import (
@@ -98,7 +106,7 @@ from runtime.content_write import ContentWriteVaeResult
 
 
 DEVELOPMENT_RECORD_SCHEMA = RECORD_SCHEMA_VERSION
-DEVELOPMENT_RECORD_COLLECTION_ROLE = "runner_only_formal_development_records"
+_VERIFIED_OUTCOME_BUILD_TOKEN = object()
 _ADAPTER_CALL_NAMES = (
     "identify_key", "derive_registered_key_stream", "derive_wrong_key_stream",
     "derive_public_noise", "route_content", "build_lf_carrier", "build_hf_carrier",
@@ -129,6 +137,14 @@ class DevelopmentUnitExcluded(DevelopmentRunnerError):
     """A frozen scientific negative/control rule excluded this unit."""
 
 
+class DevelopmentUnitDurationExceeded(DevelopmentRunnerError):
+    """A completed operation exceeded its frozen per-unit walltime budget."""
+
+    def __init__(self, elapsed_seconds: float) -> None:
+        super().__init__("development unit exceeded frozen duration")
+        self.elapsed_seconds = elapsed_seconds
+
+
 def _canonical_digest(value: object) -> str:
     return sha256(
         json.dumps(
@@ -139,6 +155,12 @@ def _canonical_digest(value: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _scientific_record_digest(record: DevelopmentScientificRecord) -> str:
+    """Match the persistence marker digest of canonical full record bytes."""
+
+    return _canonical_digest(record.payload())
 
 
 def _public_payload(value: object) -> object:
@@ -257,6 +279,33 @@ def _tensor_relative_l2(reference: torch.Tensor, observed: torch.Tensor) -> floa
     ) / denominator
 
 
+def _frozen_geometry_attack_specification(
+    protocol: FrozenDevelopmentExplorationProtocol,
+    geometry_case_id: str,
+) -> GeometricAttackSpec:
+    """Derive the attack solely from the checked-in protocol case binding."""
+
+    try:
+        case = protocol.geometry_study.case(geometry_case_id)
+    except ValueError as exc:
+        raise DevelopmentRunnerError("unit geometry case is not frozen") from exc
+    attack_id = {
+        "identity": "identity",
+        "crop": "crop",
+        "scale": "scale",
+        "rotation": "rotation",
+        "compound": "crop_scale_rotation",
+    }.get(case.operation_family)
+    if attack_id is None:
+        raise DevelopmentRunnerError("geometry operation family is not registered")
+    return GeometricAttackSpec(
+        attack_id,
+        crop_fraction=case.crop_fraction,
+        scale_factor=case.scale_factor,
+        rotation_degrees=case.rotation_degrees,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DevelopmentUnitInput:
     """Raw execution inputs; precomputed method results are intentionally absent."""
@@ -269,7 +318,6 @@ class DevelopmentUnitInput:
     combination_function_id: str
     hf_null: BranchNullCalibration | None
     lf_null: BranchNullCalibration | None
-    attack_specification: GeometricAttackSpec
     epsilon_inlier: float
     geometry_reliability_thresholds: GeometryReliabilityThresholds
     provisional_threshold: DevelopmentProvisionalThreshold | None
@@ -293,8 +341,6 @@ class DevelopmentUnitInput:
             raise DevelopmentRunnerError("mixing coefficient is not registered")
         if self.combination_function_id not in CONTENT_COMBINATION_FUNCTION_IDS:
             raise DevelopmentRunnerError("combination function is not registered")
-        if type(self.attack_specification) is not GeometricAttackSpec:
-            raise DevelopmentRunnerError("attack specification exact type is required")
         if (
             isinstance(self.epsilon_inlier, bool)
             or not isinstance(self.epsilon_inlier, (int, float))
@@ -338,54 +384,6 @@ class DevelopmentUnitInput:
                 raise DevelopmentRunnerError("joint unit threshold is not the bound development threshold")
         elif self.internal_runner_context is not None or self.internal_case_payload is not None:
             raise DevelopmentRunnerError("internal joint runner inputs are forbidden for this responsibility")
-
-
-@dataclass(frozen=True, slots=True)
-class DevelopmentScientificRecord:
-    schema_version: str
-    collection_role: str
-    record_id: str
-    run_id: str
-    protocol_id: str
-    protocol_version: str
-    protocol_digest: str
-    execution_intent_authority_digest: str
-    method_code_revision: str
-    unit_index: int
-    phase: str
-    analysis_unit_identity: dict[str, object]
-    responsibility_id: str
-    scientific_question_id: str
-    development_case_id: str
-    candidate_identity: str
-    candidate_config_digest: str
-    paired_ablation_identity: str
-    negative_control_case_ids: tuple[str, ...]
-    metric_ids: tuple[str, ...]
-    content_branch_id: str
-    geometry_case_id: str
-    attempt_index: int
-    execution_status: str
-    failure_class: str | None
-    failure_reason: str | None
-    retry_parent_intent_digest: str | None
-    operation_result_payload: dict[str, object]
-    operation_result_digest: str
-    metric_observation: dict[str, object]
-    routing_trace: dict[str, object]
-    branch_score_trace: dict[str, object]
-    detector_trace: dict[str, object]
-    geometry_trace: dict[str, object]
-    threshold_trace: dict[str, object]
-    key_control_trace: dict[str, object]
-    decision_trace: dict[str, object]
-    provenance_trace: dict[str, object]
-    module_outcome: str | None
-    candidate_recommendation: str | None
-    scientific_claim_boundary: str
-
-    def payload(self) -> dict[str, object]:
-        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,11 +591,15 @@ class DevelopmentExplorationRunner:
                 requested_split=DEVELOPMENT_SPLIT,
                 requested_analysis_unit_identity=identity,
             )
+        started = monotonic()
         result, metric, trace_values, internal_record = self._execute_real_operation(
             unit,
             identity,
             unit_input,
         )
+        elapsed_seconds = monotonic() - started
+        if elapsed_seconds > unit.maximum_duration_seconds:
+            raise DevelopmentUnitDurationExceeded(elapsed_seconds)
         record = self._record(
             unit,
             identity,
@@ -607,6 +609,7 @@ class DevelopmentExplorationRunner:
             internal_record=internal_record,
             attempt_index=attempt_index,
             retry_parent_intent_digest=retry_parent_intent_digest,
+            actual_elapsed_seconds=elapsed_seconds,
         )
         self._validate_execution_anchors()
         return DevelopmentUnitRunResult(record=record, intent=None, committed=None)
@@ -646,45 +649,62 @@ class DevelopmentExplorationRunner:
         recovery = self.persistence_store.recover(
             now_epoch_seconds=now_epoch_seconds
         )
-        committed_indices = tuple(
-            sorted({item.unit_index for item in recovery.committed_units})
-        )
-        if committed_indices != tuple(range(len(committed_indices))):
-            raise DevelopmentRunnerError(
-                "verified commits are not a breadth-first frozen roster prefix"
-            )
-        interrupted = tuple(
+        latest_commit_by_unit = {}
+        for committed_unit in recovery.committed_units:
+            latest_commit_by_unit[committed_unit.unit_id] = committed_unit
+        terminal_indices = tuple(
             sorted(
-                recovery.interrupted_attempts,
-                key=lambda item: (item.unit_id, item.attempt_index),
+                item.unit_index
+                for item in latest_commit_by_unit.values()
+                if item.attempt_disposition != "retryable_resource_failure"
             )
         )
-        if interrupted:
+        if terminal_indices != tuple(range(len(terminal_indices))):
+            raise DevelopmentRunnerError(
+                "verified terminal commits are not a breadth-first frozen roster prefix"
+            )
+        next_attempts = dict(recovery.next_attempt_by_unit)
+        if len(next_attempts) > 1:
+            raise DevelopmentRunnerError("multiple frozen units are concurrently retryable")
+        if next_attempts:
+            unit_id, attempt_index = next(iter(next_attempts.items()))
             unit_index = next(
                 (
                     item.unit_index
                     for item in self.protocol.unit_roster
-                    if self._unit_id(item) == interrupted[0].unit_id
+                    if self._unit_id(item) == unit_id
                 ),
                 -1,
             )
             if unit_index < 0:
-                raise DevelopmentRunnerError("interrupted unit is outside frozen roster")
+                raise DevelopmentRunnerError("retryable unit is outside frozen roster")
+            interrupted_parent = next(
+                (
+                    item.retry_parent_intent_digest
+                    for item in recovery.interrupted_attempts
+                    if item.unit_id == unit_id
+                    and item.attempt_index == attempt_index - 1
+                ),
+                None,
+            )
+            committed_parent = latest_commit_by_unit.get(unit_id)
+            parent_digest = (
+                interrupted_parent
+                if interrupted_parent is not None
+                else committed_parent.intent_digest
+                if committed_parent is not None
+                else None
+            )
         else:
-            unit_index = len(committed_indices)
+            unit_index = len(terminal_indices)
+            attempt_index = 0
+            parent_digest = None
         if unit_index >= len(self.protocol.unit_roster):
             raise DevelopmentRunnerError("all frozen development units are committed")
         unit = self._unit(unit_index)
         unit_id = self._unit_id(unit)
-        attempt_index = self.persistence_store.next_attempt_index(unit_id)
-        parent_digest = next(
-            (
-                item.retry_parent_intent_digest
-                for item in recovery.interrupted_attempts
-                if item.unit_id == unit_id and item.attempt_index == attempt_index - 1
-            ),
-            None,
-        )
+        if self.persistence_store.next_attempt_index(unit_id) != attempt_index:
+            raise DevelopmentRunnerError("persistence next attempt drifted")
         intent = self.persistence_store.create_intent(
             lease,
             unit_id=unit_id,
@@ -694,6 +714,7 @@ class DevelopmentExplorationRunner:
             now_epoch_seconds=now_epoch_seconds,
         )
         identity = self._analysis_identity(unit)
+        started = monotonic()
         try:
             executed = self._execute_unit(
                 unit_index,
@@ -711,6 +732,26 @@ class DevelopmentExplorationRunner:
                     execution_status="excluded",
                     failure_class="scientific_exclusion",
                     failure_reason=str(exc),
+                    actual_elapsed_seconds=monotonic() - started,
+                ),
+                None,
+                None,
+            )
+        except DevelopmentUnitDurationExceeded as exc:
+            executed = DevelopmentUnitRunResult(
+                self._failure_record(
+                    unit,
+                    identity,
+                    attempt_index=attempt_index,
+                    retry_parent_intent_digest=parent_digest,
+                    execution_status=(
+                        "retry"
+                        if attempt_index + 1 < unit.maximum_record_attempts
+                        else "failed"
+                    ),
+                    failure_class="resource_failure",
+                    failure_reason="unit_duration_exceeded",
+                    actual_elapsed_seconds=exc.elapsed_seconds,
                 ),
                 None,
                 None,
@@ -722,9 +763,14 @@ class DevelopmentExplorationRunner:
                     identity,
                     attempt_index=attempt_index,
                     retry_parent_intent_digest=parent_digest,
-                    execution_status="failed",
+                    execution_status=(
+                        "retry"
+                        if attempt_index + 1 < unit.maximum_record_attempts
+                        else "failed"
+                    ),
                     failure_class="resource_failure",
                     failure_reason=type(exc).__name__,
+                    actual_elapsed_seconds=monotonic() - started,
                 ),
                 None,
                 None,
@@ -741,32 +787,108 @@ class DevelopmentExplorationRunner:
                     failure_reason=(
                         f"{type(exc).__module__}.{type(exc).__qualname__}:{exc}"
                     ),
+                    actual_elapsed_seconds=monotonic() - started,
                 ),
                 None,
                 None,
             )
-        record_bytes = canonical_json_bytes(executed.record.payload())
         committed = self.persistence_store.commit_unit(
             lease,
             intent,
-            members={
-                "records/development_scientific_record.json": record_bytes,
-            },
+            record=executed.record,
             raw_secret_values=raw_secret_values,
             now_epoch_seconds=now_epoch_seconds,
         )
         return DevelopmentUnitRunResult(executed.record, intent, committed)
 
-    def build_module_outcome_record(
+    def build_verified_module_outcome_record(
+        self,
+        *,
+        responsibility_id: str,
+        cross_fit_plans: Mapping[str, FrozenDevelopmentCrossFitPlan] | None = None,
+        now_epoch_seconds: int,
+    ) -> DevelopmentModuleOutcomeRecord:
+        """Rebuild outcomes only from terminal records verified by the store."""
+
+        if self.persistence_store is None:
+            raise DevelopmentRunnerError("verified module outcome requires persistence")
+        plans = {} if cross_fit_plans is None else dict(cross_fit_plans)
+        records = self.persistence_store.verified_terminal_scientific_records(
+            now_epoch_seconds=now_epoch_seconds
+        )
+        studies = tuple(self.protocol.module_matrix)
+        target_index = next(
+            (
+                index
+                for index, study in enumerate(studies)
+                if study.responsibility_id == responsibility_id
+            ),
+            -1,
+        )
+        if target_index < 0:
+            raise DevelopmentRunnerError("module outcome responsibility is unknown")
+        outcomes: dict[str, DevelopmentModuleOutcomeRecord] = {}
+        for study in studies[: target_index + 1]:
+            evidence = tuple(
+                record
+                for record in records
+                if record.responsibility_id == study.responsibility_id
+            )
+            if not evidence:
+                raise DevelopmentRunnerError(
+                    "verified store lacks module outcome evidence"
+                )
+            plan = plans.get(study.responsibility_id)
+            if study.responsibility_id in {
+                "lf_detector",
+                "hf_detector",
+                "content_detector",
+            }:
+                if type(plan) is not FrozenDevelopmentCrossFitPlan:
+                    raise DevelopmentRunnerError(
+                        "verified detector outcome lacks frozen cross-fit plan"
+                    )
+            elif plan is not None:
+                raise DevelopmentRunnerError(
+                    "cross-fit plan supplied for non-detector outcome"
+                )
+            outcome = self._build_module_outcome_record(
+                evidence,
+                responsibility_id=study.responsibility_id,
+                _verified_build_token=_VERIFIED_OUTCOME_BUILD_TOKEN,
+                cross_fit_plan=plan,
+                prerequisite_outcome_records=tuple(
+                    outcomes[role]
+                    for role in study.prerequisite_responsibility_ids
+                ),
+            )
+            if outcome.evidence_record_ids != tuple(
+                record.record_id for record in evidence
+            ) or outcome.evidence_record_digests != tuple(
+                _scientific_record_digest(record) for record in evidence
+            ):
+                raise DevelopmentRunnerError(
+                    "module outcome evidence did not replay from verified records"
+                )
+            outcomes[study.responsibility_id] = outcome
+        return outcomes[responsibility_id]
+
+    def _build_module_outcome_record(
         self,
         records: Sequence[DevelopmentScientificRecord],
         *,
         responsibility_id: str,
+        _verified_build_token: object,
         cross_fit_plan: FrozenDevelopmentCrossFitPlan | None = None,
         provisional_threshold_identities: Sequence[str] = (),
         prerequisite_outcome_records: Sequence[DevelopmentModuleOutcomeRecord] = (),
     ) -> DevelopmentModuleOutcomeRecord:
-        """Apply frozen scientific criteria; callers cannot select an outcome."""
+        """Apply frozen criteria to records supplied only by the verified scheduler."""
+
+        if _verified_build_token is not _VERIFIED_OUTCOME_BUILD_TOKEN:
+            raise DevelopmentRunnerError(
+                "module outcome builder accepts only persistence-verified records"
+            )
 
         study = next(
             (
@@ -804,6 +926,9 @@ class DevelopmentExplorationRunner:
                 candidate_recommendation="candidate_not_recommended_for_selection",
                 recommendation_reason="verified_prerequisite_outcome_stopped_scientific_interpretation",
                 evidence_record_ids=tuple(record.record_id for record in records),
+                evidence_record_digests=tuple(
+                    _scientific_record_digest(record) for record in records
+                ),
                 blocking_responsibilities=blocked_by,
                 provisional_threshold_identities=provisional_threshold_identities,
             )
@@ -839,6 +964,9 @@ class DevelopmentExplorationRunner:
                 candidate_recommendation=candidate_recommendation,
                 recommendation_reason=recommendation_reason,
                 evidence_record_ids=tuple(record.record_id for record in records),
+                evidence_record_digests=tuple(
+                    _scientific_record_digest(record) for record in records
+                ),
                 blocking_responsibilities=blocking if not resource_only else (),
                 provisional_threshold_identities=provisional_threshold_identities,
             )
@@ -852,6 +980,14 @@ class DevelopmentExplorationRunner:
             cross_fit = cross_fit_development_detection_metrics(
                 responsibility_id, observations, plan=cross_fit_plan
             )
+            if responsibility_id == "hf_detector":
+                replayed_thresholds = self._replay_hf_detector_threshold_inputs(
+                    records, cross_fit_plan
+                )
+                if replayed_thresholds != cross_fit.fold_thresholds:
+                    raise DevelopmentRunnerError(
+                        "protocol threshold replay differs from metric cross-fit"
+                    )
             if responsibility_id == "lf_detector":
                 means = {
                     "lf_tpr_at_selection_fpr": cross_fit.registered_accept_rate,
@@ -903,8 +1039,107 @@ class DevelopmentExplorationRunner:
                 expected_content_branch_ids=study.content_branch_ids,
                 expected_geometry_case_ids=study.geometry_case_ids,
             )
+            if responsibility_id == "content_router":
+                eligible = tuple(
+                    item
+                    for item in observations
+                    if item.content_branch_id == "lf_hf_routed_combination"
+                )
+                if len(eligible) != study.scientific_source_cluster_scale:
+                    raise DevelopmentRunnerError(
+                        "routing outcome lacks one real paired comparison per cluster"
+                    )
+                eligible_values = tuple(
+                    dict(item.sufficient_statistics) for item in eligible
+                )
+                means = {
+                    metric_id: sum(values[metric_id] for values in eligible_values)
+                    / len(eligible_values)
+                    for metric_id in study.metric_ids
+                }
+                aggregate = DevelopmentClusterAggregate(
+                    responsibility_id=responsibility_id,
+                    source_cluster_count=len(eligible),
+                    metric_medians=tuple(
+                        (metric_id, means[metric_id]) for metric_id in study.metric_ids
+                    ),
+                    metric_means=tuple(
+                        (metric_id, means[metric_id]) for metric_id in study.metric_ids
+                    ),
+                    source_cluster_digest=aggregate.source_cluster_digest,
+                    aggregate_digest=_canonical_digest(
+                        {
+                            "paired_validation": aggregate.aggregate_digest,
+                            "eligible_observations": tuple(
+                                item.observation_digest for item in eligible
+                            ),
+                            "means": means,
+                        }
+                    ),
+                )
+            elif responsibility_id == "geometry_reliability":
+                negative_cases = set(GEOMETRY_NEGATIVE_CONTROL_CASE_IDS)
+                positive = tuple(
+                    item
+                    for item in observations
+                    if item.geometry_case_id not in negative_cases
+                )
+                negative = tuple(
+                    item
+                    for item in observations
+                    if item.geometry_case_id in negative_cases
+                )
+                if not positive or not negative:
+                    raise DevelopmentRunnerError(
+                        "geometry reliability outcome lacks positive or negative controls"
+                    )
+                positive_values = tuple(
+                    dict(item.sufficient_statistics) for item in positive
+                )
+                negative_values = tuple(
+                    dict(item.sufficient_statistics) for item in negative
+                )
+                means = {
+                    "reliable_accept_rate": sum(
+                        item["reliable_accept_rate"] for item in positive_values
+                    )
+                    / len(positive_values),
+                    "unreliable_reject_rate": sum(
+                        item["unreliable_reject_rate"] for item in negative_values
+                    )
+                    / len(negative_values),
+                    "false_reliable_rate": sum(
+                        item["false_reliable_rate"] for item in negative_values
+                    )
+                    / len(negative_values),
+                }
+                aggregate = DevelopmentClusterAggregate(
+                    responsibility_id=responsibility_id,
+                    source_cluster_count=len(
+                        {item.source_cluster_id for item in observations}
+                    ),
+                    metric_medians=tuple(
+                        (metric_id, means[metric_id]) for metric_id in study.metric_ids
+                    ),
+                    metric_means=tuple(
+                        (metric_id, means[metric_id]) for metric_id in study.metric_ids
+                    ),
+                    source_cluster_digest=aggregate.source_cluster_digest,
+                    aggregate_digest=_canonical_digest(
+                        {
+                            "paired_validation": aggregate.aggregate_digest,
+                            "positive_observations": tuple(
+                                item.observation_digest for item in positive
+                            ),
+                            "negative_observations": tuple(
+                                item.observation_digest for item in negative
+                            ),
+                            "means": means,
+                        }
+                    ),
+                )
         means = dict(aggregate.metric_means)
-        signal = self._scientific_signal_observed(responsibility_id, means)
+        signal = self._scientific_signal_observed(study, means)
         module_outcome = "mechanism_signal_observed" if signal else "mechanism_signal_not_observed"
         candidate_recommendation = (
             "candidate_worth_further_selection"
@@ -923,34 +1158,84 @@ class DevelopmentExplorationRunner:
             candidate_recommendation=candidate_recommendation,
             recommendation_reason=recommendation_reason,
             evidence_record_ids=tuple(record.record_id for record in records),
+            evidence_record_digests=tuple(
+                _scientific_record_digest(record) for record in records
+            ),
             blocking_responsibilities=(),
             provisional_threshold_identities=provisional_threshold_identities,
         )
 
-    @staticmethod
-    def _scientific_signal_observed(
-        responsibility_id: str,
-        values: Mapping[str, float],
-    ) -> bool:
-        """Conservative pre-registered development-only mechanism criteria."""
+    def _replay_hf_detector_threshold_inputs(
+        self,
+        records: Sequence[DevelopmentScientificRecord],
+        plan: FrozenDevelopmentCrossFitPlan,
+    ) -> tuple[tuple[int, float], ...]:
+        """Build protocol threshold inputs from exact persisted HF records."""
 
-        required = {
-            "key_schedule": lambda v: v["key_attribution_separation"] == 1.0 and v["domain_collision_count"] == 0.0,
-            "content_router": lambda v: v["matched_budget_incremental_tpr"] > 0.5 and v["routing_coverage"] > 0.0 and v["quality_delta"] <= 0.012,
-            "lf_carrier": lambda v: v["lf_attribution_tpr"] > 0.5 and v["lf_primary_null_fpr"] < 0.5 and v["quality_delta"] <= 0.012,
-            "hf_carrier": lambda v: v["hf_attribution_tpr"] > 0.5 and v["hf_primary_null_fpr"] < 0.5 and v["quality_delta"] <= 0.012,
-            "content_embedder": lambda v: v["realized_total_relative_l2"] <= 0.012 and v["matched_budget_quality_delta"] <= 0.012,
-            "lf_detector": lambda v: v["lf_tpr_at_selection_fpr"] > v["lf_wrong_key_rate"],
-            "hf_detector": lambda v: v["hf_tpr_at_frozen_fpr"] > v["hf_wrong_key_rate"],
-            "content_detector": lambda v: v["combined_tpr"] > v["combined_primary_null_fpr"] and v["hf_non_degradation"] >= 0.5 and v["wrong_key_rate"] < v["combined_tpr"],
-            "qk_geometry_sync": lambda v: v["relation_score_gain"] > 0.0 and v["wrong_key_relation_margin"] > 0.0,
-            "geometric_transform_estimator": lambda v: v["rotation_error"] <= 16.0 and v["scale_error"] <= 0.35 and v["translation_error"] <= 0.28 and v["coverage"] >= 0.45,
-            "geometry_reliability": lambda v: v["reliable_accept_rate"] > 0.5 and v["unreliable_reject_rate"] > 0.5 and v["false_reliable_rate"] < 0.5,
-            "image_rectifier": lambda v: v["same_detector_score_delta"] > 0.0 and v["valid_support"] > 0.0,
-            "conditional_recovery_decision": lambda v: v["incremental_tpr"] > 0.0 and v["false_rescue_rate"] == 0.0,
+        by_cluster = {
+            AnalysisUnitIdentity(
+                **record.analysis_unit_identity
+            ).source_cluster_id: record
+            for record in records
+            if record.content_branch_id == "hf_only"
         }
-        criterion = required.get(responsibility_id)
-        return bool(criterion is not None and set(values) and criterion(values))
+        if len(by_cluster) != len(plan.source_cluster_ids):
+            raise DevelopmentRunnerError(
+                "HF threshold replay lacks the frozen cluster roster"
+            )
+        thresholds: list[tuple[int, float]] = []
+        for fold in plan.folds:
+            fit_clusters = set(fold.fit_source_cluster_ids)
+            key_bindings = tuple(
+                item
+                for item in plan.execution_intent_authority.public_key_roster
+                if item.source_cluster_id in fit_clusters
+            )
+            detector_binding = create_development_threshold_detector_binding(
+                plan,
+                expected_execution_intent_authority_digest=(
+                    plan.expected_execution_intent_authority_digest
+                ),
+                fold_index=fold.fold_index,
+                input_manifest=plan.input_manifest,
+                primary_null_key_bindings=key_bindings,
+            )
+            fit_inputs = tuple(
+                create_development_threshold_fit_input(
+                    expected_execution_intent_authority_digest=(
+                        plan.expected_execution_intent_authority_digest
+                    ),
+                    source_record=by_cluster[cluster_id],
+                )
+                for cluster_id in fold.fit_source_cluster_ids
+            )
+            provisional = create_development_provisional_threshold(
+                plan,
+                expected_execution_intent_authority_digest=(
+                    plan.expected_execution_intent_authority_digest
+                ),
+                fold_index=fold.fold_index,
+                input_manifest=plan.input_manifest,
+                detector_binding=detector_binding,
+                fit_inputs=fit_inputs,
+            )
+            thresholds.append((fold.fold_index, provisional.threshold))
+        return tuple(thresholds)
+
+    @staticmethod
+    def _scientific_signal_observed(study, values: Mapping[str, float]) -> bool:
+        """Apply every checked-in development-only metric criterion."""
+
+        if set(values) != set(study.metric_ids):
+            return False
+        if tuple(criterion.metric_id for criterion in study.signal_criteria) != (
+            study.metric_ids
+        ):
+            return False
+        return all(
+            criterion.satisfied_by(values[criterion.metric_id])
+            for criterion in study.signal_criteria
+        )
 
     def _execute_real_operation(
         self,
@@ -1002,6 +1287,9 @@ class DevelopmentExplorationRunner:
             return joint, metric, traces, joint
         key_identity = self.adapter.identify_key(raw.registered_root_key).result
         wrong_material = derive_wrong_key_material(key_identity.root_key_public_digest, raw.wrong_key_index)
+        primary_null_key_identity = self.adapter.identify_key(
+            wrong_material.material_text
+        ).result
         shape = tuple(int(value) for value in raw.base_latent.shape)
         registered_domain = {
             "candidate_id": "hf_sparse_tail",
@@ -1043,6 +1331,141 @@ class DevelopmentExplorationRunner:
             return result, metric, traces, None
         adaptive = self.adapter.route_content(shape, mode="routing_stqr", observations=raw.routing_observations).result
         uniform = self.adapter.route_content(shape, mode="routing_uniform_control").result
+        if responsibility == "content_router":
+            def execute_routing_arm(route):
+                arm_lf = self.adapter.build_lf_carrier(
+                    raw.registered_root_key, shape, routing_result=route
+                ).result
+                arm_hf = self.adapter.build_hf_carrier(
+                    raw.registered_root_key, shape, routing_result=route
+                ).result
+                captured: list[object] = []
+
+                def arm_embedding(latent_values: tuple[float, ...]):
+                    observation = self.adapter.embed_content(
+                        latent_values,
+                        arm_hf,
+                        lf_carrier_result=arm_lf,
+                        mixing_coefficient=raw.mixing_coefficient,
+                        routing_result=route,
+                    ).result
+                    captured.append(observation)
+                    return observation
+
+                arm_runtime = self.runtime_adapter.execute_content_write_and_vae(
+                    raw.base_latent, arm_embedding
+                )
+                if len(captured) != 1:
+                    raise DevelopmentRunnerError(
+                        "routing arm did not invoke content embedder exactly once"
+                    )
+                observed = arm_runtime.watermarked_detection_latent
+                hf_observation = HfDetectionObservation.from_public_image_encoding(
+                    tuple(observed.to(dtype=torch.float32).reshape(-1).tolist()),
+                    tuple(observed.shape),
+                )
+                lf_observation = LfDetectionObservation.from_public_image_encoding(
+                    tuple(observed.to(dtype=torch.float32).reshape(-1).tolist()),
+                    tuple(observed.shape),
+                )
+                hf_result = self.adapter.detect_hf(
+                    hf_observation, raw.registered_root_key
+                ).result
+                lf_result = self.adapter.detect_lf(
+                    lf_observation, raw.registered_root_key
+                ).result
+                content_result = self.adapter.detect_content(
+                    hf_result,
+                    lf_result,
+                    hf_null=raw.hf_null,
+                    lf_null=raw.lf_null,
+                    combination=raw.combination_function_id,
+                    weight=(
+                        raw.mixing_coefficient
+                        if raw.combination_function_id
+                        == "weighted_hf_lf_standardized_score"
+                        else None
+                    ),
+                ).result
+                quality = _tensor_relative_l2(
+                    arm_runtime.clean_image, arm_runtime.watermarked_image
+                )
+                runtime_digest = _canonical_digest(
+                    {
+                        "content_materialization_identity": (
+                            arm_runtime.content_materialization.materialization_replay_identity
+                        ),
+                        "paired_base_latent_digest": arm_runtime.paired_base_latent_digest,
+                        "runtime_config_digest": arm_runtime.runtime_config_digest,
+                    }
+                )
+                return arm_runtime, content_result, quality, runtime_digest
+
+            adaptive_runtime, adaptive_content, adaptive_quality, adaptive_runtime_digest = (
+                execute_routing_arm(adaptive)
+            )
+            uniform_runtime, uniform_content, uniform_quality, uniform_runtime_digest = (
+                execute_routing_arm(uniform)
+            )
+            if (
+                adaptive_content.detector_identity
+                != uniform_content.detector_identity
+                or adaptive_content.content_config_digest
+                != uniform_content.content_config_digest
+            ):
+                raise DevelopmentRunnerError(
+                    "routing arms did not reuse one content detector operation"
+                )
+            comparison_eligible = unit.content_branch_id != "clean_control"
+            traces: dict[str, object] = {
+                "registered_key_public_digest": key_identity.root_key_public_digest,
+                "detection_key_public_digest": key_identity.root_key_public_digest,
+                "key_role": "registered",
+                "control_identity": "registered_key_control",
+                "routing_identity": adaptive.route_identity,
+                "routing_control": uniform.route_identity,
+                "routing_observation_digest": _canonical_digest(
+                    adaptive.observation_digests
+                ),
+                "routing_mask_digest": _canonical_digest(
+                    (adaptive.mask_lf_digest, adaptive.mask_hf_digest)
+                ),
+                "routing_comparison_eligible": comparison_eligible,
+                "adaptive_registered_score": adaptive_content.content_score,
+                "uniform_control_registered_score": uniform_content.content_score,
+                "adaptive_quality_delta": adaptive_quality,
+                "uniform_control_quality_delta": uniform_quality,
+                "adaptive_detector_identity": adaptive_content.detector_identity,
+                "uniform_control_detector_identity": uniform_content.detector_identity,
+                "adaptive_detector_config_digest": adaptive_content.content_config_digest,
+                "uniform_control_detector_config_digest": uniform_content.content_config_digest,
+                "runtime_config_digest": adaptive_runtime.runtime_config_digest,
+                "input_artifact_digest": adaptive_runtime.paired_base_latent_digest,
+                "function_id": raw.combination_function_id,
+                "mixing_coefficient": raw.mixing_coefficient,
+            }
+            metric = metric_content_router(
+                identity.source_cluster_id,
+                matched_budget_registered_score=(
+                    adaptive_content.content_score if comparison_eligible else 0.0
+                ),
+                uniform_control_registered_score=(
+                    uniform_content.content_score if comparison_eligible else 0.0
+                ),
+                routing_coverage=(adaptive.mean_mask_lf if comparison_eligible else 0.0),
+                matched_budget_quality_delta=(
+                    max(adaptive_quality, uniform_quality)
+                    if comparison_eligible
+                    else 0.0
+                ),
+                adaptive_route_identity=adaptive.route_identity,
+                uniform_route_identity=uniform.route_identity,
+                adaptive_detector_config_digest=adaptive_content.content_config_digest,
+                uniform_detector_config_digest=uniform_content.content_config_digest,
+                adaptive_runtime_result_digest=adaptive_runtime_digest,
+                uniform_runtime_result_digest=uniform_runtime_digest,
+            )
+            return adaptive, metric, traces, None
         routing = adaptive if unit.content_branch_id == "lf_hf_routed_combination" else uniform
         traces.update(
             routing_identity=routing.route_identity,
@@ -1050,7 +1473,7 @@ class DevelopmentExplorationRunner:
             routing_observation_digest=_canonical_digest(routing.observation_digests),
             routing_mask_digest=_canonical_digest((routing.mask_lf_digest, routing.mask_hf_digest)),
         )
-        responsibility_result: object | None = adaptive if responsibility == "content_router" else None
+        responsibility_result: object | None = None
         lf_carrier = self.adapter.build_lf_carrier(raw.registered_root_key, shape, routing_result=routing).result
         hf_carrier = self.adapter.build_hf_carrier(raw.registered_root_key, shape, routing_result=routing).result
         if responsibility == "lf_carrier":
@@ -1118,10 +1541,10 @@ class DevelopmentExplorationRunner:
         )
         hf_registered = self.adapter.detect_hf(registered_hf_observation, raw.registered_root_key).result
         hf_wrong = self.adapter.detect_hf(registered_hf_observation, wrong_material).result
-        hf_null = self.adapter.detect_hf(clean_hf_observation, raw.registered_root_key).result
+        hf_null = self.adapter.detect_hf(clean_hf_observation, wrong_material).result
         lf_registered = self.adapter.detect_lf(registered_lf_observation, raw.registered_root_key).result
         lf_wrong = self.adapter.detect_lf(registered_lf_observation, wrong_material).result
-        lf_null = self.adapter.detect_lf(clean_lf_observation, raw.registered_root_key).result
+        lf_null = self.adapter.detect_lf(clean_lf_observation, wrong_material).result
         traces.update(
             hf_score=hf_registered.hf_score,
             lf_score=lf_registered.lf_score,
@@ -1131,25 +1554,21 @@ class DevelopmentExplorationRunner:
             rectified_detector_config_digest=hf_registered.detector_config_digest,
             raw_preprocessing_identity="final_image_vae_posterior_mode",
             rectified_preprocessing_identity="final_image_vae_posterior_mode",
+            registered_detector_identity=hf_registered.detector_identity,
+            wrong_key_detector_identity=hf_wrong.detector_identity,
+            primary_null_detector_identity=hf_null.detector_identity,
+            registered_detector_config_digest=hf_registered.detector_config_digest,
+            wrong_key_detector_config_digest=hf_wrong.detector_config_digest,
+            primary_null_detector_config_digest=hf_null.detector_config_digest,
+            primary_null_preprocessing_identity="final_image_vae_posterior_mode",
+            primary_null_detection_key_public_digest=(
+                primary_null_key_identity.root_key_public_digest
+            ),
+            primary_null_control_identity="unwatermarked_wrong_key_primary_null",
         )
         branch_quality_delta = _tensor_relative_l2(
             runtime_result.clean_image, runtime_result.watermarked_image
         )
-        if responsibility == "content_router":
-            assert responsibility_result is not None
-            selected_content_score = (
-                hf_registered.hf_score + lf_registered.lf_score
-            )
-            uniform_control_score = hf_registered.hf_score
-            return responsibility_result, metric_content_router(
-                identity.source_cluster_id,
-                matched_budget_registered_score=selected_content_score,
-                uniform_control_registered_score=uniform_control_score,
-                routing_coverage=routing.mean_mask_lf,
-                matched_budget_quality_delta=branch_quality_delta,
-                adaptive_route_identity=adaptive.route_identity,
-                uniform_route_identity=uniform.route_identity,
-            ), traces, None
         if responsibility == "lf_carrier":
             assert responsibility_result is not None
             return responsibility_result, metric_lf_carrier(
@@ -1173,6 +1592,18 @@ class DevelopmentExplorationRunner:
                 carrier_config_digest=hf_carrier.carrier_config_digest,
             ), traces, None
         if responsibility == "lf_detector":
+            traces.update(
+                raw_detector_identity=lf_registered.detector_identity,
+                rectified_detector_identity=lf_registered.detector_identity,
+                raw_detector_config_digest=lf_registered.detector_config_digest,
+                rectified_detector_config_digest=lf_registered.detector_config_digest,
+                registered_detector_identity=lf_registered.detector_identity,
+                wrong_key_detector_identity=lf_wrong.detector_identity,
+                primary_null_detector_identity=lf_null.detector_identity,
+                registered_detector_config_digest=lf_registered.detector_config_digest,
+                wrong_key_detector_config_digest=lf_wrong.detector_config_digest,
+                primary_null_detector_config_digest=lf_null.detector_config_digest,
+            )
             metric = metric_lf_detector(
                 identity.source_cluster_id,
                 registered_score=lf_registered.lf_score,
@@ -1224,6 +1655,12 @@ class DevelopmentExplorationRunner:
         traces.update(
             combined_score=candidate_content.combined_score,
             raw_content_score=candidate_content.content_score,
+            registered_detector_identity=candidate_content.detector_identity,
+            wrong_key_detector_identity=wrong_content.detector_identity,
+            primary_null_detector_identity=null_content.detector_identity,
+            registered_detector_config_digest=candidate_content.content_config_digest,
+            wrong_key_detector_config_digest=wrong_content.content_config_digest,
+            primary_null_detector_config_digest=null_content.content_config_digest,
         )
         if responsibility == "content_detector":
             metric = metric_content_detector(
@@ -1244,17 +1681,21 @@ class DevelopmentExplorationRunner:
             if unit.content_branch_id == "clean_control"
             else runtime_result.watermarked_image
         )
+        attack_specification = _frozen_geometry_attack_specification(
+            self.protocol,
+            unit.geometry_case_id,
+        )
         attacked = apply_geometric_attack(
             AttackArtifact(identity, source_image),
-            raw.attack_specification,
+            attack_specification,
             registry=self.attack_registry,
         )
         runtime_qk = self.runtime_adapter.observe_detection_qk(attacked.attacked_artifact.image)
         qk_registered = self.adapter.synchronize_qk_observation(runtime_qk, raw.registered_root_key).result
         qk_wrong = self.adapter.synchronize_qk_observation(runtime_qk, wrong_material).result
         traces.update(
-            geometry_operation_identity=raw.attack_specification.attack_id,
-            attack_config_digest=raw.attack_specification.attack_config_digest,
+            geometry_operation_identity=attack_specification.attack_id,
+            attack_config_digest=attack_specification.attack_config_digest,
             qk_registered_relation_score=qk_registered.relation_score,
             qk_wrong_relation_score=qk_wrong.relation_score,
         )
@@ -1296,9 +1737,9 @@ class DevelopmentExplorationRunner:
                 key_margin=estimation.key_margin,
                 estimation_identity_digest=estimation.estimation_identity_digest,
                 search_config_digest=estimation.search_config_digest,
-                truth_crop_fraction=raw.attack_specification.crop_fraction,
-                truth_scale=raw.attack_specification.scale_factor,
-                truth_rotation_degrees=raw.attack_specification.rotation_degrees,
+                truth_crop_fraction=attack_specification.crop_fraction,
+                truth_scale=attack_specification.scale_factor,
+                truth_rotation_degrees=attack_specification.rotation_degrees,
                 estimated_translation_x=estimation.transform.translation_x,
                 estimated_translation_y=estimation.transform.translation_y,
                 truth_translation_x=attacked.output_to_input_matrix[0][2],
@@ -1308,19 +1749,23 @@ class DevelopmentExplorationRunner:
         reliability = self.adapter.assess_geometry_reliability(
             estimation, raw.geometry_reliability_thresholds
         ).result
-        wrong_qk_rejected = qk_wrong.relation_score < qk_registered.relation_score
         traces.update(
             geometry_reliability_identity=reliability.reliability_identity_digest,
             geometry_reliable=reliability.reliable,
             geometry_reliability_config_digest=reliability.threshold_config_digest,
+            geometry_reliability_status=reliability.status,
+            geometry_reliability_failure_reasons=reliability.failure_reasons,
+            estimator_wrong_key_objectives=estimation.wrong_key_objectives,
         )
         if responsibility == "geometry_reliability":
             return reliability, metric_geometry_reliability(
                 identity.source_cluster_id,
-                reliable_case_accepted=reliability.reliable,
-                unreliable_control_accepted=not wrong_qk_rejected,
-                reliable_identity_digest=reliability.reliability_identity_digest,
-                unreliable_identity_digest=qk_wrong.projection_digest,
+                reliability_accepted=reliability.reliable,
+                is_unreliable_control=(
+                    unit.geometry_case_id in GEOMETRY_NEGATIVE_CONTROL_CASE_IDS
+                ),
+                reliability_identity_digest=reliability.reliability_identity_digest,
+                estimation_identity_digest=estimation.estimation_identity_digest,
             ), traces, None
         if not reliability.reliable:
             raise DevelopmentUnitExcluded(
@@ -1368,6 +1813,7 @@ class DevelopmentExplorationRunner:
         internal_record: InternalValidationRecord | None,
         attempt_index: int,
         retry_parent_intent_digest: str | None,
+        actual_elapsed_seconds: float,
     ) -> DevelopmentScientificRecord:
         study = next(item for item in self.protocol.module_matrix if item.responsibility_id == unit.responsibility_id)
         metric = bind_development_metric_observation(
@@ -1380,17 +1826,15 @@ class DevelopmentExplorationRunner:
         )
         result_payload = _safe_result_payload(unit.responsibility_id, result)
         metric.validate()
-        record_id = _canonical_digest(
-            {
-                "authority": self.intent_authority.authority_digest,
-                "attempt_index": attempt_index,
-                "unit_index": unit.unit_index,
-            }
-        )
         routing_trace = {
             key: traces.get(key)
             for key in (
-                "routing_identity", "routing_control", "routing_observation_digest", "routing_mask_digest"
+                "routing_identity", "routing_control", "routing_observation_digest", "routing_mask_digest",
+                "routing_comparison_eligible", "adaptive_registered_score",
+                "uniform_control_registered_score", "adaptive_quality_delta",
+                "uniform_control_quality_delta", "adaptive_detector_identity",
+                "uniform_control_detector_identity", "adaptive_detector_config_digest",
+                "uniform_control_detector_config_digest",
             )
         }
         branch_score_trace = {
@@ -1407,6 +1851,10 @@ class DevelopmentExplorationRunner:
                 "raw_detector_config_digest", "rectified_detector_config_digest",
                 "raw_preprocessing_identity", "rectified_preprocessing_identity",
                 "raw_content_score", "rectified_content_score",
+                "registered_detector_identity", "wrong_key_detector_identity",
+                "primary_null_detector_identity", "registered_detector_config_digest",
+                "wrong_key_detector_config_digest", "primary_null_detector_config_digest",
+                "primary_null_preprocessing_identity",
             )
         }
         geometry_trace = {
@@ -1416,6 +1864,8 @@ class DevelopmentExplorationRunner:
                 "geometry_estimation_identity", "geometry_reliability_identity",
                 "geometry_reliable", "geometry_transform", "geometry_raw_metrics",
                 "rectification_status", "qk_registered_relation_score", "qk_wrong_relation_score",
+                "geometry_reliability_status", "geometry_reliability_failure_reasons",
+                "estimator_wrong_key_objectives",
             )
         }
         threshold_trace = {
@@ -1429,6 +1879,8 @@ class DevelopmentExplorationRunner:
             key: traces.get(key)
             for key in (
                 "registered_key_public_digest", "detection_key_public_digest", "key_role", "control_identity"
+                , "primary_null_detection_key_public_digest",
+                "primary_null_control_identity"
             )
         }
         decision_trace = {
@@ -1462,7 +1914,7 @@ class DevelopmentExplorationRunner:
         record = DevelopmentScientificRecord(
             schema_version=DEVELOPMENT_RECORD_SCHEMA,
             collection_role=DEVELOPMENT_RECORD_COLLECTION_ROLE,
-            record_id=record_id,
+            record_id="0" * 64,
             run_id=self.intent_authority.run_id,
             protocol_id=self.protocol.protocol_id,
             protocol_version=self.protocol.protocol_version,
@@ -1487,6 +1939,9 @@ class DevelopmentExplorationRunner:
             failure_class=None,
             failure_reason=None,
             retry_parent_intent_digest=retry_parent_intent_digest,
+            actual_elapsed_seconds=actual_elapsed_seconds,
+            maximum_duration_seconds=unit.maximum_duration_seconds,
+            duration_limit_exceeded=False,
             operation_result_payload=result_payload,
             operation_result_digest=_canonical_digest(result_payload),
             metric_observation=asdict(metric),
@@ -1502,10 +1957,18 @@ class DevelopmentExplorationRunner:
             candidate_recommendation=None,
             scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
         )
+        record = replace(
+            record,
+            record_id=_canonical_digest(record.payload_without_record_id()),
+        )
         self._validate_record(record, study)
         return record
 
     def _validate_record(self, record: DevelopmentScientificRecord, study) -> None:
+        try:
+            record.validate()
+        except DevelopmentRecordError as exc:
+            raise DevelopmentRunnerError(str(exc)) from exc
         if record.schema_version != DEVELOPMENT_RECORD_SCHEMA:
             raise DevelopmentRunnerError("development record schema drifted")
         if record.module_outcome is not None or record.candidate_recommendation is not None:
@@ -1552,6 +2015,7 @@ class DevelopmentExplorationRunner:
         execution_status: str,
         failure_class: str,
         failure_reason: str,
+        actual_elapsed_seconds: float,
     ) -> DevelopmentScientificRecord:
         if execution_status not in {"failed", "excluded", "retry"}:
             raise DevelopmentRunnerError("failure record status is invalid")
@@ -1560,19 +2024,10 @@ class DevelopmentExplorationRunner:
             if item.responsibility_id == unit.responsibility_id
         )
         empty_result: dict[str, object] = {}
-        record_id = _canonical_digest(
-            {
-                "authority": self.intent_authority.authority_digest,
-                "attempt_index": attempt_index,
-                "failure_class": failure_class,
-                "failure_reason": failure_reason,
-                "unit_index": unit.unit_index,
-            }
-        )
         record = DevelopmentScientificRecord(
             schema_version=DEVELOPMENT_RECORD_SCHEMA,
             collection_role=DEVELOPMENT_RECORD_COLLECTION_ROLE,
-            record_id=record_id,
+            record_id="0" * 64,
             run_id=self.intent_authority.run_id,
             protocol_id=self.protocol.protocol_id,
             protocol_version=self.protocol.protocol_version,
@@ -1597,6 +2052,11 @@ class DevelopmentExplorationRunner:
             failure_class=failure_class,
             failure_reason=failure_reason,
             retry_parent_intent_digest=retry_parent_intent_digest,
+            actual_elapsed_seconds=actual_elapsed_seconds,
+            maximum_duration_seconds=unit.maximum_duration_seconds,
+            duration_limit_exceeded=(
+                actual_elapsed_seconds > unit.maximum_duration_seconds
+            ),
             operation_result_payload=empty_result,
             operation_result_digest=_canonical_digest(empty_result),
             metric_observation={},
@@ -1625,6 +2085,10 @@ class DevelopmentExplorationRunner:
             module_outcome=None,
             candidate_recommendation=None,
             scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+        )
+        record = replace(
+            record,
+            record_id=_canonical_digest(record.payload_without_record_id()),
         )
         self._validate_record(record, study)
         return record
