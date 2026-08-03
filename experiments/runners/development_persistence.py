@@ -1213,6 +1213,56 @@ class DevelopmentPersistentStore:
             )
         return evidence
 
+    def verified_terminal_scientific_evidence_for_unit_indexes(
+        self,
+        unit_indexes: Sequence[int],
+        *,
+        now_epoch_seconds: int,
+    ) -> tuple[tuple[DevelopmentScientificRecord, CommittedUnit], ...]:
+        """Verify an exact frozen unit set without treating a mutable ledger as authority."""
+
+        if isinstance(unit_indexes, (str, bytes)) or not isinstance(
+            unit_indexes, Sequence
+        ):
+            raise DevelopmentPersistenceError("requested unit indexes are invalid")
+        requested = tuple(unit_indexes)
+        if (
+            not requested
+            or any(type(index) is not int for index in requested)
+            or len(requested) != len(set(requested))
+            or tuple(sorted(requested)) != requested
+        ):
+            raise DevelopmentPersistenceError(
+                "requested unit indexes must be unique and ordered"
+            )
+        if any(index not in self._registered_unit_bindings for index in requested):
+            raise DevelopmentPersistenceError(
+                "requested unit index is outside frozen roster"
+            )
+        recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
+        latest_by_index: dict[int, CommittedUnit] = {}
+        for marker in recovery.committed_units:
+            latest_by_index[marker.unit_index] = marker
+        missing = tuple(index for index in requested if index not in latest_by_index)
+        if missing:
+            raise DevelopmentPersistenceError(
+                "requested frozen units lack terminal COMMITTED evidence"
+            )
+        markers = tuple(latest_by_index[index] for index in requested)
+        if any(
+            marker.attempt_disposition == "retryable_resource_failure"
+            for marker in markers
+        ):
+            raise DevelopmentPersistenceError(
+                "requested scientific unit has no terminal record"
+            )
+        evidence = tuple((self._verify_committed(marker), marker) for marker in markers)
+        if tuple(record.unit_index for record, _marker in evidence) != requested:
+            raise DevelopmentPersistenceError(
+                "requested scientific evidence order drifted"
+            )
+        return evidence
+
     def write_session_receipt(
         self,
         receipt: SessionReceipt,

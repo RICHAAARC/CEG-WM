@@ -1359,23 +1359,16 @@ def test_threshold_is_invalid_for_every_later_split() -> None:
 
 
 @pytest.mark.unit
-def test_dependency_stop_rule_uses_implementation_blocked_semantics() -> None:
+def test_protocol_dependency_decision_requires_persistent_store_replay() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
-    missing = decide_development_module_execution(
-        protocol,
-        "content_embedder",
-        {},
-    )
-    assert not missing.approved
-    assert missing.decision_reason == "prerequisite_outcome_missing"
     with pytest.raises(
-        ValueError,
-        match="development_verified_module_outcome_required",
+        PermissionError,
+        match="persistent-store replay",
     ):
         decide_development_module_execution(
             protocol,
-            "content_embedder",
-            {"content_router": "mechanism_signal_observed"},
+            "content_router",
+            {},
         )
 
 

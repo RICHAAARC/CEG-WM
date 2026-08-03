@@ -3496,62 +3496,9 @@ def decide_development_module_execution(
         ],
     ],
 ) -> DevelopmentModuleExecutionDecision:
-    if type(protocol) is not FrozenDevelopmentExplorationProtocol or protocol.validate():
-        raise ValueError("development_protocol_invalid")
-    studies = {item.responsibility_id: item for item in protocol.module_matrix}
-    if responsibility_id not in studies:
-        raise ValueError("development_responsibility_invalid")
-    unknown = set(outcomes_by_responsibility) - set(studies)
-    if unknown:
-        raise ValueError("development_outcome_responsibility_unknown")
-    for role, value in outcomes_by_responsibility.items():
-        if (
-            type(value) is not tuple
-            or len(value) != 2
-            or type(value[0]) is not DevelopmentModuleOutcomeRecord
-            or type(value[1]) is not DevelopmentVerifiedOutcomeEvidenceContext
-            or value[0].responsibility_id != role
-            or value[0].validate(
-                protocol,
-                verified_evidence_context=value[1],
-            )
-        ):
-            raise ValueError("development_verified_module_outcome_required")
-    study = studies[responsibility_id]
-    missing = tuple(
-        dependency
-        for dependency in study.prerequisite_responsibility_ids
-        if dependency not in outcomes_by_responsibility
-    )
-    blocking = tuple(
-        dependency
-        for dependency in study.prerequisite_responsibility_ids
-        if dependency not in missing
-        and outcomes_by_responsibility[dependency][0].module_outcome
-        != "mechanism_signal_observed"
-    )
-    if missing:
-        return DevelopmentModuleExecutionDecision(
-            False,
-            responsibility_id,
-            missing,
-            (),
-            "prerequisite_outcome_missing",
-        )
-    if blocking:
-        return DevelopmentModuleExecutionDecision(
-            False,
-            responsibility_id,
-            (),
-            blocking,
-            DEPENDENCY_STOP_RULE,
-        )
-    return DevelopmentModuleExecutionDecision(
-        True,
-        responsibility_id,
-        (),
-        (),
-        "development_execution_authorized",
+    del protocol, responsibility_id, outcomes_by_responsibility
+    raise PermissionError(
+        "development execution decision requires persistent-store replay"
     )
 
 
@@ -3787,6 +3734,25 @@ class DevelopmentModuleOutcomeRecord:
         if self.outcome_record_id != _canonical_digest(self.payload_without_identity()):
             violations.append("development_module_outcome_identity_invalid")
         return tuple(dict.fromkeys(violations))
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopmentVerifiedModuleOutcome:
+    outcome_record: DevelopmentModuleOutcomeRecord
+    evidence_context: DevelopmentVerifiedOutcomeEvidenceContext
+
+    def validate_structure(
+        self,
+        protocol: FrozenDevelopmentExplorationProtocol,
+    ) -> tuple[str, ...]:
+        if type(self.outcome_record) is not DevelopmentModuleOutcomeRecord:
+            return ("verified_module_outcome_record_exact_type_required",)
+        if type(self.evidence_context) is not DevelopmentVerifiedOutcomeEvidenceContext:
+            return ("verified_module_outcome_context_exact_type_required",)
+        return self.outcome_record.validate(
+            protocol,
+            verified_evidence_context=self.evidence_context,
+        )
 
 
 def _create_verified_development_module_outcome_record(

@@ -27,6 +27,7 @@ from experiments.runners.development_persistence import (
     development_unit_roster_digest,
 )
 from experiments.protocol.development_exploration import (
+    DevelopmentVerifiedModuleOutcome,
     build_development_cross_fit_plan,
     create_development_provisional_threshold,
     create_development_threshold_fit_input,
@@ -47,6 +48,7 @@ from runtime import create_runtime_adapter
 from tests.unit.test_development_module_exploration import (
     _development_manifest,
     _execution_intent,
+    _primary_null_record,
     _redigest_scientific_record,
     _threshold_material,
 )
@@ -201,6 +203,103 @@ def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, De
         registered_unit_bindings=initial.create_persistence_unit_bindings(),
     )
     return _runner(initial.intent_authority, store), store
+
+
+def _commit_frozen_unit_indexes(
+    runner: DevelopmentExplorationRunner,
+    store: DevelopmentPersistentStore,
+    unit_indexes: tuple[int, ...],
+    *,
+    session_id: str,
+) -> None:
+    lease = store.acquire_lease(
+        session_id=session_id,
+        now_epoch_seconds=100,
+        lease_duration_seconds=80_000,
+    )
+    unit_input = _input()
+    for unit_index in unit_indexes:
+        intent = store.create_intent(
+            lease,
+            unit_id=f"development_scientific_unit_{unit_index:04d}",
+            unit_index=unit_index,
+            attempt_index=0,
+            parent_attempt_intent_digest=None,
+            now_epoch_seconds=101,
+        )
+        record = runner._execute_unit(unit_index, unit_input).record
+        store.commit_unit(
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=102,
+        )
+
+
+def _commit_hf_primary_null_fixture_records(
+    store: DevelopmentPersistentStore,
+    plan,
+) -> None:
+    lease = store.acquire_lease(
+        session_id="hf_threshold_replay_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=80_000,
+    )
+    detector_bindings = {
+        fold.fold_index: _threshold_material(plan, fold.fold_index)[1]
+        for fold in plan.folds
+    }
+    assignments = {
+        item.identity.source_cluster_id: item for item in plan.input_manifest.assignments
+    }
+    for binding in store.registered_unit_bindings:
+        if (
+            binding.responsibility_id != "hf_detector"
+            or binding.content_branch_id != "hf_only"
+        ):
+            continue
+        source_cluster_id = binding.analysis_unit_identity.source_cluster_id
+        fold = next(
+            item
+            for item in plan.folds
+            if source_cluster_id in item.fit_source_cluster_ids
+        )
+        intent = store.create_intent(
+            lease,
+            unit_id=binding.unit_id,
+            unit_index=binding.unit_index,
+            attempt_index=0,
+            parent_attempt_intent_digest=None,
+            now_epoch_seconds=101,
+        )
+        record = _primary_null_record(
+            assignments[source_cluster_id],
+            index=binding.unit_index,
+            score=float(binding.source_cluster_ordinal) / 100.0,
+            split_manifest_digest=plan.input_manifest.digest(),
+            detector_binding=detector_bindings[fold.fold_index],
+        )
+        metric_observation = dict(record.metric_observation)
+        metric_observation["geometry_case_id"] = binding.geometry_case_id
+        metric_without_digest = dict(metric_observation)
+        metric_without_digest.pop("observation_digest")
+        metric_observation["observation_digest"] = (
+            canonical_development_value_digest(metric_without_digest)
+        )
+        record = _redigest_scientific_record(
+            record,
+            phase=binding.phase,
+            analysis_unit_identity=intent.analysis_unit_identity,
+            geometry_case_id=binding.geometry_case_id,
+            maximum_duration_seconds=binding.maximum_duration_seconds,
+            metric_observation=metric_observation,
+        )
+        store.commit_unit(
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=102,
+        )
 
 
 def _input() -> DevelopmentUnitInput:
@@ -628,13 +727,155 @@ def test_module_outcome_public_surface_accepts_no_caller_records_or_outcomes() -
     assert "prerequisite_outcome_records" not in signature.parameters
     with pytest.raises(
         DevelopmentRunnerError,
-        match="persistence-verified records",
+        match="persistent-store replay",
     ):
         runner._build_module_outcome_record(
             (runner._execute_unit(0, _input()).record,),
             responsibility_id="key_schedule",
-            _verified_build_token=object(),
+            now_epoch_seconds=1,
         )
+
+
+@pytest.mark.quick
+def test_committed_key_records_replay_into_outcome_and_dependency_decision(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    key_unit_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "key_schedule"
+    )
+    _commit_frozen_unit_indexes(
+        runner,
+        store,
+        key_unit_indexes,
+        session_id="key_outcome_replay_session",
+    )
+
+    verified = runner.build_verified_module_outcome_record(
+        responsibility_id="key_schedule",
+        now_epoch_seconds=103,
+    )
+    decision = runner.decide_verified_module_execution(
+        responsibility_id="content_router",
+        outcomes_by_responsibility={"key_schedule": verified},
+        now_epoch_seconds=103,
+    )
+
+    assert verified.outcome_record.module_outcome == "mechanism_signal_observed"
+    assert len(verified.outcome_record.evidence_record_ids) == 16
+    assert len(verified.evidence_context.committed_marker_bindings) == 16
+    assert decision.approved is True
+    assert decision.decision_reason == "development_execution_authorized"
+
+
+@pytest.mark.quick
+def test_dependency_decision_rejects_ghost_or_foreign_verified_context(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    key_unit_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "key_schedule"
+    )
+    _commit_frozen_unit_indexes(
+        runner,
+        store,
+        key_unit_indexes,
+        session_id="ghost_rejection_session",
+    )
+    verified = runner.build_verified_module_outcome_record(
+        responsibility_id="key_schedule",
+        now_epoch_seconds=103,
+    )
+    ghost_context = replace(
+        verified.evidence_context,
+        committed_marker_bindings=tuple(
+            (record_id, record_digest, "f" * 64)
+            for record_id, record_digest, _marker_digest in (
+                verified.evidence_context.committed_marker_bindings
+            )
+        ),
+    )
+    ghost_record = replace(
+        verified.outcome_record,
+        committed_marker_bindings=ghost_context.committed_marker_bindings,
+    )
+    ghost_record = replace(
+        ghost_record,
+        outcome_record_id=canonical_development_value_digest(
+            ghost_record.payload_without_identity()
+        ),
+    )
+    ghost = DevelopmentVerifiedModuleOutcome(
+        outcome_record=ghost_record,
+        evidence_context=ghost_context,
+    )
+    assert ghost.validate_structure(runner.protocol) == ()
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="differs from persistent-store replay",
+    ):
+        runner.decide_verified_module_execution(
+            responsibility_id="content_router",
+            outcomes_by_responsibility={"key_schedule": ghost},
+            now_epoch_seconds=103,
+        )
+
+
+@pytest.mark.quick
+def test_hf_threshold_replay_rejects_plan_valid_uncommitted_alternate(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    plan = build_development_cross_fit_plan(
+        responsibility_id="hf_detector",
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=64,
+    )
+    _commit_hf_primary_null_fixture_records(store, plan)
+
+    replayed = runner.replay_verified_hf_provisional_thresholds(
+        cross_fit_plan=plan,
+        now_epoch_seconds=103,
+    )
+    alternate = tuple(
+        create_development_provisional_threshold(
+            plan,
+            expected_execution_intent_authority_digest=(
+                runner.intent_authority.authority_digest
+            ),
+            fold_index=fold.fold_index,
+            input_manifest=material[0],
+            detector_binding=material[1],
+            fit_inputs=material[2],
+        )
+        for fold in plan.folds
+        for material in (_threshold_material(plan, fold.fold_index),)
+    )
+
+    assert all(item.validate(plan) == () for item in alternate)
+    assert alternate != replayed
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="differ from persistent-store replay",
+    ):
+        runner.verify_hf_provisional_thresholds_from_store(
+            alternate,
+            cross_fit_plan=plan,
+            now_epoch_seconds=103,
+        )
+    assert runner.verify_hf_provisional_thresholds_from_store(
+        replayed,
+        cross_fit_plan=plan,
+        now_epoch_seconds=103,
+    ) == replayed
 
 
 @pytest.mark.quick

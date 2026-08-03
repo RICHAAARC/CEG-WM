@@ -57,6 +57,8 @@ from experiments.protocol.development_exploration import (
     MODULE_OUTCOMES,
     DevelopmentProvisionalThreshold,
     DevelopmentModuleOutcomeRecord,
+    DevelopmentModuleExecutionDecision,
+    DevelopmentVerifiedModuleOutcome,
     DevelopmentVerifiedOutcomeEvidenceContext,
     DevelopmentStudyUnit,
     FrozenDevelopmentCrossFitPlan,
@@ -108,7 +110,6 @@ from runtime.content_write import ContentWriteVaeResult
 
 
 DEVELOPMENT_RECORD_SCHEMA = RECORD_SCHEMA_VERSION
-_VERIFIED_OUTCOME_BUILD_TOKEN = object()
 _ADAPTER_CALL_NAMES = (
     "identify_key", "derive_registered_key_stream", "derive_wrong_key_stream",
     "derive_public_noise", "route_content", "build_lf_carrier", "build_hf_carrier",
@@ -808,31 +809,13 @@ class DevelopmentExplorationRunner:
         *,
         responsibility_id: str,
         cross_fit_plans: Mapping[str, FrozenDevelopmentCrossFitPlan] | None = None,
-        provisional_thresholds_by_responsibility: Mapping[
-            str, Sequence[DevelopmentProvisionalThreshold]
-        ] | None = None,
         now_epoch_seconds: int,
-    ) -> DevelopmentModuleOutcomeRecord:
+    ) -> DevelopmentVerifiedModuleOutcome:
         """Rebuild outcomes only from terminal records verified by the store."""
 
         if self.persistence_store is None:
             raise DevelopmentRunnerError("verified module outcome requires persistence")
         plans = {} if cross_fit_plans is None else dict(cross_fit_plans)
-        thresholds_by_role = (
-            {}
-            if provisional_thresholds_by_responsibility is None
-            else {
-                role: tuple(values)
-                for role, values in provisional_thresholds_by_responsibility.items()
-            }
-        )
-        verified_evidence = self.persistence_store.verified_terminal_scientific_evidence(
-            now_epoch_seconds=now_epoch_seconds
-        )
-        records = tuple(record for record, _marker in verified_evidence)
-        markers_by_record_id = {
-            record.record_id: marker for record, marker in verified_evidence
-        }
         studies = tuple(self.protocol.module_matrix)
         target_index = next(
             (
@@ -844,6 +827,25 @@ class DevelopmentExplorationRunner:
         )
         if target_index < 0:
             raise DevelopmentRunnerError("module outcome responsibility is unknown")
+        required_responsibilities = {
+            item.responsibility_id for item in studies[: target_index + 1]
+        }
+        required_unit_indexes = tuple(
+            binding.unit_index
+            for binding in self.persistence_store.registered_unit_bindings
+            if binding.responsibility_id in required_responsibilities
+        )
+        verified_evidence = (
+            self.persistence_store
+            .verified_terminal_scientific_evidence_for_unit_indexes(
+                required_unit_indexes,
+                now_epoch_seconds=now_epoch_seconds,
+            )
+        )
+        records = tuple(record for record, _marker in verified_evidence)
+        markers_by_record_id = {
+            record.record_id: marker for record, marker in verified_evidence
+        }
         outcomes: dict[str, DevelopmentModuleOutcomeRecord] = {}
         outcome_contexts: dict[str, DevelopmentVerifiedOutcomeEvidenceContext] = {}
         for study in studies[: target_index + 1]:
@@ -870,20 +872,11 @@ class DevelopmentExplorationRunner:
                 raise DevelopmentRunnerError(
                     "cross-fit plan supplied for non-detector outcome"
                 )
-            thresholds = thresholds_by_role.get(study.responsibility_id, ())
+            thresholds: tuple[DevelopmentProvisionalThreshold, ...] = ()
             if study.responsibility_id == "hf_detector":
-                if (
-                    len(thresholds) != len(plan.folds)
-                    or {item.fold_index for item in thresholds}
-                    != set(range(len(plan.folds)))
-                    or any(item.validate(plan) for item in thresholds)
-                ):
-                    raise DevelopmentRunnerError(
-                        "verified high-frequency detector outcome requires all provisional thresholds"
-                    )
-            elif thresholds:
-                raise DevelopmentRunnerError(
-                    "provisional thresholds supplied for responsibility without threshold role"
+                thresholds = self._replay_hf_detector_provisional_thresholds(
+                    evidence,
+                    plan,
                 )
             outcome, outcome_context = self._build_module_outcome_record(
                 evidence,
@@ -891,7 +884,7 @@ class DevelopmentExplorationRunner:
                     markers_by_record_id[record.record_id] for record in evidence
                 ),
                 responsibility_id=study.responsibility_id,
-                _verified_build_token=_VERIFIED_OUTCOME_BUILD_TOKEN,
+                now_epoch_seconds=now_epoch_seconds,
                 cross_fit_plan=plan,
                 provisional_threshold_identities=tuple(
                     item.threshold_identity
@@ -915,7 +908,156 @@ class DevelopmentExplorationRunner:
                 )
             outcomes[study.responsibility_id] = outcome
             outcome_contexts[study.responsibility_id] = outcome_context
-        return outcomes[responsibility_id]
+        return DevelopmentVerifiedModuleOutcome(
+            outcome_record=outcomes[responsibility_id],
+            evidence_context=outcome_contexts[responsibility_id],
+        )
+
+    def replay_verified_hf_provisional_thresholds(
+        self,
+        *,
+        cross_fit_plan: FrozenDevelopmentCrossFitPlan,
+        now_epoch_seconds: int,
+    ) -> tuple[DevelopmentProvisionalThreshold, ...]:
+        """Rebuild HF thresholds only from the exact committed primary-null units."""
+
+        if self.persistence_store is None:
+            raise DevelopmentRunnerError(
+                "verified threshold replay requires persistence"
+            )
+        if (
+            type(cross_fit_plan) is not FrozenDevelopmentCrossFitPlan
+            or cross_fit_plan.responsibility_id != "hf_detector"
+            or cross_fit_plan.validate()
+        ):
+            raise DevelopmentRunnerError("verified HF threshold plan is invalid")
+        required_unit_indexes = tuple(
+            binding.unit_index
+            for binding in self.persistence_store.registered_unit_bindings
+            if binding.responsibility_id == "hf_detector"
+            and binding.content_branch_id == "hf_only"
+            and binding.analysis_unit_identity.source_cluster_id
+            in set(cross_fit_plan.source_cluster_ids)
+        )
+        if len(required_unit_indexes) != len(cross_fit_plan.source_cluster_ids):
+            raise DevelopmentRunnerError(
+                "verified HF threshold units differ from frozen plan"
+            )
+        evidence = (
+            self.persistence_store
+            .verified_terminal_scientific_evidence_for_unit_indexes(
+                required_unit_indexes,
+                now_epoch_seconds=now_epoch_seconds,
+            )
+        )
+        return self._replay_hf_detector_provisional_thresholds(
+            tuple(record for record, _marker in evidence),
+            cross_fit_plan,
+        )
+
+    def verify_hf_provisional_thresholds_from_store(
+        self,
+        provisional_thresholds: Sequence[DevelopmentProvisionalThreshold],
+        *,
+        cross_fit_plan: FrozenDevelopmentCrossFitPlan,
+        now_epoch_seconds: int,
+    ) -> tuple[DevelopmentProvisionalThreshold, ...]:
+        """Reject any threshold set that was not replayed from the same store."""
+
+        supplied = tuple(provisional_thresholds)
+        replayed = self.replay_verified_hf_provisional_thresholds(
+            cross_fit_plan=cross_fit_plan,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+        if supplied != replayed:
+            raise DevelopmentRunnerError(
+                "provisional thresholds differ from persistent-store replay"
+            )
+        return replayed
+
+    def decide_verified_module_execution(
+        self,
+        *,
+        responsibility_id: str,
+        outcomes_by_responsibility: Mapping[
+            str, DevelopmentVerifiedModuleOutcome
+        ],
+        cross_fit_plans: Mapping[str, FrozenDevelopmentCrossFitPlan] | None = None,
+        now_epoch_seconds: int,
+    ) -> DevelopmentModuleExecutionDecision:
+        """Approve dependencies only after replaying the same persistent store."""
+
+        if self.persistence_store is None:
+            raise DevelopmentRunnerError(
+                "verified module decision requires persistence"
+            )
+        studies = {
+            item.responsibility_id: item for item in self.protocol.module_matrix
+        }
+        study = studies.get(responsibility_id)
+        if study is None:
+            raise DevelopmentRunnerError(
+                "module decision responsibility is unknown"
+            )
+        unknown = set(outcomes_by_responsibility) - set(studies)
+        if unknown:
+            raise DevelopmentRunnerError(
+                "module decision contains unknown outcome responsibility"
+            )
+        missing = tuple(
+            role
+            for role in study.prerequisite_responsibility_ids
+            if role not in outcomes_by_responsibility
+        )
+        if missing:
+            return DevelopmentModuleExecutionDecision(
+                False,
+                responsibility_id,
+                missing,
+                (),
+                "prerequisite_outcome_missing",
+            )
+        replayed: dict[str, DevelopmentVerifiedModuleOutcome] = {}
+        for role in study.prerequisite_responsibility_ids:
+            supplied = outcomes_by_responsibility[role]
+            if (
+                type(supplied) is not DevelopmentVerifiedModuleOutcome
+                or supplied.validate_structure(self.protocol)
+            ):
+                raise DevelopmentRunnerError(
+                    "module decision requires structured verified outcome bundle"
+                )
+            rebuilt = self.build_verified_module_outcome_record(
+                responsibility_id=role,
+                cross_fit_plans=cross_fit_plans,
+                now_epoch_seconds=now_epoch_seconds,
+            )
+            if supplied != rebuilt:
+                raise DevelopmentRunnerError(
+                    "module decision outcome differs from persistent-store replay"
+                )
+            replayed[role] = rebuilt
+        blocking = tuple(
+            role
+            for role in study.prerequisite_responsibility_ids
+            if replayed[role].outcome_record.module_outcome
+            != "mechanism_signal_observed"
+        )
+        if blocking:
+            return DevelopmentModuleExecutionDecision(
+                False,
+                responsibility_id,
+                (),
+                blocking,
+                "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+            )
+        return DevelopmentModuleExecutionDecision(
+            True,
+            responsibility_id,
+            (),
+            (),
+            "development_execution_authorized",
+        )
 
     def _verified_outcome_context(
         self,
@@ -936,8 +1078,8 @@ class DevelopmentExplorationRunner:
             for record in records
         )
         marker_bindings = tuple(
-            (record.record_id, record_digest, marker.digest())
-            for (record, record_digest), marker in zip(
+            (record_id, record_digest, marker.digest())
+            for (record_id, record_digest), marker in zip(
                 evidence_bindings,
                 committed_markers,
                 strict=True,
@@ -986,7 +1128,7 @@ class DevelopmentExplorationRunner:
         records: Sequence[DevelopmentScientificRecord],
         *,
         responsibility_id: str,
-        _verified_build_token: object,
+        now_epoch_seconds: int,
         committed_markers: Sequence[CommittedUnit] = (),
         cross_fit_plan: FrozenDevelopmentCrossFitPlan | None = None,
         provisional_threshold_identities: Sequence[str] = (),
@@ -996,9 +1138,25 @@ class DevelopmentExplorationRunner:
     ) -> tuple[DevelopmentModuleOutcomeRecord, DevelopmentVerifiedOutcomeEvidenceContext]:
         """Apply frozen criteria to records supplied only by the verified scheduler."""
 
-        if _verified_build_token is not _VERIFIED_OUTCOME_BUILD_TOKEN:
+        if self.persistence_store is None:
             raise DevelopmentRunnerError(
-                "module outcome builder accepts only persistence-verified records"
+                "module outcome builder requires persistent-store replay"
+            )
+        if len(committed_markers) != len(records):
+            raise DevelopmentRunnerError(
+                "module outcome requires one verified marker per record"
+            )
+        unit_indexes = tuple(record.unit_index for record in records)
+        replayed_evidence = (
+            self.persistence_store
+            .verified_terminal_scientific_evidence_for_unit_indexes(
+                unit_indexes,
+                now_epoch_seconds=now_epoch_seconds,
+            )
+        )
+        if tuple(zip(records, committed_markers, strict=True)) != replayed_evidence:
+            raise DevelopmentRunnerError(
+                "module outcome evidence differs from persistent-store replay"
             )
 
         study = next(
@@ -1011,10 +1169,6 @@ class DevelopmentExplorationRunner:
         )
         if study is None or not records:
             raise DevelopmentRunnerError("module outcome records are missing")
-        if len(committed_markers) != len(records):
-            raise DevelopmentRunnerError(
-                "module outcome requires one verified marker per record"
-            )
         prerequisite_by_responsibility = {
             item.responsibility_id: (item, context)
             for item, context in prerequisite_outcome_records
@@ -1130,10 +1284,13 @@ class DevelopmentExplorationRunner:
                 responsibility_id, observations, plan=cross_fit_plan
             )
             if responsibility_id == "hf_detector":
-                replayed_thresholds = self._replay_hf_detector_threshold_inputs(
+                replayed_thresholds = self._replay_hf_detector_provisional_thresholds(
                     records, cross_fit_plan
                 )
-                if replayed_thresholds != cross_fit.fold_thresholds:
+                if tuple(
+                    (item.fold_index, item.threshold)
+                    for item in replayed_thresholds
+                ) != cross_fit.fold_thresholds:
                     raise DevelopmentRunnerError(
                         "protocol threshold replay differs from metric cross-fit"
                     )
@@ -1324,12 +1481,12 @@ class DevelopmentExplorationRunner:
         )
         return outcome, context
 
-    def _replay_hf_detector_threshold_inputs(
+    def _replay_hf_detector_provisional_thresholds(
         self,
         records: Sequence[DevelopmentScientificRecord],
         plan: FrozenDevelopmentCrossFitPlan,
-    ) -> tuple[tuple[int, float], ...]:
-        """Build protocol threshold inputs from exact persisted HF records."""
+    ) -> tuple[DevelopmentProvisionalThreshold, ...]:
+        """Rebuild actual provisional thresholds from persisted HF records."""
 
         by_cluster = {
             AnalysisUnitIdentity(
@@ -1342,7 +1499,7 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError(
                 "HF threshold replay lacks the frozen cluster roster"
             )
-        thresholds: list[tuple[int, float]] = []
+        thresholds: list[DevelopmentProvisionalThreshold] = []
         for fold in plan.folds:
             fit_clusters = set(fold.fit_source_cluster_ids)
             key_bindings = tuple(
@@ -1378,7 +1535,7 @@ class DevelopmentExplorationRunner:
                 detector_binding=detector_binding,
                 fit_inputs=fit_inputs,
             )
-            thresholds.append((fold.fold_index, provisional.threshold))
+            thresholds.append(provisional)
         return tuple(thresholds)
 
     @staticmethod

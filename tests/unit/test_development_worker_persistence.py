@@ -465,6 +465,18 @@ def test_commit_writes_only_exact_formal_record_at_fixed_member_path(tmp_path: P
     )
     assert verified_evidence == ((verified_records[0], marker),)
     assert verified_evidence[0][1].digest() == marker.digest()
+    assert store.verified_terminal_scientific_evidence_for_unit_indexes(
+        (0,),
+        now_epoch_seconds=201,
+    ) == verified_evidence
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="lack terminal COMMITTED evidence",
+    ):
+        store.verified_terminal_scientific_evidence_for_unit_indexes(
+            (0, 1),
+            now_epoch_seconds=201,
+        )
 
 
 @pytest.mark.quick

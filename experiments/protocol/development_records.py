@@ -162,6 +162,24 @@ class DevelopmentScientificRecord:
                     f"development scientific record {field_name} must be a list"
                 )
             converted[field_name] = tuple(value)
+        metric = converted.get("metric_observation")
+        if type(metric) is dict and metric:
+            normalized_metric = dict(metric)
+            for field_name in (
+                "registered_metric_ids",
+                "sufficient_statistics",
+                "result_identity_digests",
+            ):
+                value = normalized_metric.get(field_name)
+                if type(value) is not list:
+                    raise DevelopmentRecordError(
+                        f"development metric observation {field_name} must be a list"
+                    )
+                normalized_metric[field_name] = tuple(
+                    tuple(item) if field_name == "sufficient_statistics" else item
+                    for item in value
+                )
+            converted["metric_observation"] = normalized_metric
         try:
             record = cls(**converted)
         except TypeError as exc:
