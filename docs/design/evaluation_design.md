@@ -69,6 +69,17 @@ digest，并必须逐 cluster 等于 split manifest 已冻结的 registered key-
 不保存 raw secret。protocol、authority、manifest 或 public roster 任一变化都会形成
 不同摘要，不能在 threshold 结果侧同源重绑后冒充原实验身份。
 
+在产生任何 development scientific record 前，还必须创建
+`FrozenDevelopmentExecutionIntentAuthority`。该 intent 以
+`create_only_before_scientific_records` 角色绑定 run/seed namespace、完整 split
+manifest 及全部 assignment identities、全 cluster public-key roster、protocol、
+detector authority 和 key-schedule authority；raw secret 明确禁止进入。plan、fit
+input、binding、threshold 和 recovery authorization 都必须接收调用边界已经 pinned
+的 `expected_execution_intent_authority_digest`。完整重建 manifest/roster 可以形成另一个
+尚未执行的新 intent，但即使重建全部 records 与下游摘要，也不能替换旧 run 的
+expected digest。Batch1 只冻结该协议对象与验证；后续 runner 必须以 create-only
+intent 持久化并传入 pinned digest，本批不实现存储。
+
 prompt、source cluster、seed namespace、key family 和 image lineage 五维身份从
 各 role 的真实 `FrozenSplitManifest` 与 seed namespace 绑定；任意两个已提供 role
 在任一维度有交集即 fail closed。未来 role manifest 在获授权并真实冻结前明确标记

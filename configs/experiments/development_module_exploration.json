@@ -1,7 +1,7 @@
 {
-  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v3",
+  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v4",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "3.0.0",
+  "protocol_version": "4.0.0",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -190,6 +190,14 @@
     "registered_key_schedule_derivation_identity": "main_shared_key_schedule_identify_root_key",
     "registered_key_schedule_config_digest": "8696a3fbaabb39149a3b7b30f08cdcd12b64d45bebd14658d08c09805f5b33c0",
     "public_key_relation": "registered_detection_public_digests_distinct"
+  },
+  "execution_intent_policy": {
+    "authority_role": "create_only_before_scientific_records",
+    "create_only_required": true,
+    "freeze_before_scientific_records": true,
+    "raw_secret_policy": "raw_secret_prohibited",
+    "expected_digest_required_at_result_boundaries": true,
+    "later_runner_must_pin_digest": true
   },
   "content_study": {
     "branch_ids": [

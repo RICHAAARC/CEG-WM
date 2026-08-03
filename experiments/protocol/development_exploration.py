@@ -35,8 +35,8 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "3.0.0"
-SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v3"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.0.0"
+SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v4"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
 
@@ -98,6 +98,8 @@ REGISTERED_KEY_SCHEDULE_DERIVATION_IDENTITY = (
 REGISTERED_KEY_SCHEDULE_CONFIG_DIGEST = (
     "8696a3fbaabb39149a3b7b30f08cdcd12b64d45bebd14658d08c09805f5b33c0"
 )
+DEVELOPMENT_EXECUTION_INTENT_ROLE = "create_only_before_scientific_records"
+DEVELOPMENT_EXECUTION_INTENT_RAW_SECRET_POLICY = "raw_secret_prohibited"
 
 CONTENT_BRANCH_IDS = (
     "clean_control",
@@ -399,6 +401,7 @@ _EXACT_TOP_LEVEL_KEYS = frozenset(
         "study_budget",
         "provisional_threshold_cross_fit",
         "threshold_detector_authority",
+        "execution_intent_policy",
         "content_study",
         "geometry_study",
         "module_matrix",
@@ -1326,6 +1329,41 @@ class DevelopmentThresholdCrossFitPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentExecutionIntentPolicy:
+    authority_role: str
+    create_only_required: bool
+    freeze_before_scientific_records: bool
+    raw_secret_policy: str
+    expected_digest_required_at_result_boundaries: bool
+    later_runner_must_pin_digest: bool
+
+    def validate(self) -> tuple[str, ...]:
+        violations: list[str] = []
+        if self.authority_role != DEVELOPMENT_EXECUTION_INTENT_ROLE:
+            violations.append("execution_intent_authority_role_invalid")
+        if self.raw_secret_policy != DEVELOPMENT_EXECUTION_INTENT_RAW_SECRET_POLICY:
+            violations.append("execution_intent_raw_secret_policy_invalid")
+        for value, reason in (
+            (self.create_only_required, "execution_intent_create_only_required"),
+            (
+                self.freeze_before_scientific_records,
+                "execution_intent_must_precede_scientific_records",
+            ),
+            (
+                self.expected_digest_required_at_result_boundaries,
+                "execution_intent_expected_digest_required",
+            ),
+            (
+                self.later_runner_must_pin_digest,
+                "execution_intent_runner_pin_required",
+            ),
+        ):
+            if value is not True:
+                violations.append(reason)
+        return tuple(violations)
+
+
+@dataclass(frozen=True, slots=True)
 class FrozenDevelopmentExplorationProtocol:
     schema_version: str
     protocol_id: str
@@ -1336,6 +1374,7 @@ class FrozenDevelopmentExplorationProtocol:
     study_budget: DevelopmentStudyBudget
     provisional_threshold_cross_fit: DevelopmentThresholdCrossFitPolicy
     threshold_detector_authority: DevelopmentThresholdDetectorAuthority
+    execution_intent_policy: DevelopmentExecutionIntentPolicy
     content_study: DevelopmentContentStudy
     geometry_study: DevelopmentGeometryStudy
     module_matrix: tuple[DevelopmentModuleStudy, ...]
@@ -1362,6 +1401,7 @@ class FrozenDevelopmentExplorationProtocol:
         violations.extend(
             self.threshold_detector_authority.validate(self.module_matrix)
         )
+        violations.extend(self.execution_intent_policy.validate())
         violations.extend(self.content_study.validate())
         violations.extend(self.geometry_study.validate())
         geometry_ids = frozenset(
@@ -1891,6 +1931,45 @@ def load_frozen_development_exploration_protocol(
         ),
     )
 
+    intent_policy_raw = _require_mapping(
+        raw["execution_intent_policy"],
+        "execution_intent_policy",
+    )
+    _require_exact_keys(
+        intent_policy_raw,
+        frozenset(
+            {
+                "authority_role",
+                "create_only_required",
+                "freeze_before_scientific_records",
+                "raw_secret_policy",
+                "expected_digest_required_at_result_boundaries",
+                "later_runner_must_pin_digest",
+            }
+        ),
+        "execution_intent_policy",
+    )
+    execution_intent_policy = DevelopmentExecutionIntentPolicy(
+        authority_role=_require_identity(
+            intent_policy_raw["authority_role"],
+            "execution_intent_authority_role",
+        ),
+        create_only_required=intent_policy_raw["create_only_required"],
+        freeze_before_scientific_records=intent_policy_raw[
+            "freeze_before_scientific_records"
+        ],
+        raw_secret_policy=_require_identity(
+            intent_policy_raw["raw_secret_policy"],
+            "execution_intent_raw_secret_policy",
+        ),
+        expected_digest_required_at_result_boundaries=intent_policy_raw[
+            "expected_digest_required_at_result_boundaries"
+        ],
+        later_runner_must_pin_digest=intent_policy_raw[
+            "later_runner_must_pin_digest"
+        ],
+    )
+
     outcome_raw = _require_mapping(raw["module_outcomes"], "module_outcomes")
     _require_exact_keys(
         outcome_raw,
@@ -1907,6 +1986,7 @@ def load_frozen_development_exploration_protocol(
         study_budget=study_budget,
         provisional_threshold_cross_fit=threshold_policy,
         threshold_detector_authority=threshold_detector_authority,
+        execution_intent_policy=execution_intent_policy,
         content_study=content_study,
         geometry_study=geometry_study,
         module_matrix=matrix_tuple,
@@ -1959,6 +2039,238 @@ def development_assignments_only(
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentPrimaryNullKeyBinding:
+    source_cluster_id: str
+    registered_key_family_digest: str
+    registered_key_public_digest: str
+    detection_key_public_digest: str
+
+    def validate(self) -> tuple[str, ...]:
+        violations: list[str] = []
+        for field_name in (
+            "source_cluster_id",
+            "registered_key_family_digest",
+            "registered_key_public_digest",
+            "detection_key_public_digest",
+        ):
+            if _DIGEST_PATTERN.fullmatch(getattr(self, field_name)) is None:
+                violations.append(f"primary_null_{field_name}_invalid")
+        return tuple(violations)
+
+
+def _manifest_assignment_identity_digest(manifest: FrozenSplitManifest) -> str:
+    return _canonical_digest(
+        tuple(asdict(assignment.identity) for assignment in manifest.assignments)
+    )
+
+
+def _manifest_cluster_identities(
+    manifest: FrozenSplitManifest,
+) -> tuple[AnalysisUnitIdentity, ...]:
+    by_cluster: dict[str, AnalysisUnitIdentity] = {}
+    for assignment in manifest.assignments:
+        identity = assignment.identity
+        existing = by_cluster.get(identity.source_cluster_id)
+        if existing is not None and existing != identity:
+            raise ValueError("development_manifest_cluster_identity_not_unique")
+        by_cluster[identity.source_cluster_id] = identity
+    return tuple(by_cluster[key] for key in sorted(by_cluster))
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenDevelopmentExecutionIntentAuthority:
+    authority_digest: str
+    authority_role: str
+    run_id: str
+    seed_namespace: str
+    protocol: FrozenDevelopmentExplorationProtocol
+    protocol_digest: str
+    input_manifest: FrozenSplitManifest
+    input_manifest_digest: str
+    assignment_identity_digest: str
+    source_cluster_identity_digest: str
+    public_key_roster: tuple[DevelopmentPrimaryNullKeyBinding, ...]
+    public_key_roster_digest: str
+    detector_authority_digest: str
+    key_schedule_candidate_id: str
+    key_schedule_derivation_identity: str
+    key_schedule_config_digest: str
+    raw_secret_policy: str
+
+    def payload_without_authority_digest(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload.pop("authority_digest")
+        return payload
+
+    def validate(self) -> tuple[str, ...]:
+        violations: list[str] = []
+        if type(self.protocol) is not FrozenDevelopmentExplorationProtocol:
+            return ("execution_intent_protocol_exact_type_required",)
+        if self.protocol.validate():
+            violations.append("execution_intent_protocol_invalid")
+        if self.protocol_digest != self.protocol.digest():
+            violations.append("execution_intent_protocol_digest_invalid")
+        policy = self.protocol.execution_intent_policy
+        authority = self.protocol.threshold_detector_authority
+        if self.authority_role != policy.authority_role:
+            violations.append("execution_intent_authority_role_mismatch")
+        if _IDENTITY_PATTERN.fullmatch(self.run_id) is None:
+            violations.append("execution_intent_run_id_invalid")
+        if _IDENTITY_PATTERN.fullmatch(self.seed_namespace) is None:
+            violations.append("execution_intent_seed_namespace_invalid")
+        if type(self.input_manifest) is not FrozenSplitManifest:
+            return tuple((*violations, "execution_intent_manifest_exact_type_required"))
+        manifest_violations = self.input_manifest.validate(require_all_splits=False)
+        if manifest_violations:
+            violations.append("execution_intent_manifest_invalid")
+        if any(
+            assignment.split != DEVELOPMENT_SPLIT
+            for assignment in self.input_manifest.assignments
+        ):
+            violations.append("execution_intent_manifest_split_invalid")
+        if self.input_manifest_digest != self.input_manifest.digest():
+            violations.append("execution_intent_manifest_digest_invalid")
+        if self.assignment_identity_digest != _manifest_assignment_identity_digest(
+            self.input_manifest
+        ):
+            violations.append("execution_intent_assignment_identity_digest_invalid")
+        try:
+            cluster_identities = _manifest_cluster_identities(self.input_manifest)
+        except ValueError:
+            violations.append("execution_intent_cluster_identity_not_unique")
+            cluster_identities = ()
+        if self.source_cluster_identity_digest != _canonical_digest(
+            tuple(asdict(identity) for identity in cluster_identities)
+        ):
+            violations.append("execution_intent_cluster_identity_digest_invalid")
+        expected_clusters = {
+            identity.source_cluster_id: identity for identity in cluster_identities
+        }
+        observed_roster: dict[str, DevelopmentPrimaryNullKeyBinding] = {}
+        for item in self.public_key_roster:
+            if type(item) is not DevelopmentPrimaryNullKeyBinding:
+                violations.append("execution_intent_key_binding_exact_type_required")
+                continue
+            violations.extend(item.validate())
+            if item.source_cluster_id in observed_roster:
+                violations.append("execution_intent_key_binding_cluster_duplicate")
+            observed_roster[item.source_cluster_id] = item
+            identity = expected_clusters.get(item.source_cluster_id)
+            if identity is None:
+                violations.append("execution_intent_key_binding_cluster_unknown")
+                continue
+            if item.registered_key_family_digest != (
+                identity.registered_key_family_digest
+            ):
+                violations.append("execution_intent_key_family_manifest_mismatch")
+            try:
+                derived_family = derive_development_primary_null_key_family_digest(
+                    authority,
+                    registered_key_public_digest=item.registered_key_public_digest,
+                    detection_key_public_digest=item.detection_key_public_digest,
+                )
+            except ValueError:
+                violations.append("execution_intent_public_key_relation_invalid")
+            else:
+                if derived_family != item.registered_key_family_digest:
+                    violations.append("execution_intent_key_family_roster_mismatch")
+        if set(observed_roster) != set(expected_clusters):
+            violations.append("execution_intent_public_key_roster_coverage_invalid")
+        if self.public_key_roster_digest != _canonical_digest(
+            tuple(asdict(item) for item in self.public_key_roster)
+        ):
+            violations.append("execution_intent_public_key_roster_digest_invalid")
+        if self.detector_authority_digest != authority.digest():
+            violations.append("execution_intent_detector_authority_digest_invalid")
+        if self.key_schedule_candidate_id != (
+            authority.registered_key_schedule_candidate_id
+        ):
+            violations.append("execution_intent_key_schedule_candidate_mismatch")
+        if self.key_schedule_derivation_identity != (
+            authority.registered_key_schedule_derivation_identity
+        ):
+            violations.append("execution_intent_key_schedule_derivation_mismatch")
+        if self.key_schedule_config_digest != (
+            authority.registered_key_schedule_config_digest
+        ):
+            violations.append("execution_intent_key_schedule_config_mismatch")
+        if self.raw_secret_policy != policy.raw_secret_policy:
+            violations.append("execution_intent_raw_secret_policy_mismatch")
+        if self.authority_digest != _canonical_digest(
+            self.payload_without_authority_digest()
+        ):
+            violations.append("execution_intent_authority_digest_invalid")
+        return tuple(dict.fromkeys(violations))
+
+
+def create_frozen_development_execution_intent_authority(
+    protocol: FrozenDevelopmentExplorationProtocol,
+    *,
+    run_id: str,
+    seed_namespace: str,
+    input_manifest: FrozenSplitManifest,
+    public_key_roster: Sequence[DevelopmentPrimaryNullKeyBinding],
+) -> FrozenDevelopmentExecutionIntentAuthority:
+    if type(protocol) is not FrozenDevelopmentExplorationProtocol:
+        raise TypeError("execution_intent_protocol_exact_type_required")
+    protocol_violations = protocol.validate()
+    if protocol_violations:
+        raise ValueError(",".join(protocol_violations))
+    if type(input_manifest) is not FrozenSplitManifest:
+        raise TypeError("execution_intent_manifest_exact_type_required")
+    cluster_identities = _manifest_cluster_identities(input_manifest)
+    roster = tuple(public_key_roster)
+    authority = protocol.threshold_detector_authority
+    payload = {
+        "authority_role": protocol.execution_intent_policy.authority_role,
+        "run_id": run_id,
+        "seed_namespace": seed_namespace,
+        "protocol": protocol,
+        "protocol_digest": protocol.digest(),
+        "input_manifest": input_manifest,
+        "input_manifest_digest": input_manifest.digest(),
+        "assignment_identity_digest": _manifest_assignment_identity_digest(
+            input_manifest
+        ),
+        "source_cluster_identity_digest": _canonical_digest(
+            tuple(asdict(identity) for identity in cluster_identities)
+        ),
+        "public_key_roster": roster,
+        "public_key_roster_digest": _canonical_digest(
+            tuple(asdict(item) for item in roster)
+        ),
+        "detector_authority_digest": authority.digest(),
+        "key_schedule_candidate_id": (
+            authority.registered_key_schedule_candidate_id
+        ),
+        "key_schedule_derivation_identity": (
+            authority.registered_key_schedule_derivation_identity
+        ),
+        "key_schedule_config_digest": authority.registered_key_schedule_config_digest,
+        "raw_secret_policy": protocol.execution_intent_policy.raw_secret_policy,
+    }
+    intent = FrozenDevelopmentExecutionIntentAuthority(
+        authority_digest=_canonical_digest(
+            {
+                key: (
+                    asdict(value)
+                    if key in {"protocol", "input_manifest"}
+                    else tuple(asdict(item) for item in value)
+                    if key == "public_key_roster"
+                    else value
+                )
+                for key, value in payload.items()
+            }
+        ),
+        **payload,
+    )
+    violations = intent.validate()
+    if violations:
+        raise ValueError(",".join(violations))
+    return intent
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentCrossFitFold:
     fold_index: int
     fit_source_cluster_ids: tuple[str, ...]
@@ -1988,6 +2300,13 @@ class FrozenDevelopmentCrossFitPlan:
     responsibility_id: str
     source_split: str
     source_cluster_count: int
+    execution_intent_authority: FrozenDevelopmentExecutionIntentAuthority
+    expected_execution_intent_authority_digest: str
+    input_manifest: FrozenSplitManifest
+    input_manifest_digest: str
+    assignment_identity_digest: str
+    source_cluster_ids: tuple[str, ...]
+    source_cluster_identity_digest: str
     threshold_role: str
     invalid_for_splits: tuple[str, ...]
     folds: tuple[DevelopmentCrossFitFold, ...]
@@ -2004,6 +2323,55 @@ class FrozenDevelopmentCrossFitPlan:
             violations.append("cross_fit_plan_split_invalid")
         if self.source_cluster_count not in SCIENTIFIC_SOURCE_CLUSTER_SCALES:
             violations.append("cross_fit_plan_scientific_scale_invalid")
+        if type(self.execution_intent_authority) is not (
+            FrozenDevelopmentExecutionIntentAuthority
+        ):
+            return tuple((*violations, "cross_fit_execution_intent_exact_type_required"))
+        intent_violations = self.execution_intent_authority.validate()
+        if intent_violations:
+            violations.append("cross_fit_execution_intent_invalid")
+        if self.expected_execution_intent_authority_digest != (
+            self.execution_intent_authority.authority_digest
+        ):
+            violations.append("cross_fit_expected_execution_intent_digest_mismatch")
+        if type(self.input_manifest) is not FrozenSplitManifest:
+            return tuple((*violations, "cross_fit_input_manifest_exact_type_required"))
+        if self.input_manifest != self.execution_intent_authority.input_manifest:
+            violations.append("cross_fit_input_manifest_intent_mismatch")
+        if self.input_manifest_digest != self.input_manifest.digest():
+            violations.append("cross_fit_input_manifest_digest_invalid")
+        if self.input_manifest_digest != (
+            self.execution_intent_authority.input_manifest_digest
+        ):
+            violations.append("cross_fit_input_manifest_digest_intent_mismatch")
+        if self.assignment_identity_digest != _manifest_assignment_identity_digest(
+            self.input_manifest
+        ):
+            violations.append("cross_fit_assignment_identity_digest_invalid")
+        if self.assignment_identity_digest != (
+            self.execution_intent_authority.assignment_identity_digest
+        ):
+            violations.append("cross_fit_assignment_identity_digest_intent_mismatch")
+        try:
+            manifest_identities = _manifest_cluster_identities(self.input_manifest)
+        except ValueError:
+            violations.append("cross_fit_manifest_cluster_identity_not_unique")
+            manifest_identities = ()
+        expected_cluster_ids = tuple(
+            identity.source_cluster_id for identity in manifest_identities
+        )
+        if self.source_cluster_ids != expected_cluster_ids:
+            violations.append("cross_fit_source_cluster_roster_invalid")
+        if self.source_cluster_identity_digest != _canonical_digest(
+            tuple(asdict(identity) for identity in manifest_identities)
+        ):
+            violations.append("cross_fit_source_cluster_identity_digest_invalid")
+        if self.source_cluster_identity_digest != (
+            self.execution_intent_authority.source_cluster_identity_digest
+        ):
+            violations.append("cross_fit_source_cluster_identity_intent_mismatch")
+        if self.source_cluster_count != len(expected_cluster_ids):
+            violations.append("cross_fit_source_cluster_count_manifest_mismatch")
         if self.threshold_role != DEVELOPMENT_THRESHOLD_ROLE:
             violations.append("cross_fit_plan_threshold_role_invalid")
         if self.invalid_for_splits != FORMAL_LATER_SPLIT_DENY_LIST:
@@ -2019,7 +2387,9 @@ class FrozenDevelopmentCrossFitPlan:
         )
         if len(probed) != self.source_cluster_count or len(set(probed)) != len(probed):
             violations.append("cross_fit_recovery_probe_partition_invalid")
-        all_clusters = set(probed)
+        all_clusters = set(self.source_cluster_ids)
+        if set(probed) != all_clusters:
+            violations.append("cross_fit_recovery_probe_manifest_partition_invalid")
         for fold in self.folds:
             if set(fold.fit_source_cluster_ids) | set(
                 fold.recovery_probe_source_cluster_ids
@@ -2033,13 +2403,25 @@ class FrozenDevelopmentCrossFitPlan:
 def build_development_cross_fit_plan(
     *,
     responsibility_id: str,
-    assignments: Sequence[SplitAssignment],
+    execution_intent_authority: FrozenDevelopmentExecutionIntentAuthority,
+    expected_execution_intent_authority_digest: str,
     expected_source_cluster_count: int,
 ) -> FrozenDevelopmentCrossFitPlan:
     if expected_source_cluster_count == WIRING_SOURCE_CLUSTER_COUNT:
         raise ValueError("wiring_clusters_do_not_count_as_scientific_coverage")
     if expected_source_cluster_count not in SCIENTIFIC_SOURCE_CLUSTER_SCALES:
         raise ValueError("development_scientific_source_cluster_scale_invalid")
+    if type(execution_intent_authority) is not FrozenDevelopmentExecutionIntentAuthority:
+        raise TypeError("cross_fit_execution_intent_exact_type_required")
+    intent_violations = execution_intent_authority.validate()
+    if intent_violations:
+        raise ValueError(",".join(intent_violations))
+    if expected_execution_intent_authority_digest != (
+        execution_intent_authority.authority_digest
+    ):
+        raise PermissionError("cross_fit_expected_execution_intent_digest_mismatch")
+    manifest = execution_intent_authority.input_manifest
+    assignments = manifest.assignments
     if not assignments:
         raise ValueError("development_cross_fit_assignments_missing")
     for assignment in assignments:
@@ -2052,9 +2434,8 @@ def build_development_cross_fit_plan(
         violations = assignment.identity.validate()
         if violations:
             raise ValueError(",".join(violations))
-    cluster_ids = tuple(
-        sorted({assignment.identity.source_cluster_id for assignment in assignments})
-    )
+    cluster_identities = _manifest_cluster_identities(manifest)
+    cluster_ids = tuple(identity.source_cluster_id for identity in cluster_identities)
     if len(cluster_ids) != expected_source_cluster_count:
         raise ValueError("development_cross_fit_source_cluster_count_mismatch")
     folds: list[DevelopmentCrossFitFold] = []
@@ -2078,6 +2459,17 @@ def build_development_cross_fit_plan(
         responsibility_id=responsibility_id,
         source_split=DEVELOPMENT_SPLIT,
         source_cluster_count=len(cluster_ids),
+        execution_intent_authority=execution_intent_authority,
+        expected_execution_intent_authority_digest=(
+            expected_execution_intent_authority_digest
+        ),
+        input_manifest=manifest,
+        input_manifest_digest=manifest.digest(),
+        assignment_identity_digest=_manifest_assignment_identity_digest(manifest),
+        source_cluster_ids=cluster_ids,
+        source_cluster_identity_digest=_canonical_digest(
+            tuple(asdict(identity) for identity in cluster_identities)
+        ),
         threshold_role=DEVELOPMENT_THRESHOLD_ROLE,
         invalid_for_splits=FORMAL_LATER_SPLIT_DENY_LIST,
         folds=tuple(folds),
@@ -2090,28 +2482,10 @@ def build_development_cross_fit_plan(
 
 
 @dataclass(frozen=True, slots=True)
-class DevelopmentPrimaryNullKeyBinding:
-    source_cluster_id: str
-    registered_key_family_digest: str
-    registered_key_public_digest: str
-    detection_key_public_digest: str
-
-    def validate(self) -> tuple[str, ...]:
-        violations: list[str] = []
-        for field_name in (
-            "source_cluster_id",
-            "registered_key_family_digest",
-            "registered_key_public_digest",
-            "detection_key_public_digest",
-        ):
-            if _DIGEST_PATTERN.fullmatch(getattr(self, field_name)) is None:
-                violations.append(f"primary_null_{field_name}_invalid")
-        return tuple(violations)
-
-
-@dataclass(frozen=True, slots=True)
 class FrozenDevelopmentThresholdDetectorBinding:
     binding_identity: str
+    execution_intent_authority: FrozenDevelopmentExecutionIntentAuthority
+    expected_execution_intent_authority_digest: str
     protocol: FrozenDevelopmentExplorationProtocol
     protocol_digest: str
     authority_digest: str
@@ -2138,6 +2512,22 @@ class FrozenDevelopmentThresholdDetectorBinding:
         violations: list[str] = []
         if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
             return ("development_cross_fit_plan_invalid",)
+        if type(self.execution_intent_authority) is not (
+            FrozenDevelopmentExecutionIntentAuthority
+        ):
+            return ("threshold_execution_intent_exact_type_required",)
+        if self.execution_intent_authority.validate():
+            violations.append("threshold_execution_intent_invalid")
+        if self.execution_intent_authority != plan.execution_intent_authority:
+            violations.append("threshold_execution_intent_plan_mismatch")
+        if self.expected_execution_intent_authority_digest != (
+            self.execution_intent_authority.authority_digest
+        ):
+            violations.append("threshold_expected_execution_intent_digest_mismatch")
+        if self.expected_execution_intent_authority_digest != (
+            plan.expected_execution_intent_authority_digest
+        ):
+            violations.append("threshold_expected_execution_intent_plan_mismatch")
         if type(self.protocol) is not FrozenDevelopmentExplorationProtocol:
             return ("threshold_detector_protocol_exact_type_required",)
         protocol_violations = self.protocol.validate()
@@ -2145,6 +2535,8 @@ class FrozenDevelopmentThresholdDetectorBinding:
             violations.append("threshold_detector_protocol_invalid")
         if self.protocol_digest != self.protocol.digest():
             violations.append("threshold_detector_protocol_digest_invalid")
+        if self.protocol != self.execution_intent_authority.protocol:
+            violations.append("threshold_detector_protocol_intent_mismatch")
         authority = self.protocol.threshold_detector_authority
         if self.authority_digest != authority.digest():
             violations.append("threshold_detector_authority_digest_invalid")
@@ -2152,6 +2544,10 @@ class FrozenDevelopmentThresholdDetectorBinding:
             violations.append("threshold_detector_responsibility_authority_mismatch")
         if fold_index not in range(len(plan.folds)):
             return ("threshold_detector_binding_fold_invalid",)
+        if manifest != plan.input_manifest:
+            violations.append("threshold_detector_manifest_plan_mismatch")
+        if manifest.digest() != plan.input_manifest_digest:
+            violations.append("threshold_detector_manifest_digest_plan_mismatch")
         if self.detector_identity != authority.detector_identity:
             violations.append("threshold_detector_identity_authority_mismatch")
         if self.preprocessing_identity != authority.preprocessing_identity:
@@ -2197,6 +2593,19 @@ class FrozenDevelopmentThresholdDetectorBinding:
             for item in self.primary_null_key_bindings
         } != manifest_families:
             violations.append("primary_null_key_family_manifest_mapping_invalid")
+        full_roster = {
+            item.source_cluster_id: item
+            for item in self.execution_intent_authority.public_key_roster
+        }
+        expected_fit_roster = {
+            cluster_id: full_roster[cluster_id]
+            for cluster_id in expected_clusters
+            if cluster_id in full_roster
+        }
+        if {
+            item.source_cluster_id: item for item in self.primary_null_key_bindings
+        } != expected_fit_roster:
+            violations.append("primary_null_key_roster_execution_intent_mismatch")
         if self.primary_null_key_roster_digest != _canonical_digest(
             tuple(asdict(item) for item in self.primary_null_key_bindings)
         ):
@@ -2226,6 +2635,9 @@ class FrozenDevelopmentThresholdDetectorBinding:
                 "public_key_relation": self.public_key_relation,
                 "protocol_digest": self.protocol_digest,
                 "threshold_detector_authority_digest": self.authority_digest,
+                "execution_intent_authority_digest": (
+                    self.expected_execution_intent_authority_digest
+                ),
             }
             authority_base_payload = json.loads(
                 json.dumps(
@@ -2257,18 +2669,19 @@ class FrozenDevelopmentThresholdDetectorBinding:
 
 
 def create_development_threshold_detector_binding(
-    protocol: FrozenDevelopmentExplorationProtocol,
     plan: FrozenDevelopmentCrossFitPlan,
     *,
+    expected_execution_intent_authority_digest: str,
     fold_index: int,
     input_manifest: FrozenSplitManifest,
     primary_null_key_bindings: Sequence[DevelopmentPrimaryNullKeyBinding],
 ) -> FrozenDevelopmentThresholdDetectorBinding:
-    if type(protocol) is not FrozenDevelopmentExplorationProtocol:
-        raise TypeError("threshold_detector_protocol_exact_type_required")
-    protocol_violations = protocol.validate()
-    if protocol_violations:
-        raise ValueError(",".join(protocol_violations))
+    if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
+        raise ValueError("development_cross_fit_plan_invalid")
+    intent = plan.execution_intent_authority
+    if expected_execution_intent_authority_digest != intent.authority_digest:
+        raise PermissionError("threshold_expected_execution_intent_digest_mismatch")
+    protocol = intent.protocol
     authority = protocol.threshold_detector_authority
     detector_base_config_payload = authority.detector_base_config_payload()
     key_bindings = tuple(primary_null_key_bindings)
@@ -2288,6 +2701,9 @@ def create_development_threshold_detector_binding(
         "protocol_digest": protocol.digest(),
         "public_key_relation": authority.public_key_relation,
         "threshold_detector_authority_digest": authority.digest(),
+        "execution_intent_authority_digest": (
+            expected_execution_intent_authority_digest
+        ),
     }
     config_json = json.dumps(
         config_payload,
@@ -2297,6 +2713,10 @@ def create_development_threshold_detector_binding(
         allow_nan=False,
     )
     payload = {
+        "execution_intent_authority": intent,
+        "expected_execution_intent_authority_digest": (
+            expected_execution_intent_authority_digest
+        ),
         "protocol": protocol,
         "protocol_digest": protocol.digest(),
         "authority_digest": authority.digest(),
@@ -2315,7 +2735,7 @@ def create_development_threshold_detector_binding(
                 key: tuple(asdict(item) for item in value)
                 if key == "primary_null_key_bindings"
                 else asdict(value)
-                if key == "protocol"
+                if key in {"protocol", "execution_intent_authority"}
                 else value
                 for key, value in payload.items()
             }
@@ -2332,6 +2752,7 @@ def create_development_threshold_detector_binding(
 class DevelopmentThresholdFitInput:
     source_record: InternalValidationRecord
     case_role: str
+    expected_execution_intent_authority_digest: str
     source_record_digest: str
 
     def payload_without_digest(self) -> dict[str, object]:
@@ -2355,6 +2776,12 @@ class DevelopmentThresholdFitInput:
             violations.append("threshold_fit_source_record_invalid")
         if record.split != DEVELOPMENT_SPLIT:
             violations.append("threshold_fit_input_split_invalid")
+        if self.expected_execution_intent_authority_digest != (
+            detector_binding.expected_execution_intent_authority_digest
+        ):
+            violations.append("threshold_fit_input_execution_intent_mismatch")
+        if record.run_id != detector_binding.execution_intent_authority.run_id:
+            violations.append("threshold_fit_input_run_identity_mismatch")
         if self.case_role != "primary_null":
             violations.append("threshold_fit_input_role_invalid")
         if identity.case_id != DEVELOPMENT_PRIMARY_NULL_CASE_ID:
@@ -2428,16 +2855,26 @@ class DevelopmentThresholdFitInput:
 
 def create_development_threshold_fit_input(
     *,
+    expected_execution_intent_authority_digest: str,
     source_record: InternalValidationRecord,
 ) -> DevelopmentThresholdFitInput:
     payload = {
         "source_record": source_record,
         "case_role": "primary_null",
+        "expected_execution_intent_authority_digest": (
+            expected_execution_intent_authority_digest
+        ),
     }
     return DevelopmentThresholdFitInput(
         **payload,
         source_record_digest=_canonical_digest(
-            {"source_record": asdict(source_record), "case_role": "primary_null"}
+            {
+                "source_record": asdict(source_record),
+                "case_role": "primary_null",
+                "expected_execution_intent_authority_digest": (
+                    expected_execution_intent_authority_digest
+                ),
+            }
         ),
     )
 
@@ -2451,6 +2888,7 @@ class DevelopmentProvisionalThreshold:
     input_manifest: FrozenSplitManifest
     input_manifest_digest: str
     detector_binding: FrozenDevelopmentThresholdDetectorBinding
+    expected_execution_intent_authority_digest: str
     protocol_digest: str
     threshold_detector_authority_digest: str
     detector_identity: str
@@ -2477,6 +2915,10 @@ class DevelopmentProvisionalThreshold:
             return ("development_cross_fit_plan_invalid",)
         if self.responsibility_id != plan.responsibility_id:
             violations.append("provisional_threshold_responsibility_mismatch")
+        if self.expected_execution_intent_authority_digest != (
+            plan.expected_execution_intent_authority_digest
+        ):
+            violations.append("provisional_threshold_execution_intent_plan_mismatch")
         if self.fold_index not in range(len(plan.folds)):
             violations.append("provisional_threshold_fold_index_invalid")
             return tuple(violations)
@@ -2540,6 +2982,10 @@ class DevelopmentProvisionalThreshold:
                 violations.append("provisional_threshold_manifest_invalid")
             if self.input_manifest_digest != self.input_manifest.digest():
                 violations.append("provisional_threshold_manifest_digest_invalid")
+            if self.input_manifest != plan.input_manifest:
+                violations.append("provisional_threshold_manifest_plan_mismatch")
+            if self.input_manifest_digest != plan.input_manifest_digest:
+                violations.append("provisional_threshold_manifest_digest_plan_mismatch")
         for payload_json, digest, reason in (
             (
                 self.detector_config_payload_json,
@@ -2578,6 +3024,12 @@ class DevelopmentProvisionalThreshold:
         ):
             violations.append("provisional_threshold_rule_unregistered")
         if type(self.detector_binding) is FrozenDevelopmentThresholdDetectorBinding:
+            if self.expected_execution_intent_authority_digest != (
+                self.detector_binding.expected_execution_intent_authority_digest
+            ):
+                violations.append(
+                    "provisional_threshold_execution_intent_binding_mismatch"
+                )
             if self.protocol_digest != self.detector_binding.protocol_digest:
                 violations.append("provisional_threshold_protocol_digest_mismatch")
             if self.threshold_detector_authority_digest != (
@@ -2621,6 +3073,7 @@ class DevelopmentProvisionalThreshold:
 def create_development_provisional_threshold(
     plan: FrozenDevelopmentCrossFitPlan,
     *,
+    expected_execution_intent_authority_digest: str,
     fold_index: int,
     input_manifest: FrozenSplitManifest,
     detector_binding: FrozenDevelopmentThresholdDetectorBinding,
@@ -2628,6 +3081,10 @@ def create_development_provisional_threshold(
 ) -> DevelopmentProvisionalThreshold:
     if type(plan) is not FrozenDevelopmentCrossFitPlan or plan.validate():
         raise ValueError("development_cross_fit_plan_invalid")
+    if expected_execution_intent_authority_digest != (
+        plan.expected_execution_intent_authority_digest
+    ):
+        raise PermissionError("provisional_threshold_execution_intent_mismatch")
     if fold_index not in range(len(plan.folds)):
         raise ValueError("provisional_threshold_fold_index_invalid")
     if type(input_manifest) is not FrozenSplitManifest:
@@ -2654,6 +3111,9 @@ def create_development_provisional_threshold(
         "input_manifest": input_manifest,
         "input_manifest_digest": input_manifest.digest(),
         "detector_binding": detector_binding,
+        "expected_execution_intent_authority_digest": (
+            expected_execution_intent_authority_digest
+        ),
         "protocol_digest": detector_binding.protocol_digest,
         "threshold_detector_authority_digest": detector_binding.authority_digest,
         "detector_identity": detector_binding.detector_identity,
@@ -2700,21 +3160,49 @@ def authorize_development_provisional_threshold(
     threshold: DevelopmentProvisionalThreshold,
     plan: FrozenDevelopmentCrossFitPlan,
     *,
+    expected_execution_intent_authority_digest: str,
     requested_split: str,
-    source_cluster_id: str,
+    requested_analysis_unit_identity: AnalysisUnitIdentity,
 ) -> None:
     if type(threshold) is not DevelopmentProvisionalThreshold:
         raise TypeError("development_provisional_threshold_exact_type_required")
     violations = threshold.validate(plan)
     if violations:
         raise ValueError(",".join(violations))
+    if expected_execution_intent_authority_digest != (
+        plan.expected_execution_intent_authority_digest
+    ):
+        raise PermissionError("development_execution_intent_digest_mismatch")
+    if type(requested_analysis_unit_identity) is not AnalysisUnitIdentity:
+        raise TypeError("development_recovery_identity_exact_type_required")
+    if requested_analysis_unit_identity.validate():
+        raise ValueError("development_recovery_identity_invalid")
     if requested_split != DEVELOPMENT_SPLIT:
         raise PermissionError(
             f"development_provisional_threshold_invalid_for_split:{requested_split}"
         )
     probes = plan.folds[threshold.fold_index].recovery_probe_source_cluster_ids
+    source_cluster_id = requested_analysis_unit_identity.source_cluster_id
     if source_cluster_id not in probes:
         raise PermissionError("development_provisional_threshold_fold_leakage")
+    requested_assignment = SplitAssignment(
+        identity=requested_analysis_unit_identity,
+        split=DEVELOPMENT_SPLIT,
+    )
+    if requested_assignment not in plan.input_manifest.assignments:
+        raise PermissionError("development_recovery_identity_not_in_plan_manifest")
+    if requested_assignment not in threshold.input_manifest.assignments:
+        raise PermissionError("development_recovery_identity_not_in_threshold_manifest")
+    expected_identity = next(
+        (
+            identity
+            for identity in _manifest_cluster_identities(plan.input_manifest)
+            if identity.source_cluster_id == source_cluster_id
+        ),
+        None,
+    )
+    if expected_identity != requested_analysis_unit_identity:
+        raise PermissionError("development_recovery_identity_plan_mismatch")
 
 
 @dataclass(frozen=True, slots=True)

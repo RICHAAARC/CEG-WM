@@ -644,6 +644,24 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | registered_key_schedule_candidate_id | persisted_protocol | method_identity | none | true | false | false | threshold authority 使用的登记 key-schedule candidate。 |
 | registered_key_schedule_derivation_identity | persisted_protocol | method_identity | none | true | false | false | 只引用 `main.shared.key_schedule.identify_root_key` 公共身份职责、不复制算法的冻结 derivation identity。 |
 | registered_key_schedule_config_digest | persisted_protocol | method_identity | none | true | false | false | checked-in key-schedule candidate 完整配置身份摘要。 |
+| execution_intent_policy | persisted_protocol | protocol | none | true | false | false | development records 前 create-only intent 的 checked-in 冻结政策。 |
+| authority_role | persisted_protocol | method_identity | none | true | false | false | execution intent 固定为 `create_only_before_scientific_records` 的职责身份。 |
+| create_only_required | persisted_protocol | protocol | none | true | false | false | 后续 runner 必须 create-only 持久化 execution intent，不能覆盖旧 run intent。 |
+| freeze_before_scientific_records | persisted_protocol | protocol | none | true | false | false | execution intent 必须先于任何 scientific record 冻结。 |
+| raw_secret_policy | persisted_protocol | protocol | none | true | false | false | intent 与全部 public roster 固定为 `raw_secret_prohibited`。 |
+| expected_digest_required_at_result_boundaries | persisted_protocol | protocol | none | true | false | false | plan、fit input、binding、threshold 和 authorization 都要求外部 pinned expected intent digest。 |
+| later_runner_must_pin_digest | persisted_protocol | protocol | none | true | false | false | 后续 runner 实现必须从 create-only intent 传入 pinned digest；Batch1 不实现存储。 |
+| execution_intent_authority | persisted_protocol | method_identity | none | true | false | false | protocol、run/seed、完整 manifest、全 public-key roster 与 detector/key-schedule authority 的不可变执行意图结构。 |
+| expected_execution_intent_authority_digest | persisted_protocol | provenance | none | true | false | false | 调用边界预先 pinned 的旧 run execution-intent 摘要；不得由结果层随重建数据替换。 |
+| assignment_identity_digest | persisted_protocol | provenance | none | true | false | false | 完整 split manifest 全部 AnalysisUnitIdentity 有序集合的 canonical 摘要。 |
+| source_cluster_ids | persisted_protocol | provenance | none | true | false | false | cross-fit plan 从完整 manifest 冻结的全集 cluster roster。 |
+| source_cluster_identity_digest | persisted_protocol | provenance | none | true | false | false | 完整 manifest 每个 cluster 的 exact AnalysisUnitIdentity 摘要。 |
+| public_key_roster | persisted_protocol | provenance | none | true | false | false | execution intent 覆盖完整 manifest 全部 clusters 的 registered/detection public-key 映射；不含 raw secret。 |
+| public_key_roster_digest | persisted_protocol | provenance | none | true | false | false | 完整 public-key roster 的 canonical 摘要。 |
+| detector_authority_digest | persisted_protocol | provenance | none | true | false | false | execution intent 对 checked-in threshold detector authority 的摘要绑定。 |
+| key_schedule_candidate_id | persisted_protocol | method_identity | none | true | false | false | execution intent 回绑的登记 key-schedule candidate。 |
+| key_schedule_derivation_identity | persisted_protocol | method_identity | none | true | false | false | execution intent 回绑的公开 key-family derivation identity，不含算法复制或 raw secret。 |
+| key_schedule_config_digest | persisted_protocol | method_identity | none | true | false | false | execution intent 回绑的登记 key-schedule config 摘要。 |
 | public_key_relation | persisted_protocol | method_identity | none | true | false | false | primary-null 注册公钥与检测公钥必须为不同公开摘要的冻结关系。 |
 | primary_null_key_bindings | persisted_protocol | provenance | none | true | false | false | 当前 cross-fit fold 中每个 source cluster 到 registered key family、registered public key 与 detection public key 的精确有序映射。 |
 | primary_null_key_roster_digest | persisted_protocol | provenance | none | true | false | false | 全部 primary-null source-cluster/key 映射的 canonical 摘要，并进入 detector config digest。 |

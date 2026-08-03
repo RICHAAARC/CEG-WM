@@ -42,6 +42,7 @@ from experiments.protocol.development_exploration import (
     create_development_provisional_threshold,
     create_development_threshold_detector_binding,
     create_development_threshold_fit_input,
+    create_frozen_development_execution_intent_authority,
     decide_development_module_execution,
     development_assignments_only,
     derive_development_primary_null_key_family_digest,
@@ -122,6 +123,9 @@ def _redigest_fit_input(
         source_record_digest=_digest(
             {
                 "case_role": fit_input.case_role,
+                "expected_execution_intent_authority_digest": (
+                    fit_input.expected_execution_intent_authority_digest
+                ),
                 "source_record": asdict(source_record),
             }
         ),
@@ -221,7 +225,7 @@ def _primary_null_record(
     )
     return InternalValidationRecord(
         record_id=f"primary_null_score_record_{index}",
-        run_id="development_threshold_fit_run",
+        run_id=detector_binding.execution_intent_authority.run_id,
         protocol_id=INTERNAL_VALIDATION_PROTOCOL_ID,
         protocol_version=INTERNAL_VALIDATION_PROTOCOL_VERSION,
         record_schema_version=INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
@@ -304,28 +308,35 @@ def _primary_null_record(
 
 
 def _cross_fit_plan(cluster_count: int = 16):
-    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     manifest = _development_manifest(cluster_count)
+    intent = _execution_intent(manifest)
     return build_development_cross_fit_plan(
         responsibility_id="hf_detector",
-        assignments=development_assignments_only(
-            manifest,
-            protocol=protocol,
-            seed_namespace="development_exploration_seed_namespace",
-        ),
+        execution_intent_authority=intent,
+        expected_execution_intent_authority_digest=intent.authority_digest,
         expected_source_cluster_count=cluster_count,
     )
 
 
-def _threshold_material(plan, fold_index: int = 0, manifest=None):
+def _execution_intent(
+    manifest: FrozenSplitManifest,
+    *,
+    run_id: str = "development_threshold_fit_run",
+):
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
-    manifest = (
-        _development_manifest(plan.source_cluster_count)
-        if manifest is None
-        else manifest
+    return create_frozen_development_execution_intent_authority(
+        protocol,
+        run_id=run_id,
+        seed_namespace="development_exploration_seed_namespace",
+        input_manifest=manifest,
+        public_key_roster=_full_key_roster(manifest),
     )
-    fit = set(plan.folds[fold_index].fit_source_cluster_ids)
-    key_bindings = tuple(
+
+
+def _full_key_roster(
+    manifest: FrozenSplitManifest,
+) -> tuple[DevelopmentPrimaryNullKeyBinding, ...]:
+    return tuple(
         DevelopmentPrimaryNullKeyBinding(
             source_cluster_id=assignment.identity.source_cluster_id,
             registered_key_family_digest=(
@@ -339,17 +350,95 @@ def _threshold_material(plan, fold_index: int = 0, manifest=None):
             )[1],
         )
         for assignment in manifest.assignments
-        if assignment.identity.source_cluster_id in fit
+    )
+
+
+def _rebind_manifest_public_roster(
+    manifest: FrozenSplitManifest,
+    *,
+    assignment_indexes: set[int] | None = None,
+) -> tuple[FrozenSplitManifest, tuple[DevelopmentPrimaryNullKeyBinding, ...]]:
+    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
+    authority = protocol.threshold_detector_authority
+    indexes = (
+        set(range(len(manifest.assignments)))
+        if assignment_indexes is None
+        else assignment_indexes
+    )
+    assignments = []
+    roster = []
+    existing_roster = {
+        item.source_cluster_id: item for item in _full_key_roster(manifest)
+    }
+    for index, assignment in enumerate(manifest.assignments):
+        identity = assignment.identity
+        if index in indexes:
+            registered_public = _digest(
+                {"rebound_index": index, "role": "registered_public_key"}
+            )
+            detection_public = _digest(
+                {"rebound_index": index, "role": "primary_null_detection_key"}
+            )
+            key_family = derive_development_primary_null_key_family_digest(
+                authority,
+                registered_key_public_digest=registered_public,
+                detection_key_public_digest=detection_public,
+            )
+            identity = replace(
+                identity,
+                source_cluster_id=derive_source_cluster_id(
+                    prompt_digest=identity.prompt_digest,
+                    generation_seed=identity.generation_seed,
+                    image_lineage_digest=identity.image_lineage_digest,
+                    registered_key_family_digest=key_family,
+                ),
+                registered_key_family_digest=key_family,
+            )
+            key_binding = DevelopmentPrimaryNullKeyBinding(
+                source_cluster_id=identity.source_cluster_id,
+                registered_key_family_digest=key_family,
+                registered_key_public_digest=registered_public,
+                detection_key_public_digest=detection_public,
+            )
+        else:
+            key_binding = existing_roster[identity.source_cluster_id]
+        assignments.append(replace(assignment, identity=identity))
+        roster.append(key_binding)
+    rebound = replace(
+        manifest,
+        manifest_revision="public_roster_rebound_fixture_revision",
+        assignments=tuple(assignments),
+    )
+    assert rebound.validate(require_all_splits=False) == ()
+    return rebound, tuple(roster)
+
+
+def _threshold_material(plan, fold_index: int = 0, manifest=None):
+    manifest = (
+        plan.input_manifest
+        if manifest is None
+        else manifest
+    )
+    fit = set(plan.folds[fold_index].fit_source_cluster_ids)
+    key_bindings = tuple(
+        item
+        for item in plan.execution_intent_authority.public_key_roster
+        if item.source_cluster_id in fit
     )
     detector_binding = create_development_threshold_detector_binding(
-        protocol,
         plan,
+        expected_execution_intent_authority_digest=(
+            plan.expected_execution_intent_authority_digest
+        ),
         fold_index=fold_index,
         input_manifest=manifest,
         primary_null_key_bindings=key_bindings,
     )
     fit_inputs = tuple(
         create_development_threshold_fit_input(
+            expected_execution_intent_authority_digest=(
+                plan.expected_execution_intent_authority_digest
+            ),
             source_record=_primary_null_record(
                 assignment,
                 index=index,
@@ -372,10 +461,21 @@ def _create_threshold(plan, fit_inputs=None):
     manifest, detector_binding, default_fit_inputs = _threshold_material(plan)
     return create_development_provisional_threshold(
         plan,
+        expected_execution_intent_authority_digest=(
+            plan.expected_execution_intent_authority_digest
+        ),
         fold_index=0,
         input_manifest=manifest,
         detector_binding=detector_binding,
         fit_inputs=default_fit_inputs if fit_inputs is None else fit_inputs,
+    )
+
+
+def _plan_identity(plan, source_cluster_id: str) -> AnalysisUnitIdentity:
+    return next(
+        assignment.identity
+        for assignment in plan.input_manifest.assignments
+        if assignment.identity.source_cluster_id == source_cluster_id
     )
 
 
@@ -393,6 +493,13 @@ def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
     assert authority.registered_candidate_parameter_bindings == (
         MODULE_CANDIDATE_PARAMETERS["hf_detector"]
     )
+    assert protocol.execution_intent_policy.authority_role == (
+        "create_only_before_scientific_records"
+    )
+    assert protocol.execution_intent_policy.raw_secret_policy == (
+        "raw_secret_prohibited"
+    )
+    assert protocol.execution_intent_policy.later_runner_must_pin_digest is True
     assert tuple(item.responsibility_id for item in protocol.module_matrix) == (
         REQUIRED_METHOD_RESPONSIBILITIES
     )
@@ -459,12 +566,13 @@ def test_preflight_and_wiring_counts_are_not_scientific_coverage() -> None:
         ValueError,
         match="wiring_clusters_do_not_count_as_scientific_coverage",
     ):
+        wiring_manifest = _development_manifest(WIRING_SOURCE_CLUSTER_COUNT)
+        wiring_intent = _execution_intent(wiring_manifest)
         build_development_cross_fit_plan(
             responsibility_id="key_schedule",
-            assignments=development_assignments_only(
-                _development_manifest(WIRING_SOURCE_CLUSTER_COUNT),
-                protocol=protocol,
-                seed_namespace="development_exploration_seed_namespace",
+            execution_intent_authority=wiring_intent,
+            expected_execution_intent_authority_digest=(
+                wiring_intent.authority_digest
             ),
             expected_source_cluster_count=WIRING_SOURCE_CLUSTER_COUNT,
         )
@@ -653,15 +761,24 @@ def test_threshold_cross_fit_excludes_fit_clusters_from_recovery_probes(
     authorize_development_provisional_threshold(
         threshold,
         plan,
+        expected_execution_intent_authority_digest=(
+            plan.expected_execution_intent_authority_digest
+        ),
         requested_split=DEVELOPMENT_SPLIT,
-        source_cluster_id=probe,
+        requested_analysis_unit_identity=_plan_identity(plan, probe),
     )
     with pytest.raises(PermissionError, match="fold_leakage"):
         authorize_development_provisional_threshold(
             threshold,
             plan,
+            expected_execution_intent_authority_digest=(
+                plan.expected_execution_intent_authority_digest
+            ),
             requested_split=DEVELOPMENT_SPLIT,
-            source_cluster_id=plan.folds[0].fit_source_cluster_ids[0],
+            requested_analysis_unit_identity=_plan_identity(
+                plan,
+                plan.folds[0].fit_source_cluster_ids[0],
+            ),
         )
 
 
@@ -735,16 +852,12 @@ def test_threshold_rejects_manifest_case_role_spoof_and_wrong_key_fit() -> None:
 
 @pytest.mark.unit
 def test_registered_positive_manifest_cannot_be_relabelled_as_primary_null() -> None:
-    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     manifest = _manifest(16, case_id="registered_positive_case")
-    assignments = development_assignments_only(
-        manifest,
-        protocol=protocol,
-        seed_namespace="development_exploration_seed_namespace",
-    )
+    intent = _execution_intent(manifest)
     plan = build_development_cross_fit_plan(
         responsibility_id="hf_detector",
-        assignments=assignments,
+        execution_intent_authority=intent,
+        expected_execution_intent_authority_digest=intent.authority_digest,
         expected_source_cluster_count=16,
     )
     _, detector_binding, forged_inputs = _threshold_material(
@@ -754,6 +867,9 @@ def test_registered_positive_manifest_cannot_be_relabelled_as_primary_null() -> 
     with pytest.raises(ValueError, match="threshold_fit_input_case_identity_invalid"):
         create_development_provisional_threshold(
             plan,
+            expected_execution_intent_authority_digest=(
+                plan.expected_execution_intent_authority_digest
+            ),
             fold_index=0,
             input_manifest=manifest,
             detector_binding=detector_binding,
@@ -912,12 +1028,12 @@ def test_threshold_authority_rejects_full_chain_preprocess_rebinding() -> None:
         ValueError,
         match="threshold_authority_preprocessing_identity_invalid",
     ):
-        create_development_threshold_detector_binding(
+        create_frozen_development_execution_intent_authority(
             forged_protocol,
-            plan,
-            fold_index=0,
+            run_id=plan.execution_intent_authority.run_id,
+            seed_namespace=plan.execution_intent_authority.seed_namespace,
             input_manifest=manifest,
-            primary_null_key_bindings=binding.primary_null_key_bindings,
+            public_key_roster=plan.execution_intent_authority.public_key_roster,
         )
 
 
@@ -931,18 +1047,135 @@ def test_threshold_authority_rejects_full_public_roster_replacement() -> None:
             registered_key_public_digest=f"{index + 400:064x}",
             detection_key_public_digest=f"{index + 800:064x}",
         )
-        for index, item in enumerate(binding.primary_null_key_bindings)
+        for index, item in enumerate(
+            plan.execution_intent_authority.public_key_roster
+        )
     )
     with pytest.raises(
         ValueError,
-        match="primary_null_key_family_public_roster_mismatch",
+        match="execution_intent_key_family_roster_mismatch",
+    ):
+        create_frozen_development_execution_intent_authority(
+            binding.protocol,
+            run_id=plan.execution_intent_authority.run_id,
+            seed_namespace=plan.execution_intent_authority.seed_namespace,
+            input_manifest=manifest,
+            public_key_roster=replaced_roster,
+        )
+
+
+@pytest.mark.unit
+def test_old_execution_intent_rejects_wholesale_manifest_and_result_rebuild() -> None:
+    old_plan = _cross_fit_plan()
+    old_intent_digest = old_plan.expected_execution_intent_authority_digest
+    rebound_manifest, rebound_roster = _rebind_manifest_public_roster(
+        old_plan.input_manifest
+    )
+    new_intent = create_frozen_development_execution_intent_authority(
+        old_plan.execution_intent_authority.protocol,
+        run_id=old_plan.execution_intent_authority.run_id,
+        seed_namespace=old_plan.execution_intent_authority.seed_namespace,
+        input_manifest=rebound_manifest,
+        public_key_roster=rebound_roster,
+    )
+    assert new_intent.authority_digest != old_intent_digest
+    new_plan = build_development_cross_fit_plan(
+        responsibility_id="hf_detector",
+        execution_intent_authority=new_intent,
+        expected_execution_intent_authority_digest=new_intent.authority_digest,
+        expected_source_cluster_count=old_plan.source_cluster_count,
+    )
+    fit_clusters = set(new_plan.folds[0].fit_source_cluster_ids)
+    with pytest.raises(
+        PermissionError,
+        match="threshold_expected_execution_intent_digest_mismatch",
     ):
         create_development_threshold_detector_binding(
-            binding.protocol,
-            plan,
+            new_plan,
+            expected_execution_intent_authority_digest=old_intent_digest,
+            fold_index=0,
+            input_manifest=rebound_manifest,
+            primary_null_key_bindings=tuple(
+                item
+                for item in new_intent.public_key_roster
+                if item.source_cluster_id in fit_clusters
+            ),
+        )
+    manifest, binding, fit_inputs = _threshold_material(new_plan)
+    with pytest.raises(
+        PermissionError,
+        match="provisional_threshold_execution_intent_mismatch",
+    ):
+        create_development_provisional_threshold(
+            new_plan,
+            expected_execution_intent_authority_digest=old_intent_digest,
             fold_index=0,
             input_manifest=manifest,
-            primary_null_key_bindings=replaced_roster,
+            detector_binding=binding,
+            fit_inputs=fit_inputs,
+        )
+    rebuilt_threshold = _create_threshold(new_plan)
+    probe = new_plan.folds[0].recovery_probe_source_cluster_ids[0]
+    with pytest.raises(
+        PermissionError,
+        match="development_execution_intent_digest_mismatch",
+    ):
+        authorize_development_provisional_threshold(
+            rebuilt_threshold,
+            new_plan,
+            expected_execution_intent_authority_digest=old_intent_digest,
+            requested_split=DEVELOPMENT_SPLIT,
+            requested_analysis_unit_identity=_plan_identity(new_plan, probe),
+        )
+
+
+@pytest.mark.unit
+def test_recovery_manifest_rebinding_cannot_reuse_pinned_plan_or_removed_probe() -> None:
+    plan = _cross_fit_plan()
+    threshold = _create_threshold(plan)
+    probe = plan.folds[0].recovery_probe_source_cluster_ids[0]
+    old_probe_identity = _plan_identity(plan, probe)
+    probe_index = next(
+        index
+        for index, assignment in enumerate(plan.input_manifest.assignments)
+        if assignment.identity == old_probe_identity
+    )
+    rebound_manifest, _ = _rebind_manifest_public_roster(
+        plan.input_manifest,
+        assignment_indexes={probe_index},
+    )
+    assert SplitAssignment(
+        identity=old_probe_identity,
+        split=DEVELOPMENT_SPLIT,
+    ) not in rebound_manifest.assignments
+    binding_violations = threshold.detector_binding.validate(
+        plan,
+        rebound_manifest,
+        threshold.fold_index,
+    )
+    assert "threshold_detector_manifest_plan_mismatch" in binding_violations
+    forged = replace(
+        threshold,
+        input_manifest=rebound_manifest,
+        input_manifest_digest=rebound_manifest.digest(),
+    )
+    forged = replace(
+        forged,
+        threshold_identity=_digest(forged.payload_without_identity()),
+    )
+    assert "provisional_threshold_manifest_plan_mismatch" in forged.validate(plan)
+    with pytest.raises(
+        ValueError,
+        match="provisional_threshold_manifest_plan_mismatch",
+    ):
+        authorize_development_provisional_threshold(
+            forged,
+            plan,
+            expected_execution_intent_authority_digest=(
+                plan.expected_execution_intent_authority_digest
+            ),
+            requested_split=DEVELOPMENT_SPLIT,
+            requested_analysis_unit_identity=old_probe_identity,
         )
 
 
@@ -963,12 +1196,12 @@ def test_threshold_authority_rejects_full_chain_detector_mode_rebinding() -> Non
         ValueError,
         match="threshold_authority_detector_mode_invalid",
     ):
-        create_development_threshold_detector_binding(
+        create_frozen_development_execution_intent_authority(
             forged_protocol,
-            plan,
-            fold_index=0,
+            run_id=plan.execution_intent_authority.run_id,
+            seed_namespace=plan.execution_intent_authority.seed_namespace,
             input_manifest=manifest,
-            primary_null_key_bindings=binding.primary_null_key_bindings,
+            public_key_roster=plan.execution_intent_authority.public_key_roster,
         )
 
 
@@ -989,12 +1222,12 @@ def test_threshold_authority_payload_tamper_fails_after_protocol_redigest() -> N
         ValueError,
         match="threshold_authority_candidate_config_mismatch",
     ):
-        create_development_threshold_detector_binding(
+        create_frozen_development_execution_intent_authority(
             forged_protocol,
-            plan,
-            fold_index=0,
+            run_id=plan.execution_intent_authority.run_id,
+            seed_namespace=plan.execution_intent_authority.seed_namespace,
             input_manifest=manifest,
-            primary_null_key_bindings=binding.primary_null_key_bindings,
+            public_key_roster=plan.execution_intent_authority.public_key_roster,
         )
 
 
@@ -1008,8 +1241,11 @@ def test_threshold_is_invalid_for_every_later_split() -> None:
             authorize_development_provisional_threshold(
                 threshold,
                 plan,
+                expected_execution_intent_authority_digest=(
+                    plan.expected_execution_intent_authority_digest
+                ),
                 requested_split=forbidden_split,
-                source_cluster_id=probe,
+                requested_analysis_unit_identity=_plan_identity(plan, probe),
             )
 
 
@@ -1151,6 +1387,8 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
         ("authority_preprocess_rebound", "threshold_authority_preprocessing_identity_invalid"),
         ("authority_mode_rebound", "threshold_authority_detector_mode_invalid"),
         ("authority_candidate_rebound", "threshold_authority_candidate_config_mismatch"),
+        ("execution_intent_role_rebound", "execution_intent_authority_role_invalid"),
+        ("execution_intent_secret_relaxed", "execution_intent_raw_secret_policy_invalid"),
         ("outcome_expanded", "development_module_outcomes_invalid"),
         ("unknown_field", "keys_invalid"),
     ),
@@ -1205,6 +1443,14 @@ def test_config_loader_rejects_per_module_and_protocol_drift(
         document["threshold_detector_authority"][
             "registered_candidate_config_digest"
         ] = "f" * 64
+    elif mutation == "execution_intent_role_rebound":
+        document["execution_intent_policy"]["authority_role"] = (
+            "replaceable_after_scientific_records"
+        )
+    elif mutation == "execution_intent_secret_relaxed":
+        document["execution_intent_policy"]["raw_secret_policy"] = (
+            "raw_secret_allowed"
+        )
     elif mutation == "outcome_expanded":
         document["module_outcomes"]["allowed"].append("development_closed_negative")
     else:
