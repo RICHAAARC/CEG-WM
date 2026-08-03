@@ -1035,6 +1035,39 @@ def test_development_exploration_runner_rejects_every_subclass_category(
 
 
 @pytest.mark.quick
+def test_non_delegating_compatible_metaclass_cannot_create_runner_subclass() -> None:
+    metaclass_initializations: list[str] = []
+
+    class CompatibleDevelopmentRunnerMetaclass(
+        type(DevelopmentExplorationRunner)
+    ):
+        def __init__(
+            cls,
+            name: str,
+            bases: tuple[type, ...],
+            namespace: dict[str, object],
+            **_kwargs: object,
+        ) -> None:
+            metaclass_initializations.append(name)
+
+    with pytest.raises(
+        TypeError,
+        match="development exploration runner is final",
+    ):
+        CompatibleDevelopmentRunnerMetaclass(
+            "CompatibleDerivedDevelopmentExplorationRunner",
+            (DevelopmentExplorationRunner,),
+            {
+                "_execute_unit": lambda *_args, **_kwargs: None,
+                "_guard_persistence_authority": (
+                    lambda *_args, **_kwargs: None
+                ),
+            },
+        )
+    assert metaclass_initializations == []
+
+
+@pytest.mark.quick
 def test_subclass_foreign_record_path_cannot_create_persistent_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -1071,21 +1104,15 @@ def test_subclass_foreign_record_path_cannot_create_persistent_artifacts(
 
 
 @pytest.mark.quick
-def test_abnormally_constructed_subclass_fails_every_exact_type_entry() -> None:
-    abnormal_runner_type = type.__new__(
-        type(DevelopmentExplorationRunner),
-        "AbnormallyConstructedDevelopmentExplorationRunner",
-        (DevelopmentExplorationRunner,),
-        {},
-    )
-    abnormal_runner = object.__new__(abnormal_runner_type)
+def test_foreign_object_fails_every_exact_runner_type_entry() -> None:
+    foreign_runner_object = object()
 
     with pytest.raises(
         DevelopmentRunnerError,
         match="development exploration runner exact type is required",
     ):
         DevelopmentExplorationRunner.__getattribute__(
-            abnormal_runner,
+            foreign_runner_object,
             "protocol",
         )
     with pytest.raises(
@@ -1093,7 +1120,7 @@ def test_abnormally_constructed_subclass_fails_every_exact_type_entry() -> None:
         match="development exploration runner exact type is required",
     ):
         DevelopmentExplorationRunner.__setattr__(
-            abnormal_runner,
+            foreign_runner_object,
             "protocol",
             None,
         )
@@ -1102,7 +1129,7 @@ def test_abnormally_constructed_subclass_fails_every_exact_type_entry() -> None:
         match="development exploration runner exact type is required",
     ):
         DevelopmentExplorationRunner.__delattr__(
-            abnormal_runner,
+            foreign_runner_object,
             "protocol",
         )
     with pytest.raises(
@@ -1110,7 +1137,7 @@ def test_abnormally_constructed_subclass_fails_every_exact_type_entry() -> None:
         match="development exploration runner exact type is required",
     ):
         DevelopmentExplorationRunner.__init__(
-            abnormal_runner,
+            foreign_runner_object,
             intent_authority=None,  # type: ignore[arg-type]
             adapter=None,  # type: ignore[arg-type]
             runtime_adapter=None,  # type: ignore[arg-type]

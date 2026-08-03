@@ -544,6 +544,9 @@ class DevelopmentExplorationRunner(
 ):
     """Execute a frozen roster without result-provider or module-result proxies."""
 
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        raise TypeError("development exploration runner is final")
+
     def __getattribute__(self, name: str) -> object:
         if type(self) is not DevelopmentExplorationRunner:
             raise DevelopmentRunnerError(
