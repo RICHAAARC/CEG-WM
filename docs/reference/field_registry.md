@@ -684,6 +684,55 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | source_record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的 development scientific record collection schema 版本。 |
 | outcome_record_id | persisted_protocol | provenance | none | true | false | false | module outcome 除自身 ID 外全部字段的 canonical SHA-256。 |
 
+development runner 的逐 unit record、非科学 preflight/wiring receipt 与无状态 worker 提交面使用以下字段；这些字段不能把 operational receipt 变成科学覆盖：
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| collection_role | persisted_protocol | protocol | none | true | false | false | runner-only development record collection 职责。 |
+| execution_intent_authority_digest | persisted_protocol | provenance | none | true | false | false | record/worker 对冻结 execution intent authority 的摘要绑定。 |
+| unit_index | persisted_protocol | protocol | none | true | false | false | 冻结 roster 中不可按结果改变的原子 unit 序号。 |
+| phase | persisted_protocol | protocol | none | true | false | false | breadth、critical-pair 或 cheap-detection 冻结执行阶段。 |
+| operation_result_payload | persisted_protocol | method_state | none | true | false | false | 公共方法/runtime 结果的 JSON-safe 透明载荷；不含 private state。 |
+| operation_result_digest | persisted_protocol | provenance | none | true | false | false | operation result payload 的 canonical SHA-256。 |
+| metric_observation | persisted_protocol | method_state | none | true | false | false | 由真实 typed result 派生的 development-only cluster metric。 |
+| retry_parent_intent_digest | persisted_protocol | provenance | none | true | false | false | scientific record 对中断前一 intent 的 retry lineage。 |
+| scientific_claim_boundary | persisted_protocol | protocol | none | true | false | false | 固定为 preliminary development signal，禁止正式晋升/论文 claim。 |
+| operational_role | persisted_protocol | runtime_identity | none | true | false | false | preflight 或 wiring smoke 的语义职责。 |
+| source_cluster_ordinal | persisted_protocol | protocol | none | true | false | false | operational receipt 使用的冻结 cluster ordinal。 |
+| case_ids | persisted_protocol | method_identity | none | true | false | false | operational receipt 覆盖的预登记 case identities。 |
+| responsibility_result_digests | persisted_protocol | provenance | none | true | false | false | wiring 调用 13 职责真实结果的摘要，不保存或替代科学指标。 |
+| elapsed_seconds | persisted_protocol | diagnostic | none | true | false | false | 仅 operational throughput 的真实 walltime。 |
+| counts_as_scientific_coverage | persisted_protocol | protocol | none | true | false | false | preflight/wiring 固定为 false。 |
+| worker_identity_digest | persisted_protocol | runtime_identity | none | true | false | false | revision/protocol/intent/manifest/candidate/package/bootstrap 联合摘要。 |
+| session_id | persisted_protocol | runtime_identity | none | true | false | false | 单个无状态 worker 会话身份。 |
+| shard_id | persisted_protocol | runtime_identity | none | true | false | false | 冻结 unit shard 身份。 |
+| fencing_token | persisted_protocol | runtime_identity | none | true | false | false | 单写者 lease 的单调 fencing token。 |
+| expires_at_epoch_seconds | persisted_protocol | diagnostic | none | true | false | false | lease 失效时间。 |
+| acquired_at_utc | persisted_protocol | provenance | none | true | false | false | lease create-only 获取时间。 |
+| created_at_utc | persisted_protocol | provenance | none | true | false | false | unit intent create-only 时间。 |
+| committed_at_utc | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 最后写入时间。 |
+| parent_attempt_intent_digest | persisted_protocol | provenance | none | true | false | false | retry attempt 对前一 dangling intent 的精确摘要绑定。 |
+| intent_digest | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 绑定的 exact intent 摘要。 |
+| bundle_sha256 | persisted_protocol | provenance | none | true | false | false | content-addressed unit ZIP SHA-256。 |
+| bundle_bytes | persisted_protocol | diagnostic | none | true | false | false | content-addressed unit ZIP 字节数。 |
+| artifact_manifest_digest | persisted_protocol | provenance | none | true | false | false | bundle 成员 path/size/SHA-256 manifest 摘要。 |
+| committed_units | persisted_protocol | provenance | none | true | false | false | 从验证通过的 COMMITTED markers 重建的 unit 集合。 |
+| interrupted_attempts | persisted_protocol | provenance | none | true | false | false | dangling intent 对应的 session-interrupted resource failures。 |
+| next_attempt_by_unit | persisted_protocol | protocol | none | true | false | false | 连续且不超过冻结上限的下一 attempt index。 |
+| ledger_digest | persisted_protocol | provenance | none | true | false | false | 仅从已验证 COMMITTED units 重建的 ledger 摘要。 |
+| started_at_utc | persisted_protocol | provenance | none | true | false | false | worker session 开始时间。 |
+| ended_at_utc | persisted_protocol | provenance | none | true | false | false | worker session 结束时间。 |
+| gpu_model | persisted_protocol | runtime_identity | none | true | false | false | session 实际 GPU 型号；跨型号延迟/成本不可合并。 |
+| cuda_identity | persisted_protocol | runtime_identity | none | true | false | false | session CUDA 环境公开身份。 |
+| walltime_seconds | persisted_protocol | diagnostic | none | true | false | false | session 总 walltime，必须小于 24 小时。 |
+| peak_vram_bytes | persisted_protocol | diagnostic | none | true | false | false | session 峰值显存。 |
+| termination_reason | persisted_protocol | diagnostic | none | true | false | false | 正常、软停止或资源中断的终止原因。 |
+| soft_stop_seconds | persisted_protocol | protocol | none | true | false | false | 21 小时停止领取新 unit 的冻结边界。 |
+| hard_session_cap_seconds | persisted_protocol | protocol | none | true | false | false | 每 session 小于 24 小时的硬上限。 |
+| gpu_mix_policy | persisted_protocol | protocol | none | true | false | false | 混合 GPU 只恢复同一 unit，延迟/成本按型号分组。 |
+| committed_unit_ids | persisted_protocol | provenance | none | true | false | false | session receipt 引用的已提交 unit identities。 |
+| public_secret_identity_digests | persisted_protocol | provenance | none | true | false | false | 仅允许公开 secret 身份摘要；raw secret 禁止持久化。 |
+
 以下 input-manifest 字段只描述 runner 的冻结输入边界，不直接支撑 claim：
 
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |

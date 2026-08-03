@@ -37,8 +37,36 @@ from .record_writer import (
     GovernedRecordWriterError,
     canonical_record_digest,
 )
+from .development_exploration import (
+    DevelopmentExplorationRunner,
+    DevelopmentOperationalReceipt,
+    DevelopmentRunnerError,
+    DevelopmentScientificRecord,
+    DevelopmentUnitInput,
+    DevelopmentUnitRunResult,
+)
+from .development_persistence import (
+    DevelopmentPersistenceError,
+    DevelopmentPersistentStore,
+    FrozenWorkerIdentity,
+    PersistentLease,
+    RecoveryReport,
+    SessionReceipt,
+)
 
 __all__ = [
+    "DevelopmentExplorationRunner",
+    "DevelopmentOperationalReceipt",
+    "DevelopmentPersistenceError",
+    "DevelopmentPersistentStore",
+    "DevelopmentRunnerError",
+    "DevelopmentScientificRecord",
+    "DevelopmentUnitInput",
+    "DevelopmentUnitRunResult",
+    "FrozenWorkerIdentity",
+    "PersistentLease",
+    "RecoveryReport",
+    "SessionReceipt",
     "FrozenCaseExecutionExpectation",
     "FrozenCaseInputManifest",
     "FrozenRecordBindings",
