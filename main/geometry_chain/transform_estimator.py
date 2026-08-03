@@ -104,9 +104,9 @@ class GeometricTransformEstimation:
     gap: float
     identity_margin: float
     key_margin: float
-    inlier_ratio: float
+    inlier_ratio: float | None
     mean_residual: float
-    epsilon_inlier: float
+    epsilon_inlier: float | None
     anchor_residuals: tuple[float, ...]
     registered_root_key_public_digest: str
     observation_descriptor_digest: str
@@ -602,8 +602,8 @@ def _anchor_metrics(
     candidate: _SearchCandidate,
     original_grid_side: int,
     token_indices: Sequence[int],
-    epsilon_inlier: float,
-) -> tuple[tuple[float, ...], float, float]:
+    epsilon_inlier: float | None,
+) -> tuple[tuple[float, ...], float | None, float]:
     coordinates, _ = _token_coordinates(original_grid_side, token_indices)
     matrix = candidate.matrix
     occupied: set[int] = set()
@@ -624,7 +624,11 @@ def _anchor_metrics(
         nearest = int(torch.argmin(distances))
         residual = float(distances[nearest])
         residuals.append(residual)
-        if nearest not in occupied and residual <= epsilon_inlier:
+        if (
+            epsilon_inlier is not None
+            and nearest not in occupied
+            and residual <= epsilon_inlier
+        ):
             inlier_count += 1
         occupied.add(nearest)
     mean_residual = (
@@ -632,17 +636,24 @@ def _anchor_metrics(
         if all(isfinite(value) for value in residuals)
         else inf
     )
-    return tuple(residuals), inlier_count / len(ANCHORS), mean_residual
+    inlier_ratio = (
+        None if epsilon_inlier is None else inlier_count / len(ANCHORS)
+    )
+    return tuple(residuals), inlier_ratio, mean_residual
 
 
-def _search_config_digest(epsilon_inlier: float) -> str:
+def _search_config_digest(epsilon_inlier: float | None) -> str:
     identity = {
         "candidate_id": RECTIFICATION_CANDIDATE_ID,
         "coarse_log_scale": ["0", "-log_sqrt2", "+log_sqrt2"],
         "coarse_rotation_degrees": [0, -32, -16, 16, 32],
         "coarse_translation": ["0", "-0.28", "+0.28"],
         "dihedral_order": [name for name, _ in DIHEDRAL_MATRICES],
-        "epsilon_inlier_decimal": format(epsilon_inlier, ".17g"),
+        "epsilon_inlier_decimal": (
+            None
+            if epsilon_inlier is None
+            else format(epsilon_inlier, ".17g")
+        ),
         "objective_weights": ["0.10", "0.90", "-0.01_deficits"],
         "refinement_rounds": 3,
         "wrong_key_indices": list(range(8)),
@@ -669,9 +680,9 @@ def _estimation_identity_digest(
     gap: float,
     identity_margin: float,
     key_margin: float,
-    inlier_ratio: float,
+    inlier_ratio: float | None,
     mean_residual: float,
-    epsilon_inlier: float,
+    epsilon_inlier: float | None,
     anchor_residuals: Sequence[float],
     root_key_public_digest: str,
     observation_descriptor_digest: str,
@@ -689,11 +700,19 @@ def _estimation_identity_digest(
         "coverage": format(coverage, ".17g"),
         "coverage_backward": format(coverage_backward, ".17g"),
         "coverage_forward": format(coverage_forward, ".17g"),
-        "epsilon_inlier": format(epsilon_inlier, ".17g"),
+        "epsilon_inlier": (
+            None
+            if epsilon_inlier is None
+            else format(epsilon_inlier, ".17g")
+        ),
         "exact_identity_objective": format(exact_identity_objective, ".17g"),
         "gap": format(gap, ".17g"),
         "identity_margin": format(identity_margin, ".17g"),
-        "inlier_ratio": format(inlier_ratio, ".17g"),
+        "inlier_ratio": (
+            None
+            if inlier_ratio is None
+            else format(inlier_ratio, ".17g")
+        ),
         "key_margin": format(key_margin, ".17g"),
         "mean_residual": format(mean_residual, ".17g"),
         "anchor_residuals": [
@@ -789,7 +808,7 @@ def geometric_transform_estimator(
     observation: QkGeometrySyncResult,
     detection_key: str | DerivedWrongKeyMaterial,
     *,
-    epsilon_inlier: float,
+    epsilon_inlier: float | None,
 ) -> GeometricTransformEstimation:
     """Search the frozen transform family and return raw metrics, never reliability."""
 
@@ -797,7 +816,7 @@ def geometric_transform_estimator(
         raise GeometricTransformEstimatorError(
             "detection_key must be root key text or derived wrong-key material"
         )
-    if (
+    if epsilon_inlier is not None and (
         isinstance(epsilon_inlier, bool)
         or not isinstance(epsilon_inlier, (int, float))
         or not isfinite(float(epsilon_inlier))
@@ -806,7 +825,9 @@ def geometric_transform_estimator(
         raise GeometricTransformEstimatorError(
             "epsilon_inlier must be a fitted positive finite value"
         )
-    epsilon = float(epsilon_inlier)
+    epsilon = (
+        None if epsilon_inlier is None else float(epsilon_inlier)
+    )
     observation = _validate_observation(observation, detection_key)
 
     registered_projections = projection_for_detection_key(
@@ -923,6 +944,26 @@ def validate_geometric_transform_estimation(
         raise GeometricTransformEstimatorError(
             "transform estimation must contain twelve anchor residuals"
         )
+    if (estimation.epsilon_inlier is None) != (
+        estimation.inlier_ratio is None
+    ):
+        raise GeometricTransformEstimatorError(
+            "epsilon and inlier ratio must share one fitted state"
+        )
+    if estimation.epsilon_inlier is not None:
+        if (
+            isinstance(estimation.epsilon_inlier, bool)
+            or not isinstance(estimation.epsilon_inlier, (int, float))
+            or not isfinite(float(estimation.epsilon_inlier))
+            or float(estimation.epsilon_inlier) <= 0.0
+            or isinstance(estimation.inlier_ratio, bool)
+            or not isinstance(estimation.inlier_ratio, (int, float))
+            or not isfinite(float(estimation.inlier_ratio))
+            or not 0.0 <= float(estimation.inlier_ratio) <= 1.0
+        ):
+            raise GeometricTransformEstimatorError(
+                "fitted epsilon or inlier ratio is invalid"
+            )
     derived_metrics = (
         (
             estimation.gap,

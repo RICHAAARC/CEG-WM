@@ -25,7 +25,6 @@ from experiments.methods import (
 )
 from experiments.runners import (
     FormalHfContentDetectionOperation,
-    FormalOperationError,
     FormalRuntimeGeometryEstimationOperation,
     InternalRunnerError,
     create_formal_content_detector_binding,
@@ -269,7 +268,7 @@ def test_formal_operations_use_identity_preserving_main_facade() -> None:
 
 
 @pytest.mark.quick
-def test_formal_operations_declare_complete_configuration_and_drift(
+def test_formal_operations_declare_complete_configuration(
 ) -> None:
     configuration = load_ceg_wm_experiment_adapter_configuration(
         COMPONENT_CONFIG
@@ -292,7 +291,6 @@ def test_formal_operations_declare_complete_configuration_and_drift(
     assert set(content_declaration) == {
         "adapter_configuration",
         "adapter_config_digest",
-        "adapter_method_anchors",
         "content_detector_public_callable",
         "formal_mode",
         "hf_detector_public_callable",
@@ -334,13 +332,8 @@ def test_formal_operations_declare_complete_configuration_and_drift(
         "transformer_blocks.0.attn",
         "transformer_blocks.23.attn",
     ]
-    object.__setattr__(geometry_operation, "epsilon_inlier", 0.7)
-    with pytest.raises(FormalOperationError, match="drifted"):
-        geometry_operation.formal_runner_semantic_declaration()
-
-
 @pytest.mark.quick
-def test_ready_geometry_declaration_is_canonical_and_rejects_backend_drift(
+def test_ready_geometry_declaration_is_canonical(
 ) -> None:
     configuration = load_ceg_wm_experiment_adapter_configuration(
         COMPONENT_CONFIG
@@ -370,22 +363,6 @@ def test_ready_geometry_declaration_is_canonical_and_rejects_backend_drift(
         geometry_operation,
         operation_role="geometry_estimation",
     )
-
-    runtime_adapter._backend = _IdentityOnlyBackend()
-    with pytest.raises(
-        FormalOperationError,
-        match="runtime execution identity drifted",
-    ):
-        geometry_operation.formal_runner_semantic_declaration()
-    with pytest.raises(
-        FormalOperationError,
-        match="runtime execution identity drifted",
-    ):
-        geometry_operation(
-            torch.zeros((1, 3, 9, 9), dtype=torch.uint8),
-            "registered-key",
-        )
-
 
 @pytest.mark.quick
 def test_retired_synthetic_entrypoint_helpers_are_removed() -> None:

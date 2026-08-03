@@ -132,18 +132,24 @@
     "wiring_source_cluster_count": 8,
     "wiring_counts_as_scientific_coverage": false,
     "scientific_source_cluster_scales": [16, 32, 64],
+    "maximum_operational_units": 74,
     "maximum_scientific_units": 2512,
+    "maximum_total_units": 2586,
     "maximum_record_attempts_per_unit": 3,
-    "maximum_total_record_attempts": 7536,
+    "maximum_total_record_attempts": 7758,
     "maximum_duration_seconds_per_unit": 900,
     "unit_order": [
-      "scientific_breadth_source_cluster_ordinal",
-      "module_dependency_order",
+      "environment_preflight_before_wiring",
+      "full_chain_wiring_before_reference_fit",
+      "development_reference_fit_before_scientific_units",
+      "dependency_layer",
+      "source_cluster_ordinal_within_dependency_layer",
+      "responsibility_within_dependency_layer",
       "critical_pair_extension_source_cluster_ordinal",
       "cheap_detection_extension_source_cluster_ordinal"
     ],
     "score_adaptive_unit_changes_forbidden": true,
-    "unit_roster_digest": "9c558c279aa416cf7390998f6d63ffe6ac3b3131ed26aa1efb695da02c706a28"
+    "unit_roster_digest": "8e74386100503d612752c8c4a8e74b1de67e9677f53d1854e6eebf042f34090b"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",
@@ -156,6 +162,61 @@
     "detector_binding_required": true,
     "threshold_rule_binding_required": true,
     "recovery_probe_cluster_exclusion_required": true,
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "development_routing_reference_cross_fit": {
+    "source_split": "development",
+    "role": "development_exploratory_routing_reference_fit",
+    "fold_count": 4,
+    "source_cluster_count": 64,
+    "quantile_rule": "strictly_positive_exact_nearest_rank_p95",
+    "raw_latent_persistence_forbidden": true,
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "development_geometry_reliability_cross_fit": {
+    "source_split": "development",
+    "role": "development_exploratory_geometry_reliability_cross_fit",
+    "fold_count": 4,
+    "source_cluster_count": 16,
+    "unfitted_epsilon_semantics": "none_returns_raw_residuals_and_unfitted_inlier",
+    "lower_tail_rule": "exact_nearest_rank_p05",
+    "upper_tail_rule": "exact_nearest_rank_p95",
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "development_rescue_threshold_cross_fit": {
+    "source_split": "development",
+    "role": "development_exploratory_rescue_threshold_fit",
+    "fold_count": 4,
+    "input_role": "primary_null",
+    "margin_rule": "tau_minus_exact_nearest_rank_p05_positive_margin",
+    "probe_cluster_exclusion_required": true,
     "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
     "invalid_for_splits": [
       "candidate_selection",

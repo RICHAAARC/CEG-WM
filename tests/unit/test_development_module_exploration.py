@@ -24,6 +24,7 @@ from experiments.protocol.development_exploration import (
     CRITICAL_PAIR_RESPONSIBILITIES,
     DEPENDENCY_STOP_RULE,
     DEVELOPMENT_SPLIT,
+    DEVELOPMENT_DEPENDENCY_LAYERS,
     DEVELOPMENT_THRESHOLD_INPUT_ROLES,
     DEVELOPMENT_THRESHOLD_ROLE,
     RECORD_COLLECTION_SCHEMA_VERSION,
@@ -37,6 +38,7 @@ from experiments.protocol.development_exploration import (
     MODULE_METRIC_IDS,
     MODULE_NEGATIVE_CONTROL_CASE_IDS,
     MODULE_OUTCOMES,
+    OPERATIONAL_UNIT_PHASES,
     PREFLIGHT_SOURCE_CLUSTER_COUNT,
     REGISTERED_STUDY_ROLE_BINDINGS,
     WIRING_SOURCE_CLUSTER_COUNT,
@@ -652,13 +654,20 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     roster = enumerate_development_study_units(protocol)
     budget = protocol.study_budget
-    assert len(roster) == budget.maximum_scientific_units == 2512
+    assert len(roster) == budget.maximum_total_units == 2586
+    assert budget.maximum_operational_units == 74
+    assert budget.maximum_scientific_units == 2512
+    assert all(
+        unit.phase in OPERATIONAL_UNIT_PHASES
+        for unit in roster[: budget.maximum_operational_units]
+    )
     assert budget.maximum_total_record_attempts == sum(
         unit.maximum_record_attempts for unit in roster
-    ) == 7536
+    ) == 7758
     assert len(
         {
             (
+                unit.phase,
                 unit.responsibility_id,
                 unit.source_cluster_ordinal,
                 unit.content_branch_id,
@@ -667,12 +676,20 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
             for unit in roster
         }
     ) == len(roster)
+    first_layer_size = (
+        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
+        * len(DEVELOPMENT_DEPENDENCY_LAYERS[0])
+    )
     assert tuple(
-        unit.responsibility_id for unit in roster[:13]
-    ) == REQUIRED_METHOD_RESPONSIBILITIES
-    assert all(
-        unit.source_cluster_ordinal < BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
-        for unit in roster[: 13 * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT]
+        (unit.source_cluster_ordinal, unit.responsibility_id)
+        for unit in roster[
+            budget.maximum_operational_units :
+            budget.maximum_operational_units + first_layer_size
+        ]
+    ) == tuple(
+        (cluster, responsibility)
+        for cluster in range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT)
+        for responsibility in DEVELOPMENT_DEPENDENCY_LAYERS[0]
     )
     counts = {
         responsibility: len(
@@ -680,6 +697,7 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
                 unit.source_cluster_ordinal
                 for unit in roster
                 if unit.responsibility_id == responsibility
+                and unit.phase not in OPERATIONAL_UNIT_PHASES
             }
         )
         for responsibility in REQUIRED_METHOD_RESPONSIBILITIES

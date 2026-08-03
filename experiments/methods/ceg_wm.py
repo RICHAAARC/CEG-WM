@@ -679,7 +679,7 @@ class CegWmExperimentAdapter:
         observation: QkGeometrySyncResult,
         detection_key: str | DerivedWrongKeyMaterial,
         *,
-        epsilon_inlier: float,
+        epsilon_inlier: float | None,
     ) -> ComponentCallObservation[GeometricTransformEstimation]:
         result = geometric_transform_estimator(
             observation,

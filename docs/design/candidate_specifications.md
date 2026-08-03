@@ -596,6 +596,12 @@ operator。历史固定
 
 `reference_gradient`、`reference_response`、`reference_sensitivity` 的算法固定为 candidate-selection selection partition 中所有严格正观测值的 exact nearest-rank P95：排序后取索引 `ceil(0.95*n)-1`。它们只能在该 partition 冻结；confirmation、其他 calibration 职责和 evaluation 不得重新拟合。任一正值总体为空即候选失败。
 
+在正式 candidate-selection 之前，development exploration 另行使用隔离的
+development-only 四折 cross-fit reference：每个 probe cluster 只能使用其余三折的
+严格正观测值并应用同一 exact nearest-rank P95 规则。该 reference 只用于机制探索，
+必须在 development 结束时作废，禁止复制到 candidate-selection、confirmation、
+calibration 或 evaluation；它不改变上一段唯一正式 reference 的冻结职责。
+
 ### Formula And Outputs
 
 四图以 bilinear、`align_corners=false` 映射到 latent grid：
@@ -978,6 +984,12 @@ reliable =
 
 `gamma_coverage`、`gamma_uniqueness`、`gamma_gap`、`gamma_key`、`gamma_inlier`、`gamma_residual`、`gamma_identity` 和 `epsilon_inlier` 只由独立 geometry-reliability-fit 职责冻结；在拟合前实现必须返回全部原始指标和 `reliability_not_fitted`，不得自行选择阈值。
 
+development exploration 的未拟合 estimator 调用允许令 `epsilon_inlier=None`，只返回
+变换搜索及 residual 等原始量，并明确令 inlier 统计未拟合；随后仅从隔离的
+development COMMITTED residuals 做 cross-fit 的 exploratory epsilon/gamma，再执行其
+依赖单元。该组值在 development 结束时作废，绝不构成上述正式
+geometry-reliability-fit 阈值。
+
 低 coverage、高残差、多峰歧义、边界解、错误 key、非有限 metric/matrix 或
 `reliability_not_fitted` 全部由 `geometry_reliability` fail closed。可靠性输出
 不能进入内容分数，也不能直接产生阳性。
@@ -1032,6 +1044,12 @@ else:
 ```
 
 `D_M` object identity、content configuration digest、key semantics、preprocessing 和 `tau` 在两次调用中必须相同。geometry score、confidence 或 wrong-key relation 不能直接阳性。
+
+development exploration 的 `tau_rescue` 只由同一四折 fit-fold 的已验证
+COMMITTED primary-null 产生：先使用该折 development exploratory `tau`，对所有严格
+小于 `tau` 的分数计算正 margin `tau-score`，按 exact nearest-rank P05 取 margin，
+并令 `tau_rescue=tau-margin`。probe clusters 不得参与拟合，只能验证；该值在
+development 结束时作废，不能替代未来独立 rescue-threshold-fit 的正式值。
 
 CPU 检查三路门控、几何失败、可靠但内容仍负、同 detector/threshold identity 和几何不可直接阳性。真实 runtime 检查 raw/rectified 完整重编码、rescue 触发成本和 end-to-end FPR。
 

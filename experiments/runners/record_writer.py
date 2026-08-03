@@ -61,6 +61,11 @@ from experiments.protocol.hf_only_threshold_fit_records import (
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+FORMAL_ALL_SPLITS_RECORD_SCOPE = "formal_all_registered_splits"
+DEVELOPMENT_ONLY_RECORD_SCOPE = "development_only"
+_RECORD_SCOPES = frozenset(
+    {FORMAL_ALL_SPLITS_RECORD_SCOPE, DEVELOPMENT_ONLY_RECORD_SCOPE}
+)
 
 
 class GovernedRecordWriterError(ValueError):
@@ -255,6 +260,7 @@ class GovernedRecordWriter:
         split_manifest: FrozenSplitManifest,
         input_manifest: FrozenCaseInputManifest,
         bindings: FrozenRecordBindings,
+        record_scope: str = FORMAL_ALL_SPLITS_RECORD_SCOPE,
     ) -> None:
         if type(frozen_protocol) is not FrozenInternalValidationProtocol:
             raise GovernedRecordWriterError("frozen protocol exact type is required")
@@ -264,8 +270,12 @@ class GovernedRecordWriter:
             raise GovernedRecordWriterError("input manifest exact type is required")
         if type(bindings) is not FrozenRecordBindings:
             raise GovernedRecordWriterError("frozen record bindings exact type is required")
+        if record_scope not in _RECORD_SCOPES:
+            raise GovernedRecordWriterError("record scope is invalid")
         protocol_violations = frozen_protocol.validate()
-        manifest_violations = split_manifest.validate()
+        manifest_violations = split_manifest.validate(
+            require_all_splits=(record_scope == FORMAL_ALL_SPLITS_RECORD_SCOPE)
+        )
         if protocol_violations:
             raise GovernedRecordWriterError(
                 f"frozen protocol invalid: {','.join(protocol_violations)}"
@@ -274,6 +284,18 @@ class GovernedRecordWriter:
             raise GovernedRecordWriterError(
                 f"split manifest invalid: {','.join(manifest_violations)}"
             )
+        if record_scope == DEVELOPMENT_ONLY_RECORD_SCOPE:
+            if not split_manifest.assignments or any(
+                assignment.split != "development"
+                for assignment in split_manifest.assignments
+            ):
+                raise GovernedRecordWriterError(
+                    "development-only record scope requires only development assignments"
+                )
+            if any(entry.split != "development" for entry in input_manifest.entries):
+                raise GovernedRecordWriterError(
+                    "development-only input manifest contains a future split"
+                )
         input_manifest_violations = input_manifest.validate(
             protocol=frozen_protocol,
             split_manifest=split_manifest,
@@ -300,44 +322,28 @@ class GovernedRecordWriter:
         if not root.is_absolute():
             raise GovernedRecordWriterError("records_root must be absolute")
         self._records_root = root
-        self._protocol_snapshot = _canonical_json_bytes(asdict(frozen_protocol))
-        self._split_manifest_snapshot = _canonical_json_bytes(
-            asdict(split_manifest)
-        )
-        self._input_manifest_snapshot = _canonical_json_bytes(
-            asdict(input_manifest)
-        )
-        self._bindings_snapshot = _canonical_json_bytes(asdict(bindings))
-        self._construction_anchor_digest = sha256(
-            b"\0".join(
-                (
-                    self._protocol_snapshot,
-                    self._split_manifest_snapshot,
-                    self._input_manifest_snapshot,
-                    self._bindings_snapshot,
-                )
-            )
-        ).hexdigest()
-        self._protocol = deepcopy(frozen_protocol)
-        self._split_manifest = deepcopy(split_manifest)
-        self._input_manifest = deepcopy(input_manifest)
-        self._bindings = deepcopy(bindings)
+        self._record_scope = record_scope
+        self._protocol = frozen_protocol
+        self._split_manifest = split_manifest
+        self._input_manifest = input_manifest
+        self._bindings = bindings
         self._registered_fields = INTERNAL_RECORD_FIELD_NAMES
         self._path = root / self._bindings.run_id / f"{self._bindings.case_id}.json"
         self._lock_path = (
             root / self._bindings.run_id / f".{self._bindings.case_id}.lock"
         )
-        self._assert_internal_anchors()
+        self._assert_registered_schema_binding()
 
-    def assert_context_anchors(
+    def assert_context_bindings(
         self,
         *,
         frozen_protocol: FrozenInternalValidationProtocol,
         split_manifest: FrozenSplitManifest,
         input_manifest: FrozenCaseInputManifest,
         bindings: FrozenRecordBindings,
+        record_scope: str = FORMAL_ALL_SPLITS_RECORD_SCOPE,
     ) -> None:
-        """Reject context objects that differ from construction-time anchors."""
+        """Require the runner context to match the writer's loaded bindings."""
 
         if type(frozen_protocol) is not FrozenInternalValidationProtocol:
             raise GovernedRecordWriterError("context protocol exact type is required")
@@ -351,31 +357,31 @@ class GovernedRecordWriter:
             )
         if type(bindings) is not FrozenRecordBindings:
             raise GovernedRecordWriterError("context bindings exact type is required")
-        observed = (
-            _canonical_json_bytes(asdict(frozen_protocol)),
-            _canonical_json_bytes(asdict(split_manifest)),
-            _canonical_json_bytes(asdict(input_manifest)),
-            _canonical_json_bytes(asdict(bindings)),
-        )
-        expected = (
-            self._protocol_snapshot,
-            self._split_manifest_snapshot,
-            self._input_manifest_snapshot,
-            self._bindings_snapshot,
-        )
-        if observed != expected:
+        if record_scope not in _RECORD_SCOPES:
+            raise GovernedRecordWriterError("context record scope is invalid")
+        if (
+            frozen_protocol != self._protocol
+            or split_manifest != self._split_manifest
+            or input_manifest != self._input_manifest
+            or bindings != self._bindings
+            or record_scope != self._record_scope
+        ):
             raise GovernedRecordWriterError(
-                "runner context drifted from writer construction anchors"
+                "runner context differs from writer bindings"
             )
 
     @property
     def path(self) -> Path:
         return self._path
 
+    @property
+    def record_scope(self) -> str:
+        return self._record_scope
+
     def load(self) -> RunCaseRecordCollection | None:
         """Load and fully replay-validate the current real record file."""
 
-        self._assert_internal_anchors()
+        self._assert_registered_schema_binding()
         with self._locked():
             return self._load_unlocked()
 
@@ -388,7 +394,7 @@ class GovernedRecordWriter:
     ) -> RunCaseRecordCollection:
         """Atomically append one pending outcome or return an identical write."""
 
-        self._assert_internal_anchors()
+        self._assert_registered_schema_binding()
         if type(record) is not InternalValidationRecord:
             raise GovernedRecordWriterError("record exact type is required")
         with self._locked():
@@ -451,7 +457,7 @@ class GovernedRecordWriter:
             return collection
 
     def _load_unlocked(self) -> RunCaseRecordCollection | None:
-        self._assert_internal_anchors()
+        self._assert_registered_schema_binding()
         if not self._path.exists():
             return None
         if not self._path.is_file() or self._path.is_symlink():
@@ -472,12 +478,28 @@ class GovernedRecordWriter:
         return collection
 
     def _validate_collection(self, collection: RunCaseRecordCollection) -> None:
-        self._assert_internal_anchors()
+        self._assert_registered_schema_binding()
         violations = validate_run_case_record_collection(
             collection,
             self._protocol,
             self._split_manifest,
         )
+        if self._record_scope == DEVELOPMENT_ONLY_RECORD_SCOPE:
+            partial_manifest_violations = self._split_manifest.validate(
+                require_all_splits=False
+            )
+            missing_future = {
+                violation
+                for violation in self._split_manifest.validate()
+                if violation.startswith("split_missing:")
+            }
+            if not partial_manifest_violations and missing_future:
+                violations = tuple(
+                    violation
+                    for violation in violations
+                    if violation != "split_manifest_invalid"
+                    and violation not in missing_future
+                )
         if violations:
             raise GovernedRecordWriterError(
                 f"record collection schema invalid: {','.join(violations)}"
@@ -520,7 +542,7 @@ class GovernedRecordWriter:
             )
 
     def _write_atomic(self, collection: RunCaseRecordCollection) -> None:
-        self._assert_internal_anchors()
+        self._assert_registered_schema_binding()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = _canonical_json_bytes(collection.to_dict()) + b"\n"
         temporary_path: Path | None = None
@@ -556,31 +578,7 @@ class GovernedRecordWriter:
             finally:
                 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
-    def _assert_internal_anchors(self) -> None:
-        if (
-            _canonical_json_bytes(asdict(self._protocol))
-            != self._protocol_snapshot
-            or _canonical_json_bytes(asdict(self._split_manifest))
-            != self._split_manifest_snapshot
-            or _canonical_json_bytes(asdict(self._input_manifest))
-            != self._input_manifest_snapshot
-            or _canonical_json_bytes(asdict(self._bindings))
-            != self._bindings_snapshot
-            or sha256(
-                b"\0".join(
-                    (
-                        self._protocol_snapshot,
-                        self._split_manifest_snapshot,
-                        self._input_manifest_snapshot,
-                        self._bindings_snapshot,
-                    )
-                )
-            ).hexdigest()
-            != self._construction_anchor_digest
-        ):
-            raise GovernedRecordWriterError(
-                "writer construction anchor drift detected"
-            )
+    def _assert_registered_schema_binding(self) -> None:
         if INTERNAL_RECORD_SCHEMA_BINDINGS != {
             "record_collection_schema_version": (
                 self._protocol.record_collection_schema_version

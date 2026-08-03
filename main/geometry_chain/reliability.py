@@ -133,6 +133,8 @@ def _threshold_digest(thresholds: GeometryReliabilityThresholds) -> str:
 def _all_estimator_metrics_finite(
     estimation: GeometricTransformEstimation,
 ) -> bool:
+    if estimation.inlier_ratio is None or estimation.epsilon_inlier is None:
+        return False
     scalar_metrics = (
         estimation.registered_objective,
         estimation.second_registered_objective,
@@ -165,6 +167,8 @@ def _all_estimator_metrics_finite(
 def _estimator_metrics_in_domain(
     estimation: GeometricTransformEstimation,
 ) -> bool:
+    if estimation.inlier_ratio is None or estimation.epsilon_inlier is None:
+        return False
     unit_interval_metrics = (
         estimation.coverage_forward,
         estimation.coverage_backward,
@@ -208,6 +212,13 @@ def _replay_reliability_decision(
     thresholds: GeometryReliabilityThresholds | None,
 ) -> _ReliabilityDecision:
     if thresholds is None:
+        return _ReliabilityDecision(
+            reliable=False,
+            allow_rectification=False,
+            status="reliability_not_fitted",
+            failure_reasons=("reliability_not_fitted",),
+        )
+    if estimation.epsilon_inlier is None or estimation.inlier_ratio is None:
         return _ReliabilityDecision(
             reliable=False,
             allow_rectification=False,

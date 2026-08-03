@@ -5,10 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 from hashlib import sha256
-from importlib import import_module
 import json
 from pathlib import Path
-from types import FunctionType, ModuleType
 from typing import TYPE_CHECKING, Callable, Literal
 
 import torch
@@ -38,6 +36,8 @@ DeviceRequest = Literal["auto", "cpu", "cuda"]
 if TYPE_CHECKING:
     from .content_write import ContentWriteVaeResult
     from .qk_observation import RuntimeQkObservationResult
+    from .routing_observation import RuntimeRoutingObservationResult
+    from .routing_observation import RuntimeRoutingReferenceMeasurement
 
 
 class RuntimeAdapterError(RuntimeError):
@@ -85,14 +85,12 @@ class RuntimeSession:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeExecutionIdentity:
-    """Canonical public identity of the adapter's current execution boundary."""
+    """Public runtime/config/session identity without Python-object anchors."""
 
     identity_schema_version: str
-    backend_type_identity: str
     runtime_config_digest: str
     runtime_state: str
     backend_resources_owned: bool
-    qk_observation_callable_identity: str
     runtime_backend_name: str | None
     selected_device: str | None
     runtime_session_identity_digest: str | None
@@ -100,11 +98,7 @@ class RuntimeExecutionIdentity:
     def identity_mapping(self) -> dict[str, object]:
         return {
             "backend_resources_owned": self.backend_resources_owned,
-            "backend_type_identity": self.backend_type_identity,
             "identity_schema_version": self.identity_schema_version,
-            "qk_observation_callable_identity": (
-                self.qk_observation_callable_identity
-            ),
             "runtime_backend_name": self.runtime_backend_name,
             "runtime_config_digest": self.runtime_config_digest,
             "runtime_session_identity_digest": (
@@ -153,17 +147,10 @@ class Sd35RuntimeAdapter:
 
     __slots__ = (
         "_backend",
-        "_backend_anchor",
-        "_backend_type_anchor",
         "_configuration",
         "_configuration_digest_anchor",
         "_owns_backend_resources",
-        "_qk_observation_module_anchor",
-        "_observe_detection_qk_anchor",
-        "_observe_detection_qk_identity_anchor",
         "_session",
-        "_session_anchor",
-        "_session_identity_digest_anchor",
         "_state",
     )
 
@@ -180,35 +167,13 @@ class Sd35RuntimeAdapter:
             raise RuntimeAdapterError(
                 "configuration must be Sd35RuntimeConfiguration"
             )
-        qk_observation_module = import_module(
-            ".qk_observation",
-            __package__,
-        )
-        observe_detection_qk = getattr(
-            qk_observation_module,
-            "observe_detection_qk",
-            None,
-        )
-        if type(observe_detection_qk) is not FunctionType:
-            raise RuntimeAdapterError(
-                "runtime Q/K observation callable must be an exact function"
-            )
         self._backend = backend
-        self._backend_anchor = backend
-        self._backend_type_anchor = type(backend)
         self._configuration = configuration
         self._configuration_digest_anchor = (
             configuration.runtime_config_digest
         )
         self._owns_backend_resources = False
-        self._qk_observation_module_anchor = qk_observation_module
-        self._observe_detection_qk_anchor = observe_detection_qk
-        self._observe_detection_qk_identity_anchor = (
-            _qualified_function_identity(observe_detection_qk)
-        )
         self._session: RuntimeSession | None = None
-        self._session_anchor: RuntimeSession | None = None
-        self._session_identity_digest_anchor: str | None = None
         self._state = RuntimeAdapterState.CREATED
 
     @property
@@ -226,16 +191,8 @@ class Sd35RuntimeAdapter:
         return self._session
 
     def revalidate_execution_identity(self) -> RuntimeExecutionIdentity:
-        """Fail closed on backend/config/lifecycle drift and return public identity."""
+        """Fail closed on public config/session/lifecycle drift and return identity."""
 
-        self._validated_qk_observation_callable()
-        if (
-            self._backend is not self._backend_anchor
-            or type(self._backend) is not self._backend_type_anchor
-        ):
-            raise RuntimeAdapterError(
-                "runtime backend object or exact type drifted"
-            )
         if type(self._configuration) is not Sd35RuntimeConfiguration:
             raise RuntimeAdapterError(
                 "runtime configuration exact type drifted"
@@ -273,8 +230,6 @@ class Sd35RuntimeAdapter:
                 )
             if (
                 type(self._session) is not RuntimeSession
-                or self._session is not self._session_anchor
-                or self._session_identity_digest_anchor is None
             ):
                 raise RuntimeAdapterError(
                     "ready runtime session identity drifted"
@@ -286,18 +241,12 @@ class Sd35RuntimeAdapter:
             session_digest = _runtime_session_identity_digest(
                 self._session
             )
-            if session_digest != self._session_identity_digest_anchor:
-                raise RuntimeAdapterError(
-                    "ready runtime session content drifted"
-                )
             runtime_backend_name = self._session.runtime_backend_name
             selected_device = self._session.selected_device
         elif self._state is RuntimeAdapterState.CREATED:
             if (
                 self._owns_backend_resources
                 or self._session is not None
-                or self._session_anchor is not None
-                or self._session_identity_digest_anchor is not None
             ):
                 raise RuntimeAdapterError(
                     "created runtime lifecycle identity drifted"
@@ -306,8 +255,6 @@ class Sd35RuntimeAdapter:
             if (
                 self._owns_backend_resources
                 or self._session is not None
-                or self._session_anchor is not None
-                or self._session_identity_digest_anchor is not None
             ):
                 raise RuntimeAdapterError(
                     "closed runtime lifecycle identity drifted"
@@ -315,27 +262,16 @@ class Sd35RuntimeAdapter:
         elif (
             self._owns_backend_resources
             or self._session is not None
-            or self._session_anchor is not None
-            or self._session_identity_digest_anchor is not None
         ):
             raise RuntimeAdapterError(
                 "failed runtime lifecycle retains residual execution state"
             )
 
         return RuntimeExecutionIdentity(
-            identity_schema_version=(
-                "ceg_wm_runtime_execution_identity_v2"
-            ),
-            backend_type_identity=(
-                f"{self._backend_type_anchor.__module__}."
-                f"{self._backend_type_anchor.__qualname__}"
-            ),
+            identity_schema_version="ceg_wm_runtime_execution_identity",
             runtime_config_digest=self._configuration_digest_anchor,
             runtime_state=self._state.value,
             backend_resources_owned=self._owns_backend_resources,
-            qk_observation_callable_identity=(
-                self._observe_detection_qk_identity_anchor
-            ),
             runtime_backend_name=runtime_backend_name,
             selected_device=selected_device,
             runtime_session_identity_digest=session_digest,
@@ -366,10 +302,6 @@ class Sd35RuntimeAdapter:
                 selected_device,
             )
             self._session = _runtime_session(identity)
-            self._session_anchor = self._session
-            self._session_identity_digest_anchor = (
-                _runtime_session_identity_digest(self._session)
-            )
             self._state = RuntimeAdapterState.READY
             self.revalidate_execution_identity()
             return self._session
@@ -470,7 +402,9 @@ class Sd35RuntimeAdapter:
 
         try:
             self.revalidate_execution_identity()
-            result = self._observe_detection_qk_anchor(
+            from .qk_observation import observe_detection_qk
+
+            result = observe_detection_qk(
                 self._backend,
                 self._configuration,
                 self.session,
@@ -489,44 +423,157 @@ class Sd35RuntimeAdapter:
                 "runtime backend raised an unexpected qk_observation error"
             ) from exc
 
+    def observe_generation_routing(
+        self,
+        base_latent: torch.Tensor,
+        *,
+        sample_index: int,
+        reference_gradient: float,
+        reference_response: float,
+        reference_sensitivity: float,
+    ) -> RuntimeRoutingObservationResult:
+        """Materialize the frozen generation-time T/R/Q routing observations."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before routing observation execution"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the routing observation execution protocol"
+            )
+        from .routing_observation import (
+            RuntimeRoutingObservationError,
+            observe_generation_routing,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = observe_generation_routing(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+                sample_index=sample_index,
+                reference_gradient=reference_gradient,
+                reference_response=reference_response,
+                reference_sensitivity=reference_sensitivity,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeRoutingObservationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime generation routing observation failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected routing observation error"
+            ) from exc
+
+    def measure_generation_routing_reference_inputs(
+        self,
+        base_latent: torch.Tensor,
+        *,
+        sample_index: int,
+    ) -> RuntimeRoutingReferenceMeasurement:
+        """Measure raw T/R/Q routing reference inputs in one generation."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before routing measurement"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the routing observation execution protocol"
+            )
+        from .routing_observation import (
+            RuntimeRoutingObservationError,
+            measure_generation_routing_reference_inputs,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            measurement = measure_generation_routing_reference_inputs(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+                sample_index=sample_index,
+            )
+            self.revalidate_execution_identity()
+            return measurement
+        except (RuntimeAdapterError, RuntimeRoutingObservationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime generation routing measurement failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected routing measurement error"
+            ) from exc
+
+    def normalize_generation_routing_measurement(
+        self,
+        measurement: RuntimeRoutingReferenceMeasurement,
+        *,
+        reference_gradient: float,
+        reference_response: float,
+        reference_sensitivity: float,
+    ) -> RuntimeRoutingObservationResult:
+        """Normalize a prior measurement without repeating generation or VAE."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before routing normalization"
+            )
+        from .routing_observation import (
+            RuntimeRoutingObservationError,
+            normalize_generation_routing_measurement,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = normalize_generation_routing_measurement(
+                measurement,
+                reference_gradient=reference_gradient,
+                reference_response=reference_response,
+                reference_sensitivity=reference_sensitivity,
+            )
+            if (
+                result.runtime_config_digest
+                != self._configuration.runtime_config_digest
+                or result.model_id != self._configuration.model_id
+                or result.model_revision != self._configuration.model_revision
+                or result.callback_indices
+                != tuple(range(self._configuration.inference_steps))
+            ):
+                raise RuntimeRoutingObservationError(
+                    "routing measurement does not match the prepared runtime"
+                )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeRoutingObservationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime generation routing normalization failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime raised an unexpected routing normalization error"
+            ) from exc
+
     def _release_backend_resources(self) -> None:
         if not self._owns_backend_resources:
             return
         self._backend.close()
         self._owns_backend_resources = False
 
-    def _validated_qk_observation_callable(self) -> Callable[..., object]:
-        current_module = import_module(
-            ".qk_observation",
-            __package__,
-        )
-        if (
-            type(current_module) is not ModuleType
-            or current_module is not self._qk_observation_module_anchor
-        ):
-            raise RuntimeAdapterError(
-                "runtime Q/K observation module identity drifted"
-            )
-        current_callable = getattr(
-            current_module,
-            "observe_detection_qk",
-            None,
-        )
-        if (
-            type(current_callable) is not FunctionType
-            or current_callable is not self._observe_detection_qk_anchor
-            or _qualified_function_identity(current_callable)
-            != self._observe_detection_qk_identity_anchor
-        ):
-            raise RuntimeAdapterError(
-                "runtime Q/K observation callable identity drifted"
-            )
-        return self._observe_detection_qk_anchor
-
     def _clear_session_identity(self) -> None:
         self._session = None
-        self._session_anchor = None
-        self._session_identity_digest_anchor = None
 
     def _mark_failed_clean(self) -> None:
         self._state = RuntimeAdapterState.FAILED
@@ -578,10 +625,6 @@ def _runtime_session(
         qk_layer_names=identity.qk_layer_names,
         dependency_lock=identity.dependency_lock,
     )
-
-
-def _qualified_function_identity(function: FunctionType) -> str:
-    return f"{function.__module__}.{function.__qualname__}"
 
 
 def _runtime_session_identity_mapping(

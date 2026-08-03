@@ -264,9 +264,9 @@ Notebook 与 repository module 的跨边界数据
 | gap | cross_boundary | method_statistic | none | true | false | false | 注册 key best 与 second-best objective 的差。 |
 | identity_margin | cross_boundary | method_statistic | none | true | false | false | 注册 key best 与 exact identity objective 的差。 |
 | key_margin | cross_boundary | method_statistic | none | true | false | false | 注册 key best objective 与八个 wrong-key best 最大值的差。 |
-| inlier_ratio | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor 在拟合 `epsilon_inlier` 下的有效最近点比例。 |
+| inlier_ratio | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor 在拟合 `epsilon_inlier` 下的有效最近点比例；development 未拟合 raw-metrics unit 中为 null。 |
 | mean_residual | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor residual 的均值；任一越界时为非有限失败量。 |
-| epsilon_inlier | cross_boundary | method_identity | none | false | false | false | 独立 geometry-reliability-fit 冻结并供 anchor inlier 使用的阈值。 |
+| epsilon_inlier | cross_boundary | method_identity | none | false | false | false | 独立 geometry-reliability-fit 冻结并供 anchor inlier 使用的阈值；development 未拟合 raw-metrics unit 中为 null，正式职责不允许 null。 |
 | anchor_residuals | cross_boundary | method_statistic | none | true | false | false | 十二个冻结 anchor 到 observed grid 最近点的原始 residual。 |
 | observation_descriptor_digest | cross_boundary | provenance | none | false | false | estimator 实际消费的两层 Q/K relation observation 摘要。 |
 | observation_projection_digest | cross_boundary | provenance | none | false | false | false | estimator 已验证 Q/K observation 的 geometry-key projection、层序与 polarity 摘要。 |
@@ -621,6 +621,8 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | wiring_source_cluster_count | persisted_protocol | protocol | none | false | false | false | 仅接线 smoke 的 8 个 source clusters，不计科学覆盖。 |
 | wiring_counts_as_scientific_coverage | persisted_protocol | protocol | none | false | false | false | 固定为 false。 |
 | maximum_scientific_units | persisted_protocol | protocol | none | false | false | false | breadth-first 原子 branch×geometry scientific unit roster 的硬上限。 |
+| maximum_operational_units | persisted_protocol | protocol | none | false | false | false | 同一冻结 roster 中不计科学覆盖的 routing-reference operational units 上限。 |
+| maximum_total_units | persisted_protocol | protocol | none | false | false | false | operational 与 scientific units 合并后的冻结 roster 总上限。 |
 | maximum_record_attempts_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 development unit 复用现有 record writer 的三次 attempt 上限。 |
 | maximum_total_record_attempts | persisted_protocol | protocol | none | false | false | false | scientific roster 乘每 unit attempt 上限的全局硬上限。 |
 | maximum_duration_seconds_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 scientific unit 的最大执行时长。 |
@@ -702,6 +704,7 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | collection_role | persisted_protocol | protocol | none | true | false | false | runner-only development record collection 职责。 |
+| record_scope | internal_state | protocol | none | false | false | false | writer/context 的窄执行范围；development-only 不授权读取未来 split。 |
 | execution_intent_authority_digest | persisted_protocol | provenance | none | true | false | false | record/worker 对冻结 execution intent authority 的摘要绑定。 |
 | unit_index | persisted_protocol | protocol | none | true | false | false | 冻结 roster 中不可按结果改变的原子 unit 序号。 |
 | phase | persisted_protocol | protocol | none | true | false | false | breadth、critical-pair 或 cheap-detection 冻结执行阶段。 |
@@ -712,6 +715,21 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | scientific_claim_boundary | persisted_protocol | protocol | none | true | false | false | 固定为 preliminary development signal，禁止正式晋升/论文 claim。 |
 | operational_role | persisted_protocol | runtime_identity | none | true | false | false | preflight 或 wiring smoke 的语义职责。 |
 | source_cluster_ordinal | persisted_protocol | protocol | none | true | false | false | operational receipt 使用的冻结 cluster ordinal。 |
+| cluster_ordinal | persisted_protocol | protocol | none | true | false | false | 64 项 development routing reference operational roster 中的冻结 cluster 序号。 |
+| fold_index | persisted_protocol | protocol | none | true | false | false | routing reference 所属的冻结四折 cross-fit fold；只用于 development reference fit。 |
+| prompt_roster_digest | persisted_protocol | provenance | none | true | false | false | routing reference intent 与 checked-in 64-cluster prompt roster 的摘要绑定。 |
+| callback_indices | persisted_protocol | protocol | none | true | false | false | routing reference 实际观测到的连续生成 callback 序列。 |
+| public_probe_domain_digest | persisted_protocol | provenance | none | true | false | false | Q_sens 使用的公开噪声域身份摘要；不含 secret。 |
+| public_probe_values_digest | persisted_protocol | provenance | none | true | false | false | Q_sens 公开噪声数值的 float32 摘要；不保存 private latent。 |
+| nominal_relative_probe_step | persisted_protocol | method_statistic | none | true | false | false | Q_sens 预登记的相对扰动步长。 |
+| actual_probe_step | persisted_protocol | method_statistic | none | true | false | false | 在真实 latent dtype 下物化后的 Q_sens 扰动步长。 |
+| texture_gradient_values | persisted_protocol | method_statistic | none | true | false | false | routing reference 的逐位置 T 数值；仅用于 development cross-fit reference。 |
+| texture_spatial_shape | persisted_protocol | method_state | none | true | false | false | routing reference 的 T 数值二维空间形状。 |
+| response_ratio_values | persisted_protocol | method_statistic | none | true | false | false | routing reference 的逐位置 R 数值；仅用于 development cross-fit reference。 |
+| response_spatial_shape | persisted_protocol | method_state | none | true | false | false | routing reference 的 R 数值二维空间形状。 |
+| sensitivity_ratio_values | persisted_protocol | method_statistic | none | true | false | false | routing reference 的逐位置 Q_sens 数值；仅用于 development cross-fit reference。 |
+| sensitivity_spatial_shape | persisted_protocol | method_state | none | true | false | false | routing reference 的 Q_sens 数值二维空间形状。 |
+| measurement_payload | persisted_protocol | method_state | none | true | false | false | routing reference record 的公开 T/R/Q_sens 数值与最小 runtime/probe provenance；不含 latent、RGB 或 secret。 |
 | case_ids | persisted_protocol | method_identity | none | true | false | false | operational receipt 覆盖的预登记 case identities。 |
 | responsibility_result_digests | persisted_protocol | provenance | none | true | false | false | wiring 调用 13 职责真实结果的摘要，不保存或替代科学指标。 |
 | elapsed_seconds | persisted_protocol | diagnostic | none | true | false | false | 仅 operational throughput 的真实 walltime。 |
@@ -966,8 +984,9 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | maximum_duration_seconds | persisted_protocol | resource_budget | none | true | false | false | 冻结 execution intent 对单 unit 的最大时长。 |
 | duration_limit_exceeded | persisted_protocol | resource_status | none | true | false | false | 实测时长是否越过冻结单 unit 上限。 |
 | attempt_disposition | persisted_protocol | protocol | none | true | false | false | COMMITTED attempt 的 success、final failure 或可重试资源失败处置。 |
-| scientific_record_digest | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 绑定的精确 development scientific record 摘要。 |
-| scientific_record_bytes | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 绑定的精确 development scientific record 字节数。 |
+| record_kind | persisted_protocol | method_identity | none | true | false | false | COMMITTED marker 区分 development scientific、operational check 与 routing-reference fit record。 |
+| record_digest | persisted_protocol | provenance | none | true | false | false | COMMITTED marker 绑定的精确 development record 摘要。 |
+| record_bytes | persisted_protocol | diagnostic | none | true | false | false | COMMITTED marker 绑定的精确 development record 字节数。 |
 | evidence_record_digests | persisted_protocol | provenance | none | true | false | false | module outcome 逐项绑定已验证 COMMITTED records 的摘要序列。 |
 | signal_criteria | persisted_protocol | protocol | none | false | false | false | 读取 development 数据前冻结、且逐项覆盖全部登记 metric 的信号判据。 |
 | comparison | persisted_protocol | protocol | none | false | false | false | 信号判据的冻结比较运算。 |

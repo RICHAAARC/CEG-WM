@@ -206,16 +206,40 @@ REGISTERED_STUDY_ROLE_BINDINGS = (
 )
 
 DEVELOPMENT_UNIT_ORDER = (
-    "scientific_breadth_source_cluster_ordinal",
-    "module_dependency_order",
+    "environment_preflight_before_wiring",
+    "full_chain_wiring_before_reference_fit",
+    "development_reference_fit_before_scientific_units",
+    "dependency_layer",
+    "source_cluster_ordinal_within_dependency_layer",
+    "responsibility_within_dependency_layer",
     "critical_pair_extension_source_cluster_ordinal",
     "cheap_detection_extension_source_cluster_ordinal",
 )
+DEVELOPMENT_DEPENDENCY_LAYERS = (
+    (
+        "key_schedule",
+        "content_router",
+        "lf_carrier",
+        "hf_carrier",
+        "content_embedder",
+        "lf_detector",
+        "hf_detector",
+        "qk_geometry_sync",
+        "geometric_transform_estimator",
+    ),
+    ("content_detector", "geometry_reliability"),
+    ("image_rectifier",),
+    ("conditional_recovery_decision",),
+)
 UNIT_PHASES = (
+    "development_environment_preflight",
+    "development_full_chain_wiring",
+    "development_routing_reference_fit",
     "scientific_breadth",
     "critical_pair_extension",
     "cheap_detection_extension",
 )
+OPERATIONAL_UNIT_PHASES = frozenset(UNIT_PHASES[:3])
 PREFLIGHT_CASE_IDS = (
     "environment_identity_preflight",
     "runtime_identity_preflight",
@@ -477,6 +501,9 @@ _EXACT_TOP_LEVEL_KEYS = frozenset(
         "preflight",
         "study_budget",
         "provisional_threshold_cross_fit",
+        "development_routing_reference_cross_fit",
+        "development_geometry_reliability_cross_fit",
+        "development_rescue_threshold_cross_fit",
         "threshold_detector_authority",
         "execution_intent_policy",
         "content_study",
@@ -1314,7 +1341,26 @@ def _build_study_unit_roster(
     matrix: Sequence[DevelopmentModuleStudy],
 ) -> tuple[DevelopmentStudyUnit, ...]:
     by_responsibility = {item.responsibility_id: item for item in matrix}
-    ordered: list[tuple[str, str, int]] = []
+    ordered: list[tuple[str, str, int]] = [
+        (
+            "development_environment_preflight",
+            "development_environment_preflight",
+            cluster_ordinal,
+        )
+        for cluster_ordinal in range(PREFLIGHT_SOURCE_CLUSTER_COUNT)
+    ]
+    ordered.extend(
+        (
+            "development_full_chain_wiring",
+            "development_full_chain_wiring",
+            cluster_ordinal,
+        )
+        for cluster_ordinal in range(WIRING_SOURCE_CLUSTER_COUNT)
+    )
+    ordered.extend(
+        ("development_routing_reference_fit", "content_router", cluster_ordinal)
+        for cluster_ordinal in range(CHEAP_DETECTION_SOURCE_CLUSTER_COUNT)
+    )
     for cluster_ordinal in range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT):
         ordered.extend(
             ("scientific_breadth", responsibility_id, cluster_ordinal)
@@ -1337,39 +1383,57 @@ def _build_study_unit_roster(
             for responsibility_id in CHEAP_DETECTION_RESPONSIBILITIES
         )
     atomic_descriptors: list[tuple[str, str, int, str, str]] = []
-    grouped: dict[tuple[str, int], list[str]] = {}
-    phase_by_group: dict[tuple[str, int], str] = {}
-    for phase, responsibility_id, cluster_ordinal in ordered:
-        group = (phase, cluster_ordinal)
-        grouped.setdefault(group, []).append(responsibility_id)
-        phase_by_group[group] = phase
-    for group, responsibility_ids in grouped.items():
-        phase = phase_by_group[group]
-        cluster_ordinal = group[1]
-        variants_by_responsibility: dict[str, tuple[tuple[str, str], ...]] = {}
-        for responsibility_id in responsibility_ids:
-            study = by_responsibility[responsibility_id]
-            branches = study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
-            geometries = study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
-            variants_by_responsibility[responsibility_id] = tuple(
-                (branch_id, geometry_case_id)
-                for branch_id in branches
-                for geometry_case_id in geometries
-            )
-        # Each cluster first reaches every responsibility once; remaining frozen
-        # branch x geometry variants follow without score-adaptive reordering.
-        for responsibility_id in responsibility_ids:
-            branch_id, geometry_case_id = variants_by_responsibility[responsibility_id][0]
-            atomic_descriptors.append(
-                (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
-            )
-        for responsibility_id in responsibility_ids:
-            for branch_id, geometry_case_id in variants_by_responsibility[
-                responsibility_id
-            ][1:]:
-                atomic_descriptors.append(
-                    (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
+    for phase in UNIT_PHASES:
+        phase_rows = tuple(row for row in ordered if row[0] == phase)
+        if phase in OPERATIONAL_UNIT_PHASES:
+            atomic_descriptors.extend(
+                (
+                    phase,
+                    responsibility_id,
+                    cluster_ordinal,
+                    phase,
+                    NOT_APPLICABLE_GEOMETRY_CASE_ID,
                 )
+                for _phase, responsibility_id, cluster_ordinal in phase_rows
+            )
+            continue
+        cluster_ordinals = tuple(dict.fromkeys(row[2] for row in phase_rows))
+        phase_responsibilities = {row[1] for row in phase_rows}
+        for dependency_layer in DEVELOPMENT_DEPENDENCY_LAYERS:
+            responsibilities = tuple(
+                item for item in dependency_layer if item in phase_responsibilities
+            )
+            if not responsibilities:
+                continue
+            variants_by_responsibility: dict[str, tuple[tuple[str, str], ...]] = {}
+            for responsibility_id in responsibilities:
+                study = by_responsibility[responsibility_id]
+                branches = study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
+                geometries = study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
+                variants_by_responsibility[responsibility_id] = tuple(
+                    (branch_id, geometry_case_id)
+                    for branch_id in branches
+                    for geometry_case_id in geometries
+                )
+            # Every dependency layer is frozen breadth-first across clusters.
+            # Fitted downstream inputs are therefore derived only after all
+            # prerequisite clusters have terminal COMMITTED records.
+            for cluster_ordinal in cluster_ordinals:
+                for responsibility_id in responsibilities:
+                    branch_id, geometry_case_id = variants_by_responsibility[
+                        responsibility_id
+                    ][0]
+                    atomic_descriptors.append(
+                        (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
+                    )
+            for cluster_ordinal in cluster_ordinals:
+                for responsibility_id in responsibilities:
+                    for branch_id, geometry_case_id in variants_by_responsibility[
+                        responsibility_id
+                    ][1:]:
+                        atomic_descriptors.append(
+                            (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
+                        )
     return tuple(
         DevelopmentStudyUnit(
             unit_index=index,
@@ -1397,7 +1461,9 @@ class DevelopmentStudyBudget:
     wiring_source_cluster_count: int
     wiring_counts_as_scientific_coverage: bool
     scientific_source_cluster_scales: tuple[int, ...]
+    maximum_operational_units: int
     maximum_scientific_units: int
+    maximum_total_units: int
     maximum_record_attempts_per_unit: int
     maximum_total_record_attempts: int
     maximum_duration_seconds_per_unit: int
@@ -1427,8 +1493,29 @@ class DevelopmentStudyBudget:
             violations.append("development_unit_order_invalid")
         if self.score_adaptive_unit_changes_forbidden is not True:
             violations.append("score_adaptive_unit_changes_must_be_forbidden")
-        if self.maximum_scientific_units != len(roster):
+        operational_units = tuple(
+            unit
+            for unit in roster
+            if unit.phase in OPERATIONAL_UNIT_PHASES
+        )
+        scientific_units = tuple(
+            unit
+            for unit in roster
+            if unit.phase not in OPERATIONAL_UNIT_PHASES
+        )
+        expected_operational_units = (
+            PREFLIGHT_SOURCE_CLUSTER_COUNT
+            + WIRING_SOURCE_CLUSTER_COUNT
+            + CHEAP_DETECTION_SOURCE_CLUSTER_COUNT
+        )
+        if self.maximum_operational_units != expected_operational_units:
+            violations.append("maximum_operational_units_invalid")
+        if len(operational_units) != self.maximum_operational_units:
+            violations.append("operational_unit_roster_count_invalid")
+        if self.maximum_scientific_units != len(scientific_units):
             violations.append("maximum_scientific_units_invalid")
+        if self.maximum_total_units != len(roster):
+            violations.append("maximum_total_units_invalid")
         if self.maximum_total_record_attempts != sum(
             unit.maximum_record_attempts for unit in roster
         ):
@@ -1439,16 +1526,28 @@ class DevelopmentStudyBudget:
             violations.append("unit_roster_digest_invalid")
         if tuple(unit.unit_index for unit in roster) != tuple(range(len(roster))):
             violations.append("unit_roster_index_invalid")
-        first_breadth = roster[: len(REQUIRED_METHOD_RESPONSIBILITIES)]
-        if tuple(unit.responsibility_id for unit in first_breadth) != (
-            REQUIRED_METHOD_RESPONSIBILITIES
-        ):
-            violations.append("unit_roster_breadth_first_invalid")
+        first_layer = tuple(
+            unit
+            for unit in roster
+            if unit.phase == "scientific_breadth"
+            and unit.responsibility_id in DEVELOPMENT_DEPENDENCY_LAYERS[0]
+        )[: BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT * len(DEVELOPMENT_DEPENDENCY_LAYERS[0])]
+        expected_first_layer = tuple(
+            (cluster, responsibility)
+            for cluster in range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT)
+            for responsibility in DEVELOPMENT_DEPENDENCY_LAYERS[0]
+        )
+        if tuple(
+            (unit.source_cluster_ordinal, unit.responsibility_id)
+            for unit in first_layer
+        ) != expected_first_layer:
+            violations.append("unit_roster_dependency_breadth_first_invalid")
         observed_clusters = {
             responsibility_id: {
                 unit.source_cluster_ordinal
                 for unit in roster
                 if unit.responsibility_id == responsibility_id
+                and unit.phase not in OPERATIONAL_UNIT_PHASES
             }
             for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
         }
@@ -1463,6 +1562,7 @@ class DevelopmentStudyBudget:
             violations.append("unit_roster_module_cluster_scale_mismatch")
         observed_atomic = {
             (
+                unit.phase,
                 unit.responsibility_id,
                 unit.source_cluster_ordinal,
                 unit.content_branch_id,
@@ -1518,6 +1618,92 @@ class DevelopmentThresholdCrossFitPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentRoutingReferenceCrossFitPolicy:
+    """Development-only routing normalization; never a formal candidate reference."""
+
+    source_split: str
+    role: str
+    fold_count: int
+    source_cluster_count: int
+    quantile_rule: str
+    raw_latent_persistence_forbidden: bool
+    invalidation_semantics: str
+    invalid_for_splits: tuple[str, ...]
+
+    def validate(self) -> tuple[str, ...]:
+        violations: list[str] = []
+        if self.source_split != DEVELOPMENT_SPLIT:
+            violations.append("routing_reference_source_split_invalid")
+        if self.role != "development_exploratory_routing_reference_fit":
+            violations.append("routing_reference_role_invalid")
+        if self.fold_count != DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT:
+            violations.append("routing_reference_fold_count_invalid")
+        if self.source_cluster_count != CHEAP_DETECTION_SOURCE_CLUSTER_COUNT:
+            violations.append("routing_reference_cluster_count_invalid")
+        if self.quantile_rule != "strictly_positive_exact_nearest_rank_p95":
+            violations.append("routing_reference_quantile_rule_invalid")
+        if self.raw_latent_persistence_forbidden is not True:
+            violations.append("routing_reference_raw_latent_persistence_forbidden")
+        if self.invalidation_semantics != DEVELOPMENT_THRESHOLD_INVALIDATION:
+            violations.append("routing_reference_invalidation_invalid")
+        if self.invalid_for_splits != FORMAL_LATER_SPLIT_DENY_LIST:
+            violations.append("routing_reference_later_split_reuse_forbidden")
+        return tuple(violations)
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopmentGeometryReliabilityCrossFitPolicy:
+    source_split: str
+    role: str
+    fold_count: int
+    source_cluster_count: int
+    unfitted_epsilon_semantics: str
+    lower_tail_rule: str
+    upper_tail_rule: str
+    invalidation_semantics: str
+    invalid_for_splits: tuple[str, ...]
+
+    def validate(self) -> tuple[str, ...]:
+        expected = (
+            (self.source_split, DEVELOPMENT_SPLIT, "geometry_reference_source_split_invalid"),
+            (self.role, "development_exploratory_geometry_reliability_cross_fit", "geometry_reference_role_invalid"),
+            (self.fold_count, DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT, "geometry_reference_fold_count_invalid"),
+            (self.source_cluster_count, BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT, "geometry_reference_cluster_count_invalid"),
+            (self.unfitted_epsilon_semantics, "none_returns_raw_residuals_and_unfitted_inlier", "geometry_unfitted_epsilon_semantics_invalid"),
+            (self.lower_tail_rule, "exact_nearest_rank_p05", "geometry_lower_tail_rule_invalid"),
+            (self.upper_tail_rule, "exact_nearest_rank_p95", "geometry_upper_tail_rule_invalid"),
+            (self.invalidation_semantics, DEVELOPMENT_THRESHOLD_INVALIDATION, "geometry_reference_invalidation_invalid"),
+            (self.invalid_for_splits, FORMAL_LATER_SPLIT_DENY_LIST, "geometry_reference_later_split_reuse_forbidden"),
+        )
+        return tuple(reason for observed, wanted, reason in expected if observed != wanted)
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopmentRescueThresholdCrossFitPolicy:
+    source_split: str
+    role: str
+    fold_count: int
+    input_role: str
+    margin_rule: str
+    probe_cluster_exclusion_required: bool
+    invalidation_semantics: str
+    invalid_for_splits: tuple[str, ...]
+
+    def validate(self) -> tuple[str, ...]:
+        expected = (
+            (self.source_split, DEVELOPMENT_SPLIT, "development_rescue_source_split_invalid"),
+            (self.role, "development_exploratory_rescue_threshold_fit", "development_rescue_role_invalid"),
+            (self.fold_count, DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT, "development_rescue_fold_count_invalid"),
+            (self.input_role, "primary_null", "development_rescue_input_role_invalid"),
+            (self.margin_rule, "tau_minus_exact_nearest_rank_p05_positive_margin", "development_rescue_margin_rule_invalid"),
+            (self.probe_cluster_exclusion_required, True, "development_rescue_probe_exclusion_required"),
+            (self.invalidation_semantics, DEVELOPMENT_THRESHOLD_INVALIDATION, "development_rescue_invalidation_invalid"),
+            (self.invalid_for_splits, FORMAL_LATER_SPLIT_DENY_LIST, "development_rescue_later_split_reuse_forbidden"),
+        )
+        return tuple(reason for observed, wanted, reason in expected if observed != wanted)
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentExecutionIntentPolicy:
     authority_role: str
     create_only_required: bool
@@ -1562,6 +1748,9 @@ class FrozenDevelopmentExplorationProtocol:
     preflight: DevelopmentPreflight
     study_budget: DevelopmentStudyBudget
     provisional_threshold_cross_fit: DevelopmentThresholdCrossFitPolicy
+    development_routing_reference_cross_fit: DevelopmentRoutingReferenceCrossFitPolicy
+    development_geometry_reliability_cross_fit: DevelopmentGeometryReliabilityCrossFitPolicy
+    development_rescue_threshold_cross_fit: DevelopmentRescueThresholdCrossFitPolicy
     threshold_detector_authority: DevelopmentThresholdDetectorAuthority
     execution_intent_policy: DevelopmentExecutionIntentPolicy
     content_study: DevelopmentContentStudy
@@ -1587,6 +1776,9 @@ class FrozenDevelopmentExplorationProtocol:
         violations.extend(self.split_isolation.validate())
         violations.extend(self.preflight.validate())
         violations.extend(self.provisional_threshold_cross_fit.validate())
+        violations.extend(self.development_routing_reference_cross_fit.validate())
+        violations.extend(self.development_geometry_reliability_cross_fit.validate())
+        violations.extend(self.development_rescue_threshold_cross_fit.validate())
         violations.extend(
             self.threshold_detector_authority.validate(self.module_matrix)
         )
@@ -2094,7 +2286,9 @@ def load_frozen_development_exploration_protocol(
             "wiring_source_cluster_count",
             "wiring_counts_as_scientific_coverage",
             "scientific_source_cluster_scales",
+            "maximum_operational_units",
             "maximum_scientific_units",
+            "maximum_total_units",
             "maximum_record_attempts_per_unit",
             "maximum_total_record_attempts",
             "maximum_duration_seconds_per_unit",
@@ -2116,7 +2310,9 @@ def load_frozen_development_exploration_protocol(
                 "scientific_source_cluster_scales",
             )
         ),
+        maximum_operational_units=budget_raw["maximum_operational_units"],
         maximum_scientific_units=budget_raw["maximum_scientific_units"],
+        maximum_total_units=budget_raw["maximum_total_units"],
         maximum_record_attempts_per_unit=budget_raw[
             "maximum_record_attempts_per_unit"
         ],
@@ -2179,6 +2375,122 @@ def load_frozen_development_exploration_protocol(
         ),
     )
 
+    routing_reference_raw = _require_mapping(
+        raw["development_routing_reference_cross_fit"],
+        "development_routing_reference_cross_fit",
+    )
+    _require_exact_keys(
+        routing_reference_raw,
+        frozenset(
+            {
+                "source_split",
+                "role",
+                "fold_count",
+                "source_cluster_count",
+                "quantile_rule",
+                "raw_latent_persistence_forbidden",
+                "invalidation_semantics",
+                "invalid_for_splits",
+            }
+        ),
+        "development_routing_reference_cross_fit",
+    )
+    routing_reference_policy = DevelopmentRoutingReferenceCrossFitPolicy(
+        source_split=routing_reference_raw["source_split"],
+        role=routing_reference_raw["role"],
+        fold_count=routing_reference_raw["fold_count"],
+        source_cluster_count=routing_reference_raw["source_cluster_count"],
+        quantile_rule=routing_reference_raw["quantile_rule"],
+        raw_latent_persistence_forbidden=routing_reference_raw[
+            "raw_latent_persistence_forbidden"
+        ],
+        invalidation_semantics=routing_reference_raw["invalidation_semantics"],
+        invalid_for_splits=tuple(
+            _require_sequence(
+                routing_reference_raw["invalid_for_splits"],
+                "routing_reference_invalid_for_splits",
+            )
+        ),
+    )
+
+    geometry_reference_raw = _require_mapping(
+        raw["development_geometry_reliability_cross_fit"],
+        "development_geometry_reliability_cross_fit",
+    )
+    _require_exact_keys(
+        geometry_reference_raw,
+        frozenset(
+            {
+                "source_split",
+                "role",
+                "fold_count",
+                "source_cluster_count",
+                "unfitted_epsilon_semantics",
+                "lower_tail_rule",
+                "upper_tail_rule",
+                "invalidation_semantics",
+                "invalid_for_splits",
+            }
+        ),
+        "development_geometry_reliability_cross_fit",
+    )
+    geometry_reference_policy = DevelopmentGeometryReliabilityCrossFitPolicy(
+        source_split=geometry_reference_raw["source_split"],
+        role=geometry_reference_raw["role"],
+        fold_count=geometry_reference_raw["fold_count"],
+        source_cluster_count=geometry_reference_raw["source_cluster_count"],
+        unfitted_epsilon_semantics=geometry_reference_raw[
+            "unfitted_epsilon_semantics"
+        ],
+        lower_tail_rule=geometry_reference_raw["lower_tail_rule"],
+        upper_tail_rule=geometry_reference_raw["upper_tail_rule"],
+        invalidation_semantics=geometry_reference_raw["invalidation_semantics"],
+        invalid_for_splits=tuple(
+            _require_sequence(
+                geometry_reference_raw["invalid_for_splits"],
+                "geometry_reference_invalid_for_splits",
+            )
+        ),
+    )
+
+    rescue_reference_raw = _require_mapping(
+        raw["development_rescue_threshold_cross_fit"],
+        "development_rescue_threshold_cross_fit",
+    )
+    _require_exact_keys(
+        rescue_reference_raw,
+        frozenset(
+            {
+                "source_split",
+                "role",
+                "fold_count",
+                "input_role",
+                "margin_rule",
+                "probe_cluster_exclusion_required",
+                "invalidation_semantics",
+                "invalid_for_splits",
+            }
+        ),
+        "development_rescue_threshold_cross_fit",
+    )
+    rescue_reference_policy = DevelopmentRescueThresholdCrossFitPolicy(
+        source_split=rescue_reference_raw["source_split"],
+        role=rescue_reference_raw["role"],
+        fold_count=rescue_reference_raw["fold_count"],
+        input_role=rescue_reference_raw["input_role"],
+        margin_rule=rescue_reference_raw["margin_rule"],
+        probe_cluster_exclusion_required=rescue_reference_raw[
+            "probe_cluster_exclusion_required"
+        ],
+        invalidation_semantics=rescue_reference_raw["invalidation_semantics"],
+        invalid_for_splits=tuple(
+            _require_sequence(
+                rescue_reference_raw["invalid_for_splits"],
+                "development_rescue_invalid_for_splits",
+            )
+        ),
+    )
+
     intent_policy_raw = _require_mapping(
         raw["execution_intent_policy"],
         "execution_intent_policy",
@@ -2233,6 +2545,9 @@ def load_frozen_development_exploration_protocol(
         preflight=preflight,
         study_budget=study_budget,
         provisional_threshold_cross_fit=threshold_policy,
+        development_routing_reference_cross_fit=routing_reference_policy,
+        development_geometry_reliability_cross_fit=geometry_reference_policy,
+        development_rescue_threshold_cross_fit=rescue_reference_policy,
         threshold_detector_authority=threshold_detector_authority,
         execution_intent_policy=execution_intent_policy,
         content_study=content_study,

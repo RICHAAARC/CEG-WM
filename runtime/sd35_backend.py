@@ -211,6 +211,31 @@ class Sd35PipelineBackend:
         self._requires_generation_prompt_selection = False
         return identity
 
+    def set_development_generation_prompts(
+        self,
+        prompt: str,
+        negative_prompt: str = "",
+    ) -> RuntimeGenerationPromptIdentity:
+        """Bind one development cluster prompt for its repeated paired operations."""
+
+        self._prepared()
+        if self._generation_running:
+            raise Sd35BackendError("generation prompts cannot change while running")
+        if type(prompt) is not str or not prompt or negative_prompt != "":
+            raise Sd35BackendError(
+                "development generation requires nonempty prompt and exact empty negative prompt"
+            )
+        try:
+            identity = RuntimeGenerationPromptIdentity.from_prompts(prompt, negative_prompt)
+        except RuntimeBackendError as exc:
+            raise Sd35BackendError("generation prompt identity is invalid") from exc
+        self._prompt = prompt
+        self._negative_prompt = negative_prompt
+        self._generation_prompt_identity = identity
+        self._clear_prompt_after_generation = False
+        self._requires_generation_prompt_selection = False
+        return identity
+
     def run_generation(
         self,
         initial_latent: torch.Tensor,

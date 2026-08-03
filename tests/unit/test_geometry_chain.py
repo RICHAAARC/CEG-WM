@@ -39,6 +39,7 @@ from main.geometry_chain.transform_estimator import (
     SimilarityTransform,
     geometric_transform_estimator,
     sampling_matrix,
+    validate_geometric_transform_estimation,
 )
 from main.shared.key_schedule import (
     derive_wrong_key_material,
@@ -518,6 +519,8 @@ def test_geometry_reliability_fail_closed():
     assert not not_fitted.allow_rectification
     assert not_fitted.status == "reliability_not_fitted"
     assert not_fitted.fitted_reliability_thresholds is None
+
+
     assert not_fitted.threshold_config_digest is None
     assert not validate_geometry_reliability_result(
         not_fitted,
@@ -701,6 +704,45 @@ def test_geometry_reliability_fail_closed():
             tampered_identity_flag,
             _thresholds(),
         )
+
+
+@pytest.mark.quick
+def test_transform_estimator_returns_raw_residuals_before_reliability_fit():
+    observations, _ = _actual_qk_observation(side=3, seed=2304)
+    qk_result = qk_geometry_sync(observations, _REGISTERED_KEY)
+    unfitted = geometric_transform_estimator(
+        qk_result,
+        _REGISTERED_KEY,
+        epsilon_inlier=None,
+    )
+
+    validate_geometric_transform_estimation(unfitted)
+    assert len(unfitted.anchor_residuals) == 12
+    assert unfitted.mean_residual >= 0.0
+    assert unfitted.epsilon_inlier is None
+    assert unfitted.inlier_ratio is None
+
+    result = geometry_reliability(unfitted)
+    assert not result.reliable
+    assert not result.allow_rectification
+    assert result.status == "reliability_not_fitted"
+    assert result.failure_reasons == ("reliability_not_fitted",)
+    assert result.threshold_config_digest is None
+
+
+@pytest.mark.quick
+def test_unfitted_estimator_cannot_be_relabelled_by_fitted_thresholds():
+    unfitted = replace(
+        _identity_estimation_record(),
+        epsilon_inlier=None,
+        inlier_ratio=None,
+    )
+
+    result = geometry_reliability(unfitted, _thresholds())
+    assert not result.reliable
+    assert not result.allow_rectification
+    assert result.status == "reliability_not_fitted"
+    assert result.failure_reasons == ("reliability_not_fitted",)
 
 
 @pytest.mark.quick

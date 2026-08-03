@@ -16,11 +16,10 @@
   content 路径调用真实 `CegWmExperimentAdapter.detect_hf` 与
   `detect_content`，geometry 路径调用真实 runtime Q/K observation 与
   一个无 runtime binding 的 method adapter 的 `synchronize_qk_observation`、
-  `geometric_transform_estimator`。三段公共调用的 class descriptor、bound method
-  与 main/module alias 均在调用前、段间和调用后复验；二者完整声明
-  方法/runtime 配置、公共 callable 身份与执行范围，不复制 detector、Q/K 或
-  estimator 算法。CPU synthetic wiring 的 raw-positive case 不执行未初始化的
-  模型 backend。
+  `geometric_transform_estimator`。runner 通过普通公共方法调用这些能力，并校验
+  方法/runtime 配置、输入与结果语义及执行范围；不锚定 Python descriptor、bound
+  method 或 module alias，也不复制 detector、Q/K 或 estimator 算法。CPU synthetic
+  wiring 的 raw-positive case 不执行未初始化的模型 backend。
 - `record_writer.py` 是内部正式 records 的唯一 writer。构造时必须同时接收冻结
   case input manifest；每次 load 或物化前，它都通过
   `validate_run_case_record_collection` 复验完整 collection，逐 record 核对

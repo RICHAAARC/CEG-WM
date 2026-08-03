@@ -31,6 +31,8 @@ from .formal_operations import (
     create_formal_content_detector_binding,
 )
 from .record_writer import (
+    DEVELOPMENT_ONLY_RECORD_SCOPE,
+    FORMAL_ALL_SPLITS_RECORD_SCOPE,
     HfOnlyThresholdFitRecordWriter,
     FrozenRecordBindings,
     GovernedRecordWriter,
@@ -70,6 +72,8 @@ __all__ = [
     "FrozenCaseExecutionExpectation",
     "FrozenCaseInputManifest",
     "FrozenRecordBindings",
+    "DEVELOPMENT_ONLY_RECORD_SCOPE",
+    "FORMAL_ALL_SPLITS_RECORD_SCOPE",
     "CONTENT_OPERATION_SEMANTIC_VERSION",
     "FORMAL_CONTENT_MODE",
     "GEOMETRY_OPERATION_SEMANTIC_VERSION",

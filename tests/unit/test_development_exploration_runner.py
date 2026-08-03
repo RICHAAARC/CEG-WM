@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import gc
 from hashlib import sha256
 import inspect
-import json
 from pathlib import Path
-import weakref
-from zipfile import ZipFile
 
 import pytest
 import torch
@@ -21,13 +17,12 @@ from experiments.methods import (
 )
 from experiments.runners.development_exploration import (
     DevelopmentExplorationRunner,
+    DevelopmentOperationalReceipt,
     DevelopmentRunnerError,
     DevelopmentUnitExcluded,
     DevelopmentUnitInput,
 )
-import experiments.runners.development_exploration as development_runner_module
 from experiments.runners.development_persistence import (
-    DevelopmentPersistenceError,
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
     development_unit_roster_digest,
@@ -38,10 +33,8 @@ from experiments.protocol.development_exploration import (
     create_development_provisional_threshold,
     create_development_threshold_fit_input,
 )
-from experiments.protocol.development_records import (
-    DEVELOPMENT_RECORD_MEMBER_PATH,
-    canonical_development_value_digest,
-)
+from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
+from experiments.protocol.development_records import canonical_development_value_digest
 from main import (
     BranchNullCalibration,
     GeometryReliabilityThresholds,
@@ -160,14 +153,6 @@ class _CombinedCpuWiringBackend:
         )
 
 
-class _ForeignStoreProxy:
-    pass
-
-
-class _ForeignStoreSubclass(DevelopmentPersistentStore):
-    pass
-
-
 def _runner(
     intent_authority=None,
     persistence_store: DevelopmentPersistentStore | None = None,
@@ -196,7 +181,6 @@ def _runner(
 
 
 def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, DevelopmentPersistentStore]:
-    tmp_path.mkdir(parents=True, exist_ok=True)
     initial = _runner()
     package = tmp_path / "development_package.zip"
     bootstrap = tmp_path / "development_bootstrap.py"
@@ -239,7 +223,7 @@ def _commit_frozen_unit_indexes(
     for unit_index in unit_indexes:
         intent = store.create_intent(
             lease,
-            unit_id=f"development_scientific_unit_{unit_index:04d}",
+            unit_id=f"development_unit_{unit_index:04d}",
             unit_index=unit_index,
             attempt_index=0,
             parent_attempt_intent_digest=None,
@@ -364,13 +348,52 @@ def _input() -> DevelopmentUnitInput:
     )
 
 
+def _first_scientific_unit_index(
+    runner: DevelopmentExplorationRunner,
+    responsibility_id: str,
+) -> int:
+    return next(
+        unit.unit_index
+        for unit in runner.protocol.unit_roster
+        if unit.phase == "scientific_breadth"
+        and unit.responsibility_id == responsibility_id
+    )
+
+
+@pytest.mark.quick
+def test_unfitted_geometry_inputs_are_limited_to_exploratory_responsibilities() -> None:
+    unfitted = replace(
+        _input(),
+        epsilon_inlier=None,
+        geometry_reliability_thresholds=None,
+    )
+
+    unfitted.validate("geometric_transform_estimator")
+    unfitted.validate("geometry_reliability")
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="development reliability thresholds exact type required",
+    ):
+        unfitted.validate("image_rectifier")
+
+
 @pytest.mark.quick
 def test_first_breadth_units_call_real_key_router_and_carrier_methods() -> None:
     runner = _runner()
-    key = runner._execute_unit(0, _input())
-    router = runner._execute_unit(1, _input())
-    low_frequency = _runner()._execute_unit(2, _input())
-    high_frequency = _runner()._execute_unit(3, _input())
+    key = runner._execute_unit(
+        _first_scientific_unit_index(runner, "key_schedule"), _input()
+    )
+    router = runner._execute_unit(
+        _first_scientific_unit_index(runner, "content_router"), _input()
+    )
+    low_frequency_runner = _runner()
+    low_frequency = low_frequency_runner._execute_unit(
+        _first_scientific_unit_index(low_frequency_runner, "lf_carrier"), _input()
+    )
+    high_frequency_runner = _runner()
+    high_frequency = high_frequency_runner._execute_unit(
+        _first_scientific_unit_index(high_frequency_runner, "hf_carrier"), _input()
+    )
 
     assert key.record.responsibility_id == "key_schedule"
     assert dict(key.record.metric_observation["sufficient_statistics"])[
@@ -391,7 +414,9 @@ def test_public_runner_does_not_accept_caller_prerequisite_outcomes() -> None:
 @pytest.mark.quick
 def test_content_embedding_unit_uses_actual_runtime_write_and_vae() -> None:
     runner = _runner()
-    result = runner._execute_unit(4, _input())
+    result = runner._execute_unit(
+        _first_scientific_unit_index(runner, "content_embedder"), _input()
+    )
 
     assert result.record.responsibility_id == "content_embedder"
     assert result.record.provenance_trace["runtime_config_digest"] == (
@@ -440,22 +465,66 @@ def test_preflight_calls_real_runtime_without_scientific_coverage() -> None:
 
 
 @pytest.mark.quick
+def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    observed: list[str] = []
+
+    def execute_operation(unit, _identity, _raw):
+        observed.append(unit.responsibility_id)
+        return {"responsibility_id": unit.responsibility_id}, None, {}, None
+
+    def execute_conditional(unit, _raw):
+        observed.append(unit.responsibility_id)
+        return {"responsibility_id": unit.responsibility_id}
+
+    monkeypatch.setattr(runner, "_execute_real_operation", execute_operation)
+    monkeypatch.setattr(
+        runner,
+        "_execute_wiring_conditional_call",
+        execute_conditional,
+    )
+    monkeypatch.setattr(
+        "experiments.runners.development_exploration._safe_result_payload",
+        lambda _responsibility, result: result,
+    )
+    receipt = runner.execute_wiring_smoke_cluster(
+        0,
+        {role: _input() for role in REQUIRED_METHOD_RESPONSIBILITIES},
+    )
+
+    assert receipt.operational_role == "full_chain_wiring_smoke"
+    assert tuple(role for role, _ in receipt.responsibility_result_digests) == (
+        REQUIRED_METHOD_RESPONSIBILITIES
+    )
+    assert receipt.counts_as_scientific_coverage is False
+    assert receipt.scientific_claims_supported is False
+    assert tuple(observed) == REQUIRED_METHOD_RESPONSIBILITIES
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize(
-    ("unit_index", "responsibility_id"),
+    "responsibility_id",
     (
-        (5, "lf_detector"),
-        (6, "hf_detector"),
-        (7, "content_detector"),
-        (8, "qk_geometry_sync"),
-        (9, "geometric_transform_estimator"),
-        (10, "geometry_reliability"),
+        "lf_detector",
+        "hf_detector",
+        "content_detector",
+        "qk_geometry_sync",
+        "geometric_transform_estimator",
+        "geometry_reliability",
     ),
 )
 def test_remaining_non_joint_responsibilities_use_real_public_calls(
-    unit_index: int,
     responsibility_id: str,
 ) -> None:
-    result = _runner()._execute_unit(unit_index, _input())
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == responsibility_id
+    )
+    result = runner._execute_unit(unit.unit_index, _input())
 
     assert result.record.responsibility_id == responsibility_id
     assert result.record.metric_observation["responsibility_id"] == responsibility_id
@@ -470,7 +539,13 @@ def test_remaining_non_joint_responsibilities_use_real_public_calls(
 @pytest.mark.quick
 def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() -> None:
     runner = _runner()
-    result = runner._execute_unit(28, _input())
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "hf_detector"
+        and item.content_branch_id == "hf_only"
+    )
+    result = runner._execute_unit(unit.unit_index, _input())
     record = result.record
     authority = runner.protocol.threshold_detector_authority
     identity = record.analysis_unit_identity
@@ -540,8 +615,14 @@ def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() ->
 
 @pytest.mark.quick
 def test_rectifier_fail_closed_is_classified_as_scientific_exclusion() -> None:
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "image_rectifier"
+    )
     with pytest.raises(DevelopmentUnitExcluded, match="fail-closed reliability"):
-        _runner()._execute_unit(11, _input())
+        runner._execute_unit(unit.unit_index, _input())
 
 
 @pytest.mark.quick
@@ -580,10 +661,16 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manifest = _development_manifest(64)
-    target = min(
-        (assignment.identity for assignment in manifest.assignments),
-        key=lambda identity: identity.source_cluster_id,
+    intent = _execution_intent(manifest, run_id="development_joint_wiring")
+    joint_runner = _runner(intent)
+    joint_unit = next(
+        item
+        for item in joint_runner.protocol.unit_roster
+        if item.responsibility_id == "conditional_recovery_decision"
     )
+    target = intent.input_manifest.assignments[
+        joint_unit.source_cluster_ordinal
+    ].identity
     original_unit = internal_runner_test_module._unit
     monkeypatch.setattr(
         internal_runner_test_module,
@@ -591,14 +678,20 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
         lambda index, **kwargs: target if index == 0 else original_unit(index, **kwargs),
     )
     context, payload, operation = _internal_context(tmp_path / "internal")
-    intent = _execution_intent(manifest, run_id="development_joint_wiring")
     plan = build_development_cross_fit_plan(
         responsibility_id="hf_detector",
         execution_intent_authority=intent,
         expected_execution_intent_authority_digest=intent.authority_digest,
         expected_source_cluster_count=64,
     )
-    threshold_manifest, detector_binding, fit_inputs = _threshold_material(plan)
+    fold_index = next(
+        fold.fold_index
+        for fold in plan.folds
+        if target.source_cluster_id in fold.recovery_probe_source_cluster_ids
+    )
+    threshold_manifest, detector_binding, fit_inputs = _threshold_material(
+        plan, fold_index
+    )
     desired_tau = payload.thresholds.tau
     adjusted_inputs = []
     for index, item in enumerate(fit_inputs):
@@ -639,7 +732,7 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
     threshold = create_development_provisional_threshold(
         plan,
         expected_execution_intent_authority_digest=intent.authority_digest,
-        fold_index=0,
+        fold_index=fold_index,
         input_manifest=threshold_manifest,
         detector_binding=detector_binding,
         fit_inputs=tuple(adjusted_inputs),
@@ -653,7 +746,7 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
         internal_case_payload=payload,
     )
 
-    result = _runner(intent)._execute_unit(12, joint_input)
+    result = joint_runner._execute_unit(joint_unit.unit_index, joint_input)
 
     assert result.record.responsibility_id == "conditional_recovery_decision"
     assert result.record.decision_trace["internal_validation_record_id"]
@@ -677,16 +770,9 @@ def test_production_runner_has_no_result_provider_or_module_result_surface() -> 
 
 
 @pytest.mark.quick
-def test_runner_rejects_per_instance_method_proxy_before_record() -> None:
-    runner = _runner()
-    runner.adapter.detect_hf = lambda *_args, **_kwargs: None
-
-    with pytest.raises(DevelopmentRunnerError, match="instance shadow"):
-        runner._execute_unit(6, _input())
-
-
-@pytest.mark.quick
-def test_persistent_runner_claims_only_next_breadth_first_unit(tmp_path: Path) -> None:
+def test_persistent_runner_requires_registered_producer_for_operational_prefix(
+    tmp_path: Path,
+) -> None:
     runner, store = _persistent_runner(tmp_path)
     lease = store.acquire_lease(
         session_id="runner_session",
@@ -694,19 +780,93 @@ def test_persistent_runner_claims_only_next_breadth_first_unit(tmp_path: Path) -
         lease_duration_seconds=100,
     )
 
-    result = runner.execute_and_commit_next_unit(
-        lease,
-        _input(),
-        now_epoch_seconds=101,
-        raw_secret_values=("development-runner-cpu-wiring-key",),
-    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="operational unit requires its registered producer",
+    ):
+        runner.execute_and_commit_next_unit(
+            lease,
+            _input(),
+            now_epoch_seconds=101,
+            raw_secret_values=("development-runner-cpu-wiring-key",),
+        )
+    assert store.recover(now_epoch_seconds=102).committed_units == ()
 
-    assert result.record.unit_index == 0
-    assert result.record.responsibility_id == "key_schedule"
-    assert result.record.execution_status == "success"
-    assert result.intent is not None and result.intent.unit_descriptor_digest
-    assert result.committed is not None
-    assert store.recover(now_epoch_seconds=102).committed_units == (result.committed,)
+
+@pytest.mark.quick
+def test_preflight_and_wiring_share_commit_recovery_before_routing_reference(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    lease = store.acquire_lease(
+        session_id="operational_prefix_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=100,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=101)
+    for _ in range(10):
+        unit = runner.protocol.unit_roster[cursor.next_unit_index]
+        intent = runner.create_operational_intent(
+            lease,
+            cursor,
+            now_epoch_seconds=102,
+        )
+        is_preflight = unit.phase == "development_environment_preflight"
+        roles = (
+            ("content_embedder",)
+            if is_preflight
+            else REQUIRED_METHOD_RESPONSIBILITIES
+        )
+        receipt = DevelopmentOperationalReceipt(
+            operational_role=(
+                "environment_runtime_throughput_preflight"
+                if is_preflight
+                else "full_chain_wiring_smoke"
+            ),
+            source_cluster_ordinal=unit.source_cluster_ordinal,
+            case_ids=(
+                runner.protocol.preflight.case_ids
+                if is_preflight
+                else ("all_thirteen_responsibility_wiring",)
+            ),
+            responsibility_result_digests=tuple(
+                (role, sha256(role.encode("utf-8")).hexdigest())
+                for role in roles
+            ),
+            elapsed_seconds=0.25,
+            runtime_config_digest=(
+                runner.runtime_adapter.session.runtime_config_digest
+            ),
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+        runner.commit_operational_receipt(
+            lease,
+            cursor,
+            intent,
+            receipt,
+            now_epoch_seconds=103,
+            raw_secret_values=(),
+        )
+    assert cursor.next_unit_index == 10
+    assert len(cursor.operational_records) == 10
+    recovered = store.open_session_cursor(lease, now_epoch_seconds=104)
+    assert recovered.next_unit_index == 10
+    assert len(recovered.operational_records) == 10
+    assert runner.protocol.unit_roster[recovered.next_unit_index].phase == (
+        "development_routing_reference_fit"
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="operational unit requires its registered producer",
+    ):
+        runner.execute_and_commit_session_unit(
+            lease,
+            recovered,
+            _input(),
+            now_epoch_seconds=105,
+            raw_secret_values=(),
+        )
 
 
 @pytest.mark.quick
@@ -719,19 +879,34 @@ def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
         now_epoch_seconds=100,
         lease_duration_seconds=100,
     )
+    unit_index = next(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.phase != "development_routing_reference_fit"
+    )
+    intent = store.create_intent(
+        lease,
+        unit_id=f"development_unit_{unit_index:04d}",
+        unit_index=unit_index,
+        attempt_index=0,
+        parent_attempt_intent_digest=None,
+        now_epoch_seconds=101,
+    )
     runner.adapter.identify_key = lambda *_args, **_kwargs: None
 
-    result = runner.execute_and_commit_next_unit(
+    result = runner._execute_and_commit_claimed_unit(
         lease,
+        intent,
         _input(),
         now_epoch_seconds=101,
         raw_secret_values=("development-runner-cpu-wiring-key",),
+        session_cursor=None,
     )
     recovery = store.recover(now_epoch_seconds=102)
 
     assert result.record.execution_status == "failed"
     assert result.record.failure_class == "implementation_failure"
-    assert "instance shadow" in result.record.failure_reason
+    assert result.record.failure_reason
     assert recovery.interrupted_attempts == ()
     assert recovery.committed_units == (result.committed,)
 
@@ -745,574 +920,17 @@ def test_module_outcome_public_surface_accepts_no_caller_records_or_outcomes() -
     assert "prerequisite_outcome_records" not in signature.parameters
     with pytest.raises(
         DevelopmentRunnerError,
-        match="persistent store is required",
+        match="persistent-store replay",
     ):
         runner._build_module_outcome_record(
-            (runner._execute_unit(0, _input()).record,),
+            (
+                runner._execute_unit(
+                    _first_scientific_unit_index(runner, "key_schedule"),
+                    _input(),
+                ).record,
+            ),
             responsibility_id="key_schedule",
             now_epoch_seconds=1,
-        )
-
-
-@pytest.mark.quick
-def test_runner_rejects_foreign_store_proxy_and_subclass() -> None:
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence store exact type is required",
-    ):
-        _runner(persistence_store=_ForeignStoreProxy())  # type: ignore[arg-type]
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence store exact type is required",
-    ):
-        _runner(
-            persistence_store=object.__new__(_ForeignStoreSubclass),
-        )
-
-
-@pytest.mark.quick
-def test_external_persistence_authority_registry_releases_runner_key() -> None:
-    runner = _runner()
-    runner_reference = weakref.ref(runner)
-    assert runner in (
-        development_runner_module._REGISTERED_PERSISTENCE_AUTHORITIES
-    )
-
-    del runner
-    gc.collect()
-
-    assert runner_reference() is None
-
-
-@pytest.mark.quick
-def test_runner_persistence_authority_is_read_only_and_rejects_replacement(
-    tmp_path: Path,
-) -> None:
-    runner, store = _persistent_runner(tmp_path / "original")
-    _foreign_runner, foreign_store = _persistent_runner(tmp_path / "foreign")
-
-    with pytest.raises(AttributeError, match="no setter"):
-        runner.persistence_store = store  # type: ignore[misc]
-    with pytest.raises(AttributeError, match="immutable after construction"):
-        runner._persistence_store = store
-    with pytest.raises(AttributeError, match="cannot be deleted"):
-        del runner._persistence_store
-
-    object.__setattr__(runner, "_persistence_store", foreign_store)
-    object.__setattr__(
-        runner,
-        "_persistence_store_authority_anchor",
-        {"store": foreign_store, "authority": "foreign"},
-    )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence authority object drifted",
-    ):
-        runner.build_verified_module_outcome_record(
-            responsibility_id="key_schedule",
-            now_epoch_seconds=1,
-        )
-
-
-@pytest.mark.quick
-def test_runner_replay_rejects_private_store_proxy_and_anchor_drift(
-    tmp_path: Path,
-) -> None:
-    proxy_runner, _store = _persistent_runner(tmp_path / "proxy")
-    object.__setattr__(proxy_runner, "_persistence_store", _ForeignStoreProxy())
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence authority object drifted",
-    ):
-        proxy_runner.build_verified_module_outcome_record(
-            responsibility_id="key_schedule",
-            now_epoch_seconds=1,
-        )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence authority object drifted",
-    ):
-        proxy_runner._execute_unit(0, _input())
-
-    guard_shadow_runner, _guard_shadow_store = _persistent_runner(
-        tmp_path / "guard_shadow"
-    )
-    object.__setattr__(
-        guard_shadow_runner,
-        "_guard_persistence_authority",
-        lambda **_kwargs: None,
-    )
-    object.__setattr__(
-        guard_shadow_runner,
-        "_require_persistence_store",
-        lambda: _guard_shadow_store,
-    )
-    object.__setattr__(
-        guard_shadow_runner,
-        "_persistence_store",
-        _ForeignStoreProxy(),
-    )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="runner callable instance shadow is forbidden:_guard_persistence_authority",
-    ):
-        guard_shadow_runner._execute_unit(0, _input())
-
-    anchor_runner, anchor_store = _persistent_runner(tmp_path / "anchor")
-    object.__setattr__(
-        anchor_store,
-        "run_root",
-        (tmp_path / "alternate_run_root").resolve(),
-    )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence authority anchor drifted",
-    ):
-        anchor_runner.decide_verified_module_execution(
-            responsibility_id="content_router",
-            outcomes_by_responsibility={},
-            now_epoch_seconds=1,
-        )
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "anchor_surface",
-    ("worker_identity", "registered_bindings", "package_path", "bootstrap_path"),
-)
-def test_runner_replay_rejects_each_frozen_store_anchor_drift(
-    tmp_path: Path,
-    anchor_surface: str,
-) -> None:
-    runner, store = _persistent_runner(tmp_path)
-    if anchor_surface == "worker_identity":
-        object.__setattr__(
-            store,
-            "worker_identity",
-            replace(store.worker_identity, revision="f" * 40),
-        )
-    elif anchor_surface == "registered_bindings":
-        object.__setattr__(store, "_registered_unit_bindings", {})
-    elif anchor_surface == "package_path":
-        alternate = tmp_path / "alternate_package.zip"
-        alternate.write_bytes(store.package_path.read_bytes())
-        object.__setattr__(store, "package_path", alternate.resolve())
-    else:
-        alternate = tmp_path / "alternate_bootstrap.py"
-        alternate.write_bytes(store.bootstrap_path.read_bytes())
-        object.__setattr__(store, "bootstrap_path", alternate.resolve())
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="persistence authority anchor drifted",
-    ):
-        runner.build_verified_module_outcome_record(
-            responsibility_id="key_schedule",
-            now_epoch_seconds=1,
-        )
-
-
-@pytest.mark.quick
-def test_runner_rejects_never_committed_record_store_method_shadow(
-    tmp_path: Path,
-) -> None:
-    runner, store = _persistent_runner(tmp_path)
-    object.__setattr__(
-        store,
-        "verified_terminal_scientific_evidence_for_unit_indexes",
-        lambda *_args, **_kwargs: (("never_committed_record", None),),
-    )
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match=(
-            "persistence callable instance shadow is forbidden:"
-            "verified_terminal_scientific_evidence_for_unit_indexes"
-        ),
-    ):
-        runner.build_verified_module_outcome_record(
-            responsibility_id="key_schedule",
-            now_epoch_seconds=1,
-        )
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "shadowed_method_name",
-    tuple(
-        name
-        for name, value in vars(DevelopmentPersistentStore).items()
-        if callable(value)
-    ),
-)
-def test_runner_rejects_every_persistence_callable_instance_shadow_category(
-    tmp_path: Path,
-    shadowed_method_name: str,
-) -> None:
-    runner, store = _persistent_runner(tmp_path)
-    object.__setattr__(
-        store,
-        shadowed_method_name,
-        lambda *_args, **_kwargs: None,
-    )
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match=f"persistence callable instance shadow is forbidden:{shadowed_method_name}",
-    ):
-        runner._execute_unit(0, _input())
-
-
-@pytest.mark.quick
-def test_runner_rejects_foreign_never_committed_unit_execution_shadow(
-    tmp_path: Path,
-) -> None:
-    runner, store = _persistent_runner(tmp_path / "target")
-    foreign_runner = _runner()
-    foreign_record = foreign_runner._execute_unit(0, _input()).record
-    with pytest.raises(
-        TypeError,
-        match="runner callable class descriptor is frozen:__getattribute__",
-    ):
-        DevelopmentExplorationRunner.__getattribute__ = object.__getattribute__
-    object.__setattr__(
-        runner,
-        "_execute_unit",
-        lambda *_args, **_kwargs: development_runner_module.DevelopmentUnitRunResult(
-            record=foreign_record,
-            intent=None,
-            committed=None,
-        ),
-    )
-    lease = store.acquire_lease(
-        session_id="foreign_record_shadow_session",
-        now_epoch_seconds=100,
-        lease_duration_seconds=100,
-    )
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="runner callable instance shadow is forbidden:_execute_unit",
-    ):
-        runner.execute_and_commit_next_unit(
-            lease,
-            _input(),
-            now_epoch_seconds=101,
-            raw_secret_values=("development-runner-cpu-wiring-key",),
-        )
-    assert store.recover(now_epoch_seconds=102).committed_units == ()
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "overridden_callable",
-    (
-        None,
-        "_execute_unit",
-        "_execute_real_operation",
-        "_record",
-        "_failure_record",
-        "_guard_persistence_authority",
-        "_require_persistence_store",
-    ),
-)
-def test_development_exploration_runner_rejects_every_subclass_category(
-    overridden_callable: str | None,
-) -> None:
-    namespace: dict[str, object] = {}
-    if overridden_callable is not None:
-        namespace[overridden_callable] = lambda *_args, **_kwargs: None
-
-    with pytest.raises(
-        TypeError,
-        match="development exploration runner is final",
-    ):
-        type(
-            "DerivedDevelopmentExplorationRunner",
-            (DevelopmentExplorationRunner,),
-            namespace,
-        )
-
-
-@pytest.mark.quick
-def test_non_delegating_compatible_metaclass_cannot_create_runner_subclass() -> None:
-    metaclass_initializations: list[str] = []
-
-    class CompatibleDevelopmentRunnerMetaclass(
-        type(DevelopmentExplorationRunner)
-    ):
-        def __init__(
-            cls,
-            name: str,
-            bases: tuple[type, ...],
-            namespace: dict[str, object],
-            **_kwargs: object,
-        ) -> None:
-            metaclass_initializations.append(name)
-
-    with pytest.raises(
-        TypeError,
-        match="development exploration runner is final",
-    ):
-        CompatibleDevelopmentRunnerMetaclass(
-            "CompatibleDerivedDevelopmentExplorationRunner",
-            (DevelopmentExplorationRunner,),
-            {
-                "_execute_unit": lambda *_args, **_kwargs: None,
-                "_guard_persistence_authority": (
-                    lambda *_args, **_kwargs: None
-                ),
-            },
-        )
-    assert metaclass_initializations == []
-
-
-@pytest.mark.quick
-def test_subclass_foreign_record_path_cannot_create_persistent_artifacts(
-    tmp_path: Path,
-) -> None:
-    _runner_instance, store = _persistent_runner(tmp_path)
-    foreign_record = _runner()._execute_unit(0, _input()).record
-
-    with pytest.raises(
-        TypeError,
-        match="development exploration runner is final",
-    ):
-        type(
-            "DerivedForeignRecordDevelopmentRunner",
-            (DevelopmentExplorationRunner,),
-            {
-                "_execute_unit": lambda *_args, **_kwargs: (
-                    development_runner_module.DevelopmentUnitRunResult(
-                        record=foreign_record,
-                        intent=None,
-                        committed=None,
-                    )
-                )
-            },
-        )
-    recovery = store.recover(now_epoch_seconds=100)
-    assert recovery.committed_units == ()
-    assert recovery.interrupted_attempts == ()
-    assert recovery.next_attempt_by_unit == ()
-    for artifact_directory_name in ("intents", "bundles", "markers"):
-        artifact_directory = store.run_root / artifact_directory_name
-        assert (
-            not artifact_directory.exists()
-            or tuple(artifact_directory.iterdir()) == ()
-        )
-
-
-@pytest.mark.quick
-def test_foreign_object_fails_every_exact_runner_type_entry() -> None:
-    foreign_runner_object = object()
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="development exploration runner exact type is required",
-    ):
-        DevelopmentExplorationRunner.__getattribute__(
-            foreign_runner_object,
-            "protocol",
-        )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="development exploration runner exact type is required",
-    ):
-        DevelopmentExplorationRunner.__setattr__(
-            foreign_runner_object,
-            "protocol",
-            None,
-        )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="development exploration runner exact type is required",
-    ):
-        DevelopmentExplorationRunner.__delattr__(
-            foreign_runner_object,
-            "protocol",
-        )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="development exploration runner exact type is required",
-    ):
-        DevelopmentExplorationRunner.__init__(
-            foreign_runner_object,
-            intent_authority=None,  # type: ignore[arg-type]
-            adapter=None,  # type: ignore[arg-type]
-            runtime_adapter=None,  # type: ignore[arg-type]
-            attack_registry=None,  # type: ignore[arg-type]
-            method_code_revision="0" * 40,
-            environment_digest="0" * 64,
-            resource_identity_digest="0" * 64,
-        )
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "shadowed_runner_callable",
-    ("_execute_real_operation", "_record", "_failure_record"),
-)
-def test_runner_rejects_each_execution_record_callable_shadow_category(
-    tmp_path: Path,
-    shadowed_runner_callable: str,
-) -> None:
-    runner, _store = _persistent_runner(tmp_path)
-    object.__setattr__(
-        runner,
-        shadowed_runner_callable,
-        lambda *_args, **_kwargs: None,
-    )
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match=(
-            "runner callable instance shadow is forbidden:"
-            f"{shadowed_runner_callable}"
-        ),
-    ):
-        runner._execute_unit(0, _input())
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "frozen_runner_callable",
-    tuple(
-        name
-        for name, descriptor in vars(DevelopmentExplorationRunner).items()
-        if callable(descriptor)
-        or isinstance(descriptor, (classmethod, staticmethod))
-    ),
-)
-@pytest.mark.parametrize("class_mutation", ("set", "delete"))
-def test_runner_rejects_every_frozen_callable_class_mutation(
-    frozen_runner_callable: str,
-    class_mutation: str,
-) -> None:
-    expected_descriptor = inspect.getattr_static(
-        DevelopmentExplorationRunner,
-        frozen_runner_callable,
-    )
-
-    with pytest.raises(
-        TypeError,
-        match=(
-            "runner callable class descriptor is frozen:"
-            f"{frozen_runner_callable}"
-        ),
-    ):
-        if class_mutation == "set":
-            setattr(
-                DevelopmentExplorationRunner,
-                frozen_runner_callable,
-                lambda *_args, **_kwargs: None,
-            )
-        else:
-            delattr(
-                DevelopmentExplorationRunner,
-                frozen_runner_callable,
-            )
-    assert (
-        inspect.getattr_static(
-            DevelopmentExplorationRunner,
-            frozen_runner_callable,
-        )
-        is expected_descriptor
-    )
-
-
-@pytest.mark.quick
-def test_runner_rejects_store_replacement_combined_with_critical_shadow(
-    tmp_path: Path,
-) -> None:
-    runner, _store = _persistent_runner(tmp_path / "target")
-    _foreign_runner, foreign_store = _persistent_runner(tmp_path / "foreign")
-    object.__setattr__(runner, "_persistence_store", foreign_store)
-    object.__setattr__(
-        runner,
-        "_record",
-        lambda *_args, **_kwargs: None,
-    )
-
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="runner callable instance shadow is forbidden:_record",
-    ):
-        runner._execute_unit(0, _input())
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize("tamper_surface", ("intent", "marker", "bundle", "record"))
-def test_runner_store_replay_rejects_committed_artifact_tamper(
-    tmp_path: Path,
-    tamper_surface: str,
-) -> None:
-    runner, store = _persistent_runner(tmp_path)
-    lease = store.acquire_lease(
-        session_id="tamper_probe_session",
-        now_epoch_seconds=100,
-        lease_duration_seconds=100,
-    )
-    result = runner.execute_and_commit_next_unit(
-        lease,
-        _input(),
-        now_epoch_seconds=101,
-        raw_secret_values=("development-runner-cpu-wiring-key",),
-    )
-    assert result.intent is not None and result.committed is not None
-    intent_path = (
-        store.run_root
-        / "intents"
-        / f"{result.intent.unit_id}__attempt_{result.intent.attempt_index}.json"
-    )
-    marker_path = (
-        store.run_root
-        / "markers"
-        / (
-            f"{result.intent.unit_id}__attempt_{result.intent.attempt_index}"
-            ".COMMITTED.json"
-        )
-    )
-    bundle_path = (
-        store.run_root
-        / "bundles"
-        / f"sha256_{result.committed.bundle_sha256}.zip"
-    )
-    if tamper_surface == "intent":
-        intent_payload = json.loads(intent_path.read_bytes())
-        intent_payload["responsibility_id"] = "hf_detector"
-        intent_path.write_bytes(
-            json.dumps(
-                intent_payload,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-            + b"\n"
-        )
-    elif tamper_surface == "marker":
-        marker_path.write_bytes(b"{}\n")
-    elif tamper_surface == "bundle":
-        bundle_path.write_bytes(b"tampered bundle")
-    else:
-        with ZipFile(bundle_path, "r") as archive:
-            members = {name: archive.read(name) for name in archive.namelist()}
-        record_payload = json.loads(members[DEVELOPMENT_RECORD_MEMBER_PATH])
-        record_payload["record_id"] = "f" * 64
-        members[DEVELOPMENT_RECORD_MEMBER_PATH] = json.dumps(
-            record_payload,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8") + b"\n"
-        with ZipFile(bundle_path, "w") as archive:
-            for member_path, payload in sorted(members.items()):
-                archive.writestr(member_path, payload)
-
-    with pytest.raises((DevelopmentPersistenceError, DevelopmentRunnerError)):
-        runner.build_verified_module_outcome_record(
-            responsibility_id="key_schedule",
-            now_epoch_seconds=102,
         )
 
 

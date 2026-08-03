@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from math import isfinite
@@ -53,6 +53,8 @@ from experiments.protocol.internal_validation import (
     FrozenInternalValidationProtocol,
 )
 from experiments.runners.record_writer import (
+    DEVELOPMENT_ONLY_RECORD_SCOPE,
+    FORMAL_ALL_SPLITS_RECORD_SCOPE,
     FrozenRecordBindings,
     GovernedRecordWriter,
     GovernedRecordWriterError,
@@ -102,62 +104,6 @@ class InternalCaseExecutionPayload:
     geometry_estimation_operation: GeometryEstimationOperation
     geometry_operation_identity: str
     geometry_reliability_thresholds: GeometryReliabilityThresholds | None
-    _content_operation_anchor: object = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
-    _geometry_operation_anchor: object = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
-    _content_operation_type_identity: str = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
-    _geometry_operation_type_identity: str = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
-    _construction_anchor_digest: str = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
-
-    def __post_init__(self) -> None:
-        declaration = _payload_declaration_snapshot(self)
-        content_operation = (
-            self.content_detector_binding.content_detection_operation
-        )
-        object.__setattr__(
-            self,
-            "_content_operation_anchor",
-            content_operation,
-        )
-        object.__setattr__(
-            self,
-            "_geometry_operation_anchor",
-            self.geometry_estimation_operation,
-        )
-        object.__setattr__(
-            self,
-            "_content_operation_type_identity",
-            _callable_type_identity(content_operation),
-        )
-        object.__setattr__(
-            self,
-            "_geometry_operation_type_identity",
-            _callable_type_identity(self.geometry_estimation_operation),
-        )
-        object.__setattr__(
-            self,
-            "_construction_anchor_digest",
-            _canonical_digest(declaration),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,19 +116,10 @@ class InternalRunnerContext:
     metric_registry: MetricRegistry
     writer: GovernedRecordWriter
     bindings: FrozenRecordBindings
-    _construction_anchor_digest: str = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
+    record_scope: str = FORMAL_ALL_SPLITS_RECORD_SCOPE
 
     def __post_init__(self) -> None:
         _validate_context_components(self)
-        object.__setattr__(
-            self,
-            "_construction_anchor_digest",
-            _context_anchor_digest(self),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -697,11 +634,17 @@ def _validated_case(
     if len(entries) != 1:
         raise InternalRunnerError("unit_id must resolve to one frozen input entry")
     entry = entries[0]
-    authorize_split_access(
-        context.split_manifest,
-        (entry.split,),
-        SplitAccessGrant.current_execution(),
-    )
+    if context.record_scope == DEVELOPMENT_ONLY_RECORD_SCOPE:
+        if entry.split != "development":
+            raise InternalRunnerError(
+                "development-only runner cannot authorize a future split"
+            )
+    else:
+        authorize_split_access(
+            context.split_manifest,
+            (entry.split,),
+            SplitAccessGrant.current_execution(),
+        )
     _validate_payload_execution_boundary(
         payload,
         entry.execution_expectation,
@@ -871,50 +814,25 @@ def _payload_declaration_snapshot(
     }
 
 
-def _validate_payload_construction_anchor(
-    payload: InternalCaseExecutionPayload,
-) -> None:
-    if type(payload) is not InternalCaseExecutionPayload:
-        raise InternalRunnerError("case execution payload exact type is required")
-    declaration = _payload_declaration_snapshot(payload)
-    content_operation = (
-        payload.content_detector_binding.content_detection_operation
-    )
-    if content_operation is not payload._content_operation_anchor:
-        raise InternalRunnerError("content operation object identity drifted")
-    if (
-        _callable_type_identity(content_operation)
-        != payload._content_operation_type_identity
-    ):
-        raise InternalRunnerError("content operation type identity drifted")
-    if (
-        payload.geometry_estimation_operation
-        is not payload._geometry_operation_anchor
-    ):
-        raise InternalRunnerError("geometry operation object identity drifted")
-    if (
-        _callable_type_identity(payload.geometry_estimation_operation)
-        != payload._geometry_operation_type_identity
-    ):
-        raise InternalRunnerError("geometry operation type identity drifted")
-    if (
-        _canonical_digest(declaration)
-        != payload._construction_anchor_digest
-    ):
-        raise InternalRunnerError("case execution payload construction anchor drifted")
-
-
 def _validate_payload_execution_boundary(
     payload: InternalCaseExecutionPayload,
     expectation: FrozenCaseExecutionExpectation,
 ) -> None:
-    _validate_payload_construction_anchor(payload)
-    _validate_payload_against_expectation(payload, expectation)
+    if type(payload) is not InternalCaseExecutionPayload:
+        raise InternalRunnerError("case execution payload exact type is required")
+    declaration_snapshot = _payload_declaration_snapshot(payload)
+    _validate_payload_against_expectation(
+        payload,
+        expectation,
+        declaration_snapshot=declaration_snapshot,
+    )
 
 
 def _validate_payload_against_expectation(
     payload: InternalCaseExecutionPayload,
     expectation: FrozenCaseExecutionExpectation,
+    *,
+    declaration_snapshot: Mapping[str, object],
 ) -> None:
     if type(expectation) is not FrozenCaseExecutionExpectation:
         raise InternalRunnerError("case execution expectation exact type required")
@@ -929,15 +847,13 @@ def _validate_payload_against_expectation(
     observed = {
         "calibration_identity": thresholds.calibration_identity,
         "content_detector_binding_digest": binding.detector_binding_digest,
-        "content_operation_config_digest": formal_operation_config_digest(
-            binding.content_detection_operation,
-            operation_role="content_detection",
-        ),
+        "content_operation_config_digest": declaration_snapshot[
+            "content_operation_config_digest"
+        ],
         "geometry_operation_identity": payload.geometry_operation_identity,
-        "geometry_operation_config_digest": formal_operation_config_digest(
-            payload.geometry_estimation_operation,
-            operation_role="geometry_estimation",
-        ),
+        "geometry_operation_config_digest": declaration_snapshot[
+            "geometry_operation_config_digest"
+        ],
         "geometry_reliability_config_digest": reliability_digest,
         "raw_detector_config_digest": binding.content_config_digest,
         "raw_detector_identity": binding.detector_identity,
@@ -1001,47 +917,35 @@ def _formal_operation_config_snapshot(
             "formal operation semantic declaration is required"
         )
     try:
-        declarations = (
-            declaration_provider(),
-            declaration_provider(),
-        )
+        declaration = declaration_provider()
     except Exception as exc:
         raise InternalRunnerError(
             "formal operation semantic declaration failed"
         ) from exc
-    canonical_declarations: list[dict[str, object]] = []
-    canonical_documents: list[str] = []
-    for declaration in declarations:
-        if (
-            type(declaration) is not dict
-            or not declaration
-            or any(type(key) is not str or not key for key in declaration)
-        ):
-            raise InternalRunnerError(
-                "formal operation semantic declaration must be a nonempty string-key mapping"
-            )
-        try:
-            canonical_document = json.dumps(
-                declaration,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
-            canonical_declaration = json.loads(canonical_document)
-        except (TypeError, ValueError) as exc:
-            raise InternalRunnerError(
-                "formal operation semantic declaration is not canonical JSON"
-            ) from exc
-        if canonical_declaration != declaration:
-            raise InternalRunnerError(
-                "formal operation semantic declaration is not stable JSON data"
-            )
-        canonical_declarations.append(canonical_declaration)
-        canonical_documents.append(canonical_document)
-    if canonical_documents[0] != canonical_documents[1]:
+    if (
+        type(declaration) is not dict
+        or not declaration
+        or any(type(key) is not str or not key for key in declaration)
+    ):
         raise InternalRunnerError(
-            "formal operation semantic declaration changed during validation"
+            "formal operation semantic declaration must be a nonempty string-key mapping"
+        )
+    try:
+        canonical_document = json.dumps(
+            declaration,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        canonical_declaration = json.loads(canonical_document)
+    except (TypeError, ValueError) as exc:
+        raise InternalRunnerError(
+            "formal operation semantic declaration is not canonical JSON"
+        ) from exc
+    if canonical_declaration != declaration:
+        raise InternalRunnerError(
+            "formal operation semantic declaration is not stable JSON data"
         )
     return {
         "declaration_contract": (
@@ -1049,7 +953,7 @@ def _formal_operation_config_snapshot(
         ),
         "operation_role": operation_role,
         "operation_type_identity": _callable_type_identity(operation),
-        "semantic_declaration": canonical_declarations[0],
+        "semantic_declaration": canonical_declaration,
     }
 
 
@@ -1075,17 +979,34 @@ def _validate_context(context: InternalRunnerContext) -> None:
         if type(value) is not expected_type:
             raise InternalRunnerError(f"{role} exact type is required")
     _validate_context_components(context)
-    if _context_anchor_digest(context) != context._construction_anchor_digest:
-        raise InternalRunnerError("runner context construction anchor drifted")
 
 
 def _validate_context_components(context: InternalRunnerContext) -> None:
-    context.writer.assert_context_anchors(
+    context.writer.assert_context_bindings(
         frozen_protocol=context.protocol,
         split_manifest=context.split_manifest,
         input_manifest=context.input_manifest,
         bindings=context.bindings,
+        record_scope=context.record_scope,
     )
+    if context.record_scope not in {
+        FORMAL_ALL_SPLITS_RECORD_SCOPE,
+        DEVELOPMENT_ONLY_RECORD_SCOPE,
+    }:
+        raise InternalRunnerError("runner context record scope is invalid")
+    if context.writer.record_scope != context.record_scope:
+        raise InternalRunnerError("runner context and writer scope differ")
+    if context.record_scope == DEVELOPMENT_ONLY_RECORD_SCOPE and (
+        not context.split_manifest.assignments
+        or any(
+            assignment.split != "development"
+            for assignment in context.split_manifest.assignments
+        )
+        or any(entry.split != "development" for entry in context.input_manifest.entries)
+    ):
+        raise InternalRunnerError(
+            "development-only context contains a future split"
+        )
     attack_violations = validate_attack_registry(context.attack_registry)
     if attack_violations:
         raise InternalRunnerError(
@@ -1112,21 +1033,6 @@ def _validate_context_components(context: InternalRunnerContext) -> None:
     )
     if actual_execution_digest != context.bindings.execution_config_digest:
         raise InternalRunnerError("execution configuration digest drifted")
-
-
-def _context_anchor_digest(context: InternalRunnerContext) -> str:
-    return _canonical_digest(
-        {
-            "adapter_config_digest": context.adapter.configuration.config_digest,
-            "attack_registry": asdict(context.attack_registry),
-            "bindings": asdict(context.bindings),
-            "input_manifest": asdict(context.input_manifest),
-            "metric_registry": asdict(context.metric_registry),
-            "protocol": asdict(context.protocol),
-            "split_manifest": asdict(context.split_manifest),
-            "writer_path": str(context.writer.path),
-        }
-    )
 
 
 def _record_from_joint_result(

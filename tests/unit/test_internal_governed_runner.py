@@ -9,9 +9,6 @@ from pathlib import Path
 import pytest
 import torch
 
-import experiments.methods.ceg_wm as method_adapter_module
-import main as main_public_module
-import runtime.qk_observation as runtime_qk_observation_module
 from experiments.attacks import (
     AttackArtifact,
     GeometricAttackError,
@@ -41,6 +38,7 @@ from experiments.protocol.internal_validation import (
     load_frozen_internal_validation_protocol,
 )
 from experiments.runners import (
+    DEVELOPMENT_ONLY_RECORD_SCOPE,
     FrozenCaseExecutionExpectation,
     FrozenCaseInputManifest,
     FrozenRecordBindings,
@@ -74,7 +72,7 @@ from main.content_chain import (
 )
 from main.geometry_chain import GeometricTransformEstimatorError
 from main.shared import rgb8_image_digest
-from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from runtime import create_runtime_adapter
 from tests.unit.test_runtime_qk_observation import FakeQkBackend
 
 
@@ -102,71 +100,6 @@ def _formal_ready_geometry():
         execution_scope="cpu_synthetic_wiring_only",
     )
     return backend, runtime_adapter, operation
-
-
-def _mutate_formal_geometry_dependency(
-    mutation_kind: str,
-    operation: FormalRuntimeGeometryEstimationOperation,
-    runtime_adapter,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    if mutation_kind == "runtime_method":
-        monkeypatch.setattr(
-            Sd35RuntimeAdapter,
-            "observe_detection_qk",
-            lambda *_args, **_kwargs: None,
-        )
-    elif mutation_kind == "runtime_identity_method":
-        monkeypatch.setattr(
-            Sd35RuntimeAdapter,
-            "revalidate_execution_identity",
-            lambda *_args, **_kwargs: None,
-        )
-    elif mutation_kind == "runtime_qk_module_callable":
-        monkeypatch.setattr(
-            runtime_qk_observation_module,
-            "observe_detection_qk",
-            lambda *_args, **_kwargs: None,
-        )
-    elif mutation_kind == "synchronize_method":
-        operation._method_adapter.synchronize_qk_observation = (
-            lambda *_args, **_kwargs: None
-        )
-    elif mutation_kind == "estimate_method":
-        operation._method_adapter.estimate_geometric_transform = (
-            lambda *_args, **_kwargs: None
-        )
-    elif mutation_kind == "binding_validator_method":
-        operation._method_adapter.require_no_runtime_binding = (
-            lambda *_args, **_kwargs: None
-        )
-    elif mutation_kind == "runtime_rebinding":
-        operation._method_adapter._runtime_adapter = runtime_adapter
-    elif mutation_kind == "qk_alias":
-        monkeypatch.setattr(
-            method_adapter_module,
-            "qk_geometry_sync",
-            lambda *_args, **_kwargs: None,
-        )
-    elif mutation_kind == "main_qk_alias":
-        monkeypatch.setattr(
-            main_public_module,
-            "qk_geometry_sync",
-            lambda *_args, **_kwargs: None,
-        )
-    elif mutation_kind == "main_estimator_alias":
-        monkeypatch.setattr(
-            main_public_module,
-            "geometric_transform_estimator",
-            lambda *_args, **_kwargs: None,
-        )
-    else:
-        assert mutation_kind == "estimator_alias"
-        monkeypatch.setattr(
-            method_adapter_module,
-            "geometric_transform_estimator",
-            lambda *_args, **_kwargs: None,
-        )
 
 
 class _PublicImageContentOperation:
@@ -240,19 +173,6 @@ class _UndeclaredPublicImageContentOperation(
     formal_runner_semantic_declaration = None
 
 
-class _UnstableGeometryOperation(_UnexpectedGeometryOperation):
-    def __init__(self) -> None:
-        super().__init__()
-        self.declaration_reads = 0
-
-    def formal_runner_semantic_declaration(self):
-        self.declaration_reads += 1
-        return {
-            "declaration_read": self.declaration_reads,
-            "mode": self.mode,
-        }
-
-
 class _ResourceFailingGeometryOperation:
     def __init__(self) -> None:
         self.calls = 0
@@ -266,19 +186,6 @@ class _ResourceFailingGeometryOperation:
 
     def __call__(self, _image: torch.Tensor, _registered_key: str):
         self.calls += 1
-        raise ResourceExecutionError("synthetic device unavailable")
-
-
-class _SelfMutatingResourceGeometryOperation(
-    _ResourceFailingGeometryOperation
-):
-    def __init__(self) -> None:
-        super().__init__()
-        self.mode = "resource_failure_then_semantic_drift"
-
-    def __call__(self, _image: torch.Tensor, _registered_key: str):
-        self.calls += 1
-        self.mode = "mutated_during_geometry_call"
         raise ResourceExecutionError("synthetic device unavailable")
 
 
@@ -398,10 +305,10 @@ def test_experiments_reliability_config_digest_binds_declared_fields() -> None:
 
 @pytest.mark.parametrize(
     "invalid_operation_kind",
-    ("content_missing_declaration", "geometry_missing_declaration", "unstable"),
+    ("content_missing_declaration", "geometry_missing_declaration"),
 )
 @pytest.mark.quick
-def test_payload_rejects_missing_or_unstable_formal_callable_declarations(
+def test_payload_rejects_missing_formal_callable_declarations(
     tmp_path: Path,
     invalid_operation_kind: str,
 ) -> None:
@@ -410,10 +317,8 @@ def test_payload_rejects_missing_or_unstable_formal_callable_declarations(
         arguments["content_operation"] = (
             _UndeclaredPublicImageContentOperation()
         )
-    elif invalid_operation_kind == "geometry_missing_declaration":
-        arguments["geometry_operation"] = _UndeclaredGeometryOperation()
     else:
-        arguments["geometry_operation"] = _UnstableGeometryOperation()
+        arguments["geometry_operation"] = _UndeclaredGeometryOperation()
 
     with pytest.raises(InternalRunnerError, match="semantic declaration"):
         _context(tmp_path, **arguments)
@@ -663,6 +568,126 @@ def test_runner_composes_real_adapter_attack_and_metric_replay_once(tmp_path: Pa
     assert replay.metric_aggregate_values is None
     assert len(replay.metric_observation_digest) == 64
     assert context.writer.path.read_bytes().endswith(b"\n")
+
+
+@pytest.mark.quick
+def test_development_only_scope_executes_one_registered_development_assignment(
+    tmp_path: Path,
+) -> None:
+    formal_context, payload, operation = _context(tmp_path / "formal_source")
+    entry = formal_context.input_manifest.entries[0]
+    assignment = next(
+        item
+        for item in formal_context.split_manifest.assignments
+        if item.identity == entry.analysis_unit_identity
+    )
+    split_manifest = replace(
+        formal_context.split_manifest,
+        assignments=(assignment,),
+    )
+    input_manifest = replace(
+        formal_context.input_manifest,
+        split_manifest_digest=split_manifest.digest(),
+    )
+    bindings = replace(
+        formal_context.bindings,
+        input_manifest_digest=input_manifest.digest(),
+        candidate_config_digest=candidate_config_digest(
+            adapter=formal_context.adapter,
+            input_manifest=input_manifest,
+            method_code_revision=(
+                formal_context.bindings.method_code_revision
+            ),
+        ),
+    )
+    with pytest.raises(
+        GovernedRecordWriterError,
+        match="split manifest invalid",
+    ):
+        GovernedRecordWriter(
+            records_root=(tmp_path / "formal_partial").resolve(),
+            frozen_protocol=formal_context.protocol,
+            split_manifest=split_manifest,
+            input_manifest=input_manifest,
+            bindings=bindings,
+        )
+    writer = GovernedRecordWriter(
+        records_root=(tmp_path / "development_only").resolve(),
+        frozen_protocol=formal_context.protocol,
+        split_manifest=split_manifest,
+        input_manifest=input_manifest,
+        bindings=bindings,
+        record_scope=DEVELOPMENT_ONLY_RECORD_SCOPE,
+    )
+    context = InternalRunnerContext(
+        protocol=formal_context.protocol,
+        split_manifest=split_manifest,
+        input_manifest=input_manifest,
+        adapter=formal_context.adapter,
+        attack_registry=formal_context.attack_registry,
+        metric_registry=formal_context.metric_registry,
+        writer=writer,
+        bindings=bindings,
+        record_scope=DEVELOPMENT_ONLY_RECORD_SCOPE,
+    )
+
+    executed = execute_internal_case(
+        context,
+        unit_id=entry.analysis_unit_identity.unit_id,
+        payload=payload,
+    )
+
+    assert executed.record.split == "development"
+    assert executed.record.execution_status == "success"
+    assert context.writer.load() == executed.collection
+    assert operation.calls == 1
+
+
+@pytest.mark.quick
+def test_development_only_scope_rejects_future_split_assignments(
+    tmp_path: Path,
+) -> None:
+    formal_context, _payload, _operation = _context(tmp_path / "formal_source")
+    entry = formal_context.input_manifest.entries[0]
+    assignment = next(
+        item
+        for item in formal_context.split_manifest.assignments
+        if item.identity == entry.analysis_unit_identity
+    )
+    future_assignment = replace(assignment, split="candidate_selection")
+    split_manifest = replace(
+        formal_context.split_manifest,
+        assignments=(future_assignment,),
+    )
+    input_manifest = replace(
+        formal_context.input_manifest,
+        split_manifest_digest=split_manifest.digest(),
+        entries=(replace(entry, split="candidate_selection"),),
+    )
+    bindings = replace(
+        formal_context.bindings,
+        input_manifest_digest=input_manifest.digest(),
+        candidate_config_digest=candidate_config_digest(
+            adapter=formal_context.adapter,
+            input_manifest=input_manifest,
+            method_code_revision=(
+                formal_context.bindings.method_code_revision
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        GovernedRecordWriterError,
+        match="requires only development assignments",
+    ):
+        GovernedRecordWriter(
+            records_root=(tmp_path / "future_split").resolve(),
+            frozen_protocol=formal_context.protocol,
+            split_manifest=split_manifest,
+            input_manifest=input_manifest,
+            bindings=bindings,
+            record_scope=DEVELOPMENT_ONLY_RECORD_SCOPE,
+        )
 
 
 @pytest.mark.quick
@@ -985,287 +1010,6 @@ def test_synchronized_retry_lineage_rewrite_cannot_replace_deterministic_ids(
     assert geometry.calls == geometry_calls_before_tamper
 
 
-@pytest.mark.parametrize(
-    "mutation_kind",
-    (
-        "content_callable",
-        "geometry_callable",
-        "geometry_operation_identity",
-        "threshold_tau",
-        "threshold_identity",
-        "reliability_threshold",
-        "binding_field",
-        "binding_digest",
-    ),
-)
-@pytest.mark.quick
-def test_payload_post_construction_mutation_fails_before_attack_method_or_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mutation_kind: str,
-) -> None:
-    reliability = (
-        _reliability_thresholds()
-        if mutation_kind == "reliability_threshold"
-        else None
-    )
-    context, payload, operation = _context(
-        tmp_path,
-        geometry_reliability_thresholds=reliability,
-    )
-    original_geometry = payload.geometry_estimation_operation
-    replacement_content = None
-    replacement_geometry = None
-    if mutation_kind == "content_callable":
-        replacement_content = _PublicImageContentOperation()
-        object.__setattr__(
-            payload.content_detector_binding,
-            "content_detection_operation",
-            replacement_content,
-        )
-    elif mutation_kind == "geometry_callable":
-        replacement_geometry = _UnexpectedGeometryOperation()
-        object.__setattr__(
-            payload,
-            "geometry_estimation_operation",
-            replacement_geometry,
-        )
-    elif mutation_kind == "geometry_operation_identity":
-        object.__setattr__(
-            payload,
-            "geometry_operation_identity",
-            "tampered_geometry_operation",
-        )
-    elif mutation_kind == "threshold_tau":
-        object.__setattr__(
-            payload.thresholds,
-            "tau",
-            payload.thresholds.tau + 0.01,
-        )
-    elif mutation_kind == "threshold_identity":
-        object.__setattr__(
-            payload.thresholds,
-            "threshold_identity",
-            "f" * 64,
-        )
-    elif mutation_kind == "reliability_threshold":
-        assert payload.geometry_reliability_thresholds is not None
-        object.__setattr__(
-            payload.geometry_reliability_thresholds,
-            "gamma_gap",
-            0.125,
-        )
-    elif mutation_kind == "binding_field":
-        object.__setattr__(
-            payload.content_detector_binding,
-            "preprocessing_identity",
-            "tampered_preprocessing_identity",
-        )
-    else:
-        object.__setattr__(
-            payload.content_detector_binding,
-            "detector_binding_digest",
-            "f" * 64,
-        )
-
-    attack_calls = 0
-
-    def forbidden_attack(*_args, **_kwargs):
-        nonlocal attack_calls
-        attack_calls += 1
-        raise AssertionError("attack must not execute after payload drift")
-
-    monkeypatch.setattr(
-        "experiments.runners.internal.apply_geometric_attack",
-        forbidden_attack,
-    )
-    with pytest.raises(InternalRunnerError, match="drift|invalid"):
-        execute_internal_case(
-            context,
-            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
-            payload=payload,
-        )
-    assert attack_calls == 0
-    assert operation.calls == 0
-    assert original_geometry.calls == 0
-    if replacement_content is not None:
-        assert replacement_content.calls == 0
-    if replacement_geometry is not None:
-        assert replacement_geometry.calls == 0
-    assert not context.writer.path.exists()
-
-
-@pytest.mark.parametrize(
-    "mutation_kind",
-    ("content_same_instance", "geometry_same_instance"),
-)
-@pytest.mark.quick
-def test_same_instance_callable_semantic_drift_fails_before_attack_method_or_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mutation_kind: str,
-) -> None:
-    geometry = _ResourceFailingGeometryOperation()
-    context, payload, content_operation = _context(
-        tmp_path,
-        geometry_operation=geometry,
-        force_rescue=True,
-    )
-    if mutation_kind == "content_same_instance":
-        content_operation.behavior_mode = "mutated_content_behavior"
-    else:
-        geometry.mode = "mutated_geometry_behavior"
-
-    attack_calls = 0
-
-    def forbidden_attack(*_args, **_kwargs):
-        nonlocal attack_calls
-        attack_calls += 1
-        raise AssertionError("attack must not execute after callable drift")
-
-    monkeypatch.setattr(
-        "experiments.runners.internal.apply_geometric_attack",
-        forbidden_attack,
-    )
-    with pytest.raises(InternalRunnerError, match="anchor drifted|differs"):
-        execute_internal_case(
-            context,
-            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
-            payload=payload,
-        )
-    assert attack_calls == 0
-    assert content_operation.calls == 0
-    assert geometry.calls == 0
-    assert not context.writer.path.exists()
-
-
-@pytest.mark.quick
-def test_callable_semantic_drift_during_method_fails_before_formal_write(
-    tmp_path: Path,
-) -> None:
-    geometry = _SelfMutatingResourceGeometryOperation()
-    context, payload, content_operation = _context(
-        tmp_path,
-        geometry_operation=geometry,
-        force_rescue=True,
-    )
-
-    with pytest.raises(InternalRunnerError, match="anchor drifted|differs"):
-        execute_internal_case(
-            context,
-            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
-            payload=payload,
-        )
-    assert content_operation.calls == 1
-    assert geometry.calls == 1
-    assert not context.writer.path.exists()
-
-
-@pytest.mark.parametrize(
-    "mutation_kind",
-    (
-        "runtime_method",
-        "runtime_identity_method",
-        "runtime_qk_module_callable",
-        "synchronize_method",
-        "estimate_method",
-        "binding_validator_method",
-        "runtime_rebinding",
-        "qk_alias",
-        "estimator_alias",
-        "main_qk_alias",
-        "main_estimator_alias",
-    ),
-)
-@pytest.mark.quick
-def test_formal_geometry_dependency_drift_fails_before_rescue_or_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mutation_kind: str,
-) -> None:
-    _backend, runtime_adapter, geometry = _formal_ready_geometry()
-    context, payload, content_operation = _context(
-        tmp_path,
-        geometry_operation=geometry,
-        force_rescue=True,
-    )
-    _mutate_formal_geometry_dependency(
-        mutation_kind,
-        geometry,
-        runtime_adapter,
-        monkeypatch,
-    )
-
-    with pytest.raises(
-        InternalRunnerError,
-        match="semantic declaration|differs|drifted",
-    ):
-        execute_internal_case(
-            context,
-            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
-            payload=payload,
-        )
-
-    assert content_operation.calls == 0
-    assert not context.writer.path.exists()
-
-
-@pytest.mark.parametrize(
-    "mutation_kind",
-    (
-        "runtime_method",
-        "runtime_identity_method",
-        "runtime_qk_module_callable",
-        "synchronize_method",
-        "estimate_method",
-        "binding_validator_method",
-        "runtime_rebinding",
-        "qk_alias",
-        "estimator_alias",
-        "main_qk_alias",
-        "main_estimator_alias",
-    ),
-)
-@pytest.mark.quick
-def test_formal_geometry_mid_call_drift_fails_before_rescue_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mutation_kind: str,
-) -> None:
-    backend, runtime_adapter, geometry = _formal_ready_geometry()
-    context, payload, content_operation = _context(
-        tmp_path,
-        geometry_operation=geometry,
-        force_rescue=True,
-    )
-
-    def _mutate_during_runtime_execution() -> None:
-        _mutate_formal_geometry_dependency(
-            mutation_kind,
-            geometry,
-            runtime_adapter,
-            monkeypatch,
-        )
-
-    backend.execution_callback = _mutate_during_runtime_execution
-
-    with pytest.raises(
-        InternalRunnerError,
-        match="semantic declaration|differs|drifted",
-    ):
-        execute_internal_case(
-            context,
-            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
-            payload=payload,
-        )
-
-    assert content_operation.calls == 1
-    if mutation_kind == "runtime_qk_module_callable":
-        assert runtime_adapter.state.value == "failed"
-        assert backend.close_calls == 1
-    assert not context.writer.path.exists()
-
-
 @pytest.mark.quick
 def test_atomic_failure_preserves_prior_record_bytes(
     tmp_path: Path,
@@ -1368,85 +1112,6 @@ def test_candidate_digest_binds_routing_method_revision_and_execution_declaratio
         input_manifest=context.input_manifest,
         method_code_revision="f" * 40,
     ) != baseline
-
-
-@pytest.mark.parametrize(
-    ("target_name", "attribute", "mutated_value"),
-    (
-        ("bindings", "run_id", "mutated_runner_run"),
-        ("bindings", "input_manifest_digest", "f" * 64),
-        ("protocol", "protocol_kind", "mutated_protocol"),
-        ("split_manifest", "manifest_revision", "mutated_split_revision"),
-        ("input_manifest", "manifest_revision", "mutated_input_revision"),
-        ("attack_registry", "image_padding", "border"),
-        ("attack_registry", "registry_digest", "f" * 64),
-        ("metric_registry", "analysis_unit", "mutated_analysis_unit"),
-        ("metric_registry", "registry_digest", "e" * 64),
-    ),
-)
-@pytest.mark.quick
-def test_post_construction_anchor_drift_fails_before_execution_or_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    target_name: str,
-    attribute: str,
-    mutated_value: str,
-) -> None:
-    context, payload, operation = _context(tmp_path)
-    target = getattr(context, target_name)
-    object.__setattr__(target, attribute, mutated_value)
-    attack_calls = 0
-
-    def forbidden_attack(*_args, **_kwargs):
-        nonlocal attack_calls
-        attack_calls += 1
-        raise AssertionError("attack must not execute after anchor drift")
-
-    monkeypatch.setattr(
-        "experiments.runners.internal.apply_geometric_attack",
-        forbidden_attack,
-    )
-    with pytest.raises(
-        (GovernedRecordWriterError, InternalRunnerError),
-        match="drift|invalid",
-    ):
-        execute_internal_case(
-            context,
-            unit_id=payload.source_artifact.analysis_unit_identity.unit_id,
-            payload=payload,
-        )
-    assert attack_calls == 0
-    assert operation.calls == 0
-    assert not context.writer.path.exists()
-
-
-@pytest.mark.parametrize(
-    ("private_target", "attribute", "mutated_value"),
-    (
-        ("_bindings", "run_id", "mutated_writer_run"),
-        (
-            "_input_manifest",
-            "manifest_revision",
-            "mutated_writer_input_revision",
-        ),
-    ),
-)
-@pytest.mark.quick
-def test_writer_rechecks_its_private_construction_snapshot(
-    tmp_path: Path,
-    private_target: str,
-    attribute: str,
-    mutated_value: str,
-) -> None:
-    context, _payload, _operation = _context(tmp_path)
-    object.__setattr__(
-        getattr(context.writer, private_target),
-        attribute,
-        mutated_value,
-    )
-
-    with pytest.raises(GovernedRecordWriterError, match="anchor drift"):
-        context.writer.load()
 
 
 @pytest.mark.parametrize(

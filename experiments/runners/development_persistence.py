@@ -24,7 +24,14 @@ from experiments.protocol.development_exploration import DevelopmentStudyUnit
 from experiments.protocol.development_records import (
     ATTEMPT_DISPOSITIONS,
     DEVELOPMENT_RECORD_MEMBER_PATH,
+    OPERATIONAL_RECORD_KIND,
+    OPERATIONAL_RECORD_MEMBER_PATH,
+    OPERATIONAL_RECORD_PHASES,
+    ROUTING_REFERENCE_RECORD_KIND,
+    ROUTING_REFERENCE_RECORD_MEMBER_PATH,
     DevelopmentRecordError,
+    DevelopmentOperationalRecord,
+    DevelopmentRoutingReferenceRecord,
     DevelopmentScientificRecord,
     validate_record_against_intent,
 )
@@ -231,7 +238,7 @@ def _reject_secrets(payloads: Sequence[bytes], raw_secret_values: Sequence[str])
 
 
 def _registered_unit_id(unit_index: int) -> str:
-    return f"development_scientific_unit_{unit_index:04d}"
+    return f"development_unit_{unit_index:04d}"
 
 
 def _study_unit_payload(unit: DevelopmentStudyUnit) -> dict[str, object]:
@@ -577,6 +584,60 @@ class UnitIntent:
         _parse_strict_utc(self.created_at_utc, "unit intent created_at_utc")
 
 
+def _validate_routing_reference_record_against_intent(
+    record: DevelopmentRoutingReferenceRecord,
+    intent: UnitIntent,
+) -> None:
+    try:
+        record.validate()
+    except DevelopmentRecordError as exc:
+        raise DevelopmentPersistenceError(str(exc)) from exc
+    if (
+        intent.phase != ROUTING_REFERENCE_RECORD_KIND
+        or intent.responsibility_id != "content_router"
+        or record.run_id != intent.run_id
+        or record.protocol_digest != intent.protocol_digest
+        or record.method_code_revision != intent.revision
+        or record.unit_index != intent.unit_index
+        or record.phase != intent.phase
+        or record.source_cluster_ordinal != intent.source_cluster_ordinal
+        or record.candidate_config_digest != intent.candidate_config_digest
+        or record.attempt_index != intent.attempt_index
+        or record.retry_parent_intent_digest
+        != intent.parent_attempt_intent_digest
+        or record.maximum_duration_seconds != intent.maximum_duration_seconds
+    ):
+        raise DevelopmentPersistenceError(
+            "routing reference record differs from its frozen intent"
+        )
+
+
+def _validate_operational_record_against_intent(
+    record: DevelopmentOperationalRecord,
+    intent: UnitIntent,
+) -> None:
+    try:
+        record.validate()
+    except DevelopmentRecordError as exc:
+        raise DevelopmentPersistenceError(str(exc)) from exc
+    if (
+        intent.phase not in OPERATIONAL_RECORD_PHASES
+        or record.run_id != intent.run_id
+        or record.protocol_digest != intent.protocol_digest
+        or record.method_code_revision != intent.revision
+        or record.unit_index != intent.unit_index
+        or record.phase != intent.phase
+        or record.source_cluster_ordinal != intent.source_cluster_ordinal
+        or record.candidate_config_digest != intent.candidate_config_digest
+        or record.attempt_index != intent.attempt_index
+        or record.retry_parent_intent_digest != intent.parent_attempt_intent_digest
+        or record.maximum_duration_seconds != intent.maximum_duration_seconds
+    ):
+        raise DevelopmentPersistenceError(
+            "operational record differs from its frozen intent"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactMember:
     path: str
@@ -613,8 +674,10 @@ class CommittedUnit:
     fencing_token: int
     intent_digest: str
     attempt_disposition: str
-    scientific_record_digest: str
-    scientific_record_bytes: int
+    record_kind: str
+    record_id: str
+    record_digest: str
+    record_bytes: int
     actual_elapsed_seconds: float
     maximum_duration_seconds: int
     bundle_sha256: str
@@ -646,6 +709,110 @@ class RecoveryReport:
     interrupted_attempts: tuple[InterruptedAttempt, ...]
     next_attempt_by_unit: tuple[tuple[str, int], ...]
     ledger_digest: str
+
+
+class DevelopmentSessionCursor:
+    """Ephemeral cursor derived from one fully verified session-start recovery."""
+
+    def __init__(
+        self,
+        *,
+        store: "DevelopmentPersistentStore",
+        lease: PersistentLease,
+        recovery: RecoveryReport,
+        verified_records: Sequence[
+            tuple[
+                CommittedUnit,
+                DevelopmentScientificRecord
+                | DevelopmentOperationalRecord
+                | DevelopmentRoutingReferenceRecord,
+            ]
+        ],
+    ) -> None:
+        self._store = store
+        self._lease = lease
+        self._committed_units = list(recovery.committed_units)
+        self._records_by_attempt: dict[
+            tuple[str, int],
+            DevelopmentScientificRecord
+            | DevelopmentOperationalRecord
+            | DevelopmentRoutingReferenceRecord,
+        ] = {
+            (marker.unit_id, marker.attempt_index): record
+            for marker, record in verified_records
+        }
+        self._routing_reference_records = {
+            record.unit_index: record
+            for marker, record in verified_records
+            if type(record) is DevelopmentRoutingReferenceRecord
+            and marker.attempt_disposition == "success"
+        }
+        self._operational_records = {
+            record.unit_index: record
+            for marker, record in verified_records
+            if type(record) is DevelopmentOperationalRecord
+            and marker.attempt_disposition == "success"
+        }
+        self._initial_committed_count = len(recovery.committed_units)
+        self._open_intent: UnitIntent | None = None
+        self._closed = False
+        (
+            self._next_unit_index,
+            self._next_attempt_index,
+            self._parent_attempt_intent_digest,
+        ) = store._next_claim_from_recovery(recovery)
+
+    @property
+    def initial_committed_count(self) -> int:
+        return self._initial_committed_count
+
+    @property
+    def next_unit_index(self) -> int:
+        return self._next_unit_index
+
+    @property
+    def committed_units(self) -> tuple[CommittedUnit, ...]:
+        return tuple(self._committed_units)
+
+    @property
+    def routing_reference_records(
+        self,
+    ) -> tuple[DevelopmentRoutingReferenceRecord, ...]:
+        return tuple(
+            self._routing_reference_records[index]
+            for index in sorted(self._routing_reference_records)
+        )
+
+    @property
+    def operational_records(self) -> tuple[DevelopmentOperationalRecord, ...]:
+        return tuple(
+            self._operational_records[index]
+            for index in sorted(self._operational_records)
+        )
+
+    @property
+    def terminal_scientific_evidence(
+        self,
+    ) -> tuple[tuple[DevelopmentScientificRecord, CommittedUnit], ...]:
+        latest_by_unit: dict[str, CommittedUnit] = {}
+        for marker in self._committed_units:
+            if marker.record_kind == "development_scientific_record":
+                latest_by_unit[marker.unit_id] = marker
+        evidence: list[tuple[DevelopmentScientificRecord, CommittedUnit]] = []
+        for marker in sorted(
+            latest_by_unit.values(), key=lambda item: item.unit_index
+        ):
+            if marker.attempt_disposition == "retryable_resource_failure":
+                continue
+            record = self._records_by_attempt.get(
+                (marker.unit_id, marker.attempt_index)
+            )
+            if type(record) is not DevelopmentScientificRecord:
+                raise DevelopmentPersistenceError(
+                    "session cursor lacks its verified scientific record"
+                )
+            evidence.append((record, marker))
+        return tuple(evidence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -799,6 +966,241 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError("lease lost fencing race")
         return lease
 
+    def _next_claim_from_recovery(
+        self,
+        recovery: RecoveryReport,
+    ) -> tuple[int, int, str | None]:
+        latest_by_unit: dict[str, CommittedUnit] = {}
+        for marker in recovery.committed_units:
+            latest_by_unit[marker.unit_id] = marker
+        terminal_indexes = tuple(
+            sorted(
+                marker.unit_index
+                for marker in latest_by_unit.values()
+                if marker.attempt_disposition != "retryable_resource_failure"
+            )
+        )
+        if terminal_indexes != tuple(range(len(terminal_indexes))):
+            raise DevelopmentPersistenceError(
+                "terminal commits are not a frozen roster prefix"
+            )
+        next_attempts = dict(recovery.next_attempt_by_unit)
+        if len(next_attempts) > 1:
+            raise DevelopmentPersistenceError(
+                "multiple frozen units are concurrently retryable"
+            )
+        if not next_attempts:
+            return len(terminal_indexes), 0, None
+        unit_id, attempt_index = next(iter(next_attempts.items()))
+        registered = next(
+            (
+                binding
+                for binding in self._registered_unit_bindings.values()
+                if binding.unit_id == unit_id
+            ),
+            None,
+        )
+        if registered is None:
+            raise DevelopmentPersistenceError(
+                "retryable unit is outside frozen roster"
+            )
+        interrupted_parent = next(
+            (
+                item.retry_parent_intent_digest
+                for item in recovery.interrupted_attempts
+                if item.unit_id == unit_id
+                and item.attempt_index == attempt_index - 1
+            ),
+            None,
+        )
+        committed_parent = latest_by_unit.get(unit_id)
+        parent_digest = (
+            interrupted_parent
+            if interrupted_parent is not None
+            else committed_parent.intent_digest
+            if committed_parent is not None
+            else None
+        )
+        return registered.unit_index, attempt_index, parent_digest
+
+    def open_session_cursor(
+        self,
+        lease: PersistentLease,
+        *,
+        now_epoch_seconds: int,
+    ) -> DevelopmentSessionCursor:
+        """Perform the session's sole full recovery and create an in-memory cursor."""
+
+        self._require_active_lease(lease, now_epoch_seconds)
+        recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
+        verified_records: list[
+            tuple[
+                CommittedUnit,
+                DevelopmentScientificRecord
+                | DevelopmentOperationalRecord
+                | DevelopmentRoutingReferenceRecord,
+            ]
+        ] = []
+        for marker in recovery.committed_units:
+            record = self._verify_committed(marker)
+            verified_records.append((marker, record))
+        routing_records = [
+            record
+            for marker, record in verified_records
+            if type(record) is DevelopmentRoutingReferenceRecord
+            and marker.attempt_disposition == "success"
+        ]
+        operational_records = [
+            record
+            for marker, record in verified_records
+            if type(record) is DevelopmentOperationalRecord
+            and marker.attempt_disposition == "success"
+        ]
+        expected_operational_indexes = tuple(
+            binding.unit_index
+            for binding in self.registered_unit_bindings
+            if binding.phase in OPERATIONAL_RECORD_PHASES
+        )
+        observed_operational_indexes = tuple(
+            record.unit_index
+            for record in sorted(
+                operational_records, key=lambda item: item.unit_index
+            )
+        )
+        if observed_operational_indexes != expected_operational_indexes[
+            : len(observed_operational_indexes)
+        ]:
+            raise DevelopmentPersistenceError(
+                "operational records are not a frozen roster prefix"
+            )
+        expected_reference_indexes = tuple(
+            binding.unit_index
+            for binding in self.registered_unit_bindings
+            if binding.phase == ROUTING_REFERENCE_RECORD_KIND
+        )
+        observed_reference_indexes = tuple(
+            record.unit_index
+            for record in sorted(routing_records, key=lambda item: item.unit_index)
+        )
+        if observed_reference_indexes != expected_reference_indexes[
+            : len(observed_reference_indexes)
+        ]:
+            raise DevelopmentPersistenceError(
+                "routing reference records are not a frozen roster prefix"
+            )
+        return DevelopmentSessionCursor(
+            store=self,
+            lease=lease,
+            recovery=recovery,
+            verified_records=verified_records,
+        )
+
+    def _validate_session_cursor(
+        self,
+        cursor: DevelopmentSessionCursor,
+        lease: PersistentLease,
+    ) -> None:
+        if (
+            type(cursor) is not DevelopmentSessionCursor
+            or cursor._store is not self
+            or cursor._lease != lease
+            or cursor._closed
+        ):
+            raise DevelopmentPersistenceError(
+                "development session cursor is not active for this store and lease"
+            )
+
+    def create_session_intent(
+        self,
+        cursor: DevelopmentSessionCursor,
+        lease: PersistentLease,
+        *,
+        now_epoch_seconds: int,
+    ) -> UnitIntent:
+        """Claim the cursor's exact next unit without rescanning prior bundles."""
+
+        self._validate_session_cursor(cursor, lease)
+        self._require_active_lease(lease, now_epoch_seconds)
+        self._validate_source_artifacts()
+        if cursor._open_intent is not None:
+            raise DevelopmentPersistenceError(
+                "session cursor already has an uncommitted intent"
+            )
+        lease_start_epoch = int(
+            _parse_strict_utc(
+                lease.acquired_at_utc, "lease acquired_at_utc"
+            ).timestamp()
+        )
+        if now_epoch_seconds - lease_start_epoch >= SOFT_STOP_SECONDS:
+            raise DevelopmentPersistenceError(
+                "session soft stop forbids claiming a new unit"
+            )
+        unit_index = cursor._next_unit_index
+        attempt_index = cursor._next_attempt_index
+        parent_digest = cursor._parent_attempt_intent_digest
+        registered = self._registered_unit_bindings.get(unit_index)
+        if registered is None:
+            raise DevelopmentPersistenceError(
+                "all frozen development units are committed"
+            )
+        if not 0 <= attempt_index < registered.maximum_record_attempts:
+            raise DevelopmentPersistenceError(
+                "session cursor attempt exceeds registered unit limit"
+            )
+        if attempt_index == 0 and parent_digest is not None:
+            raise DevelopmentPersistenceError(
+                "initial attempt cannot have a parent"
+            )
+        if attempt_index > 0:
+            prior = UnitIntent(
+                **_read_canonical_json(
+                    self._intent_path(registered.unit_id, attempt_index - 1),
+                    "parent unit intent",
+                )
+            )
+            prior.validate(self.worker_identity)
+            self._verify_intent_registered_binding(prior)
+            if parent_digest != prior.digest():
+                raise DevelopmentPersistenceError("retry parent intent drifted")
+        intent = UnitIntent(
+            schema_version=SCHEMA_VERSION,
+            protocol_digest=self.worker_identity.protocol_digest,
+            revision=self.worker_identity.revision,
+            run_id=self.run_id,
+            shard_id=registered.phase,
+            unit_id=registered.unit_id,
+            unit_index=registered.unit_index,
+            phase=registered.phase,
+            responsibility_id=registered.responsibility_id,
+            source_cluster_ordinal=registered.source_cluster_ordinal,
+            content_branch_id=registered.content_branch_id,
+            geometry_case_id=registered.geometry_case_id,
+            maximum_record_attempts=registered.maximum_record_attempts,
+            maximum_duration_seconds=registered.maximum_duration_seconds,
+            unit_roster_digest=self.worker_identity.unit_roster_digest,
+            analysis_unit_identity=asdict(registered.analysis_unit_identity),
+            analysis_unit_identity_digest=registered.analysis_unit_identity_digest,
+            scientific_question_id=registered.scientific_question_id,
+            development_case_id=registered.development_case_id,
+            candidate_identity=registered.candidate_identity,
+            candidate_config_digest=registered.candidate_config_digest,
+            unit_descriptor_digest=registered.unit_descriptor_digest,
+            attempt_index=attempt_index,
+            session_id=lease.session_id,
+            fencing_token=lease.fencing_token,
+            worker_identity_digest=self.worker_identity.digest(),
+            parent_attempt_intent_digest=parent_digest,
+            created_at_utc=_utc_from_epoch(now_epoch_seconds),
+        )
+        intent.validate(self.worker_identity)
+        self._verify_intent_registered_binding(intent)
+        _create_only(
+            self._intent_path(intent.unit_id, intent.attempt_index),
+            canonical_json_bytes(intent.payload()),
+        )
+        cursor._open_intent = intent
+        return intent
+
     def create_intent(
         self,
         lease: PersistentLease,
@@ -898,7 +1300,9 @@ class DevelopmentPersistentStore:
         lease: PersistentLease,
         intent: UnitIntent,
         *,
-        record: DevelopmentScientificRecord,
+        record: DevelopmentScientificRecord
+        | DevelopmentOperationalRecord
+        | DevelopmentRoutingReferenceRecord,
         diagnostic_members: Mapping[str, bytes] | None = None,
         raw_secret_values: Sequence[str] = (),
         now_epoch_seconds: int,
@@ -911,14 +1315,29 @@ class DevelopmentPersistentStore:
         if _read_canonical_json(intent_path, "unit intent") != intent.payload():
             raise DevelopmentPersistenceError("unit intent bytes drifted")
         self._verify_intent_registered_binding(intent)
-        if type(record) is not DevelopmentScientificRecord:
+        if type(record) is DevelopmentScientificRecord:
+            if intent.phase in {*OPERATIONAL_RECORD_PHASES, ROUTING_REFERENCE_RECORD_KIND}:
+                raise DevelopmentPersistenceError(
+                    "operational unit requires its registered record kind"
+                )
+            try:
+                validate_record_against_intent(record, intent)
+            except DevelopmentRecordError as exc:
+                raise DevelopmentPersistenceError(str(exc)) from exc
+            record_kind = "development_scientific_record"
+            record_member_path = DEVELOPMENT_RECORD_MEMBER_PATH
+        elif type(record) is DevelopmentOperationalRecord:
+            _validate_operational_record_against_intent(record, intent)
+            record_kind = OPERATIONAL_RECORD_KIND
+            record_member_path = OPERATIONAL_RECORD_MEMBER_PATH
+        elif type(record) is DevelopmentRoutingReferenceRecord:
+            _validate_routing_reference_record_against_intent(record, intent)
+            record_kind = ROUTING_REFERENCE_RECORD_KIND
+            record_member_path = ROUTING_REFERENCE_RECORD_MEMBER_PATH
+        else:
             raise DevelopmentPersistenceError(
-                "formal development scientific record exact type is required"
+                "formal development record exact type is required"
             )
-        try:
-            validate_record_against_intent(record, intent)
-        except DevelopmentRecordError as exc:
-            raise DevelopmentPersistenceError(str(exc)) from exc
         disposition = record.attempt_disposition()
         if (
             disposition == "retryable_resource_failure"
@@ -932,9 +1351,7 @@ class DevelopmentPersistentStore:
             diagnostic_members = {}
         if not isinstance(diagnostic_members, Mapping):
             raise DevelopmentPersistenceError("diagnostic members mapping is invalid")
-        normalized: dict[str, bytes] = {
-            DEVELOPMENT_RECORD_MEMBER_PATH: record_bytes
-        }
+        normalized: dict[str, bytes] = {record_member_path: record_bytes}
         normalized_casefold: set[str] = set()
         for name, payload in diagnostic_members.items():
             safe_name = _safe_member_path(name)
@@ -942,6 +1359,8 @@ class DevelopmentPersistentStore:
             if folded_name in {
                 "artifact_manifest.json",
                 DEVELOPMENT_RECORD_MEMBER_PATH.casefold(),
+                OPERATIONAL_RECORD_MEMBER_PATH.casefold(),
+                ROUTING_REFERENCE_RECORD_MEMBER_PATH.casefold(),
             }:
                 raise DevelopmentPersistenceError("bundle member name is reserved")
             if folded_name in normalized_casefold:
@@ -950,7 +1369,7 @@ class DevelopmentPersistentStore:
                 raise DevelopmentPersistenceError("bundle members must be bytes")
             normalized[safe_name] = payload
             normalized_casefold.add(folded_name)
-        normalized_casefold.add(DEVELOPMENT_RECORD_MEMBER_PATH.casefold())
+        normalized_casefold.add(record_member_path.casefold())
         if len(normalized) != len(diagnostic_members) + 1:
             raise DevelopmentPersistenceError("bundle member identity collision")
         _reject_secrets(tuple(normalized.values()), raw_secret_values)
@@ -980,8 +1399,10 @@ class DevelopmentPersistentStore:
             fencing_token=intent.fencing_token,
             intent_digest=intent.digest(),
             attempt_disposition=disposition,
-            scientific_record_digest=sha256(record_bytes).hexdigest(),
-            scientific_record_bytes=len(record_bytes),
+            record_kind=record_kind,
+            record_id=record.record_id,
+            record_digest=sha256(record_bytes).hexdigest(),
+            record_bytes=len(record_bytes),
             actual_elapsed_seconds=float(record.actual_elapsed_seconds),
             maximum_duration_seconds=record.maximum_duration_seconds,
             bundle_sha256=bundle_digest,
@@ -995,6 +1416,56 @@ class DevelopmentPersistentStore:
         _reject_secrets((marker_bytes,), raw_secret_values)
         _create_only(self._marker_path(intent.unit_id, intent.attempt_index), marker_bytes)
         self._verify_committed(marker)
+        return marker
+
+    def commit_session_unit(
+        self,
+        cursor: DevelopmentSessionCursor,
+        lease: PersistentLease,
+        intent: UnitIntent,
+        *,
+        record: DevelopmentScientificRecord
+        | DevelopmentOperationalRecord
+        | DevelopmentRoutingReferenceRecord,
+        diagnostic_members: Mapping[str, bytes] | None = None,
+        raw_secret_values: Sequence[str] = (),
+        now_epoch_seconds: int,
+    ) -> CommittedUnit:
+        """Commit one cursor claim and advance only the verified in-memory state."""
+
+        self._validate_session_cursor(cursor, lease)
+        if cursor._open_intent != intent:
+            raise DevelopmentPersistenceError(
+                "session commit does not match its open intent"
+            )
+        marker = self.commit_unit(
+            lease,
+            intent,
+            record=record,
+            diagnostic_members=diagnostic_members,
+            raw_secret_values=raw_secret_values,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+        cursor._committed_units.append(marker)
+        cursor._records_by_attempt[(marker.unit_id, marker.attempt_index)] = record
+        if type(record) is DevelopmentRoutingReferenceRecord:
+            cursor._routing_reference_records[record.unit_index] = record
+        elif type(record) is DevelopmentOperationalRecord:
+            cursor._operational_records[record.unit_index] = record
+        if marker.attempt_disposition == "retryable_resource_failure":
+            next_attempt = intent.attempt_index + 1
+            if next_attempt >= intent.maximum_record_attempts:
+                raise DevelopmentPersistenceError(
+                    "retryable cursor commit exhausted frozen attempts"
+                )
+            cursor._next_unit_index = intent.unit_index
+            cursor._next_attempt_index = next_attempt
+            cursor._parent_attempt_intent_digest = intent.digest()
+        else:
+            cursor._next_unit_index = intent.unit_index + 1
+            cursor._next_attempt_index = 0
+            cursor._parent_attempt_intent_digest = None
+        cursor._open_intent = None
         return marker
 
     def recover(self, *, now_epoch_seconds: int | None = None) -> RecoveryReport:
@@ -1181,6 +1652,44 @@ class DevelopmentPersistentStore:
             )
         )
 
+    def verified_terminal_routing_reference_records(
+        self,
+        *,
+        now_epoch_seconds: int,
+    ) -> tuple[DevelopmentRoutingReferenceRecord, ...]:
+        """Read committed operational fit inputs through the common recovery path."""
+
+        recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
+        markers = tuple(
+            marker
+            for marker in recovery.committed_units
+            if marker.record_kind == ROUTING_REFERENCE_RECORD_KIND
+            and marker.attempt_disposition == "success"
+        )
+        records = tuple(
+            self._verify_committed(marker)
+            for marker in sorted(markers, key=lambda item: item.unit_index)
+        )
+        if any(
+            type(record) is not DevelopmentRoutingReferenceRecord
+            for record in records
+        ):
+            raise DevelopmentPersistenceError(
+                "routing reference evidence contains another record kind"
+            )
+        expected_indexes = tuple(
+            binding.unit_index
+            for binding in self.registered_unit_bindings
+            if binding.phase == ROUTING_REFERENCE_RECORD_KIND
+        )
+        if tuple(record.unit_index for record in records) != expected_indexes[
+            : len(records)
+        ]:
+            raise DevelopmentPersistenceError(
+                "routing reference records are not a frozen roster prefix"
+            )
+        return records
+
     def verified_terminal_scientific_evidence(
         self,
         *,
@@ -1191,7 +1700,8 @@ class DevelopmentPersistentStore:
         recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
         latest_by_unit: dict[str, CommittedUnit] = {}
         for marker in recovery.committed_units:
-            latest_by_unit[marker.unit_id] = marker
+            if marker.record_kind == "development_scientific_record":
+                latest_by_unit[marker.unit_id] = marker
         if any(
             marker.attempt_disposition == "retryable_resource_failure"
             for marker in latest_by_unit.values()
@@ -1205,8 +1715,20 @@ class DevelopmentPersistentStore:
                 latest_by_unit.values(), key=lambda item: item.unit_index
             )
         )
-        if tuple(record.unit_index for record, _marker in evidence) != tuple(
-            range(len(evidence))
+        if any(type(record) is not DevelopmentScientificRecord for record, _ in evidence):
+            raise DevelopmentPersistenceError(
+                "scientific evidence contains another record kind"
+            )
+        scientific_indexes = tuple(
+            binding.unit_index
+            for binding in self.registered_unit_bindings
+            if binding.phase not in {
+                *OPERATIONAL_RECORD_PHASES,
+                ROUTING_REFERENCE_RECORD_KIND,
+            }
+        )
+        if tuple(record.unit_index for record, _marker in evidence) != (
+            scientific_indexes[: len(evidence)]
         ):
             raise DevelopmentPersistenceError(
                 "terminal scientific records are not a frozen roster prefix"
@@ -1239,6 +1761,14 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError(
                 "requested unit index is outside frozen roster"
             )
+        if any(
+            self._registered_unit_bindings[index].phase
+            in {*OPERATIONAL_RECORD_PHASES, ROUTING_REFERENCE_RECORD_KIND}
+            for index in requested
+        ):
+            raise DevelopmentPersistenceError(
+                "requested scientific evidence includes an operational unit"
+            )
         recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
         latest_by_index: dict[int, CommittedUnit] = {}
         for marker in recovery.committed_units:
@@ -1257,6 +1787,10 @@ class DevelopmentPersistentStore:
                 "requested scientific unit has no terminal record"
             )
         evidence = tuple((self._verify_committed(marker), marker) for marker in markers)
+        if any(type(record) is not DevelopmentScientificRecord for record, _ in evidence):
+            raise DevelopmentPersistenceError(
+                "requested scientific evidence contains another record kind"
+            )
         if tuple(record.unit_index for record, _marker in evidence) != requested:
             raise DevelopmentPersistenceError(
                 "requested scientific evidence order drifted"
@@ -1268,15 +1802,22 @@ class DevelopmentPersistentStore:
         receipt: SessionReceipt,
         *,
         raw_secret_values: Sequence[str] = (),
+        session_cursor: DevelopmentSessionCursor | None = None,
     ) -> Path:
         self._validate_source_artifacts()
         leases = self._load_leases()
-        commits = tuple(self._verified_commits(leases=leases))
+        if session_cursor is None:
+            commits = tuple(self._verified_commits(leases=leases))
+        else:
+            self._validate_session_cursor(session_cursor, session_cursor._lease)
+            commits = session_cursor.committed_units
         self._validate_session_receipt(receipt, commits=commits, leases=leases)
         payload = canonical_json_bytes(asdict(receipt))
         _reject_secrets((payload,), raw_secret_values)
         path = self.run_root / "receipts" / f"{_identity(receipt.session_id, 'session_id')}.json"
         _create_only(path, payload)
+        if session_cursor is not None:
+            session_cursor._closed = True
         return path
 
     def _validate_session_receipt(
@@ -1394,7 +1935,13 @@ class DevelopmentPersistentStore:
                 archive.writestr(info, payload, compress_type=ZIP_DEFLATED, compresslevel=6)
         return buffer.getvalue()
 
-    def _verify_committed(self, marker: CommittedUnit) -> DevelopmentScientificRecord:
+    def _verify_committed(
+        self, marker: CommittedUnit
+    ) -> (
+        DevelopmentScientificRecord
+        | DevelopmentOperationalRecord
+        | DevelopmentRoutingReferenceRecord
+    ):
         if marker.schema_version != RESULT_SCHEMA_VERSION:
             raise DevelopmentPersistenceError("COMMITTED marker schema drifted")
         if (
@@ -1423,9 +1970,16 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError("marker worker identity drifted")
         if marker.attempt_disposition not in ATTEMPT_DISPOSITIONS:
             raise DevelopmentPersistenceError("marker attempt disposition is invalid")
-        _digest(marker.scientific_record_digest, "marker scientific record")
-        if type(marker.scientific_record_bytes) is not int or marker.scientific_record_bytes < 1:
-            raise DevelopmentPersistenceError("marker scientific record size is invalid")
+        if marker.record_kind not in {
+            "development_scientific_record",
+            OPERATIONAL_RECORD_KIND,
+            ROUTING_REFERENCE_RECORD_KIND,
+        }:
+            raise DevelopmentPersistenceError("marker record kind is invalid")
+        _digest(marker.record_id, "marker record identity")
+        _digest(marker.record_digest, "marker record")
+        if type(marker.record_bytes) is not int or marker.record_bytes < 1:
+            raise DevelopmentPersistenceError("marker record size is invalid")
         if (
             isinstance(marker.actual_elapsed_seconds, bool)
             or not isinstance(marker.actual_elapsed_seconds, (int, float))
@@ -1455,9 +2009,16 @@ class DevelopmentPersistentStore:
                 or "artifact_manifest.json" not in names
             ):
                 raise DevelopmentPersistenceError("bundle member identities are invalid")
-            if DEVELOPMENT_RECORD_MEMBER_PATH not in names:
+            record_member_path = (
+                OPERATIONAL_RECORD_MEMBER_PATH
+                if marker.record_kind == OPERATIONAL_RECORD_KIND
+                else ROUTING_REFERENCE_RECORD_MEMBER_PATH
+                if marker.record_kind == ROUTING_REFERENCE_RECORD_KIND
+                else DEVELOPMENT_RECORD_MEMBER_PATH
+            )
+            if record_member_path not in names:
                 raise DevelopmentPersistenceError(
-                    "bundle lacks formal development scientific record"
+                    "bundle lacks its formal development record"
                 )
             for info in infos:
                 _safe_member_path(info.filename)
@@ -1508,29 +2069,37 @@ class DevelopmentPersistentStore:
                 payload = archive.read(name)
                 if len(payload) != item["size_bytes"] or sha256(payload).hexdigest() != item["sha256"]:
                     raise DevelopmentPersistenceError("bundle member digest drifted")
-            record_raw = archive.read(DEVELOPMENT_RECORD_MEMBER_PATH)
+            record_raw = archive.read(record_member_path)
             if (
-                len(record_raw) != marker.scientific_record_bytes
-                or sha256(record_raw).hexdigest() != marker.scientific_record_digest
+                len(record_raw) != marker.record_bytes
+                or sha256(record_raw).hexdigest() != marker.record_digest
             ):
                 raise DevelopmentPersistenceError(
-                    "marker scientific record digest or size drifted"
+                    "marker record digest or size drifted"
                 )
             try:
                 record_payload = json.loads(record_raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise DevelopmentPersistenceError(
-                    "formal development scientific record is unreadable"
+                    "formal development record is unreadable"
                 ) from exc
             if type(record_payload) is not dict or canonical_json_bytes(record_payload) != record_raw:
                 raise DevelopmentPersistenceError(
-                    "formal development scientific record is not canonical JSON"
+                    "formal development record is not canonical JSON"
                 )
             try:
-                record = DevelopmentScientificRecord.from_payload(record_payload)
+                record = (
+                    DevelopmentOperationalRecord.from_payload(record_payload)
+                    if marker.record_kind == OPERATIONAL_RECORD_KIND
+                    else DevelopmentRoutingReferenceRecord.from_payload(record_payload)
+                    if marker.record_kind == ROUTING_REFERENCE_RECORD_KIND
+                    else DevelopmentScientificRecord.from_payload(record_payload)
+                )
             except DevelopmentRecordError as exc:
                 raise DevelopmentPersistenceError(str(exc)) from exc
             if (
+                record.record_id != marker.record_id
+                or
                 record.attempt_disposition() != marker.attempt_disposition
                 or float(record.actual_elapsed_seconds)
                 != float(marker.actual_elapsed_seconds)
@@ -1569,10 +2138,17 @@ class DevelopmentPersistentStore:
             intent_object = UnitIntent(**intent)
             intent_object.validate(self.worker_identity)
             self._verify_intent_registered_binding(intent_object)
-            try:
-                validate_record_against_intent(record, intent_object)
-            except DevelopmentRecordError as exc:
-                raise DevelopmentPersistenceError(str(exc)) from exc
+            if type(record) is DevelopmentRoutingReferenceRecord:
+                _validate_routing_reference_record_against_intent(
+                    record, intent_object
+                )
+            elif type(record) is DevelopmentOperationalRecord:
+                _validate_operational_record_against_intent(record, intent_object)
+            else:
+                try:
+                    validate_record_against_intent(record, intent_object)
+                except DevelopmentRecordError as exc:
+                    raise DevelopmentPersistenceError(str(exc)) from exc
             lease = self._lease_for_lineage(
                 leases,
                 session_id=marker.session_id,

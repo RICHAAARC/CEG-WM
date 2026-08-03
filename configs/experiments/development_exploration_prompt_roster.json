@@ -1,0 +1,327 @@
+{
+  "schema_version": "ceg_wm_development_prompt_roster",
+  "roster_id": "development_exploration_frozen_prompt_roster",
+  "seed_namespace": "development_exploration_20260804",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "generation_seed": 2026080400,
+      "prompt": "documentary photograph of a red bicycle beside a brick wall"
+    },
+    {
+      "cluster_ordinal": 1,
+      "generation_seed": 2026080401,
+      "prompt": "natural light photograph of a red bicycle beside a brick wall"
+    },
+    {
+      "cluster_ordinal": 2,
+      "generation_seed": 2026080402,
+      "prompt": "high detail studio photograph of a red bicycle beside a brick wall"
+    },
+    {
+      "cluster_ordinal": 3,
+      "generation_seed": 2026080403,
+      "prompt": "wide angle landscape photograph of a red bicycle beside a brick wall"
+    },
+    {
+      "cluster_ordinal": 4,
+      "generation_seed": 2026080404,
+      "prompt": "documentary photograph of a quiet mountain lake at sunrise"
+    },
+    {
+      "cluster_ordinal": 5,
+      "generation_seed": 2026080405,
+      "prompt": "natural light photograph of a quiet mountain lake at sunrise"
+    },
+    {
+      "cluster_ordinal": 6,
+      "generation_seed": 2026080406,
+      "prompt": "high detail studio photograph of a quiet mountain lake at sunrise"
+    },
+    {
+      "cluster_ordinal": 7,
+      "generation_seed": 2026080407,
+      "prompt": "wide angle landscape photograph of a quiet mountain lake at sunrise"
+    },
+    {
+      "cluster_ordinal": 8,
+      "generation_seed": 2026080408,
+      "prompt": "documentary photograph of a ceramic teapot on a wooden table"
+    },
+    {
+      "cluster_ordinal": 9,
+      "generation_seed": 2026080409,
+      "prompt": "natural light photograph of a ceramic teapot on a wooden table"
+    },
+    {
+      "cluster_ordinal": 10,
+      "generation_seed": 2026080410,
+      "prompt": "high detail studio photograph of a ceramic teapot on a wooden table"
+    },
+    {
+      "cluster_ordinal": 11,
+      "generation_seed": 2026080411,
+      "prompt": "wide angle landscape photograph of a ceramic teapot on a wooden table"
+    },
+    {
+      "cluster_ordinal": 12,
+      "generation_seed": 2026080412,
+      "prompt": "documentary photograph of a city street after summer rain"
+    },
+    {
+      "cluster_ordinal": 13,
+      "generation_seed": 2026080413,
+      "prompt": "natural light photograph of a city street after summer rain"
+    },
+    {
+      "cluster_ordinal": 14,
+      "generation_seed": 2026080414,
+      "prompt": "high detail studio photograph of a city street after summer rain"
+    },
+    {
+      "cluster_ordinal": 15,
+      "generation_seed": 2026080415,
+      "prompt": "wide angle landscape photograph of a city street after summer rain"
+    },
+    {
+      "cluster_ordinal": 16,
+      "generation_seed": 2026080416,
+      "prompt": "documentary photograph of a golden retriever in a green field"
+    },
+    {
+      "cluster_ordinal": 17,
+      "generation_seed": 2026080417,
+      "prompt": "natural light photograph of a golden retriever in a green field"
+    },
+    {
+      "cluster_ordinal": 18,
+      "generation_seed": 2026080418,
+      "prompt": "high detail studio photograph of a golden retriever in a green field"
+    },
+    {
+      "cluster_ordinal": 19,
+      "generation_seed": 2026080419,
+      "prompt": "wide angle landscape photograph of a golden retriever in a green field"
+    },
+    {
+      "cluster_ordinal": 20,
+      "generation_seed": 2026080420,
+      "prompt": "documentary photograph of a glass greenhouse full of orchids"
+    },
+    {
+      "cluster_ordinal": 21,
+      "generation_seed": 2026080421,
+      "prompt": "natural light photograph of a glass greenhouse full of orchids"
+    },
+    {
+      "cluster_ordinal": 22,
+      "generation_seed": 2026080422,
+      "prompt": "high detail studio photograph of a glass greenhouse full of orchids"
+    },
+    {
+      "cluster_ordinal": 23,
+      "generation_seed": 2026080423,
+      "prompt": "wide angle landscape photograph of a glass greenhouse full of orchids"
+    },
+    {
+      "cluster_ordinal": 24,
+      "generation_seed": 2026080424,
+      "prompt": "documentary photograph of a lighthouse above a rocky coast"
+    },
+    {
+      "cluster_ordinal": 25,
+      "generation_seed": 2026080425,
+      "prompt": "natural light photograph of a lighthouse above a rocky coast"
+    },
+    {
+      "cluster_ordinal": 26,
+      "generation_seed": 2026080426,
+      "prompt": "high detail studio photograph of a lighthouse above a rocky coast"
+    },
+    {
+      "cluster_ordinal": 27,
+      "generation_seed": 2026080427,
+      "prompt": "wide angle landscape photograph of a lighthouse above a rocky coast"
+    },
+    {
+      "cluster_ordinal": 28,
+      "generation_seed": 2026080428,
+      "prompt": "documentary photograph of a bowl of citrus fruit in soft light"
+    },
+    {
+      "cluster_ordinal": 29,
+      "generation_seed": 2026080429,
+      "prompt": "natural light photograph of a bowl of citrus fruit in soft light"
+    },
+    {
+      "cluster_ordinal": 30,
+      "generation_seed": 2026080430,
+      "prompt": "high detail studio photograph of a bowl of citrus fruit in soft light"
+    },
+    {
+      "cluster_ordinal": 31,
+      "generation_seed": 2026080431,
+      "prompt": "wide angle landscape photograph of a bowl of citrus fruit in soft light"
+    },
+    {
+      "cluster_ordinal": 32,
+      "generation_seed": 2026080432,
+      "prompt": "documentary photograph of a narrow alley with hanging lanterns"
+    },
+    {
+      "cluster_ordinal": 33,
+      "generation_seed": 2026080433,
+      "prompt": "natural light photograph of a narrow alley with hanging lanterns"
+    },
+    {
+      "cluster_ordinal": 34,
+      "generation_seed": 2026080434,
+      "prompt": "high detail studio photograph of a narrow alley with hanging lanterns"
+    },
+    {
+      "cluster_ordinal": 35,
+      "generation_seed": 2026080435,
+      "prompt": "wide angle landscape photograph of a narrow alley with hanging lanterns"
+    },
+    {
+      "cluster_ordinal": 36,
+      "generation_seed": 2026080436,
+      "prompt": "documentary photograph of a snow covered cabin among pine trees"
+    },
+    {
+      "cluster_ordinal": 37,
+      "generation_seed": 2026080437,
+      "prompt": "natural light photograph of a snow covered cabin among pine trees"
+    },
+    {
+      "cluster_ordinal": 38,
+      "generation_seed": 2026080438,
+      "prompt": "high detail studio photograph of a snow covered cabin among pine trees"
+    },
+    {
+      "cluster_ordinal": 39,
+      "generation_seed": 2026080439,
+      "prompt": "wide angle landscape photograph of a snow covered cabin among pine trees"
+    },
+    {
+      "cluster_ordinal": 40,
+      "generation_seed": 2026080440,
+      "prompt": "documentary photograph of a blue sailboat on calm water"
+    },
+    {
+      "cluster_ordinal": 41,
+      "generation_seed": 2026080441,
+      "prompt": "natural light photograph of a blue sailboat on calm water"
+    },
+    {
+      "cluster_ordinal": 42,
+      "generation_seed": 2026080442,
+      "prompt": "high detail studio photograph of a blue sailboat on calm water"
+    },
+    {
+      "cluster_ordinal": 43,
+      "generation_seed": 2026080443,
+      "prompt": "wide angle landscape photograph of a blue sailboat on calm water"
+    },
+    {
+      "cluster_ordinal": 44,
+      "generation_seed": 2026080444,
+      "prompt": "documentary photograph of a library reading room with tall windows"
+    },
+    {
+      "cluster_ordinal": 45,
+      "generation_seed": 2026080445,
+      "prompt": "natural light photograph of a library reading room with tall windows"
+    },
+    {
+      "cluster_ordinal": 46,
+      "generation_seed": 2026080446,
+      "prompt": "high detail studio photograph of a library reading room with tall windows"
+    },
+    {
+      "cluster_ordinal": 47,
+      "generation_seed": 2026080447,
+      "prompt": "wide angle landscape photograph of a library reading room with tall windows"
+    },
+    {
+      "cluster_ordinal": 48,
+      "generation_seed": 2026080448,
+      "prompt": "documentary photograph of a market stall with colorful vegetables"
+    },
+    {
+      "cluster_ordinal": 49,
+      "generation_seed": 2026080449,
+      "prompt": "natural light photograph of a market stall with colorful vegetables"
+    },
+    {
+      "cluster_ordinal": 50,
+      "generation_seed": 2026080450,
+      "prompt": "high detail studio photograph of a market stall with colorful vegetables"
+    },
+    {
+      "cluster_ordinal": 51,
+      "generation_seed": 2026080451,
+      "prompt": "wide angle landscape photograph of a market stall with colorful vegetables"
+    },
+    {
+      "cluster_ordinal": 52,
+      "generation_seed": 2026080452,
+      "prompt": "documentary photograph of a stone bridge across a forest stream"
+    },
+    {
+      "cluster_ordinal": 53,
+      "generation_seed": 2026080453,
+      "prompt": "natural light photograph of a stone bridge across a forest stream"
+    },
+    {
+      "cluster_ordinal": 54,
+      "generation_seed": 2026080454,
+      "prompt": "high detail studio photograph of a stone bridge across a forest stream"
+    },
+    {
+      "cluster_ordinal": 55,
+      "generation_seed": 2026080455,
+      "prompt": "wide angle landscape photograph of a stone bridge across a forest stream"
+    },
+    {
+      "cluster_ordinal": 56,
+      "generation_seed": 2026080456,
+      "prompt": "documentary photograph of a violin resting on sheet music"
+    },
+    {
+      "cluster_ordinal": 57,
+      "generation_seed": 2026080457,
+      "prompt": "natural light photograph of a violin resting on sheet music"
+    },
+    {
+      "cluster_ordinal": 58,
+      "generation_seed": 2026080458,
+      "prompt": "high detail studio photograph of a violin resting on sheet music"
+    },
+    {
+      "cluster_ordinal": 59,
+      "generation_seed": 2026080459,
+      "prompt": "wide angle landscape photograph of a violin resting on sheet music"
+    },
+    {
+      "cluster_ordinal": 60,
+      "generation_seed": 2026080460,
+      "prompt": "documentary photograph of a desert road beneath dramatic clouds"
+    },
+    {
+      "cluster_ordinal": 61,
+      "generation_seed": 2026080461,
+      "prompt": "natural light photograph of a desert road beneath dramatic clouds"
+    },
+    {
+      "cluster_ordinal": 62,
+      "generation_seed": 2026080462,
+      "prompt": "high detail studio photograph of a desert road beneath dramatic clouds"
+    },
+    {
+      "cluster_ordinal": 63,
+      "generation_seed": 2026080463,
+      "prompt": "wide angle landscape photograph of a desert road beneath dramatic clouds"
+    }
+  ]
+}

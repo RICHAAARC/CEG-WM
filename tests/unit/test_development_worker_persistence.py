@@ -24,6 +24,11 @@ from experiments.protocol.development_exploration import (
 from experiments.protocol.development_records import (
     DEVELOPMENT_RECORD_COLLECTION_ROLE,
     DEVELOPMENT_RECORD_MEMBER_PATH,
+    ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
+    ROUTING_REFERENCE_RECORD_KIND,
+    ROUTING_REFERENCE_RECORD_MEMBER_PATH,
+    ROUTING_REFERENCE_RECORD_SCHEMA,
+    DevelopmentRoutingReferenceRecord,
     DevelopmentScientificRecord,
     canonical_development_value_digest,
 )
@@ -116,12 +121,15 @@ def _bindings(
     return tuple(bindings)
 
 
-def _store(tmp_path: Path) -> DevelopmentPersistentStore:
+def _store(
+    tmp_path: Path,
+    roster: tuple[DevelopmentStudyUnit, ...] | None = None,
+) -> DevelopmentPersistentStore:
     package = tmp_path / "development_execution_package.zip"
     bootstrap = tmp_path / "development_bootstrap.py"
     package.write_bytes(b"frozen development package")
     bootstrap.write_bytes(b"frozen development bootstrap")
-    roster = _roster()
+    roster = _roster() if roster is None else roster
     bindings = _bindings(roster)
     worker = FrozenWorkerIdentity(
         revision="1" * 40,
@@ -154,7 +162,7 @@ def _lease(store: DevelopmentPersistentStore, *, session_id: str = "colab_sessio
 def _intent(store: DevelopmentPersistentStore, lease, *, index: int = 0, now: int = 101, attempt: int = 0, parent: str | None = None):
     return store.create_intent(
         lease,
-        unit_id=f"development_scientific_unit_{index:04d}",
+        unit_id=f"development_unit_{index:04d}",
         unit_index=index,
         attempt_index=attempt,
         parent_attempt_intent_digest=parent,
@@ -282,6 +290,56 @@ def _record(
     )
 
 
+def _routing_reference_record(
+    intent,
+) -> DevelopmentRoutingReferenceRecord:
+    values = [0.25, 0.5]
+    record = DevelopmentRoutingReferenceRecord(
+        schema_version=ROUTING_REFERENCE_RECORD_SCHEMA,
+        collection_role=ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
+        record_kind=ROUTING_REFERENCE_RECORD_KIND,
+        record_id="0" * 64,
+        run_id=intent.run_id,
+        protocol_digest=intent.protocol_digest,
+        method_code_revision=intent.revision,
+        unit_index=intent.unit_index,
+        phase=intent.phase,
+        source_cluster_ordinal=intent.source_cluster_ordinal,
+        fold_index=intent.source_cluster_ordinal % 4,
+        prompt_roster_digest="9" * 64,
+        candidate_config_digest=intent.candidate_config_digest,
+        attempt_index=intent.attempt_index,
+        retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+        actual_elapsed_seconds=1.0,
+        maximum_duration_seconds=intent.maximum_duration_seconds,
+        measurement_payload={
+            "candidate_id": "routing_stqr",
+            "runtime_config_digest": "8" * 64,
+            "model_id": "registered-development-model",
+            "model_revision": "registered-development-revision",
+            "callback_indices": list(range(20)),
+            "public_probe_domain_digest": "7" * 64,
+            "public_probe_values_digest": "6" * 64,
+            "nominal_relative_probe_step": 0.001,
+            "actual_probe_step": 0.001,
+            "texture_gradient_values": values,
+            "texture_spatial_shape": [1, 2],
+            "response_ratio_values": values,
+            "response_spatial_shape": [1, 2],
+            "sensitivity_ratio_values": values,
+            "sensitivity_spatial_shape": [1, 2],
+        },
+        counts_as_scientific_coverage=False,
+        scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+    )
+    return replace(
+        record,
+        record_id=canonical_development_value_digest(
+            record.payload_without_record_id()
+        ),
+    )
+
+
 def _receipt(store: DevelopmentPersistentStore, *, session_id: str, start: int, end: int, committed_unit_ids: tuple[str, ...]) -> SessionReceipt:
     return SessionReceipt(
         schema_version=DIAGNOSTIC_SCHEMA_VERSION,
@@ -358,7 +416,7 @@ def test_intent_contains_complete_registered_unit_binding_and_rejects_drift(tmp_
     lease = _lease(store)
     intent = _intent(store, lease, index=2)
 
-    assert intent.unit_id == "development_scientific_unit_0002"
+    assert intent.unit_id == "development_unit_0002"
     assert intent.shard_id == intent.phase == "scientific_breadth"
     assert intent.responsibility_id == "key_schedule"
     assert intent.source_cluster_ordinal == 2
@@ -378,7 +436,7 @@ def test_intent_contains_complete_registered_unit_binding_and_rejects_drift(tmp_
     with pytest.raises(DevelopmentPersistenceError, match="outside frozen roster"):
         store.create_intent(
             lease,
-            unit_id="development_scientific_unit_999999",
+            unit_id="development_unit_999999",
             unit_index=999999,
             attempt_index=0,
             parent_attempt_intent_digest=None,
@@ -451,7 +509,7 @@ def test_commit_writes_only_exact_formal_record_at_fixed_member_path(tmp_path: P
         assert DEVELOPMENT_RECORD_MEMBER_PATH in archive.namelist()
         payload = json.loads(archive.read(DEVELOPMENT_RECORD_MEMBER_PATH))
     assert payload["unit_index"] == intent.unit_index
-    assert marker.scientific_record_digest == sha256(
+    assert marker.record_digest == sha256(
         canonical_json_bytes(payload)
     ).hexdigest()
     assert marker.attempt_disposition == "success"
@@ -698,6 +756,109 @@ def test_only_expired_or_closed_leaf_intent_becomes_interrupted(tmp_path: Path) 
     assert marker.parent_attempt_intent_digest == first.digest()
     assert store.recover(now_epoch_seconds=132).committed_units == (marker,)
     assert store.recover(now_epoch_seconds=132).interrupted_attempts == ()
+
+
+@pytest.mark.quick
+def test_routing_reference_reuses_common_interruption_commit_and_recovery(
+    tmp_path: Path,
+) -> None:
+    roster = (
+        DevelopmentStudyUnit(
+            unit_index=0,
+            phase=ROUTING_REFERENCE_RECORD_KIND,
+            responsibility_id="content_router",
+            source_cluster_ordinal=0,
+            content_branch_id=ROUTING_REFERENCE_RECORD_KIND,
+            geometry_case_id="geometry_case_not_applicable",
+            maximum_record_attempts=3,
+            maximum_duration_seconds=900,
+        ),
+    )
+    store = _store(tmp_path, roster)
+    lost_lease = _lease(
+        store,
+        session_id="routing_reference_lost_session",
+        duration=10,
+    )
+    first = _intent(store, lost_lease, now=101)
+    interrupted = store.recover(now_epoch_seconds=111)
+    assert interrupted.next_attempt_by_unit == ((first.unit_id, 1),)
+    assert interrupted.interrupted_attempts[0].failure_reason == (
+        "colab_session_interrupted"
+    )
+
+    resumed_lease = _lease(
+        store,
+        session_id="routing_reference_resumed_session",
+        start=111,
+        duration=20,
+    )
+    second = _intent(
+        store,
+        resumed_lease,
+        now=112,
+        attempt=1,
+        parent=first.digest(),
+    )
+    marker = store.commit_unit(
+        resumed_lease,
+        second,
+        record=_routing_reference_record(second),
+        now_epoch_seconds=113,
+    )
+
+    records = store.verified_terminal_routing_reference_records(
+        now_epoch_seconds=114
+    )
+    assert len(records) == 1
+    assert records[0].measurement_payload["candidate_id"] == "routing_stqr"
+    assert marker.record_kind == ROUTING_REFERENCE_RECORD_KIND
+    bundle = store.run_root / "bundles" / f"sha256_{marker.bundle_sha256}.zip"
+    with ZipFile(bundle) as archive:
+        assert ROUTING_REFERENCE_RECORD_MEMBER_PATH in archive.namelist()
+        assert DEVELOPMENT_RECORD_MEMBER_PATH not in archive.namelist()
+    with pytest.raises(DevelopmentPersistenceError, match="terminal"):
+        store.next_attempt_index(second.unit_id)
+
+
+@pytest.mark.quick
+def test_session_cursor_recovers_once_then_commits_units_incrementally(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path, _roster(2))
+    lease = _lease(store, duration=100)
+    recover_calls = 0
+    original_recover = store.recover
+
+    def counted_recover(*, now_epoch_seconds: int | None = None):
+        nonlocal recover_calls
+        recover_calls += 1
+        return original_recover(now_epoch_seconds=now_epoch_seconds)
+
+    monkeypatch.setattr(store, "recover", counted_recover)
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+
+    for expected_index in range(2):
+        assert cursor.next_unit_index == expected_index
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=101 + expected_index,
+        )
+        marker = store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=_record(store, intent),
+            now_epoch_seconds=102 + expected_index,
+        )
+        assert marker.unit_index == expected_index
+
+    assert cursor.next_unit_index == 2
+    assert len(cursor.committed_units) == 2
+    assert len(cursor.terminal_scientific_evidence) == 2
+    assert recover_calls == 1
 
 
 @pytest.mark.quick

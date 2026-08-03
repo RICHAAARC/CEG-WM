@@ -5,7 +5,6 @@ from dataclasses import replace
 import pytest
 import torch
 
-import runtime.qk_observation as qk_observation_module
 from experiments.methods import (
     load_ceg_wm_experiment_adapter_configuration,
 )
@@ -383,76 +382,6 @@ def test_formal_geometry_ready_public_call_chain_succeeds() -> None:
     assert result.candidate_ids[2] == "rectification_similarity"
     assert result.estimation_identity_digest
     operation._method_adapter.require_no_runtime_binding()
-
-
-@pytest.mark.unit
-def test_qk_observation_rejects_preexisting_module_callable_replacement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = FakeQkBackend()
-    adapter = create_runtime_adapter(backend)
-    adapter.initialize("cpu")
-
-    with monkeypatch.context() as scoped:
-        scoped.setattr(
-            qk_observation_module,
-            "observe_detection_qk",
-            lambda *_args, **_kwargs: None,
-        )
-        with pytest.raises(
-            RuntimeAdapterError,
-            match="Q/K observation failed closed",
-        ) as exc_info:
-            adapter.observe_detection_qk(_image())
-
-        assert exc_info.value.__cause__ is not None
-        assert "callable identity drifted" in str(
-            exc_info.value.__cause__
-        )
-        assert adapter.state is RuntimeAdapterState.FAILED
-        assert backend.close_calls == 1
-        assert backend.posterior is None
-
-    identity = adapter.revalidate_execution_identity()
-    assert identity.runtime_state == "failed"
-    assert identity.qk_observation_callable_identity == (
-        "runtime.qk_observation.observe_detection_qk"
-    )
-
-
-@pytest.mark.unit
-def test_qk_observation_rejects_mid_call_module_callable_replacement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = FakeQkBackend()
-    adapter = create_runtime_adapter(backend)
-    adapter.initialize("cpu")
-
-    with monkeypatch.context() as scoped:
-        def _replace_module_callable() -> None:
-            scoped.setattr(
-                qk_observation_module,
-                "observe_detection_qk",
-                lambda *_args, **_kwargs: None,
-            )
-
-        backend.execution_callback = _replace_module_callable
-        with pytest.raises(
-            RuntimeAdapterError,
-            match="Q/K observation failed closed",
-        ) as exc_info:
-            adapter.observe_detection_qk(_image())
-
-        assert exc_info.value.__cause__ is not None
-        assert "callable identity drifted" in str(
-            exc_info.value.__cause__
-        )
-        assert adapter.state is RuntimeAdapterState.FAILED
-        assert backend.close_calls == 1
-        assert backend.posterior is not None
-
-    identity = adapter.revalidate_execution_identity()
-    assert identity.runtime_state == "failed"
 
 
 @pytest.mark.unit
