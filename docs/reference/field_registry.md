@@ -683,6 +683,16 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | recommendation_reason | persisted_protocol | provenance | none | true | false | false | 基于既有 evidence records 的非空建议理由。 |
 | blocking_responsibilities | persisted_protocol | protocol | none | true | false | false | `implementation_blocked` 时实际阻断当前职责的前置职责。 |
 | provisional_threshold_identities | persisted_protocol | method_identity | none | true | false | false | outcome 引用的 development-only provisional threshold identities。 |
+| signal_criteria_digest | persisted_protocol | provenance | none | true | false | false | outcome 绑定的 checked-in development signal criteria 摘要。 |
+| cluster_aggregate_digest | persisted_protocol | provenance | none | true | false | false | 从 verified records 重放的 cluster aggregate 摘要。 |
+| cross_fit_plan_digest | persisted_protocol | provenance | none | true | false | false | detector outcome 使用的冻结 cross-fit plan 摘要；非 detector 为 null。 |
+| evidence_record_bindings | persisted_protocol | provenance | none | true | false | false | outcome 使用的 record ID 与 record digest 成对绑定。 |
+| committed_marker_bindings | persisted_protocol | provenance | none | true | false | false | 每个 evidence record 与已验证 COMMITTED marker digest 的成对绑定。 |
+| aggregate_metric_means | internal_state | method_statistic | none | false | false | false | verified outcome context 用于重放 criteria 的 cluster-level metric means。 |
+| source_cluster_count | persisted_protocol | method_statistic | none | true | false | false | 冻结 plan 或 aggregate 覆盖的独立 source cluster 数。 |
+| verified_module_outcome | internal_state | method_state | none | false | false | false | verified evidence context 重算出的 development module outcome。 |
+| verified_candidate_recommendation | internal_state | method_state | none | false | false | false | verified evidence context 重算出的 selection recommendation。 |
+| verified_blocking_responsibilities | internal_state | protocol | none | false | false | false | verified prerequisite context 给出的阻断职责。 |
 | source_record_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的 development scientific sample record schema 版本。 |
 | source_record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的 development scientific record collection schema 版本。 |
 | outcome_record_id | persisted_protocol | provenance | none | true | false | false | module outcome 除自身 ID 外全部字段的 canonical SHA-256。 |
@@ -981,4 +991,9 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | uniform_control_detector_config_digest | persisted_protocol | provenance | none | true | false | false | disabled-uniform 配对臂 detector 配置摘要。 |
 | geometry_reliability_status | persisted_protocol | method_status | none | true | false | false | 正式 reliability 模块的 fail-closed 状态。 |
 | geometry_reliability_failure_reasons | persisted_protocol | method_status | none | true | false | false | 正式 reliability 模块拒绝当前估计的完整原因序列。 |
-| estimator_wrong_key_objectives | persisted_protocol | method_statistic | none | true | false | false | transform estimator 保存的真实 wrong-key objective 控制值。 |
+| wrong_key_geometry_estimation_identity | persisted_protocol | method_identity | none | true | false | false | wrong-key Q/K 经正式 estimator 得到的估计身份。 |
+| wrong_key_geometry_reliability_identity | persisted_protocol | method_identity | none | true | false | false | wrong-key estimate 经正式 reliability 得到的判定身份。 |
+| wrong_key_geometry_reliable | persisted_protocol | method_status | none | true | false | false | wrong-key estimate 是否被 reliability 错误接受。 |
+| wrong_key_geometry_reliability_status | persisted_protocol | method_status | none | true | false | false | wrong-key reliability 的 fail-closed 状态。 |
+| wrong_key_geometry_reliability_failure_reasons | persisted_protocol | method_status | none | true | false | false | wrong-key reliability 的完整拒绝原因。 |
+| ambiguous_control_realized | persisted_protocol | method_status | none | true | false | false | ambiguous control 是否满足冻结 top-two gap 结构判据。 |

@@ -351,6 +351,77 @@ def test_remaining_non_joint_responsibilities_use_real_public_calls(
 
 
 @pytest.mark.quick
+def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() -> None:
+    runner = _runner()
+    result = runner._execute_unit(28, _input())
+    record = result.record
+    authority = runner.protocol.threshold_detector_authority
+    identity = record.analysis_unit_identity
+    assert record.responsibility_id == "hf_detector"
+    assert record.content_branch_id == "hf_only"
+    assert record.detector_trace["primary_null_detector_identity"] == (
+        authority.method_detector_identity
+    )
+    assert record.detector_trace["primary_null_detector_config_digest"] == (
+        authority.method_detector_config_digest
+    )
+    assert record.detector_trace["primary_null_preprocessing_identity"] == (
+        authority.preprocessing_identity
+    )
+    assert record.key_control_trace["primary_null_control_identity"] == (
+        "unwatermarked_registered_key_primary_null"
+    )
+    assert record.key_control_trace["registered_key_public_digest"] == (
+        record.key_control_trace["primary_null_detection_key_public_digest"]
+    )
+
+    plan = build_development_cross_fit_plan(
+        responsibility_id="hf_detector",
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=64,
+    )
+    fold_index = next(
+        fold.fold_index
+        for fold in plan.folds
+        if identity["source_cluster_id"] in fold.fit_source_cluster_ids
+    )
+    manifest, detector_binding, fit_inputs = _threshold_material(
+        plan,
+        fold_index,
+    )
+    real_input = create_development_threshold_fit_input(
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        source_record=record,
+    )
+    rebound_inputs = tuple(
+        real_input
+        if item.source_record.analysis_unit_identity["source_cluster_id"]
+        == identity["source_cluster_id"]
+        else item
+        for item in fit_inputs
+    )
+    threshold = create_development_provisional_threshold(
+        plan,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        fold_index=fold_index,
+        input_manifest=manifest,
+        detector_binding=detector_binding,
+        fit_inputs=rebound_inputs,
+    )
+    assert threshold.validate(plan) == ()
+    assert real_input.source_record.record_id in {
+        item.source_record.record_id for item in threshold.fit_inputs
+    }
+
+
+@pytest.mark.quick
 def test_rectifier_fail_closed_is_classified_as_scientific_exclusion() -> None:
     with pytest.raises(DevelopmentUnitExcluded, match="fail-closed reliability"):
         _runner()._execute_unit(11, _input())
@@ -376,6 +447,9 @@ def test_geometry_control_uses_frozen_attack_and_official_reliability() -> None:
         "reliable",
         "unreliable",
     }
+    assert result.record.geometry_trace["wrong_key_geometry_estimation_identity"]
+    assert result.record.geometry_trace["wrong_key_geometry_reliability_identity"]
+    assert type(result.record.geometry_trace["wrong_key_geometry_reliable"]) is bool
     assert statistics["reliable_accept_rate"] == 0.0
     assert (
         statistics["unreliable_reject_rate"]

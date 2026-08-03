@@ -84,16 +84,16 @@ DEVELOPMENT_THRESHOLD_DETECTOR_IDENTITY = (
 )
 DEVELOPMENT_THRESHOLD_DETECTOR_MODE = "hf_only"
 DEVELOPMENT_THRESHOLD_PREPROCESSING_IDENTITY = (
-    "final_image_vae_posterior_mode"
+    "rgb8_public_image_float32_unit_interval"
 )
 DEVELOPMENT_THRESHOLD_METHOD_DETECTOR_IDENTITY = (
-    "0d4ece9d74c97ecc4f32a1c1ef27d984ae7bbe815a75e9a7a182225568cf80d3"
+    "2232ca1de3480313d4ba4cfeca299eb7e295b8f4c06c23337adc29c03f442c0f"
 )
 DEVELOPMENT_THRESHOLD_METHOD_DETECTOR_CONFIG_DIGEST = (
-    "8d033b8e71905931a193800adb106037ea87ed32cc16ffcb54ab2e4c354782e1"
+    "222bfe2cdece5a0d68ab4db996409f69e92981a1e061566c632f8972ad171bd9"
 )
 DEVELOPMENT_THRESHOLD_PUBLIC_KEY_RELATION = (
-    "registered_detection_public_digests_distinct"
+    "registered_detection_public_digests_equal"
 )
 REGISTERED_KEY_SCHEDULE_DERIVATION_IDENTITY = (
     "main_shared_key_schedule_identify_root_key"
@@ -392,6 +392,77 @@ MODULE_NEGATIVE_CONTROL_CASE_IDS = {
 }
 MODULE_METRIC_IDS = {
     item.responsibility: item.metrics for item in RESPONSIBILITY_VALIDATION_MATRIX
+}
+
+# These development-only criteria are checked-in scientific direction and
+# non-degradation rules.  They are not formal thresholds and cannot support a
+# fixed-FPR or calibration claim.
+REGISTERED_DEVELOPMENT_SIGNAL_CRITERIA = {
+    "key_schedule": (
+        ("key_attribution_separation", "equal", 1.0),
+        ("domain_collision_count", "equal", 0.0),
+    ),
+    "content_router": (
+        ("matched_budget_incremental_tpr", "greater_than", 0.5),
+        ("routing_coverage", "greater_than", 0.0),
+        ("quality_delta", "less_or_equal", 0.012),
+    ),
+    "lf_carrier": (
+        ("lf_attribution_tpr", "greater_than", 0.5),
+        ("lf_primary_null_fpr", "less_than", 0.5),
+        ("quality_delta", "less_or_equal", 0.012),
+    ),
+    "hf_carrier": (
+        ("hf_attribution_tpr", "greater_than", 0.5),
+        ("hf_primary_null_fpr", "less_than", 0.5),
+        ("quality_delta", "less_or_equal", 0.012),
+    ),
+    "content_embedder": (
+        ("realized_total_relative_l2", "less_or_equal", 0.012),
+        ("matched_budget_quality_delta", "less_or_equal", 0.012),
+    ),
+    "lf_detector": (
+        ("lf_tpr_at_selection_fpr", "greater_than", 0.5),
+        ("lf_wrong_key_rate", "less_than", 0.5),
+    ),
+    "hf_detector": (
+        ("hf_tpr_at_frozen_fpr", "greater_than", 0.5),
+        ("hf_wrong_key_rate", "less_than", 0.5),
+    ),
+    "content_detector": (
+        ("combined_tpr", "greater_than", 0.5),
+        ("combined_primary_null_fpr", "less_than", 0.5),
+        ("hf_non_degradation", "greater_or_equal", 0.5),
+        ("wrong_key_rate", "less_than", 0.5),
+    ),
+    "qk_geometry_sync": (
+        ("relation_score_gain", "greater_than", 0.0),
+        ("wrong_key_relation_margin", "greater_than", 0.0),
+        ("quality_delta", "less_or_equal", 0.012),
+    ),
+    "geometric_transform_estimator": (
+        ("rotation_error", "less_or_equal", 16.0),
+        ("scale_error", "less_or_equal", 0.35),
+        ("translation_error", "less_or_equal", 0.28),
+        ("coverage", "greater_or_equal", 0.45),
+        ("residual", "less_or_equal", 1.0),
+    ),
+    "geometry_reliability": (
+        ("reliable_accept_rate", "greater_than", 0.5),
+        ("unreliable_reject_rate", "greater_than", 0.5),
+        ("false_reliable_rate", "less_than", 0.5),
+    ),
+    "image_rectifier": (
+        ("rectification_quality", "less_or_equal", 1.0),
+        ("same_detector_score_delta", "greater_than", 0.0),
+        ("valid_support", "greater_than", 0.0),
+    ),
+    "conditional_recovery_decision": (
+        ("incremental_tpr", "greater_than", 0.0),
+        ("end_to_end_fpr", "equal", 0.0),
+        ("trigger_rate", "greater_than", 0.0),
+        ("false_rescue_rate", "equal", 0.0),
+    ),
 }
 
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -765,6 +836,7 @@ class GeometryOperationCase:
 class DevelopmentGeometryStudy:
     operation_cases: tuple[GeometryOperationCase, ...]
     negative_control_cases: tuple[GeometryOperationCase, ...]
+    ambiguous_control_max_top_two_gap: float
 
     @property
     def negative_control_case_ids(self) -> tuple[str, ...]:
@@ -809,6 +881,8 @@ class DevelopmentGeometryStudy:
             violations.append("geometry_operation_parameters_invalid")
         if self.negative_control_case_ids != GEOMETRY_NEGATIVE_CONTROL_CASE_IDS:
             violations.append("geometry_negative_control_case_ids_invalid")
+        if self.ambiguous_control_max_top_two_gap != 0.05:
+            violations.append("geometry_ambiguous_control_gap_invalid")
         expected_control_parameters = (
             ("compound", 0.75, 1.0, -32.0),
             ("compound", 0.45, 1.4142135623730951, 32.0),
@@ -904,7 +978,19 @@ class DevelopmentModuleStudy:
             "negative_control_case_ids": self.negative_control_case_ids,
             "paired_ablation_identity": self.paired_ablation_identity,
             "responsibility_id": self.responsibility_id,
+            "signal_criteria": tuple(
+                (criterion.metric_id, criterion.comparison, float(criterion.threshold))
+                for criterion in self.signal_criteria
+            ),
         }
+
+    def signal_criteria_digest(self) -> str:
+        return _canonical_digest(
+            tuple(
+                (criterion.metric_id, criterion.comparison, float(criterion.threshold))
+                for criterion in self.signal_criteria
+            )
+        )
 
 
 def _expected_module_scale(responsibility_id: str) -> int:
@@ -963,6 +1049,12 @@ def validate_development_module_matrix(
             violations.append(f"{prefix}:signal_criteria_invalid")
         if tuple(criterion.metric_id for criterion in item.signal_criteria) != item.metric_ids:
             violations.append(f"{prefix}:signal_criteria_metric_coverage_invalid")
+        observed_criteria = tuple(
+            (criterion.metric_id, criterion.comparison, float(criterion.threshold))
+            for criterion in item.signal_criteria
+        )
+        if observed_criteria != REGISTERED_DEVELOPMENT_SIGNAL_CRITERIA.get(prefix):
+            violations.append(f"{prefix}:signal_criteria_unregistered")
         if item.candidate_config_digest != _canonical_digest(
             item.candidate_config_payload()
         ):
@@ -1185,7 +1277,7 @@ def derive_development_primary_null_key_family_digest(
     ):
         if _DIGEST_PATTERN.fullmatch(value) is None:
             raise ValueError(f"primary_null_{field_name}_invalid")
-    if registered_key_public_digest == detection_key_public_digest:
+    if registered_key_public_digest != detection_key_public_digest:
         raise ValueError("primary_null_public_key_relation_mismatch")
     return _canonical_digest(
         {
@@ -1724,7 +1816,13 @@ def load_frozen_development_exploration_protocol(
     geometry_raw = _require_mapping(raw["geometry_study"], "geometry_study")
     _require_exact_keys(
         geometry_raw,
-        frozenset({"operation_cases", "negative_control_cases"}),
+        frozenset(
+            {
+                "operation_cases",
+                "negative_control_cases",
+                "ambiguous_control_max_top_two_gap",
+            }
+        ),
         "geometry_study",
     )
     operation_cases: list[GeometryOperationCase] = []
@@ -1771,6 +1869,9 @@ def load_frozen_development_exploration_protocol(
     geometry_study = DevelopmentGeometryStudy(
         operation_cases=tuple(operation_cases),
         negative_control_cases=tuple(negative_control_cases),
+        ambiguous_control_max_top_two_gap=geometry_raw[
+            "ambiguous_control_max_top_two_gap"
+        ],
     )
 
     matrix_raw = _require_sequence(raw["module_matrix"], "module_matrix")
@@ -2706,7 +2807,7 @@ class FrozenDevelopmentThresholdDetectorBinding:
                 violations.append("primary_null_key_binding_exact_type_required")
             else:
                 violations.extend(item.validate())
-                if item.registered_key_public_digest == item.detection_key_public_digest:
+                if item.registered_key_public_digest != item.detection_key_public_digest:
                     violations.append("primary_null_public_key_relation_mismatch")
                 elif item.registered_key_family_digest != (
                     derive_development_primary_null_key_family_digest(
@@ -2966,7 +3067,7 @@ class DevelopmentThresholdFitInput:
         ):
             violations.append("threshold_fit_input_preprocessing_identity_mismatch")
         if record.key_control_trace.get("primary_null_control_identity") != (
-            "unwatermarked_wrong_key_primary_null"
+            "unwatermarked_registered_key_primary_null"
         ):
             violations.append("threshold_fit_input_control_identity_invalid")
         key_by_cluster = {
@@ -3387,7 +3488,13 @@ class DevelopmentModuleExecutionDecision:
 def decide_development_module_execution(
     protocol: FrozenDevelopmentExplorationProtocol,
     responsibility_id: str,
-    outcomes_by_responsibility: Mapping[str, str],
+    outcomes_by_responsibility: Mapping[
+        str,
+        tuple[
+            DevelopmentModuleOutcomeRecord,
+            DevelopmentVerifiedOutcomeEvidenceContext,
+        ],
+    ],
 ) -> DevelopmentModuleExecutionDecision:
     if type(protocol) is not FrozenDevelopmentExplorationProtocol or protocol.validate():
         raise ValueError("development_protocol_invalid")
@@ -3397,8 +3504,19 @@ def decide_development_module_execution(
     unknown = set(outcomes_by_responsibility) - set(studies)
     if unknown:
         raise ValueError("development_outcome_responsibility_unknown")
-    if any(value not in MODULE_OUTCOMES for value in outcomes_by_responsibility.values()):
-        raise ValueError("development_module_outcome_invalid")
+    for role, value in outcomes_by_responsibility.items():
+        if (
+            type(value) is not tuple
+            or len(value) != 2
+            or type(value[0]) is not DevelopmentModuleOutcomeRecord
+            or type(value[1]) is not DevelopmentVerifiedOutcomeEvidenceContext
+            or value[0].responsibility_id != role
+            or value[0].validate(
+                protocol,
+                verified_evidence_context=value[1],
+            )
+        ):
+            raise ValueError("development_verified_module_outcome_required")
     study = studies[responsibility_id]
     missing = tuple(
         dependency
@@ -3409,7 +3527,8 @@ def decide_development_module_execution(
         dependency
         for dependency in study.prerequisite_responsibility_ids
         if dependency not in missing
-        and outcomes_by_responsibility[dependency] != "mechanism_signal_observed"
+        and outcomes_by_responsibility[dependency][0].module_outcome
+        != "mechanism_signal_observed"
     )
     if missing:
         return DevelopmentModuleExecutionDecision(
@@ -3437,6 +3556,116 @@ def decide_development_module_execution(
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentVerifiedOutcomeEvidenceContext:
+    protocol_digest: str
+    execution_intent_authority_digest: str
+    input_manifest_digest: str
+    candidate_config_digest: str
+    signal_criteria_digest: str
+    cluster_aggregate_digest: str
+    source_cluster_count: int
+    aggregate_metric_means: tuple[tuple[str, float], ...]
+    evidence_record_bindings: tuple[tuple[str, str], ...]
+    committed_marker_bindings: tuple[tuple[str, str, str], ...]
+    cross_fit_plan_digest: str | None
+    provisional_threshold_identities: tuple[str, ...]
+    verified_module_outcome: str
+    verified_candidate_recommendation: str
+    verified_blocking_responsibilities: tuple[str, ...]
+
+    def validate(
+        self,
+        protocol: FrozenDevelopmentExplorationProtocol,
+        responsibility_id: str,
+    ) -> tuple[str, ...]:
+        violations: list[str] = []
+        studies = {item.responsibility_id: item for item in protocol.module_matrix}
+        study = studies.get(responsibility_id)
+        if study is None:
+            return ("module_outcome_responsibility_invalid",)
+        if self.protocol_digest != protocol.digest():
+            violations.append("module_outcome_protocol_digest_invalid")
+        if self.candidate_config_digest != study.candidate_config_digest:
+            violations.append("module_outcome_candidate_config_digest_invalid")
+        if self.signal_criteria_digest != study.signal_criteria_digest():
+            violations.append("module_outcome_signal_criteria_digest_invalid")
+        for value, reason in (
+            (self.execution_intent_authority_digest, "module_outcome_execution_intent_digest_invalid"),
+            (self.input_manifest_digest, "module_outcome_input_manifest_digest_invalid"),
+            (self.cluster_aggregate_digest, "module_outcome_cluster_aggregate_digest_invalid"),
+        ):
+            if _DIGEST_PATTERN.fullmatch(value) is None:
+                violations.append(reason)
+        if not self.evidence_record_bindings or any(
+            not record_id or _DIGEST_PATTERN.fullmatch(record_digest) is None
+            for record_id, record_digest in self.evidence_record_bindings
+        ):
+            violations.append("module_outcome_evidence_record_bindings_invalid")
+        if len(self.committed_marker_bindings) != len(self.evidence_record_bindings):
+            violations.append("module_outcome_committed_marker_coverage_invalid")
+        elif any(
+            record_id != expected_record_id
+            or record_digest != expected_record_digest
+            or _DIGEST_PATTERN.fullmatch(marker_digest) is None
+            for (record_id, record_digest, marker_digest),
+            (expected_record_id, expected_record_digest) in zip(
+                self.committed_marker_bindings,
+                self.evidence_record_bindings,
+                strict=True,
+            )
+        ):
+            violations.append("module_outcome_committed_marker_binding_invalid")
+        if any(
+            _DIGEST_PATTERN.fullmatch(value) is None
+            for value in self.provisional_threshold_identities
+        ):
+            violations.append("module_outcome_provisional_threshold_identity_invalid")
+        if self.cross_fit_plan_digest is not None and (
+            _DIGEST_PATTERN.fullmatch(self.cross_fit_plan_digest) is None
+        ):
+            violations.append("module_outcome_cross_fit_plan_digest_invalid")
+        means = dict(self.aggregate_metric_means)
+        expected_aggregate_digest = _canonical_digest(
+            {
+                "responsibility_id": responsibility_id,
+                "source_cluster_count": self.source_cluster_count,
+                "aggregate_metric_means": self.aggregate_metric_means,
+                "evidence_record_bindings": self.evidence_record_bindings,
+            }
+        )
+        if self.cluster_aggregate_digest != expected_aggregate_digest:
+            violations.append("module_outcome_cluster_aggregate_replay_invalid")
+        if self.verified_module_outcome in {
+            "mechanism_signal_observed",
+            "mechanism_signal_not_observed",
+        }:
+            if self.source_cluster_count != study.scientific_source_cluster_scale:
+                violations.append("module_outcome_cluster_coverage_invalid")
+            if tuple(means) != study.metric_ids:
+                violations.append("module_outcome_aggregate_metric_coverage_invalid")
+            else:
+                observed = all(
+                    criterion.satisfied_by(means[criterion.metric_id])
+                    for criterion in study.signal_criteria
+                )
+                expected = (
+                    "mechanism_signal_observed"
+                    if observed
+                    else "mechanism_signal_not_observed"
+                )
+                if self.verified_module_outcome != expected:
+                    violations.append("module_outcome_signal_replay_invalid")
+                expected_recommendation = (
+                    "candidate_worth_further_selection"
+                    if observed
+                    else "candidate_not_recommended_for_selection"
+                )
+                if self.verified_candidate_recommendation != expected_recommendation:
+                    violations.append("module_outcome_recommendation_replay_invalid")
+        return tuple(dict.fromkeys(violations))
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentModuleOutcomeRecord:
     outcome_record_id: str
     responsibility_id: str
@@ -3447,6 +3676,15 @@ class DevelopmentModuleOutcomeRecord:
     evidence_record_ids: tuple[str, ...]
     evidence_record_digests: tuple[str, ...]
     provisional_threshold_identities: tuple[str, ...]
+    protocol_digest: str
+    execution_intent_authority_digest: str
+    input_manifest_digest: str
+    candidate_config_digest: str
+    signal_criteria_digest: str
+    cluster_aggregate_digest: str
+    cross_fit_plan_digest: str | None
+    evidence_record_bindings: tuple[tuple[str, str], ...]
+    committed_marker_bindings: tuple[tuple[str, str, str], ...]
     source_record_schema_version: str
     source_record_collection_schema_version: str
     scientific_claims_supported: bool
@@ -3459,11 +3697,18 @@ class DevelopmentModuleOutcomeRecord:
     def validate(
         self,
         protocol: FrozenDevelopmentExplorationProtocol,
+        *,
+        verified_evidence_context: DevelopmentVerifiedOutcomeEvidenceContext | None = None,
     ) -> tuple[str, ...]:
         violations: list[str] = []
         if type(protocol) is not FrozenDevelopmentExplorationProtocol or protocol.validate():
             return ("development_protocol_invalid",)
         studies = {item.responsibility_id: item for item in protocol.module_matrix}
+        if type(verified_evidence_context) is not DevelopmentVerifiedOutcomeEvidenceContext:
+            return ("module_outcome_verified_evidence_context_required",)
+        violations.extend(
+            verified_evidence_context.validate(protocol, self.responsibility_id)
+        )
         if self.responsibility_id not in studies:
             violations.append("module_outcome_responsibility_invalid")
         if self.module_outcome not in MODULE_OUTCOMES:
@@ -3505,6 +3750,27 @@ class DevelopmentModuleOutcomeRecord:
             )
         ):
             violations.append("module_outcome_evidence_record_digests_invalid")
+        if self.evidence_record_bindings != tuple(
+            zip(self.evidence_record_ids, self.evidence_record_digests, strict=True)
+        ):
+            violations.append("module_outcome_evidence_record_pairing_invalid")
+        context_bindings = {
+            "protocol_digest": verified_evidence_context.protocol_digest,
+            "execution_intent_authority_digest": verified_evidence_context.execution_intent_authority_digest,
+            "input_manifest_digest": verified_evidence_context.input_manifest_digest,
+            "candidate_config_digest": verified_evidence_context.candidate_config_digest,
+            "signal_criteria_digest": verified_evidence_context.signal_criteria_digest,
+            "cluster_aggregate_digest": verified_evidence_context.cluster_aggregate_digest,
+            "cross_fit_plan_digest": verified_evidence_context.cross_fit_plan_digest,
+            "evidence_record_bindings": verified_evidence_context.evidence_record_bindings,
+            "committed_marker_bindings": verified_evidence_context.committed_marker_bindings,
+            "provisional_threshold_identities": verified_evidence_context.provisional_threshold_identities,
+            "module_outcome": verified_evidence_context.verified_module_outcome,
+            "candidate_recommendation": verified_evidence_context.verified_candidate_recommendation,
+            "blocking_responsibilities": verified_evidence_context.verified_blocking_responsibilities,
+        }
+        if any(getattr(self, key) != value for key, value in context_bindings.items()):
+            violations.append("module_outcome_verified_context_binding_invalid")
         if any(
             _DIGEST_PATTERN.fullmatch(value) is None
             for value in self.provisional_threshold_identities
@@ -3523,17 +3789,14 @@ class DevelopmentModuleOutcomeRecord:
         return tuple(dict.fromkeys(violations))
 
 
-def create_development_module_outcome_record(
+def _create_verified_development_module_outcome_record(
     protocol: FrozenDevelopmentExplorationProtocol,
     *,
     responsibility_id: str,
     module_outcome: str,
     candidate_recommendation: str,
     recommendation_reason: str,
-    evidence_record_ids: Sequence[str],
-    evidence_record_digests: Sequence[str],
-    blocking_responsibilities: Sequence[str] = (),
-    provisional_threshold_identities: Sequence[str] = (),
+    verified_evidence_context: DevelopmentVerifiedOutcomeEvidenceContext,
 ) -> DevelopmentModuleOutcomeRecord:
     studies = {item.responsibility_id: item for item in protocol.module_matrix}
     if responsibility_id not in studies or module_outcome not in MODULE_OUTCOMES:
@@ -3543,10 +3806,19 @@ def create_development_module_outcome_record(
         "module_outcome": module_outcome,
         "candidate_recommendation": candidate_recommendation,
         "recommendation_reason": recommendation_reason,
-        "blocking_responsibilities": tuple(blocking_responsibilities),
-        "evidence_record_ids": tuple(evidence_record_ids),
-        "evidence_record_digests": tuple(evidence_record_digests),
-        "provisional_threshold_identities": tuple(provisional_threshold_identities),
+        "blocking_responsibilities": verified_evidence_context.verified_blocking_responsibilities,
+        "evidence_record_ids": tuple(item[0] for item in verified_evidence_context.evidence_record_bindings),
+        "evidence_record_digests": tuple(item[1] for item in verified_evidence_context.evidence_record_bindings),
+        "provisional_threshold_identities": verified_evidence_context.provisional_threshold_identities,
+        "protocol_digest": verified_evidence_context.protocol_digest,
+        "execution_intent_authority_digest": verified_evidence_context.execution_intent_authority_digest,
+        "input_manifest_digest": verified_evidence_context.input_manifest_digest,
+        "candidate_config_digest": verified_evidence_context.candidate_config_digest,
+        "signal_criteria_digest": verified_evidence_context.signal_criteria_digest,
+        "cluster_aggregate_digest": verified_evidence_context.cluster_aggregate_digest,
+        "cross_fit_plan_digest": verified_evidence_context.cross_fit_plan_digest,
+        "evidence_record_bindings": verified_evidence_context.evidence_record_bindings,
+        "committed_marker_bindings": verified_evidence_context.committed_marker_bindings,
         "source_record_schema_version": RECORD_SCHEMA_VERSION,
         "source_record_collection_schema_version": (
             RECORD_COLLECTION_SCHEMA_VERSION
@@ -3557,7 +3829,10 @@ def create_development_module_outcome_record(
         outcome_record_id=_canonical_digest(payload),
         **payload,
     )
-    violations = outcome.validate(protocol)
+    violations = outcome.validate(
+        protocol,
+        verified_evidence_context=verified_evidence_context,
+    )
     if violations:
         raise ValueError(",".join(violations))
     return outcome

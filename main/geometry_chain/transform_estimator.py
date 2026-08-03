@@ -12,6 +12,7 @@ from typing import Iterable, Sequence
 import torch
 
 from main.shared.key_schedule import (
+    DerivedWrongKeyMaterial,
     derive_wrong_key_material,
     identify_root_key,
     stable_json_utf8,
@@ -734,26 +735,45 @@ def _estimation_identity_digest(
     return sha256(stable_json_utf8(identity)).hexdigest()
 
 
-def _validate_observation(observation: object, registered_key: str) -> QkGeometrySyncResult:
+def _validate_observation(
+    observation: object,
+    detection_key: str | DerivedWrongKeyMaterial,
+) -> QkGeometrySyncResult:
     if type(observation) is not QkGeometrySyncResult:
         raise GeometricTransformEstimatorError(
             "observation must be QkGeometrySyncResult"
         )
     try:
-        validate_qk_geometry_sync_result(observation, registered_key)
+        validate_qk_geometry_sync_result(observation, detection_key)
     except QkGeometrySyncError as exc:
         raise GeometricTransformEstimatorError(
             "Q/K geometry observation validation failed"
         ) from exc
-    if observation.key_role != "registered" or observation.wrong_key_index is not None:
-        raise GeometricTransformEstimatorError(
-            "estimator observation must be bound to the registered geometry key"
-        )
-    if identify_root_key(registered_key).root_key_public_digest != (
-        observation.root_key_public_digest
+    expected_role = (
+        "wrong"
+        if type(detection_key) is DerivedWrongKeyMaterial
+        else "registered"
+    )
+    expected_wrong_index = (
+        detection_key.wrong_key_index
+        if type(detection_key) is DerivedWrongKeyMaterial
+        else None
+    )
+    if (
+        observation.key_role != expected_role
+        or observation.wrong_key_index != expected_wrong_index
     ):
         raise GeometricTransformEstimatorError(
-            "registered key does not match Q/K observation key family"
+            "estimator observation must match the supplied geometry key role"
+        )
+    expected_public_digest = (
+        detection_key.registered_root_key_public_digest
+        if type(detection_key) is DerivedWrongKeyMaterial
+        else identify_root_key(detection_key).root_key_public_digest
+    )
+    if expected_public_digest != observation.root_key_public_digest:
+        raise GeometricTransformEstimatorError(
+            "detection key does not match Q/K observation key family"
         )
     if len(observation.layers) != 2:
         raise GeometricTransformEstimatorError("two relation layers are required")
@@ -767,14 +787,16 @@ def _validate_observation(observation: object, registered_key: str) -> QkGeometr
 
 def geometric_transform_estimator(
     observation: QkGeometrySyncResult,
-    registered_key: str,
+    detection_key: str | DerivedWrongKeyMaterial,
     *,
     epsilon_inlier: float,
 ) -> GeometricTransformEstimation:
     """Search the frozen transform family and return raw metrics, never reliability."""
 
-    if type(registered_key) is not str:
-        raise GeometricTransformEstimatorError("registered_key must be root key text")
+    if type(detection_key) not in {str, DerivedWrongKeyMaterial}:
+        raise GeometricTransformEstimatorError(
+            "detection_key must be root key text or derived wrong-key material"
+        )
     if (
         isinstance(epsilon_inlier, bool)
         or not isinstance(epsilon_inlier, (int, float))
@@ -785,10 +807,10 @@ def geometric_transform_estimator(
             "epsilon_inlier must be a fitted positive finite value"
         )
     epsilon = float(epsilon_inlier)
-    observation = _validate_observation(observation, registered_key)
+    observation = _validate_observation(observation, detection_key)
 
     registered_projections = projection_for_detection_key(
-        observation, registered_key
+        observation, detection_key
     )
     registered_selected, second, identity = _run_search(
         observation,

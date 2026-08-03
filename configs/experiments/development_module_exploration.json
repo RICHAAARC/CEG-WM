@@ -171,10 +171,10 @@
     "authority_id": "development_high_frequency_detector_threshold_authority",
     "responsibility_id": "hf_detector",
     "detector_identity": "development_blind_high_frequency_detector",
-    "method_detector_identity": "0d4ece9d74c97ecc4f32a1c1ef27d984ae7bbe815a75e9a7a182225568cf80d3",
-    "method_detector_config_digest": "8d033b8e71905931a193800adb106037ea87ed32cc16ffcb54ab2e4c354782e1",
+    "method_detector_identity": "2232ca1de3480313d4ba4cfeca299eb7e295b8f4c06c23337adc29c03f442c0f",
+    "method_detector_config_digest": "222bfe2cdece5a0d68ab4db996409f69e92981a1e061566c632f8972ad171bd9",
     "detector_mode": "hf_only",
-    "preprocessing_identity": "final_image_vae_posterior_mode",
+    "preprocessing_identity": "rgb8_public_image_float32_unit_interval",
     "raw_rectified_preprocessing_same": true,
     "registered_candidate_identity": "blind_high_frequency_detector_candidate",
     "registered_candidate_ids": [
@@ -187,11 +187,11 @@
         "values": ["hf_sparse_tail"]
       }
     ],
-    "registered_candidate_config_digest": "8dd40b84d23fbeaa602bb45e106681e22f1a7253c4fcb959c87af9f56d54ee98",
+    "registered_candidate_config_digest": "5663ca14be496c8d33eb7c1975e8375638ec44ee5279ec2abf0bd58560cb4149",
     "registered_key_schedule_candidate_id": "key_schedule_sha256_counter",
     "registered_key_schedule_derivation_identity": "main_shared_key_schedule_identify_root_key",
     "registered_key_schedule_config_digest": "8696a3fbaabb39149a3b7b30f08cdcd12b64d45bebd14658d08c09805f5b33c0",
-    "public_key_relation": "registered_detection_public_digests_distinct"
+    "public_key_relation": "registered_detection_public_digests_equal"
   },
   "execution_intent_policy": {
     "authority_role": "create_only_before_scientific_records",
@@ -219,6 +219,7 @@
     "attack_condition_switching_forbidden": true
   },
   "geometry_study": {
+    "ambiguous_control_max_top_two_gap": 0.05,
     "operation_cases": [
       {
         "case_id": "identity_transform",
@@ -291,7 +292,7 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "key_stream_candidate", "values": ["key_schedule_sha256_counter"]}
       ],
-      "candidate_config_digest": "551fa191f481c2318b778ea9f3e113c6db0586e3fba746e8c34202173ccbc558",
+      "candidate_config_digest": "92faac91c30b845ae46e731e9e92f706e709b4d7ca8de3d33a90f40baf10b0d5",
       "paired_ablation_identity": "wrong_and_public_key_identity_ablation",
       "negative_control_case_ids": ["wrong_key_roster", "public_noise_secret_independence"],
       "metric_ids": ["key_attribution_separation", "domain_collision_count"],
@@ -319,7 +320,7 @@
         {"parameter_id": "adaptive_router_candidate", "values": ["routing_stqr"]},
         {"parameter_id": "disabled_uniform_control_candidate", "values": ["routing_uniform_control"]}
       ],
-      "candidate_config_digest": "fe3d26cbdc328ce2f8798c21d65ee022deaf2d47ff11b7077b0207bdc88f893d",
+      "candidate_config_digest": "1d76286b6d1bd30e9b9e6192ebd452f8ce5663c7104105700f3a0c65349784cc",
       "paired_ablation_identity": "disabled_uniform_routing_ablation",
       "negative_control_case_ids": ["routing_uniform_control", "attack_label_blindness"],
       "metric_ids": ["matched_budget_incremental_tpr", "routing_coverage", "quality_delta"],
@@ -347,7 +348,7 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "carrier_candidate", "values": ["lf_low_pass"]}
       ],
-      "candidate_config_digest": "3d8be98e37aada2eaa98da1db0095e24911093f994a256a39ab1f70f40660e23",
+      "candidate_config_digest": "a1d2b8fd2abe903d79a2b490feea1e30f56aa99862881cb6ea67c2b890daffa5",
       "paired_ablation_identity": "low_frequency_write_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked", "hf_only"],
       "metric_ids": ["lf_attribution_tpr", "lf_primary_null_fpr", "quality_delta"],
@@ -375,7 +376,7 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "carrier_candidate", "values": ["hf_sparse_tail"]}
       ],
-      "candidate_config_digest": "9f9cfec2e5a8c2c84c60806a47031ca818b0fac0b5fa9edb35f8ed665ca326f5",
+      "candidate_config_digest": "cb2df2ef4123875e1b24ae7a988b703859940c00264e203811bcc1c8a76e3d05",
       "paired_ablation_identity": "high_frequency_write_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked", "clean_pair"],
       "metric_ids": ["hf_attribution_tpr", "hf_primary_null_fpr", "quality_delta"],
@@ -408,7 +409,7 @@
         {"parameter_id": "content_relative_l2", "values": ["3/250"]},
         {"parameter_id": "mixing_coefficients", "values": ["1/4", "1/2", "3/4"]}
       ],
-      "candidate_config_digest": "0b5f6f75e339e172ab54709f610390dfa44d4fafdfa339f150b9068bdd6a5312",
+      "candidate_config_digest": "d6cff9c203b25ef227b8ce5d46b761cc5b1b9e54b1d15e7c3f7e3a205933ab1c",
       "paired_ablation_identity": "single_branch_embedding_ablation",
       "negative_control_case_ids": ["hf_only", "lf_only", "routing_uniform_control"],
       "metric_ids": ["realized_total_relative_l2", "matched_budget_quality_delta"],
@@ -435,7 +436,7 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "detector_candidate", "values": ["lf_low_pass"]}
       ],
-      "candidate_config_digest": "1b40d6a3cc71dbebf4ce1b87b985c81bc2059f81d0077f3857542fcd99e92a63",
+      "candidate_config_digest": "2c03066e8434dcd93af6b62f8a1b3c660c9630531f2cca38dcbdea0f0afa5c57",
       "paired_ablation_identity": "low_frequency_detector_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked", "content_disabled"],
       "metric_ids": ["lf_tpr_at_selection_fpr", "lf_wrong_key_rate"],
@@ -462,7 +463,7 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "detector_candidate", "values": ["hf_sparse_tail"]}
       ],
-      "candidate_config_digest": "8dd40b84d23fbeaa602bb45e106681e22f1a7253c4fcb959c87af9f56d54ee98",
+      "candidate_config_digest": "5663ca14be496c8d33eb7c1975e8375638ec44ee5279ec2abf0bd58560cb4149",
       "paired_ablation_identity": "high_frequency_detector_disabled_ablation",
       "negative_control_case_ids": ["wrong_key", "unwatermarked"],
       "metric_ids": ["hf_tpr_at_frozen_fpr", "hf_wrong_key_rate"],
@@ -491,7 +492,7 @@
         {"parameter_id": "combination_functions", "values": ["hf_only_standardized_score", "weighted_hf_lf_standardized_score", "maximum_hf_lf_standardized_score"]},
         {"parameter_id": "mixing_coefficients", "values": ["1/4", "1/2", "3/4"]}
       ],
-      "candidate_config_digest": "842b3a31c512849ccfc14d1ed9175949220d1fdfe2040ca9165e7e916e050539",
+      "candidate_config_digest": "db4cf5fc4ff28b8abca407276aa3e9575c1f68ee2405ead26f07c3a6ea7e743c",
       "paired_ablation_identity": "high_frequency_only_detector_ablation",
       "negative_control_case_ids": ["hf_only_standardized_score_control", "wrong_key", "unwatermarked"],
       "metric_ids": ["combined_tpr", "combined_primary_null_fpr", "hf_non_degradation", "wrong_key_rate"],
@@ -521,7 +522,7 @@
         {"parameter_id": "relation_candidate", "values": ["qk_relation_similarity"]},
         {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
       ],
-      "candidate_config_digest": "751e99dbc4665def92db67ed74c4b76ae2afe444ea5228762f4c0d68d4eec470",
+      "candidate_config_digest": "ea6059c81865e03ad4572f8d851f16e5388fd480a868ea8bf6e3b1fb7efc03c0",
       "paired_ablation_identity": "wrong_geometry_key_sync_ablation",
       "negative_control_case_ids": ["wrong_geometry_key", "geometry_disabled"],
       "metric_ids": ["relation_score_gain", "wrong_key_relation_margin", "quality_delta"],
@@ -551,7 +552,7 @@
         {"parameter_id": "estimator_candidate", "values": ["rectification_similarity"]},
         {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
       ],
-      "candidate_config_digest": "cc83616b4ab76b1374f76a218682d34203be58652a022e195d3366cb83f09900",
+      "candidate_config_digest": "fb255dcabc2bab475df4991134e961bb6d1d15498db9a99d06fd756dceee2677",
       "paired_ablation_identity": "oracle_transform_input_ablation",
       "negative_control_case_ids": ["identity", "wrong_geometry_key", "ambiguous_transform", "oracle_diagnostic_only"],
       "metric_ids": ["rotation_error", "scale_error", "translation_error", "coverage", "residual"],
@@ -583,7 +584,7 @@
         {"parameter_id": "reliability_candidate", "values": ["rectification_similarity"]},
         {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
       ],
-      "candidate_config_digest": "7081aab30d606122c6513e48b39d1f5c60bd8fbeaaf24fcd7c63553fc4e2dbd0",
+      "candidate_config_digest": "477a99a0616969b2f6605f9c2b32309d595024d21c06348260c1d1bf00d25cf0",
       "paired_ablation_identity": "geometry_reliability_disabled_ablation",
       "negative_control_case_ids": ["wrong_geometry_key", "low_coverage", "boundary_solution", "non_finite_metric"],
       "metric_ids": ["reliable_accept_rate", "unreliable_reject_rate", "false_reliable_rate"],
@@ -612,7 +613,7 @@
         {"parameter_id": "rectifier_candidate", "values": ["rectification_similarity"]},
         {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
       ],
-      "candidate_config_digest": "65ad381b572e5092aa2bfca0153551702e9c39920ebbcc73d0882960e29b6b6e",
+      "candidate_config_digest": "6df2a3871bfa29084b3f45fbb29d61673eb0e91fc9b1c430b737326c2462ae75",
       "paired_ablation_identity": "rectification_disabled_ablation",
       "negative_control_case_ids": ["identity_warp", "rectification_disabled", "oracle_diagnostic_only"],
       "metric_ids": ["rectification_quality", "same_detector_score_delta", "valid_support"],
@@ -641,7 +642,7 @@
         {"parameter_id": "joint_candidate", "values": ["joint_conditional_recovery"]},
         {"parameter_id": "geometry_content_ratio_candidates", "values": ["1/16", "1/8", "1/4"]}
       ],
-      "candidate_config_digest": "50d0593df67f6b962f5ebb53f2e225157e72eefb5fe5e85e2ee74a6022063b89",
+      "candidate_config_digest": "0e4c229ac2e8135fd2dae7306436a555552b6557eadd3db36258a6f5b42146d4",
       "paired_ablation_identity": "raw_content_decision_ablation",
       "negative_control_case_ids": ["raw_only", "geometry_always", "geometry_disabled", "oracle_diagnostic_only"],
       "metric_ids": ["incremental_tpr", "end_to_end_fpr", "trigger_rate", "false_rescue_rate"],

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+import experiments.protocol.development_exploration as development_protocol_module
 
 from experiments.metrics.development_exploration import (
     DEVELOPMENT_METRIC_ROLE,
@@ -40,12 +41,12 @@ from experiments.protocol.development_exploration import (
     REGISTERED_STUDY_ROLE_BINDINGS,
     WIRING_SOURCE_CLUSTER_COUNT,
     DevelopmentPrimaryNullKeyBinding,
+    DevelopmentModuleOutcomeRecord,
     DevelopmentThresholdFitInput,
     assert_study_role_manifests_isolated,
     authorize_development_provisional_threshold,
     bind_study_role_manifest,
     build_development_cross_fit_plan,
-    create_development_module_outcome_record,
     create_development_provisional_threshold,
     create_development_threshold_detector_binding,
     create_development_threshold_fit_input,
@@ -57,6 +58,7 @@ from experiments.protocol.development_exploration import (
     load_frozen_development_exploration_protocol,
 )
 from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
+from main import identify_root_key
 from experiments.protocol.development_records import (
     DEVELOPMENT_CLAIM_BOUNDARY,
     DEVELOPMENT_RECORD_COLLECTION_ROLE,
@@ -109,6 +111,14 @@ def _recompute_candidate_config_digest(entry: dict[str, object]) -> None:
             "negative_control_case_ids": entry["negative_control_case_ids"],
             "paired_ablation_identity": entry["paired_ablation_identity"],
             "responsibility_id": entry["responsibility_id"],
+            "signal_criteria": tuple(
+                (
+                    item["metric_id"],
+                    item["comparison"],
+                    float(item["threshold"]),
+                )
+                for item in entry["signal_criteria"]
+            ),
         }
     )
 
@@ -152,7 +162,19 @@ def _unit(
 ) -> SplitAssignment:
     prompt_digest = f"{index + 1:064x}"
     lineage_digest = f"{index + 1001:064x}"
-    registered_public, detection_public = _fixture_public_key_digests(prompt_digest)
+    if split == DEVELOPMENT_SPLIT:
+        registered_public, detection_public = _fixture_public_key_digests(
+            prompt_digest
+        )
+    else:
+        registered_public = _digest(
+            {
+                "prompt_digest": prompt_digest,
+                "split": split,
+                "role": "registered_public_key",
+            }
+        )
+        detection_public = registered_public
     key_family_digest = derive_development_primary_null_key_family_digest(
         threshold_authority,
         registered_key_public_digest=registered_public,
@@ -205,20 +227,11 @@ def _development_manifest(count: int) -> FrozenSplitManifest:
 
 
 def _fixture_public_key_digests(prompt_digest: str) -> tuple[str, str]:
-    return (
-        _digest(
-            {
-                "prompt_digest": prompt_digest,
-                "role": "registered_public_key",
-            }
-        ),
-        _digest(
-            {
-                "prompt_digest": prompt_digest,
-                "role": "development_primary_null_detection_key",
-            }
-        ),
-    )
+    del prompt_digest
+    registered = identify_root_key(
+        "development-runner-cpu-wiring-key"
+    ).root_key_public_digest
+    return registered, registered
 
 
 def _primary_null_record(
@@ -321,7 +334,7 @@ def _primary_null_record(
         key_control_trace={
             "registered_key_public_digest": key_binding.registered_key_public_digest,
             "primary_null_detection_key_public_digest": key_binding.detection_key_public_digest,
-            "primary_null_control_identity": "unwatermarked_wrong_key_primary_null",
+            "primary_null_control_identity": "unwatermarked_registered_key_primary_null",
         },
         decision_trace={"positive_source": None},
         provenance_trace={
@@ -412,9 +425,7 @@ def _rebind_manifest_public_roster(
             registered_public = _digest(
                 {"rebound_index": index, "role": "registered_public_key"}
             )
-            detection_public = _digest(
-                {"rebound_index": index, "role": "primary_null_detection_key"}
-            )
+            detection_public = registered_public
             key_family = derive_development_primary_null_key_family_digest(
                 authority,
                 registered_key_public_digest=registered_public,
@@ -523,7 +534,7 @@ def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
     assert authority.responsibility_id == "hf_detector"
     assert authority.detector_mode == "hf_only"
     assert authority.preprocessing_identity == (
-        "final_image_vae_posterior_mode"
+        "rgb8_public_image_float32_unit_interval"
     )
     assert authority.registered_candidate_ids == MODULE_CANDIDATE_IDS["hf_detector"]
     assert authority.registered_candidate_parameter_bindings == (
@@ -978,10 +989,10 @@ def test_threshold_binds_manifest_detector_rule_and_fold() -> None:
     assert threshold.validate(plan) == ()
     detector_payload = json.loads(threshold.detector_config_payload_json)
     assert detector_payload["preprocessing_identity"] == (
-        "final_image_vae_posterior_mode"
+        "rgb8_public_image_float32_unit_interval"
     )
     assert detector_payload["public_key_relation"] == (
-        "registered_detection_public_digests_distinct"
+        "registered_detection_public_digests_equal"
     )
     assert detector_payload["primary_null_key_roster_digest"] == (
         threshold.detector_binding.primary_null_key_roster_digest
@@ -1143,7 +1154,7 @@ def test_threshold_authority_rejects_full_public_roster_replacement() -> None:
         replace(
             item,
             registered_key_public_digest=f"{index + 400:064x}",
-            detection_key_public_digest=f"{index + 800:064x}",
+            detection_key_public_digest=f"{index + 400:064x}",
         )
         for index, item in enumerate(
             plan.execution_intent_authority.public_key_roster
@@ -1357,28 +1368,15 @@ def test_dependency_stop_rule_uses_implementation_blocked_semantics() -> None:
     )
     assert not missing.approved
     assert missing.decision_reason == "prerequisite_outcome_missing"
-    blocked = decide_development_module_execution(
-        protocol,
-        "content_embedder",
-        {
-            "content_router": "mechanism_signal_observed",
-            "lf_carrier": "mechanism_signal_not_observed",
-            "hf_carrier": "mechanism_signal_observed",
-        },
-    )
-    assert not blocked.approved
-    assert blocked.decision_reason == DEPENDENCY_STOP_RULE
-    assert blocked.blocking_responsibilities == ("lf_carrier",)
-    approved = decide_development_module_execution(
-        protocol,
-        "content_embedder",
-        {
-            "content_router": "mechanism_signal_observed",
-            "lf_carrier": "mechanism_signal_observed",
-            "hf_carrier": "mechanism_signal_observed",
-        },
-    )
-    assert approved.approved
+    with pytest.raises(
+        ValueError,
+        match="development_verified_module_outcome_required",
+    ):
+        decide_development_module_execution(
+            protocol,
+            "content_embedder",
+            {"content_router": "mechanism_signal_observed"},
+        )
 
 
 @pytest.mark.unit
@@ -1404,68 +1402,38 @@ def test_outcomes_and_recommendations_are_separate_exact_identities() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("recommendation", CANDIDATE_RECOMMENDATIONS)
-def test_observed_signal_allows_independent_candidate_recommendation(
-    recommendation: str,
-) -> None:
+def test_module_outcome_requires_verified_evidence_context() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
-    outcome = create_development_module_outcome_record(
-        protocol,
+    assert not hasattr(
+        development_protocol_module,
+        "create_development_module_outcome_record",
+    )
+    outcome = DevelopmentModuleOutcomeRecord(
+        outcome_record_id="0" * 64,
         responsibility_id="hf_detector",
         module_outcome="mechanism_signal_observed",
-        candidate_recommendation=recommendation,
-        recommendation_reason="development records support this separate recommendation",
-        evidence_record_ids=("record_for_high_frequency_detector",),
+        candidate_recommendation="candidate_worth_further_selection",
+        recommendation_reason="unverified caller assertion",
+        blocking_responsibilities=(),
+        evidence_record_ids=("nonexistent_record",),
         evidence_record_digests=("1" * 64,),
+        provisional_threshold_identities=(),
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest="2" * 64,
+        input_manifest_digest="3" * 64,
+        candidate_config_digest="4" * 64,
+        signal_criteria_digest="5" * 64,
+        cluster_aggregate_digest="6" * 64,
+        cross_fit_plan_digest=None,
+        evidence_record_bindings=(("nonexistent_record", "1" * 64),),
+        committed_marker_bindings=(("nonexistent_record", "1" * 64, "7" * 64),),
+        source_record_schema_version=RECORD_SCHEMA_VERSION,
+        source_record_collection_schema_version=RECORD_COLLECTION_SCHEMA_VERSION,
+        scientific_claims_supported=False,
     )
-    assert outcome.validate(protocol) == ()
-    assert outcome.source_record_schema_version == RECORD_SCHEMA_VERSION
-    assert outcome.source_record_collection_schema_version == (
-        RECORD_COLLECTION_SCHEMA_VERSION
+    assert outcome.validate(protocol) == (
+        "module_outcome_verified_evidence_context_required",
     )
-    assert outcome.scientific_claims_supported is False
-
-
-@pytest.mark.unit
-def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
-    protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
-    with pytest.raises(
-        ValueError,
-        match="candidate_recommendation_not_supported_by_outcome",
-    ):
-        create_development_module_outcome_record(
-            protocol,
-            responsibility_id="hf_detector",
-            module_outcome="mechanism_signal_not_observed",
-            candidate_recommendation="candidate_worth_further_selection",
-            recommendation_reason="forged recommendation",
-            evidence_record_ids=("record",),
-            evidence_record_digests=("1" * 64,),
-        )
-    own_block = create_development_module_outcome_record(
-        protocol,
-        responsibility_id="key_schedule",
-        module_outcome="implementation_blocked",
-        candidate_recommendation="candidate_not_recommended_for_selection",
-        recommendation_reason="key schedule implementation could not execute",
-        blocking_responsibilities=("key_schedule",),
-        evidence_record_ids=("key_schedule_implementation_failure_record",),
-        evidence_record_digests=("2" * 64,),
-    )
-    assert own_block.validate(protocol) == ()
-    with pytest.raises(
-        ValueError,
-        match="implementation_blocking_responsibility_missing",
-    ):
-        create_development_module_outcome_record(
-            protocol,
-            responsibility_id="geometric_transform_estimator",
-            module_outcome="implementation_blocked",
-            candidate_recommendation="candidate_not_recommended_for_selection",
-            recommendation_reason="dependency did not pass its development rule",
-            evidence_record_ids=("record",),
-            evidence_record_digests=("3" * 64,),
-        )
 
 
 @pytest.mark.unit
@@ -1476,6 +1444,8 @@ def test_blocked_and_negative_outcomes_cannot_recommend_selection() -> None:
         ("unregistered_candidate", "candidate_ids_unregistered"),
         ("unregistered_metric", "metric_ids_unregistered"),
         ("unregistered_control", "negative_controls_unregistered"),
+        ("qk_quality_criterion_relaxed", "signal_criteria_unregistered"),
+        ("joint_fpr_criterion_relaxed", "signal_criteria_unregistered"),
         ("ratio_roster_drift", "candidate_parameters_unregistered"),
         ("missing_metric", "metric_ids_missing"),
         ("expanded_split", "development_allowed_split_invalid"),
@@ -1512,6 +1482,14 @@ def test_config_loader_rejects_per_module_and_protocol_drift(
     elif mutation == "unregistered_control":
         entry = document["module_matrix"][0]
         entry["negative_control_case_ids"] = ["unregistered_key_control"]
+        _recompute_candidate_config_digest(entry)
+    elif mutation == "qk_quality_criterion_relaxed":
+        entry = document["module_matrix"][8]
+        entry["signal_criteria"][2]["threshold"] = 999.0
+        _recompute_candidate_config_digest(entry)
+    elif mutation == "joint_fpr_criterion_relaxed":
+        entry = document["module_matrix"][12]
+        entry["signal_criteria"][1]["threshold"] = 1.0
         _recompute_candidate_config_digest(entry)
     elif mutation == "ratio_roster_drift":
         entry = document["module_matrix"][8]

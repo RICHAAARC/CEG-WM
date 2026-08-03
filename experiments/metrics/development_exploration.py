@@ -451,30 +451,55 @@ def metric_geometric_transform_estimator(
 def metric_geometry_reliability(
     source_cluster_id: str,
     *,
-    reliability_accepted: bool,
+    registered_reliability_accepted: bool,
+    wrong_key_reliability_accepted: bool,
     is_unreliable_control: bool,
-    reliability_identity_digest: str,
-    estimation_identity_digest: str,
+    registered_reliability_identity_digest: str,
+    wrong_key_reliability_identity_digest: str,
+    registered_estimation_identity_digest: str,
+    wrong_key_estimation_identity_digest: str,
 ) -> DevelopmentMetricObservation:
-    if type(reliability_accepted) is not bool or type(is_unreliable_control) is not bool:
+    if any(
+        type(value) is not bool
+        for value in (
+            registered_reliability_accepted,
+            wrong_key_reliability_accepted,
+            is_unreliable_control,
+        )
+    ):
         raise DevelopmentMetricError("reliability decisions must be booleans")
+    reliable_registered = (
+        registered_reliability_accepted and not is_unreliable_control
+    )
+    unreliable_rejected = (
+        not wrong_key_reliability_accepted
+        and (
+            not is_unreliable_control
+            or not registered_reliability_accepted
+        )
+    )
+    false_reliable = wrong_key_reliability_accepted or (
+        is_unreliable_control and registered_reliability_accepted
+    )
     return _observation(
         responsibility_id="geometry_reliability",
         source_cluster_id=source_cluster_id,
         metric_values={
             "reliable_accept_rate": float(
-                reliability_accepted and not is_unreliable_control
+                reliable_registered
             ),
             "unreliable_reject_rate": float(
-                not reliability_accepted and is_unreliable_control
+                unreliable_rejected
             ),
             "false_reliable_rate": float(
-                reliability_accepted and is_unreliable_control
+                false_reliable
             ),
         },
         result_identity_digests=(
-            reliability_identity_digest,
-            estimation_identity_digest,
+            registered_reliability_identity_digest,
+            wrong_key_reliability_identity_digest,
+            registered_estimation_identity_digest,
+            wrong_key_estimation_identity_digest,
         ),
     )
 

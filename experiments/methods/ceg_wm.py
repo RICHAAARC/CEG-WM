@@ -677,13 +677,13 @@ class CegWmExperimentAdapter:
     def estimate_geometric_transform(
         self,
         observation: QkGeometrySyncResult,
-        registered_key: str,
+        detection_key: str | DerivedWrongKeyMaterial,
         *,
         epsilon_inlier: float,
     ) -> ComponentCallObservation[GeometricTransformEstimation]:
         result = geometric_transform_estimator(
             observation,
-            registered_key,
+            detection_key,
             epsilon_inlier=epsilon_inlier,
         )
         return self._observe("geometric_transform_estimator", result)

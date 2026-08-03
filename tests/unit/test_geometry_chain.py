@@ -222,6 +222,17 @@ def test_qk_relation_consumption():
     assert wrong_key_result.descriptor_digest == original.descriptor_digest
     assert wrong_key_result.projection_digest != original.projection_digest
     assert wrong_key_result.key_role == "wrong"
+    wrong_estimation = geometric_transform_estimator(
+        wrong_key_result,
+        wrong_material,
+        epsilon_inlier=0.8,
+    )
+    assert wrong_estimation.observation_projection_digest == (
+        wrong_key_result.projection_digest
+    )
+    assert wrong_estimation.registered_root_key_public_digest == (
+        wrong_key_result.root_key_public_digest
+    )
 
     large_observations, large_result = _actual_qk_observation(side=10, seed=902)
     layer = large_result.layers[0]

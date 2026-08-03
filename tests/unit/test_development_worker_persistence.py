@@ -460,6 +460,11 @@ def test_commit_writes_only_exact_formal_record_at_fixed_member_path(tmp_path: P
     )
     assert len(verified_records) == 1
     assert verified_records[0].record_id == payload["record_id"]
+    verified_evidence = store.verified_terminal_scientific_evidence(
+        now_epoch_seconds=201
+    )
+    assert verified_evidence == ((verified_records[0], marker),)
+    assert verified_evidence[0][1].digest() == marker.digest()
 
 
 @pytest.mark.quick

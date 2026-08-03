@@ -57,6 +57,7 @@ from experiments.protocol.development_exploration import (
     MODULE_OUTCOMES,
     DevelopmentProvisionalThreshold,
     DevelopmentModuleOutcomeRecord,
+    DevelopmentVerifiedOutcomeEvidenceContext,
     DevelopmentStudyUnit,
     FrozenDevelopmentCrossFitPlan,
     FrozenDevelopmentExecutionIntentAuthority,
@@ -65,7 +66,7 @@ from experiments.protocol.development_exploration import (
     create_development_provisional_threshold,
     create_development_threshold_detector_binding,
     create_development_threshold_fit_input,
-    create_development_module_outcome_record,
+    _create_verified_development_module_outcome_record,
 )
 from experiments.protocol.development_records import (
     DEVELOPMENT_RECORD_COLLECTION_ROLE,
@@ -75,6 +76,7 @@ from experiments.protocol.development_records import (
 from experiments.protocol.internal_records import InternalValidationRecord
 from experiments.protocol.internal_splits import AnalysisUnitIdentity
 from experiments.runners.development_persistence import (
+    CommittedUnit,
     CommittedUnit,
     DevelopmentPersistentStore,
     FrozenDevelopmentUnitBinding,
@@ -806,6 +808,9 @@ class DevelopmentExplorationRunner:
         *,
         responsibility_id: str,
         cross_fit_plans: Mapping[str, FrozenDevelopmentCrossFitPlan] | None = None,
+        provisional_thresholds_by_responsibility: Mapping[
+            str, Sequence[DevelopmentProvisionalThreshold]
+        ] | None = None,
         now_epoch_seconds: int,
     ) -> DevelopmentModuleOutcomeRecord:
         """Rebuild outcomes only from terminal records verified by the store."""
@@ -813,9 +818,21 @@ class DevelopmentExplorationRunner:
         if self.persistence_store is None:
             raise DevelopmentRunnerError("verified module outcome requires persistence")
         plans = {} if cross_fit_plans is None else dict(cross_fit_plans)
-        records = self.persistence_store.verified_terminal_scientific_records(
+        thresholds_by_role = (
+            {}
+            if provisional_thresholds_by_responsibility is None
+            else {
+                role: tuple(values)
+                for role, values in provisional_thresholds_by_responsibility.items()
+            }
+        )
+        verified_evidence = self.persistence_store.verified_terminal_scientific_evidence(
             now_epoch_seconds=now_epoch_seconds
         )
+        records = tuple(record for record, _marker in verified_evidence)
+        markers_by_record_id = {
+            record.record_id: marker for record, marker in verified_evidence
+        }
         studies = tuple(self.protocol.module_matrix)
         target_index = next(
             (
@@ -828,6 +845,7 @@ class DevelopmentExplorationRunner:
         if target_index < 0:
             raise DevelopmentRunnerError("module outcome responsibility is unknown")
         outcomes: dict[str, DevelopmentModuleOutcomeRecord] = {}
+        outcome_contexts: dict[str, DevelopmentVerifiedOutcomeEvidenceContext] = {}
         for study in studies[: target_index + 1]:
             evidence = tuple(
                 record
@@ -852,13 +870,38 @@ class DevelopmentExplorationRunner:
                 raise DevelopmentRunnerError(
                     "cross-fit plan supplied for non-detector outcome"
                 )
-            outcome = self._build_module_outcome_record(
+            thresholds = thresholds_by_role.get(study.responsibility_id, ())
+            if study.responsibility_id == "hf_detector":
+                if (
+                    len(thresholds) != len(plan.folds)
+                    or {item.fold_index for item in thresholds}
+                    != set(range(len(plan.folds)))
+                    or any(item.validate(plan) for item in thresholds)
+                ):
+                    raise DevelopmentRunnerError(
+                        "verified high-frequency detector outcome requires all provisional thresholds"
+                    )
+            elif thresholds:
+                raise DevelopmentRunnerError(
+                    "provisional thresholds supplied for responsibility without threshold role"
+                )
+            outcome, outcome_context = self._build_module_outcome_record(
                 evidence,
+                committed_markers=tuple(
+                    markers_by_record_id[record.record_id] for record in evidence
+                ),
                 responsibility_id=study.responsibility_id,
                 _verified_build_token=_VERIFIED_OUTCOME_BUILD_TOKEN,
                 cross_fit_plan=plan,
+                provisional_threshold_identities=tuple(
+                    item.threshold_identity
+                    for item in sorted(
+                        thresholds,
+                        key=lambda item: item.fold_index,
+                    )
+                ),
                 prerequisite_outcome_records=tuple(
-                    outcomes[role]
+                    (outcomes[role], outcome_contexts[role])
                     for role in study.prerequisite_responsibility_ids
                 ),
             )
@@ -871,7 +914,72 @@ class DevelopmentExplorationRunner:
                     "module outcome evidence did not replay from verified records"
                 )
             outcomes[study.responsibility_id] = outcome
+            outcome_contexts[study.responsibility_id] = outcome_context
         return outcomes[responsibility_id]
+
+    def _verified_outcome_context(
+        self,
+        *,
+        study: object,
+        records: Sequence[DevelopmentScientificRecord],
+        committed_markers: Sequence[CommittedUnit],
+        aggregate_metric_means: Sequence[tuple[str, float]],
+        source_cluster_count: int,
+        module_outcome: str,
+        candidate_recommendation: str,
+        blocking_responsibilities: Sequence[str],
+        cross_fit_plan: FrozenDevelopmentCrossFitPlan | None,
+        provisional_threshold_identities: Sequence[str],
+    ) -> DevelopmentVerifiedOutcomeEvidenceContext:
+        evidence_bindings = tuple(
+            (record.record_id, _scientific_record_digest(record))
+            for record in records
+        )
+        marker_bindings = tuple(
+            (record.record_id, record_digest, marker.digest())
+            for (record, record_digest), marker in zip(
+                evidence_bindings,
+                committed_markers,
+                strict=True,
+            )
+        )
+        metric_means = tuple(
+            (metric_id, float(value))
+            for metric_id, value in aggregate_metric_means
+        )
+        aggregate_digest = _canonical_digest(
+            {
+                "responsibility_id": study.responsibility_id,
+                "source_cluster_count": source_cluster_count,
+                "aggregate_metric_means": metric_means,
+                "evidence_record_bindings": evidence_bindings,
+            }
+        )
+        return DevelopmentVerifiedOutcomeEvidenceContext(
+            protocol_digest=self.protocol.digest(),
+            execution_intent_authority_digest=self.intent_authority.authority_digest,
+            input_manifest_digest=self.intent_authority.input_manifest_digest,
+            candidate_config_digest=study.candidate_config_digest,
+            signal_criteria_digest=study.signal_criteria_digest(),
+            cluster_aggregate_digest=aggregate_digest,
+            source_cluster_count=source_cluster_count,
+            aggregate_metric_means=metric_means,
+            evidence_record_bindings=evidence_bindings,
+            committed_marker_bindings=marker_bindings,
+            cross_fit_plan_digest=(
+                _canonical_digest(asdict(cross_fit_plan))
+                if cross_fit_plan is not None
+                else None
+            ),
+            provisional_threshold_identities=tuple(
+                provisional_threshold_identities
+            ),
+            verified_module_outcome=module_outcome,
+            verified_candidate_recommendation=candidate_recommendation,
+            verified_blocking_responsibilities=tuple(
+                blocking_responsibilities
+            ),
+        )
 
     def _build_module_outcome_record(
         self,
@@ -879,10 +987,13 @@ class DevelopmentExplorationRunner:
         *,
         responsibility_id: str,
         _verified_build_token: object,
+        committed_markers: Sequence[CommittedUnit] = (),
         cross_fit_plan: FrozenDevelopmentCrossFitPlan | None = None,
         provisional_threshold_identities: Sequence[str] = (),
-        prerequisite_outcome_records: Sequence[DevelopmentModuleOutcomeRecord] = (),
-    ) -> DevelopmentModuleOutcomeRecord:
+        prerequisite_outcome_records: Sequence[
+            tuple[DevelopmentModuleOutcomeRecord, DevelopmentVerifiedOutcomeEvidenceContext]
+        ] = (),
+    ) -> tuple[DevelopmentModuleOutcomeRecord, DevelopmentVerifiedOutcomeEvidenceContext]:
         """Apply frozen criteria to records supplied only by the verified scheduler."""
 
         if _verified_build_token is not _VERIFIED_OUTCOME_BUILD_TOKEN:
@@ -900,14 +1011,25 @@ class DevelopmentExplorationRunner:
         )
         if study is None or not records:
             raise DevelopmentRunnerError("module outcome records are missing")
+        if len(committed_markers) != len(records):
+            raise DevelopmentRunnerError(
+                "module outcome requires one verified marker per record"
+            )
         prerequisite_by_responsibility = {
-            item.responsibility_id: item for item in prerequisite_outcome_records
+            item.responsibility_id: (item, context)
+            for item, context in prerequisite_outcome_records
         }
         if (
             len(prerequisite_by_responsibility) != len(prerequisite_outcome_records)
             or set(prerequisite_by_responsibility)
             != set(study.prerequisite_responsibility_ids)
-            or any(item.validate(self.protocol) for item in prerequisite_outcome_records)
+            or any(
+                item.validate(
+                    self.protocol,
+                    verified_evidence_context=context,
+                )
+                for item, context in prerequisite_outcome_records
+            )
         ):
             raise DevelopmentRunnerError(
                 "module prerequisites require exact verified outcome records"
@@ -915,23 +1037,36 @@ class DevelopmentExplorationRunner:
         blocked_by = tuple(
             role
             for role in study.prerequisite_responsibility_ids
-            if prerequisite_by_responsibility[role].module_outcome
+            if prerequisite_by_responsibility[role][0].module_outcome
             != "mechanism_signal_observed"
         )
         if blocked_by:
-            return create_development_module_outcome_record(
+            context = self._verified_outcome_context(
+                study=study,
+                records=records,
+                committed_markers=committed_markers,
+                aggregate_metric_means=(),
+                source_cluster_count=len(
+                    {
+                        record.analysis_unit_identity["source_cluster_id"]
+                        for record in records
+                    }
+                ),
+                module_outcome="implementation_blocked",
+                candidate_recommendation="candidate_not_recommended_for_selection",
+                blocking_responsibilities=blocked_by,
+                cross_fit_plan=cross_fit_plan,
+                provisional_threshold_identities=provisional_threshold_identities,
+            )
+            outcome = _create_verified_development_module_outcome_record(
                 self.protocol,
                 responsibility_id=responsibility_id,
                 module_outcome="implementation_blocked",
                 candidate_recommendation="candidate_not_recommended_for_selection",
                 recommendation_reason="verified_prerequisite_outcome_stopped_scientific_interpretation",
-                evidence_record_ids=tuple(record.record_id for record in records),
-                evidence_record_digests=tuple(
-                    _scientific_record_digest(record) for record in records
-                ),
-                blocking_responsibilities=blocked_by,
-                provisional_threshold_identities=provisional_threshold_identities,
+                verified_evidence_context=context,
             )
+            return outcome, context
         if any(
             type(record) is not DevelopmentScientificRecord
             or record.responsibility_id != responsibility_id
@@ -957,19 +1092,33 @@ class DevelopmentExplorationRunner:
                 else "verified_implementation_or_exclusion_records_prevented_frozen_coverage"
             )
             blocking = (responsibility_id,)
-            return create_development_module_outcome_record(
+            verified_blocking = blocking if not resource_only else ()
+            context = self._verified_outcome_context(
+                study=study,
+                records=records,
+                committed_markers=committed_markers,
+                aggregate_metric_means=(),
+                source_cluster_count=len(
+                    {
+                        record.analysis_unit_identity["source_cluster_id"]
+                        for record in records
+                    }
+                ),
+                module_outcome=module_outcome,
+                candidate_recommendation=candidate_recommendation,
+                blocking_responsibilities=verified_blocking,
+                cross_fit_plan=cross_fit_plan,
+                provisional_threshold_identities=provisional_threshold_identities,
+            )
+            outcome = _create_verified_development_module_outcome_record(
                 self.protocol,
                 responsibility_id=responsibility_id,
                 module_outcome=module_outcome,
                 candidate_recommendation=candidate_recommendation,
                 recommendation_reason=recommendation_reason,
-                evidence_record_ids=tuple(record.record_id for record in records),
-                evidence_record_digests=tuple(
-                    _scientific_record_digest(record) for record in records
-                ),
-                blocking_responsibilities=blocking if not resource_only else (),
-                provisional_threshold_identities=provisional_threshold_identities,
+                verified_evidence_context=context,
             )
+            return outcome, context
         observations = tuple(
             DevelopmentMetricObservation(**record.metric_observation)
             for record in records
@@ -1105,13 +1254,15 @@ class DevelopmentExplorationRunner:
                     )
                     / len(positive_values),
                     "unreliable_reject_rate": sum(
-                        item["unreliable_reject_rate"] for item in negative_values
+                        item["unreliable_reject_rate"]
+                        for item in (*positive_values, *negative_values)
                     )
-                    / len(negative_values),
+                    / len(observations),
                     "false_reliable_rate": sum(
-                        item["false_reliable_rate"] for item in negative_values
+                        item["false_reliable_rate"]
+                        for item in (*positive_values, *negative_values)
                     )
-                    / len(negative_values),
+                    / len(observations),
                 }
                 aggregate = DevelopmentClusterAggregate(
                     responsibility_id=responsibility_id,
@@ -1151,19 +1302,27 @@ class DevelopmentExplorationRunner:
             if signal
             else "frozen_registered_metrics_did_not_satisfy_development_signal_criteria"
         )
-        return create_development_module_outcome_record(
+        context = self._verified_outcome_context(
+            study=study,
+            records=records,
+            committed_markers=committed_markers,
+            aggregate_metric_means=aggregate.metric_means,
+            source_cluster_count=aggregate.source_cluster_count,
+            module_outcome=module_outcome,
+            candidate_recommendation=candidate_recommendation,
+            blocking_responsibilities=(),
+            cross_fit_plan=cross_fit_plan,
+            provisional_threshold_identities=provisional_threshold_identities,
+        )
+        outcome = _create_verified_development_module_outcome_record(
             self.protocol,
             responsibility_id=responsibility_id,
             module_outcome=module_outcome,
             candidate_recommendation=candidate_recommendation,
             recommendation_reason=recommendation_reason,
-            evidence_record_ids=tuple(record.record_id for record in records),
-            evidence_record_digests=tuple(
-                _scientific_record_digest(record) for record in records
-            ),
-            blocking_responsibilities=(),
-            provisional_threshold_identities=provisional_threshold_identities,
+            verified_evidence_context=context,
         )
+        return outcome, context
 
     def _replay_hf_detector_threshold_inputs(
         self,
@@ -1286,10 +1445,25 @@ class DevelopmentExplorationRunner:
             }
             return joint, metric, traces, joint
         key_identity = self.adapter.identify_key(raw.registered_root_key).result
+        planned_key_binding = next(
+            (
+                item
+                for item in self.intent_authority.public_key_roster
+                if item.source_cluster_id == identity.source_cluster_id
+            ),
+            None,
+        )
+        if (
+            planned_key_binding is None
+            or planned_key_binding.registered_key_public_digest
+            != key_identity.root_key_public_digest
+            or planned_key_binding.detection_key_public_digest
+            != key_identity.root_key_public_digest
+        ):
+            raise DevelopmentRunnerError(
+                "registered detection key differs from frozen cluster authority"
+            )
         wrong_material = derive_wrong_key_material(key_identity.root_key_public_digest, raw.wrong_key_index)
-        primary_null_key_identity = self.adapter.identify_key(
-            wrong_material.material_text
-        ).result
         shape = tuple(int(value) for value in raw.base_latent.shape)
         registered_domain = {
             "candidate_id": "hf_sparse_tail",
@@ -1541,10 +1715,14 @@ class DevelopmentExplorationRunner:
         )
         hf_registered = self.adapter.detect_hf(registered_hf_observation, raw.registered_root_key).result
         hf_wrong = self.adapter.detect_hf(registered_hf_observation, wrong_material).result
-        hf_null = self.adapter.detect_hf(clean_hf_observation, wrong_material).result
+        hf_null = self.adapter.detect_hf(
+            clean_hf_observation, raw.registered_root_key
+        ).result
         lf_registered = self.adapter.detect_lf(registered_lf_observation, raw.registered_root_key).result
         lf_wrong = self.adapter.detect_lf(registered_lf_observation, wrong_material).result
-        lf_null = self.adapter.detect_lf(clean_lf_observation, wrong_material).result
+        lf_null = self.adapter.detect_lf(
+            clean_lf_observation, raw.registered_root_key
+        ).result
         traces.update(
             hf_score=hf_registered.hf_score,
             lf_score=lf_registered.lf_score,
@@ -1562,9 +1740,9 @@ class DevelopmentExplorationRunner:
             primary_null_detector_config_digest=hf_null.detector_config_digest,
             primary_null_preprocessing_identity="final_image_vae_posterior_mode",
             primary_null_detection_key_public_digest=(
-                primary_null_key_identity.root_key_public_digest
+                key_identity.root_key_public_digest
             ),
-            primary_null_control_identity="unwatermarked_wrong_key_primary_null",
+            primary_null_control_identity="unwatermarked_registered_key_primary_null",
         )
         branch_quality_delta = _tensor_relative_l2(
             runtime_result.clean_image, runtime_result.watermarked_image
@@ -1616,6 +1794,49 @@ class DevelopmentExplorationRunner:
             )
             return lf_registered, metric, traces, None
         if responsibility == "hf_detector":
+            content_operation = FormalHfContentDetectionOperation(self.adapter)
+            registered_image = _decoded_image_to_rgb8(
+                runtime_result.clean_image
+                if unit.content_branch_id == "clean_control"
+                else runtime_result.watermarked_image
+            )
+            clean_image = _decoded_image_to_rgb8(runtime_result.clean_image)
+            registered_content = content_operation(
+                registered_image,
+                raw.registered_root_key,
+            )
+            wrong_content = content_operation(registered_image, wrong_material)
+            primary_null_content = content_operation(
+                clean_image,
+                raw.registered_root_key,
+            )
+            hf_registered = registered_content.hf_result
+            hf_wrong = wrong_content.hf_result
+            hf_null = primary_null_content.hf_result
+            traces.update(
+                hf_score=hf_registered.hf_score,
+                raw_detector_identity=hf_registered.detector_identity,
+                rectified_detector_identity=hf_registered.detector_identity,
+                raw_detector_config_digest=hf_registered.detector_config_digest,
+                rectified_detector_config_digest=hf_registered.detector_config_digest,
+                raw_preprocessing_identity=content_operation.preprocessing_identity,
+                rectified_preprocessing_identity=content_operation.preprocessing_identity,
+                registered_detector_identity=hf_registered.detector_identity,
+                wrong_key_detector_identity=hf_wrong.detector_identity,
+                primary_null_detector_identity=hf_null.detector_identity,
+                registered_detector_config_digest=hf_registered.detector_config_digest,
+                wrong_key_detector_config_digest=hf_wrong.detector_config_digest,
+                primary_null_detector_config_digest=hf_null.detector_config_digest,
+                primary_null_preprocessing_identity=(
+                    content_operation.preprocessing_identity
+                ),
+                primary_null_detection_key_public_digest=(
+                    key_identity.root_key_public_digest
+                ),
+                primary_null_control_identity=(
+                    "unwatermarked_registered_key_primary_null"
+                ),
+            )
             metric = metric_hf_detector(
                 identity.source_cluster_id,
                 registered_score=hf_registered.hf_score,
@@ -1746,26 +1967,66 @@ class DevelopmentExplorationRunner:
                 truth_translation_y=attacked.output_to_input_matrix[1][2],
             )
             return estimation, metric, traces, None
+        wrong_estimation = self.adapter.estimate_geometric_transform(
+            qk_wrong,
+            wrong_material,
+            epsilon_inlier=raw.epsilon_inlier,
+        ).result
         reliability = self.adapter.assess_geometry_reliability(
             estimation, raw.geometry_reliability_thresholds
         ).result
+        wrong_reliability = self.adapter.assess_geometry_reliability(
+            wrong_estimation,
+            raw.geometry_reliability_thresholds,
+        ).result
+        ambiguous_control_realized = (
+            unit.geometry_case_id != "ambiguous_transform_control"
+            or estimation.gap
+            <= self.protocol.geometry_study.ambiguous_control_max_top_two_gap
+        )
         traces.update(
             geometry_reliability_identity=reliability.reliability_identity_digest,
             geometry_reliable=reliability.reliable,
             geometry_reliability_config_digest=reliability.threshold_config_digest,
             geometry_reliability_status=reliability.status,
             geometry_reliability_failure_reasons=reliability.failure_reasons,
-            estimator_wrong_key_objectives=estimation.wrong_key_objectives,
+            wrong_key_geometry_estimation_identity=(
+                wrong_estimation.estimation_identity_digest
+            ),
+            wrong_key_geometry_reliability_identity=(
+                wrong_reliability.reliability_identity_digest
+            ),
+            wrong_key_geometry_reliable=wrong_reliability.reliable,
+            wrong_key_geometry_reliability_status=wrong_reliability.status,
+            wrong_key_geometry_reliability_failure_reasons=(
+                wrong_reliability.failure_reasons
+            ),
+            ambiguous_control_realized=ambiguous_control_realized,
         )
         if responsibility == "geometry_reliability":
+            if not ambiguous_control_realized:
+                raise DevelopmentUnitExcluded(
+                    "control_not_realized:ambiguous_transform_control"
+                )
             return reliability, metric_geometry_reliability(
                 identity.source_cluster_id,
-                reliability_accepted=reliability.reliable,
+                registered_reliability_accepted=reliability.reliable,
+                wrong_key_reliability_accepted=wrong_reliability.reliable,
                 is_unreliable_control=(
                     unit.geometry_case_id in GEOMETRY_NEGATIVE_CONTROL_CASE_IDS
                 ),
-                reliability_identity_digest=reliability.reliability_identity_digest,
-                estimation_identity_digest=estimation.estimation_identity_digest,
+                registered_reliability_identity_digest=(
+                    reliability.reliability_identity_digest
+                ),
+                wrong_key_reliability_identity_digest=(
+                    wrong_reliability.reliability_identity_digest
+                ),
+                registered_estimation_identity_digest=(
+                    estimation.estimation_identity_digest
+                ),
+                wrong_key_estimation_identity_digest=(
+                    wrong_estimation.estimation_identity_digest
+                ),
             ), traces, None
         if not reliability.reliable:
             raise DevelopmentUnitExcluded(
@@ -1865,7 +2126,12 @@ class DevelopmentExplorationRunner:
                 "geometry_reliable", "geometry_transform", "geometry_raw_metrics",
                 "rectification_status", "qk_registered_relation_score", "qk_wrong_relation_score",
                 "geometry_reliability_status", "geometry_reliability_failure_reasons",
-                "estimator_wrong_key_objectives",
+                "wrong_key_geometry_estimation_identity",
+                "wrong_key_geometry_reliability_identity",
+                "wrong_key_geometry_reliable",
+                "wrong_key_geometry_reliability_status",
+                "wrong_key_geometry_reliability_failure_reasons",
+                "ambiguous_control_realized",
             )
         }
         threshold_trace = {

@@ -1174,6 +1174,20 @@ class DevelopmentPersistentStore:
     ) -> tuple[DevelopmentScientificRecord, ...]:
         """Return only exact terminal records after full store recovery checks."""
 
+        return tuple(
+            record
+            for record, _marker in self.verified_terminal_scientific_evidence(
+                now_epoch_seconds=now_epoch_seconds
+            )
+        )
+
+    def verified_terminal_scientific_evidence(
+        self,
+        *,
+        now_epoch_seconds: int,
+    ) -> tuple[tuple[DevelopmentScientificRecord, CommittedUnit], ...]:
+        """Return records together with their fully verified COMMITTED markers."""
+
         recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
         latest_by_unit: dict[str, CommittedUnit] = {}
         for marker in recovery.committed_units:
@@ -1185,19 +1199,19 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError(
                 "retryable scientific unit has no terminal record"
             )
-        records = tuple(
-            self._verify_committed(marker)
+        evidence = tuple(
+            (self._verify_committed(marker), marker)
             for marker in sorted(
                 latest_by_unit.values(), key=lambda item: item.unit_index
             )
         )
-        if tuple(record.unit_index for record in records) != tuple(
-            range(len(records))
+        if tuple(record.unit_index for record, _marker in evidence) != tuple(
+            range(len(evidence))
         ):
             raise DevelopmentPersistenceError(
                 "terminal scientific records are not a frozen roster prefix"
             )
-        return records
+        return evidence
 
     def write_session_receipt(
         self,
