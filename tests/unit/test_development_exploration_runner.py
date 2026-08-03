@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 import inspect
+import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 import torch
@@ -22,6 +24,7 @@ from experiments.runners.development_exploration import (
     DevelopmentUnitInput,
 )
 from experiments.runners.development_persistence import (
+    DevelopmentPersistenceError,
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
     development_unit_roster_digest,
@@ -32,7 +35,10 @@ from experiments.protocol.development_exploration import (
     create_development_provisional_threshold,
     create_development_threshold_fit_input,
 )
-from experiments.protocol.development_records import canonical_development_value_digest
+from experiments.protocol.development_records import (
+    DEVELOPMENT_RECORD_MEMBER_PATH,
+    canonical_development_value_digest,
+)
 from main import (
     BranchNullCalibration,
     GeometryReliabilityThresholds,
@@ -151,6 +157,14 @@ class _CombinedCpuWiringBackend:
         )
 
 
+class _ForeignStoreProxy:
+    pass
+
+
+class _ForeignStoreSubclass(DevelopmentPersistentStore):
+    pass
+
+
 def _runner(
     intent_authority=None,
     persistence_store: DevelopmentPersistentStore | None = None,
@@ -179,6 +193,7 @@ def _runner(
 
 
 def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, DevelopmentPersistentStore]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     initial = _runner()
     package = tmp_path / "development_package.zip"
     bootstrap = tmp_path / "development_bootstrap.py"
@@ -727,12 +742,197 @@ def test_module_outcome_public_surface_accepts_no_caller_records_or_outcomes() -
     assert "prerequisite_outcome_records" not in signature.parameters
     with pytest.raises(
         DevelopmentRunnerError,
-        match="persistent-store replay",
+        match="persistence authority object drifted",
     ):
         runner._build_module_outcome_record(
             (runner._execute_unit(0, _input()).record,),
             responsibility_id="key_schedule",
             now_epoch_seconds=1,
+        )
+
+
+@pytest.mark.quick
+def test_runner_rejects_foreign_store_proxy_and_subclass() -> None:
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence store exact type is required",
+    ):
+        _runner(persistence_store=_ForeignStoreProxy())  # type: ignore[arg-type]
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence store exact type is required",
+    ):
+        _runner(
+            persistence_store=object.__new__(_ForeignStoreSubclass),
+        )
+
+
+@pytest.mark.quick
+def test_runner_persistence_authority_is_read_only_and_rejects_replacement(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path / "original")
+    _foreign_runner, foreign_store = _persistent_runner(tmp_path / "foreign")
+
+    with pytest.raises(AttributeError, match="no setter"):
+        runner.persistence_store = store  # type: ignore[misc]
+    with pytest.raises(AttributeError, match="immutable after construction"):
+        runner._persistence_store = store
+    with pytest.raises(AttributeError, match="cannot be deleted"):
+        del runner._persistence_store
+
+    object.__setattr__(runner, "_persistence_store", foreign_store)
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence authority object drifted",
+    ):
+        runner.build_verified_module_outcome_record(
+            responsibility_id="key_schedule",
+            now_epoch_seconds=1,
+        )
+
+
+@pytest.mark.quick
+def test_runner_replay_rejects_private_store_proxy_and_anchor_drift(
+    tmp_path: Path,
+) -> None:
+    proxy_runner, _store = _persistent_runner(tmp_path / "proxy")
+    object.__setattr__(proxy_runner, "_persistence_store", _ForeignStoreProxy())
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence authority object drifted",
+    ):
+        proxy_runner.build_verified_module_outcome_record(
+            responsibility_id="key_schedule",
+            now_epoch_seconds=1,
+        )
+
+    anchor_runner, anchor_store = _persistent_runner(tmp_path / "anchor")
+    object.__setattr__(
+        anchor_store,
+        "run_root",
+        (tmp_path / "alternate_run_root").resolve(),
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence authority anchor drifted",
+    ):
+        anchor_runner.decide_verified_module_execution(
+            responsibility_id="content_router",
+            outcomes_by_responsibility={},
+            now_epoch_seconds=1,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "anchor_surface",
+    ("worker_identity", "registered_bindings", "package_path", "bootstrap_path"),
+)
+def test_runner_replay_rejects_each_frozen_store_anchor_drift(
+    tmp_path: Path,
+    anchor_surface: str,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    if anchor_surface == "worker_identity":
+        object.__setattr__(
+            store,
+            "worker_identity",
+            replace(store.worker_identity, revision="f" * 40),
+        )
+    elif anchor_surface == "registered_bindings":
+        object.__setattr__(store, "_registered_unit_bindings", {})
+    elif anchor_surface == "package_path":
+        alternate = tmp_path / "alternate_package.zip"
+        alternate.write_bytes(store.package_path.read_bytes())
+        object.__setattr__(store, "package_path", alternate.resolve())
+    else:
+        alternate = tmp_path / "alternate_bootstrap.py"
+        alternate.write_bytes(store.bootstrap_path.read_bytes())
+        object.__setattr__(store, "bootstrap_path", alternate.resolve())
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence authority anchor drifted",
+    ):
+        runner.build_verified_module_outcome_record(
+            responsibility_id="key_schedule",
+            now_epoch_seconds=1,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("tamper_surface", ("intent", "marker", "bundle", "record"))
+def test_runner_store_replay_rejects_committed_artifact_tamper(
+    tmp_path: Path,
+    tamper_surface: str,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    lease = store.acquire_lease(
+        session_id="tamper_probe_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=100,
+    )
+    result = runner.execute_and_commit_next_unit(
+        lease,
+        _input(),
+        now_epoch_seconds=101,
+        raw_secret_values=("development-runner-cpu-wiring-key",),
+    )
+    assert result.intent is not None and result.committed is not None
+    intent_path = (
+        store.run_root
+        / "intents"
+        / f"{result.intent.unit_id}__attempt_{result.intent.attempt_index}.json"
+    )
+    marker_path = (
+        store.run_root
+        / "markers"
+        / (
+            f"{result.intent.unit_id}__attempt_{result.intent.attempt_index}"
+            ".COMMITTED.json"
+        )
+    )
+    bundle_path = (
+        store.run_root
+        / "bundles"
+        / f"sha256_{result.committed.bundle_sha256}.zip"
+    )
+    if tamper_surface == "intent":
+        intent_payload = json.loads(intent_path.read_bytes())
+        intent_payload["responsibility_id"] = "hf_detector"
+        intent_path.write_bytes(
+            json.dumps(
+                intent_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            + b"\n"
+        )
+    elif tamper_surface == "marker":
+        marker_path.write_bytes(b"{}\n")
+    elif tamper_surface == "bundle":
+        bundle_path.write_bytes(b"tampered bundle")
+    else:
+        with ZipFile(bundle_path, "r") as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        record_payload = json.loads(members[DEVELOPMENT_RECORD_MEMBER_PATH])
+        record_payload["record_id"] = "f" * 64
+        members[DEVELOPMENT_RECORD_MEMBER_PATH] = json.dumps(
+            record_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8") + b"\n"
+        with ZipFile(bundle_path, "w") as archive:
+            for member_path, payload in sorted(members.items()):
+                archive.writestr(member_path, payload)
+
+    with pytest.raises((DevelopmentPersistenceError, DevelopmentRunnerError)):
+        runner.build_verified_module_outcome_record(
+            responsibility_id="key_schedule",
+            now_epoch_seconds=102,
         )
 
 
