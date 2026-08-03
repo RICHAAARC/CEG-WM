@@ -13,8 +13,10 @@ from inspect import getattr_static, ismethod
 import json
 from math import isfinite, isnan
 from pathlib import Path
+from threading import RLock
 from time import monotonic
 from typing import Mapping, Sequence
+from weakref import WeakKeyDictionary
 
 import torch
 
@@ -421,22 +423,87 @@ class _PersistenceStoreAuthorityAnchor:
     bootstrap_path: Path
 
 
+@dataclass(frozen=True, slots=True)
+class _RegisteredPersistenceAuthority:
+    store: DevelopmentPersistentStore | None
+    anchor: _PersistenceStoreAuthorityAnchor | None
+
+
+_REGISTERED_PERSISTENCE_AUTHORITIES: WeakKeyDictionary[
+    DevelopmentExplorationRunner, _RegisteredPersistenceAuthority
+] = WeakKeyDictionary()
+_REGISTERED_PERSISTENCE_AUTHORITIES_LOCK = RLock()
+_EXPECTED_PERSISTENCE_CALLS = {
+    name: value
+    for name, value in vars(DevelopmentPersistentStore).items()
+    if callable(value)
+}
+_EXPECTED_REGISTERED_BINDINGS_PROPERTY = getattr_static(
+    DevelopmentPersistentStore,
+    "registered_unit_bindings",
+)
+
+
+def _validate_persistence_callable_authority(
+    store: DevelopmentPersistentStore,
+) -> None:
+    if type(store) is not DevelopmentPersistentStore:
+        raise DevelopmentRunnerError("persistence store exact type is required")
+    instance_attributes = vars(store)
+    for name, expected in _EXPECTED_PERSISTENCE_CALLS.items():
+        if name in instance_attributes:
+            raise DevelopmentRunnerError(
+                f"persistence callable instance shadow is forbidden:{name}"
+            )
+        if getattr_static(DevelopmentPersistentStore, name) is not expected:
+            raise DevelopmentRunnerError(
+                f"persistence callable class descriptor drifted:{name}"
+            )
+    if (
+        getattr_static(DevelopmentPersistentStore, "registered_unit_bindings")
+        is not _EXPECTED_REGISTERED_BINDINGS_PROPERTY
+    ):
+        raise DevelopmentRunnerError(
+            "persistence registered bindings descriptor drifted"
+        )
+
+
+def _registered_bindings_from_exact_descriptor(
+    store: DevelopmentPersistentStore,
+) -> tuple[FrozenDevelopmentUnitBinding, ...]:
+    descriptor = _EXPECTED_REGISTERED_BINDINGS_PROPERTY
+    if type(descriptor) is not property or descriptor.fget is None:
+        raise DevelopmentRunnerError(
+            "persistence registered bindings descriptor is invalid"
+        )
+    return descriptor.fget(store)
+
+
+def _call_exact_persistence_method(
+    method_name: str,
+    store: DevelopmentPersistentStore,
+    /,
+    *args: object,
+    **kwargs: object,
+) -> object:
+    method = _EXPECTED_PERSISTENCE_CALLS.get(method_name)
+    if method is None:
+        raise DevelopmentRunnerError(
+            f"persistence exact method is not registered:{method_name}"
+        )
+    return method(store, *args, **kwargs)
+
+
 class DevelopmentExplorationRunner:
     """Execute a frozen roster without result-provider or module-result proxies."""
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in {
-            "_persistence_store",
-            "_persistence_store_authority_anchor",
-        } and hasattr(self, name):
+        if name == "_persistence_store" and hasattr(self, name):
             raise AttributeError("persistence authority is immutable after construction")
         super().__setattr__(name, value)
 
     def __delattr__(self, name: str) -> None:
-        if name in {
-            "_persistence_store",
-            "_persistence_store_authority_anchor",
-        }:
+        if name == "_persistence_store":
             raise AttributeError("persistence authority cannot be deleted")
         super().__delattr__(name)
 
@@ -484,6 +551,7 @@ class DevelopmentExplorationRunner:
                 "persistence store exact type is required"
             )
         if persistence_store is not None:
+            _validate_persistence_callable_authority(persistence_store)
             if persistence_store.run_id != intent_authority.run_id:
                 raise DevelopmentRunnerError("persistence run identity drifted")
             identity = persistence_store.worker_identity
@@ -506,7 +574,9 @@ class DevelopmentExplorationRunner:
         persistence_anchor: _PersistenceStoreAuthorityAnchor | None = None
         if persistence_store is not None:
             expected_bindings = self.create_persistence_unit_bindings()
-            observed_bindings = persistence_store.registered_unit_bindings
+            observed_bindings = _registered_bindings_from_exact_descriptor(
+                persistence_store
+            )
             if observed_bindings != expected_bindings:
                 raise DevelopmentRunnerError(
                     "persistence unit/analysis/candidate roster binding drifted"
@@ -521,18 +591,50 @@ class DevelopmentExplorationRunner:
                 bootstrap_path=persistence_store.bootstrap_path.resolve(),
             )
         self._persistence_store = persistence_store
-        self._persistence_store_authority_anchor = persistence_anchor
         self._validate_execution_anchors()
+        with _REGISTERED_PERSISTENCE_AUTHORITIES_LOCK:
+            if self in _REGISTERED_PERSISTENCE_AUTHORITIES:
+                raise DevelopmentRunnerError(
+                    "persistence authority was already registered"
+                )
+            _REGISTERED_PERSISTENCE_AUTHORITIES[self] = (
+                _RegisteredPersistenceAuthority(
+                    store=persistence_store,
+                    anchor=persistence_anchor,
+                )
+            )
 
     @property
     def persistence_store(self) -> DevelopmentPersistentStore | None:
         """Expose the configured authority read-only for compatibility inspection."""
 
-        return self._persistence_store
+        return _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
 
-    def _require_persistence_store(self) -> DevelopmentPersistentStore:
-        store = self._persistence_store
-        anchor = self._persistence_store_authority_anchor
+    def _guard_persistence_authority(
+        self,
+        *,
+        require_store: bool,
+    ) -> DevelopmentPersistentStore | None:
+        with _REGISTERED_PERSISTENCE_AUTHORITIES_LOCK:
+            registered = _REGISTERED_PERSISTENCE_AUTHORITIES.get(self)
+        if type(registered) is not _RegisteredPersistenceAuthority:
+            raise DevelopmentRunnerError("persistence authority registry is missing")
+        store = registered.store
+        anchor = registered.anchor
+        try:
+            instance_store = object.__getattribute__(self, "_persistence_store")
+        except AttributeError as exc:
+            raise DevelopmentRunnerError(
+                "persistence authority object drifted"
+            ) from exc
+        if instance_store is not store:
+            raise DevelopmentRunnerError("persistence authority object drifted")
+        if store is None:
+            if anchor is not None:
+                raise DevelopmentRunnerError("persistence authority registry drifted")
+            if require_store:
+                raise DevelopmentRunnerError("persistent store is required")
+            return None
         if (
             type(store) is not DevelopmentPersistentStore
             or type(anchor) is not _PersistenceStoreAuthorityAnchor
@@ -540,7 +642,8 @@ class DevelopmentExplorationRunner:
         ):
             raise DevelopmentRunnerError("persistence authority object drifted")
         try:
-            observed_bindings = store.registered_unit_bindings
+            _validate_persistence_callable_authority(store)
+            observed_bindings = _registered_bindings_from_exact_descriptor(store)
             observed_root = store.run_root.resolve()
             observed_package = store.package_path.resolve()
             observed_bootstrap = store.bootstrap_path.resolve()
@@ -559,13 +662,21 @@ class DevelopmentExplorationRunner:
                 != canonical_json_bytes(asdict(anchor.worker_identity))
             ):
                 raise DevelopmentRunnerError("persistence authority anchor drifted")
-            store._validate_source_artifacts()
+            _call_exact_persistence_method(
+                "_validate_source_artifacts",
+                store,
+            )
         except DevelopmentRunnerError:
             raise
         except (AttributeError, DevelopmentPersistenceError, OSError) as exc:
             raise DevelopmentRunnerError(
                 "persistence authority anchor verification failed"
             ) from exc
+        return store
+
+    def _require_persistence_store(self) -> DevelopmentPersistentStore:
+        store = _EXPECTED_PERSISTENCE_GUARD(self, require_store=True)
+        assert type(store) is DevelopmentPersistentStore
         return store
 
     def create_persistence_unit_bindings(
@@ -595,6 +706,7 @@ class DevelopmentExplorationRunner:
     ) -> DevelopmentOperationalReceipt:
         """Measure one of the frozen one-to-two identity/throughput clusters."""
 
+        _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
         if type(source_cluster_ordinal) is not int or not 0 <= source_cluster_ordinal < self.protocol.preflight.source_cluster_count:
             raise DevelopmentRunnerError("preflight cluster ordinal is outside frozen budget")
         unit = self._representative_unit("content_embedder", source_cluster_ordinal)
@@ -624,6 +736,7 @@ class DevelopmentExplorationRunner:
     ) -> DevelopmentOperationalReceipt:
         """Call every real responsibility for one of eight non-scientific smoke clusters."""
 
+        _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
         if type(source_cluster_ordinal) is not int or not 0 <= source_cluster_ordinal < self.protocol.study_budget.wiring_source_cluster_count:
             raise DevelopmentRunnerError("wiring cluster ordinal is outside frozen budget")
         expected = tuple(item.responsibility_id for item in self.protocol.module_matrix)
@@ -669,6 +782,7 @@ class DevelopmentExplorationRunner:
         attempt_index: int = 0,
         retry_parent_intent_digest: str | None = None,
     ) -> DevelopmentUnitRunResult:
+        _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
         self._validate_execution_anchors()
         unit = self._unit(unit_index)
         unit_input.validate(unit.responsibility_id)
@@ -738,9 +852,11 @@ class DevelopmentExplorationRunner:
     ) -> DevelopmentUnitRunResult:
         """Claim exactly the next frozen breadth-first unit and persist every outcome."""
 
-        store = self._require_persistence_store()
-        recovery = store.recover(
-            now_epoch_seconds=now_epoch_seconds
+        store = _EXPECTED_PERSISTENCE_REQUIRE(self)
+        recovery = _call_exact_persistence_method(
+            "recover",
+            store,
+            now_epoch_seconds=now_epoch_seconds,
         )
         latest_commit_by_unit = {}
         for committed_unit in recovery.committed_units:
@@ -796,9 +912,15 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError("all frozen development units are committed")
         unit = self._unit(unit_index)
         unit_id = self._unit_id(unit)
-        if store.next_attempt_index(unit_id) != attempt_index:
+        if _call_exact_persistence_method(
+            "next_attempt_index",
+            store,
+            unit_id,
+        ) != attempt_index:
             raise DevelopmentRunnerError("persistence next attempt drifted")
-        intent = store.create_intent(
+        intent = _call_exact_persistence_method(
+            "create_intent",
+            store,
             lease,
             unit_id=unit_id,
             unit_index=unit_index,
@@ -885,7 +1007,9 @@ class DevelopmentExplorationRunner:
                 None,
                 None,
             )
-        committed = store.commit_unit(
+        committed = _call_exact_persistence_method(
+            "commit_unit",
+            store,
             lease,
             intent,
             record=executed.record,
@@ -903,7 +1027,7 @@ class DevelopmentExplorationRunner:
     ) -> DevelopmentVerifiedModuleOutcome:
         """Rebuild outcomes only from terminal records verified by the store."""
 
-        store = self._require_persistence_store()
+        store = _EXPECTED_PERSISTENCE_REQUIRE(self)
         plans = {} if cross_fit_plans is None else dict(cross_fit_plans)
         studies = tuple(self.protocol.module_matrix)
         target_index = next(
@@ -921,15 +1045,14 @@ class DevelopmentExplorationRunner:
         }
         required_unit_indexes = tuple(
             binding.unit_index
-            for binding in store.registered_unit_bindings
+            for binding in _registered_bindings_from_exact_descriptor(store)
             if binding.responsibility_id in required_responsibilities
         )
-        verified_evidence = (
-            store
-            .verified_terminal_scientific_evidence_for_unit_indexes(
-                required_unit_indexes,
-                now_epoch_seconds=now_epoch_seconds,
-            )
+        verified_evidence = _call_exact_persistence_method(
+            "verified_terminal_scientific_evidence_for_unit_indexes",
+            store,
+            required_unit_indexes,
+            now_epoch_seconds=now_epoch_seconds,
         )
         records = tuple(record for record, _marker in verified_evidence)
         markers_by_record_id = {
@@ -1010,7 +1133,7 @@ class DevelopmentExplorationRunner:
     ) -> tuple[DevelopmentProvisionalThreshold, ...]:
         """Rebuild HF thresholds only from the exact committed primary-null units."""
 
-        store = self._require_persistence_store()
+        store = _EXPECTED_PERSISTENCE_REQUIRE(self)
         if (
             type(cross_fit_plan) is not FrozenDevelopmentCrossFitPlan
             or cross_fit_plan.responsibility_id != "hf_detector"
@@ -1019,7 +1142,7 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError("verified HF threshold plan is invalid")
         required_unit_indexes = tuple(
             binding.unit_index
-            for binding in store.registered_unit_bindings
+            for binding in _registered_bindings_from_exact_descriptor(store)
             if binding.responsibility_id == "hf_detector"
             and binding.content_branch_id == "hf_only"
             and binding.analysis_unit_identity.source_cluster_id
@@ -1029,12 +1152,11 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError(
                 "verified HF threshold units differ from frozen plan"
             )
-        evidence = (
-            store
-            .verified_terminal_scientific_evidence_for_unit_indexes(
-                required_unit_indexes,
-                now_epoch_seconds=now_epoch_seconds,
-            )
+        evidence = _call_exact_persistence_method(
+            "verified_terminal_scientific_evidence_for_unit_indexes",
+            store,
+            required_unit_indexes,
+            now_epoch_seconds=now_epoch_seconds,
         )
         return self._replay_hf_detector_provisional_thresholds(
             tuple(record for record, _marker in evidence),
@@ -1050,6 +1172,7 @@ class DevelopmentExplorationRunner:
     ) -> tuple[DevelopmentProvisionalThreshold, ...]:
         """Reject any threshold set that was not replayed from the same store."""
 
+        _EXPECTED_PERSISTENCE_REQUIRE(self)
         supplied = tuple(provisional_thresholds)
         replayed = self.replay_verified_hf_provisional_thresholds(
             cross_fit_plan=cross_fit_plan,
@@ -1073,7 +1196,7 @@ class DevelopmentExplorationRunner:
     ) -> DevelopmentModuleExecutionDecision:
         """Approve dependencies only after replaying the same persistent store."""
 
-        self._require_persistence_store()
+        _EXPECTED_PERSISTENCE_REQUIRE(self)
         studies = {
             item.responsibility_id: item for item in self.protocol.module_matrix
         }
@@ -1156,6 +1279,7 @@ class DevelopmentExplorationRunner:
         cross_fit_plan: FrozenDevelopmentCrossFitPlan | None,
         provisional_threshold_identities: Sequence[str],
     ) -> DevelopmentVerifiedOutcomeEvidenceContext:
+        _EXPECTED_PERSISTENCE_REQUIRE(self)
         evidence_bindings = tuple(
             (record.record_id, _scientific_record_digest(record))
             for record in records
@@ -1221,18 +1345,17 @@ class DevelopmentExplorationRunner:
     ) -> tuple[DevelopmentModuleOutcomeRecord, DevelopmentVerifiedOutcomeEvidenceContext]:
         """Apply frozen criteria to records supplied only by the verified scheduler."""
 
-        store = self._require_persistence_store()
+        store = _EXPECTED_PERSISTENCE_REQUIRE(self)
         if len(committed_markers) != len(records):
             raise DevelopmentRunnerError(
                 "module outcome requires one verified marker per record"
             )
         unit_indexes = tuple(record.unit_index for record in records)
-        replayed_evidence = (
-            store
-            .verified_terminal_scientific_evidence_for_unit_indexes(
-                unit_indexes,
-                now_epoch_seconds=now_epoch_seconds,
-            )
+        replayed_evidence = _call_exact_persistence_method(
+            "verified_terminal_scientific_evidence_for_unit_indexes",
+            store,
+            unit_indexes,
+            now_epoch_seconds=now_epoch_seconds,
         )
         if tuple(zip(records, committed_markers, strict=True)) != replayed_evidence:
             raise DevelopmentRunnerError(
@@ -1568,6 +1691,7 @@ class DevelopmentExplorationRunner:
     ) -> tuple[DevelopmentProvisionalThreshold, ...]:
         """Rebuild actual provisional thresholds from persisted HF records."""
 
+        _EXPECTED_PERSISTENCE_REQUIRE(self)
         by_cluster = {
             AnalysisUnitIdentity(
                 **record.analysis_unit_identity
@@ -1639,6 +1763,7 @@ class DevelopmentExplorationRunner:
         identity: AnalysisUnitIdentity,
         raw: DevelopmentUnitInput,
     ) -> tuple[object, DevelopmentMetricObservation, dict[str, object], InternalValidationRecord | None]:
+        _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
         responsibility = unit.responsibility_id
         if responsibility == "conditional_recovery_decision":
             assert raw.internal_runner_context is not None
@@ -2313,6 +2438,7 @@ class DevelopmentExplorationRunner:
         retry_parent_intent_digest: str | None,
         actual_elapsed_seconds: float,
     ) -> DevelopmentScientificRecord:
+        _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
         study = next(item for item in self.protocol.module_matrix if item.responsibility_id == unit.responsibility_id)
         metric = bind_development_metric_observation(
             metric,
@@ -2520,6 +2646,7 @@ class DevelopmentExplorationRunner:
         failure_reason: str,
         actual_elapsed_seconds: float,
     ) -> DevelopmentScientificRecord:
+        _EXPECTED_PERSISTENCE_GUARD(self, require_store=False)
         if execution_status not in {"failed", "excluded", "retry"}:
             raise DevelopmentRunnerError("failure record status is invalid")
         study = next(
@@ -2642,3 +2769,11 @@ class DevelopmentExplorationRunner:
     @staticmethod
     def _unit_id(unit: DevelopmentStudyUnit) -> str:
         return f"development_scientific_unit_{unit.unit_index:04d}"
+
+
+_EXPECTED_PERSISTENCE_GUARD = (
+    DevelopmentExplorationRunner._guard_persistence_authority
+)
+_EXPECTED_PERSISTENCE_REQUIRE = (
+    DevelopmentExplorationRunner._require_persistence_store
+)

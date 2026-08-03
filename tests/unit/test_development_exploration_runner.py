@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import gc
 from hashlib import sha256
 import inspect
 import json
 from pathlib import Path
+import weakref
 from zipfile import ZipFile
 
 import pytest
@@ -23,6 +25,7 @@ from experiments.runners.development_exploration import (
     DevelopmentUnitExcluded,
     DevelopmentUnitInput,
 )
+import experiments.runners.development_exploration as development_runner_module
 from experiments.runners.development_persistence import (
     DevelopmentPersistenceError,
     DevelopmentPersistentStore,
@@ -742,7 +745,7 @@ def test_module_outcome_public_surface_accepts_no_caller_records_or_outcomes() -
     assert "prerequisite_outcome_records" not in signature.parameters
     with pytest.raises(
         DevelopmentRunnerError,
-        match="persistence authority object drifted",
+        match="persistent store is required",
     ):
         runner._build_module_outcome_record(
             (runner._execute_unit(0, _input()).record,),
@@ -768,6 +771,20 @@ def test_runner_rejects_foreign_store_proxy_and_subclass() -> None:
 
 
 @pytest.mark.quick
+def test_external_persistence_authority_registry_releases_runner_key() -> None:
+    runner = _runner()
+    runner_reference = weakref.ref(runner)
+    assert runner in (
+        development_runner_module._REGISTERED_PERSISTENCE_AUTHORITIES
+    )
+
+    del runner
+    gc.collect()
+
+    assert runner_reference() is None
+
+
+@pytest.mark.quick
 def test_runner_persistence_authority_is_read_only_and_rejects_replacement(
     tmp_path: Path,
 ) -> None:
@@ -782,6 +799,11 @@ def test_runner_persistence_authority_is_read_only_and_rejects_replacement(
         del runner._persistence_store
 
     object.__setattr__(runner, "_persistence_store", foreign_store)
+    object.__setattr__(
+        runner,
+        "_persistence_store_authority_anchor",
+        {"store": foreign_store, "authority": "foreign"},
+    )
     with pytest.raises(
         DevelopmentRunnerError,
         match="persistence authority object drifted",
@@ -806,6 +828,35 @@ def test_runner_replay_rejects_private_store_proxy_and_anchor_drift(
             responsibility_id="key_schedule",
             now_epoch_seconds=1,
         )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence authority object drifted",
+    ):
+        proxy_runner._execute_unit(0, _input())
+
+    guard_shadow_runner, _guard_shadow_store = _persistent_runner(
+        tmp_path / "guard_shadow"
+    )
+    object.__setattr__(
+        guard_shadow_runner,
+        "_guard_persistence_authority",
+        lambda **_kwargs: None,
+    )
+    object.__setattr__(
+        guard_shadow_runner,
+        "_require_persistence_store",
+        lambda: _guard_shadow_store,
+    )
+    object.__setattr__(
+        guard_shadow_runner,
+        "_persistence_store",
+        _ForeignStoreProxy(),
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="persistence authority object drifted",
+    ):
+        guard_shadow_runner._execute_unit(0, _input())
 
     anchor_runner, anchor_store = _persistent_runner(tmp_path / "anchor")
     object.__setattr__(
@@ -859,6 +910,57 @@ def test_runner_replay_rejects_each_frozen_store_anchor_drift(
             responsibility_id="key_schedule",
             now_epoch_seconds=1,
         )
+
+
+@pytest.mark.quick
+def test_runner_rejects_never_committed_record_store_method_shadow(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    object.__setattr__(
+        store,
+        "verified_terminal_scientific_evidence_for_unit_indexes",
+        lambda *_args, **_kwargs: (("never_committed_record", None),),
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match=(
+            "persistence callable instance shadow is forbidden:"
+            "verified_terminal_scientific_evidence_for_unit_indexes"
+        ),
+    ):
+        runner.build_verified_module_outcome_record(
+            responsibility_id="key_schedule",
+            now_epoch_seconds=1,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "shadowed_method_name",
+    tuple(
+        name
+        for name, value in vars(DevelopmentPersistentStore).items()
+        if callable(value)
+    ),
+)
+def test_runner_rejects_every_persistence_callable_instance_shadow_category(
+    tmp_path: Path,
+    shadowed_method_name: str,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    object.__setattr__(
+        store,
+        shadowed_method_name,
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match=f"persistence callable instance shadow is forbidden:{shadowed_method_name}",
+    ):
+        runner._execute_unit(0, _input())
 
 
 @pytest.mark.quick
