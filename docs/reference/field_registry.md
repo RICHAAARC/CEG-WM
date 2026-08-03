@@ -680,8 +680,8 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | recommendation_reason | persisted_protocol | provenance | none | true | false | false | 基于既有 evidence records 的非空建议理由。 |
 | blocking_responsibilities | persisted_protocol | protocol | none | true | false | false | `implementation_blocked` 时实际阻断当前职责的前置职责。 |
 | provisional_threshold_identities | persisted_protocol | method_identity | none | true | false | false | outcome 引用的 development-only provisional threshold identities。 |
-| source_record_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的现有 internal sample record schema 版本。 |
-| source_record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的现有 internal collection schema 版本。 |
+| source_record_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的 development scientific sample record schema 版本。 |
+| source_record_collection_schema_version | persisted_protocol | protocol | none | true | false | false | outcome 依赖的 development scientific record collection schema 版本。 |
 | outcome_record_id | persisted_protocol | provenance | none | true | false | false | module outcome 除自身 ID 外全部字段的 canonical SHA-256。 |
 
 以下 input-manifest 字段只描述 runner 的冻结输入边界，不直接支撑 claim：

@@ -20,6 +20,8 @@ from experiments.protocol.development_exploration import (
     DEVELOPMENT_SPLIT,
     DEVELOPMENT_THRESHOLD_INPUT_ROLES,
     DEVELOPMENT_THRESHOLD_ROLE,
+    RECORD_COLLECTION_SCHEMA_VERSION,
+    RECORD_SCHEMA_VERSION,
     FORMAL_LATER_SPLIT_DENY_LIST,
     GEOMETRY_NEGATIVE_CONTROL_CASE_IDS,
     GEOMETRY_OPERATION_FAMILIES,
@@ -1320,11 +1322,9 @@ def test_observed_signal_allows_independent_candidate_recommendation(
         evidence_record_ids=("record_for_high_frequency_detector",),
     )
     assert outcome.validate(protocol) == ()
-    assert outcome.source_record_schema_version == (
-        INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION
-    )
+    assert outcome.source_record_schema_version == RECORD_SCHEMA_VERSION
     assert outcome.source_record_collection_schema_version == (
-        INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
+        RECORD_COLLECTION_SCHEMA_VERSION
     )
     assert outcome.scientific_claims_supported is False
 

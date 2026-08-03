@@ -100,6 +100,12 @@ REGISTERED_KEY_SCHEDULE_CONFIG_DIGEST = (
 )
 DEVELOPMENT_EXECUTION_INTENT_ROLE = "create_only_before_scientific_records"
 DEVELOPMENT_EXECUTION_INTENT_RAW_SECRET_POLICY = "raw_secret_prohibited"
+RECORD_SCHEMA_VERSION = (
+    "ceg_wm_development_scientific_record_v1"
+)
+RECORD_COLLECTION_SCHEMA_VERSION = (
+    "ceg_wm_development_scientific_record_collection_v1"
+)
 
 CONTENT_BRANCH_IDS = (
     "clean_control",
@@ -3331,10 +3337,10 @@ class DevelopmentModuleOutcomeRecord:
             for value in self.provisional_threshold_identities
         ):
             violations.append("module_outcome_provisional_threshold_identity_invalid")
-        if self.source_record_schema_version != INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION:
+        if self.source_record_schema_version != RECORD_SCHEMA_VERSION:
             violations.append("source_record_schema_version_invalid")
         if self.source_record_collection_schema_version != (
-            INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
+            RECORD_COLLECTION_SCHEMA_VERSION
         ):
             violations.append("source_record_collection_schema_version_invalid")
         if self.scientific_claims_supported is not False:
@@ -3366,9 +3372,9 @@ def create_development_module_outcome_record(
         "blocking_responsibilities": tuple(blocking_responsibilities),
         "evidence_record_ids": tuple(evidence_record_ids),
         "provisional_threshold_identities": tuple(provisional_threshold_identities),
-        "source_record_schema_version": INTERNAL_VALIDATION_RECORD_SCHEMA_VERSION,
+        "source_record_schema_version": RECORD_SCHEMA_VERSION,
         "source_record_collection_schema_version": (
-            INTERNAL_VALIDATION_RECORD_COLLECTION_SCHEMA_VERSION
+            RECORD_COLLECTION_SCHEMA_VERSION
         ),
         "scientific_claims_supported": False,
     }

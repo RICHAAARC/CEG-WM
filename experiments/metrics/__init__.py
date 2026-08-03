@@ -80,8 +80,22 @@ from .hf_only_reference_metrics import (
     validate_hf_only_reference_quality_case_result,
     validate_hf_only_reference_threshold_result,
 )
+from .development_exploration import (
+    DevelopmentClusterAggregate,
+    DevelopmentCrossFitDetectionAggregate,
+    DevelopmentMetricError,
+    DevelopmentMetricObservation,
+    aggregate_development_cluster_metrics,
+    cross_fit_development_detection_metrics,
+)
 
 __all__ = [
+    "DevelopmentClusterAggregate",
+    "DevelopmentCrossFitDetectionAggregate",
+    "DevelopmentMetricError",
+    "DevelopmentMetricObservation",
+    "aggregate_development_cluster_metrics",
+    "cross_fit_development_detection_metrics",
     "BranchComplementarityAggregate",
     "BranchCaseResult",
     "BranchOutcomeCase",
