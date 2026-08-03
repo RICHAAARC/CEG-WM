@@ -497,6 +497,27 @@ def _call_exact_persistence_method(
 class _FrozenRunnerCallableDescriptorMeta(type):
     """Keep the runner's frozen execution surface class-level read-only."""
 
+    def __init__(
+        cls,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, object],
+        **kwargs: object,
+    ) -> None:
+        frozen_runner = globals().get(
+            "_FROZEN_DEVELOPMENT_EXPLORATION_RUNNER"
+        )
+        if frozen_runner is not None and any(
+            frozen_runner in base.__mro__ for base in bases
+        ):
+            raise TypeError("development exploration runner is final")
+        super().__init__(
+            name,
+            bases,
+            namespace,
+            **kwargs,
+        )
+
     def __setattr__(cls, name: str, value: object) -> None:
         frozen_descriptors = globals().get(
             "_EXPECTED_RUNNER_CALLABLE_DESCRIPTORS"
@@ -524,6 +545,10 @@ class DevelopmentExplorationRunner(
     """Execute a frozen roster without result-provider or module-result proxies."""
 
     def __getattribute__(self, name: str) -> object:
+        if type(self) is not DevelopmentExplorationRunner:
+            raise DevelopmentRunnerError(
+                "development exploration runner exact type is required"
+            )
         expected_descriptors = globals().get(
             "_EXPECTED_RUNNER_CALLABLE_DESCRIPTORS"
         )
@@ -555,11 +580,19 @@ class DevelopmentExplorationRunner(
         return object.__getattribute__(self, name)
 
     def __setattr__(self, name: str, value: object) -> None:
+        if type(self) is not DevelopmentExplorationRunner:
+            raise DevelopmentRunnerError(
+                "development exploration runner exact type is required"
+            )
         if name == "_persistence_store" and hasattr(self, name):
             raise AttributeError("persistence authority is immutable after construction")
         super().__setattr__(name, value)
 
     def __delattr__(self, name: str) -> None:
+        if type(self) is not DevelopmentExplorationRunner:
+            raise DevelopmentRunnerError(
+                "development exploration runner exact type is required"
+            )
         if name == "_persistence_store":
             raise AttributeError("persistence authority cannot be deleted")
         super().__delattr__(name)
@@ -576,6 +609,10 @@ class DevelopmentExplorationRunner(
         resource_identity_digest: str,
         persistence_store: DevelopmentPersistentStore | None = None,
     ) -> None:
+        if type(self) is not DevelopmentExplorationRunner:
+            raise DevelopmentRunnerError(
+                "development exploration runner exact type is required"
+            )
         if type(intent_authority) is not FrozenDevelopmentExecutionIntentAuthority or intent_authority.validate():
             raise DevelopmentRunnerError("execution intent authority is invalid")
         if type(adapter) is not CegWmExperimentAdapter:
@@ -2828,6 +2865,7 @@ class DevelopmentExplorationRunner(
         return f"development_scientific_unit_{unit.unit_index:04d}"
 
 
+_FROZEN_DEVELOPMENT_EXPLORATION_RUNNER = DevelopmentExplorationRunner
 _EXPECTED_PERSISTENCE_GUARD = (
     DevelopmentExplorationRunner._guard_persistence_authority
 )

@@ -1005,6 +1005,124 @@ def test_runner_rejects_foreign_never_committed_unit_execution_shadow(
 
 @pytest.mark.quick
 @pytest.mark.parametrize(
+    "overridden_callable",
+    (
+        None,
+        "_execute_unit",
+        "_execute_real_operation",
+        "_record",
+        "_failure_record",
+        "_guard_persistence_authority",
+        "_require_persistence_store",
+    ),
+)
+def test_development_exploration_runner_rejects_every_subclass_category(
+    overridden_callable: str | None,
+) -> None:
+    namespace: dict[str, object] = {}
+    if overridden_callable is not None:
+        namespace[overridden_callable] = lambda *_args, **_kwargs: None
+
+    with pytest.raises(
+        TypeError,
+        match="development exploration runner is final",
+    ):
+        type(
+            "DerivedDevelopmentExplorationRunner",
+            (DevelopmentExplorationRunner,),
+            namespace,
+        )
+
+
+@pytest.mark.quick
+def test_subclass_foreign_record_path_cannot_create_persistent_artifacts(
+    tmp_path: Path,
+) -> None:
+    _runner_instance, store = _persistent_runner(tmp_path)
+    foreign_record = _runner()._execute_unit(0, _input()).record
+
+    with pytest.raises(
+        TypeError,
+        match="development exploration runner is final",
+    ):
+        type(
+            "DerivedForeignRecordDevelopmentRunner",
+            (DevelopmentExplorationRunner,),
+            {
+                "_execute_unit": lambda *_args, **_kwargs: (
+                    development_runner_module.DevelopmentUnitRunResult(
+                        record=foreign_record,
+                        intent=None,
+                        committed=None,
+                    )
+                )
+            },
+        )
+    recovery = store.recover(now_epoch_seconds=100)
+    assert recovery.committed_units == ()
+    assert recovery.interrupted_attempts == ()
+    assert recovery.next_attempt_by_unit == ()
+    for artifact_directory_name in ("intents", "bundles", "markers"):
+        artifact_directory = store.run_root / artifact_directory_name
+        assert (
+            not artifact_directory.exists()
+            or tuple(artifact_directory.iterdir()) == ()
+        )
+
+
+@pytest.mark.quick
+def test_abnormally_constructed_subclass_fails_every_exact_type_entry() -> None:
+    abnormal_runner_type = type.__new__(
+        type(DevelopmentExplorationRunner),
+        "AbnormallyConstructedDevelopmentExplorationRunner",
+        (DevelopmentExplorationRunner,),
+        {},
+    )
+    abnormal_runner = object.__new__(abnormal_runner_type)
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="development exploration runner exact type is required",
+    ):
+        DevelopmentExplorationRunner.__getattribute__(
+            abnormal_runner,
+            "protocol",
+        )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="development exploration runner exact type is required",
+    ):
+        DevelopmentExplorationRunner.__setattr__(
+            abnormal_runner,
+            "protocol",
+            None,
+        )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="development exploration runner exact type is required",
+    ):
+        DevelopmentExplorationRunner.__delattr__(
+            abnormal_runner,
+            "protocol",
+        )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="development exploration runner exact type is required",
+    ):
+        DevelopmentExplorationRunner.__init__(
+            abnormal_runner,
+            intent_authority=None,  # type: ignore[arg-type]
+            adapter=None,  # type: ignore[arg-type]
+            runtime_adapter=None,  # type: ignore[arg-type]
+            attack_registry=None,  # type: ignore[arg-type]
+            method_code_revision="0" * 40,
+            environment_digest="0" * 64,
+            resource_identity_digest="0" * 64,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
     "shadowed_runner_callable",
     ("_execute_real_operation", "_record", "_failure_record"),
 )
