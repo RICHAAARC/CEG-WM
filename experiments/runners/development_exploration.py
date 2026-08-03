@@ -494,7 +494,33 @@ def _call_exact_persistence_method(
     return method(store, *args, **kwargs)
 
 
-class DevelopmentExplorationRunner:
+class _FrozenRunnerCallableDescriptorMeta(type):
+    """Keep the runner's frozen execution surface class-level read-only."""
+
+    def __setattr__(cls, name: str, value: object) -> None:
+        frozen_descriptors = globals().get(
+            "_EXPECTED_RUNNER_CALLABLE_DESCRIPTORS"
+        )
+        if frozen_descriptors is not None and name in frozen_descriptors:
+            raise TypeError(
+                f"runner callable class descriptor is frozen:{name}"
+            )
+        super().__setattr__(name, value)
+
+    def __delattr__(cls, name: str) -> None:
+        frozen_descriptors = globals().get(
+            "_EXPECTED_RUNNER_CALLABLE_DESCRIPTORS"
+        )
+        if frozen_descriptors is not None and name in frozen_descriptors:
+            raise TypeError(
+                f"runner callable class descriptor is frozen:{name}"
+            )
+        super().__delattr__(name)
+
+
+class DevelopmentExplorationRunner(
+    metaclass=_FrozenRunnerCallableDescriptorMeta
+):
     """Execute a frozen roster without result-provider or module-result proxies."""
 
     def __getattribute__(self, name: str) -> object:

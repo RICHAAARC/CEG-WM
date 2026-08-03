@@ -970,6 +970,11 @@ def test_runner_rejects_foreign_never_committed_unit_execution_shadow(
     runner, store = _persistent_runner(tmp_path / "target")
     foreign_runner = _runner()
     foreign_record = foreign_runner._execute_unit(0, _input()).record
+    with pytest.raises(
+        TypeError,
+        match="runner callable class descriptor is frozen:__getattribute__",
+    ):
+        DevelopmentExplorationRunner.__getattribute__ = object.__getattribute__
     object.__setattr__(
         runner,
         "_execute_unit",
@@ -1026,28 +1031,49 @@ def test_runner_rejects_each_execution_record_callable_shadow_category(
 
 @pytest.mark.quick
 @pytest.mark.parametrize(
-    "drifted_runner_callable",
-    ("_execute_unit", "_execute_real_operation", "_record", "_failure_record"),
+    "frozen_runner_callable",
+    tuple(
+        name
+        for name, descriptor in vars(DevelopmentExplorationRunner).items()
+        if callable(descriptor)
+        or isinstance(descriptor, (classmethod, staticmethod))
+    ),
 )
-def test_runner_rejects_each_critical_callable_class_descriptor_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    drifted_runner_callable: str,
+@pytest.mark.parametrize("class_mutation", ("set", "delete"))
+def test_runner_rejects_every_frozen_callable_class_mutation(
+    frozen_runner_callable: str,
+    class_mutation: str,
 ) -> None:
-    runner = _runner()
-    monkeypatch.setattr(
+    expected_descriptor = inspect.getattr_static(
         DevelopmentExplorationRunner,
-        drifted_runner_callable,
-        lambda *_args, **_kwargs: None,
+        frozen_runner_callable,
     )
 
     with pytest.raises(
-        DevelopmentRunnerError,
+        TypeError,
         match=(
-            "runner callable class descriptor drifted:"
-            f"{drifted_runner_callable}"
+            "runner callable class descriptor is frozen:"
+            f"{frozen_runner_callable}"
         ),
     ):
-        getattr(runner, drifted_runner_callable)
+        if class_mutation == "set":
+            setattr(
+                DevelopmentExplorationRunner,
+                frozen_runner_callable,
+                lambda *_args, **_kwargs: None,
+            )
+        else:
+            delattr(
+                DevelopmentExplorationRunner,
+                frozen_runner_callable,
+            )
+    assert (
+        inspect.getattr_static(
+            DevelopmentExplorationRunner,
+            frozen_runner_callable,
+        )
+        is expected_descriptor
+    )
 
 
 @pytest.mark.quick
