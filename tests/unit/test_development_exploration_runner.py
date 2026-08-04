@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 import inspect
+import json
 import os
 from pathlib import Path
 import shutil
@@ -34,6 +35,7 @@ from experiments.runners.development_persistence import (
 )
 from experiments.runners.synthetic_runtime import SyntheticQkBackend
 import experiments.runners.record_writer as record_writer_module
+import experiments.runners.development_exploration as development_runner_module
 from experiments.protocol.development_exploration import (
     DevelopmentVerifiedModuleOutcome,
     build_development_cross_fit_plan,
@@ -63,6 +65,9 @@ from runtime import (
     create_runtime_adapter,
 )
 import scripts.experiment_execution.development_exploration_worker_inputs as worker_inputs_module
+from scripts.experiment_execution import (
+    development_exploration_entrypoint as development_entrypoint,
+)
 from tests.unit.test_development_module_exploration import (
     _development_manifest,
     _execution_intent,
@@ -1433,7 +1438,7 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
         lambda seed: torch.tensor([float(seed)]),
         lease=first_lease,
         soft_stop_epoch_seconds=initial_epoch + 100,
-    ) is False
+    ) == "retryable_stop"
     first_recovery = store.recover(now_epoch_seconds=initial_epoch + 1)
     retry_marker = first_recovery.committed_units[-1]
     assert retry_marker.unit_index == 27
@@ -1469,7 +1474,7 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
         lambda seed: torch.tensor([float(seed)]),
         lease=second_lease,
         soft_stop_epoch_seconds=resumed_epoch + 100,
-    ) is True
+    ) == "complete_success"
     records = store.verified_terminal_routing_reference_records(
         now_epoch_seconds=resumed_epoch + 1
     )
@@ -1486,106 +1491,237 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runner, store = _persistent_runner(tmp_path)
-    initial_epoch = int(time.time())
-    real_monotonic = time.monotonic
-    runtime = _ReferenceMeasurementRuntime()
-    backend = _ReferencePromptBackend()
-    prior_intent_digest = None
+    real_epoch_time = time.time
+    entrypoint_clock = {"now": int(real_epoch_time())}
+    entrypoint_root = tmp_path / "production_entrypoint"
+    entrypoint_root.mkdir()
+    package = entrypoint_root / "development_execution_package.zip"
+    package.write_bytes(b"production entrypoint package fixture")
+    production_base_latent = torch.linspace(
+        -1.0,
+        1.0,
+        steps=32,
+        dtype=torch.float32,
+    ).reshape(1, 2, 4, 4).to(torch.float16)
+    measurement_state = {"calls": 0, "reference_failures": 0}
 
-    for attempt_index in range(3):
-        session_epoch = initial_epoch + attempt_index * 11
-        lease = store.acquire_lease(
-            session_id=f"routing_reference_timeout_session_{attempt_index}",
-            now_epoch_seconds=session_epoch,
-            lease_duration_seconds=10,
-        )
-        cursor = store.open_session_cursor(
-            lease,
-            now_epoch_seconds=session_epoch,
-        )
-        if attempt_index == 0:
-            _advance_session_cursor_to_routing_reference(
-                runner,
-                store,
-                lease,
-                cursor,
-                now_epoch_seconds=session_epoch,
-            )
-        builder = _reference_builder(runner, store, cursor, runtime)
-        monotonic_values = iter((0.0, 901.0))
-        monkeypatch.setattr(
-            worker_inputs_module.time,
-            "monotonic",
-            lambda: next(monotonic_values),
-        )
-        monkeypatch.setattr(
-            worker_inputs_module.time,
-            "time",
-            lambda value=session_epoch: float(value),
-        )
+    class FixedSemanticObservationProducer:
+        def __init__(self, **_keywords: object) -> None:
+            pass
 
-        assert builder.prepare_routing_reference_fit(
-            backend,
-            lambda seed: torch.tensor([float(seed)]),
-            lease=lease,
-            soft_stop_epoch_seconds=session_epoch + 100,
-        ) is False
-        marker = store.recover(
-            now_epoch_seconds=session_epoch + 1
-        ).committed_units[-1]
-        record = store._verify_committed(marker)
-        assert record.attempt_index == attempt_index
-        assert record.retry_parent_intent_digest == prior_intent_digest
-        assert record.duration_limit_exceeded is True
-        assert record.failure_class == "resource_failure"
-        if attempt_index < 2:
-            assert record.execution_status == "retry"
-            assert marker.attempt_disposition == "retryable_resource_failure"
-            prior_intent_digest = marker.intent_digest
-        else:
-            assert record.execution_status == "failed"
-            assert record.failure_reason == (
-                "routing_reference_resource_blocked_after_attempt_exhaustion"
-            )
-            assert marker.attempt_disposition == "final_failure"
+        def observe(
+            self,
+            _routing_rgb: torch.Tensor,
+            _prompt: str,
+        ) -> SpatialRoutingObservation:
+            return _observations().semantic
 
-    resumed_epoch = initial_epoch + 33
-    resumed_lease = store.acquire_lease(
-        session_id="routing_reference_after_resource_block_session",
-        now_epoch_seconds=resumed_epoch,
-        lease_duration_seconds=100,
+    class ProductionCpuBackend(_CombinedCpuWiringBackend):
+        def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+            decoded = self.content.vae_decode(latent)
+            return torch.cat((decoded, decoded[:, :1]), dim=1)
+
+    original_runtime_initialize = Sd35RuntimeAdapter.initialize
+    qk_fixture_runtime = create_runtime_adapter(_CombinedCpuWiringBackend())
+    qk_fixture_session = qk_fixture_runtime.initialize("cpu")
+    qk_observation = qk_fixture_runtime.observe_detection_qk(
+        torch.zeros(
+            (
+                1,
+                3,
+                qk_fixture_session.image_height,
+                qk_fixture_session.image_width,
+            ),
+            dtype=torch.uint8,
+        )
     )
-    resumed_cursor = store.open_session_cursor(
-        resumed_lease,
-        now_epoch_seconds=resumed_epoch,
+    qk_fixture_runtime.close()
+    original_runtime_qk_observation = Sd35RuntimeAdapter.observe_detection_qk
+
+    def initialize_cpu(self, _requested_device):
+        return original_runtime_initialize(self, "cpu")
+
+    def controlled_measurement(
+        self,
+        base_latent: torch.Tensor,
+        *,
+        sample_index: int,
+    ) -> RuntimeRoutingReferenceMeasurement:
+        is_reference_attempt = (
+            measurement_state["calls"] >= 10
+            and sample_index == 0
+            and measurement_state["reference_failures"] < 3
+        )
+        measurement_state["calls"] += 1
+        if is_reference_attempt:
+            measurement_state["reference_failures"] += 1
+            raise OSError("controlled production reference resource failure")
+        measurement = _ReferenceMeasurementRuntime().measure_generation_routing_reference_inputs(
+            base_latent,
+            sample_index=sample_index,
+        )
+        return replace(
+            measurement,
+            runtime_config_digest=self._configuration.runtime_config_digest,
+            model_id=self._configuration.model_id,
+            model_revision=self._configuration.model_revision,
+            callback_indices=tuple(range(self._configuration.inference_steps)),
+        )
+
+    def cpu_runtime_factory(_backend, _configuration_path):
+        return create_runtime_adapter(ProductionCpuBackend())
+
+    def controlled_qk_observation(self, image: torch.Tensor):
+        if isinstance(self._backend, ProductionCpuBackend):
+            return qk_observation
+        return original_runtime_qk_observation(self, image)
+
+    def ticking_entrypoint_time() -> float:
+        entrypoint_clock["now"] += 1
+        return float(entrypoint_clock["now"])
+
+    original_execute_claimed = (
+        DevelopmentExplorationRunner.execute_and_commit_claimed_session_unit
     )
-    assert resumed_cursor.next_unit_index == 11
-    resumed_builder = _reference_builder(
-        runner,
-        store,
-        resumed_cursor,
-        runtime,
+
+    def execute_one_scientific_then_soft_stop(self, *arguments, **keywords):
+        result = original_execute_claimed(self, *arguments, **keywords)
+        entrypoint_clock["now"] += (
+            development_entrypoint.SOFT_STOP_SECONDS + 1
+        )
+        return result
+
+    monkeypatch.setattr(
+        worker_inputs_module,
+        "DevelopmentSemanticObservationProducer",
+        FixedSemanticObservationProducer,
     )
     monkeypatch.setattr(
-        worker_inputs_module.time,
-        "monotonic",
-        real_monotonic,
+        development_entrypoint,
+        "Sd35PipelineBackend",
+        lambda **_keywords: _ReferencePromptBackend(),
     )
     monkeypatch.setattr(
-        worker_inputs_module.time,
+        development_entrypoint,
+        "create_runtime_adapter",
+        cpu_runtime_factory,
+    )
+    monkeypatch.setattr(Sd35RuntimeAdapter, "initialize", initialize_cpu)
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "measure_generation_routing_reference_inputs",
+        controlled_measurement,
+    )
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "observe_detection_qk",
+        controlled_qk_observation,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "_base_latent",
+        lambda _seed, **_keywords: production_base_latent,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "_build_or_verify_package",
+        lambda *_arguments: package,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "_environment_digest",
+        lambda: "b" * 64,
+    )
+    monkeypatch.setattr(
+        development_entrypoint.time,
         "time",
-        lambda: float(resumed_epoch),
+        ticking_entrypoint_time,
     )
-    assert resumed_builder.prepare_routing_reference_fit(
-        backend,
-        lambda seed: torch.tensor([float(seed)]),
-        lease=resumed_lease,
-        soft_stop_epoch_seconds=resumed_epoch + 100,
-    ) is False
-    assert resumed_cursor.next_unit_index == 74
-    assert len(resumed_cursor.routing_reference_records) == 63
-    assert len(resumed_cursor.terminal_routing_reference_records) == 64
+    monkeypatch.setattr(
+        development_runner_module,
+        "time",
+        lambda: float(entrypoint_clock["now"]),
+    )
+    monkeypatch.setattr(
+        development_entrypoint.torch.cuda,
+        "get_device_name",
+        lambda _index: "cpu-production-fixture",
+    )
+    monkeypatch.setattr(
+        development_entrypoint.torch.cuda,
+        "max_memory_allocated",
+        lambda _index: 1,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "execute_and_commit_claimed_session_unit",
+        execute_one_scientific_then_soft_stop,
+    )
+
+    production_results = []
+    for session_ordinal in range(3):
+        exit_code, result = (
+            development_entrypoint.execute_development_exploration_session(
+                repository_root=ROOT,
+                expected_revision="a" * 40,
+                persistent_root=entrypoint_root / "persistent",
+                cache_root=entrypoint_root / "cache",
+                run_id="production_routing_terminal_recovery",
+                session_id=f"production_session_{session_ordinal}",
+                environment={
+                    "CEG_WM_ROOT_KEY": "development-runner-cpu-wiring-key",
+                    "HF_TOKEN": "development-test-token",
+                },
+            )
+        )
+        assert exit_code == 0, (result, measurement_state)
+        production_results.append(result)
+        if session_ordinal < 2:
+            assert result["termination_reason"] == (
+                "resource_retry_after_committed_reference"
+            )
+        entrypoint_clock["now"] += (
+            development_entrypoint.HARD_SESSION_CAP_SECONDS
+        )
+
+    marker_root = (
+        entrypoint_root
+        / "persistent"
+        / "production_routing_terminal_recovery"
+        / "markers"
+    )
+    marker_payloads = tuple(
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(marker_root.glob("*.COMMITTED.json"))
+    )
+    reference_attempts = tuple(
+        item
+        for item in marker_payloads
+        if item["unit_index"] == 10
+    )
+    assert tuple(item["attempt_disposition"] for item in reference_attempts) == (
+        "retryable_resource_failure",
+        "retryable_resource_failure",
+        "final_failure",
+    )
+    assert reference_attempts[1]["parent_attempt_intent_digest"] == (
+        reference_attempts[0]["intent_digest"]
+    )
+    assert reference_attempts[2]["parent_attempt_intent_digest"] == (
+        reference_attempts[1]["intent_digest"]
+    )
+    assert sum(
+        item["record_kind"] == "development_routing_reference_fit"
+        and item["attempt_disposition"] == "success"
+        for item in marker_payloads
+    ) == 63
+    first_scientific_marker = next(
+        item for item in marker_payloads if item["unit_index"] == 74
+    )
+    assert first_scientific_marker["attempt_disposition"] == "success"
+    assert production_results[-1]["termination_reason"] == (
+        "soft_stop_after_current_unit"
+    )
 
 
 @pytest.mark.quick
@@ -1628,10 +1764,14 @@ def test_production_routing_reference_commits_terminal_implementation_failure(
         lambda seed: torch.tensor([float(seed)]),
         lease=lease,
         soft_stop_epoch_seconds=session_epoch + 100,
-    ) is False
-    marker = store.recover(
-        now_epoch_seconds=session_epoch + 1
-    ).committed_units[-1]
+    ) == "terminal_blocked"
+    marker = next(
+        item
+        for item in store.recover(
+            now_epoch_seconds=session_epoch + 1
+        ).committed_units
+        if item.unit_index == 10
+    )
     record = store._verify_committed(marker)
 
     assert record.unit_index == 10
@@ -1639,8 +1779,8 @@ def test_production_routing_reference_commits_terminal_implementation_failure(
     assert record.failure_class == "implementation_failure"
     assert record.failure_reason == "builtins.ValueError"
     assert marker.attempt_disposition == "final_failure"
-    assert cursor.next_unit_index == 11
-    assert len(cursor.terminal_routing_reference_records) == 1
+    assert cursor.next_unit_index == 74
+    assert len(cursor.terminal_routing_reference_records) == 64
 
 
 @pytest.mark.quick

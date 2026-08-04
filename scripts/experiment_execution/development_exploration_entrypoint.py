@@ -246,6 +246,8 @@ def execute_development_exploration_session(
     from scripts.experiment_execution.development_exploration_worker_inputs import (
         DevelopmentDependencyInputBlocked,
         DevelopmentProductionInputBuilder,
+        ROUTING_REFERENCE_SCHEDULER_READY,
+        ROUTING_REFERENCE_SESSION_STOP,
     )
     try:
         input_builder = DevelopmentProductionInputBuilder(
@@ -315,19 +317,23 @@ def execute_development_exploration_session(
                 now_epoch_seconds=max(now + 1, int(time.time())),
                 raw_secret_values=(root_key, hf_token),
             )
-        reference_complete = False
+        reference_status = None
         if operational_complete:
             active_stage = "routing_reference_fit"
             active_responsibility = "content_router"
             active_unit_index = session_cursor.next_unit_index
-            reference_complete = input_builder.prepare_routing_reference_fit(
+            reference_status = input_builder.prepare_routing_reference_fit(
                 backend,
                 latent_factory,
                 lease=lease,
                 soft_stop_epoch_seconds=started_epoch + SOFT_STOP_SECONDS,
             )
-        if operational_complete and not reference_complete:
-            termination_reason = "soft_stop_after_reference_measurement"
+        if operational_complete and reference_status in ROUTING_REFERENCE_SESSION_STOP:
+            termination_reason = (
+                "resource_retry_after_committed_reference"
+                if reference_status == "retryable_stop"
+                else "soft_stop_after_reference_measurement"
+            )
 
         cross_fit_plans = {
             responsibility_id: build_development_cross_fit_plan(
@@ -369,7 +375,7 @@ def execute_development_exploration_session(
                     runner.persist_verified_module_outcome(outcome)
                     verified_outcomes[responsibility_id] = outcome
 
-        while reference_complete:
+        while reference_status in ROUTING_REFERENCE_SCHEDULER_READY:
             now = int(time.time())
             if now - started_epoch >= SOFT_STOP_SECONDS:
                 termination_reason = "soft_stop_after_current_unit"

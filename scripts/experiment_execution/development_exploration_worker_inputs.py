@@ -8,6 +8,7 @@ import json
 from math import ceil, isfinite
 from pathlib import Path
 import time
+from typing import Literal
 
 import torch
 
@@ -89,6 +90,19 @@ from runtime import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_PROTOCOL_PATH = REPOSITORY_ROOT / "configs/experiments/internal_scientific_validation_protocol.json"
 COMPONENT_REGISTRY_PATH = REPOSITORY_ROOT / "configs/experiments/internal_execution_components.json"
+
+RoutingReferencePreparationStatus = Literal[
+    "complete_success",
+    "terminal_blocked",
+    "retryable_stop",
+    "soft_stop",
+]
+ROUTING_REFERENCE_SCHEDULER_READY = frozenset(
+    {"complete_success", "terminal_blocked"}
+)
+ROUTING_REFERENCE_SESSION_STOP = frozenset(
+    {"retryable_stop", "soft_stop"}
+)
 
 
 class DevelopmentDependencyInputBlocked(DevelopmentInputError):
@@ -358,10 +372,11 @@ class DevelopmentProductionInputBuilder:
         *,
         lease: PersistentLease,
         soft_stop_epoch_seconds: int,
-    ) -> bool:
+    ) -> RoutingReferencePreparationStatus:
         successful = {
             item.source_cluster_ordinal: item
             for item in self.session_cursor.routing_reference_records
+            if item.execution_status == "success"
         }
         terminal = {
             item.source_cluster_ordinal: item
@@ -371,7 +386,7 @@ class DevelopmentProductionInputBuilder:
             if entry.cluster_ordinal in terminal:
                 continue
             if int(time.time()) >= soft_stop_epoch_seconds:
-                return False
+                return "soft_stop"
             unit = next(
                 item
                 for item in self.protocol.unit_roster
@@ -503,11 +518,18 @@ class DevelopmentProductionInputBuilder:
                 raw_secret_values=(self.root_key, self.hf_token),
                 now_epoch_seconds=max(now + 1, int(time.time())),
             )
-            if record.execution_status != "success":
-                return False
-            successful[entry.cluster_ordinal] = record
+            if record.execution_status == "retry":
+                return "retryable_stop"
+            if record.execution_status == "success":
+                successful[entry.cluster_ordinal] = record
             terminal[entry.cluster_ordinal] = record
-        return len(successful) == 64 and len(terminal) == 64
+        if len(terminal) != 64:
+            raise DevelopmentInputError(
+                "routing reference terminal coverage is incomplete"
+            )
+        if len(successful) == 64:
+            return "complete_success"
+        return "terminal_blocked"
 
     def _routing_reference_attempt_record(
         self,
@@ -582,9 +604,12 @@ class DevelopmentProductionInputBuilder:
         records = {
             item.source_cluster_ordinal: item
             for item in self.session_cursor.routing_reference_records
+            if item.execution_status == "success"
         }
         if len(records) != 64:
-            raise DevelopmentInputError("routing reference fit is incomplete")
+            raise DevelopmentDependencyInputBlocked(
+                "routing reference fit lacks complete successful evidence"
+            )
         rows = [
             records[index].measurement_payload
             for index in range(64)
