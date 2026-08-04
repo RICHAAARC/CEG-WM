@@ -102,6 +102,7 @@ from experiments.runners.internal import (
     InternalRunnerContext,
     execute_internal_case,
 )
+from experiments.runners.synthetic_runtime import SyntheticQkBackend
 from main import (
     BranchNullCalibration,
     GeometryReliabilityThresholds,
@@ -111,7 +112,7 @@ from main import (
     RoutingObservations,
     derive_wrong_key_material,
 )
-from runtime import RuntimeAdapterState, Sd35RuntimeAdapter
+from runtime import RuntimeAdapterState, Sd35RuntimeAdapter, create_runtime_adapter
 from runtime.content_write import ContentWriteVaeResult
 
 
@@ -154,6 +155,22 @@ def _canonical_digest(value: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _wiring_identity_rgb8(height: int, width: int) -> torch.Tensor:
+    """Encode a deterministic identity coordinate image for synthetic Q/K wiring."""
+
+    horizontal = torch.linspace(64.0, 254.0, width, dtype=torch.float32)
+    vertical = torch.linspace(64.0, 254.0, height, dtype=torch.float32)
+    x_coordinates = horizontal.reshape(1, width).expand(height, width)
+    y_coordinates = vertical.reshape(height, 1).expand(height, width)
+    return torch.stack(
+        (
+            x_coordinates,
+            y_coordinates,
+            torch.full((height, width), 255.0, dtype=torch.float32),
+        )
+    ).round().to(dtype=torch.uint8).unsqueeze(0)
 
 
 def _scientific_record_digest(record: DevelopmentScientificRecord) -> str:
@@ -694,6 +711,17 @@ class DevelopmentExplorationRunner:
                     )
                 )
                 continue
+            if responsibility == "image_rectifier":
+                result = self._execute_wiring_image_rectifier_call(raw)
+                digests.append(
+                    (
+                        responsibility,
+                        _canonical_digest(
+                            _safe_result_payload(responsibility, result)
+                        ),
+                    )
+                )
+                continue
             raw.validate(responsibility)
             identity = self._analysis_identity(unit)
             result, _metric, _traces, _internal = self._execute_real_operation(
@@ -710,6 +738,58 @@ class DevelopmentExplorationRunner:
             counts_as_scientific_coverage=False,
             scientific_claims_supported=False,
         )
+
+    def _execute_wiring_image_rectifier_call(
+        self,
+        raw: DevelopmentUnitInput,
+    ) -> object:
+        """Call the real rectifier after a local deterministic identity Q/K chain."""
+
+        raw.validate("image_rectifier")
+        thresholds = raw.geometry_reliability_thresholds
+        if type(thresholds) is not GeometryReliabilityThresholds:
+            raise DevelopmentRunnerError(
+                "wiring image rectifier requires wiring-only reliability constants"
+            )
+        synthetic_runtime = create_runtime_adapter(
+            SyntheticQkBackend(
+                root_key=raw.registered_root_key,
+                model_revision=self.runtime_adapter.session.model_revision,
+            )
+        )
+        synthetic_runtime.initialize("cpu")
+        try:
+            source_image = _wiring_identity_rgb8(
+                synthetic_runtime.session.image_height,
+                synthetic_runtime.session.image_width,
+            )
+            runtime_observation = synthetic_runtime.observe_detection_qk(
+                source_image
+            )
+            synchronized = self.adapter.synchronize_qk_observation(
+                runtime_observation,
+                raw.registered_root_key,
+            ).result
+            estimation = self.adapter.estimate_geometric_transform(
+                synchronized,
+                raw.registered_root_key,
+                epsilon_inlier=thresholds.epsilon_inlier,
+            ).result
+            reliability = self.adapter.assess_geometry_reliability(
+                estimation,
+                thresholds,
+            ).result
+            if not reliability.reliable or not reliability.allow_rectification:
+                raise DevelopmentRunnerError(
+                    "wiring image rectifier identity geometry is unreliable"
+                )
+            return self.adapter.rectify_image(
+                source_image,
+                estimation,
+                reliability,
+            ).result
+        finally:
+            synthetic_runtime.close()
 
     def _execute_wiring_conditional_call(
         self,

@@ -27,6 +27,7 @@ from experiments.runners.development_persistence import (
     FrozenWorkerIdentity,
     development_unit_roster_digest,
 )
+from experiments.runners.synthetic_runtime import SyntheticQkBackend
 from experiments.protocol.development_exploration import (
     DevelopmentVerifiedModuleOutcome,
     build_development_cross_fit_plan,
@@ -46,7 +47,7 @@ from main import (
 )
 from main.content_chain.routing import SpatialRoutingObservation
 from main.content_chain.detector import NullScoreRecord
-from runtime import create_runtime_adapter
+from runtime import Sd35RuntimeAdapter, create_runtime_adapter
 from tests.unit.test_development_module_exploration import (
     _development_manifest,
     _execution_intent,
@@ -479,11 +480,20 @@ def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
         observed.append(unit.responsibility_id)
         return {"responsibility_id": unit.responsibility_id}
 
+    def execute_rectifier(_raw):
+        observed.append("image_rectifier")
+        return {"responsibility_id": "image_rectifier"}
+
     monkeypatch.setattr(runner, "_execute_real_operation", execute_operation)
     monkeypatch.setattr(
         runner,
         "_execute_wiring_conditional_call",
         execute_conditional,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_wiring_image_rectifier_call",
+        execute_rectifier,
     )
     monkeypatch.setattr(
         "experiments.runners.development_exploration._safe_result_payload",
@@ -501,6 +511,129 @@ def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
     assert receipt.counts_as_scientific_coverage is False
     assert receipt.scientific_claims_supported is False
     assert tuple(observed) == REQUIRED_METHOD_RESPONSIBILITIES
+
+
+@pytest.mark.quick
+def test_wiring_rectifier_uses_real_synthetic_identity_public_call_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    raw = _input()
+    observed: list[str] = []
+    closed: list[bool] = []
+
+    runtime_observe = Sd35RuntimeAdapter.observe_detection_qk
+    synchronize = CegWmExperimentAdapter.synchronize_qk_observation
+    estimate = CegWmExperimentAdapter.estimate_geometric_transform
+    assess = CegWmExperimentAdapter.assess_geometry_reliability
+    rectify = CegWmExperimentAdapter.rectify_image
+    backend_close = SyntheticQkBackend.close
+
+    def observe_call(self, image):
+        observed.append("runtime_qk_observation")
+        return runtime_observe(self, image)
+
+    def synchronize_call(self, observation, root_key):
+        observed.append("qk_geometry_sync")
+        return synchronize(self, observation, root_key)
+
+    def estimate_call(self, observation, root_key, *, epsilon_inlier):
+        observed.append("geometric_transform_estimator")
+        return estimate(
+            self,
+            observation,
+            root_key,
+            epsilon_inlier=epsilon_inlier,
+        )
+
+    def assess_call(self, estimation, thresholds):
+        observed.append("geometry_reliability")
+        result = assess(self, estimation, thresholds)
+        assert result.result.reliable is True
+        assert result.result.allow_rectification is True
+        return result
+
+    def rectify_call(self, image, estimation, reliability):
+        observed.append("image_rectifier")
+        return rectify(self, image, estimation, reliability)
+
+    def close_call(self):
+        closed.append(True)
+        return backend_close(self)
+
+    monkeypatch.setattr(Sd35RuntimeAdapter, "observe_detection_qk", observe_call)
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "synchronize_qk_observation",
+        synchronize_call,
+    )
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "estimate_geometric_transform",
+        estimate_call,
+    )
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "assess_geometry_reliability",
+        assess_call,
+    )
+    monkeypatch.setattr(CegWmExperimentAdapter, "rectify_image", rectify_call)
+    monkeypatch.setattr(SyntheticQkBackend, "close", close_call)
+
+    result = runner._execute_wiring_image_rectifier_call(raw)
+
+    assert result.rectification_config_digest
+    assert observed == [
+        "runtime_qk_observation",
+        "qk_geometry_sync",
+        "geometric_transform_estimator",
+        "geometry_reliability",
+        "image_rectifier",
+    ]
+    assert closed == [True]
+
+
+@pytest.mark.quick
+def test_wiring_rectifier_rejects_unreliable_identity_before_real_rectification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    raw = replace(
+        _input(),
+        geometry_reliability_thresholds=replace(
+            _reliability_thresholds(),
+            gamma_gap=1_000_000.0,
+            gamma_key=1_000_000.0,
+        ),
+    )
+    rectifier_calls: list[bool] = []
+    closed: list[bool] = []
+    rectify = CegWmExperimentAdapter.rectify_image
+    backend_close = SyntheticQkBackend.close
+
+    def unexpected_rectify(self, image, estimation, reliability):
+        rectifier_calls.append(True)
+        return rectify(self, image, estimation, reliability)
+
+    def close_call(self):
+        closed.append(True)
+        return backend_close(self)
+
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "rectify_image",
+        unexpected_rectify,
+    )
+    monkeypatch.setattr(SyntheticQkBackend, "close", close_call)
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="identity geometry is unreliable",
+    ):
+        runner._execute_wiring_image_rectifier_call(raw)
+
+    assert rectifier_calls == []
+    assert closed == [True]
 
 
 @pytest.mark.quick
@@ -614,12 +747,19 @@ def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() ->
 
 
 @pytest.mark.quick
-def test_rectifier_fail_closed_is_classified_as_scientific_exclusion() -> None:
+def test_rectifier_fail_closed_is_classified_as_scientific_exclusion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runner = _runner()
     unit = next(
         item
         for item in runner.protocol.unit_roster
         if item.responsibility_id == "image_rectifier"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_execute_wiring_image_rectifier_call",
+        lambda _raw: pytest.fail("scientific path used wiring rectifier helper"),
     )
     with pytest.raises(DevelopmentUnitExcluded, match="fail-closed reliability"):
         runner._execute_unit(unit.unit_index, _input())
