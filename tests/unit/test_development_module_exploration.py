@@ -661,6 +661,16 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
         unit.phase in OPERATIONAL_UNIT_PHASES
         for unit in roster[: budget.maximum_operational_units]
     )
+    assert {
+        unit.maximum_duration_seconds
+        for unit in roster
+        if unit.phase == "development_full_chain_wiring"
+    } == {2100}
+    assert all(
+        unit.maximum_duration_seconds == 900
+        for unit in roster
+        if unit.phase != "development_full_chain_wiring"
+    )
     assert budget.maximum_total_record_attempts == sum(
         unit.maximum_record_attempts for unit in roster
     ) == 7758
@@ -710,6 +720,29 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
         if responsibility
         not in {*CRITICAL_PAIR_RESPONSIBILITIES, *CHEAP_DETECTION_RESPONSIBILITIES}
     )
+    final_index = {
+        responsibility: max(
+            unit.unit_index
+            for unit in roster
+            if unit.responsibility_id == responsibility
+            and unit.phase not in OPERATIONAL_UNIT_PHASES
+        )
+        for responsibility in REQUIRED_METHOD_RESPONSIBILITIES
+    }
+    first_index = {
+        responsibility: min(
+            unit.unit_index
+            for unit in roster
+            if unit.responsibility_id == responsibility
+            and unit.phase not in OPERATIONAL_UNIT_PHASES
+        )
+        for responsibility in REQUIRED_METHOD_RESPONSIBILITIES
+    }
+    for study in protocol.module_matrix:
+        assert all(
+            final_index[prerequisite] < first_index[study.responsibility_id]
+            for prerequisite in study.prerequisite_responsibility_ids
+        )
     assert budget.score_adaptive_unit_changes_forbidden is True
 
 

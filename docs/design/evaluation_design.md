@@ -37,12 +37,19 @@ recommendation。outcome 只描述 mechanism signal、implementation block 或
 resource block；recommendation 不等于晋升，也不授权 candidate-selection。
 
 先执行 2-cluster 环境、身份和吞吐 preflight；8-cluster wiring smoke 也不计入
-科学覆盖。科学 roster 按 breadth-first 固定：先让全部 13 个职责各覆盖 16 个
-source clusters，再扩展 Q/K 同步与 estimator 关键 pair 到 32；只有三个廉价
-content detector 职责可确定性扩展到 64。每个 scientific unit 只绑定一个
+科学覆盖。科学 roster 按真实依赖拓扑逐层 breadth-first 固定：key schedule；
+LF/HF carrier 与 Q/K sync；LF/HF detector 与 estimator；HF-only 评分的 routing
+与 reliability；embedder 与 rectifier；content detector；conditional recovery。
+每项职责在后继层开始前完成其登记的最终规模：普通职责 16 个 source clusters，
+Q/K sync 与 estimator 关键 pair 扩至 32，三个廉价 detector 扩至 64。每个
+scientific unit 只绑定一个
 `responsibility × source cluster × content branch × geometry case` 原子身份；冻结
-roster 共 2512 个原子 unit、每 unit 三次 attempt、单 unit 900 秒、总计 7536 次
-attempt，且整体有 digest/硬上限，禁止按观测分数增删或重排。
+roster 共 2512 个原子 unit、每 unit 三次 attempt、scientific 与 routing reference
+单 unit 900 秒、8 个不计科学覆盖的 wiring unit 单独 2100 秒、总计 7536 次
+scientific attempt，且整体有 digest/硬上限，禁止按观测分数增删或重排。
+
+routing 的 adaptive/uniform 两臂复用同一 HF-only public content operation；该门
+不读取尚未拟合的 LF/HF combined null/CDF，也不替代后续 content combination。
 
 内容只含 clean、HF-only、LF-only、disabled-uniform LF/HF control 和 routed
 LF/HF combination 五个分支。几何只含一个 identity、crop、scale、rotation 和

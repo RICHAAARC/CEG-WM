@@ -271,3 +271,7 @@ def test_missing_secrets_produces_secret_free_create_only_diagnostic(
     combined = artifact.read_bytes() + Path(str(receipt["receipt_path"])).read_bytes()
     assert b"Traceback" not in combined
     assert b"private" not in combined
+    assert b"failure_message" not in combined
+    assert receipt["failure_stage"] == "secrets"
+    assert receipt["responsibility_id"] is None
+    assert receipt["unit_index"] is None

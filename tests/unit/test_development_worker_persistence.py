@@ -8,9 +8,12 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
+
+from experiments.runners.development_inputs import replay_branch_null_calibration
 
 from experiments.metrics.development_exploration import (
     DEVELOPMENT_METRIC_ROLE,
@@ -886,6 +889,119 @@ def test_routing_reference_reuses_common_interruption_commit_and_recovery(
         assert DEVELOPMENT_RECORD_MEMBER_PATH not in archive.namelist()
     with pytest.raises(DevelopmentPersistenceError, match="terminal"):
         store.next_attempt_index(second.unit_id)
+
+
+@pytest.mark.quick
+def test_routing_reference_resumes_across_two_sessions_without_duplicate_units(
+    tmp_path: Path,
+) -> None:
+    roster = tuple(
+        DevelopmentStudyUnit(
+            unit_index=index,
+            phase=ROUTING_REFERENCE_RECORD_KIND,
+            responsibility_id="content_router",
+            source_cluster_ordinal=index,
+            content_branch_id=ROUTING_REFERENCE_RECORD_KIND,
+            geometry_case_id="geometry_case_not_applicable",
+            maximum_record_attempts=3,
+            maximum_duration_seconds=900,
+        )
+        for index in range(64)
+    )
+    store = _store(tmp_path, roster)
+    first_lease = _lease(
+        store,
+        session_id="routing_reference_prefix_session",
+        start=100,
+        duration=10,
+    )
+    first_cursor = store.open_session_cursor(first_lease, now_epoch_seconds=100)
+    for offset in range(17):
+        intent = store.create_session_intent(
+            first_cursor,
+            first_lease,
+            now_epoch_seconds=101,
+        )
+        store.commit_session_unit(
+            first_cursor,
+            first_lease,
+            intent,
+            record=_routing_reference_record(intent),
+            now_epoch_seconds=102,
+        )
+    assert first_cursor.next_unit_index == 17
+
+    second_lease = _lease(
+        store,
+        session_id="routing_reference_completion_session",
+        start=111,
+        duration=100,
+    )
+    second_cursor = store.open_session_cursor(second_lease, now_epoch_seconds=111)
+    assert second_cursor.next_unit_index == 17
+    assert tuple(item.source_cluster_ordinal for item in second_cursor.routing_reference_records) == tuple(range(17))
+    for _ in range(17, 64):
+        intent = store.create_session_intent(
+            second_cursor,
+            second_lease,
+            now_epoch_seconds=112,
+        )
+        store.commit_session_unit(
+            second_cursor,
+            second_lease,
+            intent,
+            record=_routing_reference_record(intent),
+            now_epoch_seconds=113,
+        )
+
+    recovered = store.open_session_cursor(second_lease, now_epoch_seconds=114)
+    records = recovered.routing_reference_records
+    assert recovered.next_unit_index == 64
+    assert len(records) == 64
+    assert tuple(item.unit_index for item in records) == tuple(range(64))
+    assert len({item.record_id for item in records}) == 64
+
+
+@pytest.mark.quick
+def test_content_null_replay_excludes_current_cross_fit_fold() -> None:
+    bindings = _bindings(_roster(8))
+    ordinals = {
+        item.analysis_unit_identity.source_cluster_id: item.unit_index
+        for item in bindings
+    }
+    evidence = tuple(
+        (
+            SimpleNamespace(
+                responsibility_id="hf_detector",
+                content_branch_id="clean_control",
+                execution_status="success",
+                operation_result_payload={
+                    "hf_score": float(item.unit_index),
+                    "detector_identity": "registered_hf_detector",
+                },
+                analysis_unit_identity=asdict(item.analysis_unit_identity),
+                unit_index=item.unit_index,
+            ),
+            SimpleNamespace(record_id=f"{item.unit_index:064x}"),
+        )
+        for item in bindings
+    )
+    current = bindings[0].analysis_unit_identity.source_cluster_id
+
+    calibration = replay_branch_null_calibration(
+        evidence,
+        branch="hf",
+        current_source_cluster_id=current,
+        source_cluster_ordinals=ordinals,
+    )
+
+    assert calibration.partition_identity.endswith("fold_0")
+    assert {record.source_cluster_id for record in calibration.records} == {
+        item.analysis_unit_identity.source_cluster_id
+        for item in bindings
+        if item.unit_index % 4 != 0
+    }
+    assert current not in {record.source_cluster_id for record in calibration.records}
 
 
 @pytest.mark.quick

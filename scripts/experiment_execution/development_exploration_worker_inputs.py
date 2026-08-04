@@ -67,6 +67,7 @@ from experiments.runners.development_persistence import (
     DevelopmentPersistentStore,
     DevelopmentSessionCursor,
     PersistentLease,
+    UnitIntent,
 )
 from main import (
     BranchNullCalibration,
@@ -83,6 +84,10 @@ from runtime import Sd35RuntimeAdapter
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_PROTOCOL_PATH = REPOSITORY_ROOT / "configs/experiments/internal_scientific_validation_protocol.json"
 COMPONENT_REGISTRY_PATH = REPOSITORY_ROOT / "configs/experiments/internal_execution_components.json"
+
+
+class DevelopmentDependencyInputBlocked(DevelopmentInputError):
+    """Verified upstream records cannot yet authorize this frozen unit."""
 
 
 def _canonical_digest(value: object) -> str:
@@ -186,6 +191,8 @@ class DevelopmentProductionInputBuilder:
         self.store = persistence_store
         self.session_cursor = session_cursor
         self.runner = runner
+        self.cache_root = cache_root
+        self._routing_observations_by_cluster: dict[int, RoutingObservations] = {}
         self.internal_protocol = load_frozen_internal_validation_protocol(
             INTERNAL_PROTOCOL_PATH
         )
@@ -194,6 +201,21 @@ class DevelopmentProductionInputBuilder:
             cache_root=cache_root / "clip",
             hf_token=hf_token,
             device="cuda:0",
+        )
+
+    def _internal_record_scratch_root(
+        self,
+        *,
+        unit_descriptor_digest: str,
+        intent: UnitIntent,
+    ) -> Path:
+        """Keep the conditional runner's atomic scratch off the persistent worker root."""
+
+        return (
+            self.cache_root
+            / "development_internal_record_scratch"
+            / unit_descriptor_digest
+            / intent.digest()
         )
 
     def _operational_routing_observations(
@@ -360,12 +382,12 @@ class DevelopmentProductionInputBuilder:
                 raise DevelopmentInputError(
                     "routing reference cursor differs from the frozen roster"
                 )
+            started = time.monotonic()
             intent = self.store.create_session_intent(
                 self.session_cursor,
                 lease,
                 now_epoch_seconds=now,
             )
-            started = time.monotonic()
             backend.set_development_generation_prompts(entry.prompt)
             measurement = self.runtime.measure_generation_routing_reference_inputs(
                 latent_factory(entry.generation_seed),
@@ -425,7 +447,7 @@ class DevelopmentProductionInputBuilder:
                 intent,
                 record=record,
                 raw_secret_values=(self.root_key, self.hf_token),
-                now_epoch_seconds=max(now, int(time.time())),
+                now_epoch_seconds=max(now + 1, int(time.time())),
             )
             committed[entry.cluster_ordinal] = record
         if len(committed) != 64:
@@ -503,7 +525,7 @@ class DevelopmentProductionInputBuilder:
         self,
         unit: DevelopmentStudyUnit,
         base_latent: torch.Tensor,
-        routing_observations: RoutingObservations,
+        routing_observations: RoutingObservations | None,
     ):
         shape = tuple(int(value) for value in base_latent.shape)
         routing = self.runner.adapter.route_content(
@@ -604,12 +626,13 @@ class DevelopmentProductionInputBuilder:
         self,
         unit: DevelopmentStudyUnit,
         base_latent: torch.Tensor,
-        routing_observations: RoutingObservations,
+        routing_observations: RoutingObservations | None,
         *,
         provisional_threshold: DevelopmentProvisionalThreshold,
         development_tau_rescue: float,
         rescue_threshold_identity: str,
         reliability: GeometryReliabilityThresholds,
+        intent: UnitIntent,
     ) -> tuple[InternalRunnerContext, InternalCaseExecutionPayload]:
         binding = self._registered_unit_binding(unit)
         split_manifest = self._development_split_manifest(unit)
@@ -753,10 +776,13 @@ class DevelopmentProductionInputBuilder:
             environment_digest=self.runner.environment_digest,
             resource_identity_digest=self.runner.resource_identity_digest,
         )
-        records_root = (
-            self.store.run_root
-            / "development_internal_records"
-            / binding.unit_descriptor_digest
+        if intent.unit_index != unit.unit_index:
+            raise DevelopmentInputError(
+                "joint scratch record intent differs from frozen unit"
+            )
+        records_root = self._internal_record_scratch_root(
+            unit_descriptor_digest=binding.unit_descriptor_digest,
+            intent=intent,
         )
         writer = GovernedRecordWriter(
             records_root=records_root,
@@ -819,7 +845,9 @@ class DevelopmentProductionInputBuilder:
             for name in ("coverage", "uniqueness", "gap", "key_margin", "mean_residual", "identity_margin")
         }
         if any(not values for values in fields.values()):
-            raise DevelopmentInputError("verified estimator evidence is incomplete for development reliability fit")
+            raise DevelopmentDependencyInputBlocked(
+                "verified_estimator_evidence_incomplete"
+            )
         declaration = {
             "fit_role": "development_exploratory_geometry_reliability_cross_fit",
             "protocol_digest": self.protocol.digest(),
@@ -846,18 +874,54 @@ class DevelopmentProductionInputBuilder:
             fit_identity=_canonical_digest(declaration),
         )
 
-    def build(self, unit: DevelopmentStudyUnit, base_latent: torch.Tensor, *, now_epoch_seconds: int) -> DevelopmentUnitInput:
+    def build(
+        self,
+        unit: DevelopmentStudyUnit,
+        base_latent: torch.Tensor,
+        *,
+        intent: UnitIntent,
+        now_epoch_seconds: int,
+    ) -> DevelopmentUnitInput:
+        if intent.unit_index != unit.unit_index or intent.phase != unit.phase:
+            raise DevelopmentInputError(
+                "scientific input build requires the claimed unit intent"
+            )
         combination_function_id, mixing_coefficient = _combination(unit.source_cluster_ordinal)
-        routing_observations = self._routing_observations(unit, base_latent)
+        routing_observations = None
+        if (
+            unit.responsibility_id == "content_router"
+            or unit.content_branch_id == "lf_hf_routed_combination"
+        ):
+            routing_observations = self._routing_observations_by_cluster.get(
+                unit.source_cluster_ordinal
+            )
+            if routing_observations is None:
+                routing_observations = self._routing_observations(unit, base_latent)
+                self._routing_observations_by_cluster[
+                    unit.source_cluster_ordinal
+                ] = routing_observations
         hf_null = lf_null = None
         if unit.responsibility_id == "content_detector":
+            current_identity = self._registered_unit_binding(
+                unit
+            ).analysis_unit_identity
+            source_cluster_ordinals = {
+                assignment.identity.source_cluster_id: index
+                for index, assignment in enumerate(
+                    self.authority.input_manifest.assignments
+                )
+            }
             hf_null = replay_branch_null_calibration(
                 self.session_cursor.terminal_scientific_evidence,
                 branch="hf",
+                current_source_cluster_id=current_identity.source_cluster_id,
+                source_cluster_ordinals=source_cluster_ordinals,
             )
             lf_null = replay_branch_null_calibration(
                 self.session_cursor.terminal_scientific_evidence,
                 branch="lf",
+                current_source_cluster_id=current_identity.source_cluster_id,
+                source_cluster_ordinals=source_cluster_ordinals,
             )
         reliability = None
         if unit.responsibility_id in {"geometry_reliability", "image_rectifier", "conditional_recovery_decision"}:
@@ -903,6 +967,7 @@ class DevelopmentProductionInputBuilder:
                 development_tau_rescue=development_tau_rescue,
                 rescue_threshold_identity=rescue_threshold_identity,
                 reliability=reliability,
+                intent=intent,
             )
         return DevelopmentUnitInput(
             registered_root_key=self.root_key,

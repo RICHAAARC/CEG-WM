@@ -8,11 +8,12 @@ it never accepts precomputed module results or a result-provider callback.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
+from datetime import datetime
 from hashlib import sha256
 import json
 from math import isfinite, isnan
 from pathlib import Path
-from time import monotonic
+from time import monotonic, time
 from typing import Mapping, Sequence
 
 import torch
@@ -50,6 +51,7 @@ from experiments.protocol.development_exploration import (
     COMBINATION_WEIGHT_IDENTITIES,
     CONTENT_COMBINATION_FUNCTION_IDS,
     DEVELOPMENT_CLAIM_BOUNDARY,
+    DEVELOPMENT_DEPENDENCY_LAYERS,
     RECORD_SCHEMA_VERSION,
     DEVELOPMENT_SPLIT,
     GEOMETRY_NEGATIVE_CONTROL_CASE_IDS,
@@ -105,14 +107,32 @@ from experiments.runners.internal import (
 from main import (
     BranchNullCalibration,
     ConditionalRecoveryResult,
+    ContentDetectionResult,
+    ContentRoutingResult,
+    GeometricTransformEstimation,
     GeometryReliabilityThresholds,
+    GeometryReliabilityResult,
+    HfCarrierResult,
     HfDetectionObservation,
+    HfDetectionResult,
+    ImageRectificationResult,
     JointDecisionThresholds,
+    KeyStreamResult,
+    LfCarrierResult,
     LfDetectionObservation,
+    LfDetectionResult,
+    QkGeometrySyncResult,
+    RootKeyIdentity,
     RoutingObservations,
     derive_wrong_key_material,
 )
-from runtime import RuntimeAdapterState, Sd35RuntimeAdapter, create_runtime_adapter
+from runtime import (
+    RuntimeAdapterError,
+    RuntimeAdapterState,
+    RuntimeContentExecutionError,
+    Sd35RuntimeAdapter,
+    create_runtime_adapter,
+)
 from runtime.content_write import ContentWriteVaeResult
 
 
@@ -123,7 +143,7 @@ THRESHOLD_BOUND_RESPONSIBILITIES = frozenset(
     }
 )
 WIRING_ONLY_NON_SCIENTIFIC_TAU = 1_000_000.0
-WIRING_ONLY_NON_SCIENTIFIC_TAU_RESCUE = -1_000_000.0
+WIRING_ONLY_NON_SCIENTIFIC_TAU_RESCUE = 999_999.0
 WIRING_ONLY_NON_SCIENTIFIC_CALIBRATION_IDENTITY = (
     "wiring_only_non_scientific"
 )
@@ -145,6 +165,16 @@ class DevelopmentUnitDurationExceeded(DevelopmentRunnerError):
         self.elapsed_seconds = elapsed_seconds
 
 
+@dataclass(frozen=True, slots=True)
+class DevelopmentCleanControlResult:
+    """Experiment-only no-write identity for the clean content control."""
+
+    control_identity: str
+    base_latent_digest: str
+    realized_relative_l2: float = 0.0
+    image_quality_delta: float = 0.0
+
+
 def _canonical_digest(value: object) -> str:
     return sha256(
         json.dumps(
@@ -155,6 +185,10 @@ def _canonical_digest(value: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _intent_created_epoch(intent: UnitIntent) -> int:
+    return int(datetime.fromisoformat(intent.created_at_utc.replace("Z", "+00:00")).timestamp())
 
 
 def _wiring_identity_rgb8(height: int, width: int) -> torch.Tensor:
@@ -225,17 +259,17 @@ def _public_payload(value: object) -> object:
     )
 
 
-_SAFE_RESULT_FIELDS = {
-    "ContentRoutingResult": ("candidate_id", "mode", "routing_map_digest", "mask_lf_digest", "mask_hf_digest", "mean_routing_map", "mean_mask_lf", "mean_mask_hf", "route_config_digest", "route_identity"),
-    "LfCarrierResult": ("candidate_id", "template_digest", "direction_digest", "mask_digest", "route_identity", "root_key_public_digest", "key_role", "wrong_key_index", "key_domain_digest", "carrier_config_digest"),
-    "HfCarrierResult": ("candidate_id", "template_digest", "direction_digest", "mask_digest", "route_identity", "root_key_public_digest", "key_role", "wrong_key_index", "key_domain_digest", "carrier_config_digest"),
-    "LfDetectionResult": ("candidate_id", "lf_score", "detector_identity", "detector_config_digest", "observation_digest", "root_key_public_digest", "key_role", "wrong_key_index", "template_digest"),
-    "HfDetectionResult": ("candidate_id", "hf_score", "detector_identity", "detector_config_digest", "observation_digest", "root_key_public_digest", "key_role", "wrong_key_index", "template_digest"),
-    "ContentDetectionResult": ("formal_mode", "content_score", "hf_score", "lf_score", "combined_score", "detector_identity", "content_config_digest", "diagnostic_identity", "content_input_image_digest"),
-    "QkGeometrySyncResult": ("model_revision", "relation_score", "root_key_public_digest", "key_role", "wrong_key_index", "descriptor_digest", "projection_digest", "geometry_config_digest"),
-    "GeometricTransformEstimation": ("transform", "registered_objective", "second_registered_objective", "exact_identity_objective", "canonical_score", "observation_score", "coverage", "uniqueness", "gap", "identity_margin", "key_margin", "anchor_residuals", "inlier_ratio", "mean_residual", "epsilon_inlier", "registered_root_key_public_digest", "observation_descriptor_digest", "observation_projection_digest", "observation_geometry_config_digest", "search_config_digest", "estimation_identity_digest"),
-    "GeometryReliabilityResult": ("reliable", "allow_rectification", "status", "failure_reasons", "threshold_config_digest", "estimator_search_config_digest", "estimation_identity_digest", "registered_root_key_public_digest", "reliability_identity_digest"),
-    "ImageRectificationResult": ("source_image_digest", "rectified_image_digest", "token_crop_support", "pixel_crop_support", "crop_support", "canonical_to_observed_matrix", "rectification_config_digest"),
+_SAFE_RESULT_CONTRACTS: dict[str, tuple[type[object], tuple[str, ...]]] = {
+    "content_router": (ContentRoutingResult, ("candidate_id", "mode", "routing_map_digest", "mask_lf_digest", "mask_hf_digest", "mean_routing_map", "mean_mask_lf", "mean_mask_hf", "route_config_digest", "route_identity")),
+    "lf_carrier": (LfCarrierResult, ("candidate_id", "template_digest", "direction_digest", "mask_digest", "route_identity", "root_key_public_digest", "key_role", "wrong_key_index", "key_domain_digest", "carrier_config_digest")),
+    "hf_carrier": (HfCarrierResult, ("candidate_id", "template_digest", "direction_digest", "mask_digest", "route_identity", "root_key_public_digest", "key_role", "wrong_key_index", "key_domain_digest", "carrier_config_digest")),
+    "lf_detector": (LfDetectionResult, ("candidate_id", "lf_score", "detector_identity", "detector_config_digest", "observation_digest", "root_key_public_digest", "key_role", "wrong_key_index", "template_digest")),
+    "hf_detector": (HfDetectionResult, ("candidate_id", "hf_score", "detector_identity", "detector_config_digest", "observation_digest", "root_key_public_digest", "key_role", "wrong_key_index", "template_digest")),
+    "content_detector": (ContentDetectionResult, ("formal_mode", "content_score", "hf_score", "lf_score", "combined_score", "detector_identity", "content_config_digest", "diagnostic_identity", "content_input_image_digest")),
+    "qk_geometry_sync": (QkGeometrySyncResult, ("model_revision", "relation_score", "root_key_public_digest", "key_role", "wrong_key_index", "descriptor_digest", "projection_digest", "geometry_config_digest")),
+    "geometric_transform_estimator": (GeometricTransformEstimation, ("transform", "registered_objective", "second_registered_objective", "exact_identity_objective", "canonical_score", "observation_score", "coverage", "uniqueness", "gap", "identity_margin", "key_margin", "anchor_residuals", "inlier_ratio", "mean_residual", "epsilon_inlier", "registered_root_key_public_digest", "observation_descriptor_digest", "observation_projection_digest", "observation_geometry_config_digest", "search_config_digest", "estimation_identity_digest")),
+    "geometry_reliability": (GeometryReliabilityResult, ("reliable", "allow_rectification", "status", "failure_reasons", "threshold_config_digest", "estimator_search_config_digest", "estimation_identity_digest", "registered_root_key_public_digest", "reliability_identity_digest")),
+    "image_rectifier": (ImageRectificationResult, ("source_image_digest", "rectified_image_digest", "token_crop_support", "pixel_crop_support", "crop_support", "canonical_to_observed_matrix", "rectification_config_digest")),
 }
 
 _CONDITIONAL_RECOVERY_SAFE_RESULT_FIELDS = (
@@ -272,8 +306,16 @@ _CONDITIONAL_RECOVERY_SAFE_RESULT_FIELDS = (
 
 def _safe_result_payload(responsibility_id: str, result: object) -> dict[str, object]:
     if responsibility_id == "key_schedule":
-        assert type(result) is dict
+        if type(result) is not dict or set(result) != {
+            "identity", "registered", "wrong", "public_noise"
+        }:
+            raise DevelopmentRunnerError("key schedule result schema drifted")
         identity = result["identity"]
+        if type(identity) is not RootKeyIdentity or any(
+            type(result[name]) is not KeyStreamResult
+            for name in ("registered", "wrong", "public_noise")
+        ):
+            raise DevelopmentRunnerError("key schedule result type drifted")
         return {
             "root_key_public_digest": identity.root_key_public_digest,
             "registered_stream_digest": result["registered"].values_float32_be_sha256,
@@ -281,6 +323,17 @@ def _safe_result_payload(responsibility_id: str, result: object) -> dict[str, ob
             "public_noise_digest": result["public_noise"].values_float32_be_sha256,
         }
     if responsibility_id == "content_embedder":
+        if type(result) is DevelopmentCleanControlResult:
+            return {
+                "control_identity": result.control_identity,
+                "base_latent_digest": result.base_latent_digest,
+                "realized_relative_l2": result.realized_relative_l2,
+                "image_quality_delta": result.image_quality_delta,
+                "embedding_result_identity": None,
+                "materialization_replay_identity": None,
+            }
+        if type(result) is not ContentWriteVaeResult:
+            raise DevelopmentRunnerError("content embedder result type drifted")
         materialization = result.content_materialization
         return {
             "candidate_id": result.candidate_id,
@@ -301,9 +354,12 @@ def _safe_result_payload(responsibility_id: str, result: object) -> dict[str, ob
         raise DevelopmentRunnerError(
             "conditional recovery result lacks an explicit public record schema"
         )
-    fields_allowed = _SAFE_RESULT_FIELDS.get(type(result).__name__)
-    if fields_allowed is None:
+    contract = _SAFE_RESULT_CONTRACTS.get(responsibility_id)
+    if contract is None:
         raise DevelopmentRunnerError("method result lacks an explicit public record schema")
+    expected_type, fields_allowed = contract
+    if type(result) is not expected_type:
+        raise DevelopmentRunnerError("method result type differs from responsibility contract")
     return {name: _public_payload(getattr(result, name)) for name in fields_allowed}
 
 
@@ -368,7 +424,7 @@ class DevelopmentUnitInput:
     registered_root_key: str
     wrong_key_index: int
     base_latent: torch.Tensor
-    routing_observations: RoutingObservations
+    routing_observations: RoutingObservations | None
     mixing_coefficient: float
     combination_function_id: str
     hf_null: BranchNullCalibration | None
@@ -390,7 +446,9 @@ class DevelopmentUnitInput:
             raise DevelopmentRunnerError("base latent must be a real four-dimensional tensor")
         if not bool(torch.isfinite(self.base_latent).all().item()):
             raise DevelopmentRunnerError("base latent contains non-finite values")
-        if type(self.routing_observations) is not RoutingObservations:
+        if self.routing_observations is not None and type(
+            self.routing_observations
+        ) is not RoutingObservations:
             raise DevelopmentRunnerError("routing observations exact type is required")
         if self.mixing_coefficient not in {0.25, 0.50, 0.75}:
             raise DevelopmentRunnerError("mixing coefficient is not registered")
@@ -702,7 +760,11 @@ class DevelopmentExplorationRunner:
 
         if type(source_cluster_ordinal) is not int or not 0 <= source_cluster_ordinal < self.protocol.preflight.source_cluster_count:
             raise DevelopmentRunnerError("preflight cluster ordinal is outside frozen budget")
-        unit = self._representative_unit("content_embedder", source_cluster_ordinal)
+        unit = self._representative_unit(
+            "content_embedder",
+            source_cluster_ordinal,
+            content_branch_id="hf_only",
+        )
         unit_input.validate(unit.responsibility_id)
         identity = self._analysis_identity(unit)
         started = monotonic()
@@ -734,55 +796,201 @@ class DevelopmentExplorationRunner:
         expected = tuple(item.responsibility_id for item in self.protocol.module_matrix)
         if set(unit_inputs) != set(expected):
             raise DevelopmentRunnerError("wiring inputs must cover all thirteen responsibilities")
-        digests: list[tuple[str, str]] = []
         started = monotonic()
-        for responsibility in expected:
-            unit = self._representative_unit(responsibility, source_cluster_ordinal)
-            raw = unit_inputs[responsibility]
-            if responsibility == "conditional_recovery_decision":
-                result = self._execute_wiring_conditional_call(unit, raw)
-                digests.append(
-                    (
-                        responsibility,
-                        _canonical_digest(
-                            _safe_result_payload(responsibility, result)
-                        ),
-                    )
-                )
-                continue
-            if responsibility == "image_rectifier":
-                result = self._execute_wiring_image_rectifier_call(raw)
-                digests.append(
-                    (
-                        responsibility,
-                        _canonical_digest(
-                            _safe_result_payload(responsibility, result)
-                        ),
-                    )
-                )
-                continue
-            raw.validate(responsibility)
-            identity = self._analysis_identity(unit)
-            result, _metric, _traces, _internal = self._execute_real_operation(
-                unit, identity, raw
+        results = self._execute_shared_wiring_chain(
+            source_cluster_ordinal,
+            unit_inputs,
+        )
+        digests = tuple(
+            (
+                responsibility,
+                _canonical_digest(
+                    _safe_result_payload(responsibility, results[responsibility])
+                ),
             )
-            digests.append((responsibility, _canonical_digest(_safe_result_payload(responsibility, result))))
+            for responsibility in expected
+        )
         return DevelopmentOperationalReceipt(
             operational_role="full_chain_wiring_smoke",
             source_cluster_ordinal=source_cluster_ordinal,
             case_ids=("all_thirteen_responsibility_wiring",),
-            responsibility_result_digests=tuple(digests),
+            responsibility_result_digests=digests,
             elapsed_seconds=monotonic() - started,
             runtime_config_digest=self.runtime_adapter.session.runtime_config_digest,
             counts_as_scientific_coverage=False,
             scientific_claims_supported=False,
         )
 
+    def _execute_shared_wiring_chain(
+        self,
+        source_cluster_ordinal: int,
+        unit_inputs: Mapping[str, DevelopmentUnitInput],
+    ) -> dict[str, object]:
+        """Exercise all public responsibilities while sharing one runtime artifact."""
+
+        for responsibility, raw in unit_inputs.items():
+            raw.validate(
+                "content_detector"
+                if responsibility == "conditional_recovery_decision"
+                else responsibility
+            )
+        raw = unit_inputs["content_embedder"]
+        key_identity = self.adapter.identify_key(raw.registered_root_key).result
+        shape = tuple(int(value) for value in raw.base_latent.shape)
+        registered_domain = {
+            "candidate_id": "hf_sparse_tail",
+            "operator": "carrier_template",
+            "responsibility_domain": "hf_carrier",
+            "model_revision": self.runtime_adapter.session.model_revision,
+            "tensor_role": "base_gaussian",
+        }
+        public_domain = {
+            "candidate_id": "routing_stqr",
+            "operator": "local_sensitivity_public_probe",
+            "responsibility_domain": "public_noise",
+            "model_revision": self.runtime_adapter.session.model_revision,
+            "sample_index": source_cluster_ordinal,
+            "tensor_role": "latent_probe",
+        }
+        key_result = {
+            "identity": key_identity,
+            "registered": self.adapter.derive_registered_key_stream(
+                raw.registered_root_key, registered_domain, shape
+            ).result,
+            "wrong": self.adapter.derive_wrong_key_stream(
+                key_identity.root_key_public_digest,
+                raw.wrong_key_index,
+                registered_domain,
+                shape,
+            ).result,
+            "public_noise": self.adapter.derive_public_noise(
+                public_domain, shape
+            ).result,
+        }
+        routing = self.adapter.route_content(
+            shape,
+            mode="routing_stqr",
+            observations=raw.routing_observations,
+        ).result
+        low_frequency = self.adapter.build_lf_carrier(
+            raw.registered_root_key,
+            shape,
+            routing_result=routing,
+        ).result
+        high_frequency = self.adapter.build_hf_carrier(
+            raw.registered_root_key,
+            shape,
+            routing_result=routing,
+        ).result
+
+        def embed(latent_values: tuple[float, ...]):
+            return self.adapter.embed_content(
+                latent_values,
+                high_frequency,
+                lf_carrier_result=low_frequency,
+                mixing_coefficient=raw.mixing_coefficient,
+                routing_result=routing,
+            ).result
+
+        runtime_result = self.runtime_adapter.execute_content_write_and_vae(
+            raw.base_latent,
+            embed,
+        )
+        observed = runtime_result.watermarked_detection_latent
+        observed_values = tuple(
+            observed.detach().to(dtype=torch.float32).reshape(-1).tolist()
+        )
+        high_detection = self.adapter.detect_hf(
+            HfDetectionObservation.from_public_image_encoding(
+                observed_values, tuple(observed.shape)
+            ),
+            raw.registered_root_key,
+        ).result
+        low_detection = self.adapter.detect_lf(
+            LfDetectionObservation.from_public_image_encoding(
+                observed_values, tuple(observed.shape)
+            ),
+            raw.registered_root_key,
+        ).result
+        content_detection = self.adapter.detect_content(
+            high_detection,
+            low_detection,
+            hf_null=raw.hf_null,
+            lf_null=raw.lf_null,
+            combination=raw.combination_function_id,
+            weight=(
+                raw.mixing_coefficient
+                if raw.combination_function_id
+                == "weighted_hf_lf_standardized_score"
+                else None
+            ),
+        ).result
+        source_image = _decoded_image_to_rgb8(runtime_result.watermarked_image)
+        thresholds = unit_inputs[
+            "geometry_reliability"
+        ].geometry_reliability_thresholds
+        if type(thresholds) is not GeometryReliabilityThresholds:
+            raise DevelopmentRunnerError(
+                "wiring shared chain requires wiring-only reliability constants"
+            )
+        runtime_observation = self.runtime_adapter.observe_detection_qk(source_image)
+        synchronized = self.adapter.synchronize_qk_observation(
+            runtime_observation,
+            raw.registered_root_key,
+        ).result
+        estimation = self.adapter.estimate_geometric_transform(
+            synchronized,
+            raw.registered_root_key,
+            epsilon_inlier=thresholds.epsilon_inlier,
+        ).result
+        reliability = self.adapter.assess_geometry_reliability(
+            estimation,
+            thresholds,
+        ).result
+        rectified = self._execute_wiring_image_rectifier_call(
+            unit_inputs["image_rectifier"]
+        )
+        conditional = self._execute_wiring_conditional_call(
+            self._representative_unit(
+                "conditional_recovery_decision", source_cluster_ordinal
+            ),
+            unit_inputs["conditional_recovery_decision"],
+            source_image=source_image,
+        )
+        return {
+            "key_schedule": key_result,
+            "content_router": routing,
+            "lf_carrier": low_frequency,
+            "hf_carrier": high_frequency,
+            "content_embedder": runtime_result,
+            "lf_detector": low_detection,
+            "hf_detector": high_detection,
+            "content_detector": content_detection,
+            "qk_geometry_sync": synchronized,
+            "geometric_transform_estimator": estimation,
+            "geometry_reliability": reliability,
+            "image_rectifier": rectified,
+            "conditional_recovery_decision": conditional,
+        }
+
     def _execute_wiring_image_rectifier_call(
         self,
         raw: DevelopmentUnitInput,
     ) -> object:
         """Call the real rectifier after a local deterministic identity Q/K chain."""
+
+        return self._execute_wiring_geometry_chain(raw)[-1]
+
+    def _execute_wiring_geometry_chain(
+        self,
+        raw: DevelopmentUnitInput,
+    ) -> tuple[
+        QkGeometrySyncResult,
+        GeometricTransformEstimation,
+        GeometryReliabilityResult,
+        ImageRectificationResult,
+    ]:
+        """Run one complete public Q/K-to-rectification wiring chain."""
 
         raw.validate("image_rectifier")
         thresholds = raw.geometry_reliability_thresholds
@@ -824,11 +1032,12 @@ class DevelopmentExplorationRunner:
                 raise DevelopmentRunnerError(
                     "wiring image rectifier identity geometry is unreliable"
                 )
-            return self.adapter.rectify_image(
+            rectified = self.adapter.rectify_image(
                 source_image,
                 estimation,
                 reliability,
             ).result
+            return synchronized, estimation, reliability, rectified
         finally:
             synthetic_runtime.close()
 
@@ -836,6 +1045,8 @@ class DevelopmentExplorationRunner:
         self,
         unit: DevelopmentStudyUnit,
         raw: DevelopmentUnitInput,
+        *,
+        source_image: torch.Tensor | None = None,
     ) -> object:
         """Call the real joint API with an explicitly non-scientific wiring threshold."""
 
@@ -843,36 +1054,37 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError(
                 "wiring conditional call requires wiring-only reliability constants"
             )
-        shape = tuple(int(value) for value in raw.base_latent.shape)
-        routing = self.adapter.route_content(
-            shape,
-            mode="routing_uniform_control",
-        ).result
-        low_frequency = self.adapter.build_lf_carrier(
-            raw.registered_root_key,
-            shape,
-            routing_result=routing,
-        ).result
-        high_frequency = self.adapter.build_hf_carrier(
-            raw.registered_root_key,
-            shape,
-            routing_result=routing,
-        ).result
-
-        def embed(latent_values: tuple[float, ...]):
-            return self.adapter.embed_content(
-                latent_values,
-                high_frequency,
-                lf_carrier_result=low_frequency,
-                mixing_coefficient=raw.mixing_coefficient,
+        if source_image is None:
+            shape = tuple(int(value) for value in raw.base_latent.shape)
+            routing = self.adapter.route_content(
+                shape,
+                mode="routing_uniform_control",
+            ).result
+            low_frequency = self.adapter.build_lf_carrier(
+                raw.registered_root_key,
+                shape,
+                routing_result=routing,
+            ).result
+            high_frequency = self.adapter.build_hf_carrier(
+                raw.registered_root_key,
+                shape,
                 routing_result=routing,
             ).result
 
-        runtime_result = self.runtime_adapter.execute_content_write_and_vae(
-            raw.base_latent,
-            embed,
-        )
-        source_image = _decoded_image_to_rgb8(runtime_result.watermarked_image)
+            def embed(latent_values: tuple[float, ...]):
+                return self.adapter.embed_content(
+                    latent_values,
+                    high_frequency,
+                    lf_carrier_result=low_frequency,
+                    mixing_coefficient=raw.mixing_coefficient,
+                    routing_result=routing,
+                ).result
+
+            runtime_result = self.runtime_adapter.execute_content_write_and_vae(
+                raw.base_latent,
+                embed,
+            )
+            source_image = _decoded_image_to_rgb8(runtime_result.watermarked_image)
         content_operation = FormalHfContentDetectionOperation(self.adapter)
         content_binding, _ = create_formal_content_detector_binding(
             content_operation,
@@ -909,6 +1121,7 @@ class DevelopmentExplorationRunner:
         *,
         attempt_index: int = 0,
         retry_parent_intent_digest: str | None = None,
+        attempt_started_monotonic: float | None = None,
     ) -> DevelopmentUnitRunResult:
         unit = self._unit(unit_index)
         unit_input.validate(unit.responsibility_id)
@@ -925,7 +1138,11 @@ class DevelopmentExplorationRunner:
                 requested_split=DEVELOPMENT_SPLIT,
                 requested_analysis_unit_identity=identity,
             )
-        started = monotonic()
+        started = (
+            monotonic()
+            if attempt_started_monotonic is None
+            else attempt_started_monotonic
+        )
         result, metric, trace_values, internal_record = self._execute_real_operation(
             unit,
             identity,
@@ -1047,6 +1264,7 @@ class DevelopmentExplorationRunner:
         *,
         now_epoch_seconds: int,
         raw_secret_values: Sequence[str],
+        attempt_started_monotonic: float | None = None,
     ) -> DevelopmentUnitRunResult:
         """Execute the session cursor's next scientific unit without full recovery."""
 
@@ -1072,7 +1290,120 @@ class DevelopmentExplorationRunner:
             now_epoch_seconds=now_epoch_seconds,
             raw_secret_values=raw_secret_values,
             session_cursor=session_cursor,
+            attempt_started_monotonic=attempt_started_monotonic,
         )
+
+    def create_scientific_intent(
+        self,
+        lease: PersistentLease,
+        session_cursor: DevelopmentSessionCursor,
+        *,
+        now_epoch_seconds: int,
+    ) -> UnitIntent:
+        """Create the next scientific intent before any expensive input work."""
+
+        if self.persistence_store is None:
+            raise DevelopmentRunnerError("persistent store is required")
+        unit = self._unit(session_cursor.next_unit_index)
+        if unit.phase in OPERATIONAL_UNIT_PHASES:
+            raise DevelopmentRunnerError("next frozen unit is not scientific")
+        return self.persistence_store.create_session_intent(
+            session_cursor,
+            lease,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+
+    def execute_and_commit_claimed_session_unit(
+        self,
+        lease: PersistentLease,
+        session_cursor: DevelopmentSessionCursor,
+        intent: UnitIntent,
+        unit_input: DevelopmentUnitInput,
+        *,
+        attempt_started_monotonic: float,
+        raw_secret_values: Sequence[str],
+    ) -> DevelopmentUnitRunResult:
+        """Execute a previously claimed intent and include preparation walltime."""
+
+        return self._execute_and_commit_claimed_unit(
+            lease,
+            intent,
+            unit_input,
+            now_epoch_seconds=max(_intent_created_epoch(intent) + 1, int(time())),
+            raw_secret_values=raw_secret_values,
+            session_cursor=session_cursor,
+            attempt_started_monotonic=attempt_started_monotonic,
+        )
+
+    def commit_claimed_terminal_failure(
+        self,
+        lease: PersistentLease,
+        session_cursor: DevelopmentSessionCursor,
+        intent: UnitIntent,
+        *,
+        failure_class: str,
+        failure_reason: str,
+        attempt_started_monotonic: float,
+        raw_secret_values: Sequence[str],
+    ) -> DevelopmentUnitRunResult:
+        """Commit a narrow terminal build/dependency failure after an intent."""
+
+        if failure_class not in {"implementation_failure", "dependency_blocked"}:
+            raise DevelopmentRunnerError("terminal failure class is not registered")
+        unit = self._unit(intent.unit_index)
+        record = self._failure_record(
+            unit,
+            self._analysis_identity(unit),
+            attempt_index=intent.attempt_index,
+            retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+            execution_status="failed",
+            failure_class=failure_class,
+            failure_reason=failure_reason,
+            actual_elapsed_seconds=monotonic() - attempt_started_monotonic,
+        )
+        committed = self.persistence_store.commit_session_unit(
+            session_cursor,
+            lease,
+            intent,
+            record=record,
+            raw_secret_values=raw_secret_values,
+            now_epoch_seconds=max(_intent_created_epoch(intent) + 1, int(time())),
+        )
+        return DevelopmentUnitRunResult(record, intent, committed)
+
+    def commit_claimed_resource_failure(
+        self,
+        lease: PersistentLease,
+        session_cursor: DevelopmentSessionCursor,
+        intent: UnitIntent,
+        *,
+        failure_reason: str,
+        attempt_started_monotonic: float,
+        raw_secret_values: Sequence[str],
+    ) -> DevelopmentUnitRunResult:
+        """Commit a retryable resource/input-budget failure and stop the session."""
+
+        unit = self._unit(intent.unit_index)
+        retryable = intent.attempt_index + 1 < unit.maximum_record_attempts
+        record = self._failure_record(
+            unit,
+            self._analysis_identity(unit),
+            attempt_index=intent.attempt_index,
+            retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+            execution_status="retry" if retryable else "failed",
+            failure_class="resource_failure",
+            failure_reason=failure_reason,
+            actual_elapsed_seconds=monotonic() - attempt_started_monotonic,
+        )
+        committed = self.persistence_store.commit_session_unit(
+            session_cursor,
+            lease,
+            intent,
+            record=record,
+            raw_secret_values=raw_secret_values,
+            now_epoch_seconds=max(_intent_created_epoch(intent) + 1, int(time())),
+        )
+        return DevelopmentUnitRunResult(record, intent, committed)
 
     def _execute_and_commit_claimed_unit(
         self,
@@ -1083,6 +1414,7 @@ class DevelopmentExplorationRunner:
         now_epoch_seconds: int,
         raw_secret_values: Sequence[str],
         session_cursor: DevelopmentSessionCursor | None,
+        attempt_started_monotonic: float | None = None,
     ) -> DevelopmentUnitRunResult:
         if self.persistence_store is None:
             raise DevelopmentRunnerError("persistent store is required")
@@ -1091,13 +1423,14 @@ class DevelopmentExplorationRunner:
         attempt_index = intent.attempt_index
         parent_digest = intent.parent_attempt_intent_digest
         identity = self._analysis_identity(unit)
-        started = monotonic()
+        started = monotonic() if attempt_started_monotonic is None else attempt_started_monotonic
         try:
             executed = self._execute_unit(
                 unit_index,
                 unit_input,
                 attempt_index=attempt_index,
                 retry_parent_intent_digest=parent_digest,
+                attempt_started_monotonic=started,
             )
         except DevelopmentUnitExcluded as exc:
             executed = DevelopmentUnitRunResult(
@@ -1133,7 +1466,13 @@ class DevelopmentExplorationRunner:
                 None,
                 None,
             )
-        except (MemoryError, torch.cuda.OutOfMemoryError) as exc:
+        except (
+            MemoryError,
+            OSError,
+            RuntimeAdapterError,
+            RuntimeContentExecutionError,
+            torch.cuda.OutOfMemoryError,
+        ) as exc:
             executed = DevelopmentUnitRunResult(
                 self._failure_record(
                     unit,
@@ -1153,18 +1492,31 @@ class DevelopmentExplorationRunner:
                 None,
             )
         except Exception as exc:
+            elapsed = monotonic() - started
+            duration_exceeded = elapsed > unit.maximum_duration_seconds
             executed = DevelopmentUnitRunResult(
                 self._failure_record(
                     unit,
                     identity,
                     attempt_index=attempt_index,
                     retry_parent_intent_digest=parent_digest,
-                    execution_status="failed",
-                    failure_class="implementation_failure",
-                    failure_reason=(
-                        f"{type(exc).__module__}.{type(exc).__qualname__}:{exc}"
+                    execution_status=(
+                        "retry"
+                        if duration_exceeded
+                        and attempt_index + 1 < unit.maximum_record_attempts
+                        else "failed"
                     ),
-                    actual_elapsed_seconds=monotonic() - started,
+                    failure_class=(
+                        "resource_failure"
+                        if duration_exceeded
+                        else "implementation_failure"
+                    ),
+                    failure_reason=(
+                        "unit_duration_exceeded"
+                        if duration_exceeded
+                        else f"{type(exc).__module__}.{type(exc).__qualname__}"
+                    ),
+                    actual_elapsed_seconds=elapsed,
                 ),
                 None,
                 None,
@@ -1175,7 +1527,11 @@ class DevelopmentExplorationRunner:
                 intent,
                 record=executed.record,
                 raw_secret_values=raw_secret_values,
-                now_epoch_seconds=now_epoch_seconds,
+                now_epoch_seconds=max(
+                    now_epoch_seconds,
+                    _intent_created_epoch(intent) + 1,
+                    int(time()),
+                ),
             )
         else:
             committed = self.persistence_store.commit_session_unit(
@@ -1184,7 +1540,11 @@ class DevelopmentExplorationRunner:
                 intent,
                 record=executed.record,
                 raw_secret_values=raw_secret_values,
-                now_epoch_seconds=now_epoch_seconds,
+                now_epoch_seconds=max(
+                    now_epoch_seconds,
+                    _intent_created_epoch(intent) + 1,
+                    int(time()),
+                ),
             )
         return DevelopmentUnitRunResult(executed.record, intent, committed)
 
@@ -1201,19 +1561,22 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError("verified module outcome requires persistence")
         plans = {} if cross_fit_plans is None else dict(cross_fit_plans)
         studies = tuple(self.protocol.module_matrix)
-        target_index = next(
-            (
-                index
-                for index, study in enumerate(studies)
-                if study.responsibility_id == responsibility_id
-            ),
-            -1,
-        )
-        if target_index < 0:
-            raise DevelopmentRunnerError("module outcome responsibility is unknown")
-        required_responsibilities = {
-            item.responsibility_id for item in studies[: target_index + 1]
+        studies_by_responsibility = {
+            study.responsibility_id: study for study in studies
         }
+        if responsibility_id not in studies_by_responsibility:
+            raise DevelopmentRunnerError("module outcome responsibility is unknown")
+        required_responsibilities: set[str] = set()
+
+        def include_with_prerequisites(role: str) -> None:
+            if role in required_responsibilities:
+                return
+            study = studies_by_responsibility[role]
+            for prerequisite in study.prerequisite_responsibility_ids:
+                include_with_prerequisites(prerequisite)
+            required_responsibilities.add(role)
+
+        include_with_prerequisites(responsibility_id)
         required_unit_indexes = tuple(
             binding.unit_index
             for binding in self.persistence_store.registered_unit_bindings
@@ -1232,7 +1595,13 @@ class DevelopmentExplorationRunner:
         }
         outcomes: dict[str, DevelopmentModuleOutcomeRecord] = {}
         outcome_contexts: dict[str, DevelopmentVerifiedOutcomeEvidenceContext] = {}
-        for study in studies[: target_index + 1]:
+        ordered_studies = tuple(
+            studies_by_responsibility[role]
+            for layer in DEVELOPMENT_DEPENDENCY_LAYERS
+            for role in layer
+            if role in required_responsibilities
+        )
+        for study in ordered_studies:
             evidence = tuple(
                 record
                 for record in records
@@ -1295,6 +1664,26 @@ class DevelopmentExplorationRunner:
         return DevelopmentVerifiedModuleOutcome(
             outcome_record=outcomes[responsibility_id],
             evidence_context=outcome_contexts[responsibility_id],
+        )
+
+    def persist_verified_module_outcome(
+        self,
+        outcome: DevelopmentVerifiedModuleOutcome,
+    ) -> Path:
+        """Persist a validated outcome as a create-only replay cache."""
+
+        if self.persistence_store is None:
+            raise DevelopmentRunnerError("verified module outcome requires persistence")
+        if (
+            type(outcome) is not DevelopmentVerifiedModuleOutcome
+            or outcome.validate_structure(self.protocol)
+        ):
+            raise DevelopmentRunnerError("verified module outcome is invalid")
+        record = outcome.outcome_record
+        return self.persistence_store.persist_verified_module_outcome(
+            responsibility_id=record.responsibility_id,
+            outcome_record_id=record.outcome_record_id,
+            payload=asdict(record),
         )
 
     def replay_verified_hf_provisional_thresholds(
@@ -2095,9 +2484,28 @@ class DevelopmentExplorationRunner:
                 public_noise_digest=public.values_float32_be_sha256,
             )
             return result, metric, traces, None
-        adaptive = self.adapter.route_content(shape, mode="routing_stqr", observations=raw.routing_observations).result
+        adaptive_required = (
+            responsibility == "content_router"
+            or unit.content_branch_id == "lf_hf_routed_combination"
+        )
+        if adaptive_required and type(raw.routing_observations) is not RoutingObservations:
+            raise DevelopmentRunnerError(
+                "adaptive routing requires real registered observations"
+            )
+        adaptive = (
+            self.adapter.route_content(
+                shape,
+                mode="routing_stqr",
+                observations=raw.routing_observations,
+            ).result
+            if adaptive_required
+            else None
+        )
         uniform = self.adapter.route_content(shape, mode="routing_uniform_control").result
         if responsibility == "content_router":
+            assert adaptive is not None
+            content_operation = FormalHfContentDetectionOperation(self.adapter)
+
             def execute_routing_arm(route):
                 arm_lf = self.adapter.build_lf_carrier(
                     raw.registered_root_key, shape, routing_result=route
@@ -2125,34 +2533,13 @@ class DevelopmentExplorationRunner:
                     raise DevelopmentRunnerError(
                         "routing arm did not invoke content embedder exactly once"
                     )
-                observed = arm_runtime.watermarked_detection_latent
-                hf_observation = HfDetectionObservation.from_public_image_encoding(
-                    tuple(observed.to(dtype=torch.float32).reshape(-1).tolist()),
-                    tuple(observed.shape),
+                public_image = _decoded_image_to_rgb8(
+                    arm_runtime.watermarked_image
                 )
-                lf_observation = LfDetectionObservation.from_public_image_encoding(
-                    tuple(observed.to(dtype=torch.float32).reshape(-1).tolist()),
-                    tuple(observed.shape),
+                content_result = content_operation(
+                    public_image,
+                    raw.registered_root_key,
                 )
-                hf_result = self.adapter.detect_hf(
-                    hf_observation, raw.registered_root_key
-                ).result
-                lf_result = self.adapter.detect_lf(
-                    lf_observation, raw.registered_root_key
-                ).result
-                content_result = self.adapter.detect_content(
-                    hf_result,
-                    lf_result,
-                    hf_null=raw.hf_null,
-                    lf_null=raw.lf_null,
-                    combination=raw.combination_function_id,
-                    weight=(
-                        raw.mixing_coefficient
-                        if raw.combination_function_id
-                        == "weighted_hf_lf_standardized_score"
-                        else None
-                    ),
-                ).result
                 quality = _tensor_relative_l2(
                     arm_runtime.clean_image, arm_runtime.watermarked_image
                 )
@@ -2207,8 +2594,9 @@ class DevelopmentExplorationRunner:
                 "uniform_control_detector_config_digest": uniform_content.content_config_digest,
                 "runtime_config_digest": adaptive_runtime.runtime_config_digest,
                 "input_artifact_digest": adaptive_runtime.paired_base_latent_digest,
-                "function_id": raw.combination_function_id,
-                "mixing_coefficient": raw.mixing_coefficient,
+                "routing_score_role": "hf_only_public_content_operation",
+                "function_id": None,
+                "mixing_coefficient": None,
             }
             metric = metric_content_router(
                 identity.source_cluster_id,
@@ -2233,6 +2621,7 @@ class DevelopmentExplorationRunner:
             )
             return adaptive, metric, traces, None
         routing = adaptive if unit.content_branch_id == "lf_hf_routed_combination" else uniform
+        assert routing is not None
         traces.update(
             routing_identity=routing.route_identity,
             routing_control=routing.mode,
@@ -2246,6 +2635,31 @@ class DevelopmentExplorationRunner:
             responsibility_result = lf_carrier
         elif responsibility == "hf_carrier":
             responsibility_result = hf_carrier
+        if responsibility == "content_embedder" and unit.content_branch_id == "clean_control":
+            latent_payload = _public_payload(raw.base_latent)
+            assert type(latent_payload) is dict
+            base_digest = str(latent_payload["tensor_values_sha256"])
+            clean_result = DevelopmentCleanControlResult(
+                control_identity="development_clean_no_write_control",
+                base_latent_digest=base_digest,
+            )
+            traces.update(
+                content_write_control="no_write",
+                realized_relative_l2=0.0,
+                embedding_result_identity=None,
+                materialization_replay_identity=None,
+                input_artifact_digest=base_digest,
+                runtime_config_digest=self.runtime_adapter.session.runtime_config_digest,
+            )
+            return clean_result, metric_content_embedder(
+                identity.source_cluster_id,
+                nominal_relative_l2=0.0,
+                realized_relative_l2=0.0,
+                clean_watermarked_image_relative_l2=0.0,
+                embedding_result_identity=base_digest,
+                materialization_replay_identity=base_digest,
+                paired_base_latent_digest=base_digest,
+            ), traces, None
         captured_embedding: list[object] = []
 
         def embedding_operation(latent_values: tuple[float, ...]):
@@ -2448,6 +2862,18 @@ class DevelopmentExplorationRunner:
             combination=raw.combination_function_id,
             weight=(raw.mixing_coefficient if raw.combination_function_id == "weighted_hf_lf_standardized_score" else None),
         ).result
+        if responsibility == "content_detector":
+            assert raw.hf_null is not None and raw.lf_null is not None
+            traces.update(
+                hf_null_partition_identity=raw.hf_null.partition_identity,
+                lf_null_partition_identity=raw.lf_null.partition_identity,
+                hf_null_fit_source_digest=_canonical_digest(
+                    tuple(asdict(item) for item in raw.hf_null.records)
+                ),
+                lf_null_fit_source_digest=_canonical_digest(
+                    tuple(asdict(item) for item in raw.lf_null.records)
+                ),
+            )
         hf_only_content = self.adapter.detect_content(hf_registered).result
         wrong_content = self.adapter.detect_content(
             hf_wrong,
@@ -2687,7 +3113,7 @@ class DevelopmentExplorationRunner:
                 "uniform_control_registered_score", "adaptive_quality_delta",
                 "uniform_control_quality_delta", "adaptive_detector_identity",
                 "uniform_control_detector_identity", "adaptive_detector_config_digest",
-                "uniform_control_detector_config_digest",
+                "uniform_control_detector_config_digest", "routing_score_role",
             )
         }
         branch_score_trace = {
@@ -2731,6 +3157,8 @@ class DevelopmentExplorationRunner:
             for key in (
                 "raw_threshold_identity", "rectified_threshold_identity", "tau", "tau_rescue",
                 "threshold_role",
+                "hf_null_partition_identity", "lf_null_partition_identity",
+                "hf_null_fit_source_digest", "lf_null_fit_source_digest",
             )
         }
         key_control_trace = {
@@ -2983,6 +3411,8 @@ class DevelopmentExplorationRunner:
         self,
         responsibility_id: str,
         source_cluster_ordinal: int,
+        *,
+        content_branch_id: str | None = None,
     ) -> DevelopmentStudyUnit:
         unit = next(
             (
@@ -2991,6 +3421,10 @@ class DevelopmentExplorationRunner:
                 if item.responsibility_id == responsibility_id
                 and item.source_cluster_ordinal == source_cluster_ordinal
                 and item.phase not in OPERATIONAL_UNIT_PHASES
+                and (
+                    content_branch_id is None
+                    or item.content_branch_id == content_branch_id
+                )
             ),
             None,
         )

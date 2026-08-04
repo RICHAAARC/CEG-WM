@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 import inspect
+import os
 from pathlib import Path
+import shutil
+import time
 
 import pytest
 import torch
@@ -29,6 +32,7 @@ from experiments.runners.development_persistence import (
     development_unit_roster_digest,
 )
 from experiments.runners.synthetic_runtime import SyntheticQkBackend
+import experiments.runners.record_writer as record_writer_module
 from experiments.protocol.development_exploration import (
     DevelopmentVerifiedModuleOutcome,
     build_development_cross_fit_plan,
@@ -37,6 +41,9 @@ from experiments.protocol.development_exploration import (
 )
 from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
 from experiments.protocol.development_records import canonical_development_value_digest
+from scripts.experiment_execution.development_exploration_worker_inputs import (
+    DevelopmentProductionInputBuilder,
+)
 from main import (
     BranchNullCalibration,
     ConditionalRecoveryResult,
@@ -58,9 +65,17 @@ from tests.unit.test_development_module_exploration import (
     _threshold_material,
 )
 from tests.unit.test_internal_governed_runner import _context as _internal_context
+from experiments.runners.internal import execute_internal_case
 import tests.unit.test_internal_governed_runner as internal_runner_test_module
 from tests.unit.test_runtime_content_write_and_vae import FakeContentBackend
 from tests.unit.test_runtime_qk_observation import FakeQkBackend
+from tests.unit.test_development_worker_persistence import (
+    _intent as _persistence_intent,
+    _lease as _persistence_lease,
+    _record as _persistence_record,
+    _routing_reference_record,
+    _store as _persistence_store,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -415,10 +430,40 @@ def test_public_runner_does_not_accept_caller_prerequisite_outcomes() -> None:
 
 
 @pytest.mark.quick
+def test_result_serialization_is_bound_to_exact_responsibility_type() -> None:
+    runner = _runner()
+    low_frequency = runner._execute_unit(
+        _first_scientific_unit_index(runner, "lf_detector"), _input()
+    )
+    result = runner.adapter.detect_lf(
+        LfDetectionObservation.from_public_image_encoding(
+            tuple(_input().base_latent.reshape(-1).tolist()),
+            tuple(_input().base_latent.shape),
+        ),
+        _input().registered_root_key,
+    ).result
+    assert _safe_result_payload("lf_detector", result)["lf_score"] == (
+        result.lf_score
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="differs from responsibility contract",
+    ):
+        _safe_result_payload("hf_detector", result)
+    assert low_frequency.record.operation_result_payload["candidate_id"] == "lf_low_pass"
+
+
+@pytest.mark.quick
 def test_content_embedding_unit_uses_actual_runtime_write_and_vae() -> None:
     runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "content_embedder"
+        and item.content_branch_id == "hf_only"
+    )
     result = runner._execute_unit(
-        _first_scientific_unit_index(runner, "content_embedder"), _input()
+        unit.unit_index, _input()
     )
 
     assert result.record.responsibility_id == "content_embedder"
@@ -428,6 +473,26 @@ def test_content_embedding_unit_uses_actual_runtime_write_and_vae() -> None:
     values = dict(result.record.metric_observation["sufficient_statistics"])
     assert values["realized_total_relative_l2"] >= 0.0
     assert runner.runtime_adapter._backend.run_calls == 2
+
+
+@pytest.mark.quick
+def test_clean_content_embedding_control_performs_no_hidden_write() -> None:
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "content_embedder"
+        and item.content_branch_id == "clean_control"
+    )
+
+    result = runner._execute_unit(unit.unit_index, _input())
+
+    assert runner.runtime_adapter._backend.run_calls == 0
+    assert result.record.operation_result_payload["control_identity"] == (
+        "development_clean_no_write_control"
+    )
+    assert result.record.operation_result_payload["realized_relative_l2"] == 0.0
+    assert result.record.operation_result_payload["embedding_result_identity"] is None
 
 
 @pytest.mark.quick
@@ -451,6 +516,10 @@ def test_router_comparison_executes_both_frozen_runtime_arms() -> None:
     assert result.record.routing_trace["adaptive_detector_config_digest"] == (
         result.record.routing_trace["uniform_control_detector_config_digest"]
     )
+    assert result.record.routing_trace["routing_score_role"] == (
+        "hf_only_public_content_operation"
+    )
+    assert result.record.branch_score_trace["function_id"] is None
 
 
 @pytest.mark.quick
@@ -469,38 +538,8 @@ def test_preflight_calls_real_runtime_without_scientific_coverage() -> None:
 
 @pytest.mark.quick
 def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _runner()
-    observed: list[str] = []
-
-    def execute_operation(unit, _identity, _raw):
-        observed.append(unit.responsibility_id)
-        return {"responsibility_id": unit.responsibility_id}, None, {}, None
-
-    def execute_conditional(unit, _raw):
-        observed.append(unit.responsibility_id)
-        return {"responsibility_id": unit.responsibility_id}
-
-    def execute_rectifier(_raw):
-        observed.append("image_rectifier")
-        return {"responsibility_id": "image_rectifier"}
-
-    monkeypatch.setattr(runner, "_execute_real_operation", execute_operation)
-    monkeypatch.setattr(
-        runner,
-        "_execute_wiring_conditional_call",
-        execute_conditional,
-    )
-    monkeypatch.setattr(
-        runner,
-        "_execute_wiring_image_rectifier_call",
-        execute_rectifier,
-    )
-    monkeypatch.setattr(
-        "experiments.runners.development_exploration._safe_result_payload",
-        lambda _responsibility, result: result,
-    )
     receipt = runner.execute_wiring_smoke_cluster(
         0,
         {role: _input() for role in REQUIRED_METHOD_RESPONSIBILITIES},
@@ -512,7 +551,69 @@ def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
     )
     assert receipt.counts_as_scientific_coverage is False
     assert receipt.scientific_claims_supported is False
-    assert tuple(observed) == REQUIRED_METHOD_RESPONSIBILITIES
+    assert runner.runtime_adapter._backend.run_calls == 2
+
+
+@pytest.mark.quick
+def test_first_wiring_receipt_uses_real_runner_record_and_committed_bundle(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    now = int(time.time())
+    lease = store.acquire_lease(
+        session_id="real_wiring_receipt_session",
+        now_epoch_seconds=now,
+        lease_duration_seconds=600,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=now)
+    for _ in range(2):
+        unit = runner.protocol.unit_roster[cursor.next_unit_index]
+        intent = runner.create_operational_intent(
+            lease, cursor, now_epoch_seconds=now + 1
+        )
+        receipt = DevelopmentOperationalReceipt(
+            operational_role="environment_runtime_throughput_preflight",
+            source_cluster_ordinal=unit.source_cluster_ordinal,
+            case_ids=runner.protocol.preflight.case_ids,
+            responsibility_result_digests=(("content_embedder", "d" * 64),),
+            elapsed_seconds=0.25,
+            runtime_config_digest=runner.runtime_adapter.session.runtime_config_digest,
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+        runner.commit_operational_receipt(
+            lease,
+            cursor,
+            intent,
+            receipt,
+            now_epoch_seconds=now + 2,
+            raw_secret_values=(),
+        )
+    unit = runner.protocol.unit_roster[cursor.next_unit_index]
+    assert unit.unit_index == 2
+    intent = runner.create_operational_intent(
+        lease, cursor, now_epoch_seconds=now + 3
+    )
+    receipt = runner.execute_wiring_smoke_cluster(
+        unit.source_cluster_ordinal,
+        {role: _input() for role in REQUIRED_METHOD_RESPONSIBILITIES},
+    )
+    committed = runner.commit_operational_receipt(
+        lease,
+        cursor,
+        intent,
+        receipt,
+        now_epoch_seconds=max(now + 4, int(time.time())),
+        raw_secret_values=("development-runner-cpu-wiring-key",),
+    )
+    recovered = store.open_session_cursor(
+        lease, now_epoch_seconds=max(now + 5, int(time.time()))
+    )
+
+    assert committed.unit_index == 2
+    assert committed.record_kind == "development_operational_check"
+    assert recovered.operational_records[-1].record_id == committed.record_id
+    assert recovered.next_unit_index == 3
 
 
 @pytest.mark.quick
@@ -925,6 +1026,112 @@ def test_conditional_recovery_unit_delegates_once_to_governed_internal_runner(
 
 
 @pytest.mark.quick
+def test_conditional_scratch_survives_drive_limited_record_writer_and_outer_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    drive_root = (tmp_path / "drive_like_persistent_root").resolve()
+    cache_root = (tmp_path / "local_worker_cache").resolve()
+    drive_root.mkdir(parents=True)
+    cache_root.mkdir(parents=True)
+    original_replace = record_writer_module.os.replace
+    original_fsync = record_writer_module.os.fsync
+    original_flock = record_writer_module.fcntl.flock
+
+    def _fd_path(descriptor: int) -> Path | None:
+        try:
+            return Path(os.readlink(f"/proc/self/fd/{descriptor}")).resolve()
+        except OSError:
+            return None
+
+    def _under_drive(path: Path | None) -> bool:
+        return path is not None and (path == drive_root or drive_root in path.parents)
+
+    def _guarded_replace(source, destination) -> None:
+        if _under_drive(Path(destination).resolve()):
+            raise OSError("drive atomic replace unavailable")
+        original_replace(source, destination)
+
+    def _guarded_fsync(descriptor: int) -> None:
+        path = _fd_path(descriptor)
+        if _under_drive(path) and any(
+            Path(frame.filename).name == "record_writer.py"
+            for frame in inspect.stack()[1:5]
+        ):
+            raise OSError("drive fsync unavailable to internal record writer")
+        original_fsync(descriptor)
+
+    def _guarded_flock(descriptor: int, operation: int) -> None:
+        if _under_drive(_fd_path(descriptor)):
+            raise OSError("drive flock unavailable")
+        original_flock(descriptor, operation)
+
+    monkeypatch.setattr(record_writer_module.os, "replace", _guarded_replace)
+    monkeypatch.setattr(record_writer_module.os, "fsync", _guarded_fsync)
+    monkeypatch.setattr(record_writer_module.fcntl, "flock", _guarded_flock)
+
+    blocked_context, blocked_payload, _ = _internal_context(
+        drive_root / "legacy_internal_records"
+    )
+    with pytest.raises(OSError, match="drive flock unavailable"):
+        execute_internal_case(
+            blocked_context,
+            unit_id=blocked_payload.source_artifact.analysis_unit_identity.unit_id,
+            payload=blocked_payload,
+        )
+
+    outer_store_fixture_root = drive_root / "outer_store"
+    outer_store_fixture_root.mkdir()
+    outer_store = _persistence_store(outer_store_fixture_root)
+    outer_lease = _persistence_lease(outer_store, session_id="drive_limited_session")
+    outer_intent = _persistence_intent(outer_store, outer_lease)
+    builder = object.__new__(DevelopmentProductionInputBuilder)
+    builder.cache_root = cache_root
+    scratch_root = builder._internal_record_scratch_root(
+        unit_descriptor_digest=outer_intent.unit_descriptor_digest,
+        intent=outer_intent,
+    )
+    assert cache_root in scratch_root.parents
+    assert drive_root not in scratch_root.parents
+
+    local_context, local_payload, _ = _internal_context(scratch_root)
+    internal = execute_internal_case(
+        local_context,
+        unit_id=local_payload.source_artifact.analysis_unit_identity.unit_id,
+        payload=local_payload,
+    ).record
+    operation_payload = internal.to_dict()
+    outer_record = _persistence_record(outer_store, outer_intent)
+    outer_record = replace(
+        outer_record,
+        operation_result_payload=operation_payload,
+        operation_result_digest=canonical_development_value_digest(
+            operation_payload
+        ),
+    )
+    outer_record = replace(
+        outer_record,
+        record_id=canonical_development_value_digest(
+            outer_record.payload_without_record_id()
+        ),
+    )
+    marker = outer_store.commit_unit(
+        outer_lease,
+        outer_intent,
+        record=outer_record,
+        now_epoch_seconds=102,
+    )
+    shutil.rmtree(cache_root)
+
+    recovered = outer_store.verified_terminal_scientific_evidence(
+        now_epoch_seconds=103
+    )
+    assert marker.record_id == outer_record.record_id
+    assert recovered[0][0].operation_result_payload == operation_payload
+    assert recovered[0][1] == marker
+
+
+@pytest.mark.quick
 def test_production_runner_has_no_result_provider_or_module_result_surface() -> None:
     source = inspect.getsource(DevelopmentExplorationRunner)
     signature = inspect.signature(DevelopmentExplorationRunner._execute_unit)
@@ -1040,13 +1247,141 @@ def test_preflight_and_wiring_share_commit_recovery_before_routing_reference(
 
 
 @pytest.mark.quick
+def test_intent_precedes_production_build_and_first_scientific_commit(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    now = int(time.time())
+    lease = store.acquire_lease(
+        session_id="intent_first_scientific_session",
+        now_epoch_seconds=now,
+        lease_duration_seconds=600,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=now)
+    for _ in range(10):
+        unit = runner.protocol.unit_roster[cursor.next_unit_index]
+        intent = runner.create_operational_intent(
+            lease, cursor, now_epoch_seconds=now + 1
+        )
+        preflight = unit.phase == "development_environment_preflight"
+        roles = ("content_embedder",) if preflight else REQUIRED_METHOD_RESPONSIBILITIES
+        receipt = DevelopmentOperationalReceipt(
+            operational_role=(
+                "environment_runtime_throughput_preflight"
+                if preflight
+                else "full_chain_wiring_smoke"
+            ),
+            source_cluster_ordinal=unit.source_cluster_ordinal,
+            case_ids=(
+                runner.protocol.preflight.case_ids
+                if preflight
+                else ("all_thirteen_responsibility_wiring",)
+            ),
+            responsibility_result_digests=tuple(
+                (role, sha256(role.encode()).hexdigest()) for role in roles
+            ),
+            elapsed_seconds=0.25,
+            runtime_config_digest=runner.runtime_adapter.session.runtime_config_digest,
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+        runner.commit_operational_receipt(
+            lease,
+            cursor,
+            intent,
+            receipt,
+            now_epoch_seconds=now + 2,
+            raw_secret_values=(),
+        )
+    for _ in range(64):
+        intent = store.create_session_intent(
+            cursor, lease, now_epoch_seconds=now + 3
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=_routing_reference_record(intent),
+            now_epoch_seconds=now + 4,
+        )
+    unit = runner.protocol.unit_roster[cursor.next_unit_index]
+    assert unit.responsibility_id == "key_schedule"
+    attempt_started = time.monotonic()
+    intent = runner.create_scientific_intent(
+        lease, cursor, now_epoch_seconds=now + 5
+    )
+    builder = object.__new__(DevelopmentProductionInputBuilder)
+    builder.protocol = runner.protocol
+    builder.authority = runner.intent_authority
+    builder.root_key = "development-runner-cpu-wiring-key"
+    builder.runner = runner
+    builder.store = store
+    builder.session_cursor = cursor
+    builder.cache_root = tmp_path / "cache"
+    builder._routing_observations_by_cluster = {}
+    unit_input = builder.build(
+        unit,
+        _input().base_latent,
+        intent=intent,
+        now_epoch_seconds=now + 5,
+    )
+    result = runner.execute_and_commit_claimed_session_unit(
+        lease,
+        cursor,
+        intent,
+        unit_input,
+        attempt_started_monotonic=attempt_started,
+        raw_secret_values=("development-runner-cpu-wiring-key",),
+    )
+
+    assert result.record.execution_status == "success"
+    assert result.record.unit_index == 74
+    assert result.committed is not None
+    assert result.committed.committed_at_utc > intent.created_at_utc
+    assert store.recover(now_epoch_seconds=now + 6).committed_units[-1] == (
+        result.committed
+    )
+    terminal_started = time.monotonic()
+    terminal_intent = runner.create_scientific_intent(
+        lease, cursor, now_epoch_seconds=now + 7
+    )
+    terminal = runner.commit_claimed_terminal_failure(
+        lease,
+        cursor,
+        terminal_intent,
+        failure_class="dependency_blocked",
+        failure_reason="prerequisite_outcome_missing",
+        attempt_started_monotonic=terminal_started,
+        raw_secret_values=(),
+    )
+    assert terminal.record.execution_status == "failed"
+    assert cursor.next_unit_index == 76
+    resource_started = time.monotonic()
+    resource_intent = runner.create_scientific_intent(
+        lease, cursor, now_epoch_seconds=now + 8
+    )
+    resource = runner.commit_claimed_resource_failure(
+        lease,
+        cursor,
+        resource_intent,
+        failure_reason="input_preparation_resource_exhausted",
+        attempt_started_monotonic=resource_started,
+        raw_secret_values=(),
+    )
+    assert resource.record.execution_status == "retry"
+    assert cursor.next_unit_index == 76
+    assert store.next_attempt_index(resource_intent.unit_id) == 1
+
+
+@pytest.mark.quick
 def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
     tmp_path: Path,
 ) -> None:
     runner, store = _persistent_runner(tmp_path)
+    now = int(time.time())
     lease = store.acquire_lease(
         session_id="failure_session",
-        now_epoch_seconds=100,
+        now_epoch_seconds=now,
         lease_duration_seconds=100,
     )
     unit_index = next(
@@ -1060,7 +1395,7 @@ def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
         unit_index=unit_index,
         attempt_index=0,
         parent_attempt_intent_digest=None,
-        now_epoch_seconds=101,
+        now_epoch_seconds=now + 1,
     )
     runner.adapter.identify_key = lambda *_args, **_kwargs: None
 
@@ -1068,11 +1403,11 @@ def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
         lease,
         intent,
         _input(),
-        now_epoch_seconds=101,
+        now_epoch_seconds=now + 1,
         raw_secret_values=("development-runner-cpu-wiring-key",),
         session_cursor=None,
     )
-    recovery = store.recover(now_epoch_seconds=102)
+    recovery = store.recover(now_epoch_seconds=now + 2)
 
     assert result.record.execution_status == "failed"
     assert result.record.failure_class == "implementation_failure"
@@ -1125,8 +1460,11 @@ def test_committed_key_records_replay_into_outcome_and_dependency_decision(
         responsibility_id="key_schedule",
         now_epoch_seconds=103,
     )
+    outcome_path = runner.persist_verified_module_outcome(verified)
+    assert runner.persist_verified_module_outcome(verified) == outcome_path
+    assert outcome_path.is_file()
     decision = runner.decide_verified_module_execution(
-        responsibility_id="content_router",
+        responsibility_id="lf_carrier",
         outcomes_by_responsibility={"key_schedule": verified},
         now_epoch_seconds=103,
     )
@@ -1188,7 +1526,7 @@ def test_dependency_decision_rejects_ghost_or_foreign_verified_context(
         match="differs from persistent-store replay",
     ):
         runner.decide_verified_module_execution(
-            responsibility_id="content_router",
+            responsibility_id="lf_carrier",
             outcomes_by_responsibility={"key_schedule": ghost},
             now_epoch_seconds=103,
         )

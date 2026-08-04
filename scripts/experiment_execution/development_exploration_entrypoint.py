@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -20,11 +20,14 @@ import torch
 from experiments.attacks import load_attack_registry
 from experiments.methods import CegWmExperimentAdapter, load_ceg_wm_experiment_adapter_configuration
 from experiments.protocol.development_exploration import (
+    DEVELOPMENT_DEPENDENCY_LAYERS,
+    build_development_cross_fit_plan,
     create_frozen_development_execution_intent_authority,
     load_frozen_development_exploration_protocol,
 )
 from experiments.runners.development_exploration import DevelopmentExplorationRunner
 from experiments.runners.development_inputs import (
+    DevelopmentInputError,
     build_development_manifest_and_key_roster,
     load_development_prompt_roster,
 )
@@ -38,7 +41,12 @@ from experiments.runners.development_persistence import (
     SessionReceipt,
     canonical_digest,
 )
-from runtime import Sd35PipelineBackend, create_runtime_adapter
+from runtime import (
+    RuntimeAdapterError,
+    RuntimeContentExecutionError,
+    Sd35PipelineBackend,
+    create_runtime_adapter,
+)
 from main import identify_root_key
 
 
@@ -232,7 +240,11 @@ def execute_development_exploration_session(
     committed_before = session_cursor.initial_committed_count
     termination_reason = "frozen_roster_complete"
     worker_failure_type: str | None = None
+    active_stage = "session_initialization"
+    active_responsibility: str | None = None
+    active_unit_index: int | None = None
     from scripts.experiment_execution.development_exploration_worker_inputs import (
+        DevelopmentDependencyInputBlocked,
         DevelopmentProductionInputBuilder,
     )
     try:
@@ -268,6 +280,10 @@ def execute_development_exploration_session(
                 break
             entry = prompts.entries[unit.source_cluster_ordinal]
             backend.set_development_generation_prompts(entry.prompt)
+            active_stage = "operational_unit"
+            active_responsibility = unit.responsibility_id
+            active_unit_index = unit.unit_index
+            attempt_started = time.monotonic()
             intent = runner.create_operational_intent(
                 lease,
                 session_cursor,
@@ -287,16 +303,23 @@ def execute_development_exploration_session(
                     unit.source_cluster_ordinal,
                     operational_inputs,
                 )
+            operational_receipt = replace(
+                operational_receipt,
+                elapsed_seconds=time.monotonic() - attempt_started,
+            )
             runner.commit_operational_receipt(
                 lease,
                 session_cursor,
                 intent,
                 operational_receipt,
-                now_epoch_seconds=max(now, int(time.time())),
+                now_epoch_seconds=max(now + 1, int(time.time())),
                 raw_secret_values=(root_key, hf_token),
             )
         reference_complete = False
         if operational_complete:
+            active_stage = "routing_reference_fit"
+            active_responsibility = "content_router"
+            active_unit_index = session_cursor.next_unit_index
             reference_complete = input_builder.prepare_routing_reference_fit(
                 backend,
                 latent_factory,
@@ -305,6 +328,47 @@ def execute_development_exploration_session(
             )
         if operational_complete and not reference_complete:
             termination_reason = "soft_stop_after_reference_measurement"
+
+        cross_fit_plans = {
+            responsibility_id: build_development_cross_fit_plan(
+                responsibility_id=responsibility_id,
+                execution_intent_authority=authority,
+                expected_execution_intent_authority_digest=authority.authority_digest,
+                expected_source_cluster_count=len(authority.input_manifest.assignments),
+            )
+            for responsibility_id in (
+                "lf_detector",
+                "hf_detector",
+                "content_detector",
+            )
+        }
+        verified_outcomes = {}
+
+        def refresh_verified_outcomes(now_epoch_seconds: int) -> None:
+            for dependency_layer in DEVELOPMENT_DEPENDENCY_LAYERS:
+                for responsibility_id in dependency_layer:
+                    if responsibility_id in verified_outcomes:
+                        continue
+                    indexes = tuple(
+                        binding.unit_index
+                        for binding in store.registered_unit_bindings
+                        if binding.responsibility_id == responsibility_id
+                        and binding.phase not in {
+                            "development_environment_preflight",
+                            "development_full_chain_wiring",
+                            "development_routing_reference_fit",
+                        }
+                    )
+                    if not indexes or max(indexes) >= session_cursor.next_unit_index:
+                        continue
+                    outcome = runner.build_verified_module_outcome_record(
+                        responsibility_id=responsibility_id,
+                        cross_fit_plans=cross_fit_plans,
+                        now_epoch_seconds=now_epoch_seconds,
+                    )
+                    runner.persist_verified_module_outcome(outcome)
+                    verified_outcomes[responsibility_id] = outcome
+
         while reference_complete:
             now = int(time.time())
             if now - started_epoch >= SOFT_STOP_SECONDS:
@@ -313,26 +377,149 @@ def execute_development_exploration_session(
             if session_cursor.next_unit_index >= len(protocol.unit_roster):
                 break
             unit = protocol.unit_roster[session_cursor.next_unit_index]
+            active_stage = "scientific_unit"
+            active_responsibility = unit.responsibility_id
+            active_unit_index = unit.unit_index
             prompt_entry = prompts.entries[unit.source_cluster_ordinal]
             backend.set_development_generation_prompts(prompt_entry.prompt)
-            unit_input = input_builder.build(
-                unit,
-                latent_factory(prompt_entry.generation_seed),
+            refresh_verified_outcomes(now)
+            decision = runner.decide_verified_module_execution(
+                responsibility_id=unit.responsibility_id,
+                outcomes_by_responsibility=verified_outcomes,
+                cross_fit_plans=cross_fit_plans,
                 now_epoch_seconds=now,
             )
-            executed = runner.execute_and_commit_session_unit(
+            attempt_started = time.monotonic()
+            intent = runner.create_scientific_intent(
                 lease,
                 session_cursor,
-                unit_input,
                 now_epoch_seconds=now,
+            )
+            if not decision.approved:
+                runner.commit_claimed_terminal_failure(
+                    lease,
+                    session_cursor,
+                    intent,
+                    failure_class="dependency_blocked",
+                    failure_reason=decision.decision_reason,
+                    attempt_started_monotonic=attempt_started,
+                    raw_secret_values=(root_key, hf_token),
+                )
+                continue
+            try:
+                unit_input = input_builder.build(
+                    unit,
+                    latent_factory(prompt_entry.generation_seed),
+                    intent=intent,
+                    now_epoch_seconds=now,
+                )
+            except DevelopmentDependencyInputBlocked:
+                if time.monotonic() - attempt_started > unit.maximum_duration_seconds:
+                    runner.commit_claimed_resource_failure(
+                        lease,
+                        session_cursor,
+                        intent,
+                        failure_reason="unit_duration_exceeded_during_input_preparation",
+                        attempt_started_monotonic=attempt_started,
+                        raw_secret_values=(root_key, hf_token),
+                    )
+                    termination_reason = "resource_retry_after_committed_unit"
+                    break
+                runner.commit_claimed_terminal_failure(
+                    lease,
+                    session_cursor,
+                    intent,
+                    failure_class="dependency_blocked",
+                    failure_reason="verified_dependency_input_incomplete",
+                    attempt_started_monotonic=attempt_started,
+                    raw_secret_values=(root_key, hf_token),
+                )
+                continue
+            except (
+                MemoryError,
+                OSError,
+                RuntimeAdapterError,
+                RuntimeContentExecutionError,
+                torch.cuda.OutOfMemoryError,
+            ):
+                runner.commit_claimed_resource_failure(
+                    lease,
+                    session_cursor,
+                    intent,
+                    failure_reason="input_preparation_resource_exhausted",
+                    attempt_started_monotonic=attempt_started,
+                    raw_secret_values=(root_key, hf_token),
+                )
+                termination_reason = "resource_retry_after_committed_unit"
+                break
+            except DevelopmentInputError as exc:
+                if time.monotonic() - attempt_started > unit.maximum_duration_seconds:
+                    runner.commit_claimed_resource_failure(
+                        lease,
+                        session_cursor,
+                        intent,
+                        failure_reason="unit_duration_exceeded_during_input_preparation",
+                        attempt_started_monotonic=attempt_started,
+                        raw_secret_values=(root_key, hf_token),
+                    )
+                    termination_reason = "resource_retry_after_committed_unit"
+                    break
+                runner.commit_claimed_terminal_failure(
+                    lease,
+                    session_cursor,
+                    intent,
+                    failure_class="implementation_failure",
+                    failure_reason=f"{type(exc).__module__}.{type(exc).__qualname__}",
+                    attempt_started_monotonic=attempt_started,
+                    raw_secret_values=(root_key, hf_token),
+                )
+                continue
+            except Exception as exc:
+                if time.monotonic() - attempt_started > unit.maximum_duration_seconds:
+                    runner.commit_claimed_resource_failure(
+                        lease,
+                        session_cursor,
+                        intent,
+                        failure_reason="unit_duration_exceeded_during_input_preparation",
+                        attempt_started_monotonic=attempt_started,
+                        raw_secret_values=(root_key, hf_token),
+                    )
+                    termination_reason = "resource_retry_after_committed_unit"
+                    break
+                runner.commit_claimed_terminal_failure(
+                    lease,
+                    session_cursor,
+                    intent,
+                    failure_class="implementation_failure",
+                    failure_reason=f"{type(exc).__module__}.{type(exc).__qualname__}",
+                    attempt_started_monotonic=attempt_started,
+                    raw_secret_values=(root_key, hf_token),
+                )
+                continue
+            if time.monotonic() - attempt_started > unit.maximum_duration_seconds:
+                runner.commit_claimed_resource_failure(
+                    lease,
+                    session_cursor,
+                    intent,
+                    failure_reason="unit_duration_exceeded_during_input_preparation",
+                    attempt_started_monotonic=attempt_started,
+                    raw_secret_values=(root_key, hf_token),
+                )
+                termination_reason = "resource_retry_after_committed_unit"
+                break
+            executed = runner.execute_and_commit_claimed_session_unit(
+                lease,
+                session_cursor,
+                intent,
+                unit_input,
+                attempt_started_monotonic=attempt_started,
                 raw_secret_values=(root_key, hf_token),
             )
-            if executed.record.execution_status != "success":
-                termination_reason = (
-                    "resource_failure_after_committed_unit"
-                    if executed.record.failure_class == "resource_failure"
-                    else "scientific_or_implementation_failure_after_committed_unit"
-                )
+            if (
+                executed.record.failure_class == "resource_failure"
+                and executed.record.execution_status == "retry"
+            ):
+                termination_reason = "resource_retry_after_committed_unit"
                 break
     except Exception as exc:
         worker_failure_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
@@ -391,6 +578,9 @@ def execute_development_exploration_session(
                 _canonical_bytes(
                     {
                         "failure_type": worker_failure_type,
+                        "stage": active_stage,
+                        "responsibility_id": active_responsibility,
+                        "unit_index": active_unit_index,
                         "scientific_claims_supported": False,
                         "termination_reason": termination_reason,
                     }

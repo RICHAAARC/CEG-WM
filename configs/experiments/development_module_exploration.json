@@ -1,7 +1,7 @@
 {
-  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v4",
+  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v5",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "4.0.0",
+  "protocol_version": "4.1.0",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -138,18 +138,18 @@
     "maximum_record_attempts_per_unit": 3,
     "maximum_total_record_attempts": 7758,
     "maximum_duration_seconds_per_unit": 900,
+    "maximum_wiring_duration_seconds_per_unit": 2100,
     "unit_order": [
       "environment_preflight_before_wiring",
       "full_chain_wiring_before_reference_fit",
       "development_reference_fit_before_scientific_units",
-      "dependency_layer",
-      "source_cluster_ordinal_within_dependency_layer",
-      "responsibility_within_dependency_layer",
-      "critical_pair_extension_source_cluster_ordinal",
-      "cheap_detection_extension_source_cluster_ordinal"
+      "topological_dependency_layer",
+      "scientific_breadth_source_cluster_ordinal_within_layer",
+      "responsibility_within_layer",
+      "registered_scale_extension_before_successor_layer"
     ],
     "score_adaptive_unit_changes_forbidden": true,
-    "unit_roster_digest": "8e74386100503d612752c8c4a8e74b1de67e9677f53d1854e6eebf042f34090b"
+    "unit_roster_digest": "c7792b2f85d2e0b643cf839f8d4109243d7678838e9f7d26f89516b556792eab"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",
@@ -379,9 +379,10 @@
       "candidate_ids": ["key_schedule_sha256_counter", "routing_stqr", "routing_uniform_control"],
       "candidate_parameter_bindings": [
         {"parameter_id": "adaptive_router_candidate", "values": ["routing_stqr"]},
-        {"parameter_id": "disabled_uniform_control_candidate", "values": ["routing_uniform_control"]}
+        {"parameter_id": "disabled_uniform_control_candidate", "values": ["routing_uniform_control"]},
+        {"parameter_id": "routing_score_operation", "values": ["hf_only_public_content_operation"]}
       ],
-      "candidate_config_digest": "1d76286b6d1bd30e9b9e6192ebd452f8ce5663c7104105700f3a0c65349784cc",
+      "candidate_config_digest": "57b4c8c81b140c124fa59ddab54e4c866507b78e0825140b4a0ecba700b6f074",
       "paired_ablation_identity": "disabled_uniform_routing_ablation",
       "negative_control_case_ids": ["routing_uniform_control", "attack_label_blindness"],
       "metric_ids": ["matched_budget_incremental_tpr", "routing_coverage", "quality_delta"],
@@ -391,7 +392,7 @@
         {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
       ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "routing_trace", "branch_score_trace", "provenance_trace"],
-      "prerequisite_responsibility_ids": ["key_schedule"],
+      "prerequisite_responsibility_ids": ["key_schedule", "lf_detector", "hf_detector"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
       "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
       "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],

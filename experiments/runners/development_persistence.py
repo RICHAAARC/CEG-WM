@@ -861,7 +861,14 @@ class DevelopmentPersistentStore:
         self._validate_source_artifacts()
         root = _regular_directory(Path(persistent_root), "persistent_root")
         self.run_root = _regular_directory(root / self.run_id, "run_root")
-        for name in ("leases", "intents", "bundles", "markers", "receipts"):
+        for name in (
+            "leases",
+            "intents",
+            "bundles",
+            "markers",
+            "receipts",
+            "module_outcomes",
+        ):
             _regular_directory(self.run_root / name, name)
         identity_path = self.run_root / "frozen_worker_identity.json"
         identity_bytes = canonical_json_bytes(asdict(worker_identity))
@@ -870,6 +877,41 @@ class DevelopmentPersistentStore:
                 raise DevelopmentPersistenceError("frozen worker identity drifted")
         else:
             _create_only(identity_path, identity_bytes)
+
+    def persist_verified_module_outcome(
+        self,
+        *,
+        responsibility_id: str,
+        outcome_record_id: str,
+        payload: Mapping[str, object],
+    ) -> Path:
+        """Create or replay one outcome derived from verified COMMITTED records."""
+
+        _identity(responsibility_id, "responsibility_id")
+        _digest(outcome_record_id, "outcome_record_id")
+        if type(payload) is not dict:
+            raise DevelopmentPersistenceError("module outcome payload is invalid")
+        if (
+            payload.get("responsibility_id") != responsibility_id
+            or payload.get("outcome_record_id") != outcome_record_id
+        ):
+            raise DevelopmentPersistenceError("module outcome identity drifted")
+        destination = self.run_root / "module_outcomes" / (
+            responsibility_id + ".json"
+        )
+        encoded = canonical_json_bytes(payload)
+        if destination.exists():
+            if destination.is_symlink() or destination.read_bytes() != encoded:
+                raise DevelopmentPersistenceError(
+                    "persisted verified module outcome drifted"
+                )
+            return destination
+        _create_only(destination, encoded)
+        if destination.read_bytes() != encoded:
+            raise DevelopmentPersistenceError(
+                "persisted verified module outcome replay failed"
+            )
+        return destination
 
     def _validate_registered_unit_bindings(
         self,

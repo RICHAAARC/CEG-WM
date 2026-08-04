@@ -626,7 +626,8 @@ development-only cross-fit 结构和 module outcome record。outcome 只引用
 | maximum_record_attempts_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 development unit 复用现有 record writer 的三次 attempt 上限。 |
 | maximum_total_record_attempts | persisted_protocol | protocol | none | false | false | false | scientific roster 乘每 unit attempt 上限的全局硬上限。 |
 | maximum_duration_seconds_per_unit | persisted_protocol | protocol | none | false | false | false | 每个 scientific unit 的最大执行时长。 |
-| unit_order | persisted_protocol | protocol | none | false | false | false | 先 13 职责 breadth、再关键 pair、最后廉价 detection 扩展的冻结顺序。 |
+| unit_order | persisted_protocol | protocol | none | false | false | false | 按登记依赖拓扑逐层 breadth-first；每项职责完成最终 16/32/64 cluster 规模并形成 verified outcome 后才进入后继层。 |
+| maximum_wiring_duration_seconds_per_unit | persisted_protocol | protocol | none | false | false | false | 仅 8 个 non-scientific wiring unit 的 2100 秒上限；routing reference 与 scientific unit 仍使用 900 秒。 |
 | unit_roster_digest | persisted_protocol | provenance | none | false | false | false | 全部 immutable development study-unit descriptors 的 canonical 摘要。 |
 | score_adaptive_unit_changes_forbidden | persisted_protocol | protocol | none | false | false | false | 禁止按已观测分数增删或重排 unit。 |
 | threshold_role | persisted_protocol | method_identity | none | true | false | false | 固定为 `development_exploratory`，不是 formal tau。 |
@@ -1008,6 +1009,11 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | uniform_control_detector_identity | persisted_protocol | method_identity | none | true | false | false | disabled-uniform 配对臂复用的 content detector 身份。 |
 | adaptive_detector_config_digest | persisted_protocol | provenance | none | true | false | false | adaptive routing 配对臂 detector 配置摘要。 |
 | uniform_control_detector_config_digest | persisted_protocol | provenance | none | true | false | false | disabled-uniform 配对臂 detector 配置摘要。 |
+| routing_score_role | persisted_protocol | method_identity | none | true | false | false | routing 两臂固定复用 `hf_only_public_content_operation`，不得读取 combined null/CDF。 |
+| hf_null_partition_identity | persisted_protocol | protocol | none | true | false | false | content detector 的 HF development primary-null 四折排除身份。 |
+| lf_null_partition_identity | persisted_protocol | protocol | none | true | false | false | content detector 的 LF development primary-null 四折排除身份。 |
+| hf_null_fit_source_digest | persisted_protocol | provenance | none | true | false | false | 排除当前 fold 后 HF primary-null records 的冻结摘要。 |
+| lf_null_fit_source_digest | persisted_protocol | provenance | none | true | false | false | 排除当前 fold 后 LF primary-null records 的冻结摘要。 |
 | geometry_reliability_status | persisted_protocol | method_status | none | true | false | false | 正式 reliability 模块的 fail-closed 状态。 |
 | geometry_reliability_failure_reasons | persisted_protocol | method_status | none | true | false | false | 正式 reliability 模块拒绝当前估计的完整原因序列。 |
 | wrong_key_geometry_estimation_identity | persisted_protocol | method_identity | none | true | false | false | wrong-key Q/K 经正式 estimator 得到的估计身份。 |

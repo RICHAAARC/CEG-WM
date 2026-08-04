@@ -34,12 +34,30 @@ DEPENDENCY_LOCK_PATH = Path(
 PYPI_INDEX_URL = "https://pypi.org/simple"
 PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
+SERVER_FAILURE_STAGES = frozenset(
+    {
+        "arguments",
+        "configuration",
+        "dependency_install",
+        "diagnostic",
+        "model_download",
+        "receipt",
+        "repository",
+        "resource_preflight",
+        "secrets",
+        "worker_execution",
+        "worker_import",
+        "worker_result",
+    }
+)
 
 
 class DevelopmentExplorationServerError(RuntimeError):
     """A server preparation or development worker boundary failed."""
 
     def __init__(self, stage: str, message: str, *, failure_type: str | None = None) -> None:
+        if stage not in SERVER_FAILURE_STAGES:
+            raise ValueError("server failure stage is unregistered")
         super().__init__(message)
         self.stage = stage
         self.safe_message = message
@@ -576,7 +594,8 @@ def _failure_artifacts(
         "committed_revision": expected_revision,
         "failure_stage": error.stage,
         "failure_type": error.failure_type,
-        "failure_message": error.safe_message,
+        "responsibility_id": None,
+        "unit_index": None,
         "run_id": run_id,
         "session_id": session_id,
         "scientific_claims_supported": False,

@@ -35,8 +35,8 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.0.0"
-SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v4"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.1.0"
+SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
 
@@ -56,6 +56,7 @@ CHEAP_DETECTION_RESPONSIBILITIES = (
     "content_detector",
 )
 MAXIMUM_UNIT_DURATION_SECONDS = 900
+MAXIMUM_WIRING_DURATION_SECONDS = 2100
 
 DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT = 4
 DEVELOPMENT_THRESHOLD_ROLE = "development_exploratory"
@@ -209,26 +210,22 @@ DEVELOPMENT_UNIT_ORDER = (
     "environment_preflight_before_wiring",
     "full_chain_wiring_before_reference_fit",
     "development_reference_fit_before_scientific_units",
-    "dependency_layer",
-    "source_cluster_ordinal_within_dependency_layer",
-    "responsibility_within_dependency_layer",
-    "critical_pair_extension_source_cluster_ordinal",
-    "cheap_detection_extension_source_cluster_ordinal",
+    "topological_dependency_layer",
+    "scientific_breadth_source_cluster_ordinal_within_layer",
+    "responsibility_within_layer",
+    "registered_scale_extension_before_successor_layer",
 )
 DEVELOPMENT_DEPENDENCY_LAYERS = (
+    ("key_schedule",),
+    ("lf_carrier", "hf_carrier", "qk_geometry_sync"),
     (
-        "key_schedule",
-        "content_router",
-        "lf_carrier",
-        "hf_carrier",
-        "content_embedder",
         "lf_detector",
         "hf_detector",
-        "qk_geometry_sync",
         "geometric_transform_estimator",
     ),
-    ("content_detector", "geometry_reliability"),
-    ("image_rectifier",),
+    ("content_router", "geometry_reliability"),
+    ("content_embedder", "image_rectifier"),
+    ("content_detector",),
     ("conditional_recovery_decision",),
 )
 UNIT_PHASES = (
@@ -315,6 +312,7 @@ MODULE_CANDIDATE_PARAMETERS = {
     "content_router": (
         ("adaptive_router_candidate", ("routing_stqr",)),
         ("disabled_uniform_control_candidate", ("routing_uniform_control",)),
+        ("routing_score_operation", ("hf_only_public_content_operation",)),
     ),
     "lf_carrier": (("carrier_candidate", ("lf_low_pass",)),),
     "hf_carrier": (("carrier_candidate", ("hf_sparse_tail",)),),
@@ -1054,7 +1052,11 @@ def validate_development_module_matrix(
             violations.append(f"{field_name}_missing_or_invalid")
         if len(values) != len(set(values)):
             violations.append(f"{field_name}_duplicate")
-    seen: set[str] = set()
+    layer_by_responsibility = {
+        responsibility_id: layer_index
+        for layer_index, layer in enumerate(DEVELOPMENT_DEPENDENCY_LAYERS)
+        for responsibility_id in layer
+    }
     geometry_responsibilities = set(REQUIRED_METHOD_RESPONSIBILITIES[8:])
     for item in matrix:
         prefix = item.responsibility_id
@@ -1105,7 +1107,9 @@ def validate_development_module_matrix(
         if set(item.record_field_names) - REGISTERED_DEVELOPMENT_RECORD_FIELDS:
             violations.append(f"{prefix}:record_field_name_unregistered")
         if any(
-            dependency not in seen
+            dependency not in layer_by_responsibility
+            or layer_by_responsibility[dependency]
+            >= layer_by_responsibility.get(prefix, -1)
             for dependency in item.prerequisite_responsibility_ids
         ):
             violations.append(f"{prefix}:dependency_order_invalid")
@@ -1133,7 +1137,6 @@ def validate_development_module_matrix(
             violations.append(f"{prefix}:geometry_case_coverage_invalid")
         if prefix not in geometry_responsibilities and item.geometry_case_ids:
             violations.append(f"{prefix}:geometry_case_ids_forbidden")
-        seen.add(prefix)
     return tuple(dict.fromkeys(violations))
 
 
@@ -1361,79 +1364,86 @@ def _build_study_unit_roster(
         ("development_routing_reference_fit", "content_router", cluster_ordinal)
         for cluster_ordinal in range(CHEAP_DETECTION_SOURCE_CLUSTER_COUNT)
     )
-    for cluster_ordinal in range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT):
-        ordered.extend(
-            ("scientific_breadth", responsibility_id, cluster_ordinal)
-            for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
-        )
-    for cluster_ordinal in range(
-        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-        CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
-    ):
-        ordered.extend(
-            ("critical_pair_extension", responsibility_id, cluster_ordinal)
-            for responsibility_id in CRITICAL_PAIR_RESPONSIBILITIES
-        )
-    for cluster_ordinal in range(
-        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-        CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
-    ):
-        ordered.extend(
-            ("cheap_detection_extension", responsibility_id, cluster_ordinal)
-            for responsibility_id in CHEAP_DETECTION_RESPONSIBILITIES
-        )
     atomic_descriptors: list[tuple[str, str, int, str, str]] = []
-    for phase in UNIT_PHASES:
-        phase_rows = tuple(row for row in ordered if row[0] == phase)
-        if phase in OPERATIONAL_UNIT_PHASES:
-            atomic_descriptors.extend(
-                (
-                    phase,
-                    responsibility_id,
-                    cluster_ordinal,
-                    phase,
-                    NOT_APPLICABLE_GEOMETRY_CASE_ID,
-                )
-                for _phase, responsibility_id, cluster_ordinal in phase_rows
+    atomic_descriptors.extend(
+        (
+            phase,
+            responsibility_id,
+            cluster_ordinal,
+            phase,
+            NOT_APPLICABLE_GEOMETRY_CASE_ID,
+        )
+        for phase, responsibility_id, cluster_ordinal in ordered
+    )
+
+    def append_scientific_rows(
+        phase: str,
+        responsibilities: Sequence[str],
+        cluster_ordinals: Sequence[int],
+    ) -> None:
+        variants_by_responsibility: dict[str, tuple[tuple[str, str], ...]] = {}
+        for responsibility_id in responsibilities:
+            study = by_responsibility[responsibility_id]
+            branches = study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
+            geometries = study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
+            variants_by_responsibility[responsibility_id] = tuple(
+                (branch_id, geometry_case_id)
+                for branch_id in branches
+                for geometry_case_id in geometries
             )
-            continue
-        cluster_ordinals = tuple(dict.fromkeys(row[2] for row in phase_rows))
-        phase_responsibilities = {row[1] for row in phase_rows}
-        for dependency_layer in DEVELOPMENT_DEPENDENCY_LAYERS:
-            responsibilities = tuple(
-                item for item in dependency_layer if item in phase_responsibilities
-            )
-            if not responsibilities:
-                continue
-            variants_by_responsibility: dict[str, tuple[tuple[str, str], ...]] = {}
+        for cluster_ordinal in cluster_ordinals:
             for responsibility_id in responsibilities:
-                study = by_responsibility[responsibility_id]
-                branches = study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
-                geometries = study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
-                variants_by_responsibility[responsibility_id] = tuple(
-                    (branch_id, geometry_case_id)
-                    for branch_id in branches
-                    for geometry_case_id in geometries
+                branch_id, geometry_case_id = variants_by_responsibility[
+                    responsibility_id
+                ][0]
+                atomic_descriptors.append(
+                    (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
                 )
-            # Every dependency layer is frozen breadth-first across clusters.
-            # Fitted downstream inputs are therefore derived only after all
-            # prerequisite clusters have terminal COMMITTED records.
-            for cluster_ordinal in cluster_ordinals:
-                for responsibility_id in responsibilities:
-                    branch_id, geometry_case_id = variants_by_responsibility[
-                        responsibility_id
-                    ][0]
+        for cluster_ordinal in cluster_ordinals:
+            for responsibility_id in responsibilities:
+                for branch_id, geometry_case_id in variants_by_responsibility[
+                    responsibility_id
+                ][1:]:
                     atomic_descriptors.append(
                         (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
                     )
-            for cluster_ordinal in cluster_ordinals:
-                for responsibility_id in responsibilities:
-                    for branch_id, geometry_case_id in variants_by_responsibility[
-                        responsibility_id
-                    ][1:]:
-                        atomic_descriptors.append(
-                            (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
-                        )
+
+    # A successor layer is never scheduled until every responsibility in the
+    # current layer has reached its registered final 16/32/64-cluster scale.
+    for dependency_layer in DEVELOPMENT_DEPENDENCY_LAYERS:
+        append_scientific_rows(
+            "scientific_breadth",
+            dependency_layer,
+            tuple(range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT)),
+        )
+        critical = tuple(
+            item for item in dependency_layer if item in CRITICAL_PAIR_RESPONSIBILITIES
+        )
+        if critical:
+            append_scientific_rows(
+                "critical_pair_extension",
+                critical,
+                tuple(
+                    range(
+                        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+                        CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
+                    )
+                ),
+            )
+        cheap = tuple(
+            item for item in dependency_layer if item in CHEAP_DETECTION_RESPONSIBILITIES
+        )
+        if cheap:
+            append_scientific_rows(
+                "cheap_detection_extension",
+                cheap,
+                tuple(
+                    range(
+                        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+                        CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
+                    )
+                ),
+            )
     return tuple(
         DevelopmentStudyUnit(
             unit_index=index,
@@ -1443,7 +1453,11 @@ def _build_study_unit_roster(
             content_branch_id=content_branch_id,
             geometry_case_id=geometry_case_id,
             maximum_record_attempts=MAXIMUM_RECORD_ATTEMPTS,
-            maximum_duration_seconds=MAXIMUM_UNIT_DURATION_SECONDS,
+            maximum_duration_seconds=(
+                MAXIMUM_WIRING_DURATION_SECONDS
+                if phase == "development_full_chain_wiring"
+                else MAXIMUM_UNIT_DURATION_SECONDS
+            ),
         )
         for index, (
             phase,
@@ -1467,6 +1481,7 @@ class DevelopmentStudyBudget:
     maximum_record_attempts_per_unit: int
     maximum_total_record_attempts: int
     maximum_duration_seconds_per_unit: int
+    maximum_wiring_duration_seconds_per_unit: int
     unit_order: tuple[str, ...]
     score_adaptive_unit_changes_forbidden: bool
     unit_roster_digest: str
@@ -1489,6 +1504,8 @@ class DevelopmentStudyBudget:
             violations.append("maximum_record_attempts_per_unit_invalid")
         if self.maximum_duration_seconds_per_unit != MAXIMUM_UNIT_DURATION_SECONDS:
             violations.append("maximum_duration_seconds_per_unit_invalid")
+        if self.maximum_wiring_duration_seconds_per_unit != MAXIMUM_WIRING_DURATION_SECONDS:
+            violations.append("maximum_wiring_duration_seconds_per_unit_invalid")
         if self.unit_order != DEVELOPMENT_UNIT_ORDER:
             violations.append("development_unit_order_invalid")
         if self.score_adaptive_unit_changes_forbidden is not True:
@@ -1542,6 +1559,30 @@ class DevelopmentStudyBudget:
             for unit in first_layer
         ) != expected_first_layer:
             violations.append("unit_roster_dependency_breadth_first_invalid")
+        final_unit_by_responsibility = {
+            responsibility_id: max(
+                unit.unit_index
+                for unit in scientific_units
+                if unit.responsibility_id == responsibility_id
+            )
+            for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
+        }
+        first_unit_by_responsibility = {
+            responsibility_id: min(
+                unit.unit_index
+                for unit in scientific_units
+                if unit.responsibility_id == responsibility_id
+            )
+            for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
+        }
+        studies = {item.responsibility_id: item for item in matrix}
+        if any(
+            final_unit_by_responsibility[prerequisite]
+            >= first_unit_by_responsibility[responsibility_id]
+            for responsibility_id, study in studies.items()
+            for prerequisite in study.prerequisite_responsibility_ids
+        ):
+            violations.append("unit_roster_prerequisite_scale_not_complete")
         observed_clusters = {
             responsibility_id: {
                 unit.source_cluster_ordinal
@@ -2292,6 +2333,7 @@ def load_frozen_development_exploration_protocol(
             "maximum_record_attempts_per_unit",
             "maximum_total_record_attempts",
             "maximum_duration_seconds_per_unit",
+            "maximum_wiring_duration_seconds_per_unit",
             "unit_order",
             "score_adaptive_unit_changes_forbidden",
             "unit_roster_digest",
@@ -2319,6 +2361,9 @@ def load_frozen_development_exploration_protocol(
         maximum_total_record_attempts=budget_raw["maximum_total_record_attempts"],
         maximum_duration_seconds_per_unit=budget_raw[
             "maximum_duration_seconds_per_unit"
+        ],
+        maximum_wiring_duration_seconds_per_unit=budget_raw[
+            "maximum_wiring_duration_seconds_per_unit"
         ],
         unit_order=tuple(_require_sequence(budget_raw["unit_order"], "unit_order")),
         score_adaptive_unit_changes_forbidden=budget_raw[
