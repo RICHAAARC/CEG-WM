@@ -27,8 +27,8 @@ PROTOCOL_PATH = ROOT / "configs/experiments/development_module_exploration.json"
 PROMPT_ROSTER_PATH = (
     ROOT / "configs/experiments/development_exploration_prompt_roster.json"
 )
-EXECUTION_REVISION = "66cea01b5b78904af8545bf47fd1c1b6d133b381"
-EXPECTED_RUN_ID = "ceg_wm_development_exploration_receipt_recovery"
+EXECUTION_REVISION = "e4edc95a3698e85cadc82dc6d9b1e6f794806175"
+EXPECTED_RUN_ID = "ceg_wm_development_exploration_scientific_execution"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
