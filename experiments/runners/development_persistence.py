@@ -1141,20 +1141,24 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError(
                 "operational records are not a frozen roster prefix"
             )
-        expected_reference_indexes = tuple(
-            binding.unit_index
-            for binding in self.registered_unit_bindings
-            if binding.phase == ROUTING_REFERENCE_RECORD_KIND
+        terminal_reference_markers, successful_reference_markers = (
+            self._validated_routing_reference_recovery(recovery)
         )
-        observed_reference_indexes = tuple(
+        successful_reference_indexes = tuple(
+            marker.unit_index for marker in successful_reference_markers
+        )
+        if tuple(
             record.unit_index
-            for record in sorted(routing_records, key=lambda item: item.unit_index)
-        )
-        if observed_reference_indexes != expected_reference_indexes[
-            : len(observed_reference_indexes)
-        ]:
+            for record in sorted(
+                routing_records, key=lambda item: item.unit_index
+            )
+        ) != successful_reference_indexes:
             raise DevelopmentPersistenceError(
-                "routing reference records are not a frozen roster prefix"
+                "routing reference success records differ from verified terminal recovery"
+            )
+        if len(terminal_reference_markers) < len(successful_reference_markers):
+            raise DevelopmentPersistenceError(
+                "routing reference success records exceed terminal coverage"
             )
         return DevelopmentSessionCursor(
             store=self,
@@ -1162,6 +1166,56 @@ class DevelopmentPersistentStore:
             recovery=recovery,
             verified_records=verified_records,
         )
+
+    def _validated_routing_reference_recovery(
+        self,
+        recovery: RecoveryReport,
+    ) -> tuple[tuple[CommittedUnit, ...], tuple[CommittedUnit, ...]]:
+        """Validate terminal routing coverage separately from success evidence."""
+
+        latest_by_unit: dict[str, CommittedUnit] = {}
+        for marker in recovery.committed_units:
+            if marker.record_kind != ROUTING_REFERENCE_RECORD_KIND:
+                continue
+            previous = latest_by_unit.get(marker.unit_id)
+            if previous is None or marker.attempt_index > previous.attempt_index:
+                latest_by_unit[marker.unit_id] = marker
+        terminal = tuple(
+            sorted(
+                (
+                    marker
+                    for marker in latest_by_unit.values()
+                    if marker.attempt_disposition
+                    != "retryable_resource_failure"
+                ),
+                key=lambda item: item.unit_index,
+            )
+        )
+        expected_indexes = tuple(
+            binding.unit_index
+            for binding in self.registered_unit_bindings
+            if binding.phase == ROUTING_REFERENCE_RECORD_KIND
+        )
+        terminal_indexes = tuple(marker.unit_index for marker in terminal)
+        if terminal_indexes != expected_indexes[: len(terminal_indexes)]:
+            raise DevelopmentPersistenceError(
+                "terminal routing reference records are not a frozen roster prefix"
+            )
+        successful = tuple(
+            marker
+            for marker in terminal
+            if marker.attempt_disposition == "success"
+        )
+        successful_indexes = tuple(marker.unit_index for marker in successful)
+        if (
+            len(set(successful_indexes)) != len(successful_indexes)
+            or successful_indexes != tuple(sorted(successful_indexes))
+            or any(index not in terminal_indexes for index in successful_indexes)
+        ):
+            raise DevelopmentPersistenceError(
+                "routing reference success records are not a valid terminal subset"
+            )
+        return terminal, successful
 
     def _validate_session_cursor(
         self,
@@ -1516,7 +1570,10 @@ class DevelopmentPersistentStore:
         )
         cursor._committed_units.append(marker)
         cursor._records_by_attempt[(marker.unit_id, marker.attempt_index)] = record
-        if type(record) is DevelopmentRoutingReferenceRecord:
+        if (
+            type(record) is DevelopmentRoutingReferenceRecord
+            and marker.attempt_disposition == "success"
+        ):
             cursor._routing_reference_records[record.unit_index] = record
         elif type(record) is DevelopmentOperationalRecord:
             cursor._operational_records[record.unit_index] = record
@@ -1728,11 +1785,8 @@ class DevelopmentPersistentStore:
         """Read committed operational fit inputs through the common recovery path."""
 
         recovery = self.recover(now_epoch_seconds=now_epoch_seconds)
-        markers = tuple(
-            marker
-            for marker in recovery.committed_units
-            if marker.record_kind == ROUTING_REFERENCE_RECORD_KIND
-            and marker.attempt_disposition == "success"
+        _terminal_markers, markers = (
+            self._validated_routing_reference_recovery(recovery)
         )
         records = tuple(
             self._verify_committed(marker)
@@ -1745,16 +1799,11 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError(
                 "routing reference evidence contains another record kind"
             )
-        expected_indexes = tuple(
-            binding.unit_index
-            for binding in self.registered_unit_bindings
-            if binding.phase == ROUTING_REFERENCE_RECORD_KIND
-        )
-        if tuple(record.unit_index for record in records) != expected_indexes[
-            : len(records)
-        ]:
+        if tuple(record.unit_index for record in records) != tuple(
+            marker.unit_index for marker in markers
+        ):
             raise DevelopmentPersistenceError(
-                "routing reference records are not a frozen roster prefix"
+                "routing reference records differ from verified success evidence"
             )
         return records
 

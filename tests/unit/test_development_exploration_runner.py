@@ -1583,12 +1583,44 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
     original_execute_claimed = (
         DevelopmentExplorationRunner.execute_and_commit_claimed_session_unit
     )
+    original_terminal_commit = (
+        DevelopmentExplorationRunner.commit_claimed_terminal_failure
+    )
+    routing_dependency_commit = {}
 
     def execute_one_scientific_then_soft_stop(self, *arguments, **keywords):
         result = original_execute_claimed(self, *arguments, **keywords)
         entrypoint_clock["now"] += (
             development_entrypoint.SOFT_STOP_SECONDS + 1
         )
+        return result
+
+    def commit_routing_dependency_then_soft_stop(
+        self,
+        *arguments,
+        **keywords,
+    ):
+        result = original_terminal_commit(self, *arguments, **keywords)
+        if (
+            result.record.unit_index == 140
+            and keywords["failure_class"] == "dependency_blocked"
+            and keywords["failure_reason"]
+            == "verified_dependency_input_incomplete"
+        ):
+            assert result.committed is not None
+            routing_dependency_commit["result"] = result
+            routing_dependency_commit["next_unit_index"] = (
+                arguments[1].next_unit_index
+            )
+            routing_dependency_commit["successful_reference_count"] = len(
+                arguments[1].routing_reference_records
+            )
+            routing_dependency_commit["terminal_reference_count"] = len(
+                arguments[1].terminal_routing_reference_records
+            )
+            entrypoint_clock["now"] += (
+                development_entrypoint.SOFT_STOP_SECONDS + 1
+            )
         return result
 
     monkeypatch.setattr(
@@ -1721,6 +1753,80 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
     assert first_scientific_marker["attempt_disposition"] == "success"
     assert production_results[-1]["termination_reason"] == (
         "soft_stop_after_current_unit"
+    )
+
+    measurement_calls_before_routing_dependency = measurement_state["calls"]
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "execute_and_commit_claimed_session_unit",
+        original_execute_claimed,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "commit_claimed_terminal_failure",
+        commit_routing_dependency_then_soft_stop,
+    )
+    exit_code, routing_dependency_result = (
+        development_entrypoint.execute_development_exploration_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=entrypoint_root / "persistent",
+            cache_root=entrypoint_root / "cache",
+            run_id="production_routing_terminal_recovery",
+            session_id="production_session_routing_dependency",
+            environment={
+                "CEG_WM_ROOT_KEY": "development-runner-cpu-wiring-key",
+                "HF_TOKEN": "development-test-token",
+            },
+        )
+    )
+    assert exit_code == 0
+    assert routing_dependency_result["termination_reason"] == (
+        "soft_stop_after_current_unit"
+    )
+    assert measurement_state["calls"] == (
+        measurement_calls_before_routing_dependency
+    )
+
+    blocked_result = routing_dependency_commit["result"]
+    blocked_record = blocked_result.record
+    blocked_record.validate()
+    assert blocked_record.unit_index == 140
+    assert blocked_record.execution_status == "failed"
+    assert blocked_record.failure_class == "dependency_blocked"
+    assert blocked_record.failure_reason == (
+        "verified_dependency_input_incomplete"
+    )
+    assert routing_dependency_commit["next_unit_index"] == 141
+    assert routing_dependency_commit["successful_reference_count"] == 63
+    assert routing_dependency_commit["terminal_reference_count"] == 64
+    blocked_marker = blocked_result.committed
+    assert blocked_marker is not None
+    assert blocked_marker.unit_index == 140
+    assert blocked_marker.attempt_disposition == "final_failure"
+
+    final_marker_payloads = tuple(
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(marker_root.glob("*.COMMITTED.json"))
+    )
+    assert sum(
+        item["record_kind"] == "development_routing_reference_fit"
+        and item["attempt_disposition"] == "success"
+        for item in final_marker_payloads
+    ) == 63
+    blocked_marker_payload = next(
+        item for item in final_marker_payloads if item["unit_index"] == 140
+    )
+    assert blocked_marker_payload["record_id"] == blocked_record.record_id
+    bundle_path = (
+        marker_root.parent
+        / "bundles"
+        / f"sha256_{blocked_marker_payload['bundle_sha256']}.zip"
+    )
+    assert bundle_path.is_file()
+    assert bundle_path.stat().st_size == blocked_marker_payload["bundle_bytes"]
+    assert sha256(bundle_path.read_bytes()).hexdigest() == (
+        blocked_marker_payload["bundle_sha256"]
     )
 
 
