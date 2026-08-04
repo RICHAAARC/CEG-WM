@@ -47,7 +47,7 @@ count 为 null。
 
 `development_exploration.ipynb` 是 13 模块 development exploration 的独立薄入口。
 Notebook 自身由后续 delivery revision 提供，但执行权威固定为已完成方法与 readiness
-双重审核的 `5b5f4bb0b47e8153cdb603225141a911d61bb725`；它只从 GitHub 获取该 exact commit，
+双重审核的 `24d4f01eac5f9a7781ee3573f67fdb87497dc8b1`；它只从 GitHub 获取该 exact commit，
 以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
 
 用户只需选择 Colab GPU runtime、设置 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY` 两个 Secrets、

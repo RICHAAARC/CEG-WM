@@ -18,7 +18,7 @@ is a delivery convenience; only verified persistent `COMMITTED` bundles establis
 completion.
 
 The checked-in thin Notebook invokes the server from detached execution revision
-`5b5f4bb0b47e8153cdb603225141a911d61bb725`. That execution authority is intentionally
+`24d4f01eac5f9a7781ee3573f67fdb87497dc8b1`. That execution authority is intentionally
 separate from the later Notebook delivery revision and must not be replaced by a mutable
 branch.
 
