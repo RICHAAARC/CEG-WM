@@ -784,6 +784,32 @@ class DevelopmentSessionCursor:
         )
 
     @property
+    def terminal_routing_reference_records(
+        self,
+    ) -> tuple[DevelopmentRoutingReferenceRecord, ...]:
+        """Return each verified routing unit's latest non-retry terminal record."""
+
+        latest_by_unit: dict[str, CommittedUnit] = {}
+        for marker in self._committed_units:
+            if marker.record_kind == ROUTING_REFERENCE_RECORD_KIND:
+                latest_by_unit[marker.unit_id] = marker
+        records: list[DevelopmentRoutingReferenceRecord] = []
+        for marker in sorted(
+            latest_by_unit.values(), key=lambda item: item.unit_index
+        ):
+            if marker.attempt_disposition == "retryable_resource_failure":
+                continue
+            record = self._records_by_attempt.get(
+                (marker.unit_id, marker.attempt_index)
+            )
+            if type(record) is not DevelopmentRoutingReferenceRecord:
+                raise DevelopmentPersistenceError(
+                    "session cursor lacks its verified routing reference record"
+                )
+            records.append(record)
+        return tuple(records)
+
+    @property
     def operational_records(self) -> tuple[DevelopmentOperationalRecord, ...]:
         return tuple(
             self._operational_records[index]

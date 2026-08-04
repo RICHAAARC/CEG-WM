@@ -350,6 +350,10 @@ def _routing_reference_record(
         retry_parent_intent_digest=intent.parent_attempt_intent_digest,
         actual_elapsed_seconds=1.0,
         maximum_duration_seconds=intent.maximum_duration_seconds,
+        duration_limit_exceeded=False,
+        execution_status="success",
+        failure_class=None,
+        failure_reason=None,
         measurement_payload={
             "candidate_id": "routing_stqr",
             "runtime_config_digest": "8" * 64,

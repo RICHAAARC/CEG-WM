@@ -66,6 +66,7 @@ from experiments.runners.development_inputs import (
 from experiments.runners.development_persistence import (
     DevelopmentPersistentStore,
     DevelopmentSessionCursor,
+    FrozenDevelopmentUnitBinding,
     PersistentLease,
     UnitIntent,
 )
@@ -78,7 +79,11 @@ from main import (
     RoutingObservations,
 )
 from main.content_chain.detector import NullScoreRecord
-from runtime import Sd35RuntimeAdapter
+from runtime import (
+    RuntimeAdapterError,
+    RuntimeContentExecutionError,
+    Sd35RuntimeAdapter,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -354,12 +359,16 @@ class DevelopmentProductionInputBuilder:
         lease: PersistentLease,
         soft_stop_epoch_seconds: int,
     ) -> bool:
-        committed = {
+        successful = {
             item.source_cluster_ordinal: item
             for item in self.session_cursor.routing_reference_records
         }
+        terminal = {
+            item.source_cluster_ordinal: item
+            for item in self.session_cursor.terminal_routing_reference_records
+        }
         for entry in self.prompts.entries:
-            if entry.cluster_ordinal in committed:
+            if entry.cluster_ordinal in terminal:
                 continue
             if int(time.time()) >= soft_stop_epoch_seconds:
                 return False
@@ -388,59 +397,104 @@ class DevelopmentProductionInputBuilder:
                 lease,
                 now_epoch_seconds=now,
             )
-            backend.set_development_generation_prompts(entry.prompt)
-            measurement = self.runtime.measure_generation_routing_reference_inputs(
-                latent_factory(entry.generation_seed),
-                sample_index=entry.cluster_ordinal,
-            )
-            payload = {
-                "candidate_id": measurement.candidate_id,
-                "runtime_config_digest": measurement.runtime_config_digest,
-                "model_id": measurement.model_id,
-                "model_revision": measurement.model_revision,
-                "callback_indices": list(measurement.callback_indices),
-                "public_probe_domain_digest": measurement.public_probe_domain_digest,
-                "public_probe_values_digest": (
-                    measurement.public_probe_values_float32_be_sha256
-                ),
-                "nominal_relative_probe_step": measurement.nominal_relative_probe_step,
-                "actual_probe_step": measurement.actual_probe_step,
-                "texture_gradient_values": list(measurement.texture_gradient_values),
-                "texture_spatial_shape": list(measurement.texture_spatial_shape),
-                "response_ratio_values": list(measurement.response_ratio_values),
-                "response_spatial_shape": list(measurement.response_spatial_shape),
-                "sensitivity_ratio_values": list(measurement.sensitivity_ratio_values),
-                "sensitivity_spatial_shape": list(measurement.sensitivity_spatial_shape),
-            }
-            elapsed = time.monotonic() - started
-            record = DevelopmentRoutingReferenceRecord(
-                schema_version=ROUTING_REFERENCE_RECORD_SCHEMA,
-                collection_role=ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
-                record_kind=ROUTING_REFERENCE_RECORD_KIND,
-                record_id="0" * 64,
-                run_id=self.authority.run_id,
-                protocol_digest=self.protocol.digest(),
-                method_code_revision=self.runner.method_code_revision,
-                unit_index=unit.unit_index,
-                phase=unit.phase,
-                source_cluster_ordinal=entry.cluster_ordinal,
-                fold_index=entry.cluster_ordinal % 4,
-                prompt_roster_digest=self.prompts.digest,
-                candidate_config_digest=binding.candidate_config_digest,
-                attempt_index=intent.attempt_index,
-                retry_parent_intent_digest=intent.parent_attempt_intent_digest,
-                actual_elapsed_seconds=elapsed,
-                maximum_duration_seconds=intent.maximum_duration_seconds,
-                measurement_payload=payload,
-                counts_as_scientific_coverage=False,
-                scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
-            )
-            record = replace(
-                record,
-                record_id=canonical_development_value_digest(
-                    record.payload_without_record_id()
-                ),
-            )
+            try:
+                backend.set_development_generation_prompts(entry.prompt)
+                measurement = (
+                    self.runtime.measure_generation_routing_reference_inputs(
+                        latent_factory(entry.generation_seed),
+                        sample_index=entry.cluster_ordinal,
+                    )
+                )
+                elapsed = time.monotonic() - started
+                if elapsed > intent.maximum_duration_seconds:
+                    record = self._routing_reference_attempt_record(
+                        unit=unit,
+                        binding=binding,
+                        intent=intent,
+                        source_cluster_ordinal=entry.cluster_ordinal,
+                        actual_elapsed_seconds=elapsed,
+                        failure_class="resource_failure",
+                        failure_reason="routing_reference_duration_exceeded",
+                    )
+                else:
+                    payload = {
+                        "candidate_id": measurement.candidate_id,
+                        "runtime_config_digest": measurement.runtime_config_digest,
+                        "model_id": measurement.model_id,
+                        "model_revision": measurement.model_revision,
+                        "callback_indices": list(measurement.callback_indices),
+                        "public_probe_domain_digest": (
+                            measurement.public_probe_domain_digest
+                        ),
+                        "public_probe_values_digest": (
+                            measurement.public_probe_values_float32_be_sha256
+                        ),
+                        "nominal_relative_probe_step": (
+                            measurement.nominal_relative_probe_step
+                        ),
+                        "actual_probe_step": measurement.actual_probe_step,
+                        "texture_gradient_values": list(
+                            measurement.texture_gradient_values
+                        ),
+                        "texture_spatial_shape": list(
+                            measurement.texture_spatial_shape
+                        ),
+                        "response_ratio_values": list(
+                            measurement.response_ratio_values
+                        ),
+                        "response_spatial_shape": list(
+                            measurement.response_spatial_shape
+                        ),
+                        "sensitivity_ratio_values": list(
+                            measurement.sensitivity_ratio_values
+                        ),
+                        "sensitivity_spatial_shape": list(
+                            measurement.sensitivity_spatial_shape
+                        ),
+                    }
+                    record = self._routing_reference_attempt_record(
+                        unit=unit,
+                        binding=binding,
+                        intent=intent,
+                        source_cluster_ordinal=entry.cluster_ordinal,
+                        actual_elapsed_seconds=elapsed,
+                        measurement_payload=payload,
+                    )
+            except (
+                MemoryError,
+                OSError,
+                RuntimeAdapterError,
+                RuntimeContentExecutionError,
+                torch.cuda.OutOfMemoryError,
+            ):
+                record = self._routing_reference_attempt_record(
+                    unit=unit,
+                    binding=binding,
+                    intent=intent,
+                    source_cluster_ordinal=entry.cluster_ordinal,
+                    actual_elapsed_seconds=time.monotonic() - started,
+                    failure_class="resource_failure",
+                    failure_reason="routing_reference_resource_exhausted",
+                )
+            except Exception as exc:
+                elapsed = time.monotonic() - started
+                record = self._routing_reference_attempt_record(
+                    unit=unit,
+                    binding=binding,
+                    intent=intent,
+                    source_cluster_ordinal=entry.cluster_ordinal,
+                    actual_elapsed_seconds=elapsed,
+                    failure_class=(
+                        "resource_failure"
+                        if elapsed > intent.maximum_duration_seconds
+                        else "implementation_failure"
+                    ),
+                    failure_reason=(
+                        "routing_reference_duration_exceeded"
+                        if elapsed > intent.maximum_duration_seconds
+                        else f"{type(exc).__module__}.{type(exc).__qualname__}"
+                    ),
+                )
             self.store.commit_session_unit(
                 self.session_cursor,
                 lease,
@@ -449,10 +503,79 @@ class DevelopmentProductionInputBuilder:
                 raw_secret_values=(self.root_key, self.hf_token),
                 now_epoch_seconds=max(now + 1, int(time.time())),
             )
-            committed[entry.cluster_ordinal] = record
-        if len(committed) != 64:
-            raise DevelopmentInputError("routing reference fit is incomplete")
-        return True
+            if record.execution_status != "success":
+                return False
+            successful[entry.cluster_ordinal] = record
+            terminal[entry.cluster_ordinal] = record
+        return len(successful) == 64 and len(terminal) == 64
+
+    def _routing_reference_attempt_record(
+        self,
+        *,
+        unit: DevelopmentStudyUnit,
+        binding: FrozenDevelopmentUnitBinding,
+        intent: UnitIntent,
+        source_cluster_ordinal: int,
+        actual_elapsed_seconds: float,
+        measurement_payload: dict[str, object] | None = None,
+        failure_class: str | None = None,
+        failure_reason: str | None = None,
+    ) -> DevelopmentRoutingReferenceRecord:
+        """Build one success, retryable, or final routing-reference record."""
+
+        retryable = (
+            failure_class == "resource_failure"
+            and intent.attempt_index + 1 < unit.maximum_record_attempts
+        )
+        execution_status = (
+            "success"
+            if failure_class is None
+            else "retry"
+            if retryable
+            else "failed"
+        )
+        if failure_class == "resource_failure" and not retryable:
+            failure_reason = (
+                "routing_reference_resource_blocked_after_attempt_exhaustion"
+            )
+        record = DevelopmentRoutingReferenceRecord(
+            schema_version=ROUTING_REFERENCE_RECORD_SCHEMA,
+            collection_role=ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
+            record_kind=ROUTING_REFERENCE_RECORD_KIND,
+            record_id="0" * 64,
+            run_id=self.authority.run_id,
+            protocol_digest=self.protocol.digest(),
+            method_code_revision=self.runner.method_code_revision,
+            unit_index=unit.unit_index,
+            phase=unit.phase,
+            source_cluster_ordinal=source_cluster_ordinal,
+            fold_index=source_cluster_ordinal % 4,
+            prompt_roster_digest=self.prompts.digest,
+            candidate_config_digest=binding.candidate_config_digest,
+            attempt_index=intent.attempt_index,
+            retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+            actual_elapsed_seconds=actual_elapsed_seconds,
+            maximum_duration_seconds=intent.maximum_duration_seconds,
+            duration_limit_exceeded=(
+                actual_elapsed_seconds > intent.maximum_duration_seconds
+            ),
+            execution_status=execution_status,
+            failure_class=failure_class,
+            failure_reason=failure_reason,
+            measurement_payload=(
+                {} if measurement_payload is None else measurement_payload
+            ),
+            counts_as_scientific_coverage=False,
+            scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+        )
+        record = replace(
+            record,
+            record_id=canonical_development_value_digest(
+                record.payload_without_record_id()
+            ),
+        )
+        record.validate()
+        return record
 
     def _routing_observations(self, unit: DevelopmentStudyUnit, base_latent: torch.Tensor):
         fold_index = unit.source_cluster_ordinal % 4

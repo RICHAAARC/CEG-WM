@@ -317,6 +317,10 @@ class DevelopmentRoutingReferenceRecord:
     retry_parent_intent_digest: str | None
     actual_elapsed_seconds: float
     maximum_duration_seconds: int
+    duration_limit_exceeded: bool
+    execution_status: str
+    failure_class: str | None
+    failure_reason: str | None
     measurement_payload: dict[str, object]
     counts_as_scientific_coverage: bool
     scientific_claim_boundary: str
@@ -347,7 +351,11 @@ class DevelopmentRoutingReferenceRecord:
         return record
 
     def attempt_disposition(self) -> str:
-        return "success"
+        if self.execution_status == "success":
+            return "success"
+        if self.execution_status == "retry":
+            return "retryable_resource_failure"
+        return "final_failure"
 
     def validate(self) -> None:
         if self.schema_version != ROUTING_REFERENCE_RECORD_SCHEMA:
@@ -397,12 +405,56 @@ class DevelopmentRoutingReferenceRecord:
             isinstance(self.actual_elapsed_seconds, bool)
             or not isinstance(self.actual_elapsed_seconds, (int, float))
             or not isfinite(float(self.actual_elapsed_seconds))
-            or not 0.0 <= float(self.actual_elapsed_seconds)
-            <= float(self.maximum_duration_seconds)
+            or float(self.actual_elapsed_seconds) < 0.0
         ):
             raise DevelopmentRecordError(
                 "development routing reference elapsed time is invalid"
             )
+        expected_exceeded = float(self.actual_elapsed_seconds) > float(
+            self.maximum_duration_seconds
+        )
+        if (
+            type(self.duration_limit_exceeded) is not bool
+            or self.duration_limit_exceeded is not expected_exceeded
+        ):
+            raise DevelopmentRecordError(
+                "development routing reference duration status drifted"
+            )
+        if self.execution_status not in {"success", "failed", "retry"}:
+            raise DevelopmentRecordError(
+                "development routing reference execution status is invalid"
+            )
+        if self.execution_status == "success":
+            if (
+                self.failure_class is not None
+                or self.failure_reason is not None
+                or self.duration_limit_exceeded
+            ):
+                raise DevelopmentRecordError(
+                    "successful routing reference cannot carry failure"
+                )
+        else:
+            if self.failure_class not in {
+                "implementation_failure",
+                "resource_failure",
+            }:
+                raise DevelopmentRecordError(
+                    "routing reference failure class is invalid"
+                )
+            if (
+                type(self.failure_reason) is not str
+                or not self.failure_reason.strip()
+            ):
+                raise DevelopmentRecordError(
+                    "failed routing reference requires a reason"
+                )
+            if (
+                self.execution_status == "retry"
+                and self.failure_class != "resource_failure"
+            ):
+                raise DevelopmentRecordError(
+                    "only routing reference resource failure is retryable"
+                )
         if self.attempt_index == 0:
             if self.retry_parent_intent_digest is not None:
                 raise DevelopmentRecordError(
@@ -427,10 +479,31 @@ class DevelopmentRoutingReferenceRecord:
             "sensitivity_ratio_values",
             "sensitivity_spatial_shape",
         }
-        if set(self.measurement_payload) != expected_measurement_fields:
+        if self.execution_status != "success":
+            if self.measurement_payload:
+                raise DevelopmentRecordError(
+                    "failed routing reference cannot carry measurement"
+                )
+        elif set(self.measurement_payload) != expected_measurement_fields:
             raise DevelopmentRecordError(
                 "development routing reference measurement schema drifted"
             )
+        if self.execution_status != "success":
+            if self.counts_as_scientific_coverage is not False:
+                raise DevelopmentRecordError(
+                    "routing reference cannot count as scientific coverage"
+                )
+            if self.scientific_claim_boundary != DEVELOPMENT_CLAIM_BOUNDARY:
+                raise DevelopmentRecordError(
+                    "development routing reference claim boundary drifted"
+                )
+            if self.record_id != canonical_development_value_digest(
+                self.payload_without_record_id()
+            ):
+                raise DevelopmentRecordError(
+                    "development routing reference record identity drifted"
+                )
+            return
         measurement = self.measurement_payload
         if (
             measurement["candidate_id"] != "routing_stqr"

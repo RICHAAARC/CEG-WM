@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import time
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -56,7 +57,12 @@ from main import (
 )
 from main.content_chain.routing import SpatialRoutingObservation
 from main.content_chain.detector import NullScoreRecord
-from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from runtime import (
+    RuntimeRoutingReferenceMeasurement,
+    Sd35RuntimeAdapter,
+    create_runtime_adapter,
+)
+import scripts.experiment_execution.development_exploration_worker_inputs as worker_inputs_module
 from tests.unit.test_development_module_exploration import (
     _development_manifest,
     _execution_intent,
@@ -223,6 +229,145 @@ def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, De
         registered_unit_bindings=initial.create_persistence_unit_bindings(),
     )
     return _runner(initial.intent_authority, store), store
+
+
+class _ReferenceMeasurementRuntime:
+    def __init__(
+        self,
+        *,
+        fail_once_at: int | None = None,
+        implementation_failure_at: int | None = None,
+    ) -> None:
+        self.fail_once_at = fail_once_at
+        self.implementation_failure_at = implementation_failure_at
+        self.failed = False
+        self.sample_indexes: list[int] = []
+
+    def measure_generation_routing_reference_inputs(
+        self,
+        _base_latent: torch.Tensor,
+        *,
+        sample_index: int,
+    ) -> RuntimeRoutingReferenceMeasurement:
+        self.sample_indexes.append(sample_index)
+        if self.fail_once_at == sample_index and not self.failed:
+            self.failed = True
+            raise OSError("synthetic transient routing measurement failure")
+        if self.implementation_failure_at == sample_index:
+            raise ValueError("synthetic routing implementation failure")
+        latent = torch.zeros((1, 1, 2, 2), dtype=torch.float16)
+        values = (0.25, 0.5, 0.75, 1.0)
+        return RuntimeRoutingReferenceMeasurement(
+            candidate_id="routing_stqr",
+            runtime_config_digest="8" * 64,
+            model_id="registered-development-model",
+            model_revision="registered-development-revision",
+            sample_index=sample_index,
+            callback_indices=tuple(range(20)),
+            previous_write_latent=latent,
+            routing_write_latent=latent.clone(),
+            semantic_rgb=torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+            texture_gradient_values=values,
+            texture_spatial_shape=(2, 2),
+            response_ratio_values=values,
+            response_spatial_shape=(2, 2),
+            sensitivity_ratio_values=values,
+            sensitivity_spatial_shape=(2, 2),
+            public_probe_domain_digest="7" * 64,
+            public_probe_values_float32_be_sha256="6" * 64,
+            nominal_relative_probe_step=0.001,
+            actual_probe_step=0.001,
+        )
+
+
+class _ReferencePromptBackend:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def set_development_generation_prompts(self, prompt: str) -> None:
+        self.prompts.append(prompt)
+
+
+def _reference_builder(
+    runner: DevelopmentExplorationRunner,
+    store: DevelopmentPersistentStore,
+    cursor,
+    runtime: _ReferenceMeasurementRuntime,
+) -> DevelopmentProductionInputBuilder:
+    builder = object.__new__(DevelopmentProductionInputBuilder)
+    builder.prompts = SimpleNamespace(
+        entries=tuple(
+            SimpleNamespace(
+                cluster_ordinal=index,
+                prompt=f"development reference prompt {index}",
+                generation_seed=index,
+            )
+            for index in range(64)
+        ),
+        digest="9" * 64,
+    )
+    builder.protocol = runner.protocol
+    builder.authority = runner.intent_authority
+    builder.root_key = "development-runner-cpu-wiring-key"
+    builder.hf_token = "development-test-token"
+    builder.runtime = runtime
+    builder.store = store
+    builder.session_cursor = cursor
+    builder.runner = runner
+    return builder
+
+
+def _advance_session_cursor_to_routing_reference(
+    runner: DevelopmentExplorationRunner,
+    store: DevelopmentPersistentStore,
+    lease,
+    cursor,
+    *,
+    now_epoch_seconds: int,
+) -> None:
+    for _ in range(10):
+        unit = runner.protocol.unit_roster[cursor.next_unit_index]
+        intent = runner.create_operational_intent(
+            lease,
+            cursor,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+        preflight = unit.phase == "development_environment_preflight"
+        roles = (
+            ("content_embedder",)
+            if preflight
+            else REQUIRED_METHOD_RESPONSIBILITIES
+        )
+        receipt = DevelopmentOperationalReceipt(
+            operational_role=(
+                "environment_runtime_throughput_preflight"
+                if preflight
+                else "full_chain_wiring_smoke"
+            ),
+            source_cluster_ordinal=unit.source_cluster_ordinal,
+            case_ids=(
+                runner.protocol.preflight.case_ids
+                if preflight
+                else ("all_thirteen_responsibility_wiring",)
+            ),
+            responsibility_result_digests=tuple(
+                (role, sha256(role.encode()).hexdigest()) for role in roles
+            ),
+            elapsed_seconds=0.25,
+            runtime_config_digest=(
+                runner.runtime_adapter.session.runtime_config_digest
+            ),
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+        runner.commit_operational_receipt(
+            lease,
+            cursor,
+            intent,
+            receipt,
+            now_epoch_seconds=now_epoch_seconds + 1,
+            raw_secret_values=(),
+        )
 
 
 def _commit_frozen_unit_indexes(
@@ -1247,6 +1392,258 @@ def test_preflight_and_wiring_share_commit_recovery_before_routing_reference(
 
 
 @pytest.mark.quick
+def test_production_routing_reference_recovers_measurement_retry_across_sessions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    initial_epoch = int(time.time())
+    first_lease = store.acquire_lease(
+        session_id="routing_reference_measurement_failure_session",
+        now_epoch_seconds=initial_epoch,
+        lease_duration_seconds=10,
+    )
+    first_cursor = store.open_session_cursor(
+        first_lease,
+        now_epoch_seconds=initial_epoch,
+    )
+    _advance_session_cursor_to_routing_reference(
+        runner,
+        store,
+        first_lease,
+        first_cursor,
+        now_epoch_seconds=initial_epoch,
+    )
+    runtime = _ReferenceMeasurementRuntime(fail_once_at=17)
+    backend = _ReferencePromptBackend()
+    first_builder = _reference_builder(
+        runner,
+        store,
+        first_cursor,
+        runtime,
+    )
+    monkeypatch.setattr(
+        worker_inputs_module.time,
+        "time",
+        lambda: float(initial_epoch),
+    )
+
+    assert first_builder.prepare_routing_reference_fit(
+        backend,
+        lambda seed: torch.tensor([float(seed)]),
+        lease=first_lease,
+        soft_stop_epoch_seconds=initial_epoch + 100,
+    ) is False
+    first_recovery = store.recover(now_epoch_seconds=initial_epoch + 1)
+    retry_marker = first_recovery.committed_units[-1]
+    assert retry_marker.unit_index == 27
+    assert retry_marker.attempt_index == 0
+    assert retry_marker.attempt_disposition == "retryable_resource_failure"
+    assert first_cursor.next_unit_index == 27
+    assert store.next_attempt_index(retry_marker.unit_id) == 1
+
+    resumed_epoch = initial_epoch + 11
+    second_lease = store.acquire_lease(
+        session_id="routing_reference_measurement_resume_session",
+        now_epoch_seconds=resumed_epoch,
+        lease_duration_seconds=100,
+    )
+    second_cursor = store.open_session_cursor(
+        second_lease,
+        now_epoch_seconds=resumed_epoch,
+    )
+    second_builder = _reference_builder(
+        runner,
+        store,
+        second_cursor,
+        runtime,
+    )
+    monkeypatch.setattr(
+        worker_inputs_module.time,
+        "time",
+        lambda: float(resumed_epoch),
+    )
+
+    assert second_builder.prepare_routing_reference_fit(
+        backend,
+        lambda seed: torch.tensor([float(seed)]),
+        lease=second_lease,
+        soft_stop_epoch_seconds=resumed_epoch + 100,
+    ) is True
+    records = store.verified_terminal_routing_reference_records(
+        now_epoch_seconds=resumed_epoch + 1
+    )
+    resumed_record = next(item for item in records if item.unit_index == 27)
+    assert len(records) == 64
+    assert len({item.record_id for item in records}) == 64
+    assert resumed_record.attempt_index == 1
+    assert resumed_record.retry_parent_intent_digest == retry_marker.intent_digest
+    assert runtime.sample_indexes.count(17) == 2
+
+
+@pytest.mark.quick
+def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_advances(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    initial_epoch = int(time.time())
+    real_monotonic = time.monotonic
+    runtime = _ReferenceMeasurementRuntime()
+    backend = _ReferencePromptBackend()
+    prior_intent_digest = None
+
+    for attempt_index in range(3):
+        session_epoch = initial_epoch + attempt_index * 11
+        lease = store.acquire_lease(
+            session_id=f"routing_reference_timeout_session_{attempt_index}",
+            now_epoch_seconds=session_epoch,
+            lease_duration_seconds=10,
+        )
+        cursor = store.open_session_cursor(
+            lease,
+            now_epoch_seconds=session_epoch,
+        )
+        if attempt_index == 0:
+            _advance_session_cursor_to_routing_reference(
+                runner,
+                store,
+                lease,
+                cursor,
+                now_epoch_seconds=session_epoch,
+            )
+        builder = _reference_builder(runner, store, cursor, runtime)
+        monotonic_values = iter((0.0, 901.0))
+        monkeypatch.setattr(
+            worker_inputs_module.time,
+            "monotonic",
+            lambda: next(monotonic_values),
+        )
+        monkeypatch.setattr(
+            worker_inputs_module.time,
+            "time",
+            lambda value=session_epoch: float(value),
+        )
+
+        assert builder.prepare_routing_reference_fit(
+            backend,
+            lambda seed: torch.tensor([float(seed)]),
+            lease=lease,
+            soft_stop_epoch_seconds=session_epoch + 100,
+        ) is False
+        marker = store.recover(
+            now_epoch_seconds=session_epoch + 1
+        ).committed_units[-1]
+        record = store._verify_committed(marker)
+        assert record.attempt_index == attempt_index
+        assert record.retry_parent_intent_digest == prior_intent_digest
+        assert record.duration_limit_exceeded is True
+        assert record.failure_class == "resource_failure"
+        if attempt_index < 2:
+            assert record.execution_status == "retry"
+            assert marker.attempt_disposition == "retryable_resource_failure"
+            prior_intent_digest = marker.intent_digest
+        else:
+            assert record.execution_status == "failed"
+            assert record.failure_reason == (
+                "routing_reference_resource_blocked_after_attempt_exhaustion"
+            )
+            assert marker.attempt_disposition == "final_failure"
+
+    resumed_epoch = initial_epoch + 33
+    resumed_lease = store.acquire_lease(
+        session_id="routing_reference_after_resource_block_session",
+        now_epoch_seconds=resumed_epoch,
+        lease_duration_seconds=100,
+    )
+    resumed_cursor = store.open_session_cursor(
+        resumed_lease,
+        now_epoch_seconds=resumed_epoch,
+    )
+    assert resumed_cursor.next_unit_index == 11
+    resumed_builder = _reference_builder(
+        runner,
+        store,
+        resumed_cursor,
+        runtime,
+    )
+    monkeypatch.setattr(
+        worker_inputs_module.time,
+        "monotonic",
+        real_monotonic,
+    )
+    monkeypatch.setattr(
+        worker_inputs_module.time,
+        "time",
+        lambda: float(resumed_epoch),
+    )
+    assert resumed_builder.prepare_routing_reference_fit(
+        backend,
+        lambda seed: torch.tensor([float(seed)]),
+        lease=resumed_lease,
+        soft_stop_epoch_seconds=resumed_epoch + 100,
+    ) is False
+    assert resumed_cursor.next_unit_index == 74
+    assert len(resumed_cursor.routing_reference_records) == 63
+    assert len(resumed_cursor.terminal_routing_reference_records) == 64
+
+
+@pytest.mark.quick
+def test_production_routing_reference_commits_terminal_implementation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    session_epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_reference_implementation_failure_session",
+        now_epoch_seconds=session_epoch,
+        lease_duration_seconds=100,
+    )
+    cursor = store.open_session_cursor(
+        lease,
+        now_epoch_seconds=session_epoch,
+    )
+    _advance_session_cursor_to_routing_reference(
+        runner,
+        store,
+        lease,
+        cursor,
+        now_epoch_seconds=session_epoch,
+    )
+    builder = _reference_builder(
+        runner,
+        store,
+        cursor,
+        _ReferenceMeasurementRuntime(implementation_failure_at=0),
+    )
+    monkeypatch.setattr(
+        worker_inputs_module.time,
+        "time",
+        lambda: float(session_epoch),
+    )
+
+    assert builder.prepare_routing_reference_fit(
+        _ReferencePromptBackend(),
+        lambda seed: torch.tensor([float(seed)]),
+        lease=lease,
+        soft_stop_epoch_seconds=session_epoch + 100,
+    ) is False
+    marker = store.recover(
+        now_epoch_seconds=session_epoch + 1
+    ).committed_units[-1]
+    record = store._verify_committed(marker)
+
+    assert record.unit_index == 10
+    assert record.execution_status == "failed"
+    assert record.failure_class == "implementation_failure"
+    assert record.failure_reason == "builtins.ValueError"
+    assert marker.attempt_disposition == "final_failure"
+    assert cursor.next_unit_index == 11
+    assert len(cursor.terminal_routing_reference_records) == 1
+
+
+@pytest.mark.quick
 def test_intent_precedes_production_build_and_first_scientific_commit(
     tmp_path: Path,
 ) -> None:
@@ -1474,6 +1871,155 @@ def test_committed_key_records_replay_into_outcome_and_dependency_decision(
     assert len(verified.evidence_context.committed_marker_bindings) == 16
     assert decision.approved is True
     assert decision.decision_reason == "development_execution_authorized"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("hf_failure_class", "expected_hf_outcome"),
+    (
+        ("implementation_failure", "implementation_blocked"),
+        ("resource_failure", "resource_blocked"),
+    ),
+)
+def test_committed_hf_detector_failures_persist_blocked_outcome_without_threshold_replay(
+    tmp_path: Path,
+    hf_failure_class: str,
+    expected_hf_outcome: str,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    lease = store.acquire_lease(
+        session_id=f"hf_detector_{expected_hf_outcome}_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=80_000,
+    )
+    success_roles = {"key_schedule"}
+    success_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id in success_roles
+    )
+    for unit_index in success_indexes:
+        intent = store.create_intent(
+            lease,
+            unit_id=f"development_unit_{unit_index:04d}",
+            unit_index=unit_index,
+            attempt_index=0,
+            parent_attempt_intent_digest=None,
+            now_epoch_seconds=101,
+        )
+        record = runner._execute_unit(unit_index, _input()).record
+        store.commit_unit(
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=102,
+        )
+
+    terminal_roles = {"hf_carrier", "hf_detector"}
+    if expected_hf_outcome == "implementation_blocked":
+        terminal_roles.update({"lf_carrier", "lf_detector"})
+    for binding in store.registered_unit_bindings:
+        if binding.responsibility_id not in terminal_roles:
+            continue
+        intent = store.create_intent(
+            lease,
+            unit_id=binding.unit_id,
+            unit_index=binding.unit_index,
+            attempt_index=0,
+            parent_attempt_intent_digest=None,
+            now_epoch_seconds=101,
+        )
+        unit = runner.protocol.unit_roster[binding.unit_index]
+        if binding.responsibility_id == "lf_detector":
+            execution_status = (
+                "excluded"
+                if binding.source_cluster_ordinal % 3 == 0
+                else "failed"
+            )
+            failure_class = (
+                "scientific_failure"
+                if execution_status == "excluded"
+                else "dependency_blocked"
+                if binding.source_cluster_ordinal % 3 == 1
+                else "implementation_failure"
+            )
+        elif binding.responsibility_id == "hf_detector":
+            execution_status = "failed"
+            failure_class = hf_failure_class
+        else:
+            execution_status = "failed"
+            failure_class = "implementation_failure"
+        record = runner._failure_record(
+            unit,
+            runner._analysis_identity(unit),
+            attempt_index=0,
+            retry_parent_intent_digest=None,
+            execution_status=execution_status,
+            failure_class=failure_class,
+            failure_reason="registered_terminal_detector_failure",
+            actual_elapsed_seconds=(
+                901.0 if failure_class == "resource_failure" else 0.01
+            ),
+        )
+        store.commit_unit(
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=102,
+        )
+
+    plans = {
+        responsibility_id: build_development_cross_fit_plan(
+            responsibility_id=responsibility_id,
+            execution_intent_authority=runner.intent_authority,
+            expected_execution_intent_authority_digest=(
+                runner.intent_authority.authority_digest
+            ),
+            expected_source_cluster_count=64,
+        )
+        for responsibility_id in ("lf_detector", "hf_detector", "content_detector")
+    }
+    key_outcome = runner.build_verified_module_outcome_record(
+        responsibility_id="key_schedule",
+        now_epoch_seconds=103,
+    )
+    hf_outcome = runner.build_verified_module_outcome_record(
+        responsibility_id="hf_detector",
+        cross_fit_plans=plans,
+        now_epoch_seconds=103,
+    )
+    hf_path = runner.persist_verified_module_outcome(hf_outcome)
+
+    assert hf_outcome.outcome_record.module_outcome == expected_hf_outcome
+    assert hf_outcome.outcome_record.provisional_threshold_identities == ()
+    assert hf_outcome.evidence_context.provisional_threshold_identities == ()
+    assert runner.persist_verified_module_outcome(hf_outcome) == hf_path
+    assert hf_path.is_file()
+    if expected_hf_outcome == "implementation_blocked":
+        lf_outcome = runner.build_verified_module_outcome_record(
+            responsibility_id="lf_detector",
+            cross_fit_plans=plans,
+            now_epoch_seconds=103,
+        )
+        decision = runner.decide_verified_module_execution(
+            responsibility_id="content_router",
+            outcomes_by_responsibility={
+                "key_schedule": key_outcome,
+                "lf_detector": lf_outcome,
+                "hf_detector": hf_outcome,
+            },
+            cross_fit_plans=plans,
+            now_epoch_seconds=103,
+        )
+        assert decision.approved is False
+        assert decision.missing_prerequisites == ()
+        assert decision.blocking_responsibilities == (
+            "lf_detector",
+            "hf_detector",
+        )
+        assert decision.decision_reason == (
+            "stop_when_any_prerequisite_lacks_mechanism_signal_observed"
+        )
 
 
 @pytest.mark.quick

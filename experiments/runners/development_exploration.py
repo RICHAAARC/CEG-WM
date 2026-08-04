@@ -1626,7 +1626,10 @@ class DevelopmentExplorationRunner:
                     "cross-fit plan supplied for non-detector outcome"
                 )
             thresholds: tuple[DevelopmentProvisionalThreshold, ...] = ()
-            if study.responsibility_id == "hf_detector":
+            if (
+                study.responsibility_id == "hf_detector"
+                and all(record.execution_status == "success" for record in evidence)
+            ):
                 thresholds = self._replay_hf_detector_provisional_thresholds(
                     evidence,
                     plan,
@@ -2012,39 +2015,6 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError(
                 "module prerequisites require exact verified outcome records"
             )
-        blocked_by = tuple(
-            role
-            for role in study.prerequisite_responsibility_ids
-            if prerequisite_by_responsibility[role][0].module_outcome
-            != "mechanism_signal_observed"
-        )
-        if blocked_by:
-            context = self._verified_outcome_context(
-                study=study,
-                records=records,
-                committed_markers=committed_markers,
-                aggregate_metric_means=(),
-                source_cluster_count=len(
-                    {
-                        record.analysis_unit_identity["source_cluster_id"]
-                        for record in records
-                    }
-                ),
-                module_outcome="implementation_blocked",
-                candidate_recommendation="candidate_not_recommended_for_selection",
-                blocking_responsibilities=blocked_by,
-                cross_fit_plan=cross_fit_plan,
-                provisional_threshold_identities=provisional_threshold_identities,
-            )
-            outcome = _create_verified_development_module_outcome_record(
-                self.protocol,
-                responsibility_id=responsibility_id,
-                module_outcome="implementation_blocked",
-                candidate_recommendation="candidate_not_recommended_for_selection",
-                recommendation_reason="verified_prerequisite_outcome_stopped_scientific_interpretation",
-                verified_evidence_context=context,
-            )
-            return outcome, context
         if any(
             type(record) is not DevelopmentScientificRecord
             or record.responsibility_id != responsibility_id
@@ -2094,6 +2064,39 @@ class DevelopmentExplorationRunner:
                 module_outcome=module_outcome,
                 candidate_recommendation=candidate_recommendation,
                 recommendation_reason=recommendation_reason,
+                verified_evidence_context=context,
+            )
+            return outcome, context
+        blocked_by = tuple(
+            role
+            for role in study.prerequisite_responsibility_ids
+            if prerequisite_by_responsibility[role][0].module_outcome
+            != "mechanism_signal_observed"
+        )
+        if blocked_by:
+            context = self._verified_outcome_context(
+                study=study,
+                records=records,
+                committed_markers=committed_markers,
+                aggregate_metric_means=(),
+                source_cluster_count=len(
+                    {
+                        record.analysis_unit_identity["source_cluster_id"]
+                        for record in records
+                    }
+                ),
+                module_outcome="implementation_blocked",
+                candidate_recommendation="candidate_not_recommended_for_selection",
+                blocking_responsibilities=blocked_by,
+                cross_fit_plan=cross_fit_plan,
+                provisional_threshold_identities=provisional_threshold_identities,
+            )
+            outcome = _create_verified_development_module_outcome_record(
+                self.protocol,
+                responsibility_id=responsibility_id,
+                module_outcome="implementation_blocked",
+                candidate_recommendation="candidate_not_recommended_for_selection",
+                recommendation_reason="verified_prerequisite_outcome_stopped_scientific_interpretation",
                 verified_evidence_context=context,
             )
             return outcome, context
