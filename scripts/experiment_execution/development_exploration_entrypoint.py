@@ -8,6 +8,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import time
 from typing import Mapping
@@ -86,9 +87,17 @@ def _build_or_verify_package(repository: Path, persistent_root: Path, revision: 
                 info.external_attr = 0o100644 << 16
                 archive.writestr(info, source.read_bytes(), compress_type=ZIP_DEFLATED)
         try:
-            os.link(temporary, package)
-        except FileExistsError:
-            pass
+            try:
+                target = package.open("xb")
+            except FileExistsError:
+                pass
+            else:
+                try:
+                    with temporary.open("rb") as source, target:
+                        shutil.copyfileobj(source, target)
+                except Exception:
+                    package.unlink(missing_ok=True)
+                    raise
         finally:
             temporary.unlink(missing_ok=True)
     if not package.is_file():

@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+import subprocess
+import zipfile
 
 import pytest
 
@@ -16,6 +18,7 @@ from experiments.runners.development_inputs import (
     build_development_manifest_and_key_roster,
     load_development_prompt_roster,
 )
+from scripts.experiment_execution import development_exploration_entrypoint
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +49,26 @@ def _notebook_constant(notebook: dict[str, object], name: str) -> object:
                 values.append(statement.value.value)
     assert len(values) == 1
     return values[0]
+
+
+def _create_minimal_package_repository(root: Path) -> Path:
+    repository = root / "repository"
+    repository.mkdir()
+    tracked = repository / "package_member.txt"
+    tracked.write_text("development package member\n", encoding="utf-8")
+    subprocess.run(
+        ("git", "init"),
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ("git", "add", tracked.name),
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    )
+    return repository
 
 
 @pytest.mark.quick
@@ -126,3 +149,55 @@ def test_development_exploration_notebook_run_id_crosses_execution_intent_bounda
 
     assert authority.run_id == EXPECTED_RUN_ID
     assert authority.validate() == ()
+
+
+@pytest.mark.quick
+def test_development_package_create_only_write_does_not_require_hardlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _create_minimal_package_repository(tmp_path)
+    persistent = tmp_path / "persistent"
+
+    def reject_hardlink(*_arguments: object, **_keywords: object) -> None:
+        raise AssertionError("development package must not use hardlink publication")
+
+    monkeypatch.setattr(
+        development_exploration_entrypoint.os,
+        "link",
+        reject_hardlink,
+    )
+    package = development_exploration_entrypoint._build_or_verify_package(
+        repository,
+        persistent,
+        EXECUTION_REVISION,
+    )
+
+    with zipfile.ZipFile(package) as archive:
+        assert archive.namelist() == ["package_member.txt"]
+        assert archive.read("package_member.txt") == b"development package member\n"
+        assert archive.testzip() is None
+    assert not tuple(package.parent.glob("*.building.zip"))
+
+
+@pytest.mark.quick
+def test_development_package_invalid_existing_destination_is_not_overwritten(
+    tmp_path: Path,
+) -> None:
+    repository = _create_minimal_package_repository(tmp_path)
+    persistent = tmp_path / "persistent"
+    package_root = persistent / "development_execution_packages"
+    package_root.mkdir(parents=True)
+    package = package_root / f"ceg_wm_development_{EXECUTION_REVISION}.zip"
+    invalid_existing_bytes = b"preexisting invalid package"
+    package.write_bytes(invalid_existing_bytes)
+
+    with pytest.raises(zipfile.BadZipFile):
+        development_exploration_entrypoint._build_or_verify_package(
+            repository,
+            persistent,
+            EXECUTION_REVISION,
+        )
+
+    assert package.read_bytes() == invalid_existing_bytes
+    assert not tuple(package.parent.glob("*.building.zip"))
