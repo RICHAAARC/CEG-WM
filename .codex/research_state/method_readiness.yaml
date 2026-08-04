@@ -2,7 +2,7 @@
   "method_name": "ceg_wm_dual_chain",
   "design_path": "docs/design/method_architecture.md",
   "candidate_specification_path": "docs/design/candidate_specifications.md",
-  "candidate_specification_sha256": "30fb94b981e2cfeb58cb4856a7fc4958626decf99d1cca397c4a5ae204021386",
+  "candidate_specification_sha256": "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337",
   "components": {
     "key_schedule": {
       "responsibility": "root_key_derivation_and_prg",
@@ -241,8 +241,8 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "logical-role=independent-candidate-semantics-reviewer;source-thread=019fb9a4-40b7-72d2-987f-415f9d41f606;candidate_semantics_revision=3a9fd4351c4ad817f292810c328afa2a4c6e9275;decision=APPROVE;scope=independent-read-only-review-of-candidate-semantics-across-method-runtime-experiment-delivery-governance-registered-designs-and-binding-loaders-with-targeted-tests;blocking-findings=none;readiness_rebinding_revision=state-only-follow-up",
-    "reviewed_repository_revision": "3a9fd4351c4ad817f292810c328afa2a4c6e9275",
-    "candidate_specification_sha256": "30fb94b981e2cfeb58cb4856a7fc4958626decf99d1cca397c4a5ae204021386"
+    "review_reference": "agent2-method-science-overgovernance-review:ee512b31917fdf31d76e7237d3bba2b9c8ec4c64:APPROVE",
+    "reviewed_repository_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
+    "candidate_specification_sha256": "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337"
   }
 }
