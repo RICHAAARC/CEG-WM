@@ -51,7 +51,7 @@ Notebook 自身由后续 delivery revision 提供，但执行权威固定为已�
 以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
 
 用户只需选择 Colab GPU runtime、设置 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY` 两个 Secrets、
-执行 **Run all** 并授权 Drive。固定 run ID 为 `ceg-wm-development-exploration`，每次
+执行 **Run all** 并授权 Drive。固定 run ID 为 `ceg_wm_development_exploration`，每次
 session 自动生成唯一 session ID；Drive 中的 persistent root 用于跨 session 恢复，
 `/content` 只保存当次 checkout 和 cache。服务器遵守冻结的 21 小时 soft stop、24 小时
 hard cap 与 unit/attempt 总预算，后续 session 只恢复下一未完成 unit。
