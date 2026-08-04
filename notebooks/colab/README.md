@@ -44,3 +44,23 @@ SHA-256 后，将 ZIP 与 receipt 原子复制到
 不批准 tau，也不形成科学效果声明。本次 Notebook revision 只绑定服务器 source
 revision，不改变候选、阈值、split 或阶段。提交副本必须保持 outputs 为空、execution
 count 为 null。
+
+`development_exploration.ipynb` 是 13 模块 development exploration 的独立薄入口。
+Notebook 自身由后续 delivery revision 提供，但执行权威固定为已完成方法与 readiness
+双重审核的 `5b5f4bb0b47e8153cdb603225141a911d61bb725`；它只从 GitHub 获取该 exact commit，
+以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
+
+用户只需选择 Colab GPU runtime、设置 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY` 两个 Secrets、
+执行 **Run all** 并授权 Drive。固定 run ID 为 `ceg-wm-development-exploration`，每次
+session 自动生成唯一 session ID；Drive 中的 persistent root 用于跨 session 恢复，
+`/content` 只保存当次 checkout 和 cache。服务器遵守冻结的 21 小时 soft stop、24 小时
+hard cap 与 unit/attempt 总预算，后续 session 只恢复下一未完成 unit。
+
+服务器生成的 result 或 diagnostic ZIP 和 create-only receipt 会在核对 revision、run、
+session、artifact path 与 SHA-256 后复制到
+`MyDrive/CEG-WM/development_exploration/exports/<execution-revision>/<run-id>/<session-id>/`，
+同时写入 `SHA256SUMS`。非零退出也先保留 diagnostic export 再报错。这些 export 是用户
+回传便利；科学完成仍只认
+`MyDrive/CEG-WM/development_exploration/persistent/<run-id>/` 下经服务器验证的
+`COMMITTED` bundles。Notebook 不安装依赖、不下载模型、不实现方法、runner、records、
+预算、协议或科学判断，并保持 outputs 为空、execution count 为 null。

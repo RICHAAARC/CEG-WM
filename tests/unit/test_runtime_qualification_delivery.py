@@ -1708,6 +1708,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     assert notebooks == sorted(
         [
             runtime_notebook,
+            root / "notebooks/colab/development_exploration.ipynb",
             root / "notebooks/colab/experiment_execution.ipynb",
         ]
     )

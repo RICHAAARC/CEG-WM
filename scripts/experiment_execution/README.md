@@ -1,6 +1,30 @@
-# HF-only threshold-fit GPU execution experiment execution
+# Experiment execution servers
 
-This directory's active delivery path is the schema-v2 HF-only threshold-fit GPU execution
+## Development exploration
+
+`development_exploration_server.py` is the Colab-neutral and server-direct entrypoint for
+the frozen 13-module development exploration. Given one clean exact repository revision,
+an absolute persistent root, an ephemeral cache root, a fixed run ID, and a unique session
+ID, it checks basic GPU and disk availability, installs the version-frozen dependency list
+without hash mode, downloads the configured model ID and revision without model-file hash
+validation, then calls `development_exploration_entrypoint.py`.
+
+The entrypoint owns the formal runner, records, create-only intent/bundle/`COMMITTED`
+protocol, cross-session recovery, and result or diagnostic ZIP. It observes the frozen
+21-hour soft stop and 24-hour hard cap without changing the unit or attempt budget.
+`HF_TOKEN` and `CEG_WM_ROOT_KEY` are passed only through the worker environment and never
+persisted in receipts or artifacts. Colab-side copying of ZIP, receipt, and `SHA256SUMS`
+is a delivery convenience; only verified persistent `COMMITTED` bundles establish unit
+completion.
+
+The checked-in thin Notebook invokes the server from detached execution revision
+`5b5f4bb0b47e8153cdb603225141a911d61bb725`. That execution authority is intentionally
+separate from the later Notebook delivery revision and must not be replaced by a mutable
+branch.
+
+## HF-only threshold-fit GPU execution
+
+The separate schema-v2 HF-only threshold-fit GPU execution delivery
 package. It executes one preregistered fit shard at an exact committed
 revision. It cannot approve tau, unlock untouched-confirmation data, or support
 a scientific claim by itself.
