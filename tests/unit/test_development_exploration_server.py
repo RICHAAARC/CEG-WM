@@ -208,7 +208,6 @@ def test_server_delegates_to_formal_entrypoint_and_writes_secret_free_receipt(
             "candidate_config_digest": "9" * 64,
             "unit_roster_digest": "2" * 64,
             "package_sha256": "5" * 64,
-            "bootstrap_sha256": "6" * 64,
             "committed_unit_count": 7,
             "termination_reason": "session_soft_stop",
             "environment": environment,

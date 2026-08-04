@@ -420,7 +420,6 @@ def _validated_worker_result(
         "candidate_config_digest",
         "unit_roster_digest",
         "package_sha256",
-        "bootstrap_sha256",
     )
     safe_result: dict[str, object] = {}
     for name in digest_fields:

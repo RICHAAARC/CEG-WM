@@ -1,7 +1,7 @@
 {
   "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v5",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "4.1.0",
+  "protocol_version": "4.2.0",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -133,23 +133,23 @@
     "wiring_counts_as_scientific_coverage": false,
     "scientific_source_cluster_scales": [16, 32, 64],
     "maximum_operational_units": 74,
-    "maximum_scientific_units": 2512,
-    "maximum_total_units": 2586,
+    "maximum_scientific_units": 432,
+    "maximum_total_units": 506,
     "maximum_record_attempts_per_unit": 3,
-    "maximum_total_record_attempts": 7758,
+    "maximum_total_record_attempts": 1518,
     "maximum_duration_seconds_per_unit": 900,
     "maximum_wiring_duration_seconds_per_unit": 2100,
     "unit_order": [
       "environment_preflight_before_wiring",
-      "full_chain_wiring_before_reference_fit",
-      "development_reference_fit_before_scientific_units",
-      "topological_dependency_layer",
-      "scientific_breadth_source_cluster_ordinal_within_layer",
-      "responsibility_within_layer",
-      "registered_scale_extension_before_successor_layer"
+      "full_chain_wiring_before_scientific_units",
+      "key_then_high_frequency_then_low_frequency_then_geometry_sync",
+      "development_reference_fit_after_geometry_sync",
+      "content_then_geometry_recovery_dependency_order",
+      "one_responsibility_case_per_source_cluster",
+      "registered_paired_ablation_only"
     ],
     "score_adaptive_unit_changes_forbidden": true,
-    "unit_roster_digest": "c7792b2f85d2e0b643cf839f8d4109243d7678838e9f7d26f89516b556792eab"
+    "unit_roster_digest": "81d0dfd808cc76a64b922a2b3f810ab3b1b05b729a3634d3a6127f57b1d65539"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",

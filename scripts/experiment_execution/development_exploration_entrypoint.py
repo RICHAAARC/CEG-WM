@@ -177,7 +177,6 @@ def execute_development_exploration_session(
         public_key_roster=public_key_roster,
     )
     package = _build_or_verify_package(repository, persistent, expected_revision)
-    bootstrap_path = Path(__file__).resolve()
     backend = Sd35PipelineBackend(
         cache_root=cache,
         persistent_root=persistent,
@@ -199,6 +198,7 @@ def execute_development_exploration_session(
         environment_digest=environment_digest,
         resource_identity_digest=resource_digest,
     )
+    package_sha256 = _sha256_file(package)
     worker_identity = FrozenWorkerIdentity(
         revision=expected_revision,
         protocol_digest=authority.protocol_digest,
@@ -206,15 +206,11 @@ def execute_development_exploration_session(
         input_manifest_digest=authority.input_manifest_digest,
         candidate_config_digest=_candidate_digest(protocol),
         unit_roster_digest=protocol.study_budget.unit_roster_digest,
-        package_sha256=_sha256_file(package),
-        bootstrap_sha256=_sha256_file(bootstrap_path),
     )
     store = DevelopmentPersistentStore(
         persistent,
         run_id=run_id,
         worker_identity=worker_identity,
-        package_path=package,
-        bootstrap_path=bootstrap_path,
         registered_unit_bindings=provisional_runner.create_persistence_unit_bindings(),
     )
     runner = DevelopmentExplorationRunner(
@@ -317,24 +313,6 @@ def execute_development_exploration_session(
                 now_epoch_seconds=max(now + 1, int(time.time())),
                 raw_secret_values=(root_key, hf_token),
             )
-        reference_status = None
-        if operational_complete:
-            active_stage = "routing_reference_fit"
-            active_responsibility = "content_router"
-            active_unit_index = session_cursor.next_unit_index
-            reference_status = input_builder.prepare_routing_reference_fit(
-                backend,
-                latent_factory,
-                lease=lease,
-                soft_stop_epoch_seconds=started_epoch + SOFT_STOP_SECONDS,
-            )
-        if operational_complete and reference_status in ROUTING_REFERENCE_SESSION_STOP:
-            termination_reason = (
-                "resource_retry_after_committed_reference"
-                if reference_status == "retryable_stop"
-                else "soft_stop_after_reference_measurement"
-            )
-
         cross_fit_plans = {
             responsibility_id: build_development_cross_fit_plan(
                 responsibility_id=responsibility_id,
@@ -375,7 +353,7 @@ def execute_development_exploration_session(
                     runner.persist_verified_module_outcome(outcome)
                     verified_outcomes[responsibility_id] = outcome
 
-        while reference_status in ROUTING_REFERENCE_SCHEDULER_READY:
+        while operational_complete:
             now = int(time.time())
             if now - started_epoch >= SOFT_STOP_SECONDS:
                 termination_reason = "soft_stop_after_current_unit"
@@ -383,6 +361,26 @@ def execute_development_exploration_session(
             if session_cursor.next_unit_index >= len(protocol.unit_roster):
                 break
             unit = protocol.unit_roster[session_cursor.next_unit_index]
+            if unit.phase == "development_routing_reference_fit":
+                active_stage = "routing_reference_fit"
+                active_responsibility = "content_router"
+                active_unit_index = unit.unit_index
+                reference_status = input_builder.prepare_routing_reference_fit(
+                    backend,
+                    latent_factory,
+                    lease=lease,
+                    soft_stop_epoch_seconds=started_epoch + SOFT_STOP_SECONDS,
+                )
+                if reference_status in ROUTING_REFERENCE_SESSION_STOP:
+                    termination_reason = (
+                        "resource_retry_after_committed_reference"
+                        if reference_status == "retryable_stop"
+                        else "soft_stop_after_reference_measurement"
+                    )
+                    break
+                if reference_status not in ROUTING_REFERENCE_SCHEDULER_READY:
+                    raise RuntimeError("routing reference scheduler status is invalid")
+                continue
             active_stage = "scientific_unit"
             active_responsibility = unit.responsibility_id
             active_unit_index = unit.unit_index
@@ -555,7 +553,7 @@ def execute_development_exploration_session(
         ),
         environment_digest=environment_digest,
         revision=expected_revision,
-        package_sha256=worker_identity.package_sha256,
+        package_sha256=package_sha256,
         walltime_seconds=float(ended_epoch - started_epoch),
         peak_vram_bytes=max(1, int(torch.cuda.max_memory_allocated(0))),
         termination_reason=termination_reason,
@@ -605,8 +603,7 @@ def execute_development_exploration_session(
         "input_manifest_digest": authority.input_manifest_digest,
         "candidate_config_digest": _candidate_digest(protocol),
         "unit_roster_digest": protocol.study_budget.unit_roster_digest,
-        "package_sha256": worker_identity.package_sha256,
-        "bootstrap_sha256": worker_identity.bootstrap_sha256,
+        "package_sha256": package_sha256,
         "committed_unit_count": len(committed_units),
         "session_committed_unit_count": len(committed_units) - committed_before,
         "termination_reason": termination_reason,

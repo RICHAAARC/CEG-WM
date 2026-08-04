@@ -654,13 +654,10 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     roster = enumerate_development_study_units(protocol)
     budget = protocol.study_budget
-    assert len(roster) == budget.maximum_total_units == 2586
+    assert len(roster) == budget.maximum_total_units == 506
     assert budget.maximum_operational_units == 74
-    assert budget.maximum_scientific_units == 2512
-    assert all(
-        unit.phase in OPERATIONAL_UNIT_PHASES
-        for unit in roster[: budget.maximum_operational_units]
-    )
+    assert budget.maximum_scientific_units == 432
+    assert sum(unit.phase in OPERATIONAL_UNIT_PHASES for unit in roster) == 74
     assert {
         unit.maximum_duration_seconds
         for unit in roster
@@ -673,7 +670,7 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     )
     assert budget.maximum_total_record_attempts == sum(
         unit.maximum_record_attempts for unit in roster
-    ) == 7758
+    ) == 1518
     assert len(
         {
             (
@@ -686,21 +683,36 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
             for unit in roster
         }
     ) == len(roster)
-    first_layer_size = (
-        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
-        * len(DEVELOPMENT_DEPENDENCY_LAYERS[0])
-    )
     assert tuple(
-        (unit.source_cluster_ordinal, unit.responsibility_id)
-        for unit in roster[
-            budget.maximum_operational_units :
-            budget.maximum_operational_units + first_layer_size
-        ]
-    ) == tuple(
-        (cluster, responsibility)
-        for cluster in range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT)
-        for responsibility in DEVELOPMENT_DEPENDENCY_LAYERS[0]
+        (roster[index].responsibility_id, roster[index].phase)
+        for index in (10, 26, 42, 106, 122, 186, 218, 282, 314, 346, 426, 458, 474, 490)
+    ) == (
+        ("key_schedule", "development_scientific_responsibility_case"),
+        ("hf_carrier", "development_scientific_responsibility_case"),
+        ("hf_detector", "development_scientific_responsibility_case"),
+        ("lf_carrier", "development_scientific_responsibility_case"),
+        ("lf_detector", "development_scientific_responsibility_case"),
+        ("qk_geometry_sync", "development_scientific_responsibility_case"),
+        ("content_router", "development_routing_reference_fit"),
+        ("content_router", "development_scientific_responsibility_case"),
+        ("content_embedder", "development_scientific_responsibility_case"),
+        ("content_detector", "development_scientific_responsibility_case"),
+        ("geometric_transform_estimator", "development_scientific_responsibility_case"),
+        ("geometry_reliability", "development_scientific_responsibility_case"),
+        ("image_rectifier", "development_scientific_responsibility_case"),
+        ("conditional_recovery_decision", "development_scientific_responsibility_case"),
     )
+    assert sum(
+        unit.phase == "development_paired_ablation" for unit in roster
+    ) == 48
+    assert tuple(
+        unit.geometry_case_id
+        for unit in roster
+        if unit.responsibility_id == "qk_geometry_sync"
+    )[:16] == (
+        tuple(item.case_id for item in protocol.geometry_study.operation_cases)
+        + protocol.geometry_study.negative_control_case_ids
+    ) * 2
     counts = {
         responsibility: len(
             {

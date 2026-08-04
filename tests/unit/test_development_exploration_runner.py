@@ -37,6 +37,7 @@ from experiments.runners.synthetic_runtime import SyntheticQkBackend
 import experiments.runners.record_writer as record_writer_module
 import experiments.runners.development_exploration as development_runner_module
 from experiments.protocol.development_exploration import (
+    DevelopmentModuleExecutionDecision,
     DevelopmentVerifiedModuleOutcome,
     build_development_cross_fit_plan,
     create_development_provisional_threshold,
@@ -211,10 +212,6 @@ def _runner(
 
 def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, DevelopmentPersistentStore]:
     initial = _runner()
-    package = tmp_path / "development_package.zip"
-    bootstrap = tmp_path / "development_bootstrap.py"
-    package.write_bytes(b"frozen package")
-    bootstrap.write_bytes(b"frozen bootstrap")
     worker = FrozenWorkerIdentity(
         revision="a" * 40,
         protocol_digest=initial.intent_authority.protocol_digest,
@@ -222,15 +219,11 @@ def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, De
         input_manifest_digest=initial.intent_authority.input_manifest_digest,
         candidate_config_digest="d" * 64,
         unit_roster_digest=development_unit_roster_digest(initial.protocol.unit_roster),
-        package_sha256=sha256(package.read_bytes()).hexdigest(),
-        bootstrap_sha256=sha256(bootstrap.read_bytes()).hexdigest(),
     )
     store = DevelopmentPersistentStore(
         tmp_path / "persistent",
         run_id=initial.intent_authority.run_id,
         worker_identity=worker,
-        package_path=package,
-        bootstrap_path=bootstrap,
         registered_unit_bindings=initial.create_persistence_unit_bindings(),
     )
     return _runner(initial.intent_authority, store), store
@@ -372,6 +365,23 @@ def _advance_session_cursor_to_routing_reference(
             receipt,
             now_epoch_seconds=now_epoch_seconds + 1,
             raw_secret_values=(),
+        )
+    while (
+        runner.protocol.unit_roster[cursor.next_unit_index].phase
+        != "development_routing_reference_fit"
+    ):
+        unit_index = cursor.next_unit_index
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=runner._execute_unit(unit_index, _input()).record,
+            now_epoch_seconds=now_epoch_seconds + 1,
         )
 
 
@@ -1321,7 +1331,7 @@ def test_persistent_runner_requires_registered_producer_for_operational_prefix(
 
 
 @pytest.mark.quick
-def test_preflight_and_wiring_share_commit_recovery_before_routing_reference(
+def test_preflight_and_wiring_share_commit_recovery_before_first_scientific_unit(
     tmp_path: Path,
 ) -> None:
     runner, store = _persistent_runner(tmp_path)
@@ -1381,19 +1391,11 @@ def test_preflight_and_wiring_share_commit_recovery_before_routing_reference(
     assert recovered.next_unit_index == 10
     assert len(recovered.operational_records) == 10
     assert runner.protocol.unit_roster[recovered.next_unit_index].phase == (
-        "development_routing_reference_fit"
+        "development_scientific_responsibility_case"
     )
-    with pytest.raises(
-        DevelopmentRunnerError,
-        match="operational unit requires its registered producer",
-    ):
-        runner.execute_and_commit_session_unit(
-            lease,
-            recovered,
-            _input(),
-            now_epoch_seconds=105,
-            raw_secret_values=(),
-        )
+    assert runner.protocol.unit_roster[recovered.next_unit_index].responsibility_id == (
+        "key_schedule"
+    )
 
 
 @pytest.mark.quick
@@ -1441,10 +1443,10 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
     ) == "retryable_stop"
     first_recovery = store.recover(now_epoch_seconds=initial_epoch + 1)
     retry_marker = first_recovery.committed_units[-1]
-    assert retry_marker.unit_index == 27
+    assert retry_marker.unit_index == 235
     assert retry_marker.attempt_index == 0
     assert retry_marker.attempt_disposition == "retryable_resource_failure"
-    assert first_cursor.next_unit_index == 27
+    assert first_cursor.next_unit_index == 235
     assert store.next_attempt_index(retry_marker.unit_id) == 1
 
     resumed_epoch = initial_epoch + 11
@@ -1478,7 +1480,7 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
     records = store.verified_terminal_routing_reference_records(
         now_epoch_seconds=resumed_epoch + 1
     )
-    resumed_record = next(item for item in records if item.unit_index == 27)
+    resumed_record = next(item for item in records if item.unit_index == 235)
     assert len(records) == 64
     assert len({item.record_id for item in records}) == 64
     assert resumed_record.attempt_index == 1
@@ -1586,13 +1588,46 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
     original_terminal_commit = (
         DevelopmentExplorationRunner.commit_claimed_terminal_failure
     )
+    original_module_decision = (
+        DevelopmentExplorationRunner.decide_verified_module_execution
+    )
     routing_dependency_commit = {}
+    first_scientific_soft_stop = {"committed": False}
+
+    def lightweight_preflight(self, source_cluster_ordinal, _unit_input):
+        return DevelopmentOperationalReceipt(
+            operational_role="environment_runtime_throughput_preflight",
+            source_cluster_ordinal=source_cluster_ordinal,
+            case_ids=self.protocol.preflight.case_ids,
+            responsibility_result_digests=(("content_embedder", "1" * 64),),
+            elapsed_seconds=0.01,
+            runtime_config_digest=self.runtime_adapter.session.runtime_config_digest,
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+
+    def lightweight_wiring(self, source_cluster_ordinal, _unit_inputs):
+        return DevelopmentOperationalReceipt(
+            operational_role="full_chain_wiring_smoke",
+            source_cluster_ordinal=source_cluster_ordinal,
+            case_ids=("all_thirteen_responsibility_wiring",),
+            responsibility_result_digests=tuple(
+                (responsibility, sha256(responsibility.encode()).hexdigest())
+                for responsibility in REQUIRED_METHOD_RESPONSIBILITIES
+            ),
+            elapsed_seconds=0.01,
+            runtime_config_digest=self.runtime_adapter.session.runtime_config_digest,
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
 
     def execute_one_scientific_then_soft_stop(self, *arguments, **keywords):
         result = original_execute_claimed(self, *arguments, **keywords)
-        entrypoint_clock["now"] += (
-            development_entrypoint.SOFT_STOP_SECONDS + 1
-        )
+        if result.record.unit_index == 10 and not first_scientific_soft_stop["committed"]:
+            first_scientific_soft_stop["committed"] = True
+            entrypoint_clock["now"] += (
+                development_entrypoint.SOFT_STOP_SECONDS + 1
+            )
         return result
 
     def commit_routing_dependency_then_soft_stop(
@@ -1602,7 +1637,7 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
     ):
         result = original_terminal_commit(self, *arguments, **keywords)
         if (
-            result.record.unit_index == 140
+            result.record.unit_index == 282
             and keywords["failure_class"] == "dependency_blocked"
             and keywords["failure_reason"]
             == "verified_dependency_input_incomplete"
@@ -1622,6 +1657,31 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
                 development_entrypoint.SOFT_STOP_SECONDS + 1
             )
         return result
+
+    def allow_routing_gap_to_reach_formal_input_builder(
+        self,
+        *,
+        responsibility_id,
+        outcomes_by_responsibility,
+        cross_fit_plans=None,
+        now_epoch_seconds,
+    ):
+        decision = original_module_decision(
+            self,
+            responsibility_id=responsibility_id,
+            outcomes_by_responsibility=outcomes_by_responsibility,
+            cross_fit_plans=cross_fit_plans,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+        if responsibility_id != "content_router":
+            return decision
+        return DevelopmentModuleExecutionDecision(
+            True,
+            responsibility_id,
+            (),
+            (),
+            "development_execution_authorized",
+        )
 
     monkeypatch.setattr(
         worker_inputs_module,
@@ -1689,9 +1749,29 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
         "execute_and_commit_claimed_session_unit",
         execute_one_scientific_then_soft_stop,
     )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "execute_preflight_cluster",
+        lightweight_preflight,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "execute_wiring_smoke_cluster",
+        lightweight_wiring,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "commit_claimed_terminal_failure",
+        commit_routing_dependency_then_soft_stop,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "decide_verified_module_execution",
+        allow_routing_gap_to_reach_formal_input_builder,
+    )
 
     production_results = []
-    for session_ordinal in range(3):
+    for session_ordinal in range(4):
         exit_code, result = (
             development_entrypoint.execute_development_exploration_session(
                 repository_root=ROOT,
@@ -1708,7 +1788,9 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
         )
         assert exit_code == 0, (result, measurement_state)
         production_results.append(result)
-        if session_ordinal < 2:
+        if session_ordinal == 0:
+            assert result["termination_reason"] == "soft_stop_after_current_unit"
+        elif session_ordinal < 3:
             assert result["termination_reason"] == (
                 "resource_retry_after_committed_reference"
             )
@@ -1729,7 +1811,7 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
     reference_attempts = tuple(
         item
         for item in marker_payloads
-        if item["unit_index"] == 10
+        if item["unit_index"] == 218
     )
     assert tuple(item["attempt_disposition"] for item in reference_attempts) == (
         "retryable_resource_failure",
@@ -1748,61 +1830,28 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
         for item in marker_payloads
     ) == 63
     first_scientific_marker = next(
-        item for item in marker_payloads if item["unit_index"] == 74
+        item for item in marker_payloads if item["unit_index"] == 10
     )
     assert first_scientific_marker["attempt_disposition"] == "success"
     assert production_results[-1]["termination_reason"] == (
         "soft_stop_after_current_unit"
     )
 
-    measurement_calls_before_routing_dependency = measurement_state["calls"]
-    monkeypatch.setattr(
-        DevelopmentExplorationRunner,
-        "execute_and_commit_claimed_session_unit",
-        original_execute_claimed,
-    )
-    monkeypatch.setattr(
-        DevelopmentExplorationRunner,
-        "commit_claimed_terminal_failure",
-        commit_routing_dependency_then_soft_stop,
-    )
-    exit_code, routing_dependency_result = (
-        development_entrypoint.execute_development_exploration_session(
-            repository_root=ROOT,
-            expected_revision="a" * 40,
-            persistent_root=entrypoint_root / "persistent",
-            cache_root=entrypoint_root / "cache",
-            run_id="production_routing_terminal_recovery",
-            session_id="production_session_routing_dependency",
-            environment={
-                "CEG_WM_ROOT_KEY": "development-runner-cpu-wiring-key",
-                "HF_TOKEN": "development-test-token",
-            },
-        )
-    )
-    assert exit_code == 0
-    assert routing_dependency_result["termination_reason"] == (
-        "soft_stop_after_current_unit"
-    )
-    assert measurement_state["calls"] == (
-        measurement_calls_before_routing_dependency
-    )
-
     blocked_result = routing_dependency_commit["result"]
     blocked_record = blocked_result.record
     blocked_record.validate()
-    assert blocked_record.unit_index == 140
+    assert blocked_record.unit_index == 282
     assert blocked_record.execution_status == "failed"
     assert blocked_record.failure_class == "dependency_blocked"
     assert blocked_record.failure_reason == (
         "verified_dependency_input_incomplete"
     )
-    assert routing_dependency_commit["next_unit_index"] == 141
+    assert routing_dependency_commit["next_unit_index"] == 283
     assert routing_dependency_commit["successful_reference_count"] == 63
     assert routing_dependency_commit["terminal_reference_count"] == 64
     blocked_marker = blocked_result.committed
     assert blocked_marker is not None
-    assert blocked_marker.unit_index == 140
+    assert blocked_marker.unit_index == 282
     assert blocked_marker.attempt_disposition == "final_failure"
 
     final_marker_payloads = tuple(
@@ -1815,7 +1864,7 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
         for item in final_marker_payloads
     ) == 63
     blocked_marker_payload = next(
-        item for item in final_marker_payloads if item["unit_index"] == 140
+        item for item in final_marker_payloads if item["unit_index"] == 282
     )
     assert blocked_marker_payload["record_id"] == blocked_record.record_id
     bundle_path = (
@@ -1876,16 +1925,16 @@ def test_production_routing_reference_commits_terminal_implementation_failure(
         for item in store.recover(
             now_epoch_seconds=session_epoch + 1
         ).committed_units
-        if item.unit_index == 10
+        if item.unit_index == 218
     )
     record = store._verify_committed(marker)
 
-    assert record.unit_index == 10
+    assert record.unit_index == 218
     assert record.execution_status == "failed"
     assert record.failure_class == "implementation_failure"
     assert record.failure_reason == "builtins.ValueError"
     assert marker.attempt_disposition == "final_failure"
-    assert cursor.next_unit_index == 74
+    assert cursor.next_unit_index == 282
     assert len(cursor.terminal_routing_reference_records) == 64
 
 
@@ -1936,17 +1985,6 @@ def test_intent_precedes_production_build_and_first_scientific_commit(
             now_epoch_seconds=now + 2,
             raw_secret_values=(),
         )
-    for _ in range(64):
-        intent = store.create_session_intent(
-            cursor, lease, now_epoch_seconds=now + 3
-        )
-        store.commit_session_unit(
-            cursor,
-            lease,
-            intent,
-            record=_routing_reference_record(intent),
-            now_epoch_seconds=now + 4,
-        )
     unit = runner.protocol.unit_roster[cursor.next_unit_index]
     assert unit.responsibility_id == "key_schedule"
     attempt_started = time.monotonic()
@@ -1978,7 +2016,7 @@ def test_intent_precedes_production_build_and_first_scientific_commit(
     )
 
     assert result.record.execution_status == "success"
-    assert result.record.unit_index == 74
+    assert result.record.unit_index == 10
     assert result.committed is not None
     assert result.committed.committed_at_utc > intent.created_at_utc
     assert store.recover(now_epoch_seconds=now + 6).committed_units[-1] == (
@@ -1998,7 +2036,7 @@ def test_intent_precedes_production_build_and_first_scientific_commit(
         raw_secret_values=(),
     )
     assert terminal.record.execution_status == "failed"
-    assert cursor.next_unit_index == 76
+    assert cursor.next_unit_index == 12
     resource_started = time.monotonic()
     resource_intent = runner.create_scientific_intent(
         lease, cursor, now_epoch_seconds=now + 8
@@ -2012,7 +2050,7 @@ def test_intent_precedes_production_build_and_first_scientific_commit(
         raw_secret_values=(),
     )
     assert resource.record.execution_status == "retry"
-    assert cursor.next_unit_index == 76
+    assert cursor.next_unit_index == 12
     assert store.next_attempt_index(resource_intent.unit_id) == 1
 
 

@@ -163,10 +163,6 @@ def _store(
     tmp_path: Path,
     roster: tuple[DevelopmentStudyUnit, ...] | None = None,
 ) -> DevelopmentPersistentStore:
-    package = tmp_path / "development_execution_package.zip"
-    bootstrap = tmp_path / "development_bootstrap.py"
-    package.write_bytes(b"frozen development package")
-    bootstrap.write_bytes(b"frozen development bootstrap")
     roster = _roster() if roster is None else roster
     bindings = _bindings(roster)
     worker = FrozenWorkerIdentity(
@@ -176,15 +172,11 @@ def _store(
         input_manifest_digest="4" * 64,
         candidate_config_digest="5" * 64,
         unit_roster_digest=_protocol_digest(tuple(asdict(item) for item in roster)),
-        package_sha256=sha256(package.read_bytes()).hexdigest(),
-        bootstrap_sha256=sha256(bootstrap.read_bytes()).hexdigest(),
     )
     return DevelopmentPersistentStore(
         (tmp_path / "persistent").resolve(),
         run_id="development_run",
         worker_identity=worker,
-        package_path=package,
-        bootstrap_path=bootstrap,
         registered_unit_bindings=bindings,
     )
 
@@ -393,7 +385,7 @@ def _receipt(store: DevelopmentPersistentStore, *, session_id: str, start: int, 
         cuda_identity="cuda_12_8",
         environment_digest="8" * 64,
         revision=store.worker_identity.revision,
-        package_sha256=store.worker_identity.package_sha256,
+        package_sha256="7" * 64,
         walltime_seconds=float(end - start),
         peak_vram_bytes=20_000_000_000,
         termination_reason="soft_stop_after_current_unit",
@@ -438,50 +430,15 @@ def test_notebook_session_identity_crosses_persistent_lease_boundary(
 
 
 @pytest.mark.quick
-def test_construction_and_recovery_recompute_package_and_bootstrap_paths(tmp_path: Path) -> None:
+def test_recovery_identity_excludes_transport_artifact_hashes(tmp_path: Path) -> None:
     store = _store(tmp_path)
     lease = _lease(store)
     intent = _intent(store, lease)
     _commit(store, lease, intent)
     assert len(store.recover(now_epoch_seconds=201).ledger_digest) == 64
-
-    store.package_path.write_bytes(b"drifted package")
-    with pytest.raises(DevelopmentPersistenceError, match="package SHA-256 drifted"):
-        store.recover(now_epoch_seconds=201)
-
-    store.package_path.write_bytes(b"frozen development package")
-    store.bootstrap_path.write_bytes(b"drifted bootstrap")
-    with pytest.raises(DevelopmentPersistenceError, match="bootstrap SHA-256 drifted"):
-        store.recover(now_epoch_seconds=201)
-
-
-@pytest.mark.quick
-def test_constructor_rejects_supplied_digest_not_matching_actual_path(tmp_path: Path) -> None:
-    package = tmp_path / "package.zip"
-    bootstrap = tmp_path / "bootstrap.py"
-    package.write_bytes(b"package")
-    bootstrap.write_bytes(b"bootstrap")
-    roster = _roster(1)
-    bindings = _bindings(roster)
-    worker = FrozenWorkerIdentity(
-        revision="1" * 40,
-        protocol_digest="2" * 64,
-        execution_intent_authority_digest="3" * 64,
-        input_manifest_digest="4" * 64,
-        candidate_config_digest="5" * 64,
-        unit_roster_digest=_protocol_digest(tuple(asdict(item) for item in roster)),
-        package_sha256="6" * 64,
-        bootstrap_sha256=sha256(bootstrap.read_bytes()).hexdigest(),
-    )
-    with pytest.raises(DevelopmentPersistenceError, match="package SHA-256 drifted"):
-        DevelopmentPersistentStore(
-            tmp_path / "persistent",
-            run_id="development_run",
-            worker_identity=worker,
-            package_path=package,
-            bootstrap_path=bootstrap,
-            registered_unit_bindings=bindings,
-        )
+    identity_payload = asdict(store.worker_identity)
+    assert "package_sha256" not in identity_payload
+    assert "bootstrap_sha256" not in identity_payload
 
 
 @pytest.mark.quick

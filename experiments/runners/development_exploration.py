@@ -13,6 +13,7 @@ from hashlib import sha256
 import json
 from math import isfinite, isnan
 from pathlib import Path
+from statistics import median
 from time import monotonic, time
 from typing import Mapping, Sequence
 
@@ -29,7 +30,6 @@ from experiments.metrics.development_exploration import (
     DEVELOPMENT_THRESHOLD_ROLE,
     DevelopmentClusterAggregate,
     DevelopmentMetricObservation,
-    aggregate_development_cluster_metrics,
     bind_development_metric_observation,
     cross_fit_development_detection_metrics,
     metric_conditional_recovery_record,
@@ -59,6 +59,7 @@ from experiments.protocol.development_exploration import (
     OPERATIONAL_UNIT_PHASES,
     DevelopmentProvisionalThreshold,
     DevelopmentModuleOutcomeRecord,
+    DevelopmentModuleStudy,
     DevelopmentModuleExecutionDecision,
     DevelopmentVerifiedModuleOutcome,
     DevelopmentVerifiedOutcomeEvidenceContext,
@@ -1950,6 +1951,101 @@ class DevelopmentExplorationRunner:
             ),
         )
 
+    def _aggregate_exact_frozen_cases(
+        self,
+        study: DevelopmentModuleStudy,
+        records: Sequence[DevelopmentScientificRecord],
+        observations: Sequence[DevelopmentMetricObservation],
+    ) -> DevelopmentClusterAggregate:
+        """Aggregate the exact frozen case roster with source clusters equally weighted."""
+
+        if self.persistence_store is None or len(records) != len(observations):
+            raise DevelopmentRunnerError(
+                "frozen case aggregation requires persisted one-to-one observations"
+            )
+        bindings = {
+            item.unit_index: item
+            for item in self.persistence_store.registered_unit_bindings
+            if item.responsibility_id == study.responsibility_id
+            and item.phase not in OPERATIONAL_UNIT_PHASES
+        }
+        if set(bindings) != {record.unit_index for record in records}:
+            raise DevelopmentRunnerError(
+                "module observations do not cover the exact frozen case roster"
+            )
+        metric_ids = tuple(study.metric_ids)
+        values_by_cluster: dict[str, dict[str, list[float]]] = {}
+        observed_cases: set[tuple[str, str, str]] = set()
+        for record, observation in zip(records, observations, strict=True):
+            observation.validate()
+            binding = bindings[record.unit_index]
+            source_cluster_id = binding.analysis_unit_identity.source_cluster_id
+            case_identity = (
+                source_cluster_id,
+                binding.content_branch_id,
+                binding.geometry_case_id,
+            )
+            if (
+                case_identity in observed_cases
+                or observation.responsibility_id != study.responsibility_id
+                or observation.source_cluster_id != source_cluster_id
+                or observation.content_branch_id != binding.content_branch_id
+                or observation.geometry_case_id != binding.geometry_case_id
+                or observation.registered_metric_ids != metric_ids
+                or observation.candidate_config_digest
+                != study.candidate_config_digest
+                or observation.paired_ablation_identity
+                != study.paired_ablation_identity
+            ):
+                raise DevelopmentRunnerError(
+                    "module observation differs from its exact frozen case"
+                )
+            observed_cases.add(case_identity)
+            statistics = dict(observation.sufficient_statistics)
+            if set(statistics) != set(metric_ids):
+                raise DevelopmentRunnerError(
+                    "module observation metric identities drifted"
+                )
+            cluster_values = values_by_cluster.setdefault(
+                source_cluster_id,
+                {metric_id: [] for metric_id in metric_ids},
+            )
+            for metric_id in metric_ids:
+                cluster_values[metric_id].append(float(statistics[metric_id]))
+        if len(values_by_cluster) != study.scientific_source_cluster_scale:
+            raise DevelopmentRunnerError(
+                "module frozen case roster source-cluster scale drifted"
+            )
+        cluster_means = {
+            metric_id: tuple(
+                sum(values[metric_id]) / len(values[metric_id])
+                for _, values in sorted(values_by_cluster.items())
+            )
+            for metric_id in metric_ids
+        }
+        payload = {
+            "responsibility_id": study.responsibility_id,
+            "source_cluster_count": len(values_by_cluster),
+            "metric_medians": tuple(
+                (metric_id, float(median(cluster_means[metric_id])))
+                for metric_id in metric_ids
+            ),
+            "metric_means": tuple(
+                (
+                    metric_id,
+                    sum(cluster_means[metric_id]) / len(cluster_means[metric_id]),
+                )
+                for metric_id in metric_ids
+            ),
+            "source_cluster_digest": _canonical_digest(
+                tuple(sorted(values_by_cluster))
+            ),
+        }
+        return DevelopmentClusterAggregate(
+            **payload,
+            aggregate_digest=_canonical_digest(payload),
+        )
+
     def _build_module_outcome_record(
         self,
         records: Sequence[DevelopmentScientificRecord],
@@ -2162,15 +2258,10 @@ class DevelopmentExplorationRunner:
                 aggregate_digest=cross_fit.aggregate_digest,
             )
         else:
-            aggregate = aggregate_development_cluster_metrics(
-                responsibility_id,
+            aggregate = self._aggregate_exact_frozen_cases(
+                study,
+                records,
                 observations,
-                minimum_source_clusters=study.scientific_source_cluster_scale,
-                expected_metric_ids=study.metric_ids,
-                expected_candidate_config_digest=study.candidate_config_digest,
-                expected_paired_ablation_identity=study.paired_ablation_identity,
-                expected_content_branch_ids=study.content_branch_ids,
-                expected_geometry_case_ids=study.geometry_case_ids,
             )
             if responsibility_id == "content_router":
                 eligible = tuple(

@@ -35,7 +35,7 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.1.0"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.0"
 SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
@@ -208,12 +208,12 @@ REGISTERED_STUDY_ROLE_BINDINGS = (
 
 DEVELOPMENT_UNIT_ORDER = (
     "environment_preflight_before_wiring",
-    "full_chain_wiring_before_reference_fit",
-    "development_reference_fit_before_scientific_units",
-    "topological_dependency_layer",
-    "scientific_breadth_source_cluster_ordinal_within_layer",
-    "responsibility_within_layer",
-    "registered_scale_extension_before_successor_layer",
+    "full_chain_wiring_before_scientific_units",
+    "key_then_high_frequency_then_low_frequency_then_geometry_sync",
+    "development_reference_fit_after_geometry_sync",
+    "content_then_geometry_recovery_dependency_order",
+    "one_responsibility_case_per_source_cluster",
+    "registered_paired_ablation_only",
 )
 DEVELOPMENT_DEPENDENCY_LAYERS = (
     ("key_schedule",),
@@ -232,11 +232,16 @@ UNIT_PHASES = (
     "development_environment_preflight",
     "development_full_chain_wiring",
     "development_routing_reference_fit",
-    "scientific_breadth",
-    "critical_pair_extension",
-    "cheap_detection_extension",
+    "development_scientific_responsibility_case",
+    "development_paired_ablation",
 )
-OPERATIONAL_UNIT_PHASES = frozenset(UNIT_PHASES[:3])
+OPERATIONAL_UNIT_PHASES = frozenset(
+    {
+        "development_environment_preflight",
+        "development_full_chain_wiring",
+        "development_routing_reference_fit",
+    }
+)
 PREFLIGHT_CASE_IDS = (
     "environment_identity_preflight",
     "runtime_identity_preflight",
@@ -1344,26 +1349,6 @@ def _build_study_unit_roster(
     matrix: Sequence[DevelopmentModuleStudy],
 ) -> tuple[DevelopmentStudyUnit, ...]:
     by_responsibility = {item.responsibility_id: item for item in matrix}
-    ordered: list[tuple[str, str, int]] = [
-        (
-            "development_environment_preflight",
-            "development_environment_preflight",
-            cluster_ordinal,
-        )
-        for cluster_ordinal in range(PREFLIGHT_SOURCE_CLUSTER_COUNT)
-    ]
-    ordered.extend(
-        (
-            "development_full_chain_wiring",
-            "development_full_chain_wiring",
-            cluster_ordinal,
-        )
-        for cluster_ordinal in range(WIRING_SOURCE_CLUSTER_COUNT)
-    )
-    ordered.extend(
-        ("development_routing_reference_fit", "content_router", cluster_ordinal)
-        for cluster_ordinal in range(CHEAP_DETECTION_SOURCE_CLUSTER_COUNT)
-    )
     atomic_descriptors: list[tuple[str, str, int, str, str]] = []
     atomic_descriptors.extend(
         (
@@ -1373,77 +1358,118 @@ def _build_study_unit_roster(
             phase,
             NOT_APPLICABLE_GEOMETRY_CASE_ID,
         )
-        for phase, responsibility_id, cluster_ordinal in ordered
+        for phase, responsibility_id, count in (
+            (
+                "development_environment_preflight",
+                "development_environment_preflight",
+                PREFLIGHT_SOURCE_CLUSTER_COUNT,
+            ),
+            (
+                "development_full_chain_wiring",
+                "development_full_chain_wiring",
+                WIRING_SOURCE_CLUSTER_COUNT,
+            ),
+        )
+        for cluster_ordinal in range(count)
     )
 
-    def append_scientific_rows(
-        phase: str,
-        responsibilities: Sequence[str],
-        cluster_ordinals: Sequence[int],
+    def append_responsibility_cases(
+        responsibility_id: str,
+        *,
+        branches: Sequence[str] | None = None,
+        geometries: Sequence[str] | None = None,
+        count: int | None = None,
+        phase: str = "development_scientific_responsibility_case",
     ) -> None:
-        variants_by_responsibility: dict[str, tuple[tuple[str, str], ...]] = {}
-        for responsibility_id in responsibilities:
-            study = by_responsibility[responsibility_id]
-            branches = study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
-            geometries = study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
-            variants_by_responsibility[responsibility_id] = tuple(
-                (branch_id, geometry_case_id)
-                for branch_id in branches
-                for geometry_case_id in geometries
-            )
-        for cluster_ordinal in cluster_ordinals:
-            for responsibility_id in responsibilities:
-                branch_id, geometry_case_id = variants_by_responsibility[
-                    responsibility_id
-                ][0]
-                atomic_descriptors.append(
-                    (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
+        study = by_responsibility[responsibility_id]
+        selected_branches = tuple(branches) if branches is not None else (
+            study.content_branch_ids or (NOT_APPLICABLE_CONTENT_BRANCH_ID,)
+        )
+        selected_geometries = tuple(geometries) if geometries is not None else (
+            study.geometry_case_ids or (NOT_APPLICABLE_GEOMETRY_CASE_ID,)
+        )
+        case_count = study.scientific_source_cluster_scale if count is None else count
+        for cluster_ordinal in range(case_count):
+            atomic_descriptors.append(
+                (
+                    phase,
+                    responsibility_id,
+                    cluster_ordinal,
+                    selected_branches[cluster_ordinal % len(selected_branches)],
+                    selected_geometries[cluster_ordinal % len(selected_geometries)],
                 )
-        for cluster_ordinal in cluster_ordinals:
-            for responsibility_id in responsibilities:
-                for branch_id, geometry_case_id in variants_by_responsibility[
-                    responsibility_id
-                ][1:]:
-                    atomic_descriptors.append(
-                        (phase, responsibility_id, cluster_ordinal, branch_id, geometry_case_id)
-                    )
+            )
 
-    # A successor layer is never scheduled until every responsibility in the
-    # current layer has reached its registered final 16/32/64-cluster scale.
-    for dependency_layer in DEVELOPMENT_DEPENDENCY_LAYERS:
-        append_scientific_rows(
-            "scientific_breadth",
-            dependency_layer,
-            tuple(range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT)),
+    append_responsibility_cases("key_schedule", branches=("clean_control",))
+    append_responsibility_cases(
+        "hf_carrier", branches=("clean_control", "hf_only")
+    )
+    append_responsibility_cases(
+        "hf_detector", branches=("clean_control", "hf_only")
+    )
+    append_responsibility_cases(
+        "lf_carrier", branches=("clean_control", "lf_only")
+    )
+    append_responsibility_cases(
+        "lf_detector", branches=("clean_control", "lf_only")
+    )
+    append_responsibility_cases("qk_geometry_sync")
+    atomic_descriptors.extend(
+        (
+            "development_routing_reference_fit",
+            "content_router",
+            cluster_ordinal,
+            "development_routing_reference_fit",
+            NOT_APPLICABLE_GEOMETRY_CASE_ID,
         )
-        critical = tuple(
-            item for item in dependency_layer if item in CRITICAL_PAIR_RESPONSIBILITIES
-        )
-        if critical:
-            append_scientific_rows(
-                "critical_pair_extension",
-                critical,
-                tuple(
-                    range(
-                        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-                        CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
-                    )
-                ),
+        for cluster_ordinal in range(CHEAP_DETECTION_SOURCE_CLUSTER_COUNT)
+    )
+    append_responsibility_cases(
+        "content_router", branches=("lf_hf_routed_combination",)
+    )
+    append_responsibility_cases(
+        "content_router",
+        branches=("lf_hf_disabled_uniform_control",),
+        count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+        phase="development_paired_ablation",
+    )
+    append_responsibility_cases(
+        "content_embedder", branches=("lf_hf_routed_combination",)
+    )
+    append_responsibility_cases(
+        "content_embedder",
+        branches=(
+            ("hf_only",) * (BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT // 2)
+            + ("lf_only",) * (BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT // 2)
+        ),
+        count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+        phase="development_paired_ablation",
+    )
+    content_detector_core_branches = (
+        ("lf_hf_routed_combination",) * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
+        + tuple(
+            CONTENT_BRANCH_IDS[
+                cluster_ordinal % len(CONTENT_BRANCH_IDS)
+            ]
+            for cluster_ordinal in range(
+                CHEAP_DETECTION_SOURCE_CLUSTER_COUNT
+                - BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
             )
-        cheap = tuple(
-            item for item in dependency_layer if item in CHEAP_DETECTION_RESPONSIBILITIES
         )
-        if cheap:
-            append_scientific_rows(
-                "cheap_detection_extension",
-                cheap,
-                tuple(
-                    range(
-                        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-                        CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
-                    )
-                ),
-            )
+    )
+    append_responsibility_cases(
+        "content_detector", branches=content_detector_core_branches
+    )
+    append_responsibility_cases(
+        "content_detector",
+        branches=("hf_only",),
+        count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+        phase="development_paired_ablation",
+    )
+    append_responsibility_cases("geometric_transform_estimator")
+    append_responsibility_cases("geometry_reliability")
+    append_responsibility_cases("image_rectifier")
+    append_responsibility_cases("conditional_recovery_decision")
     return tuple(
         DevelopmentStudyUnit(
             unit_index=index,
@@ -1543,22 +1569,8 @@ class DevelopmentStudyBudget:
             violations.append("unit_roster_digest_invalid")
         if tuple(unit.unit_index for unit in roster) != tuple(range(len(roster))):
             violations.append("unit_roster_index_invalid")
-        first_layer = tuple(
-            unit
-            for unit in roster
-            if unit.phase == "scientific_breadth"
-            and unit.responsibility_id in DEVELOPMENT_DEPENDENCY_LAYERS[0]
-        )[: BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT * len(DEVELOPMENT_DEPENDENCY_LAYERS[0])]
-        expected_first_layer = tuple(
-            (cluster, responsibility)
-            for cluster in range(BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT)
-            for responsibility in DEVELOPMENT_DEPENDENCY_LAYERS[0]
-        )
-        if tuple(
-            (unit.source_cluster_ordinal, unit.responsibility_id)
-            for unit in first_layer
-        ) != expected_first_layer:
-            violations.append("unit_roster_dependency_breadth_first_invalid")
+        if tuple(roster) != _build_study_unit_roster(matrix):
+            violations.append("unit_roster_frozen_order_or_case_mapping_invalid")
         final_unit_by_responsibility = {
             responsibility_id: max(
                 unit.unit_index
@@ -1601,6 +1613,36 @@ class DevelopmentStudyBudget:
             for responsibility_id, cluster_ids in observed_clusters.items()
         } != expected_cluster_counts:
             violations.append("unit_roster_module_cluster_scale_mismatch")
+        paired_responsibilities = {
+            "content_router",
+            "content_embedder",
+            "content_detector",
+        }
+        expected_unit_counts = {
+            item.responsibility_id: (
+                item.scientific_source_cluster_scale
+                + (
+                    BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
+                    if item.responsibility_id in paired_responsibilities
+                    else 0
+                )
+            )
+            for item in matrix
+        }
+        observed_unit_counts = {
+            responsibility_id: sum(
+                unit.responsibility_id == responsibility_id
+                and unit.phase not in OPERATIONAL_UNIT_PHASES
+                for unit in roster
+            )
+            for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
+        }
+        if observed_unit_counts != expected_unit_counts:
+            violations.append("unit_roster_scientific_case_count_invalid")
+        if sum(
+            unit.phase == "development_paired_ablation" for unit in roster
+        ) != 3 * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT:
+            violations.append("unit_roster_paired_ablation_count_invalid")
         observed_atomic = {
             (
                 unit.phase,

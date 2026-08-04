@@ -111,16 +111,6 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _source_artifact_path(path: Path, role: str) -> Path:
-    candidate = Path(path)
-    if candidate.is_symlink():
-        raise DevelopmentPersistenceError(f"{role} cannot be a symlink")
-    resolved = candidate.resolve()
-    if not resolved.is_file():
-        raise DevelopmentPersistenceError(f"{role} must be a regular file")
-    return resolved
-
-
 def _utc_from_epoch(epoch_seconds: int) -> str:
     if type(epoch_seconds) is not int or epoch_seconds < 0:
         raise DevelopmentPersistenceError("epoch time is invalid")
@@ -285,8 +275,6 @@ class FrozenWorkerIdentity:
     input_manifest_digest: str
     candidate_config_digest: str
     unit_roster_digest: str
-    package_sha256: str
-    bootstrap_sha256: str
 
     def validate(self) -> None:
         if type(self.revision) is not str or _REVISION.fullmatch(self.revision) is None:
@@ -297,8 +285,6 @@ class FrozenWorkerIdentity:
             "input_manifest_digest",
             "candidate_config_digest",
             "unit_roster_digest",
-            "package_sha256",
-            "bootstrap_sha256",
         ):
             _digest(getattr(self, role), role)
 
@@ -872,19 +858,14 @@ class DevelopmentPersistentStore:
         *,
         run_id: str,
         worker_identity: FrozenWorkerIdentity,
-        package_path: Path,
-        bootstrap_path: Path,
         registered_unit_bindings: Sequence[FrozenDevelopmentUnitBinding],
     ) -> None:
         self.run_id = _identity(run_id, "run_id")
         worker_identity.validate()
         self.worker_identity = worker_identity
-        self.package_path = _source_artifact_path(package_path, "execution package")
-        self.bootstrap_path = _source_artifact_path(bootstrap_path, "bootstrap")
         self._registered_unit_bindings = self._validate_registered_unit_bindings(
             registered_unit_bindings
         )
-        self._validate_source_artifacts()
         root = _regular_directory(Path(persistent_root), "persistent_root")
         self.run_root = _regular_directory(root / self.run_id, "run_root")
         for name in (
@@ -973,16 +954,6 @@ class DevelopmentPersistentStore:
             for index in range(len(self._registered_unit_bindings))
         )
 
-    def _validate_source_artifacts(self) -> None:
-        for path, expected, role in (
-            (self.package_path, self.worker_identity.package_sha256, "execution package"),
-            (self.bootstrap_path, self.worker_identity.bootstrap_sha256, "bootstrap"),
-        ):
-            if not path.is_file() or path.is_symlink():
-                raise DevelopmentPersistenceError(f"{role} must be a regular file")
-            if file_sha256(path) != expected:
-                raise DevelopmentPersistenceError(f"{role} SHA-256 drifted")
-
     def _verify_intent_registered_binding(self, intent: UnitIntent) -> None:
         if intent.run_id != self.run_id:
             raise DevelopmentPersistenceError("unit intent run identity drifted")
@@ -1002,7 +973,6 @@ class DevelopmentPersistentStore:
         now_epoch_seconds: int,
         lease_duration_seconds: int,
     ) -> PersistentLease:
-        self._validate_source_artifacts()
         _identity(session_id, "session_id")
         if type(now_epoch_seconds) is not int or type(lease_duration_seconds) is not int:
             raise DevelopmentPersistenceError("lease time values must be integers")
@@ -1243,7 +1213,6 @@ class DevelopmentPersistentStore:
 
         self._validate_session_cursor(cursor, lease)
         self._require_active_lease(lease, now_epoch_seconds)
-        self._validate_source_artifacts()
         if cursor._open_intent is not None:
             raise DevelopmentPersistenceError(
                 "session cursor already has an uncommitted intent"
@@ -1334,7 +1303,6 @@ class DevelopmentPersistentStore:
         now_epoch_seconds: int,
     ) -> UnitIntent:
         self._require_active_lease(lease, now_epoch_seconds)
-        self._validate_source_artifacts()
         lease_start_epoch = int(
             _parse_strict_utc(lease.acquired_at_utc, "lease acquired_at_utc").timestamp()
         )
@@ -1430,7 +1398,6 @@ class DevelopmentPersistentStore:
         now_epoch_seconds: int,
     ) -> CommittedUnit:
         self._require_active_lease(lease, now_epoch_seconds)
-        self._validate_source_artifacts()
         if intent.fencing_token != lease.fencing_token or intent.session_id != lease.session_id:
             raise DevelopmentPersistenceError("intent does not belong to active lease")
         intent_path = self._intent_path(intent.unit_id, intent.attempt_index)
@@ -1594,7 +1561,6 @@ class DevelopmentPersistentStore:
         return marker
 
     def recover(self, *, now_epoch_seconds: int | None = None) -> RecoveryReport:
-        self._validate_source_artifacts()
         if now_epoch_seconds is None:
             now_epoch_seconds = int(time.time())
         if type(now_epoch_seconds) is not int or now_epoch_seconds < 0:
@@ -1921,7 +1887,6 @@ class DevelopmentPersistentStore:
         raw_secret_values: Sequence[str] = (),
         session_cursor: DevelopmentSessionCursor | None = None,
     ) -> Path:
-        self._validate_source_artifacts()
         leases = self._load_leases()
         if session_cursor is None:
             commits = tuple(self._verified_commits(leases=leases))
@@ -1950,8 +1915,7 @@ class DevelopmentPersistentStore:
             raise DevelopmentPersistenceError("session receipt schema drifted")
         if receipt.run_id != self.run_id or receipt.revision != self.worker_identity.revision:
             raise DevelopmentPersistenceError("session receipt frozen identity drifted")
-        if receipt.package_sha256 != self.worker_identity.package_sha256:
-            raise DevelopmentPersistenceError("session receipt package identity drifted")
+        _digest(receipt.package_sha256, "session receipt package")
         lease = self._lease_for_session(leases, receipt.session_id)
         started = _parse_strict_utc(receipt.started_at_utc, "session started_at_utc")
         ended = _parse_strict_utc(receipt.ended_at_utc, "session ended_at_utc")
