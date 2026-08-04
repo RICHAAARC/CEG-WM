@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -49,6 +50,37 @@ from experiments.runners.development_persistence import (
     canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
+
+
+ROOT = Path(__file__).resolve().parents[2]
+DEVELOPMENT_NOTEBOOK_PATH = ROOT / "notebooks/colab/development_exploration.ipynb"
+LEGACY_SESSION_ID_FORMAT = "colab-%Y%m%dT%H%M%S%fZ"
+
+
+def _notebook_session_id_format() -> str:
+    notebook = json.loads(DEVELOPMENT_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    formats: list[str] = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        tree = ast.parse("".join(cell.get("source", [])))
+        for statement in tree.body:
+            if not isinstance(statement, ast.Assign) or not any(
+                isinstance(target, ast.Name) and target.id == "SESSION_ID"
+                for target in statement.targets
+            ):
+                continue
+            value = statement.value
+            assert isinstance(value, ast.Call)
+            assert isinstance(value.func, ast.Attribute)
+            assert value.func.attr == "strftime"
+            assert len(value.args) == 1
+            format_value = value.args[0]
+            assert isinstance(format_value, ast.Constant)
+            assert isinstance(format_value.value, str)
+            formats.append(format_value.value)
+    assert len(formats) == 1
+    return formats[0]
 
 
 def _utc(epoch_seconds: int) -> str:
@@ -361,6 +393,38 @@ def _receipt(store: DevelopmentPersistentStore, *, session_id: str, start: int, 
         committed_unit_ids=committed_unit_ids,
         public_secret_identity_digests=("9" * 64,),
     )
+
+
+@pytest.mark.quick
+def test_notebook_session_identity_crosses_persistent_lease_boundary(
+    tmp_path: Path,
+) -> None:
+    fixed_utc = datetime(2026, 8, 4, 8, 12, 7, 484422, tzinfo=timezone.utc)
+    notebook_session_id = fixed_utc.strftime(_notebook_session_id_format())
+    accepted_root = tmp_path / "accepted"
+    accepted_root.mkdir()
+    accepted_store = _store(accepted_root)
+
+    lease = accepted_store.acquire_lease(
+        session_id=notebook_session_id,
+        now_epoch_seconds=100,
+        lease_duration_seconds=100,
+    )
+    assert lease.session_id == notebook_session_id
+
+    legacy_session_id = fixed_utc.strftime(LEGACY_SESSION_ID_FORMAT)
+    rejected_root = tmp_path / "rejected"
+    rejected_root.mkdir()
+    rejected_store = _store(rejected_root)
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="session_id is not a stable identity",
+    ):
+        rejected_store.acquire_lease(
+            session_id=legacy_session_id,
+            now_epoch_seconds=100,
+            lease_duration_seconds=100,
+        )
 
 
 @pytest.mark.quick
