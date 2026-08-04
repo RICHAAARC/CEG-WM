@@ -18,7 +18,9 @@ is a delivery convenience; only verified persistent `COMMITTED` bundles establis
 completion.
 
 The checked-in thin Notebook invokes the server from detached execution revision
-`24d4f01eac5f9a7781ee3573f67fdb87497dc8b1`. That execution authority is intentionally
+`66cea01b5b78904af8545bf47fd1c1b6d133b381` with run ID
+`ceg_wm_development_exploration_receipt_recovery`. The earlier run remains unchanged.
+That execution authority is intentionally
 separate from the later Notebook delivery revision and must not be replaced by a mutable
 branch.
 
