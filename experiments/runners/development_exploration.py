@@ -102,7 +102,6 @@ from experiments.runners.internal import (
     InternalRunnerContext,
     execute_internal_case,
 )
-from experiments.runners.synthetic_runtime import SyntheticQkBackend
 from main import (
     BranchNullCalibration,
     GeometryReliabilityThresholds,
@@ -751,6 +750,8 @@ class DevelopmentExplorationRunner:
             raise DevelopmentRunnerError(
                 "wiring image rectifier requires wiring-only reliability constants"
             )
+        from experiments.runners.synthetic_runtime import SyntheticQkBackend
+
         synthetic_runtime = create_runtime_adapter(
             SyntheticQkBackend(
                 root_key=raw.registered_root_key,
