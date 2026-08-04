@@ -28,13 +28,13 @@
     "key_schedule_candidate_id": "key_schedule_sha256_counter",
     "runtime_candidate_id": "runtime_sd35_flowmatch",
     "candidate_specification_path": "docs/design/candidate_specifications.md",
-    "candidate_specification_sha256": "30fb94b981e2cfeb58cb4856a7fc4958626decf99d1cca397c4a5ae204021386",
-    "method_reviewed_revision": "85fd04ffda1513d2779a2d7a6a807f7a2ef2d4f9",
+    "candidate_specification_sha256": "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337",
+    "method_reviewed_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
     "protocol_authorization_parent_revision": "8a557c076b79788405fe16f99e4acb6f43e89681",
     "method_source_files": [
       {
         "path": "main/__init__.py",
-        "sha256": "3e2bec37293d957e56be067f39cdf80c8ed7bc4f1620e68d52194cfa224062bd"
+        "sha256": "29a694fe1fff20e98a83687721f9df93ac6bdc675a150a2d34a4fe5e3fcaf6e5"
       },
       {
         "path": "main/shared/__init__.py",
@@ -82,15 +82,15 @@
       },
       {
         "path": "experiments/methods/ceg_wm.py",
-        "sha256": "d5b934cc726f85667b28572aa3a6eed81317deb12b67d6dc23a0940d76976bdd"
+        "sha256": "7f48e7478a459650b84ad61fdcf6c5421c122edc039660f869908f956d7059c5"
       },
       {
         "path": "runtime/__init__.py",
-        "sha256": "cefa1cd3f1f3afd4138327f5f8204c37fcf08b2a2a43c0502e40e2ae2203f53e"
+        "sha256": "247c9a41097c5735938d897ebdaedcd80469b2ead69dba2c0d9339b07ce276d8"
       },
       {
         "path": "runtime/adapter.py",
-        "sha256": "a114d38c0caf45d3eb981127f6062e1b976680e1087aa08ce6189930d3a480fb"
+        "sha256": "31017b1c3ff921bc44d7f9094151050fec7cbf31bd964184cdf52509e7891f32"
       },
       {
         "path": "runtime/backend.py",
@@ -110,10 +110,10 @@
       },
       {
         "path": "runtime/sd35_backend.py",
-        "sha256": "85a2e33600f9aa4dc974a35fc1d02c4f266c1fb2590b03c1851259c806129108"
+        "sha256": "fbf1ee3c9ffdecf79e95182d3df1c57b1f08e3181c05e00baffc55f47d3a51b6"
       }
     ],
-    "method_source_bundle_digest": "d51cc9f5f9e4177068e05a795a59e4d04f5d724a3e3b5cf36acca672f2633ef8",
+    "method_source_bundle_digest": "2bdf701c7dbd1e07fbe58e5ae83565a1416c5415fea2994460c19dcb3d90c026",
     "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
     "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
     "hf_formal_component_identities": [
@@ -168,7 +168,7 @@
       "absence_semantics": "hf_only_threshold_fit_gpu_execution_preflight_fail_closed",
       "hf_only_reference_protocol_status": "not_yet_materialized_no_result_claim"
     },
-    "candidate_binding_digest": "8b3c8aee65e51e2f45a274c93b4c0147ca9d87f89bf239ce844fb1f20fd90299"
+    "candidate_binding_digest": "b2d388647db918bfc4fb203713ceded31052fb1969437f32dfd22a1c247341d7"
   },
   "method_execution": {
     "write_identity": "hf_sparse_tail_registered_key_write",

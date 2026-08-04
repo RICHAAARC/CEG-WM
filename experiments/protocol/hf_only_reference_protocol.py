@@ -463,9 +463,9 @@ def _validate_candidate_binding(raw: object) -> None:
         "runtime_candidate_id": "runtime_sd35_flowmatch",
         "candidate_specification_path": "docs/design/candidate_specifications.md",
         "candidate_specification_sha256": (
-            "30fb94b981e2cfeb58cb4856a7fc4958626decf99d1cca397c4a5ae204021386"
+            "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337"
         ),
-        "method_reviewed_revision": "85fd04ffda1513d2779a2d7a6a807f7a2ef2d4f9",
+        "method_reviewed_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
         "protocol_authorization_parent_revision": (
             "8a557c076b79788405fe16f99e4acb6f43e89681"
         ),
