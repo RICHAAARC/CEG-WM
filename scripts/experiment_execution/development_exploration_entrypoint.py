@@ -8,6 +8,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import time
@@ -117,6 +118,15 @@ def _environment_digest() -> str:
             "torch": torch.__version__,
         }
     )
+
+
+def _session_runtime_identity(*, role: str, display_value: str) -> str:
+    """Convert runtime display metadata into a persisted stable identity."""
+
+    normalized = re.sub(r"[^a-z0-9]+", "_", display_value.strip().lower()).strip("_")
+    if role not in {"gpu", "cuda"} or not normalized:
+        raise DevelopmentEntrypointError("session runtime identity is unavailable")
+    return f"{role}_{normalized}"
 
 
 def _candidate_digest(protocol) -> str:
@@ -342,8 +352,14 @@ def execute_development_exploration_session(
         run_id=run_id,
         started_at_utc=datetime.fromtimestamp(started_epoch, timezone.utc).isoformat().replace("+00:00", "Z"),
         ended_at_utc=datetime.fromtimestamp(ended_epoch, timezone.utc).isoformat().replace("+00:00", "Z"),
-        gpu_model=torch.cuda.get_device_name(0).replace(" ", "_"),
-        cuda_identity=(torch.version.cuda or "cuda_unknown").replace(".", "_"),
+        gpu_model=_session_runtime_identity(
+            role="gpu",
+            display_value=torch.cuda.get_device_name(0),
+        ),
+        cuda_identity=_session_runtime_identity(
+            role="cuda",
+            display_value=torch.version.cuda or "unknown",
+        ),
         environment_digest=environment_digest,
         revision=expected_revision,
         package_sha256=worker_identity.package_sha256,

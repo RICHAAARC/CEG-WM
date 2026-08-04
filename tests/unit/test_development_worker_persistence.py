@@ -50,6 +50,9 @@ from experiments.runners.development_persistence import (
     canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
+from scripts.experiment_execution.development_exploration_entrypoint import (
+    _session_runtime_identity,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1038,6 +1041,57 @@ def test_session_receipt_is_strict_and_matches_lease_and_committed_markers(tmp_p
     for mutated, reason in mutations:
         with pytest.raises(DevelopmentPersistenceError, match=reason):
             store.write_session_receipt(mutated)
+
+
+@pytest.mark.quick
+def test_runtime_display_metadata_is_normalized_before_session_receipt_persistence(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    lease = _lease(store)
+    receipt = replace(
+        _receipt(
+            store,
+            session_id=lease.session_id,
+            start=100,
+            end=101,
+            committed_unit_ids=(),
+        ),
+        gpu_model=_session_runtime_identity(
+            role="gpu",
+            display_value="NVIDIA L4",
+        ),
+        cuda_identity=_session_runtime_identity(
+            role="cuda",
+            display_value="12.8",
+        ),
+    )
+
+    path = store.write_session_receipt(receipt)
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["gpu_model"] == "gpu_nvidia_l4"
+    assert persisted["cuda_identity"] == "cuda_12_8"
+
+    rejected_root = tmp_path / "rejected"
+    rejected_root.mkdir()
+    rejected_store = _store(rejected_root)
+    rejected_lease = _lease(rejected_store)
+    rejected_receipt = replace(
+        _receipt(
+            rejected_store,
+            session_id=rejected_lease.session_id,
+            start=100,
+            end=101,
+            committed_unit_ids=(),
+        ),
+        gpu_model="NVIDIA_L4",
+        cuda_identity="12_8",
+    )
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="session GPU model is not a stable identity",
+    ):
+        rejected_store.write_session_receipt(rejected_receipt)
 
 
 @pytest.mark.quick
