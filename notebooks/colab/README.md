@@ -46,16 +46,17 @@ revision，不改变候选、阈值、split 或阶段。提交副本必须保持
 count 为 null。
 
 `development_exploration.ipynb` 是 13 模块 development exploration 的独立薄入口。
-Notebook 自身由后续 delivery revision 提供，但执行权威固定为已完成方法与 readiness
-双重审核的 `e4edc95a3698e85cadc82dc6d9b1e6f794806175`；它只从 GitHub 获取该 exact commit，
+Notebook 自身由后续 delivery revision 提供，但执行权威固定为已完成独立方法审核的
+`dfeb03b5ef305474a482077761c0c3dccd9b88f8`；它只从 GitHub 获取该 exact commit，
 以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
 
 用户只需选择 Colab GPU runtime、设置 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY` 两个 Secrets、
 执行 **Run all** 并授权 Drive。固定 run ID 为
-`ceg_wm_development_exploration_scientific_execution`；旧
-`ceg_wm_development_exploration_receipt_recovery` run 原样保留，其中 2 个
-operational units、0 个 scientific units、dangling unit 0002 与 diagnostic 均不迁移。每次
-session 自动生成唯一 session ID；Drive 中的 persistent root 用于跨 session 恢复，
+`ceg_wm_development_exploration_joint_record_execution`。旧
+`ceg_wm_development_exploration_scientific_execution` run 原样保留：2 个
+operational commits、0 个 scientific commits、unit 0002 attempt 0 仍为 dangling，诊断为
+`builtins.AssertionError`；该状态不迁移、不删除。每次 session 自动生成唯一 session ID；
+Drive 中的 persistent root 用于跨 session 恢复，
 `/content` 只保存当次 checkout 和 cache。服务器遵守冻结的 21 小时 soft stop、24 小时
 hard cap 与 unit/attempt 总预算，后续 session 只恢复下一未完成 unit。
 
