@@ -21,6 +21,7 @@ from experiments.runners.development_exploration import (
     DevelopmentRunnerError,
     DevelopmentUnitExcluded,
     DevelopmentUnitInput,
+    _safe_result_payload,
 )
 from experiments.runners.development_persistence import (
     DevelopmentPersistentStore,
@@ -38,6 +39,7 @@ from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIE
 from experiments.protocol.development_records import canonical_development_value_digest
 from main import (
     BranchNullCalibration,
+    ConditionalRecoveryResult,
     GeometryReliabilityThresholds,
     HfDetectionObservation,
     LfDetectionObservation,
@@ -511,6 +513,34 @@ def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
     assert receipt.counts_as_scientific_coverage is False
     assert receipt.scientific_claims_supported is False
     assert tuple(observed) == REQUIRED_METHOD_RESPONSIBILITIES
+
+
+@pytest.mark.quick
+def test_wiring_conditional_call_records_real_public_result_without_science_alias() -> None:
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == "conditional_recovery_decision"
+    )
+
+    result = runner._execute_wiring_conditional_call(unit, _input())
+    payload = _safe_result_payload("conditional_recovery_decision", result)
+
+    assert type(result) is ConditionalRecoveryResult
+    assert payload["decision_identity_digest"] == result.decision_identity_digest
+    assert payload["detector_binding_digest"] == result.detector_binding_digest
+    assert payload["threshold_identity"] == result.threshold_identity
+    assert payload["calibration_identity"] == "wiring_only_non_scientific"
+    assert payload["joint_content_positive"] is False
+    assert "source_image" not in payload
+    assert "raw_content_result" not in payload
+    assert "content_detector_binding" not in payload
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="conditional recovery result lacks an explicit public record schema",
+    ):
+        _safe_result_payload("conditional_recovery_decision", object())
 
 
 @pytest.mark.quick

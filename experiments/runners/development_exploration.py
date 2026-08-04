@@ -104,6 +104,7 @@ from experiments.runners.internal import (
 )
 from main import (
     BranchNullCalibration,
+    ConditionalRecoveryResult,
     GeometryReliabilityThresholds,
     HfDetectionObservation,
     JointDecisionThresholds,
@@ -237,6 +238,37 @@ _SAFE_RESULT_FIELDS = {
     "ImageRectificationResult": ("source_image_digest", "rectified_image_digest", "token_crop_support", "pixel_crop_support", "crop_support", "canonical_to_observed_matrix", "rectification_config_digest"),
 }
 
+_CONDITIONAL_RECOVERY_SAFE_RESULT_FIELDS = (
+    "candidate_id",
+    "formal_mode",
+    "full_ceg_wm_eligible",
+    "source_image_digest",
+    "raw_content_score",
+    "geometry_triggered",
+    "trigger_reason",
+    "rectified_content_score",
+    "joint_content_positive",
+    "positive_source",
+    "positive_path",
+    "status",
+    "failure_reason",
+    "detector_identity",
+    "content_config_digest",
+    "hf_detector_identity",
+    "hf_detector_config_digest",
+    "hf_template_digest",
+    "preprocessing_identity",
+    "detector_binding_digest",
+    "tau",
+    "tau_rescue",
+    "threshold_identity",
+    "calibration_identity",
+    "root_key_public_digest",
+    "key_role",
+    "wrong_key_index",
+    "decision_identity_digest",
+)
+
 
 def _safe_result_payload(responsibility_id: str, result: object) -> dict[str, object]:
     if responsibility_id == "key_schedule":
@@ -259,8 +291,16 @@ def _safe_result_payload(responsibility_id: str, result: object) -> dict[str, ob
             "integrity_status": materialization.integrity_status,
         }
     if responsibility_id == "conditional_recovery_decision":
-        assert type(result) is InternalValidationRecord
-        return result.to_dict()
+        if type(result) is InternalValidationRecord:
+            return result.to_dict()
+        if type(result) is ConditionalRecoveryResult:
+            return {
+                name: _public_payload(getattr(result, name))
+                for name in _CONDITIONAL_RECOVERY_SAFE_RESULT_FIELDS
+            }
+        raise DevelopmentRunnerError(
+            "conditional recovery result lacks an explicit public record schema"
+        )
     fields_allowed = _SAFE_RESULT_FIELDS.get(type(result).__name__)
     if fields_allowed is None:
         raise DevelopmentRunnerError("method result lacks an explicit public record schema")
