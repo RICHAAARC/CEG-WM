@@ -731,6 +731,23 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     assert {unit.content_branch_id for unit in content_detector_paired} == {
         "hf_only"
     }
+    for responsibility_id, content_branch_id in (
+        ("hf_detector", "hf_only"),
+        ("lf_detector", "lf_only"),
+    ):
+        detector_units = tuple(
+            unit
+            for unit in roster
+            if unit.responsibility_id == responsibility_id
+            and unit.phase == "development_scientific_responsibility_case"
+        )
+        assert len(detector_units) == 64
+        assert {unit.source_cluster_ordinal for unit in detector_units} == set(
+            range(64)
+        )
+        assert {unit.content_branch_id for unit in detector_units} == {
+            content_branch_id
+        }
     assert tuple(
         unit.geometry_case_id
         for unit in roster

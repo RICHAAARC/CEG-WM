@@ -35,7 +35,7 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.1"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.2"
 SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
@@ -1405,13 +1405,13 @@ def _build_study_unit_roster(
         "hf_carrier", branches=("clean_control", "hf_only")
     )
     append_responsibility_cases(
-        "hf_detector", branches=("clean_control", "hf_only")
+        "hf_detector", branches=("hf_only",)
     )
     append_responsibility_cases(
         "lf_carrier", branches=("clean_control", "lf_only")
     )
     append_responsibility_cases(
-        "lf_detector", branches=("clean_control", "lf_only")
+        "lf_detector", branches=("lf_only",)
     )
     append_responsibility_cases("qk_geometry_sync")
     atomic_descriptors.extend(

@@ -20,6 +20,13 @@ from experiments.methods import (
     CegWmExperimentAdapter,
     load_ceg_wm_experiment_adapter_configuration,
 )
+from experiments.metrics.development_exploration import (
+    DevelopmentMetricError,
+    bind_development_metric_observation,
+    cross_fit_development_detection_metrics,
+    metric_hf_detector,
+    metric_lf_detector,
+)
 from experiments.runners.development_exploration import (
     DevelopmentExplorationRunner,
     DevelopmentOperationalReceipt,
@@ -29,6 +36,7 @@ from experiments.runners.development_exploration import (
     _safe_result_payload,
 )
 from experiments.runners.development_persistence import (
+    DevelopmentPersistenceError,
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
     development_unit_roster_digest,
@@ -421,6 +429,8 @@ def _commit_frozen_unit_indexes(
 def _commit_hf_primary_null_fixture_records(
     store: DevelopmentPersistentStore,
     plan,
+    *,
+    record_limit: int | None = None,
 ) -> None:
     lease = store.acquire_lease(
         session_id="hf_threshold_replay_session",
@@ -434,12 +444,15 @@ def _commit_hf_primary_null_fixture_records(
     assignments = {
         item.identity.source_cluster_id: item for item in plan.input_manifest.assignments
     }
+    committed_record_count = 0
     for binding in store.registered_unit_bindings:
         if (
             binding.responsibility_id != "hf_detector"
             or binding.content_branch_id != "hf_only"
         ):
             continue
+        if record_limit is not None and committed_record_count >= record_limit:
+            break
         source_cluster_id = binding.analysis_unit_identity.source_cluster_id
         fold = next(
             item
@@ -482,6 +495,7 @@ def _commit_hf_primary_null_fixture_records(
             record=record,
             now_epoch_seconds=102,
         )
+        committed_record_count += 1
 
 
 def _input() -> DevelopmentUnitInput:
@@ -1037,6 +1051,116 @@ def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() ->
     assert real_input.source_record.record_id in {
         item.source_record.record_id for item in threshold.fit_inputs
     }
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("responsibility_id", "content_branch_id"),
+    (("hf_detector", "hf_only"), ("lf_detector", "lf_only")),
+)
+def test_candidate_detector_record_keeps_registered_wrong_and_primary_null_controls(
+    responsibility_id: str,
+    content_branch_id: str,
+) -> None:
+    runner = _runner()
+    unit = next(
+        item
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == responsibility_id
+        and item.content_branch_id == content_branch_id
+    )
+
+    record = runner._execute_unit(unit.unit_index, _input()).record
+    statistics = dict(record.metric_observation["sufficient_statistics"])
+
+    assert record.execution_status == "success"
+    assert record.content_branch_id == content_branch_id
+    assert {
+        "registered_score",
+        "wrong_key_score",
+        "primary_null_score",
+    }.issubset(statistics)
+    for control_role in ("registered", "wrong_key", "primary_null"):
+        assert record.detector_trace[f"{control_role}_detector_identity"]
+        assert record.detector_trace[f"{control_role}_detector_config_digest"]
+    assert record.key_control_trace["control_identity"] == (
+        "registered_key_control"
+    )
+    assert record.key_control_trace["primary_null_control_identity"] == (
+        "unwatermarked_registered_key_primary_null"
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("responsibility_id", "content_branch_id", "metric_factory"),
+    (
+        ("hf_detector", "hf_only", metric_hf_detector),
+        ("lf_detector", "lf_only", metric_lf_detector),
+    ),
+)
+def test_detector_cross_fit_requires_all_candidate_branch_clusters(
+    responsibility_id: str,
+    content_branch_id: str,
+    metric_factory,
+) -> None:
+    runner = _runner()
+    study = next(
+        item
+        for item in runner.protocol.module_matrix
+        if item.responsibility_id == responsibility_id
+    )
+    plan = build_development_cross_fit_plan(
+        responsibility_id=responsibility_id,
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=64,
+    )
+    geometry_case_id = next(
+        item.geometry_case_id
+        for item in runner.protocol.unit_roster
+        if item.responsibility_id == responsibility_id
+    )
+    observations = tuple(
+        bind_development_metric_observation(
+            metric_factory(
+                source_cluster_id,
+                registered_score=2.0 + index / 100.0,
+                wrong_score=-1.0,
+                primary_null_score=index / 100.0,
+                detector_config_digest="1" * 64,
+                registered_observation_digest="2" * 64,
+                wrong_observation_digest="3" * 64,
+                primary_null_observation_digest="4" * 64,
+            ),
+            registered_metric_ids=study.metric_ids,
+            candidate_config_digest=study.candidate_config_digest,
+            paired_ablation_identity=study.paired_ablation_identity,
+            content_branch_id=content_branch_id,
+            geometry_case_id=geometry_case_id,
+        )
+        for index, source_cluster_id in enumerate(plan.source_cluster_ids)
+    )
+
+    aggregate = cross_fit_development_detection_metrics(
+        responsibility_id,
+        observations,
+        plan=plan,
+    )
+
+    assert aggregate.source_cluster_count == 64
+    assert aggregate.fold_count == 4
+    with pytest.raises(
+        DevelopmentMetricError,
+        match="frozen cluster roster",
+    ):
+        cross_fit_development_detection_metrics(
+            responsibility_id,
+            observations[:32],
+            plan=plan,
+        )
 
 
 @pytest.mark.quick
@@ -2500,6 +2624,8 @@ def test_hf_threshold_replay_rejects_plan_valid_uncommitted_alternate(
         cross_fit_plan=plan,
         now_epoch_seconds=103,
     )
+    assert len(replayed) == 4
+    assert all(item.validate(plan) == () for item in replayed)
     alternate = tuple(
         create_development_provisional_threshold(
             plan,
@@ -2531,6 +2657,31 @@ def test_hf_threshold_replay_rejects_plan_valid_uncommitted_alternate(
         cross_fit_plan=plan,
         now_epoch_seconds=103,
     ) == replayed
+
+
+@pytest.mark.quick
+def test_hf_threshold_replay_rejects_incomplete_candidate_branch_coverage(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    plan = build_development_cross_fit_plan(
+        responsibility_id="hf_detector",
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=64,
+    )
+    _commit_hf_primary_null_fixture_records(store, plan, record_limit=32)
+
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="requested frozen units lack terminal COMMITTED evidence",
+    ):
+        runner.replay_verified_hf_provisional_thresholds(
+            cross_fit_plan=plan,
+            now_epoch_seconds=103,
+        )
 
 
 @pytest.mark.quick
