@@ -27,8 +27,8 @@ PROTOCOL_PATH = ROOT / "configs/experiments/development_module_exploration.json"
 PROMPT_ROSTER_PATH = (
     ROOT / "configs/experiments/development_exploration_prompt_roster.json"
 )
-EXECUTION_REVISION = "7298cef0a6d4c497f2ba7b1a78e4ee4661cebe03"
-EXPECTED_RUN_ID = "ceg_wm_development_exploration_science_first_v42"
+EXECUTION_REVISION = "e948c78ebedf31ade3a9d4dec8a5fd7da1dcecf4"
+EXPECTED_RUN_ID = "ceg_wm_development_exploration_detector_crossfit_execution"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -112,10 +112,13 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "scientific completion is determined only" in source
     assert "COMMITTED" in source
     assert "ceg_wm_development_exploration_scientific_execution" in source
+    assert "ceg_wm_development_exploration_science_first_v42" in source
     assert "ceg_wm_development_exploration_joint_record_execution" in source
     assert "two operational commits, zero scientific commits" in source
     assert "dangling unit 0002 attempt 0" in source
     assert "builtins.AssertionError" in source
+    assert "Existing records, dangling attempts, and full artifacts" in source
+    assert "never read, migrated, rewritten, or deleted" in source
     for forbidden in (
         "pip install",
         "snapshot_download(",

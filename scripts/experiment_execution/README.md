@@ -18,8 +18,10 @@ is a delivery convenience; only verified persistent `COMMITTED` bundles establis
 completion.
 
 The checked-in thin Notebook invokes the server from detached execution revision
-`7298cef0a6d4c497f2ba7b1a78e4ee4661cebe03` with run ID
-`ceg_wm_development_exploration_science_first_v42`. The prior
+`e948c78ebedf31ade3a9d4dec8a5fd7da1dcecf4` with run ID
+`ceg_wm_development_exploration_detector_crossfit_execution`. The prior
+`ceg_wm_development_exploration_science_first_v42` run namespace, records, dangling
+attempts, and full artifacts remain unchanged and are not read or migrated. The prior
 `ceg_wm_development_exploration_scientific_execution` run remains unchanged with two
 operational commits, zero scientific commits, dangling unit 0002 attempt 0, and diagnostic
 `builtins.AssertionError`. Any existing
@@ -28,6 +30,10 @@ neither prior run is read, migrated, or deleted.
 That execution authority is intentionally
 separate from the later Notebook delivery revision and must not be replaced by a mutable
 branch.
+
+Rebuilding the deterministic tracked-tree execution package from that exact revision
+produces 4,487,620 bytes with SHA-256
+`49e555a9b3ff8643059aad7257a44f32a0a2b2141be0bc78f981ba4babdfff96`.
 
 ## HF-only threshold-fit GPU execution
 

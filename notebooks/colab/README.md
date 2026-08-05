@@ -47,12 +47,14 @@ count 为 null。
 
 `development_exploration.ipynb` 是 13 模块 development exploration 的独立薄入口。
 Notebook 自身由后续 delivery revision 提供，但执行权威固定为已完成独立方法审核的
-`7298cef0a6d4c497f2ba7b1a78e4ee4661cebe03`；它只从 GitHub 获取该 exact commit，
+`e948c78ebedf31ade3a9d4dec8a5fd7da1dcecf4`；它只从 GitHub 获取该 exact commit，
 以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
 
 用户只需选择 Colab GPU runtime、设置 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY` 两个 Secrets、
 执行 **Run all** 并授权 Drive。固定 run ID 为
-`ceg_wm_development_exploration_science_first_v42`。旧
+`ceg_wm_development_exploration_detector_crossfit_execution`。旧
+`ceg_wm_development_exploration_science_first_v42` run namespace 与其中已有 records、
+dangling attempts、full artifacts 均原样保留，不读取、不迁移、不改写；旧
 `ceg_wm_development_exploration_scientific_execution` run 原样保留：2 个
 operational commits、0 个 scientific commits、unit 0002 attempt 0 仍为 dangling，诊断为
 `builtins.AssertionError`；任何既有
@@ -70,3 +72,8 @@ session、artifact path 与 SHA-256 后复制到
 `MyDrive/CEG-WM/development_exploration/persistent/<run-id>/` 下经服务器验证的
 `COMMITTED` bundles。Notebook 不安装依赖、不下载模型、不实现方法、runner、records、
 预算、协议或科学判断，并保持 outputs 为空、execution count 为 null。
+
+从上述 exact execution revision 按服务器现有确定性 tracked-tree 打包逻辑重建的
+development execution package 为 4,487,620 bytes，SHA-256 为
+`49e555a9b3ff8643059aad7257a44f32a0a2b2141be0bc78f981ba4babdfff96`。该摘要只绑定
+Revision1 执行包；Notebook delivery revision 不改变包内协议或方法实现。
