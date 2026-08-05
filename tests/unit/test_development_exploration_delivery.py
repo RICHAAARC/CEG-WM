@@ -27,8 +27,10 @@ PROTOCOL_PATH = ROOT / "configs/experiments/development_module_exploration.json"
 PROMPT_ROSTER_PATH = (
     ROOT / "configs/experiments/development_exploration_prompt_roster.json"
 )
-EXECUTION_REVISION = "e948c78ebedf31ade3a9d4dec8a5fd7da1dcecf4"
-EXPECTED_RUN_ID = "ceg_wm_development_exploration_detector_crossfit_execution"
+EXECUTION_REVISION = "67bf7ea0cc9cfaf5083e1487ab593d605eda68eb"
+EXPECTED_RUN_ID = "ceg_wm_development_exploration_module_outcome_replay_execution"
+EXPECTED_PACKAGE_BYTES = 4_530_056
+EXPECTED_PACKAGE_SHA256 = "eeea6a1bf6d235be834d693b4a7ac02dcf9d3d07244b1b769b4ed240912c0c94"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -111,6 +113,7 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "mutable branch must never replace" in source
     assert "scientific completion is determined only" in source
     assert "COMMITTED" in source
+    assert "ceg_wm_development_exploration_detector_crossfit_execution" in source
     assert "ceg_wm_development_exploration_scientific_execution" in source
     assert "ceg_wm_development_exploration_science_first_v42" in source
     assert "ceg_wm_development_exploration_joint_record_execution" in source
@@ -119,6 +122,13 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "builtins.AssertionError" in source
     assert "Existing records, dangling attempts, and full artifacts" in source
     assert "never read, migrated, rewritten, or deleted" in source
+    for readme_path in (
+        ROOT / "notebooks/colab/README.md",
+        ROOT / "scripts/experiment_execution/README.md",
+    ):
+        readme = readme_path.read_text(encoding="utf-8")
+        assert f"{EXPECTED_PACKAGE_BYTES:,} bytes" in readme
+        assert EXPECTED_PACKAGE_SHA256 in readme
     for forbidden in (
         "pip install",
         "snapshot_download(",
