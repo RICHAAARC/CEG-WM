@@ -705,6 +705,32 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     assert sum(
         unit.phase == "development_paired_ablation" for unit in roster
     ) == 48
+    content_detector_core = tuple(
+        unit
+        for unit in roster
+        if unit.responsibility_id == "content_detector"
+        and unit.phase == "development_scientific_responsibility_case"
+    )
+    content_detector_paired = tuple(
+        unit
+        for unit in roster
+        if unit.responsibility_id == "content_detector"
+        and unit.phase == "development_paired_ablation"
+    )
+    assert len(content_detector_core) == 64
+    assert {unit.source_cluster_ordinal for unit in content_detector_core} == set(
+        range(64)
+    )
+    assert {unit.content_branch_id for unit in content_detector_core} == {
+        "lf_hf_routed_combination"
+    }
+    assert len(content_detector_paired) == 16
+    assert {unit.source_cluster_ordinal for unit in content_detector_paired} == set(
+        range(16)
+    )
+    assert {unit.content_branch_id for unit in content_detector_paired} == {
+        "hf_only"
+    }
     assert tuple(
         unit.geometry_case_id
         for unit in roster

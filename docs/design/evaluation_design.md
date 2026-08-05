@@ -43,6 +43,9 @@ content detector；estimator、reliability 与 rectifier；conditional recovery�
 普通职责各覆盖 16 个 source clusters，Q/K sync 与 estimator 各覆盖 32，三个
 detector 各覆盖 64，共 384 个核心科学 unit；只有 router、embedder 与 content
 detector 各增加 16 个同 cluster paired-ablation unit，因此科学总数精确为 432。
+content detector 的 64 个核心 unit 全部使用 routed LF/HF combined，作为完整
+cross-fit 输入；source cluster 0--15 另各有一个 HF-only 配对 unit，HF 非退化只在
+这 16 个冻结配对 cluster 上比较，不缩减 combined 的 64-cluster cross-fit。
 每个核心 scientific unit 只绑定一个职责相关 case，不展开 content branch 与
 geometry case 的笛卡尔积：非几何职责只循环本职责分支，几何职责只循环登记的八个
 case，conditional recovery 将内容与几何 case 确定性 zip/cycle。连同 74 个操作

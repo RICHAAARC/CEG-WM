@@ -35,7 +35,7 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.0"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.1"
 SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
@@ -1445,20 +1445,8 @@ def _build_study_unit_roster(
         count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
         phase="development_paired_ablation",
     )
-    content_detector_core_branches = (
-        ("lf_hf_routed_combination",) * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
-        + tuple(
-            CONTENT_BRANCH_IDS[
-                cluster_ordinal % len(CONTENT_BRANCH_IDS)
-            ]
-            for cluster_ordinal in range(
-                CHEAP_DETECTION_SOURCE_CLUSTER_COUNT
-                - BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
-            )
-        )
-    )
     append_responsibility_cases(
-        "content_detector", branches=content_detector_core_branches
+        "content_detector", branches=("lf_hf_routed_combination",)
     )
     append_responsibility_cases(
         "content_detector",

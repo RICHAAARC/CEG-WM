@@ -1,7 +1,7 @@
 {
   "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v5",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "4.2.0",
+  "protocol_version": "4.2.1",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -149,7 +149,7 @@
       "registered_paired_ablation_only"
     ],
     "score_adaptive_unit_changes_forbidden": true,
-    "unit_roster_digest": "81d0dfd808cc76a64b922a2b3f810ab3b1b05b729a3634d3a6127f57b1d65539"
+    "unit_roster_digest": "16d5f6f94e739a56408d643e440566998d0de6609f76ab6e13d0079159902709"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",

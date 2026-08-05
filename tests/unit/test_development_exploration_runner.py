@@ -39,6 +39,8 @@ import experiments.runners.development_exploration as development_runner_module
 from experiments.protocol.development_exploration import (
     DevelopmentModuleExecutionDecision,
     DevelopmentVerifiedModuleOutcome,
+    OPERATIONAL_UNIT_PHASES,
+    _create_verified_development_module_outcome_record,
     build_development_cross_fit_plan,
     create_development_provisional_threshold,
     create_development_threshold_fit_input,
@@ -132,7 +134,7 @@ class _CombinedCpuWiringBackend:
     def __init__(self) -> None:
         callback_sequence = tuple(range(20))
         self.content = FakeContentBackend(
-            callback_sequences=tuple(callback_sequence for _ in range(128))
+            callback_sequences=tuple(callback_sequence for _ in range(256))
         )
         self.geometry = FakeQkBackend()
 
@@ -2155,6 +2157,123 @@ def test_committed_key_records_replay_into_outcome_and_dependency_decision(
     assert len(verified.evidence_context.committed_marker_bindings) == 16
     assert decision.approved is True
     assert decision.decision_reason == "development_execution_authorized"
+
+
+@pytest.mark.quick
+def test_content_detector_outcome_uses_full_combined_cross_fit_and_frozen_hf_pairs(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    studies = {
+        item.responsibility_id: item for item in runner.protocol.module_matrix
+    }
+    prerequisite_ids = studies[
+        "content_detector"
+    ].prerequisite_responsibility_ids
+    prerequisite_indexes = tuple(
+        next(
+            binding.unit_index
+            for binding in store.registered_unit_bindings
+            if binding.responsibility_id == responsibility_id
+            and binding.phase not in OPERATIONAL_UNIT_PHASES
+        )
+        for responsibility_id in prerequisite_ids
+    )
+    content_detector_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "content_detector"
+        and binding.phase not in OPERATIONAL_UNIT_PHASES
+    )
+    _commit_frozen_unit_indexes(
+        runner,
+        store,
+        (*prerequisite_indexes, *content_detector_indexes),
+        session_id="content_detector_success_outcome_session",
+    )
+
+    def prerequisite_outcome(responsibility_id: str, unit_index: int):
+        evidence = store.verified_terminal_scientific_evidence_for_unit_indexes(
+            (unit_index,),
+            now_epoch_seconds=103,
+        )
+        record, marker = evidence[0]
+        study = studies[responsibility_id]
+        metric_means = tuple(
+            (
+                criterion.metric_id,
+                criterion.threshold + 1.0
+                if criterion.comparison in {"greater_than", "greater_or_equal"}
+                else criterion.threshold - 1.0
+                if criterion.comparison in {"less_than", "less_or_equal"}
+                else criterion.threshold,
+            )
+            for criterion in study.signal_criteria
+        )
+        context = runner._verified_outcome_context(
+            study=study,
+            records=(record,),
+            committed_markers=(marker,),
+            aggregate_metric_means=metric_means,
+            source_cluster_count=study.scientific_source_cluster_scale,
+            module_outcome="mechanism_signal_observed",
+            candidate_recommendation="candidate_worth_further_selection",
+            blocking_responsibilities=(),
+            cross_fit_plan=None,
+            provisional_threshold_identities=(),
+        )
+        outcome = _create_verified_development_module_outcome_record(
+            runner.protocol,
+            responsibility_id=responsibility_id,
+            module_outcome="mechanism_signal_observed",
+            candidate_recommendation="candidate_worth_further_selection",
+            recommendation_reason="verified_prerequisite_fixture_signal",
+            verified_evidence_context=context,
+        )
+        return outcome, context
+
+    prerequisites = tuple(
+        prerequisite_outcome(responsibility_id, unit_index)
+        for responsibility_id, unit_index in zip(
+            prerequisite_ids,
+            prerequisite_indexes,
+            strict=True,
+        )
+    )
+    evidence = store.verified_terminal_scientific_evidence_for_unit_indexes(
+        content_detector_indexes,
+        now_epoch_seconds=103,
+    )
+    plan = build_development_cross_fit_plan(
+        responsibility_id="content_detector",
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=64,
+    )
+    outcome, context = runner._build_module_outcome_record(
+        tuple(record for record, _marker in evidence),
+        responsibility_id="content_detector",
+        now_epoch_seconds=103,
+        committed_markers=tuple(marker for _record, marker in evidence),
+        cross_fit_plan=plan,
+        prerequisite_outcome_records=prerequisites,
+    )
+
+    content_records = tuple(record for record, _marker in evidence)
+    assert len(content_records) == 80
+    assert sum(
+        record.content_branch_id == "lf_hf_routed_combination"
+        for record in content_records
+    ) == 64
+    assert sum(record.content_branch_id == "hf_only" for record in content_records) == 16
+    assert context.source_cluster_count == 64
+    assert len(outcome.evidence_record_ids) == 80
+    assert outcome.validate(
+        runner.protocol,
+        verified_evidence_context=context,
+    ) == ()
 
 
 @pytest.mark.quick

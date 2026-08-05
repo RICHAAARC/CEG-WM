@@ -2228,18 +2228,54 @@ class DevelopmentExplorationRunner:
                     "hf_wrong_key_rate": cross_fit.wrong_key_accept_rate,
                 }
             else:
-                hf_by_cluster = {
-                    item.source_cluster_id: dict(item.sufficient_statistics)["candidate_score"]
+                hf_observations = tuple(
+                    item
                     for item in observations
                     if item.content_branch_id == "hf_only"
-                }
-                combined_by_cluster = {
-                    item.source_cluster_id: dict(item.sufficient_statistics)["candidate_score"]
+                )
+                combined_observations = tuple(
+                    item
                     for item in observations
                     if item.content_branch_id == "lf_hf_routed_combination"
+                )
+                hf_by_cluster = {
+                    item.source_cluster_id: dict(item.sufficient_statistics)[
+                        "candidate_score"
+                    ]
+                    for item in hf_observations
                 }
-                if set(hf_by_cluster) != set(combined_by_cluster):
-                    raise DevelopmentRunnerError("content detector HF/combined paired clusters are incomplete")
+                combined_by_cluster = {
+                    item.source_cluster_id: dict(item.sufficient_statistics)[
+                        "candidate_score"
+                    ]
+                    for item in combined_observations
+                }
+                paired_hf_clusters = {
+                    binding.analysis_unit_identity.source_cluster_id
+                    for binding in self.persistence_store.registered_unit_bindings
+                    if binding.responsibility_id == "content_detector"
+                    and binding.phase == "development_paired_ablation"
+                    and binding.content_branch_id == "hf_only"
+                }
+                combined_clusters = {
+                    binding.analysis_unit_identity.source_cluster_id
+                    for binding in self.persistence_store.registered_unit_bindings
+                    if binding.responsibility_id == "content_detector"
+                    and binding.phase
+                    == "development_scientific_responsibility_case"
+                    and binding.content_branch_id == "lf_hf_routed_combination"
+                }
+                if (
+                    len(hf_observations) != len(hf_by_cluster)
+                    or len(combined_observations) != len(combined_by_cluster)
+                    or set(hf_by_cluster) != paired_hf_clusters
+                    or set(combined_by_cluster) != combined_clusters
+                    or not paired_hf_clusters
+                    or not paired_hf_clusters.issubset(combined_clusters)
+                ):
+                    raise DevelopmentRunnerError(
+                        "content detector HF/combined frozen paired clusters are incomplete"
+                    )
                 means = {
                     "combined_tpr": cross_fit.registered_accept_rate,
                     "combined_primary_null_fpr": cross_fit.primary_null_false_accept_rate,
