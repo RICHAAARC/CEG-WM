@@ -2176,7 +2176,7 @@ def test_scientific_exception_is_committed_as_formal_failure_not_interruption(
     unit_index = next(
         binding.unit_index
         for binding in store.registered_unit_bindings
-        if binding.phase == "scientific_breadth"
+        if binding.phase == "development_scientific_responsibility_case"
     )
     intent = store.create_intent(
         lease,
