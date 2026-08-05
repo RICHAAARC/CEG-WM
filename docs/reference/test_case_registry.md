@@ -42,6 +42,47 @@ runner 节点精确移出默认集合。因此 `606 + 5 - 14 = 597`。目录汇�
 governance 的 631 个节点全部位于 `governance/tests`。完整 node ID 以以上 collect 命令
 输出为权威，下面每个文件族的数量之和必须分别等于 614 和 631。
 
+## 旧 full 失败与中断证据
+
+以下记录绑定 exact revision
+`c0fc63be6a1175504b25f157ffa5599c5f64cb4e`，执行命令为：
+
+```bash
+TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
+  python governance/tools/run_validation_profile.py full
+```
+
+该 profile 当时进入的项目 pytest 命令是：
+
+```bash
+python -m pytest -q -s tests
+```
+
+项目 pytest 在 `4175.03s` 时报告 `5 failed, 40 passed, 3 deselected`。随后在用户缩小
+scope、要求先修测试平面的情况下人工发送 SIGINT，进程以 `KeyboardInterrupt` 结束；
+没有进入 governance pytest，也没有执行 12 个 harness audits。因此该次 `full` 明确
+未通过，不能登记成 completion profile 成功。5 个失败 node 均位于
+`tests/unit/test_development_exploration_runner.py`：
+
+- `test_first_breadth_units_call_real_key_router_and_carrier_methods`：仍选择已删除的
+  `scientific_breadth` phase，触发 `StopIteration`；
+- `test_result_serialization_is_bound_to_exact_responsibility_type`：同样依赖已删除的
+  `scientific_breadth` case，触发 `StopIteration`；
+- `test_clean_content_embedding_control_performs_no_hidden_write`：选择已删除的 clean
+  content-embedder case，触发 `StopIteration`；
+- `test_geometry_control_uses_frozen_attack_and_official_reliability`：selector 同时要求
+  source cluster zero 与 `extreme_crop_control`，但当前冻结 cycle 不存在该组合；
+- `test_production_routing_reference_recovers_measurement_retry_across_sessions`：旧 helper
+  为到达 routing reference 前推约 218 个 units，耗尽 `FakeContentBackend` callback
+  sequence，最终产生 `RuntimeAdapterError`。
+
+人工中断时最后显示的栈位于 `main/content_chain/hf_carrier.py:64`；这只是 SIGINT 时的
+执行位置，不是第 6 个失败 node，也不是额外失败判决。原始 live log 仍由 Codex unified
+exec session `46828` 保留；仓库中没有虚构的本地 raw log 文件，本节就是 checked-in 的
+持久转录位置。旧 session 日志不得被后续运行覆盖；未来重新执行 `full` 时必须绑定新的
+exact revision，并单独报告 project pytest、governance pytest 与 12 个 harness audits
+是否实际到达和通过。
+
 ## 项目 pytest 文件族
 
 本表中执行命令 `P:<path>` 展开为：
