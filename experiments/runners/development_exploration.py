@@ -1582,6 +1582,7 @@ class DevelopmentExplorationRunner:
             binding.unit_index
             for binding in self.persistence_store.registered_unit_bindings
             if binding.responsibility_id in required_responsibilities
+            and binding.phase not in OPERATIONAL_UNIT_PHASES
         )
         verified_evidence = (
             self.persistence_store

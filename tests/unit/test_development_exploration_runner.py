@@ -2229,6 +2229,44 @@ def test_module_outcome_public_surface_accepts_no_caller_records_or_outcomes() -
 
 
 @pytest.mark.quick
+def test_content_router_outcome_replay_excludes_operational_routing_reference_units(
+    tmp_path: Path,
+) -> None:
+    runner, store = _persistent_runner(tmp_path)
+    routing_reference_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "content_router"
+        and binding.phase in OPERATIONAL_UNIT_PHASES
+    )
+    scientific_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "content_router"
+        and binding.phase not in OPERATIONAL_UNIT_PHASES
+    )
+
+    assert routing_reference_indexes == tuple(range(218, 282))
+    assert scientific_indexes == tuple(range(282, 314))
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="requested scientific evidence includes an operational unit",
+    ):
+        store.verified_terminal_scientific_evidence_for_unit_indexes(
+            (routing_reference_indexes[0],),
+            now_epoch_seconds=103,
+        )
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="requested frozen units lack terminal COMMITTED evidence",
+    ):
+        runner.build_verified_module_outcome_record(
+            responsibility_id="content_router",
+            now_epoch_seconds=103,
+        )
+
+
+@pytest.mark.quick
 def test_committed_key_records_replay_into_outcome_and_dependency_decision(
     tmp_path: Path,
 ) -> None:
