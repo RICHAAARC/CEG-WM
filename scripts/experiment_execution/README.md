@@ -18,11 +18,13 @@ is a delivery convenience; only verified persistent `COMMITTED` bundles establis
 completion.
 
 The checked-in thin Notebook invokes the server from detached execution revision
-`dfeb03b5ef305474a482077761c0c3dccd9b88f8` with run ID
-`ceg_wm_development_exploration_joint_record_execution`. The prior
+`7298cef0a6d4c497f2ba7b1a78e4ee4661cebe03` with run ID
+`ceg_wm_development_exploration_science_first_v42`. The prior
 `ceg_wm_development_exploration_scientific_execution` run remains unchanged with two
 operational commits, zero scientific commits, dangling unit 0002 attempt 0, and diagnostic
-`builtins.AssertionError`; none of that state is migrated or deleted.
+`builtins.AssertionError`. Any existing
+`ceg_wm_development_exploration_joint_record_execution` directory also remains unchanged;
+neither prior run is read, migrated, or deleted.
 That execution authority is intentionally
 separate from the later Notebook delivery revision and must not be replaced by a mutable
 branch.
