@@ -10,6 +10,10 @@ conda run -n CEG-WM python -m pytest --collect-only -q -s
 
 默认方法节点导入 PyTorch；缺少 `torch` 的 `.venv` 不得用于该根级收集命令。
 
+逐文件族数量、精确重节点、governance 文件族、12 个 harness audit、资源/输出/证据边界
+和显式执行命令登记在 [Test Case Registry](test_case_registry.md)。该 registry 只提供
+可审查索引；pytest 配置和实时 `--collect-only` 输出仍是执行与 node identity 权威。
+
 ## 当前测试入口
 
 | test_path | level | default_run | responsibility |

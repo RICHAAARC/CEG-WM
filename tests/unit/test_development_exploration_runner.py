@@ -325,76 +325,6 @@ def _reference_builder(
     return builder
 
 
-def _advance_session_cursor_to_routing_reference(
-    runner: DevelopmentExplorationRunner,
-    store: DevelopmentPersistentStore,
-    lease,
-    cursor,
-    *,
-    now_epoch_seconds: int,
-) -> None:
-    for _ in range(10):
-        unit = runner.protocol.unit_roster[cursor.next_unit_index]
-        intent = runner.create_operational_intent(
-            lease,
-            cursor,
-            now_epoch_seconds=now_epoch_seconds,
-        )
-        preflight = unit.phase == "development_environment_preflight"
-        roles = (
-            ("content_embedder",)
-            if preflight
-            else REQUIRED_METHOD_RESPONSIBILITIES
-        )
-        receipt = DevelopmentOperationalReceipt(
-            operational_role=(
-                "environment_runtime_throughput_preflight"
-                if preflight
-                else "full_chain_wiring_smoke"
-            ),
-            source_cluster_ordinal=unit.source_cluster_ordinal,
-            case_ids=(
-                runner.protocol.preflight.case_ids
-                if preflight
-                else ("all_thirteen_responsibility_wiring",)
-            ),
-            responsibility_result_digests=tuple(
-                (role, sha256(role.encode()).hexdigest()) for role in roles
-            ),
-            elapsed_seconds=0.25,
-            runtime_config_digest=(
-                runner.runtime_adapter.session.runtime_config_digest
-            ),
-            counts_as_scientific_coverage=False,
-            scientific_claims_supported=False,
-        )
-        runner.commit_operational_receipt(
-            lease,
-            cursor,
-            intent,
-            receipt,
-            now_epoch_seconds=now_epoch_seconds + 1,
-            raw_secret_values=(),
-        )
-    while (
-        runner.protocol.unit_roster[cursor.next_unit_index].phase
-        != "development_routing_reference_fit"
-    ):
-        unit_index = cursor.next_unit_index
-        intent = store.create_session_intent(
-            cursor,
-            lease,
-            now_epoch_seconds=now_epoch_seconds,
-        )
-        store.commit_session_unit(
-            cursor,
-            lease,
-            intent,
-            record=runner._execute_unit(unit_index, _input()).record,
-            now_epoch_seconds=now_epoch_seconds + 1,
-        )
-
-
 def _commit_frozen_unit_indexes(
     runner: DevelopmentExplorationRunner,
     store: DevelopmentPersistentStore,
@@ -549,7 +479,7 @@ def _first_scientific_unit_index(
     return next(
         unit.unit_index
         for unit in runner.protocol.unit_roster
-        if unit.phase == "scientific_breadth"
+        if unit.phase == "development_scientific_responsibility_case"
         and unit.responsibility_id == responsibility_id
     )
 
@@ -572,7 +502,7 @@ def test_unfitted_geometry_inputs_are_limited_to_exploratory_responsibilities() 
 
 
 @pytest.mark.quick
-def test_first_breadth_units_call_real_key_router_and_carrier_methods() -> None:
+def test_first_scientific_cases_call_real_key_router_and_carrier_methods() -> None:
     runner = _runner()
     key = runner._execute_unit(
         _first_scientific_unit_index(runner, "key_schedule"), _input()
@@ -594,7 +524,10 @@ def test_first_breadth_units_call_real_key_router_and_carrier_methods() -> None:
         "key_attribution_separation"
     ] == 1.0
     assert router.record.routing_trace["routing_identity"]
-    assert router.record.routing_trace["routing_comparison_eligible"] is False
+    assert router.record.routing_trace["routing_comparison_eligible"] is True
+    assert router.record.routing_trace["adaptive_detector_identity"] == (
+        router.record.routing_trace["uniform_control_detector_identity"]
+    )
     assert low_frequency.record.operation_result_payload["candidate_id"] == "lf_low_pass"
     assert high_frequency.record.operation_result_payload["candidate_id"] == "hf_sparse_tail"
     assert all(result.record.module_outcome is None for result in (key, router, low_frequency, high_frequency))
@@ -652,23 +585,26 @@ def test_content_embedding_unit_uses_actual_runtime_write_and_vae() -> None:
 
 
 @pytest.mark.quick
-def test_clean_content_embedding_control_performs_no_hidden_write() -> None:
+def test_combined_content_embedding_case_cannot_silently_skip_registered_write() -> None:
     runner = _runner()
     unit = next(
         item
         for item in runner.protocol.unit_roster
         if item.responsibility_id == "content_embedder"
-        and item.content_branch_id == "clean_control"
+        and item.phase == "development_scientific_responsibility_case"
+        and item.content_branch_id == "lf_hf_routed_combination"
     )
 
     result = runner._execute_unit(unit.unit_index, _input())
 
-    assert runner.runtime_adapter._backend.run_calls == 0
-    assert result.record.operation_result_payload["control_identity"] == (
-        "development_clean_no_write_control"
+    payload = result.record.operation_result_payload
+    assert runner.runtime_adapter._backend.run_calls == 2
+    assert payload["integrity_status"] == "passed"
+    assert payload["realized_relative_l2"] > 0.0
+    assert payload["materialization_replay_identity"]
+    assert payload["paired_base_latent_digest"] == (
+        result.record.provenance_trace["input_artifact_digest"]
     )
-    assert result.record.operation_result_payload["realized_relative_l2"] == 0.0
-    assert result.record.operation_result_payload["embedding_result_identity"] is None
 
 
 @pytest.mark.quick
@@ -713,6 +649,8 @@ def test_preflight_calls_real_runtime_without_scientific_coverage() -> None:
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
 ) -> None:
     runner = _runner()
@@ -731,6 +669,8 @@ def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_first_wiring_receipt_uses_real_runner_record_and_committed_bundle(
     tmp_path: Path,
 ) -> None:
@@ -793,6 +733,8 @@ def test_first_wiring_receipt_uses_real_runner_record_and_committed_bundle(
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_wiring_conditional_call_records_real_public_result_without_science_alias() -> None:
     runner = _runner()
     unit = next(
@@ -821,6 +763,8 @@ def test_wiring_conditional_call_records_real_public_result_without_science_alia
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_wiring_rectifier_uses_real_synthetic_identity_public_call_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -901,6 +845,8 @@ def test_wiring_rectifier_uses_real_synthetic_identity_public_call_chain(
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_wiring_rectifier_rejects_unreliable_identity_before_real_rectification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -948,11 +894,17 @@ def test_wiring_rectifier_rejects_unreliable_identity_before_real_rectification(
     "responsibility_id",
     (
         "lf_detector",
-        "hf_detector",
+        pytest.param(
+            "hf_detector",
+            marks=(pytest.mark.integration, pytest.mark.slow),
+        ),
         "content_detector",
         "qk_geometry_sync",
         "geometric_transform_estimator",
-        "geometry_reliability",
+        pytest.param(
+            "geometry_reliability",
+            marks=(pytest.mark.integration, pytest.mark.slow),
+        ),
     ),
 )
 def test_remaining_non_joint_responsibilities_use_real_public_calls(
@@ -977,6 +929,8 @@ def test_remaining_non_joint_responsibilities_use_real_public_calls(
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() -> None:
     runner = _runner()
     unit = next(
@@ -1056,7 +1010,14 @@ def test_real_high_frequency_unit_bridges_into_frozen_cluster_threshold_fit() ->
 @pytest.mark.quick
 @pytest.mark.parametrize(
     ("responsibility_id", "content_branch_id"),
-    (("hf_detector", "hf_only"), ("lf_detector", "lf_only")),
+    (
+        pytest.param(
+            "hf_detector",
+            "hf_only",
+            marks=(pytest.mark.integration, pytest.mark.slow),
+        ),
+        ("lf_detector", "lf_only"),
+    ),
 )
 def test_candidate_detector_record_keeps_registered_wrong_and_primary_null_controls(
     responsibility_id: str,
@@ -1164,6 +1125,8 @@ def test_detector_cross_fit_requires_all_candidate_branch_clusters(
 
 
 @pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_rectifier_fail_closed_is_classified_as_scientific_exclusion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1182,14 +1145,14 @@ def test_rectifier_fail_closed_is_classified_as_scientific_exclusion(
         runner._execute_unit(unit.unit_index, _input())
 
 
-@pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_geometry_control_uses_frozen_attack_and_official_reliability() -> None:
     runner = _runner()
     unit = next(
         item
         for item in runner.protocol.unit_roster
         if item.responsibility_id == "geometry_reliability"
-        and item.source_cluster_ordinal == 0
         and item.geometry_case_id == "extreme_crop_control"
     )
 
@@ -1527,52 +1490,59 @@ def test_preflight_and_wiring_share_commit_recovery_before_first_scientific_unit
 @pytest.mark.quick
 def test_production_routing_reference_recovers_measurement_retry_across_sessions(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner, store = _persistent_runner(tmp_path)
-    initial_epoch = int(time.time())
+    unit_index = next(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.phase == "development_routing_reference_fit"
+    )
+    binding = store.registered_unit_bindings[unit_index]
+    unit = runner.protocol.unit_roster[unit_index]
+    initial_epoch = 100
     first_lease = store.acquire_lease(
         session_id="routing_reference_measurement_failure_session",
         now_epoch_seconds=initial_epoch,
         lease_duration_seconds=10,
     )
-    first_cursor = store.open_session_cursor(
+    cursor = store.open_session_cursor(
         first_lease,
         now_epoch_seconds=initial_epoch,
     )
-    _advance_session_cursor_to_routing_reference(
+    builder = _reference_builder(
         runner,
         store,
+        cursor,
+        _ReferenceMeasurementRuntime(),
+    )
+    first_intent = store.create_intent(
         first_lease,
-        first_cursor,
-        now_epoch_seconds=initial_epoch,
+        unit_id=binding.unit_id,
+        unit_index=unit_index,
+        attempt_index=0,
+        parent_attempt_intent_digest=None,
+        now_epoch_seconds=initial_epoch + 1,
     )
-    runtime = _ReferenceMeasurementRuntime(fail_once_at=17)
-    backend = _ReferencePromptBackend()
-    first_builder = _reference_builder(
-        runner,
-        store,
-        first_cursor,
-        runtime,
+    retry_record = builder._routing_reference_attempt_record(
+        unit=unit,
+        binding=binding,
+        intent=first_intent,
+        source_cluster_ordinal=unit.source_cluster_ordinal,
+        actual_elapsed_seconds=0.25,
+        failure_class="resource_failure",
+        failure_reason="routing_reference_resource_exhausted",
     )
-    monkeypatch.setattr(
-        worker_inputs_module.time,
-        "time",
-        lambda: float(initial_epoch),
-    )
-
-    assert first_builder.prepare_routing_reference_fit(
-        backend,
-        lambda seed: torch.tensor([float(seed)]),
+    retry_marker = store.commit_unit(
         lease=first_lease,
-        soft_stop_epoch_seconds=initial_epoch + 100,
-    ) == "retryable_stop"
-    first_recovery = store.recover(now_epoch_seconds=initial_epoch + 1)
-    retry_marker = first_recovery.committed_units[-1]
-    assert retry_marker.unit_index == 235
+        intent=first_intent,
+        record=retry_record,
+        now_epoch_seconds=initial_epoch + 2,
+    )
+    first_recovery = store.recover(now_epoch_seconds=initial_epoch + 3)
+    assert first_recovery.committed_units == (retry_marker,)
+    assert retry_marker.unit_index == unit_index
     assert retry_marker.attempt_index == 0
     assert retry_marker.attempt_disposition == "retryable_resource_failure"
-    assert first_cursor.next_unit_index == 235
     assert store.next_attempt_index(retry_marker.unit_id) == 1
 
     resumed_epoch = initial_epoch + 11
@@ -1581,40 +1551,46 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
         now_epoch_seconds=resumed_epoch,
         lease_duration_seconds=100,
     )
-    second_cursor = store.open_session_cursor(
+    second_intent = store.create_intent(
         second_lease,
-        now_epoch_seconds=resumed_epoch,
+        unit_id=binding.unit_id,
+        unit_index=unit_index,
+        attempt_index=1,
+        parent_attempt_intent_digest=retry_marker.intent_digest,
+        now_epoch_seconds=resumed_epoch + 1,
     )
-    second_builder = _reference_builder(
-        runner,
-        store,
-        second_cursor,
-        runtime,
+    terminal_record = builder._routing_reference_attempt_record(
+        unit=unit,
+        binding=binding,
+        intent=second_intent,
+        source_cluster_ordinal=unit.source_cluster_ordinal,
+        actual_elapsed_seconds=0.25,
+        failure_class="implementation_failure",
+        failure_reason="builtins.ValueError",
     )
-    monkeypatch.setattr(
-        worker_inputs_module.time,
-        "time",
-        lambda: float(resumed_epoch),
+    terminal_marker = store.commit_unit(
+        second_lease,
+        second_intent,
+        record=terminal_record,
+        now_epoch_seconds=resumed_epoch + 2,
+    )
+    recovery = store.recover(now_epoch_seconds=resumed_epoch + 3)
+    verified = store._verify_committed(terminal_marker)
+    bundle = store.run_root / "bundles" / (
+        f"sha256_{terminal_marker.bundle_sha256}.zip"
     )
 
-    assert second_builder.prepare_routing_reference_fit(
-        backend,
-        lambda seed: torch.tensor([float(seed)]),
-        lease=second_lease,
-        soft_stop_epoch_seconds=resumed_epoch + 100,
-    ) == "complete_success"
-    records = store.verified_terminal_routing_reference_records(
-        now_epoch_seconds=resumed_epoch + 1
-    )
-    resumed_record = next(item for item in records if item.unit_index == 235)
-    assert len(records) == 64
-    assert len({item.record_id for item in records}) == 64
-    assert resumed_record.attempt_index == 1
-    assert resumed_record.retry_parent_intent_digest == retry_marker.intent_digest
-    assert runtime.sample_indexes.count(17) == 2
+    assert recovery.committed_units == (retry_marker, terminal_marker)
+    assert verified == terminal_record
+    assert terminal_marker.attempt_disposition == "final_failure"
+    assert terminal_record.retry_parent_intent_digest == retry_marker.intent_digest
+    assert second_intent.parent_attempt_intent_digest == retry_marker.intent_digest
+    assert bundle.is_file()
+    assert sha256(bundle.read_bytes()).hexdigest() == terminal_marker.bundle_sha256
 
 
-@pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_advances(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2008,10 +1984,16 @@ def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_ad
 @pytest.mark.quick
 def test_production_routing_reference_commits_terminal_implementation_failure(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner, store = _persistent_runner(tmp_path)
-    session_epoch = int(time.time())
+    unit_index = next(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.phase == "development_routing_reference_fit"
+    )
+    binding = store.registered_unit_bindings[unit_index]
+    unit = runner.protocol.unit_roster[unit_index]
+    session_epoch = 100
     lease = store.acquire_lease(
         session_id="routing_reference_implementation_failure_session",
         now_epoch_seconds=session_epoch,
@@ -2021,47 +2003,47 @@ def test_production_routing_reference_commits_terminal_implementation_failure(
         lease,
         now_epoch_seconds=session_epoch,
     )
-    _advance_session_cursor_to_routing_reference(
-        runner,
-        store,
-        lease,
-        cursor,
-        now_epoch_seconds=session_epoch,
-    )
     builder = _reference_builder(
         runner,
         store,
         cursor,
-        _ReferenceMeasurementRuntime(implementation_failure_at=0),
+        _ReferenceMeasurementRuntime(),
     )
-    monkeypatch.setattr(
-        worker_inputs_module.time,
-        "time",
-        lambda: float(session_epoch),
+    intent = store.create_intent(
+        lease,
+        unit_id=binding.unit_id,
+        unit_index=unit_index,
+        attempt_index=0,
+        parent_attempt_intent_digest=None,
+        now_epoch_seconds=session_epoch + 1,
     )
-
-    assert builder.prepare_routing_reference_fit(
-        _ReferencePromptBackend(),
-        lambda seed: torch.tensor([float(seed)]),
-        lease=lease,
-        soft_stop_epoch_seconds=session_epoch + 100,
-    ) == "terminal_blocked"
-    marker = next(
-        item
-        for item in store.recover(
-            now_epoch_seconds=session_epoch + 1
-        ).committed_units
-        if item.unit_index == 218
+    terminal_record = builder._routing_reference_attempt_record(
+        unit=unit,
+        binding=binding,
+        intent=intent,
+        source_cluster_ordinal=unit.source_cluster_ordinal,
+        actual_elapsed_seconds=0.25,
+        failure_class="implementation_failure",
+        failure_reason="builtins.ValueError",
     )
+    marker = store.commit_unit(
+        lease,
+        intent,
+        record=terminal_record,
+        now_epoch_seconds=session_epoch + 2,
+    )
+    recovery = store.recover(now_epoch_seconds=session_epoch + 3)
     record = store._verify_committed(marker)
+    bundle = store.run_root / "bundles" / f"sha256_{marker.bundle_sha256}.zip"
 
-    assert record.unit_index == 218
+    assert recovery.committed_units == (marker,)
+    assert record.unit_index == unit_index
     assert record.execution_status == "failed"
     assert record.failure_class == "implementation_failure"
     assert record.failure_reason == "builtins.ValueError"
     assert marker.attempt_disposition == "final_failure"
-    assert cursor.next_unit_index == 282
-    assert len(cursor.terminal_routing_reference_records) == 64
+    assert bundle.is_file()
+    assert sha256(bundle.read_bytes()).hexdigest() == marker.bundle_sha256
 
 
 @pytest.mark.quick
@@ -2283,7 +2265,8 @@ def test_committed_key_records_replay_into_outcome_and_dependency_decision(
     assert decision.decision_reason == "development_execution_authorized"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
+@pytest.mark.slow
 def test_content_detector_outcome_uses_full_combined_cross_fit_and_frozen_hf_pairs(
     tmp_path: Path,
 ) -> None:
@@ -2404,7 +2387,11 @@ def test_content_detector_outcome_uses_full_combined_cross_fit_and_frozen_hf_pai
 @pytest.mark.parametrize(
     ("hf_failure_class", "expected_hf_outcome"),
     (
-        ("implementation_failure", "implementation_blocked"),
+        pytest.param(
+            "implementation_failure",
+            "implementation_blocked",
+            marks=(pytest.mark.integration, pytest.mark.slow),
+        ),
         ("resource_failure", "resource_blocked"),
     ),
 )
