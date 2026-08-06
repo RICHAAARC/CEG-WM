@@ -3670,8 +3670,13 @@ class DevelopmentExplorationRunner:
                 ordered_clusters.append(assignment.identity)
             by_cluster[assignment.identity.source_cluster_id] = assignment.identity
         clusters = tuple(ordered_clusters)
-        if len(clusters) < 64:
-            raise DevelopmentRunnerError("development manifest lacks frozen 64-cluster roster")
+        required_cluster_count = 1 + max(
+            unit.source_cluster_ordinal for unit in self.protocol.unit_roster
+        )
+        if len(clusters) != required_cluster_count:
+            raise DevelopmentRunnerError(
+                "development manifest differs from the protocol-frozen cluster roster"
+            )
         return clusters
 
     def _analysis_identity(self, unit: DevelopmentStudyUnit) -> AnalysisUnitIdentity:

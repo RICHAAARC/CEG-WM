@@ -1685,10 +1685,243 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
 
 @pytest.mark.integration
 @pytest.mark.slow
+def test_screening_entrypoint_wiring_limit_commits_four_operational_units_and_resumes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entrypoint_clock = {"now": int(time.time())}
+    entrypoint_root = tmp_path / "screening_entrypoint"
+    entrypoint_root.mkdir()
+    package = entrypoint_root / "development_execution_package.zip"
+    package.write_bytes(b"screening entrypoint package fixture")
+    compact_latent = torch.linspace(
+        -1.0,
+        1.0,
+        steps=32,
+        dtype=torch.float32,
+    ).reshape(1, 2, 4, 4).to(torch.float16)
+
+    class FixedSemanticObservationProducer:
+        def __init__(self, **_keywords: object) -> None:
+            pass
+
+        def observe(
+            self,
+            _routing_rgb: torch.Tensor,
+            _prompt: str,
+        ) -> SpatialRoutingObservation:
+            return _observations().semantic
+
+    class ProductionCpuBackend(_CombinedCpuWiringBackend):
+        def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+            decoded = self.content.vae_decode(latent)
+            return torch.cat((decoded, decoded[:, :1]), dim=1)
+
+    original_runtime_initialize = Sd35RuntimeAdapter.initialize
+    qk_fixture_runtime = create_runtime_adapter(_CombinedCpuWiringBackend())
+    qk_fixture_session = qk_fixture_runtime.initialize("cpu")
+    qk_observation = qk_fixture_runtime.observe_detection_qk(
+        torch.zeros(
+            (
+                1,
+                3,
+                qk_fixture_session.image_height,
+                qk_fixture_session.image_width,
+            ),
+            dtype=torch.uint8,
+        )
+    )
+    qk_fixture_runtime.close()
+    original_runtime_qk_observation = Sd35RuntimeAdapter.observe_detection_qk
+
+    def initialize_cpu(self, _requested_device):
+        return original_runtime_initialize(self, "cpu")
+
+    def cpu_runtime_factory(_backend, _configuration_path):
+        return create_runtime_adapter(ProductionCpuBackend())
+
+    def controlled_qk_observation(self, image: torch.Tensor):
+        if isinstance(self._backend, ProductionCpuBackend):
+            return qk_observation
+        return original_runtime_qk_observation(self, image)
+
+    def controlled_routing_measurement(
+        self,
+        base_latent: torch.Tensor,
+        *,
+        sample_index: int,
+    ) -> RuntimeRoutingReferenceMeasurement:
+        measurement = (
+            _ReferenceMeasurementRuntime().measure_generation_routing_reference_inputs(
+                base_latent,
+                sample_index=sample_index,
+            )
+        )
+        return replace(
+            measurement,
+            runtime_config_digest=self._configuration.runtime_config_digest,
+            model_id=self._configuration.model_id,
+            model_revision=self._configuration.model_revision,
+            callback_indices=tuple(range(self._configuration.inference_steps)),
+        )
+
+    def lightweight_preflight(self, source_cluster_ordinal, _unit_input):
+        return DevelopmentOperationalReceipt(
+            operational_role="environment_runtime_throughput_preflight",
+            source_cluster_ordinal=source_cluster_ordinal,
+            case_ids=self.protocol.preflight.case_ids,
+            responsibility_result_digests=(("content_embedder", "1" * 64),),
+            elapsed_seconds=0.01,
+            runtime_config_digest=self.runtime_adapter.session.runtime_config_digest,
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+
+    def lightweight_wiring(self, source_cluster_ordinal, _unit_inputs):
+        return DevelopmentOperationalReceipt(
+            operational_role="full_chain_wiring_smoke",
+            source_cluster_ordinal=source_cluster_ordinal,
+            case_ids=("all_thirteen_responsibility_wiring",),
+            responsibility_result_digests=tuple(
+                (responsibility, sha256(responsibility.encode()).hexdigest())
+                for responsibility in REQUIRED_METHOD_RESPONSIBILITIES
+            ),
+            elapsed_seconds=0.01,
+            runtime_config_digest=self.runtime_adapter.session.runtime_config_digest,
+            counts_as_scientific_coverage=False,
+            scientific_claims_supported=False,
+        )
+
+    def ticking_entrypoint_time() -> float:
+        entrypoint_clock["now"] += 1
+        return float(entrypoint_clock["now"])
+
+    monkeypatch.setattr(
+        worker_inputs_module,
+        "DevelopmentSemanticObservationProducer",
+        FixedSemanticObservationProducer,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "Sd35PipelineBackend",
+        lambda **_keywords: _ReferencePromptBackend(),
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "create_runtime_adapter",
+        cpu_runtime_factory,
+    )
+    monkeypatch.setattr(Sd35RuntimeAdapter, "initialize", initialize_cpu)
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "observe_detection_qk",
+        controlled_qk_observation,
+    )
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "measure_generation_routing_reference_inputs",
+        controlled_routing_measurement,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "_base_latent",
+        lambda _seed, **_keywords: compact_latent,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "_build_or_verify_package",
+        lambda *_arguments: package,
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "_environment_digest",
+        lambda: "b" * 64,
+    )
+    monkeypatch.setattr(
+        development_entrypoint.time,
+        "time",
+        ticking_entrypoint_time,
+    )
+    monkeypatch.setattr(
+        development_entrypoint.torch.cuda,
+        "get_device_name",
+        lambda _index: "cpu-screening-fixture",
+    )
+    monkeypatch.setattr(
+        development_entrypoint.torch.cuda,
+        "max_memory_allocated",
+        lambda _index: 1,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "execute_preflight_cluster",
+        lightweight_preflight,
+    )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "execute_wiring_smoke_cluster",
+        lightweight_wiring,
+    )
+
+    results = []
+    for session_ordinal in range(2):
+        exit_code, result = (
+            development_entrypoint.execute_development_exploration_session(
+                repository_root=ROOT,
+                expected_revision="a" * 40,
+                persistent_root=entrypoint_root / "persistent",
+                cache_root=entrypoint_root / "cache",
+                run_id="screening_wiring_limit_recovery",
+                session_id=f"screening_session_{session_ordinal}",
+                environment={
+                    "CEG_WM_ROOT_KEY": "screening-runner-cpu-wiring-key",
+                    "HF_TOKEN": "development-test-token",
+                },
+                maximum_wiring_clusters=2,
+            )
+        )
+        assert exit_code == 0, result
+        results.append(result)
+        entrypoint_clock["now"] += development_entrypoint.HARD_SESSION_CAP_SECONDS
+
+    assert results[0]["termination_reason"] == "maximum_wiring_clusters_reached"
+    assert results[0]["session_committed_unit_count"] == 4
+    assert results[0]["committed_unit_count"] == 4
+    assert results[1]["termination_reason"] == "maximum_wiring_clusters_reached"
+    assert results[1]["session_committed_unit_count"] == 2
+    assert results[1]["committed_unit_count"] == 6
+    marker_root = (
+        entrypoint_root
+        / "persistent"
+        / "screening_wiring_limit_recovery"
+        / "markers"
+    )
+    marker_payloads = tuple(
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(marker_root.glob("*.COMMITTED.json"))
+    )
+    assert {item["unit_index"] for item in marker_payloads} == set(range(6))
+    assert {item["record_kind"] for item in marker_payloads} == {
+        "development_operational_check"
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.slow
 def test_production_routing_reference_timeout_exhaustion_commits_terminal_and_advances(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        development_entrypoint,
+        "PROTOCOL_PATH",
+        Path("configs/experiments/development_module_exploration.json"),
+    )
+    monkeypatch.setattr(
+        development_entrypoint,
+        "PROMPT_ROSTER_PATH",
+        Path("configs/experiments/development_exploration_prompt_roster.json"),
+    )
     real_epoch_time = time.time
     entrypoint_clock = {"now": int(real_epoch_time())}
     entrypoint_root = tmp_path / "production_entrypoint"

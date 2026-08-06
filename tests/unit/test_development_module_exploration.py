@@ -42,6 +42,7 @@ from experiments.protocol.development_exploration import (
     PREFLIGHT_SOURCE_CLUSTER_COUNT,
     REGISTERED_STUDY_ROLE_BINDINGS,
     WIRING_SOURCE_CLUSTER_COUNT,
+    THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID,
     DevelopmentPrimaryNullKeyBinding,
     DevelopmentModuleOutcomeRecord,
     DevelopmentThresholdFitInput,
@@ -80,6 +81,9 @@ from experiments.protocol.internal_splits import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "configs/experiments/development_module_exploration.json"
+MECHANISM_SCREENING_CONFIG_PATH = (
+    ROOT / "configs/experiments/thirteen_module_mechanism_screening.json"
+)
 PROTOCOL_PATH = ROOT / "experiments/protocol/development_exploration.py"
 
 
@@ -358,7 +362,7 @@ def _primary_null_record(
     )
 
 
-def _cross_fit_plan(cluster_count: int = 16):
+def _cross_fit_plan(cluster_count: int = 64):
     manifest = _development_manifest(cluster_count)
     intent = _execution_intent(manifest)
     return build_development_cross_fit_plan(
@@ -666,6 +670,63 @@ def test_preflight_and_wiring_counts_are_not_scientific_coverage() -> None:
 
 
 @pytest.mark.unit
+def test_thirteen_module_mechanism_screening_freezes_exact_budget_and_order() -> None:
+    protocol = load_frozen_development_exploration_protocol(
+        MECHANISM_SCREENING_CONFIG_PATH
+    )
+    assert protocol.protocol_id == THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID
+    assert protocol.validate() == ()
+    assert protocol.study_budget.maximum_operational_units == 42
+    assert protocol.study_budget.maximum_scientific_units == 240
+    assert protocol.study_budget.maximum_total_units == 282
+    assert protocol.study_budget.maximum_total_record_attempts == 846
+    assert protocol.study_budget.scientific_source_cluster_scales == (16, 32)
+    assert (
+        protocol.development_routing_reference_cross_fit.source_cluster_count
+        == 32
+    )
+    roster = protocol.unit_roster
+    expected_blocks = (
+        (0, 2, "development_environment_preflight", "development_environment_preflight"),
+        (2, 10, "development_full_chain_wiring", "development_full_chain_wiring"),
+        (10, 26, "development_scientific_responsibility_case", "key_schedule"),
+        (26, 42, "development_scientific_responsibility_case", "hf_carrier"),
+        (42, 58, "development_scientific_responsibility_case", "hf_detector"),
+        (58, 74, "development_scientific_responsibility_case", "lf_carrier"),
+        (74, 90, "development_scientific_responsibility_case", "lf_detector"),
+        (90, 122, "development_scientific_responsibility_case", "qk_geometry_sync"),
+        (122, 154, "development_routing_reference_fit", "content_router"),
+        (154, 170, "development_scientific_responsibility_case", "content_router"),
+        (170, 186, "development_scientific_responsibility_case", "content_embedder"),
+        (186, 202, "development_scientific_responsibility_case", "content_detector"),
+        (202, 234, "development_scientific_responsibility_case", "geometric_transform_estimator"),
+        (234, 250, "development_scientific_responsibility_case", "geometry_reliability"),
+        (250, 266, "development_scientific_responsibility_case", "image_rectifier"),
+        (266, 282, "development_scientific_responsibility_case", "conditional_recovery_decision"),
+    )
+    for start, stop, phase, responsibility_id in expected_blocks:
+        assert {
+            (unit.phase, unit.responsibility_id) for unit in roster[start:stop]
+        } == {(phase, responsibility_id)}
+    assert not any(unit.phase == "development_paired_ablation" for unit in roster)
+    assert sum(
+        unit.phase == "development_routing_reference_fit" for unit in roster
+    ) == 32
+    module_scales = {
+        item.responsibility_id: item.scientific_source_cluster_scale
+        for item in protocol.module_matrix
+    }
+    assert module_scales["qk_geometry_sync"] == 32
+    assert module_scales["geometric_transform_estimator"] == 32
+    assert {
+        module_scales[responsibility_id]
+        for responsibility_id in REQUIRED_METHOD_RESPONSIBILITIES
+        if responsibility_id
+        not in {"qk_geometry_sync", "geometric_transform_estimator"}
+    } == {16}
+
+
+@pytest.mark.unit
 def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     protocol = load_frozen_development_exploration_protocol(CONFIG_PATH)
     roster = enumerate_development_study_units(protocol)
@@ -949,7 +1010,7 @@ def test_development_split_surface_denies_every_formal_later_split() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("cluster_count", (16, 32, 64))
+@pytest.mark.parametrize("cluster_count", (64,))
 def test_threshold_cross_fit_excludes_fit_clusters_from_recovery_probes(
     cluster_count: int,
 ) -> None:
@@ -1096,13 +1157,13 @@ def test_threshold_bridge_rejects_registered_branch_and_wrong_null_identity() ->
 
 @pytest.mark.unit
 def test_registered_positive_manifest_cannot_be_relabelled_as_primary_null() -> None:
-    manifest = _manifest(16, case_id="registered_positive_case")
+    manifest = _manifest(64, case_id="registered_positive_case")
     intent = _execution_intent(manifest)
     plan = build_development_cross_fit_plan(
         responsibility_id="hf_detector",
         execution_intent_authority=intent,
         expected_execution_intent_authority_digest=intent.authority_digest,
-        expected_source_cluster_count=16,
+        expected_source_cluster_count=64,
     )
     _, detector_binding, forged_inputs = _threshold_material(
         plan,

@@ -382,17 +382,24 @@ class DevelopmentProductionInputBuilder:
             item.source_cluster_ordinal: item
             for item in self.session_cursor.terminal_routing_reference_records
         }
-        for entry in self.prompts.entries:
+        routing_units = tuple(
+            item
+            for item in self.protocol.unit_roster
+            if item.phase == ROUTING_REFERENCE_RECORD_KIND
+        )
+        expected_reference_count = (
+            self.protocol.development_routing_reference_cross_fit.source_cluster_count
+        )
+        if len(routing_units) != expected_reference_count:
+            raise DevelopmentInputError(
+                "routing reference roster differs from the frozen protocol"
+            )
+        for unit in routing_units:
+            entry = self.prompts.entries[unit.source_cluster_ordinal]
             if entry.cluster_ordinal in terminal:
                 continue
             if int(time.time()) >= soft_stop_epoch_seconds:
                 return "soft_stop"
-            unit = next(
-                item
-                for item in self.protocol.unit_roster
-                if item.phase == ROUTING_REFERENCE_RECORD_KIND
-                and item.source_cluster_ordinal == entry.cluster_ordinal
-            )
             binding = self._registered_unit_binding(unit)
             if (
                 unit.phase != ROUTING_REFERENCE_RECORD_KIND
@@ -523,11 +530,11 @@ class DevelopmentProductionInputBuilder:
             if record.execution_status == "success":
                 successful[entry.cluster_ordinal] = record
             terminal[entry.cluster_ordinal] = record
-        if len(terminal) != 64:
+        if len(terminal) != expected_reference_count:
             raise DevelopmentInputError(
                 "routing reference terminal coverage is incomplete"
             )
-        if len(successful) == 64:
+        if len(successful) == expected_reference_count:
             return "complete_success"
         return "terminal_blocked"
 
@@ -606,13 +613,16 @@ class DevelopmentProductionInputBuilder:
             for item in self.session_cursor.routing_reference_records
             if item.execution_status == "success"
         }
-        if len(records) != 64:
+        expected_reference_count = (
+            self.protocol.development_routing_reference_cross_fit.source_cluster_count
+        )
+        if len(records) != expected_reference_count:
             raise DevelopmentDependencyInputBlocked(
                 "routing reference fit lacks complete successful evidence"
             )
         rows = [
             records[index].measurement_payload
-            for index in range(64)
+            for index in range(expected_reference_count)
             if index % 4 != fold_index
         ]
         references = (

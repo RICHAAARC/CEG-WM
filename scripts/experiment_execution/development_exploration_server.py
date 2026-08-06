@@ -26,7 +26,7 @@ DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 RUNTIME_CONFIG_PATH = Path("configs/runtime/runtime_sd35_flowmatch.json")
 PROTOCOL_CONFIG_PATH = Path(
-    "configs/experiments/development_module_exploration.json"
+    "configs/experiments/thirteen_module_mechanism_screening.json"
 )
 DEPENDENCY_LOCK_PATH = Path(
     "requirements_development_exploration_gpu_execution.txt"
@@ -336,6 +336,7 @@ def _execute_development_entrypoint(
     run_id: str,
     session_id: str,
     environment: Mapping[str, str],
+    maximum_wiring_clusters: int | None,
 ) -> tuple[int, Mapping[str, object]]:
     try:
         from scripts.experiment_execution.development_exploration_entrypoint import (
@@ -356,6 +357,7 @@ def _execute_development_entrypoint(
             run_id=run_id,
             session_id=session_id,
             environment=environment,
+            maximum_wiring_clusters=maximum_wiring_clusters,
         )
     except Exception as exc:
         raise DevelopmentExplorationServerError(
@@ -468,6 +470,7 @@ def execute_development_exploration_server_session(
     session_id: str,
     environment: Mapping[str, str] | None = None,
     install_dependencies: bool = True,
+    maximum_wiring_clusters: int | None = None,
 ) -> tuple[int, dict[str, object]]:
     """Prepare a worker environment, run one session, and write a safe receipt."""
 
@@ -522,6 +525,7 @@ def execute_development_exploration_server_session(
         run_id=run_id,
         session_id=session_id,
         environment=worker_environment,
+        maximum_wiring_clusters=maximum_wiring_clusters,
     )
     if type(exit_code) is not int or isinstance(exit_code, bool):
         raise DevelopmentExplorationServerError(
@@ -638,6 +642,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--skip-dependency-install", action="store_true")
+    parser.add_argument("--maximum-wiring-clusters", type=int)
     arguments = parser.parse_args(argv)
     try:
         exit_code, receipt = execute_development_exploration_server_session(
@@ -648,6 +653,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_id=arguments.run_id,
             session_id=arguments.session_id,
             install_dependencies=not arguments.skip_dependency_install,
+            maximum_wiring_clusters=arguments.maximum_wiring_clusters,
         )
     except DevelopmentExplorationServerError as error:
         receipt = _failure_artifacts(

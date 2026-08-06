@@ -1,0 +1,167 @@
+{
+  "schema_version": "ceg_wm_development_prompt_roster",
+  "roster_id": "thirteen_module_mechanism_screening_prompt_roster",
+  "seed_namespace": "thirteen_module_mechanism_screening_20260806",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "generation_seed": 2026080600,
+      "prompt": "a cow"
+    },
+    {
+      "cluster_ordinal": 1,
+      "generation_seed": 2026080601,
+      "prompt": "a submarine"
+    },
+    {
+      "cluster_ordinal": 2,
+      "generation_seed": 2026080602,
+      "prompt": "a whale"
+    },
+    {
+      "cluster_ordinal": 3,
+      "generation_seed": 2026080603,
+      "prompt": "a t-shirt"
+    },
+    {
+      "cluster_ordinal": 4,
+      "generation_seed": 2026080604,
+      "prompt": "a bowl"
+    },
+    {
+      "cluster_ordinal": 5,
+      "generation_seed": 2026080605,
+      "prompt": "a flag"
+    },
+    {
+      "cluster_ordinal": 6,
+      "generation_seed": 2026080606,
+      "prompt": "a cat"
+    },
+    {
+      "cluster_ordinal": 7,
+      "generation_seed": 2026080607,
+      "prompt": "a towel"
+    },
+    {
+      "cluster_ordinal": 8,
+      "generation_seed": 2026080608,
+      "prompt": "a wall"
+    },
+    {
+      "cluster_ordinal": 9,
+      "generation_seed": 2026080609,
+      "prompt": "a car"
+    },
+    {
+      "cluster_ordinal": 10,
+      "generation_seed": 2026080610,
+      "prompt": "a giraffe"
+    },
+    {
+      "cluster_ordinal": 11,
+      "generation_seed": 2026080611,
+      "prompt": "an eagle"
+    },
+    {
+      "cluster_ordinal": 12,
+      "generation_seed": 2026080612,
+      "prompt": "a kangaroo"
+    },
+    {
+      "cluster_ordinal": 13,
+      "generation_seed": 2026080613,
+      "prompt": "a canal"
+    },
+    {
+      "cluster_ordinal": 14,
+      "generation_seed": 2026080614,
+      "prompt": "the grand canyon"
+    },
+    {
+      "cluster_ordinal": 15,
+      "generation_seed": 2026080615,
+      "prompt": "lily pads"
+    },
+    {
+      "cluster_ordinal": 16,
+      "generation_seed": 2026080616,
+      "prompt": "a street"
+    },
+    {
+      "cluster_ordinal": 17,
+      "generation_seed": 2026080617,
+      "prompt": "a house"
+    },
+    {
+      "cluster_ordinal": 18,
+      "generation_seed": 2026080618,
+      "prompt": "a fish"
+    },
+    {
+      "cluster_ordinal": 19,
+      "generation_seed": 2026080619,
+      "prompt": "a city intersection"
+    },
+    {
+      "cluster_ordinal": 20,
+      "generation_seed": 2026080620,
+      "prompt": "a circle"
+    },
+    {
+      "cluster_ordinal": 21,
+      "generation_seed": 2026080621,
+      "prompt": "a red circle"
+    },
+    {
+      "cluster_ordinal": 22,
+      "generation_seed": 2026080622,
+      "prompt": "a box"
+    },
+    {
+      "cluster_ordinal": 23,
+      "generation_seed": 2026080623,
+      "prompt": "a yellow box"
+    },
+    {
+      "cluster_ordinal": 24,
+      "generation_seed": 2026080624,
+      "prompt": "a red box"
+    },
+    {
+      "cluster_ordinal": 25,
+      "generation_seed": 2026080625,
+      "prompt": "a sphere"
+    },
+    {
+      "cluster_ordinal": 26,
+      "generation_seed": 2026080626,
+      "prompt": "a red sphere"
+    },
+    {
+      "cluster_ordinal": 27,
+      "generation_seed": 2026080627,
+      "prompt": "a large blue box"
+    },
+    {
+      "cluster_ordinal": 28,
+      "generation_seed": 2026080628,
+      "prompt": "a blue metallic sphere"
+    },
+    {
+      "cluster_ordinal": 29,
+      "generation_seed": 2026080629,
+      "prompt": "a horse"
+    },
+    {
+      "cluster_ordinal": 30,
+      "generation_seed": 2026080630,
+      "prompt": "a pumpkin"
+    },
+    {
+      "cluster_ordinal": 31,
+      "generation_seed": 2026080631,
+      "prompt": "a sword"
+    }
+  ]
+}

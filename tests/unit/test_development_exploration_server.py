@@ -223,6 +223,7 @@ def test_server_delegates_to_formal_entrypoint_and_writes_secret_free_receipt(
         session_id="session",
         environment=environment,
         install_dependencies=False,
+        maximum_wiring_clusters=2,
     )
     assert exit_code == 0
     assert calls == [
@@ -237,6 +238,7 @@ def test_server_delegates_to_formal_entrypoint_and_writes_secret_free_receipt(
                 "HF_TOKEN": "private-hf-token",
                 "CEG_WM_ROOT_KEY": "private-root-key",
             },
+            "maximum_wiring_clusters": 2,
         }
     ]
     assert receipt["artifact_sha256"] == sha256(artifact.read_bytes()).hexdigest()

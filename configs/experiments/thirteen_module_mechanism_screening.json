@@ -1,0 +1,1604 @@
+{
+  "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v5",
+  "protocol_id": "ceg_wm_thirteen_module_mechanism_screening",
+  "protocol_version": "1.0.0",
+  "split_policy": {
+    "allowed_split": "development",
+    "formal_later_split_deny_list": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ],
+    "candidate_selection_mapping": "one_unique_case_per_responsibility"
+  },
+  "split_isolation": {
+    "isolation_dimensions": [
+      "prompt_digest",
+      "source_cluster_id",
+      "seed_namespace",
+      "registered_key_family_digest",
+      "image_lineage_digest"
+    ],
+    "cross_role_identity_overlap_forbidden": true,
+    "role_bindings": [
+      {
+        "role_id": "development_exploration",
+        "registered_split": "development",
+        "detector_mode": "candidate_configured",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": true,
+        "manifest_reference": "development_split_manifest_runtime_binding",
+        "manifest_availability": "required_at_execution",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "candidate_selection_selection",
+        "registered_split": "candidate_selection",
+        "detector_mode": "candidate_configured",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "candidate_selection_selection_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "content_candidate_confirmation",
+        "registered_split": "untouched_confirmation",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "content_candidate_confirmation_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "hf_only_reference_confirmation",
+        "registered_split": "untouched_confirmation",
+        "detector_mode": "hf_only",
+        "requires_frozen_hf_only_tau": true,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "hf_only_reference_confirmation_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "content_threshold_calibration",
+        "registered_split": "content_threshold_fit",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "content_threshold_calibration_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "rescue_threshold_calibration",
+        "registered_split": "rescue_threshold_fit",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "rescue_threshold_calibration_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "geometry_reliability_calibration",
+        "registered_split": "reliability_fit",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "geometry_reliability_calibration_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "end_to_end_safety_check",
+        "registered_split": "end_to_end_check",
+        "detector_mode": "combined",
+        "requires_frozen_hf_only_tau": false,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "end_to_end_safety_check_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      },
+      {
+        "role_id": "formal_held_out_evaluation",
+        "registered_split": "held_out_evaluation",
+        "detector_mode": "frozen_candidate",
+        "requires_frozen_hf_only_tau": true,
+        "execution_allowed_in_development": false,
+        "manifest_reference": "formal_held_out_evaluation_manifest_unavailable_until_authorized",
+        "manifest_availability": "unavailable_until_role_authorized",
+        "frozen_manifest_digest": null
+      }
+    ]
+  },
+  "preflight": {
+    "source_cluster_count": 2,
+    "case_ids": [
+      "environment_identity_preflight",
+      "runtime_identity_preflight",
+      "throughput_preflight"
+    ],
+    "purpose": "environment_identity_and_throughput_only",
+    "counts_as_scientific_coverage": false
+  },
+  "study_budget": {
+    "preflight_source_cluster_count": 2,
+    "wiring_source_cluster_count": 8,
+    "wiring_counts_as_scientific_coverage": false,
+    "scientific_source_cluster_scales": [
+      16,
+      32
+    ],
+    "maximum_operational_units": 42,
+    "maximum_scientific_units": 240,
+    "maximum_total_units": 282,
+    "maximum_record_attempts_per_unit": 3,
+    "maximum_total_record_attempts": 846,
+    "maximum_duration_seconds_per_unit": 900,
+    "maximum_wiring_duration_seconds_per_unit": 2100,
+    "unit_order": [
+      "environment_preflight_before_wiring",
+      "full_chain_wiring_before_scientific_units",
+      "key_then_high_frequency_then_low_frequency_then_geometry_sync",
+      "development_reference_fit_after_geometry_sync",
+      "content_then_geometry_recovery_dependency_order",
+      "one_responsibility_case_per_source_cluster",
+      "registered_paired_ablation_only"
+    ],
+    "score_adaptive_unit_changes_forbidden": true,
+    "unit_roster_digest": "5146f6ccc15fdb2c2980f3fb304b425bb26124789f2ba9e0c486ee3a5d15c044"
+  },
+  "provisional_threshold_cross_fit": {
+    "source_split": "development",
+    "fold_count": 4,
+    "fit_role": "development_primary_null_fit",
+    "score_role": "development_recovery_probe_score",
+    "threshold_role": "development_exploratory",
+    "allowed_input_roles": [
+      "primary_null"
+    ],
+    "input_manifest_binding_required": true,
+    "detector_binding_required": true,
+    "threshold_rule_binding_required": true,
+    "recovery_probe_cluster_exclusion_required": true,
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "development_routing_reference_cross_fit": {
+    "source_split": "development",
+    "role": "development_exploratory_routing_reference_fit",
+    "fold_count": 4,
+    "source_cluster_count": 32,
+    "quantile_rule": "strictly_positive_exact_nearest_rank_p95",
+    "raw_latent_persistence_forbidden": true,
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "development_geometry_reliability_cross_fit": {
+    "source_split": "development",
+    "role": "development_exploratory_geometry_reliability_cross_fit",
+    "fold_count": 4,
+    "source_cluster_count": 16,
+    "unfitted_epsilon_semantics": "none_returns_raw_residuals_and_unfitted_inlier",
+    "lower_tail_rule": "exact_nearest_rank_p05",
+    "upper_tail_rule": "exact_nearest_rank_p95",
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "development_rescue_threshold_cross_fit": {
+    "source_split": "development",
+    "role": "development_exploratory_rescue_threshold_fit",
+    "fold_count": 4,
+    "input_role": "primary_null",
+    "margin_rule": "tau_minus_exact_nearest_rank_p05_positive_margin",
+    "probe_cluster_exclusion_required": true,
+    "invalidation_semantics": "invalidate_before_candidate_selection_and_all_later_splits",
+    "invalid_for_splits": [
+      "candidate_selection",
+      "untouched_confirmation",
+      "content_threshold_fit",
+      "rescue_threshold_fit",
+      "reliability_fit",
+      "end_to_end_check",
+      "held_out_evaluation"
+    ]
+  },
+  "threshold_detector_authority": {
+    "authority_id": "development_high_frequency_detector_threshold_authority",
+    "responsibility_id": "hf_detector",
+    "detector_identity": "development_blind_high_frequency_detector",
+    "method_detector_identity": "2232ca1de3480313d4ba4cfeca299eb7e295b8f4c06c23337adc29c03f442c0f",
+    "method_detector_config_digest": "222bfe2cdece5a0d68ab4db996409f69e92981a1e061566c632f8972ad171bd9",
+    "detector_mode": "hf_only",
+    "preprocessing_identity": "rgb8_public_image_float32_unit_interval",
+    "raw_rectified_preprocessing_same": true,
+    "registered_candidate_identity": "blind_high_frequency_detector_candidate",
+    "registered_candidate_ids": [
+      "key_schedule_sha256_counter",
+      "hf_sparse_tail"
+    ],
+    "registered_candidate_parameter_bindings": [
+      {
+        "parameter_id": "detector_candidate",
+        "values": [
+          "hf_sparse_tail"
+        ]
+      }
+    ],
+    "registered_candidate_config_digest": "5663ca14be496c8d33eb7c1975e8375638ec44ee5279ec2abf0bd58560cb4149",
+    "registered_key_schedule_candidate_id": "key_schedule_sha256_counter",
+    "registered_key_schedule_derivation_identity": "main_shared_key_schedule_identify_root_key",
+    "registered_key_schedule_config_digest": "8696a3fbaabb39149a3b7b30f08cdcd12b64d45bebd14658d08c09805f5b33c0",
+    "public_key_relation": "registered_detection_public_digests_equal"
+  },
+  "execution_intent_policy": {
+    "authority_role": "create_only_before_scientific_records",
+    "create_only_required": true,
+    "freeze_before_scientific_records": true,
+    "raw_secret_policy": "raw_secret_prohibited",
+    "expected_digest_required_at_result_boundaries": true,
+    "later_runner_must_pin_digest": true
+  },
+  "content_study": {
+    "branch_ids": [
+      "clean_control",
+      "hf_only",
+      "lf_only",
+      "lf_hf_disabled_uniform_control",
+      "lf_hf_routed_combination"
+    ],
+    "mixing_coefficients": [
+      0.25,
+      0.5,
+      0.75
+    ],
+    "combination_function_ids": [
+      "hf_only_standardized_score",
+      "weighted_hf_lf_standardized_score",
+      "maximum_hf_lf_standardized_score"
+    ],
+    "matched_total_budget_required": true,
+    "attack_condition_switching_forbidden": true
+  },
+  "geometry_study": {
+    "ambiguous_control_max_top_two_gap": 0.05,
+    "operation_cases": [
+      {
+        "case_id": "identity_transform",
+        "operation_family": "identity",
+        "crop_fraction": 1.0,
+        "scale_factor": 1.0,
+        "rotation_degrees": 0.0
+      },
+      {
+        "case_id": "bounded_crop_transform",
+        "operation_family": "crop",
+        "crop_fraction": 0.75,
+        "scale_factor": 1.0,
+        "rotation_degrees": 0.0
+      },
+      {
+        "case_id": "bounded_scale_transform",
+        "operation_family": "scale",
+        "crop_fraction": 1.0,
+        "scale_factor": 0.7071067811865476,
+        "rotation_degrees": 0.0
+      },
+      {
+        "case_id": "bounded_rotation_transform",
+        "operation_family": "rotation",
+        "crop_fraction": 1.0,
+        "scale_factor": 1.0,
+        "rotation_degrees": 16.0
+      },
+      {
+        "case_id": "single_compound_transform",
+        "operation_family": "compound",
+        "crop_fraction": 0.75,
+        "scale_factor": 0.7071067811865476,
+        "rotation_degrees": 16.0
+      }
+    ],
+    "negative_control_cases": [
+      {
+        "case_id": "ambiguous_transform_control",
+        "operation_family": "compound",
+        "crop_fraction": 0.75,
+        "scale_factor": 1.0,
+        "rotation_degrees": -32.0
+      },
+      {
+        "case_id": "boundary_transform_control",
+        "operation_family": "compound",
+        "crop_fraction": 0.45,
+        "scale_factor": 1.4142135623730951,
+        "rotation_degrees": 32.0
+      },
+      {
+        "case_id": "extreme_crop_control",
+        "operation_family": "crop",
+        "crop_fraction": 0.45,
+        "scale_factor": 1.0,
+        "rotation_degrees": 0.0
+      }
+    ]
+  },
+  "module_matrix": [
+    {
+      "responsibility_id": "key_schedule",
+      "scientific_question_id": "registered_wrong_and_public_key_identity_separation",
+      "development_case_id": "development_key_identity_separation",
+      "candidate_selection_case_id": "candidate_selection_key_identity_separation",
+      "candidate_identity": "registered_key_identity_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "key_stream_candidate",
+          "values": [
+            "key_schedule_sha256_counter"
+          ]
+        }
+      ],
+      "candidate_config_digest": "92faac91c30b845ae46e731e9e92f706e709b4d7ca8de3d33a90f40baf10b0d5",
+      "paired_ablation_identity": "wrong_and_public_key_identity_ablation",
+      "negative_control_case_ids": [
+        "wrong_key_roster",
+        "public_noise_secret_independence"
+      ],
+      "metric_ids": [
+        "key_attribution_separation",
+        "domain_collision_count"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "key_attribution_separation",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "domain_collision_count",
+          "comparison": "equal",
+          "threshold": 0.0
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "content_router",
+      "scientific_question_id": "matched_budget_routing_gain_and_non_degradation",
+      "development_case_id": "development_content_routing",
+      "candidate_selection_case_id": "candidate_selection_content_routing",
+      "candidate_identity": "content_adaptive_router_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "routing_stqr",
+        "routing_uniform_control"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "adaptive_router_candidate",
+          "values": [
+            "routing_stqr"
+          ]
+        },
+        {
+          "parameter_id": "disabled_uniform_control_candidate",
+          "values": [
+            "routing_uniform_control"
+          ]
+        },
+        {
+          "parameter_id": "routing_score_operation",
+          "values": [
+            "hf_only_public_content_operation"
+          ]
+        }
+      ],
+      "candidate_config_digest": "57b4c8c81b140c124fa59ddab54e4c866507b78e0825140b4a0ecba700b6f074",
+      "paired_ablation_identity": "disabled_uniform_routing_ablation",
+      "negative_control_case_ids": [
+        "routing_uniform_control",
+        "attack_label_blindness"
+      ],
+      "metric_ids": [
+        "matched_budget_incremental_tpr",
+        "routing_coverage",
+        "quality_delta"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "matched_budget_incremental_tpr",
+          "comparison": "greater_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "routing_coverage",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "quality_delta",
+          "comparison": "less_or_equal",
+          "threshold": 0.012
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "routing_trace",
+        "branch_score_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "key_schedule",
+        "lf_detector",
+        "hf_detector"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control",
+        "lf_hf_disabled_uniform_control",
+        "lf_hf_routed_combination"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "lf_carrier",
+      "scientific_question_id": "key_attributed_low_frequency_write_direction",
+      "development_case_id": "development_low_frequency_carrier",
+      "candidate_selection_case_id": "candidate_selection_low_frequency_carrier",
+      "candidate_identity": "low_frequency_carrier_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "lf_low_pass"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "carrier_candidate",
+          "values": [
+            "lf_low_pass"
+          ]
+        }
+      ],
+      "candidate_config_digest": "d8924ea37cc66151e29bc341601f6aa8bd7a37c311069deeb707aaaed3a54e84",
+      "paired_ablation_identity": "low_frequency_write_disabled_ablation",
+      "negative_control_case_ids": [
+        "registered_direction_replay",
+        "wrong_key_direction",
+        "matched_clean_pair"
+      ],
+      "metric_ids": [
+        "registered_direction_replay_match",
+        "wrong_key_direction_separation",
+        "materialized_nonzero_write_within_budget",
+        "quality_delta"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "registered_direction_replay_match",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "wrong_key_direction_separation",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "materialized_nonzero_write_within_budget",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "quality_delta",
+          "comparison": "less_or_equal",
+          "threshold": 0.012
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "branch_score_trace",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "key_schedule"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "lf_only"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "hf_carrier",
+      "scientific_question_id": "key_attributed_high_frequency_write_direction",
+      "development_case_id": "development_high_frequency_carrier",
+      "candidate_selection_case_id": "candidate_selection_high_frequency_carrier",
+      "candidate_identity": "high_frequency_carrier_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "carrier_candidate",
+          "values": [
+            "hf_sparse_tail"
+          ]
+        }
+      ],
+      "candidate_config_digest": "51cf2ba539d186e1a7d44a841d3461202a9c45d104c8b715d228e5421436e9b9",
+      "paired_ablation_identity": "high_frequency_write_disabled_ablation",
+      "negative_control_case_ids": [
+        "registered_direction_replay",
+        "wrong_key_direction",
+        "matched_clean_pair"
+      ],
+      "metric_ids": [
+        "registered_direction_replay_match",
+        "wrong_key_direction_separation",
+        "materialized_nonzero_write_within_budget",
+        "quality_delta"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "registered_direction_replay_match",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "wrong_key_direction_separation",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "materialized_nonzero_write_within_budget",
+          "comparison": "equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "quality_delta",
+          "comparison": "less_or_equal",
+          "threshold": 0.012
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "branch_score_trace",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "key_schedule"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "hf_only"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "content_embedder",
+      "scientific_question_id": "actual_dtype_joint_content_budget",
+      "development_case_id": "development_content_embedding",
+      "candidate_selection_case_id": "candidate_selection_content_embedding",
+      "candidate_identity": "matched_budget_content_embedder_candidate",
+      "candidate_ids": [
+        "runtime_sd35_flowmatch",
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "routing_stqr",
+        "routing_uniform_control"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "high_frequency_candidate",
+          "values": [
+            "hf_sparse_tail"
+          ]
+        },
+        {
+          "parameter_id": "low_frequency_candidate",
+          "values": [
+            "lf_low_pass"
+          ]
+        },
+        {
+          "parameter_id": "adaptive_router_candidate",
+          "values": [
+            "routing_stqr"
+          ]
+        },
+        {
+          "parameter_id": "disabled_uniform_control_candidate",
+          "values": [
+            "routing_uniform_control"
+          ]
+        },
+        {
+          "parameter_id": "content_relative_l2",
+          "values": [
+            "3/250"
+          ]
+        },
+        {
+          "parameter_id": "mixing_coefficients",
+          "values": [
+            "1/4",
+            "1/2",
+            "3/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "d6cff9c203b25ef227b8ce5d46b761cc5b1b9e54b1d15e7c3f7e3a205933ab1c",
+      "paired_ablation_identity": "single_branch_embedding_ablation",
+      "negative_control_case_ids": [
+        "hf_only",
+        "lf_only",
+        "routing_uniform_control"
+      ],
+      "metric_ids": [
+        "realized_total_relative_l2",
+        "matched_budget_quality_delta"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "realized_total_relative_l2",
+          "comparison": "less_or_equal",
+          "threshold": 0.012
+        },
+        {
+          "metric_id": "matched_budget_quality_delta",
+          "comparison": "less_or_equal",
+          "threshold": 0.012
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "routing_trace",
+        "branch_score_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "content_router",
+        "lf_carrier",
+        "hf_carrier"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control",
+        "hf_only",
+        "lf_only",
+        "lf_hf_disabled_uniform_control",
+        "lf_hf_routed_combination"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "lf_detector",
+      "scientific_question_id": "blind_low_frequency_key_attribution",
+      "development_case_id": "development_low_frequency_detection",
+      "candidate_selection_case_id": "candidate_selection_low_frequency_detection",
+      "candidate_identity": "blind_low_frequency_detector_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "lf_low_pass"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "detector_candidate",
+          "values": [
+            "lf_low_pass"
+          ]
+        }
+      ],
+      "candidate_config_digest": "2c03066e8434dcd93af6b62f8a1b3c660c9630531f2cca38dcbdea0f0afa5c57",
+      "paired_ablation_identity": "low_frequency_detector_disabled_ablation",
+      "negative_control_case_ids": [
+        "wrong_key",
+        "unwatermarked",
+        "content_disabled"
+      ],
+      "metric_ids": [
+        "lf_tpr_at_selection_fpr",
+        "lf_wrong_key_rate"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "lf_tpr_at_selection_fpr",
+          "comparison": "greater_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "lf_wrong_key_rate",
+          "comparison": "less_than",
+          "threshold": 0.5
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "detector_trace",
+        "branch_score_trace",
+        "threshold_trace",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "key_schedule"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control",
+        "lf_only",
+        "lf_hf_disabled_uniform_control",
+        "lf_hf_routed_combination"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "hf_detector",
+      "scientific_question_id": "blind_high_frequency_key_attribution",
+      "development_case_id": "development_high_frequency_detection",
+      "candidate_selection_case_id": "candidate_selection_high_frequency_detection",
+      "candidate_identity": "blind_high_frequency_detector_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "hf_sparse_tail"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "detector_candidate",
+          "values": [
+            "hf_sparse_tail"
+          ]
+        }
+      ],
+      "candidate_config_digest": "5663ca14be496c8d33eb7c1975e8375638ec44ee5279ec2abf0bd58560cb4149",
+      "paired_ablation_identity": "high_frequency_detector_disabled_ablation",
+      "negative_control_case_ids": [
+        "wrong_key",
+        "unwatermarked"
+      ],
+      "metric_ids": [
+        "hf_tpr_at_frozen_fpr",
+        "hf_wrong_key_rate"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "hf_tpr_at_frozen_fpr",
+          "comparison": "greater_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "hf_wrong_key_rate",
+          "comparison": "less_than",
+          "threshold": 0.5
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "detector_trace",
+        "branch_score_trace",
+        "threshold_trace",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "key_schedule"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control",
+        "hf_only",
+        "lf_hf_disabled_uniform_control",
+        "lf_hf_routed_combination"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "content_detector",
+      "scientific_question_id": "standardized_content_combination_non_degradation",
+      "development_case_id": "development_content_detection",
+      "candidate_selection_case_id": "candidate_selection_content_detection",
+      "candidate_identity": "standardized_content_combination_candidate",
+      "candidate_ids": [
+        "hf_sparse_tail",
+        "lf_low_pass",
+        "content_combination_calibrated"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "combination_candidate",
+          "values": [
+            "content_combination_calibrated"
+          ]
+        },
+        {
+          "parameter_id": "combination_functions",
+          "values": [
+            "hf_only_standardized_score",
+            "weighted_hf_lf_standardized_score",
+            "maximum_hf_lf_standardized_score"
+          ]
+        },
+        {
+          "parameter_id": "mixing_coefficients",
+          "values": [
+            "1/4",
+            "1/2",
+            "3/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "db4cf5fc4ff28b8abca407276aa3e9575c1f68ee2405ead26f07c3a6ea7e743c",
+      "paired_ablation_identity": "high_frequency_only_detector_ablation",
+      "negative_control_case_ids": [
+        "hf_only_standardized_score_control",
+        "wrong_key",
+        "unwatermarked"
+      ],
+      "metric_ids": [
+        "combined_tpr",
+        "combined_primary_null_fpr",
+        "hf_non_degradation",
+        "wrong_key_rate"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "combined_tpr",
+          "comparison": "greater_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "combined_primary_null_fpr",
+          "comparison": "less_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "hf_non_degradation",
+          "comparison": "greater_or_equal",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "wrong_key_rate",
+          "comparison": "less_than",
+          "threshold": 0.5
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "detector_trace",
+        "branch_score_trace",
+        "threshold_trace",
+        "key_control_trace",
+        "decision_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "content_embedder",
+        "lf_detector",
+        "hf_detector"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control",
+        "hf_only",
+        "lf_only",
+        "lf_hf_disabled_uniform_control",
+        "lf_hf_routed_combination"
+      ],
+      "geometry_case_ids": []
+    },
+    {
+      "responsibility_id": "qk_geometry_sync",
+      "scientific_question_id": "keyed_query_key_transform_distinguishability",
+      "development_case_id": "development_query_key_geometry_sync",
+      "candidate_selection_case_id": "candidate_selection_query_key_geometry_sync",
+      "candidate_identity": "keyed_query_key_sync_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "runtime_sd35_flowmatch",
+        "qk_relation_similarity"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "relation_candidate",
+          "values": [
+            "qk_relation_similarity"
+          ]
+        },
+        {
+          "parameter_id": "geometry_content_ratio_candidates",
+          "values": [
+            "1/16",
+            "1/8",
+            "1/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "ea6059c81865e03ad4572f8d851f16e5388fd480a868ea8bf6e3b1fb7efc03c0",
+      "paired_ablation_identity": "wrong_geometry_key_sync_ablation",
+      "negative_control_case_ids": [
+        "wrong_geometry_key",
+        "geometry_disabled"
+      ],
+      "metric_ids": [
+        "relation_score_gain",
+        "wrong_key_relation_margin",
+        "quality_delta"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "relation_score_gain",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "wrong_key_relation_margin",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "quality_delta",
+          "comparison": "less_or_equal",
+          "threshold": 0.012
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "geometry_trace",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "key_schedule"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_case_ids": [
+        "identity_transform",
+        "bounded_crop_transform",
+        "bounded_scale_transform",
+        "bounded_rotation_transform",
+        "single_compound_transform",
+        "ambiguous_transform_control",
+        "boundary_transform_control",
+        "extreme_crop_control"
+      ]
+    },
+    {
+      "responsibility_id": "geometric_transform_estimator",
+      "scientific_question_id": "blind_bounded_transform_estimation",
+      "development_case_id": "development_transform_estimation",
+      "candidate_selection_case_id": "candidate_selection_transform_estimation",
+      "candidate_identity": "blind_transform_estimator_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "qk_relation_similarity",
+        "rectification_similarity"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "relation_candidate",
+          "values": [
+            "qk_relation_similarity"
+          ]
+        },
+        {
+          "parameter_id": "estimator_candidate",
+          "values": [
+            "rectification_similarity"
+          ]
+        },
+        {
+          "parameter_id": "geometry_content_ratio_candidates",
+          "values": [
+            "1/16",
+            "1/8",
+            "1/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "fb255dcabc2bab475df4991134e961bb6d1d15498db9a99d06fd756dceee2677",
+      "paired_ablation_identity": "oracle_transform_input_ablation",
+      "negative_control_case_ids": [
+        "identity",
+        "wrong_geometry_key",
+        "ambiguous_transform",
+        "oracle_diagnostic_only"
+      ],
+      "metric_ids": [
+        "rotation_error",
+        "scale_error",
+        "translation_error",
+        "coverage",
+        "residual"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "rotation_error",
+          "comparison": "less_or_equal",
+          "threshold": 16.0
+        },
+        {
+          "metric_id": "scale_error",
+          "comparison": "less_or_equal",
+          "threshold": 0.35
+        },
+        {
+          "metric_id": "translation_error",
+          "comparison": "less_or_equal",
+          "threshold": 0.28
+        },
+        {
+          "metric_id": "coverage",
+          "comparison": "greater_or_equal",
+          "threshold": 0.45
+        },
+        {
+          "metric_id": "residual",
+          "comparison": "less_or_equal",
+          "threshold": 1.0
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "geometry_trace",
+        "key_control_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "qk_geometry_sync"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 32,
+      "content_branch_ids": [],
+      "geometry_case_ids": [
+        "identity_transform",
+        "bounded_crop_transform",
+        "bounded_scale_transform",
+        "bounded_rotation_transform",
+        "single_compound_transform",
+        "ambiguous_transform_control",
+        "boundary_transform_control",
+        "extreme_crop_control"
+      ]
+    },
+    {
+      "responsibility_id": "geometry_reliability",
+      "scientific_question_id": "fail_closed_geometry_reliability",
+      "development_case_id": "development_geometry_reliability",
+      "candidate_selection_case_id": "candidate_selection_geometry_reliability",
+      "candidate_identity": "fail_closed_geometry_reliability_candidate",
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "qk_relation_similarity",
+        "rectification_similarity"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "relation_candidate",
+          "values": [
+            "qk_relation_similarity"
+          ]
+        },
+        {
+          "parameter_id": "reliability_candidate",
+          "values": [
+            "rectification_similarity"
+          ]
+        },
+        {
+          "parameter_id": "geometry_content_ratio_candidates",
+          "values": [
+            "1/16",
+            "1/8",
+            "1/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "477a99a0616969b2f6605f9c2b32309d595024d21c06348260c1d1bf00d25cf0",
+      "paired_ablation_identity": "geometry_reliability_disabled_ablation",
+      "negative_control_case_ids": [
+        "wrong_geometry_key",
+        "low_coverage",
+        "boundary_solution",
+        "non_finite_metric"
+      ],
+      "metric_ids": [
+        "reliable_accept_rate",
+        "unreliable_reject_rate",
+        "false_reliable_rate"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "reliable_accept_rate",
+          "comparison": "greater_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "unreliable_reject_rate",
+          "comparison": "greater_than",
+          "threshold": 0.5
+        },
+        {
+          "metric_id": "false_reliable_rate",
+          "comparison": "less_than",
+          "threshold": 0.5
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "geometry_trace",
+        "decision_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "geometric_transform_estimator"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [],
+      "geometry_case_ids": [
+        "identity_transform",
+        "bounded_crop_transform",
+        "bounded_scale_transform",
+        "bounded_rotation_transform",
+        "single_compound_transform",
+        "ambiguous_transform_control",
+        "boundary_transform_control",
+        "extreme_crop_control"
+      ]
+    },
+    {
+      "responsibility_id": "image_rectifier",
+      "scientific_question_id": "coordinate_preserving_rectification_gain",
+      "development_case_id": "development_image_rectification",
+      "candidate_selection_case_id": "candidate_selection_image_rectification",
+      "candidate_identity": "coordinate_preserving_rectifier_candidate",
+      "candidate_ids": [
+        "rectification_similarity"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "rectifier_candidate",
+          "values": [
+            "rectification_similarity"
+          ]
+        },
+        {
+          "parameter_id": "geometry_content_ratio_candidates",
+          "values": [
+            "1/16",
+            "1/8",
+            "1/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "6df2a3871bfa29084b3f45fbb29d61673eb0e91fc9b1c430b737326c2462ae75",
+      "paired_ablation_identity": "rectification_disabled_ablation",
+      "negative_control_case_ids": [
+        "identity_warp",
+        "rectification_disabled",
+        "oracle_diagnostic_only"
+      ],
+      "metric_ids": [
+        "rectification_quality",
+        "same_detector_score_delta",
+        "valid_support"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "rectification_quality",
+          "comparison": "less_or_equal",
+          "threshold": 1.0
+        },
+        {
+          "metric_id": "same_detector_score_delta",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "valid_support",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "geometry_trace",
+        "detector_trace",
+        "decision_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "geometric_transform_estimator",
+        "geometry_reliability"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [],
+      "geometry_case_ids": [
+        "identity_transform",
+        "bounded_crop_transform",
+        "bounded_scale_transform",
+        "bounded_rotation_transform",
+        "single_compound_transform",
+        "ambiguous_transform_control",
+        "boundary_transform_control",
+        "extreme_crop_control"
+      ]
+    },
+    {
+      "responsibility_id": "conditional_recovery_decision",
+      "scientific_question_id": "same_detector_conditional_recovery_fpr_safety",
+      "development_case_id": "development_conditional_recovery",
+      "candidate_selection_case_id": "candidate_selection_conditional_recovery",
+      "candidate_identity": "same_detector_conditional_recovery_candidate",
+      "candidate_ids": [
+        "joint_conditional_recovery"
+      ],
+      "candidate_parameter_bindings": [
+        {
+          "parameter_id": "joint_candidate",
+          "values": [
+            "joint_conditional_recovery"
+          ]
+        },
+        {
+          "parameter_id": "geometry_content_ratio_candidates",
+          "values": [
+            "1/16",
+            "1/8",
+            "1/4"
+          ]
+        }
+      ],
+      "candidate_config_digest": "0e4c229ac2e8135fd2dae7306436a555552b6557eadd3db36258a6f5b42146d4",
+      "paired_ablation_identity": "raw_content_decision_ablation",
+      "negative_control_case_ids": [
+        "raw_only",
+        "geometry_always",
+        "geometry_disabled",
+        "oracle_diagnostic_only"
+      ],
+      "metric_ids": [
+        "incremental_tpr",
+        "end_to_end_fpr",
+        "trigger_rate",
+        "false_rescue_rate"
+      ],
+      "signal_criteria": [
+        {
+          "metric_id": "incremental_tpr",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "end_to_end_fpr",
+          "comparison": "equal",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "trigger_rate",
+          "comparison": "greater_than",
+          "threshold": 0.0
+        },
+        {
+          "metric_id": "false_rescue_rate",
+          "comparison": "equal",
+          "threshold": 0.0
+        }
+      ],
+      "record_field_names": [
+        "responsibility_id",
+        "scientific_question_id",
+        "development_case_id",
+        "candidate_identity",
+        "candidate_config_digest",
+        "paired_ablation_identity",
+        "module_outcome",
+        "candidate_recommendation",
+        "recommendation_reason",
+        "evidence_record_ids",
+        "detector_trace",
+        "branch_score_trace",
+        "geometry_trace",
+        "threshold_trace",
+        "key_control_trace",
+        "decision_trace",
+        "provenance_trace"
+      ],
+      "prerequisite_responsibility_ids": [
+        "content_detector",
+        "qk_geometry_sync",
+        "geometric_transform_estimator",
+        "geometry_reliability",
+        "image_rectifier"
+      ],
+      "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
+      "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
+      "allowed_module_outcomes": [
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+        "implementation_blocked",
+        "resource_blocked"
+      ],
+      "scientific_source_cluster_scale": 16,
+      "content_branch_ids": [
+        "clean_control",
+        "hf_only",
+        "lf_only",
+        "lf_hf_disabled_uniform_control",
+        "lf_hf_routed_combination"
+      ],
+      "geometry_case_ids": [
+        "identity_transform",
+        "bounded_crop_transform",
+        "bounded_scale_transform",
+        "bounded_rotation_transform",
+        "single_compound_transform",
+        "ambiguous_transform_control",
+        "boundary_transform_control",
+        "extreme_crop_control"
+      ]
+    }
+  ],
+  "module_outcomes": {
+    "allowed": [
+      "mechanism_signal_observed",
+      "mechanism_signal_not_observed",
+      "implementation_blocked",
+      "resource_blocked"
+    ],
+    "candidate_recommendations": [
+      "candidate_worth_further_selection",
+      "candidate_not_recommended_for_selection"
+    ]
+  },
+  "scientific_claim_boundary": "preliminary_development_signal_only_no_promotion_or_scientific_claim"
+}

@@ -36,6 +36,10 @@ from experiments.protocol.internal_splits import (
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
 DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.3"
+THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID = (
+    "ceg_wm_thirteen_module_mechanism_screening"
+)
+THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_VERSION = "1.0.0"
 SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
@@ -57,6 +61,46 @@ CHEAP_DETECTION_RESPONSIBILITIES = (
 )
 MAXIMUM_UNIT_DURATION_SECONDS = 900
 MAXIMUM_WIRING_DURATION_SECONDS = 2100
+
+
+@dataclass(frozen=True, slots=True)
+class _DevelopmentProtocolProfile:
+    protocol_id: str
+    protocol_version: str
+    scientific_source_cluster_scales: tuple[int, ...]
+    detector_source_cluster_count: int
+    routing_reference_source_cluster_count: int
+    paired_ablation_enabled: bool
+
+
+_DEVELOPMENT_PROTOCOL_PROFILES = {
+    PROTOCOL_ID: _DevelopmentProtocolProfile(
+        protocol_id=PROTOCOL_ID,
+        protocol_version=DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION,
+        scientific_source_cluster_scales=SCIENTIFIC_SOURCE_CLUSTER_SCALES,
+        detector_source_cluster_count=CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
+        routing_reference_source_cluster_count=CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
+        paired_ablation_enabled=True,
+    ),
+    THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID: _DevelopmentProtocolProfile(
+        protocol_id=THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID,
+        protocol_version=THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_VERSION,
+        scientific_source_cluster_scales=(
+            BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+            CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
+        ),
+        detector_source_cluster_count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+        routing_reference_source_cluster_count=CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
+        paired_ablation_enabled=False,
+    ),
+}
+
+
+def _development_protocol_profile(protocol_id: str) -> _DevelopmentProtocolProfile:
+    try:
+        return _DEVELOPMENT_PROTOCOL_PROFILES[protocol_id]
+    except KeyError as exc:
+        raise ValueError("development_protocol_identity_unregistered") from exc
 
 DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT = 4
 DEVELOPMENT_THRESHOLD_ROLE = "development_exploratory"
@@ -1025,9 +1069,10 @@ class DevelopmentModuleStudy:
         )
 
 
-def _expected_module_scale(responsibility_id: str) -> int:
+def _expected_module_scale(responsibility_id: str, protocol_id: str) -> int:
+    profile = _development_protocol_profile(protocol_id)
     if responsibility_id in CHEAP_DETECTION_RESPONSIBILITIES:
-        return CHEAP_DETECTION_SOURCE_CLUSTER_COUNT
+        return profile.detector_source_cluster_count
     if responsibility_id in CRITICAL_PAIR_RESPONSIBILITIES:
         return CRITICAL_PAIR_SOURCE_CLUSTER_COUNT
     return BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
@@ -1036,6 +1081,8 @@ def _expected_module_scale(responsibility_id: str) -> int:
 def validate_development_module_matrix(
     matrix: Sequence[DevelopmentModuleStudy],
     geometry_case_ids: frozenset[str],
+    *,
+    protocol_id: str = PROTOCOL_ID,
 ) -> tuple[str, ...]:
     violations: list[str] = []
     responsibilities = tuple(item.responsibility_id for item in matrix)
@@ -1126,7 +1173,9 @@ def validate_development_module_matrix(
             violations.append(f"{prefix}:module_outcome_rule_invalid")
         if item.allowed_module_outcomes != MODULE_OUTCOMES:
             violations.append(f"{prefix}:allowed_module_outcomes_invalid")
-        if item.scientific_source_cluster_scale != _expected_module_scale(prefix):
+        if item.scientific_source_cluster_scale != _expected_module_scale(
+            prefix, protocol_id
+        ):
             violations.append(f"{prefix}:scientific_source_cluster_scale_invalid")
         if set(item.content_branch_ids) - set(CONTENT_BRANCH_IDS):
             violations.append(f"{prefix}:content_branch_identity_invalid")
@@ -1350,7 +1399,10 @@ class DevelopmentStudyUnit:
 
 def _build_study_unit_roster(
     matrix: Sequence[DevelopmentModuleStudy],
+    *,
+    protocol_id: str = PROTOCOL_ID,
 ) -> tuple[DevelopmentStudyUnit, ...]:
+    profile = _development_protocol_profile(protocol_id)
     by_responsibility = {item.responsibility_id: item for item in matrix}
     atomic_descriptors: list[tuple[str, str, int, str, str]] = []
     atomic_descriptors.extend(
@@ -1421,38 +1473,41 @@ def _build_study_unit_roster(
             "development_routing_reference_fit",
             NOT_APPLICABLE_GEOMETRY_CASE_ID,
         )
-        for cluster_ordinal in range(CHEAP_DETECTION_SOURCE_CLUSTER_COUNT)
+        for cluster_ordinal in range(profile.routing_reference_source_cluster_count)
     )
     append_responsibility_cases(
         "content_router", branches=("lf_hf_routed_combination",)
     )
-    append_responsibility_cases(
-        "content_router",
-        branches=("lf_hf_disabled_uniform_control",),
-        count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-        phase="development_paired_ablation",
-    )
+    if profile.paired_ablation_enabled:
+        append_responsibility_cases(
+            "content_router",
+            branches=("lf_hf_disabled_uniform_control",),
+            count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+            phase="development_paired_ablation",
+        )
     append_responsibility_cases(
         "content_embedder", branches=("lf_hf_routed_combination",)
     )
-    append_responsibility_cases(
-        "content_embedder",
-        branches=(
-            ("hf_only",) * (BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT // 2)
-            + ("lf_only",) * (BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT // 2)
-        ),
-        count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-        phase="development_paired_ablation",
-    )
+    if profile.paired_ablation_enabled:
+        append_responsibility_cases(
+            "content_embedder",
+            branches=(
+                ("hf_only",) * (BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT // 2)
+                + ("lf_only",) * (BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT // 2)
+            ),
+            count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+            phase="development_paired_ablation",
+        )
     append_responsibility_cases(
         "content_detector", branches=("lf_hf_routed_combination",)
     )
-    append_responsibility_cases(
-        "content_detector",
-        branches=("hf_only",),
-        count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-        phase="development_paired_ablation",
-    )
+    if profile.paired_ablation_enabled:
+        append_responsibility_cases(
+            "content_detector",
+            branches=("hf_only",),
+            count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+            phase="development_paired_ablation",
+        )
     append_responsibility_cases("geometric_transform_estimator")
     append_responsibility_cases("geometry_reliability")
     append_responsibility_cases("image_rectifier")
@@ -1503,15 +1558,24 @@ class DevelopmentStudyBudget:
         self,
         matrix: Sequence[DevelopmentModuleStudy],
         roster: Sequence[DevelopmentStudyUnit],
+        *,
+        protocol_id: str = PROTOCOL_ID,
     ) -> tuple[str, ...]:
         violations: list[str] = []
+        try:
+            profile = _development_protocol_profile(protocol_id)
+        except ValueError:
+            return ("development_protocol_identity_unregistered",)
         if self.preflight_source_cluster_count != PREFLIGHT_SOURCE_CLUSTER_COUNT:
             violations.append("study_budget_preflight_count_invalid")
         if self.wiring_source_cluster_count != WIRING_SOURCE_CLUSTER_COUNT:
             violations.append("study_budget_wiring_count_invalid")
         if self.wiring_counts_as_scientific_coverage is not False:
             violations.append("wiring_scientific_coverage_forbidden")
-        if self.scientific_source_cluster_scales != SCIENTIFIC_SOURCE_CLUSTER_SCALES:
+        if (
+            self.scientific_source_cluster_scales
+            != profile.scientific_source_cluster_scales
+        ):
             violations.append("scientific_source_cluster_scales_invalid")
         if self.maximum_record_attempts_per_unit != MAXIMUM_RECORD_ATTEMPTS:
             violations.append("maximum_record_attempts_per_unit_invalid")
@@ -1536,7 +1600,7 @@ class DevelopmentStudyBudget:
         expected_operational_units = (
             PREFLIGHT_SOURCE_CLUSTER_COUNT
             + WIRING_SOURCE_CLUSTER_COUNT
-            + CHEAP_DETECTION_SOURCE_CLUSTER_COUNT
+            + profile.routing_reference_source_cluster_count
         )
         if self.maximum_operational_units != expected_operational_units:
             violations.append("maximum_operational_units_invalid")
@@ -1556,7 +1620,9 @@ class DevelopmentStudyBudget:
             violations.append("unit_roster_digest_invalid")
         if tuple(unit.unit_index for unit in roster) != tuple(range(len(roster))):
             violations.append("unit_roster_index_invalid")
-        if tuple(roster) != _build_study_unit_roster(matrix):
+        if tuple(roster) != _build_study_unit_roster(
+            matrix, protocol_id=protocol_id
+        ):
             violations.append("unit_roster_frozen_order_or_case_mapping_invalid")
         final_unit_by_responsibility = {
             responsibility_id: max(
@@ -1600,11 +1666,15 @@ class DevelopmentStudyBudget:
             for responsibility_id, cluster_ids in observed_clusters.items()
         } != expected_cluster_counts:
             violations.append("unit_roster_module_cluster_scale_mismatch")
-        paired_responsibilities = {
-            "content_router",
-            "content_embedder",
-            "content_detector",
-        }
+        paired_responsibilities = (
+            {
+                "content_router",
+                "content_embedder",
+                "content_detector",
+            }
+            if profile.paired_ablation_enabled
+            else set()
+        )
         expected_unit_counts = {
             item.responsibility_id: (
                 item.scientific_source_cluster_scale
@@ -1626,9 +1696,14 @@ class DevelopmentStudyBudget:
         }
         if observed_unit_counts != expected_unit_counts:
             violations.append("unit_roster_scientific_case_count_invalid")
+        expected_paired_ablation_count = (
+            3 * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT
+            if profile.paired_ablation_enabled
+            else 0
+        )
         if sum(
             unit.phase == "development_paired_ablation" for unit in roster
-        ) != 3 * BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT:
+        ) != expected_paired_ablation_count:
             violations.append("unit_roster_paired_ablation_count_invalid")
         observed_atomic = {
             (
@@ -1700,7 +1775,11 @@ class DevelopmentRoutingReferenceCrossFitPolicy:
     invalidation_semantics: str
     invalid_for_splits: tuple[str, ...]
 
-    def validate(self) -> tuple[str, ...]:
+    def validate(
+        self,
+        *,
+        expected_source_cluster_count: int = CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
+    ) -> tuple[str, ...]:
         violations: list[str] = []
         if self.source_split != DEVELOPMENT_SPLIT:
             violations.append("routing_reference_source_split_invalid")
@@ -1708,7 +1787,7 @@ class DevelopmentRoutingReferenceCrossFitPolicy:
             violations.append("routing_reference_role_invalid")
         if self.fold_count != DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT:
             violations.append("routing_reference_fold_count_invalid")
-        if self.source_cluster_count != CHEAP_DETECTION_SOURCE_CLUSTER_COUNT:
+        if self.source_cluster_count != expected_source_cluster_count:
             violations.append("routing_reference_cluster_count_invalid")
         if self.quantile_rule != "strictly_positive_exact_nearest_rank_p95":
             violations.append("routing_reference_quantile_rule_invalid")
@@ -1838,15 +1917,24 @@ class FrozenDevelopmentExplorationProtocol:
         violations: list[str] = []
         if self.schema_version != SCHEMA_VERSION:
             violations.append("development_schema_version_invalid")
-        if self.protocol_id != PROTOCOL_ID:
+        try:
+            profile = _development_protocol_profile(self.protocol_id)
+        except ValueError:
             violations.append("development_protocol_id_invalid")
-        if self.protocol_version != DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION:
+            return tuple(violations)
+        if self.protocol_version != profile.protocol_version:
             violations.append("development_protocol_version_invalid")
         violations.extend(self.split_policy.validate())
         violations.extend(self.split_isolation.validate())
         violations.extend(self.preflight.validate())
         violations.extend(self.provisional_threshold_cross_fit.validate())
-        violations.extend(self.development_routing_reference_cross_fit.validate())
+        violations.extend(
+            self.development_routing_reference_cross_fit.validate(
+                expected_source_cluster_count=(
+                    profile.routing_reference_source_cluster_count
+                )
+            )
+        )
         violations.extend(self.development_geometry_reliability_cross_fit.validate())
         violations.extend(self.development_rescue_threshold_cross_fit.validate())
         violations.extend(
@@ -1858,8 +1946,20 @@ class FrozenDevelopmentExplorationProtocol:
         geometry_ids = frozenset(
             (*[item.case_id for item in self.geometry_study.operation_cases], *self.geometry_study.negative_control_case_ids)
         )
-        violations.extend(validate_development_module_matrix(self.module_matrix, geometry_ids))
-        violations.extend(self.study_budget.validate(self.module_matrix, self.unit_roster))
+        violations.extend(
+            validate_development_module_matrix(
+                self.module_matrix,
+                geometry_ids,
+                protocol_id=self.protocol_id,
+            )
+        )
+        violations.extend(
+            self.study_budget.validate(
+                self.module_matrix,
+                self.unit_roster,
+                protocol_id=self.protocol_id,
+            )
+        )
         if self.module_outcomes != MODULE_OUTCOMES:
             violations.append("development_module_outcomes_invalid")
         if self.candidate_recommendations != CANDIDATE_RECOMMENDATIONS:
@@ -2347,7 +2447,9 @@ def load_frozen_development_exploration_protocol(
             "threshold_authority_public_key_relation",
         ),
     )
-    unit_roster = _build_study_unit_roster(matrix_tuple)
+    unit_roster = _build_study_unit_roster(
+        matrix_tuple, protocol_id=raw["protocol_id"]
+    )
 
     budget_raw = _require_mapping(raw["study_budget"], "study_budget")
     budget_keys = frozenset(
@@ -2958,8 +3060,6 @@ class FrozenDevelopmentCrossFitPlan:
             violations.append("cross_fit_responsibility_invalid")
         if self.source_split != DEVELOPMENT_SPLIT:
             violations.append("cross_fit_plan_split_invalid")
-        if self.source_cluster_count not in SCIENTIFIC_SOURCE_CLUSTER_SCALES:
-            violations.append("cross_fit_plan_scientific_scale_invalid")
         if type(self.execution_intent_authority) is not (
             FrozenDevelopmentExecutionIntentAuthority
         ):
@@ -2994,19 +3094,28 @@ class FrozenDevelopmentCrossFitPlan:
         except ValueError:
             violations.append("cross_fit_manifest_cluster_identity_not_unique")
             manifest_identities = ()
-        expected_cluster_ids = tuple(
-            identity.source_cluster_id for identity in manifest_identities
-        )
+        try:
+            expected_cluster_ids = development_cross_fit_source_cluster_ids(
+                self.execution_intent_authority,
+                responsibility_id=self.responsibility_id,
+            )
+        except (TypeError, ValueError):
+            violations.append("cross_fit_frozen_responsibility_roster_invalid")
+            expected_cluster_ids = ()
         if self.source_cluster_ids != expected_cluster_ids:
             violations.append("cross_fit_source_cluster_roster_invalid")
+        identity_by_source_cluster = {
+            identity.source_cluster_id: identity for identity in manifest_identities
+        }
+        expected_identities = tuple(
+            identity_by_source_cluster[source_cluster_id]
+            for source_cluster_id in expected_cluster_ids
+            if source_cluster_id in identity_by_source_cluster
+        )
         if self.source_cluster_identity_digest != _canonical_digest(
-            tuple(asdict(identity) for identity in manifest_identities)
+            tuple(asdict(identity) for identity in expected_identities)
         ):
             violations.append("cross_fit_source_cluster_identity_digest_invalid")
-        if self.source_cluster_identity_digest != (
-            self.execution_intent_authority.source_cluster_identity_digest
-        ):
-            violations.append("cross_fit_source_cluster_identity_intent_mismatch")
         if self.source_cluster_count != len(expected_cluster_ids):
             violations.append("cross_fit_source_cluster_count_manifest_mismatch")
         if self.threshold_role != DEVELOPMENT_THRESHOLD_ROLE:
@@ -3037,19 +3146,71 @@ class FrozenDevelopmentCrossFitPlan:
         return tuple(dict.fromkeys(violations))
 
 
+def development_cross_fit_source_cluster_ids(
+    execution_intent_authority: FrozenDevelopmentExecutionIntentAuthority,
+    *,
+    responsibility_id: str,
+) -> tuple[str, ...]:
+    """Return the exact protocol-frozen cluster subset for one responsibility."""
+
+    if type(execution_intent_authority) is not FrozenDevelopmentExecutionIntentAuthority:
+        raise TypeError("cross_fit_execution_intent_exact_type_required")
+    if responsibility_id not in REQUIRED_METHOD_RESPONSIBILITIES:
+        raise ValueError("cross_fit_responsibility_invalid")
+    protocol = execution_intent_authority.protocol
+    ordinals = tuple(
+        sorted(
+            {
+                unit.source_cluster_ordinal
+                for unit in protocol.unit_roster
+                if unit.responsibility_id == responsibility_id
+                and unit.phase not in OPERATIONAL_UNIT_PHASES
+            }
+        )
+    )
+    study = next(
+        item
+        for item in protocol.module_matrix
+        if item.responsibility_id == responsibility_id
+    )
+    if len(ordinals) != study.scientific_source_cluster_scale:
+        raise ValueError("cross_fit_frozen_responsibility_roster_invalid")
+    manifest_identities = _manifest_cluster_identities(
+        execution_intent_authority.input_manifest
+    )
+    if not ordinals or max(ordinals) >= len(manifest_identities):
+        raise ValueError("cross_fit_frozen_responsibility_roster_unavailable")
+    return tuple(
+        manifest_identities[ordinal].source_cluster_id for ordinal in ordinals
+    )
+
+
 def build_development_cross_fit_plan(
     *,
     responsibility_id: str,
     execution_intent_authority: FrozenDevelopmentExecutionIntentAuthority,
     expected_execution_intent_authority_digest: str,
-    expected_source_cluster_count: int,
+    expected_source_cluster_count: int | None = None,
+    expected_source_cluster_ids: Sequence[str] | None = None,
 ) -> FrozenDevelopmentCrossFitPlan:
     if expected_source_cluster_count == WIRING_SOURCE_CLUSTER_COUNT:
         raise ValueError("wiring_clusters_do_not_count_as_scientific_coverage")
-    if expected_source_cluster_count not in SCIENTIFIC_SOURCE_CLUSTER_SCALES:
-        raise ValueError("development_scientific_source_cluster_scale_invalid")
     if type(execution_intent_authority) is not FrozenDevelopmentExecutionIntentAuthority:
         raise TypeError("cross_fit_execution_intent_exact_type_required")
+    frozen_cluster_ids = development_cross_fit_source_cluster_ids(
+        execution_intent_authority,
+        responsibility_id=responsibility_id,
+    )
+    if expected_source_cluster_count is not None and (
+        expected_source_cluster_count != len(frozen_cluster_ids)
+    ):
+        raise ValueError("development_cross_fit_source_cluster_count_mismatch")
+    if expected_source_cluster_ids is not None and (
+        tuple(expected_source_cluster_ids) != frozen_cluster_ids
+    ):
+        raise ValueError("development_cross_fit_source_cluster_roster_mismatch")
+    if expected_source_cluster_count is None and expected_source_cluster_ids is None:
+        raise ValueError("development_cross_fit_expected_roster_missing")
     intent_violations = execution_intent_authority.validate()
     if intent_violations:
         raise ValueError(",".join(intent_violations))
@@ -3071,10 +3232,15 @@ def build_development_cross_fit_plan(
         violations = assignment.identity.validate()
         if violations:
             raise ValueError(",".join(violations))
-    cluster_identities = _manifest_cluster_identities(manifest)
-    cluster_ids = tuple(identity.source_cluster_id for identity in cluster_identities)
-    if len(cluster_ids) != expected_source_cluster_count:
-        raise ValueError("development_cross_fit_source_cluster_count_mismatch")
+    manifest_identities = _manifest_cluster_identities(manifest)
+    identity_by_source_cluster = {
+        identity.source_cluster_id: identity for identity in manifest_identities
+    }
+    cluster_ids = frozen_cluster_ids
+    cluster_identities = tuple(
+        identity_by_source_cluster[source_cluster_id]
+        for source_cluster_id in cluster_ids
+    )
     folds: list[DevelopmentCrossFitFold] = []
     for fold_index in range(DEVELOPMENT_THRESHOLD_CROSS_FIT_FOLD_COUNT):
         probes = tuple(

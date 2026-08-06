@@ -23,6 +23,7 @@ from experiments.protocol.development_exploration import (
     DEVELOPMENT_DEPENDENCY_LAYERS,
     build_development_cross_fit_plan,
     create_frozen_development_execution_intent_authority,
+    development_cross_fit_source_cluster_ids,
     load_frozen_development_exploration_protocol,
 )
 from experiments.runners.development_exploration import DevelopmentExplorationRunner
@@ -50,8 +51,12 @@ from runtime import (
 from main import identify_root_key
 
 
-PROTOCOL_PATH = Path("configs/experiments/development_module_exploration.json")
-PROMPT_ROSTER_PATH = Path("configs/experiments/development_exploration_prompt_roster.json")
+PROTOCOL_PATH = Path(
+    "configs/experiments/thirteen_module_mechanism_screening.json"
+)
+PROMPT_ROSTER_PATH = Path(
+    "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
+)
 COMPONENT_PATH = Path("configs/experiments/internal_execution_components.json")
 RUNTIME_PATH = Path("configs/runtime/runtime_sd35_flowmatch.json")
 
@@ -156,6 +161,7 @@ def execute_development_exploration_session(
     run_id: str,
     session_id: str,
     environment: Mapping[str, str],
+    maximum_wiring_clusters: int | None = None,
 ) -> tuple[int, dict[str, object]]:
     """Execute consecutive currently reachable frozen units and persist each one."""
 
@@ -166,8 +172,20 @@ def execute_development_exploration_session(
     hf_token = environment.get("HF_TOKEN")
     if not root_key or not hf_token:
         raise DevelopmentEntrypointError("HF_TOKEN and CEG_WM_ROOT_KEY are required")
+    if maximum_wiring_clusters is not None and (
+        type(maximum_wiring_clusters) is not int
+        or not 1 <= maximum_wiring_clusters <= 8
+    ):
+        raise DevelopmentEntrypointError("maximum wiring cluster count is invalid")
     protocol = load_frozen_development_exploration_protocol(repository / PROTOCOL_PATH)
     prompts = load_development_prompt_roster(repository / PROMPT_ROSTER_PATH)
+    required_prompt_count = 1 + max(
+        unit.source_cluster_ordinal for unit in protocol.unit_roster
+    )
+    if len(prompts.entries) != required_prompt_count:
+        raise DevelopmentEntrypointError(
+            "prompt roster differs from the active protocol cluster requirement"
+        )
     manifest, public_key_roster = build_development_manifest_and_key_roster(protocol, prompts, root_key)
     authority = create_frozen_development_execution_intent_authority(
         protocol,
@@ -264,12 +282,22 @@ def execute_development_exploration_session(
             width=session.image_width,
         )
         operational_complete = True
+        wiring_clusters_committed_this_session = 0
         while session_cursor.next_unit_index < len(protocol.unit_roster):
             unit = protocol.unit_roster[session_cursor.next_unit_index]
             if unit.phase not in {
                 "development_environment_preflight",
                 "development_full_chain_wiring",
             }:
+                break
+            if (
+                unit.phase == "development_full_chain_wiring"
+                and maximum_wiring_clusters is not None
+                and wiring_clusters_committed_this_session
+                >= maximum_wiring_clusters
+            ):
+                operational_complete = False
+                termination_reason = "maximum_wiring_clusters_reached"
                 break
             now = int(time.time())
             if now - started_epoch >= SOFT_STOP_SECONDS:
@@ -313,12 +341,17 @@ def execute_development_exploration_session(
                 now_epoch_seconds=max(now + 1, int(time.time())),
                 raw_secret_values=(root_key, hf_token),
             )
+            if unit.phase == "development_full_chain_wiring":
+                wiring_clusters_committed_this_session += 1
         cross_fit_plans = {
             responsibility_id: build_development_cross_fit_plan(
                 responsibility_id=responsibility_id,
                 execution_intent_authority=authority,
                 expected_execution_intent_authority_digest=authority.authority_digest,
-                expected_source_cluster_count=len(authority.input_manifest.assignments),
+                expected_source_cluster_ids=development_cross_fit_source_cluster_ids(
+                    authority,
+                    responsibility_id=responsibility_id,
+                ),
             )
             for responsibility_id in (
                 "lf_detector",

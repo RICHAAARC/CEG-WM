@@ -88,8 +88,10 @@ def load_development_prompt_roster(path: str | Path) -> FrozenDevelopmentPromptR
     if any(type(document[key]) is not str or not document[key] for key in ("roster_id", "seed_namespace")):
         raise DevelopmentInputError("development prompt roster identity is invalid")
     raw_entries = document["entries"]
-    if type(raw_entries) is not list or len(raw_entries) != 64:
-        raise DevelopmentInputError("development prompt roster must freeze 64 clusters")
+    if type(raw_entries) is not list or len(raw_entries) not in {32, 64}:
+        raise DevelopmentInputError(
+            "development prompt roster must freeze 32 or 64 clusters"
+        )
     entries: list[DevelopmentPrompt] = []
     for raw in raw_entries:
         if type(raw) is not dict or set(raw) != {"cluster_ordinal", "generation_seed", "prompt"}:
@@ -103,7 +105,7 @@ def load_development_prompt_roster(path: str | Path) -> FrozenDevelopmentPromptR
         ):
             raise DevelopmentInputError("development prompt entry is invalid")
         entries.append(entry)
-    if tuple(item.cluster_ordinal for item in entries) != tuple(range(64)):
+    if tuple(item.cluster_ordinal for item in entries) != tuple(range(len(entries))):
         raise DevelopmentInputError("development prompt cluster order drifted")
     return FrozenDevelopmentPromptRoster(
         roster_id=document["roster_id"],

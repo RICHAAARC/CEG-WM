@@ -36,22 +36,29 @@ fields、dependency stop rule、四项 module outcome 和独立的两项 candida
 recommendation。outcome 只描述 mechanism signal、implementation block 或
 resource block；recommendation 不等于晋升，也不授权 candidate-selection。
 
-先执行 2-cluster 环境、身份和吞吐 preflight；8-cluster wiring smoke 也不计入
-科学覆盖。冻结顺序为 key schedule；HF carrier 与 HF detector；LF carrier 与 LF
-detector；Q/K sync；64 个不计科学覆盖的 routing reference；router、embedder 与
-content detector；estimator、reliability 与 rectifier；conditional recovery。
-普通职责各覆盖 16 个 source clusters，Q/K sync 与 estimator 各覆盖 32，三个
-detector 各覆盖 64，共 384 个核心科学 unit；只有 router、embedder 与 content
-detector 各增加 16 个同 cluster paired-ablation unit，因此科学总数精确为 432。
-content detector 的 64 个核心 unit 全部使用 routed LF/HF combined，作为完整
-cross-fit 输入；source cluster 0--15 另各有一个 HF-only 配对 unit，HF 非退化只在
-这 16 个冻结配对 cluster 上比较，不缩减 combined 的 64-cluster cross-fit。
+当前活动协议为 `ceg_wm_thirteen_module_mechanism_screening`。先执行 2-cluster
+环境、身份和吞吐 preflight；8-cluster wiring smoke 也不计入科学覆盖。冻结顺序为
+key schedule；HF carrier 与 HF detector；LF carrier 与 LF detector；Q/K sync；
+32 个不计科学覆盖的 routing reference；router；embedder；content detector；
+estimator；reliability；rectifier；conditional recovery。普通职责各覆盖 16 个
+source clusters，Q/K sync 与 estimator 各覆盖 32，三个 detector 在本轮也只覆盖
+16。当前筛查不创建 paired extension，也不创建 detector 64-cluster extension，
+科学 unit 精确为 240，操作 unit 为 42，冻结 roster 总数为 282；每 unit 最多三次
+attempt，整体上限 846。
 每个核心 scientific unit 只绑定一个职责相关 case，不展开 content branch 与
 geometry case 的笛卡尔积：非几何职责只循环本职责分支，几何职责只循环登记的八个
-case，conditional recovery 将内容与几何 case 确定性 zip/cycle。连同 74 个操作
-unit，冻结 roster 总数为 506；每 unit 最多三次 attempt，科学上限 1296、整体上限
-1518。普通 unit 上限 900 秒，8 个 wiring unit 单独为 2100 秒；整体 roster 有
-digest/硬上限，禁止按观测分数增删或重排。
+case，conditional recovery 将内容与几何 case 确定性 zip/cycle。普通 unit 上限
+900 秒，8 个 wiring unit 单独为 2100 秒；整体 roster 有 digest/硬上限，禁止按
+观测分数增删或重排。
+
+旧 `ceg_wm_development_module_exploration` 的 506-unit 配置仍可加载用于历史身份
+解释，但不是当前服务器入口，也不是本轮科学分母。只有完成当前筛查且职责同时形成
+`mechanism_signal_observed` 与 `candidate_worth_further_selection` 后，未来才可另行
+冻结扩展：三个 detector 各增加 48 个 scientific units，router、embedder、content
+detector 各增加 16 个 paired units，合计增加 192 个 scientific units，并增加 32
+个 routing-reference operational units。失败职责只在本职责停止，不得用其他职责
+扩展补偿；该未来扩展目前没有入口、没有执行包且不得执行。历史 314-unit 部分诊断
+也不属于当前 240-unit 分母或未来扩展分母。
 
 routing 的 adaptive/uniform 两臂复用同一 HF-only public content operation；该门
 不读取尚未拟合的 LF/HF combined null/CDF，也不替代后续 content combination。
