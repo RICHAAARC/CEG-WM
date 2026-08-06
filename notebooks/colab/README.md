@@ -50,20 +50,27 @@ count 为 null。
 
 `development_exploration.ipynb` 是当前唯一允许 **Run all** 的 13 模块 development
 exploration 薄入口。Notebook 自身由本次 delivery revision 提供，执行权威固定为已完成
-独立方法审核的 `ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29`；它只从 GitHub 获取该 exact commit，
+独立方法审核的 `b66cb04ebb41f0d5473c498ad5769b467ff26d7e`；它只从 GitHub 获取该 exact commit，
 以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
 
 用户只需选择 Colab GPU runtime、设置 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY` 两个 Secrets、
 执行 **Run all** 并授权 Drive。固定 run ID 为
-`ceg_wm_thirteen_module_mechanism_screening_preflight_recovery`。冻结研究预算为 240 scientific 加
+`ceg_wm_thirteen_module_mechanism_screening_operational_validation`。冻结研究预算为 240 scientific 加
 42 operational，共 282 units、最多 846 attempts。本次入口固定传入
-`--maximum-wiring-clusters 2`，首次只完成 2 个 preflight 加 2 个 wiring units：
-4 operational、0 scientific，不计入 13 模块科学覆盖。只有 Agent2 与 Agent3 对本次
-持久化结果完成验真后，后续独立审核的入口才可取消该限制并运行完整机制筛查。
+`--maximum-wiring-clusters 2` 与 `--stop-before-scientific-units`。首次最多完成 2 个
+preflight 加 2 个 wiring units：4 operational、0 scientific；后续每个 session 最多恢复
+2 个 wiring，直至累计 10 个 operational units。入口始终在 unit 10 scientific 边界前
+成功停止，完成 10 个 operational 后重复 Run all 也不会创建新 commit、scientific intent、
+bundle、marker 或 module outcome。上述 operational units 不计入 13 模块科学覆盖；完整
+机制筛查必须由以后单独审核的入口授权。
 
 旧 execution revision `2ff836f45c4012010092f7075e749507ae2ad9ae`、旧 run
 `ceg_wm_thirteen_module_mechanism_screening` 及其 dangling intent 仅作为 immutable
-diagnostic 保留；当前 recovery run 不读取、不续跑、不迁移、不改写、不删除它们。
+diagnostic 保留。未获运行批准的 execution revisions
+`ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29`、
+`6c84cb121030a1190a183955dd4a27798a0eb975` 及 recovery delivery namespace
+`ceg_wm_thirteen_module_mechanism_screening_preflight_recovery` 也原样保留。当前
+operational-validation run 不读取、不续跑、不迁移、不改写、不删除上述任一 namespace。
 
 旧 506-unit development authority 不是 active 入口或当前预算分母。旧
 `ceg_wm_development_exploration_detector_crossfit_execution` run 及其中已有的
@@ -90,7 +97,7 @@ session、artifact path 与 SHA-256 后复制到
 预算、协议或科学判断，并保持 outputs 为空、execution count 为 null。
 
 从上述 exact execution revision 按服务器现有确定性 tracked-tree 打包逻辑重建的
-development execution package 为 4,546,300 bytes，SHA-256 为
-`1ff9a3424279cec77a932fc6d8bcbb9afd09aa6f55041632ce63d35b75068419`。该摘要只绑定
-`ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29` 执行包；Notebook delivery revision 不改变
+development execution package 为 4,547,630 bytes，SHA-256 为
+`9f2e4f322496412e8af39338791fded921c9d82f7b9972af44d7f2560285b1e2`。该摘要只绑定
+`b66cb04ebb41f0d5473c498ad5769b467ff26d7e` 执行包；Notebook delivery revision 不改变
 包内协议或方法实现。

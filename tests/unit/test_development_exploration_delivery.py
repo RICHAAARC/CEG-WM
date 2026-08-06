@@ -30,13 +30,22 @@ PROMPT_ROSTER_PATH = (
     / "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
 )
 PROTOCOL_ID = "ceg_wm_thirteen_module_mechanism_screening"
-EXECUTION_REVISION = "ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29"
-EXPECTED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening_preflight_recovery"
+EXECUTION_REVISION = "b66cb04ebb41f0d5473c498ad5769b467ff26d7e"
+EXPECTED_RUN_ID = (
+    "ceg_wm_thirteen_module_mechanism_screening_operational_validation"
+)
 SUPERSEDED_EXECUTION_REVISION = "2ff836f45c4012010092f7075e749507ae2ad9ae"
 SUPERSEDED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening"
-EXPECTED_PACKAGE_BYTES = 4_546_300
-EXPECTED_PACKAGE_SHA256 = "1ff9a3424279cec77a932fc6d8bcbb9afd09aa6f55041632ce63d35b75068419"
-EXPECTED_NOTEBOOK_SHA256 = "759a1d1f651a055324240f6f169e7ea82994995b7fcdd9b3f17aea6ff048bff1"
+SUPERSEDED_RECOVERY_REVISIONS = (
+    "ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29",
+    "6c84cb121030a1190a183955dd4a27798a0eb975",
+)
+SUPERSEDED_RECOVERY_RUN_ID = (
+    "ceg_wm_thirteen_module_mechanism_screening_preflight_recovery"
+)
+EXPECTED_PACKAGE_BYTES = 4_547_630
+EXPECTED_PACKAGE_SHA256 = "9f2e4f322496412e8af39338791fded921c9d82f7b9972af44d7f2560285b1e2"
+EXPECTED_NOTEBOOK_SHA256 = "da50e813784ac4a86127befa3286873ef4f9e526a8d53ea06a16c4ff1bf1e8cd"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -90,7 +99,7 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     )
 
     assert notebook["metadata"]["accelerator"] == "GPU"
-    assert 4 <= len(code_cells) <= 6
+    assert len(code_cells) == 5
     assert all(cell["execution_count"] is None for cell in code_cells)
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
     assert sha256(NOTEBOOK_PATH.read_bytes()).hexdigest() == EXPECTED_NOTEBOOK_SHA256
@@ -104,7 +113,8 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "checkout', '--detach', 'FETCH_HEAD'" in source
     assert "status', '--porcelain'" in source
     assert "development_exploration_server.py" in source
-    assert "'--maximum-wiring-clusters', '2'" in source
+    assert source.count("'--maximum-wiring-clusters', '2'") == 1
+    assert source.count("'--stop-before-scientific-units'") == 1
     assert "subprocess.Popen" in source and "stderr=subprocess.STDOUT" in source
     assert "server_receipts' / SESSION_ID / 'execution_receipt.json'" in source
     assert "server_failures' / SESSION_ID" in source
@@ -126,12 +136,20 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "240 scientific units plus 42 operational units, 282 total" in source
     assert "846 maximum attempts" in source
     assert "4 operational units and 0 scientific units" in source
+    assert "all 10 operational screening units" in source
+    assert "stops before unit 10" in source
+    assert "Repeating Run all after those 10 units creates no new commit" in source
     assert "does not count toward module science" in source
-    assert "Agent2 and Agent3 verify this preflight" in source
+    assert "Agent2 and Agent3 approve that separate boundary" in source
     assert SUPERSEDED_EXECUTION_REVISION in source
     assert SUPERSEDED_RUN_ID in source
+    assert SUPERSEDED_RECOVERY_RUN_ID in source
+    assert all(revision in source for revision in SUPERSEDED_RECOVERY_REVISIONS)
     assert "dangling intent are immutable diagnostics" in source
-    assert "never reads, resumes, migrates, rewrites, or deletes them" in source
+    assert (
+        "never reads, resumes, migrates, rewrites, or deletes any of those namespaces"
+        in source
+    )
     assert "scientific completion is determined only" in source
     assert "COMMITTED" in source
     assert "ceg_wm_development_exploration_detector_crossfit_execution" in source
@@ -167,6 +185,8 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         assert EXPECTED_RUN_ID in readme
         assert SUPERSEDED_EXECUTION_REVISION in readme
         assert SUPERSEDED_RUN_ID in readme
+        assert SUPERSEDED_RECOVERY_RUN_ID in readme
+        assert all(revision in readme for revision in SUPERSEDED_RECOVERY_REVISIONS)
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -187,6 +207,7 @@ def test_development_exploration_notebook_run_id_crosses_execution_intent_bounda
     notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
     run_id = _notebook_constant(notebook, "RUN_ID")
     assert run_id == EXPECTED_RUN_ID
+    assert run_id not in {SUPERSEDED_RUN_ID, SUPERSEDED_RECOVERY_RUN_ID}
 
     protocol = load_frozen_development_exploration_protocol(PROTOCOL_PATH)
     assert protocol.protocol_id == PROTOCOL_ID
