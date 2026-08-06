@@ -23,14 +23,15 @@ from scripts.experiment_execution import development_exploration_entrypoint
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK_PATH = ROOT / "notebooks/colab/development_exploration.ipynb"
-PROTOCOL_PATH = ROOT / "configs/experiments/development_module_exploration.json"
+PROTOCOL_PATH = ROOT / "configs/experiments/thirteen_module_mechanism_screening.json"
 PROMPT_ROSTER_PATH = (
-    ROOT / "configs/experiments/development_exploration_prompt_roster.json"
+    ROOT
+    / "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
 )
-EXECUTION_REVISION = "67bf7ea0cc9cfaf5083e1487ab593d605eda68eb"
-EXPECTED_RUN_ID = "ceg_wm_development_exploration_module_outcome_replay_execution"
-EXPECTED_PACKAGE_BYTES = 4_530_056
-EXPECTED_PACKAGE_SHA256 = "eeea6a1bf6d235be834d693b4a7ac02dcf9d3d07244b1b769b4ed240912c0c94"
+EXECUTION_REVISION = "2ff836f45c4012010092f7075e749507ae2ad9ae"
+EXPECTED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening"
+EXPECTED_PACKAGE_BYTES = 4_544_234
+EXPECTED_PACKAGE_SHA256 = "4138cd309429f80d2b4198e7a72e3785e10bdb3a4c7880dc2b7ecf429621c470"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -97,6 +98,7 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "checkout', '--detach', 'FETCH_HEAD'" in source
     assert "status', '--porcelain'" in source
     assert "development_exploration_server.py" in source
+    assert "'--maximum-wiring-clusters', '2'" in source
     assert "subprocess.Popen" in source and "stderr=subprocess.STDOUT" in source
     assert "server_receipts' / SESSION_ID / 'execution_receipt.json'" in source
     assert "server_failures' / SESSION_ID" in source
@@ -111,6 +113,15 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         "if server_exit_code != 0"
     )
     assert "mutable branch must never replace" in source
+    assert "only development entrypoint currently authorized" in source
+    assert "experiment_execution.ipynb" in source
+    assert "runtime_qualification.ipynb" in source
+    assert "paused and are not authorized to run" in source
+    assert "240 scientific units plus 42 operational units, 282 total" in source
+    assert "846 maximum attempts" in source
+    assert "4 operational units and 0 scientific units" in source
+    assert "does not count toward module science" in source
+    assert "Agent2 and Agent3 verify this preflight" in source
     assert "scientific completion is determined only" in source
     assert "COMMITTED" in source
     assert "ceg_wm_development_exploration_detector_crossfit_execution" in source
@@ -129,6 +140,19 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         readme = readme_path.read_text(encoding="utf-8")
         assert f"{EXPECTED_PACKAGE_BYTES:,} bytes" in readme
         assert EXPECTED_PACKAGE_SHA256 in readme
+    for readme_path in (
+        ROOT / "notebooks/README.md",
+        ROOT / "notebooks/colab/README.md",
+        ROOT / "scripts/experiment_execution/README.md",
+    ):
+        readme = readme_path.read_text(encoding="utf-8")
+        assert "240 scientific" in readme
+        assert "42 operational" in readme
+        assert "282" in readme
+        assert "846" in readme
+        assert "paused" in readme or "暂停" in readme
+        assert "not authorized" in readme or "未授权" in readme
+        assert "506" in readme
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -151,6 +175,13 @@ def test_development_exploration_notebook_run_id_crosses_execution_intent_bounda
     assert run_id == EXPECTED_RUN_ID
 
     protocol = load_frozen_development_exploration_protocol(PROTOCOL_PATH)
+    assert protocol.protocol_id == EXPECTED_RUN_ID
+    assert len(protocol.unit_roster) == 282
+    assert protocol.study_budget.maximum_scientific_units == 240
+    assert protocol.study_budget.maximum_operational_units == 42
+    assert protocol.study_budget.maximum_total_units == 282
+    assert protocol.study_budget.maximum_total_record_attempts == 846
+    assert protocol.study_budget.wiring_counts_as_scientific_coverage is False
     prompts = load_development_prompt_roster(PROMPT_ROSTER_PATH)
     manifest, public_key_roster = build_development_manifest_and_key_roster(
         protocol,

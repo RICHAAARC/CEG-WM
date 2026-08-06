@@ -17,9 +17,17 @@ persisted in receipts or artifacts. Colab-side copying of ZIP, receipt, and `SHA
 is a delivery convenience; only verified persistent `COMMITTED` bundles establish unit
 completion.
 
-The checked-in thin Notebook invokes the server from detached execution revision
-`67bf7ea0cc9cfaf5083e1487ab593d605eda68eb` with run ID
-`ceg_wm_development_exploration_module_outcome_replay_execution`. The prior
+The checked-in thin Notebook is the only development entrypoint currently authorized for
+**Run all**. It invokes the server from detached execution revision
+`2ff836f45c4012010092f7075e749507ae2ad9ae` with run ID
+`ceg_wm_thirteen_module_mechanism_screening` and always passes
+`--maximum-wiring-clusters 2`. The first session is therefore limited to two preflight
+and two wiring units: four operational units, zero scientific units, and no module-science
+credit. Agent2 and Agent3 must verify that persistent result before a separately reviewed
+entrypoint may start the full screening roster. The frozen study budget is 240 scientific
+plus 42 operational units, 282 total, with 846 maximum attempts. The prior 506-unit
+development authority is historical and is neither the active entrypoint nor the current
+budget denominator. The prior
 `ceg_wm_development_exploration_detector_crossfit_execution` run and all of its
 scientific records, operational records, and diagnostic artifacts remain unchanged and
 are not read, migrated, rewritten, or deleted. The prior
@@ -35,15 +43,18 @@ separate from the later Notebook delivery revision and must not be replaced by a
 branch.
 
 Rebuilding the deterministic tracked-tree execution package from that exact revision
-produces 4,530,056 bytes with SHA-256
-`eeea6a1bf6d235be834d693b4a7ac02dcf9d3d07244b1b769b4ed240912c0c94`.
+produces 4,544,234 bytes with SHA-256
+`4138cd309429f80d2b4198e7a72e3785e10bdb3a4c7880dc2b7ecf429621c470`.
 
 ## HF-only threshold-fit GPU execution
 
 The separate schema-v2 HF-only threshold-fit GPU execution delivery
 package. It executes one preregistered fit shard at an exact committed
 revision. It cannot approve tau, unlock untouched-confirmation data, or support
-a scientific claim by itself.
+a scientific claim by itself. Its checked-in `experiment_execution.ipynb` remains an
+authoritative historical entrypoint but is paused and not authorized to run in the current
+mechanism-screening batch. The checked-in `runtime_qualification.ipynb` likewise preserves
+the audited runtime-qualification authority but is paused and not authorized to rerun.
 
 ## Frozen dependency closure
 
