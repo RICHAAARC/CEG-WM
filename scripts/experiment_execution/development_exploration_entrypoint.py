@@ -162,6 +162,7 @@ def execute_development_exploration_session(
     session_id: str,
     environment: Mapping[str, str],
     maximum_wiring_clusters: int | None = None,
+    stop_before_scientific_units: bool = False,
 ) -> tuple[int, dict[str, object]]:
     """Execute consecutive currently reachable frozen units and persist each one."""
 
@@ -177,6 +178,10 @@ def execute_development_exploration_session(
         or not 1 <= maximum_wiring_clusters <= 8
     ):
         raise DevelopmentEntrypointError("maximum wiring cluster count is invalid")
+    if type(stop_before_scientific_units) is not bool:
+        raise DevelopmentEntrypointError(
+            "stop before scientific units flag must be boolean"
+        )
     protocol = load_frozen_development_exploration_protocol(repository / PROTOCOL_PATH)
     prompts = load_development_prompt_roster(repository / PROMPT_ROSTER_PATH)
     required_prompt_count = 1 + max(
@@ -343,22 +348,29 @@ def execute_development_exploration_session(
             )
             if unit.phase == "development_full_chain_wiring":
                 wiring_clusters_committed_this_session += 1
-        cross_fit_plans = {
-            responsibility_id: build_development_cross_fit_plan(
-                responsibility_id=responsibility_id,
-                execution_intent_authority=authority,
-                expected_execution_intent_authority_digest=authority.authority_digest,
-                expected_source_cluster_ids=development_cross_fit_source_cluster_ids(
-                    authority,
+        if stop_before_scientific_units and operational_complete:
+            termination_reason = "authorized_operational_boundary_reached"
+            operational_complete = False
+        cross_fit_plans = (
+            {
+                responsibility_id: build_development_cross_fit_plan(
                     responsibility_id=responsibility_id,
-                ),
-            )
-            for responsibility_id in (
-                "lf_detector",
-                "hf_detector",
-                "content_detector",
-            )
-        }
+                    execution_intent_authority=authority,
+                    expected_execution_intent_authority_digest=authority.authority_digest,
+                    expected_source_cluster_ids=development_cross_fit_source_cluster_ids(
+                        authority,
+                        responsibility_id=responsibility_id,
+                    ),
+                )
+                for responsibility_id in (
+                    "lf_detector",
+                    "hf_detector",
+                    "content_detector",
+                )
+            }
+            if operational_complete
+            else {}
+        )
         verified_outcomes = {}
 
         def refresh_verified_outcomes(now_epoch_seconds: int) -> None:

@@ -224,6 +224,7 @@ def test_server_delegates_to_formal_entrypoint_and_writes_secret_free_receipt(
         environment=environment,
         install_dependencies=False,
         maximum_wiring_clusters=2,
+        stop_before_scientific_units=True,
     )
     assert exit_code == 0
     assert calls == [
@@ -239,6 +240,7 @@ def test_server_delegates_to_formal_entrypoint_and_writes_secret_free_receipt(
                 "CEG_WM_ROOT_KEY": "private-root-key",
             },
             "maximum_wiring_clusters": 2,
+            "stop_before_scientific_units": True,
         }
     ]
     assert receipt["artifact_sha256"] == sha256(artifact.read_bytes()).hexdigest()
@@ -249,6 +251,46 @@ def test_server_delegates_to_formal_entrypoint_and_writes_secret_free_receipt(
     assert receipt["scientific_claims_supported"] is False
     assert receipt["formal_tau_created"] is False
     assert receipt["calibration_locked"] is False
+
+
+@pytest.mark.quick
+def test_cli_forwards_scientific_boundary_flag_and_preserves_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def execute(**kwargs: object) -> tuple[int, dict[str, object]]:
+        calls.append(kwargs)
+        return 0, {"artifact_kind": "development_exploration_result"}
+
+    monkeypatch.setattr(
+        server,
+        "execute_development_exploration_server_session",
+        execute,
+    )
+    common_arguments = [
+        "--repository-root",
+        "/repository",
+        "--expected-revision",
+        "a" * 40,
+        "--persistent-root",
+        "/persistent",
+        "--cache-root",
+        "/cache",
+        "--run-id",
+        "screening_run",
+        "--session-id",
+        "screening_session",
+        "--maximum-wiring-clusters",
+        "2",
+    ]
+
+    assert server.main([*common_arguments, "--stop-before-scientific-units"]) == 0
+    assert server.main(common_arguments) == 0
+    assert calls[0]["stop_before_scientific_units"] is True
+    assert calls[1]["stop_before_scientific_units"] is False
+    assert calls[0]["maximum_wiring_clusters"] == 2
+    assert calls[1]["maximum_wiring_clusters"] == 2
 
 
 @pytest.mark.quick

@@ -337,6 +337,7 @@ def _execute_development_entrypoint(
     session_id: str,
     environment: Mapping[str, str],
     maximum_wiring_clusters: int | None,
+    stop_before_scientific_units: bool,
 ) -> tuple[int, Mapping[str, object]]:
     try:
         from scripts.experiment_execution.development_exploration_entrypoint import (
@@ -358,6 +359,7 @@ def _execute_development_entrypoint(
             session_id=session_id,
             environment=environment,
             maximum_wiring_clusters=maximum_wiring_clusters,
+            stop_before_scientific_units=stop_before_scientific_units,
         )
     except Exception as exc:
         raise DevelopmentExplorationServerError(
@@ -471,6 +473,7 @@ def execute_development_exploration_server_session(
     environment: Mapping[str, str] | None = None,
     install_dependencies: bool = True,
     maximum_wiring_clusters: int | None = None,
+    stop_before_scientific_units: bool = False,
 ) -> tuple[int, dict[str, object]]:
     """Prepare a worker environment, run one session, and write a safe receipt."""
 
@@ -490,6 +493,11 @@ def execute_development_exploration_server_session(
         raise DevelopmentExplorationServerError(
             "arguments",
             "run_id or session_id is invalid",
+        )
+    if type(stop_before_scientific_units) is not bool:
+        raise DevelopmentExplorationServerError(
+            "arguments",
+            "stop before scientific units flag must be boolean",
         )
     _verify_repository(repository, expected_revision)
     bindings = _load_frozen_bindings(repository)
@@ -526,6 +534,7 @@ def execute_development_exploration_server_session(
         session_id=session_id,
         environment=worker_environment,
         maximum_wiring_clusters=maximum_wiring_clusters,
+        stop_before_scientific_units=stop_before_scientific_units,
     )
     if type(exit_code) is not int or isinstance(exit_code, bool):
         raise DevelopmentExplorationServerError(
@@ -643,6 +652,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--skip-dependency-install", action="store_true")
     parser.add_argument("--maximum-wiring-clusters", type=int)
+    parser.add_argument("--stop-before-scientific-units", action="store_true")
     arguments = parser.parse_args(argv)
     try:
         exit_code, receipt = execute_development_exploration_server_session(
@@ -654,6 +664,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             session_id=arguments.session_id,
             install_dependencies=not arguments.skip_dependency_install,
             maximum_wiring_clusters=arguments.maximum_wiring_clusters,
+            stop_before_scientific_units=arguments.stop_before_scientific_units,
         )
     except DevelopmentExplorationServerError as error:
         receipt = _failure_artifacts(

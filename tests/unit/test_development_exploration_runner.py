@@ -1792,7 +1792,7 @@ def test_production_routing_reference_recovers_measurement_retry_across_sessions
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_screening_entrypoint_wiring_limit_commits_four_operational_units_and_resumes(
+def test_screening_entrypoint_stops_at_authorized_operational_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1903,6 +1903,12 @@ def test_screening_entrypoint_wiring_limit_commits_four_operational_units_and_re
         entrypoint_clock["now"] += 1
         return float(entrypoint_clock["now"])
 
+    def reject_scientific_intent(*_arguments: object, **_keywords: object) -> None:
+        raise AssertionError("scientific intent must not be created")
+
+    def reject_scientific_input(*_arguments: object, **_keywords: object) -> None:
+        raise AssertionError("scientific input must not be built")
+
     monkeypatch.setattr(
         worker_inputs_module,
         "DevelopmentSemanticObservationProducer",
@@ -1969,9 +1975,19 @@ def test_screening_entrypoint_wiring_limit_commits_four_operational_units_and_re
         "execute_wiring_smoke_cluster",
         lightweight_wiring,
     )
+    monkeypatch.setattr(
+        DevelopmentExplorationRunner,
+        "create_scientific_intent",
+        reject_scientific_intent,
+    )
+    monkeypatch.setattr(
+        DevelopmentProductionInputBuilder,
+        "build",
+        reject_scientific_input,
+    )
 
     results = []
-    for session_ordinal in range(2):
+    for session_ordinal in range(5):
         exit_code, result = (
             development_entrypoint.execute_development_exploration_session(
                 repository_root=ROOT,
@@ -1985,32 +2001,58 @@ def test_screening_entrypoint_wiring_limit_commits_four_operational_units_and_re
                     "HF_TOKEN": "development-test-token",
                 },
                 maximum_wiring_clusters=2,
+                stop_before_scientific_units=True,
             )
         )
         assert exit_code == 0, result
         results.append(result)
         entrypoint_clock["now"] += development_entrypoint.HARD_SESSION_CAP_SECONDS
 
-    assert results[0]["termination_reason"] == "maximum_wiring_clusters_reached"
-    assert results[0]["session_committed_unit_count"] == 4
-    assert results[0]["committed_unit_count"] == 4
-    assert results[1]["termination_reason"] == "maximum_wiring_clusters_reached"
-    assert results[1]["session_committed_unit_count"] == 2
-    assert results[1]["committed_unit_count"] == 6
-    marker_root = (
+    assert tuple(item["termination_reason"] for item in results) == (
+        "maximum_wiring_clusters_reached",
+        "maximum_wiring_clusters_reached",
+        "maximum_wiring_clusters_reached",
+        "authorized_operational_boundary_reached",
+        "authorized_operational_boundary_reached",
+    )
+    assert tuple(item["session_committed_unit_count"] for item in results) == (
+        4,
+        2,
+        2,
+        2,
+        0,
+    )
+    assert tuple(item["committed_unit_count"] for item in results) == (
+        4,
+        6,
+        8,
+        10,
+        10,
+    )
+    run_root = (
         entrypoint_root
         / "persistent"
         / "screening_wiring_limit_recovery"
-        / "markers"
     )
     marker_payloads = tuple(
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(marker_root.glob("*.COMMITTED.json"))
+        for path in sorted((run_root / "markers").glob("*.COMMITTED.json"))
     )
-    assert {item["unit_index"] for item in marker_payloads} == set(range(6))
+    assert {item["unit_index"] for item in marker_payloads} == set(range(10))
     assert {item["record_kind"] for item in marker_payloads} == {
         "development_operational_check"
     }
+    assert len(tuple((run_root / "intents").glob("*.json"))) == 10
+    assert not tuple(
+        (run_root / "intents").glob("development_unit_0010__attempt_*.json")
+    )
+    assert not tuple(
+        (run_root / "markers").glob(
+            "development_unit_0010__attempt_*.COMMITTED.json"
+        )
+    )
+    assert len(tuple((run_root / "bundles").glob("sha256_*.zip"))) == 10
+    assert not tuple((run_root / "module_outcomes").glob("*.json"))
 
 
 @pytest.mark.integration
