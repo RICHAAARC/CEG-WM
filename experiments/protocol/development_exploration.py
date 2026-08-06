@@ -36,9 +36,6 @@ from experiments.protocol.internal_splits import (
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
 DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.3"
-THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID = (
-    "ceg_wm_thirteen_module_mechanism_screening"
-)
 THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_VERSION = "1.0.0"
 SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
@@ -73,6 +70,22 @@ class _DevelopmentProtocolProfile:
     paired_ablation_enabled: bool
 
 
+_thirteen_module_mechanism_screening_protocol_profile = _DevelopmentProtocolProfile(
+    protocol_id="ceg_wm_thirteen_module_mechanism_screening",
+    protocol_version=THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_VERSION,
+    scientific_source_cluster_scales=(
+        BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+        CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
+    ),
+    detector_source_cluster_count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
+    routing_reference_source_cluster_count=CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
+    paired_ablation_enabled=False,
+)
+thirteen_module_mechanism_screening_protocol_id = (
+    _thirteen_module_mechanism_screening_protocol_profile.protocol_id
+)
+
+
 _DEVELOPMENT_PROTOCOL_PROFILES = {
     PROTOCOL_ID: _DevelopmentProtocolProfile(
         protocol_id=PROTOCOL_ID,
@@ -82,16 +95,8 @@ _DEVELOPMENT_PROTOCOL_PROFILES = {
         routing_reference_source_cluster_count=CHEAP_DETECTION_SOURCE_CLUSTER_COUNT,
         paired_ablation_enabled=True,
     ),
-    THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID: _DevelopmentProtocolProfile(
-        protocol_id=THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID,
-        protocol_version=THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_VERSION,
-        scientific_source_cluster_scales=(
-            BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-            CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
-        ),
-        detector_source_cluster_count=BASE_SCIENTIFIC_SOURCE_CLUSTER_COUNT,
-        routing_reference_source_cluster_count=CRITICAL_PAIR_SOURCE_CLUSTER_COUNT,
-        paired_ablation_enabled=False,
+    thirteen_module_mechanism_screening_protocol_id: (
+        _thirteen_module_mechanism_screening_protocol_profile
     ),
 }
 

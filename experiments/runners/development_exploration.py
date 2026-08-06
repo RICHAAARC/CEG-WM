@@ -57,7 +57,7 @@ from experiments.protocol.development_exploration import (
     GEOMETRY_NEGATIVE_CONTROL_CASE_IDS,
     MODULE_OUTCOMES,
     OPERATIONAL_UNIT_PHASES,
-    THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID,
+    thirteen_module_mechanism_screening_protocol_id,
     DevelopmentProvisionalThreshold,
     DevelopmentModuleOutcomeRecord,
     DevelopmentModuleStudy,
@@ -2060,7 +2060,7 @@ class DevelopmentExplorationRunner:
 
         if (
             self.protocol.protocol_id
-            != THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID
+            != thirteen_module_mechanism_screening_protocol_id
             or paired_hf_clusters
             or cross_fit_plan.responsibility_id != "content_detector"
         ):
@@ -2349,7 +2349,7 @@ class DevelopmentExplorationRunner:
                 }
                 if (
                     self.protocol.protocol_id
-                    == THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID
+                    == thirteen_module_mechanism_screening_protocol_id
                     and not paired_hf_clusters
                 ):
                     if hf_observations:

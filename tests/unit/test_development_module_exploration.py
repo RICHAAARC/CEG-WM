@@ -42,7 +42,7 @@ from experiments.protocol.development_exploration import (
     PREFLIGHT_SOURCE_CLUSTER_COUNT,
     REGISTERED_STUDY_ROLE_BINDINGS,
     WIRING_SOURCE_CLUSTER_COUNT,
-    THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID,
+    thirteen_module_mechanism_screening_protocol_id,
     DevelopmentPrimaryNullKeyBinding,
     DevelopmentModuleOutcomeRecord,
     DevelopmentThresholdFitInput,
@@ -674,7 +674,7 @@ def test_thirteen_module_mechanism_screening_freezes_exact_budget_and_order() ->
     protocol = load_frozen_development_exploration_protocol(
         MECHANISM_SCREENING_CONFIG_PATH
     )
-    assert protocol.protocol_id == THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID
+    assert protocol.protocol_id == thirteen_module_mechanism_screening_protocol_id
     assert protocol.validate() == ()
     assert protocol.study_budget.maximum_operational_units == 42
     assert protocol.study_budget.maximum_scientific_units == 240
