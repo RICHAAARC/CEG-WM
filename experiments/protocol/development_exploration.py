@@ -3155,6 +3155,9 @@ def development_cross_fit_source_cluster_ids(
 
     if type(execution_intent_authority) is not FrozenDevelopmentExecutionIntentAuthority:
         raise TypeError("cross_fit_execution_intent_exact_type_required")
+    authority_violations = execution_intent_authority.validate()
+    if authority_violations:
+        raise ValueError(",".join(authority_violations))
     if responsibility_id not in REQUIRED_METHOD_RESPONSIBILITIES:
         raise ValueError("cross_fit_responsibility_invalid")
     protocol = execution_intent_authority.protocol
@@ -3175,13 +3178,29 @@ def development_cross_fit_source_cluster_ids(
     )
     if len(ordinals) != study.scientific_source_cluster_scale:
         raise ValueError("cross_fit_frozen_responsibility_roster_invalid")
-    manifest_identities = _manifest_cluster_identities(
-        execution_intent_authority.input_manifest
-    )
-    if not ordinals or max(ordinals) >= len(manifest_identities):
+    ordered_manifest_identities: list[AnalysisUnitIdentity] = []
+    identity_by_source_cluster: dict[str, AnalysisUnitIdentity] = {}
+    for assignment in execution_intent_authority.input_manifest.assignments:
+        if type(assignment) is not SplitAssignment:
+            raise TypeError("development_cross_fit_assignment_exact_type_required")
+        if assignment.split != DEVELOPMENT_SPLIT:
+            raise PermissionError("development_cross_fit_later_split_forbidden")
+        if type(assignment.identity) is not AnalysisUnitIdentity:
+            raise TypeError("development_cross_fit_identity_exact_type_required")
+        identity = assignment.identity
+        identity_violations = identity.validate()
+        if identity_violations:
+            raise ValueError(",".join(identity_violations))
+        existing = identity_by_source_cluster.get(identity.source_cluster_id)
+        if existing is not None:
+            raise ValueError("development_cross_fit_source_cluster_assignment_duplicate")
+        ordered_manifest_identities.append(identity)
+        identity_by_source_cluster[identity.source_cluster_id] = identity
+    if not ordinals or max(ordinals) >= len(ordered_manifest_identities):
         raise ValueError("cross_fit_frozen_responsibility_roster_unavailable")
     return tuple(
-        manifest_identities[ordinal].source_cluster_id for ordinal in ordinals
+        ordered_manifest_identities[ordinal].source_cluster_id
+        for ordinal in ordinals
     )
 
 

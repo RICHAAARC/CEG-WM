@@ -21,6 +21,7 @@ from experiments.methods import (
     load_ceg_wm_experiment_adapter_configuration,
 )
 from experiments.metrics.development_exploration import (
+    DevelopmentMetricObservation,
     DevelopmentMetricError,
     bind_development_metric_observation,
     cross_fit_development_detection_metrics,
@@ -50,11 +51,18 @@ from experiments.protocol.development_exploration import (
     OPERATIONAL_UNIT_PHASES,
     _create_verified_development_module_outcome_record,
     build_development_cross_fit_plan,
+    create_frozen_development_execution_intent_authority,
     create_development_provisional_threshold,
     create_development_threshold_fit_input,
+    development_cross_fit_source_cluster_ids,
+    load_frozen_development_exploration_protocol,
 )
 from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
 from experiments.protocol.development_records import canonical_development_value_digest
+from experiments.runners.development_inputs import (
+    build_development_manifest_and_key_roster,
+    load_development_prompt_roster,
+)
 from scripts.experiment_execution.development_exploration_worker_inputs import (
     DevelopmentProductionInputBuilder,
 )
@@ -237,6 +245,46 @@ def _persistent_runner(tmp_path: Path) -> tuple[DevelopmentExplorationRunner, De
         registered_unit_bindings=initial.create_persistence_unit_bindings(),
     )
     return _runner(initial.intent_authority, store), store
+
+
+def _screening_persistent_runner(
+    tmp_path: Path,
+) -> tuple[DevelopmentExplorationRunner, DevelopmentPersistentStore]:
+    protocol = load_frozen_development_exploration_protocol(
+        ROOT / "configs/experiments/thirteen_module_mechanism_screening.json"
+    )
+    prompts = load_development_prompt_roster(
+        ROOT
+        / "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
+    )
+    manifest, key_roster = build_development_manifest_and_key_roster(
+        protocol,
+        prompts,
+        "development-runner-cpu-wiring-key",
+    )
+    authority = create_frozen_development_execution_intent_authority(
+        protocol,
+        run_id="thirteen_module_mechanism_screening_runner_test",
+        seed_namespace=prompts.seed_namespace,
+        input_manifest=manifest,
+        public_key_roster=key_roster,
+    )
+    initial = _runner(authority)
+    worker = FrozenWorkerIdentity(
+        revision="a" * 40,
+        protocol_digest=authority.protocol_digest,
+        execution_intent_authority_digest=authority.authority_digest,
+        input_manifest_digest=authority.input_manifest_digest,
+        candidate_config_digest="d" * 64,
+        unit_roster_digest=development_unit_roster_digest(protocol.unit_roster),
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path / "screening_persistent",
+        run_id=authority.run_id,
+        worker_identity=worker,
+        registered_unit_bindings=initial.create_persistence_unit_bindings(),
+    )
+    return _runner(authority, store), store
 
 
 class _ReferenceMeasurementRuntime:
@@ -2746,6 +2794,268 @@ def test_content_detector_outcome_uses_full_combined_cross_fit_and_frozen_hf_pai
         runner.protocol,
         verified_evidence_context=context,
     ) == ()
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_screening_conditional_input_replays_exact_hf_detector_subset(
+    tmp_path: Path,
+) -> None:
+    runner, store = _screening_persistent_runner(tmp_path)
+    hf_source_cluster_ids = development_cross_fit_source_cluster_ids(
+        runner.intent_authority,
+        responsibility_id="hf_detector",
+    )
+    hf_unit_binding_ids = tuple(
+        binding.analysis_unit_identity.source_cluster_id
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "hf_detector"
+        and binding.content_branch_id == "hf_only"
+    )
+    assert hf_source_cluster_ids == hf_unit_binding_ids
+    plan = build_development_cross_fit_plan(
+        responsibility_id="hf_detector",
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=len(hf_source_cluster_ids),
+        expected_source_cluster_ids=hf_source_cluster_ids,
+    )
+    _commit_hf_primary_null_fixture_records(store, plan)
+    hf_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "hf_detector"
+        and binding.content_branch_id == "hf_only"
+    )
+    evidence = store.verified_terminal_scientific_evidence_for_unit_indexes(
+        hf_indexes,
+        now_epoch_seconds=103,
+    )
+    builder = object.__new__(DevelopmentProductionInputBuilder)
+    builder.protocol = runner.protocol
+    builder.authority = runner.intent_authority
+    builder.root_key = "development-runner-cpu-wiring-key"
+    builder.runner = runner
+    builder.store = store
+    builder.session_cursor = SimpleNamespace(
+        terminal_scientific_evidence=evidence,
+    )
+    conditional_unit = next(
+        unit
+        for unit in runner.protocol.unit_roster
+        if unit.responsibility_id == "conditional_recovery_decision"
+    )
+    builder._routing_observations_by_cluster = {
+        conditional_unit.source_cluster_ordinal: _observations()
+    }
+    builder._reliability_thresholds = lambda *_arguments: _reliability_thresholds()
+    builder._build_conditional_inputs = lambda *_arguments, **_keywords: (None, None)
+    unit_input = builder.build(
+        conditional_unit,
+        _input().base_latent,
+        intent=SimpleNamespace(
+            unit_index=conditional_unit.unit_index,
+            phase=conditional_unit.phase,
+        ),
+        now_epoch_seconds=103,
+    )
+
+    assert unit_input.cross_fit_plan is not None
+    assert unit_input.cross_fit_plan.source_cluster_count == 16
+    assert unit_input.cross_fit_plan.source_cluster_ids == hf_source_cluster_ids
+    assert unit_input.provisional_threshold is not None
+    with pytest.raises(
+        ValueError,
+        match="development_cross_fit_source_cluster_roster_mismatch",
+    ):
+        build_development_cross_fit_plan(
+            responsibility_id="hf_detector",
+            execution_intent_authority=runner.intent_authority,
+            expected_execution_intent_authority_digest=(
+                runner.intent_authority.authority_digest
+            ),
+            expected_source_cluster_count=16,
+            expected_source_cluster_ids=hf_source_cluster_ids[:-1],
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_screening_content_detector_outcome_uses_same_operation_hf_scores(
+    tmp_path: Path,
+) -> None:
+    runner, store = _screening_persistent_runner(tmp_path)
+    studies = {
+        item.responsibility_id: item for item in runner.protocol.module_matrix
+    }
+    study = studies["content_detector"]
+    prerequisite_indexes = tuple(
+        next(
+            binding.unit_index
+            for binding in store.registered_unit_bindings
+            if binding.responsibility_id == responsibility_id
+            and binding.phase not in OPERATIONAL_UNIT_PHASES
+        )
+        for responsibility_id in study.prerequisite_responsibility_ids
+    )
+    content_indexes = tuple(
+        binding.unit_index
+        for binding in store.registered_unit_bindings
+        if binding.responsibility_id == "content_detector"
+        and binding.phase not in OPERATIONAL_UNIT_PHASES
+    )
+    assert len(content_indexes) == 16
+    _commit_frozen_unit_indexes(
+        runner,
+        store,
+        (*prerequisite_indexes, *content_indexes),
+        session_id="screening_content_detector_outcome_session",
+    )
+
+    def prerequisite_outcome(responsibility_id: str, unit_index: int):
+        evidence = store.verified_terminal_scientific_evidence_for_unit_indexes(
+            (unit_index,),
+            now_epoch_seconds=103,
+        )
+        record, marker = evidence[0]
+        prerequisite_study = studies[responsibility_id]
+        metric_means = tuple(
+            (
+                criterion.metric_id,
+                criterion.threshold + 1.0
+                if criterion.comparison in {"greater_than", "greater_or_equal"}
+                else criterion.threshold - 1.0
+                if criterion.comparison in {"less_than", "less_or_equal"}
+                else criterion.threshold,
+            )
+            for criterion in prerequisite_study.signal_criteria
+        )
+        context = runner._verified_outcome_context(
+            study=prerequisite_study,
+            records=(record,),
+            committed_markers=(marker,),
+            aggregate_metric_means=metric_means,
+            source_cluster_count=prerequisite_study.scientific_source_cluster_scale,
+            module_outcome="mechanism_signal_observed",
+            candidate_recommendation="candidate_worth_further_selection",
+            blocking_responsibilities=(),
+            cross_fit_plan=None,
+            provisional_threshold_identities=(),
+        )
+        outcome = _create_verified_development_module_outcome_record(
+            runner.protocol,
+            responsibility_id=responsibility_id,
+            module_outcome="mechanism_signal_observed",
+            candidate_recommendation="candidate_worth_further_selection",
+            recommendation_reason="verified_prerequisite_fixture_signal",
+            verified_evidence_context=context,
+        )
+        return outcome, context
+
+    prerequisites = tuple(
+        prerequisite_outcome(responsibility_id, unit_index)
+        for responsibility_id, unit_index in zip(
+            study.prerequisite_responsibility_ids,
+            prerequisite_indexes,
+            strict=True,
+        )
+    )
+    evidence = store.verified_terminal_scientific_evidence_for_unit_indexes(
+        content_indexes,
+        now_epoch_seconds=103,
+    )
+    expected_ids = development_cross_fit_source_cluster_ids(
+        runner.intent_authority,
+        responsibility_id="content_detector",
+    )
+    plan = build_development_cross_fit_plan(
+        responsibility_id="content_detector",
+        execution_intent_authority=runner.intent_authority,
+        expected_execution_intent_authority_digest=(
+            runner.intent_authority.authority_digest
+        ),
+        expected_source_cluster_count=len(expected_ids),
+        expected_source_cluster_ids=expected_ids,
+    )
+    records = tuple(record for record, _marker in evidence)
+    outcome, context = runner._build_module_outcome_record(
+        records,
+        responsibility_id="content_detector",
+        now_epoch_seconds=103,
+        committed_markers=tuple(marker for _record, marker in evidence),
+        cross_fit_plan=plan,
+        prerequisite_outcome_records=prerequisites,
+    )
+    assert outcome.module_outcome in {
+        "mechanism_signal_observed",
+        "mechanism_signal_not_observed",
+    }
+    assert context.source_cluster_count == 16
+    assert len(outcome.evidence_record_ids) == 16
+
+    observations = tuple(
+        DevelopmentMetricObservation(**record.metric_observation)
+        for record in records
+    )
+    combined_clusters = frozenset(expected_ids)
+    valid_value = runner._screening_content_hf_non_degradation(
+        observations,
+        paired_hf_clusters=frozenset(),
+        combined_clusters=combined_clusters,
+        cross_fit_plan=plan,
+    )
+    assert 0.0 <= valid_value <= 1.0
+    first_statistics = dict(observations[0].sufficient_statistics)
+    missing_hf = replace(
+        observations[0],
+        sufficient_statistics=tuple(
+            (key, value)
+            for key, value in first_statistics.items()
+            if key != "hf_only_score"
+        ),
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="same-operation metrics are incomplete",
+    ):
+        runner._screening_content_hf_non_degradation(
+            (missing_hf, *observations[1:]),
+            paired_hf_clusters=frozenset(),
+            combined_clusters=combined_clusters,
+            cross_fit_plan=plan,
+        )
+    tampered_statistics = dict(first_statistics)
+    tampered_statistics["candidate_minus_hf_only"] += 1.0
+    tampered_delta = replace(
+        observations[0],
+        sufficient_statistics=tuple(tampered_statistics.items()),
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="same-operation score binding drifted",
+    ):
+        runner._screening_content_hf_non_degradation(
+            (tampered_delta, *observations[1:]),
+            paired_hf_clusters=frozenset(),
+            combined_clusters=combined_clusters,
+            cross_fit_plan=plan,
+        )
+    wrong_cluster = replace(
+        observations[0],
+        source_cluster_id="f" * 64,
+    )
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="metric clusters differ from cross-fit",
+    ):
+        runner._screening_content_hf_non_degradation(
+            (wrong_cluster, *observations[1:]),
+            paired_hf_clusters=frozenset(),
+            combined_clusters=combined_clusters,
+            cross_fit_plan=plan,
+        )
 
 
 @pytest.mark.quick

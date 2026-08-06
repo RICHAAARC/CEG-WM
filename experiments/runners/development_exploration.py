@@ -57,6 +57,7 @@ from experiments.protocol.development_exploration import (
     GEOMETRY_NEGATIVE_CONTROL_CASE_IDS,
     MODULE_OUTCOMES,
     OPERATIONAL_UNIT_PHASES,
+    THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID,
     DevelopmentProvisionalThreshold,
     DevelopmentModuleOutcomeRecord,
     DevelopmentModuleStudy,
@@ -2047,6 +2048,86 @@ class DevelopmentExplorationRunner:
             aggregate_digest=_canonical_digest(payload),
         )
 
+    def _screening_content_hf_non_degradation(
+        self,
+        observations: Sequence[DevelopmentMetricObservation],
+        *,
+        paired_hf_clusters: frozenset[str],
+        combined_clusters: frozenset[str],
+        cross_fit_plan: FrozenDevelopmentCrossFitPlan,
+    ) -> float:
+        """Use the same combined operation's HF-only score for screening only."""
+
+        if (
+            self.protocol.protocol_id
+            != THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID
+            or paired_hf_clusters
+            or cross_fit_plan.responsibility_id != "content_detector"
+        ):
+            raise DevelopmentRunnerError(
+                "content detector same-operation comparison is not authorized"
+            )
+        expected_clusters = frozenset(cross_fit_plan.source_cluster_ids)
+        if (
+            len(observations) != 16
+            or len(combined_clusters) != 16
+            or combined_clusters != expected_clusters
+        ):
+            raise DevelopmentRunnerError(
+                "screening content detector combined cluster roster is incomplete"
+            )
+        required_statistics = {
+            "candidate_score",
+            "hf_only_score",
+            "wrong_key_score",
+            "primary_null_score",
+            "candidate_minus_hf_only",
+            "lf_score",
+        }
+        by_cluster: dict[str, tuple[float, float, float]] = {}
+        for observation in observations:
+            statistics = dict(observation.sufficient_statistics)
+            if (
+                observation.content_branch_id != "lf_hf_routed_combination"
+                or set(statistics) != required_statistics
+                or observation.source_cluster_id in by_cluster
+            ):
+                raise DevelopmentRunnerError(
+                    "screening content detector same-operation metrics are incomplete"
+                )
+            candidate_score = float(statistics["candidate_score"])
+            hf_only_score = float(statistics["hf_only_score"])
+            candidate_minus_hf_only = float(
+                statistics["candidate_minus_hf_only"]
+            )
+            if (
+                not all(
+                    isfinite(value)
+                    for value in (
+                        candidate_score,
+                        hf_only_score,
+                        candidate_minus_hf_only,
+                    )
+                )
+                or candidate_minus_hf_only != candidate_score - hf_only_score
+            ):
+                raise DevelopmentRunnerError(
+                    "screening content detector same-operation score binding drifted"
+                )
+            by_cluster[observation.source_cluster_id] = (
+                candidate_score,
+                hf_only_score,
+                candidate_minus_hf_only,
+            )
+        if frozenset(by_cluster) != expected_clusters:
+            raise DevelopmentRunnerError(
+                "screening content detector metric clusters differ from cross-fit"
+            )
+        return sum(
+            candidate_score >= hf_only_score
+            for candidate_score, hf_only_score, _delta in by_cluster.values()
+        ) / len(by_cluster)
+
     def _build_module_outcome_record(
         self,
         records: Sequence[DevelopmentScientificRecord],
@@ -2267,23 +2348,40 @@ class DevelopmentExplorationRunner:
                     and binding.content_branch_id == "lf_hf_routed_combination"
                 }
                 if (
-                    len(hf_observations) != len(hf_by_cluster)
-                    or len(combined_observations) != len(combined_by_cluster)
-                    or set(hf_by_cluster) != paired_hf_clusters
-                    or set(combined_by_cluster) != combined_clusters
-                    or not paired_hf_clusters
-                    or not paired_hf_clusters.issubset(combined_clusters)
+                    self.protocol.protocol_id
+                    == THIRTEEN_MODULE_MECHANISM_SCREENING_PROTOCOL_ID
+                    and not paired_hf_clusters
                 ):
-                    raise DevelopmentRunnerError(
-                        "content detector HF/combined frozen paired clusters are incomplete"
+                    if hf_observations:
+                        raise DevelopmentRunnerError(
+                            "screening content detector has unregistered HF paired evidence"
+                        )
+                    hf_non_degradation = self._screening_content_hf_non_degradation(
+                        combined_observations,
+                        paired_hf_clusters=frozenset(paired_hf_clusters),
+                        combined_clusters=frozenset(combined_clusters),
+                        cross_fit_plan=cross_fit_plan,
                     )
+                else:
+                    if (
+                        len(hf_observations) != len(hf_by_cluster)
+                        or len(combined_observations) != len(combined_by_cluster)
+                        or set(hf_by_cluster) != paired_hf_clusters
+                        or set(combined_by_cluster) != combined_clusters
+                        or not paired_hf_clusters
+                        or not paired_hf_clusters.issubset(combined_clusters)
+                    ):
+                        raise DevelopmentRunnerError(
+                            "content detector HF/combined frozen paired clusters are incomplete"
+                        )
+                    hf_non_degradation = sum(
+                        combined_by_cluster[key] >= hf_by_cluster[key]
+                        for key in hf_by_cluster
+                    ) / len(hf_by_cluster)
                 means = {
                     "combined_tpr": cross_fit.registered_accept_rate,
                     "combined_primary_null_fpr": cross_fit.primary_null_false_accept_rate,
-                    "hf_non_degradation": sum(
-                        combined_by_cluster[key] >= hf_by_cluster[key]
-                        for key in hf_by_cluster
-                    ) / len(hf_by_cluster),
+                    "hf_non_degradation": hf_non_degradation,
                     "wrong_key_rate": cross_fit.wrong_key_accept_rate,
                 }
             aggregate = DevelopmentClusterAggregate(

@@ -20,6 +20,7 @@ from experiments.protocol.development_exploration import (
     FrozenDevelopmentExecutionIntentAuthority,
     FrozenDevelopmentExplorationProtocol,
     build_development_cross_fit_plan,
+    development_cross_fit_source_cluster_ids,
 )
 from experiments.protocol.development_records import (
     DEVELOPMENT_CLAIM_BOUNDARY,
@@ -1087,13 +1088,16 @@ class DevelopmentProductionInputBuilder:
         provisional_threshold = cross_fit_plan = development_tau_rescue = None
         internal_runner_context = internal_case_payload = None
         if unit.responsibility_id == "conditional_recovery_decision":
+            hf_source_cluster_ids = development_cross_fit_source_cluster_ids(
+                self.authority,
+                responsibility_id="hf_detector",
+            )
             cross_fit_plan = build_development_cross_fit_plan(
                 responsibility_id="hf_detector",
                 execution_intent_authority=self.authority,
                 expected_execution_intent_authority_digest=self.authority.authority_digest,
-                expected_source_cluster_count=len(
-                    self.authority.input_manifest.assignments
-                ),
+                expected_source_cluster_count=len(hf_source_cluster_ids),
+                expected_source_cluster_ids=hf_source_cluster_ids,
             )
             thresholds = self.runner.replay_hf_provisional_thresholds_from_evidence(
                 cross_fit_plan=cross_fit_plan,
