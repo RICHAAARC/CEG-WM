@@ -765,7 +765,6 @@ class DevelopmentExplorationRunner:
         unit = self._representative_unit(
             "content_embedder",
             source_cluster_ordinal,
-            content_branch_id="hf_only",
         )
         unit_input.validate(unit.responsibility_id)
         identity = self._analysis_identity(unit)

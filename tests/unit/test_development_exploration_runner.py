@@ -791,6 +791,65 @@ def test_preflight_calls_real_runtime_without_scientific_coverage() -> None:
 
 
 @pytest.mark.quick
+def test_screening_preflight_uses_frozen_content_embedder_representatives(
+    tmp_path: Path,
+) -> None:
+    runner, _store = _screening_persistent_runner(tmp_path)
+    representatives = tuple(
+        unit
+        for unit in runner.protocol.unit_roster
+        if unit.responsibility_id == "content_embedder"
+        and unit.source_cluster_ordinal in {0, 1}
+        and unit.phase not in OPERATIONAL_UNIT_PHASES
+    )
+
+    assert tuple(unit.source_cluster_ordinal for unit in representatives) == (0, 1)
+    assert all(
+        unit.content_branch_id == "lf_hf_routed_combination"
+        for unit in representatives
+    )
+    receipts = tuple(
+        runner.execute_preflight_cluster(source_cluster_ordinal, _input())
+        for source_cluster_ordinal in (0, 1)
+    )
+
+    assert tuple(receipt.source_cluster_ordinal for receipt in receipts) == (0, 1)
+    assert all(
+        receipt.operational_role == "environment_runtime_throughput_preflight"
+        and receipt.responsibility_result_digests[0][0] == "content_embedder"
+        and receipt.counts_as_scientific_coverage is False
+        and receipt.scientific_claims_supported is False
+        for receipt in receipts
+    )
+    assert runner.runtime_adapter._backend.run_calls == 4
+
+
+@pytest.mark.quick
+def test_screening_preflight_fails_without_frozen_representative(
+    tmp_path: Path,
+) -> None:
+    runner, _store = _screening_persistent_runner(tmp_path)
+    runner.protocol = replace(
+        runner.protocol,
+        unit_roster=tuple(
+            unit
+            for unit in runner.protocol.unit_roster
+            if not (
+                unit.responsibility_id == "content_embedder"
+                and unit.source_cluster_ordinal == 0
+                and unit.phase not in OPERATIONAL_UNIT_PHASES
+            )
+        ),
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="frozen roster lacks operational representative",
+    ):
+        runner.execute_preflight_cluster(0, _input())
+
+
+@pytest.mark.quick
 @pytest.mark.integration
 @pytest.mark.slow
 def test_wiring_smoke_dispatches_all_responsibilities_without_threshold_fit(
