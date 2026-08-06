@@ -2006,7 +2006,6 @@ def test_screening_entrypoint_stops_at_authorized_operational_boundary(
         )
         assert exit_code == 0, result
         results.append(result)
-        entrypoint_clock["now"] += development_entrypoint.HARD_SESSION_CAP_SECONDS
 
     assert tuple(item["termination_reason"] for item in results) == (
         "maximum_wiring_clusters_reached",

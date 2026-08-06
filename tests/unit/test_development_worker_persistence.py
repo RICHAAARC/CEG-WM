@@ -1021,6 +1021,84 @@ def test_single_writer_lease_soft_stop_and_stale_fence_fail_closed(tmp_path: Pat
 
 
 @pytest.mark.quick
+def test_valid_session_receipt_closes_unexpired_lease_for_immediate_resume(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    first = _lease(
+        store,
+        session_id="completed_session",
+        start=100,
+        duration=100,
+    )
+    marker = _commit(store, first, _intent(store, first), now=102)
+    store.write_session_receipt(
+        _receipt(
+            store,
+            session_id=first.session_id,
+            start=100,
+            end=102,
+            committed_unit_ids=(marker.unit_id,),
+        )
+    )
+
+    with pytest.raises(DevelopmentPersistenceError, match="active writer"):
+        _lease(
+            store,
+            session_id="premature_session",
+            start=101,
+            duration=100,
+        )
+
+    second = _lease(
+        store,
+        session_id="resumed_session",
+        start=102,
+        duration=100,
+    )
+    assert second.fencing_token == first.fencing_token + 1
+    with pytest.raises(DevelopmentPersistenceError, match="stale fencing"):
+        _intent(store, first, index=1, now=103)
+
+
+@pytest.mark.quick
+def test_invalid_session_receipt_does_not_close_unexpired_lease(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    lease = _lease(
+        store,
+        session_id="invalid_receipt_session",
+        start=100,
+        duration=100,
+    )
+    marker = _commit(store, lease, _intent(store, lease), now=102)
+    invalid_receipt = replace(
+        _receipt(
+            store,
+            session_id=lease.session_id,
+            start=100,
+            end=102,
+            committed_unit_ids=(marker.unit_id,),
+        ),
+        walltime_seconds=1.0,
+    )
+    receipt_path = store.run_root / "receipts" / f"{lease.session_id}.json"
+    receipt_path.write_bytes(canonical_json_bytes(asdict(invalid_receipt)))
+
+    with pytest.raises(DevelopmentPersistenceError, match="active writer"):
+        _lease(
+            store,
+            session_id="blocked_resume_session",
+            start=103,
+            duration=100,
+        )
+    assert tuple(path.name for path in (store.run_root / "leases").iterdir()) == (
+        "fence_00000001.json",
+    )
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize(
     "member_path",
     (

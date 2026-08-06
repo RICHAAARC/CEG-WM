@@ -982,7 +982,35 @@ class DevelopmentPersistentStore:
         if leases:
             active = leases[-1]
             if active.expires_at_epoch_seconds > now_epoch_seconds:
-                raise DevelopmentPersistenceError("run already has an active writer lease")
+                commits = tuple(self._verified_commits(leases=leases))
+                try:
+                    receipts = self._load_receipts(
+                        commits=commits,
+                        leases=leases,
+                    )
+                except DevelopmentPersistenceError as exc:
+                    raise DevelopmentPersistenceError(
+                        "run already has an active writer lease"
+                    ) from exc
+                closed_receipt = next(
+                    (
+                        receipt
+                        for receipt in receipts
+                        if receipt.session_id == active.session_id
+                    ),
+                    None,
+                )
+                if (
+                    closed_receipt is None
+                    or _parse_strict_utc(
+                        closed_receipt.ended_at_utc,
+                        "session ended_at_utc",
+                    ).timestamp()
+                    > now_epoch_seconds
+                ):
+                    raise DevelopmentPersistenceError(
+                        "run already has an active writer lease"
+                    )
             token = active.fencing_token + 1
         else:
             token = 1
