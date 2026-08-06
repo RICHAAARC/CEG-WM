@@ -30,9 +30,9 @@ PROMPT_ROSTER_PATH = (
     / "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
 )
 PROTOCOL_ID = "ceg_wm_thirteen_module_mechanism_screening"
-EXECUTION_REVISION = "b66cb04ebb41f0d5473c498ad5769b467ff26d7e"
+EXECUTION_REVISION = "7e449aa29f53ea38e3a044681c75c8f3dccff135"
 EXPECTED_RUN_ID = (
-    "ceg_wm_thirteen_module_mechanism_screening_operational_validation"
+    "ceg_wm_thirteen_module_mechanism_screening_session_resume_validation"
 )
 SUPERSEDED_EXECUTION_REVISION = "2ff836f45c4012010092f7075e749507ae2ad9ae"
 SUPERSEDED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening"
@@ -43,9 +43,13 @@ SUPERSEDED_RECOVERY_REVISIONS = (
 SUPERSEDED_RECOVERY_RUN_ID = (
     "ceg_wm_thirteen_module_mechanism_screening_preflight_recovery"
 )
-EXPECTED_PACKAGE_BYTES = 4_547_630
-EXPECTED_PACKAGE_SHA256 = "9f2e4f322496412e8af39338791fded921c9d82f7b9972af44d7f2560285b1e2"
-EXPECTED_NOTEBOOK_SHA256 = "da50e813784ac4a86127befa3286873ef4f9e526a8d53ea06a16c4ff1bf1e8cd"
+SUPERSEDED_OPERATIONAL_REVISION = "b66cb04ebb41f0d5473c498ad5769b467ff26d7e"
+SUPERSEDED_OPERATIONAL_RUN_ID = (
+    "ceg_wm_thirteen_module_mechanism_screening_operational_validation"
+)
+EXPECTED_PACKAGE_BYTES = 4_549_335
+EXPECTED_PACKAGE_SHA256 = "260a76d0e10ddbcf705bbdfda11e5593c688d2b3957d1635b4404b498187067e"
+EXPECTED_NOTEBOOK_SHA256 = "24ba2bb12ddb1eea41f366aa728aee618be656c5f63a2cb0b860f131dba52998"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -136,6 +140,8 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "240 scientific units plus 42 operational units, 282 total" in source
     assert "846 maximum attempts" in source
     assert "4 operational units and 0 scientific units" in source
+    assert "only units 0 through 3" in source
+    assert "validates immediate session-receipt recovery" in source
     assert "all 10 operational screening units" in source
     assert "stops before unit 10" in source
     assert "Repeating Run all after those 10 units creates no new commit" in source
@@ -145,9 +151,13 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert SUPERSEDED_RUN_ID in source
     assert SUPERSEDED_RECOVERY_RUN_ID in source
     assert all(revision in source for revision in SUPERSEDED_RECOVERY_REVISIONS)
+    assert SUPERSEDED_OPERATIONAL_REVISION in source
+    assert SUPERSEDED_OPERATIONAL_RUN_ID in source
+    assert "four committed operational units" in source
+    assert "second-session active-writer diagnostic" in source
     assert "dangling intent are immutable diagnostics" in source
     assert (
-        "never reads, resumes, migrates, rewrites, or deletes any of those namespaces"
+        "never reads, resumes, migrates, rewrites, deletes, or mixes any of those namespaces"
         in source
     )
     assert "scientific completion is determined only" in source
@@ -187,6 +197,8 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         assert SUPERSEDED_RUN_ID in readme
         assert SUPERSEDED_RECOVERY_RUN_ID in readme
         assert all(revision in readme for revision in SUPERSEDED_RECOVERY_REVISIONS)
+        assert SUPERSEDED_OPERATIONAL_REVISION in readme
+        assert SUPERSEDED_OPERATIONAL_RUN_ID in readme
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -207,7 +219,11 @@ def test_development_exploration_notebook_run_id_crosses_execution_intent_bounda
     notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
     run_id = _notebook_constant(notebook, "RUN_ID")
     assert run_id == EXPECTED_RUN_ID
-    assert run_id not in {SUPERSEDED_RUN_ID, SUPERSEDED_RECOVERY_RUN_ID}
+    assert run_id not in {
+        SUPERSEDED_RUN_ID,
+        SUPERSEDED_RECOVERY_RUN_ID,
+        SUPERSEDED_OPERATIONAL_RUN_ID,
+    }
 
     protocol = load_frozen_development_exploration_protocol(PROTOCOL_PATH)
     assert protocol.protocol_id == PROTOCOL_ID

@@ -19,11 +19,12 @@ completion.
 
 The checked-in thin Notebook is the only development entrypoint currently authorized for
 **Run all**. It invokes the server from detached execution revision
-`b66cb04ebb41f0d5473c498ad5769b467ff26d7e` with run ID
-`ceg_wm_thirteen_module_mechanism_screening_operational_validation` and always passes
+`7e449aa29f53ea38e3a044681c75c8f3dccff135` with run ID
+`ceg_wm_thirteen_module_mechanism_screening_session_resume_validation` and always passes
 both `--maximum-wiring-clusters 2` and `--stop-before-scientific-units`. The first session
-is therefore limited to two preflight and two wiring units: four operational units and zero
-scientific units. Later sessions resume at most two wiring units each until all ten operational
+is therefore limited to units 0 through 3, two preflight and two wiring units: four operational units and zero
+scientific units. A later Run all in the same new namespace validates immediate recovery from
+the preceding verified session receipt. Later sessions resume at most two wiring units each until all ten operational
 screening units are committed. Every session stops before scientific unit 10, and repeated
 Run all after operational completion creates no new commit or scientific artifact. These units
 receive no module-science credit. A separately reviewed entrypoint is required to start the
@@ -38,8 +39,11 @@ delete them. The prior
 unexecuted delivery revisions `ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29` and
 `6c84cb121030a1190a183955dd4a27798a0eb975`, together with recovery namespace
 `ceg_wm_thirteen_module_mechanism_screening_preflight_recovery`, also remain unchanged and
-unapproved for execution. The new operational-validation run does not read, resume, migrate,
-rewrite, or delete any of those namespaces. The prior
+unapproved for execution. The prior `b66cb04ebb41f0d5473c498ad5769b467ff26d7e` run
+`ceg_wm_thirteen_module_mechanism_screening_operational_validation`, including its four
+committed operational units and second-session active-writer diagnostic, also remains immutable.
+The new session-resume-validation run does not read, resume, migrate, rewrite, delete, or mix
+any of those namespaces. The prior
 `ceg_wm_development_exploration_detector_crossfit_execution` run and all of its
 scientific records, operational records, and diagnostic artifacts remain unchanged and
 are not read, migrated, rewritten, or deleted. The prior
@@ -55,8 +59,8 @@ separate from the later Notebook delivery revision and must not be replaced by a
 branch.
 
 Rebuilding the deterministic tracked-tree execution package from that exact revision
-produces 4,547,630 bytes with SHA-256
-`9f2e4f322496412e8af39338791fded921c9d82f7b9972af44d7f2560285b1e2`.
+produces 4,549,335 bytes with SHA-256
+`260a76d0e10ddbcf705bbdfda11e5593c688d2b3957d1635b4404b498187067e`.
 
 ## HF-only threshold-fit GPU execution
 
