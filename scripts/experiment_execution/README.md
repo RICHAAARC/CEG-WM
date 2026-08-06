@@ -19,8 +19,8 @@ completion.
 
 The checked-in thin Notebook is the only development entrypoint currently authorized for
 **Run all**. It invokes the server from detached execution revision
-`2ff836f45c4012010092f7075e749507ae2ad9ae` with run ID
-`ceg_wm_thirteen_module_mechanism_screening` and always passes
+`ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29` with run ID
+`ceg_wm_thirteen_module_mechanism_screening_preflight_recovery` and always passes
 `--maximum-wiring-clusters 2`. The first session is therefore limited to two preflight
 and two wiring units: four operational units, zero scientific units, and no module-science
 credit. Agent2 and Agent3 must verify that persistent result before a separately reviewed
@@ -28,6 +28,9 @@ entrypoint may start the full screening roster. The frozen study budget is 240 s
 plus 42 operational units, 282 total, with 846 maximum attempts. The prior 506-unit
 development authority is historical and is neither the active entrypoint nor the current
 budget denominator. The prior
+execution revision `2ff836f45c4012010092f7075e749507ae2ad9ae`, run
+`ceg_wm_thirteen_module_mechanism_screening`, and its dangling intent are immutable
+diagnostics. The recovery run does not read, resume, migrate, rewrite, or delete them. The prior
 `ceg_wm_development_exploration_detector_crossfit_execution` run and all of its
 scientific records, operational records, and diagnostic artifacts remain unchanged and
 are not read, migrated, rewritten, or deleted. The prior
@@ -43,8 +46,8 @@ separate from the later Notebook delivery revision and must not be replaced by a
 branch.
 
 Rebuilding the deterministic tracked-tree execution package from that exact revision
-produces 4,544,234 bytes with SHA-256
-`4138cd309429f80d2b4198e7a72e3785e10bdb3a4c7880dc2b7ecf429621c470`.
+produces 4,546,300 bytes with SHA-256
+`1ff9a3424279cec77a932fc6d8bcbb9afd09aa6f55041632ce63d35b75068419`.
 
 ## HF-only threshold-fit GPU execution
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -28,10 +29,14 @@ PROMPT_ROSTER_PATH = (
     ROOT
     / "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
 )
-EXECUTION_REVISION = "2ff836f45c4012010092f7075e749507ae2ad9ae"
-EXPECTED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening"
-EXPECTED_PACKAGE_BYTES = 4_544_234
-EXPECTED_PACKAGE_SHA256 = "4138cd309429f80d2b4198e7a72e3785e10bdb3a4c7880dc2b7ecf429621c470"
+PROTOCOL_ID = "ceg_wm_thirteen_module_mechanism_screening"
+EXECUTION_REVISION = "ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29"
+EXPECTED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening_preflight_recovery"
+SUPERSEDED_EXECUTION_REVISION = "2ff836f45c4012010092f7075e749507ae2ad9ae"
+SUPERSEDED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening"
+EXPECTED_PACKAGE_BYTES = 4_546_300
+EXPECTED_PACKAGE_SHA256 = "1ff9a3424279cec77a932fc6d8bcbb9afd09aa6f55041632ce63d35b75068419"
+EXPECTED_NOTEBOOK_SHA256 = "759a1d1f651a055324240f6f169e7ea82994995b7fcdd9b3f17aea6ff048bff1"
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -88,6 +93,7 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert 4 <= len(code_cells) <= 6
     assert all(cell["execution_count"] is None for cell in code_cells)
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
+    assert sha256(NOTEBOOK_PATH.read_bytes()).hexdigest() == EXPECTED_NOTEBOOK_SHA256
     assert "https://github.com/RICHAAARC/CEG-WM.git" in source
     assert f"EXECUTION_REVISION = '{EXECUTION_REVISION}'" in source
     assert _notebook_constant(notebook, "RUN_ID") == EXPECTED_RUN_ID
@@ -122,6 +128,10 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
     assert "4 operational units and 0 scientific units" in source
     assert "does not count toward module science" in source
     assert "Agent2 and Agent3 verify this preflight" in source
+    assert SUPERSEDED_EXECUTION_REVISION in source
+    assert SUPERSEDED_RUN_ID in source
+    assert "dangling intent are immutable diagnostics" in source
+    assert "never reads, resumes, migrates, rewrites, or deletes them" in source
     assert "scientific completion is determined only" in source
     assert "COMMITTED" in source
     assert "ceg_wm_development_exploration_detector_crossfit_execution" in source
@@ -153,6 +163,10 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         assert "paused" in readme or "暂停" in readme
         assert "not authorized" in readme or "未授权" in readme
         assert "506" in readme
+        assert EXECUTION_REVISION in readme
+        assert EXPECTED_RUN_ID in readme
+        assert SUPERSEDED_EXECUTION_REVISION in readme
+        assert SUPERSEDED_RUN_ID in readme
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -175,7 +189,7 @@ def test_development_exploration_notebook_run_id_crosses_execution_intent_bounda
     assert run_id == EXPECTED_RUN_ID
 
     protocol = load_frozen_development_exploration_protocol(PROTOCOL_PATH)
-    assert protocol.protocol_id == EXPECTED_RUN_ID
+    assert protocol.protocol_id == PROTOCOL_ID
     assert len(protocol.unit_roster) == 282
     assert protocol.study_budget.maximum_scientific_units == 240
     assert protocol.study_budget.maximum_operational_units == 42

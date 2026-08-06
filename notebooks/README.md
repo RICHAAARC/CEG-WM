@@ -12,8 +12,9 @@
 当前有三个保留入口，但只有一个具有本批运行授权：
 
 - `colab/development_exploration.ipynb` 是当前唯一允许 **Run all** 的入口。它绑定
-  revision `2ff836f45c4012010092f7075e749507ae2ad9ae` 和 run
-  `ceg_wm_thirteen_module_mechanism_screening`，以 Drive 为跨会话 persistent root，
+  revision `ce536f1ad66b5f45c05d7b0a08e5c83fb8fb4b29` 和 run
+  `ceg_wm_thirteen_module_mechanism_screening_preflight_recovery`，以 Drive 为跨会话
+  persistent root，
   并只调用该 revision 中的统一 development server。本次入口固定传入
   `--maximum-wiring-clusters 2`，只运行 2 个 preflight 加 2 个 wiring operational
   units，共 4 operational、0 scientific；Agent2/Agent3 验真前不得运行完整筛查。
@@ -25,6 +26,10 @@
 机制筛查冻结总预算为 240 scientific + 42 operational = 282 units，最多 846
 attempts。旧 506-unit development authority 和旧 run IDs 只作为不可变历史边界，
 不是 active 入口或当前预算分母；Git 历史继续保留。
+
+旧 execution revision `2ff836f45c4012010092f7075e749507ae2ad9ae`、旧 run
+`ceg_wm_thirteen_module_mechanism_screening` 及其 dangling intent 是不可变诊断；
+当前 recovery run 不读取、不续跑、不迁移、不改写、不删除它们。
 
 结果 ZIP、receipt 与 `SHA256SUMS` 的 Drive export 只是交付便利，不是科学完成权威。
 
