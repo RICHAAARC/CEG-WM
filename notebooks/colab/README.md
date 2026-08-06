@@ -48,8 +48,9 @@ SHA-256 后，将 ZIP 与 receipt 原子复制到
 revision，不改变候选、阈值、split 或阶段。提交副本必须保持 outputs 为空、execution
 count 为 null。
 
-`development_exploration.ipynb` 是当前唯一允许 **Run all** 的 13 模块 development
-exploration 薄入口。Notebook 自身由本次 delivery revision 提供，执行权威固定为已完成
+`development_exploration.ipynb` 已完成 13 模块 operational validation，现为
+**permanently paused / not authorized**，不得再次 Run all。Notebook 自身由既有
+delivery revision 提供，执行权威固定为已完成
 独立方法审核的 `7e449aa29f53ea38e3a044681c75c8f3dccff135`；它只从 GitHub 获取该 exact commit，
 以 detached checkout 调用 `development_exploration_server.py`，不得改用 mutable branch。
 
@@ -63,8 +64,9 @@ session 最多完成 2 个 preflight 加 2 个 wiring units，即只提交 units
 Run all 验证有效 session receipt 关闭未过期 lease 后的即时恢复，每个 session 最多恢复
 2 个 wiring，直至累计 10 个 operational units。入口始终在 unit 10 scientific 边界前
 成功停止，完成 10 个 operational 后重复 Run all 也不会创建新 commit、scientific intent、
-bundle、marker 或 module outcome。上述 operational units 不计入 13 模块科学覆盖；完整
-机制筛查必须由以后单独审核的入口授权。
+bundle、marker 或 module outcome。实际运行已完成 2 个 preflight 和全部 8/8 wiring
+smoke clusters，并以 `authorized_operational_boundary_reached` 闭合。上述 operational
+units 不计入 13 模块科学覆盖。
 
 旧 execution revision `2ff836f45c4012010092f7075e749507ae2ad9ae`、旧 run
 `ceg_wm_thirteen_module_mechanism_screening` 及其 dangling intent 仅作为 immutable
@@ -106,3 +108,19 @@ development execution package 为 4,549,335 bytes，SHA-256 为
 `260a76d0e10ddbcf705bbdfda11e5593c688d2b3957d1635b4404b498187067e`。该摘要只绑定
 `7e449aa29f53ea38e3a044681c75c8f3dccff135` 执行包；Notebook delivery revision 不改变
 包内协议或方法实现。
+
+`thirteen_module_mechanism_screening.ipynb` 是唯一待 Agent2/Agent3 独立批准的完整
+科学筛查薄入口；批准前不得 Run all。它继续从 GitHub detached checkout 获取 exact
+execution revision `7e449aa29f53ea38e3a044681c75c8f3dccff135`，但使用全新 run
+`ceg_wm_thirteen_module_mechanism_scientific_screening`，从冻结 roster unit 0 开始。
+该入口不传入 `--maximum-wiring-clusters` 或 `--stop-before-scientific-units`，因此由
+repository server 按确定性顺序执行完整的 240 scientific + 42 operational = 282 units、
+最多 846 attempts，并保持既有跨 session 恢复、21 小时 soft stop 与 24 小时 hard cap。
+
+新入口不读取、续跑、迁移、改写、删除或混用已完成的
+`ceg_wm_thirteen_module_mechanism_screening_session_resume_validation` namespace 或任一
+更早历史 run。Notebook 仍只挂载 Drive、桥接 Secrets、拉取 exact Git revision、调用
+`development_exploration_server.py` 并复制服务器生成的 ZIP/receipt/`SHA256SUMS`；不安装
+依赖、不下载模型、不实现 runner、records、预算、协议或科学判定。提交副本保持 outputs
+为空、execution count 为 null。本筛查仍属 development，不创建 formal tau、Calibration
+Locked、candidate promotion、final-held-out evaluation、external baseline 或论文 claim。

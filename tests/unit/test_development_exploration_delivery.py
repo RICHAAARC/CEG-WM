@@ -24,6 +24,9 @@ from scripts.experiment_execution import development_exploration_entrypoint
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK_PATH = ROOT / "notebooks/colab/development_exploration.ipynb"
+SCIENTIFIC_SCREENING_NOTEBOOK_PATH = (
+    ROOT / "notebooks/colab/thirteen_module_mechanism_screening.ipynb"
+)
 PROTOCOL_PATH = ROOT / "configs/experiments/thirteen_module_mechanism_screening.json"
 PROMPT_ROSTER_PATH = (
     ROOT
@@ -33,6 +36,9 @@ PROTOCOL_ID = "ceg_wm_thirteen_module_mechanism_screening"
 EXECUTION_REVISION = "7e449aa29f53ea38e3a044681c75c8f3dccff135"
 EXPECTED_RUN_ID = (
     "ceg_wm_thirteen_module_mechanism_screening_session_resume_validation"
+)
+SCIENTIFIC_SCREENING_RUN_ID = (
+    "ceg_wm_thirteen_module_mechanism_scientific_screening"
 )
 SUPERSEDED_EXECUTION_REVISION = "2ff836f45c4012010092f7075e749507ae2ad9ae"
 SUPERSEDED_RUN_ID = "ceg_wm_thirteen_module_mechanism_screening"
@@ -50,6 +56,9 @@ SUPERSEDED_OPERATIONAL_RUN_ID = (
 EXPECTED_PACKAGE_BYTES = 4_549_335
 EXPECTED_PACKAGE_SHA256 = "260a76d0e10ddbcf705bbdfda11e5593c688d2b3957d1635b4404b498187067e"
 EXPECTED_NOTEBOOK_SHA256 = "24ba2bb12ddb1eea41f366aa728aee618be656c5f63a2cb0b860f131dba52998"
+EXPECTED_SCIENTIFIC_SCREENING_NOTEBOOK_SHA256 = (
+    "8b6d1e6b6c2a70f72ade40240f212314efd39841f68db1729537dc6fa2652f61"
+)
 TEST_ROOT_KEY = "development_exploration_delivery_non_secret_test_root_key"
 
 
@@ -93,7 +102,7 @@ def _create_minimal_package_repository(root: Path) -> Path:
 
 
 @pytest.mark.quick
-def test_development_exploration_notebook_is_thin_and_output_free() -> None:
+def test_operational_validation_notebook_remains_frozen_and_paused() -> None:
     notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
     code_cells = tuple(
         cell for cell in notebook["cells"] if cell["cell_type"] == "code"
@@ -199,6 +208,10 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         assert all(revision in readme for revision in SUPERSEDED_RECOVERY_REVISIONS)
         assert SUPERSEDED_OPERATIONAL_REVISION in readme
         assert SUPERSEDED_OPERATIONAL_RUN_ID in readme
+        assert "8/8 wiring" in readme
+        assert "authorized_operational_boundary_reached" in readme
+        assert SCIENTIFIC_SCREENING_RUN_ID in readme
+        assert "thirteen_module_mechanism_screening.ipynb" in readme
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -212,6 +225,112 @@ def test_development_exploration_notebook_is_thin_and_output_free() -> None:
         "zipfile",
     ):
         assert forbidden not in source
+
+
+@pytest.mark.quick
+def test_scientific_screening_notebook_is_thin_and_uses_fresh_namespace() -> None:
+    notebook = json.loads(
+        SCIENTIFIC_SCREENING_NOTEBOOK_PATH.read_text(encoding="utf-8")
+    )
+    code_cells = tuple(
+        cell for cell in notebook["cells"] if cell["cell_type"] == "code"
+    )
+    source = "\n".join(
+        "".join(cell.get("source", [])) for cell in notebook["cells"]
+    )
+    code_source = "\n".join(
+        "".join(cell.get("source", [])) for cell in code_cells
+    )
+
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert len(code_cells) == 5
+    assert all(cell["execution_count"] is None for cell in code_cells)
+    assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
+    assert (
+        sha256(SCIENTIFIC_SCREENING_NOTEBOOK_PATH.read_bytes()).hexdigest()
+        == EXPECTED_SCIENTIFIC_SCREENING_NOTEBOOK_SHA256
+    )
+    assert "https://github.com/RICHAAARC/CEG-WM.git" in source
+    assert f"EXECUTION_REVISION = '{EXECUTION_REVISION}'" in source
+    assert (
+        _notebook_constant(notebook, "RUN_ID")
+        == SCIENTIFIC_SCREENING_RUN_ID
+    )
+    assert EXPECTED_RUN_ID not in code_source
+    assert EXPECTED_RUN_ID in source
+    assert "--maximum-wiring-clusters" not in code_source
+    assert "--stop-before-scientific-units" not in code_source
+    assert "development_exploration_server.py" in code_source
+    assert "drive.mount('/content/drive')" in code_source
+    assert "userdata.get('HF_TOKEN')" in code_source
+    assert "userdata.get('CEG_WM_ROOT_KEY')" in code_source
+    assert "checkout', '--detach', 'FETCH_HEAD'" in code_source
+    assert "status', '--porcelain'" in code_source
+    assert "subprocess.Popen" in code_source
+    assert "server_receipts' / SESSION_ID / 'execution_receipt.json'" in code_source
+    assert "server_failures' / SESSION_ID" in code_source
+    assert "copy_to_drive_export" in code_source
+    assert "SHA256SUMS" in code_source
+    assert "240 scientific units plus 42 operational units, 282 total" in source
+    assert "846 maximum attempts" in source
+    assert "starts from frozen roster unit 0" in source
+    assert "all 8/8 wiring smoke clusters" in source
+    assert "authorized_operational_boundary_reached" in source
+    assert "permanently paused" in source
+    assert (
+        "never reads, resumes, migrates, rewrites, deletes, or mixes the prior operational run"
+        in source
+    )
+    assert "The Notebook never hand-writes records or scientific outcomes" in source
+    assert "pending Agent2 and Agent3 approval" in source
+    for forbidden in (
+        "pip install",
+        "snapshot_download(",
+        "from_pretrained(",
+        "DevelopmentExplorationRunner(",
+        "DevelopmentScientificRecord(",
+        "execute_development_exploration_session(",
+        "hf_only_threshold_fit",
+        "4096",
+        "--skip-dependency-install",
+        "zipfile",
+    ):
+        assert forbidden not in code_source
+
+
+@pytest.mark.quick
+def test_scientific_screening_run_starts_at_frozen_roster_boundary() -> None:
+    notebook = json.loads(
+        SCIENTIFIC_SCREENING_NOTEBOOK_PATH.read_text(encoding="utf-8")
+    )
+    run_id = _notebook_constant(notebook, "RUN_ID")
+    assert run_id == SCIENTIFIC_SCREENING_RUN_ID
+    assert run_id != EXPECTED_RUN_ID
+
+    protocol = load_frozen_development_exploration_protocol(PROTOCOL_PATH)
+    assert protocol.protocol_id == PROTOCOL_ID
+    assert len(protocol.unit_roster) == 282
+    assert protocol.unit_roster[0].unit_index == 0
+    assert protocol.study_budget.maximum_scientific_units == 240
+    assert protocol.study_budget.maximum_operational_units == 42
+    assert protocol.study_budget.maximum_total_units == 282
+    assert protocol.study_budget.maximum_total_record_attempts == 846
+    prompts = load_development_prompt_roster(PROMPT_ROSTER_PATH)
+    manifest, public_key_roster = build_development_manifest_and_key_roster(
+        protocol,
+        prompts,
+        TEST_ROOT_KEY,
+    )
+    authority = create_frozen_development_execution_intent_authority(
+        protocol,
+        run_id=run_id,
+        seed_namespace=prompts.seed_namespace,
+        input_manifest=manifest,
+        public_key_roster=public_key_roster,
+    )
+
+    assert authority.run_id == SCIENTIFIC_SCREENING_RUN_ID
+    assert authority.validate() == ()
 
 
 @pytest.mark.quick

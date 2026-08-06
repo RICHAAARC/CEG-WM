@@ -17,8 +17,9 @@ persisted in receipts or artifacts. Colab-side copying of ZIP, receipt, and `SHA
 is a delivery convenience; only verified persistent `COMMITTED` bundles establish unit
 completion.
 
-The checked-in thin Notebook is the only development entrypoint currently authorized for
-**Run all**. It invokes the server from detached execution revision
+The checked-in `development_exploration.ipynb` operational Notebook completed its authorized
+boundary and is now permanently paused and not authorized for another **Run all**. It invoked
+the server from detached execution revision
 `7e449aa29f53ea38e3a044681c75c8f3dccff135` with run ID
 `ceg_wm_thirteen_module_mechanism_screening_session_resume_validation` and always passes
 both `--maximum-wiring-clusters 2` and `--stop-before-scientific-units`. The first session
@@ -26,9 +27,18 @@ is therefore limited to units 0 through 3, two preflight and two wiring units: f
 scientific units. A later Run all in the same new namespace validates immediate recovery from
 the preceding verified session receipt. Later sessions resume at most two wiring units each until all ten operational
 screening units are committed. Every session stops before scientific unit 10, and repeated
-Run all after operational completion creates no new commit or scientific artifact. These units
-receive no module-science credit. A separately reviewed entrypoint is required to start the
-full screening roster. The frozen study budget is 240 scientific
+Run all after operational completion was not used to create a scientific artifact. The verified
+result contains two preflight units and all 8/8 wiring smoke clusters and terminates with
+`authorized_operational_boundary_reached`. These units receive no module-science credit.
+
+The checked-in `thirteen_module_mechanism_screening.ipynb` is the only full-screening entrypoint
+pending independent Agent2/Agent3 approval and must not run before approval. It invokes this same
+server and exact execution revision with the fresh run ID
+`ceg_wm_thirteen_module_mechanism_scientific_screening`, begins at frozen roster unit 0, and passes
+neither `--maximum-wiring-clusters` nor `--stop-before-scientific-units`. The server therefore owns
+the complete deterministic roster, session recovery, soft stop, records, and budget. The new run
+does not read, resume, migrate, rewrite, delete, or mix the completed operational namespace or any
+historical run. The frozen study budget is 240 scientific
 plus 42 operational units, 282 total, with 846 maximum attempts. The prior 506-unit
 development authority is historical and is neither the active entrypoint nor the current
 budget denominator. The prior
