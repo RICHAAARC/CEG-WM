@@ -1,7 +1,7 @@
 {
   "schema_version": "ceg_wm_development_module_exploration_protocol_schema_v5",
   "protocol_id": "ceg_wm_development_module_exploration",
-  "protocol_version": "4.2.2",
+  "protocol_version": "4.2.3",
   "split_policy": {
     "allowed_split": "development",
     "formal_later_split_deny_list": [
@@ -149,7 +149,7 @@
       "registered_paired_ablation_only"
     ],
     "score_adaptive_unit_changes_forbidden": true,
-    "unit_roster_digest": "687c33b75dd8f364d30534dc74bdd0d7110d5a2dc0a36231d7b0fcda5be0eced"
+    "unit_roster_digest": "e50c240eb50e560df06092aacee36855cd9f6e04af563f5f87e7a5bcb22dda4b"
   },
   "provisional_threshold_cross_fit": {
     "source_split": "development",
@@ -410,13 +410,14 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "carrier_candidate", "values": ["lf_low_pass"]}
       ],
-      "candidate_config_digest": "a1d2b8fd2abe903d79a2b490feea1e30f56aa99862881cb6ea67c2b890daffa5",
+      "candidate_config_digest": "d8924ea37cc66151e29bc341601f6aa8bd7a37c311069deeb707aaaed3a54e84",
       "paired_ablation_identity": "low_frequency_write_disabled_ablation",
-      "negative_control_case_ids": ["wrong_key", "unwatermarked", "hf_only"],
-      "metric_ids": ["lf_attribution_tpr", "lf_primary_null_fpr", "quality_delta"],
+      "negative_control_case_ids": ["registered_direction_replay", "wrong_key_direction", "matched_clean_pair"],
+      "metric_ids": ["registered_direction_replay_match", "wrong_key_direction_separation", "materialized_nonzero_write_within_budget", "quality_delta"],
       "signal_criteria": [
-        {"metric_id": "lf_attribution_tpr", "comparison": "greater_than", "threshold": 0.5},
-        {"metric_id": "lf_primary_null_fpr", "comparison": "less_than", "threshold": 0.5},
+        {"metric_id": "registered_direction_replay_match", "comparison": "equal", "threshold": 1.0},
+        {"metric_id": "wrong_key_direction_separation", "comparison": "equal", "threshold": 1.0},
+        {"metric_id": "materialized_nonzero_write_within_budget", "comparison": "equal", "threshold": 1.0},
         {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
       ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
@@ -425,7 +426,7 @@
       "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
       "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
       "scientific_source_cluster_scale": 16,
-      "content_branch_ids": ["clean_control", "lf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "content_branch_ids": ["lf_only"],
       "geometry_case_ids": []
     },
     {
@@ -438,13 +439,14 @@
       "candidate_parameter_bindings": [
         {"parameter_id": "carrier_candidate", "values": ["hf_sparse_tail"]}
       ],
-      "candidate_config_digest": "cb2df2ef4123875e1b24ae7a988b703859940c00264e203811bcc1c8a76e3d05",
+      "candidate_config_digest": "51cf2ba539d186e1a7d44a841d3461202a9c45d104c8b715d228e5421436e9b9",
       "paired_ablation_identity": "high_frequency_write_disabled_ablation",
-      "negative_control_case_ids": ["wrong_key", "unwatermarked", "clean_pair"],
-      "metric_ids": ["hf_attribution_tpr", "hf_primary_null_fpr", "quality_delta"],
+      "negative_control_case_ids": ["registered_direction_replay", "wrong_key_direction", "matched_clean_pair"],
+      "metric_ids": ["registered_direction_replay_match", "wrong_key_direction_separation", "materialized_nonzero_write_within_budget", "quality_delta"],
       "signal_criteria": [
-        {"metric_id": "hf_attribution_tpr", "comparison": "greater_than", "threshold": 0.5},
-        {"metric_id": "hf_primary_null_fpr", "comparison": "less_than", "threshold": 0.5},
+        {"metric_id": "registered_direction_replay_match", "comparison": "equal", "threshold": 1.0},
+        {"metric_id": "wrong_key_direction_separation", "comparison": "equal", "threshold": 1.0},
+        {"metric_id": "materialized_nonzero_write_within_budget", "comparison": "equal", "threshold": 1.0},
         {"metric_id": "quality_delta", "comparison": "less_or_equal", "threshold": 0.012}
       ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "branch_score_trace", "key_control_trace", "provenance_trace"],
@@ -453,7 +455,7 @@
       "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
       "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
       "scientific_source_cluster_scale": 16,
-      "content_branch_ids": ["clean_control", "hf_only", "lf_hf_disabled_uniform_control", "lf_hf_routed_combination"],
+      "content_branch_ids": ["hf_only"],
       "geometry_case_ids": []
     },
     {
@@ -507,7 +509,7 @@
         {"metric_id": "lf_wrong_key_rate", "comparison": "less_than", "threshold": 0.5}
       ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
-      "prerequisite_responsibility_ids": ["key_schedule", "lf_carrier"],
+      "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
       "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
       "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],
@@ -534,7 +536,7 @@
         {"metric_id": "hf_wrong_key_rate", "comparison": "less_than", "threshold": 0.5}
       ],
       "record_field_names": ["responsibility_id", "scientific_question_id", "development_case_id", "candidate_identity", "candidate_config_digest", "paired_ablation_identity", "module_outcome", "candidate_recommendation", "recommendation_reason", "evidence_record_ids", "detector_trace", "branch_score_trace", "threshold_trace", "key_control_trace", "provenance_trace"],
-      "prerequisite_responsibility_ids": ["key_schedule", "hf_carrier"],
+      "prerequisite_responsibility_ids": ["key_schedule"],
       "dependency_stop_rule": "stop_when_any_prerequisite_lacks_mechanism_signal_observed",
       "module_outcome_rule": "classify_mechanism_signal_separately_from_candidate_recommendation",
       "allowed_module_outcomes": ["mechanism_signal_observed", "mechanism_signal_not_observed", "implementation_blocked", "resource_blocked"],

@@ -530,7 +530,101 @@ def test_first_scientific_cases_call_real_key_router_and_carrier_methods() -> No
     )
     assert low_frequency.record.operation_result_payload["candidate_id"] == "lf_low_pass"
     assert high_frequency.record.operation_result_payload["candidate_id"] == "hf_sparse_tail"
-    assert all(result.record.module_outcome is None for result in (key, router, low_frequency, high_frequency))
+    for result, branch_id in (
+        (low_frequency, "lf_only"),
+        (high_frequency, "hf_only"),
+    ):
+        statistics = dict(
+            result.record.metric_observation["sufficient_statistics"]
+        )
+        identities = result.record.metric_observation[
+            "result_identity_digests"
+        ]
+        assert result.record.content_branch_id == branch_id
+        assert statistics["registered_direction_replay_match"] == 1.0
+        assert statistics["wrong_key_direction_separation"] == 1.0
+        assert statistics["materialized_nonzero_write_within_budget"] == 1.0
+        assert 0.0 < statistics["quality_delta"] <= 0.012
+        assert identities[0] == identities[1]
+        assert identities[2] != identities[0]
+        assert all(identities[index] for index in range(3, 7))
+        assert set(result.record.metric_ids) == {
+            "registered_direction_replay_match",
+            "wrong_key_direction_separation",
+            "materialized_nonzero_write_within_budget",
+            "quality_delta",
+        }
+        assert all(
+            result.record.branch_score_trace[field_name] is None
+            for field_name in ("lf_score", "hf_score", "combined_score")
+        )
+        assert result.record.detector_trace["registered_detector_identity"] is None
+    assert all(
+        result.record.module_outcome is None
+        for result in (key, router, low_frequency, high_frequency)
+    )
+
+
+@pytest.mark.quick
+def test_qk_scientific_case_runs_before_all_content_detectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner()
+    raw = replace(_input(), hf_null=None, lf_null=None)
+    calls: list[str] = []
+    observe = Sd35RuntimeAdapter.observe_detection_qk
+    synchronize = CegWmExperimentAdapter.synchronize_qk_observation
+
+    def observe_call(self, image):
+        calls.append("observe_detection_qk")
+        return observe(self, image)
+
+    def synchronize_call(self, observation, root_key):
+        calls.append("synchronize_qk_observation")
+        return synchronize(self, observation, root_key)
+
+    def unexpected_detector_call(*_args, **_kwargs):
+        raise AssertionError("geometry scientific cases cannot call a content detector")
+
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "observe_detection_qk",
+        observe_call,
+    )
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "synchronize_qk_observation",
+        synchronize_call,
+    )
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "detect_hf",
+        unexpected_detector_call,
+    )
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "detect_lf",
+        unexpected_detector_call,
+    )
+    monkeypatch.setattr(
+        CegWmExperimentAdapter,
+        "detect_content",
+        unexpected_detector_call,
+    )
+
+    result = runner._execute_unit(
+        _first_scientific_unit_index(runner, "qk_geometry_sync"),
+        raw,
+    )
+
+    assert result.record.responsibility_id == "qk_geometry_sync"
+    assert result.record.geometry_trace["qk_registered_relation_score"] is not None
+    assert result.record.geometry_trace["qk_wrong_relation_score"] is not None
+    assert calls == [
+        "observe_detection_qk",
+        "synchronize_qk_observation",
+        "synchronize_qk_observation",
+    ]
 
 
 @pytest.mark.quick

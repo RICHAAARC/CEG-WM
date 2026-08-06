@@ -576,6 +576,22 @@ def test_protocol_freezes_exact_thirteen_module_scientific_structure() -> None:
         assert item.dependency_stop_rule == DEPENDENCY_STOP_RULE
         assert item.allowed_module_outcomes == MODULE_OUTCOMES
         assert len(item.candidate_config_digest) == 64
+    studies = {
+        item.responsibility_id: item for item in protocol.module_matrix
+    }
+    assert studies["lf_detector"].prerequisite_responsibility_ids == (
+        "key_schedule",
+    )
+    assert studies["hf_detector"].prerequisite_responsibility_ids == (
+        "key_schedule",
+    )
+    for carrier_id in ("lf_carrier", "hf_carrier"):
+        assert not {
+            "lf_attribution_tpr",
+            "lf_primary_null_fpr",
+            "hf_attribution_tpr",
+            "hf_primary_null_fpr",
+        } & set(studies[carrier_id].metric_ids)
 
 
 @pytest.mark.unit
@@ -705,6 +721,23 @@ def test_study_roster_is_breadth_first_enumerable_and_budget_bounded() -> None:
     assert sum(
         unit.phase == "development_paired_ablation" for unit in roster
     ) == 48
+    for responsibility_id, content_branch_id in (
+        ("lf_carrier", "lf_only"),
+        ("hf_carrier", "hf_only"),
+    ):
+        carrier_units = tuple(
+            unit
+            for unit in roster
+            if unit.responsibility_id == responsibility_id
+            and unit.phase == "development_scientific_responsibility_case"
+        )
+        assert len(carrier_units) == 16
+        assert {unit.source_cluster_ordinal for unit in carrier_units} == set(
+            range(16)
+        )
+        assert {unit.content_branch_id for unit in carrier_units} == {
+            content_branch_id
+        }
     content_detector_core = tuple(
         unit
         for unit in roster

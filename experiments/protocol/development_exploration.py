@@ -35,7 +35,7 @@ from experiments.protocol.internal_splits import (
 
 
 PROTOCOL_ID = "ceg_wm_development_module_exploration"
-DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.2"
+DEVELOPMENT_EXPLORATION_PROTOCOL_VERSION = "4.2.3"
 SCHEMA_VERSION = "ceg_wm_development_module_exploration_protocol_schema_v5"
 DEVELOPMENT_SPLIT = "development"
 FORMAL_LATER_SPLIT_DENY_LIST = INTERNAL_VALIDATION_SPLITS[1:]
@@ -435,13 +435,15 @@ REGISTERED_DEVELOPMENT_SIGNAL_CRITERIA = {
         ("quality_delta", "less_or_equal", 0.012),
     ),
     "lf_carrier": (
-        ("lf_attribution_tpr", "greater_than", 0.5),
-        ("lf_primary_null_fpr", "less_than", 0.5),
+        ("registered_direction_replay_match", "equal", 1.0),
+        ("wrong_key_direction_separation", "equal", 1.0),
+        ("materialized_nonzero_write_within_budget", "equal", 1.0),
         ("quality_delta", "less_or_equal", 0.012),
     ),
     "hf_carrier": (
-        ("hf_attribution_tpr", "greater_than", 0.5),
-        ("hf_primary_null_fpr", "less_than", 0.5),
+        ("registered_direction_replay_match", "equal", 1.0),
+        ("wrong_key_direction_separation", "equal", 1.0),
+        ("materialized_nonzero_write_within_budget", "equal", 1.0),
         ("quality_delta", "less_or_equal", 0.012),
     ),
     "content_embedder": (
@@ -1130,6 +1132,7 @@ def validate_development_module_matrix(
             violations.append(f"{prefix}:content_branch_identity_invalid")
         if (
             prefix in set(REQUIRED_METHOD_RESPONSIBILITIES[1:8])
+            and prefix not in {"lf_carrier", "hf_carrier"}
             and "clean_control" not in item.content_branch_ids
         ):
             violations.append(f"{prefix}:clean_control_missing")
@@ -1401,15 +1404,11 @@ def _build_study_unit_roster(
             )
 
     append_responsibility_cases("key_schedule", branches=("clean_control",))
-    append_responsibility_cases(
-        "hf_carrier", branches=("clean_control", "hf_only")
-    )
+    append_responsibility_cases("hf_carrier", branches=("hf_only",))
     append_responsibility_cases(
         "hf_detector", branches=("hf_only",)
     )
-    append_responsibility_cases(
-        "lf_carrier", branches=("clean_control", "lf_only")
-    )
+    append_responsibility_cases("lf_carrier", branches=("lf_only",))
     append_responsibility_cases(
         "lf_detector", branches=("lf_only",)
     )

@@ -2508,6 +2508,209 @@ class DevelopmentExplorationRunner:
             for criterion in study.signal_criteria
         )
 
+    def _execute_geometry_operation(
+        self,
+        unit: DevelopmentStudyUnit,
+        identity: AnalysisUnitIdentity,
+        raw: DevelopmentUnitInput,
+        *,
+        runtime_result: ContentWriteVaeResult,
+        wrong_material: object,
+        traces: dict[str, object],
+    ) -> tuple[
+        object,
+        DevelopmentMetricObservation,
+        dict[str, object],
+        InternalValidationRecord | None,
+    ]:
+        """Run the public geometry chain before any content-detector construction."""
+
+        responsibility = unit.responsibility_id
+        source_image = _decoded_image_to_rgb8(runtime_result.watermarked_image)
+        attack_specification = _frozen_geometry_attack_specification(
+            self.protocol,
+            unit.geometry_case_id,
+        )
+        attacked = apply_geometric_attack(
+            AttackArtifact(identity, source_image),
+            attack_specification,
+            registry=self.attack_registry,
+        )
+        runtime_qk = self.runtime_adapter.observe_detection_qk(
+            attacked.attacked_artifact.image
+        )
+        qk_registered = self.adapter.synchronize_qk_observation(
+            runtime_qk,
+            raw.registered_root_key,
+        ).result
+        qk_wrong = self.adapter.synchronize_qk_observation(
+            runtime_qk,
+            wrong_material,
+        ).result
+        traces.update(
+            geometry_operation_identity=attack_specification.attack_id,
+            attack_config_digest=attack_specification.attack_config_digest,
+            qk_registered_relation_score=qk_registered.relation_score,
+            qk_wrong_relation_score=qk_wrong.relation_score,
+        )
+        if responsibility == "qk_geometry_sync":
+            return qk_registered, metric_qk_geometry_sync(
+                identity.source_cluster_id,
+                registered_relation_score=qk_registered.relation_score,
+                wrong_key_relation_score=qk_wrong.relation_score,
+                registered_descriptor_digest=qk_registered.descriptor_digest,
+                registered_projection_digest=qk_registered.projection_digest,
+                wrong_projection_digest=qk_wrong.projection_digest,
+                quality_delta=_tensor_relative_l2(
+                    source_image.to(dtype=torch.float32),
+                    attacked.attacked_artifact.image.to(dtype=torch.float32),
+                ),
+            ), traces, None
+        estimation = self.adapter.estimate_geometric_transform(
+            qk_registered,
+            raw.registered_root_key,
+            epsilon_inlier=raw.epsilon_inlier,
+        ).result
+        traces.update(
+            geometry_estimation_identity=estimation.estimation_identity_digest,
+            geometry_transform=_public_payload(estimation.transform),
+            geometry_raw_metrics={
+                "coverage": estimation.coverage,
+                "uniqueness": estimation.uniqueness,
+                "gap": estimation.gap,
+                "key_margin": estimation.key_margin,
+                "inlier_ratio": estimation.inlier_ratio,
+                "mean_residual": _public_payload(estimation.mean_residual),
+            },
+        )
+        if responsibility == "geometric_transform_estimator":
+            metric = metric_geometric_transform_estimator(
+                identity.source_cluster_id,
+                estimated_log_scale=estimation.transform.log_scale,
+                estimated_rotation_degrees=(
+                    estimation.transform.residual_rotation_degrees
+                ),
+                estimated_coverage=estimation.coverage,
+                mean_residual=estimation.mean_residual,
+                key_margin=estimation.key_margin,
+                estimation_identity_digest=estimation.estimation_identity_digest,
+                search_config_digest=estimation.search_config_digest,
+                truth_crop_fraction=attack_specification.crop_fraction,
+                truth_scale=attack_specification.scale_factor,
+                truth_rotation_degrees=attack_specification.rotation_degrees,
+                estimated_translation_x=estimation.transform.translation_x,
+                estimated_translation_y=estimation.transform.translation_y,
+                truth_translation_x=attacked.output_to_input_matrix[0][2],
+                truth_translation_y=attacked.output_to_input_matrix[1][2],
+            )
+            return estimation, metric, traces, None
+        wrong_estimation = self.adapter.estimate_geometric_transform(
+            qk_wrong,
+            wrong_material,
+            epsilon_inlier=raw.epsilon_inlier,
+        ).result
+        reliability = self.adapter.assess_geometry_reliability(
+            estimation,
+            raw.geometry_reliability_thresholds,
+        ).result
+        wrong_reliability = self.adapter.assess_geometry_reliability(
+            wrong_estimation,
+            raw.geometry_reliability_thresholds,
+        ).result
+        ambiguous_control_realized = (
+            unit.geometry_case_id != "ambiguous_transform_control"
+            or estimation.gap
+            <= self.protocol.geometry_study.ambiguous_control_max_top_two_gap
+        )
+        traces.update(
+            geometry_reliability_identity=reliability.reliability_identity_digest,
+            geometry_reliable=reliability.reliable,
+            geometry_reliability_config_digest=reliability.threshold_config_digest,
+            geometry_reliability_status=reliability.status,
+            geometry_reliability_failure_reasons=reliability.failure_reasons,
+            wrong_key_geometry_estimation_identity=(
+                wrong_estimation.estimation_identity_digest
+            ),
+            wrong_key_geometry_reliability_identity=(
+                wrong_reliability.reliability_identity_digest
+            ),
+            wrong_key_geometry_reliable=wrong_reliability.reliable,
+            wrong_key_geometry_reliability_status=wrong_reliability.status,
+            wrong_key_geometry_reliability_failure_reasons=(
+                wrong_reliability.failure_reasons
+            ),
+            ambiguous_control_realized=ambiguous_control_realized,
+        )
+        if responsibility == "geometry_reliability":
+            if not ambiguous_control_realized:
+                raise DevelopmentUnitExcluded(
+                    "control_not_realized:ambiguous_transform_control"
+                )
+            return reliability, metric_geometry_reliability(
+                identity.source_cluster_id,
+                registered_reliability_accepted=reliability.reliable,
+                wrong_key_reliability_accepted=wrong_reliability.reliable,
+                is_unreliable_control=(
+                    unit.geometry_case_id in GEOMETRY_NEGATIVE_CONTROL_CASE_IDS
+                ),
+                registered_reliability_identity_digest=(
+                    reliability.reliability_identity_digest
+                ),
+                wrong_key_reliability_identity_digest=(
+                    wrong_reliability.reliability_identity_digest
+                ),
+                registered_estimation_identity_digest=(
+                    estimation.estimation_identity_digest
+                ),
+                wrong_key_estimation_identity_digest=(
+                    wrong_estimation.estimation_identity_digest
+                ),
+            ), traces, None
+        if not reliability.reliable:
+            raise DevelopmentUnitExcluded(
+                "rectification unit was blocked by fail-closed reliability"
+            )
+        rectified = self.adapter.rectify_image(
+            attacked.attacked_artifact.image,
+            estimation,
+            reliability,
+        ).result
+        content_operation = FormalHfContentDetectionOperation(self.adapter)
+        attacked_content = content_operation(
+            attacked.attacked_artifact.image,
+            raw.registered_root_key,
+        )
+        rectified_content = content_operation(
+            rectified.rectified_image,
+            raw.registered_root_key,
+        )
+        traces.update(
+            raw_detector_identity=attacked_content.detector_identity,
+            rectified_detector_identity=rectified_content.detector_identity,
+            raw_detector_config_digest=attacked_content.content_config_digest,
+            rectified_detector_config_digest=rectified_content.content_config_digest,
+            raw_preprocessing_identity=content_operation.preprocessing_identity,
+            rectified_preprocessing_identity=content_operation.preprocessing_identity,
+            raw_content_score=attacked_content.content_score,
+            rectified_content_score=rectified_content.content_score,
+            rectification_status="succeeded",
+        )
+        if responsibility == "image_rectifier":
+            return rectified, metric_image_rectifier(
+                identity.source_cluster_id,
+                attacked_content_score=attacked_content.content_score,
+                rectified_content_score=rectified_content.content_score,
+                token_crop_support=rectified.token_crop_support,
+                pixel_crop_support=rectified.pixel_crop_support,
+                rectified_image_digest=rectified.rectified_image_digest,
+                rectification_config_digest=rectified.rectification_config_digest,
+                rectification_quality=_tensor_relative_l2(
+                    source_image.to(dtype=torch.float32),
+                    rectified.rectified_image.to(dtype=torch.float32),
+                ),
+            ), traces, None
+        raise DevelopmentRunnerError("geometry responsibility dispatch is incomplete")
+
     def _execute_real_operation(
         self,
         unit: DevelopmentStudyUnit,
@@ -2760,12 +2963,34 @@ class DevelopmentExplorationRunner:
             routing_mask_digest=_canonical_digest((routing.mask_lf_digest, routing.mask_hf_digest)),
         )
         responsibility_result: object | None = None
+        replayed_carrier: object | None = None
+        wrong_key_carrier: object | None = None
         lf_carrier = self.adapter.build_lf_carrier(raw.registered_root_key, shape, routing_result=routing).result
         hf_carrier = self.adapter.build_hf_carrier(raw.registered_root_key, shape, routing_result=routing).result
         if responsibility == "lf_carrier":
             responsibility_result = lf_carrier
+            replayed_carrier = self.adapter.build_lf_carrier(
+                raw.registered_root_key,
+                shape,
+                routing_result=routing,
+            ).result
+            wrong_key_carrier = self.adapter.build_lf_carrier(
+                wrong_material,
+                shape,
+                routing_result=routing,
+            ).result
         elif responsibility == "hf_carrier":
             responsibility_result = hf_carrier
+            replayed_carrier = self.adapter.build_hf_carrier(
+                raw.registered_root_key,
+                shape,
+                routing_result=routing,
+            ).result
+            wrong_key_carrier = self.adapter.build_hf_carrier(
+                wrong_material,
+                shape,
+                routing_result=routing,
+            ).result
         if responsibility == "content_embedder" and unit.content_branch_id == "clean_control":
             latent_payload = _public_payload(raw.base_latent)
             assert type(latent_payload) is dict
@@ -2831,6 +3056,111 @@ class DevelopmentExplorationRunner:
                 materialization_replay_identity=materialization.materialization_replay_identity,
                 paired_base_latent_digest=runtime_result.paired_base_latent_digest,
             ), traces, None
+        if responsibility in {"lf_carrier", "hf_carrier"}:
+            assert responsibility_result is not None
+            assert replayed_carrier is not None
+            assert wrong_key_carrier is not None
+            materialization = runtime_result.content_materialization
+            materialization_result = runtime_result.content_materialization_result
+            if responsibility == "lf_carrier":
+                assert type(responsibility_result) is LfCarrierResult
+                assert type(replayed_carrier) is LfCarrierResult
+                assert type(wrong_key_carrier) is LfCarrierResult
+                embedded_registered_direction = (
+                    embedding.active_lf_direction == responsibility_result.direction
+                    and embedding.active_hf_direction is None
+                    and embedding.content_direction == responsibility_result.direction
+                    and embedding.lf_carrier_config_digest
+                    == responsibility_result.carrier_config_digest
+                    and embedding.hf_carrier_config_digest is None
+                )
+            else:
+                assert type(responsibility_result) is HfCarrierResult
+                assert type(replayed_carrier) is HfCarrierResult
+                assert type(wrong_key_carrier) is HfCarrierResult
+                embedded_registered_direction = (
+                    embedding.active_hf_direction == responsibility_result.direction
+                    and embedding.active_lf_direction is None
+                    and embedding.content_direction == responsibility_result.direction
+                    and embedding.hf_carrier_config_digest
+                    == responsibility_result.carrier_config_digest
+                    and embedding.lf_carrier_config_digest is None
+                )
+            replay_matches = replayed_carrier == responsibility_result
+            wrong_key_separated = (
+                wrong_key_carrier.key_role == "wrong"
+                and wrong_key_carrier.wrong_key_index == raw.wrong_key_index
+                and wrong_key_carrier.root_key_public_digest
+                == responsibility_result.root_key_public_digest
+                and wrong_key_carrier.carrier_config_digest
+                == responsibility_result.carrier_config_digest
+                and wrong_key_carrier.direction_digest
+                != responsibility_result.direction_digest
+                and wrong_key_carrier.direction != responsibility_result.direction
+            )
+            materialized_within_budget = (
+                embedded_registered_direction
+                and materialization_result.embedding_result == embedding
+                and materialization.integrity_status == "passed"
+                and materialization_result.integrity_status == "passed"
+                and materialization_result.budget_status == "accepted"
+                and materialization.realized_total_l2 > 0.0
+                and materialization_result.realized_relative_l2 > 0.0
+                and materialization_result.realized_relative_l2
+                <= materialization_result.content_relative_l2_limit
+                and materialization.materialization_replay_identity
+                == materialization_result.observation.materialization_replay_identity
+            )
+            traces.update(
+                content_write_control="registered_carrier_write_with_matched_clean_pair",
+                embedding_result_identity=embedding.embedding_result_identity,
+                materialization_replay_identity=(
+                    materialization.materialization_replay_identity
+                ),
+                realized_relative_l2=materialization_result.realized_relative_l2,
+            )
+            metric_builder = (
+                metric_lf_carrier
+                if responsibility == "lf_carrier"
+                else metric_hf_carrier
+            )
+            return responsibility_result, metric_builder(
+                identity.source_cluster_id,
+                registered_direction_replay_match=replay_matches,
+                wrong_key_direction_separated=wrong_key_separated,
+                materialized_nonzero_write_within_budget=(
+                    materialized_within_budget
+                ),
+                quality_delta=_tensor_relative_l2(
+                    runtime_result.clean_image,
+                    runtime_result.watermarked_image,
+                ),
+                registered_direction_digest=responsibility_result.direction_digest,
+                replayed_direction_digest=replayed_carrier.direction_digest,
+                wrong_key_direction_digest=wrong_key_carrier.direction_digest,
+                carrier_config_digest=responsibility_result.carrier_config_digest,
+                embedding_result_identity=embedding.embedding_result_identity,
+                materialization_replay_identity=(
+                    materialization.materialization_replay_identity
+                ),
+                materialized_delta_digest=(
+                    materialization.delta_content_actual_digest
+                ),
+            ), traces, None
+        if responsibility in {
+            "qk_geometry_sync",
+            "geometric_transform_estimator",
+            "geometry_reliability",
+            "image_rectifier",
+        }:
+            return self._execute_geometry_operation(
+                unit,
+                identity,
+                raw,
+                runtime_result=runtime_result,
+                wrong_material=wrong_material,
+                traces=traces,
+            )
         observed_latent = (
             runtime_result.clean_detection_latent
             if unit.content_branch_id == "clean_control"
@@ -2881,31 +3211,6 @@ class DevelopmentExplorationRunner:
             ),
             primary_null_control_identity="unwatermarked_registered_key_primary_null",
         )
-        branch_quality_delta = _tensor_relative_l2(
-            runtime_result.clean_image, runtime_result.watermarked_image
-        )
-        if responsibility == "lf_carrier":
-            assert responsibility_result is not None
-            return responsibility_result, metric_lf_carrier(
-                identity.source_cluster_id,
-                registered_score=lf_registered.lf_score,
-                primary_null_score=lf_null.lf_score,
-                quality_delta=branch_quality_delta,
-                direction_digest=lf_carrier.direction_digest,
-                template_digest=lf_carrier.template_digest,
-                carrier_config_digest=lf_carrier.carrier_config_digest,
-            ), traces, None
-        if responsibility == "hf_carrier":
-            assert responsibility_result is not None
-            return responsibility_result, metric_hf_carrier(
-                identity.source_cluster_id,
-                registered_score=hf_registered.hf_score,
-                primary_null_score=hf_null.hf_score,
-                quality_delta=branch_quality_delta,
-                direction_digest=hf_carrier.direction_digest,
-                template_digest=hf_carrier.template_digest,
-                carrier_config_digest=hf_carrier.carrier_config_digest,
-            ), traces, None
         if responsibility == "lf_detector":
             traces.update(
                 raw_detector_identity=lf_registered.detector_identity,
@@ -3046,170 +3351,6 @@ class DevelopmentExplorationRunner:
                 primary_null_config_digest=null_content.content_config_digest,
             )
             return candidate_content, metric, traces, None
-        source_image = _decoded_image_to_rgb8(
-            runtime_result.clean_image
-            if unit.content_branch_id == "clean_control"
-            else runtime_result.watermarked_image
-        )
-        attack_specification = _frozen_geometry_attack_specification(
-            self.protocol,
-            unit.geometry_case_id,
-        )
-        attacked = apply_geometric_attack(
-            AttackArtifact(identity, source_image),
-            attack_specification,
-            registry=self.attack_registry,
-        )
-        runtime_qk = self.runtime_adapter.observe_detection_qk(attacked.attacked_artifact.image)
-        qk_registered = self.adapter.synchronize_qk_observation(runtime_qk, raw.registered_root_key).result
-        qk_wrong = self.adapter.synchronize_qk_observation(runtime_qk, wrong_material).result
-        traces.update(
-            geometry_operation_identity=attack_specification.attack_id,
-            attack_config_digest=attack_specification.attack_config_digest,
-            qk_registered_relation_score=qk_registered.relation_score,
-            qk_wrong_relation_score=qk_wrong.relation_score,
-        )
-        if responsibility == "qk_geometry_sync":
-            return qk_registered, metric_qk_geometry_sync(
-                identity.source_cluster_id,
-                registered_relation_score=qk_registered.relation_score,
-                wrong_key_relation_score=qk_wrong.relation_score,
-                registered_descriptor_digest=qk_registered.descriptor_digest,
-                registered_projection_digest=qk_registered.projection_digest,
-                wrong_projection_digest=qk_wrong.projection_digest,
-                quality_delta=_tensor_relative_l2(
-                    source_image.to(dtype=torch.float32),
-                    attacked.attacked_artifact.image.to(dtype=torch.float32),
-                ),
-            ), traces, None
-        estimation = self.adapter.estimate_geometric_transform(
-            qk_registered, raw.registered_root_key, epsilon_inlier=raw.epsilon_inlier
-        ).result
-        traces.update(
-            geometry_estimation_identity=estimation.estimation_identity_digest,
-            geometry_transform=_public_payload(estimation.transform),
-            geometry_raw_metrics={
-                "coverage": estimation.coverage,
-                "uniqueness": estimation.uniqueness,
-                "gap": estimation.gap,
-                "key_margin": estimation.key_margin,
-                "inlier_ratio": estimation.inlier_ratio,
-                "mean_residual": _public_payload(estimation.mean_residual),
-            },
-        )
-        if responsibility == "geometric_transform_estimator":
-            metric = metric_geometric_transform_estimator(
-                identity.source_cluster_id,
-                estimated_log_scale=estimation.transform.log_scale,
-                estimated_rotation_degrees=estimation.transform.residual_rotation_degrees,
-                estimated_coverage=estimation.coverage,
-                mean_residual=estimation.mean_residual,
-                key_margin=estimation.key_margin,
-                estimation_identity_digest=estimation.estimation_identity_digest,
-                search_config_digest=estimation.search_config_digest,
-                truth_crop_fraction=attack_specification.crop_fraction,
-                truth_scale=attack_specification.scale_factor,
-                truth_rotation_degrees=attack_specification.rotation_degrees,
-                estimated_translation_x=estimation.transform.translation_x,
-                estimated_translation_y=estimation.transform.translation_y,
-                truth_translation_x=attacked.output_to_input_matrix[0][2],
-                truth_translation_y=attacked.output_to_input_matrix[1][2],
-            )
-            return estimation, metric, traces, None
-        wrong_estimation = self.adapter.estimate_geometric_transform(
-            qk_wrong,
-            wrong_material,
-            epsilon_inlier=raw.epsilon_inlier,
-        ).result
-        reliability = self.adapter.assess_geometry_reliability(
-            estimation, raw.geometry_reliability_thresholds
-        ).result
-        wrong_reliability = self.adapter.assess_geometry_reliability(
-            wrong_estimation,
-            raw.geometry_reliability_thresholds,
-        ).result
-        ambiguous_control_realized = (
-            unit.geometry_case_id != "ambiguous_transform_control"
-            or estimation.gap
-            <= self.protocol.geometry_study.ambiguous_control_max_top_two_gap
-        )
-        traces.update(
-            geometry_reliability_identity=reliability.reliability_identity_digest,
-            geometry_reliable=reliability.reliable,
-            geometry_reliability_config_digest=reliability.threshold_config_digest,
-            geometry_reliability_status=reliability.status,
-            geometry_reliability_failure_reasons=reliability.failure_reasons,
-            wrong_key_geometry_estimation_identity=(
-                wrong_estimation.estimation_identity_digest
-            ),
-            wrong_key_geometry_reliability_identity=(
-                wrong_reliability.reliability_identity_digest
-            ),
-            wrong_key_geometry_reliable=wrong_reliability.reliable,
-            wrong_key_geometry_reliability_status=wrong_reliability.status,
-            wrong_key_geometry_reliability_failure_reasons=(
-                wrong_reliability.failure_reasons
-            ),
-            ambiguous_control_realized=ambiguous_control_realized,
-        )
-        if responsibility == "geometry_reliability":
-            if not ambiguous_control_realized:
-                raise DevelopmentUnitExcluded(
-                    "control_not_realized:ambiguous_transform_control"
-                )
-            return reliability, metric_geometry_reliability(
-                identity.source_cluster_id,
-                registered_reliability_accepted=reliability.reliable,
-                wrong_key_reliability_accepted=wrong_reliability.reliable,
-                is_unreliable_control=(
-                    unit.geometry_case_id in GEOMETRY_NEGATIVE_CONTROL_CASE_IDS
-                ),
-                registered_reliability_identity_digest=(
-                    reliability.reliability_identity_digest
-                ),
-                wrong_key_reliability_identity_digest=(
-                    wrong_reliability.reliability_identity_digest
-                ),
-                registered_estimation_identity_digest=(
-                    estimation.estimation_identity_digest
-                ),
-                wrong_key_estimation_identity_digest=(
-                    wrong_estimation.estimation_identity_digest
-                ),
-            ), traces, None
-        if not reliability.reliable:
-            raise DevelopmentUnitExcluded(
-                "rectification unit was blocked by fail-closed reliability"
-            )
-        rectified = self.adapter.rectify_image(attacked.attacked_artifact.image, estimation, reliability).result
-        content_operation = FormalHfContentDetectionOperation(self.adapter)
-        attacked_content = content_operation(attacked.attacked_artifact.image, raw.registered_root_key)
-        rectified_content = content_operation(rectified.rectified_image, raw.registered_root_key)
-        traces.update(
-            raw_detector_identity=attacked_content.detector_identity,
-            rectified_detector_identity=rectified_content.detector_identity,
-            raw_detector_config_digest=attacked_content.content_config_digest,
-            rectified_detector_config_digest=rectified_content.content_config_digest,
-            raw_preprocessing_identity=content_operation.preprocessing_identity,
-            rectified_preprocessing_identity=content_operation.preprocessing_identity,
-            raw_content_score=attacked_content.content_score,
-            rectified_content_score=rectified_content.content_score,
-            rectification_status="succeeded",
-        )
-        if responsibility == "image_rectifier":
-            return rectified, metric_image_rectifier(
-                identity.source_cluster_id,
-                attacked_content_score=attacked_content.content_score,
-                rectified_content_score=rectified_content.content_score,
-                token_crop_support=rectified.token_crop_support,
-                pixel_crop_support=rectified.pixel_crop_support,
-                rectified_image_digest=rectified.rectified_image_digest,
-                rectification_config_digest=rectified.rectification_config_digest,
-                rectification_quality=_tensor_relative_l2(
-                    source_image.to(dtype=torch.float32),
-                    rectified.rectified_image.to(dtype=torch.float32),
-                ),
-            ), traces, None
         raise DevelopmentRunnerError("responsibility dispatch is incomplete")
 
     def _record(

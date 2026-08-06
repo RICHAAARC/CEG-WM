@@ -258,29 +258,51 @@ def _carrier_metric(
     responsibility_id: str,
     source_cluster_id: str,
     *,
-    registered_score: float,
-    primary_null_score: float,
+    registered_direction_replay_match: bool,
+    wrong_key_direction_separated: bool,
+    materialized_nonzero_write_within_budget: bool,
     quality_delta: float,
-    direction_digest: str,
-    template_digest: str,
+    registered_direction_digest: str,
+    replayed_direction_digest: str,
+    wrong_key_direction_digest: str,
     carrier_config_digest: str,
+    embedding_result_identity: str,
+    materialization_replay_identity: str,
+    materialized_delta_digest: str,
 ) -> DevelopmentMetricObservation:
-    prefix = "lf" if responsibility_id == "lf_carrier" else "hf"
+    if any(
+        type(value) is not bool
+        for value in (
+            registered_direction_replay_match,
+            wrong_key_direction_separated,
+            materialized_nonzero_write_within_budget,
+        )
+    ):
+        raise DevelopmentMetricError("carrier mechanism checks must be booleans")
     return _observation(
         responsibility_id=responsibility_id,
         source_cluster_id=source_cluster_id,
         metric_values={
-            f"{prefix}_attribution_tpr": float(
-                _finite(registered_score, "registered carrier score")
-                > _finite(primary_null_score, "primary null carrier score")
+            "registered_direction_replay_match": float(
+                registered_direction_replay_match
             ),
-            f"{prefix}_primary_null_fpr": float(
-                _finite(primary_null_score, "primary null carrier score")
-                >= _finite(registered_score, "registered carrier score")
+            "wrong_key_direction_separation": float(
+                wrong_key_direction_separated
+            ),
+            "materialized_nonzero_write_within_budget": float(
+                materialized_nonzero_write_within_budget
             ),
             "quality_delta": _finite(quality_delta, "carrier quality delta"),
         },
-        result_identity_digests=(direction_digest, template_digest, carrier_config_digest),
+        result_identity_digests=(
+            registered_direction_digest,
+            replayed_direction_digest,
+            wrong_key_direction_digest,
+            carrier_config_digest,
+            embedding_result_identity,
+            materialization_replay_identity,
+            materialized_delta_digest,
+        ),
     )
 
 
