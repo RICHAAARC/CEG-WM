@@ -19,13 +19,7 @@ from experiments.methods import (
     load_ceg_wm_experiment_adapter_configuration,
 )
 from experiments.protocol.development_records import (
-    DEVELOPMENT_CLAIM_BOUNDARY,
-    OPERATIONAL_RECORD_COLLECTION_ROLE,
-    OPERATIONAL_RECORD_KIND,
-    OPERATIONAL_RECORD_SCHEMA,
-    DevelopmentOperationalRecord,
     DevelopmentScientificRecord,
-    canonical_development_value_digest,
 )
 from experiments.protocol.hf_transmission_diagnostic import (
     load_hf_transmission_protocol,
@@ -86,65 +80,6 @@ def _is_retryable_resource_failure(error: BaseException) -> bool:
     return False
 
 
-def _operational_record(
-    *,
-    run_id: str,
-    protocol_digest: str,
-    revision: str,
-    unit_index: int,
-    candidate_config_digest: str,
-    attempt_index: int,
-    retry_parent_intent_digest: str | None,
-    maximum_duration_seconds: int,
-    runtime_config_digest: str,
-    operation_identity: str,
-    elapsed_seconds: float,
-) -> DevelopmentOperationalRecord:
-    payload = {
-        "schema_version": OPERATIONAL_RECORD_SCHEMA,
-        "collection_role": OPERATIONAL_RECORD_COLLECTION_ROLE,
-        "record_kind": OPERATIONAL_RECORD_KIND,
-        "record_id": "0" * 64,
-        "run_id": run_id,
-        "protocol_digest": protocol_digest,
-        "method_code_revision": revision,
-        "unit_index": unit_index,
-        "phase": "development_environment_preflight",
-        "source_cluster_ordinal": unit_index,
-        "candidate_config_digest": candidate_config_digest,
-        "attempt_index": attempt_index,
-        "retry_parent_intent_digest": retry_parent_intent_digest,
-        "actual_elapsed_seconds": elapsed_seconds,
-        "maximum_duration_seconds": maximum_duration_seconds,
-        "operation_result_payload": {
-            "operational_role": "environment_runtime_throughput_preflight",
-            "source_cluster_ordinal": unit_index,
-            "case_ids": ["hf_transmission_runtime_identity"],
-            "responsibility_result_digests": [
-                ["content_embedder", operation_identity]
-            ],
-            "elapsed_seconds": elapsed_seconds,
-            "runtime_config_digest": runtime_config_digest,
-            "counts_as_scientific_coverage": False,
-            "scientific_claims_supported": False,
-        },
-        "counts_as_scientific_coverage": False,
-        "scientific_claims_supported": False,
-        "scientific_claim_boundary": DEVELOPMENT_CLAIM_BOUNDARY,
-    }
-    provisional = DevelopmentOperationalRecord(**payload)
-    record = DevelopmentOperationalRecord(
-        **{
-            **payload,
-            "record_id": canonical_development_value_digest(
-                provisional.payload_without_record_id()
-            ),
-        }
-    )
-    record.validate()
-    return record
-
-
 def execute_hf_transmission_diagnostic_session(
     *,
     repository_root: str | Path,
@@ -155,7 +90,7 @@ def execute_hf_transmission_diagnostic_session(
     session_id: str,
     environment: Mapping[str, str],
 ) -> tuple[int, dict[str, object]]:
-    """Run or resume at most the frozen ten-unit HF diagnostic roster."""
+    """Run or resume the frozen eight-unit HF scientific diagnostic roster."""
 
     repository = Path(repository_root).resolve()
     persistent = Path(persistent_root).resolve()
@@ -250,78 +185,48 @@ def execute_hf_transmission_diagnostic_session(
                 break
             unit = protocol.unit_roster[cursor.next_unit_index]
             active_unit_index = unit.unit_index
-            if unit.unit_index < protocol.operational_unit_count:
-                entry = manifest.entries[unit.source_cluster_ordinal]
-                backend.set_development_generation_prompts(entry.prompt)
-                runtime_result, elapsed = runner.execute_operational_smoke(
+            intent = store.create_session_intent(
+                cursor, lease, now_epoch_seconds=now
+            )
+            attempted_at = monotonic()
+            entry = manifest.entries[unit.source_cluster_ordinal]
+            backend.set_development_generation_prompts(entry.prompt)
+            try:
+                record = runner.execute_scientific_cluster(
+                    cluster_ordinal=unit.source_cluster_ordinal,
                     base_latent=_base_latent(
                         entry.generation_seed,
                         height=runtime_session.image_height,
                         width=runtime_session.image_width,
-                    )
-                )
-                intent = store.create_session_intent(
-                    cursor, lease, now_epoch_seconds=max(now, int(time.time()))
-                )
-                record = _operational_record(
-                    run_id=run_id,
-                    protocol_digest=protocol_digest,
-                    revision=expected_revision,
-                    unit_index=unit.unit_index,
-                    candidate_config_digest=candidate_config_digest,
-                    attempt_index=intent.attempt_index,
-                    retry_parent_intent_digest=intent.parent_attempt_intent_digest,
-                    maximum_duration_seconds=unit.maximum_duration_seconds,
-                    runtime_config_digest=runtime_session.runtime_config_digest,
-                    operation_identity=(
-                        runtime_result.content_materialization
-                        .materialization_replay_identity
                     ),
-                    elapsed_seconds=elapsed,
+                    attempt_index=intent.attempt_index,
+                    retry_parent_intent_digest=(
+                        intent.parent_attempt_intent_digest
+                    ),
+                    maximum_duration_seconds=unit.maximum_duration_seconds,
+                    started_monotonic=attempted_at,
                 )
-            else:
-                intent = store.create_session_intent(
-                    cursor, lease, now_epoch_seconds=now
+            except Exception as exc:
+                resource_failure = _is_retryable_resource_failure(exc)
+                retryable = (
+                    resource_failure
+                    and intent.attempt_index + 1
+                    < intent.maximum_record_attempts
                 )
-                attempted_at = monotonic()
-                entry = manifest.entries[unit.source_cluster_ordinal]
-                backend.set_development_generation_prompts(entry.prompt)
-                try:
-                    record = runner.execute_scientific_cluster(
-                        cluster_ordinal=unit.source_cluster_ordinal,
-                        base_latent=_base_latent(
-                            entry.generation_seed,
-                            height=runtime_session.image_height,
-                            width=runtime_session.image_width,
-                        ),
-                        attempt_index=intent.attempt_index,
-                        retry_parent_intent_digest=(
-                            intent.parent_attempt_intent_digest
-                        ),
-                        maximum_duration_seconds=unit.maximum_duration_seconds,
-                        started_monotonic=attempted_at,
-                    )
-                except Exception as exc:
-                    resource_failure = _is_retryable_resource_failure(exc)
-                    retryable = (
-                        resource_failure
-                        and intent.attempt_index + 1
-                        < intent.maximum_record_attempts
-                    )
-                    record = runner.create_failed_scientific_record(
-                        cluster_ordinal=unit.source_cluster_ordinal,
-                        attempt_index=intent.attempt_index,
-                        retry_parent_intent_digest=(
-                            intent.parent_attempt_intent_digest
-                        ),
-                        maximum_duration_seconds=unit.maximum_duration_seconds,
-                        actual_elapsed_seconds=float(monotonic() - attempted_at),
-                        failure_type=(
-                            f"{type(exc).__module__}.{type(exc).__qualname__}"
-                        ),
-                        resource_failure=resource_failure,
-                        retryable_resource_failure=retryable,
-                    )
+                record = runner.create_failed_scientific_record(
+                    cluster_ordinal=unit.source_cluster_ordinal,
+                    attempt_index=intent.attempt_index,
+                    retry_parent_intent_digest=(
+                        intent.parent_attempt_intent_digest
+                    ),
+                    maximum_duration_seconds=unit.maximum_duration_seconds,
+                    actual_elapsed_seconds=float(monotonic() - attempted_at),
+                    failure_type=(
+                        f"{type(exc).__module__}.{type(exc).__qualname__}"
+                    ),
+                    resource_failure=resource_failure,
+                    retryable_resource_failure=retryable,
+                )
             store.commit_session_unit(
                 cursor,
                 lease,

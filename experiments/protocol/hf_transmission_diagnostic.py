@@ -15,9 +15,9 @@ from experiments.protocol.development_exploration import DevelopmentStudyUnit
 PROTOCOL_ID = "ceg_wm_hf_transmission_diagnostic"
 PROTOCOL_VERSION = "1.0.0"
 SCIENTIFIC_CLUSTER_COUNT = 8
-OPERATIONAL_UNIT_COUNT = 2
+OPERATIONAL_UNIT_COUNT = 0
 SCIENTIFIC_UNIT_COUNT = 8
-MAXIMUM_TOTAL_UNITS = 10
+MAXIMUM_TOTAL_UNITS = 8
 MAXIMUM_ATTEMPTS_PER_UNIT = 2
 MAXIMUM_DURATION_SECONDS = 2700
 SIGNAL_POSITIONS = (
@@ -148,22 +148,9 @@ class HfTransmissionDiagnosticProtocol:
 
     @property
     def unit_roster(self) -> tuple[DevelopmentStudyUnit, ...]:
-        operational = tuple(
+        return tuple(
             DevelopmentStudyUnit(
-                unit_index=index,
-                phase="development_environment_preflight",
-                responsibility_id="development_environment_preflight",
-                source_cluster_ordinal=index,
-                content_branch_id="hf_transmission_operational_smoke",
-                geometry_case_id="not_applicable",
-                maximum_record_attempts=self.maximum_attempts_per_unit,
-                maximum_duration_seconds=self.maximum_duration_seconds_per_unit,
-            )
-            for index in range(self.operational_unit_count)
-        )
-        scientific = tuple(
-            DevelopmentStudyUnit(
-                unit_index=self.operational_unit_count + ordinal,
+                unit_index=ordinal,
                 phase="development_scientific_breadth",
                 responsibility_id="hf_detector",
                 source_cluster_ordinal=ordinal,
@@ -174,7 +161,6 @@ class HfTransmissionDiagnosticProtocol:
             )
             for ordinal in range(self.scientific_cluster_count)
         )
-        return operational + scientific
 
     def digest(self) -> str:
         return canonical_digest(asdict(self))

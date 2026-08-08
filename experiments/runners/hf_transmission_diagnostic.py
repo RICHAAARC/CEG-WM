@@ -143,26 +143,15 @@ class HfTransmissionDiagnosticRunner:
         bindings: list[FrozenDevelopmentUnitBinding] = []
         for unit in self.protocol.unit_roster:
             entry = self.manifest.entries[unit.source_cluster_ordinal]
-            operational = unit.unit_index < self.protocol.operational_unit_count
             bindings.append(
                 create_frozen_development_unit_binding(
                     unit,
                     analysis_unit_identity=self._analysis_identity(entry),
                     scientific_question_id=(
-                        "hf_transmission_runtime_smoke"
-                        if operational
-                        else "hf_signal_survival_across_generation_boundaries"
+                        "hf_signal_survival_across_generation_boundaries"
                     ),
-                    development_case_id=(
-                        "hf_transmission_operational_smoke"
-                        if operational
-                        else "paired_clean_hf_transport_observation"
-                    ),
-                    candidate_identity=(
-                        "hf_transmission_execution_environment"
-                        if operational
-                        else self.protocol.candidate_identity
-                    ),
+                    development_case_id="paired_clean_hf_transport_observation",
+                    candidate_identity=self.protocol.candidate_identity,
                     candidate_config_digest=self.candidate_config_digest,
                 )
             )
@@ -311,12 +300,12 @@ class HfTransmissionDiagnosticRunner:
             "primary_null": asdict(primary_null),
         }
 
-    def execute_operational_smoke(
+    def _execute_paired_runtime(
         self,
         *,
         base_latent: torch.Tensor,
     ) -> tuple[ContentWriteVaeResult, float]:
-        """Run one real paired carrier/embedder/runtime operation without science."""
+        """Run the paired content write and clean-control runtime operation."""
 
         started = monotonic()
         shape = tuple(int(size) for size in base_latent.shape)
@@ -332,7 +321,7 @@ class HfTransmissionDiagnosticRunner:
             raise HfTransmissionRunnerError("runtime result exact type is required")
         elapsed = float(monotonic() - started)
         if not isfinite(elapsed) or elapsed <= 0.0:
-            raise HfTransmissionRunnerError("operational elapsed time was not measured")
+            raise HfTransmissionRunnerError("paired runtime elapsed time was not measured")
         return result, elapsed
 
     def execute_scientific_cluster(
@@ -348,7 +337,7 @@ class HfTransmissionDiagnosticRunner:
         if type(cluster_ordinal) is not int or not 0 <= cluster_ordinal < 8:
             raise HfTransmissionRunnerError("cluster ordinal is outside frozen manifest")
         started = monotonic() if started_monotonic is None else started_monotonic
-        runtime_result, _runtime_elapsed = self.execute_operational_smoke(
+        runtime_result, _runtime_elapsed = self._execute_paired_runtime(
             base_latent=base_latent
         )
         materialization = runtime_result.content_materialization
@@ -433,7 +422,7 @@ class HfTransmissionDiagnosticRunner:
             "protocol_digest": self.protocol_digest,
             "execution_intent_authority_digest": self.execution_intent_authority_digest,
             "method_code_revision": self.method_code_revision,
-            "unit_index": self.protocol.operational_unit_count + cluster_ordinal,
+            "unit_index": cluster_ordinal,
             "phase": "development_scientific_breadth",
             "responsibility_id": "hf_detector",
             "analysis_unit_identity": asdict(identity),
@@ -557,7 +546,7 @@ class HfTransmissionDiagnosticRunner:
             "protocol_digest": self.protocol_digest,
             "execution_intent_authority_digest": self.execution_intent_authority_digest,
             "method_code_revision": self.method_code_revision,
-            "unit_index": self.protocol.operational_unit_count + cluster_ordinal,
+            "unit_index": cluster_ordinal,
             "phase": "development_scientific_breadth",
             "responsibility_id": "hf_detector",
             "analysis_unit_identity": asdict(identity),
@@ -648,7 +637,7 @@ class HfTransmissionDiagnosticRunner:
         if len(evidence) != 8:
             raise HfTransmissionRunnerError("verified HF cluster coverage is incomplete")
         indexes = tuple(record.unit_index for record, _marker in evidence)
-        if indexes != tuple(range(2, 10)) or len(set(indexes)) != 8:
+        if indexes != tuple(range(8)) or len(set(indexes)) != 8:
             raise HfTransmissionRunnerError("verified HF unit indexes drifted")
         source_ids: set[str] = set()
         final_observations: list[HfSignalPositionObservation] = []
@@ -687,7 +676,7 @@ class HfTransmissionDiagnosticRunner:
             if identity.source_cluster_id in source_ids:
                 raise HfTransmissionRunnerError("verified HF source cluster duplicated")
             source_ids.add(identity.source_cluster_id)
-            expected_entry = self.manifest.entries[record.unit_index - 2]
+            expected_entry = self.manifest.entries[record.unit_index]
             if identity != self._analysis_identity(expected_entry):
                 raise HfTransmissionRunnerError("verified HF source cluster is foreign")
             if record.execution_status != "success":

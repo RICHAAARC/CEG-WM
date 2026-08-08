@@ -144,12 +144,13 @@ def test_hf_transmission_protocol_freezes_isolated_eight_cluster_roster() -> Non
     assert {item.role_id for item in manifest.entries} == {
         "hf_transmission_diagnostic"
     }
-    assert len(protocol.unit_roster) == 10
-    assert tuple(item.unit_index for item in protocol.unit_roster) == tuple(range(10))
-    assert sum(
-        item.phase == "development_environment_preflight"
+    assert protocol.operational_unit_count == 0
+    assert len(protocol.unit_roster) == 8
+    assert tuple(item.unit_index for item in protocol.unit_roster) == tuple(range(8))
+    assert all(
+        item.phase == "development_scientific_breadth"
         for item in protocol.unit_roster
-    ) == 2
+    )
     assert sum(item.responsibility_id == "hf_detector" for item in protocol.unit_roster) == 8
 
 
@@ -267,80 +268,6 @@ def test_hf_transport_directional_rule_is_exactly_seven_of_eight() -> None:
 
 
 @pytest.mark.unit
-def test_hf_transport_operational_failure_precedes_intent_and_can_retry(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    revision = "b" * 40
-    persistent_root = tmp_path / "operational_retry_persistent"
-    run_id = "hf_transmission_operational_retry"
-    environment = {
-        "CEG_WM_ROOT_KEY": ROOT_KEY,
-        "HF_TOKEN": "hf_transport_test_token",
-    }
-    _install_entrypoint_fakes(
-        monkeypatch,
-        tmp_path,
-        [
-            _CudaDiagnosticBackend(
-                failure_run_index=0,
-                failure_factory=lambda: MemoryError("first operational failure"),
-            ),
-            _CudaDiagnosticBackend(
-                failure_run_index=0,
-                failure_factory=lambda: MemoryError("second operational failure"),
-            ),
-            _CudaDiagnosticBackend(),
-        ],
-    )
-
-    for ordinal in range(2):
-        code, result = (
-            hf_transmission_diagnostic_entrypoint.execute_hf_transmission_diagnostic_session(
-                repository_root=ROOT,
-                expected_revision=revision,
-                persistent_root=persistent_root,
-                cache_root=tmp_path / "cache",
-                run_id=run_id,
-                session_id=f"hf_transport_operational_failure_{ordinal}",
-                environment=environment,
-            )
-        )
-        assert code == 3
-        assert result["committed_unit_count"] == 0
-        assert not tuple((persistent_root / run_id / "intents").glob("*.json"))
-        assert not tuple(
-            (persistent_root / run_id / "markers").glob("*.COMMITTED.json")
-        )
-
-    code, result = (
-        hf_transmission_diagnostic_entrypoint.execute_hf_transmission_diagnostic_session(
-            repository_root=ROOT,
-            expected_revision=revision,
-            persistent_root=persistent_root,
-            cache_root=tmp_path / "cache",
-            run_id=run_id,
-            session_id="hf_transport_operational_success",
-            environment=environment,
-        )
-    )
-    assert code == 0
-    assert result["termination_reason"] == "frozen_roster_complete"
-    assert result["committed_unit_count"] == 10
-    assert len(tuple((persistent_root / run_id / "intents").glob("*.json"))) == 10
-    assert (
-        len(
-            tuple(
-                (persistent_root / run_id / "markers").glob(
-                    "*.COMMITTED.json"
-                )
-            )
-        )
-        == 10
-    )
-
-
-@pytest.mark.unit
 def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -356,8 +283,14 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
         tmp_path,
         [
             _CudaDiagnosticBackend(
-                failure_run_index=4,
+                failure_run_index=0,
                 failure_factory=lambda: MemoryError("test resource exhaustion"),
+            ),
+            _CudaDiagnosticBackend(
+                failure_run_index=0,
+                failure_factory=lambda: MemoryError(
+                    "test repeated resource exhaustion"
+                ),
             ),
             _CudaDiagnosticBackend(),
         ],
@@ -376,7 +309,7 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
     )
     assert first_code == 0
     assert first_result["termination_reason"] == "retryable_resource_failure"
-    assert first_result["committed_unit_count"] == 3
+    assert first_result["committed_unit_count"] == 1
     assert first_result["directional_decision"] is None
 
     second_code, second_result = (
@@ -391,14 +324,36 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
         )
     )
     assert second_code == 0
-    assert second_result["termination_reason"] == "frozen_roster_complete"
-    assert second_result["committed_unit_count"] == 11
-    assert second_result["directional_decision"] is not None
+    assert second_result["termination_reason"] == "terminal_scientific_failure"
+    assert second_result["committed_unit_count"] == 2
+    assert second_result["directional_decision"] is None
+
+    third_code, third_result = (
+        hf_transmission_diagnostic_entrypoint.execute_hf_transmission_diagnostic_session(
+            repository_root=ROOT,
+            expected_revision=revision,
+            persistent_root=retry_root,
+            cache_root=tmp_path / "cache",
+            run_id="hf_transmission_retry_recovery",
+            session_id="hf_transport_after_exhausted_retry",
+            environment=environment,
+        )
+    )
+    assert third_code == 0
+    assert third_result["termination_reason"] == "frozen_roster_complete"
+    assert third_result["committed_unit_count"] == 9
+    assert third_result["directional_decision"] is not None
     assert (
-        second_result["directional_decision"][
+        third_result["directional_decision"][
             "budget_integrity_nonfinite_failure_count"
         ]
-        == 0
+        == 1
+    )
+    assert (
+        third_result["directional_decision"][
+            "allow_request_for_next_scientific_gate"
+        ]
+        is False
     )
     protocol, manifest = load_hf_transmission_protocol(
         PROTOCOL, repository_root=ROOT
@@ -428,7 +383,7 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
                 "root_key_public_digest": root_public,
             }
         ),
-        candidate_config_digest=second_result["candidate_config_digest"],
+        candidate_config_digest=third_result["candidate_config_digest"],
     )
     evidence = _load_terminal_scientific_evidence(
         retry_root / "hf_transmission_retry_recovery"
@@ -451,7 +406,7 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
         tmp_path,
         [
             _CudaDiagnosticBackend(
-                failure_run_index=4,
+                failure_run_index=0,
                 failure_factory=lambda: ValueError("test implementation failure"),
             ),
             _CudaDiagnosticBackend(),
@@ -470,7 +425,7 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
     )
     assert terminal_code == 0
     assert terminal_result["termination_reason"] == "terminal_scientific_failure"
-    assert terminal_result["committed_unit_count"] == 3
+    assert terminal_result["committed_unit_count"] == 1
     assert terminal_result["directional_decision"] is None
 
     resumed_code, resumed_result = (
@@ -486,7 +441,7 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
     )
     assert resumed_code == 0
     assert resumed_result["termination_reason"] == "frozen_roster_complete"
-    assert resumed_result["committed_unit_count"] == 10
+    assert resumed_result["committed_unit_count"] == 8
     assert resumed_result["directional_decision"] is not None
     assert (
         resumed_result["directional_decision"][
@@ -505,4 +460,4 @@ def test_hf_transport_entrypoint_commits_retry_terminal_failure_and_decision(
             "*.COMMITTED.json"
         )
     )
-    assert len(marker_paths) == 10
+    assert len(marker_paths) == 8
