@@ -1,0 +1,44 @@
+{
+  "schema_version": "ceg_wm_hf_only_detector_directional_protocol_v1",
+  "protocol_id": "ceg_wm_hf_only_detector_directional_validation",
+  "protocol_version": "1.0.0",
+  "split": "development",
+  "role_id": "hf_only_detector_directional_validation",
+  "candidate_identity": "hf_sparse_tail",
+  "detector_operation_identity": "main.hf_detector",
+  "manifest_path": "configs/experiments/hf_only_detector_directional_validation_manifest.json",
+  "manifest_file_sha256": "ca39a56e4b2ebdad4c59219e129c42d91c404a31f2e8cd9b8b18cf4760de233e",
+  "prior_development_manifests": [
+    {
+      "path": "configs/experiments/development_exploration_prompt_roster.json",
+      "file_sha256": "a5b11f76270346351ad79bcba8ff4928f3fc11b843b0889108090045e71bc7bd"
+    },
+    {
+      "path": "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json",
+      "file_sha256": "1245e497971a058a071f5e474b92b67fb548b440f88d50fb718abb3749a6965f"
+    },
+    {
+      "path": "configs/experiments/hf_transmission_diagnostic_manifest.json",
+      "file_sha256": "8dc5708d50cc2093d4e481e35bdd39a6d6960c7939ab31cd278d0611b9ff7172"
+    }
+  ],
+  "source_cluster_deny_list_digest": "bbef8b9d50ab4d1f60920584e2113c698aa97d61b2272ed2cf5fee90eaa83217",
+  "operational_unit_count": 2,
+  "scientific_cluster_count": 32,
+  "initial_gpu_gate_scientific_unit_count": 8,
+  "maximum_total_units": 34,
+  "maximum_attempts_per_unit": 2,
+  "maximum_duration_seconds_per_unit": 2700,
+  "wrong_key_roster_size": 4,
+  "practical_margin_floor": 0.001,
+  "content_relative_l2_numerator": 3,
+  "content_relative_l2_denominator": 250,
+  "minimum_registered_minus_null_success_count": 28,
+  "minimum_registered_minus_wrong_success_count": 28,
+  "confidence_level": 0.95,
+  "confidence_lower_bound_requirement": "strictly_greater_than_one_half",
+  "margin_quantile_probability": 0.25,
+  "margin_quantile_method": "nearest_rank",
+  "claim_boundary": "development_hf_detector_direction_only_no_threshold_no_fpr_no_promotion_no_claim",
+  "unit_roster_digest": "1d175e1f5a34c783b3bec88cdbbb1e75afabebe7d18bb29aff304082d44d6d97"
+}
