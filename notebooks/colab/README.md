@@ -2,6 +2,23 @@
 
 CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，例如方法机制探测、实验执行或 artifact 检查，不使用编号阶段或含义不明的状态词。
 
+## Current authorized entrypoint
+
+`hf_transmission_diagnostic.ipynb` 是当前唯一允许在收到最终固定链接后执行
+**Run all** 的入口。它固定拉取 execution revision
+`31c7e557fe0a98bf70c5349838572dcfd8be40cf`，使用全新 run ID
+`ceg_wm_hf_transmission_diagnostic`，只执行 8 scientific HF transmission units、
+0 operational units，每 unit 最多 2 attempts。Notebook 挂载 Drive、读取
+`HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
+`hf_transmission_diagnostic_server.py`，并把服务器的 result/diagnostic ZIP、
+execution receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
+
+依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实方法/runtime 调用、正式
+records、持久化和内部 ZIP 全部属于服务器脚本。该 development diagnostic 不拟合
+threshold，不形成 FPR、candidate promotion、calibration、formal evaluation、baseline
+或论文 claim，也不执行 LF、routing、组合、Q/K 或几何恢复。目录内其余全部 Notebook
+均为 **paused / not authorized**，不得作为当前入口运行。
+
 `runtime_qualification.ipynb` 保留已审核 runtime qualification 的历史权威，但当前
 **paused / not authorized**，不得再次 Run all。其既有职责为：
 
@@ -109,8 +126,8 @@ development execution package 为 4,549,335 bytes，SHA-256 为
 `7e449aa29f53ea38e3a044681c75c8f3dccff135` 执行包；Notebook delivery revision 不改变
 包内协议或方法实现。
 
-`thirteen_module_mechanism_screening.ipynb` 是唯一待 Agent2/Agent3 独立批准的完整
-科学筛查薄入口；批准前不得 Run all。它继续从 GitHub detached checkout 获取 exact
+`thirteen_module_mechanism_screening.ipynb` 已完成历史 13 模块科学筛查，当前为
+**paused / not authorized**，不得再次 Run all。它从 GitHub detached checkout 获取 exact
 execution revision `7e449aa29f53ea38e3a044681c75c8f3dccff135`，但使用全新 run
 `ceg_wm_thirteen_module_mechanism_scientific_screening`，从冻结 roster unit 0 开始。
 该入口不传入 `--maximum-wiring-clusters` 或 `--stop-before-scientific-units`，因此由

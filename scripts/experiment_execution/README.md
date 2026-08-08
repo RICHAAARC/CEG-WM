@@ -1,5 +1,21 @@
 # Experiment execution servers
 
+## HF transmission diagnostic
+
+`hf_transmission_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。
+当前唯一授权 Notebook 为 `notebooks/colab/hf_transmission_diagnostic.ipynb`，固定绑定
+execution revision `31c7e557fe0a98bf70c5349838572dcfd8be40cf` 与 run ID
+`ceg_wm_hf_transmission_diagnostic`。冻结 roster 只有 8 scientific units、0 operational
+units，每 unit 最多 2 attempts。
+
+服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 paired
+runtime 与 HF detector 调用、正式 records、跨 session persistence 和内部 result 或
+diagnostic ZIP。Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/
+ZIP/`SHA256SUMS`。本 diagnostic 不拟合 threshold，不授权 FPR、candidate promotion、
+calibration、formal evaluation、baseline 或论文 claim；不执行 LF、routing、组合、Q/K、
+estimator、reliability、rectification 或 conditional recovery。其他 checked-in Notebook
+入口均已暂停。
+
 ## Development exploration
 
 `development_exploration_server.py` is the Colab-neutral and server-direct entrypoint for
@@ -31,8 +47,8 @@ Run all after operational completion was not used to create a scientific artifac
 result contains two preflight units and all 8/8 wiring smoke clusters and terminates with
 `authorized_operational_boundary_reached`. These units receive no module-science credit.
 
-The checked-in `thirteen_module_mechanism_screening.ipynb` is the only full-screening entrypoint
-pending independent Agent2/Agent3 approval and must not run before approval. It invokes this same
+The checked-in `thirteen_module_mechanism_screening.ipynb` completed its historical full-screening
+run and is now paused and not authorized to run again. It invoked this same
 server and exact execution revision with the fresh run ID
 `ceg_wm_thirteen_module_mechanism_scientific_screening`, begins at frozen roster unit 0, and passes
 neither `--maximum-wiring-clusters` nor `--stop-before-scientific-units`. The server therefore owns
