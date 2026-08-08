@@ -3,6 +3,10 @@
   "manifest_id": "hf_only_detector_directional_validation_manifest",
   "split": "development",
   "seed_namespace": "hf_only_detector_directional_validation_20260808",
+  "source_cluster_namespace": "hf_detector_directional_source_clusters_20260808",
+  "image_lineage_namespace": "hf_detector_directional_paired_rgb_lineages_20260808",
+  "registered_key_derivation_identity": "hf_detector_directional_registered_root_subdomain_v1",
+  "wrong_key_control_identity": "hf_detector_directional_wrong_key_roster_v1",
   "entries": [
     {"entry_role":"operational_smoke","cluster_ordinal":0,"cluster_identity":"operational_glass_prism","prompt":"a glass prism casting a rainbow on white paper","generation_seed":202608081000},
     {"entry_role":"operational_smoke","cluster_ordinal":1,"cluster_identity":"operational_brass_compass","prompt":"a brass compass beside a folded linen map","generation_seed":202608081001},

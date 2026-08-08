@@ -7,7 +7,7 @@
   "candidate_identity": "hf_sparse_tail",
   "detector_operation_identity": "main.hf_detector",
   "manifest_path": "configs/experiments/hf_only_detector_directional_validation_manifest.json",
-  "manifest_file_sha256": "ca39a56e4b2ebdad4c59219e129c42d91c404a31f2e8cd9b8b18cf4760de233e",
+  "manifest_file_sha256": "cd2131de0c779612f49fae44cb70899cfeb304661975727b26e3f8c4322ba6f6",
   "prior_development_manifests": [
     {
       "path": "configs/experiments/development_exploration_prompt_roster.json",
@@ -20,9 +20,29 @@
     {
       "path": "configs/experiments/hf_transmission_diagnostic_manifest.json",
       "file_sha256": "8dc5708d50cc2093d4e481e35bdd39a6d6960c7939ab31cd278d0611b9ff7172"
+    },
+    {
+      "path": "configs/experiments/hf_only_reference_prompt_roster.json",
+      "file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f"
+    },
+    {
+      "path": "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+      "file_sha256": "554d1f488dadc433dba57a2b4e9435a8f55eeecef77929c76161076753b2886a"
+    },
+    {
+      "path": "configs/experiments/hf_only_untouched_confirmation_manifest.json",
+      "file_sha256": "43d7d6d81f827348655f6bd0caa4b808f401cf20b1153923d14c5cc86270e6cd"
+    },
+    {
+      "path": "configs/experiments/hf_only_reference_validation.json",
+      "file_sha256": "b9c16d3519431315a71847fa37540a9906ebb3c732aac14fe37459e8c8eadd82"
+    },
+    {
+      "path": "configs/experiments/hf_only_threshold_fit_gpu_execution.json",
+      "file_sha256": "d064174a3ba9eaba5ba407e39d86c1153ef9f282ae3d3cbfc35d646fbc5ec8db"
     }
   ],
-  "source_cluster_deny_list_digest": "bbef8b9d50ab4d1f60920584e2113c698aa97d61b2272ed2cf5fee90eaa83217",
+  "source_cluster_deny_list_digest": "f107d21a2f7369a16465d6d38cec6f1dc2bd777f42c2d7823fe8b576d9962728",
   "operational_unit_count": 2,
   "scientific_cluster_count": 32,
   "initial_gpu_gate_scientific_unit_count": 8,

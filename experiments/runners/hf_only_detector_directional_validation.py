@@ -18,7 +18,7 @@ from experiments.metrics.hf_only_detector_directional_validation import (
     HfDetectorDirectionalObservation,
     aggregate_hf_detector_direction,
     create_hf_detector_directional_observation,
-    paired_rgb_relative_l2,
+    paired_rgb8_quality,
 )
 from experiments.protocol.development_records import (
     DEVELOPMENT_CLAIM_BOUNDARY,
@@ -90,6 +90,19 @@ def _public_observation(tensor: torch.Tensor) -> HfDetectionObservation:
     return HfDetectionObservation.from_public_image_encoding(
         _tensor_values(tensor), tuple(int(size) for size in tensor.shape)
     )
+
+
+def _rgb8_values(image: torch.Tensor) -> tuple[int, ...]:
+    if (
+        not isinstance(image, torch.Tensor)
+        or image.ndim != 4
+        or tuple(image.shape[:2]) != (1, 3)
+        or not bool(torch.isfinite(image).all().item())
+    ):
+        raise HfDetectorDirectionalRunnerError("final RGB tensor is invalid")
+    rgb8 = image.detach().to(device="cpu", dtype=torch.float32).clamp(0.0, 1.0)
+    rgb8 = torch.round(rgb8 * 255.0).to(dtype=torch.uint8)
+    return tuple(int(item) for item in rgb8.reshape(-1).tolist())
 
 
 class HfOnlyDetectorDirectionalRunner:
@@ -240,6 +253,21 @@ class HfOnlyDetectorDirectionalRunner:
             raise HfDetectorDirectionalRunnerError(
                 "formal HF detector configuration drifted"
             )
+        preprocessing_identity = candidate_observation.observation_protocol
+        if clean_observation.observation_protocol != preprocessing_identity:
+            raise HfDetectorDirectionalRunnerError(
+                "formal HF detector preprocessing drifted"
+            )
+        statistic_identity = "hf_direct_score_centered_normalized_correlation"
+        detector_identity = canonical_digest(
+            {
+                "candidate_identity": self.protocol.candidate_identity,
+                "detector_operation_identity": self.protocol.detector_operation_identity,
+                "detector_config_digest": registered.detector_config_digest,
+                "preprocessing_identity": preprocessing_identity,
+                "statistic_identity": statistic_identity,
+            }
+        )
         materialization = runtime_result.content_materialization
         materialization_result = runtime_result.content_materialization_result
         if (
@@ -256,6 +284,10 @@ class HfOnlyDetectorDirectionalRunner:
             or materialization_result.integrity_status != "passed"
         ):
             raise HfDetectorDirectionalEvidenceViolation("integrity_violation")
+        rgb_relative_l2, rgb_mse = paired_rgb8_quality(
+            _rgb8_values(runtime_result.watermarked_image),
+            _rgb8_values(runtime_result.clean_image),
+        )
         observation = create_hf_detector_directional_observation(
             cluster_ordinal=cluster_ordinal,
             wrong_key_index=wrong_key_index,
@@ -264,11 +296,12 @@ class HfOnlyDetectorDirectionalRunner:
             primary_null_score=primary_null.hf_score,
             candidate_observation_digest=registered.observation_digest,
             clean_observation_digest=primary_null.observation_digest,
-            registered_detector_identity=registered.detector_identity,
-            wrong_key_detector_identity=wrong.detector_identity,
-            primary_null_detector_identity=primary_null.detector_identity,
+            registered_detector_identity=detector_identity,
+            wrong_key_detector_identity=detector_identity,
+            primary_null_detector_identity=detector_identity,
             detector_config_digest=registered.detector_config_digest,
             observation_protocol=candidate_observation.observation_protocol,
+            detector_statistic_identity=statistic_identity,
             registered_template_digest=registered.template_digest,
             wrong_key_template_digest=wrong.template_digest,
             primary_null_template_digest=primary_null.template_digest,
@@ -278,10 +311,10 @@ class HfOnlyDetectorDirectionalRunner:
             materialization_integrity_status=materialization.integrity_status,
             realized_relative_l2=materialization.realized_relative_l2,
             content_relative_l2_limit=materialization_result.content_relative_l2_limit,
-            rgb_paired_relative_l2=paired_rgb_relative_l2(
-                _tensor_values(runtime_result.watermarked_image),
-                _tensor_values(runtime_result.clean_image),
-            ),
+            rgb_paired_relative_l2=rgb_relative_l2,
+            rgb_paired_mse=rgb_mse,
+            rgb_quality_dtype="torch.uint8",
+            actual_runtime_dtype=str(materialization.written_latent_actual.dtype),
         )
         return observation, {
             "registered": asdict(registered),
@@ -397,6 +430,9 @@ class HfOnlyDetectorDirectionalRunner:
             "content_relative_l2_nominal": result.content_materialization_result.content_relative_l2_nominal,
             "content_relative_l2_limit": result.content_materialization_result.content_relative_l2_limit,
             "rgb_paired_relative_l2": observation.rgb_paired_relative_l2,
+            "rgb_paired_mse": observation.rgb_paired_mse,
+            "rgb_quality_dtype": observation.rgb_quality_dtype,
+            "actual_runtime_dtype": observation.actual_runtime_dtype,
             "formal_hf_detection_results": detector_results,
             "directional_observation": asdict(observation),
         }
@@ -489,6 +525,10 @@ class HfOnlyDetectorDirectionalRunner:
                 "detector_operation_identity": self.protocol.detector_operation_identity,
                 "detector_config_digest": observation.detector_config_digest,
                 "preprocessing_identity": observation.observation_protocol,
+                "statistic_identity": "hf_direct_score_centered_normalized_correlation",
+                "registered_detector_identity": observation.registered_detector_identity,
+                "wrong_key_detector_identity": observation.wrong_key_detector_identity,
+                "primary_null_detector_identity": observation.primary_null_detector_identity,
                 "candidate_observation_digest": observation.candidate_observation_digest,
                 "clean_observation_digest": observation.clean_observation_digest,
                 "same_image_registered_wrong_reuse": True,

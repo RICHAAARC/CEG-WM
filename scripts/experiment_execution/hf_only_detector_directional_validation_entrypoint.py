@@ -21,6 +21,7 @@ from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.protocol.hf_only_detector_directional_validation import (
     OPERATIONAL_UNIT_COUNT,
     canonical_digest,
+    load_authority_deny_axes,
     load_hf_only_detector_directional_protocol,
 )
 from experiments.runners.development_persistence import (
@@ -36,7 +37,7 @@ from experiments.runners.hf_only_detector_directional_validation import (
     HfDetectorDirectionalEvidenceViolation,
     HfOnlyDetectorDirectionalRunner,
 )
-from main import identify_root_key
+from main import identify_root_key, key_schedule_sha256_counter
 from runtime import Sd35PipelineBackend, create_runtime_adapter
 from scripts.experiment_execution.development_exploration_entrypoint import (
     _base_latent,
@@ -57,6 +58,29 @@ RUNTIME_PATH = Path("configs/runtime/runtime_sd35_flowmatch.json")
 
 class HfDetectorDirectionalEntrypointError(RuntimeError):
     """The HF detector directional worker could not preserve its boundary."""
+
+
+def _derive_registered_experiment_root(
+    base_root_key: str, *, protocol_digest: str, manifest_digest: str
+) -> str:
+    stream = key_schedule_sha256_counter(
+        base_root_key,
+        {
+            "candidate_id": "hf_sparse_tail",
+            "operator": "carrier_template",
+            "responsibility_domain": "hf_carrier",
+            "model_revision": canonical_digest(
+                {
+                    "derivation_identity": "hf_detector_directional_registered_root_subdomain_v1",
+                    "manifest_digest": manifest_digest,
+                    "protocol_digest": protocol_digest,
+                }
+            ),
+            "tensor_role": "base_gaussian",
+        },
+        (8,),
+    )
+    return "ceg-wm-hf-directional-registered:" + stream.domain_digest
 
 
 def _is_resource_failure(error: BaseException) -> bool:
@@ -105,14 +129,12 @@ def execute_hf_only_detector_directional_validation_session(
         repository / PROTOCOL_PATH,
         repository_root=repository,
     )
-    if (
-        type(authorized_scientific_unit_count) is not int
-        or not 1
-        <= authorized_scientific_unit_count
-        <= protocol.scientific_cluster_count
-    ):
+    if authorized_scientific_unit_count not in {
+        protocol.initial_gpu_gate_scientific_unit_count,
+        protocol.scientific_cluster_count,
+    }:
         raise HfDetectorDirectionalEntrypointError(
-            "authorized scientific unit count is outside the frozen roster"
+            "authorized scientific unit count must be the first gate or full roster"
         )
     first_entry = manifest.entries[0]
     backend = Sd35PipelineBackend(
@@ -126,8 +148,32 @@ def execute_hf_only_detector_directional_validation_session(
     adapter = CegWmExperimentAdapter(
         load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH)
     )
-    public_root = identify_root_key(root_key).root_key_public_digest
     protocol_digest = protocol.digest()
+    registered_root_key = _derive_registered_experiment_root(
+        root_key,
+        protocol_digest=protocol_digest,
+        manifest_digest=manifest.digest(),
+    )
+    base_public_root = identify_root_key(root_key).root_key_public_digest
+    public_root = identify_root_key(registered_root_key).root_key_public_digest
+    registered_key_family_digest = canonical_digest(
+        {
+            "root_key_public_digest": public_root,
+            "seed_namespace": manifest.seed_namespace,
+            "role": "registered_hf_detector_directional_key_family",
+        }
+    )
+    deny_axes = load_authority_deny_axes(
+        protocol.prior_development_manifests, repository
+    )
+    if (
+        public_root == base_public_root
+        or public_root in set(deny_axes.key_control_identities)
+        or registered_key_family_digest in set(deny_axes.key_control_identities)
+    ):
+        raise HfDetectorDirectionalEntrypointError(
+            "experiment registered key family overlaps a prior authority"
+        )
     candidate_config_digest = canonical_digest(
         {
             "adapter_config_digest": adapter.configuration.config_digest,
@@ -152,7 +198,7 @@ def execute_hf_only_detector_directional_validation_session(
         runtime_adapter=runtime_adapter,
         method_code_revision=expected_revision,
         run_id=run_id,
-        registered_root_key=root_key,
+        registered_root_key=registered_root_key,
         root_key_public_digest=public_root,
         protocol_digest=protocol_digest,
         execution_intent_authority_digest=authority_digest,
@@ -181,6 +227,26 @@ def execute_hf_only_detector_directional_validation_session(
         lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1,
     )
     cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
+    first_gate_boundary = (
+        OPERATIONAL_UNIT_COUNT + protocol.initial_gpu_gate_scientific_unit_count
+    )
+    if (
+        authorized_scientific_unit_count == protocol.scientific_cluster_count
+        and cursor.next_unit_index < first_gate_boundary
+    ):
+        runtime_adapter.close()
+        raise HfDetectorDirectionalEntrypointError(
+            "full directional roster requires verified first-gate COMMITTED evidence"
+        )
+    if (
+        authorized_scientific_unit_count
+        == protocol.initial_gpu_gate_scientific_unit_count
+        and cursor.next_unit_index > first_gate_boundary
+    ):
+        runtime_adapter.close()
+        raise HfDetectorDirectionalEntrypointError(
+            "first directional gate cannot resume beyond its frozen boundary"
+        )
     committed_before = cursor.initial_committed_count
     termination_reason = "frozen_roster_complete"
     failure: dict[str, object] | None = None
@@ -268,7 +334,7 @@ def execute_hf_only_detector_directional_validation_session(
                 lease,
                 intent,
                 record=record,
-                raw_secret_values=(root_key, hf_token),
+                raw_secret_values=(root_key, registered_root_key, hf_token),
                 now_epoch_seconds=max(now, int(time.time())),
             )
         if cursor.next_unit_index == len(protocol.unit_roster):
@@ -320,7 +386,7 @@ def execute_hf_only_detector_directional_validation_session(
     )
     receipt_path = store.write_session_receipt(
         receipt,
-        raw_secret_values=(root_key, hf_token),
+        raw_secret_values=(root_key, registered_root_key, hf_token),
         session_cursor=cursor,
     )
     result_root = persistent / run_id / "session_results"

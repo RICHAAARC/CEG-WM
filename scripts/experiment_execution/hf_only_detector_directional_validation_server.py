@@ -18,6 +18,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 
 from experiments.protocol.hf_only_detector_directional_validation import (
+    INITIAL_GPU_GATE_SCIENTIFIC_UNIT_COUNT,
+    SCIENTIFIC_CLUSTER_COUNT,
     load_hf_only_detector_directional_protocol,
 )
 from scripts.experiment_execution.development_exploration_server import (
@@ -69,6 +71,13 @@ def execute_hf_only_detector_directional_validation_server_session(
         raise HfDetectorDirectionalServerError("execution roots must be disjoint")
     if SAFE_ID_PATTERN.fullmatch(run_id) is None or SAFE_ID_PATTERN.fullmatch(session_id) is None:
         raise HfDetectorDirectionalServerError("run or session identity is invalid")
+    if authorized_scientific_unit_count not in {
+        INITIAL_GPU_GATE_SCIENTIFIC_UNIT_COUNT,
+        SCIENTIFIC_CLUSTER_COUNT,
+    }:
+        raise HfDetectorDirectionalServerError(
+            "authorized scientific unit count must be the first gate or full roster"
+        )
     _verify_repository(repository, expected_revision)
     protocol, manifest = load_hf_only_detector_directional_protocol(
         repository / PROTOCOL_PATH,

@@ -37,13 +37,13 @@ def _digest(value: object) -> str:
     ).hexdigest()
 
 
-def paired_rgb_relative_l2(candidate_values: Sequence[float], clean_values: Sequence[float]) -> float:
-    candidate = tuple(float(item) for item in candidate_values)
-    clean = tuple(float(item) for item in clean_values)
+def paired_rgb8_quality(candidate_values: Sequence[int], clean_values: Sequence[int]) -> tuple[float, float]:
+    candidate = tuple(candidate_values)
+    clean = tuple(clean_values)
     if (
         not candidate
         or len(candidate) != len(clean)
-        or any(not isfinite(item) for item in (*candidate, *clean))
+        or any(type(item) is not int or not 0 <= item <= 255 for item in (*candidate, *clean))
     ):
         raise HfDetectorDirectionalMetricError("paired RGB values are invalid")
     clean_norm = sum(item * item for item in clean) ** 0.5
@@ -55,7 +55,11 @@ def paired_rgb_relative_l2(candidate_values: Sequence[float], clean_values: Sequ
     ) ** 0.5 / clean_norm
     if not isfinite(relative):
         raise HfDetectorDirectionalMetricError("paired RGB quality is non-finite")
-    return float(relative)
+    mse = sum(
+        (candidate_item - clean_item) ** 2
+        for candidate_item, clean_item in zip(candidate, clean, strict=True)
+    ) / len(candidate)
+    return float(relative), float(mse)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +78,7 @@ class HfDetectorDirectionalObservation:
     primary_null_detector_identity: str
     detector_config_digest: str
     observation_protocol: str
+    detector_statistic_identity: str
     registered_template_digest: str
     wrong_key_template_digest: str
     primary_null_template_digest: str
@@ -84,6 +89,13 @@ class HfDetectorDirectionalObservation:
     realized_relative_l2: float
     content_relative_l2_limit: float
     rgb_paired_relative_l2: float
+    rgb_paired_mse: float
+    rgb_quality_dtype: str
+    actual_runtime_dtype: str
+    registered_minus_wrong_key_strict_floor_passed: bool
+    registered_minus_wrong_key_exact_tie: bool
+    registered_minus_primary_null_strict_floor_passed: bool
+    registered_minus_primary_null_exact_tie: bool
     observation_identity: str
 
     def validate(self) -> None:
@@ -105,6 +117,7 @@ class HfDetectorDirectionalObservation:
             self.realized_relative_l2,
             self.content_relative_l2_limit,
             self.rgb_paired_relative_l2,
+            self.rgb_paired_mse,
         )
         if any(
             isinstance(item, bool)
@@ -127,6 +140,7 @@ class HfDetectorDirectionalObservation:
             self.primary_null_detector_identity,
             self.detector_config_digest,
             self.observation_protocol,
+            self.detector_statistic_identity,
             self.registered_template_digest,
             self.wrong_key_template_digest,
             self.primary_null_template_digest,
@@ -140,6 +154,7 @@ class HfDetectorDirectionalObservation:
             )
         if (
             self.candidate_observation_digest == self.clean_observation_digest
+            or len({self.registered_detector_identity, self.wrong_key_detector_identity, self.primary_null_detector_identity}) != 1
             or self.registered_root_key_public_digest
             != self.wrong_key_root_key_public_digest
             or self.registered_root_key_public_digest
@@ -152,6 +167,18 @@ class HfDetectorDirectionalObservation:
             != pack(">f", 3 / 250)
             or self.realized_relative_l2 > self.content_relative_l2_limit
             or self.rgb_paired_relative_l2 < 0.0
+            or self.rgb_paired_mse < 0.0
+            or self.rgb_quality_dtype != "torch.uint8"
+            or type(self.actual_runtime_dtype) is not str
+            or not self.actual_runtime_dtype
+            or self.registered_minus_wrong_key_strict_floor_passed
+            is not (self.registered_minus_wrong_key > PRACTICAL_MARGIN_FLOOR)
+            or self.registered_minus_primary_null_strict_floor_passed
+            is not (self.registered_minus_primary_null > PRACTICAL_MARGIN_FLOOR)
+            or self.registered_minus_wrong_key_exact_tie
+            is not (self.registered_minus_wrong_key == 0.0)
+            or self.registered_minus_primary_null_exact_tie
+            is not (self.registered_minus_primary_null == 0.0)
         ):
             raise HfDetectorDirectionalMetricError(
                 "directional detector/control binding drifted"
@@ -175,6 +202,10 @@ def create_hf_detector_directional_observation(**values: object) -> HfDetectorDi
         primary_null_score=primary_null_score,
         registered_minus_wrong_key=registered_score - wrong_key_score,
         registered_minus_primary_null=registered_score - primary_null_score,
+        registered_minus_wrong_key_strict_floor_passed=(registered_score - wrong_key_score) > PRACTICAL_MARGIN_FLOOR,
+        registered_minus_wrong_key_exact_tie=(registered_score - wrong_key_score) == 0.0,
+        registered_minus_primary_null_strict_floor_passed=(registered_score - primary_null_score) > PRACTICAL_MARGIN_FLOOR,
+        registered_minus_primary_null_exact_tie=(registered_score - primary_null_score) == 0.0,
     )
     result = HfDetectorDirectionalObservation(
         **payload,
@@ -189,10 +220,10 @@ class DirectionalMarginSummary:
     observation_count: int
     practical_success_count: int
     exact_tie_count: int
-    mean_margin: float
-    median_margin: float
-    minimum_margin: float
-    lower_quartile_nearest_rank_margin: float
+    mean_margin: float | None
+    median_margin: float | None
+    minimum_margin: float | None
+    lower_quartile_nearest_rank_margin: float | None
     threshold_free_paired_ranking_auc: float
     exact_one_sided_confidence_lower_bound: float
 
@@ -208,10 +239,12 @@ class HfDetectorDirectionalAggregate:
     budget_violation_count: int
     integrity_violation_count: int
     nonfinite_violation_count: int
-    mean_realized_relative_l2: float
-    maximum_realized_relative_l2: float
-    mean_rgb_paired_relative_l2: float
-    maximum_rgb_paired_relative_l2: float
+    mean_realized_relative_l2: float | None
+    maximum_realized_relative_l2: float | None
+    mean_rgb_paired_relative_l2: float | None
+    maximum_rgb_paired_relative_l2: float | None
+    mean_rgb_paired_mse: float | None
+    maximum_rgb_paired_mse: float | None
     allow_request_for_next_scientific_gate: bool
     aggregate_identity: str
 
@@ -228,29 +261,29 @@ class HfDetectorDirectionalAggregate:
             )
 
 
-def _margin_summary(values: Sequence[float]) -> DirectionalMarginSummary:
+def _margin_summary(values: Sequence[float], *, failed_cluster_count: int) -> DirectionalMarginSummary:
     margins = tuple(float(item) for item in values)
-    if not margins or any(not isfinite(item) for item in margins):
+    if any(not isfinite(item) for item in margins) or len(margins) + failed_cluster_count != SCIENTIFIC_CLUSTER_COUNT:
         raise HfDetectorDirectionalMetricError("directional margins are invalid")
     ordered = tuple(sorted(margins))
-    successes = sum(item >= PRACTICAL_MARGIN_FLOOR for item in margins)
+    successes = sum(item > PRACTICAL_MARGIN_FLOOR for item in margins)
     ties = sum(item == 0.0 for item in margins)
-    quantile_index = max(0, ceil(MARGIN_QUANTILE_PROBABILITY * len(ordered)) - 1)
+    quantile_index = max(0, ceil(MARGIN_QUANTILE_PROBABILITY * len(ordered)) - 1) if ordered else 0
     return DirectionalMarginSummary(
-        observation_count=len(margins),
+        observation_count=SCIENTIFIC_CLUSTER_COUNT,
         practical_success_count=successes,
         exact_tie_count=ties,
-        mean_margin=float(mean(margins)),
-        median_margin=float(median(margins)),
-        minimum_margin=float(ordered[0]),
-        lower_quartile_nearest_rank_margin=float(ordered[quantile_index]),
+        mean_margin=float(mean(margins)) if margins else None,
+        median_margin=float(median(margins)) if margins else None,
+        minimum_margin=float(ordered[0]) if ordered else None,
+        lower_quartile_nearest_rank_margin=float(ordered[quantile_index]) if ordered else None,
         threshold_free_paired_ranking_auc=float(
-            (sum(item > 0.0 for item in margins) + 0.5 * ties) / len(margins)
+            (sum(item > 0.0 for item in margins) + 0.5 * ties) / SCIENTIFIC_CLUSTER_COUNT
         ),
         exact_one_sided_confidence_lower_bound=float(
             clopper_pearson_lower(
                 successes,
-                len(margins),
+                SCIENTIFIC_CLUSTER_COUNT,
                 confidence_level=CONFIDENCE_LEVEL,
             )
         ),
@@ -293,13 +326,14 @@ def aggregate_hf_detector_direction(
             "directional violation count is invalid"
         )
     null_summary = _margin_summary(
-        tuple(item.registered_minus_primary_null for item in items)
+        tuple(item.registered_minus_primary_null for item in items), failed_cluster_count=failed_cluster_count
     )
     wrong_summary = _margin_summary(
-        tuple(item.registered_minus_wrong_key for item in items)
+        tuple(item.registered_minus_wrong_key for item in items), failed_cluster_count=failed_cluster_count
     )
     realized = tuple(item.realized_relative_l2 for item in items)
     rgb_quality = tuple(item.rgb_paired_relative_l2 for item in items)
+    rgb_mse = tuple(item.rgb_paired_mse for item in items)
     gate = (
         len(items) == SCIENTIFIC_CLUSTER_COUNT
         and failed_cluster_count == 0
@@ -321,10 +355,12 @@ def aggregate_hf_detector_direction(
         "budget_violation_count": budget_violation_count,
         "integrity_violation_count": integrity_violation_count,
         "nonfinite_violation_count": nonfinite_violation_count,
-        "mean_realized_relative_l2": float(mean(realized)),
-        "maximum_realized_relative_l2": float(max(realized)),
-        "mean_rgb_paired_relative_l2": float(mean(rgb_quality)),
-        "maximum_rgb_paired_relative_l2": float(max(rgb_quality)),
+        "mean_realized_relative_l2": float(mean(realized)) if realized else None,
+        "maximum_realized_relative_l2": float(max(realized)) if realized else None,
+        "mean_rgb_paired_relative_l2": float(mean(rgb_quality)) if rgb_quality else None,
+        "maximum_rgb_paired_relative_l2": float(max(rgb_quality)) if rgb_quality else None,
+        "mean_rgb_paired_mse": float(mean(rgb_mse)) if rgb_mse else None,
+        "maximum_rgb_paired_mse": float(max(rgb_mse)) if rgb_mse else None,
         "allow_request_for_next_scientific_gate": gate,
     }
     aggregate = HfDetectorDirectionalAggregate(
@@ -341,6 +377,8 @@ def aggregate_hf_detector_direction(
         maximum_realized_relative_l2=payload["maximum_realized_relative_l2"],
         mean_rgb_paired_relative_l2=payload["mean_rgb_paired_relative_l2"],
         maximum_rgb_paired_relative_l2=payload["maximum_rgb_paired_relative_l2"],
+        mean_rgb_paired_mse=payload["mean_rgb_paired_mse"],
+        maximum_rgb_paired_mse=payload["maximum_rgb_paired_mse"],
         allow_request_for_next_scientific_gate=gate,
         aggregate_identity=_digest(payload),
     )
@@ -355,5 +393,5 @@ __all__ = [
     "HfDetectorDirectionalObservation",
     "aggregate_hf_detector_direction",
     "create_hf_detector_directional_observation",
-    "paired_rgb_relative_l2",
+    "paired_rgb8_quality",
 ]

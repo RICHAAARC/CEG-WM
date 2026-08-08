@@ -124,6 +124,10 @@ class HfDetectorDirectionalManifest:
     manifest_id: str
     split: str
     seed_namespace: str
+    source_cluster_namespace: str
+    image_lineage_namespace: str
+    registered_key_derivation_identity: str
+    wrong_key_control_identity: str
     entries: tuple[HfDetectorDirectionalManifestEntry, ...]
 
     @property
@@ -149,6 +153,14 @@ class HfDetectorDirectionalManifest:
             or self.split != "development"
             or self.seed_namespace
             != "hf_only_detector_directional_validation_20260808"
+            or self.source_cluster_namespace
+            != "hf_detector_directional_source_clusters_20260808"
+            or self.image_lineage_namespace
+            != "hf_detector_directional_paired_rgb_lineages_20260808"
+            or self.registered_key_derivation_identity
+            != "hf_detector_directional_registered_root_subdomain_v1"
+            or self.wrong_key_control_identity
+            != "hf_detector_directional_wrong_key_roster_v1"
         ):
             raise HfDetectorDirectionalProtocolError(
                 "directional manifest identity drifted"
@@ -323,36 +335,81 @@ def _load_json(path: Path) -> dict[str, object]:
     return value
 
 
-def _prior_source_bindings(
+@dataclass(frozen=True, slots=True)
+class AuthorityDenyAxes:
+    prompt_digests: tuple[str, ...]
+    source_cluster_identities: tuple[str, ...]
+    seed_namespaces: tuple[str, ...]
+    generation_seeds: tuple[int, ...]
+    image_lineage_identities: tuple[str, ...]
+    key_control_identities: tuple[str, ...]
+
+    def digest_value(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def _walk_authority_values(value: object, axes: dict[str, set[object]]) -> None:
+    if type(value) is dict:
+        for key, item in value.items():
+            lowered = key.lower()
+            scalar_values = item if type(item) is list else [item]
+            for scalar in scalar_values:
+                if type(scalar) not in {str, int} or type(scalar) is bool:
+                    continue
+                if lowered in {"prompt", "prompt_text"}:
+                    axes["prompt_digests"].add(sha256(str(scalar).encode("utf-8")).hexdigest())
+                elif lowered == "prompt_digest" and type(scalar) is str:
+                    axes["prompt_digests"].add(scalar)
+                if "source_cluster" in lowered or lowered == "cluster_identity":
+                    axes["source_cluster_identities"].add(str(scalar))
+                if lowered == "seed_namespace":
+                    axes["seed_namespaces"].add(str(scalar))
+                if lowered == "generation_seed":
+                    axes["generation_seeds"].add(int(scalar))
+                if "image_lineage" in lowered:
+                    axes["image_lineage_identities"].add(str(scalar))
+                if "key" in lowered or "control" in lowered:
+                    axes["key_control_identities"].add(str(scalar))
+            _walk_authority_values(item, axes)
+    elif type(value) is list:
+        for item in value:
+            _walk_authority_values(item, axes)
+
+
+def load_authority_deny_axes(
     bindings: tuple[PriorDevelopmentManifestBinding, ...],
     repository_root: Path,
-) -> tuple[tuple[str, int], ...]:
-    values: set[tuple[str, int]] = set()
+) -> AuthorityDenyAxes:
+    axes: dict[str, set[object]] = {
+        "prompt_digests": set(),
+        "source_cluster_identities": set(),
+        "seed_namespaces": set(),
+        "generation_seeds": set(),
+        "image_lineage_identities": set(),
+        "key_control_identities": set(),
+    }
     for binding in bindings:
         path = repository_root / binding.path
-        if sha256(path.read_bytes()).hexdigest() != binding.file_sha256:
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise HfDetectorDirectionalProtocolError(
+                "prior authority file is missing or unreadable"
+            ) from exc
+        if sha256(payload).hexdigest() != binding.file_sha256:
             raise HfDetectorDirectionalProtocolError(
                 "prior development manifest file digest drifted"
             )
         raw = _load_json(path)
-        entries = raw.get("entries")
-        if type(entries) is not list or not entries:
-            raise HfDetectorDirectionalProtocolError(
-                "prior development manifest entries are invalid"
-            )
-        for entry in entries:
-            if type(entry) is not dict:
-                raise HfDetectorDirectionalProtocolError(
-                    "prior development manifest entry is invalid"
-                )
-            prompt = entry.get("prompt")
-            seed = entry.get("generation_seed")
-            if type(prompt) is not str or not prompt or type(seed) is not int:
-                raise HfDetectorDirectionalProtocolError(
-                    "prior development source identity is invalid"
-                )
-            values.add((sha256(prompt.encode("utf-8")).hexdigest(), seed))
-    return tuple(sorted(values))
+        _walk_authority_values(raw, axes)
+    return AuthorityDenyAxes(
+        prompt_digests=tuple(sorted(str(item) for item in axes["prompt_digests"])),
+        source_cluster_identities=tuple(sorted(str(item) for item in axes["source_cluster_identities"])),
+        seed_namespaces=tuple(sorted(str(item) for item in axes["seed_namespaces"])),
+        generation_seeds=tuple(sorted(int(item) for item in axes["generation_seeds"])),
+        image_lineage_identities=tuple(sorted(str(item) for item in axes["image_lineage_identities"])),
+        key_control_identities=tuple(sorted(str(item) for item in axes["key_control_identities"])),
+    )
 
 
 def load_hf_detector_directional_manifest(
@@ -365,6 +422,10 @@ def load_hf_detector_directional_manifest(
             manifest_id=raw["manifest_id"],
             split=raw["split"],
             seed_namespace=raw["seed_namespace"],
+            source_cluster_namespace=raw["source_cluster_namespace"],
+            image_lineage_namespace=raw["image_lineage_namespace"],
+            registered_key_derivation_identity=raw["registered_key_derivation_identity"],
+            wrong_key_control_identity=raw["wrong_key_control_identity"],
             entries=tuple(
                 HfDetectorDirectionalManifestEntry(**item)
                 for item in raw["entries"]
@@ -406,7 +467,7 @@ def load_hf_only_detector_directional_protocol(
             "directional manifest file digest drifted"
         )
     manifest = load_hf_detector_directional_manifest(manifest_path)
-    prior_bindings = _prior_source_bindings(
+    deny_axes = load_authority_deny_axes(
         protocol.prior_development_manifests, repository
     )
     if protocol.source_cluster_deny_list_digest != canonical_digest(
@@ -414,18 +475,27 @@ def load_hf_only_detector_directional_protocol(
             "manifest_bindings": tuple(
                 asdict(item) for item in protocol.prior_development_manifests
             ),
-            "prior_prompt_seed_bindings": prior_bindings,
+            "authority_deny_axes": deny_axes.digest_value(),
         }
     ):
         raise HfDetectorDirectionalProtocolError(
             "directional source deny-list digest drifted"
         )
-    if any(
-        (entry.prompt_digest, entry.generation_seed) in set(prior_bindings)
-        for entry in manifest.entries
-    ):
+    new_axes = AuthorityDenyAxes(
+        prompt_digests=tuple(sorted(item.prompt_digest for item in manifest.entries)),
+        source_cluster_identities=tuple(sorted((manifest.source_cluster_namespace, *(item.cluster_identity for item in manifest.entries)))),
+        seed_namespaces=(manifest.seed_namespace,),
+        generation_seeds=tuple(sorted(item.generation_seed for item in manifest.entries)),
+        image_lineage_identities=(manifest.image_lineage_namespace, *(sorted({item.image_lineage_identity for item in manifest.entries}))),
+        key_control_identities=(manifest.registered_key_derivation_identity, manifest.wrong_key_control_identity),
+    )
+    intersections = {
+        name: sorted(set(getattr(deny_axes, name)) & set(getattr(new_axes, name)))
+        for name in asdict(deny_axes)
+    }
+    if any(intersections.values()):
         raise HfDetectorDirectionalProtocolError(
-            "directional source cluster overlaps prior development data"
+            "directional manifest overlaps a prior or future authority axis"
         )
     return protocol, manifest
 
@@ -435,8 +505,10 @@ __all__ = [
     "HfDetectorDirectionalManifest",
     "HfDetectorDirectionalManifestEntry",
     "HfDetectorDirectionalProtocolError",
+    "AuthorityDenyAxes",
     "HfOnlyDetectorDirectionalProtocol",
     "canonical_digest",
     "load_hf_detector_directional_manifest",
+    "load_authority_deny_axes",
     "load_hf_only_detector_directional_protocol",
 ]
