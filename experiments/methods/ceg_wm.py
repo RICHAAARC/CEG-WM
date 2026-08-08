@@ -562,7 +562,7 @@ class CegWmExperimentAdapter:
     @_revalidate_configuration_before_call
     def build_hf_carrier(
         self,
-        detection_key: str | DerivedWrongKeyMaterial,
+        detection_key: str,
         shape: Sequence[int],
         *,
         routing_result: ContentRoutingResult | None = None,
@@ -606,7 +606,7 @@ class CegWmExperimentAdapter:
     def detect_hf(
         self,
         observation: HfDetectionObservation,
-        detection_key: str | DerivedWrongKeyMaterial,
+        detection_key: str,
     ) -> ComponentCallObservation[HfDetectionResult]:
         result = hf_detector(observation, detection_key)
         return self._observe("hf_detector", result)
