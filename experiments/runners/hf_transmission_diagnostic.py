@@ -247,7 +247,7 @@ class HfTransmissionDiagnosticRunner:
             primary_null_wrong_key_index=registered_carrier.wrong_key_index,
         )
 
-    def _score_final_public_image_position(
+    def _score_reencoded_public_image_position(
         self,
         candidate_tensor: torch.Tensor,
         clean_tensor: torch.Tensor,
@@ -342,7 +342,7 @@ class HfTransmissionDiagnosticRunner:
         )
         materialization = runtime_result.content_materialization
         final_position, formal_detector_results = (
-            self._score_final_public_image_position(
+            self._score_reencoded_public_image_position(
                 runtime_result.watermarked_detection_latent,
                 runtime_result.clean_detection_latent,
             )

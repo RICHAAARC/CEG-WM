@@ -6,7 +6,7 @@
   "role_id": "hf_transmission_diagnostic",
   "candidate_identity": "hf_sparse_tail",
   "manifest_path": "configs/experiments/hf_transmission_diagnostic_manifest.json",
-  "manifest_file_sha256": "e5f204b1941ac79360e9b4e800e75190e4f10755227701932f32b5f77cc45e12",
+  "manifest_file_sha256": "8dc5708d50cc2093d4e481e35bdd39a6d6960c7939ab31cd278d0611b9ff7172",
   "signal_positions": [
     "callback_pre_write",
     "actual_dtype_post_write",
