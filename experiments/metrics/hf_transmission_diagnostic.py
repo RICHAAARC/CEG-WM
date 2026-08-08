@@ -73,6 +73,18 @@ class HfSignalPositionObservation:
     registered_statistic_identity: str
     wrong_key_statistic_identity: str
     primary_null_statistic_identity: str
+    registered_template_digest: str
+    wrong_key_template_digest: str
+    primary_null_template_digest: str
+    registered_root_key_public_digest: str
+    wrong_key_root_key_public_digest: str
+    primary_null_root_key_public_digest: str
+    registered_key_role: str
+    wrong_key_key_role: str
+    primary_null_key_role: str
+    registered_wrong_key_index: int | None
+    wrong_key_index: int | None
+    primary_null_wrong_key_index: int | None
     observation_identity: str
 
     def validate(self) -> None:
@@ -111,9 +123,33 @@ class HfSignalPositionObservation:
             self.registered_statistic_identity,
             self.wrong_key_statistic_identity,
             self.primary_null_statistic_identity,
+            self.registered_template_digest,
+            self.wrong_key_template_digest,
+            self.primary_null_template_digest,
+            self.registered_root_key_public_digest,
+            self.wrong_key_root_key_public_digest,
+            self.primary_null_root_key_public_digest,
+            self.registered_key_role,
+            self.wrong_key_key_role,
+            self.primary_null_key_role,
         )
         if any(type(value) is not str or not value for value in identities):
             raise HfTransmissionMetricError("signal identity is missing")
+        if (
+            self.registered_key_role != "registered"
+            or self.wrong_key_key_role != "wrong"
+            or self.primary_null_key_role != "registered"
+            or self.registered_wrong_key_index is not None
+            or self.wrong_key_index != 0
+            or self.primary_null_wrong_key_index is not None
+            or self.registered_root_key_public_digest
+            != self.wrong_key_root_key_public_digest
+            or self.registered_root_key_public_digest
+            != self.primary_null_root_key_public_digest
+            or self.registered_template_digest == self.wrong_key_template_digest
+            or self.registered_template_digest != self.primary_null_template_digest
+        ):
+            raise HfTransmissionMetricError("key-specific template binding drifted")
         payload = asdict(self)
         identity = payload.pop("observation_identity")
         if identity != _digest(payload):
@@ -132,6 +168,18 @@ def create_hf_signal_position_observation(
     registered_statistic_identity: str,
     wrong_key_statistic_identity: str,
     primary_null_statistic_identity: str,
+    registered_template_digest: str,
+    wrong_key_template_digest: str,
+    primary_null_template_digest: str,
+    registered_root_key_public_digest: str,
+    wrong_key_root_key_public_digest: str,
+    primary_null_root_key_public_digest: str,
+    registered_key_role: str,
+    wrong_key_key_role: str,
+    primary_null_key_role: str,
+    registered_wrong_key_index: int | None,
+    wrong_key_index: int | None,
+    primary_null_wrong_key_index: int | None,
 ) -> HfSignalPositionObservation:
     payload = {
         "position_id": position_id,
@@ -148,6 +196,18 @@ def create_hf_signal_position_observation(
         "registered_statistic_identity": registered_statistic_identity,
         "wrong_key_statistic_identity": wrong_key_statistic_identity,
         "primary_null_statistic_identity": primary_null_statistic_identity,
+        "registered_template_digest": registered_template_digest,
+        "wrong_key_template_digest": wrong_key_template_digest,
+        "primary_null_template_digest": primary_null_template_digest,
+        "registered_root_key_public_digest": registered_root_key_public_digest,
+        "wrong_key_root_key_public_digest": wrong_key_root_key_public_digest,
+        "primary_null_root_key_public_digest": primary_null_root_key_public_digest,
+        "registered_key_role": registered_key_role,
+        "wrong_key_key_role": wrong_key_key_role,
+        "primary_null_key_role": primary_null_key_role,
+        "registered_wrong_key_index": registered_wrong_key_index,
+        "wrong_key_index": wrong_key_index,
+        "primary_null_wrong_key_index": primary_null_wrong_key_index,
     }
     observation = HfSignalPositionObservation(
         **payload,
@@ -195,9 +255,12 @@ def evaluate_hf_transmission_direction(
     budget_integrity_nonfinite_failure_count: int,
 ) -> HfTransmissionDirectionalDecision:
     observations = tuple(final_position_observations)
-    if len(observations) != 8 or any(
-        type(item) is not HfSignalPositionObservation
-        for item in observations
+    if (
+        len(observations) + budget_integrity_nonfinite_failure_count != 8
+        or any(
+            type(item) is not HfSignalPositionObservation
+            for item in observations
+        )
     ):
         raise HfTransmissionMetricError("directional decision coverage is incomplete")
     for item in observations:
@@ -205,7 +268,7 @@ def evaluate_hf_transmission_direction(
         if item.position_id != "rgb_vae_reencoded":
             raise HfTransmissionMetricError("decision uses only final re-encoded position")
     payload = {
-        "cluster_count": len(observations),
+        "cluster_count": 8,
         "registered_minus_wrong_positive_count": sum(
             item.registered_minus_wrong_key > 0.0 for item in observations
         ),

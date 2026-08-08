@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import time
+from time import monotonic
 from typing import Mapping
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -63,6 +64,28 @@ class HfTransmissionEntrypointError(RuntimeError):
     """The HF transport worker could not preserve its frozen boundary."""
 
 
+def _is_retryable_resource_failure(error: BaseException) -> bool:
+    """Recognize the bounded runtime resource failures eligible for one retry."""
+
+    resource_types = tuple(
+        dict.fromkeys(
+            (
+                MemoryError,
+                getattr(torch, "OutOfMemoryError", MemoryError),
+                getattr(torch.cuda, "OutOfMemoryError", MemoryError),
+            )
+        )
+    )
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        if isinstance(current, resource_types):
+            return True
+        visited.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _operational_record(
     *,
     run_id: str,
@@ -74,7 +97,7 @@ def _operational_record(
     retry_parent_intent_digest: str | None,
     maximum_duration_seconds: int,
     runtime_config_digest: str,
-    adapter_config_digest: str,
+    operation_identity: str,
     elapsed_seconds: float,
 ) -> DevelopmentOperationalRecord:
     payload = {
@@ -98,7 +121,7 @@ def _operational_record(
             "source_cluster_ordinal": unit_index,
             "case_ids": ["hf_transmission_runtime_identity"],
             "responsibility_result_digests": [
-                ["content_embedder", adapter_config_digest]
+                ["content_embedder", operation_identity]
             ],
             "elapsed_seconds": elapsed_seconds,
             "runtime_config_digest": runtime_config_digest,
@@ -217,6 +240,7 @@ def execute_hf_transmission_diagnostic_session(
     package_digest = _sha256_file(package)
     termination_reason = "frozen_roster_complete"
     failure: dict[str, object] | None = None
+    directional_decision: dict[str, object] | None = None
     active_unit_index: int | None = None
     try:
         while cursor.next_unit_index < len(protocol.unit_roster):
@@ -229,8 +253,17 @@ def execute_hf_transmission_diagnostic_session(
             intent = store.create_session_intent(
                 cursor, lease, now_epoch_seconds=now
             )
+            attempted_at = monotonic()
             if unit.unit_index < protocol.operational_unit_count:
-                elapsed = 0.0
+                entry = manifest.entries[unit.source_cluster_ordinal]
+                backend.set_development_generation_prompts(entry.prompt)
+                runtime_result, elapsed = runner.execute_operational_smoke(
+                    base_latent=_base_latent(
+                        entry.generation_seed,
+                        height=runtime_session.image_height,
+                        width=runtime_session.image_width,
+                    )
+                )
                 record = _operational_record(
                     run_id=run_id,
                     protocol_digest=protocol_digest,
@@ -241,30 +274,77 @@ def execute_hf_transmission_diagnostic_session(
                     retry_parent_intent_digest=intent.parent_attempt_intent_digest,
                     maximum_duration_seconds=unit.maximum_duration_seconds,
                     runtime_config_digest=runtime_session.runtime_config_digest,
-                    adapter_config_digest=adapter.configuration.config_digest,
+                    operation_identity=(
+                        runtime_result.content_materialization
+                        .materialization_replay_identity
+                    ),
                     elapsed_seconds=elapsed,
                 )
             else:
                 entry = manifest.entries[unit.source_cluster_ordinal]
                 backend.set_development_generation_prompts(entry.prompt)
-                record = runner.execute_scientific_cluster(
-                    cluster_ordinal=unit.source_cluster_ordinal,
-                    base_latent=_base_latent(
-                        entry.generation_seed,
-                        height=runtime_session.image_height,
-                        width=runtime_session.image_width,
-                    ),
-                    attempt_index=intent.attempt_index,
-                    retry_parent_intent_digest=intent.parent_attempt_intent_digest,
-                    maximum_duration_seconds=unit.maximum_duration_seconds,
-                )
+                try:
+                    record = runner.execute_scientific_cluster(
+                        cluster_ordinal=unit.source_cluster_ordinal,
+                        base_latent=_base_latent(
+                            entry.generation_seed,
+                            height=runtime_session.image_height,
+                            width=runtime_session.image_width,
+                        ),
+                        attempt_index=intent.attempt_index,
+                        retry_parent_intent_digest=(
+                            intent.parent_attempt_intent_digest
+                        ),
+                        maximum_duration_seconds=unit.maximum_duration_seconds,
+                        started_monotonic=attempted_at,
+                    )
+                except Exception as exc:
+                    resource_failure = _is_retryable_resource_failure(exc)
+                    retryable = (
+                        resource_failure
+                        and intent.attempt_index + 1
+                        < intent.maximum_record_attempts
+                    )
+                    record = runner.create_failed_scientific_record(
+                        cluster_ordinal=unit.source_cluster_ordinal,
+                        attempt_index=intent.attempt_index,
+                        retry_parent_intent_digest=(
+                            intent.parent_attempt_intent_digest
+                        ),
+                        maximum_duration_seconds=unit.maximum_duration_seconds,
+                        actual_elapsed_seconds=float(monotonic() - attempted_at),
+                        failure_type=(
+                            f"{type(exc).__module__}.{type(exc).__qualname__}"
+                        ),
+                        resource_failure=resource_failure,
+                        retryable_resource_failure=retryable,
+                    )
             store.commit_session_unit(
                 cursor,
                 lease,
                 intent,
                 record=record,
                 raw_secret_values=(root_key, hf_token),
-                now_epoch_seconds=max(now + 1, int(time.time())),
+                now_epoch_seconds=max(now, int(time.time())),
+            )
+            if (
+                type(record) is DevelopmentScientificRecord
+                and record.execution_status == "retry"
+            ):
+                termination_reason = "retryable_resource_failure"
+                break
+            if (
+                type(record) is DevelopmentScientificRecord
+                and record.execution_status == "failed"
+            ):
+                termination_reason = "terminal_scientific_failure"
+                break
+        if cursor.next_unit_index == len(protocol.unit_roster):
+            verified_evidence = store.verified_terminal_scientific_evidence(
+                now_epoch_seconds=int(time.time())
+            )
+            directional_decision = asdict(
+                runner.replay_directional_decision(verified_evidence)
             )
     except Exception as exc:
         termination_reason = "worker_execution_failure"
@@ -323,6 +403,11 @@ def execute_hf_transmission_diagnostic_session(
         target.writestr(
             "committed_unit_ids.json", _canonical_bytes(list(session_commits))
         )
+        if directional_decision is not None:
+            target.writestr(
+                "directional_decision.json",
+                _canonical_bytes(directional_decision),
+            )
         if failure is not None:
             target.writestr("diagnostic.json", _canonical_bytes(failure))
     return (3 if failure is not None else 0), {
@@ -340,6 +425,7 @@ def execute_hf_transmission_diagnostic_session(
         "committed_unit_count": len(cursor.committed_units),
         "session_committed_unit_count": len(cursor.committed_units) - committed_before,
         "termination_reason": termination_reason,
+        "directional_decision": directional_decision,
         "formal_tau_created": False,
         "candidate_promoted": False,
         "scientific_claims_supported": False,

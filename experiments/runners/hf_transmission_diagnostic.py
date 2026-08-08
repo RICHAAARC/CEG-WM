@@ -14,8 +14,10 @@ import torch
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.hf_transmission_diagnostic import (
     HfSignalPositionObservation,
+    HfTransmissionDirectionalDecision,
     create_hf_signal_position_observation,
     diagnostic_latent_template_projection,
+    evaluate_hf_transmission_direction,
 )
 from experiments.protocol.development_records import (
     DEVELOPMENT_CLAIM_BOUNDARY,
@@ -36,6 +38,7 @@ from experiments.protocol.internal_splits import (
     derive_source_cluster_id,
 )
 from experiments.runners.development_persistence import (
+    CommittedUnit,
     FrozenDevelopmentUnitBinding,
     create_frozen_development_unit_binding,
 )
@@ -207,32 +210,59 @@ class HfTransmissionDiagnosticRunner:
             registered_statistic_identity=canonical_digest(
                 {
                     "metric": "diagnostic_latent_template_projection",
-                    "carrier": registered_carrier.carrier_config_digest,
+                    "carrier_config_digest": (
+                        registered_carrier.carrier_config_digest
+                    ),
+                    "template_digest": registered_carrier.template_digest,
+                    "key_role": registered_carrier.key_role,
                     "position": position_id,
                 }
             ),
             wrong_key_statistic_identity=canonical_digest(
                 {
                     "metric": "diagnostic_latent_template_projection",
-                    "carrier": wrong_carrier.carrier_config_digest,
+                    "carrier_config_digest": wrong_carrier.carrier_config_digest,
+                    "template_digest": wrong_carrier.template_digest,
+                    "key_role": wrong_carrier.key_role,
+                    "wrong_key_index": wrong_carrier.wrong_key_index,
                     "position": position_id,
                 }
             ),
             primary_null_statistic_identity=canonical_digest(
                 {
                     "metric": "diagnostic_latent_template_projection",
-                    "carrier": registered_carrier.carrier_config_digest,
+                    "carrier_config_digest": (
+                        registered_carrier.carrier_config_digest
+                    ),
+                    "template_digest": registered_carrier.template_digest,
+                    "key_role": registered_carrier.key_role,
                     "position": position_id,
                     "control": "paired_clean_primary_null",
                 }
             ),
+            registered_template_digest=registered_carrier.template_digest,
+            wrong_key_template_digest=wrong_carrier.template_digest,
+            primary_null_template_digest=registered_carrier.template_digest,
+            registered_root_key_public_digest=(
+                registered_carrier.root_key_public_digest
+            ),
+            wrong_key_root_key_public_digest=wrong_carrier.root_key_public_digest,
+            primary_null_root_key_public_digest=(
+                registered_carrier.root_key_public_digest
+            ),
+            registered_key_role=registered_carrier.key_role,
+            wrong_key_key_role=wrong_carrier.key_role,
+            primary_null_key_role=registered_carrier.key_role,
+            registered_wrong_key_index=registered_carrier.wrong_key_index,
+            wrong_key_index=wrong_carrier.wrong_key_index,
+            primary_null_wrong_key_index=registered_carrier.wrong_key_index,
         )
 
     def _score_final_public_image_position(
         self,
         candidate_tensor: torch.Tensor,
         clean_tensor: torch.Tensor,
-    ) -> HfSignalPositionObservation:
+    ) -> tuple[HfSignalPositionObservation, dict[str, object]]:
         candidate_observation = _observation(candidate_tensor)
         clean_observation = _observation(clean_tensor)
         wrong_key = derive_wrong_key_material(self.root_key_public_digest, 0)
@@ -249,7 +279,7 @@ class HfTransmissionDiagnosticRunner:
             == primary_null.detector_config_digest
         ):
             raise HfTransmissionRunnerError("HF detector configuration drifted")
-        return create_hf_signal_position_observation(
+        observation = create_hf_signal_position_observation(
             position_id="rgb_vae_reencoded",
             statistic_role="formal_hf_detector_operation",
             registered_score=registered.hf_score,
@@ -260,7 +290,50 @@ class HfTransmissionDiagnosticRunner:
             registered_statistic_identity=registered.detector_identity,
             wrong_key_statistic_identity=wrong.detector_identity,
             primary_null_statistic_identity=primary_null.detector_identity,
+            registered_template_digest=registered.template_digest,
+            wrong_key_template_digest=wrong.template_digest,
+            primary_null_template_digest=primary_null.template_digest,
+            registered_root_key_public_digest=registered.root_key_public_digest,
+            wrong_key_root_key_public_digest=wrong.root_key_public_digest,
+            primary_null_root_key_public_digest=(
+                primary_null.root_key_public_digest
+            ),
+            registered_key_role=registered.key_role,
+            wrong_key_key_role=wrong.key_role,
+            primary_null_key_role=primary_null.key_role,
+            registered_wrong_key_index=registered.wrong_key_index,
+            wrong_key_index=wrong.wrong_key_index,
+            primary_null_wrong_key_index=primary_null.wrong_key_index,
         )
+        return observation, {
+            "registered": asdict(registered),
+            "wrong_key": asdict(wrong),
+            "primary_null": asdict(primary_null),
+        }
+
+    def execute_operational_smoke(
+        self,
+        *,
+        base_latent: torch.Tensor,
+    ) -> tuple[ContentWriteVaeResult, float]:
+        """Run one real paired carrier/embedder/runtime operation without science."""
+
+        started = monotonic()
+        shape = tuple(int(size) for size in base_latent.shape)
+        carrier = self.adapter.build_hf_carrier(
+            self.registered_root_key, shape
+        ).result
+
+        def embed(values: tuple[float, ...]):
+            return self.adapter.embed_content(values, carrier).result
+
+        result = self.runtime.execute_content_write_and_vae(base_latent, embed)
+        if type(result) is not ContentWriteVaeResult:
+            raise HfTransmissionRunnerError("runtime result exact type is required")
+        elapsed = float(monotonic() - started)
+        if not isfinite(elapsed) or elapsed <= 0.0:
+            raise HfTransmissionRunnerError("operational elapsed time was not measured")
+        return result, elapsed
 
     def execute_scientific_cluster(
         self,
@@ -275,20 +348,16 @@ class HfTransmissionDiagnosticRunner:
         if type(cluster_ordinal) is not int or not 0 <= cluster_ordinal < 8:
             raise HfTransmissionRunnerError("cluster ordinal is outside frozen manifest")
         started = monotonic() if started_monotonic is None else started_monotonic
-        shape = tuple(int(size) for size in base_latent.shape)
-        carrier = self.adapter.build_hf_carrier(
-            self.registered_root_key, shape
-        ).result
-
-        def embed(values: tuple[float, ...]):
-            return self.adapter.embed_content(values, carrier).result
-
-        runtime_result = self.runtime.execute_content_write_and_vae(
-            base_latent, embed
+        runtime_result, _runtime_elapsed = self.execute_operational_smoke(
+            base_latent=base_latent
         )
-        if type(runtime_result) is not ContentWriteVaeResult:
-            raise HfTransmissionRunnerError("runtime result exact type is required")
         materialization = runtime_result.content_materialization
+        final_position, formal_detector_results = (
+            self._score_final_public_image_position(
+                runtime_result.watermarked_detection_latent,
+                runtime_result.clean_detection_latent,
+            )
+        )
         positions = (
             self._score_position(
                 "callback_pre_write",
@@ -305,10 +374,7 @@ class HfTransmissionDiagnosticRunner:
                 runtime_result.watermarked_generation_terminal_latent,
                 runtime_result.clean_generation_terminal_latent,
             ),
-            self._score_final_public_image_position(
-                runtime_result.watermarked_detection_latent,
-                runtime_result.clean_detection_latent,
-            ),
+            final_position,
         )
         elapsed = float(monotonic() - started)
         if not isfinite(elapsed) or elapsed < 0.0:
@@ -326,6 +392,7 @@ class HfTransmissionDiagnosticRunner:
             "realized_total_l2": materialization.realized_total_l2,
             "realized_relative_l2": materialization.realized_relative_l2,
             "signal_positions": tuple(asdict(item) for item in positions),
+            "formal_hf_detection_results": formal_detector_results,
         }
         final = positions[-1]
         metric_payload = {
@@ -449,6 +516,203 @@ class HfTransmissionDiagnosticRunner:
         )
         record.validate()
         return record
+
+    def create_failed_scientific_record(
+        self,
+        *,
+        cluster_ordinal: int,
+        attempt_index: int,
+        retry_parent_intent_digest: str | None,
+        maximum_duration_seconds: int,
+        actual_elapsed_seconds: float,
+        failure_type: str,
+        resource_failure: bool,
+        retryable_resource_failure: bool,
+    ) -> DevelopmentScientificRecord:
+        """Persist an honest terminal or retryable failure after intent claim."""
+
+        if not 0 <= cluster_ordinal < 8:
+            raise HfTransmissionRunnerError("failed cluster is outside frozen manifest")
+        if (
+            type(failure_type) is not str
+            or not failure_type
+            or not isfinite(actual_elapsed_seconds)
+            or actual_elapsed_seconds < 0.0
+        ):
+            raise HfTransmissionRunnerError("failed cluster facts are invalid")
+        entry = self.manifest.entries[cluster_ordinal]
+        identity = self._analysis_identity(entry)
+        operation_payload = {
+            "failure_stage": "hf_transmission_runtime_operation",
+            "failure_type": failure_type,
+            "result_available": False,
+        }
+        record_payload = {
+            "schema_version": RECORD_SCHEMA_VERSION,
+            "collection_role": DEVELOPMENT_RECORD_COLLECTION_ROLE,
+            "record_id": "0" * 64,
+            "run_id": self.run_id,
+            "protocol_id": self.protocol.protocol_id,
+            "protocol_version": self.protocol.protocol_version,
+            "protocol_digest": self.protocol_digest,
+            "execution_intent_authority_digest": self.execution_intent_authority_digest,
+            "method_code_revision": self.method_code_revision,
+            "unit_index": self.protocol.operational_unit_count + cluster_ordinal,
+            "phase": "development_scientific_breadth",
+            "responsibility_id": "hf_detector",
+            "analysis_unit_identity": asdict(identity),
+            "scientific_question_id": "hf_signal_survival_across_generation_boundaries",
+            "development_case_id": "paired_clean_hf_transport_observation",
+            "candidate_identity": self.protocol.candidate_identity,
+            "candidate_config_digest": self.candidate_config_digest,
+            "paired_ablation_identity": "paired_clean_hf_same_generation",
+            "negative_control_case_ids": (
+                "same_image_wrong_key",
+                "paired_clean_primary_null",
+            ),
+            "metric_ids": ("wrong_key_attribution", "matched_budget_quality"),
+            "content_branch_id": "hf_only",
+            "geometry_case_id": "not_applicable",
+            "attempt_index": attempt_index,
+            "execution_status": (
+                "retry" if retryable_resource_failure else "failed"
+            ),
+            "failure_class": (
+                "resource_failure"
+                if resource_failure
+                else "implementation_failure"
+            ),
+            "failure_reason": "hf_transmission_runtime_operation_failed",
+            "retry_parent_intent_digest": retry_parent_intent_digest,
+            "actual_elapsed_seconds": actual_elapsed_seconds,
+            "maximum_duration_seconds": maximum_duration_seconds,
+            "duration_limit_exceeded": (
+                actual_elapsed_seconds > maximum_duration_seconds
+            ),
+            "operation_result_payload": operation_payload,
+            "operation_result_digest": canonical_development_value_digest(
+                operation_payload
+            ),
+            "metric_observation": {},
+            "routing_trace": {"routing_used": False},
+            "branch_score_trace": {},
+            "detector_trace": {"formal_detector_completed": False},
+            "geometry_trace": {"geometry_attempted": False},
+            "threshold_trace": {
+                "threshold_role": "not_fitted_hf_transmission_diagnostic",
+                "raw_threshold_identity": None,
+                "rectified_threshold_identity": None,
+            },
+            "key_control_trace": {
+                "root_key_public_digest": self.root_key_public_digest,
+                "wrong_key_index": 0,
+                "raw_secret_persisted": False,
+            },
+            "decision_trace": {
+                "positive_source": None,
+                "decision_role": "failed_transport_observation",
+            },
+            "provenance_trace": {
+                "protocol_digest": self.protocol_digest,
+                "execution_intent_authority_digest": self.execution_intent_authority_digest,
+                "method_code_revision": self.method_code_revision,
+                "candidate_config_digest": self.candidate_config_digest,
+                "manifest_digest": self.manifest.digest(),
+                "cluster_identity": entry.cluster_identity,
+            },
+            "module_outcome": None,
+            "candidate_recommendation": None,
+            "scientific_claim_boundary": DEVELOPMENT_CLAIM_BOUNDARY,
+        }
+        provisional = DevelopmentScientificRecord(**record_payload)
+        record = DevelopmentScientificRecord(
+            **{
+                **record_payload,
+                "record_id": canonical_development_value_digest(
+                    provisional.payload_without_record_id()
+                ),
+            }
+        )
+        record.validate()
+        return record
+
+    def replay_directional_decision(
+        self,
+        verified_evidence: Sequence[
+            tuple[DevelopmentScientificRecord, CommittedUnit]
+        ],
+    ) -> HfTransmissionDirectionalDecision:
+        """Derive go/no-go only from eight verified COMMITTED terminal records."""
+
+        evidence = tuple(verified_evidence)
+        if len(evidence) != 8:
+            raise HfTransmissionRunnerError("verified HF cluster coverage is incomplete")
+        indexes = tuple(record.unit_index for record, _marker in evidence)
+        if indexes != tuple(range(2, 10)) or len(set(indexes)) != 8:
+            raise HfTransmissionRunnerError("verified HF unit indexes drifted")
+        source_ids: set[str] = set()
+        final_observations: list[HfSignalPositionObservation] = []
+        failure_count = 0
+        for record, marker in evidence:
+            record.validate()
+            if (
+                marker.protocol_digest != self.protocol_digest
+                or marker.run_id != self.run_id
+                or marker.revision != self.method_code_revision
+                or record.method_code_revision != self.method_code_revision
+                or record.run_id != self.run_id
+                or record.protocol_digest != self.protocol_digest
+                or record.execution_intent_authority_digest
+                != self.execution_intent_authority_digest
+                or record.candidate_config_digest != self.candidate_config_digest
+                or record.provenance_trace.get("manifest_digest")
+                != self.manifest.digest()
+                or record.responsibility_id != "hf_detector"
+                or marker.record_digest
+                != sha256(
+                    (
+                        json.dumps(
+                            record.payload(),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                            allow_nan=False,
+                        )
+                        + "\n"
+                    ).encode("utf-8")
+                ).hexdigest()
+            ):
+                raise HfTransmissionRunnerError("verified HF evidence binding drifted")
+            identity = AnalysisUnitIdentity(**record.analysis_unit_identity)
+            if identity.source_cluster_id in source_ids:
+                raise HfTransmissionRunnerError("verified HF source cluster duplicated")
+            source_ids.add(identity.source_cluster_id)
+            expected_entry = self.manifest.entries[record.unit_index - 2]
+            if identity != self._analysis_identity(expected_entry):
+                raise HfTransmissionRunnerError("verified HF source cluster is foreign")
+            if record.execution_status != "success":
+                failure_count += 1
+                continue
+            raw_positions = record.operation_result_payload.get("signal_positions")
+            if type(raw_positions) not in {tuple, list} or len(raw_positions) != 4:
+                raise HfTransmissionRunnerError("verified HF positions are incomplete")
+            try:
+                positions = tuple(
+                    HfSignalPositionObservation(**item) for item in raw_positions
+                )
+            except (TypeError, ValueError) as exc:
+                raise HfTransmissionRunnerError(
+                    "verified HF position schema drifted"
+                ) from exc
+            for position in positions:
+                position.validate()
+            if tuple(item.position_id for item in positions) != self.protocol.signal_positions:
+                raise HfTransmissionRunnerError("verified HF position order drifted")
+            final_observations.append(positions[-1])
+        return evaluate_hf_transmission_direction(
+            final_observations,
+            budget_integrity_nonfinite_failure_count=failure_count,
+        )
 
 
 __all__ = ["HfTransmissionDiagnosticRunner", "HfTransmissionRunnerError"]
