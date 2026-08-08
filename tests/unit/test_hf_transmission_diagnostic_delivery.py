@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -15,6 +18,7 @@ from experiments.protocol.hf_transmission_diagnostic import (
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks/colab/hf_transmission_diagnostic.ipynb"
+SERVER = ROOT / "scripts/experiment_execution/hf_transmission_diagnostic_server.py"
 HISTORICAL_DEVELOPMENT_NOTEBOOK = (
     ROOT / "notebooks/colab/development_exploration.ipynb"
 )
@@ -40,6 +44,25 @@ def _constant(notebook: dict[str, object], name: str) -> object:
                 values.append(statement.value.value)
     assert len(values) == 1
     return values[0]
+
+
+@pytest.mark.quick
+def test_hf_transmission_server_help_imports_from_an_isolated_cwd(
+    tmp_path: Path,
+) -> None:
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    completed = subprocess.run(
+        (sys.executable, "-I", str(SERVER), "--help"),
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "ModuleNotFoundError" not in completed.stderr
 
 
 @pytest.mark.quick
