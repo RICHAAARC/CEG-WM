@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from hashlib import sha256
 import inspect
 import json
@@ -58,9 +58,16 @@ from experiments.protocol.development_exploration import (
     load_frozen_development_exploration_protocol,
 )
 from experiments.protocol.internal_matrix import REQUIRED_METHOD_RESPONSIBILITIES
-from experiments.protocol.development_records import canonical_development_value_digest
+from experiments.protocol.development_records import (
+    OPERATIONAL_RECORD_COLLECTION_ROLE,
+    OPERATIONAL_RECORD_KIND,
+    OPERATIONAL_RECORD_SCHEMA,
+    DevelopmentOperationalRecord,
+    canonical_development_value_digest,
+)
 from experiments.runners.development_inputs import (
     build_development_manifest_and_key_roster,
+    build_development_manifest_and_key_roster_from_public_digest,
     load_development_prompt_roster,
 )
 from scripts.experiment_execution.development_exploration_worker_inputs import (
@@ -74,6 +81,7 @@ from main import (
     LfDetectionObservation,
     RoutingObservations,
     hf_detector,
+    identify_root_key,
     lf_detector,
 )
 from main.content_chain.routing import SpatialRoutingObservation
@@ -2776,6 +2784,224 @@ def test_committed_key_records_replay_into_outcome_and_dependency_decision(
     assert len(verified.evidence_context.committed_marker_bindings) == 16
     assert decision.approved is True
     assert decision.decision_reason == "development_execution_authorized"
+
+
+@pytest.mark.quick
+def test_public_digest_manifest_rebuild_matches_root_key_path() -> None:
+    protocol = load_frozen_development_exploration_protocol(
+        ROOT / "configs/experiments/thirteen_module_mechanism_screening.json"
+    )
+    prompts = load_development_prompt_roster(
+        ROOT
+        / "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
+    )
+    root_key = "development-runner-cpu-wiring-key"
+    expected = build_development_manifest_and_key_roster(
+        protocol,
+        prompts,
+        root_key,
+    )
+    observed = build_development_manifest_and_key_roster_from_public_digest(
+        protocol,
+        prompts,
+        identify_root_key(root_key).root_key_public_digest,
+    )
+
+    assert observed == expected
+
+
+def _commit_screening_terminal_failure_roster(
+    runner: DevelopmentExplorationRunner,
+    store: DevelopmentPersistentStore,
+) -> None:
+    lease = store.acquire_lease(
+        session_id="completed_outcome_replay_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=80_000,
+    )
+    for binding in store.registered_unit_bindings:
+        intent = store.create_intent(
+            lease,
+            unit_id=binding.unit_id,
+            unit_index=binding.unit_index,
+            attempt_index=0,
+            parent_attempt_intent_digest=None,
+            now_epoch_seconds=101,
+        )
+        unit = runner.protocol.unit_roster[binding.unit_index]
+        if binding.phase in {
+            "development_environment_preflight",
+            "development_full_chain_wiring",
+        }:
+            preflight = binding.phase == "development_environment_preflight"
+            roles = (
+                ("content_embedder",)
+                if preflight
+                else REQUIRED_METHOD_RESPONSIBILITIES
+            )
+            receipt = DevelopmentOperationalReceipt(
+                operational_role=(
+                    "environment_runtime_throughput_preflight"
+                    if preflight
+                    else "full_chain_wiring_smoke"
+                ),
+                source_cluster_ordinal=binding.source_cluster_ordinal,
+                case_ids=(
+                    runner.protocol.preflight.case_ids
+                    if preflight
+                    else ("all_thirteen_responsibility_wiring",)
+                ),
+                responsibility_result_digests=tuple(
+                    (role, sha256(role.encode()).hexdigest()) for role in roles
+                ),
+                elapsed_seconds=0.01,
+                runtime_config_digest="8" * 64,
+                counts_as_scientific_coverage=False,
+                scientific_claims_supported=False,
+            )
+            record = DevelopmentOperationalRecord(
+                schema_version=OPERATIONAL_RECORD_SCHEMA,
+                collection_role=OPERATIONAL_RECORD_COLLECTION_ROLE,
+                record_kind=OPERATIONAL_RECORD_KIND,
+                record_id="0" * 64,
+                run_id=store.run_id,
+                protocol_digest=store.worker_identity.protocol_digest,
+                method_code_revision=store.worker_identity.revision,
+                unit_index=binding.unit_index,
+                phase=binding.phase,
+                source_cluster_ordinal=binding.source_cluster_ordinal,
+                candidate_config_digest=binding.candidate_config_digest,
+                attempt_index=0,
+                retry_parent_intent_digest=None,
+                actual_elapsed_seconds=0.01,
+                maximum_duration_seconds=unit.maximum_duration_seconds,
+                operation_result_payload=json.loads(json.dumps(asdict(receipt))),
+                counts_as_scientific_coverage=False,
+                scientific_claims_supported=False,
+                scientific_claim_boundary=runner.protocol.scientific_claim_boundary,
+            )
+            record = replace(
+                record,
+                record_id=canonical_development_value_digest(
+                    record.payload_without_record_id()
+                ),
+            )
+        elif binding.phase == "development_routing_reference_fit":
+            record = _routing_reference_record(intent)
+        else:
+            record = runner._failure_record(
+                unit,
+                runner._analysis_identity(unit),
+                attempt_index=0,
+                retry_parent_intent_digest=None,
+                execution_status="failed",
+                failure_class="dependency_blocked",
+                failure_reason="registered_prerequisite_outcome_not_observed",
+                actual_elapsed_seconds=0.01,
+            )
+        store.commit_unit(
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=102,
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_complete_terminal_roster_replays_all_outcomes_create_only(
+    tmp_path: Path,
+) -> None:
+    runner, store = _screening_persistent_runner(tmp_path)
+    _commit_screening_terminal_failure_roster(runner, store)
+    replay_runner = DevelopmentExplorationRunner._for_verified_record_replay(
+        intent_authority=runner.intent_authority,
+        method_code_revision=runner.method_code_revision,
+        persistence_store=store,
+    )
+    plans = {
+        responsibility_id: build_development_cross_fit_plan(
+            responsibility_id=responsibility_id,
+            execution_intent_authority=runner.intent_authority,
+            expected_execution_intent_authority_digest=(
+                runner.intent_authority.authority_digest
+            ),
+            expected_source_cluster_ids=development_cross_fit_source_cluster_ids(
+                runner.intent_authority,
+                responsibility_id=responsibility_id,
+            ),
+        )
+        for responsibility_id in (
+            "lf_detector",
+            "hf_detector",
+            "content_detector",
+        )
+    }
+
+    outcomes = replay_runner.replay_and_persist_completed_module_outcomes(
+        responsibility_ids=tuple(
+            item.responsibility_id for item in runner.protocol.module_matrix
+        ),
+        cross_fit_plans=plans,
+        now_epoch_seconds=103,
+    )
+    replayed = replay_runner.replay_and_persist_completed_module_outcomes(
+        responsibility_ids=tuple(
+            item.responsibility_id for item in runner.protocol.module_matrix
+        ),
+        cross_fit_plans=plans,
+        now_epoch_seconds=103,
+    )
+
+    assert set(outcomes) == {
+        item.responsibility_id for item in runner.protocol.module_matrix
+    }
+    assert replayed == outcomes
+    assert len(tuple((store.run_root / "module_outcomes").glob("*.json"))) == 13
+    assert outcomes[
+        "conditional_recovery_decision"
+    ].outcome_record.module_outcome == "implementation_blocked"
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="cannot execute method units",
+    ):
+        replay_runner._execute_unit(10, _input())
+
+    conditional_path = (
+        store.run_root
+        / "module_outcomes"
+        / "conditional_recovery_decision.json"
+    )
+    conditional_path.write_bytes(conditional_path.read_bytes() + b" ")
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="different existing outcome",
+    ):
+        replay_runner.replay_and_persist_completed_module_outcomes(
+            responsibility_ids=("conditional_recovery_decision",),
+            cross_fit_plans=plans,
+            now_epoch_seconds=103,
+        )
+
+
+@pytest.mark.quick
+def test_completed_outcome_replay_rejects_partial_roster(tmp_path: Path) -> None:
+    runner, store = _screening_persistent_runner(tmp_path)
+    replay_runner = DevelopmentExplorationRunner._for_verified_record_replay(
+        intent_authority=runner.intent_authority,
+        method_code_revision=runner.method_code_revision,
+        persistence_store=store,
+    )
+
+    with pytest.raises(
+        DevelopmentRunnerError,
+        match="terminal frozen roster",
+    ):
+        replay_runner.replay_and_persist_completed_module_outcomes(
+            responsibility_ids=("conditional_recovery_decision",),
+            now_epoch_seconds=103,
+        )
+    assert not tuple((store.run_root / "module_outcomes").glob("*.json"))
 
 
 @pytest.mark.integration

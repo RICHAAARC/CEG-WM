@@ -94,6 +94,7 @@ from experiments.runners.development_persistence import (
     FrozenDevelopmentUnitBinding,
     PersistentLease,
     UnitIntent,
+    canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
 from experiments.runners.formal_operations import (
@@ -540,38 +541,57 @@ class DevelopmentExplorationRunner:
         self,
         *,
         intent_authority: FrozenDevelopmentExecutionIntentAuthority,
-        adapter: CegWmExperimentAdapter,
-        runtime_adapter: Sd35RuntimeAdapter,
-        attack_registry: AttackRegistry,
+        adapter: CegWmExperimentAdapter | None,
+        runtime_adapter: Sd35RuntimeAdapter | None,
+        attack_registry: AttackRegistry | None,
         method_code_revision: str,
-        environment_digest: str,
-        resource_identity_digest: str,
+        environment_digest: str | None,
+        resource_identity_digest: str | None,
         persistence_store: DevelopmentPersistentStore | None = None,
+        _verified_record_replay_only: bool = False,
     ) -> None:
         if type(intent_authority) is not FrozenDevelopmentExecutionIntentAuthority or intent_authority.validate():
             raise DevelopmentRunnerError("execution intent authority is invalid")
-        if type(adapter) is not CegWmExperimentAdapter:
-            raise DevelopmentRunnerError("CEG-WM adapter exact type is required")
-        if type(runtime_adapter) is not Sd35RuntimeAdapter:
-            raise DevelopmentRunnerError("SD3.5 runtime adapter exact type is required")
-        try:
-            adapter.require_no_runtime_binding()
-        except Exception as exc:
-            raise DevelopmentRunnerError(
-                "method adapter must not retain a hidden runtime binding"
-            ) from exc
-        if runtime_adapter.state is not RuntimeAdapterState.READY:
-            raise DevelopmentRunnerError("runtime adapter must be ready")
-        if type(attack_registry) is not AttackRegistry:
-            raise DevelopmentRunnerError("attack registry exact type is required")
+        if type(_verified_record_replay_only) is not bool:
+            raise DevelopmentRunnerError("verified-record replay mode is invalid")
+        if _verified_record_replay_only:
+            if any(
+                value is not None
+                for value in (
+                    adapter,
+                    runtime_adapter,
+                    attack_registry,
+                    environment_digest,
+                    resource_identity_digest,
+                )
+            ):
+                raise DevelopmentRunnerError(
+                    "verified-record replay cannot bind execution dependencies"
+                )
+        else:
+            if type(adapter) is not CegWmExperimentAdapter:
+                raise DevelopmentRunnerError("CEG-WM adapter exact type is required")
+            if type(runtime_adapter) is not Sd35RuntimeAdapter:
+                raise DevelopmentRunnerError("SD3.5 runtime adapter exact type is required")
+            try:
+                adapter.require_no_runtime_binding()
+            except Exception as exc:
+                raise DevelopmentRunnerError(
+                    "method adapter must not retain a hidden runtime binding"
+                ) from exc
+            if runtime_adapter.state is not RuntimeAdapterState.READY:
+                raise DevelopmentRunnerError("runtime adapter must be ready")
+            if type(attack_registry) is not AttackRegistry:
+                raise DevelopmentRunnerError("attack registry exact type is required")
         if type(method_code_revision) is not str or len(method_code_revision) != 40:
             raise DevelopmentRunnerError("method code revision must be a full Git SHA")
-        for role, value in (
-            ("environment_digest", environment_digest),
-            ("resource_identity_digest", resource_identity_digest),
-        ):
-            if type(value) is not str or len(value) != 64:
-                raise DevelopmentRunnerError(f"{role} is invalid")
+        if not _verified_record_replay_only:
+            for role, value in (
+                ("environment_digest", environment_digest),
+                ("resource_identity_digest", resource_identity_digest),
+            ):
+                if type(value) is not str or len(value) != 64:
+                    raise DevelopmentRunnerError(f"{role} is invalid")
         if persistence_store is not None:
             if persistence_store.run_id != intent_authority.run_id:
                 raise DevelopmentRunnerError("persistence run identity drifted")
@@ -592,6 +612,7 @@ class DevelopmentExplorationRunner:
         self.environment_digest = environment_digest
         self.resource_identity_digest = resource_identity_digest
         self.persistence_store = persistence_store
+        self._verified_record_replay_only = _verified_record_replay_only
         self._clusters = self._cluster_identities()
         if persistence_store is not None:
             expected_bindings = self.create_persistence_unit_bindings()
@@ -600,6 +621,28 @@ class DevelopmentExplorationRunner:
                 raise DevelopmentRunnerError(
                     "persistence unit/analysis/candidate roster binding drifted"
                 )
+
+    @classmethod
+    def _for_verified_record_replay(
+        cls,
+        *,
+        intent_authority: FrozenDevelopmentExecutionIntentAuthority,
+        method_code_revision: str,
+        persistence_store: DevelopmentPersistentStore | None = None,
+    ) -> "DevelopmentExplorationRunner":
+        """Create a CPU-only view that can only replay verified records."""
+
+        return cls(
+            intent_authority=intent_authority,
+            adapter=None,
+            runtime_adapter=None,
+            attack_registry=None,
+            method_code_revision=method_code_revision,
+            environment_digest=None,
+            resource_identity_digest=None,
+            persistence_store=persistence_store,
+            _verified_record_replay_only=True,
+        )
 
     def create_persistence_unit_bindings(
         self,
@@ -1124,6 +1167,10 @@ class DevelopmentExplorationRunner:
         retry_parent_intent_digest: str | None = None,
         attempt_started_monotonic: float | None = None,
     ) -> DevelopmentUnitRunResult:
+        if self._verified_record_replay_only:
+            raise DevelopmentRunnerError(
+                "verified-record replay runner cannot execute method units"
+            )
         unit = self._unit(unit_index)
         unit_input.validate(unit.responsibility_id)
         if type(attempt_index) is not int or not 0 <= attempt_index < unit.maximum_record_attempts:
@@ -1690,6 +1737,93 @@ class DevelopmentExplorationRunner:
             outcome_record_id=record.outcome_record_id,
             payload=asdict(record),
         )
+
+    def replay_and_persist_completed_module_outcomes(
+        self,
+        *,
+        responsibility_ids: Sequence[str],
+        cross_fit_plans: Mapping[str, FrozenDevelopmentCrossFitPlan] | None = None,
+        now_epoch_seconds: int,
+    ) -> dict[str, DevelopmentVerifiedModuleOutcome]:
+        """Rebuild every outcome only after the frozen run is fully terminal."""
+
+        if self.persistence_store is None or not self._verified_record_replay_only:
+            raise DevelopmentRunnerError(
+                "completed outcome replay requires the replay-only runner"
+            )
+        recovery = self.persistence_store.recover(
+            now_epoch_seconds=now_epoch_seconds,
+        )
+        if recovery.interrupted_attempts:
+            raise DevelopmentRunnerError(
+                "completed outcome replay contains interrupted attempts"
+            )
+        latest_by_index: dict[int, CommittedUnit] = {}
+        for marker in recovery.committed_units:
+            latest_by_index[marker.unit_index] = marker
+        expected_indexes = tuple(range(len(self.protocol.unit_roster)))
+        if tuple(sorted(latest_by_index)) != expected_indexes or any(
+            marker.attempt_disposition == "retryable_resource_failure"
+            for marker in latest_by_index.values()
+        ):
+            raise DevelopmentRunnerError(
+                "completed outcome replay requires a terminal frozen roster"
+            )
+
+        requested = tuple(responsibility_ids)
+        known_responsibilities = {
+            item.responsibility_id for item in self.protocol.module_matrix
+        }
+        if (
+            isinstance(responsibility_ids, (str, bytes))
+            or not requested
+            or len(requested) != len(set(requested))
+            or any(item not in known_responsibilities for item in requested)
+        ):
+            raise DevelopmentRunnerError(
+                "completed outcome replay responsibility set is invalid"
+            )
+        plans = {} if cross_fit_plans is None else dict(cross_fit_plans)
+        replayed: dict[str, DevelopmentVerifiedModuleOutcome] = {}
+        for dependency_layer in DEVELOPMENT_DEPENDENCY_LAYERS:
+            for responsibility_id in dependency_layer:
+                if responsibility_id not in requested:
+                    continue
+                indexes = tuple(
+                    binding.unit_index
+                    for binding in self.persistence_store.registered_unit_bindings
+                    if binding.responsibility_id == responsibility_id
+                    and binding.phase not in OPERATIONAL_UNIT_PHASES
+                )
+                if not indexes:
+                    raise DevelopmentRunnerError(
+                        "completed outcome replay responsibility has no evidence"
+                    )
+                outcome = self.build_verified_module_outcome_record(
+                    responsibility_id=responsibility_id,
+                    cross_fit_plans=plans,
+                    now_epoch_seconds=now_epoch_seconds,
+                )
+                replayed[responsibility_id] = outcome
+
+        if set(replayed) != set(requested):
+            raise DevelopmentRunnerError(
+                "completed outcome replay did not rebuild every requested responsibility"
+            )
+        for responsibility_id, outcome in replayed.items():
+            path = (
+                self.persistence_store.run_root
+                / "module_outcomes"
+                / f"{responsibility_id}.json"
+            )
+            expected = canonical_json_bytes(asdict(outcome.outcome_record))
+            if path.exists() and (path.is_symlink() or path.read_bytes() != expected):
+                raise DevelopmentRunnerError(
+                    "completed outcome replay found a different existing outcome"
+                )
+        for outcome in replayed.values():
+            self.persist_verified_module_outcome(outcome)
+        return replayed
 
     def replay_verified_hf_provisional_thresholds(
         self,
@@ -2814,6 +2948,10 @@ class DevelopmentExplorationRunner:
         identity: AnalysisUnitIdentity,
         raw: DevelopmentUnitInput,
     ) -> tuple[object, DevelopmentMetricObservation, dict[str, object], InternalValidationRecord | None]:
+        if self._verified_record_replay_only:
+            raise DevelopmentRunnerError(
+                "verified-record replay runner cannot execute method units"
+            )
         responsibility = unit.responsibility_id
         if responsibility == "conditional_recovery_decision":
             assert raw.internal_runner_context is not None

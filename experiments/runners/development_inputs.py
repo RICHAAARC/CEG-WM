@@ -120,9 +120,33 @@ def build_development_manifest_and_key_roster(
     prompt_roster: FrozenDevelopmentPromptRoster,
     registered_root_key: str,
 ) -> tuple[FrozenSplitManifest, tuple[DevelopmentPrimaryNullKeyBinding, ...]]:
+    public_digest = identify_root_key(registered_root_key).root_key_public_digest
+    return build_development_manifest_and_key_roster_from_public_digest(
+        protocol,
+        prompt_roster,
+        public_digest,
+    )
+
+
+def build_development_manifest_and_key_roster_from_public_digest(
+    protocol: FrozenDevelopmentExplorationProtocol,
+    prompt_roster: FrozenDevelopmentPromptRoster,
+    registered_root_key_public_digest: str,
+) -> tuple[FrozenSplitManifest, tuple[DevelopmentPrimaryNullKeyBinding, ...]]:
+    """Rebuild public run identities without requiring the raw root key."""
+
     if type(protocol) is not FrozenDevelopmentExplorationProtocol or protocol.validate():
         raise DevelopmentInputError("development protocol is invalid")
-    public_digest = identify_root_key(registered_root_key).root_key_public_digest
+    if (
+        type(registered_root_key_public_digest) is not str
+        or len(registered_root_key_public_digest) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in registered_root_key_public_digest
+        )
+    ):
+        raise DevelopmentInputError("registered root-key public digest is invalid")
+    public_digest = registered_root_key_public_digest
     assignments: list[SplitAssignment] = []
     bindings: list[DevelopmentPrimaryNullKeyBinding] = []
     for entry in prompt_roster.entries:

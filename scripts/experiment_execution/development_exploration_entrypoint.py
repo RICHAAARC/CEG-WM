@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -30,6 +31,7 @@ from experiments.runners.development_exploration import DevelopmentExplorationRu
 from experiments.runners.development_inputs import (
     DevelopmentInputError,
     build_development_manifest_and_key_roster,
+    build_development_manifest_and_key_roster_from_public_digest,
     load_development_prompt_roster,
 )
 from experiments.runners.development_persistence import (
@@ -150,6 +152,160 @@ def _base_latent(seed: int, *, height: int, width: int) -> torch.Tensor:
     generator = torch.Generator(device="cpu")
     generator.manual_seed(seed)
     return torch.randn((1, 16, height // 8, width // 8), generator=generator, dtype=torch.float32).to(device="cuda:0", dtype=torch.float16)
+
+
+def replay_complete_development_module_outcomes(
+    *,
+    repository_root: Path,
+    persistent_root: Path,
+    run_id: str,
+    producer_revision: str,
+    now_epoch_seconds: int | None = None,
+) -> dict[str, str]:
+    """Create missing outcomes from a fully verified completed run, without GPU."""
+
+    repository = Path(repository_root).resolve()
+    persistent = Path(persistent_root).resolve()
+    if type(run_id) is not str or not run_id:
+        raise DevelopmentEntrypointError("outcome replay run identity is invalid")
+    if (
+        type(producer_revision) is not str
+        or re.fullmatch(r"[0-9a-f]{40}", producer_revision) is None
+    ):
+        raise DevelopmentEntrypointError("outcome replay revision is invalid")
+    run_root = persistent / run_id
+    if (
+        not run_root.is_dir()
+        or run_root.is_symlink()
+        or not (run_root / "frozen_worker_identity.json").is_file()
+    ):
+        raise DevelopmentEntrypointError(
+            "outcome replay requires an existing frozen run"
+        )
+    protocol = load_frozen_development_exploration_protocol(repository / PROTOCOL_PATH)
+    prompts = load_development_prompt_roster(repository / PROMPT_ROSTER_PATH)
+    receipt_paths = tuple(sorted((persistent / run_id / "receipts").glob("*.json")))
+    if not receipt_paths:
+        raise DevelopmentEntrypointError("outcome replay lacks session receipts")
+    public_digests: set[str] = set()
+    for path in receipt_paths:
+        try:
+            payload = json.loads(path.read_text("utf-8"))
+            values = payload["public_secret_identity_digests"]
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError) as exc:
+            raise DevelopmentEntrypointError(
+                "outcome replay receipt identity is unreadable"
+            ) from exc
+        if type(values) is not list or len(values) != 1 or type(values[0]) is not str:
+            raise DevelopmentEntrypointError(
+                "outcome replay receipt public identity is invalid"
+            )
+        public_digests.add(values[0])
+    if len(public_digests) != 1:
+        raise DevelopmentEntrypointError(
+            "outcome replay receipt public identity drifted"
+        )
+    manifest, public_key_roster = (
+        build_development_manifest_and_key_roster_from_public_digest(
+            protocol,
+            prompts,
+            next(iter(public_digests)),
+        )
+    )
+    authority = create_frozen_development_execution_intent_authority(
+        protocol,
+        run_id=run_id,
+        seed_namespace=prompts.seed_namespace,
+        input_manifest=manifest,
+        public_key_roster=public_key_roster,
+    )
+    provisional_runner = DevelopmentExplorationRunner._for_verified_record_replay(
+        intent_authority=authority,
+        method_code_revision=producer_revision,
+    )
+    worker_identity = FrozenWorkerIdentity(
+        revision=producer_revision,
+        protocol_digest=authority.protocol_digest,
+        execution_intent_authority_digest=authority.authority_digest,
+        input_manifest_digest=authority.input_manifest_digest,
+        candidate_config_digest=_candidate_digest(protocol),
+        unit_roster_digest=protocol.study_budget.unit_roster_digest,
+    )
+    store = DevelopmentPersistentStore(
+        persistent,
+        run_id=run_id,
+        worker_identity=worker_identity,
+        registered_unit_bindings=provisional_runner.create_persistence_unit_bindings(),
+    )
+    recovery_time = int(time.time()) if now_epoch_seconds is None else now_epoch_seconds
+    cross_fit_plans = {
+        responsibility_id: build_development_cross_fit_plan(
+            responsibility_id=responsibility_id,
+            execution_intent_authority=authority,
+            expected_execution_intent_authority_digest=authority.authority_digest,
+            expected_source_cluster_ids=development_cross_fit_source_cluster_ids(
+                authority,
+                responsibility_id=responsibility_id,
+            ),
+        )
+        for responsibility_id in (
+            "lf_detector",
+            "hf_detector",
+            "content_detector",
+        )
+    }
+    runner = DevelopmentExplorationRunner._for_verified_record_replay(
+        intent_authority=authority,
+        method_code_revision=producer_revision,
+        persistence_store=store,
+    )
+    expected_responsibilities = tuple(
+        item.responsibility_id for item in protocol.module_matrix
+    )
+    outcome_root = store.run_root / "module_outcomes"
+    outcome_entries = tuple(outcome_root.iterdir())
+    if any(path.is_symlink() or not path.is_file() for path in outcome_entries):
+        raise DevelopmentEntrypointError(
+            "outcome replay found a non-regular module outcome"
+        )
+    observed_names = {path.name for path in outcome_entries}
+    expected_names = {
+        f"{responsibility_id}.json"
+        for responsibility_id in expected_responsibilities
+    }
+    if not observed_names.issubset(expected_names):
+        raise DevelopmentEntrypointError(
+            "outcome replay found an unknown module outcome"
+        )
+    missing_responsibilities = tuple(
+        responsibility_id
+        for responsibility_id in expected_responsibilities
+        if f"{responsibility_id}.json" not in observed_names
+    )
+    replay_responsibilities = tuple(
+        dict.fromkeys(
+            (*missing_responsibilities, "conditional_recovery_decision")
+        )
+    )
+    outcomes = runner.replay_and_persist_completed_module_outcomes(
+        responsibility_ids=replay_responsibilities,
+        cross_fit_plans=cross_fit_plans,
+        now_epoch_seconds=recovery_time,
+    )
+    final_entries = tuple(outcome_root.iterdir())
+    if any(path.is_symlink() or not path.is_file() for path in final_entries):
+        raise DevelopmentEntrypointError(
+            "outcome replay produced a non-regular module outcome"
+        )
+    final_names = {path.name for path in final_entries}
+    if set(outcomes) != set(replay_responsibilities) or final_names != expected_names:
+        raise DevelopmentEntrypointError(
+            "outcome replay did not rebuild every frozen responsibility"
+        )
+    return {
+        responsibility_id: outcome.outcome_record.outcome_record_id
+        for responsibility_id, outcome in outcomes.items()
+    }
 
 
 def execute_development_exploration_session(
@@ -570,6 +726,7 @@ def execute_development_exploration_session(
             ):
                 termination_reason = "resource_retry_after_committed_unit"
                 break
+        refresh_verified_outcomes(int(time.time()))
     except Exception as exc:
         worker_failure_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
         termination_reason = "worker_input_or_session_failure"
@@ -653,3 +810,45 @@ def execute_development_exploration_session(
         "session_committed_unit_count": len(committed_units) - committed_before,
         "termination_reason": termination_reason,
     }
+
+
+def _main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--replay-completed-outcomes", action="store_true")
+    parser.add_argument("--repository-root", required=True)
+    parser.add_argument("--persistent-root", required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--producer-revision", required=True)
+    arguments = parser.parse_args()
+    if not arguments.replay_completed_outcomes:
+        parser.error("only completed outcome replay is available from this CLI")
+    repository = Path(arguments.repository_root).resolve()
+    replay_revision = _git(repository, "rev-parse", "HEAD")
+    if _git(repository, "status", "--porcelain"):
+        raise DevelopmentEntrypointError(
+            "outcome replay repository worktree must be clean"
+        )
+    outcomes = replay_complete_development_module_outcomes(
+        repository_root=repository,
+        persistent_root=Path(arguments.persistent_root),
+        run_id=arguments.run_id,
+        producer_revision=arguments.producer_revision,
+    )
+    print(
+        json.dumps(
+            {
+                "producer_revision": arguments.producer_revision,
+                "replay_revision": replay_revision,
+                "run_id": arguments.run_id,
+                "module_outcome_ids": outcomes,
+                "scientific_claims_supported": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
