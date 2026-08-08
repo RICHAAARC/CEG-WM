@@ -277,16 +277,7 @@ def replay_complete_development_module_outcomes(
         raise DevelopmentEntrypointError(
             "outcome replay found an unknown module outcome"
         )
-    missing_responsibilities = tuple(
-        responsibility_id
-        for responsibility_id in expected_responsibilities
-        if f"{responsibility_id}.json" not in observed_names
-    )
-    replay_responsibilities = tuple(
-        dict.fromkeys(
-            (*missing_responsibilities, "conditional_recovery_decision")
-        )
-    )
+    replay_responsibilities = expected_responsibilities
     outcomes = runner.replay_and_persist_completed_module_outcomes(
         responsibility_ids=replay_responsibilities,
         cross_fit_plans=cross_fit_plans,

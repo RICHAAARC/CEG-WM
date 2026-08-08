@@ -111,6 +111,7 @@ from tests.unit.test_development_worker_persistence import (
     _intent as _persistence_intent,
     _lease as _persistence_lease,
     _record as _persistence_record,
+    _receipt as _persistence_receipt,
     _routing_reference_record,
     _store as _persistence_store,
 )
@@ -283,7 +284,7 @@ def _screening_persistent_runner(
         protocol_digest=authority.protocol_digest,
         execution_intent_authority_digest=authority.authority_digest,
         input_manifest_digest=authority.input_manifest_digest,
-        candidate_config_digest="d" * 64,
+        candidate_config_digest=development_entrypoint._candidate_digest(protocol),
         unit_roster_digest=development_unit_roster_digest(protocol.unit_roster),
     )
     store = DevelopmentPersistentStore(
@@ -2914,6 +2915,24 @@ def test_complete_terminal_roster_replays_all_outcomes_create_only(
 ) -> None:
     runner, store = _screening_persistent_runner(tmp_path)
     _commit_screening_terminal_failure_roster(runner, store)
+    store.write_session_receipt(
+        replace(
+            _persistence_receipt(
+                store,
+                session_id="completed_outcome_replay_session",
+                start=100,
+                end=103,
+                committed_unit_ids=tuple(
+                    binding.unit_id for binding in store.registered_unit_bindings
+                ),
+            ),
+            public_secret_identity_digests=(
+                identify_root_key(
+                    "development-runner-cpu-wiring-key"
+                ).root_key_public_digest,
+            ),
+        )
+    )
     replay_runner = DevelopmentExplorationRunner._for_verified_record_replay(
         intent_authority=runner.intent_authority,
         method_code_revision=runner.method_code_revision,
@@ -2967,19 +2986,21 @@ def test_complete_terminal_roster_replays_all_outcomes_create_only(
     ):
         replay_runner._execute_unit(10, _input())
 
-    conditional_path = (
+    detector_path = (
         store.run_root
         / "module_outcomes"
-        / "conditional_recovery_decision.json"
+        / "hf_detector.json"
     )
-    conditional_path.write_bytes(conditional_path.read_bytes() + b" ")
+    detector_path.write_bytes(detector_path.read_bytes() + b" ")
     with pytest.raises(
         DevelopmentRunnerError,
         match="different existing outcome",
     ):
-        replay_runner.replay_and_persist_completed_module_outcomes(
-            responsibility_ids=("conditional_recovery_decision",),
-            cross_fit_plans=plans,
+        development_entrypoint.replay_complete_development_module_outcomes(
+            repository_root=ROOT,
+            persistent_root=store.run_root.parent,
+            run_id=store.run_id,
+            producer_revision=store.worker_identity.revision,
             now_epoch_seconds=103,
         )
 
