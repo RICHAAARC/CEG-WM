@@ -1,0 +1,24 @@
+{
+  "schema_version": "ceg_wm_hf_transmission_diagnostic_protocol_v1",
+  "protocol_id": "ceg_wm_hf_transmission_diagnostic",
+  "protocol_version": "1.0.0",
+  "split": "development",
+  "role_id": "hf_transmission_diagnostic",
+  "candidate_identity": "hf_sparse_tail",
+  "manifest_path": "configs/experiments/hf_transmission_diagnostic_manifest.json",
+  "manifest_file_sha256": "e5f204b1941ac79360e9b4e800e75190e4f10755227701932f32b5f77cc45e12",
+  "signal_positions": [
+    "callback_pre_write",
+    "actual_dtype_post_write",
+    "scheduler_suffix_final",
+    "rgb_vae_reencoded"
+  ],
+  "operational_unit_count": 2,
+  "scientific_cluster_count": 8,
+  "maximum_total_units": 10,
+  "maximum_attempts_per_unit": 2,
+  "maximum_duration_seconds_per_unit": 2700,
+  "stop_rule": "registered_minus_primary_null_positive_at_least_seven_of_eight_and_registered_minus_wrong_key_positive_at_least_seven_of_eight_with_no_budget_integrity_or_nonfinite_failure",
+  "claim_boundary": "development_hf_transport_direction_only_no_threshold_no_promotion_no_claim",
+  "unit_roster_digest": "a6c551d24a9ef79959bb31988d45c6f7d1c4187982c03cf4369409b37da65a65"
+}
