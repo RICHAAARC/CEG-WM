@@ -4,20 +4,26 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 ## Current authorized entrypoint
 
-`hf_transmission_diagnostic.ipynb` 是当前唯一允许在收到最终固定链接后执行
+`hf_only_detector_directional_validation.ipynb` 是当前唯一允许在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`af1eea8f55086b583e3e5e4a02586959983db70b`，使用全新 run ID
-`ceg_wm_hf_transmission_diagnostic_server_execution`，只执行 8 scientific HF transmission units、
-0 operational units，每 unit 最多 2 attempts。Notebook 挂载 Drive、读取
+`eb892067a0b730a171535f8dca8b0bd32376fc37`，使用全新 run ID
+`ceg_wm_hf_only_detector_directional_validation_initial_gate`，只执行 2 个不计科学覆盖的
+operational checks 与 8 个 HF detector directional scientific units，每 unit 最多 2 attempts。Notebook 挂载 Drive、读取
 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
-`hf_transmission_diagnostic_server.py`，并把服务器的 result/diagnostic ZIP、
+`hf_only_detector_directional_validation_server.py`，并把服务器的 result/diagnostic ZIP、
 execution receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
 
 依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实方法/runtime 调用、正式
-records、持久化和内部 ZIP 全部属于服务器脚本。该 development diagnostic 不拟合
+records、持久化和内部 ZIP 全部属于服务器脚本。该 development directional validation 不拟合
 threshold，不形成 FPR、candidate promotion、calibration、formal evaluation、baseline
 或论文 claim，也不执行 LF、routing、组合、Q/K 或几何恢复。目录内其余全部 Notebook
 均为 **paused / not authorized**，不得作为当前入口运行。
+
+`hf_transmission_diagnostic.ipynb` 已完成其历史传输诊断职责，当前为
+**paused / not authorized**；其 revision、run 与 records 保持独立历史证据，不得续跑或
+混入本次 detector directional validation。历史 execution revision 为
+`af1eea8f55086b583e3e5e4a02586959983db70b`，run ID 为
+`ceg_wm_hf_transmission_diagnostic_server_execution`。
 
 `runtime_qualification.ipynb` 保留已审核 runtime qualification 的历史权威，但当前
 **paused / not authorized**，不得再次 Run all。其既有职责为：

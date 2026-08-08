@@ -66,7 +66,7 @@ def test_hf_transmission_server_help_imports_from_an_isolated_cwd(
 
 
 @pytest.mark.quick
-def test_hf_transmission_notebook_is_thin_exact_and_scientific_only() -> None:
+def test_hf_transmission_notebook_is_thin_historical_and_scientific_only() -> None:
     notebook = json.loads(NOTEBOOK.read_text("utf-8"))
     code_cells = tuple(
         cell for cell in notebook["cells"] if cell["cell_type"] == "code"
@@ -100,8 +100,9 @@ def test_hf_transmission_notebook_is_thin_exact_and_scientific_only() -> None:
     assert "hf_transmission_diagnostic_result" in code_source
     assert "hf_transmission_diagnostic_failure" in code_source
     assert source.count("eight-cluster development HF transmission diagnostic") == 1
-    assert "fits no threshold" in source
-    assert "All older Colab entrypoints are paused" in source
+    assert "fitted no threshold" in source
+    assert "paused and is not authorized to run" in source
+    assert "hf_only_detector_directional_validation.ipynb" in source
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -136,9 +137,8 @@ def test_hf_transmission_notebook_is_thin_exact_and_scientific_only() -> None:
         assert "hf_transmission_diagnostic.ipynb" in readme
         assert EXECUTION_REVISION in readme
         assert RUN_ID in readme
-        assert "8 scientific" in readme
-        assert "current" in readme.lower() or "当前" in readme
         assert "paused" in readme.lower() or "暂停" in readme
+        assert "not authorized" in readme.lower() or "不得运行" in readme
 
 
 @pytest.mark.quick
