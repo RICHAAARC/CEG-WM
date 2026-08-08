@@ -6,8 +6,8 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `hf_transmission_diagnostic.ipynb` 是当前唯一允许在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`f63b0e58090692cd1ac5ac86f03da27f96dd26b9`，使用全新 run ID
-`ceg_wm_hf_transmission_diagnostic`，只执行 8 scientific HF transmission units、
+`af1eea8f55086b583e3e5e4a02586959983db70b`，使用全新 run ID
+`ceg_wm_hf_transmission_diagnostic_server_execution`，只执行 8 scientific HF transmission units、
 0 operational units，每 unit 最多 2 attempts。Notebook 挂载 Drive、读取
 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
 `hf_transmission_diagnostic_server.py`，并把服务器的 result/diagnostic ZIP、

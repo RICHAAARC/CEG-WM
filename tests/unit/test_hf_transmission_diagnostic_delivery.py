@@ -23,8 +23,8 @@ HISTORICAL_DEVELOPMENT_NOTEBOOK = (
     ROOT / "notebooks/colab/development_exploration.ipynb"
 )
 PROTOCOL = ROOT / "configs/experiments/hf_transmission_diagnostic.json"
-EXECUTION_REVISION = "f63b0e58090692cd1ac5ac86f03da27f96dd26b9"
-RUN_ID = "ceg_wm_hf_transmission_diagnostic"
+EXECUTION_REVISION = "af1eea8f55086b583e3e5e4a02586959983db70b"
+RUN_ID = "ceg_wm_hf_transmission_diagnostic_server_execution"
 
 
 def _constant(notebook: dict[str, object], name: str) -> object:
