@@ -55,7 +55,7 @@ SUPERSEDED_OPERATIONAL_RUN_ID = (
 )
 EXPECTED_PACKAGE_BYTES = 4_549_335
 EXPECTED_PACKAGE_SHA256 = "260a76d0e10ddbcf705bbdfda11e5593c688d2b3957d1635b4404b498187067e"
-EXPECTED_NOTEBOOK_SHA256 = "24ba2bb12ddb1eea41f366aa728aee618be656c5f63a2cb0b860f131dba52998"
+EXPECTED_NOTEBOOK_SHA256 = "b0fdddab047c4deceaa8e5d3e184677b5da96e825e8ffbe8bc55c645cebb013e"
 EXPECTED_SCIENTIFIC_SCREENING_NOTEBOOK_SHA256 = (
     "8b6d1e6b6c2a70f72ade40240f212314efd39841f68db1729537dc6fa2652f61"
 )
@@ -142,7 +142,11 @@ def test_operational_validation_notebook_remains_frozen_and_paused() -> None:
         "if server_exit_code != 0"
     )
     assert "mutable branch must never replace" in source
-    assert "only development entrypoint currently authorized" in source
+    assert "only development entrypoint currently authorized" not in source
+    assert "historical development entrypoint" in source
+    assert "paused and is not authorized to run" in source
+    assert "do not use **Run all**" in source
+    assert "hf_transmission_diagnostic.ipynb" in source
     assert "experiment_execution.ipynb" in source
     assert "runtime_qualification.ipynb" in source
     assert "paused and are not authorized to run" in source

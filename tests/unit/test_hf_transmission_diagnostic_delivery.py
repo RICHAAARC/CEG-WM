@@ -15,6 +15,9 @@ from experiments.protocol.hf_transmission_diagnostic import (
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks/colab/hf_transmission_diagnostic.ipynb"
+HISTORICAL_DEVELOPMENT_NOTEBOOK = (
+    ROOT / "notebooks/colab/development_exploration.ipynb"
+)
 PROTOCOL = ROOT / "configs/experiments/hf_transmission_diagnostic.json"
 EXECUTION_REVISION = "31c7e557fe0a98bf70c5349838572dcfd8be40cf"
 RUN_ID = "ceg_wm_hf_transmission_diagnostic"
@@ -113,3 +116,17 @@ def test_hf_transmission_notebook_is_thin_exact_and_scientific_only() -> None:
         assert "8 scientific" in readme
         assert "current" in readme.lower() or "当前" in readme
         assert "paused" in readme.lower() or "暂停" in readme
+
+
+@pytest.mark.quick
+def test_historical_development_notebook_is_explicitly_paused() -> None:
+    notebook = json.loads(HISTORICAL_DEVELOPMENT_NOTEBOOK.read_text("utf-8"))
+    source = "\n".join(
+        "".join(cell.get("source", [])) for cell in notebook["cells"]
+    )
+
+    assert "only development entrypoint currently authorized" not in source
+    assert "historical development entrypoint" in source
+    assert "paused and is not authorized to run" in source
+    assert "do not use **Run all**" in source
+    assert "hf_transmission_diagnostic.ipynb" in source
