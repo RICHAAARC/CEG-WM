@@ -6,6 +6,7 @@ from pathlib import Path
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
+from zipfile import ZipFile
 
 import pytest
 import torch
@@ -54,7 +55,7 @@ ROOT_KEY = "ceg-wm-hf-detector-directional-test-key"
 
 class _DirectionalCudaBackend(FakeContentBackend):
     def __init__(self) -> None:
-        callbacks = tuple(tuple(range(20)) for _ in range(20))
+        callbacks = tuple(tuple(range(20)) for _ in range(80))
         super().__init__(callback_sequences=callbacks)  # type: ignore[arg-type]
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
@@ -66,6 +67,18 @@ class _DirectionalCudaBackend(FakeContentBackend):
     def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
         decoded = super().vae_decode(latent)
         return decoded.repeat(1, 3, 1, 1)
+
+
+class _RetryDirectionalCudaBackend(_DirectionalCudaBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.decode_call_count = 0
+
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        self.decode_call_count += 1
+        if self.decode_call_count in {5, 6}:
+            raise MemoryError("controlled directional resource exhaustion")
+        return super().vae_decode(latent)
 
 
 def _runner() -> tuple[HfOnlyDetectorDirectionalRunner, Sd35RuntimeAdapter]:
@@ -463,3 +476,121 @@ def test_hf_detector_directional_entrypoint_commits_operational_and_scientific_r
     assert continuation["termination_reason"] == "frozen_roster_complete"
     assert continuation["committed_unit_count"] == 34
     assert continuation["directional_aggregate"]["expected_cluster_count"] == 32
+
+
+@pytest.mark.unit
+def test_hf_detector_directional_entrypoint_recovers_resource_attempt_before_terminal_denominator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "retry_directional_package.zip"
+    package.write_bytes(b"retry-directional-package")
+    backend = _RetryDirectionalCudaBackend()
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "Sd35PipelineBackend",
+        lambda **_kwargs: backend,
+    )
+    initialize_runtime = Sd35RuntimeAdapter.initialize
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "initialize",
+        lambda self, _device: initialize_runtime(self, "cpu"),
+    )
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "_build_or_verify_package",
+        lambda *_args: package,
+    )
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "_base_latent",
+        lambda generation_seed, **_kwargs: (
+            _base_latent().to(torch.float32)
+            + float(generation_seed % 97) / 10000.0
+        ).to(torch.float16),
+    )
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _index: "Test GPU")
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda _index: 1)
+    common = {
+        "repository_root": ROOT,
+        "expected_revision": "a" * 40,
+        "persistent_root": tmp_path / "retry_persistent",
+        "cache_root": tmp_path / "retry_cache",
+        "run_id": "hf_detector_directional_resource_retry_test",
+        "environment": {"HF_TOKEN": "test-token", "CEG_WM_ROOT_KEY": ROOT_KEY},
+    }
+
+    first_code, first = directional_entrypoint.execute_hf_only_detector_directional_validation_session(
+        **common,
+        session_id="directional_resource_attempt_initial",
+        authorized_scientific_unit_count=8,
+    )
+    assert first_code == 0
+    assert first["termination_reason"] == "retryable_resource_failure_after_committed_attempt"
+    assert first["committed_unit_count"] == 3
+
+    second_code, second = directional_entrypoint.execute_hf_only_detector_directional_validation_session(
+        **common,
+        session_id="directional_resource_attempt_terminal",
+        authorized_scientific_unit_count=8,
+    )
+    assert second_code == 0
+    assert second["termination_reason"] == "terminal_resource_failure_after_committed_attempt"
+    assert second["committed_unit_count"] == 4
+
+    markers = []
+    for path in sorted((tmp_path / "retry_persistent" / common["run_id"] / "markers").glob("*.json")):
+        markers.append(json.loads(path.read_text("utf-8")))
+    attempts = sorted(
+        (item for item in markers if item["unit_index"] == 2),
+        key=lambda item: item["attempt_index"],
+    )
+    assert [item["attempt_disposition"] for item in attempts] == [
+        "retryable_resource_failure",
+        "final_failure",
+    ]
+    assert attempts[1]["parent_attempt_intent_digest"] == attempts[0]["intent_digest"]
+    assert attempts[1]["attempt_index"] == 1
+    attempt_records = []
+    bundle_root = tmp_path / "retry_persistent" / common["run_id"] / "bundles"
+    for marker in attempts:
+        with ZipFile(bundle_root / f"sha256_{marker['bundle_sha256']}.zip") as archive:
+            record_member = next(
+                name
+                for name in archive.namelist()
+                if name != "artifact_manifest.json"
+            )
+            attempt_records.append(json.loads(archive.read(record_member)))
+    assert [item["execution_status"] for item in attempt_records] == [
+        "retry",
+        "failed",
+    ]
+    assert attempt_records[0]["failure_class"] == "resource_failure"
+    assert attempt_records[1]["failure_class"] == "resource_failure"
+    assert attempt_records[1]["retry_parent_intent_digest"] == attempts[0]["intent_digest"]
+
+    gate_code, gate = directional_entrypoint.execute_hf_only_detector_directional_validation_session(
+        **common,
+        session_id="directional_resource_attempt_gate_completion",
+        authorized_scientific_unit_count=8,
+    )
+    assert gate_code == 0
+    assert gate["termination_reason"] == "authorized_directional_unit_boundary_reached"
+    assert gate["committed_unit_count"] == 11
+
+    final_code, final = directional_entrypoint.execute_hf_only_detector_directional_validation_session(
+        **common,
+        session_id="directional_resource_attempt_complete",
+        authorized_scientific_unit_count=32,
+    )
+    assert final_code == 0
+    assert final["termination_reason"] == "frozen_roster_complete"
+    assert final["committed_unit_count"] == 35
+    aggregate = final["directional_aggregate"]
+    assert aggregate["expected_cluster_count"] == 32
+    assert aggregate["successful_cluster_count"] == 31
+    assert aggregate["failed_cluster_count"] == 1
+    assert aggregate["registered_minus_primary_null"]["observation_count"] == 32
+    assert aggregate["registered_minus_wrong_key"]["observation_count"] == 32
+    assert aggregate["allow_request_for_next_scientific_gate"] is False

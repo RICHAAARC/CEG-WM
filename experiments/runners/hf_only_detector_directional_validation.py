@@ -596,6 +596,10 @@ class HfOnlyDetectorDirectionalRunner:
             )
         entry = self.manifest.scientific_entries[cluster_ordinal]
         identity = self._analysis_identity(entry)
+        retryable_resource_failure = (
+            resource_failure
+            and attempt_index + 1 < self.protocol.maximum_attempts_per_unit
+        )
         operation_payload = {
             "failure_stage": "hf_detector_directional_runtime_operation",
             "failure_type": failure_type,
@@ -633,7 +637,9 @@ class HfOnlyDetectorDirectionalRunner:
             "content_branch_id": "hf_only",
             "geometry_case_id": "not_applicable",
             "attempt_index": attempt_index,
-            "execution_status": "failed",
+            "execution_status": (
+                "retry" if retryable_resource_failure else "failed"
+            ),
             "failure_class": "resource_failure" if resource_failure else "implementation_failure",
             "failure_reason": "hf_detector_directional_operation_failed",
             "retry_parent_intent_digest": retry_parent_intent_digest,
@@ -661,7 +667,11 @@ class HfOnlyDetectorDirectionalRunner:
             },
             "decision_trace": {
                 "positive_source": None,
-                "decision_role": "failed_directional_observation",
+                "decision_role": (
+                    "retryable_resource_failure"
+                    if retryable_resource_failure
+                    else "terminal_failed_directional_observation"
+                ),
             },
             "provenance_trace": {
                 "protocol_digest": self.protocol_digest,

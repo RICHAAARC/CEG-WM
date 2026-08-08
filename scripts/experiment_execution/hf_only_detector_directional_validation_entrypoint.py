@@ -303,6 +303,7 @@ def execute_hf_only_detector_directional_validation_session(
                         started_monotonic=attempted_at,
                     )
                 except Exception as exc:
+                    resource_failure = _is_resource_failure(exc)
                     record = runner.create_failed_scientific_record(
                         cluster_ordinal=unit.source_cluster_ordinal,
                         attempt_index=intent.attempt_index,
@@ -312,24 +313,30 @@ def execute_hf_only_detector_directional_validation_session(
                         failure_type=(
                             f"{type(exc).__module__}.{type(exc).__qualname__}"
                         ),
-                        resource_failure=_is_resource_failure(exc),
+                        resource_failure=resource_failure,
                         failure_category=(
-                            exc.category
-                            if isinstance(exc, HfDetectorDirectionalEvidenceViolation)
-                            else "nonfinite_violation"
-                            if "finite" in str(exc).lower()
-                            else "identity_violation"
-                            if "identity" in str(exc).lower()
-                            or "configuration" in str(exc).lower()
-                            else "budget_violation"
-                            if "budget" in str(exc).lower()
-                            else "integrity_violation"
-                            if "integrity" in str(exc).lower()
-                            or "replay" in str(exc).lower()
-                            else "implementation_failure"
+                            "resource_failure"
+                            if resource_failure
+                            else (
+                                exc.category
+                                if isinstance(
+                                    exc, HfDetectorDirectionalEvidenceViolation
+                                )
+                                else "nonfinite_violation"
+                                if "finite" in str(exc).lower()
+                                else "identity_violation"
+                                if "identity" in str(exc).lower()
+                                or "configuration" in str(exc).lower()
+                                else "budget_violation"
+                                if "budget" in str(exc).lower()
+                                else "integrity_violation"
+                                if "integrity" in str(exc).lower()
+                                or "replay" in str(exc).lower()
+                                else "implementation_failure"
+                            )
                         ),
                     )
-            store.commit_session_unit(
+            marker = store.commit_session_unit(
                 cursor,
                 lease,
                 intent,
@@ -337,6 +344,15 @@ def execute_hf_only_detector_directional_validation_session(
                 raw_secret_values=(root_key, registered_root_key, hf_token),
                 now_epoch_seconds=max(now, int(time.time())),
             )
+            if marker.attempt_disposition == "retryable_resource_failure":
+                termination_reason = "retryable_resource_failure_after_committed_attempt"
+                break
+            if (
+                type(record) is DevelopmentScientificRecord
+                and record.failure_class == "resource_failure"
+            ):
+                termination_reason = "terminal_resource_failure_after_committed_attempt"
+                break
         if cursor.next_unit_index == len(protocol.unit_roster):
             verified = store.verified_terminal_scientific_evidence(
                 now_epoch_seconds=int(time.time())
