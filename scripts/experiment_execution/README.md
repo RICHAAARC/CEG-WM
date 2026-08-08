@@ -4,7 +4,7 @@
 
 `hf_transmission_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。
 当前唯一授权 Notebook 为 `notebooks/colab/hf_transmission_diagnostic.ipynb`，固定绑定
-execution revision `31c7e557fe0a98bf70c5349838572dcfd8be40cf` 与 run ID
+execution revision `f63b0e58090692cd1ac5ac86f03da27f96dd26b9` 与 run ID
 `ceg_wm_hf_transmission_diagnostic`。冻结 roster 只有 8 scientific units、0 operational
 units，每 unit 最多 2 attempts。
 

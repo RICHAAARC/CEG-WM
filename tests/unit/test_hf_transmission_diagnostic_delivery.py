@@ -19,7 +19,7 @@ HISTORICAL_DEVELOPMENT_NOTEBOOK = (
     ROOT / "notebooks/colab/development_exploration.ipynb"
 )
 PROTOCOL = ROOT / "configs/experiments/hf_transmission_diagnostic.json"
-EXECUTION_REVISION = "31c7e557fe0a98bf70c5349838572dcfd8be40cf"
+EXECUTION_REVISION = "f63b0e58090692cd1ac5ac86f03da27f96dd26b9"
 RUN_ID = "ceg_wm_hf_transmission_diagnostic"
 
 
