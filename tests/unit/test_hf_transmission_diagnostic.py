@@ -15,6 +15,7 @@ from experiments.methods import (
     load_ceg_wm_experiment_adapter_configuration,
 )
 from experiments.metrics.hf_transmission_diagnostic import (
+    HfTransmissionMetricError,
     create_hf_signal_position_observation,
     evaluate_hf_transmission_direction,
 )
@@ -97,7 +98,10 @@ def _install_entrypoint_fakes(
     monkeypatch.setattr(
         hf_transmission_diagnostic_entrypoint,
         "_base_latent",
-        lambda *_args, **_kwargs: small_base_latent(),
+        lambda generation_seed, **_kwargs: (
+            small_base_latent().to(torch.float32)
+            + float(generation_seed % 97) / 10000.0
+        ).to(torch.float16),
     )
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda _index: "Test GPU")
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda _index: 1)
@@ -255,6 +259,85 @@ def test_hf_transport_directional_rule_is_exactly_seven_of_eight() -> None:
     assert approved.registered_minus_null_positive_count == 7
     assert approved.allow_request_for_next_scientific_gate is True
     assert blocked.allow_request_for_next_scientific_gate is False
+    with pytest.raises(HfTransmissionMetricError, match="duplicated"):
+        evaluate_hf_transmission_direction(
+            (observations[0],) * 8,
+            budget_integrity_nonfinite_failure_count=0,
+        )
+
+
+@pytest.mark.unit
+def test_hf_transport_operational_failure_precedes_intent_and_can_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = "b" * 40
+    persistent_root = tmp_path / "operational_retry_persistent"
+    run_id = "hf_transmission_operational_retry"
+    environment = {
+        "CEG_WM_ROOT_KEY": ROOT_KEY,
+        "HF_TOKEN": "hf_transport_test_token",
+    }
+    _install_entrypoint_fakes(
+        monkeypatch,
+        tmp_path,
+        [
+            _CudaDiagnosticBackend(
+                failure_run_index=0,
+                failure_factory=lambda: MemoryError("first operational failure"),
+            ),
+            _CudaDiagnosticBackend(
+                failure_run_index=0,
+                failure_factory=lambda: MemoryError("second operational failure"),
+            ),
+            _CudaDiagnosticBackend(),
+        ],
+    )
+
+    for ordinal in range(2):
+        code, result = (
+            hf_transmission_diagnostic_entrypoint.execute_hf_transmission_diagnostic_session(
+                repository_root=ROOT,
+                expected_revision=revision,
+                persistent_root=persistent_root,
+                cache_root=tmp_path / "cache",
+                run_id=run_id,
+                session_id=f"hf_transport_operational_failure_{ordinal}",
+                environment=environment,
+            )
+        )
+        assert code == 3
+        assert result["committed_unit_count"] == 0
+        assert not tuple((persistent_root / run_id / "intents").glob("*.json"))
+        assert not tuple(
+            (persistent_root / run_id / "markers").glob("*.COMMITTED.json")
+        )
+
+    code, result = (
+        hf_transmission_diagnostic_entrypoint.execute_hf_transmission_diagnostic_session(
+            repository_root=ROOT,
+            expected_revision=revision,
+            persistent_root=persistent_root,
+            cache_root=tmp_path / "cache",
+            run_id=run_id,
+            session_id="hf_transport_operational_success",
+            environment=environment,
+        )
+    )
+    assert code == 0
+    assert result["termination_reason"] == "frozen_roster_complete"
+    assert result["committed_unit_count"] == 10
+    assert len(tuple((persistent_root / run_id / "intents").glob("*.json"))) == 10
+    assert (
+        len(
+            tuple(
+                (persistent_root / run_id / "markers").glob(
+                    "*.COMMITTED.json"
+                )
+            )
+        )
+        == 10
+    )
 
 
 @pytest.mark.unit

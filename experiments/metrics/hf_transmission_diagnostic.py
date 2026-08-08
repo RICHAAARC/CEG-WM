@@ -267,6 +267,12 @@ def evaluate_hf_transmission_direction(
         item.validate()
         if item.position_id != "rgb_vae_reencoded":
             raise HfTransmissionMetricError("decision uses only final re-encoded position")
+    if len({item.observation_identity for item in observations}) != len(
+        observations
+    ):
+        raise HfTransmissionMetricError(
+            "directional decision observations are duplicated"
+        )
     payload = {
         "cluster_count": 8,
         "registered_minus_wrong_positive_count": sum(

@@ -250,10 +250,6 @@ def execute_hf_transmission_diagnostic_session(
                 break
             unit = protocol.unit_roster[cursor.next_unit_index]
             active_unit_index = unit.unit_index
-            intent = store.create_session_intent(
-                cursor, lease, now_epoch_seconds=now
-            )
-            attempted_at = monotonic()
             if unit.unit_index < protocol.operational_unit_count:
                 entry = manifest.entries[unit.source_cluster_ordinal]
                 backend.set_development_generation_prompts(entry.prompt)
@@ -263,6 +259,9 @@ def execute_hf_transmission_diagnostic_session(
                         height=runtime_session.image_height,
                         width=runtime_session.image_width,
                     )
+                )
+                intent = store.create_session_intent(
+                    cursor, lease, now_epoch_seconds=max(now, int(time.time()))
                 )
                 record = _operational_record(
                     run_id=run_id,
@@ -281,6 +280,10 @@ def execute_hf_transmission_diagnostic_session(
                     elapsed_seconds=elapsed,
                 )
             else:
+                intent = store.create_session_intent(
+                    cursor, lease, now_epoch_seconds=now
+                )
+                attempted_at = monotonic()
                 entry = manifest.entries[unit.source_cluster_ordinal]
                 backend.set_development_generation_prompts(entry.prompt)
                 try:
