@@ -71,7 +71,7 @@ def _derive_registered_experiment_root(
             "responsibility_domain": "hf_carrier",
             "model_revision": canonical_digest(
                 {
-                    "derivation_identity": "hf_detector_directional_registered_root_subdomain_v1",
+                    "derivation_identity": "hf_detector_directional_registered_key_subdomain_derivation",
                     "manifest_digest": manifest_digest,
                     "protocol_digest": protocol_digest,
                 }

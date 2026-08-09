@@ -158,9 +158,9 @@ class HfDetectorDirectionalManifest:
             or self.image_lineage_namespace
             != "hf_detector_directional_paired_rgb_lineages_20260808"
             or self.registered_key_derivation_identity
-            != "hf_detector_directional_registered_root_subdomain_v1"
+            != "hf_detector_directional_registered_key_subdomain_derivation"
             or self.wrong_key_control_identity
-            != "hf_detector_directional_wrong_key_roster_v1"
+            != "hf_detector_directional_wrong_key_control_roster"
         ):
             raise HfDetectorDirectionalProtocolError(
                 "directional manifest identity drifted"

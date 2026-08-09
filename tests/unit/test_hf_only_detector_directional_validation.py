@@ -324,7 +324,7 @@ def test_hf_detector_directional_authority_files_fail_closed_when_missing(tmp_pa
         {"seed_namespace": "hf_only_detector_directional_validation_20260808"},
         {"generation_seed": 202608081100},
         {"image_lineage_identity": "paired_clean_hf_final_rgb_lineage"},
-        {"key_control_identity": "hf_detector_directional_wrong_key_roster_v1"},
+        {"key_control_identity": "hf_detector_directional_wrong_key_control_roster"},
     ],
 )
 def test_hf_detector_directional_rejects_each_authority_axis_independently(

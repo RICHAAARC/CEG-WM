@@ -7,7 +7,7 @@
   "candidate_identity": "hf_sparse_tail",
   "detector_operation_identity": "main.hf_detector",
   "manifest_path": "configs/experiments/hf_only_detector_directional_validation_manifest.json",
-  "manifest_file_sha256": "cd2131de0c779612f49fae44cb70899cfeb304661975727b26e3f8c4322ba6f6",
+  "manifest_file_sha256": "9cfbec095ddb896d526697e831072d6062c7755629ac3622688ee0a15f98441e",
   "prior_development_manifests": [
     {
       "path": "configs/experiments/development_exploration_prompt_roster.json",
