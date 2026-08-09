@@ -11,21 +11,17 @@ from typing import Sequence
 
 import numpy as np
 
-from main.content_chain.lf_whitening import (
-    LF_NULL_WHITENING_BAND_IDENTITY,
-    LF_NULL_WHITENING_DETREND_IDENTITY,
-    LF_NULL_WHITENING_FIT_SOURCE_CLUSTER_COUNT,
-    LF_NULL_WHITENING_LATENT_SHAPE,
-    LF_NULL_WHITENING_OBSERVATION_PROTOCOL,
-    LF_NULL_WHITENING_REGULARIZATION_RATIO,
-    LF_NULL_WHITENING_TRANSFORM_IDENTITY,
-    LF_NULL_WHITENING_WEIGHT_COUNT,
-    LfNullWhiteningAsset,
-)
-from main.shared.key_schedule import stable_json_utf8
-
-
 RING_COUNTS = (3, 12, 48, 192, 768, 3072)
+_CANDIDATE_ID = "lf_null_whitened_matched_score"
+_ARTIFACT_ROLE = "lf_clean_null_whitening_operator"
+_BAND_IDENTITY = "six_dyadic_chebyshev_frequency_rings_without_dc"
+_DETREND_IDENTITY = "per_channel_affine_plane_normalized_coordinates"
+_FIT_SOURCE_CLUSTER_COUNT = 32
+_LATENT_SHAPE = (1, 16, 64, 64)
+_OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
+_REGULARIZATION_RATIO = "0x1.0000000000000p-10"
+_TRANSFORM_IDENTITY = "orthonormal_dct_ii"
+_WEIGHT_COUNT = 96
 _PI = float.fromhex("0x1.921fb54442d18p+1")
 _SIZE = 64
 _COORDINATES = tuple((2.0 * index - 63.0) / 63.0 for index in range(64))
@@ -60,6 +56,78 @@ def _digest(value: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class LfNullWhiteningFitResult:
+    """Pure metric output for one frozen public whitening asset payload."""
+
+    canonical_payload: dict[str, object]
+    whitening_asset_digest: str
+
+    def validate(self) -> None:
+        payload = self.canonical_payload
+        expected_keys = {
+            "artifact_role",
+            "band_identity",
+            "candidate_id",
+            "detrend_identity",
+            "fit_manifest_sha256",
+            "fit_source_cluster_count",
+            "latent_shape",
+            "observation_protocol",
+            "regularization_ratio",
+            "transform_identity",
+            "weights_binary32_be_hex",
+        }
+        if type(payload) is not dict or set(payload) != expected_keys:
+            raise LfWhitenedScoreMetricError(
+                "whitening fit payload fields drifted"
+            )
+        if (
+            payload["artifact_role"] != _ARTIFACT_ROLE
+            or payload["band_identity"] != _BAND_IDENTITY
+            or payload["candidate_id"] != _CANDIDATE_ID
+            or payload["detrend_identity"] != _DETREND_IDENTITY
+            or payload["fit_source_cluster_count"] != _FIT_SOURCE_CLUSTER_COUNT
+            or payload["latent_shape"] != list(_LATENT_SHAPE)
+            or payload["observation_protocol"] != _OBSERVATION_PROTOCOL
+            or payload["regularization_ratio"] != _REGULARIZATION_RATIO
+            or payload["transform_identity"] != _TRANSFORM_IDENTITY
+        ):
+            raise LfWhitenedScoreMetricError(
+                "whitening fit payload identity drifted"
+            )
+        fit_manifest_sha256 = payload["fit_manifest_sha256"]
+        if (
+            type(fit_manifest_sha256) is not str
+            or len(fit_manifest_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in fit_manifest_sha256
+            )
+        ):
+            raise LfWhitenedScoreMetricError(
+                "whitening fit manifest digest is invalid"
+            )
+        words = payload["weights_binary32_be_hex"]
+        if (
+            type(words) is not list
+            or len(words) != _WEIGHT_COUNT
+            or any(
+                type(word) is not str
+                or len(word) != 8
+                or any(character not in "0123456789abcdef" for character in word)
+                for word in words
+            )
+        ):
+            raise LfWhitenedScoreMetricError(
+                "whitening fit weight bytes are invalid"
+            )
+        if self.whitening_asset_digest != _digest(payload):
+            raise LfWhitenedScoreMetricError(
+                "whitening fit payload digest drifted"
+            )
 
 
 def _detrended_dct(values: Sequence[float]) -> np.ndarray:
@@ -138,7 +206,7 @@ def clean_null_band_energy_sums(values: Sequence[float]) -> tuple[float, ...]:
                     "clean null band energy is invalid"
                 )
             energy.append(total)
-    if len(energy) != LF_NULL_WHITENING_WEIGHT_COUNT:
+    if len(energy) != _WEIGHT_COUNT:
         raise LfWhitenedScoreMetricError("clean null statistic count drifted")
     return tuple(energy)
 
@@ -147,13 +215,13 @@ def fit_lf_null_whitening_asset(
     ordered_energy_sums: Sequence[Sequence[float]],
     *,
     fit_manifest_sha256: str,
-) -> LfNullWhiteningAsset:
+) -> LfNullWhiteningFitResult:
     """Fit the unique 16-channel by 6-band public whitening asset."""
 
     rows = tuple(tuple(float(value) for value in row) for row in ordered_energy_sums)
     if (
-        len(rows) != LF_NULL_WHITENING_FIT_SOURCE_CLUSTER_COUNT
-        or any(len(row) != LF_NULL_WHITENING_WEIGHT_COUNT for row in rows)
+        len(rows) != _FIT_SOURCE_CLUSTER_COUNT
+        or any(len(row) != _WEIGHT_COUNT for row in rows)
         or any(not isfinite(value) or value < 0.0 for row in rows for value in row)
     ):
         raise LfWhitenedScoreMetricError("clean null fit coverage is invalid")
@@ -195,24 +263,24 @@ def fit_lf_null_whitening_asset(
             raise LfWhitenedScoreMetricError("binary32 whitening weight is invalid")
         words.append(word)
     payload = {
-        "artifact_role": "lf_clean_null_whitening_operator",
-        "band_identity": LF_NULL_WHITENING_BAND_IDENTITY,
-        "candidate_id": "lf_null_whitened_matched_score",
-        "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
+        "artifact_role": _ARTIFACT_ROLE,
+        "band_identity": _BAND_IDENTITY,
+        "candidate_id": _CANDIDATE_ID,
+        "detrend_identity": _DETREND_IDENTITY,
         "fit_manifest_sha256": fit_manifest_sha256,
-        "fit_source_cluster_count": LF_NULL_WHITENING_FIT_SOURCE_CLUSTER_COUNT,
-        "latent_shape": list(LF_NULL_WHITENING_LATENT_SHAPE),
-        "observation_protocol": LF_NULL_WHITENING_OBSERVATION_PROTOCOL,
-        "regularization_ratio": LF_NULL_WHITENING_REGULARIZATION_RATIO,
-        "transform_identity": LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+        "fit_source_cluster_count": _FIT_SOURCE_CLUSTER_COUNT,
+        "latent_shape": list(_LATENT_SHAPE),
+        "observation_protocol": _OBSERVATION_PROTOCOL,
+        "regularization_ratio": _REGULARIZATION_RATIO,
+        "transform_identity": _TRANSFORM_IDENTITY,
         "weights_binary32_be_hex": words,
     }
-    asset = LfNullWhiteningAsset.from_canonical_payload(
-        payload,
-        whitening_asset_digest=sha256(stable_json_utf8(payload)).hexdigest(),
+    result = LfNullWhiteningFitResult(
+        canonical_payload=payload,
+        whitening_asset_digest=_digest(payload),
     )
-    asset.validate()
-    return asset
+    result.validate()
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,7 +471,8 @@ def evaluate_lf_whitened_screening(
 
 
 __all__ = [
-    "LfWhitenedScoreMetricError", "LfWhitenedScreeningDecision", "LfWhitenedScreeningObservation",
+    "LfNullWhiteningFitResult", "LfWhitenedScoreMetricError",
+    "LfWhitenedScreeningDecision", "LfWhitenedScreeningObservation",
     "clean_null_band_energy_sums", "create_lf_whitened_screening_observation",
     "evaluate_lf_whitened_screening", "fit_lf_null_whitening_asset",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from hashlib import sha256
 import json
 from math import cos, pi
 from pathlib import Path
@@ -181,17 +182,28 @@ def test_lf_clean_null_fit_freezes_one_binary32_whitening_asset() -> None:
         tuple(float((cluster + 1) * (index + 1)) for index in range(96))
         for cluster in range(32)
     )
-    asset = fit_lf_null_whitening_asset(
+    fit_result = fit_lf_null_whitening_asset(
         rows, fit_manifest_sha256="a" * 64
     )
     replay = fit_lf_null_whitening_asset(
         rows, fit_manifest_sha256="a" * 64
     )
 
-    assert len(asset.weights_binary32_be_hex) == 96
-    assert asset.whitening_asset_digest == replay.whitening_asset_digest
-    assert asset.canonical_payload == replay.canonical_payload
-    assert asset.fit_manifest_sha256 == "a" * 64
+    payload = fit_result.canonical_payload
+    words = payload["weights_binary32_be_hex"]
+    assert type(words) is list and len(words) == 96
+    assert fit_result.whitening_asset_digest == replay.whitening_asset_digest
+    assert fit_result.canonical_payload == replay.canonical_payload
+    assert payload["fit_manifest_sha256"] == "a" * 64
+    assert (
+        fit_result.whitening_asset_digest
+        == "2440dbd09cf241bba8fc484043fa7c02eff9aa8e5e29dc5f103594db8266e105"
+    )
+    assert (
+        sha256(bytes.fromhex("".join(words))).hexdigest()
+        == "d6c20a6c7574e390c8d49d9590175fec74420ceafc8babe29392d6300e08551c"
+    )
+    assert (words[0], words[-1]) == ("3eda4b79", "3fb20ed4")
     with pytest.raises(LfWhitenedScoreMetricError, match="coverage"):
         fit_lf_null_whitening_asset(
             rows[:-1], fit_manifest_sha256="a" * 64

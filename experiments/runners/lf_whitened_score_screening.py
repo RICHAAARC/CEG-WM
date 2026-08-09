@@ -519,10 +519,15 @@ class LfWhitenedScoreScreeningRunner:
                         "verified null-fit statistic is missing"
                     )
                 rows.append(tuple(float(value) for value in row))
-            asset = fit_lf_null_whitening_asset(
+            fit_result = fit_lf_null_whitening_asset(
                 (*rows, energy),
                 fit_manifest_sha256=self.protocol.null_fit_manifest_file_sha256,
             )
+            asset = LfNullWhiteningAsset.from_canonical_payload(
+                fit_result.canonical_payload,
+                whitening_asset_digest=fit_result.whitening_asset_digest,
+            )
+            asset.validate()
             operation_payload["whitening_asset_payload"] = asset.canonical_payload
             operation_payload["whitening_asset_digest"] = asset.whitening_asset_digest
         elapsed = float(monotonic() - started)
@@ -587,10 +592,15 @@ class LfWhitenedScoreScreeningRunner:
             if type(values) not in {tuple, list}:
                 raise LfWhitenedScoreRunnerError("verified null-fit statistic is missing")
             rows.append(tuple(float(value) for value in values))
-        expected = fit_lf_null_whitening_asset(
+        expected_fit = fit_lf_null_whitening_asset(
             rows,
             fit_manifest_sha256=self.protocol.null_fit_manifest_file_sha256,
         )
+        expected_asset = LfNullWhiteningAsset.from_canonical_payload(
+            expected_fit.canonical_payload,
+            whitening_asset_digest=expected_fit.whitening_asset_digest,
+        )
+        expected_asset.validate()
         final_record = fit[-1][0]
         payload = final_record.operation_result_payload.get(
             "whitening_asset_payload"
@@ -598,12 +608,16 @@ class LfWhitenedScoreScreeningRunner:
         digest = final_record.operation_result_payload.get(
             "whitening_asset_digest"
         )
-        if type(payload) is not dict or digest != expected.whitening_asset_digest:
+        if (
+            type(payload) is not dict
+            or digest != expected_asset.whitening_asset_digest
+        ):
             raise LfWhitenedScoreRunnerError("committed whitening asset is missing")
         replayed = LfNullWhiteningAsset.from_canonical_payload(
             payload, whitening_asset_digest=digest
         )
-        if replayed.canonical_payload != expected.canonical_payload:
+        replayed.validate()
+        if replayed.canonical_payload != expected_asset.canonical_payload:
             raise LfWhitenedScoreRunnerError("committed whitening asset drifted")
         return replayed
 
