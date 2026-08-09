@@ -186,7 +186,10 @@ geometry/content budget ratio 只在 `qk_relation_similarity` 登记的有限集
 
 ### Raw Content Detection
 
-检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。
+检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。LF 的
+`lf_low_pass` raw score 与 `lf_null_whitened_matched_score` 是两个独立候选身份；
+后者只读消费由独立 32-clean partition 冻结的 96 参数 channel-band diagonal `W`，
+不得在检测时读取 fit images 或重拟合。
 `lf_detector` 和 `hf_detector` 必须是独立可调用责任，三类 `s_lf`、`s_hf`、
 `s_combined` 必须独立可观测。`content_detector` 消费两个分支统计并形成
 `D_M(I, K)`；在 LF/HF 组合晋升前，`D_M` 等于 CEG-WM HF direct score。组合不得

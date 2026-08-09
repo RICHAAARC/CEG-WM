@@ -8,7 +8,7 @@
 
 本文关闭“实现时由 Codex 自行发明算法”的空白。这里登记的是可实施、可证伪的候选规格，不是已验证项目参数、有效性结论或实施授权。
 
-当前 registry 固定为 **10 个候选 ID**：其中 9 个是待实施与晋升的
+当前 registry 固定为 **11 个候选 ID**：其中 10 个是待实施与晋升的
 method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得晋升为方法的
 同预算禁用对照。计数如下：
 
@@ -16,6 +16,7 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 - `runtime_sd35_flowmatch`；
 - `hf_sparse_tail`；
 - `lf_low_pass`；
+- `lf_null_whitened_matched_score`；
 - `routing_stqr`，并以 `routing_uniform_control` 为同预算禁用对照；
 - `content_combination_calibrated`；
 - `qk_relation_similarity`；
@@ -24,7 +25,7 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 
 实现者只能实现这些身份及其明确列出的有限候选值。增加 relation、objective、write、score、observation、backbone、runtime 或搜索策略，必须先修订本文并重新接受候选规格审计。
 
-候选 registry 与实现职责是两个不同计数：上面的 10 个 ID 描述算法/runtime/key
+候选 registry 与实现职责是两个不同计数：上面的 11 个 ID 描述算法/runtime/key
 候选身份；未来实现固定为 13 项职责组件。每项职责只消费下表列出的现有候选，
 不得据此新增候选、别名组件或把多个职责集中到一个代理模块：
 
@@ -35,7 +36,7 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 | `lf_carrier` | `low_frequency_carrier_template_and_write_direction` | `main/content_chain/lf_carrier.py` | `key_schedule_sha256_counter`, `lf_low_pass` |
 | `hf_carrier` | `high_frequency_carrier_template_and_write_direction` | `main/content_chain/hf_carrier.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `hf_sparse_tail` |
 | `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control` |
-| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass` |
+| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score` |
 | `hf_detector` | `high_frequency_direct_scoring` | `main/content_chain/hf_detector.py` | `key_schedule_sha256_counter`, `hf_sparse_tail` |
 | `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated` |
 | `qk_geometry_sync` | `keyed_qk_geometry_synchronization_and_relation_observation` | `main/geometry_chain/qk_sync.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `qk_relation_similarity` |
@@ -540,13 +541,17 @@ actual 下限。
 之和才是 nominal `delta_content`；由于交叉项存在，它们的 norm/energy 不得相加冒充 total。
 未定义也不可观测的分支级实际写入量不得出现在 runtime 或 evidence 中。
 
-### LF Detector Boundary
+### Raw LF Detector Boundary
 
-LF 分数使用与 HF 相同 final-image VAE mode latent 和 score-time centered normalized correlation：
+原始 LF 分数使用与 HF 相同 final-image VAE mode latent 和 score-time centered normalized correlation：
 
 ```text
-s_lf = normalized_correlation(center(Y), center(T_lf))
+s_lf_raw = normalized_correlation(center(Y), center(T_lf))
 ```
+
+该 raw score 仍绑定 `lf_low_pass`，保留为已实现的历史候选和后续独立比较 control；
+既有 8-cluster transmission diagnostic 的阴性/部分信号结果不被改写，也不能用于
+拟合下面的新候选。新增候选并不使当前 readiness、正式 detector 或科学结论自动变化。
 
 ### Identity And Source Boundary
 
@@ -577,6 +582,150 @@ operator。历史固定
   confirmation 选择供 `content_embedder` 使用的 `a`。
 - 淘汰：LF 无独立密钥归属、只检测通用低频偏移、detector 依赖参考图/record，或
   所有 `a` 均无稳定互补增益。
+
+## Candidate `lf_null_whitened_matched_score`
+
+### Scientific Role And Fixed Observation
+
+该候选只改变 `lf_detector` 的盲评分统计，不改变 `lf_low_pass` 的 carrier、模板、
+写入方向、`3/250` 内容 hard budget、runtime 或 key schedule。它要检验的唯一问题是：
+在公共 clean-null LF 观测的低维二阶结构下白化后，registered `T_lf` 是否比 wrong-key
+模板获得稳定更高的 matched score。登记候选不表示实现完成、机制有效、可晋升、已有
+`tau` 或支持 FPR 声明。
+
+检测观测固定为普通 `512 x 512` RGB8 待检图像，经
+`runtime_sd35_flowmatch` 同一 public VAE encode 和 posterior `mode()` 得到
+binary32 latent `Y`，shape 必须精确为 `[1,16,64,64]`。检测只允许消费该 RGB8、
+检测 key、冻结 model/preprocess identity 和下面的公开 whitening artifact；不得读取
+参考图、fit images、embed record、callback latent、写入模板记录、routing mask 或
+其他私有生成状态。
+
+### Centering, Detrending And Frequency Coordinates
+
+对任一 latent 或由检测 key 重构的未遮罩 `T_lf`，先去掉 batch 维。对 channel `c`
+和零基坐标 `h,w in {0,...,63}`，定义：
+
+```text
+x_h = (2*h - 63) / 63
+y_w = (2*w - 63) / 63
+a_c = sum_{h,w} Z[c,h,w] / (64*64)
+b_c = sum_{h,w} x_h*Z[c,h,w] / (64*sum_h x_h^2)
+g_c = sum_{h,w} y_w*Z[c,h,w] / (64*sum_w y_w^2)
+D(Z)[c,h,w] = Z[c,h,w] - a_c - b_c*x_h - g_c*y_w
+```
+
+上述对称坐标使常数、`x`、`y` 三列两两正交，因此给出唯一 affine-plane
+least-squares 解，不存在 detrending 候选或拟合网格。输入先转换为 binary32，
+上述求和、乘除和后续 fit/DCT/score 运算均用 binary64。每个 affine sum 固定按
+`h=0..63` 外层、`w=0..63` 内层累加，先完成 `a_c`，再分别完成 `b_c`、`g_c`，
+最后按同一顺序形成 residual；不得先应用 `W`、按 key 改变 detrending，或对单个
+待检样本重新拟合 null 统计。
+
+令 `F(Z)` 为对 `D(Z)` 每个 channel 施加的 orthonormal 2D DCT-II：
+
+```text
+alpha_64(0) = sqrt(1/64)
+alpha_64(k) = sqrt(2/64), k>0
+F(Z)[c,u,v] = alpha_64(u)*alpha_64(v) *
+  sum_{h,w} D(Z)[c,h,w]
+             * cos(pi*(h+1/2)*u/64)
+             * cos(pi*(w+1/2)*v/64)
+```
+
+第一轴 `h/u` 是 latent height，第二轴 `w/v` 是 latent width；每个 coefficient 的
+内和固定按 `h` 外层、`w` 内层 binary64 累加。`pi` 固定为 binary64
+`0x1.921fb54442d18p+1`，DCT 不允许换成 FFT 周期边界或非正交 normalization。
+
+DC coefficient `(u,v)=(0,0)` 永久排除。其余频率按
+`r=max(u,v)` 和 `band=floor(log2(r))` 唯一分成 6 个 dyadic Chebyshev rings：
+`{1}`、`{2,3}`、`{4,...,7}`、`{8,...,15}`、`{16,...,31}`、
+`{32,...,63}`。没有其他 band count、band boundary 或 transform 候选。
+
+### Single Clean-Null Fit And Whitening Operator
+
+`W` 只允许从一个预登记、与旧 LF 8-cluster diagnostic、全部 development
+screening、candidate selection、calibration 和 evaluation source clusters 零交集的
+fit manifest 产生。manifest 必须恰含 32 个独立 source clusters；每个 cluster 只贡献
+一个 clean public RGB8，经同一 public RGB-to-VAE 路径得到 `Y_i`。旧 8 个样本、
+candidate/wrong-key 图像、攻击图像和任何 observed score 均禁止进入 fit。
+
+对 channel `c`、band `q`，令 `B_q` 为该 ring 的 `(u,v)` 集合、`n_q=|B_q|`：
+
+```text
+v[c,q] = sum_{i=0}^{31} sum_{(u,v) in B_q} F(Y_i)[c,u,v]^2
+         / (32*n_q)
+v_global = sum_{c,q} n_q*v[c,q] / (16*sum_q n_q)
+lambda = 2^-10
+W[c,q] = binary32_rne((v[c,q] + lambda*v_global)^(-1/2))
+```
+
+这是唯一允许的 `W`：channel-by-dyadic-band stationary diagonal whitening，固定
+`16*6=96` 个 binary32 权重。`v[c,q]` 的累加顺序固定为 fit manifest 中的 cluster
+顺序，然后 `u` 外层、`v` 内层；`v_global` 固定按 `c=0..15` 外层、`q=0..5`
+内层并按真实 coefficient count 加权。正则语义唯一是给每个 `v[c,q]` 加上同一个
+strictly-positive ridge energy `2^-10*v_global`，不是与 global variance 做 convex
+shrinkage。不做 full
+dense covariance、per-pixel diagonal、shrinkage family、epsilon grid、结果后 band
+合并或多个 whitening variant screening。fit 输入、所有 `v`、`v_global` 和全部
+`W` 必须有限，且 `v_global>0`、每个正则化分母严格大于零；否则整个 fit fail closed，
+不生成可用 artifact。
+
+### Blind Whitened Matched Score
+
+检测时按上述顺序分别计算 public observation 和 key-only template 的 detrended DCT，
+再把 `W[c,band(u,v)]` 广播到非 DC coefficients：
+
+```text
+Q_W(Z)[c,u,v] = W[c,band(u,v)] * F(Z)[c,u,v]
+s_lf_whitened =
+  dot(Q_W(Y), Q_W(T_lf)) /
+  (norm2(Q_W(Y)) * norm2(Q_W(T_lf)))
+```
+
+dot 与 norm 只遍历非 DC coefficients，并使用固定 channel-major、`u`-major、
+`v`-minor binary64 累加；`norm2(A)=sqrt(sum A^2)`，分子与两个平方和各自从
+binary64 positive zero 开始独立累加。分母是两个 whitened L2 norm 的乘积，不得换成未白化 norm、
+fit-set经验标准差或 score-dependent normalization。missing/mismatched artifact、
+artifact payload 重算 digest 与声明值不一致、shape/channel/dtype 漂移、任何非有限量或任一 norm 不严格为正都使该检测调用 fail
+closed，不得回退 raw score。registered、wrong-key 与 primary-null 必须复用同一
+`W`、VAE/preprocess/config 和 score operator；`W` 对 key 不变。
+
+### Artifact Identity And Responsibility Boundary
+
+fit 责任属于未来获授权的独立 experiment fit runner；`main.lf_detector` 只读消费已
+冻结 artifact，不得读取 32 张 fit 图、在检测中更新 `W` 或对 evaluation 重拟合。
+artifact canonical payload 使用本文 `stable_json_utf8`，字段至少精确包含：
+
+```text
+candidate_id = "lf_null_whitened_matched_score"
+artifact_role = "lf_clean_null_whitening_operator"
+observation_protocol = "final_image_vae_posterior_mode"
+latent_shape = [1,16,64,64]
+fit_source_cluster_count = 32
+detrend_identity = "per_channel_affine_plane_normalized_coordinates"
+transform_identity = "orthonormal_dct_ii"
+band_identity = "six_dyadic_chebyshev_frequency_rings_without_dc"
+regularization_ratio = "0x1.0000000000000p-10"
+fit_manifest_sha256 = <64 lowercase hex>
+weights_binary32_be_hex = <channel-major list of exactly 96 eight-hex words>
+```
+
+每个权重先按 IEEE-754 round-to-nearest-ties-to-even 物化为 binary32，再序列化为
+4-byte big-endian 的 8 位小写 hex；不得用十进制文本重新决定数值。artifact digest
+唯一为 `SHA256(stable_json_utf8(payload))` 的 64 位小写 hex，并与 candidate、model、
+preprocess 和 detector config identity 一起进入后续 records。raw fit images 不属于
+正式检测资产。
+
+### Checks And Evidence Boundary
+
+- 设计/CPU 检查只证明 shape、affine detrend、DCT/ring 分配、单一正则、96 权重
+  serialization/digest、有限值/零 norm fail-closed 和 raw-score 非回退。
+- 真实 GPU fit 必须在任何候选验证结果之前一次性冻结 32-clean manifest 与 artifact；
+  该 fit 不得消费旧 8-cluster artifact，也不得输出 mechanism outcome。
+- 随后的全新 validation 才能比较 registered/wrong-key/paired primary-null；本候选
+  当前没有效果证据、阈值、FPR、candidate promotion 或论文 claim。
+- `lf_low_pass` raw normalized-correlation 继续作为独立 historical/control score，
+  但不得与本候选组成结果后 ensemble，也不得充当本候选失败时的静默 fallback。
 
 ## Candidates `routing_stqr` And `routing_uniform_control`
 
@@ -1057,16 +1206,17 @@ CPU 检查三路门控、几何失败、可靠但内容仍负、同 detector/thr
 
 本文已经为当前候选集合关闭 key/KDF/PRG、relation/objective、LF write/score、
 routing observations、backbone/runtime、搜索、可靠性指标、回正和联合判定的实现
-选择空白。registry 合计 10 个 ID：9 个待实施/晋升候选，加上
+选择空白。registry 合计 11 个 ID：10 个待实施/晋升候选，加上
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
-方法晋升，也不把 10 个候选 ID 误写为 13 项实现职责。仍待实验决定的是明确有限候选
+方法晋升，也不把 11 个候选 ID 误写为 13 项实现职责。仍待实验决定的是明确有限候选
 中的晋升结果和 calibration 数值，不是实现算法。
 
 ### Frozen Specification Values Versus Evidence Outcomes
 
 现在已成为候选规格值的是：key encoding/KDF/PRG 与 golden bits；SD3.5 revision 和
 runtime protocol；HF sparse-tail/filter/write/score 顺序与候选强度；LF
-filter/write/score 与有限 `a` 集；S/T/R/Q observations；empirical-CDF/tie/clip/table
+filter/write/raw score、唯一 clean-null whitening fit/matched score 与有限 `a` 集；
+S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
 rectification；conditional recovery 控制流。

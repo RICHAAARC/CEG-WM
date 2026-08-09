@@ -193,15 +193,31 @@ L_lf = P_M(G_lf)
 T_lf = normalize(center(L_lf))
 ```
 
-首个 LF 候选的滤波器、边界、写入位置、同预算组合和分数已在 `lf_low_pass` 中明确；
-实验只在其中登记的有限 mixing-coefficient 候选集合内选择。LF 分数使用与其模板和
-观测域匹配的冻结归一相关统计：
+`lf_low_pass` 已固定 LF 滤波器、边界、写入位置、同预算组合、raw score 和有限
+mixing-coefficient 集合。该 raw score 保留为历史/control 候选。唯一新增的评分候选
+`lf_null_whitened_matched_score` 不改变 carrier/write，而是在公共 final-image VAE
+latent 上固定执行：
 
 ```text
-s_lf = score_lf_M(E_M(I), T_lf)
+Z = binary32(E_M(I))                         # [1,16,64,64]
+D(Z) = per_channel_affine_plane_residual(Z) # fixed normalized coordinates
+F(Z) = orthonormal_dct_ii_2d(D(Z))
+Q_W(Z)[c,u,v] = W[c,floor(log2(max(u,v)))] * F(Z)[c,u,v]
+s_lf_whitened = cosine(Q_W(Z), Q_W(T_lf))   # (u,v)!=(0,0)
 ```
 
-`score_lf_M` 只有在正确密钥、错误密钥、无水印负样本和图像质量证据共同通过后才能冻结。
+`W` 是从 32 个全新、独立 clean public RGB-to-VAE observations 一次拟合的
+`16 x 6 = 96` 参数 stationary channel-band diagonal operator。六个非 DC dyadic
+Chebyshev rings 精确为 `r=max(u,v)` 的 `{1}`、`{2,3}`、`{4,...,7}`、
+`{8,...,15}`、`{16,...,31}`、`{32,...,63}`；唯一正则为
+`lambda=2^-10` 乘 coefficient-count-weighted global clean energy。候选规格唯一规定
+affine least-squares、DCT-II normalization、fit 分母/顺序、binary32 RNE、big-endian
+hex artifact 和 score 分母。它不是 full covariance、per-pixel diagonal 或候选网格。
+
+fit partition 禁止旧 8-cluster transmission diagnostic 和 development screening；
+detector 只读公开 `W` artifact，不读取 clean fit images、参考图、embed record 或私有
+latent。只有正确密钥、错误密钥、无水印负样本和图像质量证据共同通过后，才可考虑
+冻结哪一个 LF score 为后续方法；本设计登记本身不改 readiness 或正式 detector。
 
 ### LF Rejection Conditions
 
@@ -420,19 +436,23 @@ else:
   物化边界；其 sparse-tail 顺序具有 historical DirectHF 来源，但候选身份和证据
   不继承历史名称；
 - `lf_low_pass` 固定 LF template/direction、embedder 使用、score 与有限 `a` 集合；
+- `lf_null_whitened_matched_score` 固定 32-clean fit、96 参数 stationary
+  channel-band diagonal `W`、白化 matched score 与只读 blind detector 边界；
 - `routing_stqr` 固定 S/T/R/Q observations 和路由公式；
 - `content_combination_calibrated` 固定有限组合函数集合；
 - `qk_relation_similarity` 固定 Q/K 层、直接 relation、keyed objective 和同步写入；
 - `rectification_similarity` 固定搜索域、目标、可靠性指标和回正规则；
 - `joint_conditional_recovery` 固定联合判定。
 
-registry 共 10 个 ID：9 个具名候选和 1 个强制同预算禁用对照
+registry 共 11 个 ID：10 个具名候选和 1 个强制同预算禁用对照
 `routing_uniform_control`。CPU/synthetic 实现不等于实验晋升；该计数不等于固定的
 13 项实现职责，也不把对照视为方法候选。
 
-CPU/synthetic 实现与方法行为门已经闭合。仍开放的是候选能否通过真实 runtime、
-candidate-selection、calibration 和 formal evaluation 门，以及由互斥 calibration
-职责拟合的阈值数值。这些是证据结果，不是实现空白。
+原 10-ID registry 的 CPU/synthetic 实现与方法行为门已经闭合；新增的第 11 项
+`lf_null_whitened_matched_score` 当前只有设计冻结，尚未实施或重绑 readiness。
+仍开放的是该候选的实现/独立语义审核，以及各候选能否通过真实 runtime、
+candidate-selection、calibration 和 formal evaluation 门及互斥 calibration 职责拟合的
+阈值数值。设计冻结与效果证据必须保持分离。
 
 13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
 审计。实际 stage/status 已由独立 revisions 同步为

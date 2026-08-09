@@ -70,7 +70,9 @@ stage/status 已由独立 revisions 同步为 `experiment_ready / implemented`�
 登记冻结实验协议与可追溯执行交付的基础设施闭环。真实 qualification 只验证冻结
 runtime 边界；当前没有 `tau`、confirmation 结果、Calibration Locked、正式
 evaluation 或科学证据，也没有 LF/routing/组合/geometry 的实验晋升。
-候选 registry 的 10 个 ID 是算法身份计数，不是组件计数。
+候选 registry 的 11 个 ID 是算法身份计数，不是组件计数；第 11 项
+`lf_null_whitened_matched_score` 当前仅完成设计冻结，尚未进入 implementation
+readiness、正式 detector 或科学晋升。
 
 ## Success Conditions
 

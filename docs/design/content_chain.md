@@ -25,7 +25,11 @@ CEG-WM 自有 HF carrier 与 HF direct score 当前承担 HF 主检测候选；�
 
 ## LF Validation Questions
 
-LF 的 `lf_low_pass`、`routing_stqr` 和 `content_combination_calibrated` 候选算法已经关闭，但仍是待证伪内容载体，不预设已经晋升。实验需要回答：
+LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
+`content_combination_calibrated` 候选算法已经关闭，但仍是待证伪内容载体，不预设
+已经晋升。新增 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
+固定 channel-band diagonal null operator 做只读白化 matched score；它不改变 carrier，
+也不把 fit images、参考图或私有 latent 引入检测。实验需要回答：
 
 1. LF 在哪些失真下提供 HF direct score 缺少的互补证据？
 2. LF 是否保持密钥归属，而不是只检测通用低频偏移？
@@ -64,7 +68,9 @@ runtime 只物化 delta
 并返回 actual-dtype 张量及 combined delta 的 total norm/relative L2，不改变预算或
 方向，也不提供未定义的分支级实际写入量。embedder 不得计算检测统计。
 `lf_detector` 独立从普通待检图像、
-检测 key 和公共资产计算盲 `s_lf`。`content_detector` 消费独立可观测的 `s_lf`
+检测 key 和公共资产计算盲 `s_lf`；raw normalized-correlation 与新登记的
+clean-null-whitened matched score 必须保持不同 candidate identity，后者只能只读
+消费冻结 `W` artifact，不得在待检样本上拟合。`content_detector` 消费独立可观测的 `s_lf`
 与 `s_hf`，负责标准化、冻结组合和正式 `D_M` 身份，不得隐藏分支失败或错误密钥归属。
 
 共同 nominal relative L2 与 actual-dtype combined content hard limit 均冻结为

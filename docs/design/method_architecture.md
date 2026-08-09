@@ -54,7 +54,8 @@ budget policy。
 
 首个 `hf_sparse_tail` 候选固定为高频剩余经 sparse tail 后直接 L2 normalize，只在
 normalized-correlation 评分时中心化；该顺序具有 historical DirectHF 来源，但历史
-名称与成功证据不进入本项目身份。LF、路由、组合、Q/K 与 runtime 的具体实现候选已在
+名称与成功证据不进入本项目身份。LF 的新白化 matched-score 设计、路由、组合、Q/K
+与 runtime 的具体候选已在
 [candidate_specifications.md](candidate_specifications.md) 中关闭；尚未冻结的是
 候选的实验晋升结果。当前冻结的 `D_M` 候选仍是 HF-only 的 HF direct score；只有组合候选
 通过预登记晋升后，`content_detector` 才可消费 `s_lf` 与 `s_hf` 形成组合 `D_M`。
@@ -129,8 +130,9 @@ uniform control；`content_embedder` 独占冻结 `a`、LF/HF 组合写入、共
 方向内积/组合归一因子、nominal/limit、materialization scale/attempt/integrity/
 budget status 与 realized combined total norm/relative L2，以及 active/combined
 零方向失败；
-`lf_detector` 独占盲 LF 分数；`geometry_reliability` 独占 estimator 原始指标上的
-合取门。候选 registry 仍是 10 个 ID（9 个具名候选加 1 个 routing 强制对照）；
+`lf_detector` 独占盲 LF 分数；`lf_null_whitened_matched_score` 只增加其未来评分候选，
+不改变 `lf_carrier` 或现有 readiness；`geometry_reliability` 独占 estimator 原始指标上的
+合取门。候选 registry 现在是 11 个 ID（10 个具名候选加 1 个 routing 强制对照）；
 CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现职责不是同一计数。
 
 `content_direction`、`active_lf_direction`、`active_hf_direction` 及 target

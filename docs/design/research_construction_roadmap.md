@@ -107,7 +107,7 @@ revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑�
 ### Validation
 
 - 每个候选都有明确输入、输出、身份、失败语义和可证伪指标；
-- registry 计数固定为 10 个 ID：9 个具名候选和 1 个 mandatory
+- registry 计数固定为 11 个 ID：10 个具名候选和 1 个 mandatory
   `routing_uniform_control`；不得把对照计入方法候选数；
 - 不存在固定历史 LF/HF 权重；
 - 不存在 reference image、embed record 或私有嵌入状态检测依赖；
@@ -152,8 +152,10 @@ audit 必须从 authorization base revision
 - image rectifier；
 - conditional recovery decision。
 
-以上按唯一的 13 项正式职责和固定路径实施；候选 registry 的 10 个 ID 不是组件
-计数。同时建立 `.codex/research_state/method_readiness.yaml`，逐组件连接候选 ID、
+以上按唯一的 13 项正式职责和固定路径实施；当时 readiness 审核绑定的 10 个候选 ID
+不是组件计数。此后设计新增的第 11 项 `lf_null_whitened_matched_score` 尚未实现，
+不得在对应实现与独立语义审核完成前写入 readiness。同时建立的
+`.codex/research_state/method_readiness.yaml` 逐组件连接已实现候选 ID、
 架构规定路径、声明责任、具体且唯一的实现 symbol、方法特异性验收测试和实现完成后
 的独立语义审计 revision。
 

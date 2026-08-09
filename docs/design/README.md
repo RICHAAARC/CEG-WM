@@ -17,7 +17,8 @@
 
 当前 CPU/synthetic 方法实现采用唯一的 13 项职责组件口径；精确 responsibility、
 固定路径和候选绑定见 [candidate_specifications.md](candidate_specifications.md)。
-候选 registry 保持 10 个 ID（9 个具名候选加 1 个 routing 对照）；实现不等于
+候选 registry 现在是 11 个 ID（10 个具名候选加 1 个 routing 对照）；新增的
+`lf_null_whitened_matched_score` 仅完成设计冻结，尚未实施或重绑 readiness。实现不等于
 LF/routing 的实验晋升，该计数不得与组件数混淆。
 
 ## Derived Method Diagrams
