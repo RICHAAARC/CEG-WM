@@ -33,6 +33,7 @@ from experiments.runners.hf_only_detector_directional_validation import (
     HfOnlyDetectorDirectionalRunner,
 )
 from main import derive_wrong_key_material, identify_root_key
+from main.content_chain.hf_detector import OBSERVATION_PROTOCOL
 from runtime import RuntimeDeviceCapabilities, Sd35RuntimeAdapter, create_runtime_adapter
 from scripts.experiment_execution import (
     hf_only_detector_directional_validation_entrypoint as directional_entrypoint,
@@ -172,7 +173,7 @@ def test_hf_detector_directional_runner_calls_public_blind_detector_for_paired_r
     observation = scientific.operation_result_payload["directional_observation"]
     assert observation["wrong_key_index"] == 1
     assert scientific.key_control_trace["wrong_key_roster_size"] == 4
-    assert scientific.detector_trace["detector_operation_identity"] == "main.hf_detector"
+    assert scientific.detector_trace["public_callable"] == "main.hf_detector"
     assert scientific.detector_trace["same_image_registered_wrong_reuse"] is True
     assert scientific.detector_trace["paired_clean_primary_null"] is True
     assert scientific.detector_trace["reference_image_used"] is False
@@ -209,7 +210,7 @@ def _observation(index: int, *, success: bool = True):
         wrong_key_detector_identity="shared_hf_detector_operation",
         primary_null_detector_identity="shared_hf_detector_operation",
         detector_config_digest="d" * 64,
-        observation_protocol="hf_public_image_encoding_v1",
+        observation_protocol=OBSERVATION_PROTOCOL,
         detector_statistic_identity="hf_direct_score_centered_normalized_correlation",
         registered_template_digest="e" * 64,
         wrong_key_template_digest=f"{index + 201:064x}",
@@ -283,14 +284,14 @@ def test_hf_detector_directional_floor_is_strict_and_failures_keep_frozen_denomi
 
 
 @pytest.mark.unit
-def test_hf_detector_directional_rejects_mixed_detector_operation_identity() -> None:
+def test_hf_detector_directional_rejects_mixed_detector_identity() -> None:
     source = _observation(0)
     with pytest.raises(HfDetectorDirectionalMetricError, match="control binding"):
         replace(source, wrong_key_detector_identity="different_detector").validate()
 
 
 @pytest.mark.unit
-def test_hf_detector_directional_registered_subdomain_is_not_base_or_old_wrong_control() -> None:
+def test_hf_detector_directional_registered_subdomain_differs_from_base_and_wrong_control() -> None:
     protocol, manifest = load_hf_only_detector_directional_protocol(
         PROTOCOL, repository_root=ROOT
     )
@@ -323,7 +324,7 @@ def test_hf_detector_directional_authority_files_fail_closed_when_missing(tmp_pa
         {"source_cluster_id": "scientific_amber_lantern"},
         {"seed_namespace": "hf_only_detector_directional_validation_20260808"},
         {"generation_seed": 202608081100},
-        {"image_lineage_identity": "paired_clean_hf_final_rgb_lineage"},
+        {"image_lineage_identity": "paired_clean_hf_rendered_rgb8_lineage"},
         {"key_control_identity": "hf_detector_directional_wrong_key_control_roster"},
     ],
 )

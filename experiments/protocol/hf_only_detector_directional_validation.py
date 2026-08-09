@@ -82,7 +82,7 @@ class HfDetectorDirectionalManifestEntry:
 
     @property
     def image_lineage_identity(self) -> str:
-        return "paired_clean_hf_final_rgb_lineage"
+        return "paired_clean_hf_rendered_rgb8_lineage"
 
     @property
     def image_lineage_digest(self) -> str:
@@ -201,7 +201,7 @@ class HfOnlyDetectorDirectionalProtocol:
     split: str
     role_id: str
     candidate_identity: str
-    detector_operation_identity: str
+    public_callable: str
     manifest_path: str
     manifest_file_sha256: str
     prior_development_manifests: tuple[PriorDevelopmentManifestBinding, ...]
@@ -267,7 +267,7 @@ class HfOnlyDetectorDirectionalProtocol:
             or self.split != "development"
             or self.role_id != "hf_only_detector_directional_validation"
             or self.candidate_identity != "hf_sparse_tail"
-            or self.detector_operation_identity != "main.hf_detector"
+            or self.public_callable != "main.hf_detector"
         ):
             raise HfDetectorDirectionalProtocolError(
                 "directional protocol identity drifted"

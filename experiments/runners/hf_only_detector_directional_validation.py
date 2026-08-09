@@ -262,7 +262,7 @@ class HfOnlyDetectorDirectionalRunner:
         detector_identity = canonical_digest(
             {
                 "candidate_identity": self.protocol.candidate_identity,
-                "detector_operation_identity": self.protocol.detector_operation_identity,
+                "public_callable": self.protocol.public_callable,
                 "detector_config_digest": registered.detector_config_digest,
                 "preprocessing_identity": preprocessing_identity,
                 "statistic_identity": statistic_identity,
@@ -447,7 +447,7 @@ class HfOnlyDetectorDirectionalRunner:
                 "paired_rgb_quality",
             ),
             "candidate_config_digest": self.candidate_config_digest,
-            "paired_ablation_identity": "paired_clean_hf_same_prompt_seed_final_rgb",
+            "paired_ablation_identity": "paired_clean_hf_same_prompt_seed_rendered_rgb8",
             "content_branch_id": "hf_only",
             "geometry_case_id": "not_applicable",
             "sufficient_statistics": (
@@ -488,7 +488,7 @@ class HfOnlyDetectorDirectionalRunner:
             "development_case_id": "paired_clean_hf_blind_directional_detection",
             "candidate_identity": self.protocol.candidate_identity,
             "candidate_config_digest": self.candidate_config_digest,
-            "paired_ablation_identity": "paired_clean_hf_same_prompt_seed_final_rgb",
+            "paired_ablation_identity": "paired_clean_hf_same_prompt_seed_rendered_rgb8",
             "negative_control_case_ids": (
                 "same_image_wrong_key",
                 "paired_clean_primary_null",
@@ -522,7 +522,7 @@ class HfOnlyDetectorDirectionalRunner:
                 "registered_minus_primary_null": observation.registered_minus_primary_null,
             },
             "detector_trace": {
-                "detector_operation_identity": self.protocol.detector_operation_identity,
+                "public_callable": self.protocol.public_callable,
                 "detector_config_digest": observation.detector_config_digest,
                 "preprocessing_identity": observation.observation_protocol,
                 "statistic_identity": "hf_direct_score_centered_normalized_correlation",
@@ -624,7 +624,7 @@ class HfOnlyDetectorDirectionalRunner:
             "development_case_id": "paired_clean_hf_blind_directional_detection",
             "candidate_identity": self.protocol.candidate_identity,
             "candidate_config_digest": self.candidate_config_digest,
-            "paired_ablation_identity": "paired_clean_hf_same_prompt_seed_final_rgb",
+            "paired_ablation_identity": "paired_clean_hf_same_prompt_seed_rendered_rgb8",
             "negative_control_case_ids": (
                 "same_image_wrong_key",
                 "paired_clean_primary_null",

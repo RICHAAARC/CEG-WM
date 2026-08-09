@@ -178,7 +178,7 @@ def execute_hf_only_detector_directional_validation_session(
         {
             "adapter_config_digest": adapter.configuration.config_digest,
             "candidate_identity": protocol.candidate_identity,
-            "detector_operation_identity": protocol.detector_operation_identity,
+            "public_callable": protocol.public_callable,
             "manifest_digest": manifest.digest(),
             "runtime_config_digest": runtime_session.runtime_config_digest,
         }

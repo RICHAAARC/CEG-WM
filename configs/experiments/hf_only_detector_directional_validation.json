@@ -5,7 +5,7 @@
   "split": "development",
   "role_id": "hf_only_detector_directional_validation",
   "candidate_identity": "hf_sparse_tail",
-  "detector_operation_identity": "main.hf_detector",
+  "public_callable": "main.hf_detector",
   "manifest_path": "configs/experiments/hf_only_detector_directional_validation_manifest.json",
   "manifest_file_sha256": "9cfbec095ddb896d526697e831072d6062c7755629ac3622688ee0a15f98441e",
   "prior_development_manifests": [
