@@ -73,6 +73,15 @@ Notebook 与 repository module 的跨边界数据
 | method_config_digest | persisted_protocol | protocol | none | true | false | false | 当前 record 所用方法配置的内容摘要。 |
 | candidate_id | cross_boundary | method_identity | none | false | false | false | 方法组件实际消费的冻结候选身份。 |
 | candidate_ids | cross_boundary | method_identity | none | false | false | false | 跨职责组件实际绑定的完整有序候选身份集合。 |
+| whitening_asset_digest | cross_boundary | provenance | none | false | false | false | LF clean-null whitening 公开资产 canonical payload 的 SHA-256。 |
+| fit_manifest_sha256 | cross_boundary | provenance | none | false | false | false | LF whitening 资产绑定的独立 32-clean fit manifest SHA-256。 |
+| fit_source_cluster_count | cross_boundary | protocol | none | false | false | false | LF whitening 资产固定消费的 clean source-cluster 数量。 |
+| weights_binary32_be_hex | cross_boundary | method_parameter | none | false | false | false | LF whitening 资产按 channel-major 序列化的 96 个 binary32 big-endian 权重。 |
+| artifact_role | cross_boundary | method_identity | none | false | false | false | LF whitening canonical payload 的公开资产职责身份。 |
+| detrend_identity | cross_boundary | method_identity | none | false | false | false | LF whitening 候选固定 affine-plane detrend 算法身份。 |
+| transform_identity | cross_boundary | method_identity | none | false | false | false | LF whitening 候选固定正交 DCT-II 变换身份。 |
+| band_identity | cross_boundary | method_identity | none | false | false | false | LF whitening 候选固定六个 dyadic Chebyshev rings 身份。 |
+| regularization_ratio | cross_boundary | method_parameter | none | false | false | false | LF whitening fit 唯一固定 ridge 比率的 binary64 hex 身份。 |
 | mode | cross_boundary | method_identity | none | false | false | false | router 或 content embedder 当前执行的冻结候选模式。 |
 | keyed_prg_version | cross_boundary | method_identity | none | false | false | false | 密钥流使用的 KDF/PRG 算法身份。 |
 | normal_quantile_table_sha256 | cross_boundary | method_identity | none | false | false | false | 共享冻结 `2^20` midpoint float32 normal quantile table 的字节摘要。 |

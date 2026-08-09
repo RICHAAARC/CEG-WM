@@ -33,6 +33,8 @@ from main import (
     LfCarrierResult,
     LfDetectionObservation,
     LfDetectionResult,
+    LfNullWhitenedDetectionResult,
+    LfNullWhiteningAsset,
     QkGeometrySyncResult,
     RootKeyIdentity,
     RoutingObservations,
@@ -52,6 +54,7 @@ from main import (
     key_schedule_sha256_counter,
     lf_carrier,
     lf_detector,
+    lf_null_whitened_matched_detector,
     qk_geometry_sync,
 )
 from runtime import RuntimeQkObservationResult, Sd35RuntimeAdapter
@@ -597,10 +600,30 @@ class CegWmExperimentAdapter:
     def detect_lf(
         self,
         observation: LfDetectionObservation,
-        detection_key: str,
+        detection_key: str | DerivedWrongKeyMaterial,
     ) -> ComponentCallObservation[LfDetectionResult]:
         result = lf_detector(observation, detection_key)
         return self._observe("lf_detector", result)
+
+    @_revalidate_configuration_before_call
+    def detect_lf_null_whitened(
+        self,
+        observation: LfDetectionObservation,
+        detection_key: str | DerivedWrongKeyMaterial,
+        whitening_asset: LfNullWhiteningAsset,
+    ) -> ComponentCallObservation[LfNullWhitenedDetectionResult]:
+        """Delegate the explicit no-fallback LF whitening candidate."""
+
+        result = lf_null_whitened_matched_detector(
+            observation,
+            detection_key,
+            whitening_asset,
+        )
+        return self._observe(
+            "lf_detector",
+            result,
+            public_callable="main.lf_null_whitened_matched_detector",
+        )
 
     @_revalidate_configuration_before_call
     def detect_hf(

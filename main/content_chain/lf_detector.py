@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha256
-from math import isfinite, sqrt
+from math import cos, isfinite, sqrt
 from struct import pack, unpack
 from typing import Sequence
 
@@ -12,6 +12,15 @@ from main.shared.key_schedule import DerivedWrongKeyMaterial, stable_json_utf8
 
 from .hf_carrier import MODEL_REVISION
 from .lf_carrier import LfCarrierError, lf_carrier
+from .lf_whitening import (
+    LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+    LF_NULL_WHITENING_BAND_IDENTITY,
+    LF_NULL_WHITENING_DETREND_IDENTITY,
+    LF_NULL_WHITENING_LATENT_SHAPE,
+    LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+    LfNullWhiteningAsset,
+    LfNullWhiteningAssetError,
+)
 
 OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
 
@@ -125,6 +134,23 @@ class LfDetectionResult:
     template_digest: str
 
 
+@dataclass(frozen=True, slots=True)
+class LfNullWhitenedDetectionResult:
+    """LF clean-null-whitened blind score with an explicit public asset."""
+
+    candidate_id: str
+    candidate_ids: tuple[str, ...]
+    lf_score: float
+    detector_identity: str
+    detector_config_digest: str
+    whitening_asset_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    observation_digest: str
+    template_digest: str
+
+
 def _center(values: Sequence[float]) -> tuple[float, ...]:
     total = 0.0
     for value in values:
@@ -219,6 +245,296 @@ def lf_detector(
         lf_score=score,
         detector_identity=detector_identity,
         detector_config_digest=detector_config_digest,
+        root_key_public_digest=carrier.root_key_public_digest,
+        key_role=carrier.key_role,
+        wrong_key_index=carrier.wrong_key_index,
+        observation_digest=observation.observation_digest,
+        template_digest=carrier.template_digest,
+    )
+
+
+_DCT_PI = float.fromhex("0x1.921fb54442d18p+1")
+_DCT_SIZE = 64
+_DCT_BASIS = tuple(
+    tuple(
+        sqrt(1.0 / _DCT_SIZE)
+        if frequency == 0
+        else sqrt(2.0 / _DCT_SIZE)
+        * cos(
+            _DCT_PI
+            * (coordinate + 0.5)
+            * frequency
+            / _DCT_SIZE
+        )
+        for coordinate in range(_DCT_SIZE)
+    )
+    for frequency in range(_DCT_SIZE)
+)
+_NORMALIZED_COORDINATES = tuple(
+    (2.0 * coordinate - 63.0) / 63.0
+    for coordinate in range(_DCT_SIZE)
+)
+_NORMALIZED_COORDINATE_SQUARED_SUM = sum(
+    coordinate * coordinate for coordinate in _NORMALIZED_COORDINATES
+)
+
+
+def _affine_detrended_dct(
+    values: Sequence[float],
+    *,
+    role: str,
+) -> tuple[tuple[tuple[float, ...], ...], ...]:
+    residual_channels: list[list[list[float]]] = []
+    offset = 0
+    denominator = 64.0 * _NORMALIZED_COORDINATE_SQUARED_SUM
+    for channel in range(16):
+        channel_values = values[offset : offset + 64 * 64]
+        offset += 64 * 64
+        constant_sum = 0.0
+        for height in range(64):
+            row_offset = height * 64
+            for width in range(64):
+                value = float(channel_values[row_offset + width])
+                constant_sum += value
+        constant = constant_sum / (64.0 * 64.0)
+        height_sum = 0.0
+        for height in range(64):
+            height_coordinate = _NORMALIZED_COORDINATES[height]
+            row_offset = height * 64
+            for width in range(64):
+                height_sum += (
+                    height_coordinate
+                    * float(channel_values[row_offset + width])
+                )
+        height_slope = height_sum / denominator
+        width_sum = 0.0
+        for height in range(64):
+            row_offset = height * 64
+            for width in range(64):
+                width_sum += (
+                    _NORMALIZED_COORDINATES[width]
+                    * float(channel_values[row_offset + width])
+                )
+        width_slope = width_sum / denominator
+        residual_rows: list[list[float]] = []
+        for height in range(64):
+            row_offset = height * 64
+            residual_row: list[float] = []
+            for width in range(64):
+                residual_value = (
+                    float(channel_values[row_offset + width])
+                    - constant
+                    - height_slope * _NORMALIZED_COORDINATES[height]
+                    - width_slope * _NORMALIZED_COORDINATES[width]
+                )
+                if not isfinite(residual_value):
+                    raise LfDetectorError(
+                        f"{role} affine residual must be finite"
+                    )
+                residual_row.append(residual_value)
+            residual_rows.append(residual_row)
+        residual_channels.append(residual_rows)
+
+    coefficient_channels: list[tuple[tuple[float, ...], ...]] = []
+    for channel in range(16):
+        horizontal: list[list[float]] = [
+            [0.0 for _ in range(64)] for _ in range(64)
+        ]
+        for height in range(64):
+            residual_row = residual_channels[channel][height]
+            for width_frequency in range(64):
+                accumulator = 0.0
+                basis_row = _DCT_BASIS[width_frequency]
+                for width in range(64):
+                    accumulator += residual_row[width] * basis_row[width]
+                horizontal[height][width_frequency] = accumulator
+        coefficient_rows: list[tuple[float, ...]] = []
+        for height_frequency in range(64):
+            basis_row = _DCT_BASIS[height_frequency]
+            coefficient_row: list[float] = []
+            for width_frequency in range(64):
+                accumulator = 0.0
+                for height in range(64):
+                    accumulator += (
+                        basis_row[height]
+                        * horizontal[height][width_frequency]
+                    )
+                if not isfinite(accumulator):
+                    raise LfDetectorError(
+                        f"{role} DCT coefficients must be finite"
+                    )
+                coefficient_row.append(accumulator)
+            coefficient_rows.append(tuple(coefficient_row))
+        coefficient_channels.append(tuple(coefficient_rows))
+    return tuple(coefficient_channels)
+
+
+def _whitened_cosine(
+    observation_coefficients: tuple[
+        tuple[tuple[float, ...], ...], ...
+    ],
+    template_coefficients: tuple[
+        tuple[tuple[float, ...], ...], ...
+    ],
+    asset: LfNullWhiteningAsset,
+) -> float:
+    observation_whitened: list[float] = []
+    template_whitened: list[float] = []
+    for channel in range(16):
+        for height_frequency in range(64):
+            for width_frequency in range(64):
+                if height_frequency == 0 and width_frequency == 0:
+                    continue
+                ring_radius = max(height_frequency, width_frequency)
+                band = ring_radius.bit_length() - 1
+                weight = asset.weights[channel * 6 + band]
+                observed = (
+                    weight
+                    * float(
+                        observation_coefficients[channel][height_frequency][
+                            width_frequency
+                        ]
+                    )
+                )
+                template = (
+                    weight
+                    * float(
+                        template_coefficients[channel][height_frequency][
+                            width_frequency
+                        ]
+                    )
+                )
+                observation_whitened.append(observed)
+                template_whitened.append(template)
+    dot = 0.0
+    for observed, template in zip(
+        observation_whitened,
+        template_whitened,
+        strict=True,
+    ):
+        dot += observed * template
+    observation_squared_sum = 0.0
+    for observed in observation_whitened:
+        observation_squared_sum += observed * observed
+    template_squared_sum = 0.0
+    for template in template_whitened:
+        template_squared_sum += template * template
+    if (
+        not isfinite(dot)
+        or not isfinite(observation_squared_sum)
+        or not isfinite(template_squared_sum)
+    ):
+        raise LfDetectorError("LF whitened score accumulators must be finite")
+    if observation_squared_sum <= 0.0 or template_squared_sum <= 0.0:
+        raise LfDetectorError(
+            "LF whitened score requires strictly positive non-DC norms"
+        )
+    norm_product = observation_squared_sum * template_squared_sum
+    if not isfinite(norm_product) or norm_product <= 0.0:
+        raise LfDetectorError(
+            "LF whitened norm product must be finite and positive"
+        )
+    score = dot / sqrt(norm_product)
+    if not isfinite(score):
+        raise LfDetectorError("LF whitened blind score must be finite")
+    return score
+
+
+def lf_null_whitened_matched_detector(
+    observation: LfDetectionObservation,
+    detection_key: str | DerivedWrongKeyMaterial,
+    whitening_asset: LfNullWhiteningAsset | None = None,
+    *,
+    model_revision: str = MODEL_REVISION,
+) -> LfNullWhitenedDetectionResult:
+    """Score a public RGB-to-VAE observation with the frozen whitening asset."""
+
+    if type(observation) is not LfDetectionObservation:
+        raise LfDetectorError(
+            "LF whitened detector requires a public-image observation"
+        )
+    if observation.shape != LF_NULL_WHITENING_LATENT_SHAPE:
+        raise LfDetectorError(
+            "LF whitened detector requires shape [1,16,64,64]"
+        )
+    if observation.observation_protocol != OBSERVATION_PROTOCOL:
+        raise LfDetectorError("LF observation protocol identity mismatch")
+    if _digest(observation.values) != observation.observation_digest:
+        raise LfDetectorError("LF observation digest mismatch")
+    if type(whitening_asset) is not LfNullWhiteningAsset:
+        raise LfDetectorError(
+            "LF whitened detector requires a frozen public whitening asset"
+        )
+    try:
+        whitening_asset.validate()
+    except LfNullWhiteningAssetError as exc:
+        raise LfDetectorError("LF whitening asset validation failed") from exc
+    try:
+        carrier = lf_carrier(
+            detection_key,
+            observation.shape,
+            mask_lf=None,
+            model_revision=model_revision,
+        )
+    except LfCarrierError as exc:
+        raise LfDetectorError(
+            "LF whitened detector template reconstruction failed"
+        ) from exc
+
+    observation_coefficients = _affine_detrended_dct(
+        observation.values,
+        role="LF observation",
+    )
+    template_coefficients = _affine_detrended_dct(
+        carrier.template,
+        role="LF template",
+    )
+    score = _whitened_cosine(
+        observation_coefficients,
+        template_coefficients,
+        whitening_asset,
+    )
+    candidate_ids = (
+        "key_schedule_sha256_counter",
+        "lf_low_pass",
+        LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+    )
+    detector_config = {
+        "band_identity": LF_NULL_WHITENING_BAND_IDENTITY,
+        "candidate_ids": list(candidate_ids),
+        "carrier_config_digest": carrier.carrier_config_digest,
+        "computation_dtype": "float64",
+        "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
+        "input_dtype": "float32",
+        "model_revision": model_revision,
+        "observation_protocol": OBSERVATION_PROTOCOL,
+        "score_operator": LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+        "template_mask": "unmasked",
+        "transform_identity": LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+        "whitening_asset_digest": whitening_asset.whitening_asset_digest,
+    }
+    detector_config_digest = sha256(
+        stable_json_utf8(detector_config)
+    ).hexdigest()
+    detector_identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_ids": list(candidate_ids),
+                "detector_config_digest": detector_config_digest,
+                "detector_role": "lf_null_whitened_blind_score",
+                "whitening_asset_digest": (
+                    whitening_asset.whitening_asset_digest
+                ),
+            }
+        )
+    ).hexdigest()
+    return LfNullWhitenedDetectionResult(
+        candidate_id=LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+        candidate_ids=candidate_ids,
+        lf_score=score,
+        detector_identity=detector_identity,
+        detector_config_digest=detector_config_digest,
+        whitening_asset_digest=whitening_asset.whitening_asset_digest,
         root_key_public_digest=carrier.root_key_public_digest,
         key_role=carrier.key_role,
         wrong_key_index=carrier.wrong_key_index,

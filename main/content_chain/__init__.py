@@ -36,7 +36,14 @@ from .lf_detector import (
     LfDetectionObservation,
     LfDetectionResult,
     LfDetectorError,
+    LfNullWhitenedDetectionResult,
     lf_detector,
+    lf_null_whitened_matched_detector,
+)
+from .lf_whitening import (
+    LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+    LfNullWhiteningAsset,
+    LfNullWhiteningAssetError,
 )
 from .routing import (
     ContentRouterError,
@@ -67,6 +74,10 @@ __all__ = [
     "LfDetectionObservation",
     "LfDetectionResult",
     "LfDetectorError",
+    "LfNullWhitenedDetectionResult",
+    "LfNullWhiteningAsset",
+    "LfNullWhiteningAssetError",
+    "LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID",
     "NullScoreRecord",
     "RoutingObservations",
     "SpatialRoutingObservation",
@@ -77,5 +88,6 @@ __all__ = [
     "hf_detector",
     "lf_carrier",
     "lf_detector",
+    "lf_null_whitened_matched_detector",
     "validate_content_detection_result",
 ]
