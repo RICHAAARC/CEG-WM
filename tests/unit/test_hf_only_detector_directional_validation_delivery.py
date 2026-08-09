@@ -79,7 +79,7 @@ def test_hf_detector_directional_server_help_imports_from_isolated_cwd(
 
 
 @pytest.mark.quick
-def test_hf_detector_directional_notebook_is_thin_and_initial_gate_only() -> None:
+def test_hf_detector_directional_notebook_is_thin_and_resumes_full_directional_roster() -> None:
     notebook = json.loads(NOTEBOOK.read_text("utf-8"))
     code_cells = tuple(
         cell for cell in notebook["cells"] if cell["cell_type"] == "code"
@@ -96,7 +96,7 @@ def test_hf_detector_directional_notebook_is_thin_and_initial_gate_only() -> Non
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
     assert _constant(notebook, "EXECUTION_REVISION") == EXECUTION_REVISION
     assert _constant(notebook, "RUN_ID") == RUN_ID
-    assert _constant(notebook, "AUTHORIZED_SCIENTIFIC_UNIT_COUNT") == 8
+    assert _constant(notebook, "AUTHORIZED_SCIENTIFIC_UNIT_COUNT") == 32
     assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
     assert "drive.mount('/content/drive')" in code_source
     assert "userdata.get('HF_TOKEN')" in code_source
@@ -106,8 +106,9 @@ def test_hf_detector_directional_notebook_is_thin_and_initial_gate_only() -> Non
     assert "--authorized-scientific-unit-count" in code_source
     assert "execution_receipt.json" in code_source
     assert "SHA256SUMS" in code_source
-    assert "two non-scientific operational checks" in source
-    assert "eight HF-only detector directional scientific units" in source
+    assert "existing COMMITTED units 0 through 9" in source
+    assert "resumes units 10 through 33" in source
+    assert "all thirty-two HF-only detector directional scientific units" in source
     assert "immutable partial evidence" in source
     assert SUPERSEDED_RUN_ID not in code_source
     assert "fits no threshold" in source
