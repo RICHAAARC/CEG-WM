@@ -1,0 +1,137 @@
+{
+  "schema_version": "ceg_wm_lf_whitened_directional_validation_protocol_v1",
+  "protocol_id": "ceg_wm_lf_whitened_directional_validation",
+  "protocol_version": "1.0.0",
+  "run_id": "ceg_wm_lf_whitened_directional_validation",
+  "split": "development",
+  "role_id": "lf_whitened_directional_validation",
+  "candidate_identity": "lf_null_whitened_matched_score",
+  "public_callable": "main.lf_null_whitened_matched_detector",
+  "manifest_path": "configs/experiments/lf_whitened_directional_validation_manifest.json",
+  "manifest_file_sha256": "fb47fa5dfa4e80bcd833d84892371b3e7a2d6793fa2d429c998d5965453f4468",
+  "prior_development_manifests": [
+    {
+      "path": "configs/experiments/development_exploration_prompt_roster.json",
+      "file_sha256": "a5b11f76270346351ad79bcba8ff4928f3fc11b843b0889108090045e71bc7bd"
+    },
+    {
+      "path": "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json",
+      "file_sha256": "1245e497971a058a071f5e474b92b67fb548b440f88d50fb718abb3749a6965f"
+    },
+    {
+      "path": "configs/experiments/hf_transmission_diagnostic_manifest.json",
+      "file_sha256": "8dc5708d50cc2093d4e481e35bdd39a6d6960c7939ab31cd278d0611b9ff7172"
+    },
+    {
+      "path": "configs/experiments/hf_only_detector_directional_validation_manifest.json",
+      "file_sha256": "9cfbec095ddb896d526697e831072d6062c7755629ac3622688ee0a15f98441e"
+    },
+    {
+      "path": "configs/experiments/hf_only_reference_prompt_roster.json",
+      "file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f"
+    },
+    {
+      "path": "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+      "file_sha256": "554d1f488dadc433dba57a2b4e9435a8f55eeecef77929c76161076753b2886a"
+    },
+    {
+      "path": "configs/experiments/hf_only_untouched_confirmation_manifest.json",
+      "file_sha256": "43d7d6d81f827348655f6bd0caa4b808f401cf20b1153923d14c5cc86270e6cd"
+    },
+    {
+      "path": "configs/experiments/lf_transmission_diagnostic_manifest.json",
+      "file_sha256": "158287d69632bb4952ddab93202aba7316b8fe22a7c4d6c160c1340d3fe2034d"
+    },
+    {
+      "path": "configs/experiments/lf_whitening_null_fit_manifest.json",
+      "file_sha256": "5d7388a92c98aa5fb1996369bae8de65360e2d25fa7569400135753257bb6e86"
+    },
+    {
+      "path": "configs/experiments/lf_whitened_score_screening_manifest.json",
+      "file_sha256": "3e41f1740284dc7a139e33e49bcd6b5c863324548a2dfb776d088cfbc90b78fe"
+    }
+  ],
+  "source_cluster_deny_list_digest": "d7a0970709c8ca12cc7cba1fd345483d7fb5046af4888a306a2a646c266208f0",
+  "future_split_exclusion_roles": [
+    "candidate_selection",
+    "calibration",
+    "evaluation"
+  ],
+  "registered_key_derivation_identity": "lf_whitened_directional_registered_key_derivation",
+  "wrong_key_control_identity": "lf_whitened_directional_four_key_max_control",
+  "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1",
+  "method_review_reference": "agent2-lf-whitened-method-semantic-review:4cd7d33a37b041970ed078b699bb8f0aa82b4e31:APPROVE",
+  "method_reviewed_revision": "4cd7d33a37b041970ed078b699bb8f0aa82b4e31",
+  "whitening_asset_fit_producer_revision": "a78c47184cf83ad351bb4442ebd31c218726de25",
+  "whitening_asset_fit_identity": "ceg_wm_lf_whitened_score_screening",
+  "whitening_asset_fit_run_id": "ceg_wm_lf_whitening_asset_fit_and_score_screening",
+  "whitening_asset_fit_protocol_digest": "901f3d82d9e92614669ef31508cfe1c1c33e62b9dfc0f7014915ce439bfe0898",
+  "whitening_null_fit_manifest_file_sha256": "5d7388a92c98aa5fb1996369bae8de65360e2d25fa7569400135753257bb6e86",
+  "ordered_component_ids": [
+    "key_schedule",
+    "lf_carrier",
+    "content_embedder",
+    "lf_detector"
+  ],
+  "component_source_bindings": [
+    {
+      "component_id": "key_schedule",
+      "source_role": "component_implementation",
+      "implementation_path": "main/shared/key_schedule.py",
+      "implementation_symbol": "key_schedule_sha256_counter",
+      "source_sha256": "d199e5fe1a99531cde9a0d5fbd433cec12fd92421f9f96c9248793bea684b038"
+    },
+    {
+      "component_id": "lf_carrier",
+      "source_role": "component_implementation",
+      "implementation_path": "main/content_chain/lf_carrier.py",
+      "implementation_symbol": "lf_carrier",
+      "source_sha256": "c7b862e69a82589cfbaa5e9164942c8194a61187800374d1a9d9c0d620ba59ef"
+    },
+    {
+      "component_id": "content_embedder",
+      "source_role": "component_implementation",
+      "implementation_path": "main/content_chain/embedder.py",
+      "implementation_symbol": "content_embedder",
+      "source_sha256": "098995752b17071cb47120699ce69066fd24dba7c29a773844caf243c127ece2"
+    },
+    {
+      "component_id": "lf_detector",
+      "source_role": "component_implementation",
+      "implementation_path": "main/content_chain/lf_detector.py",
+      "implementation_symbol": "lf_detector",
+      "source_sha256": "c8482e803f26cc05ed7e9d6e9d1e5558756db28a5dd308a788b712fe92ffa622"
+    },
+    {
+      "component_id": "lf_detector",
+      "source_role": "candidate_public_asset_contract",
+      "implementation_path": "main/content_chain/lf_whitening.py",
+      "implementation_symbol": "LfNullWhiteningAsset",
+      "source_sha256": "608f0ab7f24a01b152aceb455b718530a9690efdb9843953020c95bc599b4c7a"
+    }
+  ],
+  "component_implementation_digest": "005e18bd923995dfc09a1d782e74bd1fba69287c465c9d56d311fc7a3e307c66",
+  "operational_smoke_prompt": "a limestone reading alcove with diffuse daylight and a cedar writing desk",
+  "operational_smoke_prompt_digest": "5046b5a5db898869ade6255a06ecbe683d1f53942d6e7db8d8abbfa807d5a586",
+  "operational_smoke_generation_seed": 2026083100,
+  "operational_smoke_image_lineage_identity": "lf_whitened_detector_operational_rendered_rgb8_observation",
+  "operational_smoke_image_lineage_digest": "20c92fecb59589ba363dca9c2bc305df0fe3bd0f5eef0bd04e31288c635f48d4",
+  "operational_unit_count": 1,
+  "scientific_cluster_count": 32,
+  "maximum_total_units": 33,
+  "maximum_attempts_per_unit": 2,
+  "maximum_duration_seconds_per_unit": 2700,
+  "wrong_key_roster_size": 4,
+  "practical_margin_floor": 0.0009765625,
+  "content_relative_l2_numerator": 3,
+  "content_relative_l2_denominator": 250,
+  "minimum_registered_minus_null_success_count": 28,
+  "minimum_registered_minus_max_wrong_success_count": 28,
+  "confidence_level": 0.95,
+  "confidence_lower_bound_requirement": "strictly_greater_than_one_half",
+  "stop_rule": "complete_all_thirty_two_scientific_clusters_then_require_twenty_eight_registered_primary_null_and_twenty_eight_registered_max_wrong_margins_strictly_above_the_frozen_floor_with_both_one_sided_exact_ninety_five_percent_lower_bounds_strictly_above_one_half_and_no_identity_budget_integrity_or_nonfinite_violation",
+  "passing_module_outcome": "mechanism_signal_observed",
+  "passing_candidate_recommendation": "candidate_worth_further_selection",
+  "claim_boundary": "development_lf_whitened_directional_validation_only_no_threshold_no_fpr_no_promotion_no_calibration",
+  "unit_roster_digest": "8c471a0682c8912b9e868c197ab4f1fbc0c00803ea5fef344bed31ad59e6239f"
+}
