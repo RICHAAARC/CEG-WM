@@ -1,22 +1,30 @@
 # Experiment execution servers
 
-## LF whitening asset fit and score screening
+## LF whitened directional validation
 
-`lf_whitened_score_screening_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。
-当前唯一授权 Notebook 为 `notebooks/colab/lf_whitened_score_screening.ipynb`，固定绑定
-execution revision `a78c47184cf83ad351bb4442ebd31c218726de25` 与 run ID
-`ceg_wm_lf_whitening_asset_fit_and_score_screening`。服务器执行冻结的 1 个
-non-scientific operational smoke、32 个 clean null-fit 与 8 个 paired raw-vs-whitened
-screening units；每 unit 最多 2 attempts、2700 秒。operational unit 不计 scientific
-coverage。
+`lf_whitened_directional_validation_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行
+入口。当前唯一授权 Notebook 为
+`notebooks/colab/lf_whitened_directional_validation.ipynb`，固定绑定 execution revision
+`b23eb00391dc9ad03deb5ffd12c2a47739a3aa09` 与 run ID
+`ceg_wm_lf_whitened_directional_validation`。服务器执行冻结的 1 个 non-scientific
+public-endpoint smoke 与 32 个 LF whitened directional scientific units；每 unit 最多
+2 attempts、2700 秒。operational unit 不计 scientific coverage。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 public
 method/runtime 调用、正式 records、跨 session persistence 和内部 result 或 diagnostic ZIP。
 Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/ZIP/`SHA256SUMS`。
-本 development-only fit 与 screening 不拟合 threshold，不授权 FPR、candidate promotion、
-calibration、formal evaluation、baseline 或论文 claim；不执行 LF directional validation、
-routing、LF/HF 组合、Q/K、estimator、reliability、rectification 或 conditional recovery。
-其他 checked-in Notebook 入口均已暂停。
+本 development-only directional validation 只读使用 producer revision
+`a78c47184cf83ad351bb4442ebd31c218726de25`、run ID
+`ceg_wm_lf_whitening_asset_fit_and_score_screening` 已冻结的 whitening asset，不重拟合、
+迁移或回写旧 run。它不拟合 threshold，不授权 FPR、candidate promotion、calibration、
+formal evaluation、baseline 或论文 claim；不执行 routing、LF/HF 组合、Q/K、estimator、
+reliability、rectification 或 conditional recovery。其他 checked-in Notebook 入口均已暂停。
+
+`lf_whitened_score_screening_server.py` 与
+`notebooks/colab/lf_whitened_score_screening.ipynb` 已完成 1 个 non-scientific operational
+smoke、32 个 clean null-fit 与 8 个 paired raw-vs-whitened screening units，当前为
+**paused / not authorized**。其冻结 whitening asset 仅作为当前方向验证的只读输入；旧
+records 保持原 producer/run 身份，且不进入新验证的 scientific 分母。
 
 `lf_transmission_diagnostic_server.py` 与
 `notebooks/colab/lf_transmission_diagnostic.ipynb` 绑定的 execution revision

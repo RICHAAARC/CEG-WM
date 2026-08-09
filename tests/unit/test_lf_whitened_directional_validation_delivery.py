@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from hashlib import sha256
 import json
 import os
@@ -22,9 +23,13 @@ from scripts.experiment_execution import lf_whitened_directional_validation_serv
 
 
 ROOT = Path(__file__).resolve().parents[2]
+NOTEBOOK = ROOT / "notebooks/colab/lf_whitened_directional_validation.ipynb"
 PROTOCOL = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
 SERVER_RELATIVE = Path("scripts/experiment_execution/lf_whitened_directional_validation_server.py")
 SERVER = ROOT / SERVER_RELATIVE
+EXECUTION_REVISION = "b23eb00391dc9ad03deb5ffd12c2a47739a3aa09"
+RUN_ID = "ceg_wm_lf_whitened_directional_validation"
+WHITENING_ASSET_FIT_RUN_ID = "ceg_wm_lf_whitening_asset_fit_and_score_screening"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/lf_whitened_directional_validation.json",
     "configs/experiments/lf_whitened_directional_validation_manifest.json",
@@ -34,6 +39,25 @@ REQUIRED_PACKAGE_MEMBERS = {
     "scripts/experiment_execution/lf_whitened_directional_validation_entrypoint.py",
     SERVER_RELATIVE.as_posix(),
 }
+
+
+def _constant(notebook: dict[str, object], name: str) -> object:
+    values: list[object] = []
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        tree = ast.parse("".join(cell.get("source", [])))
+        for statement in tree.body:
+            if not isinstance(statement, ast.Assign):
+                continue
+            if any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in statement.targets
+            ):
+                assert isinstance(statement.value, ast.Constant)
+                values.append(statement.value.value)
+    assert len(values) == 1
+    return values[0]
 
 
 @pytest.mark.quick
@@ -134,3 +158,78 @@ def test_lf_whitened_directional_server_writes_safe_receipt(
     assert root_secret.encode() not in receipt_bytes
     assert hf_secret.encode() not in receipt_bytes
     assert json.loads(receipt_bytes)["development_claim_boundary"] == protocol.claim_boundary
+
+
+@pytest.mark.quick
+def test_lf_whitened_directional_notebook_is_thin_and_output_free() -> None:
+    notebook = json.loads(NOTEBOOK.read_text("utf-8"))
+    code_cells = tuple(
+        cell for cell in notebook["cells"] if cell["cell_type"] == "code"
+    )
+    source = "\n".join(
+        "".join(cell.get("source", [])) for cell in notebook["cells"]
+    )
+    code_source = "\n".join(
+        "".join(cell.get("source", [])) for cell in code_cells
+    )
+
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert len(code_cells) == 5
+    assert all(cell["execution_count"] is None for cell in code_cells)
+    assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
+    assert _constant(notebook, "EXECUTION_REVISION") == EXECUTION_REVISION
+    assert _constant(notebook, "RUN_ID") == RUN_ID
+    assert (
+        _constant(notebook, "WHITENING_ASSET_FIT_RUN_ID")
+        == WHITENING_ASSET_FIT_RUN_ID
+    )
+    assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
+    assert "drive.mount('/content/drive')" in code_source
+    assert "userdata.get('HF_TOKEN')" in code_source
+    assert "userdata.get('CEG_WM_ROOT_KEY')" in code_source
+    assert "checkout', '--detach', 'FETCH_HEAD'" in code_source
+    assert SERVER_RELATIVE.name in code_source
+    assert (
+        "DRIVE_ROOT = DRIVE_MOUNT / 'MyDrive' / 'CEG-WM' / "
+        "'lf_whitened_directional_validation'"
+    ) in code_source
+    assert "PERSISTENT_ROOT = DRIVE_ROOT / 'persistent'" in code_source
+    assert (
+        "WHITENING_ASSET_PERSISTENT_ROOT = DRIVE_MOUNT / 'MyDrive' / "
+        "'CEG-WM' / 'lf_whitened_score_screening' / 'persistent'"
+    ) in code_source
+    assert "--whitening-asset-persistent-root" in code_source
+    assert "execution_receipt.json" in code_source
+    assert "SHA256SUMS" in code_source
+    assert "one non-scientific public-endpoint smoke unit" in source
+    assert "thirty-two frozen LF whitened directional scientific units" in source
+    assert "fits no threshold" in source
+    assert "estimates no FPR" in source
+    assert "promotes no candidate" in source
+    for forbidden in (
+        "pip install",
+        "snapshot_download(",
+        "from_pretrained(",
+        "LfWhitenedDirectionalValidationRunner(",
+        "DevelopmentScientificRecord(",
+        "execute_lf_whitened_directional_validation_session(",
+        "--skip-dependency-install",
+        "content_router",
+        "qk_geometry_sync",
+        "hf_only_threshold_fit",
+        "4096",
+    ):
+        assert forbidden not in code_source
+
+    protocol, manifest = load_lf_whitened_directional_validation_protocol(
+        PROTOCOL,
+        repository_root=ROOT,
+    )
+    assert protocol.run_id == RUN_ID
+    assert protocol.whitening_asset_fit_run_id == WHITENING_ASSET_FIT_RUN_ID
+    assert protocol.operational_unit_count == 1
+    assert protocol.scientific_cluster_count == 32
+    assert protocol.maximum_total_units == 33
+    assert protocol.maximum_attempts_per_unit == 2
+    assert protocol.maximum_duration_seconds_per_unit == 2700
+    assert len(manifest.entries) == 32
