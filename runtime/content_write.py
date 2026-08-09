@@ -107,6 +107,22 @@ class ContentWriteVaeResult:
     watermarked_detection_latent: torch.Tensor
 
 
+@dataclass(frozen=True, slots=True)
+class CleanImageVaeObservationResult:
+    """Single clean generation and public RGB-to-VAE observation."""
+
+    candidate_id: str
+    runtime_config_digest: str
+    selected_device: str
+    clean_base_latent_digest: str
+    clean_callback_indices: tuple[int, ...]
+    clean_generation_terminal_latent: torch.Tensor
+    vae_scaling_factor_actual: float
+    vae_shift_factor_actual: float
+    clean_image: torch.Tensor
+    clean_detection_latent: torch.Tensor
+
+
 def _float32(value: float, role: str) -> float:
     if not isfinite(value):
         raise RuntimeContentExecutionError(f"{role} must be finite")
@@ -509,15 +525,12 @@ def _encode_detection_image(
     ).detach().clone()
 
 
-def execute_content_write_and_vae(
+def _validated_content_execution_latent(
     backend: RuntimeContentBackend,
     configuration: Sd35RuntimeConfiguration,
     session: RuntimeSession,
     base_latent: torch.Tensor,
-    content_embedding_operation: ContentEmbeddingOperation,
-) -> ContentWriteVaeResult:
-    """让 main 驱动 actual-dtype 预算闭环并执行一对生成。"""
-
+) -> torch.Tensor:
     if not isinstance(backend, RuntimeContentBackend):
         raise RuntimeContentExecutionError(
             "prepared backend lacks the content_write_and_vae execution protocol"
@@ -539,10 +552,6 @@ def execute_content_write_and_vae(
         raise RuntimeContentExecutionError(
             "runtime session does not match the frozen execution identity"
         )
-    if not callable(content_embedding_operation):
-        raise RuntimeContentExecutionError(
-            "content_embedding_operation must be callable"
-        )
     latent = _tensor(
         base_latent,
         role="base_latent",
@@ -563,22 +572,14 @@ def execute_content_write_and_vae(
         raise RuntimeContentExecutionError(
             "base_latent has zero L2 energy"
         )
+    return latent
 
-    clean_initial = latent.detach().clone()
-    watermarked_initial = latent.detach().clone()
-    if clean_initial.data_ptr() == watermarked_initial.data_ptr():
-        raise RuntimeContentExecutionError(
-            "paired generation latents unexpectedly share storage"
-        )
-    base_digest = _tensor_digest(latent)
-    if (
-        _tensor_digest(clean_initial) != base_digest
-        or _tensor_digest(watermarked_initial) != base_digest
-    ):
-        raise RuntimeContentExecutionError(
-            "clean/watermarked paths do not share one base latent"
-        )
 
+def _execute_clean_generation(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    initial_latent: torch.Tensor,
+) -> tuple[torch.Tensor, tuple[int, ...], dict[int, torch.Tensor]]:
     expected_indices = tuple(range(configuration.inference_steps))
     clean_indices: list[int] = []
     clean_trace: dict[int, torch.Tensor] = {}
@@ -595,9 +596,9 @@ def execute_content_write_and_vae(
         current = _tensor(
             callback_latent,
             role="clean_callback_latent",
-            shape=latent.shape,
+            shape=initial_latent.shape,
             dtype=torch.float16,
-            device=latent.device,
+            device=initial_latent.device,
         )
         clean_indices.append(index)
         clean_trace[index] = current.detach().clone()
@@ -605,11 +606,11 @@ def execute_content_write_and_vae(
 
     try:
         clean_terminal = _tensor(
-            backend.run_generation(clean_initial, clean_callback),
+            backend.run_generation(initial_latent, clean_callback),
             role="clean_generation_terminal_latent",
-            shape=latent.shape,
+            shape=initial_latent.shape,
             dtype=torch.float16,
-            device=latent.device,
+            device=initial_latent.device,
         ).detach().clone()
     except RuntimeContentExecutionError:
         raise
@@ -621,6 +622,106 @@ def execute_content_write_and_vae(
         raise RuntimeContentExecutionError(
             "clean generation callback sequence is missing or out of order"
         )
+    return clean_terminal, tuple(clean_indices), clean_trace
+
+
+def execute_clean_image_and_vae_observation(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+) -> CleanImageVaeObservationResult:
+    """Generate one clean image and return its public posterior-mode observation."""
+
+    latent = _validated_content_execution_latent(
+        backend,
+        configuration,
+        session,
+        base_latent,
+    )
+    clean_initial = latent.detach().clone()
+    if _tensor_digest(clean_initial) != _tensor_digest(latent):
+        raise RuntimeContentExecutionError(
+            "clean generation latent does not match base latent"
+        )
+    clean_terminal, clean_indices, _clean_trace = _execute_clean_generation(
+        backend,
+        configuration,
+        clean_initial,
+    )
+    factors = backend.vae_factors()
+    if type(factors) is not RuntimeVaeFactors:
+        raise RuntimeContentExecutionError(
+            "backend VAE factors do not match the execution protocol"
+        )
+    clean_image = _decode_generation_latent(
+        backend,
+        clean_terminal,
+        factors,
+        "clean",
+    )
+    clean_detection_latent = _encode_detection_image(
+        backend,
+        clean_image,
+        factors,
+        "clean",
+    )
+    return CleanImageVaeObservationResult(
+        candidate_id=session.candidate_id,
+        runtime_config_digest=session.runtime_config_digest,
+        selected_device=session.selected_device,
+        clean_base_latent_digest=_tensor_digest(latent),
+        clean_callback_indices=clean_indices,
+        clean_generation_terminal_latent=clean_terminal,
+        vae_scaling_factor_actual=float(factors.scaling_factor),
+        vae_shift_factor_actual=float(factors.shift_factor),
+        clean_image=clean_image,
+        clean_detection_latent=clean_detection_latent,
+    )
+
+
+def execute_content_write_and_vae(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+    content_embedding_operation: ContentEmbeddingOperation,
+) -> ContentWriteVaeResult:
+    """让 main 驱动 actual-dtype 预算闭环并执行一对生成。"""
+
+    latent = _validated_content_execution_latent(
+        backend,
+        configuration,
+        session,
+        base_latent,
+    )
+    if not callable(content_embedding_operation):
+        raise RuntimeContentExecutionError(
+            "content_embedding_operation must be callable"
+        )
+
+    clean_initial = latent.detach().clone()
+    watermarked_initial = latent.detach().clone()
+    if clean_initial.data_ptr() == watermarked_initial.data_ptr():
+        raise RuntimeContentExecutionError(
+            "paired generation latents unexpectedly share storage"
+        )
+    base_digest = _tensor_digest(latent)
+    if (
+        _tensor_digest(clean_initial) != base_digest
+        or _tensor_digest(watermarked_initial) != base_digest
+    ):
+        raise RuntimeContentExecutionError(
+            "clean/watermarked paths do not share one base latent"
+        )
+
+    clean_terminal, clean_indices, clean_trace = _execute_clean_generation(
+        backend,
+        configuration,
+        clean_initial,
+    )
+
+    expected_indices = tuple(range(configuration.inference_steps))
 
     watermarked_indices: list[int] = []
     watermarked_seen: set[int] = set()

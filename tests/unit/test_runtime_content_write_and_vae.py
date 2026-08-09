@@ -87,6 +87,8 @@ class FakeContentBackend:
         erase_second_suffix: bool = False,
         invalid_posterior: bool = False,
         nonfinite_posterior_mode: bool = False,
+        invalid_vae_factors: bool = False,
+        generation_failure: bool = False,
     ) -> None:
         default = tuple(range(20))
         self.callback_sequences = callback_sequences or (default, default)
@@ -94,6 +96,8 @@ class FakeContentBackend:
         self.erase_second_suffix = erase_second_suffix
         self.invalid_posterior = invalid_posterior
         self.nonfinite_posterior_mode = nonfinite_posterior_mode
+        self.invalid_vae_factors = invalid_vae_factors
+        self.generation_failure = generation_failure
         self.run_calls = 0
         self.close_calls = 0
         self.decode_inputs: list[torch.Tensor] = []
@@ -112,6 +116,8 @@ class FakeContentBackend:
         self.close_calls += 1
 
     def run_generation(self, initial_latent, callback):
+        if self.generation_failure:
+            raise RuntimeError("synthetic clean generation failure")
         run_index = self.run_calls
         self.run_calls += 1
         state = initial_latent.detach().clone()
@@ -132,6 +138,8 @@ class FakeContentBackend:
         return state
 
     def vae_factors(self) -> RuntimeVaeFactors:
+        if self.invalid_vae_factors:
+            return object()
         return RuntimeVaeFactors(
             scaling_factor=0.5,
             shift_factor=0.25,
@@ -199,6 +207,121 @@ def _initialized_adapter(backend: FakeContentBackend):
     adapter = create_runtime_adapter(backend)
     adapter.initialize("cpu")
     return adapter
+
+
+@pytest.mark.unit
+def test_clean_image_observation_runs_one_generation_decode_encode_and_mode(
+) -> None:
+    backend = FakeContentBackend()
+    adapter = _initialized_adapter(backend)
+    base = _base_latent()
+    base_before = base.detach().clone()
+
+    result = adapter.execute_clean_image_and_vae_observation(base)
+
+    assert adapter.state is RuntimeAdapterState.READY
+    assert torch.equal(base, base_before)
+    assert backend.run_calls == 1
+    assert result.clean_callback_indices == tuple(range(20))
+    assert len(backend.decode_inputs) == 1
+    assert len(backend.posteriors) == 1
+    assert backend.posteriors[0].mode_calls == 1
+    assert backend.posteriors[0].sample_calls == 0
+    assert torch.equal(
+        backend.decode_inputs[0],
+        result.clean_generation_terminal_latent.to(torch.float32) / 0.5 + 0.25,
+    )
+    assert torch.equal(
+        result.clean_detection_latent,
+        (result.clean_image / 4.0 - 0.25) * 0.5,
+    )
+    assert result.candidate_id == adapter.session.candidate_id
+    assert result.runtime_config_digest == adapter.session.runtime_config_digest
+    assert result.selected_device == "cpu"
+    assert len(result.clean_base_latent_digest) == 64
+    assert not hasattr(result, "watermarked_image")
+    assert not hasattr(result, "content_materialization")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "backend,error_match",
+    [
+        (
+            FakeContentBackend(
+                callback_sequences=(
+                    tuple(index for index in range(20) if index != 18),
+                    tuple(range(20)),
+                )
+            ),
+            "missing or out of order",
+        ),
+        (FakeContentBackend(invalid_posterior=True), "posterior mode boundary"),
+        (
+            FakeContentBackend(nonfinite_posterior_mode=True),
+            "posterior_mode contains non-finite",
+        ),
+        (FakeContentBackend(invalid_vae_factors=True), "VAE factors"),
+        (FakeContentBackend(generation_failure=True), "generation backend failed"),
+    ],
+)
+def test_clean_image_observation_fails_closed_on_runtime_boundary(
+    backend: FakeContentBackend,
+    error_match: str,
+) -> None:
+    adapter = _initialized_adapter(backend)
+
+    with pytest.raises(RuntimeAdapterError, match="failed closed") as exc_info:
+        adapter.execute_clean_image_and_vae_observation(_base_latent())
+
+    assert error_match in str(exc_info.value.__cause__)
+    assert adapter.state is RuntimeAdapterState.FAILED
+    assert backend.close_calls == 1
+    assert backend.run_calls <= 1
+
+
+@pytest.mark.unit
+def test_clean_image_observation_requires_ready_content_backend() -> None:
+    backend = FakeContentBackend()
+    adapter = create_runtime_adapter(backend)
+
+    with pytest.raises(RuntimeAdapterError, match="must be ready"):
+        adapter.execute_clean_image_and_vae_observation(_base_latent())
+
+    assert backend.run_calls == 0
+    assert backend.decode_inputs == []
+    assert backend.posteriors == []
+
+
+@pytest.mark.unit
+def test_clean_image_observation_matches_existing_paired_clean_path() -> None:
+    clean_backend = FakeContentBackend()
+    paired_backend = FakeContentBackend()
+    clean_adapter = _initialized_adapter(clean_backend)
+    paired_adapter = _initialized_adapter(paired_backend)
+    base = _base_latent()
+
+    clean = clean_adapter.execute_clean_image_and_vae_observation(base)
+    paired = paired_adapter.execute_content_write_and_vae(
+        base,
+        _embedding_operation([]),
+    )
+
+    assert clean.clean_base_latent_digest == paired.paired_base_latent_digest
+    assert clean.clean_callback_indices == paired.clean_callback_indices
+    assert torch.equal(
+        clean.clean_generation_terminal_latent,
+        paired.clean_generation_terminal_latent,
+    )
+    assert clean.vae_scaling_factor_actual == paired.vae_scaling_factor_actual
+    assert clean.vae_shift_factor_actual == paired.vae_shift_factor_actual
+    assert torch.equal(clean.clean_image, paired.clean_image)
+    assert torch.equal(
+        clean.clean_detection_latent,
+        paired.clean_detection_latent,
+    )
+    assert clean_backend.run_calls == 1
+    assert paired_backend.run_calls == 2
 
 
 @pytest.mark.unit

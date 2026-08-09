@@ -40,11 +40,13 @@ from .configuration import (
     parse_runtime_configuration,
 )
 from .content_write import (
+    CleanImageVaeObservationResult,
     ContentEmbeddingOperation,
     ContentMaterializationAttempt,
     ContentMaterializationMeasurement,
     ContentWriteVaeResult,
     RuntimeContentExecutionError,
+    execute_clean_image_and_vae_observation,
     measure_content_materialization,
 )
 from .qk_observation import (
@@ -69,6 +71,7 @@ from .sd35_backend import (
 
 __all__ = [
     "DEFAULT_RUNTIME_CONFIG_PATH",
+    "CleanImageVaeObservationResult",
     "ContentEmbeddingOperation",
     "ContentMaterializationAttempt",
     "ContentMaterializationMeasurement",
@@ -107,6 +110,7 @@ __all__ = [
     "Sd35BackendError",
     "Sd35PipelineBackend",
     "create_runtime_adapter",
+    "execute_clean_image_and_vae_observation",
     "load_runtime_configuration",
     "measure_content_materialization",
     "measure_generation_routing_reference_inputs",

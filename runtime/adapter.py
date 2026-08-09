@@ -34,7 +34,10 @@ from .configuration import (
 DeviceRequest = Literal["auto", "cpu", "cuda"]
 
 if TYPE_CHECKING:
-    from .content_write import ContentWriteVaeResult
+    from .content_write import (
+        CleanImageVaeObservationResult,
+        ContentWriteVaeResult,
+    )
     from .qk_observation import RuntimeQkObservationResult
     from .routing_observation import RuntimeRoutingObservationResult
     from .routing_observation import RuntimeRoutingReferenceMeasurement
@@ -382,6 +385,43 @@ class Sd35RuntimeAdapter:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected content_write_and_vae error"
+            ) from exc
+
+    def execute_clean_image_and_vae_observation(
+        self,
+        base_latent: torch.Tensor,
+    ) -> CleanImageVaeObservationResult:
+        """Run one clean generation and its public posterior-mode observation."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before clean image observation"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the clean image observation protocol"
+            )
+        from .content_write import (
+            RuntimeContentExecutionError,
+            execute_clean_image_and_vae_observation,
+        )
+
+        try:
+            return execute_clean_image_and_vae_observation(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+            )
+        except RuntimeContentExecutionError as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime clean image observation failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected clean observation error"
             ) from exc
 
     def observe_detection_qk(
