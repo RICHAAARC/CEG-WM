@@ -68,7 +68,6 @@ class HfDetectorDirectionalEvidenceViolation(HfDetectorDirectionalRunnerError):
         content_relative_l2_limit: float,
         budget_status: str,
         integrity_status: str,
-        materialization_integrity_status: str,
     ) -> None:
         if category not in {
             "identity_violation",
@@ -83,7 +82,6 @@ class HfDetectorDirectionalEvidenceViolation(HfDetectorDirectionalRunnerError):
             "content_relative_l2_limit": content_relative_l2_limit,
             "budget_status": budget_status,
             "integrity_status": integrity_status,
-            "materialization_integrity_status": materialization_integrity_status,
         }
         super().__init__(category)
 
@@ -290,8 +288,11 @@ class HfOnlyDetectorDirectionalRunner:
             "realized_relative_l2": materialization.realized_relative_l2,
             "content_relative_l2_limit": materialization_result.content_relative_l2_limit,
             "budget_status": materialization_result.budget_status,
-            "integrity_status": materialization_result.integrity_status,
-            "materialization_integrity_status": materialization.integrity_status,
+            "integrity_status": (
+                materialization.integrity_status
+                if materialization.integrity_status != "passed"
+                else materialization_result.integrity_status
+            ),
         }
         if (
             pack(">f", materialization_result.content_relative_l2_nominal)
@@ -630,7 +631,7 @@ class HfOnlyDetectorDirectionalRunner:
         operation_payload = {
             "failure_stage": "hf_detector_directional_runtime_operation",
             "failure_type": failure_type,
-            "result_available": failure_diagnostics is not None,
+            "result_available": False,
             "failure_category": failure_category,
         }
         if failure_diagnostics is not None:

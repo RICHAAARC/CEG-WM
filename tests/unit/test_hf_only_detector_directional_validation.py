@@ -31,7 +31,6 @@ from experiments.protocol.hf_only_detector_directional_validation import (
     load_hf_only_detector_directional_protocol,
 )
 from experiments.runners.hf_only_detector_directional_validation import (
-    HfDetectorDirectionalEvidenceViolation,
     HfOnlyDetectorDirectionalRunner,
 )
 from main import derive_wrong_key_material, identify_root_key
@@ -229,73 +228,129 @@ def test_hf_detector_directional_runner_accepts_embedder_binary32_budget_boundar
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("failure_category", "materialization_integrity_status", "limit_offset"),
-    (
-        ("budget_violation", "passed", 0.001),
-        ("integrity_violation", "write_disappeared", 0.0),
-    ),
-)
-def test_hf_detector_directional_runner_records_controlled_evidence_failures(
+def test_hf_detector_directional_entrypoint_commits_controlled_evidence_failure(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    failure_category: str,
-    materialization_integrity_status: str,
-    limit_offset: float,
 ) -> None:
-    runner, runtime = _runner()
-    runtime_result = runner._execute_paired_runtime(_base_latent())
-    binary32_limit = unpack(">f", pack(">f", 3 / 250))[0]
-    controlled_result = replace(
-        runtime_result,
-        content_materialization=replace(
-            runtime_result.content_materialization,
-            realized_relative_l2=binary32_limit,
-            integrity_status=materialization_integrity_status,
-        ),
-        content_materialization_result=replace(
-            runtime_result.content_materialization_result,
-            content_relative_l2_nominal=binary32_limit,
-            content_relative_l2_limit=binary32_limit + limit_offset,
-            realized_relative_l2=binary32_limit,
-        ),
+    package = tmp_path / "directional_failure_package.zip"
+    package.write_bytes(b"directional-failure-package")
+    backend = _DirectionalCudaBackend()
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "Sd35PipelineBackend",
+        lambda **_kwargs: backend,
+    )
+    initialize_runtime = Sd35RuntimeAdapter.initialize
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "initialize",
+        lambda self, _device: initialize_runtime(self, "cpu"),
     )
     monkeypatch.setattr(
-        runner, "_execute_paired_runtime", lambda _base_latent: controlled_result
+        directional_entrypoint,
+        "_build_or_verify_package",
+        lambda *_args: package,
     )
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "_base_latent",
+        lambda generation_seed, **_kwargs: (
+            _base_latent().to(torch.float32)
+            + float(generation_seed % 97) / 10000.0
+        ).to(torch.float16),
+    )
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _index: "Test GPU")
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda _index: 1)
 
-    with pytest.raises(HfDetectorDirectionalEvidenceViolation) as caught:
-        runner.execute_scientific_cluster(
-            cluster_ordinal=0,
-            base_latent=_base_latent(),
-            attempt_index=0,
-            retry_parent_intent_digest=None,
-            maximum_duration_seconds=2700,
+    original_execute = Sd35RuntimeAdapter.execute_content_write_and_vae
+    execution_count = 0
+    binary32_limit = unpack(">f", pack(">f", 3 / 250))[0]
+
+    def execute_with_controlled_evidence_failure(
+        runtime_adapter: Sd35RuntimeAdapter,
+        base_latent: torch.Tensor,
+        content_embedding_operation,
+    ):
+        nonlocal execution_count
+        execution_count += 1
+        result = original_execute(
+            runtime_adapter, base_latent, content_embedding_operation
         )
-    exc = caught.value
-    record = runner.create_failed_scientific_record(
-        cluster_ordinal=0,
-        attempt_index=0,
-        retry_parent_intent_digest=None,
-        maximum_duration_seconds=2700,
-        actual_elapsed_seconds=1.0,
-        failure_type=f"{type(exc).__module__}.{type(exc).__qualname__}",
-        resource_failure=False,
-        failure_category=exc.category,
-        failure_diagnostics=exc.diagnostics,
-    )
-    runtime.close()
+        if execution_count != 3:
+            return result
+        return replace(
+            result,
+            content_materialization=replace(
+                result.content_materialization,
+                realized_relative_l2=binary32_limit,
+                integrity_status="write_disappeared",
+            ),
+            content_materialization_result=replace(
+                result.content_materialization_result,
+                content_relative_l2_nominal=binary32_limit,
+                content_relative_l2_limit=binary32_limit + 0.001,
+                realized_relative_l2=binary32_limit,
+            ),
+        )
 
-    assert record.execution_status == "failed"
-    assert record.operation_result_payload == {
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "execute_content_write_and_vae",
+        execute_with_controlled_evidence_failure,
+    )
+
+    exit_code, result = (
+        directional_entrypoint.execute_hf_only_detector_directional_validation_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=tmp_path / "persistent",
+            cache_root=tmp_path / "cache",
+            run_id="hf_detector_directional_controlled_failure_test",
+            session_id="directional_controlled_failure_session",
+            environment={"HF_TOKEN": "test-token", "CEG_WM_ROOT_KEY": ROOT_KEY},
+            authorized_scientific_unit_count=8,
+        )
+    )
+    assert exit_code == 0
+    assert result["committed_unit_count"] == 10
+
+    marker_root = (
+        tmp_path
+        / "persistent"
+        / "hf_detector_directional_controlled_failure_test"
+        / "markers"
+    )
+    markers = tuple(
+        json.loads(path.read_text("utf-8"))
+        for path in marker_root.glob("*.COMMITTED.json")
+    )
+    scientific_failure_markers = tuple(
+        marker for marker in markers if marker["unit_index"] == 2
+    )
+    assert len(scientific_failure_markers) == 1
+    marker = scientific_failure_markers[0]
+    bundle = (
+        tmp_path
+        / "persistent"
+        / "hf_detector_directional_controlled_failure_test"
+        / "bundles"
+        / f"sha256_{marker['bundle_sha256']}.zip"
+    )
+    with ZipFile(bundle) as archive:
+        record_member = next(
+            name for name in archive.namelist() if name != "artifact_manifest.json"
+        )
+        record_payload = json.loads(archive.read(record_member))
+    assert record_payload["execution_status"] == "failed"
+    assert record_payload["operation_result_payload"] == {
         "failure_stage": "hf_detector_directional_runtime_operation",
         "failure_type": "experiments.runners.hf_only_detector_directional_validation.HfDetectorDirectionalEvidenceViolation",
-        "result_available": True,
-        "failure_category": failure_category,
+        "result_available": False,
+        "failure_category": "budget_violation",
         "realized_relative_l2": binary32_limit,
-        "content_relative_l2_limit": binary32_limit + limit_offset,
+        "content_relative_l2_limit": binary32_limit + 0.001,
         "budget_status": "accepted",
-        "integrity_status": "passed",
-        "materialization_integrity_status": materialization_integrity_status,
+        "integrity_status": "write_disappeared",
     }
 
 
