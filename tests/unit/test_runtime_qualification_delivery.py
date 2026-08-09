@@ -1710,6 +1710,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
             runtime_notebook,
             root / "notebooks/colab/development_exploration.ipynb",
             root / "notebooks/colab/experiment_execution.ipynb",
+            root / "notebooks/colab/hf_only_detector_directional_validation.ipynb",
             root / "notebooks/colab/hf_transmission_diagnostic.ipynb",
             root / "notebooks/colab/thirteen_module_mechanism_screening.ipynb",
         ]
