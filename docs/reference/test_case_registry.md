@@ -2,9 +2,9 @@
 
 ## 审核绑定与事实边界
 
-- 初始登记日期：`2026-08-05`；本次调度复核日期：`2026-08-10`。
-- 本次审核绑定：待提交 subject `perf: 收敛登记验证并行调度`，parent
-  `c0d9459a1aa08a3929d1dd07ef101ae6d867c296`。提交自身 SHA 不写入自身文件；exact
+- 登记日期：`2026-08-05`。
+- 审核绑定：待提交 subject `test: 精简并登记开发探索测试平面`，parent
+  `f614084e30d414d9c2718d74e214cc3074ea2509`。提交自身 SHA 不写入自身文件；exact
   revision 由提交后的独立审核报告绑定。
 - 本页是测试节点、测试族和审计入口的可审查登记，不替代 `pyproject.toml`、
   `governance/pytest.ini` 或 `governance/harness/run_all_audits.py` 的执行权威。
@@ -33,72 +33,14 @@ TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
 | snapshot | project all | project default | governance default | harness audits |
 | --- | ---: | ---: | ---: | ---: |
 | 返修前权威 | 609 | 606（3 deselected） | 631 | 12 |
-| 当前登记 | 699 | 678（21 deselected） | 635 | 12 |
+| 当前登记 | 614 | 597（17 deselected） | 631 | 12 |
 
-当前 exact tree 的权威收集结果为 project `699`、默认 project `678/699`
-（`21 deselected`）及 governance `635`。本 revision 不增加 project 测试节点；它为
-validation profile 新增 4 个 governance 自测实例（其中串行补集测试有 project 与
-governance 两个参数实例），因此 governance 从 `631` 增至 `635`。并行/串行分片只改变
-执行调度，不改变 pytest 的目录收集权威、marker 选择或断言语义；任何节点都不得因分片
-静默消失或重复执行。完整 node ID 仍以上述 collect 命令输出为权威；早期逐族清单保留为
-历史审核基线，当前数量以本节和下述调度登记为准。
-
-## Registered profile scheduling
-
-并行分片只接受以下正向文件白名单。project 固定为 28 个文件：
-
-```text
-tests/functional/test_governed_artifact_structures.py
-tests/functional/test_lf_null_whitened_detector.py
-tests/unit/test_comparison_preflight.py
-tests/unit/test_development_exploration_metrics.py
-tests/unit/test_development_inputs.py
-tests/unit/test_development_module_exploration.py
-tests/unit/test_development_worker_persistence.py
-tests/unit/test_geometry_chain.py
-tests/unit/test_hf_content_backbone.py
-tests/unit/test_hf_only_detector_directional_validation.py
-tests/unit/test_hf_only_reference_metrics.py
-tests/unit/test_hf_only_reference_protocol.py
-tests/unit/test_hf_only_threshold_fit_gpu_execution.py
-tests/unit/test_hf_transmission_diagnostic.py
-tests/unit/test_internal_experiment_components.py
-tests/unit/test_internal_governed_runner.py
-tests/unit/test_internal_scientific_validation_protocol.py
-tests/unit/test_joint_decision.py
-tests/unit/test_key_schedule.py
-tests/unit/test_lf_null_whitened_detector.py
-tests/unit/test_lf_routing_combination.py
-tests/unit/test_lf_transmission_diagnostic.py
-tests/unit/test_lf_whitened_score_screening.py
-tests/unit/test_runtime_configuration_and_adapter.py
-tests/unit/test_runtime_content_write_and_vae.py
-tests/unit/test_runtime_qk_observation.py
-tests/unit/test_runtime_qualification_bootstrap.py
-tests/unit/test_runtime_routing_observation.py
-```
-
-governance 固定为 6 个文件：
-
-```text
-governance/tests/test_extended_naming_audit.py
-governance/tests/test_governance_policy.py
-governance/tests/test_harness_registry.py
-governance/tests/test_naming_and_field_rules.py
-governance/tests/test_notebook_governance.py
-governance/tests/test_validation_profiles.py
-```
-
-并行命令固定为 `-x -n 4 --dist=loadfile` 加以上文件；串行分片使用同一 pytest 配置和
-`-x`，对完整 `tests` 或 `governance/tests` 目录收集，同时逐一 `--ignore` 并行文件。
-因此并行白名单与串行补集无重复，新文件默认进入串行补集。`full` 顺序固定为 project
-并行、project 串行、governance 并行、governance 串行、harness；首个失败立即返回且
-harness 只在全部已选 pytest 分片通过后运行。所有子进程继承 stdout/stderr，并强制
-Linux 临时目录及单线程 BLAS 环境；禁止 `-n auto`、suite 并发、失败后的自动回退或
-harness 并行。当前 exact tree 的 collect-only 穿透结果为 project
-`492 parallel + 186 serial = 678`、governance
-`579 parallel + 56 serial = 635`；两个平面的分片交集均为 `0`，各自并集分别精确等于
-未分片的默认目录收集集合。
+项目节点增加 5 个来自 parent 已批准的 detector 64-cluster/cross-fit 覆盖；本 revision
+不新增或删除测试节点，只修正两个语义名称并把 14 个实测超过 30 秒的 development
+runner 节点精确移出默认集合。因此 `606 + 5 - 14 = 597`。目录汇总为：
+`tests/unit` 607、`tests/functional` 5、`tests/integration` 1、`tests/smoke` 1；
+governance 的 631 个节点全部位于 `governance/tests`。完整 node ID 以以上 collect 命令
+输出为权威，下面每个文件族的数量之和必须分别等于 614 和 631。
 
 ## 旧 full 失败与中断证据
 
@@ -265,7 +207,7 @@ parent 的重复完整 default pytest 基线为 `439.65s`；收敛后的定向�
 | notebook_governance | `governance/tests/test_notebook_governance.py` | unit, constraint | 3/3 | CPU, Notebook reads | none | Notebook boundary only | notebooks/project imports read-only | G:path | Notebook audit change |
 | project_copy_contract | `governance/tests/test_project_copy_contract.py` | constraint | 1/1 | CPU, project copy | tmp copy | copy contract only | all project planes read-only | G:path | detachability/copy change |
 | research_definition_audit | `governance/tests/test_research_definition_audit.py` | unit | 17/17 | CPU, git/AST/tmp trees | tmp audit reports | research-state structure only | designs/state/main read-only | G:path | stage/design audit change |
-| validation_profiles | `governance/tests/test_validation_profiles.py` | unit | 10/10 | CPU, subprocess fixtures | tmp reports | fixed parallel shards, serial complements and fail-fast orchestration only | project/governance/harness commands | G:path | profile runner change |
+| validation_profiles | `governance/tests/test_validation_profiles.py` | unit | 6/6 | CPU, subprocess fixtures | tmp reports | profile orchestration only | project/governance/harness commands | G:path | profile runner change |
 
 ## Harness audits
 
@@ -739,8 +681,7 @@ monkeypatch target；`yes:delegating` 表示替换只作观测/时钟控制并�
 | `tests/unit/test_runtime_routing_observation.py::test_texture_and_response_follow_registered_formulas` | `unit` | `test_texture_and_response_follow_registered_formulas` | `@file:tests/unit/test_runtime_routing_observation.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `default+full 1/1` | `@project-node tests/unit/test_runtime_routing_observation.py::test_texture_and_response_follow_registered_formulas` | `no` | `protected=no; patch-targets=none` | `runtime_routing_observation` | `unique;none` | `@file-boundary:runtime_routing_observation` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
 ### Governance pytest base families
 
-- fresh collect nodes: `635`; base families: `220`; repository-prefixed sorted-family JSON
-  digest: `e234b915da95298c096180de005620661a136951788d7b2b2a3987427f851c0b`.
+- fresh collect nodes: `631`; base families: `217`; canonical family digest: `2183eaff5e800d87c3ac198408bf78b43432561942cbf726a34d2e529b550a6b`.
 
 | base node/family + file | marker/category | concrete failure mode or use | actual production boundary | fixture scale/parameters | expected maximum duration | default/full | explicit command | tmp_path | replaced protected production surface | module owner | duplicate/supersedes | over-plane risk | review binding/date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -958,9 +899,6 @@ monkeypatch target；`yes:delegating` 表示替换只作观测/时钟控制并�
 | `governance/tests/test_validation_profiles.py::test_full_profile_runs_both_pytest_suites_before_harness` | `unit` | `test_full_profile_runs_both_pytest_suites_before_harness` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_full_profile_runs_both_pytest_suites_before_harness` | `no` | `protected=no; patch-targets=none` | `validation_profiles` | `unique;none` | `@file-boundary:validation_profiles` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
 | `governance/tests/test_validation_profiles.py::test_governance_profile_excludes_project_pytest` | `unit` | `test_governance_profile_excludes_project_pytest` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_governance_profile_excludes_project_pytest` | `no` | `protected=no; patch-targets=none` | `validation_profiles` | `unique;none` | `@file-boundary:validation_profiles` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
 | `governance/tests/test_validation_profiles.py::test_method_profile_excludes_governance_pytest` | `unit` | `test_method_profile_excludes_governance_pytest` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_method_profile_excludes_governance_pytest` | `no` | `protected=no; patch-targets=none` | `validation_profiles` | `unique;none` | `@file-boundary:validation_profiles` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
-| `governance/tests/test_validation_profiles.py::test_parallel_allowlists_are_positive_existing_file_sets` | `unit` | `test_parallel_allowlists_are_positive_existing_file_sets` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=[28, 6]` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_parallel_allowlists_are_positive_existing_file_sets` | `no` | `protected=no; patch-targets=none` | `validation_profiles` | `unique;positive allowlist existence and uniqueness` | `@file-boundary:validation_profiles` | `2026-08-10@perf:收敛登记验证并行调度@parent-c0d9459a1aa08a3929d1dd07ef101ae6d867c296` |
 | `governance/tests/test_validation_profiles.py::test_run_profile_propagates_first_failure_code` | `unit` | `test_run_profile_propagates_first_failure_code` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_run_profile_propagates_first_failure_code` | `yes` | `protected=no; patch-targets=run` | `validation_profiles` | `unique;none` | `@file-boundary:validation_profiles` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
-| `governance/tests/test_validation_profiles.py::test_run_profile_runs_harness_only_after_all_selected_pytest_shards_pass` | `unit` | `test_run_profile_runs_harness_only_after_all_selected_pytest_shards_pass` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_run_profile_runs_harness_only_after_all_selected_pytest_shards_pass` | `yes` | `protected=no; patch-targets=run` | `validation_profiles` | `unique;harness ordering and inherited environment` | `@file-boundary:validation_profiles` | `2026-08-10@perf:收敛登记验证并行调度@parent-c0d9459a1aa08a3929d1dd07ef101ae6d867c296` |
 | `governance/tests/test_validation_profiles.py::test_run_profile_stops_before_harness_after_second_failure` | `unit` | `test_run_profile_stops_before_harness_after_second_failure` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=[9]` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_run_profile_stops_before_harness_after_second_failure` | `yes` | `protected=no; patch-targets=run` | `validation_profiles` | `unique;none` | `@file-boundary:validation_profiles` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
-| `governance/tests/test_validation_profiles.py::test_serial_shard_collects_the_directory_complement_without_repetition` | `unit` | `test_serial_shard_collects_the_directory_complement_without_repetition` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=2; params=project and governance complements; scale-literals=none` | `<30s selection budget` | `governance+full 2/2` | `@governance-node governance/tests/test_validation_profiles.py::test_serial_shard_collects_the_directory_complement_without_repetition` | `no` | `protected=no; patch-targets=none` | `validation_profiles` | `unique;serial complement and no duplicate execution` | `@file-boundary:validation_profiles` | `2026-08-10@perf:收敛登记验证并行调度@parent-c0d9459a1aa08a3929d1dd07ef101ae6d867c296` |
 | `governance/tests/test_validation_profiles.py::test_unknown_profile_fails_closed` | `unit` | `test_unknown_profile_fails_closed` | `@file:governance/tests/test_validation_profiles.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_validation_profiles.py::test_unknown_profile_fails_closed` | `no` | `protected=no; patch-targets=none` | `validation_profiles` | `unique;none` | `@file-boundary:validation_profiles` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |

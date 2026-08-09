@@ -5,7 +5,6 @@ channels:
 dependencies:
   - python=3.12.13
   - pytest=9.1.1
-  - pytest-xdist=3.8.0
   - numpy=2.5.1
   - pytorch=2.5.1
   - cpuonly=2.0
