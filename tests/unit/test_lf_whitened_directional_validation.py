@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -14,6 +14,7 @@ from experiments.methods import (
     CegWmExperimentAdapter,
     load_ceg_wm_experiment_adapter_configuration,
 )
+from experiments.metrics.binomial import clopper_pearson_lower
 from experiments.metrics.lf_whitened_directional_validation import (
     aggregate_lf_whitened_direction,
     create_lf_whitened_directional_observation,
@@ -21,7 +22,11 @@ from experiments.metrics.lf_whitened_directional_validation import (
 from experiments.metrics.lf_whitened_score_screening import (
     fit_lf_null_whitening_asset,
 )
-from experiments.protocol.development_records import DevelopmentOperationalRecord
+from experiments.protocol.development_records import (
+    DevelopmentOperationalRecord,
+    DevelopmentScientificRecord,
+    canonical_development_value_digest,
+)
 
 from experiments.protocol.hf_only_detector_directional_validation import (
     load_authority_deny_axes,
@@ -39,10 +44,12 @@ from experiments.protocol.lf_whitened_score_screening import (
     load_lf_whitened_score_screening_protocol,
 )
 from experiments.runners.development_persistence import (
+    CommittedUnit,
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
 )
 from experiments.runners.lf_whitened_directional_validation import (
+    LfWhitenedDirectionalRunnerError,
     LfWhitenedDirectionalValidationRunner,
 )
 from main import LfNullWhiteningAsset, identify_root_key
@@ -429,21 +436,223 @@ def _metric_observation(index: int, *, passed: bool):
 def test_lf_whitened_directional_metric_keeps_failures_in_frozen_denominator() -> None:
     passing = aggregate_lf_whitened_direction(
         tuple(_metric_observation(index, passed=True) for index in range(32)),
-        failed_cluster_count=0,
     )
-    failed = aggregate_lf_whitened_direction(
+    scientific_negative = aggregate_lf_whitened_direction(
+        tuple(_metric_observation(index, passed=False) for index in range(32)),
+    )
+    blocked = aggregate_lf_whitened_direction(
         tuple(_metric_observation(index, passed=True) for index in range(27)),
-        failed_cluster_count=5,
+        implementation_failure_count=3,
+        resource_failure_count=2,
     )
 
     assert passing.directional_validation_passed is True
     assert passing.module_outcome == "mechanism_signal_observed"
     assert passing.candidate_recommendation == "candidate_worth_further_selection"
     assert passing.registered_minus_max_wrong.exact_one_sided_confidence_lower_bound > 0.5
-    assert failed.directional_validation_passed is False
-    assert failed.expected_cluster_count == 32
-    assert failed.failed_cluster_count == 5
-    assert failed.registered_minus_max_wrong.observation_count == 32
+    assert scientific_negative.directional_validation_passed is False
+    assert scientific_negative.module_outcome == "mechanism_signal_not_observed"
+    assert scientific_negative.candidate_recommendation == (
+        "candidate_not_recommended_for_selection"
+    )
+    assert blocked.directional_validation_passed is False
+    assert blocked.module_outcome == "implementation_blocked"
+    assert blocked.expected_cluster_count == 32
+    assert blocked.successful_cluster_count == 27
+    assert blocked.failed_cluster_count == 5
+    assert blocked.implementation_failure_count == 3
+    assert blocked.resource_failure_count == 2
+    assert blocked.registered_minus_max_wrong.observation_count == 32
+    assert blocked.registered_minus_max_wrong.practical_success_count == 27
+    assert blocked.registered_minus_max_wrong.threshold_free_paired_ranking_auc == (
+        27 / 32
+    )
+    assert (
+        blocked.registered_minus_max_wrong.exact_one_sided_confidence_lower_bound
+        == clopper_pearson_lower(27, 32, confidence_level=0.95)
+    )
+
+
+def _replace_scientific_record(
+    record: DevelopmentScientificRecord,
+    **changes: object,
+) -> DevelopmentScientificRecord:
+    provisional = replace(record, record_id="0" * 64, **changes)
+    return replace(
+        provisional,
+        record_id=canonical_development_value_digest(
+            provisional.payload_without_record_id()
+        ),
+    )
+
+
+def _committed_marker(
+    runner: LfWhitenedDirectionalValidationRunner,
+    record: DevelopmentScientificRecord,
+) -> CommittedUnit:
+    record_bytes = (
+        json.dumps(
+            record.payload(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    return CommittedUnit(
+        schema_version="ceg_wm_development_committed_marker_v2",
+        protocol_digest=runner.protocol_digest,
+        revision=runner.method_code_revision,
+        run_id=runner.run_id,
+        shard_id="full",
+        unit_id=str(record.analysis_unit_identity["unit_id"]),
+        unit_index=record.unit_index,
+        attempt_index=record.attempt_index,
+        session_id="lf_whitened_directional_terminal_replay",
+        fencing_token=1,
+        intent_digest=canonical_digest(
+            {"unit_index": record.unit_index, "attempt": record.attempt_index}
+        ),
+        attempt_disposition=record.attempt_disposition(),
+        record_kind="development_scientific_record",
+        record_id=record.record_id,
+        record_digest=sha256(record_bytes).hexdigest(),
+        record_bytes=len(record_bytes),
+        actual_elapsed_seconds=float(record.actual_elapsed_seconds),
+        maximum_duration_seconds=record.maximum_duration_seconds,
+        bundle_sha256="2" * 64,
+        bundle_bytes=1,
+        artifact_manifest_digest="3" * 64,
+        worker_identity_digest="4" * 64,
+        parent_attempt_intent_digest=record.retry_parent_intent_digest,
+        committed_at_utc="2026-08-10T00:00:00Z",
+    )
+
+
+def _terminal_failure_evidence(
+    runner: LfWhitenedDirectionalValidationRunner,
+    failure_classes: tuple[str, ...],
+    *,
+    first_failure_category: str | None = None,
+) -> tuple[tuple[DevelopmentScientificRecord, CommittedUnit], ...]:
+    evidence = []
+    for ordinal, failure_class in enumerate(failure_classes):
+        resource_failure = failure_class == "resource_failure"
+        attempt_index = 1 if resource_failure else 0
+        retry_parent = (
+            canonical_digest({"resource_retry_parent": ordinal})
+            if resource_failure
+            else None
+        )
+        record = runner.create_failed_scientific_record(
+            cluster_ordinal=ordinal,
+            attempt_index=attempt_index,
+            retry_parent_intent_digest=retry_parent,
+            maximum_duration_seconds=2700,
+            actual_elapsed_seconds=1.0,
+            failure_type=(
+                "builtins.MemoryError"
+                if resource_failure
+                else "builtins.RuntimeError"
+            ),
+            resource_failure=resource_failure,
+            failure_category=(
+                first_failure_category
+                if ordinal == 0 and first_failure_category is not None
+                else failure_class
+            ),
+        )
+        evidence.append((record, _committed_marker(runner, record)))
+    return tuple(evidence)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("failure_classes", "expected_outcome"),
+    (
+        (("implementation_failure",) * 32, "implementation_blocked"),
+        (("resource_failure",) * 32, "resource_blocked"),
+        (
+            ("implementation_failure",) + ("resource_failure",) * 31,
+            "implementation_blocked",
+        ),
+    ),
+)
+def test_lf_whitened_directional_replay_preserves_terminal_failure_outcome(
+    failure_classes: tuple[str, ...],
+    expected_outcome: str,
+) -> None:
+    runner, runtime = _directional_runner()
+    evidence = _terminal_failure_evidence(
+        runner,
+        failure_classes,
+        first_failure_category=(
+            "identity_violation"
+            if "implementation_failure" in failure_classes
+            else None
+        ),
+    )
+
+    aggregate = runner.replay_directional_aggregate(evidence)
+    runtime.close()
+
+    assert aggregate.successful_cluster_count == 0
+    assert aggregate.failed_cluster_count == 32
+    assert aggregate.implementation_failure_count == failure_classes.count(
+        "implementation_failure"
+    )
+    assert aggregate.resource_failure_count == failure_classes.count(
+        "resource_failure"
+    )
+    assert aggregate.module_outcome == expected_outcome
+    assert aggregate.candidate_recommendation == (
+        "candidate_not_recommended_for_selection"
+    )
+    assert aggregate.registered_minus_primary_null.observation_count == 32
+    assert aggregate.registered_minus_primary_null.practical_success_count == 0
+    assert aggregate.registered_minus_primary_null.threshold_free_paired_ranking_auc == 0.0
+    assert aggregate.identity_violation_count == (
+        1 if "implementation_failure" in failure_classes else 0
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure_class", (None, "unregistered_failure"))
+def test_lf_whitened_directional_replay_rejects_missing_or_unknown_failure_class(
+    failure_class: str | None,
+) -> None:
+    runner, runtime = _directional_runner()
+    evidence = list(
+        _terminal_failure_evidence(runner, ("implementation_failure",) * 32)
+    )
+    invalid = _replace_scientific_record(
+        evidence[0][0],
+        failure_class=failure_class,
+    )
+    evidence[0] = (invalid, _committed_marker(runner, invalid))
+
+    with pytest.raises(LfWhitenedDirectionalRunnerError):
+        runner.replay_directional_aggregate(evidence)
+    runtime.close()
+
+
+@pytest.mark.unit
+def test_lf_whitened_directional_replay_rejects_success_with_failure_class() -> None:
+    runner, runtime = _directional_runner()
+    evidence = list(
+        _terminal_failure_evidence(runner, ("implementation_failure",) * 32)
+    )
+    invalid = _replace_scientific_record(
+        evidence[0][0],
+        execution_status="success",
+        failure_reason=None,
+    )
+    evidence[0] = (invalid, _committed_marker(runner, invalid))
+
+    with pytest.raises(LfWhitenedDirectionalRunnerError):
+        runner.replay_directional_aggregate(evidence)
+    runtime.close()
 
 
 @pytest.mark.unit

@@ -237,6 +237,8 @@ class LfWhitenedDirectionalAggregate:
     expected_cluster_count: int
     successful_cluster_count: int
     failed_cluster_count: int
+    implementation_failure_count: int
+    resource_failure_count: int
     registered_minus_primary_null: LfDirectionalMarginSummary
     registered_minus_max_wrong: LfDirectionalMarginSummary
     identity_violation_count: int
@@ -257,17 +259,41 @@ class LfWhitenedDirectionalAggregate:
             raise LfWhitenedDirectionalMetricError(
                 "directional aggregate identity drifted"
             )
+        expected_outcome = (
+            PASSING_MODULE_OUTCOME
+            if self.directional_validation_passed
+            else (
+                "implementation_blocked"
+                if self.implementation_failure_count
+                else (
+                    "resource_blocked"
+                    if self.resource_failure_count
+                    else "mechanism_signal_not_observed"
+                )
+            )
+        )
+        expected_recommendation = (
+            PASSING_CANDIDATE_RECOMMENDATION
+            if self.directional_validation_passed
+            else "candidate_not_recommended_for_selection"
+        )
         if (
             self.expected_cluster_count != SCIENTIFIC_CLUSTER_COUNT
+            or any(
+                type(value) is not int or value < 0
+                for value in (
+                    self.successful_cluster_count,
+                    self.failed_cluster_count,
+                    self.implementation_failure_count,
+                    self.resource_failure_count,
+                )
+            )
+            or self.failed_cluster_count
+            != self.implementation_failure_count + self.resource_failure_count
             or self.successful_cluster_count + self.failed_cluster_count
             != SCIENTIFIC_CLUSTER_COUNT
-            or self.directional_validation_passed
-            is not (self.module_outcome == PASSING_MODULE_OUTCOME)
-            or self.directional_validation_passed
-            is not (
-                self.candidate_recommendation
-                == PASSING_CANDIDATE_RECOMMENDATION
-            )
+            or self.module_outcome != expected_outcome
+            or self.candidate_recommendation != expected_recommendation
         ):
             raise LfWhitenedDirectionalMetricError(
                 "directional aggregate boundary drifted"
@@ -316,17 +342,25 @@ def _margin_summary(
 def aggregate_lf_whitened_direction(
     observations: Sequence[LfWhitenedDirectionalObservation],
     *,
-    failed_cluster_count: int,
+    implementation_failure_count: int = 0,
+    resource_failure_count: int = 0,
     identity_violation_count: int = 0,
     budget_violation_count: int = 0,
     integrity_violation_count: int = 0,
     nonfinite_violation_count: int = 0,
 ) -> LfWhitenedDirectionalAggregate:
     items = tuple(observations)
+    failure_counts = (
+        implementation_failure_count,
+        resource_failure_count,
+    )
+    if any(type(value) is not int or value < 0 for value in failure_counts):
+        raise LfWhitenedDirectionalMetricError(
+            "directional failure count is invalid"
+        )
+    failed_cluster_count = sum(failure_counts)
     if (
-        type(failed_cluster_count) is not int
-        or failed_cluster_count < 0
-        or len(items) + failed_cluster_count != SCIENTIFIC_CLUSTER_COUNT
+        len(items) + failed_cluster_count != SCIENTIFIC_CLUSTER_COUNT
         or any(type(item) is not LfWhitenedDirectionalObservation for item in items)
     ):
         raise LfWhitenedDirectionalMetricError(
@@ -370,11 +404,26 @@ def aggregate_lf_whitened_direction(
         and wrong_summary.exact_one_sided_confidence_lower_bound > 0.5
         and sum(counts) == 0
     )
+    module_outcome = (
+        PASSING_MODULE_OUTCOME
+        if passed
+        else (
+            "implementation_blocked"
+            if implementation_failure_count
+            else (
+                "resource_blocked"
+                if resource_failure_count
+                else "mechanism_signal_not_observed"
+            )
+        )
+    )
     realized = tuple(item.realized_relative_l2 for item in items)
     payload = {
         "expected_cluster_count": SCIENTIFIC_CLUSTER_COUNT,
         "successful_cluster_count": len(items),
         "failed_cluster_count": failed_cluster_count,
+        "implementation_failure_count": implementation_failure_count,
+        "resource_failure_count": resource_failure_count,
         "registered_minus_primary_null": asdict(null_summary),
         "registered_minus_max_wrong": asdict(wrong_summary),
         "identity_violation_count": identity_violation_count,
@@ -388,11 +437,7 @@ def aggregate_lf_whitened_direction(
             float(max(realized)) if realized else None
         ),
         "directional_validation_passed": passed,
-        "module_outcome": (
-            PASSING_MODULE_OUTCOME
-            if passed
-            else "mechanism_signal_not_observed"
-        ),
+        "module_outcome": module_outcome,
         "candidate_recommendation": (
             PASSING_CANDIDATE_RECOMMENDATION
             if passed
@@ -403,6 +448,8 @@ def aggregate_lf_whitened_direction(
         expected_cluster_count=SCIENTIFIC_CLUSTER_COUNT,
         successful_cluster_count=len(items),
         failed_cluster_count=failed_cluster_count,
+        implementation_failure_count=implementation_failure_count,
+        resource_failure_count=resource_failure_count,
         registered_minus_primary_null=null_summary,
         registered_minus_max_wrong=wrong_summary,
         identity_violation_count=identity_violation_count,

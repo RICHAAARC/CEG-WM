@@ -27,6 +27,7 @@ from experiments.protocol.development_records import (
     OPERATIONAL_RECORD_KIND,
     OPERATIONAL_RECORD_SCHEMA,
     RECORD_SCHEMA_VERSION,
+    DevelopmentRecordError,
     DevelopmentOperationalRecord,
     DevelopmentScientificRecord,
     canonical_development_value_digest,
@@ -479,11 +480,19 @@ class LfWhitenedDirectionalValidationRunner:
         if len(evidence) != SCIENTIFIC_CLUSTER_COUNT or tuple(record.unit_index for record, _ in evidence) != tuple(range(1, 33)):
             raise LfWhitenedDirectionalRunnerError("verified directional coverage is incomplete")
         observations: list[LfWhitenedDirectionalObservation] = []
-        failures = 0
+        failure_counts = {
+            "implementation_failure": 0,
+            "resource_failure": 0,
+        }
         violation_counts = {key: 0 for key in ("identity_violation", "budget_violation", "integrity_violation", "nonfinite_violation")}
         sources: set[str] = set()
         for record, marker in evidence:
-            record.validate()
+            try:
+                record.validate()
+            except DevelopmentRecordError as exc:
+                raise LfWhitenedDirectionalRunnerError(
+                    "verified directional record is invalid"
+                ) from exc
             ordinal = record.unit_index - 1
             identity = AnalysisUnitIdentity(**record.analysis_unit_identity)
             digest = sha256((json.dumps(record.payload(), ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False) + "\n").encode()).hexdigest()
@@ -500,8 +509,24 @@ class LfWhitenedDirectionalValidationRunner:
             ):
                 raise LfWhitenedDirectionalRunnerError("verified directional evidence binding drifted")
             sources.add(identity.source_cluster_id)
-            if record.execution_status != "success":
-                failures += 1
+            if record.execution_status == "success":
+                if (
+                    record.failure_class is not None
+                    or marker.attempt_disposition != "success"
+                ):
+                    raise LfWhitenedDirectionalRunnerError(
+                        "verified successful directional record carries failure"
+                    )
+            else:
+                if (
+                    record.execution_status != "failed"
+                    or marker.attempt_disposition != "final_failure"
+                    or record.failure_class not in failure_counts
+                ):
+                    raise LfWhitenedDirectionalRunnerError(
+                        "verified directional terminal failure class is invalid"
+                    )
+                failure_counts[record.failure_class] += 1
                 category = record.operation_result_payload.get("failure_category")
                 if category in violation_counts:
                     violation_counts[str(category)] += 1
@@ -525,7 +550,10 @@ class LfWhitenedDirectionalValidationRunner:
             observations.append(observation)
         return aggregate_lf_whitened_direction(
             observations,
-            failed_cluster_count=failures,
+            implementation_failure_count=failure_counts[
+                "implementation_failure"
+            ],
+            resource_failure_count=failure_counts["resource_failure"],
             identity_violation_count=violation_counts["identity_violation"],
             budget_violation_count=violation_counts["budget_violation"],
             integrity_violation_count=violation_counts["integrity_violation"],
