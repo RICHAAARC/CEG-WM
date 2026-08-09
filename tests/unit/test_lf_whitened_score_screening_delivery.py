@@ -84,6 +84,8 @@ def test_lf_whitened_screening_server_builds_exact_package_and_safe_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks exact Git checkout capability")
     checkout = tmp_path / "exact_checkout"
     subprocess.run(
         ("git", "clone", "--quiet", str(ROOT), str(checkout)),
