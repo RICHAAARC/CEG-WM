@@ -6,6 +6,7 @@ from pathlib import Path
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
+from struct import pack, unpack
 from zipfile import ZipFile
 
 import pytest
@@ -30,6 +31,7 @@ from experiments.protocol.hf_only_detector_directional_validation import (
     load_hf_only_detector_directional_protocol,
 )
 from experiments.runners.hf_only_detector_directional_validation import (
+    HfDetectorDirectionalEvidenceViolation,
     HfOnlyDetectorDirectionalRunner,
 )
 from main import derive_wrong_key_material, identify_root_key
@@ -185,6 +187,116 @@ def test_hf_detector_directional_runner_calls_public_blind_detector_for_paired_r
     assert observation["rgb_quality_dtype"] == "torch.uint8"
     assert observation["rgb_paired_mse"] >= 0.0
     assert observation["actual_runtime_dtype"] == "torch.float16"
+
+
+@pytest.mark.unit
+def test_hf_detector_directional_runner_accepts_embedder_binary32_budget_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, runtime = _runner()
+    runtime_result = runner._execute_paired_runtime(_base_latent())
+    binary32_limit = unpack(">f", pack(">f", 3 / 250))[0]
+    assert binary32_limit > 3 / 250
+    boundary_result = replace(
+        runtime_result,
+        content_materialization=replace(
+            runtime_result.content_materialization,
+            realized_relative_l2=binary32_limit,
+        ),
+        content_materialization_result=replace(
+            runtime_result.content_materialization_result,
+            content_relative_l2_nominal=binary32_limit,
+            content_relative_l2_limit=binary32_limit,
+            realized_relative_l2=binary32_limit,
+        ),
+    )
+    monkeypatch.setattr(
+        runner, "_execute_paired_runtime", lambda _base_latent: boundary_result
+    )
+
+    record = runner.execute_scientific_cluster(
+        cluster_ordinal=0,
+        base_latent=_base_latent(),
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    runtime.close()
+
+    assert record.execution_status == "success"
+    assert record.operation_result_payload["realized_relative_l2"] == binary32_limit
+    assert record.operation_result_payload["content_relative_l2_limit"] == binary32_limit
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("failure_category", "materialization_integrity_status", "limit_offset"),
+    (
+        ("budget_violation", "passed", 0.001),
+        ("integrity_violation", "write_disappeared", 0.0),
+    ),
+)
+def test_hf_detector_directional_runner_records_controlled_evidence_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_category: str,
+    materialization_integrity_status: str,
+    limit_offset: float,
+) -> None:
+    runner, runtime = _runner()
+    runtime_result = runner._execute_paired_runtime(_base_latent())
+    binary32_limit = unpack(">f", pack(">f", 3 / 250))[0]
+    controlled_result = replace(
+        runtime_result,
+        content_materialization=replace(
+            runtime_result.content_materialization,
+            realized_relative_l2=binary32_limit,
+            integrity_status=materialization_integrity_status,
+        ),
+        content_materialization_result=replace(
+            runtime_result.content_materialization_result,
+            content_relative_l2_nominal=binary32_limit,
+            content_relative_l2_limit=binary32_limit + limit_offset,
+            realized_relative_l2=binary32_limit,
+        ),
+    )
+    monkeypatch.setattr(
+        runner, "_execute_paired_runtime", lambda _base_latent: controlled_result
+    )
+
+    with pytest.raises(HfDetectorDirectionalEvidenceViolation) as caught:
+        runner.execute_scientific_cluster(
+            cluster_ordinal=0,
+            base_latent=_base_latent(),
+            attempt_index=0,
+            retry_parent_intent_digest=None,
+            maximum_duration_seconds=2700,
+        )
+    exc = caught.value
+    record = runner.create_failed_scientific_record(
+        cluster_ordinal=0,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        failure_type=f"{type(exc).__module__}.{type(exc).__qualname__}",
+        resource_failure=False,
+        failure_category=exc.category,
+        failure_diagnostics=exc.diagnostics,
+    )
+    runtime.close()
+
+    assert record.execution_status == "failed"
+    assert record.operation_result_payload == {
+        "failure_stage": "hf_detector_directional_runtime_operation",
+        "failure_type": "experiments.runners.hf_only_detector_directional_validation.HfDetectorDirectionalEvidenceViolation",
+        "result_available": True,
+        "failure_category": failure_category,
+        "realized_relative_l2": binary32_limit,
+        "content_relative_l2_limit": binary32_limit + limit_offset,
+        "budget_status": "accepted",
+        "integrity_status": "passed",
+        "materialization_integrity_status": materialization_integrity_status,
+    }
 
 
 @pytest.mark.unit

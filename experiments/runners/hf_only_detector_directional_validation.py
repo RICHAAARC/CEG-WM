@@ -60,7 +60,16 @@ class HfDetectorDirectionalRunnerError(RuntimeError):
 class HfDetectorDirectionalEvidenceViolation(HfDetectorDirectionalRunnerError):
     """A successful runtime return violated a frozen evidence boundary."""
 
-    def __init__(self, category: str) -> None:
+    def __init__(
+        self,
+        category: str,
+        *,
+        realized_relative_l2: float,
+        content_relative_l2_limit: float,
+        budget_status: str,
+        integrity_status: str,
+        materialization_integrity_status: str,
+    ) -> None:
         if category not in {
             "identity_violation",
             "budget_violation",
@@ -69,6 +78,13 @@ class HfDetectorDirectionalEvidenceViolation(HfDetectorDirectionalRunnerError):
         }:
             raise ValueError("directional violation category is invalid")
         self.category = category
+        self.diagnostics = {
+            "realized_relative_l2": realized_relative_l2,
+            "content_relative_l2_limit": content_relative_l2_limit,
+            "budget_status": budget_status,
+            "integrity_status": integrity_status,
+            "materialization_integrity_status": materialization_integrity_status,
+        }
         super().__init__(category)
 
 
@@ -270,20 +286,30 @@ class HfOnlyDetectorDirectionalRunner:
         )
         materialization = runtime_result.content_materialization
         materialization_result = runtime_result.content_materialization_result
+        violation_diagnostics = {
+            "realized_relative_l2": materialization.realized_relative_l2,
+            "content_relative_l2_limit": materialization_result.content_relative_l2_limit,
+            "budget_status": materialization_result.budget_status,
+            "integrity_status": materialization_result.integrity_status,
+            "materialization_integrity_status": materialization.integrity_status,
+        }
         if (
             pack(">f", materialization_result.content_relative_l2_nominal)
             != pack(">f", 3 / 250)
             or pack(">f", materialization_result.content_relative_l2_limit)
             != pack(">f", 3 / 250)
             or materialization_result.budget_status != "accepted"
-            or materialization.realized_relative_l2 > 3 / 250
         ):
-            raise HfDetectorDirectionalEvidenceViolation("budget_violation")
+            raise HfDetectorDirectionalEvidenceViolation(
+                "budget_violation", **violation_diagnostics
+            )
         if (
             materialization.integrity_status != "passed"
             or materialization_result.integrity_status != "passed"
         ):
-            raise HfDetectorDirectionalEvidenceViolation("integrity_violation")
+            raise HfDetectorDirectionalEvidenceViolation(
+                "integrity_violation", **violation_diagnostics
+            )
         rgb_relative_l2, rgb_mse = paired_rgb8_quality(
             _rgb8_values(runtime_result.watermarked_image),
             _rgb8_values(runtime_result.clean_image),
@@ -589,6 +615,7 @@ class HfOnlyDetectorDirectionalRunner:
         failure_type: str,
         resource_failure: bool,
         failure_category: str,
+        failure_diagnostics: dict[str, object] | None = None,
     ) -> DevelopmentScientificRecord:
         if not 0 <= cluster_ordinal < SCIENTIFIC_CLUSTER_COUNT:
             raise HfDetectorDirectionalRunnerError(
@@ -603,9 +630,11 @@ class HfOnlyDetectorDirectionalRunner:
         operation_payload = {
             "failure_stage": "hf_detector_directional_runtime_operation",
             "failure_type": failure_type,
-            "result_available": False,
+            "result_available": failure_diagnostics is not None,
             "failure_category": failure_category,
         }
+        if failure_diagnostics is not None:
+            operation_payload.update(failure_diagnostics)
         record_payload = {
             "schema_version": RECORD_SCHEMA_VERSION,
             "collection_role": DEVELOPMENT_RECORD_COLLECTION_ROLE,

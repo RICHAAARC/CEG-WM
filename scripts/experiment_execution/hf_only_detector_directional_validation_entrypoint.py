@@ -335,6 +335,13 @@ def execute_hf_only_detector_directional_validation_session(
                                 else "implementation_failure"
                             )
                         ),
+                        failure_diagnostics=(
+                            exc.diagnostics
+                            if isinstance(
+                                exc, HfDetectorDirectionalEvidenceViolation
+                            )
+                            else None
+                        ),
                     )
             marker = store.commit_session_unit(
                 cursor,
