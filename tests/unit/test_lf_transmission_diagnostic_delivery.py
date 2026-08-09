@@ -1,4 +1,4 @@
-"""Delivery boundary for the thin HF-only detector directional Notebook."""
+"""Delivery boundary for the thin LF transmission diagnostic Notebook."""
 
 from __future__ import annotations
 
@@ -13,28 +13,27 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.protocol.hf_only_detector_directional_validation import (
-    load_hf_only_detector_directional_protocol,
+from experiments.protocol.lf_transmission_diagnostic import (
+    load_lf_transmission_protocol,
 )
 
 
 ROOT = Path(__file__).resolve().parents[2]
-NOTEBOOK = ROOT / "notebooks/colab/hf_only_detector_directional_validation.ipynb"
+NOTEBOOK = ROOT / "notebooks/colab/lf_transmission_diagnostic.ipynb"
 SERVER_RELATIVE = Path(
-    "scripts/experiment_execution/hf_only_detector_directional_validation_server.py"
+    "scripts/experiment_execution/lf_transmission_diagnostic_server.py"
 )
 SERVER = ROOT / SERVER_RELATIVE
-PROTOCOL = ROOT / "configs/experiments/hf_only_detector_directional_validation.json"
-EXECUTION_REVISION = "0d4253ab2614c642563c566e6268565c337b503f"
-RUN_ID = "ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority"
-SUPERSEDED_RUN_ID = "ceg_wm_hf_only_detector_directional_validation_initial_gate"
+PROTOCOL = ROOT / "configs/experiments/lf_transmission_diagnostic.json"
+EXECUTION_REVISION = "2337f9d7c773a6054d558108e31d07d35fbee42f"
+RUN_ID = "ceg_wm_lf_carrier_to_detector_transmission_diagnostic"
 REQUIRED_PACKAGE_MEMBERS = {
-    "configs/experiments/hf_only_detector_directional_validation.json",
-    "configs/experiments/hf_only_detector_directional_validation_manifest.json",
-    "experiments/metrics/hf_only_detector_directional_validation.py",
-    "experiments/protocol/hf_only_detector_directional_validation.py",
-    "experiments/runners/hf_only_detector_directional_validation.py",
-    "scripts/experiment_execution/hf_only_detector_directional_validation_entrypoint.py",
+    "configs/experiments/lf_transmission_diagnostic.json",
+    "configs/experiments/lf_transmission_diagnostic_manifest.json",
+    "experiments/metrics/lf_transmission_diagnostic.py",
+    "experiments/protocol/lf_transmission_diagnostic.py",
+    "experiments/runners/lf_transmission_diagnostic.py",
+    "scripts/experiment_execution/lf_transmission_diagnostic_entrypoint.py",
     SERVER_RELATIVE.as_posix(),
     "requirements_development_exploration_gpu_execution.txt",
 }
@@ -60,7 +59,7 @@ def _constant(notebook: dict[str, object], name: str) -> object:
 
 
 @pytest.mark.quick
-def test_hf_detector_directional_server_help_imports_from_isolated_cwd(
+def test_lf_transmission_server_help_imports_from_an_isolated_cwd(
     tmp_path: Path,
 ) -> None:
     environment = dict(os.environ)
@@ -73,13 +72,13 @@ def test_hf_detector_directional_server_help_imports_from_isolated_cwd(
         capture_output=True,
         text=True,
     )
+
     assert completed.returncode == 0, completed.stderr
-    assert "--authorized-scientific-unit-count" in completed.stdout
     assert "ModuleNotFoundError" not in completed.stderr
 
 
 @pytest.mark.quick
-def test_hf_detector_directional_notebook_is_thin_and_resumes_full_directional_roster() -> None:
+def test_lf_transmission_notebook_is_thin_and_scientific_only() -> None:
     notebook = json.loads(NOTEBOOK.read_text("utf-8"))
     code_cells = tuple(
         cell for cell in notebook["cells"] if cell["cell_type"] == "code"
@@ -90,54 +89,60 @@ def test_hf_detector_directional_notebook_is_thin_and_resumes_full_directional_r
     code_source = "\n".join(
         "".join(cell.get("source", [])) for cell in code_cells
     )
+
     assert notebook["metadata"]["accelerator"] == "GPU"
     assert len(code_cells) == 5
     assert all(cell["execution_count"] is None for cell in code_cells)
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
     assert _constant(notebook, "EXECUTION_REVISION") == EXECUTION_REVISION
     assert _constant(notebook, "RUN_ID") == RUN_ID
-    assert _constant(notebook, "AUTHORIZED_SCIENTIFIC_UNIT_COUNT") == 32
     assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
     assert "drive.mount('/content/drive')" in code_source
     assert "userdata.get('HF_TOKEN')" in code_source
     assert "userdata.get('CEG_WM_ROOT_KEY')" in code_source
     assert "checkout', '--detach', 'FETCH_HEAD'" in code_source
     assert SERVER_RELATIVE.name in code_source
-    assert "--authorized-scientific-unit-count" in code_source
+    assert "DRIVE_ROOT = DRIVE_MOUNT / 'MyDrive' / 'CEG-WM' / 'lf_transmission_diagnostic'" in code_source
+    assert "PERSISTENT_ROOT = DRIVE_ROOT / 'persistent'" in code_source
+    assert "CACHE_ROOT = DRIVE_ROOT / 'cache'" in code_source
+    assert "EXPORT_BASE = DRIVE_ROOT / 'exports'" in code_source
     assert "execution_receipt.json" in code_source
     assert "SHA256SUMS" in code_source
-    assert "existing COMMITTED units 0 through 9" in source
-    assert "resumes units 10 through 33" in source
-    assert "all thirty-two HF-only detector directional scientific units" in source
-    assert "immutable partial evidence" in source
-    assert SUPERSEDED_RUN_ID not in code_source
+    assert "lf_transmission_diagnostic_result" in code_source
+    assert "lf_transmission_diagnostic_failure" in code_source
+    assert "zero operational units and eight scientific units" in source
+    assert "2700 seconds per unit" in source
     assert "fits no threshold" in source
     for forbidden in (
         "pip install",
         "snapshot_download(",
         "from_pretrained(",
-        "HfOnlyDetectorDirectionalRunner(",
+        "LfTransmissionDiagnosticRunner(",
         "DevelopmentScientificRecord(",
-        "execute_hf_only_detector_directional_validation_session(",
+        "execute_lf_transmission_diagnostic_session(",
         "--skip-dependency-install",
         "qk_geometry_sync",
-        "lf_carrier",
+        "geometry_synchronization_write",
         "content_router",
         "hf_only_threshold_fit",
+        "4096",
     ):
         assert forbidden not in code_source
-    protocol, manifest = load_hf_only_detector_directional_protocol(
+
+    protocol, manifest = load_lf_transmission_protocol(
         PROTOCOL, repository_root=ROOT
     )
-    assert protocol.operational_unit_count == 2
-    assert protocol.initial_gpu_gate_scientific_unit_count == 8
+    assert protocol.operational_unit_count == 0
+    assert protocol.scientific_cluster_count == 8
+    assert protocol.maximum_total_units == 8
     assert protocol.maximum_attempts_per_unit == 2
-    assert len(manifest.operational_entries) == 2
-    assert len(manifest.scientific_entries) == 32
+    assert protocol.maximum_duration_seconds_per_unit == 2700
+    assert tuple(unit.unit_index for unit in protocol.unit_roster) == tuple(range(8))
+    assert len(manifest.entries) == 8
 
 
 @pytest.mark.quick
-def test_hf_detector_directional_exact_checkout_builds_importable_execution_package(
+def test_lf_transmission_exact_checkout_builds_importable_execution_package(
     tmp_path: Path,
 ) -> None:
     if not (ROOT / ".git").exists():
@@ -148,7 +153,15 @@ def test_hf_detector_directional_exact_checkout_builds_importable_execution_pack
         check=True,
     )
     subprocess.run(
-        ("git", "-C", str(checkout), "checkout", "--detach", "--quiet", EXECUTION_REVISION),
+        (
+            "git",
+            "-C",
+            str(checkout),
+            "checkout",
+            "--detach",
+            "--quiet",
+            EXECUTION_REVISION,
+        ),
         check=True,
     )
     package_root = tmp_path / "package_persistent"
@@ -183,7 +196,7 @@ def test_hf_detector_directional_exact_checkout_builds_importable_execution_pack
 
 
 @pytest.mark.quick
-def test_hf_detector_directional_readmes_preserve_paused_evidence_boundary() -> None:
+def test_lf_transmission_readmes_expose_only_current_notebook() -> None:
     for path in (
         ROOT / "notebooks/colab/README.md",
         ROOT / "scripts/experiment_execution/README.md",
@@ -192,9 +205,6 @@ def test_hf_detector_directional_readmes_preserve_paused_evidence_boundary() -> 
         assert NOTEBOOK.name in source
         assert EXECUTION_REVISION in source
         assert RUN_ID in source
-        assert SUPERSEDED_RUN_ID in source
-        assert "immutable partial evidence" in source
-        assert "不读取、不迁移、不改写或混合" in source
-        assert "hf_transmission_diagnostic.ipynb" in source
-        assert "lf_transmission_diagnostic.ipynb" in source
+        assert "当前唯一授权" in source
+        assert "hf_only_detector_directional_validation.ipynb" in source
         assert "paused / not authorized" in source

@@ -4,25 +4,27 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 ## Current authorized entrypoint
 
-`hf_only_detector_directional_validation.ipynb` 是当前唯一允许在收到最终固定链接后执行
-**Run all** 的入口。它固定拉取 execution revision
-`0d4253ab2614c642563c566e6268565c337b503f`，使用全新 run ID
-`ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority`。服务器先验证既有
-COMMITTED units `0..9`，随后续跑 `10..33`，完成冻结的 32 个 HF detector directional
-scientific units；每 unit 最多 2 attempts。Notebook 挂载 Drive、读取
+`lf_transmission_diagnostic.ipynb` 是当前唯一授权在收到最终固定链接后执行 **Run all**
+的入口。它固定拉取 execution revision
+`2337f9d7c773a6054d558108e31d07d35fbee42f`，使用独立 run ID
+`ceg_wm_lf_carrier_to_detector_transmission_diagnostic`，执行冻结的 0 个 operational 与
+8 个 scientific units；每 unit 最多 2 attempts、2700 秒。Notebook 挂载 Drive、读取
 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
-`hf_only_detector_directional_validation_server.py`，并把服务器的 result/diagnostic ZIP、
-execution receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
+`lf_transmission_diagnostic_server.py`，并把服务器的 result/diagnostic ZIP、execution
+receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
 
 依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实方法/runtime 调用、正式
-records、持久化和内部 ZIP 全部属于服务器脚本。该 development directional validation 不拟合
-threshold，不形成 FPR、candidate promotion、calibration、formal evaluation、baseline
-或论文 claim，也不执行 LF、routing、组合、Q/K 或几何恢复。目录内其余全部 Notebook
-均为 **paused / not authorized**，不得作为当前入口运行。
+records、持久化和内部 ZIP 全部属于服务器脚本。该 development LF transport diagnostic
+不拟合 threshold，不形成 FPR、candidate promotion、calibration、formal evaluation、baseline
+或论文 claim，也不执行 HF、routing、组合、Q/K 或几何恢复。目录内其余全部 Notebook 均为
+**paused / not authorized**，不得作为当前入口运行。
 
-旧 run `ceg_wm_hf_only_detector_directional_validation_initial_gate` 及其 records 是
-immutable partial evidence；当前入口不读取、不迁移、不改写或混合该 namespace。上述新 run 是当前
-唯一允许执行的 HF detector directional validation 身份。
+`hf_only_detector_directional_validation.ipynb` 及其 execution revision
+`0d4253ab2614c642563c566e6268565c337b503f`、run ID
+`ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority` 当前为
+**paused / not authorized**。更早的 run
+`ceg_wm_hf_only_detector_directional_validation_initial_gate` 及其 records 是
+immutable partial evidence；当前 LF 入口不读取、不迁移、不改写或混合这些 namespace。
 
 `hf_transmission_diagnostic.ipynb` 已完成其历史传输诊断职责，当前为
 **paused / not authorized**；其 revision、run 与 records 保持独立历史证据，不得续跑或

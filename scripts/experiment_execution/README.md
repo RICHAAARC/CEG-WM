@@ -1,25 +1,28 @@
 # Experiment execution servers
 
-## HF-only detector directional validation
+## LF carrier-to-detector transmission diagnostic
 
-`hf_only_detector_directional_validation_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。
-当前唯一授权 Notebook 为 `notebooks/colab/hf_only_detector_directional_validation.ipynb`，固定绑定
-execution revision `0d4253ab2614c642563c566e6268565c337b503f` 与 run ID
-`ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority`。服务器先验证既有
-COMMITTED units `0..9`，随后续跑 `10..33`，完成冻结的 32 个 directional scientific
-units；每 unit 最多 2 attempts。
+`lf_transmission_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。当前唯一授权
+Notebook 为 `notebooks/colab/lf_transmission_diagnostic.ipynb`，固定绑定 execution revision
+`2337f9d7c773a6054d558108e31d07d35fbee42f` 与 run ID
+`ceg_wm_lf_carrier_to_detector_transmission_diagnostic`。服务器执行冻结的 0 个 operational 与
+8 个 scientific units；每 unit 最多 2 attempts、2700 秒。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 paired
-paired runtime 与 public HF detector 调用、正式 records、跨 session persistence 和内部 result 或
+runtime 与 public LF carrier/detector 调用、正式 records、跨 session persistence 和内部 result 或
 diagnostic ZIP。Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/
-ZIP/`SHA256SUMS`。本 development validation 不拟合 threshold，不授权 FPR、candidate promotion、
-calibration、formal evaluation、baseline 或论文 claim；不执行 LF、routing、组合、Q/K、
+ZIP/`SHA256SUMS`。本 development diagnostic 不拟合 threshold，不授权 FPR、candidate promotion、
+calibration、formal evaluation、baseline 或论文 claim；不执行 HF、routing、组合、Q/K、
 estimator、reliability、rectification 或 conditional recovery。其他 checked-in Notebook
 入口均已暂停。
 
-旧 run `ceg_wm_hf_only_detector_directional_validation_initial_gate` 及其 records 是
-immutable partial evidence；当前入口不读取、不迁移、不改写或混合该 namespace。上述新 run 是当前
-唯一允许执行的 HF detector directional validation 身份。
+`hf_only_detector_directional_validation_server.py` 与
+`notebooks/colab/hf_only_detector_directional_validation.ipynb` 绑定的 execution revision
+`0d4253ab2614c642563c566e6268565c337b503f`、run ID
+`ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority` 当前为
+**paused / not authorized**。更早的 run
+`ceg_wm_hf_only_detector_directional_validation_initial_gate` 及其 records 是
+immutable partial evidence；当前 LF 入口不读取、不迁移、不改写或混合这些 namespace。
 
 `hf_transmission_diagnostic_server.py` 与 `notebooks/colab/hf_transmission_diagnostic.ipynb`
 保留其已完成的历史传输诊断身份，
