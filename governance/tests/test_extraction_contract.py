@@ -104,6 +104,14 @@ def test_artifact_package_keeps_research_evidence_docs_only(tmp_path: Path) -> N
     assert "scripts/extract_release_package.py" not in copied_files
     assert all(not path.startswith("scripts/") or path.startswith("scripts/artifact_rebuild/") for path in copied_files)
     assert all(not path.startswith(("governance/", "docs/governance/")) for path in copied_files)
+    assert sorted(
+        path
+        for path in copied_files
+        if path.startswith("tests/")
+        and Path(path).name.startswith("test_")
+        and path.endswith(".py")
+    ) == ["tests/functional/test_governed_artifact_structures.py"]
+    assert "tests/functional/test_lf_null_whitened_detector.py" not in copied_files
 
 
 @pytest.mark.constraint

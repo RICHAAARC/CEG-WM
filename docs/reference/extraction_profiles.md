@@ -54,11 +54,11 @@ paper_artifacts/
 docs/guides/artifact_rebuild.md
 docs/reference/field_registry.md
 docs/reference/artifact_evidence.md
-tests/functional/
+tests/functional/test_governed_artifact_structures.py
 pyproject.toml
 ```
 
-存在真实重建脚本时，可纳入 `scripts/artifact_rebuild/`。main、runtime、method/attack/metric/runner implementations、notebooks、infrastructure、`third_party/`、拆包工具、extraction profile 说明、治理控制平面、integration tests 和生成目录被排除。输出使用包内 README 模板。纯治理说明不进入该包；artifact evidence 文档保留是因为它定义研究证据链语义。
+存在真实重建脚本时，可纳入 `scripts/artifact_rebuild/`。包内只保留直接验证 records 与 artifact manifest 重建结构的 `test_governed_artifact_structures.py`；其他 functional tests 属于方法或运行验证，不进入论文产物包。main、runtime、method/attack/metric/runner implementations、notebooks、infrastructure、`third_party/`、拆包工具、extraction profile 说明、治理控制平面、integration tests 和生成目录被排除。输出使用包内 README 模板。纯治理说明不进入该包；artifact evidence 文档保留是因为它定义研究证据链语义。
 
 ## 就绪判定与安全检查
 

@@ -78,7 +78,7 @@ PROFILES = {
             "docs/guides/artifact_rebuild.md",
             "docs/reference/field_registry.md",
             "docs/reference/artifact_evidence.md",
-            "tests/functional",
+            "tests/functional/test_governed_artifact_structures.py",
             "pyproject.toml",
         ),
         optional_include_paths=("scripts/artifact_rebuild",),
