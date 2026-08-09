@@ -8,6 +8,20 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
+
+from experiments.methods import (
+    CegWmExperimentAdapter,
+    load_ceg_wm_experiment_adapter_configuration,
+)
+from experiments.metrics.lf_whitened_directional_validation import (
+    aggregate_lf_whitened_direction,
+    create_lf_whitened_directional_observation,
+)
+from experiments.metrics.lf_whitened_score_screening import (
+    fit_lf_null_whitening_asset,
+)
+from experiments.protocol.development_records import DevelopmentOperationalRecord
 
 from experiments.protocol.hf_only_detector_directional_validation import (
     load_authority_deny_axes,
@@ -24,15 +38,30 @@ from experiments.protocol.lf_whitened_directional_validation import (
 from experiments.protocol.lf_whitened_score_screening import (
     load_lf_whitened_score_screening_protocol,
 )
+from experiments.runners.development_persistence import (
+    DevelopmentPersistentStore,
+    FrozenWorkerIdentity,
+)
+from experiments.runners.lf_whitened_directional_validation import (
+    LfWhitenedDirectionalValidationRunner,
+)
+from main import LfNullWhiteningAsset, identify_root_key
+from runtime import create_runtime_adapter
+from scripts.experiment_execution.lf_whitened_directional_validation_entrypoint import (
+    _derive_registered_experiment_root,
+)
 from scripts.experiment_execution.component_source_closure import (
     build_component_source_closure,
 )
+from tests.unit.test_runtime_content_write_and_vae import FakeContentBackend
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
 READINESS = ROOT / ".codex/research_state/method_readiness.yaml"
 SCREENING_CONFIG = ROOT / "configs/experiments/lf_whitened_score_screening.json"
+COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
+ROOT_KEY = "ceg-wm-lf-whitened-directional-test-key"
 
 
 def _load_config() -> dict[str, object]:
@@ -263,3 +292,260 @@ def test_lf_whitened_directional_protocol_rejects_prior_prompt_reuse(
         load_lf_whitened_directional_validation_protocol(
             config_path, repository_root=ROOT
         )
+
+
+def _asset() -> LfNullWhiteningAsset:
+    fit = fit_lf_null_whitening_asset(
+        tuple(
+            tuple(float((cluster + 1) * (index + 1)) for index in range(96))
+            for cluster in range(32)
+        ),
+        fit_manifest_sha256="a" * 64,
+    )
+    return LfNullWhiteningAsset.from_canonical_payload(
+        fit.canonical_payload,
+        whitening_asset_digest=fit.whitening_asset_digest,
+    )
+
+
+def _lf_base_latent() -> torch.Tensor:
+    return torch.linspace(
+        -1.0,
+        1.0,
+        steps=16 * 64 * 64,
+        dtype=torch.float32,
+    ).reshape(1, 16, 64, 64).to(torch.float16)
+
+
+def _directional_runner() -> tuple[
+    LfWhitenedDirectionalValidationRunner,
+    object,
+]:
+    protocol, manifest = load_lf_whitened_directional_validation_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    runtime = create_runtime_adapter(
+        FakeContentBackend(
+            callback_sequences=tuple(tuple(range(20)) for _ in range(8))
+        )  # type: ignore[arg-type]
+    )
+    runtime.initialize("cpu")
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS)
+    )
+    registered_root = _derive_registered_experiment_root(
+        ROOT_KEY,
+        protocol_digest=protocol.digest(),
+        manifest_digest=manifest.digest(),
+        key_family_namespace=manifest.key_family_namespace,
+    )
+    public_root = identify_root_key(registered_root).root_key_public_digest
+    return (
+        LfWhitenedDirectionalValidationRunner(
+            protocol=protocol,
+            manifest=manifest,
+            adapter=adapter,
+            runtime_adapter=runtime,
+            whitening_asset=_asset(),
+            method_code_revision="a" * 40,
+            run_id=protocol.run_id,
+            registered_root_key=registered_root,
+            root_key_public_digest=public_root,
+            protocol_digest=protocol.digest(),
+            execution_intent_authority_digest="b" * 64,
+            candidate_config_digest="c" * 64,
+        ),
+        runtime,
+    )
+
+
+@pytest.mark.unit
+def test_lf_whitened_directional_runner_uses_public_detector_and_four_wrong_controls() -> None:
+    runner, runtime = _directional_runner()
+    operational = runner.execute_operational_smoke(
+        base_latent=_lf_base_latent(),
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    scientific = runner.execute_scientific_cluster(
+        cluster_ordinal=0,
+        base_latent=_lf_base_latent(),
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    runtime.close()
+
+    assert type(operational) is DevelopmentOperationalRecord
+    assert operational.counts_as_scientific_coverage is False
+    result = scientific.operation_result_payload["directional_observation"]
+    assert len(result["wrong_key_scores"]) == 4
+    assert scientific.detector_trace["public_callable"] == (
+        "main.lf_null_whitened_matched_detector"
+    )
+    assert scientific.detector_trace["same_image_registered_four_wrong_reuse"] is True
+    assert scientific.detector_trace["paired_clean_primary_null"] is True
+    assert scientific.detector_trace["reference_image_used"] is False
+    assert scientific.detector_trace["embed_record_used"] is False
+    assert scientific.detector_trace["private_latent_used_by_detector"] is False
+    assert scientific.threshold_trace["raw_threshold_identity"] is None
+    assert scientific.module_outcome is None
+    assert scientific.candidate_recommendation is None
+
+
+def _metric_observation(index: int, *, passed: bool):
+    registered = 0.4 if passed else 0.0
+    return create_lf_whitened_directional_observation(
+        cluster_ordinal=index,
+        registered_score=registered,
+        primary_null_score=0.0,
+        wrong_key_scores=(0.1, 0.09, 0.08, 0.07),
+        candidate_observation_digest=canonical_digest({"candidate": index}),
+        clean_observation_digest=canonical_digest({"clean": index}),
+        registered_detector_identity="d" * 64,
+        primary_null_detector_identity="d" * 64,
+        wrong_key_detector_identities=("d" * 64,) * 4,
+        detector_config_digest="e" * 64,
+        observation_protocol="final_image_vae_posterior_mode",
+        whitening_asset_digest="f" * 64,
+        registered_template_digest=canonical_digest({"registered": index}),
+        primary_null_template_digest=canonical_digest({"registered": index}),
+        wrong_key_template_digests=tuple(
+            canonical_digest({"wrong": wrong, "cluster": index})
+            for wrong in range(4)
+        ),
+        registered_root_key_public_digest="1" * 64,
+        wrong_key_indexes=(0, 1, 2, 3),
+        materialization_integrity_status="passed",
+        materialization_budget_status="accepted",
+        realized_relative_l2=0.01,
+        content_relative_l2_limit=3 / 250,
+        actual_runtime_dtype="torch.float16",
+    )
+
+
+@pytest.mark.unit
+def test_lf_whitened_directional_metric_keeps_failures_in_frozen_denominator() -> None:
+    passing = aggregate_lf_whitened_direction(
+        tuple(_metric_observation(index, passed=True) for index in range(32)),
+        failed_cluster_count=0,
+    )
+    failed = aggregate_lf_whitened_direction(
+        tuple(_metric_observation(index, passed=True) for index in range(27)),
+        failed_cluster_count=5,
+    )
+
+    assert passing.directional_validation_passed is True
+    assert passing.module_outcome == "mechanism_signal_observed"
+    assert passing.candidate_recommendation == "candidate_worth_further_selection"
+    assert passing.registered_minus_max_wrong.exact_one_sided_confidence_lower_bound > 0.5
+    assert failed.directional_validation_passed is False
+    assert failed.expected_cluster_count == 32
+    assert failed.failed_cluster_count == 5
+    assert failed.registered_minus_max_wrong.observation_count == 32
+
+
+@pytest.mark.unit
+def test_lf_whitened_directional_persistence_commits_recovers_and_preserves_retry_lineage(
+    tmp_path: Path,
+) -> None:
+    runner, runtime = _directional_runner()
+    identity = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest=runner.manifest.digest(),
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.run_id,
+        worker_identity=identity,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    lease = store.acquire_lease(
+        session_id="lf_directional_persistence_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+    intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101)
+    record = runner.execute_operational_smoke(
+        base_latent=_lf_base_latent(),
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        intent,
+        record=record,
+        raw_secret_values=(ROOT_KEY, runner.registered_root_key),
+        now_epoch_seconds=102,
+    )
+    success_intent = store.create_session_intent(cursor, lease, now_epoch_seconds=103)
+    success = runner.execute_scientific_cluster(
+        cluster_ordinal=0,
+        base_latent=_lf_base_latent(),
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        success_intent,
+        record=success,
+        raw_secret_values=(ROOT_KEY, runner.registered_root_key),
+        now_epoch_seconds=104,
+    )
+    retry_intent = store.create_session_intent(cursor, lease, now_epoch_seconds=105)
+    retry_record = runner.create_failed_scientific_record(
+        cluster_ordinal=1,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        failure_type="builtins.MemoryError",
+        resource_failure=True,
+        failure_category="resource_failure",
+    )
+    marker = store.commit_session_unit(
+        cursor,
+        lease,
+        retry_intent,
+        record=retry_record,
+        raw_secret_values=(ROOT_KEY, runner.registered_root_key),
+        now_epoch_seconds=106,
+    )
+    assert marker.attempt_disposition == "retryable_resource_failure"
+    second_intent = store.create_session_intent(cursor, lease, now_epoch_seconds=107)
+    assert second_intent.attempt_index == 1
+    assert second_intent.parent_attempt_intent_digest == retry_intent.digest()
+    terminal = runner.create_failed_scientific_record(
+        cluster_ordinal=1,
+        attempt_index=1,
+        retry_parent_intent_digest=retry_intent.digest(),
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        failure_type="builtins.MemoryError",
+        resource_failure=True,
+        failure_category="resource_failure",
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        second_intent,
+        record=terminal,
+        raw_secret_values=(ROOT_KEY, runner.registered_root_key),
+        now_epoch_seconds=108,
+    )
+    recovery = store.recover(now_epoch_seconds=109)
+    runtime.close()
+
+    assert cursor.next_unit_index == 3
+    assert len(recovery.committed_units) == 4
+    assert recovery.committed_units[-1].attempt_disposition == "final_failure"
