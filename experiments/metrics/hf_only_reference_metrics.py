@@ -101,7 +101,7 @@ HF_ONLY_REFERENCE_FORMULA_IMPLEMENTATION_IDENTITIES = {
     ),
 }
 HF_ONLY_REFERENCE_EXPECTED_SPECIFICATION_DIGEST = (
-    "fd045e7de10f3cb450dbf7f402ca69c6ca169ef0b2ddd545283a2aaa2667e354"
+    "9e27e9cc1dac30a1c3aadd93b4e7e99bf5a6fed9502f3c3b48c0e4b3417eebad"
 )
 HF_ONLY_REFERENCE_THRESHOLD_RULE = "float64_nextafter_above_fit_primary_null_maximum"
 HF_ONLY_REFERENCE_DECISION_COMPARISON = "score_greater_than_or_equal_to_tau"

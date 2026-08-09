@@ -90,11 +90,11 @@
       },
       {
         "path": "runtime/__init__.py",
-        "sha256": "247c9a41097c5735938d897ebdaedcd80469b2ead69dba2c0d9339b07ce276d8"
+        "sha256": "e7d7a398a6b8f1c0b966128e9ea2e7e4aa7923cb05c20f4d5d03f3e71b556376"
       },
       {
         "path": "runtime/adapter.py",
-        "sha256": "31017b1c3ff921bc44d7f9094151050fec7cbf31bd964184cdf52509e7891f32"
+        "sha256": "d2c7999cde516a46f66265bf54a4476808c694fe0fc1c9c37edb854a9ebe0f53"
       },
       {
         "path": "runtime/backend.py",
@@ -106,7 +106,7 @@
       },
       {
         "path": "runtime/content_write.py",
-        "sha256": "4ed586e59a51ba968eee3da7634eb791eadc846bd1236b867898e3ad0a320364"
+        "sha256": "c783d75a73369c7490f9fb9dcf3aec44ad092b5bd2c46a521464a0bebb0662dc"
       },
       {
         "path": "runtime/qk_observation.py",
@@ -117,7 +117,7 @@
         "sha256": "fbf1ee3c9ffdecf79e95182d3df1c57b1f08e3181c05e00baffc55f47d3a51b6"
       }
     ],
-    "method_source_bundle_digest": "378535ef2d5fce08c7da79bed8888ea93142530f637623bbe22b6eb09d803057",
+    "method_source_bundle_digest": "5919870bd3bf96e2fbe12bc98cee9f05792bd4d46ed3a27ad86fc0d1da357c1f",
     "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
     "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
     "hf_formal_component_identities": [
@@ -172,7 +172,7 @@
       "absence_semantics": "hf_only_threshold_fit_gpu_execution_preflight_fail_closed",
       "hf_only_reference_protocol_status": "not_yet_materialized_no_result_claim"
     },
-    "candidate_binding_digest": "759b07f43ddeb51f02e0fa9cef8e55de196b890178bf6cd6af254ff482c51a01"
+    "candidate_binding_digest": "a352359c0f22909968a6d4b932a9e4921fc8c9c36d3bf88bf03e6a969bc53714"
   },
   "method_execution": {
     "write_identity": "hf_sparse_tail_registered_key_write",

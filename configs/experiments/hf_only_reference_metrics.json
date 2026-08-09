@@ -1,7 +1,7 @@
 {
   "schema_version": "ceg_wm_hf_only_reference_metric_implementation_binding_v2",
   "hf_only_reference_specification_path": "configs/experiments/hf_only_reference_validation.json",
-  "hf_only_reference_specification_digest": "fd045e7de10f3cb450dbf7f402ca69c6ca169ef0b2ddd545283a2aaa2667e354",
+  "hf_only_reference_specification_digest": "9e27e9cc1dac30a1c3aadd93b4e7e99bf5a6fed9502f3c3b48c0e4b3417eebad",
   "protocol_digest": "e05cab6af8adf4413bd33d8fca8226103ac5ed617208cdb41e57c0f6cb0f984d",
   "split_manifest_digests": {
     "content_threshold_fit": "1150c89cc11db5d6bbe9cb17f032c0a5934f9189db0feb4e5de3998e5302719b",
@@ -76,7 +76,7 @@
   },
   "formula_identity_digest": "07f0d846fc67f20f226de66b9c0fe1226abbeca6918d40013af107a97c5c3acd",
   "implementation_module_path": "experiments/metrics/hf_only_reference_metrics.py",
-  "implementation_source_sha256": "d704ef8121652b7ca5656366d58946f80d53e0b2b056804bb823911e182b1be4",
+  "implementation_source_sha256": "7deec432f5480a82dd38ee964f55c58362e20c26563e6baa31317a8308307135",
   "implementation_symbols": [
     {
       "metric_id": "hf_only_reference_tau_fit",
@@ -109,5 +109,5 @@
   ],
   "formal_confirmation_entrypoint": "evaluate_hf_only_reference_confirmation_metrics",
   "confirmation_cross_input_validation": "required_fit_tau_and_raw_rgb8_replay_before_confirmation_results",
-  "binding_digest": "95c13ee8fde9b7ec65333571a546e5f51aa2ca133403d673ed536229ec75e712"
+  "binding_digest": "4caebc6c507089d2433b5c7ac30ce96335b960011431fae0e53b7506830945e2"
 }
