@@ -1,0 +1,100 @@
+{
+  "schema_version": "ceg_wm_lf_transmission_manifest_v1",
+  "manifest_id": "lf_transmission_diagnostic_eight_cluster_manifest",
+  "seed_namespace": "lf_transmission_diagnostic_20260809",
+  "source_cluster_namespace": "lf_transmission_source_clusters_20260809",
+  "image_lineage_namespace": "lf_transmission_paired_rgb_lineages_20260809",
+  "registered_key_derivation_identity": "lf_transmission_registered_key_subdomain_derivation",
+  "registered_key_domain_identity": "lf_carrier_registered_detection_key_domain",
+  "registered_key_family_namespace": "lf_transmission_registered_key_family_20260809",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "cluster_identity": "silver_compass",
+      "prompt": "a silver compass beside a folded map",
+      "prompt_digest": "08b3582c43310891e78b5f59d3abf49d8362f0feef84ed572c5f0b4539cbc207",
+      "generation_seed": 2026080900,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "abfbbd09ed0cee25f8c79a7a36b3effe71a9326e78cde0abad796aa6fd540807",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 1,
+      "cluster_identity": "mossy_well",
+      "prompt": "a moss-covered stone well in a forest clearing",
+      "prompt_digest": "69f950f10bb35b8df6b3ef3500201a68768b81fa4c46ea8218d54a947695f3a3",
+      "generation_seed": 2026080901,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "9265fb34a6d153d784e18610996ed3cb5f3dda2f01b57886acf50b68e4a80d01",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 2,
+      "cluster_identity": "copper_lantern",
+      "prompt": "a copper lantern glowing on a windowsill",
+      "prompt_digest": "17fb2cf9da03e60be84b55f067a3a21de05c26577f65c9db4cf01b90e31d5368",
+      "generation_seed": 2026080902,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "cef5461c7a08921083a530f54251021c9d2067055485772481f7f8e7a8b719e3",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 3,
+      "cluster_identity": "winter_orchard",
+      "prompt": "a quiet winter orchard under pale sunlight",
+      "prompt_digest": "dcc9d350b57d77a139fb2fec24839a4b42e91abfdea50b6974f558150c9f7fce",
+      "generation_seed": 2026080903,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "6e72dd271a55726c7ce3d3158ee24d71ab9902b308091eb5a11855547faf236b",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 4,
+      "cluster_identity": "navy_sailboat",
+      "prompt": "a navy sailboat crossing a calm lake",
+      "prompt_digest": "ee39ed96511e95de60c9c415370061ccfaf09c3ca8f26f937c6c47623a278631",
+      "generation_seed": 2026080904,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "b17d867e7b6c4a3d864dedcc56e1765e4c34b394fa50ae1e8b57ad7e60ed9963",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 5,
+      "cluster_identity": "porcelain_vase",
+      "prompt": "a porcelain vase filled with white flowers",
+      "prompt_digest": "2597b5671c9a676ffdd4250b7f5224fa836bc355531b74fef2e534825afb6863",
+      "generation_seed": 2026080905,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "2cdbe461dbcca89383f5facb93c3e88682abc0969b3af5e484ecd043141146ff",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 6,
+      "cluster_identity": "cedar_library",
+      "prompt": "a cedar bookshelf in a sunlit library",
+      "prompt_digest": "db15e1820683f87fded78b9017676899685298549109c68f7b25fe2bfa62a5df",
+      "generation_seed": 2026080906,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "2465272de9624b87e52027675b5832d3f37a91fbfcd8b6e7ec08834ee09a5359",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    },
+    {
+      "cluster_ordinal": 7,
+      "cluster_identity": "sunrise_balloon",
+      "prompt": "a hot air balloon at sunrise above fields",
+      "prompt_digest": "a09b5462c90334de13285da8ad00ea2ca89771b4790137dc4708ce7eab97fe4d",
+      "generation_seed": 2026080907,
+      "image_lineage_identity": "paired_clean_lf_single_generation_lineage",
+      "image_lineage_digest": "76f40ac00884ed165d0daf6a882dcddb39a57100092e38caf722bbf80b2d1003",
+      "split": "development",
+      "role_id": "lf_transmission_diagnostic"
+    }
+  ]
+}

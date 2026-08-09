@@ -1,0 +1,25 @@
+{
+  "schema_version": "ceg_wm_lf_transmission_diagnostic_protocol_v1",
+  "protocol_id": "ceg_wm_lf_transmission_diagnostic",
+  "protocol_version": "1.0.0",
+  "run_id": "ceg_wm_lf_carrier_to_detector_transmission_diagnostic",
+  "split": "development",
+  "role_id": "lf_transmission_diagnostic",
+  "candidate_identity": "lf_low_pass",
+  "manifest_path": "configs/experiments/lf_transmission_diagnostic_manifest.json",
+  "manifest_file_sha256": "158287d69632bb4952ddab93202aba7316b8fe22a7c4d6c160c1340d3fe2034d",
+  "signal_positions": [
+    "callback_pre_write",
+    "actual_dtype_post_write",
+    "scheduler_suffix_final",
+    "rgb_vae_reencoded"
+  ],
+  "operational_unit_count": 0,
+  "scientific_cluster_count": 8,
+  "maximum_total_units": 8,
+  "maximum_attempts_per_unit": 2,
+  "maximum_duration_seconds_per_unit": 2700,
+  "stop_rule": "registered_minus_primary_null_positive_at_least_seven_of_eight_and_registered_minus_wrong_key_positive_at_least_seven_of_eight_with_no_budget_integrity_or_nonfinite_failure_then_allow_request_for_lf_directional_validation",
+  "claim_boundary": "development_lf_transport_direction_only_no_threshold_no_promotion_no_claim",
+  "unit_roster_digest": "d8e415e9dd8a9f0a648ff85d3cdc3131deb49738dcc11f197a72609d3c7dfa6c"
+}
