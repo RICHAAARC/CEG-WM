@@ -4,8 +4,8 @@
 
 `hf_only_detector_directional_validation_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。
 当前唯一授权 Notebook 为 `notebooks/colab/hf_only_detector_directional_validation.ipynb`，固定绑定
-execution revision `13000756d7af9111d129f5867ac06f816dfe326a` 与 run ID
-`ceg_wm_hf_only_detector_directional_validation_initial_gate`。首次冻结边界只有 2 个
+execution revision `0d4253ab2614c642563c566e6268565c337b503f` 与 run ID
+`ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority`。首次冻结边界只有 2 个
 non-scientific operational checks 与 8 个 directional scientific units，每 unit 最多 2 attempts。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 paired
@@ -15,6 +15,10 @@ ZIP/`SHA256SUMS`。本 development validation 不拟合 threshold，不授权 FP
 calibration、formal evaluation、baseline 或论文 claim；不执行 LF、routing、组合、Q/K、
 estimator、reliability、rectification 或 conditional recovery。其他 checked-in Notebook
 入口均已暂停。
+
+旧 run `ceg_wm_hf_only_detector_directional_validation_initial_gate` 及其 records 是
+immutable partial evidence；当前入口不读取、不迁移、不改写或混合该 namespace。上述新 run 是当前
+唯一允许执行的 HF detector directional validation 身份。
 
 `hf_transmission_diagnostic_server.py` 与 `notebooks/colab/hf_transmission_diagnostic.ipynb`
 保留其已完成的历史传输诊断身份，

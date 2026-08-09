@@ -25,8 +25,9 @@ SERVER_RELATIVE = Path(
 )
 SERVER = ROOT / SERVER_RELATIVE
 PROTOCOL = ROOT / "configs/experiments/hf_only_detector_directional_validation.json"
-EXECUTION_REVISION = "13000756d7af9111d129f5867ac06f816dfe326a"
-RUN_ID = "ceg_wm_hf_only_detector_directional_validation_initial_gate"
+EXECUTION_REVISION = "0d4253ab2614c642563c566e6268565c337b503f"
+RUN_ID = "ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority"
+SUPERSEDED_RUN_ID = "ceg_wm_hf_only_detector_directional_validation_initial_gate"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/hf_only_detector_directional_validation.json",
     "configs/experiments/hf_only_detector_directional_validation_manifest.json",
@@ -107,6 +108,8 @@ def test_hf_detector_directional_notebook_is_thin_and_initial_gate_only() -> Non
     assert "SHA256SUMS" in code_source
     assert "two non-scientific operational checks" in source
     assert "eight HF-only detector directional scientific units" in source
+    assert "immutable partial evidence" in source
+    assert SUPERSEDED_RUN_ID not in code_source
     assert "fits no threshold" in source
     for forbidden in (
         "pip install",
@@ -188,5 +191,8 @@ def test_hf_detector_directional_readmes_expose_only_current_notebook() -> None:
         assert NOTEBOOK.name in source
         assert EXECUTION_REVISION in source
         assert RUN_ID in source
+        assert SUPERSEDED_RUN_ID in source
+        assert "immutable partial evidence" in source
+        assert "不读取、不迁移、不改写或混合" in source
         assert "hf_transmission_diagnostic.ipynb" in source
         assert "paused / not authorized" in source
