@@ -196,7 +196,7 @@ def test_lf_transmission_exact_checkout_builds_importable_execution_package(
 
 
 @pytest.mark.quick
-def test_lf_transmission_readmes_expose_only_current_notebook() -> None:
+def test_lf_transmission_readmes_preserve_paused_historical_boundary() -> None:
     for path in (
         ROOT / "notebooks/colab/README.md",
         ROOT / "scripts/experiment_execution/README.md",
@@ -206,5 +206,8 @@ def test_lf_transmission_readmes_expose_only_current_notebook() -> None:
         assert EXECUTION_REVISION in source
         assert RUN_ID in source
         assert "当前唯一授权" in source
+        assert "lf_whitened_score_screening.ipynb" in source
+        assert "a78c47184cf83ad351bb4442ebd31c218726de25" in source
+        assert "ceg_wm_lf_whitening_asset_fit_and_score_screening" in source
         assert "hf_only_detector_directional_validation.ipynb" in source
         assert "paused / not authorized" in source

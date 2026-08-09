@@ -1,20 +1,29 @@
 # Experiment execution servers
 
-## LF carrier-to-detector transmission diagnostic
+## LF whitening asset fit and score screening
 
-`lf_transmission_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。当前唯一授权
-Notebook 为 `notebooks/colab/lf_transmission_diagnostic.ipynb`，固定绑定 execution revision
-`2337f9d7c773a6054d558108e31d07d35fbee42f` 与 run ID
-`ceg_wm_lf_carrier_to_detector_transmission_diagnostic`。服务器执行冻结的 0 个 operational 与
-8 个 scientific units；每 unit 最多 2 attempts、2700 秒。
+`lf_whitened_score_screening_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行入口。
+当前唯一授权 Notebook 为 `notebooks/colab/lf_whitened_score_screening.ipynb`，固定绑定
+execution revision `a78c47184cf83ad351bb4442ebd31c218726de25` 与 run ID
+`ceg_wm_lf_whitening_asset_fit_and_score_screening`。服务器执行冻结的 1 个
+non-scientific operational smoke、32 个 clean null-fit 与 8 个 paired raw-vs-whitened
+screening units；每 unit 最多 2 attempts、2700 秒。operational unit 不计 scientific
+coverage。
 
-服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 paired
-runtime 与 public LF carrier/detector 调用、正式 records、跨 session persistence 和内部 result 或
-diagnostic ZIP。Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/
-ZIP/`SHA256SUMS`。本 development diagnostic 不拟合 threshold，不授权 FPR、candidate promotion、
-calibration、formal evaluation、baseline 或论文 claim；不执行 HF、routing、组合、Q/K、
-estimator、reliability、rectification 或 conditional recovery。其他 checked-in Notebook
-入口均已暂停。
+服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 public
+method/runtime 调用、正式 records、跨 session persistence 和内部 result 或 diagnostic ZIP。
+Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/ZIP/`SHA256SUMS`。
+本 development-only fit 与 screening 不拟合 threshold，不授权 FPR、candidate promotion、
+calibration、formal evaluation、baseline 或论文 claim；不执行 LF directional validation、
+routing、LF/HF 组合、Q/K、estimator、reliability、rectification 或 conditional recovery。
+其他 checked-in Notebook 入口均已暂停。
+
+`lf_transmission_diagnostic_server.py` 与
+`notebooks/colab/lf_transmission_diagnostic.ipynb` 绑定的 execution revision
+`2337f9d7c773a6054d558108e31d07d35fbee42f`、run ID
+`ceg_wm_lf_carrier_to_detector_transmission_diagnostic` 已完成历史诊断职责，当前为
+**paused / not authorized**。其 records 保持独立，不读取、不迁移、不改写或混入当前
+LF whitening fit 与 screening 分母。
 
 `hf_only_detector_directional_validation_server.py` 与
 `notebooks/colab/hf_only_detector_directional_validation.ipynb` 绑定的 execution revision
