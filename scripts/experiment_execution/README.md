@@ -5,7 +5,7 @@
 `lf_whitened_directional_validation_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行
 入口。当前唯一授权 Notebook 为
 `notebooks/colab/lf_whitened_directional_validation.ipynb`，固定绑定 execution revision
-`b23eb00391dc9ad03deb5ffd12c2a47739a3aa09` 与 run ID
+`194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与 run ID
 `ceg_wm_lf_whitened_directional_validation`。服务器执行冻结的 1 个 non-scientific
 public-endpoint smoke 与 32 个 LF whitened directional scientific units；每 unit 最多
 2 attempts、2700 秒。operational unit 不计 scientific coverage。

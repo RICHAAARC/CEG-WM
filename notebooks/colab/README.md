@@ -6,7 +6,7 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `lf_whitened_directional_validation.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`b23eb00391dc9ad03deb5ffd12c2a47739a3aa09`，使用独立 run ID
+`194eccdd1f16c295528a4d9e1d7c75c2748f061a`，使用独立 run ID
 `ceg_wm_lf_whitened_directional_validation`，执行冻结的 1 个 non-scientific public-endpoint
 smoke 与 32 个 LF whitened directional scientific units；每 unit 最多 2 attempts、2700 秒。
 operational unit 不计 scientific coverage。Notebook 挂载 Drive、读取 `HF_TOKEN` 与
