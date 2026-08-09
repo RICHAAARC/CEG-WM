@@ -6,7 +6,7 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `hf_only_detector_directional_validation.ipynb` 是当前唯一允许在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`eb892067a0b730a171535f8dca8b0bd32376fc37`，使用全新 run ID
+`13000756d7af9111d129f5867ac06f816dfe326a`，使用全新 run ID
 `ceg_wm_hf_only_detector_directional_validation_initial_gate`，只执行 2 个不计科学覆盖的
 operational checks 与 8 个 HF detector directional scientific units，每 unit 最多 2 attempts。Notebook 挂载 Drive、读取
 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用

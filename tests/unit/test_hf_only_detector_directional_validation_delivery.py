@@ -25,7 +25,7 @@ SERVER_RELATIVE = Path(
 )
 SERVER = ROOT / SERVER_RELATIVE
 PROTOCOL = ROOT / "configs/experiments/hf_only_detector_directional_validation.json"
-EXECUTION_REVISION = "eb892067a0b730a171535f8dca8b0bd32376fc37"
+EXECUTION_REVISION = "13000756d7af9111d129f5867ac06f816dfe326a"
 RUN_ID = "ceg_wm_hf_only_detector_directional_validation_initial_gate"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/hf_only_detector_directional_validation.json",
@@ -136,6 +136,8 @@ def test_hf_detector_directional_notebook_is_thin_and_initial_gate_only() -> Non
 def test_hf_detector_directional_exact_checkout_builds_importable_execution_package(
     tmp_path: Path,
 ) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks exact Git checkout capability")
     checkout = tmp_path / "exact_checkout"
     subprocess.run(
         ("git", "clone", "--no-checkout", "--quiet", str(ROOT), str(checkout)),
