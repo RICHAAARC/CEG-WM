@@ -1,0 +1,99 @@
+{
+  "schema_version": "ceg_wm_lf_whitened_score_screening_manifest_v1",
+  "manifest_id": "lf_whitened_score_screening_complete_cluster_manifest",
+  "role_id": "lf_whitened_score_screening",
+  "seed_namespace": "lf_whitened_score_screening_seeds_20260810",
+  "source_cluster_namespace": "lf_whitened_score_screening_source_clusters_20260810",
+  "image_lineage_namespace": "lf_whitened_score_screening_public_rgb8_lineage_20260810",
+  "key_family_namespace": "lf_whitened_score_screening_key_family_20260810",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "cluster_identity": "bronze_bronze",
+      "prompt": "a bronze armillary sphere in a bright observatory",
+      "prompt_digest": "6d96afac350774f065f9a5ac6611594e1e0a8e52d7d7779ebe66730fe931149c",
+      "generation_seed": 2026082000,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "ca5e04ed8393d2b6dae1e336c8cc41fbc428fc0ff92f15f17f565973600029cd",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 1,
+      "cluster_identity": "cedar_cedar",
+      "prompt": "a cedar music box on a white mantel",
+      "prompt_digest": "ac4a9c3c4597e22b6aeb2c108a3c9aababb2e28eb6446a72de5265af33099cb5",
+      "generation_seed": 2026082001,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "aa1f47138eb85e81f3553b475d9c88e88a5f034aa675582fd3498d23c71723a8",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 2,
+      "cluster_identity": "glazed_glazed",
+      "prompt": "a glazed clay pitcher beside green apples",
+      "prompt_digest": "8d1e31f94db8808800c3785c28018bb21b6e66fed39fb6bf94cdcdcc60252e09",
+      "generation_seed": 2026082002,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "b276aa2ed4db161c9d073ecae3a9d64561646bc2681e2a6410660b08630da56b",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 3,
+      "cluster_identity": "limestone_limestone",
+      "prompt": "a limestone bridge crossing a narrow canal",
+      "prompt_digest": "3e87e84b2b6af647000e63dc8c00af45c496fcaef310c692c48398294388293f",
+      "generation_seed": 2026082003,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "ac06d94621f3af72bce4a0d2cd40adb2fecfbff97e75e48563a712f43e738eed",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 4,
+      "cluster_identity": "silver_silver",
+      "prompt": "a silver thimble beside folded blue fabric",
+      "prompt_digest": "2f370779e25dab7d78f234a56c3726a0e15f50be8e163484416eb5d0ff8b0f14",
+      "generation_seed": 2026082004,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "713aaf71cbde1a4c07568562404902ad91584ff537d30186cc6f29bb3cda7995",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 5,
+      "cluster_identity": "steel_steel",
+      "prompt": "a steel drafting compass on graph paper",
+      "prompt_digest": "6f5531a3e88bc99a9851cd601a8a26e8dcd9247982a5f19f9fa415a35f509441",
+      "generation_seed": 2026082005,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "7486b150f8afd73e4dfdc23ade45f891e105e654ae1b97bdfb083e458dcaef97",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 6,
+      "cluster_identity": "walnut_walnut",
+      "prompt": "a walnut chessboard beneath a skylight",
+      "prompt_digest": "f8300ed19b76249ba9974ee80cab90981646dff1bc2c566b5e8a323fdd615fc0",
+      "generation_seed": 2026082006,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "fe278d727aeac1a1b99258397b1e9a6bbd57df1b54087c213745efbf932c8039",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    },
+    {
+      "cluster_ordinal": 7,
+      "cluster_identity": "yellow_yellow",
+      "prompt": "a yellow glass buoy on a sandy beach",
+      "prompt_digest": "86267208de4e83f4cf679cb0019eebff8ca2ca2502add77a2b0166383b72d5cf",
+      "generation_seed": 2026082007,
+      "image_lineage_identity": "paired_clean_lf_rendered_rgb8_observation",
+      "image_lineage_digest": "2190e910093a1fa87d7751b56fc66b214bd466b130e12f4e0a27d97a0cd052f6",
+      "split": "development",
+      "role_id": "lf_whitened_score_screening"
+    }
+  ]
+}
