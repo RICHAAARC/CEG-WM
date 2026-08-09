@@ -2,7 +2,7 @@
   "method_name": "ceg_wm_dual_chain",
   "design_path": "docs/design/method_architecture.md",
   "candidate_specification_path": "docs/design/candidate_specifications.md",
-  "candidate_specification_sha256": "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337",
+  "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1",
   "components": {
     "key_schedule": {
       "responsibility": "root_key_derivation_and_prg",
@@ -50,7 +50,11 @@
     },
     "lf_detector": {
       "responsibility": "low_frequency_blind_scoring",
-      "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "lf_low_pass",
+        "lf_null_whitened_matched_score"
+      ],
       "implementation_path": "main/content_chain/lf_detector.py",
       "implementation_symbol": "lf_detector"
     },
@@ -117,6 +121,8 @@
     "tests/unit/test_key_schedule.py",
     "tests/unit/test_hf_content_backbone.py",
     "tests/unit/test_lf_routing_combination.py",
+    "tests/unit/test_lf_null_whitened_detector.py",
+    "tests/functional/test_lf_null_whitened_detector.py",
     "tests/unit/test_geometry_chain.py",
     "tests/unit/test_joint_decision.py"
   ],
@@ -156,6 +162,10 @@
     "lf_wrong_key_rejection": {
       "test_node": "tests/unit/test_lf_routing_combination.py::test_lf_wrong_key_rejection",
       "components": ["lf_carrier", "lf_detector"]
+    },
+    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": {
+      "test_node": "tests/unit/test_lf_null_whitened_detector.py::test_lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates",
+      "components": ["lf_detector"]
     },
     "routing_mask_partition_and_range": {
       "test_node": "tests/unit/test_lf_routing_combination.py::test_routing_mask_partition_and_range",
@@ -241,8 +251,8 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "agent2-method-science-overgovernance-review:ee512b31917fdf31d76e7237d3bba2b9c8ec4c64:APPROVE",
-    "reviewed_repository_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
-    "candidate_specification_sha256": "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337"
+    "review_reference": "agent2-lf-whitened-method-semantic-review:4cd7d33a37b041970ed078b699bb8f0aa82b4e31:APPROVE",
+    "reviewed_repository_revision": "4cd7d33a37b041970ed078b699bb8f0aa82b4e31",
+    "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1"
   }
 }

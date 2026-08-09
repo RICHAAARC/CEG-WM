@@ -66,7 +66,11 @@ CANDIDATE_IDS = {
         "routing_stqr",
         "routing_uniform_control",
     ],
-    "lf_detector": ["key_schedule_sha256_counter", "lf_low_pass"],
+    "lf_detector": [
+        "key_schedule_sha256_counter",
+        "lf_low_pass",
+        "lf_null_whitened_matched_score",
+    ],
     "hf_detector": ["key_schedule_sha256_counter", "hf_sparse_tail"],
     "content_detector": [
         "hf_sparse_tail",
@@ -116,6 +120,9 @@ BEHAVIOR_BINDINGS = {
     "lf_domain_and_independent_key": ["lf_carrier"],
     "lf_blind_score_time_centering": ["lf_detector"],
     "lf_wrong_key_rejection": ["lf_carrier", "lf_detector"],
+    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": [
+        "lf_detector"
+    ],
     "routing_mask_partition_and_range": ["content_router"],
     "routing_disabled_uniform_control": ["content_router"],
     "content_embedding_branch_consumption": [
@@ -269,6 +276,12 @@ def _method_sources() -> dict[str, str]:
             "    if denominator == 0:\n"
             "        raise ValueError('zero centered energy')\n"
             "    return numerator / denominator\n"
+            "def lf_null_whitened_matched_detector(observed, template, weights):\n"
+            "    if len(observed) != len(template) or len(weights) != len(observed):\n"
+            "        raise ValueError('whitening shape mismatch')\n"
+            "    whitened_observed = tuple(value * weight for value, weight in zip(observed, weights))\n"
+            "    whitened_template = tuple(value * weight for value, weight in zip(template, weights))\n"
+            "    return lf_detector(whitened_observed, whitened_template)\n"
         ),
         "main/content_chain/hf_carrier.py": (
             "def hf_carrier(tail_values, key_signs, keep, mask=None):\n"
@@ -390,7 +403,7 @@ from main.content_chain.embedder import content_embedder
 from main.content_chain.hf_carrier import hf_carrier
 from main.content_chain.hf_detector import hf_detector
 from main.content_chain.lf_carrier import lf_carrier
-from main.content_chain.lf_detector import lf_detector
+from main.content_chain.lf_detector import lf_detector, lf_null_whitened_matched_detector
 from main.content_chain.routing import content_router
 from main.geometry_chain.qk_sync import qk_geometry_sync
 from main.geometry_chain.reliability import geometry_reliability
@@ -462,6 +475,18 @@ def test_lf_wrong_key_rejection():
     registered_score = lf_detector(registered, registered)
     wrong_score = lf_detector(registered, wrong)
     assert registered_score > wrong_score
+
+@pytest.mark.unit
+def test_lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates():
+    observed = (3.0, -2.0, 1.0, 4.0)
+    template = (1.0, -1.0, 2.0, 0.5)
+    raw = lf_detector(observed, template)
+    whitened = lf_null_whitened_matched_detector(
+        observed,
+        template,
+        (4.0, 0.5, 2.0, 0.25),
+    )
+    assert whitened != raw
 
 @pytest.mark.unit
 def test_routing_mask_partition_and_range():

@@ -50,7 +50,11 @@
     },
     "lf_detector": {
       "responsibility": "low_frequency_blind_scoring",
-      "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "lf_low_pass",
+        "lf_null_whitened_matched_score"
+      ],
       "implementation_path": "main/content_chain/lf_detector.py",
       "implementation_symbol": ""
     },
@@ -150,6 +154,10 @@
     "lf_wrong_key_rejection": {
       "test_node": "",
       "components": ["lf_carrier", "lf_detector"]
+    },
+    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": {
+      "test_node": "",
+      "components": ["lf_detector"]
     },
     "routing_mask_partition_and_range": {
       "test_node": "",

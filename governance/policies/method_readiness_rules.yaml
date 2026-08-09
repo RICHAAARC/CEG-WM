@@ -1,5 +1,5 @@
 {
-  "policy_version": 9,
+  "policy_version": 10,
   "project_name": "ceg_wm",
   "stage_order": [
     "project_constraint_framework",
@@ -139,7 +139,11 @@
       "routing_stqr",
       "routing_uniform_control"
     ],
-    "lf_detector": ["key_schedule_sha256_counter", "lf_low_pass"],
+    "lf_detector": [
+      "key_schedule_sha256_counter",
+      "lf_low_pass",
+      "lf_null_whitened_matched_score"
+    ],
     "hf_detector": ["key_schedule_sha256_counter", "hf_sparse_tail"],
     "content_detector": [
       "hf_sparse_tail",
@@ -174,6 +178,7 @@
     "lf_domain_and_independent_key",
     "lf_blind_score_time_centering",
     "lf_wrong_key_rejection",
+    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates",
     "routing_mask_partition_and_range",
     "routing_disabled_uniform_control",
     "content_embedding_branch_consumption",
@@ -203,6 +208,9 @@
     "lf_domain_and_independent_key": ["lf_carrier"],
     "lf_blind_score_time_centering": ["lf_detector"],
     "lf_wrong_key_rejection": ["lf_carrier", "lf_detector"],
+    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": [
+      "lf_detector"
+    ],
     "routing_mask_partition_and_range": ["content_router"],
     "routing_disabled_uniform_control": ["content_router"],
     "content_embedding_branch_consumption": [
