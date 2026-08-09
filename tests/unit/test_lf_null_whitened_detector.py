@@ -279,25 +279,21 @@ def test_lf_whitened_dct_matches_registered_formula_at_selected_coefficient() ->
                 - height_slope * coordinates[height]
                 - width_slope * coordinates[width]
             )
-            direct_sum += (
-                residual
-                * cos(
-                    fixed_pi
-                    * (height + 0.5)
-                    * height_frequency
-                    / 64.0
-                )
-                * cos(
-                    fixed_pi
-                    * (width + 0.5)
-                    * width_frequency
-                    / 64.0
-                )
+            height_basis = sqrt(2.0 / 64.0) * cos(
+                fixed_pi
+                * (height + 0.5)
+                * height_frequency
+                / 64.0
             )
-    expected = sqrt(2.0 / 64.0) * sqrt(2.0 / 64.0) * direct_sum
-    assert coefficients[0][height_frequency][width_frequency] == pytest.approx(
-        expected,
-        abs=2e-14,
+            width_basis = sqrt(2.0 / 64.0) * cos(
+                fixed_pi
+                * (width + 0.5)
+                * width_frequency
+                / 64.0
+            )
+            direct_sum += residual * height_basis * width_basis
+    assert coefficients[0, height_frequency, width_frequency].item().hex() == (
+        direct_sum.hex()
     )
 
 

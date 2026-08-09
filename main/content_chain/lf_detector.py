@@ -8,6 +8,8 @@ from math import cos, isfinite, sqrt
 from struct import pack, unpack
 from typing import Sequence
 
+import numpy as np
+
 from main.shared.key_schedule import DerivedWrongKeyMaterial, stable_json_utf8
 
 from .hf_carrier import MODEL_REVISION
@@ -283,8 +285,8 @@ def _affine_detrended_dct(
     values: Sequence[float],
     *,
     role: str,
-) -> tuple[tuple[tuple[float, ...], ...], ...]:
-    residual_channels: list[list[list[float]]] = []
+) -> np.ndarray:
+    residual = np.empty((16, 64, 64), dtype=np.float64, order="C")
     offset = 0
     denominator = 64.0 * _NORMALIZED_COORDINATE_SQUARED_SUM
     for channel in range(16):
@@ -316,10 +318,8 @@ def _affine_detrended_dct(
                     * float(channel_values[row_offset + width])
                 )
         width_slope = width_sum / denominator
-        residual_rows: list[list[float]] = []
         for height in range(64):
             row_offset = height * 64
-            residual_row: list[float] = []
             for width in range(64):
                 residual_value = (
                     float(channel_values[row_offset + width])
@@ -331,51 +331,29 @@ def _affine_detrended_dct(
                     raise LfDetectorError(
                         f"{role} affine residual must be finite"
                     )
-                residual_row.append(residual_value)
-            residual_rows.append(residual_row)
-        residual_channels.append(residual_rows)
+                residual[channel, height, width] = residual_value
 
-    coefficient_channels: list[tuple[tuple[float, ...], ...]] = []
-    for channel in range(16):
-        horizontal: list[list[float]] = [
-            [0.0 for _ in range(64)] for _ in range(64)
-        ]
-        for height in range(64):
-            residual_row = residual_channels[channel][height]
-            for width_frequency in range(64):
-                accumulator = 0.0
-                basis_row = _DCT_BASIS[width_frequency]
-                for width in range(64):
-                    accumulator += residual_row[width] * basis_row[width]
-                horizontal[height][width_frequency] = accumulator
-        coefficient_rows: list[tuple[float, ...]] = []
-        for height_frequency in range(64):
-            basis_row = _DCT_BASIS[height_frequency]
-            coefficient_row: list[float] = []
-            for width_frequency in range(64):
-                accumulator = 0.0
-                for height in range(64):
-                    accumulator += (
-                        basis_row[height]
-                        * horizontal[height][width_frequency]
-                    )
-                if not isfinite(accumulator):
-                    raise LfDetectorError(
-                        f"{role} DCT coefficients must be finite"
-                    )
-                coefficient_row.append(accumulator)
-            coefficient_rows.append(tuple(coefficient_row))
-        coefficient_channels.append(tuple(coefficient_rows))
-    return tuple(coefficient_channels)
+    basis = np.asarray(_DCT_BASIS, dtype=np.float64, order="C")
+    coefficients = np.einsum(
+        "chw,uh,vw->cuv",
+        residual,
+        basis,
+        basis,
+        dtype=np.float64,
+        order="C",
+        casting="no",
+        optimize=False,
+    )
+    if not coefficients.flags.c_contiguous:
+        raise LfDetectorError(f"{role} DCT coefficient order drifted")
+    if not np.isfinite(coefficients).all():
+        raise LfDetectorError(f"{role} DCT coefficients must be finite")
+    return coefficients
 
 
 def _whitened_cosine(
-    observation_coefficients: tuple[
-        tuple[tuple[float, ...], ...], ...
-    ],
-    template_coefficients: tuple[
-        tuple[tuple[float, ...], ...], ...
-    ],
+    observation_coefficients: np.ndarray,
+    template_coefficients: np.ndarray,
     asset: LfNullWhiteningAsset,
 ) -> float:
     observation_whitened: list[float] = []
@@ -391,16 +369,20 @@ def _whitened_cosine(
                 observed = (
                     weight
                     * float(
-                        observation_coefficients[channel][height_frequency][
-                            width_frequency
+                        observation_coefficients[
+                            channel,
+                            height_frequency,
+                            width_frequency,
                         ]
                     )
                 )
                 template = (
                     weight
                     * float(
-                        template_coefficients[channel][height_frequency][
-                            width_frequency
+                        template_coefficients[
+                            channel,
+                            height_frequency,
+                            width_frequency,
                         ]
                     )
                 )
