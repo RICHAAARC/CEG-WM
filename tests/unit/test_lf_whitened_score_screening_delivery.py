@@ -6,7 +6,6 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 from zipfile import ZipFile
@@ -55,29 +54,6 @@ def test_lf_whitened_screening_server_builds_exact_package_and_safe_receipt(
     checkout = tmp_path / "exact_checkout"
     subprocess.run(
         ("git", "clone", "--quiet", str(ROOT), str(checkout)),
-        check=True,
-    )
-    checked_in_server = checkout / SERVER_RELATIVE
-    checked_in_server.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SERVER, checked_in_server)
-    subprocess.run(
-        ("git", "-C", str(checkout), "add", SERVER_RELATIVE.as_posix()),
-        check=True,
-    )
-    subprocess.run(
-        (
-            "git",
-            "-C",
-            str(checkout),
-            "-c",
-            "user.name=CEG-WM Test",
-            "-c",
-            "user.email=ceg-wm-test@example.invalid",
-            "commit",
-            "--quiet",
-            "-m",
-            "test: freeze server fixture",
-        ),
         check=True,
     )
     revision = subprocess.run(
