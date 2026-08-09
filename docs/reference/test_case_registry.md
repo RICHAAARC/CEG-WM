@@ -172,9 +172,31 @@ TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
 所有 governance 测试只读检查项目平面或在 `tmp_path` 构造临时受治理树；输出只进入
 pytest 临时目录，不是项目 records 或科学证据。
 
+`detachability_contract` 保留 research roots 复制、外层护栏缺失、requirements、文档链接、
+研究入口导入和 paper digest 检查，但不再在 detached copy 中重复完整 default pytest。
+它以显式 `-o addopts='' -p no:cacheprovider` 分别收集 source 与 detached 项目测试，要求
+规范化后的完整 node ID 集合非空、无重复且逐项相同；parent `cfc9da7f...` 的实测集合均为
+`699` 个 node，排序列表 SHA-256 均为
+`300b302dd7c9b63217063197fe811fbc8718556ef00a52ca67560300d394ed55`。随后只在 detached
+copy 运行以下八个现有代表节点，要求全部 pass 且不得 skip/xfail：
+
+- `tests/unit/test_key_schedule.py::test_key_schedule_root_and_domain_separation`
+- `tests/unit/test_runtime_configuration_and_adapter.py::test_mock_backend_initialization_preserves_frozen_identity`
+- `tests/unit/test_internal_scientific_validation_protocol.py::test_internal_record_contains_all_scientific_trace_groups`
+- `tests/unit/test_internal_governed_runner.py::test_runner_composes_real_adapter_attack_and_metric_replay_once`
+- `tests/functional/test_lf_null_whitened_detector.py::test_lf_whitened_candidate_crosses_real_public_adapter_without_raw_fallback`
+- `tests/unit/test_lf_whitened_score_screening_delivery.py::test_lf_whitened_screening_server_help_imports_from_isolated_cwd`
+- `tests/unit/test_experiment_execution_delivery.py::test_builder_path_scanners_preserve_behavior_without_source_local_paths`
+- `tests/functional/test_governed_artifact_structures.py::test_artifact_manifest_records_rebuild_provenance`
+
+parent 的重复完整 default pytest 基线为 `439.65s`；收敛后的定向节点实测为
+`1 passed in 11.55s`、wall `12.47s`，其中 detached 八节点 smoke 为
+`8 passed in 4.81s`、wall `5.95s`。source/detached collection 列表、摘要和 smoke 输出只保存
+于 `/tmp` 验证证据，不写入项目或研究 records。
+
 | registry_id | path_or_node | category | collected/default | resource_and_io | output_surface | evidence_boundary | over_plane_risk | execution_authority | review_trigger |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
-| detachability_contract | `governance/tests/test_detachability_contract.py` | constraint | 1/1 | CPU, read-only project copy | tmp copy | detachability only | all project planes read-only | G:path | dependency boundary change |
+| detachability_contract | `governance/tests/test_detachability_contract.py` | constraint | 1/1 | CPU, read-only project copy, collect parity, fixed 8-node smoke | tmp copy | detachability collection and representative execution only | all project planes read-only | G:path | dependency boundary or project test collection change |
 | extended_naming_audit | `governance/tests/test_extended_naming_audit.py` | unit | 529/529 | CPU, tmp trees | tmp audit reports | naming rule only | governed paths read-only | G:path | naming matcher/audit change |
 | extraction_contract | `governance/tests/test_extraction_contract.py` | constraint | 10/10 | CPU, git/tmp | tmp package | extraction contract only | package/project tree read-only | G:path | extraction profile change |
 | governance_policy | `governance/tests/test_governance_policy.py` | unit, constraint | 12/12 | CPU, policy reads | none | policy structure only | project roots/state read-only | G:path | governance policy change |
@@ -663,7 +685,7 @@ monkeypatch target；`yes:delegating` 表示替换只作观测/时钟控制并�
 
 | base node/family + file | marker/category | concrete failure mode or use | actual production boundary | fixture scale/parameters | expected maximum duration | default/full | explicit command | tmp_path | replaced protected production surface | module owner | duplicate/supersedes | over-plane risk | review binding/date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `governance/tests/test_detachability_contract.py::test_research_project_runs_after_outer_guard_is_removed` | `constraint` | `test_research_project_runs_after_outer_guard_is_removed` | `@file:governance/tests/test_detachability_contract.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_detachability_contract.py::test_research_project_runs_after_outer_guard_is_removed` | `yes` | `protected=no; patch-targets=none` | `detachability_contract` | `unique;none` | `@file-boundary:detachability_contract` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
+| `governance/tests/test_detachability_contract.py::test_research_project_runs_after_outer_guard_is_removed` | `constraint` | source/detached full collection parity plus fixed key/runtime/protocol/runner/LF/server/builder/artifact smoke | source and detached `699`-node collections; fixed smoke `8/8` | `pytest-cases=1; tmp project copy; no full default pytest replay` | `20s maximum; observed 12.47s; parent repeated-suite baseline 439.65s` | `governance+full 1/1` | `@governance-node governance/tests/test_detachability_contract.py::test_research_project_runs_after_outer_guard_is_removed` | `yes` | `protected=no; patch-targets=none` | `detachability_contract` | `supersedes detached full default pytest replay` | read-only across all project planes; bounded representative execution | `2026-08-10@test:收敛可拆卸项目重复验证@parent-cfc9da7f0cacaed48540adaa0e39c0bcdb3ebc0c` |
 | `governance/tests/test_extended_naming_audit.py::test_aliased_indirect_reference_after_helper_definition_passes_real_audit` | `unit` | `test_aliased_indirect_reference_after_helper_definition_passes_real_audit` | `@file:governance/tests/test_extended_naming_audit.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_extended_naming_audit.py::test_aliased_indirect_reference_after_helper_definition_passes_real_audit` | `yes` | `protected=no; patch-targets=none` | `extended_naming_audit` | `unique;none` | `@file-boundary:extended_naming_audit` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
 | `governance/tests/test_extended_naming_audit.py::test_aliased_indirect_reference_before_helper_definition_fails_real_audit` | `unit` | `test_aliased_indirect_reference_before_helper_definition_fails_real_audit` | `@file:governance/tests/test_extended_naming_audit.py` | `pytest-cases=9; params=9 cases; first=@register_callback(alias)\ndef registered():\n    return 1.0,def invoke_callback(callback=alias):\n    return callback,def registered(callback: alias):\n    return 1.0; node-digest=b0cda8433c3e39221357036e1f964c190f3c382830399868c22f9557c8a30d7d; scale-literals=none` | `<30s selection budget` | `governance+full 9/9` | `@governance-node governance/tests/test_extended_naming_audit.py::test_aliased_indirect_reference_before_helper_definition_fails_real_audit` | `yes` | `protected=no; patch-targets=none` | `extended_naming_audit` | `unique;none` | `@file-boundary:extended_naming_audit` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
 | `governance/tests/test_extended_naming_audit.py::test_annotated_tensor_parameter_supports_narrow_math_method` | `unit` | `test_annotated_tensor_parameter_supports_narrow_math_method` | `@file:governance/tests/test_extended_naming_audit.py` | `pytest-cases=1; params=non-parameterized; scale-literals=none` | `<30s selection budget` | `governance+full 1/1` | `@governance-node governance/tests/test_extended_naming_audit.py::test_annotated_tensor_parameter_supports_narrow_math_method` | `yes` | `protected=no; patch-targets=none` | `extended_naming_audit` | `unique;none` | `@file-boundary:extended_naming_audit` | `2026-08-05@test:精简并登记开发探索测试平面@parent-f614084e30d414d9c2718d74e214cc3074ea2509` |
