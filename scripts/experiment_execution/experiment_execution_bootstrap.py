@@ -98,6 +98,7 @@ EXACT_FILES = frozenset(
         "main/content_chain/hf_detector.py",
         "main/content_chain/lf_carrier.py",
         "main/content_chain/lf_detector.py",
+        "main/content_chain/lf_whitening.py",
         "main/content_chain/routing.py",
         "main/geometry_chain/__init__.py",
         "main/geometry_chain/qk_sync.py",

@@ -7,7 +7,7 @@
   ],
   "authorization_base_revision": "309b3be549409e3d1e16ea9c1ee9c2c9e33c0bf7",
   "hf_only_reference_specification_path": "configs/experiments/hf_only_reference_validation.json",
-  "hf_only_reference_specification_digest": "5a98a5ae73f9be5525eb4ee134f88f86c3c3c193df424e398e8b34bca2cc12c5",
+  "hf_only_reference_specification_digest": "fd045e7de10f3cb450dbf7f402ca69c6ca169ef0b2ddd545283a2aaa2667e354",
   "prompt_roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
   "prompt_roster_file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f",
   "dataset_snapshot_path": "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
@@ -19,8 +19,8 @@
   "method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
   "metric_registry_digest": "f6f6cf5914f27bdf26ac0c6fb8bc3930adb502ba80dd8b698dfea82555efe855",
   "metric_implementation_path": "configs/experiments/hf_only_reference_metrics.json",
-  "metric_implementation_binding_digest": "30c2d342a8065c4c0fd7cacc857ab791ff441e7e94fa153ba05361db85cd87b6",
-  "metric_implementation_source_sha256": "665ca240692d8a875e3c0968d38af7b5174f791d2ac2f7c15b2d1daf118906cd",
+  "metric_implementation_binding_digest": "95c13ee8fde9b7ec65333571a546e5f51aa2ca133403d673ed536229ec75e712",
+  "metric_implementation_source_sha256": "d704ef8121652b7ca5656366d58946f80d53e0b2b056804bb823911e182b1be4",
   "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
   "runtime_config_sha256": "a097e826551dfa74601defef406d027cd6428946894f85012d2c65268b0bff1f",
   "runtime_qualification_revision": "8b2344756c4c247906ff0d4eab68e46a773e13f5",
@@ -56,5 +56,5 @@
     "incremental_unit_attempt_persistence_required": true
   },
   "claim_boundary": "execution_preparation_only_no_gpu_run_no_scientific_result",
-  "execution_config_digest": "062d61068581cf88abbe9af1638c684e9edea4219cb79453e8c217e9c26f1d1e"
+  "execution_config_digest": "b5b6f1db66a9a848dcab9d766bf185e675f5cba2034b2360946078b809894f01"
 }

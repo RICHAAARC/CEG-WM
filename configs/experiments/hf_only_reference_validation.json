@@ -28,13 +28,13 @@
     "key_schedule_candidate_id": "key_schedule_sha256_counter",
     "runtime_candidate_id": "runtime_sd35_flowmatch",
     "candidate_specification_path": "docs/design/candidate_specifications.md",
-    "candidate_specification_sha256": "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337",
+    "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1",
     "method_reviewed_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
     "protocol_authorization_parent_revision": "8a557c076b79788405fe16f99e4acb6f43e89681",
     "method_source_files": [
       {
         "path": "main/__init__.py",
-        "sha256": "29a694fe1fff20e98a83687721f9df93ac6bdc675a150a2d34a4fe5e3fcaf6e5"
+        "sha256": "b2fef5e850bb99250cc97227b4dd16550005ceff1a566a693f5f97bfef92d9b2"
       },
       {
         "path": "main/shared/__init__.py",
@@ -50,7 +50,7 @@
       },
       {
         "path": "main/content_chain/__init__.py",
-        "sha256": "4af1b900cf1721fecd2d9634df10a8b608bfd3e5fd5a113450cf7281b3c7a1de"
+        "sha256": "b7a01137978d7e0e79d7309b23755fc128b9e04242130a7cb2c436b30e073f40"
       },
       {
         "path": "main/content_chain/routing.py",
@@ -70,7 +70,11 @@
       },
       {
         "path": "main/content_chain/lf_detector.py",
-        "sha256": "dedcf6573cb281fdd5463a41dd2e5efef34a0f9b350e5384e453e22166301e27"
+        "sha256": "c8482e803f26cc05ed7e9d6e9d1e5558756db28a5dd308a788b712fe92ffa622"
+      },
+      {
+        "path": "main/content_chain/lf_whitening.py",
+        "sha256": "608f0ab7f24a01b152aceb455b718530a9690efdb9843953020c95bc599b4c7a"
       },
       {
         "path": "main/content_chain/hf_detector.py",
@@ -82,7 +86,7 @@
       },
       {
         "path": "experiments/methods/ceg_wm.py",
-        "sha256": "7f48e7478a459650b84ad61fdcf6c5421c122edc039660f869908f956d7059c5"
+        "sha256": "1a332a61c2fc538af56f814e9417c313f02117ee82811fe92a6c69173687234f"
       },
       {
         "path": "runtime/__init__.py",
@@ -113,7 +117,7 @@
         "sha256": "fbf1ee3c9ffdecf79e95182d3df1c57b1f08e3181c05e00baffc55f47d3a51b6"
       }
     ],
-    "method_source_bundle_digest": "2bdf701c7dbd1e07fbe58e5ae83565a1416c5415fea2994460c19dcb3d90c026",
+    "method_source_bundle_digest": "378535ef2d5fce08c7da79bed8888ea93142530f637623bbe22b6eb09d803057",
     "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
     "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
     "hf_formal_component_identities": [
@@ -168,7 +172,7 @@
       "absence_semantics": "hf_only_threshold_fit_gpu_execution_preflight_fail_closed",
       "hf_only_reference_protocol_status": "not_yet_materialized_no_result_claim"
     },
-    "candidate_binding_digest": "b2d388647db918bfc4fb203713ceded31052fb1969437f32dfd22a1c247341d7"
+    "candidate_binding_digest": "759b07f43ddeb51f02e0fa9cef8e55de196b890178bf6cd6af254ff482c51a01"
   },
   "method_execution": {
     "write_identity": "hf_sparse_tail_registered_key_write",

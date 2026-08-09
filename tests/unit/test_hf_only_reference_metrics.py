@@ -220,7 +220,7 @@ def test_hf_only_reference_metric_binding_binds_formula_registry_source_and_safe
     binding = _binding()
     assert (
         binding.hf_only_reference_specification_digest
-        == "5a98a5ae73f9be5525eb4ee134f88f86c3c3c193df424e398e8b34bca2cc12c5"
+        == "fd045e7de10f3cb450dbf7f402ca69c6ca169ef0b2ddd545283a2aaa2667e354"
     )
     assert binding.implementation_source_sha256 == hashlib.sha256(
         HF_ONLY_REFERENCE_METRIC_MODULE.read_bytes()

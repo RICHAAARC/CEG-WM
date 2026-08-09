@@ -463,7 +463,7 @@ def _validate_candidate_binding(raw: object) -> None:
         "runtime_candidate_id": "runtime_sd35_flowmatch",
         "candidate_specification_path": "docs/design/candidate_specifications.md",
         "candidate_specification_sha256": (
-            "fc241dc0e85089e1d71635765527b44a9cd453ac7b221ac2e9dc177088108337"
+            "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1"
         ),
         "method_reviewed_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
         "protocol_authorization_parent_revision": (
@@ -491,6 +491,7 @@ def _validate_candidate_binding(raw: object) -> None:
         "main/content_chain/hf_carrier.py",
         "main/content_chain/embedder.py",
         "main/content_chain/lf_detector.py",
+        "main/content_chain/lf_whitening.py",
         "main/content_chain/hf_detector.py",
         "main/content_chain/detector.py",
         "experiments/methods/ceg_wm.py",
