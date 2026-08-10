@@ -578,9 +578,21 @@ class QkSynchronizationWriteDiagnosticRunner:
         started = monotonic()
         embed, directions, _carrier = self._hf_operation(base_latent)
         ratio = self.protocol.geometry_ratio_roster[0]
-        result = self.adapter.execute_qk_synchronization_write(base_latent, embed, directions, geometry_ratio=ratio.ratio, detection_key=self.geometry_root).result
+        call = self.adapter.execute_qk_synchronization_write(base_latent, embed, directions, geometry_ratio=ratio.ratio, detection_key=self.geometry_root)
+        result = call.result
         elapsed = float(monotonic() - started)
-        operation = {"operational_role": "public_qk_synchronization_write_smoke", "write_status": result.geometry_write_result.status, "runtime_config_digest": result.runtime_config_digest, "counts_as_scientific_coverage": False, "scientific_claims_supported": False}
+        operation = {
+            "operational_role": "public_qk_synchronization_write_smoke",
+            "source_cluster_ordinal": 0,
+            "case_ids": ["qk_synchronization_write_public_runtime_smoke"],
+            "responsibility_result_digests": [
+                ["qk_geometry_sync", call.result_identity]
+            ],
+            "elapsed_seconds": elapsed,
+            "runtime_config_digest": result.runtime_config_digest,
+            "counts_as_scientific_coverage": False,
+            "scientific_claims_supported": False,
+        }
         record = DevelopmentOperationalRecord(schema_version=OPERATIONAL_RECORD_SCHEMA, collection_role=OPERATIONAL_RECORD_COLLECTION_ROLE, record_kind=OPERATIONAL_RECORD_KIND, record_id="0"*64, run_id=self.run_id, protocol_digest=self.protocol_digest, method_code_revision=self.method_code_revision, unit_index=0, phase="development_environment_preflight", source_cluster_ordinal=0, candidate_config_digest=self.candidate_config_digest, attempt_index=attempt_index, retry_parent_intent_digest=retry_parent_intent_digest, actual_elapsed_seconds=elapsed, maximum_duration_seconds=maximum_duration_seconds, operation_result_payload=operation, counts_as_scientific_coverage=False, scientific_claims_supported=False, scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY)
         record = replace(record, record_id=canonical_development_value_digest(record.payload_without_record_id()))
         record.validate()

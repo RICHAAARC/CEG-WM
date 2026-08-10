@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from hashlib import sha256
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ import torch.nn.functional as functional
 
 from experiments.methods import (
     CegWmExperimentAdapter,
+    CegWmExperimentAdapterError,
     load_ceg_wm_experiment_adapter_configuration,
 )
 from experiments.metrics.qk_synchronization_write_diagnostic import (
@@ -26,6 +28,15 @@ from experiments.metrics.qk_synchronization_write_diagnostic import (
 )
 from experiments.protocol.hf_only_detector_directional_validation import (
     load_authority_deny_axes,
+)
+from experiments.protocol.development_records import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
+    OPERATIONAL_RECORD_COLLECTION_ROLE,
+    OPERATIONAL_RECORD_KIND,
+    OPERATIONAL_RECORD_SCHEMA,
+    DevelopmentOperationalRecord,
+    DevelopmentRecordError,
+    canonical_development_value_digest,
 )
 from experiments.protocol.qk_synchronization_write_diagnostic import (
     CLAIM_BOUNDARY,
@@ -43,9 +54,12 @@ from experiments.runners.development_persistence import (
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
 )
-from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from runtime import RuntimeAdapterError, Sd35RuntimeAdapter, create_runtime_adapter
 from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint import (
     QkSynchronizationWriteEntrypointError,
+    _failure_diagnostic,
+    _is_resource_failure,
+    _qualified_exception_type_chain,
     _selected_rgb8,
 )
 from tests.unit.test_runtime_qk_observation import (
@@ -151,6 +165,46 @@ def _runner() -> QkSynchronizationWriteDiagnosticRunner:
         execution_intent_authority_digest="2" * 64,
         candidate_config_digest="3" * 64,
         package_identity="4" * 64,
+    )
+
+
+def _valid_qk_operational_record() -> DevelopmentOperationalRecord:
+    operation = {
+        "operational_role": "public_qk_synchronization_write_smoke",
+        "source_cluster_ordinal": 0,
+        "case_ids": ["qk_synchronization_write_public_runtime_smoke"],
+        "responsibility_result_digests": [["qk_geometry_sync", "4" * 64]],
+        "elapsed_seconds": 1.0,
+        "runtime_config_digest": "5" * 64,
+        "counts_as_scientific_coverage": False,
+        "scientific_claims_supported": False,
+    }
+    record = DevelopmentOperationalRecord(
+        schema_version=OPERATIONAL_RECORD_SCHEMA,
+        collection_role=OPERATIONAL_RECORD_COLLECTION_ROLE,
+        record_kind=OPERATIONAL_RECORD_KIND,
+        record_id="0" * 64,
+        run_id="qk_synchronization_write_operational_record_test",
+        protocol_digest="1" * 64,
+        method_code_revision="2" * 40,
+        unit_index=0,
+        phase="development_environment_preflight",
+        source_cluster_ordinal=0,
+        candidate_config_digest="3" * 64,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        actual_elapsed_seconds=1.0,
+        maximum_duration_seconds=2700,
+        operation_result_payload=operation,
+        counts_as_scientific_coverage=False,
+        scientific_claims_supported=False,
+        scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+    )
+    return replace(
+        record,
+        record_id=canonical_development_value_digest(
+            record.payload_without_record_id()
+        ),
     )
 
 
@@ -629,6 +683,209 @@ def test_qk_runner_resource_retry_and_implementation_terminal_are_explicit() -> 
     assert terminal.execution_status == "failed"
     assert terminal.attempt_disposition() == "final_failure"
     assert implementation.failure_class == "implementation_failure"
+
+
+@pytest.mark.unit
+def test_qk_operational_smoke_commits_and_recovers_exact_non_scientific_record(
+    tmp_path: Path,
+) -> None:
+    runner, runtime, _backend = _public_chain_runner()
+    bindings = runner.create_persistence_unit_bindings()
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest=runner.manifest.digest(),
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=runner.protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=bindings,
+    )
+    lease = store.acquire_lease(
+        session_id="qk_public_runtime_smoke_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+    intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101)
+    record = runner.execute_operational_smoke(
+        base_latent=torch.randn(
+            (1, 16, 64, 64),
+            generator=torch.Generator().manual_seed(2026084200),
+            dtype=torch.float16,
+        ),
+        attempt_index=intent.attempt_index,
+        retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+        maximum_duration_seconds=intent.maximum_duration_seconds,
+    )
+    record.validate()
+    marker = store.commit_session_unit(
+        cursor,
+        lease,
+        intent,
+        record=record,
+        raw_secret_values=(runner.content_root, runner.geometry_root),
+        now_epoch_seconds=102,
+    )
+    recovery = store.recover(now_epoch_seconds=103)
+    recovered_cursor = store.open_session_cursor(lease, now_epoch_seconds=103)
+    runtime.close()
+
+    assert marker.attempt_disposition == "success"
+    assert marker.record_id == record.record_id
+    assert tuple(item.unit_index for item in recovery.committed_units) == (0,)
+    assert recovered_cursor.operational_records == (record,)
+    assert recovered_cursor.next_unit_index == 1
+    assert record.counts_as_scientific_coverage is False
+    assert record.scientific_claims_supported is False
+    assert record.operation_result_payload == {
+        "operational_role": "public_qk_synchronization_write_smoke",
+        "source_cluster_ordinal": 0,
+        "case_ids": ["qk_synchronization_write_public_runtime_smoke"],
+        "responsibility_result_digests": [
+            [
+                "qk_geometry_sync",
+                record.operation_result_payload["responsibility_result_digests"][0][1],
+            ]
+        ],
+        "elapsed_seconds": record.actual_elapsed_seconds,
+        "runtime_config_digest": record.operation_result_payload[
+            "runtime_config_digest"
+        ],
+        "counts_as_scientific_coverage": False,
+        "scientific_claims_supported": False,
+    }
+    assert len(
+        record.operation_result_payload["responsibility_result_digests"][0][1]
+    ) == 64
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "replacement", "error_match"),
+    (
+        (
+            "operational_role",
+            "qk_runtime_smoke_alias",
+            "identity drifted",
+        ),
+        (
+            "case_ids",
+            ["qk_synchronization_write_wrong_runtime_smoke"],
+            "case identity drifted",
+        ),
+        (
+            "responsibility_result_digests",
+            [["content_embedder", "a" * 64]],
+            "responsibility coverage drifted",
+        ),
+    ),
+)
+def test_qk_operational_smoke_rejects_identity_drift(
+    field: str,
+    replacement: object,
+    error_match: str,
+) -> None:
+    record = _valid_qk_operational_record()
+    operation = {**record.operation_result_payload, field: replacement}
+    with pytest.raises(DevelopmentRecordError, match=error_match):
+        replace(record, operation_result_payload=operation).validate()
+
+
+@pytest.mark.unit
+def test_qk_operational_smoke_rejects_extra_result_field() -> None:
+    record = _valid_qk_operational_record()
+    operation = {**record.operation_result_payload, "write_status": "accepted"}
+    with pytest.raises(DevelopmentRecordError, match="result schema drifted"):
+        replace(record, operation_result_payload=operation).validate()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "resource_type",
+    tuple(
+        dict.fromkeys(
+            (
+                MemoryError,
+                getattr(torch, "OutOfMemoryError", MemoryError),
+                getattr(torch.cuda, "OutOfMemoryError", MemoryError),
+            )
+        )
+    ),
+)
+@pytest.mark.parametrize("link_name", ("__cause__", "__context__"))
+def test_qk_resource_failure_follows_wrapped_type_chain(
+    resource_type: type[BaseException],
+    link_name: str,
+) -> None:
+    secret = "must-not-enter-diagnostic"
+    resource = resource_type(secret)
+    runtime_error = RuntimeAdapterError(secret)
+    setattr(runtime_error, link_name, resource)
+    adapter_error = CegWmExperimentAdapterError(secret)
+    setattr(adapter_error, link_name, runtime_error)
+
+    assert _is_resource_failure(adapter_error) is True
+    assert _qualified_exception_type_chain(adapter_error) == (
+        "experiments.methods.ceg_wm.CegWmExperimentAdapterError",
+        "runtime.adapter.RuntimeAdapterError",
+        f"{resource_type.__module__}.{resource_type.__qualname__}",
+    )
+
+
+@pytest.mark.unit
+def test_qk_failure_diagnostic_is_cycle_safe_and_excludes_sensitive_state() -> None:
+    secret = "qk-secret-must-not-be-persisted"
+    outer = CegWmExperimentAdapterError(secret)
+    resource = MemoryError(secret)
+    outer.__cause__ = resource
+    resource.__cause__ = outer
+    binding = _runner().create_persistence_unit_bindings()[0]
+
+    diagnostic = _failure_diagnostic(outer, active_binding=binding)
+    serialized = json.dumps(diagnostic, sort_keys=True)
+
+    assert diagnostic["failure_type_chain"] == [
+        "experiments.methods.ceg_wm.CegWmExperimentAdapterError",
+        "builtins.MemoryError",
+    ]
+    assert diagnostic["failure_class"] == "resource_failure"
+    assert diagnostic["unit_index"] == 0
+    assert diagnostic["unit_id"] == "development_unit_0000"
+    assert diagnostic["operation_identity"] == (
+        "qk_synchronization_write_public_runtime_smoke"
+    )
+    assert diagnostic["phase"] == "development_environment_preflight"
+    assert diagnostic["counts_as_scientific_coverage"] is False
+    assert diagnostic["scientific_claims_supported"] is False
+    assert secret not in serialized
+    for forbidden in (
+        "message",
+        "repr",
+        "traceback",
+        "locals",
+        "record_id",
+        "module_outcome",
+        "candidate_recommendation",
+    ):
+        assert forbidden not in diagnostic
+
+
+@pytest.mark.unit
+def test_qk_failure_diagnostic_does_not_classify_message_as_resource_failure() -> None:
+    error = RuntimeError("torch.cuda.OutOfMemoryError and MemoryError text only")
+    diagnostic = _failure_diagnostic(error, active_binding=None)
+
+    assert _is_resource_failure(error) is False
+    assert diagnostic["failure_type_chain"] == ["builtins.RuntimeError"]
+    assert diagnostic["failure_class"] == "implementation_failure"
+    assert diagnostic["unit_index"] is None
+    assert "module_outcome" not in diagnostic
 
 
 @pytest.mark.unit

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -9,7 +10,6 @@ import json
 from pathlib import Path
 import time
 from time import monotonic
-from typing import Mapping
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import torch
@@ -33,6 +33,7 @@ from experiments.runners.development_persistence import (
     HARD_SESSION_CAP_SECONDS,
     SOFT_STOP_SECONDS,
     DevelopmentPersistentStore,
+    FrozenDevelopmentUnitBinding,
     FrozenWorkerIdentity,
     SessionReceipt,
 )
@@ -78,16 +79,55 @@ def _registered_roots(base_root: str, *, protocol_digest: str, manifest_digest: 
     )
 
 
-def _is_resource_failure(error: BaseException) -> bool:
-    resource_types = tuple(dict.fromkeys((MemoryError, getattr(torch, "OutOfMemoryError", MemoryError), getattr(torch.cuda, "OutOfMemoryError", MemoryError))))
+def _exception_chain(error: BaseException) -> Iterator[BaseException]:
     current: BaseException | None = error
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
-        if isinstance(current, resource_types):
-            return True
         seen.add(id(current))
+        yield current
         current = current.__cause__ or current.__context__
-    return False
+
+
+def _is_resource_failure(error: BaseException) -> bool:
+    resource_types = tuple(dict.fromkeys((MemoryError, getattr(torch, "OutOfMemoryError", MemoryError), getattr(torch.cuda, "OutOfMemoryError", MemoryError))))
+    return any(isinstance(current, resource_types) for current in _exception_chain(error))
+
+
+def _qualified_exception_type_chain(error: BaseException) -> tuple[str, ...]:
+    return tuple(
+        f"{type(current).__module__}.{type(current).__qualname__}"
+        for current in _exception_chain(error)
+    )
+
+
+def _failure_diagnostic(
+    error: BaseException,
+    *,
+    active_binding: FrozenDevelopmentUnitBinding | None,
+) -> dict[str, object]:
+    type_chain = _qualified_exception_type_chain(error)
+    return {
+        "failure_type": type_chain[0],
+        "failure_type_chain": list(type_chain),
+        "failure_class": (
+            "resource_failure"
+            if _is_resource_failure(error)
+            else "implementation_failure"
+        ),
+        "stage": "qk_synchronization_write_diagnostic_execution",
+        "unit_index": (
+            None if active_binding is None else active_binding.unit_index
+        ),
+        "unit_id": None if active_binding is None else active_binding.unit_id,
+        "operation_identity": (
+            None
+            if active_binding is None
+            else active_binding.analysis_unit_identity.case_id
+        ),
+        "phase": None if active_binding is None else active_binding.phase,
+        "counts_as_scientific_coverage": False,
+        "scientific_claims_supported": False,
+    }
 
 
 def _selected_rgb8(
@@ -243,7 +283,8 @@ def execute_qk_synchronization_write_diagnostic_session(
     candidate_digest = canonical_digest({"candidate_identity": protocol.candidate_identity, "adapter_config_digest": adapter.configuration.config_digest, "runtime_config_digest": runtime_session.runtime_config_digest, "manifest_digest": manifest.digest(), "package_identity": execution_package_sha256})
     authority_digest = canonical_digest({"protocol_digest": protocol_digest, "manifest_digest": manifest.digest(), "content_root_public_digest": content_public, "geometry_root_public_digest": geometry_public, "run_id": run_id})
     runner = QkSynchronizationWriteDiagnosticRunner(protocol=protocol, manifest=manifest, adapter=adapter, runtime_adapter=runtime, method_code_revision=expected_revision, run_id=run_id, content_registered_root_key=content_root, geometry_registered_root_key=geometry_root, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, candidate_config_digest=candidate_digest, package_identity=execution_package_sha256)
-    store = DevelopmentPersistentStore(persistent, run_id=run_id, worker_identity=FrozenWorkerIdentity(revision=expected_revision, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, input_manifest_digest=manifest.digest(), candidate_config_digest=candidate_digest, unit_roster_digest=protocol.unit_roster_digest), registered_unit_bindings=runner.create_persistence_unit_bindings())
+    registered_bindings = runner.create_persistence_unit_bindings()
+    store = DevelopmentPersistentStore(persistent, run_id=run_id, worker_identity=FrozenWorkerIdentity(revision=expected_revision, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, input_manifest_digest=manifest.digest(), candidate_config_digest=candidate_digest, unit_roster_digest=protocol.unit_roster_digest), registered_unit_bindings=registered_bindings)
     started_epoch = int(time.time())
     lease = store.acquire_lease(session_id=session_id, now_epoch_seconds=started_epoch, lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1)
     cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
@@ -251,7 +292,7 @@ def execute_qk_synchronization_write_diagnostic_session(
     termination_reason = "frozen_roster_complete"
     failure = None
     aggregate = None
-    active_unit_index = None
+    active_binding = None
     try:
         while cursor.next_unit_index < len(protocol.unit_roster):
             now = int(time.time())
@@ -259,7 +300,7 @@ def execute_qk_synchronization_write_diagnostic_session(
                 termination_reason = "soft_stop_after_current_unit"
                 break
             unit = protocol.unit_roster[cursor.next_unit_index]
-            active_unit_index = unit.unit_index
+            active_binding = registered_bindings[unit.unit_index]
             if unit.unit_index > RATIO_PROBE_UNIT_COUNT:
                 ratio_aggregate = runner.replay_ratio_aggregate(cursor.terminal_scientific_evidence)
             else:
@@ -299,7 +340,7 @@ def execute_qk_synchronization_write_diagnostic_session(
             aggregate = asdict(runner.replay_synchronization_diagnosis_aggregate(store.verified_terminal_scientific_evidence(now_epoch_seconds=int(time.time()))))
     except Exception as exc:
         termination_reason = "worker_execution_failure"
-        failure = {"failure_type": f"{type(exc).__module__}.{type(exc).__qualname__}", "stage": "qk_synchronization_write_diagnostic_execution", "unit_index": active_unit_index, "scientific_claims_supported": False}
+        failure = _failure_diagnostic(exc, active_binding=active_binding)
     finally:
         runtime.close()
     ended_epoch = int(time.time())

@@ -230,14 +230,29 @@ class DevelopmentOperationalRecord:
                 "development operational result schema drifted"
             )
         result = self.operation_result_payload
-        expected_role = (
-            "environment_runtime_throughput_preflight"
-            if self.phase == "development_environment_preflight"
-            else "full_chain_wiring_smoke"
-        )
+        operational_role = result["operational_role"]
+        if self.phase == "development_environment_preflight":
+            if operational_role == "environment_runtime_throughput_preflight":
+                expected_responsibilities = ("content_embedder",)
+                expected_case_ids = None
+            elif operational_role == "public_qk_synchronization_write_smoke":
+                expected_responsibilities = ("qk_geometry_sync",)
+                expected_case_ids = (
+                    "qk_synchronization_write_public_runtime_smoke",
+                )
+            else:
+                raise DevelopmentRecordError(
+                    "development operational result identity drifted"
+                )
+        else:
+            if operational_role != "full_chain_wiring_smoke":
+                raise DevelopmentRecordError(
+                    "development operational result identity drifted"
+                )
+            expected_responsibilities = REQUIRED_METHOD_RESPONSIBILITIES
+            expected_case_ids = None
         if (
-            result["operational_role"] != expected_role
-            or result["source_cluster_ordinal"] != self.source_cluster_ordinal
+            result["source_cluster_ordinal"] != self.source_cluster_ordinal
             or result["counts_as_scientific_coverage"] is not False
             or result["scientific_claims_supported"] is not False
         ):
@@ -265,14 +280,13 @@ class DevelopmentOperationalRecord:
         ):
             raise DevelopmentRecordError("development operational result payload is invalid")
         observed_responsibilities = tuple(item[0] for item in result_digests)
-        expected_responsibilities = (
-            ("content_embedder",)
-            if self.phase == "development_environment_preflight"
-            else REQUIRED_METHOD_RESPONSIBILITIES
-        )
         if observed_responsibilities != expected_responsibilities:
             raise DevelopmentRecordError(
                 "development operational responsibility coverage drifted"
+            )
+        if expected_case_ids is not None and tuple(case_ids) != expected_case_ids:
+            raise DevelopmentRecordError(
+                "development operational case identity drifted"
             )
         elapsed = result["elapsed_seconds"]
         if (
