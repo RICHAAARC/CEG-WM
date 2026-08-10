@@ -374,6 +374,84 @@ def row_normalized_relation_score(
     return value
 
 
+def differentiable_qk_relation_objective(
+    observations: Sequence[QkLayerObservation],
+    detection_key: str | DerivedWrongKeyMaterial,
+    *,
+    model_revision: str = MODEL_REVISION,
+) -> torch.Tensor:
+    """Return the frozen two-layer keyed relation score as a scalar tensor."""
+
+    if type(model_revision) is not str or model_revision != MODEL_REVISION:
+        raise QkGeometrySyncError("model_revision must match runtime_sd35_flowmatch")
+    if isinstance(observations, (str, bytes)) or not isinstance(
+        observations, Sequence
+    ):
+        raise QkGeometrySyncError(
+            "observations must be the two registered Q/K layers"
+        )
+    if len(observations) != len(REGISTERED_LAYERS):
+        raise QkGeometrySyncError("exactly two registered Q/K layers are required")
+
+    layer_scores: list[torch.Tensor] = []
+    public_digest: str | None = None
+    key_role: str | None = None
+    wrong_key_index: int | None = None
+    for expected_layer, observation in zip(
+        REGISTERED_LAYERS,
+        observations,
+        strict=True,
+    ):
+        if type(observation) is not QkLayerObservation:
+            raise QkGeometrySyncError("each observation must be QkLayerObservation")
+        if observation.layer_name != expected_layer:
+            raise QkGeometrySyncError("Q/K layer order or identity mismatch")
+        if (
+            type(observation.operator_identity) is not str
+            or not observation.operator_identity
+        ):
+            raise QkGeometrySyncError(
+                "operator_identity must be a non-empty string"
+            )
+        relation, _, _ = _relation_tensor(
+            observation.query,
+            observation.attention_key,
+        )
+        projection, _, current_digest, current_role, current_wrong_index = (
+            _geometry_projection(
+                detection_key,
+                layer_name=observation.layer_name,
+                token_count=relation.shape[0],
+                model_revision=model_revision,
+            )
+        )
+        if public_digest is None:
+            public_digest = current_digest
+            key_role = current_role
+            wrong_key_index = current_wrong_index
+        elif (
+            current_digest != public_digest
+            or current_role != key_role
+            or current_wrong_index != wrong_key_index
+        ):
+            raise QkGeometrySyncError("geometry key identity changed across layers")
+        layer_scores.append(
+            _row_normalized_channel_scores(
+                relation,
+                projection.to(device=relation.device, dtype=relation.dtype),
+            ).mean()
+        )
+
+    objective = torch.stack(layer_scores).mean()
+    if objective.ndim != 0 or objective.dtype is not torch.float32:
+        raise QkGeometrySyncError(
+            "differentiable relation objective must be one float32 scalar"
+        )
+    if not bool(torch.isfinite(objective)):
+        raise QkGeometrySyncError("differentiable relation objective must be finite")
+    return objective
+
+
 def _tensor_float32_digest(value: torch.Tensor) -> str:
     flattened = value.detach().to(device="cpu", dtype=torch.float32).reshape(-1)
     return sha256(b"".join(pack(">f", float(item)) for item in flattened)).hexdigest()
@@ -848,6 +926,7 @@ def geometry_synchronization_write(
 
 
 __all__ = [
+    "differentiable_qk_relation_objective",
     "GeometrySynchronizationWriteResult",
     "QkGeometrySyncError",
     "QkGeometrySyncResult",

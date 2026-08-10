@@ -16,6 +16,7 @@ from main.geometry_chain.qk_sync import (
     QkLayerObservation,
     _aggregate_descriptor_digest,
     _content_projection,
+    differentiable_qk_relation_objective,
     geometry_direction_outside_content_span,
     geometry_synchronization_write,
     qk_geometry_sync,
@@ -196,6 +197,36 @@ def _thresholds(
 @pytest.mark.unit
 def test_qk_relation_consumption():
     observations, original = _actual_qk_observation(side=4, seed=901)
+    differentiable_observations = tuple(
+        replace(
+            observation,
+            query=observation.query.detach().clone().requires_grad_(True),
+            attention_key=(
+                observation.attention_key.detach().clone().requires_grad_(True)
+            ),
+        )
+        for observation in observations
+    )
+    objective = differentiable_qk_relation_objective(
+        differentiable_observations,
+        _REGISTERED_KEY,
+    )
+    assert objective.dtype is torch.float32
+    assert objective.ndim == 0
+    assert float(objective.detach()) == pytest.approx(
+        original.relation_score,
+        abs=1e-7,
+        rel=1e-7,
+    )
+    objective.backward()
+    for observation in differentiable_observations:
+        assert observation.query.grad is not None
+        assert observation.attention_key.grad is not None
+        assert torch.isfinite(observation.query.grad).all()
+        assert torch.isfinite(observation.attention_key.grad).all()
+        assert torch.linalg.vector_norm(observation.query.grad) > 0.0
+        assert torch.linalg.vector_norm(observation.attention_key.grad) > 0.0
+
     query_changed = list(observations)
     changed_query = observations[0].query.clone()
     changed_query[0, 0, 0] += 0.25
@@ -220,6 +251,16 @@ def test_qk_relation_consumption():
         0,
     )
     wrong_key_result = qk_geometry_sync(observations, wrong_material)
+    wrong_key_objective = differentiable_qk_relation_objective(
+        observations,
+        wrong_material,
+    )
+    assert float(wrong_key_objective) == pytest.approx(
+        wrong_key_result.relation_score,
+        abs=1e-7,
+        rel=1e-7,
+    )
+    assert not torch.isclose(objective.detach(), wrong_key_objective)
     assert wrong_key_result.descriptor_digest == original.descriptor_digest
     assert wrong_key_result.projection_digest != original.projection_digest
     assert wrong_key_result.key_role == "wrong"
@@ -234,6 +275,23 @@ def test_qk_relation_consumption():
     assert wrong_estimation.registered_root_key_public_digest == (
         wrong_key_result.root_key_public_digest
     )
+
+    with pytest.raises(QkGeometrySyncError, match="exactly two registered"):
+        differentiable_qk_relation_objective(
+            differentiable_observations[:1],
+            _REGISTERED_KEY,
+        )
+    with pytest.raises(QkGeometrySyncError, match="layer order or identity"):
+        differentiable_qk_relation_objective(
+            tuple(reversed(differentiable_observations)),
+            _REGISTERED_KEY,
+        )
+    with pytest.raises(QkGeometrySyncError, match="model_revision"):
+        differentiable_qk_relation_objective(
+            differentiable_observations,
+            _REGISTERED_KEY,
+            model_revision="unsupported-model-revision",
+        )
 
     large_observations, large_result = _actual_qk_observation(side=10, seed=902)
     layer = large_result.layers[0]
