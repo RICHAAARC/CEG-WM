@@ -23,6 +23,7 @@ from main import (
     GeometryEstimationOperation,
     GeometryReliabilityResult,
     GeometryReliabilityThresholds,
+    GeometrySynchronizationWriteResult,
     HfCarrierResult,
     HfDetectionObservation,
     HfDetectionResult,
@@ -44,10 +45,12 @@ from main import (
     content_embedder,
     content_router,
     conditional_recovery_decision,
+    differentiable_qk_relation_objective,
     derive_public_noise_stream,
     derive_wrong_key_material,
     derive_wrong_key_stream,
     geometric_transform_estimator,
+    geometry_synchronization_write,
     geometry_reliability,
     hf_carrier,
     hf_detector,
@@ -59,7 +62,14 @@ from main import (
     lf_null_whitened_matched_detector,
     qk_geometry_sync,
 )
-from runtime import RuntimeQkObservationResult, Sd35RuntimeAdapter
+from runtime import (
+    ContentWriteGeometrySuffixResult,
+    ContentWriteVaeResult,
+    RuntimeActualQkSuffixResult,
+    RuntimeDifferentiableQkSuffixResult,
+    RuntimeQkObservationResult,
+    Sd35RuntimeAdapter,
+)
 
 
 DEFAULT_COMPONENT_CONFIG_PATH = (
@@ -67,6 +77,22 @@ DEFAULT_COMPONENT_CONFIG_PATH = (
     / "configs"
     / "experiments"
     / "internal_execution_components.json"
+)
+QK_OBSERVATION_PUBLIC_CALLABLE = (
+    "runtime.Sd35RuntimeAdapter.observe_detection_qk"
+    " -> main.qk_geometry_sync"
+)
+QK_SYNCHRONIZATION_WRITE_PUBLIC_CALLABLE = (
+    "runtime.Sd35RuntimeAdapter."
+    "execute_content_write_and_capture_geometry_suffix"
+    " -> runtime.Sd35RuntimeAdapter."
+    "observe_differentiable_qk_from_generation_suffix"
+    " -> main.differentiable_qk_relation_objective"
+    " -> main.geometry_synchronization_write"
+    " -> runtime.Sd35RuntimeAdapter.materialize_geometry_candidate"
+    " -> runtime.Sd35RuntimeAdapter."
+    "observe_actual_qk_from_generation_suffix"
+    " -> main.qk_geometry_sync"
 )
 REQUIRED_COMPONENT_BINDINGS = (
     ("key_schedule", "main.identify_root_key", "config_digest"),
@@ -83,10 +109,7 @@ REQUIRED_COMPONENT_BINDINGS = (
     ("content_detector", "main.content_detector", "detector_identity"),
     (
         "qk_geometry_sync",
-        (
-            "runtime.Sd35RuntimeAdapter.observe_detection_qk"
-            " -> main.qk_geometry_sync"
-        ),
+        QK_SYNCHRONIZATION_WRITE_PUBLIC_CALLABLE,
         "geometry_config_digest",
     ),
     (
@@ -328,6 +351,25 @@ class ComponentCallObservation(Generic[T]):
     result_identity: str
     upstream_runtime_identity: str | None
     result: T
+
+
+@dataclass(frozen=True, slots=True)
+class QkSynchronizationWriteExecutionResult:
+    """Ephemeral public results from one real Q/K synchronization write."""
+
+    content_write_result: ContentWriteVaeResult
+    pre_write_observation: QkGeometrySyncResult
+    geometry_write_result: GeometrySynchronizationWriteResult
+    accepted_post_write_observation: QkGeometrySyncResult | None
+    accepted_actual_runtime_result: RuntimeActualQkSuffixResult | None
+    gradient_objective: float
+    gradient_l2: float
+    runtime_config_digest: str
+    callback_index: int
+
+    @property
+    def geometry_config_digest(self) -> str:
+        return self.pre_write_observation.geometry_config_digest
 
 
 def load_ceg_wm_experiment_adapter_configuration(
@@ -675,7 +717,19 @@ class CegWmExperimentAdapter:
         runtime_result = self._runtime_adapter.observe_detection_qk(
             detection_image
         )
-        return self.synchronize_qk_observation(runtime_result, detection_key)
+        synchronized = self.synchronize_qk_observation(
+            runtime_result,
+            detection_key,
+        )
+        return ComponentCallObservation(
+            responsibility=synchronized.responsibility,
+            public_callable=QK_OBSERVATION_PUBLIC_CALLABLE,
+            adapter_config_digest=synchronized.adapter_config_digest,
+            result_type=synchronized.result_type,
+            result_identity=synchronized.result_identity,
+            upstream_runtime_identity=synchronized.upstream_runtime_identity,
+            result=synchronized.result,
+        )
 
     @_revalidate_configuration_before_call
     def synchronize_qk_observation(
@@ -701,7 +755,154 @@ class CegWmExperimentAdapter:
             "qk_geometry_sync",
             result,
             upstream_runtime_identity=_runtime_observation_identity(runtime_result),
+            public_callable="main.qk_geometry_sync",
         )
+
+    @_revalidate_configuration_before_call
+    def execute_qk_synchronization_write(
+        self,
+        base_latent: torch.Tensor,
+        content_embedding_operation: Callable[
+            [tuple[float, ...]],
+            ContentEmbeddingResult,
+        ],
+        content_directions: Sequence[torch.Tensor],
+        *,
+        geometry_ratio: float,
+        detection_key: str | DerivedWrongKeyMaterial,
+    ) -> ComponentCallObservation[QkSynchronizationWriteExecutionResult]:
+        """Delegate one ratio to the frozen public Q/K write execution chain."""
+
+        runtime_adapter = self._runtime_adapter
+        if runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "Q/K synchronization write requires a prepared runtime adapter"
+            )
+        try:
+            captured = (
+                runtime_adapter.execute_content_write_and_capture_geometry_suffix(
+                    base_latent,
+                    content_embedding_operation,
+                )
+            )
+            if type(captured) is not ContentWriteGeometrySuffixResult:
+                raise CegWmExperimentAdapterError(
+                    "runtime returned an invalid content suffix result"
+                )
+            content_result = captured.content_write_result
+            if type(content_result) is not ContentWriteVaeResult:
+                raise CegWmExperimentAdapterError(
+                    "runtime returned an invalid content write result"
+                )
+            measurement = content_result.content_materialization
+            differentiable = (
+                runtime_adapter.observe_differentiable_qk_from_generation_suffix(
+                    captured.suffix_context,
+                    measurement.written_latent_actual,
+                )
+            )
+            if type(differentiable) is not RuntimeDifferentiableQkSuffixResult:
+                raise CegWmExperimentAdapterError(
+                    "runtime returned an invalid differentiable Q/K result"
+                )
+            objective = differentiable_qk_relation_objective(
+                differentiable.qk_observation.qk_layer_observations,
+                detection_key,
+            )
+            gradient = torch.autograd.grad(
+                objective,
+                differentiable.callback_latent_float32,
+                allow_unused=False,
+            )[0]
+            pre_write = qk_geometry_sync(
+                differentiable.qk_observation.qk_layer_observations,
+                detection_key,
+            )
+            objective_value = float(objective.detach())
+            if objective_value != pre_write.relation_score:
+                raise CegWmExperimentAdapterError(
+                    "differentiable and public Q/K relation scores differ"
+                )
+
+            accepted_runtime: RuntimeActualQkSuffixResult | None = None
+            accepted_post_write: QkGeometrySyncResult | None = None
+
+            def materialize(candidate: torch.Tensor) -> torch.Tensor:
+                return runtime_adapter.materialize_geometry_candidate(
+                    candidate,
+                    expected_shape=measurement.written_latent_actual.shape,
+                    expected_device=measurement.written_latent_actual.device,
+                )
+
+            def replay_score(candidate_actual: torch.Tensor) -> float:
+                nonlocal accepted_runtime, accepted_post_write
+                actual = runtime_adapter.observe_actual_qk_from_generation_suffix(
+                    captured.suffix_context,
+                    candidate_actual,
+                )
+                if type(actual) is not RuntimeActualQkSuffixResult:
+                    raise CegWmExperimentAdapterError(
+                        "runtime returned an invalid actual Q/K result"
+                    )
+                post_write = qk_geometry_sync(
+                    actual.qk_observation.qk_layer_observations,
+                    detection_key,
+                )
+                accepted_runtime = actual
+                accepted_post_write = post_write
+                return post_write.relation_score
+
+            write = geometry_synchronization_write(
+                measurement.baseline_latent_actual,
+                measurement.written_latent_actual,
+                gradient,
+                content_directions,
+                geometry_ratio=geometry_ratio,
+                baseline_score=pre_write.relation_score,
+                materialize=materialize,
+                replay_score=replay_score,
+            )
+            if write.accepted:
+                if (
+                    accepted_runtime is None
+                    or accepted_post_write is None
+                    or write.accepted_score
+                    != accepted_post_write.relation_score
+                ):
+                    raise CegWmExperimentAdapterError(
+                        "accepted Q/K synchronization result is incomplete"
+                    )
+            else:
+                accepted_runtime = None
+                accepted_post_write = None
+            result = QkSynchronizationWriteExecutionResult(
+                content_write_result=content_result,
+                pre_write_observation=pre_write,
+                geometry_write_result=write,
+                accepted_post_write_observation=accepted_post_write,
+                accepted_actual_runtime_result=accepted_runtime,
+                gradient_objective=objective_value,
+                gradient_l2=float(
+                    torch.linalg.vector_norm(
+                        gradient.detach().to(device="cpu", dtype=torch.float32)
+                    )
+                ),
+                runtime_config_digest=differentiable.runtime_config_digest,
+                callback_index=differentiable.callback_index,
+            )
+            return self._observe(
+                "qk_geometry_sync",
+                result,
+                upstream_runtime_identity=_runtime_observation_identity(
+                    differentiable.qk_observation
+                ),
+            )
+        except CegWmExperimentAdapterError:
+            raise
+        except Exception as exc:
+            raise CegWmExperimentAdapterError(
+                "Q/K synchronization write execution failed closed"
+            ) from exc
 
     @_revalidate_configuration_before_call
     def estimate_geometric_transform(

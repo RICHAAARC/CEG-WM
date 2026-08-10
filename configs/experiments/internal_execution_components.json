@@ -73,7 +73,7 @@
         "result_identity_field": "detector_identity"
       },
       {
-        "public_callable": "runtime.Sd35RuntimeAdapter.observe_detection_qk -> main.qk_geometry_sync",
+        "public_callable": "runtime.Sd35RuntimeAdapter.execute_content_write_and_capture_geometry_suffix -> runtime.Sd35RuntimeAdapter.observe_differentiable_qk_from_generation_suffix -> main.differentiable_qk_relation_objective -> main.geometry_synchronization_write -> runtime.Sd35RuntimeAdapter.materialize_geometry_candidate -> runtime.Sd35RuntimeAdapter.observe_actual_qk_from_generation_suffix -> main.qk_geometry_sync",
         "responsibility": "qk_geometry_sync",
         "result_identity_field": "geometry_config_digest"
       },

@@ -76,7 +76,13 @@ from main.joint_decision import (
     JointDecisionThresholds,
 )
 from main.shared import identify_root_key, rgb8_image_digest
-from runtime import RuntimeQkObservationResult
+from runtime import (
+    ContentWriteGeometrySuffixResult,
+    ContentWriteVaeResult,
+    RuntimeActualQkSuffixResult,
+    RuntimeDifferentiableQkSuffixResult,
+    RuntimeQkObservationResult,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,10 +119,13 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "GeometricTransformEstimation",
         "GeometryReliabilityResult",
         "GeometryReliabilityThresholds",
+        "GeometrySynchronizationWriteResult",
         "ImageRectificationResult",
         "QkGeometrySyncResult",
+        "differentiable_qk_relation_objective",
         "geometric_transform_estimator",
         "geometry_reliability",
+        "geometry_synchronization_write",
         "image_rectifier",
         "qk_geometry_sync",
     ),
@@ -298,10 +307,265 @@ def test_adapter_main_symbols_are_identity_preserving_top_level_exports() -> Non
         for symbol in symbols
     }
     assert set(imported_from_main) == expected
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and isinstance(node.module, str)
+        and (
+            node.module.startswith("main.")
+            or node.module.startswith("runtime.")
+        )
+        for node in ast.walk(tree)
+    )
     for owner, symbols in ADAPTER_MAIN_PUBLIC_OWNERS.items():
         for symbol in symbols:
             assert symbol in main.__all__
             assert getattr(main, symbol) is getattr(owner, symbol)
+
+
+@pytest.mark.unit
+def test_adapter_executes_public_qk_synchronization_write_chain() -> None:
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration)
+    detection_key = "internal-components-qk-synchronization-write-key"
+    baseline_latent = torch.linspace(
+        -1.0,
+        1.0,
+        steps=16,
+        dtype=torch.float16,
+    ).reshape(1, 1, 4, 4)
+    written_latent = baseline_latent.detach().clone()
+    measurement = SimpleNamespace(
+        baseline_latent_actual=baseline_latent,
+        written_latent_actual=written_latent,
+    )
+    content_result = ContentWriteVaeResult(
+        candidate_id="runtime_sd35_flowmatch",
+        runtime_config_digest="1" * 64,
+        selected_device="cpu",
+        paired_base_latent_digest="2" * 64,
+        clean_callback_indices=tuple(range(20)),
+        watermarked_callback_indices=tuple(range(20)),
+        content_materialization=measurement,
+        content_materialization_result=SimpleNamespace(),
+        content_materialization_attempts=(),
+        clean_generation_terminal_latent=baseline_latent,
+        watermarked_generation_terminal_latent=written_latent,
+        vae_scaling_factor_actual=1.0,
+        vae_shift_factor_actual=0.0,
+        clean_image=torch.zeros((1, 3, 4, 4), dtype=torch.float32),
+        watermarked_image=torch.ones((1, 3, 4, 4), dtype=torch.float32),
+        clean_detection_latent=baseline_latent,
+        watermarked_detection_latent=written_latent,
+    )
+    suffix_context = SimpleNamespace(
+        runtime_config_digest="1" * 64,
+        callback_index=18,
+    )
+    captured = ContentWriteGeometrySuffixResult(
+        content_write_result=content_result,
+        suffix_context=suffix_context,
+    )
+    layer_names = (
+        "transformer_blocks.0.attn",
+        "transformer_blocks.23.attn",
+    )
+
+    def runtime_qk_result(
+        observations: tuple[QkLayerObservation, ...],
+    ) -> RuntimeQkObservationResult:
+        return RuntimeQkObservationResult(
+            candidate_id="runtime_sd35_flowmatch",
+            runtime_config_digest="1" * 64,
+            model_id="stabilityai/stable-diffusion-3.5-medium",
+            model_revision="b940f670f0eda2d07fbb75229e779da1ad11eb80",
+            scheduler_class="FlowMatchEulerDiscreteScheduler",
+            detection_schedule_index=7,
+            detection_timestep=1.0,
+            detection_conditioning_protocol=(
+                "sd3_empty_text_triplet_without_cfg"
+            ),
+            public_noise_domain_digest="3" * 64,
+            public_noise_values_float32_be_sha256="4" * 64,
+            qk_actual_dtype="float16",
+            qk_layer_observations=observations,
+        )
+
+    def differentiable_result() -> RuntimeDifferentiableQkSuffixResult:
+        callback_latent = written_latent.to(dtype=torch.float32).detach().clone()
+        callback_latent.requires_grad_(True)
+        observations = []
+        for layer_index, layer_name in enumerate(layer_names):
+            generator = torch.Generator().manual_seed(100 + layer_index)
+            query = torch.randn((2, 16, 4), generator=generator)
+            attention_key = torch.randn((2, 16, 4), generator=generator)
+            query = query + callback_latent.mean() * torch.linspace(
+                -1.0,
+                1.0,
+                steps=64,
+            ).reshape(1, 16, 4)
+            attention_key = attention_key + callback_latent.mean() * torch.linspace(
+                1.0,
+                -1.0,
+                steps=64,
+            ).reshape(1, 16, 4)
+            observations.append(
+                QkLayerObservation(
+                    layer_name=layer_name,
+                    query=query,
+                    attention_key=attention_key,
+                    operator_identity="public_runtime_projected_qk",
+                )
+            )
+        qk_result = runtime_qk_result(tuple(observations))
+        return RuntimeDifferentiableQkSuffixResult(
+            runtime_config_digest="1" * 64,
+            callback_index=18,
+            callback_latent_float32=callback_latent,
+            generation_terminal_latent=callback_latent.to(dtype=torch.float16),
+            rgb8_ste_image=torch.zeros(
+                (1, 3, 4, 4),
+                dtype=torch.float32,
+            ),
+            qk_observation=qk_result,
+        )
+
+    baseline_score = main.qk_geometry_sync(
+        differentiable_result().qk_observation.qk_layer_observations,
+        detection_key,
+    ).relation_score
+    actual_observations = []
+    for observation_seed in range(1, 129):
+        candidate_observations = []
+        for layer_index, layer_name in enumerate(layer_names):
+            generator = torch.Generator().manual_seed(
+                observation_seed * 10 + layer_index
+            )
+            candidate_observations.append(
+                QkLayerObservation(
+                    layer_name=layer_name,
+                    query=torch.randn((2, 16, 4), generator=generator),
+                    attention_key=torch.randn((2, 16, 4), generator=generator),
+                    operator_identity="public_runtime_projected_qk",
+                )
+            )
+        if (
+            main.qk_geometry_sync(
+                tuple(candidate_observations),
+                detection_key,
+            ).relation_score
+            > baseline_score
+        ):
+            actual_observations = candidate_observations
+            break
+    assert actual_observations
+    actual_qk = runtime_qk_result(tuple(actual_observations))
+    call_order: list[str] = []
+
+    class RuntimeSynchronizationSpy:
+        def execute_content_write_and_capture_geometry_suffix(
+            self,
+            actual_base_latent,
+            content_embedding_operation,
+        ):
+            call_order.append("capture_content_suffix")
+            assert torch.equal(actual_base_latent, baseline_latent)
+            assert callable(content_embedding_operation)
+            return captured
+
+        def observe_differentiable_qk_from_generation_suffix(
+            self,
+            actual_suffix_context,
+            actual_content_written,
+        ):
+            call_order.append("differentiable_qk")
+            assert actual_suffix_context is suffix_context
+            assert torch.equal(actual_content_written, written_latent)
+            return differentiable_result()
+
+        def materialize_geometry_candidate(
+            self,
+            candidate,
+            *,
+            expected_shape,
+            expected_device,
+        ):
+            call_order.append("materialize")
+            assert candidate.shape == expected_shape
+            assert candidate.device == expected_device
+            return candidate.detach().to(dtype=torch.float16)
+
+        def observe_actual_qk_from_generation_suffix(
+            self,
+            actual_suffix_context,
+            candidate_actual,
+        ):
+            call_order.append("actual_qk")
+            assert actual_suffix_context is suffix_context
+            return RuntimeActualQkSuffixResult(
+                runtime_config_digest="1" * 64,
+                callback_index=18,
+                generation_terminal_latent=candidate_actual,
+                rgb8_image=torch.zeros((1, 3, 4, 4), dtype=torch.float32),
+                qk_observation=actual_qk,
+            )
+
+    adapter._runtime_adapter = RuntimeSynchronizationSpy()
+    observed = adapter.execute_qk_synchronization_write(
+        baseline_latent,
+        lambda values: SimpleNamespace(values=values),
+        (),
+        geometry_ratio=1.0 / 4.0,
+        detection_key=detection_key,
+    )
+
+    result = observed.result
+    assert observed.responsibility == "qk_geometry_sync"
+    assert observed.public_callable == configuration.component_bindings[8].public_callable
+    assert result.geometry_write_result.accepted
+    assert result.geometry_write_result.geometry_ratio == 1.0 / 4.0
+    assert result.accepted_post_write_observation is not None
+    assert result.accepted_actual_runtime_result is not None
+    assert result.gradient_objective == (
+        result.pre_write_observation.relation_score
+    )
+    assert result.gradient_l2 > 0.0
+    assert result.geometry_config_digest == observed.result_identity
+    assert call_order[:2] == ["capture_content_suffix", "differentiable_qk"]
+    assert call_order.count("materialize") >= 2
+    assert call_order.count("actual_qk") >= 1
+    assert not hasattr(result, "suffix_context")
+    assert not hasattr(result, "differentiable_qk_observation")
+
+
+@pytest.mark.unit
+def test_adapter_qk_synchronization_write_runtime_failure_is_explicit() -> None:
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration)
+
+    class FailingRuntime:
+        @staticmethod
+        def execute_content_write_and_capture_geometry_suffix(*args, **kwargs):
+            raise RuntimeError("synthetic public runtime failure")
+
+    adapter._runtime_adapter = FailingRuntime()
+    with pytest.raises(
+        CegWmExperimentAdapterError,
+        match="failed closed",
+    ) as exc_info:
+        adapter.execute_qk_synchronization_write(
+            torch.ones((1, 1, 4, 4), dtype=torch.float16),
+            lambda values: SimpleNamespace(values=values),
+            (),
+            geometry_ratio=1.0 / 16.0,
+            detection_key="internal-components-qk-write-failure-key",
+        )
+
+    assert exc_info.value.__cause__ is not None
+    assert "synthetic public runtime failure" in str(exc_info.value.__cause__)
 
 
 @pytest.mark.unit
