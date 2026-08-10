@@ -185,7 +185,7 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         )
     assert isinstance(
         transformer_error.value.__cause__,
-        sd35_backend_module.Sd35GenerationSuffixTransformerForwardError,
+        sd35_backend_module.Sd35BackendGenerationSuffixTransformerForwardError,
     )
 
     suffix_scheduler = backend(Pipeline(transformer=Transformer(fail=False)))
@@ -197,25 +197,25 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         )
     assert isinstance(
         scheduler_error.value.__cause__,
-        sd35_backend_module.Sd35GenerationSuffixSchedulerStepError,
+        sd35_backend_module.Sd35BackendGenerationSuffixSchedulerStepError,
     )
 
     decode = backend(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_decode=True))
     )
-    with pytest.raises(sd35_backend_module.Sd35DifferentiableVaeDecodeError):
+    with pytest.raises(sd35_backend_module.Sd35BackendDifferentiableVaeDecodeError):
         decode.vae_decode_differentiable(latent)
 
     encode = backend(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_encode=True))
     )
-    with pytest.raises(sd35_backend_module.Sd35DifferentiableVaeEncodeError):
+    with pytest.raises(sd35_backend_module.Sd35BackendDifferentiableVaeEncodeError):
         encode.vae_encode_differentiable(image)
 
     noise = backend(Pipeline(transformer=Transformer(fail=False)))
     noise._detection_scheduler = Scheduler(fail_noise=True)
     with pytest.raises(
-        sd35_backend_module.Sd35DifferentiableDetectionNoiseSchedulingError
+        sd35_backend_module.Sd35BackendDifferentiableDetectionNoiseSchedulingError
     ):
         noise.scale_detection_noise_differentiable(
             latent,
@@ -225,7 +225,7 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
 
     qk = backend(Pipeline(transformer=Transformer(fail=True)))
     with pytest.raises(
-        sd35_backend_module.Sd35DifferentiableQkTransformerForwardError
+        sd35_backend_module.Sd35BackendDifferentiableQkTransformerForwardError
     ):
         qk.run_qk_detection_forward_differentiable(
             latent,
@@ -263,7 +263,7 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         )
     assert not isinstance(
         conditioning_error.value,
-        sd35_backend_module.Sd35DifferentiableQkTransformerForwardError,
+        sd35_backend_module.Sd35BackendDifferentiableQkTransformerForwardError,
     )
 
 

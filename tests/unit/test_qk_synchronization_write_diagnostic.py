@@ -1030,15 +1030,15 @@ def test_qk_failure_diagnostic_does_not_classify_message_as_resource_failure() -
 @pytest.mark.parametrize(
     "stage_error_type",
     (
-        sd35_backend_module.Sd35GenerationSuffixTransformerForwardError,
-        sd35_backend_module.Sd35GenerationSuffixSchedulerStepError,
-        sd35_backend_module.Sd35DifferentiableVaeDecodeError,
-        sd35_backend_module.Sd35DifferentiableVaeEncodeError,
-        sd35_backend_module.Sd35DifferentiableDetectionNoiseSchedulingError,
-        sd35_backend_module.Sd35DifferentiableQkTransformerForwardError,
+        sd35_backend_module.Sd35BackendGenerationSuffixTransformerForwardError,
+        sd35_backend_module.Sd35BackendGenerationSuffixSchedulerStepError,
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeError,
+        sd35_backend_module.Sd35BackendDifferentiableVaeEncodeError,
+        sd35_backend_module.Sd35BackendDifferentiableDetectionNoiseSchedulingError,
+        sd35_backend_module.Sd35BackendDifferentiableQkTransformerForwardError,
     ),
 )
-def test_qk_failure_diagnostic_preserves_safe_sd35_stage_type(
+def test_qk_failure_diagnostic_preserves_safe_sd35_backend_failure_type(
     stage_error_type: type[BaseException],
 ) -> None:
     secret = "stage-message-must-not-be-persisted"

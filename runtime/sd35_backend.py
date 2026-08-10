@@ -37,27 +37,27 @@ class Sd35BackendError(RuntimeBackendError):
     """The real SD3.5 backend failed closed."""
 
 
-class Sd35GenerationSuffixTransformerForwardError(Sd35BackendError):
+class Sd35BackendGenerationSuffixTransformerForwardError(Sd35BackendError):
     """The generation-suffix transformer forward failed closed."""
 
 
-class Sd35GenerationSuffixSchedulerStepError(Sd35BackendError):
+class Sd35BackendGenerationSuffixSchedulerStepError(Sd35BackendError):
     """The generation-suffix scheduler step failed closed."""
 
 
-class Sd35DifferentiableVaeDecodeError(Sd35BackendError):
+class Sd35BackendDifferentiableVaeDecodeError(Sd35BackendError):
     """The differentiable VAE decode failed closed."""
 
 
-class Sd35DifferentiableVaeEncodeError(Sd35BackendError):
+class Sd35BackendDifferentiableVaeEncodeError(Sd35BackendError):
     """The differentiable VAE encode failed closed."""
 
 
-class Sd35DifferentiableDetectionNoiseSchedulingError(Sd35BackendError):
+class Sd35BackendDifferentiableDetectionNoiseSchedulingError(Sd35BackendError):
     """The differentiable detection-noise scheduling failed closed."""
 
 
-class Sd35DifferentiableQkTransformerForwardError(Sd35BackendError):
+class Sd35BackendDifferentiableQkTransformerForwardError(Sd35BackendError):
     """The differentiable image-only Q/K transformer forward failed closed."""
 
 
@@ -505,7 +505,7 @@ class Sd35PipelineBackend:
                         return_dict=False,
                     )[0]
                 except Exception as exc:
-                    raise Sd35GenerationSuffixTransformerForwardError from exc
+                    raise Sd35BackendGenerationSuffixTransformerForwardError from exc
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                 guided_noise = noise_pred_uncond + configuration.guidance_scale * (
                     noise_pred_text - noise_pred_uncond
@@ -518,7 +518,7 @@ class Sd35PipelineBackend:
                         return_dict=False,
                     )[0]
                 except Exception as exc:
-                    raise Sd35GenerationSuffixSchedulerStepError from exc
+                    raise Sd35BackendGenerationSuffixSchedulerStepError from exc
             return latents
 
         execution_context = nullcontext() if differentiable else torch.inference_mode()
@@ -599,7 +599,7 @@ class Sd35PipelineBackend:
             ).sample
             image = pipeline.image_processor.postprocess(decoded, output_type="pt")
         except Exception as exc:
-            raise Sd35DifferentiableVaeDecodeError from exc
+            raise Sd35BackendDifferentiableVaeDecodeError from exc
         if not isinstance(image, torch.Tensor) or not bool(
             torch.isfinite(image).all()
         ):
@@ -650,7 +650,7 @@ class Sd35PipelineBackend:
                 return_dict=True,
             ).latent_dist
         except Exception as exc:
-            raise Sd35DifferentiableVaeEncodeError from exc
+            raise Sd35BackendDifferentiableVaeEncodeError from exc
         if not isinstance(posterior, RuntimeVaePosterior):
             raise Sd35BackendError("differentiable VAE did not expose posterior mode()")
         return posterior
@@ -716,7 +716,7 @@ class Sd35PipelineBackend:
                 public_noise,
             )
         except Exception as exc:
-            raise Sd35DifferentiableDetectionNoiseSchedulingError from exc
+            raise Sd35BackendDifferentiableDetectionNoiseSchedulingError from exc
 
     def attention_module(self, layer_name: str) -> torch.nn.Module:
         _configuration, _device, pipeline = self._prepared()
@@ -825,7 +825,7 @@ class Sd35PipelineBackend:
                 return_dict=False,
             )
         except Exception as exc:
-            raise Sd35DifferentiableQkTransformerForwardError from exc
+            raise Sd35BackendDifferentiableQkTransformerForwardError from exc
         return RuntimeQkForwardIdentity(
             runtime_config_digest=configuration.runtime_config_digest,
             model_id=configuration.model_id,
