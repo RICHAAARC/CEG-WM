@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -15,7 +16,6 @@ from experiments.protocol.qk_synchronization_write_diagnostic import (
     CLAIM_BOUNDARY,
     load_qk_synchronization_write_protocol,
 )
-from experiments.runners.qk_synchronization_write_diagnostic import RGB8_MEMBER_PATH
 from scripts.experiment_execution import qk_synchronization_write_diagnostic_server as server_module
 from scripts.experiment_execution.qk_synchronization_write_diagnostic_server import (
     QkSynchronizationWriteServerError,
@@ -28,10 +28,21 @@ ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL = ROOT / "configs/experiments/qk_synchronization_write_diagnostic.json"
 ENTRYPOINT = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_entrypoint.py"
 SERVER = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_server.py"
+SERVER_RELATIVE = SERVER.relative_to(ROOT)
 NOTEBOOK = ROOT / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb"
-EXECUTION_REVISION = "1c80ee84cadfc73744ddbcdb48b45787ee7c44e2"
-RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
-HISTORICAL_RUN_ID = "ceg_wm_qk_synchronization_write_diagnosis"
+EXECUTION_REVISION = "9003453d48cad909375ecb7185452e54dfcb3824"
+RUN_ID = "ceg_wm_qk_runtime_failure_localization"
+HISTORICAL_RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
+REQUIRED_PACKAGE_MEMBERS = {
+    "configs/experiments/qk_synchronization_write_diagnostic.json",
+    "configs/experiments/qk_synchronization_write_diagnostic_manifest.json",
+    "experiments/metrics/qk_synchronization_write_diagnostic.py",
+    "experiments/protocol/qk_synchronization_write_diagnostic.py",
+    "experiments/runners/qk_synchronization_write_diagnostic.py",
+    "runtime/sd35_backend.py",
+    "scripts/experiment_execution/qk_synchronization_write_diagnostic_entrypoint.py",
+    SERVER_RELATIVE.as_posix(),
+}
 
 
 def _notebook_source() -> tuple[dict[str, object], str]:
@@ -72,7 +83,7 @@ def test_qk_diagnosis_server_help_imports_from_isolated_cwd(tmp_path: Path) -> N
 
 
 @pytest.mark.quick
-def test_qk_diagnosis_delivery_binds_production_entrypoint_and_public_rgb8_member() -> None:
+def test_qk_failure_localization_delivery_binds_only_operational_entrypoint() -> None:
     protocol, _manifest = load_qk_synchronization_write_protocol(
         PROTOCOL, repository_root=ROOT
     )
@@ -88,11 +99,17 @@ def test_qk_diagnosis_delivery_binds_production_entrypoint_and_public_rgb8_membe
     assert "execute_qk_synchronization_write_diagnostic_session" in source
     assert "create_session_intent" in calls
     assert "commit_session_unit" in calls
-    assert "verified_terminal_scientific_evidence" in calls
-    assert "execute_scientific_unit" in calls
-    assert "create_dependency_blocked_record" in calls
-    assert "RGB8_MEMBER_PATH" in source
+    assert "_authorized_persistence_bindings" in calls
+    assert "verified_terminal_scientific_evidence" not in calls
+    assert "execute_scientific_unit" not in calls
+    assert "create_dependency_blocked_record" not in calls
+    assert "_selected_rgb8" not in calls
     assert protocol.run_id == RUN_ID
+    assert protocol.authorized_operational_unit_count == 1
+    assert protocol.authorized_scientific_unit_count == 0
+    assert protocol.authorized_total_unit_count == 1
+    assert protocol.authorized_maximum_attempts_per_unit == 1
+    assert len(protocol.authorized_unit_roster) == 1
     assert protocol.operational_unit_count == 1
     assert protocol.scientific_unit_count == 28
     assert protocol.maximum_total_units == 29
@@ -317,6 +334,11 @@ def test_qk_diagnosis_notebook_is_thin_exact_and_output_free() -> None:
     assert "--run-id" in code_source
     assert "--session-id" in code_source
     assert "qk_synchronization_diagnosis_aggregate" in code_source
+    assert "receipt['scientific_unit_count'] == 0" in code_source
+    assert "receipt['total_unit_count'] == 1" in code_source
+    assert "receipt['maximum_attempts_per_unit'] == 1" in code_source
+    assert "receipt['qk_synchronization_diagnosis_aggregate'] is None" in code_source
+    assert "twenty-eight scientific units" not in source
     for forbidden in (
         "geometry_synchronization_write(",
         "create_qk_ratio_probe_observation(",
@@ -327,6 +349,62 @@ def test_qk_diagnosis_notebook_is_thin_exact_and_output_free() -> None:
         "evaluate_qk_synchronization_write_diagnosis(",
     ):
         assert forbidden not in source
+
+
+@pytest.mark.quick
+def test_qk_localization_exact_checkout_builds_importable_execution_package(
+    tmp_path: Path,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks exact Git checkout capability")
+    checkout = tmp_path / "exact_checkout"
+    subprocess.run(
+        ("git", "clone", "--no-checkout", "--quiet", str(ROOT), str(checkout)),
+        check=True,
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(checkout),
+            "checkout",
+            "--detach",
+            "--quiet",
+            EXECUTION_REVISION,
+        ),
+        check=True,
+    )
+    package_root = tmp_path / "package_persistent"
+    build_script = (
+        "from pathlib import Path; import sys; "
+        "sys.path.insert(0, str(Path('.').resolve())); "
+        "from scripts.experiment_execution.development_exploration_entrypoint "
+        "import _build_or_verify_package; "
+        f"print(_build_or_verify_package(Path('.').resolve(), Path({str(package_root)!r}), {EXECUTION_REVISION!r}))"
+    )
+    built = subprocess.run(
+        (sys.executable, "-I", "-c", build_script),
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    package = Path(built.stdout.strip())
+    with ZipFile(package) as archive:
+        names = set(archive.namelist())
+        assert REQUIRED_PACKAGE_MEMBERS <= names
+        assert archive.testzip() is None
+        extracted = tmp_path / "exact_package"
+        archive.extractall(extracted)
+    isolated_help = subprocess.run(
+        (sys.executable, "-I", str(extracted / SERVER_RELATIVE), "--help"),
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert isolated_help.returncode == 0, isolated_help.stderr
+    assert sha256(package.read_bytes()).hexdigest()
 
 
 @pytest.mark.quick
@@ -343,3 +421,4 @@ def test_qk_diagnosis_readmes_preserve_historical_run_boundary() -> None:
         assert HISTORICAL_RUN_ID in source
         assert "records、diagnostics 与 intents 保持不可变" in normalized_source
         assert "不读取、迁移、覆盖或混入" in normalized_source
+        assert "1 operational / 0 scientific / 1 total / 1 attempt" in source

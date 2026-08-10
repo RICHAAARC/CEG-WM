@@ -5,20 +5,19 @@
 `qk_synchronization_write_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的
 执行入口。当前唯一授权 Notebook 为
 `notebooks/colab/qk_synchronization_write_diagnostic.ipynb`，固定绑定 execution
-revision `1c80ee84cadfc73744ddbcdb48b45787ee7c44e2` 与独立 run ID
-`ceg_wm_qk_synchronization_write_public_rgb8_diagnosis`。服务器执行冻结的 1 个 non-scientific
-operational smoke、12 个 geometry-write ratio probes，以及仅在预登记资格规则满足后
-执行的 16 个 transformed-relation probes；scientific 上限为 28 units，operational
-unit 不计 scientific coverage。按 `1/16`、`1/8`、`1/4` 的冻结顺序取首个满足全部
-4/4 条件的 ratio，只是后续 development probe 的确定性执行 ratio，不是正式 ratio
-selection。
-旧 run ID `ceg_wm_qk_synchronization_write_diagnosis` 下的 records、diagnostics 与
-intents 保持不可变；当前服务器入口不读取、迁移、覆盖或混入这些历史执行内容。
+revision `9003453d48cad909375ecb7185452e54dfcb3824` 与独立 run ID
+`ceg_wm_qk_runtime_failure_localization`。服务器的 execution authority 精确为
+`1 operational / 0 scientific / 1 total / 1 attempt`：只运行 unit0 attempt0，并在
+operational success 或安全 failure diagnostic 后立即停止；休眠的 12 个 ratio 与16个
+transform units仍保留在科学protocol定义中，但本入口不注册、不执行，也不产生aggregate。
+旧 run ID `ceg_wm_qk_synchronization_write_public_rgb8_diagnosis` 与更早的
+`ceg_wm_qk_synchronization_write_diagnosis` 下的 records、diagnostics 与 intents
+保持不可变；当前服务器入口不读取、迁移、覆盖或混入这些历史执行内容。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 public
-method/runtime 调用、正式 records、跨 session persistence 和内部 result 或 diagnostic
-ZIP。Notebook 只负责 Drive、Secrets、exact checkout、调用与 export
-receipt/ZIP/`SHA256SUMS`。本诊断不让几何产生水印阳性，不形成 transform estimator
+method/runtime 调用、operational record、持久化和内部 result 或 diagnostic ZIP。
+Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/ZIP/`SHA256SUMS`。
+本定位入口不形成Q/K机制阳性或阴性，不让几何产生水印阳性，不形成 transform estimator
 结论、threshold、FPR、candidate promotion、calibration、formal evaluation、baseline
 或论文 claim。
 
