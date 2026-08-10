@@ -38,7 +38,7 @@ class Sd35BackendError(RuntimeBackendError):
 
 
 @dataclass(frozen=True, slots=True)
-class _Sd35GenerationSuffixContext:
+class _PipelineGenerationSuffixReplayContext:
     """Backend-private tensors needed to replay one captured generation suffix."""
 
     runtime_config_digest: str
@@ -297,7 +297,7 @@ class Sd35PipelineBackend:
         callback: GenerationCallback,
         *,
         capture_suffix_context: bool,
-    ) -> tuple[torch.Tensor, _Sd35GenerationSuffixContext | None]:
+    ) -> tuple[torch.Tensor, _PipelineGenerationSuffixReplayContext | None]:
         configuration, _device, pipeline = self._prepared()
         if self._generation_running:
             raise Sd35BackendError("overlapping generation is forbidden")
@@ -325,7 +325,7 @@ class Sd35PipelineBackend:
         ):
             raise Sd35BackendError("generation prompt snapshot identity drifted")
         self._generation_running = True
-        suffix_context: _Sd35GenerationSuffixContext | None = None
+        suffix_context: _PipelineGenerationSuffixReplayContext | None = None
 
         def on_step_end(
             _pipeline: Any,
@@ -363,7 +363,7 @@ class Sd35PipelineBackend:
                     raise Sd35BackendError(
                         "generation suffix interval count drifted"
                     )
-                suffix_context = _Sd35GenerationSuffixContext(
+                suffix_context = _PipelineGenerationSuffixReplayContext(
                     runtime_config_digest=configuration.runtime_config_digest,
                     callback_index=configuration.callback_index,
                     owner_identity=id(self),
@@ -414,7 +414,7 @@ class Sd35PipelineBackend:
             raise Sd35BackendError("registered generation suffix was not captured")
         if suffix_context is not None:
             captured = suffix_context
-            suffix_context = _Sd35GenerationSuffixContext(
+            suffix_context = _PipelineGenerationSuffixReplayContext(
                 runtime_config_digest=captured.runtime_config_digest,
                 callback_index=captured.callback_index,
                 owner_identity=captured.owner_identity,
@@ -439,7 +439,7 @@ class Sd35PipelineBackend:
         """Replay the captured scheduler suffix using the original conditioning."""
 
         configuration, device, pipeline = self._prepared()
-        if type(suffix_context) is not _Sd35GenerationSuffixContext:
+        if type(suffix_context) is not _PipelineGenerationSuffixReplayContext:
             raise Sd35BackendError(
                 "generation suffix context belongs to another backend"
             )
