@@ -6,8 +6,8 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `qk_synchronization_write_diagnostic.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`0bf68738584b66a4de2f09089dcb81e901ff0337`，使用独立 run ID
-`ceg_wm_qk_synchronization_write_diagnosis`，执行冻结的 1 个 non-scientific
+`1c80ee84cadfc73744ddbcdb48b45787ee7c44e2`，使用独立 run ID
+`ceg_wm_qk_synchronization_write_public_rgb8_diagnosis`，执行冻结的 1 个 non-scientific
 operational smoke、12 个 geometry-write ratio probes，以及仅在预登记资格规则满足后
 执行的 16 个 transformed-relation probes；scientific 上限为 28 units，operational
 unit 不计 scientific coverage。按 `1/16`、`1/8`、`1/4` 的冻结顺序取首个满足全部
@@ -15,6 +15,8 @@ unit 不计 scientific coverage。按 `1/16`、`1/8`、`1/4` 的冻结顺序取�
 selection。Notebook 挂载 Drive、读取 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached
 exact checkout、调用 `qk_synchronization_write_diagnostic_server.py`，并把服务器的
 result/diagnostic ZIP、execution receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
+旧 run ID `ceg_wm_qk_synchronization_write_diagnosis` 下的 records、diagnostics 与
+intents 保持不可变；当前入口不读取、迁移、覆盖或混入这些历史执行内容。
 
 依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实 public method/runtime 调用、
 正式 records、持久化和内部 ZIP 全部属于服务器脚本。该 development-only 诊断不让

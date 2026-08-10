@@ -5,13 +5,15 @@
 `qk_synchronization_write_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的
 执行入口。当前唯一授权 Notebook 为
 `notebooks/colab/qk_synchronization_write_diagnostic.ipynb`，固定绑定 execution
-revision `0bf68738584b66a4de2f09089dcb81e901ff0337` 与独立 run ID
-`ceg_wm_qk_synchronization_write_diagnosis`。服务器执行冻结的 1 个 non-scientific
+revision `1c80ee84cadfc73744ddbcdb48b45787ee7c44e2` 与独立 run ID
+`ceg_wm_qk_synchronization_write_public_rgb8_diagnosis`。服务器执行冻结的 1 个 non-scientific
 operational smoke、12 个 geometry-write ratio probes，以及仅在预登记资格规则满足后
 执行的 16 个 transformed-relation probes；scientific 上限为 28 units，operational
 unit 不计 scientific coverage。按 `1/16`、`1/8`、`1/4` 的冻结顺序取首个满足全部
 4/4 条件的 ratio，只是后续 development probe 的确定性执行 ratio，不是正式 ratio
 selection。
+旧 run ID `ceg_wm_qk_synchronization_write_diagnosis` 下的 records、diagnostics 与
+intents 保持不可变；当前服务器入口不读取、迁移、覆盖或混入这些历史执行内容。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 public
 method/runtime 调用、正式 records、跨 session persistence 和内部 result 或 diagnostic

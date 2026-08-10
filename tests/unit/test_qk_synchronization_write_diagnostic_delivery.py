@@ -23,8 +23,9 @@ PROTOCOL = ROOT / "configs/experiments/qk_synchronization_write_diagnostic.json"
 ENTRYPOINT = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_entrypoint.py"
 SERVER = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_server.py"
 NOTEBOOK = ROOT / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb"
-EXECUTION_REVISION = "0bf68738584b66a4de2f09089dcb81e901ff0337"
-RUN_ID = "ceg_wm_qk_synchronization_write_diagnosis"
+EXECUTION_REVISION = "1c80ee84cadfc73744ddbcdb48b45787ee7c44e2"
+RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
+HISTORICAL_RUN_ID = "ceg_wm_qk_synchronization_write_diagnosis"
 
 
 def _notebook_source() -> tuple[dict[str, object], str]:
@@ -154,3 +155,19 @@ def test_qk_diagnosis_notebook_is_thin_exact_and_output_free() -> None:
         "evaluate_qk_synchronization_write_diagnosis(",
     ):
         assert forbidden not in source
+
+
+@pytest.mark.quick
+def test_qk_diagnosis_readmes_preserve_historical_run_boundary() -> None:
+    for path in (
+        ROOT / "notebooks/colab/README.md",
+        ROOT / "scripts/experiment_execution/README.md",
+    ):
+        source = path.read_text("utf-8")
+        normalized_source = " ".join(source.split())
+        assert NOTEBOOK.name in source
+        assert EXECUTION_REVISION in source
+        assert RUN_ID in source
+        assert HISTORICAL_RUN_ID in source
+        assert "records、diagnostics 与 intents 保持不可变" in normalized_source
+        assert "不读取、迁移、覆盖或混入" in normalized_source
