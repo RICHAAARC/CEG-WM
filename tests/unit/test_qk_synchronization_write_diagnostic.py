@@ -105,7 +105,12 @@ def _ratio_matrix(*, first_eligible_ratio_index: int | None):
     )
 
 
-def _transforms(selected_ratio_identity: str):
+def _transforms(
+    selected_ratio_identity: str,
+    *,
+    registered_score: float = 0.2,
+    wrong_key_scores: tuple[float, ...] = (0.01, 0.02, 0.03, 0.04),
+):
     return tuple(
         create_qk_transformed_relation_observation(
             cluster_ordinal=cluster,
@@ -113,8 +118,8 @@ def _transforms(selected_ratio_identity: str):
             selected_ratio_identity=selected_ratio_identity,
             source_geometry_written_rgb8_digest=f"source-{cluster}",
             transformed_rgb8_digest=f"transformed-{cluster}-{transform_identity}",
-            registered_score=0.2,
-            wrong_key_scores=(0.01, 0.02, 0.03, 0.04),
+            registered_score=registered_score,
+            wrong_key_scores=wrong_key_scores,
             public_observation_identity="public_image_only_qk_observation",
             method_identity="main.qk_geometry_sync",
             runtime_identity="runtime.public_rgb8_vae_qk_observation",
@@ -349,6 +354,10 @@ def test_qk_ratio_failure_class_and_no_eligible_ratio_preserve_scientific_bounda
         )
     with pytest.raises(QkSynchronizationWriteMetricError):
         replace(terminals[0], terminal_identity="tampered-terminal").validate()
+    with pytest.raises(TypeError):
+        aggregate_qk_synchronization_diagnosis(
+            negative, dependency_blocked_excluded_count=16
+        )
 
     failures = tuple(
         QkTerminalFailure(
@@ -403,6 +412,47 @@ def test_qk_transform_probe_uses_selected_ratio_and_fixed_sixteen_unit_denominat
         )
     with pytest.raises(QkSynchronizationWriteMetricError):
         replace(transformed[0], identity_violation_count=1).validate()
+
+
+@pytest.mark.unit
+def test_qk_negative_transform_margins_remain_diagnostic_not_transform_robustness_gate() -> None:
+    ratio = aggregate_qk_ratio_probes(
+        _ratio_matrix(first_eligible_ratio_index=0)
+    )
+    transformed = _transforms(
+        ratio.selected_ratio_identity,
+        registered_score=-0.2,
+        wrong_key_scores=(0.01, 0.02, 0.03, 0.04),
+    )
+    aggregate = aggregate_qk_synchronization_diagnosis(ratio, transformed)
+
+    assert aggregate.transform_observation_count == 16
+    assert aggregate.transform_margin_minimum == pytest.approx(-0.24)
+    assert aggregate.transform_margin_mean == pytest.approx(-0.24)
+    assert aggregate.transform_margin_median == pytest.approx(-0.24)
+    assert aggregate.module_outcome == ratio.ratio_probe_outcome
+    assert aggregate.module_outcome == "mechanism_signal_observed"
+    assert aggregate.candidate_recommendation == (
+        "candidate_worth_further_selection"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "violation_field",
+    (
+        "identity_violation_count",
+        "integrity_violation_count",
+        "nonfinite_violation_count",
+    ),
+)
+def test_qk_transform_probe_rejects_any_recorded_violation(
+    violation_field: str,
+) -> None:
+    observation = _transforms(GEOMETRY_RATIO_ROSTER[0][0])[0]
+
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        replace(observation, **{violation_field: 1}).validate()
 
 
 @pytest.mark.unit
