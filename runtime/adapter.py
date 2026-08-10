@@ -19,6 +19,9 @@ from .backend import (
     RuntimeBackendIdentity,
     RuntimeContentBackend,
     RuntimeDeviceCapabilities,
+    RuntimeGenerationSuffixBackend,
+    RuntimeGenerationSuffixContext,
+    RuntimeGeometrySynchronizationBackend,
     RuntimeQkBackend,
     validate_backend_identity,
 )
@@ -36,7 +39,12 @@ DeviceRequest = Literal["auto", "cpu", "cuda"]
 if TYPE_CHECKING:
     from .content_write import (
         CleanImageVaeObservationResult,
+        ContentWriteGeometrySuffixResult,
         ContentWriteVaeResult,
+    )
+    from .geometry_synchronization import (
+        RuntimeActualQkSuffixResult,
+        RuntimeDifferentiableQkSuffixResult,
     )
     from .qk_observation import RuntimeQkObservationResult
     from .routing_observation import RuntimeRoutingObservationResult
@@ -422,6 +430,167 @@ class Sd35RuntimeAdapter:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected clean observation error"
+            ) from exc
+
+    def execute_content_write_and_capture_geometry_suffix(
+        self,
+        base_latent: torch.Tensor,
+        content_embedding_operation: Callable[
+            [tuple[float, ...]],
+            ContentEmbeddingResult,
+        ],
+    ) -> ContentWriteGeometrySuffixResult:
+        """Run paired content execution and retain one in-memory suffix capability."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before geometry suffix capture"
+            )
+        if not isinstance(self._backend, RuntimeGenerationSuffixBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks generation suffix execution"
+            )
+        from .content_write import (
+            RuntimeContentExecutionError,
+            execute_content_write_and_capture_geometry_suffix,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = execute_content_write_and_capture_geometry_suffix(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+                content_embedding_operation,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeContentExecutionError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime geometry suffix capture failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected geometry suffix capture error"
+            ) from exc
+
+    def materialize_geometry_candidate(
+        self,
+        candidate_latent: torch.Tensor,
+        *,
+        expected_shape: torch.Size,
+        expected_device: torch.device,
+    ) -> torch.Tensor:
+        """Materialize one line-search candidate at the frozen actual dtype."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before geometry materialization"
+            )
+        from .geometry_synchronization import (
+            RuntimeGeometrySynchronizationError,
+            materialize_geometry_candidate,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            return materialize_geometry_candidate(
+                candidate_latent,
+                expected_shape=expected_shape,
+                expected_device=expected_device,
+                actual_dtype=self._configuration.latent_dtype,
+            )
+        except (RuntimeAdapterError, RuntimeGeometrySynchronizationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime geometry candidate materialization failed closed"
+            ) from exc
+
+    def observe_differentiable_qk_from_generation_suffix(
+        self,
+        suffix_context: RuntimeGenerationSuffixContext,
+        content_written_latent: torch.Tensor,
+    ) -> RuntimeDifferentiableQkSuffixResult:
+        """Run the real suffix and RGB8-STE image-only Q/K gradient path."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before differentiable suffix Q/K"
+            )
+        if not isinstance(self._backend, RuntimeGeometrySynchronizationBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks geometry synchronization execution"
+            )
+        from .geometry_synchronization import (
+            RuntimeGeometrySynchronizationError,
+            observe_differentiable_qk_from_generation_suffix,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = observe_differentiable_qk_from_generation_suffix(
+                self._backend,
+                self._configuration,
+                self.session,
+                suffix_context,
+                content_written_latent,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeGeometrySynchronizationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime differentiable suffix Q/K replay failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime raised an unexpected differentiable suffix Q/K error"
+            ) from exc
+
+    def observe_actual_qk_from_generation_suffix(
+        self,
+        suffix_context: RuntimeGenerationSuffixContext,
+        candidate_latent_actual: torch.Tensor,
+    ) -> RuntimeActualQkSuffixResult:
+        """Run one actual candidate through suffix, RGB8 and blind Q/K."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before actual suffix Q/K"
+            )
+        if not isinstance(self._backend, RuntimeGeometrySynchronizationBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks geometry synchronization execution"
+            )
+        from .geometry_synchronization import (
+            RuntimeGeometrySynchronizationError,
+            observe_actual_qk_from_generation_suffix,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = observe_actual_qk_from_generation_suffix(
+                self._backend,
+                self._configuration,
+                self.session,
+                suffix_context,
+                candidate_latent_actual,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeGeometrySynchronizationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime actual suffix Q/K replay failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime raised an unexpected actual suffix Q/K error"
             ) from exc
 
     def observe_detection_qk(

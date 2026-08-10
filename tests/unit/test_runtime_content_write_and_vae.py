@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import sqrt
 from struct import pack, unpack
@@ -18,6 +18,7 @@ from runtime import (
     RuntimeAdapterState,
     RuntimeBackendIdentity,
     RuntimeDeviceCapabilities,
+    RuntimeGenerationWithSuffixContextResult,
     RuntimeVaeFactors,
     create_runtime_adapter,
     measure_content_materialization,
@@ -78,6 +79,12 @@ class FakePosterior:
         raise AssertionError("detection encode must never sample the posterior")
 
 
+@dataclass(frozen=True, slots=True)
+class FakeGenerationSuffixContext:
+    runtime_config_digest: str
+    callback_index: int
+
+
 class FakeContentBackend:
     def __init__(
         self,
@@ -99,9 +106,12 @@ class FakeContentBackend:
         self.invalid_vae_factors = invalid_vae_factors
         self.generation_failure = generation_failure
         self.run_calls = 0
+        self.suffix_capture_calls = 0
+        self.suffix_callback_latents: list[torch.Tensor] = []
         self.close_calls = 0
         self.decode_inputs: list[torch.Tensor] = []
         self.posteriors: list[FakePosterior] = []
+        self.configuration = None
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
         return RuntimeDeviceCapabilities(
@@ -110,6 +120,7 @@ class FakeContentBackend:
         )
 
     def prepare(self, configuration, selected_device: str):
+        self.configuration = configuration
         return _identity(configuration, selected_device)
 
     def close(self) -> None:
@@ -137,6 +148,43 @@ class FakeContentBackend:
             state = callback(callback_index, state)
         return state
 
+    def run_generation_with_suffix_context(
+        self,
+        initial_latent,
+        callback,
+    ) -> RuntimeGenerationWithSuffixContextResult:
+        assert self.configuration is not None
+        self.suffix_capture_calls += 1
+        def capture_callback(
+            callback_index: int,
+            latent: torch.Tensor,
+        ) -> torch.Tensor:
+            returned = callback(callback_index, latent)
+            if callback_index == self.configuration.callback_index:
+                self.suffix_callback_latents.append(returned.detach().clone())
+            return returned
+
+        return RuntimeGenerationWithSuffixContextResult(
+            terminal_latent=self.run_generation(initial_latent, capture_callback),
+            suffix_context=FakeGenerationSuffixContext(
+                runtime_config_digest=self.configuration.runtime_config_digest,
+                callback_index=self.configuration.callback_index,
+            ),
+        )
+
+    def replay_generation_suffix(
+        self,
+        callback_latent,
+        suffix_context,
+        *,
+        differentiable,
+    ):
+        assert suffix_context.runtime_config_digest == (
+            self.configuration.runtime_config_digest
+        )
+        assert type(differentiable) is bool
+        return callback_latent.clone()
+
     def vae_factors(self) -> RuntimeVaeFactors:
         if self.invalid_vae_factors:
             return object()
@@ -148,6 +196,9 @@ class FakeContentBackend:
     def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
         self.decode_inputs.append(latent.detach().clone())
         return latent.detach().clone() * 2.0
+
+    def vae_decode_differentiable(self, latent: torch.Tensor) -> torch.Tensor:
+        return latent.clone() * 2.0
 
     def vae_encode(self, image: torch.Tensor):
         if self.invalid_posterior:
@@ -322,6 +373,7 @@ def test_clean_image_observation_matches_existing_paired_clean_path() -> None:
     )
     assert clean_backend.run_calls == 1
     assert paired_backend.run_calls == 2
+    assert paired_backend.suffix_capture_calls == 0
 
 
 @pytest.mark.unit
@@ -420,6 +472,66 @@ def test_paired_write_uses_main_budget_result_and_maximal_scale() -> None:
         result.watermarked_detection_latent,
         (result.watermarked_image / 4.0 - 0.25) * 0.5,
     )
+    assert backend.run_calls == 2
+    assert backend.suffix_capture_calls == 0
+
+
+@pytest.mark.unit
+def test_content_write_captures_callback_suffix_without_changing_paired_result(
+) -> None:
+    ordinary_backend = FakeContentBackend()
+    captured_backend = FakeContentBackend()
+    ordinary_adapter = _initialized_adapter(ordinary_backend)
+    captured_adapter = _initialized_adapter(captured_backend)
+    base = _base_latent()
+
+    ordinary = ordinary_adapter.execute_content_write_and_vae(
+        base,
+        _embedding_operation([]),
+    )
+    captured = captured_adapter.execute_content_write_and_capture_geometry_suffix(
+        base,
+        _embedding_operation([]),
+    )
+
+    paired = captured.content_write_result
+    assert captured_backend.run_calls == 2
+    assert captured_backend.suffix_capture_calls == 1
+    assert len(captured_backend.suffix_callback_latents) == 1
+    assert ordinary_backend.suffix_capture_calls == 0
+    assert captured.suffix_context.runtime_config_digest == (
+        captured_adapter.session.runtime_config_digest
+    )
+    assert captured.suffix_context.callback_index == 18
+    assert paired.clean_callback_indices == tuple(range(20))
+    assert paired.watermarked_callback_indices == tuple(range(20))
+    assert torch.equal(
+        ordinary.clean_generation_terminal_latent,
+        paired.clean_generation_terminal_latent,
+    )
+    assert torch.equal(
+        ordinary.watermarked_generation_terminal_latent,
+        paired.watermarked_generation_terminal_latent,
+    )
+    assert torch.equal(ordinary.clean_image, paired.clean_image)
+    assert torch.equal(ordinary.watermarked_image, paired.watermarked_image)
+    assert torch.equal(
+        ordinary.content_materialization.baseline_latent_actual,
+        paired.content_materialization.baseline_latent_actual,
+    )
+    assert torch.equal(
+        ordinary.content_materialization.written_latent_actual,
+        paired.content_materialization.written_latent_actual,
+    )
+    assert torch.equal(
+        captured_backend.suffix_callback_latents[0],
+        paired.content_materialization.written_latent_actual,
+    )
+    assert ordinary.content_materialization_result == (
+        paired.content_materialization_result
+    )
+    ordinary_adapter.close()
+    captured_adapter.close()
 
 
 @pytest.mark.unit

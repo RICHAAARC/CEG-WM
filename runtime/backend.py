@@ -183,6 +183,27 @@ class RuntimeQkForwardIdentity:
 
 
 @runtime_checkable
+class RuntimeGenerationSuffixContext(Protocol):
+    """Opaque, execution-local capability for replaying the frozen suffix."""
+
+    @property
+    def runtime_config_digest(self) -> str:
+        """Frozen runtime identity that created this context."""
+
+    @property
+    def callback_index(self) -> int:
+        """Callback index immediately preceding the captured suffix."""
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeGenerationWithSuffixContextResult:
+    """One generation terminal latent plus its non-persistable suffix context."""
+
+    terminal_latent: torch.Tensor
+    suffix_context: RuntimeGenerationSuffixContext
+
+
+@runtime_checkable
 class RuntimeVaeBackend(Protocol):
     """Shared deterministic VAE boundary used by generation and detection."""
 
@@ -236,6 +257,66 @@ class RuntimeQkBackend(RuntimeVaeBackend, Protocol):
         conditioning: RuntimeDetectionConditioning,
     ) -> RuntimeQkForwardIdentity:
         """Run one image-only transformer forward while hooks are active."""
+
+
+@runtime_checkable
+class RuntimeGenerationSuffixBackend(RuntimeContentBackend, Protocol):
+    """Generation suffix and differentiable VAE portion of synchronization."""
+
+    def run_generation_with_suffix_context(
+        self,
+        initial_latent: torch.Tensor,
+        callback: GenerationCallback,
+    ) -> RuntimeGenerationWithSuffixContextResult:
+        """Run generation and capture the post-callback suffix capability."""
+
+    def replay_generation_suffix(
+        self,
+        callback_latent: torch.Tensor,
+        suffix_context: RuntimeGenerationSuffixContext,
+        *,
+        differentiable: bool,
+    ) -> torch.Tensor:
+        """Replay every scheduler step after the registered callback."""
+
+    def vae_decode_differentiable(self, latent: torch.Tensor) -> torch.Tensor:
+        """Decode without disabling autograd."""
+
+
+@runtime_checkable
+class RuntimeDifferentiableQkBackend(RuntimeQkBackend, Protocol):
+    """Image-only Q/K observation boundary that preserves autograd."""
+
+    def vae_encode_differentiable(
+        self,
+        image: torch.Tensor,
+    ) -> RuntimeVaePosterior:
+        """Encode without disabling autograd and expose posterior mode."""
+
+    def scale_detection_noise_differentiable(
+        self,
+        detection_latent: torch.Tensor,
+        public_noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply the public detection schedule without disabling autograd."""
+
+    def run_qk_detection_forward_differentiable(
+        self,
+        noisy_detection_latent: torch.Tensor,
+        timestep: torch.Tensor,
+        conditioning: RuntimeDetectionConditioning,
+    ) -> RuntimeQkForwardIdentity:
+        """Run the frozen image-only Q/K forward with autograd enabled."""
+
+
+@runtime_checkable
+class RuntimeGeometrySynchronizationBackend(
+    RuntimeGenerationSuffixBackend,
+    RuntimeDifferentiableQkBackend,
+    Protocol,
+):
+    """Complete public runtime capability for Q/K synchronization write replay."""
 
 
 def validate_backend_identity(

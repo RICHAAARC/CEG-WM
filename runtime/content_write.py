@@ -23,6 +23,9 @@ from main import (
 from .adapter import RuntimeSession
 from .backend import (
     RuntimeContentBackend,
+    RuntimeGenerationSuffixContext,
+    RuntimeGenerationSuffixBackend,
+    RuntimeGenerationWithSuffixContextResult,
     RuntimeVaeFactors,
     RuntimeVaePosterior,
 )
@@ -121,6 +124,14 @@ class CleanImageVaeObservationResult:
     vae_shift_factor_actual: float
     clean_image: torch.Tensor
     clean_detection_latent: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class ContentWriteGeometrySuffixResult:
+    """Paired content result plus its execution-local geometry suffix capability."""
+
+    content_write_result: ContentWriteVaeResult
+    suffix_context: RuntimeGenerationSuffixContext
 
 
 def _float32(value: float, role: str) -> float:
@@ -680,13 +691,15 @@ def execute_clean_image_and_vae_observation(
     )
 
 
-def execute_content_write_and_vae(
+def _execute_content_write_and_vae_core(
     backend: RuntimeContentBackend,
     configuration: Sd35RuntimeConfiguration,
     session: RuntimeSession,
     base_latent: torch.Tensor,
     content_embedding_operation: ContentEmbeddingOperation,
-) -> ContentWriteVaeResult:
+    *,
+    capture_geometry_suffix: bool,
+) -> tuple[ContentWriteVaeResult, RuntimeGenerationSuffixContext | None]:
     """让 main 驱动 actual-dtype 预算闭环并执行一对生成。"""
 
     latent = _validated_content_execution_latent(
@@ -853,12 +866,30 @@ def execute_content_write_and_vae(
             )
         return materialization.written_latent_actual.detach().clone()
 
+    suffix_context: RuntimeGenerationSuffixContext | None = None
     try:
-        watermarked_terminal = _tensor(
-            backend.run_generation(
+        if capture_geometry_suffix:
+            if not isinstance(backend, RuntimeGenerationSuffixBackend):
+                raise RuntimeContentExecutionError(
+                    "prepared backend lacks geometry synchronization suffix replay"
+                )
+            generation_result = backend.run_generation_with_suffix_context(
                 watermarked_initial,
                 watermarked_callback,
-            ),
+            )
+            if type(generation_result) is not RuntimeGenerationWithSuffixContextResult:
+                raise RuntimeContentExecutionError(
+                    "backend returned an invalid geometry suffix capture"
+                )
+            terminal_value = generation_result.terminal_latent
+            suffix_context = generation_result.suffix_context
+        else:
+            terminal_value = backend.run_generation(
+                watermarked_initial,
+                watermarked_callback,
+            )
+        watermarked_terminal = _tensor(
+            terminal_value,
             role="watermarked_generation_terminal_latent",
             shape=latent.shape,
             dtype=torch.float16,
@@ -916,7 +947,7 @@ def execute_content_write_and_vae(
         factors,
         "watermarked",
     )
-    return ContentWriteVaeResult(
+    result = ContentWriteVaeResult(
         candidate_id=session.candidate_id,
         runtime_config_digest=session.runtime_config_digest,
         selected_device=session.selected_device,
@@ -937,4 +968,67 @@ def execute_content_write_and_vae(
         watermarked_image=watermarked_image,
         clean_detection_latent=clean_detection_latent,
         watermarked_detection_latent=watermarked_detection_latent,
+    )
+    return result, suffix_context
+
+
+def execute_content_write_and_vae(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+    content_embedding_operation: ContentEmbeddingOperation,
+) -> ContentWriteVaeResult:
+    """Run the established paired path without exposing suffix state."""
+
+    result, suffix_context = _execute_content_write_and_vae_core(
+        backend,
+        configuration,
+        session,
+        base_latent,
+        content_embedding_operation,
+        capture_geometry_suffix=False,
+    )
+    if suffix_context is not None:
+        raise RuntimeContentExecutionError(
+            "ordinary content execution unexpectedly retained suffix state"
+        )
+    return result
+
+
+def execute_content_write_and_capture_geometry_suffix(
+    backend: RuntimeGenerationSuffixBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+    content_embedding_operation: ContentEmbeddingOperation,
+) -> ContentWriteGeometrySuffixResult:
+    """Run paired content generation and retain one in-memory suffix capability."""
+
+    if not isinstance(backend, RuntimeGenerationSuffixBackend):
+        raise RuntimeContentExecutionError(
+            "prepared backend lacks generation suffix execution"
+        )
+    result, suffix_context = _execute_content_write_and_vae_core(
+        backend,
+        configuration,
+        session,
+        base_latent,
+        content_embedding_operation,
+        capture_geometry_suffix=True,
+    )
+    if suffix_context is None:
+        raise RuntimeContentExecutionError(
+            "geometry synchronization suffix context is missing"
+        )
+    if (
+        suffix_context.runtime_config_digest != configuration.runtime_config_digest
+        or suffix_context.callback_index != configuration.callback_index
+    ):
+        raise RuntimeContentExecutionError(
+            "geometry synchronization suffix context identity drifted"
+        )
+    return ContentWriteGeometrySuffixResult(
+        content_write_result=result,
+        suffix_context=suffix_context,
     )

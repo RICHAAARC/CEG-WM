@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import pytest
 import torch
@@ -11,27 +11,42 @@ from experiments.methods import (
 from experiments.runners import (
     FormalRuntimeGeometryEstimationOperation,
 )
-from main import QkLayerObservation, derive_public_noise_stream
+from main import (
+    QkLayerObservation,
+    derive_public_noise_stream,
+    differentiable_qk_relation_objective,
+    qk_geometry_sync,
+)
 from runtime import (
     RuntimeAdapterError,
     RuntimeAdapterState,
     RuntimeBackendIdentity,
     RuntimeDetectionScheduleStep,
     RuntimeDeviceCapabilities,
+    RuntimeGenerationWithSuffixContextResult,
     RuntimeQkForwardIdentity,
     RuntimeVaeFactors,
     create_runtime_adapter,
+    observe_differentiable_detection_qk,
 )
 
 
 class FakePosterior:
-    def __init__(self, mode_value: torch.Tensor) -> None:
+    def __init__(
+        self,
+        mode_value: torch.Tensor,
+        *,
+        preserve_gradient: bool = False,
+    ) -> None:
         self.mode_value = mode_value
+        self.preserve_gradient = preserve_gradient
         self.mode_calls = 0
         self.sample_calls = 0
 
     def mode(self) -> torch.Tensor:
         self.mode_calls += 1
+        if self.preserve_gradient:
+            return self.mode_value.clone()
         return self.mode_value.detach().clone()
 
     def sample(self) -> torch.Tensor:
@@ -244,6 +259,17 @@ class FakeQkBackend:
         self.posterior = FakePosterior(mode)
         return self.posterior
 
+    def vae_encode_differentiable(self, image: torch.Tensor) -> FakePosterior:
+        image_mean = image.to(dtype=torch.float32).mean()
+        mode = (
+            torch.arange(32, dtype=torch.float32)
+            .reshape(1, 2, 4, 4)
+            .div(64.0)
+            .add(image_mean)
+        )
+        self.posterior = FakePosterior(mode, preserve_gradient=True)
+        return self.posterior
+
     def create_detection_schedule(
         self,
         inference_steps: int,
@@ -296,6 +322,18 @@ class FakeQkBackend:
         assert self.scale_noise_output_mode == "valid"
         return output
 
+    def scale_detection_noise_differentiable(
+        self,
+        detection_latent: torch.Tensor,
+        public_noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.scale_detection_noise(
+            detection_latent,
+            public_noise,
+            timestep,
+        )
+
     def attention_module(self, layer_name: str) -> torch.nn.Module:
         if layer_name == self.missing_layer:
             raise KeyError(layer_name)
@@ -340,6 +378,85 @@ class FakeQkBackend:
             field, value = self.forward_identity_drift
             identity = replace(identity, **{field: value})
         return identity
+
+    def run_qk_detection_forward_differentiable(
+        self,
+        noisy_detection_latent: torch.Tensor,
+        timestep: torch.Tensor,
+        conditioning,
+    ) -> RuntimeQkForwardIdentity:
+        return self.run_qk_detection_forward(
+            noisy_detection_latent,
+            timestep,
+            conditioning,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FakeGenerationSuffixContext:
+    runtime_config_digest: str
+    callback_index: int
+
+
+class FakeGeometrySynchronizationBackend(FakeQkBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.suffix_replay_modes: list[bool] = []
+
+    def run_generation(self, initial_latent, callback):
+        state = initial_latent.detach().clone()
+        for callback_index in range(20):
+            state = callback(callback_index, state)
+        return state
+
+    def run_generation_with_suffix_context(
+        self,
+        initial_latent,
+        callback,
+    ) -> RuntimeGenerationWithSuffixContextResult:
+        assert self.configuration is not None
+        return RuntimeGenerationWithSuffixContextResult(
+            terminal_latent=self.run_generation(initial_latent, callback),
+            suffix_context=FakeGenerationSuffixContext(
+                runtime_config_digest=self.configuration.runtime_config_digest,
+                callback_index=self.configuration.callback_index,
+            ),
+        )
+
+    def replay_generation_suffix(
+        self,
+        callback_latent,
+        suffix_context,
+        *,
+        differentiable,
+    ):
+        assert self.configuration is not None
+        assert suffix_context.runtime_config_digest == (
+            self.configuration.runtime_config_digest
+        )
+        assert suffix_context.callback_index == self.configuration.callback_index
+        self.suffix_replay_modes.append(differentiable)
+        return callback_latent.to(dtype=torch.float16) * torch.tensor(
+            0.5,
+            dtype=torch.float16,
+            device=callback_latent.device,
+        )
+
+    @staticmethod
+    def _decoded_image(latent: torch.Tensor) -> torch.Tensor:
+        value = torch.sigmoid(latent.to(dtype=torch.float32).mean()).reshape(
+            1,
+            1,
+            1,
+            1,
+        )
+        return value.expand(1, 3, 512, 512).clone()
+
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        return self._decoded_image(latent).detach()
+
+    def vae_decode_differentiable(self, latent: torch.Tensor) -> torch.Tensor:
+        return self._decoded_image(latent)
 
 
 def _image(value: float = 0.5) -> torch.Tensor:
@@ -486,6 +603,159 @@ def test_qk_observation_uses_mode_public_noise_and_real_projection_hooks() -> No
     )
     first_adapter.close()
     second_adapter.close()
+
+
+@pytest.mark.unit
+def test_differentiable_qk_observation_preserves_the_public_score_and_gradient(
+) -> None:
+    backend = FakeQkBackend()
+    adapter = create_runtime_adapter(backend)
+    session = adapter.initialize("cpu")
+    image = _image().requires_grad_(True)
+
+    differentiable = observe_differentiable_detection_qk(
+        backend,
+        adapter.configuration,
+        session,
+        image,
+    )
+    objective = differentiable_qk_relation_objective(
+        differentiable.qk_layer_observations,
+        "geometry-cpu-synthetic-key",
+    )
+    gradient = torch.autograd.grad(objective, image)[0]
+
+    assert objective.requires_grad
+    assert gradient.shape == image.shape
+    assert torch.isfinite(gradient).all()
+    assert torch.linalg.vector_norm(gradient) > 0.0
+    assert all(
+        observation.query.requires_grad
+        and observation.attention_key.requires_grad
+        for observation in differentiable.qk_layer_observations
+    )
+
+    formal = adapter.observe_detection_qk(image.detach())
+    formal_score = qk_geometry_sync(
+        formal.qk_layer_observations,
+        "geometry-cpu-synthetic-key",
+    )
+    assert float(objective.detach()) == formal_score.relation_score
+    assert differentiable.runtime_config_digest == formal.runtime_config_digest
+    assert (
+        differentiable.public_noise_domain_digest
+        == formal.public_noise_domain_digest
+    )
+    assert (
+        differentiable.public_noise_values_float32_be_sha256
+        == formal.public_noise_values_float32_be_sha256
+    )
+    assert all(
+        torch.equal(left.query.detach(), right.query)
+        and torch.equal(left.attention_key.detach(), right.attention_key)
+        for left, right in zip(
+            differentiable.qk_layer_observations,
+            formal.qk_layer_observations,
+            strict=True,
+        )
+    )
+    assert all(
+        not observation.query.requires_grad
+        and not observation.attention_key.requires_grad
+        for observation in formal.qk_layer_observations
+    )
+    _assert_projection_hooks_removed(backend)
+    adapter.close()
+
+
+@pytest.mark.unit
+def test_geometry_suffix_replay_uses_rgb8_ste_for_gradient_and_blind_actual_qk(
+) -> None:
+    backend = FakeGeometrySynchronizationBackend()
+    adapter = create_runtime_adapter(backend)
+    session = adapter.initialize("cpu")
+    context = FakeGenerationSuffixContext(
+        runtime_config_digest=session.runtime_config_digest,
+        callback_index=session.callback_index,
+    )
+    content_written = torch.linspace(
+        -0.25,
+        0.25,
+        steps=32,
+        dtype=torch.float16,
+    ).reshape(1, 2, 4, 4)
+
+    differentiable = adapter.observe_differentiable_qk_from_generation_suffix(
+        context,
+        content_written,
+    )
+    objective = differentiable_qk_relation_objective(
+        differentiable.qk_observation.qk_layer_observations,
+        "geometry-cpu-synthetic-key",
+    )
+    gradient = torch.autograd.grad(
+        objective,
+        differentiable.callback_latent_float32,
+    )[0]
+    assert torch.isfinite(gradient).all()
+    assert torch.linalg.vector_norm(gradient) > 0.0
+
+    candidate_actual = adapter.materialize_geometry_candidate(
+        differentiable.callback_latent_float32,
+        expected_shape=content_written.shape,
+        expected_device=content_written.device,
+    )
+    actual = adapter.observe_actual_qk_from_generation_suffix(
+        context,
+        candidate_actual,
+    )
+
+    assert backend.suffix_replay_modes == [True, False]
+    assert candidate_actual.dtype is torch.float16
+    assert torch.equal(
+        differentiable.rgb8_ste_image.detach(),
+        actual.rgb8_image,
+    )
+    differentiable_score = qk_geometry_sync(
+        differentiable.qk_observation.qk_layer_observations,
+        "geometry-cpu-synthetic-key",
+    )
+    actual_score = qk_geometry_sync(
+        actual.qk_observation.qk_layer_observations,
+        "geometry-cpu-synthetic-key",
+    )
+    assert differentiable_score.relation_score == actual_score.relation_score
+    assert all(
+        not observation.query.requires_grad
+        and not observation.attention_key.requires_grad
+        for observation in actual.qk_observation.qk_layer_observations
+    )
+    assert not hasattr(actual, "suffix_context")
+    adapter.close()
+
+
+@pytest.mark.unit
+def test_geometry_suffix_replay_rejects_foreign_context_and_closes_runtime(
+) -> None:
+    backend = FakeGeometrySynchronizationBackend()
+    adapter = create_runtime_adapter(backend)
+    session = adapter.initialize("cpu")
+    foreign_context = FakeGenerationSuffixContext(
+        runtime_config_digest="0" * 64,
+        callback_index=session.callback_index,
+    )
+
+    with pytest.raises(RuntimeAdapterError, match="failed closed") as exc_info:
+        adapter.observe_differentiable_qk_from_generation_suffix(
+            foreign_context,
+            torch.zeros((1, 2, 4, 4), dtype=torch.float16),
+        )
+
+    assert exc_info.value.__cause__ is not None
+    assert "identity drifted" in str(exc_info.value.__cause__)
+    assert adapter.state is RuntimeAdapterState.FAILED
+    assert backend.close_calls == 1
+    assert backend.suffix_replay_modes == []
 
 
 @pytest.mark.unit

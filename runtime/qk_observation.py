@@ -14,9 +14,11 @@ from .adapter import RuntimeSession
 from .backend import (
     RuntimeDetectionConditioning,
     RuntimeDetectionScheduleStep,
+    RuntimeDifferentiableQkBackend,
     RuntimeQkBackend,
     RuntimeQkForwardIdentity,
     RuntimeVaeFactors,
+    RuntimeVaePosterior,
 )
 from .configuration import Sd35RuntimeConfiguration
 from .content_write import (
@@ -213,6 +215,8 @@ def _reshape_projection(
     projection_role: Literal["query", "attention_key"],
     expected_dtype: torch.dtype,
     expected_device: torch.device,
+    *,
+    preserve_gradient: bool = False,
 ) -> torch.Tensor:
     if not isinstance(raw, torch.Tensor):
         raise RuntimeQkObservationError(
@@ -268,6 +272,8 @@ def _reshape_projection(
         raise RuntimeQkObservationError(
             f"{binding.layer_name} {projection_role} normalized output is invalid"
         )
+    if preserve_gradient:
+        return normalized[0].clone()
     return normalized[0].detach().clone()
 
 
@@ -335,13 +341,15 @@ def _validate_forward_identity(
     return identity
 
 
-def observe_detection_qk(
+def _observe_detection_qk_core(
     backend: RuntimeQkBackend,
     configuration: Sd35RuntimeConfiguration,
     session: RuntimeSession,
     detection_image: torch.Tensor,
+    *,
+    differentiable: bool,
 ) -> RuntimeQkObservationResult:
-    """Capture actual registered-layer Q/K from one ordinary detection image."""
+    """Capture the same image-only Q/K path with an explicit gradient boundary."""
 
     if not isinstance(backend, RuntimeQkBackend):
         raise RuntimeQkObservationError(
@@ -366,12 +374,34 @@ def observe_detection_qk(
             "backend VAE factors do not match the detection protocol"
         )
     try:
-        detection_latent = _encode_detection_image(
-            backend,
-            image,
-            factors,
-            "qk_detection",
-        )
+        if differentiable:
+            if not isinstance(backend, RuntimeDifferentiableQkBackend):
+                raise RuntimeQkObservationError(
+                    "prepared backend lacks differentiable Q/K execution"
+                )
+            posterior = backend.vae_encode_differentiable(image)
+            if not isinstance(posterior, RuntimeVaePosterior):
+                raise RuntimeQkObservationError(
+                    "differentiable VAE encode lacks posterior mode"
+                )
+            mode = _tensor(
+                posterior.mode(),
+                role="qk_detection_differentiable_posterior_mode",
+            )
+            detection_latent = (
+                mode.to(dtype=torch.float32) - float(factors.shift_factor)
+            ) * float(factors.scaling_factor)
+            detection_latent = _tensor(
+                detection_latent,
+                role="qk_detection_differentiable_latent",
+            )
+        else:
+            detection_latent = _encode_detection_image(
+                backend,
+                image,
+                factors,
+                "qk_detection",
+            )
     except RuntimeContentExecutionError as exc:
         raise RuntimeQkObservationError(
             "detection image VAE posterior-mode encoding failed"
@@ -388,7 +418,9 @@ def observe_detection_qk(
         raise RuntimeQkObservationError(
             "registered Q/K path requires the frozen float16 latent dtype"
         )
-    detection_latent_actual = detection_latent.detach().to(dtype=torch.float16)
+    detection_latent_actual = detection_latent.to(dtype=torch.float16)
+    if not differentiable:
+        detection_latent_actual = detection_latent_actual.detach()
     if not bool(torch.isfinite(detection_latent_actual).all()):
         raise RuntimeQkObservationError(
             "detection VAE latent contains non-finite values"
@@ -417,9 +449,15 @@ def observe_detection_qk(
 
     schedule_step = _schedule_step(backend, configuration)
     try:
+        scale_noise = (
+            backend.scale_detection_noise_differentiable
+            if differentiable
+            and isinstance(backend, RuntimeDifferentiableQkBackend)
+            else backend.scale_detection_noise
+        )
         noisy_latent = _tensor(
-            backend.scale_detection_noise(
-                detection_latent_actual.detach().clone(),
+            scale_noise(
+                detection_latent_actual.clone(),
                 public_noise.detach().clone(),
                 schedule_step.detection_timestep.detach().clone(),
             ),
@@ -427,7 +465,9 @@ def observe_detection_qk(
             shape=detection_latent_actual.shape,
             dtype=torch.float16,
             device=detection_latent_actual.device,
-        ).detach().clone()
+        ).clone()
+        if not differentiable:
+            noisy_latent = noisy_latent.detach()
     except RuntimeContentExecutionError as exc:
         raise RuntimeQkObservationError(
             "scheduler scale_noise returned an invalid latent"
@@ -472,7 +512,9 @@ def observe_detection_qk(
                 raise RuntimeQkObservationError(
                     f"{layer_name} {projection_role} hook output is not a tensor"
                 )
-            captures[capture_key] = output.detach().clone()
+            captures[capture_key] = (
+                output.clone() if differentiable else output.detach().clone()
+            )
 
         return hook
 
@@ -488,8 +530,14 @@ def observe_detection_qk(
                     capture_hook(binding.layer_name, "attention_key")
                 )
             )
-        forward_identity = backend.run_qk_detection_forward(
-            noisy_latent.detach().clone(),
+        forward_operation = (
+            backend.run_qk_detection_forward_differentiable
+            if differentiable
+            and isinstance(backend, RuntimeDifferentiableQkBackend)
+            else backend.run_qk_detection_forward
+        )
+        forward_identity = forward_operation(
+            noisy_latent.clone(),
             schedule_step.detection_timestep.detach().clone(),
             conditioning,
         )
@@ -522,6 +570,7 @@ def observe_detection_qk(
             "query",
             torch.float16,
             noisy_latent.device,
+            preserve_gradient=differentiable,
         )
         attention_key = _reshape_projection(
             captures[(binding.layer_name, "attention_key")],
@@ -529,6 +578,7 @@ def observe_detection_qk(
             "attention_key",
             torch.float16,
             noisy_latent.device,
+            preserve_gradient=differentiable,
         )
         if query.shape != attention_key.shape:
             raise RuntimeQkObservationError(
@@ -569,4 +619,42 @@ def observe_detection_qk(
         ),
         qk_actual_dtype=configuration.latent_dtype,
         qk_layer_observations=tuple(observations),
+    )
+
+
+def observe_detection_qk(
+    backend: RuntimeQkBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    detection_image: torch.Tensor,
+) -> RuntimeQkObservationResult:
+    """Capture detached registered-layer Q/K from one ordinary detection image."""
+
+    return _observe_detection_qk_core(
+        backend,
+        configuration,
+        session,
+        detection_image,
+        differentiable=False,
+    )
+
+
+def observe_differentiable_detection_qk(
+    backend: RuntimeDifferentiableQkBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    detection_image: torch.Tensor,
+) -> RuntimeQkObservationResult:
+    """Capture the frozen image-only Q/K tensors while preserving autograd."""
+
+    if not isinstance(backend, RuntimeDifferentiableQkBackend):
+        raise RuntimeQkObservationError(
+            "prepared backend lacks differentiable Q/K execution"
+        )
+    return _observe_detection_qk_core(
+        backend,
+        configuration,
+        session,
+        detection_image,
+        differentiable=True,
     )

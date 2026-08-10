@@ -7,6 +7,9 @@ weights.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from copy import deepcopy
+from dataclasses import dataclass
 import importlib
 from pathlib import Path
 from typing import Any
@@ -21,6 +24,8 @@ from .backend import (
     RuntimeDetectionScheduleStep,
     RuntimeDeviceCapabilities,
     RuntimeGenerationPromptIdentity,
+    RuntimeGenerationSuffixContext,
+    RuntimeGenerationWithSuffixContextResult,
     RuntimeQkForwardIdentity,
     RuntimeVaeFactors,
     RuntimeVaePosterior,
@@ -30,6 +35,23 @@ from .configuration import Sd35RuntimeConfiguration
 
 class Sd35BackendError(RuntimeBackendError):
     """The real SD3.5 backend failed closed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Sd35GenerationSuffixContext:
+    """Backend-private tensors needed to replay one captured generation suffix."""
+
+    runtime_config_digest: str
+    callback_index: int
+    owner_identity: int
+    latent_shape: tuple[int, ...]
+    latent_dtype: torch.dtype
+    selected_device: str
+    prompt_identity: RuntimeGenerationPromptIdentity
+    prompt_embeds: torch.Tensor
+    pooled_prompt_embeds: torch.Tensor
+    suffix_timesteps: torch.Tensor
+    scheduler_snapshot: Any
 
 
 def _explicit_absolute_root(value: str | Path, field_name: str) -> Path:
@@ -241,6 +263,41 @@ class Sd35PipelineBackend:
         initial_latent: torch.Tensor,
         callback: GenerationCallback,
     ) -> torch.Tensor:
+        """Run the established generation path without exposing suffix state."""
+
+        terminal, _context = self._run_generation(
+            initial_latent,
+            callback,
+            capture_suffix_context=False,
+        )
+        return terminal
+
+    def run_generation_with_suffix_context(
+        self,
+        initial_latent: torch.Tensor,
+        callback: GenerationCallback,
+    ) -> RuntimeGenerationWithSuffixContextResult:
+        """Run generation and retain only the execution-local registered suffix."""
+
+        terminal, context = self._run_generation(
+            initial_latent,
+            callback,
+            capture_suffix_context=True,
+        )
+        if context is None:
+            raise Sd35BackendError("generation suffix context was not captured")
+        return RuntimeGenerationWithSuffixContextResult(
+            terminal_latent=terminal,
+            suffix_context=context,
+        )
+
+    def _run_generation(
+        self,
+        initial_latent: torch.Tensor,
+        callback: GenerationCallback,
+        *,
+        capture_suffix_context: bool,
+    ) -> tuple[torch.Tensor, _Sd35GenerationSuffixContext | None]:
         configuration, _device, pipeline = self._prepared()
         if self._generation_running:
             raise Sd35BackendError("overlapping generation is forbidden")
@@ -268,6 +325,7 @@ class Sd35PipelineBackend:
         ):
             raise Sd35BackendError("generation prompt snapshot identity drifted")
         self._generation_running = True
+        suffix_context: _Sd35GenerationSuffixContext | None = None
 
         def on_step_end(
             _pipeline: Any,
@@ -275,10 +333,49 @@ class Sd35PipelineBackend:
             _timestep: torch.Tensor,
             callback_kwargs: dict[str, torch.Tensor],
         ) -> dict[str, torch.Tensor]:
+            nonlocal suffix_context
             latent = callback_kwargs.get("latents")
             if not isinstance(latent, torch.Tensor):
                 raise Sd35BackendError("generation callback did not expose latents")
             callback_kwargs["latents"] = callback(step_index, latent)
+            if capture_suffix_context and step_index == configuration.callback_index:
+                if suffix_context is not None:
+                    raise Sd35BackendError(
+                        "generation suffix context was captured more than once"
+                    )
+                prompt_embeds = callback_kwargs.get("prompt_embeds")
+                pooled_prompt_embeds = callback_kwargs.get("pooled_prompt_embeds")
+                timesteps = getattr(pipeline.scheduler, "timesteps", None)
+                if (
+                    not isinstance(prompt_embeds, torch.Tensor)
+                    or not isinstance(pooled_prompt_embeds, torch.Tensor)
+                    or not isinstance(timesteps, torch.Tensor)
+                ):
+                    raise Sd35BackendError(
+                        "generation suffix conditioning or schedule is unavailable"
+                    )
+                suffix_timesteps = timesteps[step_index + 1 :].detach().clone()
+                if (
+                    suffix_timesteps.ndim != 1
+                    or int(suffix_timesteps.numel())
+                    != configuration.callback_hold_scheduler_intervals
+                ):
+                    raise Sd35BackendError(
+                        "generation suffix interval count drifted"
+                    )
+                suffix_context = _Sd35GenerationSuffixContext(
+                    runtime_config_digest=configuration.runtime_config_digest,
+                    callback_index=configuration.callback_index,
+                    owner_identity=id(self),
+                    latent_shape=tuple(int(size) for size in latent.shape),
+                    latent_dtype=latent.dtype,
+                    selected_device=str(latent.device),
+                    prompt_identity=prompt_identity,
+                    prompt_embeds=prompt_embeds.detach().clone(),
+                    pooled_prompt_embeds=pooled_prompt_embeds.detach().clone(),
+                    suffix_timesteps=suffix_timesteps,
+                    scheduler_snapshot=deepcopy(pipeline.scheduler),
+                )
             return callback_kwargs
 
         try:
@@ -294,7 +391,11 @@ class Sd35PipelineBackend:
                     output_type="latent",
                     return_dict=True,
                     callback_on_step_end=on_step_end,
-                    callback_on_step_end_tensor_inputs=["latents"],
+                    callback_on_step_end_tensor_inputs=(
+                        ["latents", "prompt_embeds", "pooled_prompt_embeds"]
+                        if capture_suffix_context
+                        else ["latents"]
+                    ),
                 )
         except Exception as exc:
             raise Sd35BackendError("SD3.5 generation failed") from exc
@@ -309,7 +410,103 @@ class Sd35PipelineBackend:
         latent = getattr(output, "images", None)
         if not isinstance(latent, torch.Tensor):
             raise Sd35BackendError("SD3.5 generation did not return a latent tensor")
-        return latent
+        if capture_suffix_context and suffix_context is None:
+            raise Sd35BackendError("registered generation suffix was not captured")
+        if suffix_context is not None:
+            captured = suffix_context
+            suffix_context = _Sd35GenerationSuffixContext(
+                runtime_config_digest=captured.runtime_config_digest,
+                callback_index=captured.callback_index,
+                owner_identity=captured.owner_identity,
+                latent_shape=captured.latent_shape,
+                latent_dtype=captured.latent_dtype,
+                selected_device=captured.selected_device,
+                prompt_identity=captured.prompt_identity,
+                prompt_embeds=captured.prompt_embeds.clone(),
+                pooled_prompt_embeds=captured.pooled_prompt_embeds.clone(),
+                suffix_timesteps=captured.suffix_timesteps.clone(),
+                scheduler_snapshot=deepcopy(captured.scheduler_snapshot),
+            )
+        return latent, suffix_context
+
+    def replay_generation_suffix(
+        self,
+        callback_latent: torch.Tensor,
+        suffix_context: RuntimeGenerationSuffixContext,
+        *,
+        differentiable: bool,
+    ) -> torch.Tensor:
+        """Replay the captured scheduler suffix using the original conditioning."""
+
+        configuration, device, pipeline = self._prepared()
+        if type(suffix_context) is not _Sd35GenerationSuffixContext:
+            raise Sd35BackendError(
+                "generation suffix context belongs to another backend"
+            )
+        context = suffix_context
+        if (
+            context.owner_identity != id(self)
+            or context.runtime_config_digest != configuration.runtime_config_digest
+            or context.callback_index != configuration.callback_index
+            or context.selected_device != str(device)
+            or context.latent_shape
+            != tuple(int(size) for size in callback_latent.shape)
+            or type(differentiable) is not bool
+        ):
+            raise Sd35BackendError("generation suffix context identity drifted")
+        if (
+            not isinstance(callback_latent, torch.Tensor)
+            or callback_latent.device != device
+            or not bool(torch.isfinite(callback_latent).all())
+        ):
+            raise Sd35BackendError("generation suffix latent is invalid")
+        scheduler = deepcopy(context.scheduler_snapshot)
+
+        def replay() -> torch.Tensor:
+            latents = callback_latent.to(dtype=context.latent_dtype)
+            prompt_embeds = context.prompt_embeds.to(device=device)
+            pooled_prompt_embeds = context.pooled_prompt_embeds.to(device=device)
+            for timestep_value in context.suffix_timesteps:
+                latent_model_input = torch.cat([latents, latents], dim=0)
+                timestep = timestep_value.to(device=device).expand(
+                    latent_model_input.shape[0]
+                )
+                noise_pred = pipeline.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    encoder_hidden_states=prompt_embeds,
+                    pooled_projections=pooled_prompt_embeds,
+                    joint_attention_kwargs=None,
+                    return_dict=False,
+                )[0]
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                guided_noise = noise_pred_uncond + configuration.guidance_scale * (
+                    noise_pred_text - noise_pred_uncond
+                )
+                latents = scheduler.step(
+                    guided_noise,
+                    timestep_value.to(device=device),
+                    latents,
+                    return_dict=False,
+                )[0]
+            return latents
+
+        execution_context = nullcontext() if differentiable else torch.inference_mode()
+        try:
+            with execution_context:
+                terminal = replay()
+        except Exception as exc:
+            raise Sd35BackendError("generation suffix replay failed") from exc
+        if (
+            not isinstance(terminal, torch.Tensor)
+            or terminal.shape != callback_latent.shape
+            or terminal.device != callback_latent.device
+            or not bool(torch.isfinite(terminal).all())
+        ):
+            raise Sd35BackendError(
+                "generation suffix replay returned an invalid latent"
+            )
+        return terminal
 
     def vae_factors(self) -> RuntimeVaeFactors:
         _configuration, _device, pipeline = self._prepared()
@@ -360,6 +557,27 @@ class Sd35PipelineBackend:
             raise Sd35BackendError("prepared VAE decode returned a non-tensor")
         return image
 
+    def vae_decode_differentiable(self, latent: torch.Tensor) -> torch.Tensor:
+        """Decode through the prepared VAE without disabling autograd."""
+
+        _configuration, device, pipeline = self._prepared()
+        try:
+            vae_dtype = self._vae_execution_dtype(pipeline)
+            decoded = pipeline.vae.decode(
+                latent.to(device=device, dtype=vae_dtype or latent.dtype),
+                return_dict=True,
+            ).sample
+            image = pipeline.image_processor.postprocess(decoded, output_type="pt")
+        except Exception as exc:
+            raise Sd35BackendError("differentiable VAE decode failed") from exc
+        if not isinstance(image, torch.Tensor) or not bool(
+            torch.isfinite(image).all()
+        ):
+            raise Sd35BackendError(
+                "differentiable VAE decode returned an invalid image"
+            )
+        return image
+
     def vae_encode(self, image: torch.Tensor) -> RuntimeVaePosterior:
         configuration, device, pipeline = self._prepared()
         try:
@@ -381,6 +599,30 @@ class Sd35PipelineBackend:
             raise Sd35BackendError("prepared VAE posterior encode failed") from exc
         if not isinstance(posterior, RuntimeVaePosterior):
             raise Sd35BackendError("prepared VAE did not expose posterior mode()")
+        return posterior
+
+    def vae_encode_differentiable(
+        self,
+        image: torch.Tensor,
+    ) -> RuntimeVaePosterior:
+        """Encode through the prepared VAE without disabling autograd."""
+
+        configuration, device, pipeline = self._prepared()
+        try:
+            vae_dtype = self._vae_execution_dtype(pipeline)
+            prepared_image = pipeline.image_processor.preprocess(
+                image,
+                height=configuration.image_height,
+                width=configuration.image_width,
+            ).to(device=device, dtype=vae_dtype or image.dtype)
+            posterior = pipeline.vae.encode(
+                prepared_image,
+                return_dict=True,
+            ).latent_dist
+        except Exception as exc:
+            raise Sd35BackendError("differentiable VAE encode failed") from exc
+        if not isinstance(posterior, RuntimeVaePosterior):
+            raise Sd35BackendError("differentiable VAE did not expose posterior mode()")
         return posterior
 
     def create_detection_schedule(
@@ -426,6 +668,27 @@ class Sd35PipelineBackend:
                 )
         except Exception as exc:
             raise Sd35BackendError("detection scheduler scale_noise failed") from exc
+
+    def scale_detection_noise_differentiable(
+        self,
+        detection_latent: torch.Tensor,
+        public_noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply the established detection scheduler with autograd enabled."""
+
+        if self._detection_scheduler is None:
+            raise Sd35BackendError("detection schedule was not established")
+        try:
+            return self._detection_scheduler.scale_noise(
+                detection_latent,
+                timestep,
+                public_noise,
+            )
+        except Exception as exc:
+            raise Sd35BackendError(
+                "differentiable detection scheduler scale_noise failed"
+            ) from exc
 
     def attention_module(self, layer_name: str) -> torch.nn.Module:
         _configuration, _device, pipeline = self._prepared()
@@ -490,6 +753,62 @@ class Sd35PipelineBackend:
             do_classifier_free_guidance=(
                 conditioning.do_classifier_free_guidance
             ),
+            qk_layer_names=configuration.qk_layer_names,
+        )
+
+    def run_qk_detection_forward_differentiable(
+        self,
+        noisy_detection_latent: torch.Tensor,
+        timestep: torch.Tensor,
+        conditioning: RuntimeDetectionConditioning,
+    ) -> RuntimeQkForwardIdentity:
+        """Run the same image-only forward without the blind path's detach boundary."""
+
+        configuration, device, pipeline = self._prepared()
+        if (
+            conditioning.prompt
+            or conditioning.prompt_2
+            or conditioning.prompt_3
+            or conditioning.do_classifier_free_guidance
+        ):
+            raise Sd35BackendError("Q/K detection requires empty text without CFG")
+        try:
+            with torch.inference_mode():
+                encoded = pipeline.encode_prompt(
+                    prompt="",
+                    prompt_2="",
+                    prompt_3="",
+                    device=device,
+                    num_images_per_prompt=1,
+                    do_classifier_free_guidance=False,
+                )
+                prompt_embeds = encoded[0].detach().clone()
+                pooled_prompt_embeds = encoded[2].detach().clone()
+            pipeline.transformer(
+                hidden_states=noisy_detection_latent,
+                timestep=timestep.expand(noisy_detection_latent.shape[0]),
+                encoder_hidden_states=prompt_embeds,
+                pooled_projections=pooled_prompt_embeds,
+                return_dict=False,
+            )
+        except Exception as exc:
+            raise Sd35BackendError(
+                "differentiable image-only Q/K transformer forward failed"
+            ) from exc
+        return RuntimeQkForwardIdentity(
+            runtime_config_digest=configuration.runtime_config_digest,
+            model_id=configuration.model_id,
+            model_revision=configuration.model_revision,
+            scheduler_class=configuration.scheduler_class,
+            inference_steps=configuration.inference_steps,
+            detection_schedule_index=configuration.detection_schedule_index,
+            detection_conditioning_protocol=(
+                conditioning.detection_conditioning_protocol
+            ),
+            prompt=conditioning.prompt,
+            prompt_2=conditioning.prompt_2,
+            prompt_3=conditioning.prompt_3,
+            do_classifier_free_guidance=conditioning.do_classifier_free_guidance,
             qk_layer_names=configuration.qk_layer_names,
         )
 
