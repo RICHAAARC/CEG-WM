@@ -40,10 +40,17 @@ from experiments.metrics import (
     validate_hf_only_reference_quality_case_result,
     validate_hf_only_reference_threshold_result,
 )
+from tests.helpers.historical_repository import (
+    HF_REFERENCE_PRODUCER_PATHS,
+    HF_REFERENCE_PRODUCER_REVISION,
+    HF_REFERENCE_SOURCE_EQUIVALENCE_PATHS,
+    materialize_historical_repository,
+)
 
 
-ROOT = Path(__file__).resolve().parents[2]
-HF_ONLY_REFERENCE_METRIC_MODULE = ROOT / "experiments/metrics/hf_only_reference_metrics.py"
+CURRENT_ROOT = Path(__file__).resolve().parents[2]
+ROOT = CURRENT_ROOT
+HF_ONLY_REFERENCE_METRIC_MODULE = CURRENT_ROOT / "experiments/metrics/hf_only_reference_metrics.py"
 SOURCE_CLUSTER_COUNT = 4096
 REGISTERED_KEY_DIGEST = hashlib.sha256(b"registered-key").hexdigest()
 DETECTOR_CONFIG_DIGEST = hashlib.sha256(b"detector-config").hexdigest()
@@ -61,6 +68,26 @@ QUALITY_MARKED_IMAGE = HfOnlyReferenceRgb8Image(
     dtype="uint8",
     values_hwc=bytes((11, 20, 30)),
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _historical_hf_reference_root(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    global ROOT
+    ROOT = materialize_historical_repository(
+        source_root=CURRENT_ROOT,
+        revision=HF_REFERENCE_PRODUCER_REVISION,
+        destination=tmp_path_factory.mktemp("hf_reference_metrics") / "repository",
+        paths=HF_REFERENCE_PRODUCER_PATHS,
+        source_equivalence_paths=HF_REFERENCE_SOURCE_EQUIVALENCE_PATHS,
+    )
+    _binding.cache_clear()
+    _ordered_analysis_units.cache_clear()
+    yield
+    _binding.cache_clear()
+    _ordered_analysis_units.cache_clear()
+    ROOT = CURRENT_ROOT
 
 
 def _digest(text: str) -> str:
@@ -81,7 +108,9 @@ def _canonical_digest(value: object) -> str:
 
 @lru_cache(maxsize=1)
 def _binding():
-    return load_hf_only_reference_metric_implementation_binding()
+    return load_hf_only_reference_metric_implementation_binding(
+        ROOT / "configs/experiments/hf_only_reference_metrics.json"
+    )
 
 
 @lru_cache(maxsize=2)

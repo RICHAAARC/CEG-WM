@@ -73,11 +73,13 @@ from scripts.experiment_execution.component_source_closure import (
     build_component_source_closure,
 )
 from tests.unit.test_runtime_content_write_and_vae import FakeContentBackend
+from tests.helpers.historical_repository import materialize_historical_repository
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
 READINESS = ROOT / ".codex/research_state/method_readiness.yaml"
+LF_DIRECTIONAL_PRODUCER_REVISION = "51adb765cdddafcb4c65c357e899c77b4c9f36d2"
 SCREENING_CONFIG = ROOT / "configs/experiments/lf_whitened_score_screening.json"
 COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
 ROOT_KEY = "ceg-wm-lf-whitened-directional-test-key"
@@ -175,7 +177,9 @@ def test_lf_whitened_directional_manifest_is_disjoint_from_prior_authorities() -
 
 
 @pytest.mark.unit
-def test_lf_whitened_directional_component_authority_replays_reviewed_sources() -> None:
+def test_lf_whitened_directional_component_authority_replays_reviewed_sources(
+    tmp_path: Path,
+) -> None:
     protocol, _manifest = load_lf_whitened_directional_validation_protocol(
         CONFIG, repository_root=ROOT
     )
@@ -197,22 +201,34 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources() 
     assert protocol.candidate_specification_sha256 == sha256(
         (ROOT / "docs/design/candidate_specifications.md").read_bytes()
     ).hexdigest()
-    assert protocol.method_review_reference == (
-        readiness["independent_semantic_review"]["review_reference"]
+    producer_root = materialize_historical_repository(
+        source_root=ROOT,
+        revision=LF_DIRECTIONAL_PRODUCER_REVISION,
+        destination=tmp_path / "lf-directional-producer",
+        paths=("configs/experiments/lf_whitened_directional_validation.json",),
     )
-    assert protocol.method_review_reference == (
+    producer_authority = json.loads(
+        (
+            producer_root
+            / "configs/experiments/lf_whitened_directional_validation.json"
+        ).read_text(encoding="utf-8")
+    )
+    frozen_review_reference = (
         "independent_lf_prepared_feature_semantic_review:"
         "019fe0f3-b8e8-7230-98f1-9ae0450c1f4a:"
         "00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE"
     )
-    assert protocol.method_reviewed_revision == (
-        readiness["independent_semantic_review"][
-            "reviewed_repository_revision"
-        ]
+    frozen_reviewed_revision = "00bed2baaf60f039868c208291c86b539a54b2f3"
+    assert producer_authority["method_review_reference"] == frozen_review_reference
+    assert producer_authority["method_reviewed_revision"] == frozen_reviewed_revision
+    assert protocol.method_review_reference == frozen_review_reference
+    assert protocol.method_reviewed_revision == frozen_reviewed_revision
+    assert readiness["independent_semantic_review"]["review_reference"] != (
+        frozen_review_reference
     )
-    assert protocol.method_reviewed_revision == (
-        "00bed2baaf60f039868c208291c86b539a54b2f3"
-    )
+    assert readiness["independent_semantic_review"][
+        "reviewed_repository_revision"
+    ] != frozen_reviewed_revision
 
 
 @pytest.mark.unit

@@ -34,14 +34,40 @@ from experiments.protocol.internal_splits import (
     LEGACY_INTERNAL_VALIDATION_PROTOCOL_VERSION,
 )
 from experiments.protocol.internal_validation import LEGACY_PROTOCOL_COMPATIBILITY
+from tests.helpers.historical_repository import (
+    HF_REFERENCE_PRODUCER_PATHS,
+    HF_REFERENCE_PRODUCER_REVISION,
+    HF_REFERENCE_SOURCE_EQUIVALENCE_PATHS,
+    HistoricalRepositoryError,
+    materialize_historical_repository,
+)
 
 
-ROOT = Path(__file__).resolve().parents[2]
-HF_ONLY_REFERENCE_PROTOCOL_MODULE = ROOT / "experiments/protocol/hf_only_reference_protocol.py"
+CURRENT_ROOT = Path(__file__).resolve().parents[2]
+ROOT = CURRENT_ROOT
+HF_ONLY_REFERENCE_PROTOCOL_MODULE = CURRENT_ROOT / "experiments/protocol/hf_only_reference_protocol.py"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _historical_hf_reference_root(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    global ROOT
+    ROOT = materialize_historical_repository(
+        source_root=CURRENT_ROOT,
+        revision=HF_REFERENCE_PRODUCER_REVISION,
+        destination=tmp_path_factory.mktemp("hf_reference_producer") / "repository",
+        paths=HF_REFERENCE_PRODUCER_PATHS,
+        source_equivalence_paths=HF_REFERENCE_SOURCE_EQUIVALENCE_PATHS,
+    )
+    yield
+    ROOT = CURRENT_ROOT
 
 
 @pytest.mark.unit
-def test_hf_only_reference_bundle_loads_exact_authorities_and_offline_prompt_snapshot() -> None:
+def test_hf_only_reference_bundle_loads_exact_authorities_and_offline_prompt_snapshot(
+    tmp_path: Path,
+) -> None:
     bundle = load_hf_only_reference_bundle(ROOT)
     specification = bundle.specification.raw
     assert specification["protocol_id"] == INTERNAL_VALIDATION_PROTOCOL_ID
@@ -81,6 +107,21 @@ def test_hf_only_reference_bundle_loads_exact_authorities_and_offline_prompt_sna
     )
     snapshot = ROOT / specification["dataset"]["dataset_snapshot_path"]
     assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == HF_ONLY_REFERENCE_DATASET_SHA256
+    with pytest.raises(HistoricalRepositoryError, match="local Git object database"):
+        materialize_historical_repository(
+            source_root=CURRENT_ROOT,
+            revision="f" * 40,
+            destination=tmp_path / "missing-producer",
+            paths=HF_REFERENCE_PRODUCER_PATHS,
+        )
+    with pytest.raises(HistoricalRepositoryError, match="current source differs"):
+        materialize_historical_repository(
+            source_root=CURRENT_ROOT,
+            revision=HF_REFERENCE_PRODUCER_REVISION,
+            destination=tmp_path / "mixed-producer",
+            paths=(*HF_REFERENCE_PRODUCER_PATHS, "experiments/methods/ceg_wm.py"),
+            source_equivalence_paths=("experiments/methods/ceg_wm.py",),
+        )
 
 
 @pytest.mark.unit

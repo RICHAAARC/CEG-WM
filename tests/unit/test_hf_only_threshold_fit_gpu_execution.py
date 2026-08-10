@@ -7,7 +7,9 @@ from hashlib import sha256
 import inspect
 import json
 import math
+import os
 from pathlib import Path
+import subprocess
 from types import ModuleType, SimpleNamespace
 import sys
 
@@ -68,6 +70,11 @@ from experiments.runners.formal_operations import (
 )
 from experiments.runners.record_writer import HfOnlyThresholdFitRecordWriter
 from runtime import Sd35BackendError, Sd35PipelineBackend, load_runtime_configuration
+from tests.helpers.historical_repository import (
+    HF_REFERENCE_PRODUCER_REVISION,
+    HF_REFERENCE_SOURCE_EQUIVALENCE_PATHS,
+    materialize_historical_tree,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -223,19 +230,52 @@ def test_typed_record_parser_rejects_nonfinite_json_as_custom_error(
 
 
 @pytest.mark.quick
-def test_production_authority_loader_replays_full_protocol_and_metrics() -> None:
-    authority = load_hf_only_threshold_fit_authority(ROOT)
-    assert len(authority.assignments) == 4096
-    assert authority.metric_binding.fit_analysis_units == frozenset(
-        authority.assignments
+def test_production_authority_loader_replays_full_protocol_and_metrics(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError) as current_failure:
+        load_hf_only_threshold_fit_authority(ROOT)
+    assert "formal_method_adapter" in str(current_failure.value)
+
+    producer_root = materialize_historical_tree(
+        source_root=ROOT,
+        revision=HF_REFERENCE_PRODUCER_REVISION,
+        destination=tmp_path / "hf-reference-producer",
+        source_equivalence_paths=HF_REFERENCE_SOURCE_EQUIVALENCE_PATHS,
     )
-    assert len(authority.metric_binding.confirmation_analysis_units) == 4096
-    assert authority.configuration.raw["accessible_split"] == (
-        "content_threshold_fit"
+    script = """
+import json
+from experiments.runners.hf_only_threshold_fit_gpu_execution import load_hf_only_threshold_fit_authority
+
+authority = load_hf_only_threshold_fit_authority('.')
+print(json.dumps({
+    'assignment_count': len(authority.assignments),
+    'fit_matches': authority.metric_binding.fit_analysis_units == frozenset(authority.assignments),
+    'confirmation_count': len(authority.metric_binding.confirmation_analysis_units),
+    'accessible_split': authority.configuration.raw['accessible_split'],
+    'forbidden_splits': authority.configuration.raw['forbidden_splits'],
+}, sort_keys=True))
+"""
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(producer_root)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    completed = subprocess.run(
+        (sys.executable, "-c", script),
+        cwd=producer_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
     )
-    assert authority.configuration.raw["forbidden_splits"] == [
-        "untouched_confirmation"
-    ]
+    assert completed.returncode == 0, completed.stderr
+    observed = json.loads(completed.stdout)
+    assert observed == {
+        "accessible_split": "content_threshold_fit",
+        "assignment_count": 4096,
+        "confirmation_count": 4096,
+        "fit_matches": True,
+        "forbidden_splits": ["untouched_confirmation"],
+    }
 
 
 @pytest.mark.quick

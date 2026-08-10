@@ -4,42 +4,30 @@ from __future__ import annotations
 
 from hashlib import sha256
 import ast
+import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from types import ModuleType
 import zipfile
 
 import pytest
 
-from scripts.experiment_execution import experiment_execution_bootstrap as bootstrap
 from scripts.experiment_execution import experiment_execution_entrypoint as entrypoint
-from scripts.experiment_execution.build_experiment_execution_package import (
-    EXACT_FILES,
-    build_experiment_execution_package,
-)
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOTS = (
-    "main",
-    "runtime",
-    "experiments",
-    "configs",
-    "infrastructure",
+HF_REFERENCE_PRODUCER_REVISION = "cc9af5df0d9a63d349402d56ddd6bb81d117d1e8"
+HF_THRESHOLD_DELIVERY_PRODUCER_REVISION = (
+    "7797e78a4da11ee39d5554772b299821ea0019b3"
 )
-PACKAGE_EXTRAS = (
-    "pyproject.toml",
-    "requirements_hf_only_threshold_fit_gpu_execution.txt",
-    "templates/release_readmes/experiment_execution_package.md",
-    "scripts/experiment_execution/__init__.py",
-    "scripts/experiment_execution/experiment_execution_entrypoint.py",
-    "tests/integration/__init__.py",
-    "tests/integration/test_packaged_experiment_execution.py",
-    "tests/smoke/test_packaged_experiment_execution.py",
-)
+DELIVERY_ROOT = ROOT
+bootstrap: ModuleType
+builder_module: ModuleType
+EXACT_FILES: frozenset[str]
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -52,23 +40,43 @@ def _git(root: Path, *arguments: str) -> str:
     ).stdout.strip()
 
 
-def _copy_package_repository(destination: Path) -> str:
-    for relative in PACKAGE_ROOTS:
-        shutil.copytree(
-            ROOT / relative,
-            destination / relative,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
-        )
-    for relative in PACKAGE_EXTRAS:
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, target)
-    _git(destination, "init")
-    _git(destination, "config", "user.email", "test@example.invalid")
-    _git(destination, "config", "user.name", "Threshold Fit Test")
-    _git(destination, "add", ".")
-    _git(destination, "commit", "-m", "threshold fit package fixture")
-    return _git(destination, "rev-parse", "HEAD")
+def _load_historical_module(name: str, path: Path) -> ModuleType:
+    specification = importlib.util.spec_from_file_location(name, path)
+    if specification is None or specification.loader is None:
+        raise RuntimeError(f"cannot load historical delivery module: {path}")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _historical_threshold_delivery_root(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    global DELIVERY_ROOT, EXACT_FILES, bootstrap, builder_module
+    root = tmp_path_factory.mktemp("threshold_delivery_producer") / "repository"
+    subprocess.run(
+        ("git", "clone", "--no-checkout", "--quiet", str(ROOT), str(root)),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _git(root, "checkout", "--detach", HF_THRESHOLD_DELIVERY_PRODUCER_REVISION)
+    assert _git(root, "rev-parse", "HEAD") == HF_THRESHOLD_DELIVERY_PRODUCER_REVISION
+    assert _git(root, "status", "--porcelain") == ""
+    DELIVERY_ROOT = root
+    builder_module = _load_historical_module(
+        "ceg_wm_historical_threshold_package_builder",
+        root / "scripts/experiment_execution/build_experiment_execution_package.py",
+    )
+    bootstrap = _load_historical_module(
+        "ceg_wm_historical_threshold_bootstrap",
+        root / "scripts/experiment_execution/experiment_execution_bootstrap.py",
+    )
+    EXACT_FILES = builder_module.EXACT_FILES
+    yield root
+    DELIVERY_ROOT = ROOT
 
 
 def _authority_digests(repository: Path) -> dict[str, str]:
@@ -94,12 +102,11 @@ def _authority_digests(repository: Path) -> dict[str, str]:
 
 @pytest.fixture(scope="module")
 def threshold_package(tmp_path_factory: pytest.TempPathFactory) -> dict[str, object]:
-    root = tmp_path_factory.mktemp("threshold_package") / "repository"
-    root.mkdir()
-    revision = _copy_package_repository(root)
+    root = DELIVERY_ROOT
+    revision = HF_THRESHOLD_DELIVERY_PRODUCER_REVISION
     digests = _authority_digests(root)
-    package = root.parent / "threshold-fit.zip"
-    build = build_experiment_execution_package(
+    package = tmp_path_factory.mktemp("threshold_package") / "threshold-fit.zip"
+    build = builder_module.build_experiment_execution_package(
         root=root,
         output_zip=package,
         committed_revision=revision,
@@ -121,7 +128,7 @@ def test_builder_uses_exact_threshold_fit_allowlist_and_is_deterministic(
     tmp_path: Path,
 ) -> None:
     second = tmp_path / "threshold-fit.zip"
-    second_build = build_experiment_execution_package(
+    second_build = builder_module.build_experiment_execution_package(
         root=threshold_package["repository"],
         output_zip=second,
         committed_revision=threshold_package["revision"],
@@ -183,6 +190,15 @@ def test_builder_uses_exact_threshold_fit_allowlist_and_is_deterministic(
     assert "CPU/synthetic development wiring" not in package_readme
     assert "prepare_synthetic_wiring" not in entrypoint_source
     assert "run_synthetic_wiring" not in entrypoint_source
+    with pytest.raises(
+        builder_module.ExperimentPackageBuildError,
+        match="does not equal HEAD",
+    ):
+        builder_module.build_experiment_execution_package(
+            root=threshold_package["repository"],
+            output_zip=tmp_path / "cross-signed.zip",
+            committed_revision=HF_REFERENCE_PRODUCER_REVISION,
+        )
 
 
 def _bootstrap_command(
@@ -202,7 +218,7 @@ def _bootstrap_command(
     sidecar_path = sidecar or fixture["sidecar"]
     command = (
         sys.executable,
-        str(ROOT / "scripts/experiment_execution/experiment_execution_bootstrap.py"),
+        str(DELIVERY_ROOT / "scripts/experiment_execution/experiment_execution_bootstrap.py"),
         "--package-zip",
         str(package_path),
         "--delivery-manifest-path",
@@ -238,7 +254,7 @@ def _bootstrap_command(
     fake_site = ephemeral_root.parent / "verified_dependency_metadata"
     fake_site.mkdir(exist_ok=True)
     for requirement in (
-        ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
+        DELIVERY_ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
     ).read_text(encoding="utf-8").splitlines():
         distribution, version = requirement.split("==", 1)
         metadata_root = fake_site / (
@@ -255,7 +271,7 @@ def _bootstrap_command(
     expected_torch = next(
         requirement.split("==", 1)[1]
         for requirement in (
-            ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
+            DELIVERY_ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
         ).read_text(encoding="utf-8").splitlines()
         if requirement.startswith("torch==")
     )
@@ -377,7 +393,7 @@ def test_resource_failure_and_second_resume_produce_distinct_artifacts(
     expected_dependencies = dict(
         line.split("==", 1)
         for line in (
-            ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
+            DELIVERY_ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
         ).read_text(encoding="utf-8").splitlines()
     )
     environment_facts = outcome["execution_facts"]["environment"]
@@ -667,7 +683,7 @@ def test_hf_only_reference_dependency_lock_rejects_incomplete_or_drifted_closure
     tamper_kind: str,
 ) -> None:
     lines = (
-        ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
+        DELIVERY_ROOT / "requirements_hf_only_threshold_fit_gpu_execution.txt"
     ).read_text(encoding="utf-8").splitlines()
     if tamper_kind == "missing":
         lines.pop()
