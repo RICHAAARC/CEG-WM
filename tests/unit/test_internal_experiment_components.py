@@ -97,6 +97,8 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "LfDetectionResult",
         "LfNullWhitenedDetectionResult",
         "LfNullWhiteningAsset",
+        "PreparedLfWhitenedObservation",
+        "PreparedLfWhitenedTemplate",
         "RoutingObservations",
         "content_detector",
         "content_embedder",
