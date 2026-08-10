@@ -31,93 +31,51 @@
     "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1",
     "method_reviewed_revision": "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64",
     "protocol_authorization_parent_revision": "8a557c076b79788405fe16f99e4acb6f43e89681",
-    "method_source_files": [
+    "ordered_component_ids": [
+      "key_schedule",
+      "hf_carrier",
+      "content_embedder",
+      "hf_detector",
+      "content_detector"
+    ],
+    "component_source_bindings": [
       {
-        "path": "main/__init__.py",
-        "sha256": "b2fef5e850bb99250cc97227b4dd16550005ceff1a566a693f5f97bfef92d9b2"
+        "component_id": "key_schedule",
+        "source_role": "component_implementation",
+        "implementation_path": "main/shared/key_schedule.py",
+        "implementation_symbol": "key_schedule_sha256_counter",
+        "source_sha256": "d199e5fe1a99531cde9a0d5fbd433cec12fd92421f9f96c9248793bea684b038"
       },
       {
-        "path": "main/shared/__init__.py",
-        "sha256": "00db8b808211ea0175e13b34afa32ab2cb76f294e3aa83e80e45491147467ec1"
+        "component_id": "hf_carrier",
+        "source_role": "component_implementation",
+        "implementation_path": "main/content_chain/hf_carrier.py",
+        "implementation_symbol": "hf_carrier",
+        "source_sha256": "ff4c7e1a5c7107f07afd4a4f7f4ea5599ed3c0ed1cd22f2d08eb4fbebd60a921"
       },
       {
-        "path": "main/shared/key_schedule.py",
-        "sha256": "d199e5fe1a99531cde9a0d5fbd433cec12fd92421f9f96c9248793bea684b038"
+        "component_id": "content_embedder",
+        "source_role": "component_implementation",
+        "implementation_path": "main/content_chain/embedder.py",
+        "implementation_symbol": "content_embedder",
+        "source_sha256": "098995752b17071cb47120699ce69066fd24dba7c29a773844caf243c127ece2"
       },
       {
-        "path": "main/shared/rgb8.py",
-        "sha256": "4169042cf494af58717c2ddb87a11c0fddd8999d4783b051c066ca52b1c3a411"
+        "component_id": "hf_detector",
+        "source_role": "component_implementation",
+        "implementation_path": "main/content_chain/hf_detector.py",
+        "implementation_symbol": "hf_detector",
+        "source_sha256": "2f718667682cb52565475a8995dec75fedaf5d3ebeb049e5098d42dc55a45a7a"
       },
       {
-        "path": "main/content_chain/__init__.py",
-        "sha256": "b7a01137978d7e0e79d7309b23755fc128b9e04242130a7cb2c436b30e073f40"
-      },
-      {
-        "path": "main/content_chain/routing.py",
-        "sha256": "2c2b7b5bc6219fb6885850ab8f9d956adba7b955a884d82ea854f986dc7896fa"
-      },
-      {
-        "path": "main/content_chain/lf_carrier.py",
-        "sha256": "c7b862e69a82589cfbaa5e9164942c8194a61187800374d1a9d9c0d620ba59ef"
-      },
-      {
-        "path": "main/content_chain/hf_carrier.py",
-        "sha256": "ff4c7e1a5c7107f07afd4a4f7f4ea5599ed3c0ed1cd22f2d08eb4fbebd60a921"
-      },
-      {
-        "path": "main/content_chain/embedder.py",
-        "sha256": "098995752b17071cb47120699ce69066fd24dba7c29a773844caf243c127ece2"
-      },
-      {
-        "path": "main/content_chain/lf_detector.py",
-        "sha256": "c8482e803f26cc05ed7e9d6e9d1e5558756db28a5dd308a788b712fe92ffa622"
-      },
-      {
-        "path": "main/content_chain/lf_whitening.py",
-        "sha256": "608f0ab7f24a01b152aceb455b718530a9690efdb9843953020c95bc599b4c7a"
-      },
-      {
-        "path": "main/content_chain/hf_detector.py",
-        "sha256": "2f718667682cb52565475a8995dec75fedaf5d3ebeb049e5098d42dc55a45a7a"
-      },
-      {
-        "path": "main/content_chain/detector.py",
-        "sha256": "688f12f0d961db6a632057fe4e195b1945e2213e9d151621c7c9e1f26b339849"
-      },
-      {
-        "path": "experiments/methods/ceg_wm.py",
-        "sha256": "1a332a61c2fc538af56f814e9417c313f02117ee82811fe92a6c69173687234f"
-      },
-      {
-        "path": "runtime/__init__.py",
-        "sha256": "e7d7a398a6b8f1c0b966128e9ea2e7e4aa7923cb05c20f4d5d03f3e71b556376"
-      },
-      {
-        "path": "runtime/adapter.py",
-        "sha256": "d2c7999cde516a46f66265bf54a4476808c694fe0fc1c9c37edb854a9ebe0f53"
-      },
-      {
-        "path": "runtime/backend.py",
-        "sha256": "b1097449b25df27d7442f2d80cdc28316691fe38af422c97720a2d84dbe427f8"
-      },
-      {
-        "path": "runtime/configuration.py",
-        "sha256": "ff6af18a9177cd4983dbc39267e8424b49cd7c54637536ed04881a1cfc53c55a"
-      },
-      {
-        "path": "runtime/content_write.py",
-        "sha256": "c783d75a73369c7490f9fb9dcf3aec44ad092b5bd2c46a521464a0bebb0662dc"
-      },
-      {
-        "path": "runtime/qk_observation.py",
-        "sha256": "41bbe199ab5b83461bcfb0206ae668bc3e9b102c4780dc39aa4fe2218f0a7c29"
-      },
-      {
-        "path": "runtime/sd35_backend.py",
-        "sha256": "fbf1ee3c9ffdecf79e95182d3df1c57b1f08e3181c05e00baffc55f47d3a51b6"
+        "component_id": "content_detector",
+        "source_role": "component_implementation",
+        "implementation_path": "main/content_chain/detector.py",
+        "implementation_symbol": "content_detector",
+        "source_sha256": "688f12f0d961db6a632057fe4e195b1945e2213e9d151621c7c9e1f26b339849"
       }
     ],
-    "method_source_bundle_digest": "5919870bd3bf96e2fbe12bc98cee9f05792bd4d46ed3a27ad86fc0d1da357c1f",
+    "component_implementation_digest": "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1",
     "formal_method_adapter_config_path": "configs/experiments/internal_execution_components.json",
     "formal_method_adapter_config_digest": "e539b1237e654574242976304f266cb0362f950394358f63f9e3ab96393061b7",
     "hf_formal_component_identities": [
@@ -172,7 +130,7 @@
       "absence_semantics": "hf_only_threshold_fit_gpu_execution_preflight_fail_closed",
       "hf_only_reference_protocol_status": "not_yet_materialized_no_result_claim"
     },
-    "candidate_binding_digest": "a352359c0f22909968a6d4b932a9e4921fc8c9c36d3bf88bf03e6a969bc53714"
+    "candidate_binding_digest": "3e349494e057164f2c389a0465fe7851b4f4549dd5d817ae8b865fd76bc9d3e4"
   },
   "method_execution": {
     "write_identity": "hf_sparse_tail_registered_key_write",

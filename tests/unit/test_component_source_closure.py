@@ -1,4 +1,4 @@
-"""Focused tests for the LF directional component source closure."""
+"""Focused tests for the named HF and LF component source closures."""
 
 from __future__ import annotations
 
@@ -10,33 +10,48 @@ import shutil
 import pytest
 
 from scripts.experiment_execution.component_source_closure import (
+    HF_REFERENCE_COMPONENT_IDS,
     LF_DIRECTIONAL_COMPONENT_IDS,
     ComponentSourceClosureError,
     build_component_source_closure,
+    build_hf_reference_component_source_closure,
+    build_lf_directional_component_source_closure,
 )
 
 
 ROOT = Path(__file__).resolve().parents[2]
 READINESS = ROOT / ".codex/research_state/method_readiness.yaml"
-EXPECTED_PATHS = (
+LF_EXPECTED_PATHS = (
     "main/shared/key_schedule.py",
     "main/content_chain/lf_carrier.py",
     "main/content_chain/embedder.py",
     "main/content_chain/lf_detector.py",
     "main/content_chain/lf_whitening.py",
 )
+HF_EXPECTED_PATHS = (
+    "main/shared/key_schedule.py",
+    "main/content_chain/hf_carrier.py",
+    "main/content_chain/embedder.py",
+    "main/content_chain/hf_detector.py",
+    "main/content_chain/detector.py",
+)
 
 
-def _reviewed_components() -> dict[str, dict[str, object]]:
+def _reviewed_components(
+    component_ids: tuple[str, ...] = LF_DIRECTIONAL_COMPONENT_IDS,
+) -> dict[str, dict[str, object]]:
     payload = json.loads(READINESS.read_text("utf-8"))
     return {
         component_id: payload["components"][component_id]
-        for component_id in LF_DIRECTIONAL_COMPONENT_IDS
+        for component_id in component_ids
     }
 
 
-def _copy_component_sources(destination: Path) -> None:
-    for relative in EXPECTED_PATHS:
+def _copy_component_sources(
+    destination: Path,
+    expected_paths: tuple[str, ...] = LF_EXPECTED_PATHS,
+) -> None:
+    for relative in expected_paths:
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / relative, target)
@@ -44,8 +59,7 @@ def _copy_component_sources(destination: Path) -> None:
 
 @pytest.mark.unit
 def test_lf_directional_component_closure_binds_only_reviewed_method_sources() -> None:
-    closure = build_component_source_closure(
-        LF_DIRECTIONAL_COMPONENT_IDS,
+    closure = build_lf_directional_component_source_closure(
         _reviewed_components(),
         ROOT,
     )
@@ -53,7 +67,7 @@ def test_lf_directional_component_closure_binds_only_reviewed_method_sources() -
     assert closure.ordered_component_ids == LF_DIRECTIONAL_COMPONENT_IDS
     assert tuple(
         binding.implementation_path for binding in closure.source_bindings
-    ) == EXPECTED_PATHS
+    ) == LF_EXPECTED_PATHS
     assert closure.component_implementation_digest == (
         "005e18bd923995dfc09a1d782e74bd1fba69287c465c9d56d311fc7a3e307c66"
     )
@@ -111,6 +125,102 @@ def test_unrelated_science_and_delivery_sources_do_not_change_component_digest(
     )
 
     assert replay == original
+
+
+@pytest.mark.unit
+def test_hf_reference_component_closure_binds_exact_scientific_sources() -> None:
+    closure = build_hf_reference_component_source_closure(
+        _reviewed_components(HF_REFERENCE_COMPONENT_IDS),
+        ROOT,
+    )
+
+    assert closure.ordered_component_ids == HF_REFERENCE_COMPONENT_IDS
+    assert tuple(
+        binding.implementation_path for binding in closure.source_bindings
+    ) == HF_EXPECTED_PATHS
+    assert all(
+        binding.source_role == "component_implementation"
+        for binding in closure.source_bindings
+    )
+    assert closure.component_implementation_digest == (
+        "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("changed_path", HF_EXPECTED_PATHS)
+def test_each_hf_scientific_source_change_updates_component_digest(
+    tmp_path: Path,
+    changed_path: str,
+) -> None:
+    _copy_component_sources(tmp_path, HF_EXPECTED_PATHS)
+    components = _reviewed_components(HF_REFERENCE_COMPONENT_IDS)
+    original = build_hf_reference_component_source_closure(components, tmp_path)
+
+    source = tmp_path / changed_path
+    source.write_text(
+        source.read_text("utf-8") + "\n# changed reviewed HF component\n",
+        encoding="utf-8",
+    )
+    changed = build_hf_reference_component_source_closure(components, tmp_path)
+
+    assert changed.component_implementation_digest != (
+        original.component_implementation_digest
+    )
+
+
+@pytest.mark.unit
+def test_unrelated_planes_do_not_change_hf_component_digest(tmp_path: Path) -> None:
+    _copy_component_sources(tmp_path, HF_EXPECTED_PATHS)
+    components = _reviewed_components(HF_REFERENCE_COMPONENT_IDS)
+    original = build_hf_reference_component_source_closure(components, tmp_path)
+    for relative in (
+        "main/__init__.py",
+        "main/content_chain/__init__.py",
+        "main/content_chain/lf_detector.py",
+        "main/content_chain/routing.py",
+        "main/geometry_chain/qk_sync.py",
+        "runtime/adapter.py",
+        "experiments/methods/ceg_wm.py",
+        "scripts/experiment_execution/package_builder.py",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("UNRELATED_VALUE = 1\n", encoding="utf-8")
+
+    replay = build_hf_reference_component_source_closure(components, tmp_path)
+
+    assert replay == original
+
+
+@pytest.mark.unit
+def test_hf_component_closure_rejects_facade_missing_reordered_and_duplicate(
+    tmp_path: Path,
+) -> None:
+    _copy_component_sources(tmp_path, HF_EXPECTED_PATHS)
+    components = _reviewed_components(HF_REFERENCE_COMPONENT_IDS)
+
+    facade = deepcopy(components)
+    facade["hf_detector"]["implementation_path"] = "main/content_chain/__init__.py"
+    with pytest.raises(ComponentSourceClosureError, match="concrete Python"):
+        build_hf_reference_component_source_closure(facade, tmp_path)
+
+    missing = deepcopy(components)
+    del missing["hf_detector"]
+    with pytest.raises(ComponentSourceClosureError, match="mapping is incomplete"):
+        build_hf_reference_component_source_closure(missing, tmp_path)
+
+    reordered = (
+        HF_REFERENCE_COMPONENT_IDS[1],
+        HF_REFERENCE_COMPONENT_IDS[0],
+        *HF_REFERENCE_COMPONENT_IDS[2:],
+    )
+    with pytest.raises(ComponentSourceClosureError, match="order or membership"):
+        build_component_source_closure(reordered, components, tmp_path)
+
+    duplicate = (*HF_REFERENCE_COMPONENT_IDS[:-1], HF_REFERENCE_COMPONENT_IDS[-2])
+    with pytest.raises(ComponentSourceClosureError, match="order or membership"):
+        build_component_source_closure(duplicate, components, tmp_path)
 
 
 @pytest.mark.unit

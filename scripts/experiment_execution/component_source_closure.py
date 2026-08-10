@@ -1,4 +1,4 @@
-"""Deterministic source closure for the LF directional science identity."""
+"""Deterministic source closures for reviewed HF and LF science identities."""
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ LF_DIRECTIONAL_COMPONENT_IDS = (
     "content_embedder",
     "lf_detector",
 )
+HF_REFERENCE_COMPONENT_IDS = (
+    "key_schedule",
+    "hf_carrier",
+    "content_embedder",
+    "hf_detector",
+    "content_detector",
+)
 _LF_CANDIDATE_SOURCE_DEPENDENCIES = {
     "lf_detector": (
         (
@@ -27,7 +34,7 @@ _LF_CANDIDATE_SOURCE_DEPENDENCIES = {
 
 
 class ComponentSourceClosureError(ValueError):
-    """The reviewed component mapping cannot form the frozen LF closure."""
+    """The reviewed component mapping cannot form a frozen source closure."""
 
 
 def canonical_digest(value: object) -> str:
@@ -109,12 +116,16 @@ def build_component_source_closure(
     reviewed_components: Mapping[str, Mapping[str, object]],
     repository_root: str | Path,
 ) -> ComponentSourceClosure:
-    """Bind only reviewed LF method sources; exclude delivery/import closure."""
+    """Bind one registered component set; exclude delivery/import closure."""
 
     component_ids = tuple(ordered_component_ids)
-    if component_ids != LF_DIRECTIONAL_COMPONENT_IDS:
+    if component_ids == LF_DIRECTIONAL_COMPONENT_IDS:
+        candidate_dependencies = _LF_CANDIDATE_SOURCE_DEPENDENCIES
+    elif component_ids == HF_REFERENCE_COMPONENT_IDS:
+        candidate_dependencies = {}
+    else:
         raise ComponentSourceClosureError(
-            "LF directional component order or membership drifted"
+            "component closure order or membership drifted"
         )
     if len(set(component_ids)) != len(component_ids):
         raise ComponentSourceClosureError("component identities must be unique")
@@ -142,7 +153,7 @@ def build_component_source_closure(
             )
         )
         for dependency_path, dependency_symbol, source_role in (
-            _LF_CANDIDATE_SOURCE_DEPENDENCIES.get(component_id, ())
+            candidate_dependencies.get(component_id, ())
         ):
             bindings.append(
                 _validated_source_binding(
@@ -164,11 +175,40 @@ def build_component_source_closure(
     )
 
 
+def build_lf_directional_component_source_closure(
+    reviewed_components: Mapping[str, Mapping[str, object]],
+    repository_root: str | Path,
+) -> ComponentSourceClosure:
+    """Bind the reviewed LF directional implementations and public asset."""
+
+    return build_component_source_closure(
+        LF_DIRECTIONAL_COMPONENT_IDS,
+        reviewed_components,
+        repository_root,
+    )
+
+
+def build_hf_reference_component_source_closure(
+    reviewed_components: Mapping[str, Mapping[str, object]],
+    repository_root: str | Path,
+) -> ComponentSourceClosure:
+    """Bind only the five reviewed HF scientific component implementations."""
+
+    return build_component_source_closure(
+        HF_REFERENCE_COMPONENT_IDS,
+        reviewed_components,
+        repository_root,
+    )
+
+
 __all__ = [
+    "HF_REFERENCE_COMPONENT_IDS",
     "LF_DIRECTIONAL_COMPONENT_IDS",
     "ComponentSourceBinding",
     "ComponentSourceClosure",
     "ComponentSourceClosureError",
     "build_component_source_closure",
+    "build_hf_reference_component_source_closure",
+    "build_lf_directional_component_source_closure",
     "canonical_digest",
 ]

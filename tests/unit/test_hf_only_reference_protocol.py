@@ -14,6 +14,7 @@ import pytest
 
 from experiments.protocol.hf_only_reference_protocol import (
     HF_ONLY_REFERENCE_CONFIDENCE_LEVEL,
+    HF_ONLY_REFERENCE_COMPONENT_IDS,
     HF_ONLY_REFERENCE_DATASET_SHA256,
     HF_ONLY_REFERENCE_MANIFEST_IDENTITIES,
     HF_ONLY_REFERENCE_PRIMARY_NULL_TARGET_FPR,
@@ -48,6 +49,25 @@ def test_hf_only_reference_bundle_loads_exact_authorities_and_offline_prompt_sna
     assert specification["dataset"]["runtime_network_access"] == (
         "forbidden_use_frozen_roster_only"
     )
+    candidate_binding = specification["candidate_binding"]
+    assert tuple(candidate_binding["ordered_component_ids"]) == (
+        HF_ONLY_REFERENCE_COMPONENT_IDS
+    )
+    assert tuple(
+        entry["implementation_path"]
+        for entry in candidate_binding["component_source_bindings"]
+    ) == (
+        "main/shared/key_schedule.py",
+        "main/content_chain/hf_carrier.py",
+        "main/content_chain/embedder.py",
+        "main/content_chain/hf_detector.py",
+        "main/content_chain/detector.py",
+    )
+    assert candidate_binding["component_implementation_digest"] == (
+        "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1"
+    )
+    assert "method_source_files" not in candidate_binding
+    assert "method_source_bundle_digest" not in candidate_binding
     assert len(bundle.roster.rows) == HF_ONLY_REFERENCE_PROMPT_COUNT
     assert len({row.prompt_text for row in bundle.roster.rows}) == HF_ONLY_REFERENCE_PROMPT_COUNT
     assert len({row.prompt_digest for row in bundle.roster.rows}) == HF_ONLY_REFERENCE_PROMPT_COUNT
@@ -80,7 +100,10 @@ def test_hf_only_reference_bundle_rejects_candidate_specification_authority_tamp
             Path(manifest["path"])
             for manifest in specification["split_manifests"].values()
         ),
-        *(Path(entry["path"]) for entry in binding["method_source_files"]),
+        *(
+            Path(entry["implementation_path"])
+            for entry in binding["component_source_bindings"]
+        ),
     }
     for relative_path in bound_paths:
         destination = temporary_root / relative_path
@@ -95,6 +118,51 @@ def test_hf_only_reference_bundle_rejects_candidate_specification_authority_tamp
     with pytest.raises(
         ValueError,
         match="^candidate_specification_authority_mismatch$",
+    ):
+        load_hf_only_reference_bundle(temporary_root)
+
+
+@pytest.mark.unit
+def test_hf_only_reference_component_binding_rejects_package_source_tamper(
+    tmp_path: Path,
+) -> None:
+    bundle = load_hf_only_reference_bundle(ROOT)
+    specification = bundle.specification.raw
+    binding = specification["candidate_binding"]
+    temporary_root = tmp_path / "repository"
+    bound_paths = {
+        Path("configs/experiments/hf_only_reference_validation.json"),
+        Path(binding["candidate_specification_path"]),
+        Path(binding["formal_method_adapter_config_path"]),
+        Path(binding["runtime_config_path"]),
+        Path(specification["dataset"]["roster_path"]),
+        Path(specification["dataset"]["dataset_snapshot_path"]),
+        *(
+            Path(manifest["path"])
+            for manifest in specification["split_manifests"].values()
+        ),
+        *(
+            Path(entry["implementation_path"])
+            for entry in binding["component_source_bindings"]
+        ),
+    }
+    for relative_path in bound_paths:
+        destination = temporary_root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative_path, destination)
+
+    component_path = Path(
+        binding["component_source_bindings"][3]["implementation_path"]
+    )
+    component_source = temporary_root / component_path
+    component_source.write_bytes(component_source.read_bytes() + b"\nsource tamper\n")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "^bound_authority_file_mismatch:"
+            "main/content_chain/hf_detector.py$"
+        ),
     ):
         load_hf_only_reference_bundle(temporary_root)
 

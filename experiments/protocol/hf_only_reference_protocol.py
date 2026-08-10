@@ -28,6 +28,20 @@ HF_ONLY_REFERENCE_COMPACT_MANIFEST_SCHEMA_VERSION = "ceg_wm_hf_only_reference_co
 HF_ONLY_REFERENCE_GATE_ID = "hf_reference_candidate_frozen"
 HF_ONLY_REFERENCE_RESULT_GATE_ID = "hf_detector_reference_gate_passed"
 HF_ONLY_REFERENCE_DETECTOR_MODE = "hf_only"
+HF_ONLY_REFERENCE_COMPONENT_IDS = (
+    "key_schedule",
+    "hf_carrier",
+    "content_embedder",
+    "hf_detector",
+    "content_detector",
+)
+_HF_ONLY_REFERENCE_COMPONENT_IMPLEMENTATIONS = (
+    ("main/shared/key_schedule.py", "key_schedule_sha256_counter"),
+    ("main/content_chain/hf_carrier.py", "hf_carrier"),
+    ("main/content_chain/embedder.py", "content_embedder"),
+    ("main/content_chain/hf_detector.py", "hf_detector"),
+    ("main/content_chain/detector.py", "content_detector"),
+)
 HF_ONLY_REFERENCE_SPLITS = ("content_threshold_fit", "untouched_confirmation")
 HF_ONLY_REFERENCE_DATASET_ID = "nateraw/parti-prompts"
 HF_ONLY_REFERENCE_DATASET_REVISION = "944b156abfdad7627c3221b5ec4f6a6fb060a197"
@@ -444,8 +458,9 @@ def _validate_candidate_binding(raw: object) -> None:
             "candidate_specification_sha256",
             "method_reviewed_revision",
             "protocol_authorization_parent_revision",
-            "method_source_files",
-            "method_source_bundle_digest",
+            "ordered_component_ids",
+            "component_source_bindings",
+            "component_implementation_digest",
             "formal_method_adapter_config_path",
             "formal_method_adapter_config_digest",
             "hf_formal_component_identities",
@@ -477,41 +492,55 @@ def _validate_candidate_binding(raw: object) -> None:
     for name, value in expected.items():
         if raw[name] != value:
             raise ValueError(f"candidate_binding_{name}_mismatch")
-    source_files = raw["method_source_files"]
-    if type(source_files) is not list or not source_files:
-        raise ValueError("method_source_files_invalid")
-    expected_paths = (
-        "main/__init__.py",
-        "main/shared/__init__.py",
-        "main/shared/key_schedule.py",
-        "main/shared/rgb8.py",
-        "main/content_chain/__init__.py",
-        "main/content_chain/routing.py",
-        "main/content_chain/lf_carrier.py",
-        "main/content_chain/hf_carrier.py",
-        "main/content_chain/embedder.py",
-        "main/content_chain/lf_detector.py",
-        "main/content_chain/lf_whitening.py",
-        "main/content_chain/hf_detector.py",
-        "main/content_chain/detector.py",
-        "experiments/methods/ceg_wm.py",
-        "runtime/__init__.py",
-        "runtime/adapter.py",
-        "runtime/backend.py",
-        "runtime/configuration.py",
-        "runtime/content_write.py",
-        "runtime/qk_observation.py",
-        "runtime/sd35_backend.py",
+    component_ids = raw["ordered_component_ids"]
+    if type(component_ids) is not list or tuple(component_ids) != (
+        HF_ONLY_REFERENCE_COMPONENT_IDS
+    ):
+        raise ValueError("ordered_component_ids_invalid")
+    if len(component_ids) != len(set(component_ids)):
+        raise ValueError("ordered_component_ids_duplicate")
+    source_bindings = raw["component_source_bindings"]
+    if type(source_bindings) is not list or len(source_bindings) != len(
+        HF_ONLY_REFERENCE_COMPONENT_IDS
+    ):
+        raise ValueError("component_source_bindings_invalid")
+    expected_bindings = tuple(
+        zip(
+            HF_ONLY_REFERENCE_COMPONENT_IDS,
+            _HF_ONLY_REFERENCE_COMPONENT_IMPLEMENTATIONS,
+            strict=True,
+        )
     )
-    if tuple(entry.get("path") for entry in source_files) != expected_paths:
-        raise ValueError("method_source_file_paths_invalid")
-    for entry in source_files:
-        if type(entry) is not dict or set(entry) != {"path", "sha256"}:
-            raise ValueError("method_source_file_entry_invalid")
-        _require_digest(entry["sha256"], "method_source_file_sha256")
-    expected_bundle = _canonical_digest(source_files)
-    if raw["method_source_bundle_digest"] != expected_bundle:
-        raise ValueError("method_source_bundle_digest_mismatch")
+    for entry, (component_id, (implementation_path, implementation_symbol)) in zip(
+        source_bindings,
+        expected_bindings,
+        strict=True,
+    ):
+        if type(entry) is not dict or set(entry) != {
+            "component_id",
+            "source_role",
+            "implementation_path",
+            "implementation_symbol",
+            "source_sha256",
+        }:
+            raise ValueError("component_source_binding_invalid")
+        if entry != {
+            "component_id": component_id,
+            "source_role": "component_implementation",
+            "implementation_path": implementation_path,
+            "implementation_symbol": implementation_symbol,
+            "source_sha256": entry["source_sha256"],
+        }:
+            raise ValueError("component_source_binding_identity_mismatch")
+        _require_digest(entry["source_sha256"], "component_source_sha256")
+    component_payload = {
+        "ordered_component_ids": component_ids,
+        "source_bindings": source_bindings,
+    }
+    if raw["component_implementation_digest"] != _canonical_digest(
+        component_payload
+    ):
+        raise ValueError("component_implementation_digest_mismatch")
     if (
         raw["formal_method_adapter_config_path"]
         != "configs/experiments/internal_execution_components.json"
@@ -1332,10 +1361,12 @@ def validate_bound_authority_files(
         != binding["candidate_specification_sha256"]
     ):
         violations.append("candidate_specification_authority_mismatch")
-    for entry in binding["method_source_files"]:
-        path = root / entry["path"]
-        if not path.is_file() or _file_sha256(path) != entry["sha256"]:
-            violations.append(f"bound_authority_file_mismatch:{entry['path']}")
+    for entry in binding["component_source_bindings"]:
+        path = root / entry["implementation_path"]
+        if not path.is_file() or _file_sha256(path) != entry["source_sha256"]:
+            violations.append(
+                f"bound_authority_file_mismatch:{entry['implementation_path']}"
+            )
     runtime_path = root / binding["runtime_config_path"]
     if (
         not runtime_path.is_file()
