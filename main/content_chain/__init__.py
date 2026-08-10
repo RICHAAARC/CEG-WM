@@ -37,8 +37,12 @@ from .lf_detector import (
     LfDetectionResult,
     LfDetectorError,
     LfNullWhitenedDetectionResult,
+    PreparedLfWhitenedObservation,
+    PreparedLfWhitenedTemplate,
     lf_detector,
     lf_null_whitened_matched_detector,
+    prepare_lf_null_whitened_observation,
+    prepare_lf_null_whitened_template,
 )
 from .lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
@@ -75,6 +79,8 @@ __all__ = [
     "LfDetectionResult",
     "LfDetectorError",
     "LfNullWhitenedDetectionResult",
+    "PreparedLfWhitenedObservation",
+    "PreparedLfWhitenedTemplate",
     "LfNullWhiteningAsset",
     "LfNullWhiteningAssetError",
     "LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID",
@@ -89,5 +95,7 @@ __all__ = [
     "lf_carrier",
     "lf_detector",
     "lf_null_whitened_matched_detector",
+    "prepare_lf_null_whitened_observation",
+    "prepare_lf_null_whitened_template",
     "validate_content_detection_result",
 ]

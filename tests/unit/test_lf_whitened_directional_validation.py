@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from hashlib import sha256
+from importlib import import_module
 import json
 from pathlib import Path
 
@@ -55,8 +56,15 @@ from experiments.runners.development_persistence import (
 from experiments.runners.lf_whitened_directional_validation import (
     LfWhitenedDirectionalRunnerError,
     LfWhitenedDirectionalValidationRunner,
+    _observation,
 )
-from main import LfNullWhiteningAsset, identify_root_key
+from main import (
+    LfDetectionObservation,
+    LfNullWhiteningAsset,
+    derive_wrong_key_material,
+    identify_root_key,
+    lf_carrier,
+)
 from runtime import create_runtime_adapter
 from scripts.experiment_execution.lf_whitened_directional_validation_entrypoint import (
     _derive_registered_experiment_root,
@@ -444,6 +452,169 @@ def test_lf_whitened_directional_runner_uses_public_detector_and_four_wrong_cont
     assert scientific.threshold_trace["raw_threshold_identity"] is None
     assert scientific.module_outcome is None
     assert scientific.candidate_recommendation is None
+
+
+@pytest.mark.unit
+def test_lf_whitened_directional_prepared_record_payload_matches_legacy_calls() -> None:
+    runner, runtime = _directional_runner()
+    runtime_result = runner._execute_paired_runtime(_lf_base_latent())
+    _measurement, prepared_payload = runner._detect_public_pair(
+        runtime_result,
+        cluster_ordinal=0,
+    )
+    candidate = _observation(runtime_result.watermarked_detection_latent)
+    clean = _observation(runtime_result.clean_detection_latent)
+    registered = runner.adapter.detect_lf_null_whitened(
+        candidate,
+        runner.registered_root_key,
+        runner.whitening_asset,
+    ).result
+    primary_null = runner.adapter.detect_lf_null_whitened(
+        clean,
+        runner.registered_root_key,
+        runner.whitening_asset,
+    ).result
+    wrong = tuple(
+        runner.adapter.detect_lf_null_whitened(
+            candidate,
+            derive_wrong_key_material(runner.root_key_public_digest, index),
+            runner.whitening_asset,
+        ).result
+        for index in range(runner.protocol.wrong_key_roster_size)
+    )
+    runtime.close()
+
+    legacy_payload = {
+        "registered": asdict(registered),
+        "primary_null": asdict(primary_null),
+        "wrong_keys": tuple(asdict(item) for item in wrong),
+    }
+    assert prepared_payload == legacy_payload
+    assert canonical_digest(prepared_payload) == canonical_digest(
+        legacy_payload
+    )
+    assert "prepared" not in json.dumps(
+        prepared_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+@pytest.mark.unit
+def test_lf_whitened_directional_runner_reuses_deterministic_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_runner, baseline_runtime = _directional_runner()
+    runtime_result = baseline_runner._execute_paired_runtime(_lf_base_latent())
+    candidate = LfDetectionObservation.from_public_image_encoding(
+        tuple(
+            float(item)
+            for item in runtime_result.watermarked_detection_latent.detach()
+            .cpu()
+            .float()
+            .reshape(-1)
+        ),
+        tuple(int(size) for size in runtime_result.watermarked_detection_latent.shape),
+    )
+    clean = LfDetectionObservation.from_public_image_encoding(
+        tuple(
+            float(item)
+            for item in runtime_result.clean_detection_latent.detach()
+            .cpu()
+            .float()
+            .reshape(-1)
+        ),
+        tuple(int(size) for size in runtime_result.clean_detection_latent.shape),
+    )
+    lf_detector_module = import_module("main.content_chain.lf_detector")
+    method_module = import_module("experiments.methods.ceg_wm")
+    original_dct = lf_detector_module._affine_detrended_dct
+    original_public_detector = method_module.lf_null_whitened_matched_detector
+    coefficient_by_input_digest = {
+        lf_detector_module._digest(candidate.values): original_dct(
+            candidate.values,
+            role="candidate count fixture",
+        ),
+        lf_detector_module._digest(clean.values): original_dct(
+            clean.values,
+            role="clean count fixture",
+        ),
+    }
+    registered_carrier = lf_carrier(
+        baseline_runner.registered_root_key,
+        (1, 16, 64, 64),
+    )
+    carrier_by_wrong_index = {None: registered_carrier}
+    coefficient_by_input_digest[
+        lf_detector_module._digest(registered_carrier.template)
+    ] = baseline_runner._registered_prepared_template.coefficients
+    for index, prepared in enumerate(
+        baseline_runner._wrong_prepared_templates
+    ):
+        wrong_carrier = lf_carrier(
+            derive_wrong_key_material(
+                baseline_runner.root_key_public_digest,
+                index,
+            ),
+            (1, 16, 64, 64),
+        )
+        coefficient_by_input_digest[
+            lf_detector_module._digest(wrong_carrier.template)
+        ] = prepared.coefficients
+        carrier_by_wrong_index[index] = wrong_carrier
+    counts = {"dct": 0, "public_detector": 0}
+
+    def counted_dct(values, *, role):
+        counts["dct"] += 1
+        coefficients = coefficient_by_input_digest[
+            lf_detector_module._digest(values)
+        ]
+        return coefficients.copy(order="C")
+
+    def counted_public_detector(*args, **kwargs):
+        counts["public_detector"] += 1
+        return original_public_detector(*args, **kwargs)
+
+    monkeypatch.setattr(
+        lf_detector_module,
+        "_affine_detrended_dct",
+        counted_dct,
+    )
+    monkeypatch.setattr(
+        method_module,
+        "lf_null_whitened_matched_detector",
+        counted_public_detector,
+    )
+    monkeypatch.setattr(
+        lf_detector_module,
+        "_whitened_cosine",
+        lambda observation_coefficients, template_coefficients, asset: 0.25,
+    )
+    monkeypatch.setattr(
+        lf_detector_module,
+        "lf_carrier",
+        lambda detection_key, shape, mask_lf, model_revision: (
+            carrier_by_wrong_index[
+                None
+                if isinstance(detection_key, str)
+                else detection_key.wrong_key_index
+            ]
+        ),
+    )
+    runner, runtime = _directional_runner()
+    for cluster_ordinal in range(32):
+        runner._detect_public_pair(
+            runtime_result,
+            cluster_ordinal=cluster_ordinal,
+        )
+    runtime.close()
+    baseline_runtime.close()
+
+    assert counts == {"dct": 69, "public_detector": 192}
+    assert 69 == 2 * 32 + 1 + 4
+    assert 384 == 32 * (2 + 1 + 1 + 4 + 4)
 
 
 def _metric_observation(index: int, *, passed: bool):

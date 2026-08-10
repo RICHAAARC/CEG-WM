@@ -46,7 +46,14 @@ from experiments.runners.development_persistence import (
     FrozenDevelopmentUnitBinding,
     create_frozen_development_unit_binding,
 )
-from main import LfDetectionObservation, LfNullWhiteningAsset, derive_wrong_key_material
+from main import (
+    LfDetectionObservation,
+    LfNullWhiteningAsset,
+    PreparedLfWhitenedTemplate,
+    derive_wrong_key_material,
+    prepare_lf_null_whitened_observation,
+    prepare_lf_null_whitened_template,
+)
 from runtime import ContentWriteVaeResult, Sd35RuntimeAdapter
 
 
@@ -124,6 +131,19 @@ class LfWhitenedDirectionalValidationRunner:
         self.protocol_digest = protocol_digest
         self.execution_intent_authority_digest = execution_intent_authority_digest
         self.candidate_config_digest = candidate_config_digest
+        self._registered_prepared_template = prepare_lf_null_whitened_template(
+            self.registered_root_key,
+            self.whitening_asset,
+        )
+        self._wrong_prepared_templates: tuple[
+            PreparedLfWhitenedTemplate, ...
+        ] = tuple(
+            prepare_lf_null_whitened_template(
+                derive_wrong_key_material(self.root_key_public_digest, index),
+                self.whitening_asset,
+            )
+            for index in range(self.protocol.wrong_key_roster_size)
+        )
 
     def _key_family_digest(self) -> str:
         return canonical_digest({
@@ -198,17 +218,35 @@ class LfWhitenedDirectionalValidationRunner:
     ) -> tuple[LfWhitenedDirectionalObservation, dict[str, object]]:
         candidate = _observation(result.watermarked_detection_latent)
         clean = _observation(result.clean_detection_latent)
+        prepared_candidate = prepare_lf_null_whitened_observation(
+            candidate,
+            self.whitening_asset,
+        )
+        prepared_clean = prepare_lf_null_whitened_observation(
+            clean,
+            self.whitening_asset,
+        )
         registered = self.adapter.detect_lf_null_whitened(
-            candidate, self.registered_root_key, self.whitening_asset
+            candidate,
+            self.registered_root_key,
+            self.whitening_asset,
+            prepared_observation=prepared_candidate,
+            prepared_template=self._registered_prepared_template,
         ).result
         primary_null = self.adapter.detect_lf_null_whitened(
-            clean, self.registered_root_key, self.whitening_asset
+            clean,
+            self.registered_root_key,
+            self.whitening_asset,
+            prepared_observation=prepared_clean,
+            prepared_template=self._registered_prepared_template,
         ).result
         wrong = tuple(
             self.adapter.detect_lf_null_whitened(
                 candidate,
                 derive_wrong_key_material(self.root_key_public_digest, index),
                 self.whitening_asset,
+                prepared_observation=prepared_candidate,
+                prepared_template=self._wrong_prepared_templates[index],
             ).result
             for index in range(self.protocol.wrong_key_roster_size)
         )

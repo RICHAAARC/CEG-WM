@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import asdict
 from hashlib import sha256
+import json
 from math import cos, sqrt
 from pathlib import Path
+from struct import pack
 
+import numpy as np
 import pytest
 
 from main.content_chain.lf_carrier import lf_carrier
 from main.content_chain.lf_detector import (
     LfDetectionObservation,
     LfDetectorError,
+    PreparedLfWhitenedObservation,
     _affine_detrended_dct,
     lf_detector,
     lf_null_whitened_matched_detector,
+    prepare_lf_null_whitened_observation,
+    prepare_lf_null_whitened_template,
 )
 from main.content_chain.lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
@@ -37,13 +44,14 @@ def _asset(
     *,
     weight_words: tuple[str, ...] = ("3f800000",) * 96,
     declared_digest: str | None = None,
+    fit_manifest_sha256: str = "a" * 64,
 ) -> LfNullWhiteningAsset:
     payload = {
         "artifact_role": "lf_clean_null_whitening_operator",
         "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
         "candidate_id": LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
         "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
-        "fit_manifest_sha256": "a" * 64,
+        "fit_manifest_sha256": fit_manifest_sha256,
         "fit_source_cluster_count": 32,
         "latent_shape": [1, 16, 64, 64],
         "observation_protocol": "final_image_vae_posterior_mode",
@@ -171,6 +179,240 @@ def test_lf_whitened_detector_reuses_one_asset_across_registered_wrong_and_null(
     } == {registered.detector_config_digest}
     assert registered.lf_score > wrong.lf_score
     assert registered.lf_score > primary_null.lf_score
+
+
+@pytest.mark.unit
+def test_lf_whitened_prepared_features_preserve_legacy_binary64_results() -> None:
+    weights = tuple(
+        f"{0x3F000000 + channel * 6 + band:08x}"
+        for channel in range(16)
+        for band in range(6)
+    )
+    asset = _asset(weight_words=weights)
+    registered_observation = LfDetectionObservation.from_public_image_encoding(
+        lf_carrier(ROOT_KEY, LATENT_SHAPE).template,
+        LATENT_SHAPE,
+    )
+    null_observation = LfDetectionObservation.from_public_image_encoding(
+        tuple(
+            ((index % 37) - 18) / 37.0
+            for index in range(16 * 64 * 64)
+        ),
+        LATENT_SHAPE,
+    )
+    wrong_keys = tuple(
+        derive_wrong_key_material(
+            identify_root_key(ROOT_KEY).root_key_public_digest,
+            index,
+        )
+        for index in range(4)
+    )
+    calls = (
+        (registered_observation, ROOT_KEY),
+        (null_observation, ROOT_KEY),
+        *((registered_observation, key) for key in wrong_keys),
+    )
+    legacy = tuple(
+        lf_null_whitened_matched_detector(observation, key, asset)
+        for observation, key in calls
+    )
+    prepared_observations = {
+        observation.observation_digest: prepare_lf_null_whitened_observation(
+            observation,
+            asset,
+        )
+        for observation in (registered_observation, null_observation)
+    }
+    prepared_templates = {
+        key: prepare_lf_null_whitened_template(key, asset)
+        for key in (ROOT_KEY, *wrong_keys)
+    }
+    optimized = tuple(
+        lf_null_whitened_matched_detector(
+            observation,
+            key,
+            asset,
+            prepared_observation=prepared_observations[
+                observation.observation_digest
+            ],
+            prepared_template=prepared_templates[key],
+        )
+        for observation, key in calls
+    )
+    expected_score_bits = (
+        "3ff0000000000000",
+        "3f820c26b18e0b5e",
+        "bf94abf44cc6955a",
+        "bf8d8f62b6f69a5e",
+        "bf8bf8832447c2f8",
+        "bf7f20b427919497",
+    )
+    expected_canonical_sha256 = (
+        "837dbd2535c224824d3858ae497691c2e5443e885fed52e9d80a35e2c11e72f4",
+        "52a7acf32fc9e19dbb036e96de9adecda9b7e99a13aa37eb4ce268960e7bf75d",
+        "e2d5a7c990d01d67fd8cbe1344179d24b91ad0b52527369ce95b150ce2122bba",
+        "fc737c1a5b3e985a6fd2933c97fe784cc1f4102fbfed102239c7b6c3eab6589a",
+        "9f76f94cd2ff33c80872b36fe9144ab67f0d31a357cd3830dbcabec0898f9269",
+        "cf82c1469ea4fbca8e6de32834bd9cbb7cb417a892aca6c3d524f31d627ac184",
+    )
+
+    for index, (legacy_result, optimized_result) in enumerate(
+        zip(legacy, optimized, strict=True)
+    ):
+        legacy_payload = json.dumps(
+            asdict(legacy_result),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        optimized_payload = json.dumps(
+            asdict(optimized_result),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        assert pack(">d", legacy_result.lf_score) == pack(
+            ">d", optimized_result.lf_score
+        )
+        assert pack(">d", optimized_result.lf_score).hex() == (
+            expected_score_bits[index]
+        )
+        assert legacy_payload == optimized_payload
+        assert sha256(optimized_payload).hexdigest() == (
+            expected_canonical_sha256[index]
+        )
+        assert asdict(legacy_result) == asdict(optimized_result)
+        assert "prepared" not in optimized_payload.decode("utf-8")
+
+
+@pytest.mark.unit
+def test_lf_whitened_prepared_features_fail_closed_on_identity_drift() -> None:
+    asset = _asset()
+    observation = LfDetectionObservation.from_public_image_encoding(
+        lf_carrier(ROOT_KEY, LATENT_SHAPE).template,
+        LATENT_SHAPE,
+    )
+    different_observation = LfDetectionObservation.from_public_image_encoding(
+        tuple(-value for value in observation.values),
+        LATENT_SHAPE,
+    )
+    wrong_key = derive_wrong_key_material(
+        identify_root_key(ROOT_KEY).root_key_public_digest,
+        0,
+    )
+    prepared_observation = prepare_lf_null_whitened_observation(
+        observation,
+        asset,
+    )
+    prepared_template = prepare_lf_null_whitened_template(ROOT_KEY, asset)
+
+    with pytest.raises(LfDetectorError, match="observation identity mismatch"):
+        lf_null_whitened_matched_detector(
+            different_observation,
+            ROOT_KEY,
+            asset,
+            prepared_observation=prepared_observation,
+            prepared_template=prepared_template,
+        )
+    with pytest.raises(LfDetectorError, match="template identity mismatch"):
+        lf_null_whitened_matched_detector(
+            observation,
+            wrong_key,
+            asset,
+            prepared_observation=prepared_observation,
+            prepared_template=prepared_template,
+        )
+    model_drifted_observation = prepare_lf_null_whitened_observation(
+        observation,
+        asset,
+    )
+    object.__setattr__(
+        model_drifted_observation,
+        "model_revision",
+        "different-model-revision",
+    )
+    with pytest.raises(LfDetectorError, match="observation model mismatch"):
+        lf_null_whitened_matched_detector(
+            observation,
+            ROOT_KEY,
+            asset,
+            prepared_observation=model_drifted_observation,
+            prepared_template=prepared_template,
+        )
+    changed_asset = _asset(fit_manifest_sha256="b" * 64)
+    with pytest.raises(LfDetectorError, match="observation identity mismatch"):
+        lf_null_whitened_matched_detector(
+            observation,
+            ROOT_KEY,
+            changed_asset,
+            prepared_observation=prepared_observation,
+            prepared_template=prepared_template,
+        )
+
+
+@pytest.mark.unit
+def test_lf_whitened_prepared_coefficients_reject_mutable_layout_and_data_drift() -> None:
+    asset = _asset()
+    observation = LfDetectionObservation.from_public_image_encoding(
+        lf_carrier(ROOT_KEY, LATENT_SHAPE).template,
+        LATENT_SHAPE,
+    )
+    prepared = prepare_lf_null_whitened_observation(observation, asset)
+    assert prepared.coefficients.dtype == np.dtype(np.float64)
+    assert prepared.coefficients.flags.c_contiguous
+    assert not prepared.coefficients.flags.writeable
+    assert np.isfinite(prepared.coefficients).all()
+    with pytest.raises(ValueError, match="WRITEABLE"):
+        prepared.coefficients.setflags(write=True)
+
+    writable = np.array(prepared.coefficients, dtype=np.float64, order="C")
+    object.__setattr__(prepared, "coefficients", writable)
+    with pytest.raises(LfDetectorError, match="read only"):
+        prepared.validate()
+
+    layout_drifted = prepare_lf_null_whitened_observation(observation, asset)
+    non_contiguous = np.asfortranarray(layout_drifted.coefficients)
+    non_contiguous.setflags(write=False)
+    object.__setattr__(layout_drifted, "coefficients", non_contiguous)
+    with pytest.raises(LfDetectorError, match="C contiguous"):
+        layout_drifted.validate()
+
+    nonfinite_drifted = prepare_lf_null_whitened_observation(
+        observation,
+        asset,
+    )
+    nonfinite = np.array(non_contiguous, dtype=np.float64, order="C")
+    nonfinite[0, 0, 0] = np.nan
+    nonfinite.setflags(write=False)
+    object.__setattr__(nonfinite_drifted, "coefficients", nonfinite)
+    with pytest.raises(LfDetectorError, match="finite"):
+        nonfinite_drifted.validate()
+
+    valid = prepare_lf_null_whitened_observation(observation, asset)
+    object.__setattr__(valid, "coefficients_digest", "0" * 64)
+    with pytest.raises(LfDetectorError, match="digest mismatch"):
+        lf_null_whitened_matched_detector(
+            observation,
+            ROOT_KEY,
+            asset,
+            prepared_observation=valid,
+        )
+
+    writable = np.array(valid.coefficients, dtype=np.float64, order="C")
+    with pytest.raises(LfDetectorError, match="read only"):
+        PreparedLfWhitenedObservation(
+            coefficients=writable,
+            coefficients_digest=sha256(
+                writable.tobytes(order="C")
+            ).hexdigest(),
+            observation_digest=observation.observation_digest,
+            observation_shape=observation.shape,
+            observation_protocol=observation.observation_protocol,
+            whitening_asset_digest=asset.whitening_asset_digest,
+            model_revision=prepared.model_revision,
+        )
 
 
 @pytest.mark.unit

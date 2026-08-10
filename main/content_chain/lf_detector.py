@@ -351,6 +351,246 @@ def _affine_detrended_dct(
     return coefficients
 
 
+_LF_WHITENED_COEFFICIENT_SHAPE = (16, 64, 64)
+
+
+def _coefficient_digest(coefficients: np.ndarray) -> str:
+    return sha256(coefficients.tobytes(order="C")).hexdigest()
+
+
+def _freeze_coefficients(coefficients: np.ndarray) -> np.ndarray:
+    frozen = np.frombuffer(
+        coefficients.tobytes(order="C"),
+        dtype=np.float64,
+    ).reshape(_LF_WHITENED_COEFFICIENT_SHAPE)
+    if frozen.flags.writeable:
+        raise LfDetectorError("prepared LF coefficients must be immutable")
+    return frozen
+
+
+def _is_sha256_digest(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validate_prepared_coefficients(
+    coefficients: np.ndarray,
+    coefficients_digest: str,
+    *,
+    role: str,
+) -> None:
+    if type(coefficients) is not np.ndarray:
+        raise LfDetectorError(f"{role} coefficients must be an exact ndarray")
+    if coefficients.dtype != np.dtype(np.float64):
+        raise LfDetectorError(f"{role} coefficients must use exact float64")
+    if coefficients.shape != _LF_WHITENED_COEFFICIENT_SHAPE:
+        raise LfDetectorError(f"{role} coefficient shape mismatch")
+    if not coefficients.flags.c_contiguous:
+        raise LfDetectorError(f"{role} coefficients must be C contiguous")
+    if coefficients.flags.writeable:
+        raise LfDetectorError(f"{role} coefficients must be read only")
+    if not np.isfinite(coefficients).all():
+        raise LfDetectorError(f"{role} coefficients must be finite")
+    if (
+        type(coefficients_digest) is not str
+        or _coefficient_digest(coefficients) != coefficients_digest
+    ):
+        raise LfDetectorError(f"{role} coefficient digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedLfWhitenedObservation:
+    """Immutable deterministic DCT features for one public observation."""
+
+    coefficients: np.ndarray
+    coefficients_digest: str
+    observation_digest: str
+    observation_shape: tuple[int, int, int, int]
+    observation_protocol: str
+    whitening_asset_digest: str
+    model_revision: str
+    detrend_identity: str = LF_NULL_WHITENING_DETREND_IDENTITY
+    transform_identity: str = LF_NULL_WHITENING_TRANSFORM_IDENTITY
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        _validate_prepared_coefficients(
+            self.coefficients,
+            self.coefficients_digest,
+            role="prepared LF observation",
+        )
+        if self.observation_shape != LF_NULL_WHITENING_LATENT_SHAPE:
+            raise LfDetectorError("prepared LF observation shape mismatch")
+        if self.observation_protocol != OBSERVATION_PROTOCOL:
+            raise LfDetectorError("prepared LF observation protocol mismatch")
+        if self.detrend_identity != LF_NULL_WHITENING_DETREND_IDENTITY:
+            raise LfDetectorError("prepared LF observation detrend mismatch")
+        if self.transform_identity != LF_NULL_WHITENING_TRANSFORM_IDENTITY:
+            raise LfDetectorError("prepared LF observation transform mismatch")
+        if not _is_sha256_digest(self.whitening_asset_digest):
+            raise LfDetectorError("prepared LF observation asset mismatch")
+        if self.model_revision != MODEL_REVISION:
+            raise LfDetectorError("prepared LF observation model mismatch")
+        if not _is_sha256_digest(self.observation_digest):
+            raise LfDetectorError("prepared LF observation digest mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedLfWhitenedTemplate:
+    """Immutable deterministic DCT features for one reconstructed key template."""
+
+    coefficients: np.ndarray
+    coefficients_digest: str
+    template_digest: str
+    carrier_config_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    template_shape: tuple[int, int, int, int]
+    whitening_asset_digest: str
+    model_revision: str
+    detrend_identity: str = LF_NULL_WHITENING_DETREND_IDENTITY
+    transform_identity: str = LF_NULL_WHITENING_TRANSFORM_IDENTITY
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        _validate_prepared_coefficients(
+            self.coefficients,
+            self.coefficients_digest,
+            role="prepared LF template",
+        )
+        if self.template_shape != LF_NULL_WHITENING_LATENT_SHAPE:
+            raise LfDetectorError("prepared LF template shape mismatch")
+        if self.detrend_identity != LF_NULL_WHITENING_DETREND_IDENTITY:
+            raise LfDetectorError("prepared LF template detrend mismatch")
+        if self.transform_identity != LF_NULL_WHITENING_TRANSFORM_IDENTITY:
+            raise LfDetectorError("prepared LF template transform mismatch")
+        if not _is_sha256_digest(self.whitening_asset_digest):
+            raise LfDetectorError("prepared LF template asset mismatch")
+        if self.model_revision != MODEL_REVISION:
+            raise LfDetectorError("prepared LF template model mismatch")
+        if any(
+            not _is_sha256_digest(value)
+            for value in (
+                self.template_digest,
+                self.carrier_config_digest,
+                self.root_key_public_digest,
+            )
+        ):
+            raise LfDetectorError("prepared LF template identity mismatch")
+        if (
+            self.key_role == "registered"
+            and self.wrong_key_index is not None
+        ) or (
+            self.key_role == "wrong"
+            and (
+                type(self.wrong_key_index) is not int
+                or self.wrong_key_index < 0
+            )
+        ) or self.key_role not in {"registered", "wrong"}:
+            raise LfDetectorError("prepared LF template wrong-key mismatch")
+
+
+def prepare_lf_null_whitened_observation(
+    observation: LfDetectionObservation,
+    whitening_asset: LfNullWhiteningAsset,
+    *,
+    model_revision: str = MODEL_REVISION,
+) -> PreparedLfWhitenedObservation:
+    """Prepare deterministic observation features without changing detector math."""
+
+    if type(observation) is not LfDetectionObservation:
+        raise LfDetectorError(
+            "LF whitened detector requires a public-image observation"
+        )
+    if observation.shape != LF_NULL_WHITENING_LATENT_SHAPE:
+        raise LfDetectorError(
+            "LF whitened detector requires shape [1,16,64,64]"
+        )
+    if observation.observation_protocol != OBSERVATION_PROTOCOL:
+        raise LfDetectorError("LF observation protocol identity mismatch")
+    if _digest(observation.values) != observation.observation_digest:
+        raise LfDetectorError("LF observation digest mismatch")
+    if type(whitening_asset) is not LfNullWhiteningAsset:
+        raise LfDetectorError(
+            "LF whitened detector requires a frozen public whitening asset"
+        )
+    try:
+        whitening_asset.validate()
+    except LfNullWhiteningAssetError as exc:
+        raise LfDetectorError("LF whitening asset validation failed") from exc
+    coefficients = _affine_detrended_dct(
+        observation.values,
+        role="LF observation",
+    )
+    coefficients = _freeze_coefficients(coefficients)
+    return PreparedLfWhitenedObservation(
+        coefficients=coefficients,
+        coefficients_digest=_coefficient_digest(coefficients),
+        observation_digest=observation.observation_digest,
+        observation_shape=observation.shape,
+        observation_protocol=observation.observation_protocol,
+        whitening_asset_digest=whitening_asset.whitening_asset_digest,
+        model_revision=model_revision,
+    )
+
+
+def prepare_lf_null_whitened_template(
+    detection_key: str | DerivedWrongKeyMaterial,
+    whitening_asset: LfNullWhiteningAsset,
+    *,
+    shape: tuple[int, int, int, int] = LF_NULL_WHITENING_LATENT_SHAPE,
+    model_revision: str = MODEL_REVISION,
+) -> PreparedLfWhitenedTemplate:
+    """Prepare deterministic key-template features without persisting them."""
+
+    if shape != LF_NULL_WHITENING_LATENT_SHAPE:
+        raise LfDetectorError("prepared LF template shape mismatch")
+    if type(whitening_asset) is not LfNullWhiteningAsset:
+        raise LfDetectorError(
+            "LF whitened detector requires a frozen public whitening asset"
+        )
+    try:
+        whitening_asset.validate()
+    except LfNullWhiteningAssetError as exc:
+        raise LfDetectorError("LF whitening asset validation failed") from exc
+    try:
+        carrier = lf_carrier(
+            detection_key,
+            shape,
+            mask_lf=None,
+            model_revision=model_revision,
+        )
+    except LfCarrierError as exc:
+        raise LfDetectorError(
+            "LF whitened detector template reconstruction failed"
+        ) from exc
+    coefficients = _affine_detrended_dct(
+        carrier.template,
+        role="LF template",
+    )
+    coefficients = _freeze_coefficients(coefficients)
+    return PreparedLfWhitenedTemplate(
+        coefficients=coefficients,
+        coefficients_digest=_coefficient_digest(coefficients),
+        template_digest=carrier.template_digest,
+        carrier_config_digest=carrier.carrier_config_digest,
+        root_key_public_digest=carrier.root_key_public_digest,
+        key_role=carrier.key_role,
+        wrong_key_index=carrier.wrong_key_index,
+        template_shape=shape,
+        whitening_asset_digest=whitening_asset.whitening_asset_digest,
+        model_revision=model_revision,
+    )
+
+
 def _whitened_cosine(
     observation_coefficients: np.ndarray,
     template_coefficients: np.ndarray,
@@ -428,6 +668,8 @@ def lf_null_whitened_matched_detector(
     whitening_asset: LfNullWhiteningAsset | None = None,
     *,
     model_revision: str = MODEL_REVISION,
+    prepared_observation: PreparedLfWhitenedObservation | None = None,
+    prepared_template: PreparedLfWhitenedTemplate | None = None,
 ) -> LfNullWhitenedDetectionResult:
     """Score a public RGB-to-VAE observation with the frozen whitening asset."""
 
@@ -463,14 +705,51 @@ def lf_null_whitened_matched_detector(
             "LF whitened detector template reconstruction failed"
         ) from exc
 
-    observation_coefficients = _affine_detrended_dct(
-        observation.values,
-        role="LF observation",
-    )
-    template_coefficients = _affine_detrended_dct(
-        carrier.template,
-        role="LF template",
-    )
+    if prepared_observation is None:
+        observation_coefficients = _affine_detrended_dct(
+            observation.values,
+            role="LF observation",
+        )
+    else:
+        if type(prepared_observation) is not PreparedLfWhitenedObservation:
+            raise LfDetectorError("prepared LF observation type mismatch")
+        prepared_observation.validate()
+        if (
+            prepared_observation.observation_digest
+            != observation.observation_digest
+            or prepared_observation.observation_shape != observation.shape
+            or prepared_observation.observation_protocol
+            != observation.observation_protocol
+            or prepared_observation.whitening_asset_digest
+            != whitening_asset.whitening_asset_digest
+            or prepared_observation.model_revision != model_revision
+        ):
+            raise LfDetectorError("prepared LF observation identity mismatch")
+        observation_coefficients = prepared_observation.coefficients
+    if prepared_template is None:
+        template_coefficients = _affine_detrended_dct(
+            carrier.template,
+            role="LF template",
+        )
+    else:
+        if type(prepared_template) is not PreparedLfWhitenedTemplate:
+            raise LfDetectorError("prepared LF template type mismatch")
+        prepared_template.validate()
+        if (
+            prepared_template.template_digest != carrier.template_digest
+            or prepared_template.carrier_config_digest
+            != carrier.carrier_config_digest
+            or prepared_template.root_key_public_digest
+            != carrier.root_key_public_digest
+            or prepared_template.key_role != carrier.key_role
+            or prepared_template.wrong_key_index != carrier.wrong_key_index
+            or prepared_template.template_shape != observation.shape
+            or prepared_template.whitening_asset_digest
+            != whitening_asset.whitening_asset_digest
+            or prepared_template.model_revision != model_revision
+        ):
+            raise LfDetectorError("prepared LF template identity mismatch")
+        template_coefficients = prepared_template.coefficients
     score = _whitened_cosine(
         observation_coefficients,
         template_coefficients,

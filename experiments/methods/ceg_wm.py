@@ -35,6 +35,8 @@ from main import (
     LfDetectionResult,
     LfNullWhitenedDetectionResult,
     LfNullWhiteningAsset,
+    PreparedLfWhitenedObservation,
+    PreparedLfWhitenedTemplate,
     QkGeometrySyncResult,
     RootKeyIdentity,
     RoutingObservations,
@@ -611,6 +613,9 @@ class CegWmExperimentAdapter:
         observation: LfDetectionObservation,
         detection_key: str | DerivedWrongKeyMaterial,
         whitening_asset: LfNullWhiteningAsset,
+        *,
+        prepared_observation: PreparedLfWhitenedObservation | None = None,
+        prepared_template: PreparedLfWhitenedTemplate | None = None,
     ) -> ComponentCallObservation[LfNullWhitenedDetectionResult]:
         """Delegate the explicit no-fallback LF whitening candidate."""
 
@@ -618,6 +623,8 @@ class CegWmExperimentAdapter:
             observation,
             detection_key,
             whitening_asset,
+            prepared_observation=prepared_observation,
+            prepared_template=prepared_template,
         )
         return self._observe(
             "lf_detector",

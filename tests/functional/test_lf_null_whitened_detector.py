@@ -15,6 +15,8 @@ from main import (
     LfDetectionObservation,
     LfNullWhiteningAsset,
     lf_carrier,
+    prepare_lf_null_whitened_observation,
+    prepare_lf_null_whitened_template,
 )
 from main.shared.key_schedule import stable_json_utf8
 
@@ -53,10 +55,24 @@ def test_lf_whitened_candidate_crosses_real_public_adapter_without_raw_fallback(
     )
 
     raw = adapter.detect_lf(observation, root_key)
+    asset = _identity_asset()
     whitened = adapter.detect_lf_null_whitened(
         observation,
         root_key,
-        _identity_asset(),
+        asset,
+    )
+    prepared = adapter.detect_lf_null_whitened(
+        observation,
+        root_key,
+        asset,
+        prepared_observation=prepare_lf_null_whitened_observation(
+            observation,
+            asset,
+        ),
+        prepared_template=prepare_lf_null_whitened_template(
+            root_key,
+            asset,
+        ),
     )
 
     assert raw.public_callable == "main.lf_detector"
@@ -68,4 +84,5 @@ def test_lf_whitened_candidate_crosses_real_public_adapter_without_raw_fallback(
     )
     assert raw.result_identity == raw.result.detector_identity
     assert whitened.result_identity == whitened.result.detector_identity
+    assert prepared == whitened
     assert raw.result_identity != whitened.result_identity
