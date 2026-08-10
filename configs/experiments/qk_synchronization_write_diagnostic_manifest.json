@@ -1,0 +1,56 @@
+{
+  "schema_version": "ceg_wm_qk_synchronization_write_diagnosis_manifest",
+  "manifest_id": "qk_synchronization_write_diagnosis_source_clusters",
+  "role_id": "qk_synchronization_write_diagnosis",
+  "seed_namespace": "qk_synchronization_write_diagnosis_seed_namespace",
+  "source_cluster_namespace": "qk_synchronization_write_diagnosis_source_cluster_namespace",
+  "image_lineage_namespace": "qk_synchronization_write_diagnosis_public_rgb8_lineage_namespace",
+  "content_key_family_namespace": "qk_synchronization_write_diagnosis_hf_content_key_family",
+  "geometry_key_family_namespace": "qk_synchronization_write_diagnosis_geometry_key_family",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "cluster_identity": "basalt_orrery_window",
+      "prompt": "a basalt orrery beside a frost-patterned observatory window",
+      "prompt_digest": "210325d1ecb623e6d515b6a0cba1b2af6d3f4893f4c0aa3721e0d8b3d0d74a7d",
+      "generation_seed": 2026084100,
+      "image_lineage_identity": "hf_content_then_geometry_written_public_rgb8_lineage",
+      "image_lineage_digest": "f80ae232bc0726b185e982964585d63ff6727c5b3dca25ed15b54d0b716c32b3",
+      "split": "development",
+      "role_id": "qk_synchronization_write_diagnosis"
+    },
+    {
+      "cluster_ordinal": 1,
+      "cluster_identity": "celadon_drafting_compass",
+      "prompt": "a celadon drafting compass on an ashwood map table",
+      "prompt_digest": "4ef69be1cdc4609600944d6d89c3e0f1e4efba0a178b2cf388403196fc6de44e",
+      "generation_seed": 2026084101,
+      "image_lineage_identity": "hf_content_then_geometry_written_public_rgb8_lineage",
+      "image_lineage_digest": "6cb53e3d938e36a4d2c2ed1fec7173b7c513da932fa2f346191393d67984ea9b",
+      "split": "development",
+      "role_id": "qk_synchronization_write_diagnosis"
+    },
+    {
+      "cluster_ordinal": 2,
+      "cluster_identity": "garnet_tide_gauge",
+      "prompt": "a garnet tide gauge inside a quiet harbor workshop",
+      "prompt_digest": "df8c29494136b87b006eb6018042c0e10afc56e93edfeb091df9ba96615734f5",
+      "generation_seed": 2026084102,
+      "image_lineage_identity": "hf_content_then_geometry_written_public_rgb8_lineage",
+      "image_lineage_digest": "5d11396ae4be7ee655a2e72859b30c0c792214ebc79fbfc27ab486f8f7099068",
+      "split": "development",
+      "role_id": "qk_synchronization_write_diagnosis"
+    },
+    {
+      "cluster_ordinal": 3,
+      "cluster_identity": "ivory_transit_instrument",
+      "prompt": "an ivory transit instrument beneath a copper lattice skylight",
+      "prompt_digest": "30e1201eaf74bfdce5689d5733e669abf56ba4e452dcb839365931c866228ead",
+      "generation_seed": 2026084103,
+      "image_lineage_identity": "hf_content_then_geometry_written_public_rgb8_lineage",
+      "image_lineage_digest": "0490c6f84ae61db31a24a9886274e31c3eaf58c5a899f36e5d2a557bbaa4a020",
+      "split": "development",
+      "role_id": "qk_synchronization_write_diagnosis"
+    }
+  ]
+}
