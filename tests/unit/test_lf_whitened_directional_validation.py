@@ -101,6 +101,9 @@ def test_lf_whitened_directional_protocol_freezes_budget_controls_and_gate() -> 
     )
 
     assert protocol.operational_unit_count == 1
+    assert protocol.run_id == (
+        "ceg_wm_lf_whitened_directional_validation_prepared_feature_execution"
+    )
     assert protocol.scientific_cluster_count == 32
     assert protocol.maximum_total_units == 33
     assert tuple(unit.unit_index for unit in protocol.unit_roster) == tuple(
@@ -197,10 +200,17 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources() 
     assert protocol.method_review_reference == (
         readiness["independent_semantic_review"]["review_reference"]
     )
+    assert protocol.method_review_reference == (
+        "agent2-lf-prepared-feature-semantic-review:"
+        "00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE"
+    )
     assert protocol.method_reviewed_revision == (
         readiness["independent_semantic_review"][
             "reviewed_repository_revision"
         ]
+    )
+    assert protocol.method_reviewed_revision == (
+        "00bed2baaf60f039868c208291c86b539a54b2f3"
     )
 
 

@@ -69,7 +69,7 @@ def test_lf_directional_component_closure_binds_only_reviewed_method_sources() -
         binding.implementation_path for binding in closure.source_bindings
     ) == LF_EXPECTED_PATHS
     assert closure.component_implementation_digest == (
-        "005e18bd923995dfc09a1d782e74bd1fba69287c465c9d56d311fc7a3e307c66"
+        "9e79aaaadf545966f55fd311a0466f718431c21c39c88addac994149399b41f6"
     )
     assert not any(
         binding.implementation_path.endswith("/__init__.py")

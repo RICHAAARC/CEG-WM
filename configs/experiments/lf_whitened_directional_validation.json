@@ -2,7 +2,7 @@
   "schema_version": "ceg_wm_lf_whitened_directional_validation_protocol_v1",
   "protocol_id": "ceg_wm_lf_whitened_directional_validation",
   "protocol_version": "1.0.0",
-  "run_id": "ceg_wm_lf_whitened_directional_validation",
+  "run_id": "ceg_wm_lf_whitened_directional_validation_prepared_feature_execution",
   "split": "development",
   "role_id": "lf_whitened_directional_validation",
   "candidate_identity": "lf_null_whitened_matched_score",
@@ -60,8 +60,8 @@
   "registered_key_derivation_identity": "lf_whitened_directional_registered_key_derivation",
   "wrong_key_control_identity": "lf_whitened_directional_four_key_max_control",
   "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1",
-  "method_review_reference": "agent2-lf-whitened-method-semantic-review:4cd7d33a37b041970ed078b699bb8f0aa82b4e31:APPROVE",
-  "method_reviewed_revision": "4cd7d33a37b041970ed078b699bb8f0aa82b4e31",
+  "method_review_reference": "agent2-lf-prepared-feature-semantic-review:00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE",
+  "method_reviewed_revision": "00bed2baaf60f039868c208291c86b539a54b2f3",
   "whitening_asset_fit_producer_revision": "a78c47184cf83ad351bb4442ebd31c218726de25",
   "whitening_asset_fit_identity": "ceg_wm_lf_whitened_score_screening",
   "whitening_asset_fit_run_id": "ceg_wm_lf_whitening_asset_fit_and_score_screening",
@@ -100,7 +100,7 @@
       "source_role": "component_implementation",
       "implementation_path": "main/content_chain/lf_detector.py",
       "implementation_symbol": "lf_detector",
-      "source_sha256": "c8482e803f26cc05ed7e9d6e9d1e5558756db28a5dd308a788b712fe92ffa622"
+      "source_sha256": "2aed8081a75938b097a37a4c96817238a88bac3e0bd1385095f310cbe9954ed2"
     },
     {
       "component_id": "lf_detector",
@@ -110,7 +110,7 @@
       "source_sha256": "608f0ab7f24a01b152aceb455b718530a9690efdb9843953020c95bc599b4c7a"
     }
   ],
-  "component_implementation_digest": "005e18bd923995dfc09a1d782e74bd1fba69287c465c9d56d311fc7a3e307c66",
+  "component_implementation_digest": "9e79aaaadf545966f55fd311a0466f718431c21c39c88addac994149399b41f6",
   "operational_smoke_prompt": "a limestone reading alcove with diffuse daylight and a cedar writing desk",
   "operational_smoke_prompt_digest": "5046b5a5db898869ade6255a06ecbe683d1f53942d6e7db8d8abbfa807d5a586",
   "operational_smoke_generation_seed": 2026083100,

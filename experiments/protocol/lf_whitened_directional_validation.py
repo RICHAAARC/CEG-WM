@@ -27,7 +27,7 @@ from experiments.protocol.lf_whitened_score_screening import (
 
 PROTOCOL_ID = "ceg_wm_lf_whitened_directional_validation"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_lf_whitened_directional_validation"
+RUN_ID = "ceg_wm_lf_whitened_directional_validation_prepared_feature_execution"
 SCIENTIFIC_CLUSTER_COUNT = 32
 OPERATIONAL_UNIT_COUNT = 1
 MAXIMUM_TOTAL_UNITS = 33

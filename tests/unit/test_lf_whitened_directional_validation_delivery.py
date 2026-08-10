@@ -27,7 +27,7 @@ NOTEBOOK = ROOT / "notebooks/colab/lf_whitened_directional_validation.ipynb"
 PROTOCOL = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
 SERVER_RELATIVE = Path("scripts/experiment_execution/lf_whitened_directional_validation_server.py")
 EXECUTION_REVISION = "194eccdd1f16c295528a4d9e1d7c75c2748f061a"
-RUN_ID = "ceg_wm_lf_whitened_directional_validation"
+RUN_ID = "ceg_wm_lf_whitened_directional_validation_prepared_feature_execution"
 WHITENING_ASSET_FIT_RUN_ID = "ceg_wm_lf_whitening_asset_fit_and_score_screening"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/lf_whitened_directional_validation.json",
