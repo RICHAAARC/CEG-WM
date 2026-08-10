@@ -133,14 +133,18 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
             transformer: Transformer,
             scheduler: Scheduler | None = None,
             vae: Vae | None = None,
+            fail_prompt_encoding: bool = False,
         ) -> None:
             self.transformer = transformer
             self.scheduler = scheduler or Scheduler()
             self.vae = vae or Vae()
             self.image_processor = ImageProcessor()
+            self.fail_prompt_encoding = fail_prompt_encoding
 
         def encode_prompt(self, **kwargs):
             assert kwargs["do_classifier_free_guidance"] is False
+            if self.fail_prompt_encoding:
+                raise RuntimeError("excluded conditioning detail")
             prompt = torch.zeros((1, 2, 2), dtype=torch.float32)
             pooled = torch.zeros((1, 2), dtype=torch.float32)
             return prompt, None, pooled, None
@@ -236,6 +240,31 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
                 ),
             ),
         )
+
+    conditioning = backend(
+        Pipeline(
+            transformer=Transformer(fail=False),
+            fail_prompt_encoding=True,
+        )
+    )
+    with pytest.raises(sd35_backend_module.Sd35BackendError) as conditioning_error:
+        conditioning.run_qk_detection_forward_differentiable(
+            latent,
+            torch.tensor([1.0]),
+            RuntimeDetectionConditioning(
+                prompt="",
+                prompt_2="",
+                prompt_3="",
+                do_classifier_free_guidance=False,
+                detection_conditioning_protocol=(
+                    "sd3_empty_text_triplet_without_cfg"
+                ),
+            ),
+        )
+    assert not isinstance(
+        conditioning_error.value,
+        sd35_backend_module.Sd35DifferentiableQkTransformerForwardError,
+    )
 
 
 @pytest.mark.parametrize(

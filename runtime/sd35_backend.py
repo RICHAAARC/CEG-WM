@@ -812,6 +812,11 @@ class Sd35PipelineBackend:
                 )
                 prompt_embeds = encoded[0].detach().clone()
                 pooled_prompt_embeds = encoded[2].detach().clone()
+        except Exception as exc:
+            raise Sd35BackendError(
+                "differentiable Q/K conditioning failed"
+            ) from exc
+        try:
             pipeline.transformer(
                 hidden_states=noisy_detection_latent,
                 timestep=timestep.expand(noisy_detection_latent.shape[0]),
