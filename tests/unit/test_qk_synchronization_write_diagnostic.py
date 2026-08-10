@@ -55,6 +55,7 @@ from experiments.runners.development_persistence import (
     FrozenWorkerIdentity,
 )
 from runtime import RuntimeAdapterError, Sd35RuntimeAdapter, create_runtime_adapter
+from runtime import sd35_backend as sd35_backend_module
 from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint import (
     QkSynchronizationWriteEntrypointError,
     _failure_diagnostic,
@@ -947,6 +948,40 @@ def test_qk_failure_diagnostic_does_not_classify_message_as_resource_failure() -
     assert diagnostic["failure_class"] == "implementation_failure"
     assert diagnostic["unit_index"] is None
     assert "module_outcome" not in diagnostic
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "stage_error_type",
+    (
+        sd35_backend_module.Sd35GenerationSuffixTransformerForwardError,
+        sd35_backend_module.Sd35GenerationSuffixSchedulerStepError,
+        sd35_backend_module.Sd35DifferentiableVaeDecodeError,
+        sd35_backend_module.Sd35DifferentiableVaeEncodeError,
+        sd35_backend_module.Sd35DifferentiableDetectionNoiseSchedulingError,
+        sd35_backend_module.Sd35DifferentiableQkTransformerForwardError,
+    ),
+)
+def test_qk_failure_diagnostic_preserves_safe_sd35_stage_type(
+    stage_error_type: type[BaseException],
+) -> None:
+    secret = "stage-message-must-not-be-persisted"
+    leaf = RuntimeError(secret)
+    stage = stage_error_type()
+    stage.__cause__ = leaf
+    outer = CegWmExperimentAdapterError(secret)
+    outer.__cause__ = stage
+
+    diagnostic = _failure_diagnostic(outer, active_binding=None)
+    serialized = json.dumps(diagnostic, sort_keys=True)
+
+    assert diagnostic["failure_type_chain"] == [
+        "experiments.methods.ceg_wm.CegWmExperimentAdapterError",
+        f"{stage_error_type.__module__}.{stage_error_type.__qualname__}",
+        "builtins.RuntimeError",
+    ]
+    assert diagnostic["failure_class"] == "implementation_failure"
+    assert secret not in serialized
 
 
 @pytest.mark.unit

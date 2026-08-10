@@ -19,12 +19,14 @@ from runtime import (
     RuntimeAdapterError,
     RuntimeContentExecutionError,
     RuntimeDetectionConditioning,
+    RuntimeGenerationPromptIdentity,
     RuntimeQkObservationError,
     Sd35BackendError,
     Sd35PipelineBackend,
     create_runtime_adapter,
     load_runtime_configuration,
 )
+from runtime import sd35_backend as sd35_backend_module
 from main import ContentEmbedderError, content_embedder, hf_carrier
 from scripts.experiment_execution import runtime_qualification_runner as runner
 from scripts.experiment_execution.build_runtime_qualification_package import (
@@ -61,6 +63,179 @@ def test_sd35_backend_is_lazy_and_accepts_disjoint_roots(
         prompt="probe",
     )
     assert calls == []
+
+
+def test_sd35_backend_reports_specific_differentiable_stage_types(
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+    latent = torch.ones((1, 16, 2, 2), dtype=torch.float32)
+    image = torch.ones((1, 3, 2, 2), dtype=torch.float32)
+
+    class Scheduler:
+        def __init__(self, *, fail_step: bool = False, fail_noise: bool = False):
+            self.fail_step = fail_step
+            self.fail_noise = fail_noise
+
+        def step(self, _noise, _timestep, value, *, return_dict):
+            assert return_dict is False
+            if self.fail_step:
+                raise RuntimeError("excluded scheduler detail")
+            return (value,)
+
+        def scale_noise(self, value, _timestep, noise):
+            if self.fail_noise:
+                raise RuntimeError("excluded noise detail")
+            return value + noise
+
+    class Transformer:
+        def __init__(self, *, fail: bool):
+            self.fail = fail
+
+        def __call__(self, **kwargs):
+            if self.fail:
+                raise RuntimeError("excluded transformer detail")
+            return (torch.zeros_like(kwargs["hidden_states"]),)
+
+    class Vae:
+        dtype = torch.float32
+        config = types.SimpleNamespace(force_upcast=False)
+
+        def __init__(self, *, fail_decode: bool = False, fail_encode: bool = False):
+            self.fail_decode = fail_decode
+            self.fail_encode = fail_encode
+
+        def decode(self, value, *, return_dict):
+            assert return_dict is True
+            if self.fail_decode:
+                raise RuntimeError("excluded decode detail")
+            return types.SimpleNamespace(sample=value[:, :3])
+
+        def encode(self, value, *, return_dict):
+            assert return_dict is True
+            if self.fail_encode:
+                raise RuntimeError("excluded encode detail")
+            return types.SimpleNamespace(latent_dist=types.SimpleNamespace(mode=lambda: value))
+
+    class ImageProcessor:
+        def postprocess(self, value, *, output_type):
+            assert output_type == "pt"
+            return value
+
+        def preprocess(self, value, *, height, width):
+            assert (height, width) == (512, 512)
+            return value
+
+    class Pipeline:
+        def __init__(
+            self,
+            *,
+            transformer: Transformer,
+            scheduler: Scheduler | None = None,
+            vae: Vae | None = None,
+        ) -> None:
+            self.transformer = transformer
+            self.scheduler = scheduler or Scheduler()
+            self.vae = vae or Vae()
+            self.image_processor = ImageProcessor()
+
+        def encode_prompt(self, **kwargs):
+            assert kwargs["do_classifier_free_guidance"] is False
+            prompt = torch.zeros((1, 2, 2), dtype=torch.float32)
+            pooled = torch.zeros((1, 2), dtype=torch.float32)
+            return prompt, None, pooled, None
+
+    def backend(pipeline: Pipeline) -> Sd35PipelineBackend:
+        value = Sd35PipelineBackend(
+            cache_root=tmp_path / "cache",
+            persistent_root=tmp_path / "persistent",
+            hf_token=None,
+            prompt="probe",
+        )
+        value._configuration = configuration
+        value._device = torch.device("cpu")
+        value._pipeline = pipeline
+        return value
+
+    def suffix_context(value: Sd35PipelineBackend, scheduler: Scheduler):
+        return sd35_backend_module._PipelineGenerationSuffixReplayContext(
+            runtime_config_digest=configuration.runtime_config_digest,
+            callback_index=configuration.callback_index,
+            owner_identity=id(value),
+            latent_shape=tuple(latent.shape),
+            latent_dtype=latent.dtype,
+            selected_device="cpu",
+            prompt_identity=RuntimeGenerationPromptIdentity.from_prompts("probe", ""),
+            prompt_embeds=torch.zeros((2, 2, 2), dtype=torch.float32),
+            pooled_prompt_embeds=torch.zeros((2, 2), dtype=torch.float32),
+            suffix_timesteps=torch.tensor([1.0]),
+            scheduler_snapshot=scheduler,
+        )
+
+    suffix_transformer = backend(Pipeline(transformer=Transformer(fail=True)))
+    with pytest.raises(sd35_backend_module.Sd35BackendError) as transformer_error:
+        suffix_transformer.replay_generation_suffix(
+            latent,
+            suffix_context(suffix_transformer, Scheduler()),
+            differentiable=True,
+        )
+    assert isinstance(
+        transformer_error.value.__cause__,
+        sd35_backend_module.Sd35GenerationSuffixTransformerForwardError,
+    )
+
+    suffix_scheduler = backend(Pipeline(transformer=Transformer(fail=False)))
+    with pytest.raises(sd35_backend_module.Sd35BackendError) as scheduler_error:
+        suffix_scheduler.replay_generation_suffix(
+            latent,
+            suffix_context(suffix_scheduler, Scheduler(fail_step=True)),
+            differentiable=True,
+        )
+    assert isinstance(
+        scheduler_error.value.__cause__,
+        sd35_backend_module.Sd35GenerationSuffixSchedulerStepError,
+    )
+
+    decode = backend(
+        Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_decode=True))
+    )
+    with pytest.raises(sd35_backend_module.Sd35DifferentiableVaeDecodeError):
+        decode.vae_decode_differentiable(latent)
+
+    encode = backend(
+        Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_encode=True))
+    )
+    with pytest.raises(sd35_backend_module.Sd35DifferentiableVaeEncodeError):
+        encode.vae_encode_differentiable(image)
+
+    noise = backend(Pipeline(transformer=Transformer(fail=False)))
+    noise._detection_scheduler = Scheduler(fail_noise=True)
+    with pytest.raises(
+        sd35_backend_module.Sd35DifferentiableDetectionNoiseSchedulingError
+    ):
+        noise.scale_detection_noise_differentiable(
+            latent,
+            torch.ones_like(latent),
+            torch.tensor([1.0]),
+        )
+
+    qk = backend(Pipeline(transformer=Transformer(fail=True)))
+    with pytest.raises(
+        sd35_backend_module.Sd35DifferentiableQkTransformerForwardError
+    ):
+        qk.run_qk_detection_forward_differentiable(
+            latent,
+            torch.tensor([1.0]),
+            RuntimeDetectionConditioning(
+                prompt="",
+                prompt_2="",
+                prompt_3="",
+                do_classifier_free_guidance=False,
+                detection_conditioning_protocol=(
+                    "sd3_empty_text_triplet_without_cfg"
+                ),
+            ),
+        )
 
 
 @pytest.mark.parametrize(
