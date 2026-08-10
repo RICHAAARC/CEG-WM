@@ -6,7 +6,13 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
+import torch
+import torch.nn.functional as functional
 
+from experiments.methods import (
+    CegWmExperimentAdapter,
+    load_ceg_wm_experiment_adapter_configuration,
+)
 from experiments.metrics.qk_synchronization_write_diagnostic import (
     QkSynchronizationWriteMetricError,
     QkTerminalFailure,
@@ -28,10 +34,44 @@ from experiments.protocol.qk_synchronization_write_diagnostic import (
     derive_qk_synchronization_analysis_identity,
     load_qk_synchronization_write_protocol,
 )
+from experiments.runners.qk_synchronization_write_diagnostic import (
+    QkSynchronizationWriteDiagnosticRunner,
+)
+from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from tests.unit.test_runtime_qk_observation import (
+    FakeGeometrySynchronizationBackend,
+    FakePosterior,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/qk_synchronization_write_diagnostic.json"
+COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
+
+
+def _runner() -> QkSynchronizationWriteDiagnosticRunner:
+    protocol, manifest = load_qk_synchronization_write_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    runtime = object.__new__(Sd35RuntimeAdapter)
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS),
+        runtime_adapter=runtime,
+    )
+    return QkSynchronizationWriteDiagnosticRunner(
+        protocol=protocol,
+        manifest=manifest,
+        adapter=adapter,
+        runtime_adapter=runtime,
+        method_code_revision="1" * 40,
+        run_id=protocol.run_id,
+        content_registered_root_key="qk-diagnosis-content-test-root",
+        geometry_registered_root_key="qk-diagnosis-geometry-test-root",
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest="2" * 64,
+        candidate_config_digest="3" * 64,
+        package_identity="4" * 64,
+    )
 
 
 def _accepted_ratio(
@@ -435,6 +475,165 @@ def test_qk_negative_transform_margins_remain_diagnostic_not_transform_robustnes
     assert aggregate.candidate_recommendation == (
         "candidate_worth_further_selection"
     )
+
+
+@pytest.mark.unit
+def test_qk_runner_registers_exact_roster_and_commits_dependency_terminal_shape() -> None:
+    runner = _runner()
+    bindings = runner.create_persistence_unit_bindings()
+    record = runner.create_dependency_blocked_record(
+        unit_index=13,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+
+    assert len(bindings) == 29
+    assert tuple(item.unit_index for item in bindings) == tuple(range(29))
+    assert record.execution_status == "excluded"
+    assert record.failure_class == "dependency_blocked"
+    assert record.decision_trace["decision_role"] == "dependency_blocked_excluded"
+    assert record.operation_result_payload["dependency_blocked_terminal"][
+        "dependency_identity"
+    ] == "no_eligible_geometry_write_ratio"
+    assert record.scientific_claim_boundary == (
+        "preliminary_development_signal_only_no_promotion_or_scientific_claim"
+    )
+
+
+@pytest.mark.unit
+def test_qk_runner_resource_retry_and_implementation_terminal_are_explicit() -> None:
+    runner = _runner()
+    retry = runner.create_failed_record(
+        unit_index=1,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        failure_type="builtins.MemoryError",
+        resource_failure=True,
+    )
+    terminal = runner.create_failed_record(
+        unit_index=1,
+        attempt_index=1,
+        retry_parent_intent_digest="5" * 64,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=2.0,
+        failure_type="builtins.MemoryError",
+        resource_failure=True,
+    )
+    implementation = runner.create_failed_record(
+        unit_index=2,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        failure_type="builtins.RuntimeError",
+        resource_failure=False,
+    )
+
+    assert retry.execution_status == "retry"
+    assert retry.attempt_disposition() == "retryable_resource_failure"
+    assert terminal.execution_status == "failed"
+    assert terminal.attempt_disposition() == "final_failure"
+    assert implementation.failure_class == "implementation_failure"
+
+
+@pytest.mark.unit
+def test_qk_runner_success_record_binds_ratio_metric_to_registered_responsibility() -> None:
+    runner = _runner()
+    observation = _accepted_ratio(0, *GEOMETRY_RATIO_ROSTER[0])
+    record = runner._record(
+        unit_index=1,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        operation={"ratio_probe_observation": asdict(observation)},
+        observation_identity=observation.observation_identity,
+    )
+
+    assert record.execution_status == "success"
+    assert record.responsibility_id == "geometry_write_ratio_probe"
+    assert record.metric_observation["responsibility_id"] == record.responsibility_id
+    assert tuple(record.metric_observation["registered_metric_ids"]) == record.metric_ids
+
+
+@pytest.mark.unit
+def test_qk_runner_crosses_real_public_write_and_blind_observation_chain() -> None:
+    class SpatialGeometrySynchronizationBackend(FakeGeometrySynchronizationBackend):
+        @staticmethod
+        def _decoded_image(latent: torch.Tensor) -> torch.Tensor:
+            spatial = latent.to(dtype=torch.float32)[:, :3]
+            return torch.sigmoid(
+                functional.interpolate(
+                    spatial,
+                    size=(512, 512),
+                    mode="bilinear",
+                    align_corners=True,
+                )
+            )
+
+        @staticmethod
+        def _encoded_latent(image: torch.Tensor) -> torch.Tensor:
+            return functional.adaptive_avg_pool2d(
+                image.to(dtype=torch.float32)[:, :2],
+                (4, 4),
+            )
+
+        def vae_encode(self, image: torch.Tensor) -> FakePosterior:
+            return FakePosterior(self._encoded_latent(image))
+
+        def vae_encode_differentiable(
+            self, image: torch.Tensor
+        ) -> FakePosterior:
+            return FakePosterior(
+                self._encoded_latent(image),
+                preserve_gradient=True,
+            )
+
+    protocol, manifest = load_qk_synchronization_write_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    backend = SpatialGeometrySynchronizationBackend()
+    runtime = create_runtime_adapter(backend)
+    runtime.initialize("cpu")
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS),
+        runtime_adapter=runtime,
+    )
+    runner = QkSynchronizationWriteDiagnosticRunner(
+        protocol=protocol,
+        manifest=manifest,
+        adapter=adapter,
+        runtime_adapter=runtime,
+        method_code_revision="1" * 40,
+        run_id=protocol.run_id,
+        content_registered_root_key="qk-public-chain-content-root",
+        geometry_registered_root_key="qk-public-chain-geometry-root",
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest="2" * 64,
+        candidate_config_digest="3" * 64,
+        package_identity="4" * 64,
+    )
+
+    observation, operation, members = runner.execute_ratio_probe(
+        unit_index=1,
+        base_latent=torch.randn(
+            (1, 16, 64, 64),
+            generator=torch.Generator().manual_seed(2026084199),
+            dtype=torch.float16,
+        ),
+    )
+
+    assert operation["routing_used"] is False
+    assert operation["content_branch_id"] == "hf_only"
+    assert len(observation.public_pre_wrong_key_scores) == 4
+    assert observation.public_pre_observation_identity
+    assert operation["private_qk_or_latent_persisted"] is False
+    assert set(members) <= {"diagnostics/geometry_written_rgb8.bin"}
+    assert backend.suffix_replay_modes
+    assert True in backend.suffix_replay_modes
 
 
 @pytest.mark.unit
