@@ -4,15 +4,29 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 ## Current authorized entrypoint
 
-`lf_whitened_directional_validation.ipynb` 是当前唯一授权在收到最终固定链接后执行
+`qk_synchronization_write_diagnostic.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`51adb765cdddafcb4c65c357e899c77b4c9f36d2`，使用优化后独立 run ID
-`ceg_wm_lf_whitened_directional_validation_prepared_feature_execution`，执行冻结的 1 个 non-scientific public-endpoint
-smoke 与 32 个 LF whitened directional scientific units；每 unit 最多 2 attempts、2700 秒。
-operational unit 不计 scientific coverage。Notebook 挂载 Drive、读取 `HF_TOKEN` 与
-`CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
-`lf_whitened_directional_validation_server.py`，并把服务器的 result/diagnostic ZIP、
-execution receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
+`0bf68738584b66a4de2f09089dcb81e901ff0337`，使用独立 run ID
+`ceg_wm_qk_synchronization_write_diagnosis`，执行冻结的 1 个 non-scientific
+operational smoke、12 个 geometry-write ratio probes，以及仅在预登记资格规则满足后
+执行的 16 个 transformed-relation probes；scientific 上限为 28 units，operational
+unit 不计 scientific coverage。按 `1/16`、`1/8`、`1/4` 的冻结顺序取首个满足全部
+4/4 条件的 ratio，只是后续 development probe 的确定性执行 ratio，不是正式 ratio
+selection。Notebook 挂载 Drive、读取 `HF_TOKEN` 与 `CEG_WM_ROOT_KEY`、核对 detached
+exact checkout、调用 `qk_synchronization_write_diagnostic_server.py`，并把服务器的
+result/diagnostic ZIP、execution receipt 与 `SHA256SUMS` 保存到 Drive export 目录。
+
+依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实 public method/runtime 调用、
+正式 records、持久化和内部 ZIP 全部属于服务器脚本。该 development-only 诊断不让
+几何产生水印阳性，不形成 formal ratio selection、transform estimator 结论、threshold、
+FPR、candidate promotion、calibration、formal evaluation、baseline 或论文 claim。
+
+`lf_whitened_directional_validation.ipynb` 已完成其冻结的 1 个 non-scientific
+public-endpoint smoke 与 32 个 LF whitened directional scientific units，当前为
+**paused / not authorized**。其 execution revision
+`51adb765cdddafcb4c65c357e899c77b4c9f36d2` 与 run ID
+`ceg_wm_lf_whitened_directional_validation_prepared_feature_execution` 保持
+producer-bound，不读取、不迁移、不改写或混入当前 Q/K 诊断分母。
 
 依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实方法/runtime 调用、正式
 records、持久化和内部 ZIP 全部属于服务器脚本。该 development-only LF whitened
@@ -24,7 +38,7 @@ formal evaluation、baseline 或论文 claim，也不执行 routing、LF/HF 组�
 旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
 `ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
 **paused / not authorized**，不得作为当前入口运行或与新 run 混合。
-目录内其余全部 Notebook 均为
+除当前 Q/K 入口外，目录内其余全部 Notebook 均为
 **paused / not authorized**，不得作为当前入口运行。
 
 `lf_whitened_score_screening.ipynb` 已完成 1 个 non-scientific operational smoke、32 个

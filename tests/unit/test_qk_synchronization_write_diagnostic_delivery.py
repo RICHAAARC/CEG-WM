@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -21,6 +22,31 @@ ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL = ROOT / "configs/experiments/qk_synchronization_write_diagnostic.json"
 ENTRYPOINT = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_entrypoint.py"
 SERVER = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_server.py"
+NOTEBOOK = ROOT / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb"
+EXECUTION_REVISION = "0bf68738584b66a4de2f09089dcb81e901ff0337"
+RUN_ID = "ceg_wm_qk_synchronization_write_diagnosis"
+
+
+def _notebook_source() -> tuple[dict[str, object], str]:
+    document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+    return document, "\n".join(
+        "".join(cell.get("source", [])) for cell in document["cells"]
+    )
+
+
+def _constant(source: str, name: str):
+    tree = ast.parse(source)
+    matches = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == name
+        and isinstance(node.value, ast.Constant)
+    ]
+    assert len(matches) == 1
+    return matches[0].value
 
 
 @pytest.mark.quick
@@ -59,6 +85,9 @@ def test_qk_diagnosis_delivery_binds_production_entrypoint_and_public_rgb8_membe
     assert "execute_scientific_unit" in calls
     assert "create_dependency_blocked_record" in calls
     assert "RGB8_MEMBER_PATH" in source
+    assert protocol.run_id == RUN_ID
+    assert protocol.operational_unit_count == 1
+    assert protocol.scientific_unit_count == 28
     assert protocol.maximum_total_units == 29
     assert protocol.ratio_probe_unit_count == 12
     assert protocol.transform_probe_unit_count == 16
@@ -86,3 +115,42 @@ def test_qk_diagnosis_server_receipt_boundary_is_non_scientific(monkeypatch, cap
     assert '"formal_tau_created": False' in server_source
     assert '"fpr_estimated": False' in server_source
     assert '"candidate_promoted": False' in server_source
+
+
+@pytest.mark.quick
+def test_qk_diagnosis_notebook_is_thin_exact_and_output_free() -> None:
+    document, source = _notebook_source()
+    code_source = "\n".join(
+        "".join(cell.get("source", []))
+        for cell in document["cells"]
+        if cell["cell_type"] == "code"
+    )
+
+    assert len(document["cells"]) == 6
+    assert all(
+        cell.get("execution_count") is None
+        for cell in document["cells"]
+        if cell["cell_type"] == "code"
+    )
+    assert all(cell.get("outputs", []) == [] for cell in document["cells"])
+    assert _constant(code_source, "EXECUTION_REVISION") == EXECUTION_REVISION
+    assert _constant(code_source, "RUN_ID") == RUN_ID
+    assert "qk_synchronization_write_diagnostic_server.py" in code_source
+    assert "HF_TOKEN" in code_source and "CEG_WM_ROOT_KEY" in code_source
+    assert "/content/drive" in code_source
+    assert "--expected-revision" in code_source
+    assert "--persistent-root" in code_source
+    assert "--cache-root" in code_source
+    assert "--run-id" in code_source
+    assert "--session-id" in code_source
+    assert "qk_synchronization_diagnosis_aggregate" in code_source
+    for forbidden in (
+        "geometry_synchronization_write(",
+        "create_qk_ratio_probe_observation(",
+        "DevelopmentScientificRecord(",
+        "commit_session_unit(",
+        "replay_synchronization_diagnosis_aggregate(",
+        "fit_threshold(",
+        "evaluate_qk_synchronization_write_diagnosis(",
+    ):
+        assert forbidden not in source
