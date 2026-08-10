@@ -220,7 +220,7 @@ def test_hf_only_reference_metric_binding_binds_formula_registry_source_and_safe
     binding = _binding()
     assert (
         binding.hf_only_reference_specification_digest
-        == "9e27e9cc1dac30a1c3aadd93b4e7e99bf5a6fed9502f3c3b48c0e4b3417eebad"
+        == "62023f317847ddd5f675187dd9e1823da80ee62cf590a25982fe0a1d533d536a"
     )
     assert binding.implementation_source_sha256 == hashlib.sha256(
         HF_ONLY_REFERENCE_METRIC_MODULE.read_bytes()
@@ -272,7 +272,10 @@ def test_hf_only_reference_metric_binding_rejects_candidate_authority_byte_tampe
             Path(manifest["path"])
             for manifest in specification["split_manifests"].values()
         ),
-        *(Path(entry["path"]) for entry in candidate["method_source_files"]),
+        *(
+            Path(entry["implementation_path"])
+            for entry in candidate["component_source_bindings"]
+        ),
     }
     for relative_path in paths:
         destination = temporary_root / relative_path

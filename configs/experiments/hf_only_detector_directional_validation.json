@@ -32,17 +32,9 @@
     {
       "path": "configs/experiments/hf_only_untouched_confirmation_manifest.json",
       "file_sha256": "43d7d6d81f827348655f6bd0caa4b808f401cf20b1153923d14c5cc86270e6cd"
-    },
-    {
-      "path": "configs/experiments/hf_only_reference_validation.json",
-      "file_sha256": "c472f6dfc3ce962c196f159d55bae3e3e9b0f0c68d8263e0cc721a27c2a6b0e3"
-    },
-    {
-      "path": "configs/experiments/hf_only_threshold_fit_gpu_execution.json",
-      "file_sha256": "e1c8887e90889f0ebe331177c0c44828c276d74f586c750a31485a7d8c6d7025"
     }
   ],
-  "source_cluster_deny_list_digest": "4f093418137b10d88faf6ce0f30d30c09c7f20291096c3dba04186b681b6fea0",
+  "source_cluster_deny_list_digest": "e223624269ea37bfa1fcefc8f6fac54164bb9e5e37b95180f1da4ee0d7bf7364",
   "operational_unit_count": 2,
   "scientific_cluster_count": 32,
   "initial_gpu_gate_scientific_unit_count": 8,

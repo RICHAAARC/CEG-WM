@@ -138,15 +138,34 @@ def test_hf_detector_directional_protocol_freezes_disjoint_budget_and_controls()
     assert protocol.practical_margin_floor == 0.001
     assert protocol.minimum_registered_minus_null_success_count == 28
     assert protocol.minimum_registered_minus_wrong_success_count == 28
-    assert {item.path for item in protocol.prior_development_manifests} >= {
+    assert {item.path for item in protocol.prior_development_manifests} == {
         "configs/experiments/hf_transmission_diagnostic_manifest.json",
         "configs/experiments/development_exploration_prompt_roster.json",
         "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json",
+        "configs/experiments/hf_only_reference_prompt_roster.json",
         "configs/experiments/hf_only_content_threshold_fit_manifest.json",
         "configs/experiments/hf_only_untouched_confirmation_manifest.json",
-        "configs/experiments/hf_only_reference_validation.json",
-        "configs/experiments/hf_only_threshold_fit_gpu_execution.json",
     }
+    deny_axes = load_authority_deny_axes(protocol.prior_development_manifests, ROOT)
+    assert not {item.prompt_digest for item in manifest.entries} & set(
+        deny_axes.prompt_digests
+    )
+    assert not {
+        manifest.source_cluster_namespace,
+        *(item.cluster_identity for item in manifest.entries),
+    } & set(deny_axes.source_cluster_identities)
+    assert manifest.seed_namespace not in deny_axes.seed_namespaces
+    assert not {item.generation_seed for item in manifest.entries} & set(
+        deny_axes.generation_seeds
+    )
+    assert not {
+        manifest.image_lineage_namespace,
+        *(item.image_lineage_identity for item in manifest.entries),
+    } & set(deny_axes.image_lineage_identities)
+    assert not {
+        manifest.registered_key_derivation_identity,
+        manifest.wrong_key_control_identity,
+    } & set(deny_axes.key_control_identities)
 
 
 @pytest.mark.unit
