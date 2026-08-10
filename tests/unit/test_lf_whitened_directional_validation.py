@@ -205,12 +205,20 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources(
         source_root=ROOT,
         revision=LF_DIRECTIONAL_PRODUCER_REVISION,
         destination=tmp_path / "lf-directional-producer",
-        paths=("configs/experiments/lf_whitened_directional_validation.json",),
+        paths=(
+            ".codex/research_state/method_readiness.yaml",
+            "configs/experiments/lf_whitened_directional_validation.json",
+        ),
     )
     producer_authority = json.loads(
         (
             producer_root
             / "configs/experiments/lf_whitened_directional_validation.json"
+        ).read_text(encoding="utf-8")
+    )
+    producer_readiness = json.loads(
+        (
+            producer_root / ".codex/research_state/method_readiness.yaml"
         ).read_text(encoding="utf-8")
     )
     frozen_review_reference = (
@@ -219,6 +227,17 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources(
         "00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE"
     )
     frozen_reviewed_revision = "00bed2baaf60f039868c208291c86b539a54b2f3"
+    producer_review = producer_readiness["independent_semantic_review"]
+    assert producer_review["decision"] == "approve"
+    assert producer_review["review_reference"] == producer_authority[
+        "method_review_reference"
+    ]
+    assert producer_review["reviewed_repository_revision"] == producer_authority[
+        "method_reviewed_revision"
+    ]
+    assert producer_review["candidate_specification_sha256"] == producer_authority[
+        "candidate_specification_sha256"
+    ]
     assert producer_authority["method_review_reference"] == frozen_review_reference
     assert producer_authority["method_reviewed_revision"] == frozen_reviewed_revision
     assert protocol.method_review_reference == frozen_review_reference
