@@ -6,8 +6,8 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `lf_whitened_directional_validation.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`194eccdd1f16c295528a4d9e1d7c75c2748f061a`，使用独立 run ID
-`ceg_wm_lf_whitened_directional_validation`，执行冻结的 1 个 non-scientific public-endpoint
+`51adb765cdddafcb4c65c357e899c77b4c9f36d2`，使用优化后独立 run ID
+`ceg_wm_lf_whitened_directional_validation_prepared_feature_execution`，执行冻结的 1 个 non-scientific public-endpoint
 smoke 与 32 个 LF whitened directional scientific units；每 unit 最多 2 attempts、2700 秒。
 operational unit 不计 scientific coverage。Notebook 挂载 Drive、读取 `HF_TOKEN` 与
 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
@@ -21,6 +21,9 @@ directional validation 只读使用 producer revision
 `ceg_wm_lf_whitening_asset_fit_and_score_screening` 已冻结的 whitening asset，不重拟合、
 迁移或回写旧 run。它不拟合 threshold，不形成 FPR、candidate promotion、calibration、
 formal evaluation、baseline 或论文 claim，也不执行 routing、LF/HF 组合、Q/K 或几何恢复。
+旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
+`ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
+**paused / not authorized**，不得作为当前入口运行或与新 run 混合。
 目录内其余全部 Notebook 均为
 **paused / not authorized**，不得作为当前入口运行。
 

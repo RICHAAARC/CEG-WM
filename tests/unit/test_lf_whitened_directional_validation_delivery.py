@@ -26,8 +26,9 @@ ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks/colab/lf_whitened_directional_validation.ipynb"
 PROTOCOL = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
 SERVER_RELATIVE = Path("scripts/experiment_execution/lf_whitened_directional_validation_server.py")
-EXECUTION_REVISION = "194eccdd1f16c295528a4d9e1d7c75c2748f061a"
+EXECUTION_REVISION = "51adb765cdddafcb4c65c357e899c77b4c9f36d2"
 RUN_ID = "ceg_wm_lf_whitened_directional_validation_prepared_feature_execution"
+PROTOCOL_DIGEST = "534d15df2ca924de971489e9bfc41eebad143def106155401c7061a8eb4d9cff"
 WHITENING_ASSET_FIT_RUN_ID = "ceg_wm_lf_whitening_asset_fit_and_score_screening"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/lf_whitened_directional_validation.json",
@@ -165,8 +166,11 @@ def test_lf_whitened_directional_server_writes_safe_receipt(
     )
 
     receipt_bytes = Path(receipt["receipt_path"]).read_bytes()
+    package_sha256 = sha256(lf_whitened_directional_exact_package.read_bytes()).hexdigest()
     assert code == 0
     assert receipt["committed_revision"] == "a" * 40
+    assert receipt["protocol_digest"] == PROTOCOL_DIGEST
+    assert receipt["execution_package_sha256"] == package_sha256
     assert receipt["operational_unit_count"] == 1
     assert receipt["scientific_unit_count"] == 32
     assert receipt["formal_tau_created"] is False
@@ -174,7 +178,9 @@ def test_lf_whitened_directional_server_writes_safe_receipt(
     assert receipt["candidate_promoted"] is False
     assert root_secret.encode() not in receipt_bytes
     assert hf_secret.encode() not in receipt_bytes
-    assert json.loads(receipt_bytes)["development_claim_boundary"] == protocol.claim_boundary
+    persisted_receipt = json.loads(receipt_bytes)
+    assert persisted_receipt["development_claim_boundary"] == protocol.claim_boundary
+    assert persisted_receipt["execution_package_sha256"] == package_sha256
 
 
 @pytest.mark.quick
@@ -243,6 +249,7 @@ def test_lf_whitened_directional_notebook_is_thin_and_output_free() -> None:
         repository_root=ROOT,
     )
     assert protocol.run_id == RUN_ID
+    assert protocol.digest() == PROTOCOL_DIGEST
     assert protocol.whitening_asset_fit_run_id == WHITENING_ASSET_FIT_RUN_ID
     assert protocol.operational_unit_count == 1
     assert protocol.scientific_cluster_count == 32

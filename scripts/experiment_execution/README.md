@@ -5,8 +5,8 @@
 `lf_whitened_directional_validation_server.py` 是当前 Colab 与普通 GPU 服务器共用的执行
 入口。当前唯一授权 Notebook 为
 `notebooks/colab/lf_whitened_directional_validation.ipynb`，固定绑定 execution revision
-`194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与 run ID
-`ceg_wm_lf_whitened_directional_validation`。服务器执行冻结的 1 个 non-scientific
+`51adb765cdddafcb4c65c357e899c77b4c9f36d2` 与优化后独立 run ID
+`ceg_wm_lf_whitened_directional_validation_prepared_feature_execution`。服务器执行冻结的 1 个 non-scientific
 public-endpoint smoke 与 32 个 LF whitened directional scientific units；每 unit 最多
 2 attempts、2700 秒。operational unit 不计 scientific coverage。
 
@@ -19,6 +19,9 @@ Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/Z
 迁移或回写旧 run。它不拟合 threshold，不授权 FPR、candidate promotion、calibration、
 formal evaluation、baseline 或论文 claim；不执行 routing、LF/HF 组合、Q/K、estimator、
 reliability、rectification 或 conditional recovery。其他 checked-in Notebook 入口均已暂停。
+旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
+`ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
+**paused / not authorized**，不得续跑或与优化后 run 混合。
 
 `lf_whitened_score_screening_server.py` 与
 `notebooks/colab/lf_whitened_score_screening.ipynb` 已完成 1 个 non-scientific operational

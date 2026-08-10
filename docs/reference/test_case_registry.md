@@ -34,13 +34,12 @@ TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
 | --- | ---: | ---: | ---: | ---: |
 | 返修前权威 | 609 | 606（3 deselected） | 631 | 12 |
 | 2026-08-05 历史登记 | 614 | 597（17 deselected） | 631 | 12 |
-| 本批实施后临时 collect | 725 | 703（22 deselected） | 631 | 12 |
+| 优化后交付 final collect | 739 | 717（22 deselected） | 631 | 12 |
 
-2026-08-05 行保留当时测试平面整理的历史事实。本批临时 collect 使用上述三条权威命令
-重新取得 `725`、`703/725` 与 `631`；新增的 LF detector→record→persistence 节点明确
-标为 `integration+slow`，因此只增加 all collection，不进入 default。最终 exact revision
-的全仓计数仍须由后续全仓测试清单重新采集登记，本页不把历史 `614/597` 手填为当前
-最终权威。完整 node ID 始终以 collect 命令输出为准。
+2026-08-05 行保留当时测试平面整理的历史事实。优化后交付 final collect 使用上述三条
+权威命令重新取得 `739`、`717/739` 与 `631`；LF detector→record→persistence 全链节点
+保持 `integration+slow`，因此进入 all collection 而不进入 default。本页不把历史
+`614/597` 手填为当前权威；完整 node ID 始终以 collect 命令输出为准。
 
 ## 旧 full 失败与中断证据
 
@@ -136,6 +135,14 @@ registered/null/four-wrong `17.87s`、functional public adapter `2.30s`。收敛
 `9.44s`，persistence/retry 为 `0.03s`，functional public adapter 为 `2.44s`。
 被移出默认路径的 detector→record→persistence 全链以登记命令显式执行，结果为
 `1 passed in 10.16s`，node call `9.04s`。
+
+确定性特征复用 revision 的定向实测为：detector 与 functional 组合 `10 passed in
+34.68s`，directional 组合 `3 passed in 48.33s`，最终 bitwise/failure 回归组合
+`3 passed in 37.06s`。DCT 计数节点只证明 public detector 调用结构与冻结的
+`64 observation + 5 template = 69` 次准备边界，不重复 32-cluster 的 384 次真实 DCT；
+完整 detector→record→persistence 穿透继续仅由下列显式 `integration+slow` 节点承担。
+优化后交付 exact 的 4-node delivery family 与全局 Notebook inventory 合并定向结果为
+`5 passed in 4.38s`；共享 package 只构建一次，isolated server help call 为 `2.03s`。
 
 | registry_id | exact node/family | category | default | concrete failure mode | production boundary | fixture scale | mock/replacement | supersedes/repetition | review trigger |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
