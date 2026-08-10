@@ -251,8 +251,8 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "agent2-lf-whitened-method-semantic-review:4cd7d33a37b041970ed078b699bb8f0aa82b4e31:APPROVE",
-    "reviewed_repository_revision": "4cd7d33a37b041970ed078b699bb8f0aa82b4e31",
+    "review_reference": "agent2-lf-prepared-feature-semantic-review:00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE",
+    "reviewed_repository_revision": "00bed2baaf60f039868c208291c86b539a54b2f3",
     "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1"
   }
 }
