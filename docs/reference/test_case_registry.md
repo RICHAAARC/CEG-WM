@@ -39,7 +39,7 @@ TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
 2026-08-05 行保留当时测试平面整理的历史事实。本批临时 collect 使用上述三条权威命令
 重新取得 `725`、`703/725` 与 `631`；新增的 LF detector→record→persistence 节点明确
 标为 `integration+slow`，因此只增加 all collection，不进入 default。最终 exact revision
-的全仓计数仍须由后续 D3 fresh refresh 重新登记，本页不把历史 `614/597` 手填为当前
+的全仓计数仍须由后续全仓测试清单重新采集登记，本页不把历史 `614/597` 手填为当前
 最终权威。完整 node ID 始终以 collect 命令输出为准。
 
 ## 旧 full 失败与中断证据

@@ -201,7 +201,8 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources() 
         readiness["independent_semantic_review"]["review_reference"]
     )
     assert protocol.method_review_reference == (
-        "agent2-lf-prepared-feature-semantic-review:"
+        "independent_lf_prepared_feature_semantic_review:"
+        "019fe0f3-b8e8-7230-98f1-9ae0450c1f4a:"
         "00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE"
     )
     assert protocol.method_reviewed_revision == (

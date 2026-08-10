@@ -251,7 +251,7 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "agent2-lf-prepared-feature-semantic-review:00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE",
+    "review_reference": "independent_lf_prepared_feature_semantic_review:019fe0f3-b8e8-7230-98f1-9ae0450c1f4a:00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE",
     "reviewed_repository_revision": "00bed2baaf60f039868c208291c86b539a54b2f3",
     "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1"
   }
