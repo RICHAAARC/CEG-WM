@@ -330,11 +330,25 @@ def _dependency_blocked_terminals():
 
 
 @pytest.mark.unit
-def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary() -> None:
+def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary(
+    tmp_path: Path,
+) -> None:
     protocol, manifest = load_qk_synchronization_write_protocol(
         CONFIG, repository_root=ROOT
     )
+    config_payload = json.loads(CONFIG.read_text(encoding="utf-8"))
 
+    assert protocol.run_id == (
+        "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
+    )
+    assert config_payload["run_id"] == protocol.run_id
+    assert protocol.schema_version == (
+        "ceg_wm_qk_synchronization_write_diagnosis_protocol"
+    )
+    assert protocol.protocol_id == "ceg_wm_qk_synchronization_write_diagnosis"
+    assert protocol.protocol_version == "1.0.0"
+    assert protocol.role_id == "qk_synchronization_write_diagnosis"
+    assert protocol.candidate_identity == "qk_relation_similarity"
     assert protocol.routing_mode == "routing_disabled"
     assert protocol.content_branch_id == "hf_only"
     assert protocol.operational_unit_count == 1
@@ -352,9 +366,56 @@ def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary() -> N
     assert protocol.wrong_key_indexes == (0, 1, 2, 3)
     assert protocol.geometry_ratio_roster[0].ratio == 1.0 / 16.0
     assert protocol.geometry_ratio_roster[-1].ratio == 1.0 / 4.0
+    assert tuple(
+        (
+            item.transform_identity,
+            item.crop_fraction,
+            item.scale_factor,
+            item.rotation_degrees,
+        )
+        for item in protocol.transform_probe_roster
+    ) == TRANSFORM_PROBE_ROSTER
+    assert protocol.line_search_factors == tuple(
+        1.0 / (2**index) for index in range(8)
+    )
+    assert (
+        protocol.content_relative_l2_numerator,
+        protocol.content_relative_l2_denominator,
+    ) == (3, 250)
+    assert protocol.content_projection_relative_limit == 1.0e-4
+    assert protocol.callback_index == 18
+    assert protocol.qk_observation_schedule_index == 7
+    assert protocol.maximum_attempts_per_unit == 2
+    assert protocol.maximum_duration_seconds_per_unit == 2700
+    assert protocol.ratio_eligibility_rule == (
+        "after_all_twelve_ratio_probe_units_are_terminal_choose_the_first_ratio_"
+        "in_ascending_frozen_order_with_four_of_four_write_accepted_positive_"
+        "actual_registered_gain_positive_keyed_gain_margin_and_zero_identity_"
+        "budget_integrity_or_nonfinite_violation"
+    )
+    assert protocol.claim_boundary == CLAIM_BOUNDARY
+    assert protocol.unit_roster_digest == (
+        "e5eea4590b4dfaa0494aef483fce8f2ce89f10be66b92db8d776a3fe6c9ac448"
+    )
     assert "no_ratio_selection" in CLAIM_BOUNDARY
     assert "no_estimator" in CLAIM_BOUNDARY
     assert len(manifest.entries) == 4
+
+    legacy_payload = dict(config_payload)
+    legacy_payload["run_id"] = "ceg_wm_qk_synchronization_write_diagnosis"
+    legacy_config = tmp_path / "qk_legacy_run_identity.json"
+    legacy_config.write_text(
+        json.dumps(legacy_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        QkSynchronizationWriteProtocolError,
+        match="protocol identity drifted",
+    ):
+        load_qk_synchronization_write_protocol(
+            legacy_config,
+            repository_root=ROOT,
+        )
 
 
 @pytest.mark.unit

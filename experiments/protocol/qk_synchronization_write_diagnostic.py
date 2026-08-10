@@ -22,7 +22,7 @@ from experiments.protocol.internal_splits import (
 
 PROTOCOL_ID = "ceg_wm_qk_synchronization_write_diagnosis"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_qk_synchronization_write_diagnosis"
+RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
 OPERATIONAL_UNIT_COUNT = 1
 RATIO_PROBE_CLUSTER_COUNT = 4
 RATIO_PROBE_UNIT_COUNT = 12
