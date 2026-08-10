@@ -55,6 +55,16 @@ def _historical_threshold_delivery_root(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
     global DELIVERY_ROOT, EXACT_FILES, bootstrap, builder_module
+    historical_builder_name = "ceg_wm_historical_threshold_package_builder"
+    historical_bootstrap_name = "ceg_wm_historical_threshold_bootstrap"
+    trusted_bootstrap_alias = "ceg_wm_verified_experiment_bootstrap"
+    missing_module = object()
+    original_trusted_bootstrap = sys.modules.get(
+        trusted_bootstrap_alias,
+        missing_module,
+    )
+    assert historical_builder_name not in sys.modules
+    assert historical_bootstrap_name not in sys.modules
     root = tmp_path_factory.mktemp("threshold_delivery_producer") / "repository"
     subprocess.run(
         ("git", "clone", "--no-checkout", "--quiet", str(ROOT), str(root)),
@@ -65,18 +75,26 @@ def _historical_threshold_delivery_root(
     _git(root, "checkout", "--detach", HF_THRESHOLD_DELIVERY_PRODUCER_REVISION)
     assert _git(root, "rev-parse", "HEAD") == HF_THRESHOLD_DELIVERY_PRODUCER_REVISION
     assert _git(root, "status", "--porcelain") == ""
-    DELIVERY_ROOT = root
-    builder_module = _load_historical_module(
-        "ceg_wm_historical_threshold_package_builder",
-        root / "scripts/experiment_execution/build_experiment_execution_package.py",
-    )
-    bootstrap = _load_historical_module(
-        "ceg_wm_historical_threshold_bootstrap",
-        root / "scripts/experiment_execution/experiment_execution_bootstrap.py",
-    )
-    EXACT_FILES = builder_module.EXACT_FILES
-    yield root
-    DELIVERY_ROOT = ROOT
+    try:
+        DELIVERY_ROOT = root
+        builder_module = _load_historical_module(
+            historical_builder_name,
+            root / "scripts/experiment_execution/build_experiment_execution_package.py",
+        )
+        bootstrap = _load_historical_module(
+            historical_bootstrap_name,
+            root / "scripts/experiment_execution/experiment_execution_bootstrap.py",
+        )
+        EXACT_FILES = builder_module.EXACT_FILES
+        yield root
+    finally:
+        DELIVERY_ROOT = ROOT
+        sys.modules.pop(historical_builder_name, None)
+        sys.modules.pop(historical_bootstrap_name, None)
+        if original_trusted_bootstrap is missing_module:
+            sys.modules.pop(trusted_bootstrap_alias, None)
+        else:
+            sys.modules[trusted_bootstrap_alias] = original_trusted_bootstrap
 
 
 def _authority_digests(repository: Path) -> dict[str, str]:
