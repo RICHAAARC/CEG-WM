@@ -7,7 +7,12 @@ import subprocess
 
 import pytest
 
-from governance.tools.run_validation_profile import commands_for_profile, run_profile
+import governance.tools.run_validation_profile as validation_profile
+from governance.tools.run_validation_profile import (
+    VALIDATION_ENVIRONMENT_OVERRIDES,
+    commands_for_profile,
+    run_profile,
+)
 
 
 @pytest.mark.unit
@@ -69,24 +74,37 @@ def test_unknown_profile_fails_closed() -> None:
 def test_run_profile_propagates_first_failure_code(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     calls: list[tuple[str, ...]] = []
+    observed_environment: dict[str, str] = {}
 
     def fail_first(
         command: tuple[str, ...],
         *,
         cwd: Path,
         check: bool,
+        env: dict[str, str],
     ) -> subprocess.CompletedProcess[tuple[str, ...]]:
         assert cwd == tmp_path
         assert check is False
         calls.append(command)
+        observed_environment.update(env)
         return subprocess.CompletedProcess(command, 7)
 
     monkeypatch.setattr(subprocess, "run", fail_first)
+    elapsed = iter((10.0, 12.5))
+    monkeypatch.setattr(validation_profile, "perf_counter", lambda: next(elapsed))
 
     assert run_profile("full", tmp_path) == 7
     assert calls == [commands_for_profile("full")[0]]
+    assert {
+        key: observed_environment[key]
+        for key in VALIDATION_ENVIRONMENT_OVERRIDES
+    } == VALIDATION_ENVIRONMENT_OVERRIDES
+    output = capsys.readouterr().out
+    assert "command_identity=project_pytest" in output
+    assert "walltime_seconds=2.500 returncode=7" in output
 
 
 @pytest.mark.unit
@@ -102,9 +120,13 @@ def test_run_profile_stops_before_harness_after_second_failure(
         *,
         cwd: Path,
         check: bool,
+        env: dict[str, str],
     ) -> subprocess.CompletedProcess[tuple[str, ...]]:
         assert cwd == tmp_path
         assert check is False
+        assert {
+            key: env[key] for key in VALIDATION_ENVIRONMENT_OVERRIDES
+        } == VALIDATION_ENVIRONMENT_OVERRIDES
         calls.append(command)
         return subprocess.CompletedProcess(command, next(return_codes))
 

@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+import os
 from pathlib import Path
 import shlex
 import subprocess
 import sys
+from time import perf_counter
 
 PROFILE_NAMES = ("governance", "method", "full")
+VALIDATION_ENVIRONMENT_OVERRIDES = {
+    "TMPDIR": "/tmp",
+    "TEMP": "/tmp",
+    "TMP": "/tmp",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+}
 
 
 def commands_for_profile(
@@ -50,6 +61,17 @@ def commands_for_profile(
     return project_pytest, governance_pytest, harness
 
 
+def command_identity(command: tuple[str, ...]) -> str:
+    """返回登记命令的稳定职责身份。"""
+    if command[-1:] == ("tests",):
+        return "project_pytest"
+    if command[-1:] == ("governance/tests",):
+        return "governance_pytest"
+    if command[-1:] == ("governance/harness/run_all_audits.py",):
+        return "harness_audits"
+    raise ValueError("validation command identity is unknown")
+
+
 def run_profile(
     profile: str,
     repository_root: Path,
@@ -58,11 +80,29 @@ def run_profile(
 ) -> int:
     """从仓库根目录运行档位；首个失败立即停止。"""
     commands = commands_for_profile(profile)
+    environment = dict(os.environ)
+    environment.update(VALIDATION_ENVIRONMENT_OVERRIDES)
     for command in commands:
-        print(f"[{profile}] {shlex.join(command)}", flush=True)
+        identity = command_identity(command)
+        print(
+            f"[{profile}] command_identity={identity} command={shlex.join(command)}",
+            flush=True,
+        )
         if dry_run:
             continue
-        completed = subprocess.run(command, cwd=repository_root, check=False)
+        started = perf_counter()
+        completed = subprocess.run(
+            command,
+            cwd=repository_root,
+            check=False,
+            env=environment,
+        )
+        elapsed = perf_counter() - started
+        print(
+            f"[{profile}] command_identity={identity} "
+            f"walltime_seconds={elapsed:.3f} returncode={completed.returncode}",
+            flush=True,
+        )
         if completed.returncode != 0:
             return completed.returncode
     return 0

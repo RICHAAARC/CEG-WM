@@ -26,7 +26,6 @@ ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks/colab/lf_whitened_directional_validation.ipynb"
 PROTOCOL = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
 SERVER_RELATIVE = Path("scripts/experiment_execution/lf_whitened_directional_validation_server.py")
-SERVER = ROOT / SERVER_RELATIVE
 EXECUTION_REVISION = "194eccdd1f16c295528a4d9e1d7c75c2748f061a"
 RUN_ID = "ceg_wm_lf_whitened_directional_validation"
 WHITENING_ASSET_FIT_RUN_ID = "ceg_wm_lf_whitening_asset_fit_and_score_screening"
@@ -60,12 +59,26 @@ def _constant(notebook: dict[str, object], name: str) -> object:
     return values[0]
 
 
+@pytest.fixture(scope="module")
+def lf_whitened_directional_exact_package(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    package_root = tmp_path_factory.mktemp("lf_whitened_directional_exact_package")
+    return _build_or_verify_package(ROOT, package_root, "a" * 40)
+
+
 @pytest.mark.quick
-def test_lf_whitened_directional_server_help_imports_from_isolated_cwd(tmp_path: Path) -> None:
+def test_lf_whitened_directional_server_help_imports_from_isolated_cwd(
+    tmp_path: Path,
+    lf_whitened_directional_exact_package: Path,
+) -> None:
+    extracted = tmp_path / "package"
+    with ZipFile(lf_whitened_directional_exact_package) as archive:
+        archive.extractall(extracted)
     environment = dict(os.environ)
     environment.pop("PYTHONPATH", None)
     completed = subprocess.run(
-        (sys.executable, "-I", str(SERVER), "--help"),
+        (sys.executable, "-I", str(extracted / SERVER_RELATIVE), "--help"),
         cwd=tmp_path,
         env=environment,
         check=False,
@@ -78,19 +91,21 @@ def test_lf_whitened_directional_server_help_imports_from_isolated_cwd(tmp_path:
 
 
 @pytest.mark.quick
-def test_lf_whitened_directional_generic_package_contains_complete_execution_chain(tmp_path: Path) -> None:
-    package = _build_or_verify_package(ROOT, tmp_path, "a" * 40)
-    with ZipFile(package) as archive:
+def test_lf_whitened_directional_generic_package_contains_complete_execution_chain(
+    lf_whitened_directional_exact_package: Path,
+) -> None:
+    with ZipFile(lf_whitened_directional_exact_package) as archive:
         names = set(archive.namelist())
         assert REQUIRED_PACKAGE_MEMBERS <= names
         assert archive.testzip() is None
-    assert sha256(package.read_bytes()).hexdigest()
+    assert sha256(lf_whitened_directional_exact_package.read_bytes()).hexdigest()
 
 
 @pytest.mark.quick
 def test_lf_whitened_directional_server_writes_safe_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    lf_whitened_directional_exact_package: Path,
 ) -> None:
     protocol, manifest = load_lf_whitened_directional_validation_protocol(
         PROTOCOL, repository_root=ROOT
@@ -103,14 +118,16 @@ def test_lf_whitened_directional_server_writes_safe_receipt(
     artifact = persistent / "worker.zip"
     with ZipFile(artifact, "x") as archive:
         archive.writestr("result.json", "{}")
-    package = persistent / "package.zip"
-    package.write_bytes(b"package")
     root_secret = "directional-root-secret"
     hf_secret = "directional-hf-secret"
     monkeypatch.setattr(server, "_verify_repository", lambda *_args: None)
     monkeypatch.setattr(server, "_probe_resources", lambda **_kwargs: {"gpu": "test"})
     monkeypatch.setattr(server, "_download_configured_model", lambda **_kwargs: None)
-    monkeypatch.setattr(server, "_build_or_verify_package", lambda *_args: package)
+    monkeypatch.setattr(
+        server,
+        "_build_or_verify_package",
+        lambda *_args: lf_whitened_directional_exact_package,
+    )
     worker = {
         "result_zip": str(artifact),
         "protocol_digest": protocol.digest(),

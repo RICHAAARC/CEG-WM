@@ -52,6 +52,14 @@ conda run -n CEG-WM python governance/tools/run_validation_profile.py full
 
 `-s` 用于规避部分 WSL/Windows 临时目录上的 pytest capture 文件异常；它不改变测试选择或断言语义。
 
+登记 profile 会为每个子进程统一覆盖 `TMPDIR`、`TEMP`、`TMP` 为 Linux `/tmp`，并将
+`OMP_NUM_THREADS`、`MKL_NUM_THREADS`、`OPENBLAS_NUM_THREADS`、
+`NUMEXPR_NUM_THREADS` 固定为 `1`。这样不会把继承的 Windows 挂载临时目录或数学库
+线程数误当作验证环境权威。profile 仍按 project pytest、governance pytest、harness
+的登记顺序逐个单进程执行，遇到首个非零返回码立即停止，不启用 `xdist`。每条实际执行
+命令都会输出 `command_identity`、walltime 和 return code，便于区分选择耗时与失败位置；
+这些计时只是运行诊断，不是科学 records 或性能声明。
+
 ## Boundary
 
 - `.venv/` 是未提交的 `local_environment`，不进入治理扫描、拆包或实验 provenance。

@@ -23,6 +23,10 @@ from experiments.metrics.lf_whitened_score_screening import (
     fit_lf_null_whitening_asset,
 )
 from experiments.protocol.development_records import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
+    OPERATIONAL_RECORD_COLLECTION_ROLE,
+    OPERATIONAL_RECORD_KIND,
+    OPERATIONAL_RECORD_SCHEMA,
     DevelopmentOperationalRecord,
     DevelopmentScientificRecord,
     canonical_development_value_digest,
@@ -366,15 +370,58 @@ def _directional_runner() -> tuple[
     )
 
 
+def _validated_operational_record(
+    runner: LfWhitenedDirectionalValidationRunner,
+) -> DevelopmentOperationalRecord:
+    elapsed_seconds = 0.01
+    result_payload = {
+        "operational_role": "environment_runtime_throughput_preflight",
+        "source_cluster_ordinal": 0,
+        "case_ids": ["formal_record_persistence_contract"],
+        "responsibility_result_digests": [
+            ["content_embedder", canonical_digest({"formal_record": "operational"})]
+        ],
+        "elapsed_seconds": elapsed_seconds,
+        "runtime_config_digest": canonical_digest(
+            {"runtime": "lf_directional_persistence_fixture"}
+        ),
+        "counts_as_scientific_coverage": False,
+        "scientific_claims_supported": False,
+    }
+    provisional = DevelopmentOperationalRecord(
+        schema_version=OPERATIONAL_RECORD_SCHEMA,
+        collection_role=OPERATIONAL_RECORD_COLLECTION_ROLE,
+        record_kind=OPERATIONAL_RECORD_KIND,
+        record_id="0" * 64,
+        run_id=runner.run_id,
+        protocol_digest=runner.protocol_digest,
+        method_code_revision=runner.method_code_revision,
+        unit_index=0,
+        phase="development_environment_preflight",
+        source_cluster_ordinal=0,
+        candidate_config_digest=runner.candidate_config_digest,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        actual_elapsed_seconds=elapsed_seconds,
+        maximum_duration_seconds=2700,
+        operation_result_payload=result_payload,
+        counts_as_scientific_coverage=False,
+        scientific_claims_supported=False,
+        scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY,
+    )
+    record = replace(
+        provisional,
+        record_id=canonical_development_value_digest(
+            provisional.payload_without_record_id()
+        ),
+    )
+    record.validate()
+    return record
+
+
 @pytest.mark.unit
 def test_lf_whitened_directional_runner_uses_public_detector_and_four_wrong_controls() -> None:
     runner, runtime = _directional_runner()
-    operational = runner.execute_operational_smoke(
-        base_latent=_lf_base_latent(),
-        attempt_index=0,
-        retry_parent_intent_digest=None,
-        maximum_duration_seconds=2700,
-    )
     scientific = runner.execute_scientific_cluster(
         cluster_ordinal=0,
         base_latent=_lf_base_latent(),
@@ -384,8 +431,6 @@ def test_lf_whitened_directional_runner_uses_public_detector_and_four_wrong_cont
     )
     runtime.close()
 
-    assert type(operational) is DevelopmentOperationalRecord
-    assert operational.counts_as_scientific_coverage is False
     result = scientific.operation_result_payload["directional_observation"]
     assert len(result["wrong_key_scores"]) == 4
     assert scientific.detector_trace["public_callable"] == (
@@ -681,12 +726,7 @@ def test_lf_whitened_directional_persistence_commits_recovers_and_preserves_retr
     )
     cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
     intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101)
-    record = runner.execute_operational_smoke(
-        base_latent=_lf_base_latent(),
-        attempt_index=0,
-        retry_parent_intent_digest=None,
-        maximum_duration_seconds=2700,
-    )
+    record = _validated_operational_record(runner)
     store.commit_session_unit(
         cursor,
         lease,
@@ -695,19 +735,22 @@ def test_lf_whitened_directional_persistence_commits_recovers_and_preserves_retr
         raw_secret_values=(ROOT_KEY, runner.registered_root_key),
         now_epoch_seconds=102,
     )
-    success_intent = store.create_session_intent(cursor, lease, now_epoch_seconds=103)
-    success = runner.execute_scientific_cluster(
+    blocked_intent = store.create_session_intent(cursor, lease, now_epoch_seconds=103)
+    blocked = runner.create_failed_scientific_record(
         cluster_ordinal=0,
-        base_latent=_lf_base_latent(),
         attempt_index=0,
         retry_parent_intent_digest=None,
         maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        failure_type="builtins.RuntimeError",
+        resource_failure=False,
+        failure_category="implementation_failure",
     )
     store.commit_session_unit(
         cursor,
         lease,
-        success_intent,
-        record=success,
+        blocked_intent,
+        record=blocked,
         raw_secret_values=(ROOT_KEY, runner.registered_root_key),
         now_epoch_seconds=104,
     )
@@ -758,3 +801,72 @@ def test_lf_whitened_directional_persistence_commits_recovers_and_preserves_retr
     assert cursor.next_unit_index == 3
     assert len(recovery.committed_units) == 4
     assert recovery.committed_units[-1].attempt_disposition == "final_failure"
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_lf_whitened_directional_detector_record_persistence_full_chain(
+    tmp_path: Path,
+) -> None:
+    runner, runtime = _directional_runner()
+    identity = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest=runner.manifest.digest(),
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.run_id,
+        worker_identity=identity,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    lease = store.acquire_lease(
+        session_id="lf_directional_full_chain_session",
+        now_epoch_seconds=200,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=200)
+    operational_intent = store.create_session_intent(
+        cursor, lease, now_epoch_seconds=201
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        operational_intent,
+        record=_validated_operational_record(runner),
+        raw_secret_values=(ROOT_KEY, runner.registered_root_key),
+        now_epoch_seconds=202,
+    )
+    scientific_intent = store.create_session_intent(
+        cursor, lease, now_epoch_seconds=203
+    )
+    scientific = runner.execute_scientific_cluster(
+        cluster_ordinal=0,
+        base_latent=_lf_base_latent(),
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    committed = store.commit_session_unit(
+        cursor,
+        lease,
+        scientific_intent,
+        record=scientific,
+        raw_secret_values=(ROOT_KEY, runner.registered_root_key),
+        now_epoch_seconds=204,
+    )
+    recovery = store.recover(now_epoch_seconds=205)
+    runtime.close()
+
+    assert committed.attempt_disposition == "success"
+    assert committed.record_id == scientific.record_id
+    assert scientific.detector_trace["public_callable"] == (
+        "main.lf_null_whitened_matched_detector"
+    )
+    assert scientific.detector_trace["same_image_registered_four_wrong_reuse"] is True
+    assert scientific.detector_trace["paired_clean_primary_null"] is True
+    assert cursor.next_unit_index == 2
+    assert tuple(item.unit_index for item in recovery.committed_units) == (0, 1)

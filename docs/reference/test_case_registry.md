@@ -33,14 +33,14 @@ TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
 | snapshot | project all | project default | governance default | harness audits |
 | --- | ---: | ---: | ---: | ---: |
 | 返修前权威 | 609 | 606（3 deselected） | 631 | 12 |
-| 当前登记 | 614 | 597（17 deselected） | 631 | 12 |
+| 2026-08-05 历史登记 | 614 | 597（17 deselected） | 631 | 12 |
+| 本批实施后临时 collect | 725 | 703（22 deselected） | 631 | 12 |
 
-项目节点增加 5 个来自 parent 已批准的 detector 64-cluster/cross-fit 覆盖；本 revision
-不新增或删除测试节点，只修正两个语义名称并把 14 个实测超过 30 秒的 development
-runner 节点精确移出默认集合。因此 `606 + 5 - 14 = 597`。目录汇总为：
-`tests/unit` 607、`tests/functional` 5、`tests/integration` 1、`tests/smoke` 1；
-governance 的 631 个节点全部位于 `governance/tests`。完整 node ID 以以上 collect 命令
-输出为权威，下面每个文件族的数量之和必须分别等于 614 和 631。
+2026-08-05 行保留当时测试平面整理的历史事实。本批临时 collect 使用上述三条权威命令
+重新取得 `725`、`703/725` 与 `631`；新增的 LF detector→record→persistence 节点明确
+标为 `integration+slow`，因此只增加 all collection，不进入 default。最终 exact revision
+的全仓计数仍须由后续 D3 fresh refresh 重新登记，本页不把历史 `614/597` 手填为当前
+最终权威。完整 node ID 始终以 collect 命令输出为准。
 
 ## 旧 full 失败与中断证据
 
@@ -126,6 +126,35 @@ TMPDIR=/tmp TEMP=/tmp TMP=/tmp /home/richar/miniforge3/bin/conda run -n CEG-WM \
 | runtime_qualification_bootstrap | `tests/unit/test_runtime_qualification_bootstrap.py` | registered default | 23/23 | CPU, tmp package | tmp diagnostics | bootstrap contract only | external package/bootstrap | P:path | qualification bootstrap change |
 | runtime_qualification_delivery | `tests/unit/test_runtime_qualification_delivery.py` | registered default | 82/82 | CPU, git/tmp | tmp package/receipt | delivery contract only | package/Notebook/bootstrap | P:path | qualification delivery change |
 | runtime_routing_observation | `tests/unit/test_runtime_routing_observation.py` | unit | 9/9 | CPU tensor, fake backend | none | routing observation only | runtime/router | P:path | runtime routing change |
+
+## LF whitened directional 测试职责与耗时
+
+本批 parent `7210d9f4b4ba65fe11eba21c51ba119b5bda180a` 的三文件默认基线为
+`21 passed in 42.46s`。主要节点为 persistence/retry `18.13s`、public detector
+registered/null/four-wrong `17.87s`、functional public adapter `2.30s`。收敛后同一
+默认选择为 `21 passed, 1 deselected in 15.53s`：public detector 完整穿透仍为
+`9.44s`，persistence/retry 为 `0.03s`，functional public adapter 为 `2.44s`。
+被移出默认路径的 detector→record→persistence 全链以登记命令显式执行，结果为
+`1 passed in 10.16s`，node call `9.04s`。
+
+| registry_id | exact node/family | category | default | concrete failure mode | production boundary | fixture scale | mock/replacement | supersedes/repetition | review trigger |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lf_directional_public_controls | `tests/unit/test_lf_whitened_directional_validation.py::test_lf_whitened_directional_runner_uses_public_detector_and_four_wrong_controls` | unit | yes | registered、primary-null 或四个 wrong controls 未共用冻结 public detector | real runner→runtime→public LF detector→formal scientific record | 1 cluster, 6 detector calls | no production replacement | unique default full control traversal | LF detector/runner/control change |
+| lf_directional_persistence_retry | `tests/unit/test_lf_whitened_directional_validation.py::test_lf_whitened_directional_persistence_commits_recovers_and_preserves_retry_lineage` | unit | yes | create-only commit、cursor、resource retry parent 或 recovery lineage 漂移 | formal operational/scientific records→persistent store→COMMITTED→recover | 3 unit indexes, 4 committed attempts | no record validation or persistence replacement; no DCT | replaces repeated detector execution in persistence-only evidence | persistence/record schema change |
+| lf_directional_full_chain | `tests/unit/test_lf_whitened_directional_validation.py::test_lf_whitened_directional_detector_record_persistence_full_chain` | integration, slow | no | detector结果不能形成正式record或不能经COMMITTED恢复 | real public detector→formal record→persistent store→COMMITTED→recover | 1 operational + 1 scientific | no production replacement | intentionally overlaps only at cross-boundary integration | detector/runner/persistence interface change |
+| lf_whitened_public_adapter | `tests/functional/test_lf_null_whitened_detector.py::test_lf_whitened_candidate_crosses_real_public_adapter_without_raw_fallback` | functional, quick | yes | whitened candidate退回raw或public callable/candidate identity混淆 | real public adapter raw and whitened calls | 1 registered observation | no production replacement | distinct candidate identity evidence | LF public adapter/candidate change |
+| lf_directional_delivery | `tests/unit/test_lf_whitened_directional_validation_delivery.py` | quick family, 4 nodes | yes | exact package缺成员/不可导入、server receipt泄密、Notebook变厚 | one module-scoped exact package→isolated server import→server receipt and Notebook checks | 1 package, 1 receipt, 1 Notebook | worker execution only replaced in receipt isolation; package/import real | one package build shared across family | delivery/package/Notebook change |
+| validation_profile_environment | `governance/tests/test_validation_profiles.py` | unit family, 6 nodes | governance/full | profile越界选集、环境继承漂移、非fail-fast或计时身份缺失 | subprocess orchestration only | 3 registered commands maximum | subprocess fixture only | unique profile orchestration evidence | validation profile change |
+
+显式全链命令：
+
+```bash
+TMPDIR=/tmp TEMP=/tmp TMP=/tmp OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+/home/richar/miniforge3/bin/conda run -n CEG-WM python -m pytest -q \
+  -o addopts='' \
+  tests/unit/test_lf_whitened_directional_validation.py::test_lf_whitened_directional_detector_record_persistence_full_chain
+```
 
 ## Development runner 重节点
 
