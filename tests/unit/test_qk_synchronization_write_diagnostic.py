@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from hashlib import sha256
+import inspect
 import json
 from pathlib import Path
 
@@ -62,6 +63,7 @@ from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint
     _is_resource_failure,
     _qualified_exception_type_chain,
     _selected_rgb8,
+    execute_qk_synchronization_write_diagnostic_session,
 )
 from tests.unit.test_runtime_qk_observation import (
     FakeGeometrySynchronizationBackend,
@@ -340,7 +342,7 @@ def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary(
     config_payload = json.loads(CONFIG.read_text(encoding="utf-8"))
 
     assert protocol.run_id == (
-        "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
+        "ceg_wm_qk_runtime_failure_localization"
     )
     assert config_payload["run_id"] == protocol.run_id
     assert protocol.schema_version == (
@@ -387,6 +389,15 @@ def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary(
     assert protocol.callback_index == 18
     assert protocol.qk_observation_schedule_index == 7
     assert protocol.maximum_attempts_per_unit == 2
+    assert protocol.authorized_operational_unit_count == 1
+    assert protocol.authorized_scientific_unit_count == 0
+    assert protocol.authorized_total_unit_count == 1
+    assert protocol.authorized_maximum_attempts_per_unit == 1
+    assert tuple(unit.unit_index for unit in protocol.authorized_unit_roster) == (0,)
+    assert protocol.authorized_unit_roster[0].maximum_record_attempts == 1
+    assert protocol.authorized_unit_roster_digest == (
+        "a1edd1bdfb2c337c1ade319e1972a51bf19a647b0983932d947bf9e031502e3c"
+    )
     assert protocol.maximum_duration_seconds_per_unit == 2700
     assert protocol.ratio_eligibility_rule == (
         "after_all_twelve_ratio_probe_units_are_terminal_choose_the_first_ratio_"
@@ -417,6 +428,19 @@ def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary(
             legacy_config,
             repository_root=ROOT,
         )
+
+
+@pytest.mark.unit
+def test_qk_failure_localization_entrypoint_cannot_execute_scientific_units() -> None:
+    source = inspect.getsource(execute_qk_synchronization_write_diagnostic_session)
+
+    assert "protocol.authorized_unit_roster" in source
+    assert "protocol.authorized_total_unit_count" in source
+    assert "execute_scientific_unit" not in source
+    assert "replay_synchronization_diagnosis_aggregate" not in source
+    assert "frozen_roster_complete" not in source
+    assert "operational_failure_localization_complete" in source
+    assert "operational_failure_localization_failed" in source
 
 
 @pytest.mark.unit

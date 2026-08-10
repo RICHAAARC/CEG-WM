@@ -283,46 +283,37 @@ def execute_qk_synchronization_write_diagnostic_session(
     candidate_digest = canonical_digest({"candidate_identity": protocol.candidate_identity, "adapter_config_digest": adapter.configuration.config_digest, "runtime_config_digest": runtime_session.runtime_config_digest, "manifest_digest": manifest.digest(), "package_identity": execution_package_sha256})
     authority_digest = canonical_digest({"protocol_digest": protocol_digest, "manifest_digest": manifest.digest(), "content_root_public_digest": content_public, "geometry_root_public_digest": geometry_public, "run_id": run_id})
     runner = QkSynchronizationWriteDiagnosticRunner(protocol=protocol, manifest=manifest, adapter=adapter, runtime_adapter=runtime, method_code_revision=expected_revision, run_id=run_id, content_registered_root_key=content_root, geometry_registered_root_key=geometry_root, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, candidate_config_digest=candidate_digest, package_identity=execution_package_sha256)
-    registered_bindings = runner.create_persistence_unit_bindings()
-    store = DevelopmentPersistentStore(persistent, run_id=run_id, worker_identity=FrozenWorkerIdentity(revision=expected_revision, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, input_manifest_digest=manifest.digest(), candidate_config_digest=candidate_digest, unit_roster_digest=protocol.unit_roster_digest), registered_unit_bindings=registered_bindings)
+    registered_bindings = runner.create_persistence_unit_bindings()[
+        : protocol.authorized_total_unit_count
+    ]
+    store = DevelopmentPersistentStore(persistent, run_id=run_id, worker_identity=FrozenWorkerIdentity(revision=expected_revision, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, input_manifest_digest=manifest.digest(), candidate_config_digest=candidate_digest, unit_roster_digest=protocol.authorized_unit_roster_digest), registered_unit_bindings=registered_bindings)
     started_epoch = int(time.time())
     lease = store.acquire_lease(session_id=session_id, now_epoch_seconds=started_epoch, lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1)
     cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
     committed_before = cursor.initial_committed_count
-    termination_reason = "frozen_roster_complete"
+    termination_reason = "operational_failure_localization_incomplete"
     failure = None
     aggregate = None
     active_binding = None
     try:
-        while cursor.next_unit_index < len(protocol.unit_roster):
+        while cursor.next_unit_index < len(protocol.authorized_unit_roster):
             now = int(time.time())
             if now - started_epoch >= SOFT_STOP_SECONDS:
                 termination_reason = "soft_stop_after_current_unit"
                 break
-            unit = protocol.unit_roster[cursor.next_unit_index]
+            unit = protocol.authorized_unit_roster[cursor.next_unit_index]
             active_binding = registered_bindings[unit.unit_index]
-            if unit.unit_index > RATIO_PROBE_UNIT_COUNT:
-                ratio_aggregate = runner.replay_ratio_aggregate(cursor.terminal_scientific_evidence)
-            else:
-                ratio_aggregate = None
             intent = store.create_session_intent(cursor, lease, now_epoch_seconds=now)
             diagnostic_members = {}
             attempted_at = monotonic()
             try:
-                if unit.unit_index == 0:
-                    backend.set_development_generation_prompts(protocol.operational_smoke_prompt)
-                    latent = _base_latent(protocol.operational_smoke_generation_seed, height=runtime_session.image_height, width=runtime_session.image_width)
-                    record = runner.execute_operational_smoke(base_latent=latent, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
-                elif unit.unit_index <= RATIO_PROBE_UNIT_COUNT:
-                    entry = manifest.entries[unit.source_cluster_ordinal]
-                    backend.set_development_generation_prompts(entry.prompt)
-                    latent = _base_latent(entry.generation_seed, height=runtime_session.image_height, width=runtime_session.image_width)
-                    record, diagnostic_members = runner.execute_scientific_unit(unit_index=unit.unit_index, base_latent=latent, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
-                elif ratio_aggregate.selected_ratio_identity is None:
-                    record = runner.create_dependency_blocked_record(unit_index=unit.unit_index, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
-                else:
-                    rgb8 = _selected_rgb8(persistent, run_id=run_id, cluster_ordinal=unit.source_cluster_ordinal, selected_ratio_identity=ratio_aggregate.selected_ratio_identity, evidence=cursor.terminal_scientific_evidence, protocol=protocol, manifest=manifest)
-                    record, diagnostic_members = runner.execute_scientific_unit(unit_index=unit.unit_index, base_latent=None, selected_ratio_identity=ratio_aggregate.selected_ratio_identity, source_rgb8=rgb8, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
+                if unit.unit_index != 0:
+                    raise QkSynchronizationWriteEntrypointError(
+                        "failure localization cannot execute scientific units"
+                    )
+                backend.set_development_generation_prompts(protocol.operational_smoke_prompt)
+                latent = _base_latent(protocol.operational_smoke_generation_seed, height=runtime_session.image_height, width=runtime_session.image_width)
+                record = runner.execute_operational_smoke(base_latent=latent, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
             except Exception as exc:
                 if unit.unit_index == 0:
                     raise
@@ -330,16 +321,14 @@ def execute_qk_synchronization_write_diagnostic_session(
                 record = runner.create_failed_record(unit_index=unit.unit_index, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds, actual_elapsed_seconds=float(monotonic() - attempted_at), failure_type=f"{type(exc).__module__}.{type(exc).__qualname__}", resource_failure=resource)
                 diagnostic_members = {}
             marker = store.commit_session_unit(cursor, lease, intent, record=record, diagnostic_members=diagnostic_members, raw_secret_values=(root_key, content_root, geometry_root, hf_token), now_epoch_seconds=max(now, int(time.time())))
-            if marker.attempt_disposition == "retryable_resource_failure":
-                termination_reason = "retryable_resource_failure_after_committed_attempt"
-                break
-            if type(record) is DevelopmentScientificRecord and record.failure_class == "resource_failure":
-                termination_reason = "terminal_resource_failure_after_committed_attempt"
-                break
-        if cursor.next_unit_index == len(protocol.unit_roster):
-            aggregate = asdict(runner.replay_synchronization_diagnosis_aggregate(store.verified_terminal_scientific_evidence(now_epoch_seconds=int(time.time()))))
+            if marker.attempt_disposition != "success":
+                raise QkSynchronizationWriteEntrypointError(
+                    "failure localization operational record did not terminate"
+                )
+            termination_reason = "operational_failure_localization_complete"
+            break
     except Exception as exc:
-        termination_reason = "worker_execution_failure"
+        termination_reason = "operational_failure_localization_failed"
         failure = _failure_diagnostic(exc, active_binding=active_binding)
     finally:
         runtime.close()
@@ -357,7 +346,7 @@ def execute_qk_synchronization_write_diagnostic_session(
             target.writestr("qk_synchronization_diagnosis_aggregate.json", _canonical_bytes(aggregate))
         if failure is not None:
             target.writestr("diagnostic.json", _canonical_bytes(failure))
-    return (3 if failure is not None else 0), {"artifact_kind": "qk_synchronization_write_diagnostic_failure" if failure is not None else "qk_synchronization_write_diagnostic_result", "diagnostic_zip" if failure is not None else "result_zip": str(archive), "protocol_digest": protocol_digest, "input_manifest_digest": manifest.digest(), "candidate_config_digest": candidate_digest, "unit_roster_digest": protocol.unit_roster_digest, "source_cluster_deny_list_digest": protocol.source_cluster_deny_list_digest, "package_sha256": execution_package_sha256, "committed_unit_count": len(cursor.committed_units), "session_committed_unit_count": len(cursor.committed_units)-committed_before, "termination_reason": termination_reason, "qk_synchronization_diagnosis_aggregate": aggregate, "formal_tau_created": False, "fpr_estimated": False, "candidate_promoted": False, "scientific_claims_supported": False}
+    return (3 if failure is not None else 0), {"artifact_kind": "qk_synchronization_write_diagnostic_failure" if failure is not None else "qk_synchronization_write_diagnostic_result", "diagnostic_zip" if failure is not None else "result_zip": str(archive), "protocol_digest": protocol_digest, "input_manifest_digest": manifest.digest(), "candidate_config_digest": candidate_digest, "unit_roster_digest": protocol.authorized_unit_roster_digest, "source_cluster_deny_list_digest": protocol.source_cluster_deny_list_digest, "package_sha256": execution_package_sha256, "committed_unit_count": len(cursor.committed_units), "session_committed_unit_count": len(cursor.committed_units)-committed_before, "termination_reason": termination_reason, "qk_synchronization_diagnosis_aggregate": aggregate, "formal_tau_created": False, "fpr_estimated": False, "candidate_promoted": False, "scientific_claims_supported": False}
 
 
 __all__ = ["QkSynchronizationWriteEntrypointError", "execute_qk_synchronization_write_diagnostic_session"]

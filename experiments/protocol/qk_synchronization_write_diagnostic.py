@@ -22,8 +22,12 @@ from experiments.protocol.internal_splits import (
 
 PROTOCOL_ID = "ceg_wm_qk_synchronization_write_diagnosis"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
+RUN_ID = "ceg_wm_qk_runtime_failure_localization"
 OPERATIONAL_UNIT_COUNT = 1
+AUTHORIZED_OPERATIONAL_UNIT_COUNT = 1
+AUTHORIZED_SCIENTIFIC_UNIT_COUNT = 0
+AUTHORIZED_TOTAL_UNIT_COUNT = 1
+AUTHORIZED_MAXIMUM_ATTEMPTS_PER_UNIT = 1
 RATIO_PROBE_CLUSTER_COUNT = 4
 RATIO_PROBE_UNIT_COUNT = 12
 TRANSFORM_PROBE_CLUSTER_COUNT = 4
@@ -247,6 +251,11 @@ class QkSynchronizationWriteProtocol:
     operational_smoke_image_lineage_identity: str
     operational_smoke_image_lineage_digest: str
     operational_unit_count: int
+    authorized_operational_unit_count: int
+    authorized_scientific_unit_count: int
+    authorized_total_unit_count: int
+    authorized_maximum_attempts_per_unit: int
+    authorized_unit_roster_digest: str
     ratio_probe_cluster_count: int
     ratio_probe_unit_count: int
     transform_probe_cluster_count: int
@@ -328,6 +337,23 @@ class QkSynchronizationWriteProtocol:
         )
         return operational + ratio_units + transform_units
 
+    @property
+    def authorized_unit_roster(self) -> tuple[DevelopmentStudyUnit, ...]:
+        return (
+            DevelopmentStudyUnit(
+                unit_index=0,
+                phase="development_environment_preflight",
+                responsibility_id="qk_synchronization_write_runtime_preflight",
+                source_cluster_ordinal=0,
+                content_branch_id="hf_only",
+                geometry_case_id="identity",
+                maximum_record_attempts=(
+                    self.authorized_maximum_attempts_per_unit
+                ),
+                maximum_duration_seconds=self.maximum_duration_seconds_per_unit,
+            ),
+        )
+
     def digest(self) -> str:
         return canonical_digest(asdict(self))
 
@@ -388,6 +414,14 @@ class QkSynchronizationWriteProtocol:
             )
         if (
             self.operational_unit_count != OPERATIONAL_UNIT_COUNT
+            or self.authorized_operational_unit_count
+            != AUTHORIZED_OPERATIONAL_UNIT_COUNT
+            or self.authorized_scientific_unit_count
+            != AUTHORIZED_SCIENTIFIC_UNIT_COUNT
+            or self.authorized_total_unit_count != AUTHORIZED_TOTAL_UNIT_COUNT
+            or self.authorized_maximum_attempts_per_unit
+            != AUTHORIZED_MAXIMUM_ATTEMPTS_PER_UNIT
+            or len(self.authorized_unit_roster) != AUTHORIZED_TOTAL_UNIT_COUNT
             or self.ratio_probe_cluster_count != RATIO_PROBE_CLUSTER_COUNT
             or self.ratio_probe_unit_count != RATIO_PROBE_UNIT_COUNT
             or self.transform_probe_cluster_count
@@ -486,6 +520,12 @@ class QkSynchronizationWriteProtocol:
         ):
             raise QkSynchronizationWriteProtocolError(
                 "Q/K diagnosis unit roster digest drifted"
+            )
+        if self.authorized_unit_roster_digest != canonical_digest(
+            tuple(asdict(unit) for unit in self.authorized_unit_roster)
+        ):
+            raise QkSynchronizationWriteProtocolError(
+                "Q/K diagnosis authorized unit roster digest drifted"
             )
 
 
@@ -714,6 +754,8 @@ def derive_qk_synchronization_analysis_identity(
 
 __all__ = [
     "CLAIM_BOUNDARY",
+    "AUTHORIZED_SCIENTIFIC_UNIT_COUNT",
+    "AUTHORIZED_TOTAL_UNIT_COUNT",
     "GEOMETRY_RATIO_ROSTER",
     "MAXIMUM_TOTAL_UNITS",
     "QkSynchronizationManifest",
