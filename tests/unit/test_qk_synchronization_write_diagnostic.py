@@ -52,6 +52,7 @@ from experiments.runners.qk_synchronization_write_diagnostic import (
     RGB8_MEMBER_PATH,
 )
 from experiments.runners.development_persistence import (
+    DevelopmentPersistenceError,
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
 )
@@ -59,6 +60,7 @@ from runtime import RuntimeAdapterError, Sd35RuntimeAdapter, create_runtime_adap
 from runtime import sd35_backend as sd35_backend_module
 from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint import (
     QkSynchronizationWriteEntrypointError,
+    _authorized_persistence_bindings,
     _failure_diagnostic,
     _is_resource_failure,
     _qualified_exception_type_chain,
@@ -435,12 +437,17 @@ def test_qk_failure_localization_entrypoint_cannot_execute_scientific_units() ->
     source = inspect.getsource(execute_qk_synchronization_write_diagnostic_session)
 
     assert "protocol.authorized_unit_roster" in source
-    assert "protocol.authorized_total_unit_count" in source
     assert "execute_scientific_unit" not in source
     assert "replay_synchronization_diagnosis_aggregate" not in source
     assert "frozen_roster_complete" not in source
     assert "operational_failure_localization_complete" in source
     assert "operational_failure_localization_failed" in source
+
+    bindings = _authorized_persistence_bindings(_runner())
+    assert len(bindings) == 1
+    assert bindings[0].unit_index == 0
+    assert bindings[0].maximum_record_attempts == 1
+    assert bindings[0].study_unit() == _runner().protocol.authorized_unit_roster[0]
 
 
 @pytest.mark.unit
@@ -776,7 +783,7 @@ def test_qk_operational_smoke_commits_and_recovers_exact_non_scientific_record(
     tmp_path: Path,
 ) -> None:
     runner, runtime, _backend = _public_chain_runner()
-    bindings = runner.create_persistence_unit_bindings()
+    bindings = _authorized_persistence_bindings(runner)
     store = DevelopmentPersistentStore(
         tmp_path,
         run_id=runner.run_id,
@@ -788,7 +795,7 @@ def test_qk_operational_smoke_commits_and_recovers_exact_non_scientific_record(
             ),
             input_manifest_digest=runner.manifest.digest(),
             candidate_config_digest=runner.candidate_config_digest,
-            unit_roster_digest=runner.protocol.unit_roster_digest,
+            unit_roster_digest=runner.protocol.authorized_unit_roster_digest,
         ),
         registered_unit_bindings=bindings,
     )
@@ -823,6 +830,9 @@ def test_qk_operational_smoke_commits_and_recovers_exact_non_scientific_record(
     runtime.close()
 
     assert marker.attempt_disposition == "success"
+    assert len(bindings) == 1
+    assert intent.unit_index == 0
+    assert intent.maximum_record_attempts == 1
     assert marker.record_id == record.record_id
     assert tuple(item.unit_index for item in recovery.committed_units) == (0,)
     assert recovered_cursor.operational_records == (record,)
@@ -849,6 +859,48 @@ def test_qk_operational_smoke_commits_and_recovers_exact_non_scientific_record(
     assert len(
         record.operation_result_payload["responsibility_result_digests"][0][1]
     ) == 64
+
+
+@pytest.mark.unit
+def test_qk_operational_failure_exhausts_only_authorized_unit_zero(
+    tmp_path: Path,
+) -> None:
+    runner = _runner()
+    bindings = _authorized_persistence_bindings(runner)
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest=runner.manifest.digest(),
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=runner.protocol.authorized_unit_roster_digest,
+        ),
+        registered_unit_bindings=bindings,
+    )
+    lease = store.acquire_lease(
+        session_id="qk_failure_localization_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=10,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+    intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101)
+
+    assert intent.unit_index == 0
+    assert intent.attempt_index == 0
+    assert intent.maximum_record_attempts == 1
+    assert cursor.committed_units == ()
+    assert tuple((store.run_root / "markers").glob("*.json")) == ()
+    assert tuple((store.run_root / "bundles").glob("*.zip")) == ()
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="interrupted unit exhausted frozen attempts",
+    ):
+        store.recover(now_epoch_seconds=111)
 
 
 @pytest.mark.unit

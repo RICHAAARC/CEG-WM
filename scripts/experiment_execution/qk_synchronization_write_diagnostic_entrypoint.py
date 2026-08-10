@@ -36,6 +36,7 @@ from experiments.runners.development_persistence import (
     FrozenDevelopmentUnitBinding,
     FrozenWorkerIdentity,
     SessionReceipt,
+    create_frozen_development_unit_binding,
 )
 from experiments.runners.qk_synchronization_write_diagnostic import (
     RGB8_MEMBER_PATH,
@@ -58,6 +59,23 @@ RUNTIME_PATH = Path("configs/runtime/runtime_sd35_flowmatch.json")
 
 class QkSynchronizationWriteEntrypointError(RuntimeError):
     """The Q/K diagnosis worker could not preserve its frozen boundary."""
+
+
+def _authorized_persistence_bindings(
+    runner: QkSynchronizationWriteDiagnosticRunner,
+) -> tuple[FrozenDevelopmentUnitBinding, ...]:
+    source = runner.create_persistence_unit_bindings()[0]
+    unit = runner.protocol.authorized_unit_roster[0]
+    return (
+        create_frozen_development_unit_binding(
+            unit,
+            analysis_unit_identity=source.analysis_unit_identity,
+            scientific_question_id=source.scientific_question_id,
+            development_case_id=source.development_case_id,
+            candidate_identity=source.candidate_identity,
+            candidate_config_digest=source.candidate_config_digest,
+        ),
+    )
 
 
 def _registered_roots(base_root: str, *, protocol_digest: str, manifest_digest: str):
@@ -283,9 +301,7 @@ def execute_qk_synchronization_write_diagnostic_session(
     candidate_digest = canonical_digest({"candidate_identity": protocol.candidate_identity, "adapter_config_digest": adapter.configuration.config_digest, "runtime_config_digest": runtime_session.runtime_config_digest, "manifest_digest": manifest.digest(), "package_identity": execution_package_sha256})
     authority_digest = canonical_digest({"protocol_digest": protocol_digest, "manifest_digest": manifest.digest(), "content_root_public_digest": content_public, "geometry_root_public_digest": geometry_public, "run_id": run_id})
     runner = QkSynchronizationWriteDiagnosticRunner(protocol=protocol, manifest=manifest, adapter=adapter, runtime_adapter=runtime, method_code_revision=expected_revision, run_id=run_id, content_registered_root_key=content_root, geometry_registered_root_key=geometry_root, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, candidate_config_digest=candidate_digest, package_identity=execution_package_sha256)
-    registered_bindings = runner.create_persistence_unit_bindings()[
-        : protocol.authorized_total_unit_count
-    ]
+    registered_bindings = _authorized_persistence_bindings(runner)
     store = DevelopmentPersistentStore(persistent, run_id=run_id, worker_identity=FrozenWorkerIdentity(revision=expected_revision, protocol_digest=protocol_digest, execution_intent_authority_digest=authority_digest, input_manifest_digest=manifest.digest(), candidate_config_digest=candidate_digest, unit_roster_digest=protocol.authorized_unit_roster_digest), registered_unit_bindings=registered_bindings)
     started_epoch = int(time.time())
     lease = store.acquire_lease(session_id=session_id, now_epoch_seconds=started_epoch, lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1)
