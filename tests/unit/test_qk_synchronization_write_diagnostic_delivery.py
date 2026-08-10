@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from zipfile import ZipFile
 
 import pytest
 
@@ -15,7 +16,12 @@ from experiments.protocol.qk_synchronization_write_diagnostic import (
     load_qk_synchronization_write_protocol,
 )
 from experiments.runners.qk_synchronization_write_diagnostic import RGB8_MEMBER_PATH
-from scripts.experiment_execution.qk_synchronization_write_diagnostic_server import main
+from scripts.experiment_execution import qk_synchronization_write_diagnostic_server as server_module
+from scripts.experiment_execution.qk_synchronization_write_diagnostic_server import (
+    QkSynchronizationWriteServerError,
+    execute_qk_synchronization_write_diagnostic_server_session,
+    main,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -116,6 +122,172 @@ def test_qk_diagnosis_server_receipt_boundary_is_non_scientific(monkeypatch, cap
     assert '"formal_tau_created": False' in server_source
     assert '"fpr_estimated": False' in server_source
     assert '"candidate_promoted": False' in server_source
+
+
+def _patch_server_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    exit_code: int,
+    roster_digest: str,
+) -> tuple[Path, str]:
+    protocol, manifest = load_qk_synchronization_write_protocol(
+        PROTOCOL, repository_root=ROOT
+    )
+    persistent = tmp_path / "persistent"
+    cache = tmp_path / "cache"
+    persistent.mkdir()
+    cache.mkdir()
+    package = persistent / "execution_package.zip"
+    with ZipFile(package, "x") as archive:
+        archive.writestr("package_identity.txt", "qk localization")
+    artifact = persistent / (
+        "diagnostic.zip" if exit_code else "result.zip"
+    )
+    with ZipFile(artifact, "x") as archive:
+        archive.writestr("diagnostic.json", "{}")
+    secret = "must-not-enter-qk-localization-receipt"
+    worker = {
+        "artifact_kind": (
+            "qk_synchronization_write_diagnostic_failure"
+            if exit_code
+            else "qk_synchronization_write_diagnostic_result"
+        ),
+        "diagnostic_zip" if exit_code else "result_zip": str(artifact),
+        "protocol_digest": protocol.digest(),
+        "input_manifest_digest": manifest.digest(),
+        "candidate_config_digest": "a" * 64,
+        "unit_roster_digest": roster_digest,
+        "source_cluster_deny_list_digest": (
+            protocol.source_cluster_deny_list_digest
+        ),
+        "package_sha256": "b" * 64,
+        "committed_unit_count": 0 if exit_code else 1,
+        "session_committed_unit_count": 0 if exit_code else 1,
+        "termination_reason": (
+            "operational_failure_localization_failed"
+            if exit_code
+            else "operational_failure_localization_complete"
+        ),
+        "qk_synchronization_diagnosis_aggregate": None,
+        "formal_tau_created": False,
+        "fpr_estimated": False,
+        "candidate_promoted": False,
+        "scientific_claims_supported": False,
+    }
+    monkeypatch.setattr(server_module, "_verify_repository", lambda *_args: None)
+    monkeypatch.setattr(
+        server_module,
+        "_probe_resources",
+        lambda **_kwargs: {"gpu_model": "test"},
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_download_configured_model",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_build_or_verify_package",
+        lambda *_args: package,
+    )
+
+    def execute_worker(**kwargs):
+        assert kwargs["environment"] == {
+            "HF_TOKEN": secret,
+            "CEG_WM_ROOT_KEY": secret,
+        }
+        return exit_code, worker
+
+    monkeypatch.setattr(
+        server_module,
+        "execute_qk_synchronization_write_diagnostic_session",
+        execute_worker,
+    )
+    return persistent, secret
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("exit_code", (0, 3))
+def test_qk_localization_server_accepts_authorized_roster_and_writes_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    exit_code: int,
+) -> None:
+    protocol, _manifest = load_qk_synchronization_write_protocol(
+        PROTOCOL, repository_root=ROOT
+    )
+    persistent, secret = _patch_server_execution(
+        monkeypatch,
+        tmp_path,
+        exit_code=exit_code,
+        roster_digest=protocol.authorized_unit_roster_digest,
+    )
+    observed_exit_code, receipt = (
+        execute_qk_synchronization_write_diagnostic_server_session(
+            repository_root=ROOT,
+            expected_revision="1" * 40,
+            persistent_root=persistent,
+            cache_root=tmp_path / "cache",
+            run_id=protocol.run_id,
+            session_id=f"qk_localization_{exit_code}",
+            environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+            install_dependencies=False,
+        )
+    )
+
+    assert observed_exit_code == exit_code
+    assert receipt["unit_roster_digest"] == (
+        protocol.authorized_unit_roster_digest
+    )
+    assert receipt["operational_unit_count"] == 1
+    assert receipt["scientific_unit_count"] == 0
+    assert receipt["total_unit_count"] == 1
+    assert receipt["maximum_attempts_per_unit"] == 1
+    assert receipt["qk_synchronization_diagnosis_aggregate"] is None
+    assert receipt["scientific_claims_supported"] is False
+    assert receipt["termination_reason"] != "frozen_roster_complete"
+    receipt_bytes = Path(receipt["receipt_path"]).read_text("utf-8")
+    assert secret not in receipt_bytes
+    assert "traceback" not in receipt_bytes.lower()
+    assert "exception_message" not in receipt_bytes
+
+
+@pytest.mark.quick
+def test_qk_localization_server_rejects_dormant_scientific_roster_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    protocol, _manifest = load_qk_synchronization_write_protocol(
+        PROTOCOL, repository_root=ROOT
+    )
+    persistent, secret = _patch_server_execution(
+        monkeypatch,
+        tmp_path,
+        exit_code=0,
+        roster_digest=protocol.unit_roster_digest,
+    )
+    with pytest.raises(
+        QkSynchronizationWriteServerError,
+        match="worker frozen identity drifted",
+    ):
+        execute_qk_synchronization_write_diagnostic_server_session(
+            repository_root=ROOT,
+            expected_revision="1" * 40,
+            persistent_root=persistent,
+            cache_root=tmp_path / "cache",
+            run_id=protocol.run_id,
+            session_id="qk_localization_full_roster_rejected",
+            environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+            install_dependencies=False,
+        )
+    assert not (
+        persistent
+        / protocol.run_id
+        / "server_receipts"
+        / "qk_localization_full_roster_rejected"
+        / "execution_receipt.json"
+    ).exists()
 
 
 @pytest.mark.quick

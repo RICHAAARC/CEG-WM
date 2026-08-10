@@ -94,8 +94,19 @@ def execute_qk_synchronization_write_diagnostic_server_session(
     if type(exit_code) is not int or isinstance(exit_code, bool):
         raise QkSynchronizationWriteServerError("worker exit code is invalid")
     artifact = _validated_artifact(worker, persistent=persistent, exit_code=exit_code)
-    if worker.get("protocol_digest") != protocol.digest() or worker.get("input_manifest_digest") != manifest.digest() or worker.get("unit_roster_digest") != protocol.unit_roster_digest or worker.get("source_cluster_deny_list_digest") != protocol.source_cluster_deny_list_digest:
+    if worker.get("protocol_digest") != protocol.digest() or worker.get("input_manifest_digest") != manifest.digest() or worker.get("unit_roster_digest") != protocol.authorized_unit_roster_digest or worker.get("source_cluster_deny_list_digest") != protocol.source_cluster_deny_list_digest:
         raise QkSynchronizationWriteServerError("worker frozen identity drifted")
+    if (
+        worker.get("qk_synchronization_diagnosis_aggregate") is not None
+        or worker.get("termination_reason")
+        not in {
+            "operational_failure_localization_complete",
+            "operational_failure_localization_failed",
+        }
+    ):
+        raise QkSynchronizationWriteServerError(
+            "worker operational localization boundary drifted"
+        )
     receipt_path = persistent / run_id / "server_receipts" / session_id / "execution_receipt.json"
     receipt = {
         **worker,
@@ -109,8 +120,12 @@ def execute_qk_synchronization_write_diagnostic_server_session(
         "model_revision": runtime_document["model_revision"],
         "protocol_id": protocol.protocol_id,
         "protocol_version": protocol.protocol_version,
-        "operational_unit_count": protocol.operational_unit_count,
-        "scientific_unit_count": protocol.scientific_unit_count,
+        "operational_unit_count": protocol.authorized_operational_unit_count,
+        "scientific_unit_count": protocol.authorized_scientific_unit_count,
+        "total_unit_count": protocol.authorized_total_unit_count,
+        "maximum_attempts_per_unit": (
+            protocol.authorized_maximum_attempts_per_unit
+        ),
         "resource_facts": resources,
         "run_id": run_id,
         "session_id": session_id,
