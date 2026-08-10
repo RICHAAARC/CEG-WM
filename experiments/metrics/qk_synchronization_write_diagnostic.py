@@ -68,7 +68,10 @@ class QkRgb8QualityDelta:
             or self.mean_squared_error < 0.0
             or not self.content_only_rgb8_digest
             or not self.geometry_written_rgb8_digest
-            or self.content_only_rgb8_digest == self.geometry_written_rgb8_digest
+            or (
+                self.content_only_rgb8_digest == self.geometry_written_rgb8_digest
+            )
+            is not (self.relative_l2 == 0.0 and self.mean_squared_error == 0.0)
             or identity != _digest(payload)
         ):
             raise QkSynchronizationWriteMetricError(
@@ -115,7 +118,11 @@ class QkRatioProbeObservation:
     actual_total_relative_l2: float | None
     content_span_projection_relative: float | None
     rgb8_quality_delta: QkRgb8QualityDelta | None
-    public_observation_identity: str
+    public_pre_observation_identity: str
+    public_post_observation_identity: str | None
+    content_only_rgb8_digest: str
+    geometry_written_rgb8_digest: str | None
+    paired_public_evidence_digest: str | None
     geometry_key_family_digest: str
     registered_template_digest: str
     wrong_key_template_digests: tuple[str, ...]
@@ -151,7 +158,8 @@ class QkRatioProbeObservation:
         if any(
             type(value) is not str or not value
             for value in (
-                self.public_observation_identity,
+                self.public_pre_observation_identity,
+                self.content_only_rgb8_digest,
                 self.geometry_key_family_digest,
                 self.registered_template_digest,
                 *self.wrong_key_template_digests,
@@ -202,6 +210,12 @@ class QkRatioProbeObservation:
                 len(self.public_post_wrong_key_scores) != len(WRONG_KEY_INDEXES)
                 or len(self.wrong_key_gains) != len(WRONG_KEY_INDEXES)
                 or self.rgb8_quality_delta is None
+                or type(self.public_post_observation_identity) is not str
+                or not self.public_post_observation_identity
+                or type(self.geometry_written_rgb8_digest) is not str
+                or not self.geometry_written_rgb8_digest
+                or type(self.paired_public_evidence_digest) is not str
+                or not self.paired_public_evidence_digest
                 or any(not _finite(value) for value in accepted_values)
                 or self.line_search_factor not in LINE_SEARCH_FACTORS
                 or self.ste_acceptance_score
@@ -225,6 +239,32 @@ class QkRatioProbeObservation:
                     "accepted Q/K ratio probe is incomplete"
                 )
             self.rgb8_quality_delta.validate()
+            expected_pair_digest = _digest(
+                {
+                    "cluster_ordinal": self.cluster_ordinal,
+                    "ratio_identity": self.ratio_identity,
+                    "public_pre_observation_identity": (
+                        self.public_pre_observation_identity
+                    ),
+                    "public_post_observation_identity": (
+                        self.public_post_observation_identity
+                    ),
+                    "content_only_rgb8_digest": self.content_only_rgb8_digest,
+                    "geometry_written_rgb8_digest": (
+                        self.geometry_written_rgb8_digest
+                    ),
+                }
+            )
+            if (
+                self.rgb8_quality_delta.content_only_rgb8_digest
+                != self.content_only_rgb8_digest
+                or self.rgb8_quality_delta.geometry_written_rgb8_digest
+                != self.geometry_written_rgb8_digest
+                or self.paired_public_evidence_digest != expected_pair_digest
+            ):
+                raise QkSynchronizationWriteMetricError(
+                    "accepted Q/K public evidence pairing drifted"
+                )
             wrong_gains = tuple(
                 post - pre
                 for post, pre in zip(
@@ -251,6 +291,9 @@ class QkRatioProbeObservation:
             self.public_post_wrong_key_scores
             or self.wrong_key_gains
             or self.rgb8_quality_delta is not None
+            or self.public_post_observation_identity is not None
+            or self.geometry_written_rgb8_digest is not None
+            or self.paired_public_evidence_digest is not None
             or any(value is not None for value in accepted_values)
         ):
             raise QkSynchronizationWriteMetricError(
@@ -285,6 +328,22 @@ def create_qk_ratio_probe_observation(**values: object) -> QkRatioProbeObservati
     )
     payload["wrong_key_indexes"] = tuple(payload["wrong_key_indexes"])
     if payload["write_accepted"]:
+        payload["paired_public_evidence_digest"] = _digest(
+            {
+                "cluster_ordinal": payload["cluster_ordinal"],
+                "ratio_identity": payload["ratio_identity"],
+                "public_pre_observation_identity": (
+                    payload["public_pre_observation_identity"]
+                ),
+                "public_post_observation_identity": (
+                    payload["public_post_observation_identity"]
+                ),
+                "content_only_rgb8_digest": payload["content_only_rgb8_digest"],
+                "geometry_written_rgb8_digest": (
+                    payload["geometry_written_rgb8_digest"]
+                ),
+            }
+        )
         registered_gain = float(payload["public_post_registered_score"]) - float(
             payload["public_pre_registered_score"]
         )
@@ -316,6 +375,9 @@ def create_qk_ratio_probe_observation(**values: object) -> QkRatioProbeObservati
             actual_total_relative_l2=None,
             content_span_projection_relative=None,
             rgb8_quality_delta=None,
+            public_post_observation_identity=None,
+            geometry_written_rgb8_digest=None,
+            paired_public_evidence_digest=None,
         )
     violations = tuple(
         int(payload[name])
@@ -532,14 +594,12 @@ class QkTransformedRelationObservation:
                     self.runtime_identity,
                 )
             )
-            or any(
-                type(value) is not int or value < 0
-                for value in (
-                    self.identity_violation_count,
-                    self.integrity_violation_count,
-                    self.nonfinite_violation_count,
-                )
+            or (
+                self.identity_violation_count,
+                self.integrity_violation_count,
+                self.nonfinite_violation_count,
             )
+            != (0, 0, 0)
         ):
             raise QkSynchronizationWriteMetricError(
                 "transformed Q/K relation probe is invalid"
@@ -570,10 +630,58 @@ def create_qk_transformed_relation_observation(
 
 
 @dataclass(frozen=True, slots=True)
+class QkTransformDependencyBlockedTerminal:
+    cluster_ordinal: int
+    transform_identity: str
+    dependency_identity: str
+    exclusion_identity: str
+    terminal_identity: str
+
+    def validate(self) -> None:
+        payload = asdict(self)
+        identity = payload.pop("terminal_identity")
+        if (
+            type(self.cluster_ordinal) is not int
+            or not 0 <= self.cluster_ordinal < RATIO_PROBE_CLUSTER_COUNT
+            or self.transform_identity
+            not in tuple(item[0] for item in TRANSFORM_PROBE_ROSTER)
+            or self.dependency_identity
+            != "no_eligible_geometry_write_ratio"
+            or self.exclusion_identity
+            != "transformed_relation_probe_dependency_blocked_excluded"
+            or identity != _digest(payload)
+        ):
+            raise QkSynchronizationWriteMetricError(
+                "Q/K transform dependency terminal is invalid"
+            )
+
+
+def create_qk_transform_dependency_blocked_terminal(
+    *,
+    cluster_ordinal: int,
+    transform_identity: str,
+) -> QkTransformDependencyBlockedTerminal:
+    payload = {
+        "cluster_ordinal": cluster_ordinal,
+        "transform_identity": transform_identity,
+        "dependency_identity": "no_eligible_geometry_write_ratio",
+        "exclusion_identity": (
+            "transformed_relation_probe_dependency_blocked_excluded"
+        ),
+    }
+    terminal = QkTransformDependencyBlockedTerminal(
+        **payload, terminal_identity=_digest(payload)
+    )
+    terminal.validate()
+    return terminal
+
+
+@dataclass(frozen=True, slots=True)
 class QkSynchronizationDiagnosisAggregate:
     ratio_probe: QkRatioProbeAggregate
-    transform_success_count: int
+    transform_observation_count: int
     transform_excluded_count: int
+    transform_dependency_blocked_terminal_identities: tuple[str, ...]
     transform_implementation_failure_count: int
     transform_resource_failure_count: int
     transform_margin_mean: float | None
@@ -586,11 +694,23 @@ class QkSynchronizationDiagnosisAggregate:
     def validate(self) -> None:
         self.ratio_probe.validate()
         if (
-            self.transform_success_count
+            self.transform_observation_count
             + self.transform_excluded_count
             + self.transform_implementation_failure_count
             + self.transform_resource_failure_count
             != TRANSFORM_PROBE_UNIT_COUNT
+            or len(self.transform_dependency_blocked_terminal_identities)
+            != self.transform_excluded_count
+            or len(set(self.transform_dependency_blocked_terminal_identities))
+            != self.transform_excluded_count
+            or (
+                self.ratio_probe.selected_ratio_identity is None
+                and self.transform_excluded_count != TRANSFORM_PROBE_UNIT_COUNT
+            )
+            or (
+                self.ratio_probe.selected_ratio_identity is not None
+                and self.transform_excluded_count != 0
+            )
         ):
             raise QkSynchronizationWriteMetricError(
                 "Q/K diagnosis transform denominator drifted"
@@ -609,7 +729,8 @@ class QkSynchronizationDiagnosisAggregate:
                 )
                 else (
                     PASSING_MODULE_OUTCOME
-                    if self.transform_success_count == TRANSFORM_PROBE_UNIT_COUNT
+                    if self.transform_observation_count
+                    == TRANSFORM_PROBE_UNIT_COUNT
                     else "mechanism_signal_not_observed"
                 )
             )
@@ -635,15 +756,19 @@ def aggregate_qk_synchronization_diagnosis(
     ratio_probe: QkRatioProbeAggregate,
     transformed_observations: Sequence[QkTransformedRelationObservation] = (),
     transform_failures: Sequence[QkTerminalFailure] = (),
-    *,
-    dependency_blocked_excluded_count: int = 0,
+    dependency_blocked_terminals: Sequence[
+        QkTransformDependencyBlockedTerminal
+    ] = (),
 ) -> QkSynchronizationDiagnosisAggregate:
     ratio_probe.validate()
     transformed = tuple(transformed_observations)
     failed = tuple(transform_failures)
+    dependency_blocked = tuple(dependency_blocked_terminals)
     for item in transformed:
         item.validate()
     for item in failed:
+        item.validate()
+    for item in dependency_blocked:
         item.validate()
     expected = {
         (cluster, transform_identity)
@@ -652,13 +777,26 @@ def aggregate_qk_synchronization_diagnosis(
     }
     observed = {(item.cluster_ordinal, item.transform_identity) for item in transformed}
     failed_keys = {(item.cluster_ordinal, item.case_identity) for item in failed}
+    dependency_blocked_keys = {
+        (item.cluster_ordinal, item.transform_identity)
+        for item in dependency_blocked
+    }
     if ratio_probe.selected_ratio_identity is None:
-        if transformed or failed or dependency_blocked_excluded_count != TRANSFORM_PROBE_UNIT_COUNT:
+        if (
+            transformed
+            or failed
+            or dependency_blocked_keys != expected
+            or len(dependency_blocked_keys) != len(dependency_blocked)
+            or len(
+                {item.terminal_identity for item in dependency_blocked}
+            )
+            != len(dependency_blocked)
+        ):
             raise QkSynchronizationWriteMetricError(
                 "ineligible ratio requires sixteen excluded transform terminals"
             )
     elif (
-        dependency_blocked_excluded_count != 0
+        dependency_blocked
         or observed & failed_keys
         or observed | failed_keys != expected
         or len(observed) != len(transformed)
@@ -699,8 +837,11 @@ def aggregate_qk_synchronization_diagnosis(
     )
     payload = {
         "ratio_probe": asdict(ratio_probe),
-        "transform_success_count": len(transformed),
-        "transform_excluded_count": dependency_blocked_excluded_count,
+        "transform_observation_count": len(transformed),
+        "transform_excluded_count": len(dependency_blocked),
+        "transform_dependency_blocked_terminal_identities": tuple(
+            item.terminal_identity for item in dependency_blocked
+        ),
         "transform_implementation_failure_count": implementation_failures,
         "transform_resource_failure_count": resource_failures,
         "transform_margin_mean": float(mean(margins)) if margins else None,
@@ -715,8 +856,11 @@ def aggregate_qk_synchronization_diagnosis(
     }
     aggregate = QkSynchronizationDiagnosisAggregate(
         ratio_probe=ratio_probe,
-        transform_success_count=len(transformed),
-        transform_excluded_count=dependency_blocked_excluded_count,
+        transform_observation_count=len(transformed),
+        transform_excluded_count=len(dependency_blocked),
+        transform_dependency_blocked_terminal_identities=payload[
+            "transform_dependency_blocked_terminal_identities"
+        ],
         transform_implementation_failure_count=implementation_failures,
         transform_resource_failure_count=resource_failures,
         transform_margin_mean=payload["transform_margin_mean"],
@@ -737,10 +881,12 @@ __all__ = [
     "QkSynchronizationDiagnosisAggregate",
     "QkSynchronizationWriteMetricError",
     "QkTerminalFailure",
+    "QkTransformDependencyBlockedTerminal",
     "QkTransformedRelationObservation",
     "aggregate_qk_ratio_probes",
     "aggregate_qk_synchronization_diagnosis",
     "create_qk_ratio_probe_observation",
     "create_qk_rgb8_quality_delta",
+    "create_qk_transform_dependency_blocked_terminal",
     "create_qk_transformed_relation_observation",
 ]

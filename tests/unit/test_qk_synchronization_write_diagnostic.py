@@ -14,6 +14,7 @@ from experiments.metrics.qk_synchronization_write_diagnostic import (
     aggregate_qk_synchronization_diagnosis,
     create_qk_ratio_probe_observation,
     create_qk_rgb8_quality_delta,
+    create_qk_transform_dependency_blocked_terminal,
     create_qk_transformed_relation_observation,
 )
 from experiments.protocol.hf_only_detector_directional_validation import (
@@ -62,7 +63,14 @@ def _accepted_ratio(
             content_only_rgb8_digest=f"content-{cluster}",
             geometry_written_rgb8_digest=f"geometry-{cluster}-{ratio_identity}",
         ),
-        public_observation_identity="public_rgb8_vae_qk_observation",
+        public_pre_observation_identity=(
+            f"public_rgb8_vae_qk_pre_{cluster}_{ratio_identity}"
+        ),
+        public_post_observation_identity=(
+            f"public_rgb8_vae_qk_post_{cluster}_{ratio_identity}"
+        ),
+        content_only_rgb8_digest=f"content-{cluster}",
+        geometry_written_rgb8_digest=f"geometry-{cluster}-{ratio_identity}",
         geometry_key_family_digest="a" * 64,
         registered_template_digest="b" * 64,
         wrong_key_template_digests=("c" * 64, "d" * 64, "e" * 64, "f" * 64),
@@ -113,6 +121,17 @@ def _transforms(selected_ratio_identity: str):
             identity_violation_count=0,
             integrity_violation_count=0,
             nonfinite_violation_count=0,
+        )
+        for transform_identity, *_ in TRANSFORM_PROBE_ROSTER
+        for cluster in range(4)
+    )
+
+
+def _dependency_blocked_terminals():
+    return tuple(
+        create_qk_transform_dependency_blocked_terminal(
+            cluster_ordinal=cluster,
+            transform_identity=transform_identity,
         )
         for transform_identity, *_ in TRANSFORM_PROBE_ROSTER
         for cluster in range(4)
@@ -221,8 +240,71 @@ def test_qk_ratio_observation_separates_ste_acceptance_from_public_rgb8_gains() 
     assert observation.maximum_wrong_gain == pytest.approx(0.005)
     assert observation.keyed_gain_margin == pytest.approx(0.035)
     assert observation.ratio_eligible
+    assert observation.rgb8_quality_delta.content_only_rgb8_digest == (
+        observation.content_only_rgb8_digest
+    )
+    assert observation.rgb8_quality_delta.geometry_written_rgb8_digest == (
+        observation.geometry_written_rgb8_digest
+    )
     with pytest.raises(QkSynchronizationWriteMetricError):
         replace(observation, wrong_key_indexes=(0, 1, 2)).validate()
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        replace(observation, content_only_rgb8_digest="unpaired-content").validate()
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        replace(observation, paired_public_evidence_digest="tampered-pair").validate()
+
+
+@pytest.mark.unit
+def test_qk_quality_and_rejected_write_enforce_exact_pairing_biconditional() -> None:
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        create_qk_rgb8_quality_delta(
+            relative_l2=0.1,
+            mean_squared_error=1.0,
+            content_only_rgb8_digest="same",
+            geometry_written_rgb8_digest="same",
+        )
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        create_qk_rgb8_quality_delta(
+            relative_l2=0.0,
+            mean_squared_error=0.0,
+            content_only_rgb8_digest="content",
+            geometry_written_rgb8_digest="geometry",
+        )
+    identical = create_qk_rgb8_quality_delta(
+        relative_l2=0.0,
+        mean_squared_error=0.0,
+        content_only_rgb8_digest="same",
+        geometry_written_rgb8_digest="same",
+    )
+    assert identical.relative_l2 == identical.mean_squared_error == 0.0
+
+    accepted = _accepted_ratio(0, *GEOMETRY_RATIO_ROSTER[0])
+    rejected = create_qk_ratio_probe_observation(
+        **{
+            key: value
+            for key, value in asdict(accepted).items()
+            if key
+            not in {
+                "observation_identity",
+                "paired_public_evidence_digest",
+                "ratio_eligible",
+                "write_accepted",
+                "registered_gain",
+                "wrong_key_gains",
+                "maximum_wrong_gain",
+                "keyed_gain_margin",
+            }
+        },
+        write_accepted=False,
+    )
+    assert rejected.public_post_observation_identity is None
+    assert rejected.geometry_written_rgb8_digest is None
+    assert rejected.paired_public_evidence_digest is None
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        replace(
+            rejected,
+            public_post_observation_identity="forbidden-post",
+        ).validate()
 
 
 @pytest.mark.unit
@@ -248,13 +330,25 @@ def test_qk_ratio_failure_class_and_no_eligible_ratio_preserve_scientific_bounda
         _ratio_matrix(first_eligible_ratio_index=None)
     )
     final = aggregate_qk_synchronization_diagnosis(
-        negative, dependency_blocked_excluded_count=16
+        negative, dependency_blocked_terminals=_dependency_blocked_terminals()
     )
 
     assert negative.ratio_probe_outcome == "mechanism_signal_not_observed"
     assert final.module_outcome == "mechanism_signal_not_observed"
     assert final.transform_excluded_count == 16
     assert final.candidate_recommendation == "candidate_not_recommended_for_selection"
+    terminals = _dependency_blocked_terminals()
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        aggregate_qk_synchronization_diagnosis(
+            negative, dependency_blocked_terminals=terminals[:-1]
+        )
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        aggregate_qk_synchronization_diagnosis(
+            negative,
+            dependency_blocked_terminals=(*terminals[:-1], terminals[0]),
+        )
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        replace(terminals[0], terminal_identity="tampered-terminal").validate()
 
     failures = tuple(
         QkTerminalFailure(
@@ -271,7 +365,7 @@ def test_qk_ratio_failure_class_and_no_eligible_ratio_preserve_scientific_bounda
     )
     blocked = aggregate_qk_ratio_probes((), failures)
     blocked_final = aggregate_qk_synchronization_diagnosis(
-        blocked, dependency_blocked_excluded_count=16
+        blocked, dependency_blocked_terminals=_dependency_blocked_terminals()
     )
     assert blocked.ratio_probe_outcome == "implementation_blocked"
     assert blocked_final.module_outcome == "implementation_blocked"
@@ -293,7 +387,7 @@ def test_qk_transform_probe_uses_selected_ratio_and_fixed_sixteen_unit_denominat
     transformed = _transforms(ratio.selected_ratio_identity)
     aggregate = aggregate_qk_synchronization_diagnosis(ratio, transformed)
 
-    assert aggregate.transform_success_count == 16
+    assert aggregate.transform_observation_count == 16
     assert aggregate.module_outcome == "mechanism_signal_observed"
     assert aggregate.candidate_recommendation == (
         "candidate_worth_further_selection"
@@ -301,6 +395,14 @@ def test_qk_transform_probe_uses_selected_ratio_and_fixed_sixteen_unit_denominat
     assert aggregate.transform_margin_minimum == pytest.approx(0.16)
     with pytest.raises(QkSynchronizationWriteMetricError):
         aggregate_qk_synchronization_diagnosis(ratio, transformed[:-1])
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        aggregate_qk_synchronization_diagnosis(
+            ratio,
+            transformed,
+            dependency_blocked_terminals=_dependency_blocked_terminals(),
+        )
+    with pytest.raises(QkSynchronizationWriteMetricError):
+        replace(transformed[0], identity_violation_count=1).validate()
 
 
 @pytest.mark.unit
