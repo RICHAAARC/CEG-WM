@@ -74,8 +74,11 @@ def _rgb8_tensor(image: torch.Tensor) -> torch.Tensor:
         not isinstance(image, torch.Tensor)
         or image.ndim != 4
         or tuple(image.shape[:2]) != (1, 3)
-        or not bool(torch.isfinite(image).all().item())
     ):
+        raise QkSynchronizationWriteRunnerError("public RGB image is invalid")
+    if image.dtype == torch.uint8:
+        return image.detach().to(device="cpu").contiguous().clone()
+    if not bool(torch.isfinite(image).all().item()):
         raise QkSynchronizationWriteRunnerError("public RGB image is invalid")
     return torch.floor(image.detach().to(device="cpu", dtype=torch.float32).clamp(0, 1) * 255).to(torch.uint8).contiguous()
 
@@ -234,7 +237,10 @@ class QkSynchronizationWriteDiagnosticRunner:
         )
         result = call.result
         content_image = result.content_write_result.watermarked_image
-        pre_runtime = self.runtime.observe_detection_qk(content_image)
+        content_only_rgb8 = _rgb8_tensor(content_image)
+        pre_runtime = self.runtime.observe_detection_qk(
+            content_only_rgb8.to(dtype=torch.float32) / 255.0
+        )
         pre_registered, pre_wrong = self._scores(pre_runtime)
         write = result.geometry_write_result
         accepted_runtime = result.accepted_actual_runtime_result
@@ -249,7 +255,7 @@ class QkSynchronizationWriteDiagnosticRunner:
             if post_registered.result != result.accepted_post_write_observation:
                 raise QkSynchronizationWriteRunnerError("accepted post-write public observation drifted")
             geometry_image = accepted_runtime.rgb8_image
-            quality = _quality(content_image, geometry_image)
+            quality = _quality(content_only_rgb8, geometry_image)
         observation = create_qk_ratio_probe_observation(
             cluster_ordinal=unit.source_cluster_ordinal,
             ratio_identity=ratio.ratio_identity,
@@ -268,7 +274,7 @@ class QkSynchronizationWriteDiagnosticRunner:
             rgb8_quality_delta=quality,
             public_pre_observation_identity=pre_registered.upstream_runtime_identity,
             public_post_observation_identity=(None if post_registered is None else post_registered.upstream_runtime_identity),
-            content_only_rgb8_digest=_rgb8_digest(content_image),
+            content_only_rgb8_digest=_rgb8_digest(content_only_rgb8),
             geometry_written_rgb8_digest=(None if geometry_image is None else _rgb8_digest(geometry_image)),
             geometry_key_family_digest=self._key_family("registered_geometry_key_family"),
             registered_template_digest=pre_registered.result.projection_digest,
@@ -327,14 +333,18 @@ class QkSynchronizationWriteDiagnosticRunner:
             ),
             registry=self.attack_registry,
         )
-        runtime_result = self.runtime.observe_detection_qk(attacked.image.to(torch.float32) / 255.0)
+        runtime_result = self.runtime.observe_detection_qk(
+            attacked.attacked_artifact.image.to(torch.float32) / 255.0
+        )
         registered, wrong = self._scores(runtime_result)
         observation = create_qk_transformed_relation_observation(
             cluster_ordinal=unit.source_cluster_ordinal,
             transform_identity=spec.transform_identity,
             selected_ratio_identity=selected_ratio_identity,
             source_geometry_written_rgb8_digest=_rgb8_digest(source_rgb8),
-            transformed_rgb8_digest=sha256(attacked.image.cpu().contiguous().numpy().tobytes()).hexdigest(),
+            transformed_rgb8_digest=sha256(
+                attacked.attacked_artifact.image.cpu().contiguous().numpy().tobytes()
+            ).hexdigest(),
             registered_score=registered.result.relation_score,
             wrong_key_scores=tuple(item.result.relation_score for item in wrong),
             public_observation_identity=registered.upstream_runtime_identity,

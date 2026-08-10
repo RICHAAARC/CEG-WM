@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -36,8 +37,17 @@ from experiments.protocol.qk_synchronization_write_diagnostic import (
 )
 from experiments.runners.qk_synchronization_write_diagnostic import (
     QkSynchronizationWriteDiagnosticRunner,
+    RGB8_MEMBER_PATH,
+)
+from experiments.runners.development_persistence import (
+    DevelopmentPersistentStore,
+    FrozenWorkerIdentity,
 )
 from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint import (
+    QkSynchronizationWriteEntrypointError,
+    _selected_rgb8,
+)
 from tests.unit.test_runtime_qk_observation import (
     FakeGeometrySynchronizationBackend,
     FakePosterior,
@@ -47,6 +57,76 @@ from tests.unit.test_runtime_qk_observation import (
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/qk_synchronization_write_diagnostic.json"
 COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
+
+
+class _SpatialGeometrySynchronizationBackend(FakeGeometrySynchronizationBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.generation_call_count = 0
+        self.public_detection_images: list[torch.Tensor] = []
+
+    @staticmethod
+    def _decoded_image(latent: torch.Tensor) -> torch.Tensor:
+        spatial = latent.to(dtype=torch.float32)[:, :3]
+        return torch.sigmoid(
+            functional.interpolate(
+                spatial,
+                size=(512, 512),
+                mode="bilinear",
+                align_corners=True,
+            )
+        )
+
+    @staticmethod
+    def _encoded_latent(image: torch.Tensor) -> torch.Tensor:
+        return functional.adaptive_avg_pool2d(
+            image.to(dtype=torch.float32)[:, :2],
+            (4, 4),
+        )
+
+    def run_generation(self, initial_latent, callback):
+        self.generation_call_count += 1
+        return super().run_generation(initial_latent, callback)
+
+    def vae_encode(self, image: torch.Tensor) -> FakePosterior:
+        self.public_detection_images.append(image.detach().cpu().clone())
+        return FakePosterior(self._encoded_latent(image))
+
+    def vae_encode_differentiable(
+        self, image: torch.Tensor
+    ) -> FakePosterior:
+        return FakePosterior(
+            self._encoded_latent(image),
+            preserve_gradient=True,
+        )
+
+
+def _public_chain_runner():
+    protocol, manifest = load_qk_synchronization_write_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    backend = _SpatialGeometrySynchronizationBackend()
+    runtime = create_runtime_adapter(backend)
+    runtime.initialize("cpu")
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS),
+        runtime_adapter=runtime,
+    )
+    runner = QkSynchronizationWriteDiagnosticRunner(
+        protocol=protocol,
+        manifest=manifest,
+        adapter=adapter,
+        runtime_adapter=runtime,
+        method_code_revision="1" * 40,
+        run_id=protocol.run_id,
+        content_registered_root_key="qk-public-chain-content-root",
+        geometry_registered_root_key="qk-public-chain-geometry-root",
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest="2" * 64,
+        candidate_config_digest="3" * 64,
+        package_identity="4" * 64,
+    )
+    return runner, runtime, backend
 
 
 def _runner() -> QkSynchronizationWriteDiagnosticRunner:
@@ -80,8 +160,20 @@ def _accepted_ratio(
     ratio: float,
     *,
     eligible: bool = True,
+    content_only_rgb8_digest: str | None = None,
+    geometry_written_rgb8_digest: str | None = None,
 ):
     registered_post = 0.14 if eligible else 0.105
+    content_digest = (
+        f"content-{cluster}"
+        if content_only_rgb8_digest is None
+        else content_only_rgb8_digest
+    )
+    geometry_digest = (
+        f"geometry-{cluster}-{ratio_identity}"
+        if geometry_written_rgb8_digest is None
+        else geometry_written_rgb8_digest
+    )
     return create_qk_ratio_probe_observation(
         cluster_ordinal=cluster,
         ratio_identity=ratio_identity,
@@ -100,8 +192,8 @@ def _accepted_ratio(
         rgb8_quality_delta=create_qk_rgb8_quality_delta(
             relative_l2=0.004,
             mean_squared_error=3.0,
-            content_only_rgb8_digest=f"content-{cluster}",
-            geometry_written_rgb8_digest=f"geometry-{cluster}-{ratio_identity}",
+            content_only_rgb8_digest=content_digest,
+            geometry_written_rgb8_digest=geometry_digest,
         ),
         public_pre_observation_identity=(
             f"public_rgb8_vae_qk_pre_{cluster}_{ratio_identity}"
@@ -109,8 +201,8 @@ def _accepted_ratio(
         public_post_observation_identity=(
             f"public_rgb8_vae_qk_post_{cluster}_{ratio_identity}"
         ),
-        content_only_rgb8_digest=f"content-{cluster}",
-        geometry_written_rgb8_digest=f"geometry-{cluster}-{ratio_identity}",
+        content_only_rgb8_digest=content_digest,
+        geometry_written_rgb8_digest=geometry_digest,
         geometry_key_family_digest="a" * 64,
         registered_template_digest="b" * 64,
         wrong_key_template_digests=("c" * 64, "d" * 64, "e" * 64, "f" * 64),
@@ -561,61 +653,7 @@ def test_qk_runner_success_record_binds_ratio_metric_to_registered_responsibilit
 
 @pytest.mark.unit
 def test_qk_runner_crosses_real_public_write_and_blind_observation_chain() -> None:
-    class SpatialGeometrySynchronizationBackend(FakeGeometrySynchronizationBackend):
-        @staticmethod
-        def _decoded_image(latent: torch.Tensor) -> torch.Tensor:
-            spatial = latent.to(dtype=torch.float32)[:, :3]
-            return torch.sigmoid(
-                functional.interpolate(
-                    spatial,
-                    size=(512, 512),
-                    mode="bilinear",
-                    align_corners=True,
-                )
-            )
-
-        @staticmethod
-        def _encoded_latent(image: torch.Tensor) -> torch.Tensor:
-            return functional.adaptive_avg_pool2d(
-                image.to(dtype=torch.float32)[:, :2],
-                (4, 4),
-            )
-
-        def vae_encode(self, image: torch.Tensor) -> FakePosterior:
-            return FakePosterior(self._encoded_latent(image))
-
-        def vae_encode_differentiable(
-            self, image: torch.Tensor
-        ) -> FakePosterior:
-            return FakePosterior(
-                self._encoded_latent(image),
-                preserve_gradient=True,
-            )
-
-    protocol, manifest = load_qk_synchronization_write_protocol(
-        CONFIG, repository_root=ROOT
-    )
-    backend = SpatialGeometrySynchronizationBackend()
-    runtime = create_runtime_adapter(backend)
-    runtime.initialize("cpu")
-    adapter = CegWmExperimentAdapter(
-        load_ceg_wm_experiment_adapter_configuration(COMPONENTS),
-        runtime_adapter=runtime,
-    )
-    runner = QkSynchronizationWriteDiagnosticRunner(
-        protocol=protocol,
-        manifest=manifest,
-        adapter=adapter,
-        runtime_adapter=runtime,
-        method_code_revision="1" * 40,
-        run_id=protocol.run_id,
-        content_registered_root_key="qk-public-chain-content-root",
-        geometry_registered_root_key="qk-public-chain-geometry-root",
-        protocol_digest=protocol.digest(),
-        execution_intent_authority_digest="2" * 64,
-        candidate_config_digest="3" * 64,
-        package_identity="4" * 64,
-    )
+    runner, runtime, backend = _public_chain_runner()
 
     observation, operation, members = runner.execute_ratio_probe(
         unit_index=1,
@@ -634,6 +672,171 @@ def test_qk_runner_crosses_real_public_write_and_blind_observation_chain() -> No
     assert set(members) <= {"diagnostics/geometry_written_rgb8.bin"}
     assert backend.suffix_replay_modes
     assert True in backend.suffix_replay_modes
+    public_pre_image = backend.public_detection_images[-1]
+    public_pre_rgb8 = torch.floor(public_pre_image * 255.0).to(torch.uint8)
+    assert sha256(public_pre_rgb8.contiguous().numpy().tobytes()).hexdigest() == (
+        observation.content_only_rgb8_digest
+    )
+    assert observation.rgb8_quality_delta is None
+    runtime.close()
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_qk_ratio_record_recovers_exact_rgb8_for_transform_without_regeneration(
+    tmp_path: Path,
+) -> None:
+    runner, runtime, backend = _public_chain_runner()
+    protocol = runner.protocol
+    manifest = runner.manifest
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest=manifest.digest(),
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    lease = store.acquire_lease(
+        session_id="qk_ratio_member_recovery_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=10000,
+    )
+    ratio_binding = runner.create_persistence_unit_bindings()[1]
+    ratio_intent = store.create_intent(
+        lease,
+        unit_id=ratio_binding.unit_id,
+        unit_index=ratio_binding.unit_index,
+        attempt_index=0,
+        parent_attempt_intent_digest=None,
+        now_epoch_seconds=101,
+    )
+    content_rgb8 = torch.zeros((1, 3, 512, 512), dtype=torch.uint8)
+    source_rgb8 = torch.arange(
+        1 * 3 * 512 * 512,
+        dtype=torch.int64,
+    ).remainder(251).to(torch.uint8).reshape(1, 3, 512, 512)
+    content_digest = sha256(content_rgb8.numpy().tobytes()).hexdigest()
+    source_digest = sha256(source_rgb8.numpy().tobytes()).hexdigest()
+    selected_ratio_identity = protocol.geometry_ratio_roster[0].ratio_identity
+    ratio_observation = _accepted_ratio(
+        0,
+        selected_ratio_identity,
+        protocol.geometry_ratio_roster[0].ratio,
+        content_only_rgb8_digest=content_digest,
+        geometry_written_rgb8_digest=source_digest,
+    )
+    source_bytes = source_rgb8.numpy().tobytes()
+    operation = {
+        "routing_used": False,
+        "content_branch_id": "hf_only",
+        "hf_carrier_identity": "integration_fixture_carrier",
+        "ratio_probe_observation": asdict(ratio_observation),
+        "accepted_rgb8_member": {
+            "path": RGB8_MEMBER_PATH,
+            "shape": tuple(source_rgb8.shape),
+            "dtype": "torch.uint8",
+            "size_bytes": len(source_bytes),
+            "sha256": source_digest,
+        },
+        "private_qk_or_latent_persisted": False,
+    }
+    ratio_record = runner._record(
+        unit_index=1,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+        actual_elapsed_seconds=1.0,
+        operation=operation,
+        observation_identity=ratio_observation.observation_identity,
+    )
+    ratio_record.validate()
+    marker = store.commit_unit(
+        lease,
+        ratio_intent,
+        record=ratio_record,
+        diagnostic_members={RGB8_MEMBER_PATH: source_bytes},
+        now_epoch_seconds=102,
+    )
+    recovery = store.recover(now_epoch_seconds=103)
+    evidence = store.verified_terminal_scientific_evidence(
+        now_epoch_seconds=103
+    )
+    recovered_rgb8 = _selected_rgb8(
+        tmp_path,
+        run_id=runner.run_id,
+        cluster_ordinal=0,
+        selected_ratio_identity=selected_ratio_identity,
+        evidence=evidence,
+        protocol=protocol,
+        manifest=manifest,
+    )
+    assert marker.attempt_disposition == "success"
+    assert tuple(item.unit_index for item in recovery.committed_units) == (1,)
+    assert len(tuple((store.run_root / "markers").glob("*.json"))) == 1
+    assert sha256(recovered_rgb8.numpy().tobytes()).hexdigest() == (
+        ratio_observation.geometry_written_rgb8_digest
+    )
+
+    generation_count_before_transform = backend.generation_call_count
+    transformed_record, transformed_members = runner.execute_scientific_unit(
+        unit_index=13,
+        base_latent=None,
+        selected_ratio_identity=selected_ratio_identity,
+        source_rgb8=recovered_rgb8,
+        attempt_index=0,
+        retry_parent_intent_digest=None,
+        maximum_duration_seconds=2700,
+    )
+    transformed_record.validate()
+    assert transformed_members == {}
+    assert backend.generation_call_count == generation_count_before_transform
+    assert transformed_record.operation_result_payload[
+        "transformed_relation_observation"
+    ]["source_geometry_written_rgb8_digest"] == (
+        ratio_observation.geometry_written_rgb8_digest
+    )
+
+    for cluster_ordinal, ratio_identity in (
+        (1, selected_ratio_identity),
+        (0, protocol.geometry_ratio_roster[1].ratio_identity),
+    ):
+        with pytest.raises(QkSynchronizationWriteEntrypointError):
+            _selected_rgb8(
+                tmp_path,
+                run_id=runner.run_id,
+                cluster_ordinal=cluster_ordinal,
+                selected_ratio_identity=ratio_identity,
+                evidence=evidence,
+                protocol=protocol,
+                manifest=manifest,
+            )
+
+    bundle_path = (
+        store.run_root / "bundles" / f"sha256_{marker.bundle_sha256}.zip"
+    )
+    bundle_path.write_bytes(bundle_path.read_bytes() + b"tampered")
+    with pytest.raises(
+        QkSynchronizationWriteEntrypointError,
+        match="bundle bytes drifted",
+    ):
+        _selected_rgb8(
+            tmp_path,
+            run_id=runner.run_id,
+            cluster_ordinal=0,
+            selected_ratio_identity=selected_ratio_identity,
+            evidence=evidence,
+            protocol=protocol,
+            manifest=manifest,
+        )
+    runtime.close()
 
 
 @pytest.mark.unit

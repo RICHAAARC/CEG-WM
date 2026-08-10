@@ -15,11 +15,15 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import torch
 
 from experiments.methods import CegWmExperimentAdapter, load_ceg_wm_experiment_adapter_configuration
-from experiments.protocol.development_records import DevelopmentScientificRecord
+from experiments.protocol.development_records import (
+    DevelopmentRecordError,
+    DevelopmentScientificRecord,
+)
 from experiments.protocol.qk_synchronization_write_diagnostic import (
     OPERATIONAL_UNIT_COUNT,
     RATIO_PROBE_UNIT_COUNT,
     canonical_digest,
+    derive_qk_synchronization_analysis_identity,
     load_authority_deny_axes,
     load_qk_synchronization_write_protocol,
 )
@@ -93,26 +97,104 @@ def _selected_rgb8(
     cluster_ordinal: int,
     selected_ratio_identity: str,
     evidence,
+    protocol,
+    manifest,
 ) -> torch.Tensor:
+    ratio_units = tuple(
+        unit
+        for unit in protocol.unit_roster
+        if 1 <= unit.unit_index <= RATIO_PROBE_UNIT_COUNT
+        and unit.source_cluster_ordinal == cluster_ordinal
+        and unit.geometry_case_id == selected_ratio_identity
+    )
+    if len(ratio_units) != 1 or not 0 <= cluster_ordinal < len(manifest.entries):
+        raise QkSynchronizationWriteEntrypointError(
+            "selected ratio is outside the frozen roster"
+        )
+    expected_unit = ratio_units[0]
+    expected_identity = derive_qk_synchronization_analysis_identity(
+        manifest.entries[cluster_ordinal],
+        expected_unit,
+        content_key_family_digest=canonical_digest(
+            {
+                "role": "registered_hf_content_key_family",
+                "protocol_digest": protocol.digest(),
+                "manifest_digest": manifest.digest(),
+            }
+        ),
+        geometry_key_family_digest=canonical_digest(
+            {
+                "role": "registered_geometry_key_family",
+                "protocol_digest": protocol.digest(),
+                "manifest_digest": manifest.digest(),
+            }
+        ),
+    )
     matches = tuple(
         (record, marker)
         for record, marker in evidence
-        if record.unit_index <= RATIO_PROBE_UNIT_COUNT
-        and record.analysis_unit_identity["case_id"] == selected_ratio_identity
-        and record.source_cluster_ordinal == cluster_ordinal
-        and marker.attempt_disposition == "success"
+        if record.unit_index == expected_unit.unit_index
     )
     if len(matches) != 1:
         raise QkSynchronizationWriteEntrypointError("selected ratio bundle is not unique")
     record, marker = matches[0]
+    try:
+        record.validate()
+    except DevelopmentRecordError as exc:
+        raise QkSynchronizationWriteEntrypointError(
+            "selected ratio record is invalid"
+        ) from exc
+    if (
+        marker.attempt_disposition != "success"
+        or marker.unit_index != expected_unit.unit_index
+        or marker.record_id != record.record_id
+        or marker.record_digest
+        != sha256(_canonical_bytes(record.payload())).hexdigest()
+        or record.execution_status != "success"
+        or record.run_id != run_id
+        or record.unit_index != expected_unit.unit_index
+        or record.phase != expected_unit.phase
+        or record.responsibility_id != expected_unit.responsibility_id
+        or record.geometry_case_id != selected_ratio_identity
+        or record.analysis_unit_identity != asdict(expected_identity)
+    ):
+        raise QkSynchronizationWriteEntrypointError(
+            "selected ratio record or marker identity drifted"
+        )
     metadata = record.operation_result_payload.get("accepted_rgb8_member")
     if type(metadata) is not dict or metadata.get("path") != RGB8_MEMBER_PATH:
         raise QkSynchronizationWriteEntrypointError("selected ratio RGB8 member metadata is missing")
+    ratio_observation = record.operation_result_payload.get(
+        "ratio_probe_observation"
+    )
+    if (
+        type(ratio_observation) is not dict
+        or ratio_observation.get("geometry_written_rgb8_digest")
+        != metadata.get("sha256")
+    ):
+        raise QkSynchronizationWriteEntrypointError(
+            "selected ratio record geometry digest drifted"
+        )
     bundle = persistent / run_id / "bundles" / f"sha256_{marker.bundle_sha256}.zip"
     if sha256(bundle.read_bytes()).hexdigest() != marker.bundle_sha256:
         raise QkSynchronizationWriteEntrypointError("selected ratio bundle bytes drifted")
     with ZipFile(bundle, "r") as archive:
         payload = archive.read(RGB8_MEMBER_PATH)
+        artifact_manifest = json.loads(archive.read("artifact_manifest.json"))
+    artifact_members = {
+        item.get("path"): item
+        for item in artifact_manifest.get("members", ())
+        if type(item) is dict
+    }
+    artifact_member = artifact_members.get(RGB8_MEMBER_PATH)
+    if (
+        type(artifact_member) is not dict
+        or artifact_member.get("size_bytes") != metadata.get("size_bytes")
+        or artifact_member.get("sha256") != metadata.get("sha256")
+    ):
+        raise QkSynchronizationWriteEntrypointError(
+            "selected ratio artifact manifest drifted"
+        )
     if len(payload) != metadata.get("size_bytes") or sha256(payload).hexdigest() != metadata.get("sha256"):
         raise QkSynchronizationWriteEntrypointError("selected ratio RGB8 member digest drifted")
     shape = tuple(metadata.get("shape", ()))
@@ -198,7 +280,7 @@ def execute_qk_synchronization_write_diagnostic_session(
                 elif ratio_aggregate.selected_ratio_identity is None:
                     record = runner.create_dependency_blocked_record(unit_index=unit.unit_index, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
                 else:
-                    rgb8 = _selected_rgb8(persistent, run_id=run_id, cluster_ordinal=unit.source_cluster_ordinal, selected_ratio_identity=ratio_aggregate.selected_ratio_identity, evidence=cursor.terminal_scientific_evidence)
+                    rgb8 = _selected_rgb8(persistent, run_id=run_id, cluster_ordinal=unit.source_cluster_ordinal, selected_ratio_identity=ratio_aggregate.selected_ratio_identity, evidence=cursor.terminal_scientific_evidence, protocol=protocol, manifest=manifest)
                     record, diagnostic_members = runner.execute_scientific_unit(unit_index=unit.unit_index, base_latent=None, selected_ratio_identity=ratio_aggregate.selected_ratio_identity, source_rgb8=rgb8, attempt_index=intent.attempt_index, retry_parent_intent_digest=intent.parent_attempt_intent_digest, maximum_duration_seconds=unit.maximum_duration_seconds)
             except Exception as exc:
                 if unit.unit_index == 0:
