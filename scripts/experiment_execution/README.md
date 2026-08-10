@@ -5,7 +5,7 @@
 `qk_synchronization_write_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的
 执行入口。当前唯一授权 Notebook 为
 `notebooks/colab/qk_synchronization_write_diagnostic.ipynb`，固定绑定 execution
-revision `9003453d48cad909375ecb7185452e54dfcb3824` 与独立 run ID
+revision `8fdeb237e24a7948431db9869db4c7830ae20b49` 与独立 run ID
 `ceg_wm_qk_runtime_failure_localization`。服务器的 execution authority 精确为
 `1 operational / 0 scientific / 1 total / 1 attempt`：只运行 unit0 attempt0，并在
 operational success 或安全 failure diagnostic 后立即停止；休眠的 12 个 ratio 与16个

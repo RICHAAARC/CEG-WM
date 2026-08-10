@@ -6,7 +6,7 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `qk_synchronization_write_diagnostic.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`9003453d48cad909375ecb7185452e54dfcb3824`，使用独立 run ID
+`8fdeb237e24a7948431db9869db4c7830ae20b49`，使用独立 run ID
 `ceg_wm_qk_runtime_failure_localization`。当前 execution authority 精确为
 `1 operational / 0 scientific / 1 total / 1 attempt`：只运行 unit0 attempt0，并在
 operational success 或安全 failure diagnostic 后立即停止，不执行休眠的 12 个 ratio
