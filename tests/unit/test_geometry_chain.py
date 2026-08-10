@@ -171,6 +171,35 @@ def _identity_estimation_record() -> GeometricTransformEstimation:
     )
 
 
+def _left_associated_content_projection_reference(
+    vector: torch.Tensor,
+    content_directions: tuple[torch.Tensor, ...],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reproduce the former small-fixture projection association."""
+
+    flattened = vector.to(device="cpu", dtype=torch.float64).reshape(-1)
+    columns = tuple(
+        direction.to(device="cpu", dtype=torch.float64).reshape(-1)
+        / torch.linalg.vector_norm(
+            direction.to(device="cpu", dtype=torch.float64).reshape(-1)
+        )
+        for direction in content_directions
+    )
+    matrix = torch.stack(columns, dim=1)
+    left, singular_values, right_transpose = torch.linalg.svd(
+        matrix,
+        full_matrices=False,
+    )
+    retained = singular_values > 1e-6 * singular_values.max()
+    moore_penrose = (
+        right_transpose[retained, :].transpose(0, 1)
+        @ torch.diag(1.0 / singular_values[retained])
+        @ left[:, retained].transpose(0, 1)
+    )
+    projected = (matrix @ moore_penrose) @ flattened
+    return projected, flattened - projected
+
+
 def _thresholds(
     *,
     coverage: float = 0.45,
@@ -192,6 +221,112 @@ def _thresholds(
         epsilon_inlier=0.8,
         fit_identity="geometry_reliability_fit_cpu_synthetic",
     )
+
+
+@pytest.mark.unit
+def test_qk_content_projection_reassociation_preserves_small_reference():
+    vector = torch.tensor(
+        (
+            (0.25, -0.5, 0.75, 1.0),
+            (-1.25, 1.5, -1.75, 2.0),
+            (2.25, -2.5, 2.75, -3.0),
+        ),
+        dtype=torch.float32,
+    )
+    content_directions = (
+        torch.tensor(
+            (
+                (1.0, 0.0, -1.0, 0.5),
+                (0.25, -0.75, 1.25, -1.5),
+                (0.5, 1.0, -0.25, 0.75),
+            ),
+            dtype=torch.float32,
+        ),
+        torch.tensor(
+            (
+                (-0.5, 1.5, 0.25, -1.0),
+                (1.25, 0.5, -0.75, 1.0),
+                (-1.5, 0.25, 0.5, 1.75),
+            ),
+            dtype=torch.float32,
+        ),
+    )
+    expected_projection, expected_residual = (
+        _left_associated_content_projection_reference(
+            vector,
+            content_directions,
+        )
+    )
+    actual_projection, actual_residual = _content_projection(
+        vector,
+        content_directions,
+    )
+
+    projection_max_abs_error = float(
+        torch.max(torch.abs(actual_projection - expected_projection))
+    )
+    residual_max_abs_error = float(
+        torch.max(torch.abs(actual_residual - expected_residual))
+    )
+    assert projection_max_abs_error <= 2e-15
+    assert residual_max_abs_error <= 2e-15
+    assert torch.allclose(
+        actual_projection + actual_residual,
+        vector.to(dtype=torch.float64).reshape(-1),
+        atol=2e-15,
+        rtol=0.0,
+    )
+    for content_direction in content_directions:
+        normalized = content_direction.to(dtype=torch.float64).reshape(-1)
+        normalized = normalized / torch.linalg.vector_norm(normalized)
+        assert abs(float(torch.dot(actual_residual, normalized))) <= 2e-14
+
+    expected_direction = (
+        expected_residual / torch.linalg.vector_norm(expected_residual)
+    ).to(dtype=torch.float32).reshape(vector.shape)
+    actual_direction = geometry_direction_outside_content_span(
+        vector,
+        content_directions,
+    )
+    assert torch.equal(actual_direction, expected_direction)
+
+
+@pytest.mark.unit
+def test_qk_content_projection_completes_real_latent_shape_without_dense_square():
+    generator = torch.Generator().manual_seed(43017)
+    vector = torch.randn((1, 16, 64, 64), generator=generator)
+    content_direction = torch.randn((1, 16, 64, 64), generator=generator)
+
+    projected, residual = _content_projection(vector, (content_direction,))
+
+    flattened = vector.to(dtype=torch.float64).reshape(-1)
+    normalized_content = content_direction.to(dtype=torch.float64).reshape(-1)
+    normalized_content = normalized_content / torch.linalg.vector_norm(
+        normalized_content
+    )
+    assert projected.shape == flattened.shape
+    assert residual.shape == flattened.shape
+    assert projected.dtype == torch.float64
+    assert residual.dtype == torch.float64
+    assert projected.numel() == 16 * 64 * 64
+    assert torch.isfinite(projected).all()
+    assert torch.isfinite(residual).all()
+    assert torch.allclose(
+        projected + residual,
+        flattened,
+        atol=2e-15,
+        rtol=0.0,
+    )
+    orthogonality_error = abs(float(torch.dot(residual, normalized_content)))
+    assert orthogonality_error <= 2e-12 * float(torch.linalg.vector_norm(residual))
+
+    final_direction = geometry_direction_outside_content_span(
+        vector,
+        (content_direction,),
+    )
+    assert final_direction.shape == vector.shape
+    assert final_direction.dtype == torch.float32
+    assert torch.isfinite(final_direction).all()
 
 
 @pytest.mark.unit

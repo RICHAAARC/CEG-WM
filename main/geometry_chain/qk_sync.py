@@ -797,7 +797,7 @@ def _content_projection(
         @ reciprocal
         @ left_retained.transpose(0, 1)
     )
-    projected = matrix @ moore_penrose @ flattened
+    projected = matrix @ (moore_penrose @ flattened)
     return projected, flattened - projected
 
 
