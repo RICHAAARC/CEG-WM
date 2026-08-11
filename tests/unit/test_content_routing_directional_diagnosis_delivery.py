@@ -121,6 +121,7 @@ def _patch_server(
 
 
 @pytest.mark.quick
+@pytest.mark.unit
 def test_content_routing_server_writes_safe_fixed_roster_receipt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -150,6 +151,7 @@ def test_content_routing_server_writes_safe_fixed_roster_receipt(
     assert secret.encode("utf-8") not in receipt_bytes
 
 
+@pytest.mark.unit
 def test_content_routing_entrypoint_preserves_fixed_execution_boundaries() -> None:
     source = inspect.getsource(
         __import__(
@@ -158,6 +160,8 @@ def test_content_routing_entrypoint_preserves_fixed_execution_boundaries() -> No
         )
     )
     assert "cursor.routing_reference_records" in source
+    assert "cursor.terminal_routing_reference_records" in source
+    assert "_commit_dependency_blocked_probe_records" in source
     assert "verified_terminal_scientific_evidence" in source
     assert "aggregate_content_routing_directional_diagnosis" in source
     assert "attempt_index" not in source or "create_session_intent" in source
@@ -170,6 +174,7 @@ def test_content_routing_entrypoint_preserves_fixed_execution_boundaries() -> No
         assert forbidden not in source
 
 
+@pytest.mark.unit
 def test_content_routing_exact_package_contains_execution_closure(tmp_path: Path) -> None:
     revision = subprocess.run(
         ("git", "rev-parse", "HEAD"),

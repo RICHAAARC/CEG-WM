@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 import inspect
 import json
 from pathlib import Path
+import shutil
+import time
 
 import pytest
 import torch
@@ -34,16 +36,34 @@ from experiments.protocol.development_records import (
     ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
     ROUTING_REFERENCE_RECORD_KIND,
     ROUTING_REFERENCE_RECORD_SCHEMA,
+    DevelopmentRecordError,
     DevelopmentRoutingReferenceRecord,
+    DevelopmentScientificRecord,
     canonical_development_value_digest,
 )
 from experiments.runners.content_routing_directional_diagnosis import (
     ContentRoutingDirectionalDiagnosisRunner,
 )
+from experiments.runners.development_inputs import (
+    DevelopmentSemanticObservationProducer,
+)
+from experiments.runners.development_persistence import (
+    DevelopmentPersistenceError,
+    DevelopmentPersistentStore,
+    FrozenWorkerIdentity,
+)
 from experiments.runners.formal_operations import (
     FormalHfContentDetectionOperation,
 )
-from main import RoutingObservations, SpatialRoutingObservation
+from main import RoutingObservations, SpatialRoutingObservation, identify_root_key
+from runtime import create_runtime_adapter
+from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
+    ContentRoutingDirectionalEntrypointError,
+    _commit_dependency_blocked_probe_records,
+    _reference_dependency_failure_class,
+    _replay_aggregate,
+)
+from tests.unit.test_runtime_content_write_and_vae import FakeContentBackend
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -139,6 +159,101 @@ def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRec
         draft.payload_without_record_id()
     )
     return DevelopmentRoutingReferenceRecord.from_payload(payload)
+
+
+def _failed_reference_record(
+    ordinal: int,
+    failure_class: str | None,
+    *,
+    execution_status: str = "failed",
+) -> DevelopmentRoutingReferenceRecord:
+    payload = _persistent_reference_record(ordinal).payload()
+    payload.update(
+        {
+            "record_id": "0" * 64,
+            "execution_status": execution_status,
+            "failure_class": failure_class,
+            "failure_reason": "registered_reference_failure",
+            "measurement_payload": {},
+        }
+    )
+    draft = DevelopmentRoutingReferenceRecord(**payload)
+    payload["record_id"] = canonical_development_value_digest(
+        draft.payload_without_record_id()
+    )
+    return DevelopmentRoutingReferenceRecord.from_payload(payload)
+
+
+def _persistence_runner() -> ContentRoutingDirectionalDiagnosisRunner:
+    protocol, reference_manifest, probe_manifest = _protocol_bundle()
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(
+            ROOT / "configs/experiments/internal_execution_components.json"
+        )
+    )
+    callback_sequence = tuple(range(20))
+    runtime = create_runtime_adapter(
+        FakeContentBackend(
+            callback_sequences=(
+                callback_sequence,
+                callback_sequence,
+                callback_sequence,
+                callback_sequence,
+            )
+        )
+    )
+    runtime.initialize("cpu")
+    semantic = object.__new__(DevelopmentSemanticObservationProducer)
+    registered_root = "routing-persistence-test-key"
+    return ContentRoutingDirectionalDiagnosisRunner(
+        protocol=protocol,
+        reference_manifest=reference_manifest,
+        probe_manifest=probe_manifest,
+        adapter=adapter,
+        runtime_adapter=runtime,
+        semantic_producer=semantic,
+        method_code_revision="a" * 40,
+        registered_root_key=registered_root,
+        root_key_public_digest=(
+            identify_root_key(registered_root).root_key_public_digest
+        ),
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest="b" * 64,
+        candidate_config_digest="c" * 64,
+    )
+
+
+def _bound_reference_record(
+    runner: ContentRoutingDirectionalDiagnosisRunner,
+    intent,
+    *,
+    failure_class: str | None = None,
+) -> DevelopmentRoutingReferenceRecord:
+    ordinal = intent.unit_index - 2
+    source = (
+        _persistent_reference_record(ordinal)
+        if failure_class is None
+        else _failed_reference_record(ordinal, failure_class)
+    )
+    record = replace(
+        source,
+        record_id="0" * 64,
+        run_id=runner.protocol.run_id,
+        protocol_digest=runner.protocol_digest,
+        method_code_revision=runner.method_code_revision,
+        unit_index=intent.unit_index,
+        source_cluster_ordinal=ordinal,
+        candidate_config_digest=runner.candidate_config_digest,
+        attempt_index=intent.attempt_index,
+        retry_parent_intent_digest=intent.parent_attempt_intent_digest,
+        maximum_duration_seconds=intent.maximum_duration_seconds,
+    )
+    return replace(
+        record,
+        record_id=canonical_development_value_digest(
+            record.payload_without_record_id()
+        ),
+    )
 
 
 def _blind_score_rows(
@@ -417,6 +532,320 @@ def test_routing_reference_fit_replays_thirty_two_persistent_records() -> None:
     assert hierarchical_texture_reference == 31.25
     assert reference.texture_gradient_reference != hierarchical_texture_reference
     assert not any("semantic" in field.name for field in fields(measurements[0]))
+
+
+@pytest.mark.parametrize(
+    ("failure_classes", "expected"),
+    (
+        (("resource_failure",), "resource_failure"),
+        (("implementation_failure",), "implementation_failure"),
+        (
+            (("resource_failure", "implementation_failure")),
+            "implementation_failure",
+        ),
+    ),
+)
+def test_routing_reference_dependency_classification_preserves_terminal_failures(
+    failure_classes: tuple[str, ...],
+    expected: str,
+) -> None:
+    records = list(_persistent_reference_record(index) for index in range(32))
+    for offset, failure_class in enumerate(failure_classes):
+        records[31 - offset] = _failed_reference_record(
+            31 - offset,
+            failure_class,
+        )
+    assert _reference_dependency_failure_class(tuple(records)) == expected
+
+
+@pytest.mark.parametrize(
+    ("records", "expected_error"),
+    (
+        (
+            tuple(_persistent_reference_record(index) for index in range(31)),
+            ContentRoutingDirectionalEntrypointError,
+        ),
+        (
+            (
+                *tuple(_persistent_reference_record(index) for index in range(31)),
+                replace(
+                    _failed_reference_record(31, "resource_failure"),
+                    failure_class=None,
+                ),
+            ),
+            DevelopmentRecordError,
+        ),
+        (
+            (
+                *tuple(_persistent_reference_record(index) for index in range(31)),
+                replace(
+                    _failed_reference_record(31, "resource_failure"),
+                    execution_status="retry",
+                ),
+            ),
+            DevelopmentRecordError,
+        ),
+    ),
+)
+def test_routing_reference_dependency_unknown_missing_or_nonterminal_fails_closed(
+    records: tuple[DevelopmentRoutingReferenceRecord, ...],
+    expected_error: type[Exception],
+) -> None:
+    with pytest.raises(expected_error):
+        _reference_dependency_failure_class(records)
+
+
+@pytest.mark.parametrize(
+    ("reference_failures", "expected_failure_class", "expected_outcome"),
+    (
+        ({31: "resource_failure"}, "resource_failure", "resource_blocked"),
+        (
+            {31: "implementation_failure"},
+            "implementation_failure",
+            "implementation_blocked",
+        ),
+        (
+            {30: "resource_failure", 31: "implementation_failure"},
+            "implementation_failure",
+            "implementation_blocked",
+        ),
+    ),
+)
+def test_routing_dependency_block_commits_fixed_probe_denominator_and_recovers(
+    tmp_path: Path,
+    reference_failures: dict[int, str],
+    expected_failure_class: str,
+    expected_outcome: str,
+) -> None:
+    runner = _persistence_runner()
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.protocol.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest="d" * 64,
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=runner.protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_dependency_block_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    base = torch.ones((1, 16, 2, 2), dtype=torch.float16)
+    for unit_index in range(2):
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=epoch + 1 + unit_index * 2,
+        )
+        record = runner.execute_operational_unit(
+            unit_index=unit_index,
+            base_latent=base,
+            intent=intent,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=epoch + 2 + unit_index * 2,
+        )
+    for ordinal in range(32):
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=epoch + 10 + ordinal * 2,
+        )
+        record = _bound_reference_record(
+            runner,
+            intent,
+            failure_class=reference_failures.get(ordinal),
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=epoch + 11 + ordinal * 2,
+        )
+    assert len(cursor.routing_reference_records) == 32 - len(reference_failures)
+    assert len(cursor.terminal_routing_reference_records) == 32
+    failure_class = _reference_dependency_failure_class(
+        cursor.terminal_routing_reference_records
+    )
+    records = _commit_dependency_blocked_probe_records(
+        store=store,
+        cursor=cursor,
+        lease=lease,
+        runner=runner,
+        failure_class=failure_class,
+        raw_secret_values=(),
+    )
+    aggregate = _replay_aggregate(records)
+    recovered = store.open_session_cursor(lease, now_epoch_seconds=epoch + 200)
+
+    assert cursor.next_unit_index == 42
+    assert recovered.next_unit_index == 42
+    assert len(cursor.committed_units) == 42
+    assert len(records) == 8
+    assert all(type(record) is DevelopmentScientificRecord for record in records)
+    assert all(record.execution_status == "failed" for record in records)
+    assert all(record.failure_class == expected_failure_class for record in records)
+    assert all(record.operation_result_payload == {} for record in records)
+    for record in records:
+        replayed = DevelopmentScientificRecord.from_payload(
+            json.loads(json.dumps(record.payload()))
+        )
+        assert replayed.record_id == record.record_id
+    assert aggregate.expected_probe_count == 8
+    assert aggregate.successful_probe_count == 0
+    assert aggregate.failed_probe_count == 8
+    assert aggregate.outcome == expected_outcome
+    assert aggregate.outcome != "routing_directional_signal_not_observed"
+    assert "execute_probe_unit" not in inspect.getsource(
+        _commit_dependency_blocked_probe_records
+    )
+    assert len(tuple((store.run_root / "intents").glob("*.json"))) == 42
+    assert len(tuple((store.run_root / "bundles").glob("*.zip"))) == 42
+    assert len(
+        tuple((store.run_root / "markers").glob("*.COMMITTED.json"))
+    ) == 42
+    with pytest.raises(DevelopmentPersistenceError):
+        store.create_session_intent(
+            recovered,
+            lease,
+            now_epoch_seconds=epoch + 201,
+        )
+
+
+@pytest.mark.parametrize(
+    "tamper_role",
+    ("duplicate_marker", "foreign_marker", "mismatched_marker"),
+)
+def test_routing_persistence_recovery_rejects_invalid_committed_markers(
+    tmp_path: Path,
+    tamper_role: str,
+) -> None:
+    runner = _persistence_runner()
+    identity = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest="d" * 64,
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+    bindings = runner.create_persistence_unit_bindings()
+    source_root = tmp_path / "source"
+    store = DevelopmentPersistentStore(
+        source_root,
+        run_id=runner.protocol.run_id,
+        worker_identity=identity,
+        registered_unit_bindings=bindings,
+    )
+    epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_marker_integrity_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    intent = store.create_session_intent(
+        cursor,
+        lease,
+        now_epoch_seconds=epoch + 1,
+    )
+    record = runner.execute_operational_unit(
+        unit_index=0,
+        base_latent=torch.ones((1, 16, 2, 2), dtype=torch.float16),
+        intent=intent,
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        intent,
+        record=record,
+        now_epoch_seconds=epoch + 2,
+    )
+    tampered_root = tmp_path / tamper_role
+    shutil.copytree(source_root, tampered_root)
+    tampered_store = DevelopmentPersistentStore(
+        tampered_root,
+        run_id=runner.protocol.run_id,
+        worker_identity=identity,
+        registered_unit_bindings=bindings,
+    )
+    marker = next((tampered_store.run_root / "markers").glob("*.COMMITTED.json"))
+    payload = json.loads(marker.read_text("utf-8"))
+    if tamper_role == "duplicate_marker":
+        duplicate = marker.with_name(
+            "development_unit_0001__attempt_0.COMMITTED.json"
+        )
+        duplicate.write_bytes(marker.read_bytes())
+    elif tamper_role == "foreign_marker":
+        payload["run_id"] = "ceg_wm_foreign_routing_run"
+        marker.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+    else:
+        payload["record_digest"] = "f" * 64
+        marker.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+    with pytest.raises(DevelopmentPersistenceError):
+        tampered_store.recover(now_epoch_seconds=epoch + 3)
+
+
+def test_routing_persistence_dangling_attempt_fails_closed_without_rerun(
+    tmp_path: Path,
+) -> None:
+    runner = _persistence_runner()
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.protocol.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest="d" * 64,
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=runner.protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_dangling_attempt_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=10,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    intent = store.create_session_intent(
+        cursor,
+        lease,
+        now_epoch_seconds=epoch + 1,
+    )
+    assert intent.attempt_index == 0
+    assert intent.maximum_record_attempts == 1
+    assert cursor.committed_units == ()
+    with pytest.raises(
+        DevelopmentPersistenceError,
+        match="interrupted unit exhausted frozen attempts",
+    ):
+        store.recover(now_epoch_seconds=epoch + 11)
 
 
 def test_routing_runner_calls_real_public_method_surfaces() -> None:

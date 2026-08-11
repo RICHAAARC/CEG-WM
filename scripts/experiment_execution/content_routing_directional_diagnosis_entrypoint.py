@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import time
@@ -119,7 +120,9 @@ def _replay_aggregate(records: tuple[DevelopmentScientificRecord, ...]):
     implementation_failures = 0
     resource_failures = 0
     for record in records:
-        checked = DevelopmentScientificRecord.from_payload(record.payload())
+        checked = DevelopmentScientificRecord.from_payload(
+            json.loads(_canonical_bytes(record.payload()))
+        )
         if checked.execution_status != "success":
             if checked.failure_class == "implementation_failure":
                 implementation_failures += 1
@@ -152,6 +155,93 @@ def _replay_aggregate(records: tuple[DevelopmentScientificRecord, ...]):
         implementation_failure_count=implementation_failures,
         resource_failure_count=resource_failures,
     )
+
+
+def _reference_dependency_failure_class(
+    records: tuple[DevelopmentRoutingReferenceRecord, ...],
+) -> str:
+    """Classify the complete terminal fit roster without hiding failed units."""
+
+    if len(records) != 32:
+        raise ContentRoutingDirectionalEntrypointError(
+            "routing reference terminal roster is incomplete"
+        )
+    implementation_failures = 0
+    resource_failures = 0
+    for record in records:
+        checked = DevelopmentRoutingReferenceRecord.from_payload(record.payload())
+        if checked.execution_status == "success":
+            if checked.failure_class is not None:
+                raise ContentRoutingDirectionalEntrypointError(
+                    "successful routing reference carries a failure class"
+                )
+            continue
+        if checked.execution_status != "failed":
+            raise ContentRoutingDirectionalEntrypointError(
+                "routing reference is not terminal"
+            )
+        if checked.failure_class == "implementation_failure":
+            implementation_failures += 1
+        elif checked.failure_class == "resource_failure":
+            resource_failures += 1
+        else:
+            raise ContentRoutingDirectionalEntrypointError(
+                "routing reference failure classification drifted"
+            )
+    if implementation_failures:
+        return "implementation_failure"
+    if resource_failures:
+        return "resource_failure"
+    raise ContentRoutingDirectionalEntrypointError(
+        "routing reference dependency is not blocked"
+    )
+
+
+def _commit_dependency_blocked_probe_records(
+    *,
+    store: DevelopmentPersistentStore,
+    cursor,
+    lease,
+    runner: ContentRoutingDirectionalDiagnosisRunner,
+    failure_class: str,
+    raw_secret_values: tuple[str, ...],
+) -> tuple[DevelopmentScientificRecord, ...]:
+    """Commit the remaining fixed probe denominator without running observations."""
+
+    if failure_class not in {"implementation_failure", "resource_failure"}:
+        raise ContentRoutingDirectionalEntrypointError(
+            "routing dependency failure class is invalid"
+        )
+    while cursor.next_unit_index < len(runner.protocol.unit_roster):
+        if cursor.next_unit_index < 34:
+            raise ContentRoutingDirectionalEntrypointError(
+                "routing dependency block started before the probe roster"
+            )
+        now = int(time.time())
+        intent = store.create_session_intent(cursor, lease, now_epoch_seconds=now)
+        record = runner.create_failed_probe_record(
+            intent=intent,
+            failure_class=failure_class,
+            failure_reason="routing_reference_dependency_blocked",
+            elapsed_seconds=0.0,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            raw_secret_values=raw_secret_values,
+            now_epoch_seconds=max(now, int(time.time())),
+        )
+    evidence = store.verified_terminal_scientific_evidence(
+        now_epoch_seconds=int(time.time())
+    )
+    records = tuple(record for record, _marker in evidence)
+    if len(records) != 8:
+        raise ContentRoutingDirectionalEntrypointError(
+            "routing dependency block did not preserve the fixed probe denominator"
+        )
+    return records
 
 
 def execute_content_routing_directional_diagnosis_session(
@@ -295,6 +385,20 @@ def execute_content_routing_directional_diagnosis_session(
                 break
             unit = protocol.unit_roster[cursor.next_unit_index]
             active_unit_index = unit.unit_index
+            if unit.unit_index >= 34 and len(cursor.routing_reference_records) != 32:
+                dependency_failure_class = _reference_dependency_failure_class(
+                    cursor.terminal_routing_reference_records
+                )
+                records = _commit_dependency_blocked_probe_records(
+                    store=store,
+                    cursor=cursor,
+                    lease=lease,
+                    runner=runner,
+                    failure_class=dependency_failure_class,
+                    raw_secret_values=(root_key, registered_root, hf_token),
+                )
+                aggregate = asdict(_replay_aggregate(records))
+                break
             entry = (
                 reference_manifest.entries[unit.source_cluster_ordinal]
                 if unit.unit_index < 34
@@ -322,20 +426,12 @@ def execute_content_routing_directional_diagnosis_session(
                         intent=intent,
                     )
                 else:
-                    if len(cursor.routing_reference_records) != 32:
-                        record = runner.create_failed_probe_record(
-                            intent=intent,
-                            failure_class="implementation_failure",
-                            failure_reason="routing_reference_dependency_blocked",
-                            elapsed_seconds=float(monotonic() - started),
-                        )
-                    else:
-                        record = runner.execute_probe_unit(
-                            unit_index=unit.unit_index,
-                            base_latent=base_latent,
-                            intent=intent,
-                            reference_records=cursor.routing_reference_records,
-                        )
+                    record = runner.execute_probe_unit(
+                        unit_index=unit.unit_index,
+                        base_latent=base_latent,
+                        intent=intent,
+                        reference_records=cursor.routing_reference_records,
+                    )
             except Exception as exc:
                 failure_class = (
                     "resource_failure" if _resource_failure(exc) else "implementation_failure"
@@ -366,7 +462,7 @@ def execute_content_routing_directional_diagnosis_session(
                 raw_secret_values=(root_key, registered_root, hf_token),
                 now_epoch_seconds=max(now, int(time.time())),
             )
-        if cursor.next_unit_index == len(protocol.unit_roster):
+        if aggregate is None and cursor.next_unit_index == len(protocol.unit_roster):
             evidence = store.verified_terminal_scientific_evidence(
                 now_epoch_seconds=int(time.time())
             )
