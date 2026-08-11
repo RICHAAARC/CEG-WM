@@ -64,6 +64,7 @@ from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint
     _failure_diagnostic,
     _is_resource_failure,
     _qualified_exception_type_chain,
+    _runtime_failure_resource_facts,
     _selected_rgb8,
     execute_qk_synchronization_write_diagnostic_session,
 )
@@ -1058,6 +1059,57 @@ def test_qk_failure_diagnostic_preserves_safe_sd35_backend_failure_type(
     ]
     assert diagnostic["failure_class"] == "implementation_failure"
     assert secret not in serialized
+
+
+@pytest.mark.unit
+def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> None:
+    secret = "cuda-fact-secret-must-not-be-persisted"
+    facts = (
+        ("before_allocated_bytes", 10),
+        ("before_reserved_bytes", 20),
+        ("before_max_allocated_bytes", 30),
+        ("before_max_reserved_bytes", 40),
+        ("after_allocated_bytes", 50),
+        ("after_reserved_bytes", 60),
+        ("after_max_allocated_bytes", 70),
+        ("after_max_reserved_bytes", 80),
+        ("total_device_bytes", 100),
+    )
+    stage = sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError(
+        cuda_memory_facts=facts
+    )
+    stage.__cause__ = RuntimeError(secret)
+    outer = CegWmExperimentAdapterError(secret)
+    outer.__cause__ = stage
+
+    assert _runtime_failure_resource_facts(outer) == (
+        "differentiable_vae_decode_forward",
+        dict(facts),
+    )
+    diagnostic = _failure_diagnostic(outer, active_binding=None)
+    serialized = json.dumps(diagnostic, sort_keys=True)
+
+    assert diagnostic["runtime_failure_operation_identity"] == (
+        "differentiable_vae_decode_forward"
+    )
+    assert diagnostic["runtime_failure_cuda_memory_facts"] == dict(facts)
+    assert diagnostic["failure_class"] == "implementation_failure"
+    assert secret not in serialized
+    for forbidden in ("message", "traceback", "tensor", "latent", "repr"):
+        assert forbidden not in serialized
+
+    no_cuda_stage = (
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError()
+    )
+    no_cuda_outer = CegWmExperimentAdapterError(secret)
+    no_cuda_outer.__cause__ = no_cuda_stage
+    assert _runtime_failure_resource_facts(no_cuda_outer) is None
+    no_cuda_diagnostic = _failure_diagnostic(
+        no_cuda_outer,
+        active_binding=None,
+    )
+    assert "runtime_failure_operation_identity" not in no_cuda_diagnostic
+    assert "runtime_failure_cuda_memory_facts" not in no_cuda_diagnostic
 
 
 @pytest.mark.unit

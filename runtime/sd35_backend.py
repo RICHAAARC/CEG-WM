@@ -51,6 +51,74 @@ class Sd35BackendDifferentiableVaeDecodeError(Sd35BackendError):
     """The differentiable VAE decode failed closed."""
 
 
+class _Sd35BackendDifferentiableVaeOperationError(
+    Sd35BackendDifferentiableVaeDecodeError
+):
+    """One finite differentiable VAE sub-operation failed closed."""
+
+    operation_identity = ""
+
+    def __init__(
+        self,
+        *,
+        cuda_memory_facts: tuple[tuple[str, int], ...] = (),
+    ) -> None:
+        super().__init__()
+        allowed = {
+            "before_allocated_bytes",
+            "before_reserved_bytes",
+            "before_max_allocated_bytes",
+            "before_max_reserved_bytes",
+            "after_allocated_bytes",
+            "after_reserved_bytes",
+            "after_max_allocated_bytes",
+            "after_max_reserved_bytes",
+            "total_device_bytes",
+        }
+        facts_are_complete = (
+            len(cuda_memory_facts) == len(allowed)
+            and {name for name, _value in cuda_memory_facts} == allowed
+        )
+        if (
+            not self.operation_identity
+            or (cuda_memory_facts and not facts_are_complete)
+            or any(
+                type(name) is not str
+                or type(value) is not int
+                or value < 0
+                for name, value in cuda_memory_facts
+            )
+        ):
+            raise Sd35BackendError(
+                "differentiable VAE failure resource facts are invalid"
+            )
+        self.cuda_memory_facts = tuple(sorted(cuda_memory_facts))
+
+
+class Sd35BackendDifferentiableVaeInputPreparationError(
+    _Sd35BackendDifferentiableVaeOperationError
+):
+    """Differentiable VAE input preparation failed closed."""
+
+    operation_identity = "differentiable_vae_input_preparation"
+
+
+class Sd35BackendDifferentiableVaeDecodeForwardError(
+    _Sd35BackendDifferentiableVaeOperationError
+):
+    """The differentiable VAE decoder forward failed closed."""
+
+    operation_identity = "differentiable_vae_decode_forward"
+
+
+class Sd35BackendDifferentiableImagePostprocessError(
+    _Sd35BackendDifferentiableVaeOperationError
+):
+    """Differentiable decoded-image postprocessing failed closed."""
+
+    operation_identity = "differentiable_image_postprocess"
+
+
 class Sd35BackendDifferentiableVaeEncodeError(Sd35BackendError):
     """The differentiable VAE encode failed closed."""
 
@@ -61,6 +129,56 @@ class Sd35BackendDifferentiableDetectionNoiseSchedulingError(Sd35BackendError):
 
 class Sd35BackendDifferentiableQkTransformerForwardError(Sd35BackendError):
     """The differentiable image-only Q/K transformer forward failed closed."""
+
+
+_CUDA_MEMORY_FACT_NAMES = (
+    "allocated_bytes",
+    "reserved_bytes",
+    "max_allocated_bytes",
+    "max_reserved_bytes",
+)
+
+
+def _cuda_memory_snapshot(device: torch.device) -> dict[str, int] | None:
+    """Return bounded CUDA allocator facts without exposing tensors or paths."""
+
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return None
+    try:
+        index = device.index
+        if index is None:
+            index = torch.cuda.current_device()
+        values = {
+            "allocated_bytes": int(torch.cuda.memory_allocated(index)),
+            "reserved_bytes": int(torch.cuda.memory_reserved(index)),
+            "max_allocated_bytes": int(torch.cuda.max_memory_allocated(index)),
+            "max_reserved_bytes": int(torch.cuda.max_memory_reserved(index)),
+            "total_device_bytes": int(
+                torch.cuda.get_device_properties(index).total_memory
+            ),
+        }
+    except Exception:
+        return None
+    if any(type(value) is not int or value < 0 for value in values.values()):
+        return None
+    return values
+
+
+def _cuda_failure_facts(
+    before: dict[str, int] | None,
+    after: dict[str, int] | None,
+) -> tuple[tuple[str, int], ...]:
+    if before is None or after is None:
+        return ()
+    return tuple(
+        sorted(
+            (
+                *((f"before_{name}", before[name]) for name in _CUDA_MEMORY_FACT_NAMES),
+                *((f"after_{name}", after[name]) for name in _CUDA_MEMORY_FACT_NAMES),
+                ("total_device_bytes", after["total_device_bytes"]),
+            )
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -645,15 +763,43 @@ class Sd35PipelineBackend:
         """Decode through the prepared VAE without disabling autograd."""
 
         _configuration, device, pipeline = self._prepared()
+        before = _cuda_memory_snapshot(device)
         try:
             vae_dtype = self._vae_execution_dtype(pipeline)
+            decode_input = latent.to(
+                device=device,
+                dtype=vae_dtype or latent.dtype,
+            )
+        except Exception as exc:
+            raise Sd35BackendDifferentiableVaeInputPreparationError(
+                cuda_memory_facts=_cuda_failure_facts(
+                    before,
+                    _cuda_memory_snapshot(device),
+                )
+            ) from exc
+        before = _cuda_memory_snapshot(device)
+        try:
             decoded = pipeline.vae.decode(
-                latent.to(device=device, dtype=vae_dtype or latent.dtype),
+                decode_input,
                 return_dict=True,
             ).sample
+        except Exception as exc:
+            raise Sd35BackendDifferentiableVaeDecodeForwardError(
+                cuda_memory_facts=_cuda_failure_facts(
+                    before,
+                    _cuda_memory_snapshot(device),
+                )
+            ) from exc
+        before = _cuda_memory_snapshot(device)
+        try:
             image = pipeline.image_processor.postprocess(decoded, output_type="pt")
         except Exception as exc:
-            raise Sd35BackendDifferentiableVaeDecodeError from exc
+            raise Sd35BackendDifferentiableImagePostprocessError(
+                cuda_memory_facts=_cuda_failure_facts(
+                    before,
+                    _cuda_memory_snapshot(device),
+                )
+            ) from exc
         if not isinstance(image, torch.Tensor) or not bool(
             torch.isfinite(image).all()
         ):

@@ -68,6 +68,7 @@ def test_sd35_backend_is_lazy_and_accepts_disjoint_roots(
 
 
 def test_sd35_backend_reports_specific_differentiable_stage_types(
+    monkeypatch,
     tmp_path: Path,
 ) -> None:
     configuration = load_runtime_configuration()
@@ -103,9 +104,25 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         dtype = torch.float32
         config = types.SimpleNamespace(force_upcast=False)
 
-        def __init__(self, *, fail_decode: bool = False, fail_encode: bool = False):
+        def __init__(
+            self,
+            *,
+            fail_preparation: bool = False,
+            fail_decode: bool = False,
+            fail_encode: bool = False,
+        ):
+            self.dtype = torch.float16 if fail_preparation else torch.float32
+            self.config = types.SimpleNamespace(force_upcast=fail_preparation)
+            self.fail_preparation = fail_preparation
             self.fail_decode = fail_decode
             self.fail_encode = fail_encode
+
+        def to(self, *, dtype):
+            assert dtype is torch.float32
+            if self.fail_preparation:
+                raise RuntimeError("excluded preparation detail")
+            self.dtype = dtype
+            return self
 
         def decode(self, value, *, return_dict):
             assert return_dict is True
@@ -120,8 +137,13 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
             return types.SimpleNamespace(latent_dist=types.SimpleNamespace(mode=lambda: value))
 
     class ImageProcessor:
+        def __init__(self, *, fail_postprocess: bool = False) -> None:
+            self.fail_postprocess = fail_postprocess
+
         def postprocess(self, value, *, output_type):
             assert output_type == "pt"
+            if self.fail_postprocess:
+                raise RuntimeError("excluded postprocess detail")
             return value
 
         def preprocess(self, value, *, height, width):
@@ -136,11 +158,14 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
             scheduler: Scheduler | None = None,
             vae: Vae | None = None,
             fail_prompt_encoding: bool = False,
+            fail_postprocess: bool = False,
         ) -> None:
             self.transformer = transformer
             self.scheduler = scheduler or Scheduler()
             self.vae = vae or Vae()
-            self.image_processor = ImageProcessor()
+            self.image_processor = ImageProcessor(
+                fail_postprocess=fail_postprocess
+            )
             self.fail_prompt_encoding = fail_prompt_encoding
 
         def encode_prompt(self, **kwargs):
@@ -202,11 +227,94 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         sd35_backend_module.Sd35BackendGenerationSuffixSchedulerStepError,
     )
 
+    memory_snapshot = {
+        "allocated_bytes": 10,
+        "reserved_bytes": 20,
+        "max_allocated_bytes": 30,
+        "max_reserved_bytes": 40,
+        "total_device_bytes": 100,
+    }
+    monkeypatch.setattr(
+        sd35_backend_module,
+        "_cuda_memory_snapshot",
+        lambda _device: dict(memory_snapshot),
+    )
+
+    preparation = backend(
+        Pipeline(
+            transformer=Transformer(fail=False),
+            vae=Vae(fail_preparation=True),
+        )
+    )
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeInputPreparationError
+    ) as preparation_error:
+        preparation.vae_decode_differentiable(latent)
+
     decode = backend(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_decode=True))
     )
-    with pytest.raises(sd35_backend_module.Sd35BackendDifferentiableVaeDecodeError):
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+    ) as decode_error:
         decode.vae_decode_differentiable(latent)
+
+    postprocess = backend(
+        Pipeline(
+            transformer=Transformer(fail=False),
+            fail_postprocess=True,
+        )
+    )
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableImagePostprocessError
+    ) as postprocess_error:
+        postprocess.vae_decode_differentiable(latent)
+
+    for error in (
+        preparation_error.value,
+        decode_error.value,
+        postprocess_error.value,
+    ):
+        assert dict(error.cuda_memory_facts) == {
+            "before_allocated_bytes": 10,
+            "before_reserved_bytes": 20,
+            "before_max_allocated_bytes": 30,
+            "before_max_reserved_bytes": 40,
+            "after_allocated_bytes": 10,
+            "after_reserved_bytes": 20,
+            "after_max_allocated_bytes": 30,
+            "after_max_reserved_bytes": 40,
+            "total_device_bytes": 100,
+        }
+
+    success_latent = latent.detach().clone().requires_grad_(True)
+    success = backend(Pipeline(transformer=Transformer(fail=False)))
+    success_image = success.vae_decode_differentiable(success_latent)
+    assert torch.equal(success_image, success_latent[:, :3])
+    assert torch.equal(
+        torch.autograd.grad(success_image.sum(), success_latent)[0],
+        torch.cat(
+            (
+                torch.ones_like(success_latent[:, :3]),
+                torch.zeros_like(success_latent[:, 3:]),
+            ),
+            dim=1,
+        ),
+    )
+
+    monkeypatch.setattr(
+        sd35_backend_module,
+        "_cuda_memory_snapshot",
+        lambda _device: None,
+    )
+    no_cuda_facts = backend(
+        Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_decode=True))
+    )
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+    ) as no_cuda_error:
+        no_cuda_facts.vae_decode_differentiable(latent)
+    assert no_cuda_error.value.cuda_memory_facts == ()
 
     encode = backend(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_encode=True))

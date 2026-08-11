@@ -118,13 +118,51 @@ def _qualified_exception_type_chain(error: BaseException) -> tuple[str, ...]:
     )
 
 
+_CUDA_MEMORY_FACT_KEYS = frozenset(
+    {
+        "before_allocated_bytes",
+        "before_reserved_bytes",
+        "before_max_allocated_bytes",
+        "before_max_reserved_bytes",
+        "after_allocated_bytes",
+        "after_reserved_bytes",
+        "after_max_allocated_bytes",
+        "after_max_reserved_bytes",
+        "total_device_bytes",
+    }
+)
+
+
+def _runtime_failure_resource_facts(
+    error: BaseException,
+) -> tuple[str, dict[str, int]] | None:
+    for current in _exception_chain(error):
+        operation_identity = getattr(type(current), "operation_identity", None)
+        raw_facts = getattr(current, "cuda_memory_facts", None)
+        if type(operation_identity) is not str or not operation_identity:
+            continue
+        if type(raw_facts) is not tuple:
+            return None
+        try:
+            facts = dict(raw_facts)
+        except (TypeError, ValueError):
+            return None
+        if (
+            set(facts) != _CUDA_MEMORY_FACT_KEYS
+            or any(type(value) is not int or value < 0 for value in facts.values())
+        ):
+            return None
+        return operation_identity, facts
+    return None
+
+
 def _failure_diagnostic(
     error: BaseException,
     *,
     active_binding: FrozenDevelopmentUnitBinding | None,
 ) -> dict[str, object]:
     type_chain = _qualified_exception_type_chain(error)
-    return {
+    diagnostic = {
         "failure_type": type_chain[0],
         "failure_type_chain": list(type_chain),
         "failure_class": (
@@ -146,6 +184,12 @@ def _failure_diagnostic(
         "counts_as_scientific_coverage": False,
         "scientific_claims_supported": False,
     }
+    runtime_failure = _runtime_failure_resource_facts(error)
+    if runtime_failure is not None:
+        operation_identity, facts = runtime_failure
+        diagnostic["runtime_failure_operation_identity"] = operation_identity
+        diagnostic["runtime_failure_cuda_memory_facts"] = facts
+    return diagnostic
 
 
 def _selected_rgb8(
