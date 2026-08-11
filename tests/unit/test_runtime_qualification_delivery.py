@@ -21,10 +21,12 @@ from runtime import (
     RuntimeDetectionConditioning,
     RuntimeGenerationPromptIdentity,
     RuntimeQkObservationError,
+    RuntimeSession,
     Sd35BackendError,
     Sd35PipelineBackend,
     create_runtime_adapter,
     load_runtime_configuration,
+    observe_differentiable_detection_qk,
 )
 from runtime import sd35_backend as sd35_backend_module
 from main import ContentEmbedderError, content_embedder, hf_carrier
@@ -377,7 +379,7 @@ def test_sd35_backend_checkpointed_suffix_preserves_values_gradients_and_call_bo
 
     reference_events: list[str] = []
     reference_transformer = Transformer(reference_events)
-    reference_transformer.requires_grad_(False)
+    assert reference_transformer.weight.requires_grad
     reference_scheduler = Scheduler(reference_events)
     reference_latent = torch.linspace(
         -1.0,
@@ -394,6 +396,30 @@ def test_sd35_backend_checkpointed_suffix_preserves_values_gradients_and_call_bo
         reference_terminal.sum(),
         reference_latent,
     )[0]
+
+    initial_failure_events: list[str] = []
+    initial_failure_transformer = Transformer(
+        initial_failure_events,
+        fail_on_call=1,
+    )
+    initial_failure_transformer.requires_grad_(False)
+    initial_failure_scheduler = Scheduler(initial_failure_events)
+    initial_failure_backend = backend(
+        initial_failure_transformer,
+        initial_failure_scheduler,
+    )
+    with pytest.raises(sd35_backend_module.Sd35BackendError) as initial_error:
+        initial_failure_backend.replay_generation_suffix(
+            reference_latent.detach().clone().requires_grad_(True),
+            suffix_context(initial_failure_backend, initial_failure_scheduler),
+            differentiable=True,
+        )
+    assert isinstance(
+        initial_error.value.__cause__,
+        sd35_backend_module.Sd35BackendGenerationSuffixTransformerForwardError,
+    )
+    assert isinstance(initial_error.value.__cause__.__cause__, torch.OutOfMemoryError)
+    assert initial_failure_events == ["transformer"]
 
     checkpoint_events: list[str] = []
     checkpoint_transformer = Transformer(checkpoint_events)
@@ -502,7 +528,6 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def scale_noise(self, sample, timestep, noise):
             assert timestep.numel() == 1
-            assert not torch.is_grad_enabled()
             return sample + noise
 
     Scheduler.__name__ = "FlowMatchEulerDiscreteScheduler"
@@ -523,7 +548,6 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def decode(self, latent, return_dict):
             assert return_dict is True
-            assert not torch.is_grad_enabled()
             return types.SimpleNamespace(
                 sample=torch_functional.interpolate(
                     latent[:, :3],
@@ -534,7 +558,6 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def encode(self, image, return_dict):
             assert return_dict is True
-            assert not torch.is_grad_enabled()
             mode = torch_functional.interpolate(
                 image,
                 size=(64, 64),
@@ -546,12 +569,10 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
     class ImageProcessor:
         def postprocess(self, value, output_type):
             assert output_type == "pt"
-            assert not torch.is_grad_enabled()
             return value
 
         def preprocess(self, value, height, width):
             assert (height, width) == (512, 512)
-            assert not torch.is_grad_enabled()
             return value
 
     class Attention(torch.nn.Module):
@@ -578,7 +599,6 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def forward(self, **kwargs):
             assert kwargs["return_dict"] is False
-            assert not torch.is_grad_enabled()
             hidden = kwargs["hidden_states"].flatten(2).transpose(1, 2)
             for index in (0, 23):
                 attention = self.transformer_blocks[index].attn
@@ -641,6 +661,7 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
     configuration = load_runtime_configuration()
     adapter = create_runtime_adapter(backend=backend)
     identity = adapter.initialize(requested_device="cpu")
+    assert isinstance(identity, RuntimeSession)
     assert identity.runtime_config_digest == configuration.runtime_config_digest
     assert identity.runtime_backend_name == "diffusers_sd35_pipeline"
     assert identity.callback_index == 18
@@ -687,6 +708,40 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
         ),
     )
     assert forward.qk_layer_names == configuration.qk_layer_names
+
+    differentiable_latent = torch.linspace(
+        -0.5,
+        0.5,
+        steps=16 * 64 * 64,
+        dtype=torch.float32,
+    ).reshape(1, 16, 64, 64).requires_grad_(True)
+    differentiable_image = backend.vae_decode_differentiable(
+        differentiable_latent
+    )
+    differentiable_qk = observe_differentiable_detection_qk(
+        backend,
+        configuration,
+        identity,
+        differentiable_image,
+    )
+    differentiable_objective = sum(
+        observation.query.sum() + observation.attention_key.sum()
+        for observation in differentiable_qk.qk_layer_observations
+    )
+    differentiable_gradient = torch.autograd.grad(
+        differentiable_objective,
+        differentiable_latent,
+    )[0]
+    assert bool(torch.isfinite(differentiable_gradient).all())
+    assert bool(torch.count_nonzero(differentiable_gradient))
+    assert all(
+        parameter.grad is None
+        for parameter in backend._pipeline.transformer.parameters()
+    )
+    assert all(
+        parameter.grad is None
+        for parameter in backend._pipeline.vae.parameters()
+    )
 
     carrier = hf_carrier("delivery-e2e-key", tuple(latent.shape))
     paired = adapter.execute_content_write_and_vae(
