@@ -1,0 +1,268 @@
+{
+  "schema_version": "1.0.0",
+  "manifest_id": "content_routing_reference_fit_cluster_manifest",
+  "role_id": "content_routing_reference_fit",
+  "split": "development",
+  "seed_namespace": "content_routing_reference_fit_seed_namespace",
+  "source_cluster_namespace": "content_routing_reference_fit_source_cluster_namespace",
+  "image_lineage_namespace": "content_routing_reference_fit_rendered_rgb8_lineage_namespace",
+  "key_family_namespace": "content_routing_reference_fit_registered_key_family_namespace",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "cluster_identity": "amber_lens_workbench",
+      "prompt": "an amber lens on a walnut workbench",
+      "generation_seed": 2026081200,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 1,
+      "cluster_identity": "birch_weather_vane",
+      "prompt": "a birch weather vane beside a slate roof model",
+      "generation_seed": 2026081201,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 2,
+      "cluster_identity": "cobalt_glass_press",
+      "prompt": "a cobalt glass press in a quiet studio",
+      "generation_seed": 2026081202,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 3,
+      "cluster_identity": "dunewood_herbarium_frame",
+      "prompt": "a dunewood herbarium frame beneath diffuse daylight",
+      "generation_seed": 2026081203,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 4,
+      "cluster_identity": "elm_tide_clock",
+      "prompt": "an elm tide clock near a harbor window",
+      "generation_seed": 2026081204,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 5,
+      "cluster_identity": "frosted_ceramic_scope",
+      "prompt": "a frosted ceramic scope on a linen-covered table",
+      "generation_seed": 2026081205,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 6,
+      "cluster_identity": "granite_music_box",
+      "prompt": "a granite music box beside handwritten notation",
+      "generation_seed": 2026081206,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 7,
+      "cluster_identity": "hazel_map_drawer",
+      "prompt": "a hazel map drawer open in an archive",
+      "generation_seed": 2026081207,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 8,
+      "cluster_identity": "ivory_reed_lantern",
+      "prompt": "an ivory reed lantern against a plaster wall",
+      "generation_seed": 2026081208,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 9,
+      "cluster_identity": "jade_compass_table",
+      "prompt": "a jade compass table under a skylight",
+      "generation_seed": 2026081209,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 10,
+      "cluster_identity": "kestrel_brass_plaque",
+      "prompt": "a kestrel brass plaque on a museum stand",
+      "generation_seed": 2026081210,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 11,
+      "cluster_identity": "linen_astrolabe_case",
+      "prompt": "a linen astrolabe case beside a folded chart",
+      "generation_seed": 2026081211,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 12,
+      "cluster_identity": "maple_specimen_tray",
+      "prompt": "a maple specimen tray filled with river stones",
+      "generation_seed": 2026081212,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 13,
+      "cluster_identity": "nickel_printing_frame",
+      "prompt": "a nickel printing frame near handmade paper",
+      "generation_seed": 2026081213,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 14,
+      "cluster_identity": "ochre_seed_cabinet",
+      "prompt": "an ochre seed cabinet in a greenhouse library",
+      "generation_seed": 2026081214,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 15,
+      "cluster_identity": "pewter_survey_lamp",
+      "prompt": "a pewter survey lamp beside measuring rods",
+      "generation_seed": 2026081215,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 16,
+      "cluster_identity": "quartz_folding_screen",
+      "prompt": "a quartz folding screen casting geometric shadows",
+      "generation_seed": 2026081216,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 17,
+      "cluster_identity": "rattan_mineral_cradle",
+      "prompt": "a rattan mineral cradle on a pale shelf",
+      "generation_seed": 2026081217,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 18,
+      "cluster_identity": "saffron_chart_weights",
+      "prompt": "saffron chart weights on an ocean map",
+      "generation_seed": 2026081218,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 19,
+      "cluster_identity": "teak_signal_bell",
+      "prompt": "a teak signal bell in an empty station",
+      "generation_seed": 2026081219,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 20,
+      "cluster_identity": "umber_drafting_stool",
+      "prompt": "an umber drafting stool beside a tilted easel",
+      "generation_seed": 2026081220,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 21,
+      "cluster_identity": "verdigris_field_scope",
+      "prompt": "a verdigris field scope overlooking dunes",
+      "generation_seed": 2026081221,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 22,
+      "cluster_identity": "willow_archive_ladder",
+      "prompt": "a willow archive ladder beside labeled folios",
+      "generation_seed": 2026081222,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 23,
+      "cluster_identity": "xanthic_clay_tablet",
+      "prompt": "a xanthic clay tablet on a stone plinth",
+      "generation_seed": 2026081223,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 24,
+      "cluster_identity": "yew_navigation_case",
+      "prompt": "a yew navigation case beside a brass divider",
+      "generation_seed": 2026081224,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 25,
+      "cluster_identity": "zinnia_copper_press",
+      "prompt": "a zinnia copper press near dried flowers",
+      "generation_seed": 2026081225,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 26,
+      "cluster_identity": "alabaster_tuning_stand",
+      "prompt": "an alabaster tuning stand in a rehearsal room",
+      "generation_seed": 2026081226,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 27,
+      "cluster_identity": "bronze_botanical_grid",
+      "prompt": "a bronze botanical grid on a clean desk",
+      "generation_seed": 2026081227,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 28,
+      "cluster_identity": "cedar_weather_dial",
+      "prompt": "a cedar weather dial in a covered courtyard",
+      "generation_seed": 2026081228,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 29,
+      "cluster_identity": "dolomite_instrument_rack",
+      "prompt": "a dolomite instrument rack beneath soft lamps",
+      "generation_seed": 2026081229,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 30,
+      "cluster_identity": "eggshell_map_cylinder",
+      "prompt": "an eggshell map cylinder beside a reading chair",
+      "generation_seed": 2026081230,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 31,
+      "cluster_identity": "flaxen_observatory_chair",
+      "prompt": "a flaxen observatory chair facing a star chart",
+      "generation_seed": 2026081231,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_reference_fit_paired_rendered_rgb8_observation"
+    }
+  ]
+}

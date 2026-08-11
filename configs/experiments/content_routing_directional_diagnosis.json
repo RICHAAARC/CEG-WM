@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0.0",
+  "protocol_id": "ceg_wm_content_routing_directional_diagnosis",
+  "protocol_version": "1.0.0",
+  "run_id": "ceg_wm_content_routing_directional_diagnosis",
+  "split": "development",
+  "reference_fit_manifest_path": "configs/experiments/content_routing_reference_fit_manifest.json",
+  "reference_fit_manifest_file_sha256": "9137d41d67950e91b27391fe45c6927d111ea187959b6f1902987009fc92d027",
+  "directional_probe_manifest_path": "configs/experiments/content_routing_directional_diagnosis_manifest.json",
+  "directional_probe_manifest_file_sha256": "4f5ee4b163165b83c9091daa693fdcc5ea04fbdbac745182e5d7372364749faa",
+  "prior_authority_bindings": [
+    {
+      "path": "configs/experiments/development_exploration_prompt_roster.json",
+      "file_sha256": "a5b11f76270346351ad79bcba8ff4928f3fc11b843b0889108090045e71bc7bd"
+    },
+    {
+      "path": "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json",
+      "file_sha256": "1245e497971a058a071f5e474b92b67fb548b440f88d50fb718abb3749a6965f"
+    },
+    {
+      "path": "configs/experiments/hf_transmission_diagnostic_manifest.json",
+      "file_sha256": "8dc5708d50cc2093d4e481e35bdd39a6d6960c7939ab31cd278d0611b9ff7172"
+    },
+    {
+      "path": "configs/experiments/hf_only_detector_directional_validation_manifest.json",
+      "file_sha256": "9cfbec095ddb896d526697e831072d6062c7755629ac3622688ee0a15f98441e"
+    },
+    {
+      "path": "configs/experiments/hf_only_reference_prompt_roster.json",
+      "file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f"
+    },
+    {
+      "path": "configs/experiments/hf_only_content_threshold_fit_manifest.json",
+      "file_sha256": "554d1f488dadc433dba57a2b4e9435a8f55eeecef77929c76161076753b2886a"
+    },
+    {
+      "path": "configs/experiments/hf_only_untouched_confirmation_manifest.json",
+      "file_sha256": "43d7d6d81f827348655f6bd0caa4b808f401cf20b1153923d14c5cc86270e6cd"
+    },
+    {
+      "path": "configs/experiments/lf_transmission_diagnostic_manifest.json",
+      "file_sha256": "158287d69632bb4952ddab93202aba7316b8fe22a7c4d6c160c1340d3fe2034d"
+    },
+    {
+      "path": "configs/experiments/lf_whitening_null_fit_manifest.json",
+      "file_sha256": "5d7388a92c98aa5fb1996369bae8de65360e2d25fa7569400135753257bb6e86"
+    },
+    {
+      "path": "configs/experiments/lf_whitened_score_screening_manifest.json",
+      "file_sha256": "3e41f1740284dc7a139e33e49bcd6b5c863324548a2dfb776d088cfbc90b78fe"
+    },
+    {
+      "path": "configs/experiments/lf_whitened_directional_validation_manifest.json",
+      "file_sha256": "fb47fa5dfa4e80bcd833d84892371b3e7a2d6793fa2d429c998d5965453f4468"
+    },
+    {
+      "path": "configs/experiments/qk_synchronization_write_diagnostic_manifest.json",
+      "file_sha256": "b6e5df39566e6ce25661a29b6189cbea2c79bcc9ec59f9eb624959bec1a496d0"
+    }
+  ],
+  "source_cluster_deny_list_digest": "2043de7a5365fc7260032e4fad269738c3111a74ecabe793af848e016f966c26",
+  "future_split_exclusion_roles": [
+    "routing_directional_validation",
+    "candidate_selection",
+    "content_threshold_fit",
+    "rescue_window_fit",
+    "geometry_reliability_fit",
+    "end_to_end_calibration_check",
+    "evaluation"
+  ],
+  "routing_candidate_identity": "routing_stqr",
+  "uniform_control_identity": "routing_uniform_control",
+  "content_embedding_identity": "content_combination_calibrated",
+  "public_content_operation": "FormalHfContentDetectionOperation",
+  "mixing_coefficient": 0.5,
+  "content_relative_l2_numerator": 3,
+  "content_relative_l2_denominator": 250,
+  "cross_fit_fold_count": 4,
+  "reference_fit_count_per_probe": 24,
+  "reference_quantile_rule": "strictly_positive_exact_nearest_rank_p95",
+  "reference_statistic_identities": [
+    "texture_gradient_reference",
+    "latent_response_reference",
+    "local_sensitivity_reference"
+  ],
+  "semantic_observation_identity": "clip_patch_prompt_similarity_without_fitted_reference",
+  "wrong_key_roster_size": 4,
+  "operational_unit_count": 2,
+  "reference_fit_cluster_count": 32,
+  "directional_probe_cluster_count": 8,
+  "maximum_total_units": 42,
+  "maximum_attempts_per_unit": 1,
+  "maximum_duration_seconds_per_unit": 2700,
+  "operational_role": "environment_runtime_throughput_preflight",
+  "operational_case_ids": [
+    "environment_identity_preflight",
+    "runtime_identity_preflight",
+    "throughput_preflight"
+  ],
+  "operational_result_responsibility_id": "content_embedder",
+  "incremental_indicator_mean_requirement": 0.5,
+  "routing_coverage_requirement": 0.0,
+  "passing_outcome": "routing_directional_signal_observed",
+  "negative_outcome": "routing_directional_signal_not_observed",
+  "passing_request": "allow_request_for_routing_directional_validation",
+  "stop_rule": "complete_two_operational_preflights_then_thirty_two_reference_fit_clusters_then_all_eight_paired_directional_probes_without_adaptive_sampling_or_parameter_change",
+  "claim_boundary": "development_content_routing_directional_diagnosis_only_no_mechanism_promotion_no_threshold_no_fpr_no_combination_conclusion",
+  "unit_roster_digest": "7365e6fc1d75aa91b97a00663a5a6e900e518fd97a0dca96d52c79cd33e66c9b"
+}

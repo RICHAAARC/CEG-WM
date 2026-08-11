@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0.0",
+  "manifest_id": "content_routing_directional_probe_cluster_manifest",
+  "role_id": "content_routing_directional_probe",
+  "split": "development",
+  "seed_namespace": "content_routing_directional_probe_seed_namespace",
+  "source_cluster_namespace": "content_routing_directional_probe_source_cluster_namespace",
+  "image_lineage_namespace": "content_routing_directional_probe_rendered_rgb8_lineage_namespace",
+  "key_family_namespace": "content_routing_directional_probe_registered_key_family_namespace",
+  "entries": [
+    {
+      "cluster_ordinal": 0,
+      "cluster_identity": "garnet_sundial_shelf",
+      "prompt": "a garnet sundial on a sheltered shelf",
+      "generation_seed": 2026081232,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 1,
+      "cluster_identity": "hemlock_radio_console",
+      "prompt": "a hemlock radio console in a quiet room",
+      "generation_seed": 2026081233,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 2,
+      "cluster_identity": "indigo_measurement_frame",
+      "prompt": "an indigo measurement frame beside a ruler",
+      "generation_seed": 2026081234,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 3,
+      "cluster_identity": "juniper_chart_lectern",
+      "prompt": "a juniper chart lectern under gallery light",
+      "generation_seed": 2026081235,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 4,
+      "cluster_identity": "kaolin_signal_drum",
+      "prompt": "a kaolin signal drum on a woven mat",
+      "generation_seed": 2026081236,
+      "fold_index": 0,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 5,
+      "cluster_identity": "larch_specimen_press",
+      "prompt": "a larch specimen press beside fern samples",
+      "generation_seed": 2026081237,
+      "fold_index": 1,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 6,
+      "cluster_identity": "malachite_navigation_box",
+      "prompt": "a malachite navigation box near a folded map",
+      "generation_seed": 2026081238,
+      "fold_index": 2,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    },
+    {
+      "cluster_ordinal": 7,
+      "cluster_identity": "nutmeg_telescope_stand",
+      "prompt": "a nutmeg telescope stand beneath an open dome",
+      "generation_seed": 2026081239,
+      "fold_index": 3,
+      "image_lineage_identity": "content_routing_directional_probe_paired_rendered_rgb8_observation"
+    }
+  ]
+}
