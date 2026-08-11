@@ -65,9 +65,9 @@ def _blind_score_rows(
         common = {
             "arm_id": arm_id,
             "formal_mode": "hf_only",
-            "content_detector_identity": "main.content_detector",
+            "content_detector_identity": "a" * 64,
             "content_config_digest": "1" * 64,
-            "hf_detector_identity": "main.hf_detector",
+            "hf_detector_identity": "b" * 64,
             "hf_detector_config_digest": "2" * 64,
             "root_key_public_digest": "3" * 64,
         }
@@ -339,7 +339,29 @@ def test_routing_blind_registered_score_rejects_non_hf_or_wrong_key_semantics(
         create_content_routing_blind_score_observation(**values)
 
 
-def test_routing_blind_controls_require_same_candidate_and_registered_clean_key() -> None:
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("content_detector_identity", "main.content_detector"),
+        ("hf_detector_identity", ""),
+        ("content_config_digest", "A" * 64),
+        ("hf_observation_digest", "g" * 64),
+    ),
+)
+def test_routing_blind_score_rejects_non_sha256_identities_and_digests(
+    field_name: str,
+    invalid_value: str,
+) -> None:
+    values = asdict(_blind_score_rows(0, routed_wins=True)[0])
+    values[field_name] = invalid_value
+    with pytest.raises(ContentRoutingDirectionalMetricError, match="blind score semantics"):
+        create_content_routing_blind_score_observation(**values)
+
+
+def _directional_values_with_mutable_blind_rows() -> tuple[
+    dict[str, object],
+    list[dict[str, object]],
+]:
     values = asdict(_observation(0))
     for key in (
         "observation_identity",
@@ -348,11 +370,45 @@ def test_routing_blind_controls_require_same_candidate_and_registered_clean_key(
         "quality_relative_l2",
     ):
         values.pop(key)
-    rows = [ContentRoutingBlindScoreObservation(**row) for row in values["blind_score_observations"]]
-    wrong = asdict(rows[2])
-    wrong["content_input_image_digest"] = "f" * 64
-    rows[2] = ContentRoutingBlindScoreObservation(**wrong)
-    values["blind_score_observations"] = tuple(rows)
+    rows = list(values["blind_score_observations"])
+    values["blind_score_observations"] = rows
+    return values, rows
+
+
+def test_routing_registered_template_must_match_across_arms() -> None:
+    values, rows = _directional_values_with_mutable_blind_rows()
+    rows[6]["hf_template_digest"] = "c" * 64
+    rows[7]["hf_template_digest"] = "c" * 64
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="cross-arm detector template",
+    ):
+        create_content_routing_directional_observation(**values)
+
+
+def test_routing_paired_clean_template_must_match_registered_template() -> None:
+    values, rows = _directional_values_with_mutable_blind_rows()
+    rows[1]["hf_template_digest"] = "c" * 64
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="control pairing",
+    ):
+        create_content_routing_directional_observation(**values)
+
+
+def test_routing_each_wrong_key_template_must_match_across_arms() -> None:
+    values, rows = _directional_values_with_mutable_blind_rows()
+    rows[10]["hf_template_digest"] = "f" * 64
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="cross-arm detector template",
+    ):
+        create_content_routing_directional_observation(**values)
+
+
+def test_routing_blind_controls_require_same_candidate_and_registered_clean_key() -> None:
+    values, rows = _directional_values_with_mutable_blind_rows()
+    rows[2]["content_input_image_digest"] = "f" * 64
     with pytest.raises(ContentRoutingDirectionalMetricError, match="control pairing"):
         create_content_routing_directional_observation(**values)
 

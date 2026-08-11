@@ -261,10 +261,8 @@ class ContentRoutingBlindScoreObservation:
             or not isfinite(float(self.hf_score))
             or float(self.content_score) != float(self.hf_score)
             or self.formal_mode != "hf_only"
-            or type(self.content_detector_identity) is not str
-            or not self.content_detector_identity
-            or type(self.hf_detector_identity) is not str
-            or not self.hf_detector_identity
+            or not _is_sha256(self.content_detector_identity)
+            or not _is_sha256(self.hf_detector_identity)
             or any(not _is_sha256(value) for value in digest_values)
             or (
                 registered_or_null
@@ -504,6 +502,30 @@ class ContentRoutingDirectionalObservation:
         ):
             raise ContentRoutingDirectionalMetricError(
                 "routing paired clean identity drifted"
+            )
+        if (
+            registered_rows["routed"].hf_template_digest
+            != registered_rows["uniform"].hf_template_digest
+            or clean_rows[0].hf_template_digest
+            != registered_rows["routed"].hf_template_digest
+            or clean_rows[1].hf_template_digest
+            != registered_rows["uniform"].hf_template_digest
+            or any(
+                self._blind_score(
+                    arm_id="routed",
+                    control_role="wrong_key_control",
+                    wrong_key_index=index,
+                ).hf_template_digest
+                != self._blind_score(
+                    arm_id="uniform",
+                    control_role="wrong_key_control",
+                    wrong_key_index=index,
+                ).hf_template_digest
+                for index in range(WRONG_KEY_ROSTER_SIZE)
+            )
+        ):
+            raise ContentRoutingDirectionalMetricError(
+                "routing cross-arm detector template identity drifted"
             )
         if (
             not all(
