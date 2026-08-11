@@ -205,6 +205,7 @@ def test_content_routing_exact_package_contains_execution_closure(tmp_path: Path
     assert completed.returncode == 0, completed.stderr
 
 
+@pytest.mark.unit
 def test_content_routing_server_source_has_no_secret_or_scientific_promotion() -> None:
     source = SERVER.read_text("utf-8")
     assert '"scientific_claims_supported": False' in source

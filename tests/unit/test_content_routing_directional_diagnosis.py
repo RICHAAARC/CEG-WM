@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, fields, replace
 import inspect
 import json
@@ -56,7 +57,7 @@ from experiments.runners.formal_operations import (
     FormalHfContentDetectionOperation,
 )
 from main import RoutingObservations, SpatialRoutingObservation, identify_root_key
-from runtime import create_runtime_adapter
+from runtime import Sd35RuntimeAdapter, create_runtime_adapter
 from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
     ContentRoutingDirectionalEntrypointError,
     _commit_dependency_blocked_probe_records,
@@ -64,6 +65,10 @@ from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoi
     _replay_aggregate,
 )
 from tests.unit.test_runtime_content_write_and_vae import FakeContentBackend
+from tests.unit.test_runtime_routing_observation import (
+    _Posterior,
+    _RoutingBackend,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -846,6 +851,312 @@ def test_routing_persistence_dangling_attempt_fails_closed_without_rerun(
         match="interrupted unit exhausted frozen attempts",
     ):
         store.recover(now_epoch_seconds=epoch + 11)
+
+
+def test_routing_real_public_success_chain_commits_recovers_and_replays(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, reference_manifest, probe_manifest = _protocol_bundle()
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(
+            ROOT / "configs/experiments/internal_execution_components.json"
+        )
+    )
+    class RoutingExecutionBackend(_RoutingBackend):
+        def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+            self.decode_inputs.append(latent.detach().clone())
+            values = latent.detach().to(torch.float32)
+            channel_count = int(values.shape[1])
+            weights = torch.linspace(
+                0.5,
+                1.5,
+                steps=channel_count,
+                dtype=torch.float32,
+                device=values.device,
+            ).reshape(1, channel_count, 1, 1)
+            normalized = (values * weights).sum(dim=1, keepdim=True) / weights.sum()
+            height, width = (int(value) for value in values.shape[-2:])
+            vertical = torch.linspace(
+                0.0,
+                0.12,
+                steps=height,
+                device=values.device,
+            ).reshape(1, 1, height, 1)
+            horizontal = torch.linspace(
+                0.0,
+                0.08,
+                steps=width,
+                device=values.device,
+            ).reshape(1, 1, 1, width)
+            global_weights = torch.linspace(
+                0.2,
+                1.8,
+                steps=values.numel(),
+                device=values.device,
+            ).reshape_as(values)
+            globally_coupled = (values * global_weights).sum() / global_weights.sum()
+            normalized = normalized + vertical + horizontal + globally_coupled * 0.05
+            return torch.cat(
+                (normalized, normalized * 0.9, normalized * 0.8),
+                dim=1,
+            ).clamp(-0.9, 0.9)
+
+        def vae_encode(self, image: torch.Tensor) -> _Posterior:
+            mean = image.detach().to(torch.float32).mean(dim=1, keepdim=True)
+            return _Posterior(mean.repeat(1, 16, 1, 1).to(torch.float16))
+
+    backend = RoutingExecutionBackend()
+    runtime = create_runtime_adapter(backend)
+    runtime.initialize("cpu")
+    semantic = object.__new__(DevelopmentSemanticObservationProducer)
+    calls: Counter[str] = Counter()
+
+    def observe_semantic(
+        routing_rgb: torch.Tensor,
+        prompt: str,
+    ) -> SpatialRoutingObservation:
+        calls["semantic_observation"] += 1
+        assert routing_rgb.ndim == 4
+        assert tuple(routing_rgb.shape[:2]) == (1, 3)
+        assert prompt
+        height, width = (int(value) for value in routing_rgb.shape[-2:])
+        return SpatialRoutingObservation(
+            values=tuple(0.5 for _ in range(height * width)),
+            spatial_shape=(height, width),
+            source_identity_digest=f"{calls['semantic_observation']:064x}",
+        )
+
+    semantic.observe = observe_semantic
+    for method_name in (
+        "route_content",
+        "build_lf_carrier",
+        "build_hf_carrier",
+        "embed_content",
+        "detect_hf",
+        "detect_content",
+    ):
+        original = getattr(CegWmExperimentAdapter, method_name)
+
+        def counted_adapter_call(
+            self,
+            *args,
+            _method_name=method_name,
+            _original=original,
+            **kwargs,
+        ):
+            calls[_method_name] += 1
+            return _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(
+            CegWmExperimentAdapter,
+            method_name,
+            counted_adapter_call,
+        )
+    original_write = Sd35RuntimeAdapter.execute_content_write_and_vae
+
+    def counted_public_write(self, *args, **kwargs):
+        calls["execute_content_write_and_vae"] += 1
+        return original_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "execute_content_write_and_vae",
+        counted_public_write,
+    )
+    original_measure = Sd35RuntimeAdapter.measure_generation_routing_reference_inputs
+
+    def counted_reference_measurement(self, *args, **kwargs):
+        calls["measure_generation_routing_reference_inputs"] += 1
+        return original_measure(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "measure_generation_routing_reference_inputs",
+        counted_reference_measurement,
+    )
+    registered_root = "routing-real-public-success-key"
+
+    def create_runner() -> ContentRoutingDirectionalDiagnosisRunner:
+        return ContentRoutingDirectionalDiagnosisRunner(
+            protocol=protocol,
+            reference_manifest=reference_manifest,
+            probe_manifest=probe_manifest,
+            adapter=adapter,
+            runtime_adapter=runtime,
+            semantic_producer=semantic,
+            method_code_revision="a" * 40,
+            registered_root_key=registered_root,
+            root_key_public_digest=(
+                identify_root_key(registered_root).root_key_public_digest
+            ),
+            protocol_digest=protocol.digest(),
+            execution_intent_authority_digest="b" * 64,
+            candidate_config_digest="c" * 64,
+        )
+
+    runner = create_runner()
+    worker_identity = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest="d" * 64,
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+
+    def create_store(current_runner):
+        return DevelopmentPersistentStore(
+            tmp_path,
+            run_id=current_runner.protocol.run_id,
+            worker_identity=worker_identity,
+            registered_unit_bindings=(
+                current_runner.create_persistence_unit_bindings()
+            ),
+        )
+
+    store = create_store(runner)
+    epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_real_public_success_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    base = torch.linspace(
+        0.05,
+        0.45,
+        steps=16 * 4 * 4,
+        dtype=torch.float16,
+    ).reshape(1, 16, 4, 4)
+    for unit_index in range(2):
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=epoch + unit_index * 2 + 1,
+        )
+        record = runner.execute_operational_unit(
+            unit_index=unit_index,
+            base_latent=base,
+            intent=intent,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=epoch + unit_index * 2 + 2,
+        )
+    for ordinal in range(32):
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=epoch + ordinal * 2 + 10,
+        )
+        record = runner.execute_reference_fit_unit(
+            unit_index=ordinal + 2,
+            base_latent=base,
+            intent=intent,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=epoch + ordinal * 2 + 11,
+        )
+        if ordinal == 15:
+            generation_calls = backend.generation_calls
+            runner = create_runner()
+            store = create_store(runner)
+            cursor = store.open_session_cursor(
+                lease,
+                now_epoch_seconds=epoch + 100,
+            )
+            assert cursor.next_unit_index == 18
+            assert backend.generation_calls == generation_calls
+    assert len(cursor.routing_reference_records) == 32
+    for reference_record in cursor.routing_reference_records:
+        payload = reference_record.measurement_payload
+        for field_name in (
+            "texture_gradient_values",
+            "response_ratio_values",
+            "sensitivity_ratio_values",
+        ):
+            assert min(payload[field_name]) > 0.0, (
+                reference_record.source_cluster_ordinal,
+                field_name,
+                payload[field_name],
+            )
+    for ordinal in range(8):
+        intent = store.create_session_intent(
+            cursor,
+            lease,
+            now_epoch_seconds=epoch + ordinal * 2 + 200,
+        )
+        record = runner.execute_probe_unit(
+            unit_index=ordinal + 34,
+            base_latent=base,
+            intent=intent,
+            reference_records=cursor.routing_reference_records,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            now_epoch_seconds=epoch + ordinal * 2 + 201,
+        )
+        checked = DevelopmentScientificRecord.from_payload(
+            json.loads(json.dumps(record.payload()))
+        )
+        observation = checked.operation_result_payload["routing_observation"]
+        rows = observation["blind_score_observations"]
+        assert len(rows) == 12
+        assert observation["routed_realized_relative_l2"] <= 0.012
+        assert observation["uniform_realized_relative_l2"] <= 0.012
+        assert observation["routed_materialization_budget_status"] == "accepted"
+        assert observation["uniform_materialization_budget_status"] == "accepted"
+        assert rows[1]["content_input_image_digest"] == rows[7][
+            "content_input_image_digest"
+        ]
+        assert rows[0]["hf_template_digest"] == rows[1]["hf_template_digest"]
+        assert rows[6]["hf_template_digest"] == rows[7]["hf_template_digest"]
+        for wrong_index in range(4):
+            routed_wrong = rows[wrong_index + 2]
+            uniform_wrong = rows[wrong_index + 8]
+            assert routed_wrong["wrong_key_index"] == wrong_index
+            assert uniform_wrong["wrong_key_index"] == wrong_index
+            assert routed_wrong["hf_template_digest"] == uniform_wrong[
+                "hf_template_digest"
+            ]
+    evidence = store.verified_terminal_scientific_evidence(
+        now_epoch_seconds=epoch + 300
+    )
+    records = tuple(record for record, _marker in evidence)
+    aggregate = _replay_aggregate(records)
+    final_cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch + 301)
+
+    assert protocol.mixing_coefficient == 0.50
+    assert len(final_cursor.committed_units) == 42
+    assert final_cursor.next_unit_index == 42
+    assert tuple(marker.unit_index for marker in final_cursor.committed_units) == tuple(
+        range(42)
+    )
+    assert len(records) == 8
+    assert all(record.execution_status == "success" for record in records)
+    assert aggregate.expected_probe_count == 8
+    assert aggregate.successful_probe_count == 8
+    assert aggregate.failed_probe_count == 0
+    assert calls["semantic_observation"] == 8
+    assert calls["measure_generation_routing_reference_inputs"] == 40
+    assert calls["route_content"] == 18
+    assert calls["build_lf_carrier"] == 18
+    assert calls["build_hf_carrier"] == 18
+    assert calls["embed_content"] == 18
+    assert calls["execute_content_write_and_vae"] == 18
+    assert calls["detect_hf"] == 96
+    assert calls["detect_content"] == 96
 
 
 def test_routing_runner_calls_real_public_method_surfaces() -> None:
