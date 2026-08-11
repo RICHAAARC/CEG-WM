@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, fields
+import inspect
 import json
 from pathlib import Path
 
 import pytest
+import torch
+
+from experiments.methods import (
+    CegWmExperimentAdapter,
+    load_ceg_wm_experiment_adapter_configuration,
+)
 
 from experiments.metrics.content_routing_directional_diagnosis import (
     ContentRoutingBlindScoreObservation,
@@ -30,6 +37,13 @@ from experiments.protocol.development_records import (
     DevelopmentRoutingReferenceRecord,
     canonical_development_value_digest,
 )
+from experiments.runners.content_routing_directional_diagnosis import (
+    ContentRoutingDirectionalDiagnosisRunner,
+)
+from experiments.runners.formal_operations import (
+    FormalHfContentDetectionOperation,
+)
+from main import RoutingObservations, SpatialRoutingObservation
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -125,23 +139,6 @@ def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRec
         draft.payload_without_record_id()
     )
     return DevelopmentRoutingReferenceRecord.from_payload(payload)
-
-
-def _measurement_from_persistent_record(
-    record: DevelopmentRoutingReferenceRecord,
-):
-    checked = DevelopmentRoutingReferenceRecord.from_payload(record.payload())
-    payload = checked.measurement_payload
-    return create_content_routing_reference_measurement(
-        cluster_ordinal=checked.source_cluster_ordinal,
-        fold_index=checked.fold_index,
-        texture_gradient_values=tuple(payload["texture_gradient_values"]),
-        texture_spatial_shape=tuple(payload["texture_spatial_shape"]),
-        response_ratio_values=tuple(payload["response_ratio_values"]),
-        response_spatial_shape=tuple(payload["response_spatial_shape"]),
-        sensitivity_ratio_values=tuple(payload["sensitivity_ratio_values"]),
-        sensitivity_spatial_shape=tuple(payload["sensitivity_spatial_shape"]),
-    )
 
 
 def _blind_score_rows(
@@ -394,7 +391,12 @@ def test_routing_reference_identity_changes_with_each_spatial_statistic(
 
 def test_routing_reference_fit_replays_thirty_two_persistent_records() -> None:
     records = tuple(_persistent_reference_record(ordinal) for ordinal in range(32))
-    measurements = tuple(_measurement_from_persistent_record(record) for record in records)
+    measurements = tuple(
+        ContentRoutingDirectionalDiagnosisRunner.reference_measurement_from_committed_record(
+            record
+        )
+        for record in records
+    )
     assert len(measurements) == 32
     reference = fit_content_routing_fold_reference(
         measurements,
@@ -415,6 +417,77 @@ def test_routing_reference_fit_replays_thirty_two_persistent_records() -> None:
     assert hierarchical_texture_reference == 31.25
     assert reference.texture_gradient_reference != hierarchical_texture_reference
     assert not any("semantic" in field.name for field in fields(measurements[0]))
+
+
+def test_routing_runner_calls_real_public_method_surfaces() -> None:
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(
+            ROOT / "configs/experiments/internal_execution_components.json"
+        )
+    )
+    observation = SpatialRoutingObservation(
+        values=(0.2, 0.4, 0.6, 0.8),
+        spatial_shape=(2, 2),
+        source_identity_digest="7" * 64,
+    )
+    routing_observations = RoutingObservations(
+        semantic=observation,
+        texture=observation,
+        response=observation,
+        sensitivity=observation,
+    )
+    shape = (1, 16, 2, 2)
+    routed = adapter.route_content(
+        shape,
+        mode="routing_stqr",
+        observations=routing_observations,
+    ).result
+    uniform = adapter.route_content(shape, mode="routing_uniform_control").result
+    key = "routing-public-method-test-key"
+    for route in (routed, uniform):
+        low = adapter.build_lf_carrier(key, shape, routing_result=route).result
+        high = adapter.build_hf_carrier(key, shape, routing_result=route).result
+        embedding = adapter.embed_content(
+            (1.0,) * 64,
+            high,
+            lf_carrier_result=low,
+            mixing_coefficient=0.50,
+            routing_result=route,
+        ).result
+        assert embedding.active_lf_direction is not None
+        assert embedding.active_hf_direction is not None
+    public_image = torch.arange(48, dtype=torch.uint8).reshape(1, 3, 4, 4)
+    detected = FormalHfContentDetectionOperation(adapter)(public_image, key)
+    assert detected.formal_mode == "hf_only"
+    assert detected.content_score == detected.hf_score
+    assert detected.lf_score is None
+    assert detected.lf_result is None
+    assert detected.combined_score is None
+    assert detected.diagnostic_combination is None
+    assert detected.diagnostic_identity is None
+
+
+def test_routing_runner_source_uses_runtime_semantic_and_public_detector_calls() -> None:
+    source = inspect.getsource(ContentRoutingDirectionalDiagnosisRunner)
+    for required_call in (
+        "measure_generation_routing_reference_inputs",
+        "normalize_generation_routing_measurement",
+        "self.semantic.observe",
+        "self.adapter.route_content",
+        "self.adapter.build_lf_carrier",
+        "self.adapter.build_hf_carrier",
+        "self.adapter.embed_content",
+        "self.runtime.execute_content_write_and_vae",
+        "FormalHfContentDetectionOperation",
+    ):
+        assert required_call in source
+    for forbidden_call in (
+        "detect_lf(",
+        "private_state",
+        "precomputed_score",
+        "content_" + "combination_calibrated",
+    ):
+        assert forbidden_call not in source
 
 
 @pytest.mark.parametrize(
