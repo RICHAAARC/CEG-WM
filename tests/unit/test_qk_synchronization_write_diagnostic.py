@@ -1130,6 +1130,23 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     assert "runtime_failure_cuda_memory_facts" not in foreign_diagnostic
     assert "unsafe_path_or_secret_sentinel" not in foreign_serialized
 
+    class SpoofedTrustedFailure(
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+    ):
+        operation_identity = "spoofed_trusted_failure_identity"
+
+    spoofed_outer = CegWmExperimentAdapterError(secret)
+    spoofed_outer.__cause__ = SpoofedTrustedFailure(cuda_memory_facts=facts)
+    assert _runtime_failure_resource_facts(spoofed_outer) is None
+    spoofed_diagnostic = _failure_diagnostic(
+        spoofed_outer,
+        active_binding=None,
+    )
+    spoofed_serialized = json.dumps(spoofed_diagnostic, sort_keys=True)
+    assert "runtime_failure_operation_identity" not in spoofed_diagnostic
+    assert "runtime_failure_cuda_memory_facts" not in spoofed_diagnostic
+    assert "spoofed_trusted_failure_identity" not in spoofed_serialized
+
 
 @pytest.mark.unit
 def test_qk_runner_success_record_binds_ratio_metric_to_registered_responsibility() -> None:
