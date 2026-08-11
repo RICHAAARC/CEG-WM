@@ -855,11 +855,50 @@ class Sd35PipelineBackend:
                 )
             ) from exc
         before = _cuda_memory_snapshot(device)
+
+        initial_decode_failure: Exception | None = None
+        decode_invocation_count = 0
+
+        def decode_forward(value: torch.Tensor) -> torch.Tensor:
+            nonlocal initial_decode_failure, decode_invocation_count
+            decode_invocation_count += 1
+            try:
+                return pipeline.vae.decode(
+                    value,
+                    return_dict=True,
+                ).sample
+            except Exception as exc:
+                if decode_invocation_count == 1:
+                    initial_decode_failure = exc
+                    return value
+                raise Sd35BackendDifferentiableVaeDecodeForwardError(
+                    cuda_memory_facts=_cuda_failure_facts(
+                        before,
+                        _cuda_memory_snapshot(device),
+                    ),
+                    runtime_reason_identity=_vae_decode_runtime_reason_identity(exc),
+                ) from exc
+
         try:
-            decoded = pipeline.vae.decode(
-                decode_input,
-                return_dict=True,
-            ).sample
+            with set_checkpoint_early_stop(False):
+                decoded = activation_checkpoint(
+                    decode_forward,
+                    decode_input,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                )
+            if initial_decode_failure is not None:
+                raise Sd35BackendDifferentiableVaeDecodeForwardError(
+                    cuda_memory_facts=_cuda_failure_facts(
+                        before,
+                        _cuda_memory_snapshot(device),
+                    ),
+                    runtime_reason_identity=_vae_decode_runtime_reason_identity(
+                        initial_decode_failure
+                    ),
+                ) from initial_decode_failure
+        except Sd35BackendDifferentiableVaeDecodeForwardError:
+            raise
         except Exception as exc:
             raise Sd35BackendDifferentiableVaeDecodeForwardError(
                 cuda_memory_facts=_cuda_failure_facts(

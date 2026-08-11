@@ -644,6 +644,188 @@ def test_sd35_backend_checkpointed_suffix_preserves_values_gradients_and_call_bo
     assert inference_transformer.weight.grad is None
 
 
+def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gradients_and_failures(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+
+    class Vae(torch.nn.Module):
+        def __init__(self, *, fail_on_call: int | None = None) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(0.75))
+            self.config = types.SimpleNamespace(force_upcast=False)
+            self.dtype = torch.float32
+            self.fail_on_call = fail_on_call
+            self.call_count = 0
+
+        def decode(self, value, *, return_dict):
+            assert return_dict is True
+            self.call_count += 1
+            if self.call_count == self.fail_on_call:
+                raise torch.OutOfMemoryError("excluded VAE decoder detail")
+            expanded = torch_functional.interpolate(
+                value[:, :3] * self.weight + value[:, 3:6] * 0.125,
+                scale_factor=8,
+                mode="nearest",
+            )
+            decoded = expanded
+            for scale in (0.875, 0.75, 0.625, 0.5):
+                decoded = torch.tanh(decoded * scale)
+            return types.SimpleNamespace(sample=decoded)
+
+    class ImageProcessor:
+        @staticmethod
+        def postprocess(value, *, output_type):
+            assert output_type == "pt"
+            return value
+
+    class Pipeline:
+        def __init__(self, vae: Vae) -> None:
+            self.vae = vae
+            self.image_processor = ImageProcessor()
+
+    def backend(vae: Vae) -> Sd35PipelineBackend:
+        value = Sd35PipelineBackend(
+            cache_root=tmp_path / f"cache-{id(vae)}",
+            persistent_root=tmp_path / f"persistent-{id(vae)}",
+            hf_token=None,
+            prompt="probe",
+        )
+        value._configuration = configuration
+        value._device = torch.device("cpu")
+        value._pipeline = Pipeline(vae)
+        return value
+
+    reference_vae = Vae()
+    assert reference_vae.weight.requires_grad
+    reference_input = torch.linspace(
+        -1.0,
+        1.0,
+        steps=16 * 4 * 4,
+        dtype=torch.float32,
+    ).reshape(1, 16, 4, 4).requires_grad_(True)
+    reference_image = reference_vae.decode(
+        reference_input,
+        return_dict=True,
+    ).sample
+    reference_gradient = torch.autograd.grad(
+        reference_image.square().sum(),
+        reference_input,
+    )[0]
+
+    checkpoint_vae = Vae()
+    checkpoint_vae.requires_grad_(False)
+    checkpoint_backend = backend(checkpoint_vae)
+    checkpoint_input = reference_input.detach().clone().requires_grad_(True)
+    checkpoint_image = checkpoint_backend.vae_decode_differentiable(
+        checkpoint_input
+    )
+    checkpoint_gradient = torch.autograd.grad(
+        checkpoint_image.square().sum(),
+        checkpoint_input,
+    )[0]
+    assert torch.equal(checkpoint_image, reference_image)
+    assert torch.equal(checkpoint_gradient, reference_gradient)
+    assert bool(torch.isfinite(checkpoint_gradient).all())
+    assert bool(torch.count_nonzero(checkpoint_gradient))
+    assert checkpoint_vae.call_count == 2
+    assert checkpoint_vae.weight.grad is None
+
+    def saved_tensor_bytes(callable_decode) -> tuple[torch.Tensor, int]:
+        total = 0
+
+        def record_saved_tensor(value: torch.Tensor) -> torch.Tensor:
+            nonlocal total
+            total += value.numel() * value.element_size()
+            return value
+
+        with torch.autograd.graph.saved_tensors_hooks(
+            record_saved_tensor,
+            lambda value: value,
+        ):
+            image = callable_decode()
+        return image, total
+
+    direct_memory_vae = Vae()
+    direct_memory_vae.requires_grad_(False)
+    direct_memory_input = reference_input.detach().clone().requires_grad_(True)
+    direct_memory_image, direct_saved_bytes = saved_tensor_bytes(
+        lambda: direct_memory_vae.decode(
+            direct_memory_input,
+            return_dict=True,
+        ).sample
+    )
+    checkpoint_memory_vae = Vae()
+    checkpoint_memory_vae.requires_grad_(False)
+    checkpoint_memory_input = reference_input.detach().clone().requires_grad_(True)
+    checkpoint_memory_image, checkpoint_saved_bytes = saved_tensor_bytes(
+        lambda: backend(checkpoint_memory_vae).vae_decode_differentiable(
+            checkpoint_memory_input
+        )
+    )
+    assert torch.equal(checkpoint_memory_image, direct_memory_image)
+    assert checkpoint_saved_bytes < direct_saved_bytes
+
+    initial_failure_vae = Vae(fail_on_call=1)
+    initial_failure_vae.requires_grad_(False)
+    initial_failure_backend = backend(initial_failure_vae)
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+    ) as initial_error:
+        initial_failure_backend.vae_decode_differentiable(
+            reference_input.detach().clone().requires_grad_(True)
+        )
+    assert isinstance(initial_error.value.__cause__, torch.OutOfMemoryError)
+    assert initial_error.value.runtime_reason_identity == (
+        "runtime_reported_memory_allocation_failure"
+    )
+
+    initial_failure_vae.fail_on_call = None
+    recovered_input = reference_input.detach().clone().requires_grad_(True)
+    recovered_image = initial_failure_backend.vae_decode_differentiable(
+        recovered_input
+    )
+    recovered_gradient = torch.autograd.grad(
+        recovered_image.square().sum(),
+        recovered_input,
+    )[0]
+    assert torch.equal(recovered_image, reference_image)
+    assert torch.equal(recovered_gradient, reference_gradient)
+
+    recompute_failure_vae = Vae(fail_on_call=2)
+    recompute_failure_vae.requires_grad_(False)
+    recompute_failure_backend = backend(recompute_failure_vae)
+    recompute_input = reference_input.detach().clone().requires_grad_(True)
+    recompute_image = recompute_failure_backend.vae_decode_differentiable(
+        recompute_input
+    )
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+    ) as recompute_error:
+        torch.autograd.grad(recompute_image.square().sum(), recompute_input)
+    assert isinstance(recompute_error.value.__cause__, torch.OutOfMemoryError)
+    assert recompute_error.value.runtime_reason_identity == (
+        "runtime_reported_memory_allocation_failure"
+    )
+
+    def forbidden_checkpoint(*_args, **_kwargs):
+        raise AssertionError("non-differentiable VAE decode must not use checkpoint")
+
+    monkeypatch.setattr(
+        sd35_backend_module,
+        "activation_checkpoint",
+        forbidden_checkpoint,
+    )
+    inference_vae = Vae()
+    inference_vae.requires_grad_(False)
+    inference_image = backend(inference_vae).vae_decode(reference_input.detach())
+    assert torch.equal(inference_image, reference_image)
+    assert not inference_image.requires_grad
+    assert inference_vae.call_count == 1
+    assert inference_vae.weight.grad is None
+
+
 @pytest.mark.parametrize(
     ("cache_relative", "persistent_relative"),
     (
