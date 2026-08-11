@@ -30,8 +30,9 @@ ENTRYPOINT = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagn
 SERVER = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnostic_server.py"
 SERVER_RELATIVE = SERVER.relative_to(ROOT)
 NOTEBOOK = ROOT / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb"
-EXECUTION_REVISION = "8fdeb237e24a7948431db9869db4c7830ae20b49"
-RUN_ID = "ceg_wm_qk_runtime_failure_localization"
+EXECUTION_REVISION = "9f444ba78dc11f49d2867d008ec02e89a92eeaab"
+RUN_ID = "ceg_wm_qk_suffix_memory_correction_preflight"
+HISTORICAL_LOCALIZATION_RUN_ID = "ceg_wm_qk_runtime_failure_localization"
 HISTORICAL_RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/qk_synchronization_write_diagnostic.json",
@@ -418,6 +419,7 @@ def test_qk_diagnosis_readmes_preserve_historical_run_boundary() -> None:
         assert NOTEBOOK.name in source
         assert EXECUTION_REVISION in source
         assert RUN_ID in source
+        assert HISTORICAL_LOCALIZATION_RUN_ID in source
         assert HISTORICAL_RUN_ID in source
         assert "records、diagnostics 与 intents 保持不可变" in normalized_source
         assert "不读取、迁移、覆盖或混入" in normalized_source
