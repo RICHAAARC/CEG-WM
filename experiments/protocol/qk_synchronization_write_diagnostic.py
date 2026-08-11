@@ -22,7 +22,7 @@ from experiments.protocol.internal_splits import (
 
 PROTOCOL_ID = "ceg_wm_qk_synchronization_write_diagnosis"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_qk_differentiable_vae_checkpoint_resource_qualification"
+RUN_ID = "ceg_wm_qk_vae_checkpoint_operation_localization"
 OPERATIONAL_UNIT_COUNT = 1
 AUTHORIZED_OPERATIONAL_UNIT_COUNT = 1
 AUTHORIZED_SCIENTIFIC_UNIT_COUNT = 0
