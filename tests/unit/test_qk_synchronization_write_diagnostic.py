@@ -11,6 +11,10 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn.functional as functional
+from torch.utils.checkpoint import (
+    CheckpointError,
+    checkpoint as activation_checkpoint,
+)
 
 from experiments.methods import (
     CegWmExperimentAdapter,
@@ -1280,6 +1284,66 @@ def test_qk_runtime_failure_attribution_requires_exact_checkpoint_failure_type(
     assert "runtime_failure_reason_identity" not in derived_diagnostic
     assert "runtime_failure_cuda_memory_facts" not in derived_diagnostic
     assert secret not in json.dumps(derived_diagnostic, sort_keys=True)
+
+
+@pytest.mark.unit
+def test_qk_runtime_failure_attribution_identifies_real_checkpoint_backward_metadata_mismatch(
+) -> None:
+    invocation_count = 0
+
+    def checkpointed_sine(value: torch.Tensor) -> torch.Tensor:
+        nonlocal invocation_count
+        invocation_count += 1
+        active = value if invocation_count == 1 else value[:1]
+        return torch.sin(active)
+
+    checkpoint_input = torch.arange(4.0, requires_grad=True)
+    checkpoint_output = activation_checkpoint(
+        checkpointed_sine,
+        checkpoint_input,
+        use_reentrant=False,
+        preserve_rng_state=True,
+    )
+    with pytest.raises(CheckpointError) as checkpoint_failure:
+        torch.autograd.grad(checkpoint_output.sum(), checkpoint_input)
+
+    secret = "checkpoint-framework-message-must-not-be-persisted"
+    outer = CegWmExperimentAdapterError(secret)
+    outer.__cause__ = checkpoint_failure.value
+    diagnostic = _failure_diagnostic(outer, active_binding=None)
+    serialized = json.dumps(diagnostic, sort_keys=True)
+
+    assert type(checkpoint_failure.value) is CheckpointError
+    assert invocation_count == 2
+    assert diagnostic["failure_type_chain"] == [
+        "experiments.methods.ceg_wm.CegWmExperimentAdapterError",
+        "torch.utils.checkpoint.CheckpointError",
+    ]
+    assert diagnostic["failure_class"] == "implementation_failure"
+    assert diagnostic["runtime_failure_operation_identity"] == (
+        "differentiable_vae_checkpoint_execution"
+    )
+    assert diagnostic["runtime_failure_reason_identity"] == (
+        "checkpoint_recomputation_metadata_mismatch"
+    )
+    assert "runtime_failure_cuda_memory_facts" not in diagnostic
+    assert secret not in serialized
+    for forbidden in ("message", "traceback", "tensor", "path", "repr"):
+        assert forbidden not in serialized
+
+    class DerivedCheckpointError(CheckpointError):
+        pass
+
+    derived_outer = CegWmExperimentAdapterError(secret)
+    derived_outer.__cause__ = DerivedCheckpointError(secret)
+    derived_diagnostic = _failure_diagnostic(derived_outer, active_binding=None)
+    derived_serialized = json.dumps(derived_diagnostic, sort_keys=True)
+
+    assert _runtime_failure_safe_attribution(derived_outer) is None
+    assert "runtime_failure_operation_identity" not in derived_diagnostic
+    assert "runtime_failure_reason_identity" not in derived_diagnostic
+    assert "runtime_failure_cuda_memory_facts" not in derived_diagnostic
+    assert secret not in derived_serialized
 
 
 @pytest.mark.unit

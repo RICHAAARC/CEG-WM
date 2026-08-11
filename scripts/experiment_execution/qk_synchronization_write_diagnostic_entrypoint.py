@@ -16,6 +16,7 @@ from typing import Sequence
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import torch
+from torch.utils.checkpoint import CheckpointError
 
 from experiments.methods import CegWmExperimentAdapter, load_ceg_wm_experiment_adapter_configuration
 from experiments.protocol.development_records import (
@@ -159,6 +160,7 @@ _RUNTIME_FAILURE_OPERATION_IDENTITIES = {
     Sd35BackendDifferentiableImagePostprocessError: (
         "differentiable_image_postprocess"
     ),
+    CheckpointError: "differentiable_vae_checkpoint_execution",
 }
 _VAE_DECODE_RUNTIME_FAILURE_TYPES = frozenset(
     {
@@ -172,6 +174,7 @@ _VAE_DECODE_RUNTIME_REASON_IDENTITIES = frozenset(
         "runtime_reported_memory_allocation_failure",
         "cuda_kernel_execution_failure",
         "dtype_shape_operator_contract_failure",
+        "checkpoint_recomputation_metadata_mismatch",
         "unclassified_runtime_failure",
     }
 )
@@ -184,6 +187,12 @@ def _runtime_failure_safe_attribution(
         operation_identity = _RUNTIME_FAILURE_OPERATION_IDENTITIES.get(type(current))
         if operation_identity is None:
             continue
+        if type(current) is CheckpointError:
+            return (
+                operation_identity,
+                "checkpoint_recomputation_metadata_mismatch",
+                None,
+            )
         raw_facts = getattr(current, "cuda_memory_facts", None)
         if type(raw_facts) is not tuple:
             return None
