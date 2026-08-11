@@ -345,7 +345,7 @@ def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary(
     config_payload = json.loads(CONFIG.read_text(encoding="utf-8"))
 
     assert protocol.run_id == (
-        "ceg_wm_qk_differentiable_vae_resource_qualification"
+        "ceg_wm_qk_differentiable_vae_decode_cause_localization"
     )
     assert config_payload["run_id"] == protocol.run_id
     assert protocol.schema_version == (
@@ -1025,6 +1025,21 @@ def test_qk_failure_diagnostic_does_not_classify_message_as_resource_failure() -
     assert diagnostic["failure_class"] == "implementation_failure"
     assert diagnostic["unit_index"] is None
     assert "module_outcome" not in diagnostic
+
+
+@pytest.mark.unit
+def test_qk_failure_diagnostic_records_only_launch_blocking_identity() -> None:
+    secret = "launch-blocking-message-must-not-be-persisted"
+    diagnostic = _failure_diagnostic(
+        RuntimeError(secret),
+        active_binding=None,
+        cuda_launch_blocking_enabled=True,
+    )
+
+    assert diagnostic["cuda_launch_blocking_identity"] == (
+        "cuda_launch_blocking_enabled"
+    )
+    assert secret not in json.dumps(diagnostic, sort_keys=True)
 
 
 @pytest.mark.unit

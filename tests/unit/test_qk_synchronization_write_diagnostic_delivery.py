@@ -31,7 +31,8 @@ SERVER = ROOT / "scripts/experiment_execution/qk_synchronization_write_diagnosti
 SERVER_RELATIVE = SERVER.relative_to(ROOT)
 NOTEBOOK = ROOT / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb"
 EXECUTION_REVISION = "66b3655cb28832c69706f951bb0e74c308373cf8"
-RUN_ID = "ceg_wm_qk_differentiable_vae_resource_qualification"
+RUN_ID = "ceg_wm_qk_differentiable_vae_decode_cause_localization"
+NOTEBOOK_RUN_ID = "ceg_wm_qk_differentiable_vae_resource_qualification"
 HISTORICAL_LOCALIZATION_RUN_ID = "ceg_wm_qk_runtime_failure_localization"
 HISTORICAL_RUN_ID = "ceg_wm_qk_synchronization_write_public_rgb8_diagnosis"
 REQUIRED_PACKAGE_MEMBERS = {
@@ -98,6 +99,7 @@ def test_qk_failure_localization_delivery_binds_only_operational_entrypoint() ->
     }
 
     assert "execute_qk_synchronization_write_diagnostic_session" in source
+    assert 'environment.get("CUDA_LAUNCH_BLOCKING") == "1"' in source
     assert "create_session_intent" in calls
     assert "commit_session_unit" in calls
     assert "_authorized_persistence_bindings" in calls
@@ -148,6 +150,7 @@ def _patch_server_execution(
     *,
     exit_code: int,
     roster_digest: str,
+    cuda_launch_blocking_identity: object = "cuda_launch_blocking_enabled",
 ) -> tuple[Path, str]:
     protocol, manifest = load_qk_synchronization_write_protocol(
         PROTOCOL, repository_root=ROOT
@@ -192,6 +195,7 @@ def _patch_server_execution(
         "fpr_estimated": False,
         "candidate_promoted": False,
         "scientific_claims_supported": False,
+        "cuda_launch_blocking_identity": cuda_launch_blocking_identity,
     }
     monkeypatch.setattr(server_module, "_verify_repository", lambda *_args: None)
     monkeypatch.setattr(
@@ -211,18 +215,71 @@ def _patch_server_execution(
     )
 
     def execute_worker(**kwargs):
-        assert kwargs["environment"] == {
-            "HF_TOKEN": secret,
-            "CEG_WM_ROOT_KEY": secret,
-        }
+        assert kwargs["environment"]["HF_TOKEN"] == secret
+        assert kwargs["environment"]["CEG_WM_ROOT_KEY"] == secret
         return exit_code, worker
 
     monkeypatch.setattr(
         server_module,
-        "execute_qk_synchronization_write_diagnostic_session",
+        "_execute_worker_process",
         execute_worker,
     )
     return persistent, secret
+
+
+@pytest.mark.quick
+def test_qk_worker_process_enables_launch_blocking_before_module_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed: dict[str, object] = {}
+    worker = {
+        "cuda_launch_blocking_identity": "cuda_launch_blocking_enabled",
+    }
+
+    def run_worker(command, **kwargs):
+        observed["command"] = command
+        observed["environment"] = kwargs["env"]
+        assert kwargs["cwd"] == ROOT
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["check"] is False
+        return subprocess.CompletedProcess(
+            command,
+            3,
+            stdout=(
+                server_module.WORKER_RESULT_PREFIX
+                + json.dumps(worker, sort_keys=True)
+                + "\n"
+            ),
+            stderr="worker-private-diagnostic-must-not-be-persisted",
+        )
+
+    monkeypatch.setattr(server_module.subprocess, "run", run_worker)
+    exit_code, result = server_module._execute_worker_process(
+        repository=ROOT,
+        expected_revision="1" * 40,
+        persistent=tmp_path / "persistent",
+        cache=tmp_path / "cache",
+        run_id=RUN_ID,
+        session_id="qk_launch_blocking_process",
+        package_sha256="2" * 64,
+        environment={
+            "HF_TOKEN": "test-hf-token",
+            "CEG_WM_ROOT_KEY": "test-root-key",
+        },
+    )
+
+    command = observed["command"]
+    environment = observed["environment"]
+    assert command[:3] == (
+        sys.executable,
+        "-m",
+        "scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint",
+    )
+    assert environment["CUDA_LAUNCH_BLOCKING"] == "1"
+    assert exit_code == 3
+    assert result == worker
 
 
 @pytest.mark.quick
@@ -309,6 +366,37 @@ def test_qk_localization_server_rejects_dormant_scientific_roster_digest(
 
 
 @pytest.mark.quick
+def test_qk_localization_server_rejects_missing_launch_blocking_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    protocol, _manifest = load_qk_synchronization_write_protocol(
+        PROTOCOL, repository_root=ROOT
+    )
+    persistent, secret = _patch_server_execution(
+        monkeypatch,
+        tmp_path,
+        exit_code=3,
+        roster_digest=protocol.authorized_unit_roster_digest,
+        cuda_launch_blocking_identity=None,
+    )
+    with pytest.raises(
+        QkSynchronizationWriteServerError,
+        match="worker frozen identity drifted",
+    ):
+        execute_qk_synchronization_write_diagnostic_server_session(
+            repository_root=ROOT,
+            expected_revision="1" * 40,
+            persistent_root=persistent,
+            cache_root=tmp_path / "cache",
+            run_id=protocol.run_id,
+            session_id="qk_launch_blocking_identity_rejected",
+            environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+            install_dependencies=False,
+        )
+
+
+@pytest.mark.quick
 def test_qk_diagnosis_notebook_is_thin_exact_and_output_free() -> None:
     document, source = _notebook_source()
     code_source = "\n".join(
@@ -325,7 +413,7 @@ def test_qk_diagnosis_notebook_is_thin_exact_and_output_free() -> None:
     )
     assert all(cell.get("outputs", []) == [] for cell in document["cells"])
     assert _constant(code_source, "EXECUTION_REVISION") == EXECUTION_REVISION
-    assert _constant(code_source, "RUN_ID") == RUN_ID
+    assert _constant(code_source, "RUN_ID") == NOTEBOOK_RUN_ID
     assert "qk_synchronization_write_diagnostic_server.py" in code_source
     assert "HF_TOKEN" in code_source and "CEG_WM_ROOT_KEY" in code_source
     assert "/content/drive" in code_source
@@ -418,7 +506,7 @@ def test_qk_diagnosis_readmes_preserve_historical_run_boundary() -> None:
         normalized_source = " ".join(source.split())
         assert NOTEBOOK.name in source
         assert EXECUTION_REVISION in source
-        assert RUN_ID in source
+        assert NOTEBOOK_RUN_ID in source
         assert HISTORICAL_LOCALIZATION_RUN_ID in source
         assert HISTORICAL_RUN_ID in source
         assert "records、diagnostics 与 intents 保持不可变" in normalized_source

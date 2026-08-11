@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Iterator, Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import time
 from time import monotonic
+from typing import Sequence
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import torch
@@ -60,6 +63,8 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
 PROTOCOL_PATH = Path("configs/experiments/qk_synchronization_write_diagnostic.json")
 COMPONENT_PATH = Path("configs/experiments/internal_execution_components.json")
 RUNTIME_PATH = Path("configs/runtime/runtime_sd35_flowmatch.json")
+CUDA_LAUNCH_BLOCKING_IDENTITY = "cuda_launch_blocking_enabled"
+WORKER_RESULT_PREFIX = "CEG_WM_QK_WORKER_RESULT="
 
 
 class QkSynchronizationWriteEntrypointError(RuntimeError):
@@ -194,6 +199,7 @@ def _failure_diagnostic(
     error: BaseException,
     *,
     active_binding: FrozenDevelopmentUnitBinding | None,
+    cuda_launch_blocking_enabled: bool = False,
 ) -> dict[str, object]:
     type_chain = _qualified_exception_type_chain(error)
     diagnostic = {
@@ -218,6 +224,10 @@ def _failure_diagnostic(
         "counts_as_scientific_coverage": False,
         "scientific_claims_supported": False,
     }
+    if cuda_launch_blocking_enabled:
+        diagnostic["cuda_launch_blocking_identity"] = (
+            CUDA_LAUNCH_BLOCKING_IDENTITY
+        )
     runtime_failure = _runtime_failure_safe_attribution(error)
     if runtime_failure is not None:
         operation_identity, runtime_reason_identity, facts = runtime_failure
@@ -362,8 +372,16 @@ def execute_qk_synchronization_write_diagnostic_session(
     cache = Path(cache_root).resolve()
     root_key = environment.get("CEG_WM_ROOT_KEY")
     hf_token = environment.get("HF_TOKEN")
+    cuda_launch_blocking_enabled = (
+        environment.get("CUDA_LAUNCH_BLOCKING") == "1"
+        and os.environ.get("CUDA_LAUNCH_BLOCKING") == "1"
+    )
     if not root_key or not hf_token:
         raise QkSynchronizationWriteEntrypointError("HF_TOKEN and CEG_WM_ROOT_KEY are required")
+    if not cuda_launch_blocking_enabled:
+        raise QkSynchronizationWriteEntrypointError(
+            "CUDA launch blocking identity is required before worker import"
+        )
     if len(expected_revision) != 40 or len(execution_package_sha256) != 64:
         raise QkSynchronizationWriteEntrypointError("execution identity is invalid")
     protocol, manifest = load_qk_synchronization_write_protocol(repository / PROTOCOL_PATH, repository_root=repository)
@@ -428,7 +446,11 @@ def execute_qk_synchronization_write_diagnostic_session(
             break
     except Exception as exc:
         termination_reason = "operational_failure_localization_failed"
-        failure = _failure_diagnostic(exc, active_binding=active_binding)
+        failure = _failure_diagnostic(
+            exc,
+            active_binding=active_binding,
+            cuda_launch_blocking_enabled=cuda_launch_blocking_enabled,
+        )
     finally:
         runtime.close()
     ended_epoch = int(time.time())
@@ -445,7 +467,38 @@ def execute_qk_synchronization_write_diagnostic_session(
             target.writestr("qk_synchronization_diagnosis_aggregate.json", _canonical_bytes(aggregate))
         if failure is not None:
             target.writestr("diagnostic.json", _canonical_bytes(failure))
-    return (3 if failure is not None else 0), {"artifact_kind": "qk_synchronization_write_diagnostic_failure" if failure is not None else "qk_synchronization_write_diagnostic_result", "diagnostic_zip" if failure is not None else "result_zip": str(archive), "protocol_digest": protocol_digest, "input_manifest_digest": manifest.digest(), "candidate_config_digest": candidate_digest, "unit_roster_digest": protocol.authorized_unit_roster_digest, "source_cluster_deny_list_digest": protocol.source_cluster_deny_list_digest, "package_sha256": execution_package_sha256, "committed_unit_count": len(cursor.committed_units), "session_committed_unit_count": len(cursor.committed_units)-committed_before, "termination_reason": termination_reason, "qk_synchronization_diagnosis_aggregate": aggregate, "formal_tau_created": False, "fpr_estimated": False, "candidate_promoted": False, "scientific_claims_supported": False}
+    return (3 if failure is not None else 0), {"artifact_kind": "qk_synchronization_write_diagnostic_failure" if failure is not None else "qk_synchronization_write_diagnostic_result", "diagnostic_zip" if failure is not None else "result_zip": str(archive), "protocol_digest": protocol_digest, "input_manifest_digest": manifest.digest(), "candidate_config_digest": candidate_digest, "unit_roster_digest": protocol.authorized_unit_roster_digest, "source_cluster_deny_list_digest": protocol.source_cluster_deny_list_digest, "package_sha256": execution_package_sha256, "committed_unit_count": len(cursor.committed_units), "session_committed_unit_count": len(cursor.committed_units)-committed_before, "termination_reason": termination_reason, "qk_synchronization_diagnosis_aggregate": aggregate, "cuda_launch_blocking_identity": CUDA_LAUNCH_BLOCKING_IDENTITY, "formal_tau_created": False, "fpr_estimated": False, "candidate_promoted": False, "scientific_claims_supported": False}
 
 
-__all__ = ["QkSynchronizationWriteEntrypointError", "execute_qk_synchronization_write_diagnostic_session"]
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repository-root", required=True)
+    parser.add_argument("--expected-revision", required=True)
+    parser.add_argument("--persistent-root", required=True)
+    parser.add_argument("--cache-root", required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--session-id", required=True)
+    parser.add_argument("--execution-package-sha256", required=True)
+    arguments = parser.parse_args(argv)
+    exit_code, result = execute_qk_synchronization_write_diagnostic_session(
+        repository_root=arguments.repository_root,
+        expected_revision=arguments.expected_revision,
+        persistent_root=arguments.persistent_root,
+        cache_root=arguments.cache_root,
+        run_id=arguments.run_id,
+        session_id=arguments.session_id,
+        execution_package_sha256=arguments.execution_package_sha256,
+        environment=os.environ,
+    )
+    print(WORKER_RESULT_PREFIX + json.dumps(result, sort_keys=True, allow_nan=False))
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "QkSynchronizationWriteEntrypointError",
+    "execute_qk_synchronization_write_diagnostic_session",
+]

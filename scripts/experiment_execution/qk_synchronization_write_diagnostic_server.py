@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Mapping, Sequence
 from zipfile import is_zipfile
@@ -33,17 +34,78 @@ from scripts.experiment_execution.development_exploration_server import (
     _verify_repository,
     _write_json_create_only,
 )
-from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint import (
-    execute_qk_synchronization_write_diagnostic_session,
-)
-
-
 PROTOCOL_PATH = Path("configs/experiments/qk_synchronization_write_diagnostic.json")
 SAFE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
+WORKER_RESULT_PREFIX = "CEG_WM_QK_WORKER_RESULT="
 
 
 class QkSynchronizationWriteServerError(RuntimeError):
     """The server could not start the exact Q/K diagnosis worker."""
+
+
+def _execute_worker_process(
+    *,
+    repository: Path,
+    expected_revision: str,
+    persistent: Path,
+    cache: Path,
+    run_id: str,
+    session_id: str,
+    package_sha256: str,
+    environment: Mapping[str, str],
+) -> tuple[int, Mapping[str, object]]:
+    worker_environment = dict(environment)
+    worker_environment["CUDA_LAUNCH_BLOCKING"] = "1"
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint",
+            "--repository-root",
+            str(repository),
+            "--expected-revision",
+            expected_revision,
+            "--persistent-root",
+            str(persistent),
+            "--cache-root",
+            str(cache),
+            "--run-id",
+            run_id,
+            "--session-id",
+            session_id,
+            "--execution-package-sha256",
+            package_sha256,
+        ),
+        cwd=repository,
+        env=worker_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode not in {0, 3}:
+        raise QkSynchronizationWriteServerError(
+            "Q/K diagnosis worker did not return a bounded result"
+        )
+    result_lines = tuple(
+        line.removeprefix(WORKER_RESULT_PREFIX)
+        for line in completed.stdout.splitlines()
+        if line.startswith(WORKER_RESULT_PREFIX)
+    )
+    if len(result_lines) != 1:
+        raise QkSynchronizationWriteServerError(
+            "Q/K diagnosis worker result identity is unavailable"
+        )
+    try:
+        result = json.loads(result_lines[0])
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise QkSynchronizationWriteServerError(
+            "Q/K diagnosis worker result identity is invalid"
+        ) from exc
+    if type(result) is not dict:
+        raise QkSynchronizationWriteServerError(
+            "Q/K diagnosis worker result identity is invalid"
+        )
+    return completed.returncode, result
 
 
 def _validated_artifact(worker: Mapping[str, object], *, persistent: Path, exit_code: int) -> Path:
@@ -90,11 +152,24 @@ def execute_qk_synchronization_write_diagnostic_server_session(
     _download_configured_model(model_id=runtime_document["model_id"], model_revision=runtime_document["model_revision"], cache_root=cache, hf_token=hf_token)
     package = _build_or_verify_package(repository, persistent, expected_revision)
     package_sha = _file_sha256(package)
-    exit_code, worker = execute_qk_synchronization_write_diagnostic_session(repository_root=repository, expected_revision=expected_revision, persistent_root=persistent, cache_root=cache, run_id=run_id, session_id=session_id, execution_package_sha256=package_sha, environment={"HF_TOKEN": hf_token, "CEG_WM_ROOT_KEY": root_key})
+    exit_code, worker = _execute_worker_process(
+        repository=repository,
+        expected_revision=expected_revision,
+        persistent=persistent,
+        cache=cache,
+        run_id=run_id,
+        session_id=session_id,
+        package_sha256=package_sha,
+        environment={
+            **env,
+            "HF_TOKEN": hf_token,
+            "CEG_WM_ROOT_KEY": root_key,
+        },
+    )
     if type(exit_code) is not int or isinstance(exit_code, bool):
         raise QkSynchronizationWriteServerError("worker exit code is invalid")
     artifact = _validated_artifact(worker, persistent=persistent, exit_code=exit_code)
-    if worker.get("protocol_digest") != protocol.digest() or worker.get("input_manifest_digest") != manifest.digest() or worker.get("unit_roster_digest") != protocol.authorized_unit_roster_digest or worker.get("source_cluster_deny_list_digest") != protocol.source_cluster_deny_list_digest:
+    if worker.get("protocol_digest") != protocol.digest() or worker.get("input_manifest_digest") != manifest.digest() or worker.get("unit_roster_digest") != protocol.authorized_unit_roster_digest or worker.get("source_cluster_deny_list_digest") != protocol.source_cluster_deny_list_digest or worker.get("cuda_launch_blocking_identity") != "cuda_launch_blocking_enabled":
         raise QkSynchronizationWriteServerError("worker frozen identity drifted")
     if (
         worker.get("qk_synchronization_diagnosis_aggregate") is not None
