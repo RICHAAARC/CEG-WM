@@ -1111,6 +1111,25 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     assert "runtime_failure_operation_identity" not in no_cuda_diagnostic
     assert "runtime_failure_cuda_memory_facts" not in no_cuda_diagnostic
 
+    class ForeignFailure(RuntimeError):
+        operation_identity = "unsafe_path_or_secret_sentinel"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.cuda_memory_facts = facts
+
+    foreign_outer = CegWmExperimentAdapterError(secret)
+    foreign_outer.__cause__ = ForeignFailure()
+    assert _runtime_failure_resource_facts(foreign_outer) is None
+    foreign_diagnostic = _failure_diagnostic(
+        foreign_outer,
+        active_binding=None,
+    )
+    foreign_serialized = json.dumps(foreign_diagnostic, sort_keys=True)
+    assert "runtime_failure_operation_identity" not in foreign_diagnostic
+    assert "runtime_failure_cuda_memory_facts" not in foreign_diagnostic
+    assert "unsafe_path_or_secret_sentinel" not in foreign_serialized
+
 
 @pytest.mark.unit
 def test_qk_runner_success_record_binds_ratio_metric_to_registered_responsibility() -> None:

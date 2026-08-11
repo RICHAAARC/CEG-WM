@@ -44,6 +44,11 @@ from experiments.runners.qk_synchronization_write_diagnostic import (
 )
 from main import identify_root_key, key_schedule_sha256_counter
 from runtime import Sd35PipelineBackend, create_runtime_adapter
+from runtime.sd35_backend import (
+    Sd35BackendDifferentiableImagePostprocessError,
+    Sd35BackendDifferentiableVaeDecodeForwardError,
+    Sd35BackendDifferentiableVaeInputPreparationError,
+)
 from scripts.experiment_execution.development_exploration_entrypoint import (
     _base_latent,
     _canonical_bytes,
@@ -131,16 +136,27 @@ _CUDA_MEMORY_FACT_KEYS = frozenset(
         "total_device_bytes",
     }
 )
+_RUNTIME_FAILURE_OPERATION_IDENTITIES = {
+    Sd35BackendDifferentiableVaeInputPreparationError: (
+        "differentiable_vae_input_preparation"
+    ),
+    Sd35BackendDifferentiableVaeDecodeForwardError: (
+        "differentiable_vae_decode_forward"
+    ),
+    Sd35BackendDifferentiableImagePostprocessError: (
+        "differentiable_image_postprocess"
+    ),
+}
 
 
 def _runtime_failure_resource_facts(
     error: BaseException,
 ) -> tuple[str, dict[str, int]] | None:
     for current in _exception_chain(error):
-        operation_identity = getattr(type(current), "operation_identity", None)
-        raw_facts = getattr(current, "cuda_memory_facts", None)
-        if type(operation_identity) is not str or not operation_identity:
+        operation_identity = _RUNTIME_FAILURE_OPERATION_IDENTITIES.get(type(current))
+        if operation_identity is None:
             continue
+        raw_facts = getattr(current, "cuda_memory_facts", None)
         if type(raw_facts) is not tuple:
             return None
         try:
