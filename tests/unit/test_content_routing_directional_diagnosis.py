@@ -22,6 +22,14 @@ from experiments.protocol.content_routing_directional_diagnosis import (
     load_content_routing_directional_protocol,
     reference_entries_for_probe,
 )
+from experiments.protocol.development_records import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
+    ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
+    ROUTING_REFERENCE_RECORD_KIND,
+    ROUTING_REFERENCE_RECORD_SCHEMA,
+    DevelopmentRoutingReferenceRecord,
+    canonical_development_value_digest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,9 +52,79 @@ def _reference_measurements():
             texture_gradient_value=float(ordinal + 1),
             latent_response_value=float(ordinal + 101),
             local_sensitivity_value=float(ordinal + 201),
-            semantic_observation_digest=f"{ordinal + 1:064x}",
         )
         for ordinal in range(32)
+    )
+
+
+def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRecord:
+    value = float(ordinal + 1)
+    payload = {
+        "schema_version": ROUTING_REFERENCE_RECORD_SCHEMA,
+        "collection_role": ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
+        "record_kind": ROUTING_REFERENCE_RECORD_KIND,
+        "record_id": "0" * 64,
+        "run_id": "ceg_wm_content_routing_directional_diagnosis",
+        "protocol_digest": "1" * 64,
+        "method_code_revision": "2" * 40,
+        "unit_index": ordinal + 2,
+        "phase": ROUTING_REFERENCE_RECORD_KIND,
+        "source_cluster_ordinal": ordinal,
+        "fold_index": ordinal % 4,
+        "prompt_roster_digest": "3" * 64,
+        "candidate_config_digest": "4" * 64,
+        "attempt_index": 0,
+        "retry_parent_intent_digest": None,
+        "actual_elapsed_seconds": 1.0,
+        "maximum_duration_seconds": 2700,
+        "duration_limit_exceeded": False,
+        "execution_status": "success",
+        "failure_class": None,
+        "failure_reason": None,
+        "measurement_payload": {
+            "candidate_id": "routing_stqr",
+            "runtime_config_digest": "5" * 64,
+            "model_id": "registered-routing-model",
+            "model_revision": "registered-routing-model-revision",
+            "callback_indices": list(range(20)),
+            "public_probe_domain_digest": f"{ordinal + 6:064x}",
+            "public_probe_values_digest": f"{ordinal + 38:064x}",
+            "nominal_relative_probe_step": 0.001,
+            "actual_probe_step": 0.001,
+            "texture_gradient_values": [value],
+            "texture_spatial_shape": [1, 1],
+            "response_ratio_values": [value + 100.0],
+            "response_spatial_shape": [1, 1],
+            "sensitivity_ratio_values": [value + 200.0],
+            "sensitivity_spatial_shape": [1, 1],
+        },
+        "counts_as_scientific_coverage": False,
+        "scientific_claim_boundary": DEVELOPMENT_CLAIM_BOUNDARY,
+    }
+    draft = DevelopmentRoutingReferenceRecord(**payload)
+    payload["record_id"] = canonical_development_value_digest(
+        draft.payload_without_record_id()
+    )
+    return DevelopmentRoutingReferenceRecord.from_payload(payload)
+
+
+def _measurement_from_persistent_record(
+    record: DevelopmentRoutingReferenceRecord,
+):
+    checked = DevelopmentRoutingReferenceRecord.from_payload(record.payload())
+    payload = checked.measurement_payload
+    return create_content_routing_reference_measurement(
+        cluster_ordinal=checked.source_cluster_ordinal,
+        fold_index=checked.fold_index,
+        texture_gradient_value=exact_nearest_rank_positive_p95(
+            payload["texture_gradient_values"]
+        ),
+        latent_response_value=exact_nearest_rank_positive_p95(
+            payload["response_ratio_values"]
+        ),
+        local_sensitivity_value=exact_nearest_rank_positive_p95(
+            payload["sensitivity_ratio_values"]
+        ),
     )
 
 
@@ -262,6 +340,46 @@ def test_routing_reference_fits_only_texture_response_and_sensitivity() -> None:
     assert reference.texture_gradient_reference == 31.0
     assert reference.latent_response_reference == 131.0
     assert reference.local_sensitivity_reference == 231.0
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    (
+        "texture_gradient_value",
+        "latent_response_value",
+        "local_sensitivity_value",
+    ),
+)
+def test_routing_reference_identity_changes_with_each_fitted_statistic(
+    changed_field: str,
+) -> None:
+    original_values = {
+        "cluster_ordinal": 0,
+        "fold_index": 0,
+        "texture_gradient_value": 1.0,
+        "latent_response_value": 2.0,
+        "local_sensitivity_value": 3.0,
+    }
+    original = create_content_routing_reference_measurement(**original_values)
+    changed_values = {**original_values, changed_field: original_values[changed_field] + 1.0}
+    changed = create_content_routing_reference_measurement(**changed_values)
+    assert changed.observation_identity != original.observation_identity
+
+
+def test_routing_reference_fit_replays_thirty_two_persistent_records() -> None:
+    records = tuple(_persistent_reference_record(ordinal) for ordinal in range(32))
+    measurements = tuple(_measurement_from_persistent_record(record) for record in records)
+    assert len(measurements) == 32
+    reference = fit_content_routing_fold_reference(
+        measurements,
+        probe_fold_index=0,
+    )
+    assert len(reference.fit_cluster_ordinals) == 24
+    assert all(ordinal % 4 != 0 for ordinal in reference.fit_cluster_ordinals)
+    assert reference.texture_gradient_reference == 31.0
+    assert reference.latent_response_reference == 131.0
+    assert reference.local_sensitivity_reference == 231.0
+    assert not any("semantic" in field.name for field in fields(measurements[0]))
 
 
 def test_exact_nearest_rank_p95_rejects_nonpositive_reference_values() -> None:

@@ -73,7 +73,6 @@ class ContentRoutingReferenceMeasurement:
     texture_gradient_value: float
     latent_response_value: float
     local_sensitivity_value: float
-    semantic_observation_digest: str
     observation_identity: str
 
     def validate(self) -> None:
@@ -94,8 +93,6 @@ class ContentRoutingReferenceMeasurement:
                 or float(value) <= 0.0
                 for value in numeric
             )
-            or type(self.semantic_observation_digest) is not str
-            or len(self.semantic_observation_digest) != 64
         ):
             raise ContentRoutingDirectionalMetricError(
                 "routing reference measurement drifted"
