@@ -4,7 +4,23 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 ## Current authorized entrypoint
 
-`qk_synchronization_write_diagnostic.ipynb` 是当前唯一授权在收到最终固定链接后执行
+`content_routing_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
+**Run all** 的入口。它固定拉取 execution revision
+`cd10d86b51f21c8c76bbc920160bc1e792c706a7`，使用独立 run ID
+`ceg_wm_content_routing_directional_diagnosis`，并执行冻结的
+`2 operational + 32 reference fit + 8 paired scientific = 42 total` units；每个 unit
+只允许 attempt zero。Notebook 只挂载 Drive、读取 `HF_TOKEN` 与
+`CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
+`content_routing_directional_diagnosis_server.py`，并以 create-only 方式导出 result 或
+diagnostic ZIP、execution receipt 与 `SHA256SUMS`。失败时先完成导出再报错。
+
+该入口比较同 prompt/seed/key/base latent、共同实际总预算下的 routed 与 uniform control，
+只形成 development routing directional diagnosis；不拟合 threshold/FPR，不形成正式组合、
+candidate promotion、calibration、evaluation、baseline 或论文 claim。所有历史 run 与 records
+保持 producer-bound，不读取、迁移、改写或拼接到本次 8-probe 分母。
+
+`qk_synchronization_write_diagnostic.ipynb` 当前为 **paused / not authorized**。它此前是
+唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
 `24042298bef550803c1710b84485c07ca6223cf2`，使用独立 run ID
 `ceg_wm_qk_vae_checkpoint_operation_localization`。当前入口仅用于验证已审核的
@@ -31,7 +47,7 @@ public-endpoint smoke 与 32 个 LF whitened directional scientific units，当�
 **paused / not authorized**。其 execution revision
 `51adb765cdddafcb4c65c357e899c77b4c9f36d2` 与 run ID
 `ceg_wm_lf_whitened_directional_validation_prepared_feature_execution` 保持
-producer-bound，不读取、不迁移、不改写或混入当前 Q/K 诊断分母。
+producer-bound，不读取、不迁移、不改写或混入当前 content-routing 诊断分母。
 
 依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实方法/runtime 调用、正式
 records、持久化和内部 ZIP 全部属于服务器脚本。该 development-only LF whitened
@@ -43,7 +59,7 @@ formal evaluation、baseline 或论文 claim，也不执行 routing、LF/HF 组�
 旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
 `ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
 **paused / not authorized**，不得作为当前入口运行或与新 run 混合。
-除当前 Q/K 入口外，目录内其余全部 Notebook 均为
+除当前 content-routing 入口外，目录内其余全部 Notebook 均为
 **paused / not authorized**，不得作为当前入口运行。
 
 `lf_whitened_score_screening.ipynb` 已完成 1 个 non-scientific operational smoke、32 个

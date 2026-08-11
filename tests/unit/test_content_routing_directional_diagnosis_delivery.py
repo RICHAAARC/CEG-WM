@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 from dataclasses import asdict
@@ -31,7 +32,9 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_routing_directional_diagnosis.json"
 SERVER = ROOT / "scripts/experiment_execution/content_routing_directional_diagnosis_server.py"
+NOTEBOOK = ROOT / "notebooks/colab/content_routing_directional_diagnosis.ipynb"
 RUN_ID = "ceg_wm_content_routing_directional_diagnosis"
+EXECUTION_REVISION = "cd10d86b51f21c8c76bbc920160bc1e792c706a7"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/content_routing_directional_diagnosis.json",
     "configs/experiments/content_routing_reference_fit_manifest.json",
@@ -215,3 +218,127 @@ def test_content_routing_server_source_has_no_secret_or_scientific_promotion() -
     assert "traceback" not in source
     assert "repr(" not in source
     assert "raw_secret" not in source
+
+
+def _notebook_source() -> tuple[dict[str, object], str, str]:
+    document = json.loads(NOTEBOOK.read_text("utf-8"))
+    source = "\n".join(
+        "".join(cell.get("source", [])) for cell in document["cells"]
+    )
+    code_source = "\n".join(
+        "".join(cell.get("source", []))
+        for cell in document["cells"]
+        if cell["cell_type"] == "code"
+    )
+    return document, source, code_source
+
+
+def _constant(source: str, name: str):
+    tree = ast.parse(source)
+    matches = [
+        node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == name
+        and isinstance(node.value, ast.Constant)
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+@pytest.mark.unit
+def test_content_routing_notebook_is_thin_exact_and_output_free() -> None:
+    document, source, code_source = _notebook_source()
+    code_cells = tuple(
+        cell for cell in document["cells"] if cell["cell_type"] == "code"
+    )
+    assert document["metadata"]["accelerator"] == "GPU"
+    assert len(code_cells) == 5
+    assert all(cell["execution_count"] is None for cell in code_cells)
+    assert all(cell.get("outputs", []) == [] for cell in document["cells"])
+    assert _constant(code_source, "EXECUTION_REVISION") == EXECUTION_REVISION
+    assert _constant(code_source, "RUN_ID") == RUN_ID
+    for required in (
+        "drive.mount('/content/drive')",
+        "userdata.get('HF_TOKEN')",
+        "userdata.get('CEG_WM_ROOT_KEY')",
+        "checkout', '--detach', 'FETCH_HEAD'",
+        "content_routing_directional_diagnosis_server.py",
+        "execution_receipt.json",
+        "SHA256SUMS",
+        "content_routing_directional_aggregate",
+        "reference_fit_cluster_count",
+        "directional_probe_cluster_count",
+        "frozen_roster_complete",
+    ):
+        assert required in code_source
+    assert "two non-scientific operational units" in source
+    assert "thirty-two routing-reference fit units" in source
+    assert "eight paired routed-versus-uniform scientific probes" in source
+    for forbidden in (
+        "pip install",
+        "snapshot_download(",
+        "from_pretrained(",
+        "ContentRoutingDirectionalDiagnosisRunner(",
+        "DevelopmentScientificRecord(",
+        "aggregate_content_routing_directional_diagnosis(",
+        "create_content_routing_directional_observation(",
+        "FormalHfContentDetectionOperation(",
+        "--skip-dependency-install",
+    ):
+        assert forbidden not in code_source
+
+
+@pytest.mark.unit
+def test_content_routing_server_exports_failure_receipt_without_scientific_claim(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    persistent, secret = _patch_server(monkeypatch, tmp_path)
+    protocol, reference, probes = load_content_routing_directional_protocol(
+        CONFIG,
+        repository_root=ROOT,
+    )
+    artifact = persistent / "result.zip"
+    worker = {
+        "artifact_kind": "content_routing_directional_diagnosis_failure",
+        "diagnostic_zip": str(artifact),
+        "protocol_digest": protocol.digest(),
+        "reference_manifest_digest": canonical_digest(asdict(reference)),
+        "probe_manifest_digest": canonical_digest(asdict(probes)),
+        "input_manifest_digest": "a" * 64,
+        "candidate_config_digest": "b" * 64,
+        "unit_roster_digest": protocol.unit_roster_digest,
+        "package_sha256": "c" * 64,
+        "committed_unit_count": 0,
+        "session_committed_unit_count": 0,
+        "termination_reason": "worker_execution_failure",
+        "content_routing_directional_aggregate": None,
+        "formal_tau_created": False,
+        "candidate_promoted": False,
+        "scientific_claims_supported": False,
+        "claim_boundary": CLAIM_BOUNDARY,
+    }
+    monkeypatch.setattr(
+        server_module,
+        "execute_content_routing_directional_diagnosis_session",
+        lambda **_kwargs: (3, worker),
+    )
+    exit_code, receipt = execute_content_routing_directional_diagnosis_server_session(
+        repository_root=ROOT,
+        expected_revision="4" * 40,
+        persistent_root=persistent,
+        cache_root=tmp_path / "cache",
+        run_id=RUN_ID,
+        session_id="routing_failure_export_session",
+        environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+        install_dependencies=False,
+    )
+    assert exit_code == 3
+    assert receipt["artifact_kind"] == worker["artifact_kind"]
+    assert receipt["content_routing_directional_aggregate"] is None
+    assert receipt["scientific_claims_supported"] is False
+    assert receipt["termination_reason"] == "worker_execution_failure"
+    assert Path(receipt["receipt_path"]).is_file()

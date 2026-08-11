@@ -1,9 +1,25 @@
 # Experiment execution servers
 
+## Content-routing directional diagnosis
+
+`content_routing_directional_diagnosis_server.py` 是当前 Colab 与普通 GPU 服务器共用的
+执行入口；当前唯一授权 Notebook 为
+`notebooks/colab/content_routing_directional_diagnosis.ipynb`，固定绑定 execution revision
+`cd10d86b51f21c8c76bbc920160bc1e792c706a7` 与独立 run ID
+`ceg_wm_content_routing_directional_diagnosis`。服务器执行冻结的 2 个 operational、32 个
+reference-fit 与 8 个 paired routed/uniform scientific units，共 42 units、每 unit 仅
+attempt zero。它负责依赖、模型、真实 public method/runtime、records、create-only persistence、
+package 与 result/diagnostic ZIP；Notebook 只负责 Drive、Secrets、exact checkout、调用和
+ZIP/receipt/`SHA256SUMS` 导出，失败也必须先保存 diagnostic export。
+
+该 development diagnosis 不拟合 threshold 或 FPR，不形成正式组合、candidate promotion、
+calibration、evaluation、baseline 或论文 claim；历史 run、artifacts 与 records 不迁移、
+不改写、不拼接进本次固定分母。
+
 ## Q/K synchronization-write diagnosis
 
-`qk_synchronization_write_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的
-执行入口。当前唯一授权 Notebook 为
+`qk_synchronization_write_diagnostic_server.py` 保留此前 Colab 与普通 GPU 服务器共用的
+执行入口，但其 Notebook 当前为 **paused / not authorized**。此前授权 Notebook 为
 `notebooks/colab/qk_synchronization_write_diagnostic.ipynb`，固定绑定 execution
 revision `24042298bef550803c1710b84485c07ca6223cf2` 与独立 run ID
 `ceg_wm_qk_vae_checkpoint_operation_localization`。当前入口仅用于验证已审核的
@@ -31,7 +47,7 @@ Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/Z
 `ceg_wm_lf_whitened_directional_validation_prepared_feature_execution`，已完成冻结的 1 个 non-scientific
 public-endpoint smoke 与 32 个 LF whitened directional scientific units；每 unit 最多
 2 attempts、2700 秒。该入口当前为 **paused / not authorized**；operational unit 不计
-scientific coverage，历史 records 不读取、不迁移、不改写或混入当前 Q/K 诊断分母。
+scientific coverage，历史 records 不读取、不迁移、不改写或混入当前 content-routing 诊断分母。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 public
 method/runtime 调用、正式 records、跨 session persistence 和内部 result 或 diagnostic ZIP。
@@ -41,7 +57,7 @@ Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/Z
 `ceg_wm_lf_whitening_asset_fit_and_score_screening` 已冻结的 whitening asset，不重拟合、
 迁移或回写旧 run。它不拟合 threshold，不授权 FPR、candidate promotion、calibration、
 formal evaluation、baseline 或论文 claim；不执行 routing、LF/HF 组合、Q/K、estimator、
-reliability、rectification 或 conditional recovery。除当前 Q/K Notebook 外，其他
+reliability、rectification 或 conditional recovery。除当前 content-routing Notebook 外，其他
 checked-in Notebook 入口均已暂停。
 旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
 `ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
