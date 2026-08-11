@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from torch.utils.checkpoint import checkpoint as activation_checkpoint
+from torch.utils.checkpoint import set_checkpoint_early_stop
 
 from .backend import (
     GenerationCallback,
@@ -183,6 +185,22 @@ class Sd35PipelineBackend:
             pipeline, "transformer", None
         ) is None:
             raise Sd35BackendError("prepared pipeline lacks VAE or transformer")
+        for component_name in ("transformer", "vae"):
+            component = getattr(pipeline, component_name)
+            if not isinstance(component, torch.nn.Module):
+                raise Sd35BackendError(
+                    f"prepared {component_name} does not expose frozen parameters"
+                )
+            try:
+                component.requires_grad_(False)
+            except Exception as exc:
+                raise Sd35BackendError(
+                    f"prepared {component_name} parameter freezing failed"
+                ) from exc
+            if any(parameter.requires_grad for parameter in component.parameters()):
+                raise Sd35BackendError(
+                    f"prepared {component_name} parameters remain trainable"
+                )
         self._configuration = configuration
         self._device = torch.device(selected_device)
         self._pipeline = pipeline
@@ -490,20 +508,56 @@ class Sd35PipelineBackend:
             latents = callback_latent.to(dtype=context.latent_dtype)
             prompt_embeds = context.prompt_embeds.to(device=device)
             pooled_prompt_embeds = context.pooled_prompt_embeds.to(device=device)
-            for timestep_value in context.suffix_timesteps:
-                latent_model_input = torch.cat([latents, latents], dim=0)
-                timestep = timestep_value.to(device=device).expand(
-                    latent_model_input.shape[0]
-                )
+
+            def transformer_forward(
+                hidden_states: torch.Tensor,
+                timestep: torch.Tensor,
+            ) -> torch.Tensor:
+                nonlocal initial_transformer_failure, transformer_invocation_count
+                transformer_invocation_count += 1
                 try:
-                    noise_pred = pipeline.transformer(
-                        hidden_states=latent_model_input,
+                    return pipeline.transformer(
+                        hidden_states=hidden_states,
                         timestep=timestep,
                         encoder_hidden_states=prompt_embeds,
                         pooled_projections=pooled_prompt_embeds,
                         joint_attention_kwargs=None,
                         return_dict=False,
                     )[0]
+                except Exception as exc:
+                    if differentiable and transformer_invocation_count == 1:
+                        initial_transformer_failure = exc
+                        return hidden_states
+                    raise Sd35BackendGenerationSuffixTransformerForwardError from exc
+
+            for timestep_value in context.suffix_timesteps:
+                initial_transformer_failure: Exception | None = None
+                transformer_invocation_count = 0
+                latent_model_input = torch.cat([latents, latents], dim=0)
+                timestep = timestep_value.to(device=device).expand(
+                    latent_model_input.shape[0]
+                )
+                try:
+                    if differentiable:
+                        with set_checkpoint_early_stop(False):
+                            noise_pred = activation_checkpoint(
+                                transformer_forward,
+                                latent_model_input,
+                                timestep,
+                                use_reentrant=False,
+                                preserve_rng_state=True,
+                            )
+                        if initial_transformer_failure is not None:
+                            raise Sd35BackendGenerationSuffixTransformerForwardError from (
+                                initial_transformer_failure
+                            )
+                    else:
+                        noise_pred = transformer_forward(
+                            latent_model_input,
+                            timestep,
+                        )
+                except Sd35BackendGenerationSuffixTransformerForwardError:
+                    raise
                 except Exception as exc:
                     raise Sd35BackendGenerationSuffixTransformerForwardError from exc
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)

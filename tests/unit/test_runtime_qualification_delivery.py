@@ -267,6 +267,201 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
     )
 
 
+def test_sd35_backend_checkpointed_suffix_preserves_values_gradients_and_call_boundaries(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+    latent_shape = (1, 16, 2, 2)
+
+    class Scheduler:
+        def __init__(self, events: list[str]) -> None:
+            self.events = events
+
+        def __deepcopy__(self, _memo):
+            return self
+
+        def step(self, noise, timestep, value, *, return_dict):
+            assert return_dict is False
+            assert timestep.shape == ()
+            self.events.append("scheduler")
+            return (value - noise * 0.125,)
+
+    class Transformer(torch.nn.Module):
+        def __init__(
+            self,
+            events: list[str],
+            *,
+            fail_on_call: int | None = None,
+        ) -> None:
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(0.25))
+            self.events = events
+            self.fail_on_call = fail_on_call
+            self.call_count = 0
+
+        def forward(self, **kwargs):
+            self.call_count += 1
+            self.events.append("transformer")
+            if self.call_count == self.fail_on_call:
+                raise torch.OutOfMemoryError("excluded transformer detail")
+            hidden_states = kwargs["hidden_states"]
+            assert kwargs["return_dict"] is False
+            assert kwargs["joint_attention_kwargs"] is None
+            assert kwargs["timestep"].shape == (2,)
+            return (hidden_states * self.weight,)
+
+    class Pipeline:
+        def __init__(self, transformer: Transformer, scheduler: Scheduler) -> None:
+            self.transformer = transformer
+            self.scheduler = scheduler
+
+    def backend(
+        transformer: Transformer,
+        scheduler: Scheduler,
+    ) -> Sd35PipelineBackend:
+        value = Sd35PipelineBackend(
+            cache_root=tmp_path / f"cache-{id(transformer)}",
+            persistent_root=tmp_path / f"persistent-{id(transformer)}",
+            hf_token=None,
+            prompt="probe",
+        )
+        value._configuration = configuration
+        value._device = torch.device("cpu")
+        value._pipeline = Pipeline(transformer, scheduler)
+        return value
+
+    def suffix_context(
+        value: Sd35PipelineBackend,
+        scheduler: Scheduler,
+    ) -> sd35_backend_module._PipelineGenerationSuffixReplayContext:
+        return sd35_backend_module._PipelineGenerationSuffixReplayContext(
+            runtime_config_digest=configuration.runtime_config_digest,
+            callback_index=configuration.callback_index,
+            owner_identity=id(value),
+            latent_shape=latent_shape,
+            latent_dtype=torch.float32,
+            selected_device="cpu",
+            prompt_identity=RuntimeGenerationPromptIdentity.from_prompts("probe", ""),
+            prompt_embeds=torch.zeros((2, 2, 2), dtype=torch.float32),
+            pooled_prompt_embeds=torch.zeros((2, 2), dtype=torch.float32),
+            suffix_timesteps=torch.tensor([1.0]),
+            scheduler_snapshot=scheduler,
+        )
+
+    def direct_reference(
+        callback_latent: torch.Tensor,
+        transformer: Transformer,
+        scheduler: Scheduler,
+    ) -> torch.Tensor:
+        latent_model_input = torch.cat([callback_latent, callback_latent], dim=0)
+        timestep = torch.tensor(1.0).expand(latent_model_input.shape[0])
+        noise_pred = transformer(
+            hidden_states=latent_model_input,
+            timestep=timestep,
+            encoder_hidden_states=torch.zeros((2, 2, 2), dtype=torch.float32),
+            pooled_projections=torch.zeros((2, 2), dtype=torch.float32),
+            joint_attention_kwargs=None,
+            return_dict=False,
+        )[0]
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        guided_noise = noise_pred_uncond + configuration.guidance_scale * (
+            noise_pred_text - noise_pred_uncond
+        )
+        return scheduler.step(
+            guided_noise,
+            torch.tensor(1.0),
+            callback_latent,
+            return_dict=False,
+        )[0]
+
+    reference_events: list[str] = []
+    reference_transformer = Transformer(reference_events)
+    reference_transformer.requires_grad_(False)
+    reference_scheduler = Scheduler(reference_events)
+    reference_latent = torch.linspace(
+        -1.0,
+        1.0,
+        steps=64,
+        dtype=torch.float32,
+    ).reshape(latent_shape).requires_grad_(True)
+    reference_terminal = direct_reference(
+        reference_latent,
+        reference_transformer,
+        reference_scheduler,
+    )
+    reference_gradient = torch.autograd.grad(
+        reference_terminal.sum(),
+        reference_latent,
+    )[0]
+
+    checkpoint_events: list[str] = []
+    checkpoint_transformer = Transformer(checkpoint_events)
+    checkpoint_transformer.requires_grad_(False)
+    checkpoint_scheduler = Scheduler(checkpoint_events)
+    checkpoint_backend = backend(checkpoint_transformer, checkpoint_scheduler)
+    checkpoint_latent = reference_latent.detach().clone().requires_grad_(True)
+    checkpoint_terminal = checkpoint_backend.replay_generation_suffix(
+        checkpoint_latent,
+        suffix_context(checkpoint_backend, checkpoint_scheduler),
+        differentiable=True,
+    )
+    checkpoint_gradient = torch.autograd.grad(
+        checkpoint_terminal.sum(),
+        checkpoint_latent,
+    )[0]
+
+    assert torch.equal(checkpoint_terminal, reference_terminal)
+    assert torch.equal(checkpoint_gradient, reference_gradient)
+    assert bool(torch.isfinite(checkpoint_gradient).all())
+    assert bool(torch.count_nonzero(checkpoint_gradient))
+    assert checkpoint_events == ["transformer", "scheduler", "transformer"]
+    assert checkpoint_transformer.call_count == 2
+    assert checkpoint_transformer.weight.grad is None
+
+    failing_events: list[str] = []
+    failing_transformer = Transformer(failing_events, fail_on_call=2)
+    failing_transformer.requires_grad_(False)
+    failing_scheduler = Scheduler(failing_events)
+    failing_backend = backend(failing_transformer, failing_scheduler)
+    failing_latent = reference_latent.detach().clone().requires_grad_(True)
+    failing_terminal = failing_backend.replay_generation_suffix(
+        failing_latent,
+        suffix_context(failing_backend, failing_scheduler),
+        differentiable=True,
+    )
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendGenerationSuffixTransformerForwardError
+    ) as recompute_error:
+        torch.autograd.grad(failing_terminal.sum(), failing_latent)
+    assert isinstance(recompute_error.value.__cause__, torch.OutOfMemoryError)
+    assert failing_events == ["transformer", "scheduler", "transformer"]
+    assert failing_transformer.weight.grad is None
+
+    def forbidden_checkpoint(*_args, **_kwargs):
+        raise AssertionError("non-differentiable replay must not use checkpoint")
+
+    monkeypatch.setattr(
+        sd35_backend_module,
+        "activation_checkpoint",
+        forbidden_checkpoint,
+    )
+    inference_events: list[str] = []
+    inference_transformer = Transformer(inference_events)
+    inference_transformer.requires_grad_(False)
+    inference_scheduler = Scheduler(inference_events)
+    inference_backend = backend(inference_transformer, inference_scheduler)
+    inference_terminal = inference_backend.replay_generation_suffix(
+        reference_latent.detach(),
+        suffix_context(inference_backend, inference_scheduler),
+        differentiable=False,
+    )
+    assert not inference_terminal.requires_grad
+    assert inference_events == ["transformer", "scheduler"]
+    assert inference_transformer.call_count == 1
+    assert inference_transformer.weight.grad is None
+
+
 @pytest.mark.parametrize(
     ("cache_relative", "persistent_relative"),
     (
@@ -319,8 +514,12 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
         def mode(self):
             return self.value
 
-    class Vae:
+    class Vae(torch.nn.Module):
         config = types.SimpleNamespace(scaling_factor=1.5, shift_factor=0.25)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.frozen_parameter = torch.nn.Parameter(torch.ones(()))
 
         def decode(self, latent, return_dict):
             assert return_dict is True
@@ -372,6 +571,7 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
     class Transformer(torch.nn.Module):
         def __init__(self):
             super().__init__()
+            self.frozen_parameter = torch.nn.Parameter(torch.ones(()))
             self.transformer_blocks = torch.nn.ModuleList(
                 Block() for _ in range(24)
             )
@@ -444,6 +644,14 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
     assert identity.runtime_config_digest == configuration.runtime_config_digest
     assert identity.runtime_backend_name == "diffusers_sd35_pipeline"
     assert identity.callback_index == 18
+    assert all(
+        not parameter.requires_grad
+        for parameter in backend._pipeline.transformer.parameters()
+    )
+    assert all(
+        not parameter.requires_grad
+        for parameter in backend._pipeline.vae.parameters()
+    )
     latent = torch.ones((1, 16, 64, 64), dtype=torch.float16)
     callback_indices: list[int] = []
     assert backend.run_generation(
