@@ -110,6 +110,19 @@ class Sd35BackendDifferentiableVaeDecodeForwardError(
 
     operation_identity = "differentiable_vae_decode_forward"
 
+    def __init__(
+        self,
+        *,
+        cuda_memory_facts: tuple[tuple[str, int], ...] = (),
+        runtime_reason_identity: str = "unclassified_runtime_failure",
+    ) -> None:
+        super().__init__(cuda_memory_facts=cuda_memory_facts)
+        if runtime_reason_identity not in _VAE_DECODE_RUNTIME_REASON_IDENTITIES:
+            raise Sd35BackendError(
+                "differentiable VAE runtime reason identity is invalid"
+            )
+        self.runtime_reason_identity = runtime_reason_identity
+
 
 class Sd35BackendDifferentiableImagePostprocessError(
     _Sd35BackendDifferentiableVaeOperationError
@@ -137,6 +150,70 @@ _CUDA_MEMORY_FACT_NAMES = (
     "max_allocated_bytes",
     "max_reserved_bytes",
 )
+_VAE_DECODE_RUNTIME_REASON_IDENTITIES = frozenset(
+    {
+        "runtime_reported_memory_allocation_failure",
+        "cuda_kernel_execution_failure",
+        "dtype_shape_operator_contract_failure",
+        "unclassified_runtime_failure",
+    }
+)
+_RUNTIME_REPORTED_MEMORY_PATTERNS = (
+    "out of memory",
+    "cannot allocate memory",
+    "can't allocate memory",
+    "allocation failed",
+    "cudnn_status_alloc_failed",
+    "cublas_status_alloc_failed",
+)
+_CUDA_KERNEL_EXECUTION_PATTERNS = (
+    "cuda error",
+    "device-side assert",
+    "illegal memory access",
+    "kernel launch",
+    "cudnn_status_execution_failed",
+    "cublas_status_execution_failed",
+)
+_DTYPE_SHAPE_OPERATOR_PATTERNS = (
+    "expected scalar type",
+    "input type",
+    "dtype",
+    "shape",
+    "size mismatch",
+    "sizes of tensors",
+    "not implemented for",
+    "unsupported",
+    "expected all tensors to be on the same device",
+    "must have the same dtype",
+    "mat1 and mat2",
+)
+
+
+def _vae_decode_runtime_reason_identity(error: BaseException) -> str:
+    """Map one runtime failure to a finite identity without retaining its text."""
+
+    resource_types = tuple(
+        dict.fromkeys(
+            (
+                MemoryError,
+                getattr(torch, "OutOfMemoryError", MemoryError),
+                getattr(torch.cuda, "OutOfMemoryError", MemoryError),
+            )
+        )
+    )
+    if isinstance(error, resource_types):
+        return "runtime_reported_memory_allocation_failure"
+    try:
+        normalized = str(error).casefold()
+    except Exception:
+        return "unclassified_runtime_failure"
+    if any(pattern in normalized for pattern in _RUNTIME_REPORTED_MEMORY_PATTERNS):
+        return "runtime_reported_memory_allocation_failure"
+    if any(pattern in normalized for pattern in _CUDA_KERNEL_EXECUTION_PATTERNS):
+        return "cuda_kernel_execution_failure"
+    if any(pattern in normalized for pattern in _DTYPE_SHAPE_OPERATOR_PATTERNS):
+        return "dtype_shape_operator_contract_failure"
+    return "unclassified_runtime_failure"
 
 
 def _cuda_memory_snapshot(device: torch.device) -> dict[str, int] | None:
@@ -788,7 +865,8 @@ class Sd35PipelineBackend:
                 cuda_memory_facts=_cuda_failure_facts(
                     before,
                     _cuda_memory_snapshot(device),
-                )
+                ),
+                runtime_reason_identity=_vae_decode_runtime_reason_identity(exc),
             ) from exc
         before = _cuda_memory_snapshot(device)
         try:

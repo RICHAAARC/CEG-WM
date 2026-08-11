@@ -109,12 +109,14 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
             *,
             fail_preparation: bool = False,
             fail_decode: bool = False,
+            decode_error: BaseException | None = None,
             fail_encode: bool = False,
         ):
             self.dtype = torch.float16 if fail_preparation else torch.float32
             self.config = types.SimpleNamespace(force_upcast=fail_preparation)
             self.fail_preparation = fail_preparation
             self.fail_decode = fail_decode
+            self.decode_error = decode_error
             self.fail_encode = fail_encode
 
         def to(self, *, dtype):
@@ -126,6 +128,8 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
 
         def decode(self, value, *, return_dict):
             assert return_dict is True
+            if self.decode_error is not None:
+                raise self.decode_error
             if self.fail_decode:
                 raise RuntimeError("excluded decode detail")
             return types.SimpleNamespace(sample=value[:, :3])
@@ -258,6 +262,9 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
     ) as decode_error:
         decode.vae_decode_differentiable(latent)
+    assert decode_error.value.runtime_reason_identity == (
+        "unclassified_runtime_failure"
+    )
 
     postprocess = backend(
         Pipeline(
@@ -315,6 +322,47 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
     ) as no_cuda_error:
         no_cuda_facts.vae_decode_differentiable(latent)
     assert no_cuda_error.value.cuda_memory_facts == ()
+
+    reason_cases = (
+        (
+            torch.OutOfMemoryError("excluded native memory detail"),
+            "runtime_reported_memory_allocation_failure",
+        ),
+        (
+            RuntimeError("CUDA out of memory: excluded allocator detail"),
+            "runtime_reported_memory_allocation_failure",
+        ),
+        (
+            RuntimeError("CUDA error: excluded kernel detail"),
+            "cuda_kernel_execution_failure",
+        ),
+        (
+            RuntimeError("expected scalar type Float but found Half"),
+            "dtype_shape_operator_contract_failure",
+        ),
+        (
+            RuntimeError("excluded unknown runtime detail"),
+            "unclassified_runtime_failure",
+        ),
+    )
+    for runtime_error, expected_reason in reason_cases:
+        reason_backend = backend(
+            Pipeline(
+                transformer=Transformer(fail=False),
+                vae=Vae(decode_error=runtime_error),
+            )
+        )
+        with pytest.raises(
+            sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+        ) as reason_error:
+            reason_backend.vae_decode_differentiable(latent)
+        assert reason_error.value.runtime_reason_identity == expected_reason
+        assert reason_error.value.__cause__ is runtime_error
+
+    with pytest.raises(sd35_backend_module.Sd35BackendError):
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError(
+            runtime_reason_identity="unsafe_unregistered_runtime_reason"
+        )
 
     encode = backend(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_encode=True))

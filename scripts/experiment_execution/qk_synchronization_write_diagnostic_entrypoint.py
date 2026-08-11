@@ -147,11 +147,19 @@ _RUNTIME_FAILURE_OPERATION_IDENTITIES = {
         "differentiable_image_postprocess"
     ),
 }
+_VAE_DECODE_RUNTIME_REASON_IDENTITIES = frozenset(
+    {
+        "runtime_reported_memory_allocation_failure",
+        "cuda_kernel_execution_failure",
+        "dtype_shape_operator_contract_failure",
+        "unclassified_runtime_failure",
+    }
+)
 
 
-def _runtime_failure_resource_facts(
+def _runtime_failure_safe_attribution(
     error: BaseException,
-) -> tuple[str, dict[str, int]] | None:
+) -> tuple[str, str | None, dict[str, int] | None] | None:
     for current in _exception_chain(error):
         operation_identity = _RUNTIME_FAILURE_OPERATION_IDENTITIES.get(type(current))
         if operation_identity is None:
@@ -159,6 +167,16 @@ def _runtime_failure_resource_facts(
         raw_facts = getattr(current, "cuda_memory_facts", None)
         if type(raw_facts) is not tuple:
             return None
+        runtime_reason_identity = None
+        if type(current) is Sd35BackendDifferentiableVaeDecodeForwardError:
+            observed_reason = getattr(current, "runtime_reason_identity", None)
+            if observed_reason not in _VAE_DECODE_RUNTIME_REASON_IDENTITIES:
+                return None
+            runtime_reason_identity = observed_reason
+        if not raw_facts:
+            if runtime_reason_identity is None:
+                return None
+            return operation_identity, runtime_reason_identity, None
         try:
             facts = dict(raw_facts)
         except (TypeError, ValueError):
@@ -168,7 +186,7 @@ def _runtime_failure_resource_facts(
             or any(type(value) is not int or value < 0 for value in facts.values())
         ):
             return None
-        return operation_identity, facts
+        return operation_identity, runtime_reason_identity, facts
     return None
 
 
@@ -200,11 +218,16 @@ def _failure_diagnostic(
         "counts_as_scientific_coverage": False,
         "scientific_claims_supported": False,
     }
-    runtime_failure = _runtime_failure_resource_facts(error)
+    runtime_failure = _runtime_failure_safe_attribution(error)
     if runtime_failure is not None:
-        operation_identity, facts = runtime_failure
+        operation_identity, runtime_reason_identity, facts = runtime_failure
         diagnostic["runtime_failure_operation_identity"] = operation_identity
-        diagnostic["runtime_failure_cuda_memory_facts"] = facts
+        if facts is not None:
+            diagnostic["runtime_failure_cuda_memory_facts"] = facts
+        if runtime_reason_identity is not None:
+            diagnostic["runtime_failure_reason_identity"] = (
+                runtime_reason_identity
+            )
     return diagnostic
 
 

@@ -64,7 +64,7 @@ from scripts.experiment_execution.qk_synchronization_write_diagnostic_entrypoint
     _failure_diagnostic,
     _is_resource_failure,
     _qualified_exception_type_chain,
-    _runtime_failure_resource_facts,
+    _runtime_failure_safe_attribution,
     _selected_rgb8,
     execute_qk_synchronization_write_diagnostic_session,
 )
@@ -1076,14 +1076,16 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
         ("total_device_bytes", 100),
     )
     stage = sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError(
-        cuda_memory_facts=facts
+        cuda_memory_facts=facts,
+        runtime_reason_identity="runtime_reported_memory_allocation_failure",
     )
     stage.__cause__ = RuntimeError(secret)
     outer = CegWmExperimentAdapterError(secret)
     outer.__cause__ = stage
 
-    assert _runtime_failure_resource_facts(outer) == (
+    assert _runtime_failure_safe_attribution(outer) == (
         "differentiable_vae_decode_forward",
+        "runtime_reported_memory_allocation_failure",
         dict(facts),
     )
     diagnostic = _failure_diagnostic(outer, active_binding=None)
@@ -1093,6 +1095,9 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
         "differentiable_vae_decode_forward"
     )
     assert diagnostic["runtime_failure_cuda_memory_facts"] == dict(facts)
+    assert diagnostic["runtime_failure_reason_identity"] == (
+        "runtime_reported_memory_allocation_failure"
+    )
     assert diagnostic["failure_class"] == "implementation_failure"
     assert secret not in serialized
     for forbidden in ("message", "traceback", "tensor", "latent", "repr"):
@@ -1103,13 +1108,22 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     )
     no_cuda_outer = CegWmExperimentAdapterError(secret)
     no_cuda_outer.__cause__ = no_cuda_stage
-    assert _runtime_failure_resource_facts(no_cuda_outer) is None
+    assert _runtime_failure_safe_attribution(no_cuda_outer) == (
+        "differentiable_vae_decode_forward",
+        "unclassified_runtime_failure",
+        None,
+    )
     no_cuda_diagnostic = _failure_diagnostic(
         no_cuda_outer,
         active_binding=None,
     )
-    assert "runtime_failure_operation_identity" not in no_cuda_diagnostic
+    assert no_cuda_diagnostic["runtime_failure_operation_identity"] == (
+        "differentiable_vae_decode_forward"
+    )
     assert "runtime_failure_cuda_memory_facts" not in no_cuda_diagnostic
+    assert no_cuda_diagnostic["runtime_failure_reason_identity"] == (
+        "unclassified_runtime_failure"
+    )
 
     class ForeignFailure(RuntimeError):
         operation_identity = "unsafe_path_or_secret_sentinel"
@@ -1120,7 +1134,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
 
     foreign_outer = CegWmExperimentAdapterError(secret)
     foreign_outer.__cause__ = ForeignFailure()
-    assert _runtime_failure_resource_facts(foreign_outer) is None
+    assert _runtime_failure_safe_attribution(foreign_outer) is None
     foreign_diagnostic = _failure_diagnostic(
         foreign_outer,
         active_binding=None,
@@ -1128,6 +1142,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     foreign_serialized = json.dumps(foreign_diagnostic, sort_keys=True)
     assert "runtime_failure_operation_identity" not in foreign_diagnostic
     assert "runtime_failure_cuda_memory_facts" not in foreign_diagnostic
+    assert "runtime_failure_reason_identity" not in foreign_diagnostic
     assert "unsafe_path_or_secret_sentinel" not in foreign_serialized
 
     class SpoofedTrustedFailure(
@@ -1137,7 +1152,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
 
     spoofed_outer = CegWmExperimentAdapterError(secret)
     spoofed_outer.__cause__ = SpoofedTrustedFailure(cuda_memory_facts=facts)
-    assert _runtime_failure_resource_facts(spoofed_outer) is None
+    assert _runtime_failure_safe_attribution(spoofed_outer) is None
     spoofed_diagnostic = _failure_diagnostic(
         spoofed_outer,
         active_binding=None,
@@ -1145,7 +1160,37 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     spoofed_serialized = json.dumps(spoofed_diagnostic, sort_keys=True)
     assert "runtime_failure_operation_identity" not in spoofed_diagnostic
     assert "runtime_failure_cuda_memory_facts" not in spoofed_diagnostic
+    assert "runtime_failure_reason_identity" not in spoofed_diagnostic
     assert "spoofed_trusted_failure_identity" not in spoofed_serialized
+
+    string_reported_memory_stage = (
+        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError(
+            cuda_memory_facts=facts,
+            runtime_reason_identity=(
+                "runtime_reported_memory_allocation_failure"
+            ),
+        )
+    )
+    string_reported_memory_stage.__cause__ = RuntimeError(
+        "CUDA out of memory: secret allocation detail"
+    )
+    string_reported_outer = CegWmExperimentAdapterError(secret)
+    string_reported_outer.__cause__ = string_reported_memory_stage
+    string_reported_diagnostic = _failure_diagnostic(
+        string_reported_outer,
+        active_binding=None,
+    )
+    string_reported_serialized = json.dumps(
+        string_reported_diagnostic,
+        sort_keys=True,
+    )
+    assert string_reported_diagnostic["failure_class"] == (
+        "implementation_failure"
+    )
+    assert string_reported_diagnostic["runtime_failure_reason_identity"] == (
+        "runtime_reported_memory_allocation_failure"
+    )
+    assert "secret allocation detail" not in string_reported_serialized
 
 
 @pytest.mark.unit
