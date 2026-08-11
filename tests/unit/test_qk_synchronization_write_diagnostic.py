@@ -1321,14 +1321,22 @@ def test_qk_runtime_failure_attribution_identifies_real_checkpoint_backward_meta
     ]
     assert diagnostic["failure_class"] == "implementation_failure"
     assert diagnostic["runtime_failure_operation_identity"] == (
-        "differentiable_vae_checkpoint_execution"
+        "differentiable_checkpoint_framework_execution"
     )
     assert diagnostic["runtime_failure_reason_identity"] == (
-        "checkpoint_recomputation_metadata_mismatch"
+        "checkpoint_recomputation_contract_failure"
     )
+    assert "vae" not in diagnostic["runtime_failure_operation_identity"]
     assert "runtime_failure_cuda_memory_facts" not in diagnostic
     assert secret not in serialized
-    for forbidden in ("message", "traceback", "tensor", "path", "repr"):
+    for forbidden in (
+        "message",
+        "metadata",
+        "traceback",
+        "tensor",
+        "path",
+        "repr",
+    ):
         assert forbidden not in serialized
 
     class DerivedCheckpointError(CheckpointError):
@@ -1344,6 +1352,33 @@ def test_qk_runtime_failure_attribution_identifies_real_checkpoint_backward_meta
     assert "runtime_failure_reason_identity" not in derived_diagnostic
     assert "runtime_failure_cuda_memory_facts" not in derived_diagnostic
     assert secret not in derived_serialized
+
+    specific_vae_failure = (
+        sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointExecutionError(
+            cuda_memory_facts=(),
+            runtime_reason_identity="unclassified_runtime_failure",
+        )
+    )
+    specific_vae_failure.__cause__ = checkpoint_failure.value
+    specific_outer = CegWmExperimentAdapterError(secret)
+    specific_outer.__cause__ = specific_vae_failure
+    specific_diagnostic = _failure_diagnostic(specific_outer, active_binding=None)
+    specific_serialized = json.dumps(specific_diagnostic, sort_keys=True)
+
+    assert _runtime_failure_safe_attribution(specific_outer) == (
+        "differentiable_vae_checkpoint_execution",
+        "unclassified_runtime_failure",
+        None,
+    )
+    assert specific_diagnostic["failure_class"] == "implementation_failure"
+    assert specific_diagnostic["runtime_failure_operation_identity"] == (
+        "differentiable_vae_checkpoint_execution"
+    )
+    assert specific_diagnostic["runtime_failure_reason_identity"] == (
+        "unclassified_runtime_failure"
+    )
+    assert "runtime_failure_cuda_memory_facts" not in specific_diagnostic
+    assert secret not in specific_serialized
 
 
 @pytest.mark.unit

@@ -160,7 +160,7 @@ _RUNTIME_FAILURE_OPERATION_IDENTITIES = {
     Sd35BackendDifferentiableImagePostprocessError: (
         "differentiable_image_postprocess"
     ),
-    CheckpointError: "differentiable_vae_checkpoint_execution",
+    CheckpointError: "differentiable_checkpoint_framework_execution",
 }
 _VAE_DECODE_RUNTIME_FAILURE_TYPES = frozenset(
     {
@@ -174,7 +174,6 @@ _VAE_DECODE_RUNTIME_REASON_IDENTITIES = frozenset(
         "runtime_reported_memory_allocation_failure",
         "cuda_kernel_execution_failure",
         "dtype_shape_operator_contract_failure",
-        "checkpoint_recomputation_metadata_mismatch",
         "unclassified_runtime_failure",
     }
 )
@@ -190,7 +189,7 @@ def _runtime_failure_safe_attribution(
         if type(current) is CheckpointError:
             return (
                 operation_identity,
-                "checkpoint_recomputation_metadata_mismatch",
+                "checkpoint_recomputation_contract_failure",
                 None,
             )
         raw_facts = getattr(current, "cuda_memory_facts", None)
