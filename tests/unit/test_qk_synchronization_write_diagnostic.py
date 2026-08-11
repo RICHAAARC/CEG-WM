@@ -344,7 +344,7 @@ def test_qk_diagnosis_protocol_freezes_roster_order_controls_and_boundary(
     config_payload = json.loads(CONFIG.read_text(encoding="utf-8"))
 
     assert protocol.run_id == (
-        "ceg_wm_qk_runtime_failure_localization"
+        "ceg_wm_qk_suffix_memory_correction_preflight"
     )
     assert config_payload["run_id"] == protocol.run_id
     assert protocol.schema_version == (

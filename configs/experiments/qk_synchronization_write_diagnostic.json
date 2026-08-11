@@ -2,7 +2,7 @@
   "schema_version": "ceg_wm_qk_synchronization_write_diagnosis_protocol",
   "protocol_id": "ceg_wm_qk_synchronization_write_diagnosis",
   "protocol_version": "1.0.0",
-  "run_id": "ceg_wm_qk_runtime_failure_localization",
+  "run_id": "ceg_wm_qk_suffix_memory_correction_preflight",
   "split": "development",
   "role_id": "qk_synchronization_write_diagnosis",
   "candidate_identity": "qk_relation_similarity",
