@@ -1289,6 +1289,96 @@ def test_qk_runtime_failure_attribution_requires_exact_checkpoint_failure_type(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "trusted_failure_type",
+    (
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError,
+        sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+    ),
+)
+@pytest.mark.parametrize(
+    "decoder_operation_identity",
+    tuple(
+        sorted(
+            sd35_backend_module.DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES
+        )
+    ),
+)
+def test_qk_failure_diagnostic_reports_only_trusted_decoder_operation(
+    trusted_failure_type: type[BaseException],
+    decoder_operation_identity: str,
+) -> None:
+    secret = "decoder-operation-message-must-not-be-persisted"
+    trusted_failure = trusted_failure_type(
+        decoder_operation_identity=decoder_operation_identity
+    )
+    trusted_failure.__cause__ = RuntimeError(secret)
+    outer = CegWmExperimentAdapterError(secret)
+    outer.__cause__ = trusted_failure
+
+    diagnostic = _failure_diagnostic(outer, active_binding=None)
+    serialized = json.dumps(diagnostic, sort_keys=True)
+
+    assert diagnostic["runtime_failure_decoder_operation_identity"] == (
+        decoder_operation_identity
+    )
+    assert secret not in serialized
+    for forbidden in (
+        "message",
+        "traceback",
+        "path",
+        "module_repr",
+        "tensor",
+        "latent",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.unit
+def test_qk_failure_diagnostic_rejects_untrusted_decoder_operation() -> None:
+    trusted_type = (
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
+    )
+    valid_identity = "differentiable_vae_decoder_middle_attention"
+    secret = "untrusted-decoder-operation-message"
+
+    class DerivedDecoderFailure(trusted_type):
+        pass
+
+    derived = DerivedDecoderFailure(decoder_operation_identity=valid_identity)
+    derived.__cause__ = RuntimeError(secret)
+    derived_outer = CegWmExperimentAdapterError(secret)
+    derived_outer.__cause__ = derived
+    derived_diagnostic = _failure_diagnostic(derived_outer, active_binding=None)
+
+    mutated = trusted_type(decoder_operation_identity=valid_identity)
+    mutated.decoder_operation_identity = "unregistered_decoder_operation"
+    mutated.__cause__ = RuntimeError(secret)
+    mutated_outer = CegWmExperimentAdapterError(secret)
+    mutated_outer.__cause__ = mutated
+    mutated_diagnostic = _failure_diagnostic(mutated_outer, active_binding=None)
+
+    checkpoint = CheckpointError(secret)
+    checkpoint_outer = CegWmExperimentAdapterError(secret)
+    checkpoint_outer.__cause__ = checkpoint
+    checkpoint_diagnostic = _failure_diagnostic(
+        checkpoint_outer,
+        active_binding=None,
+    )
+
+    for diagnostic in (
+        derived_diagnostic,
+        mutated_diagnostic,
+        checkpoint_diagnostic,
+    ):
+        assert "runtime_failure_decoder_operation_identity" not in diagnostic
+        assert secret not in json.dumps(diagnostic, sort_keys=True)
+
+    with pytest.raises(sd35_backend_module.Sd35BackendError):
+        trusted_type(decoder_operation_identity="unregistered_decoder_operation")
+
+
+@pytest.mark.unit
 def test_qk_runtime_failure_attribution_identifies_real_checkpoint_backward_metadata_mismatch(
 ) -> None:
     invocation_count = 0

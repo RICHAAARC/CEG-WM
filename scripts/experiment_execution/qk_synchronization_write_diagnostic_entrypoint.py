@@ -49,6 +49,7 @@ from experiments.runners.qk_synchronization_write_diagnostic import (
 from main import identify_root_key, key_schedule_sha256_counter
 from runtime import Sd35PipelineBackend, create_runtime_adapter
 from runtime.sd35_backend import (
+    DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES,
     Sd35BackendDifferentiableImagePostprocessError,
     Sd35BackendDifferentiableVaeCheckpointExecutionError,
     Sd35BackendDifferentiableVaeCheckpointRecomputationError,
@@ -218,6 +219,23 @@ def _runtime_failure_safe_attribution(
     return None
 
 
+def _runtime_failure_decoder_operation_identity(
+    error: BaseException,
+) -> str | None:
+    trusted_types = {
+        Sd35BackendDifferentiableVaeInitialDecodeForwardError,
+        Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+    }
+    for current in _exception_chain(error):
+        if type(current) not in trusted_types:
+            continue
+        operation_identity = getattr(current, "decoder_operation_identity", None)
+        if operation_identity in DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES:
+            return operation_identity
+        return None
+    return None
+
+
 def _failure_diagnostic(
     error: BaseException,
     *,
@@ -261,6 +279,11 @@ def _failure_diagnostic(
             diagnostic["runtime_failure_reason_identity"] = (
                 runtime_reason_identity
             )
+    decoder_operation_identity = _runtime_failure_decoder_operation_identity(error)
+    if decoder_operation_identity is not None:
+        diagnostic["runtime_failure_decoder_operation_identity"] = (
+            decoder_operation_identity
+        )
     return diagnostic
 
 

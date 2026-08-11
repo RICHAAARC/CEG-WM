@@ -115,13 +115,23 @@ class Sd35BackendDifferentiableVaeDecodeForwardError(
         *,
         cuda_memory_facts: tuple[tuple[str, int], ...] = (),
         runtime_reason_identity: str = "unclassified_runtime_failure",
+        decoder_operation_identity: str | None = None,
     ) -> None:
         super().__init__(cuda_memory_facts=cuda_memory_facts)
         if runtime_reason_identity not in _VAE_DECODE_RUNTIME_REASON_IDENTITIES:
             raise Sd35BackendError(
                 "differentiable VAE runtime reason identity is invalid"
             )
+        if (
+            decoder_operation_identity is not None
+            and decoder_operation_identity
+            not in DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES
+        ):
+            raise Sd35BackendError(
+                "differentiable VAE decoder operation identity is invalid"
+            )
         self.runtime_reason_identity = runtime_reason_identity
+        self.decoder_operation_identity = decoder_operation_identity
 
 
 class Sd35BackendDifferentiableVaeInitialDecodeForwardError(
@@ -182,6 +192,189 @@ _VAE_DECODE_RUNTIME_REASON_IDENTITIES = frozenset(
         "unclassified_runtime_failure",
     }
 )
+DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES = frozenset(
+    {
+        "differentiable_vae_decode_entry",
+        "differentiable_vae_post_quant_projection",
+        "differentiable_vae_decoder_input_convolution",
+        "differentiable_vae_decoder_middle_block_dispatch",
+        "differentiable_vae_decoder_middle_input_residual",
+        "differentiable_vae_decoder_middle_attention",
+        "differentiable_vae_decoder_middle_output_residual",
+        "differentiable_vae_decoder_lowest_resolution_upsampling",
+        "differentiable_vae_decoder_lower_middle_resolution_upsampling",
+        "differentiable_vae_decoder_upper_middle_resolution_upsampling",
+        "differentiable_vae_decoder_highest_resolution_upsampling",
+        "differentiable_vae_decoder_output_normalization",
+        "differentiable_vae_decoder_output_activation",
+        "differentiable_vae_decoder_output_convolution",
+    }
+)
+
+
+class _DifferentiableVaeDecoderOperationTracker:
+    """Track one bounded decoder operation without retaining module state."""
+
+    def __init__(self, vae: Any) -> None:
+        self._vae = vae
+        self._operation_stack = ["differentiable_vae_decode_entry"]
+        self._handles: list[Any] = []
+
+    @property
+    def current_operation_identity(self) -> str:
+        return self._operation_stack[-1]
+
+    def _push(self, operation_identity: str):
+        def push_operation(_module: torch.nn.Module, _inputs: tuple[Any, ...]) -> None:
+            self._operation_stack.append(operation_identity)
+
+        return push_operation
+
+    def _pop(self, operation_identity: str):
+        def pop_operation(
+            _module: torch.nn.Module,
+            _inputs: tuple[Any, ...],
+            _output: Any,
+        ) -> None:
+            if self._operation_stack[-1] != operation_identity:
+                raise Sd35BackendError(
+                    "differentiable VAE decoder operation stack drifted"
+                )
+            self._operation_stack.pop()
+
+        return pop_operation
+
+    @staticmethod
+    def _module_at(value: Any, name: str) -> torch.nn.Module | None:
+        module = getattr(value, name, None)
+        return module if isinstance(module, torch.nn.Module) else None
+
+    def _bounded_modules(self) -> tuple[tuple[torch.nn.Module, str], ...]:
+        modules: list[tuple[torch.nn.Module, str]] = []
+        post_quant = self._module_at(self._vae, "post_quant_conv")
+        configured_post_quant = getattr(
+            getattr(self._vae, "config", None),
+            "use_post_quant_conv",
+            None,
+        )
+        if configured_post_quant is not False or post_quant is not None:
+            raise Sd35BackendError(
+                "differentiable VAE post-quant projection identity drifted"
+            )
+
+        decoder = self._module_at(self._vae, "decoder")
+        if decoder is None:
+            raise Sd35BackendError(
+                "differentiable VAE decoder identity is unavailable"
+            )
+        direct_decoder_modules = (
+            (
+                self._module_at(decoder, "conv_in"),
+                "differentiable_vae_decoder_input_convolution",
+            ),
+            (
+                self._module_at(decoder, "conv_norm_out"),
+                "differentiable_vae_decoder_output_normalization",
+            ),
+            (
+                self._module_at(decoder, "conv_act"),
+                "differentiable_vae_decoder_output_activation",
+            ),
+            (
+                self._module_at(decoder, "conv_out"),
+                "differentiable_vae_decoder_output_convolution",
+            ),
+        )
+        if any(module is None for module, _identity in direct_decoder_modules):
+            raise Sd35BackendError(
+                "differentiable VAE decoder direct operation identity drifted"
+            )
+        for module, operation_identity in direct_decoder_modules:
+            if module is None:
+                raise Sd35BackendError(
+                    "differentiable VAE decoder direct operation identity drifted"
+                )
+            modules.append((module, operation_identity))
+
+        middle = self._module_at(decoder, "mid_block")
+        if middle is None:
+            raise Sd35BackendError(
+                "differentiable VAE decoder middle block identity drifted"
+            )
+        modules.append(
+            (
+                middle,
+                "differentiable_vae_decoder_middle_block_dispatch",
+            )
+        )
+        residuals = tuple(getattr(middle, "resnets", ()))
+        attentions = tuple(getattr(middle, "attentions", ()))
+        if (
+            len(residuals) != 2
+            or len(attentions) != 1
+            or any(
+                not isinstance(module, torch.nn.Module)
+                for module in (*residuals, *attentions)
+            )
+        ):
+            raise Sd35BackendError(
+                "differentiable VAE decoder middle operation identity drifted"
+            )
+        modules.extend(
+            (
+                (
+                    residuals[0],
+                    "differentiable_vae_decoder_middle_input_residual",
+                ),
+                (
+                    attentions[0],
+                    "differentiable_vae_decoder_middle_attention",
+                ),
+                (
+                    residuals[1],
+                    "differentiable_vae_decoder_middle_output_residual",
+                ),
+            )
+        )
+
+        up_blocks = tuple(getattr(decoder, "up_blocks", ()))
+        up_identities = (
+            "differentiable_vae_decoder_lowest_resolution_upsampling",
+            "differentiable_vae_decoder_lower_middle_resolution_upsampling",
+            "differentiable_vae_decoder_upper_middle_resolution_upsampling",
+            "differentiable_vae_decoder_highest_resolution_upsampling",
+        )
+        if len(up_blocks) != len(up_identities) or any(
+            not isinstance(module, torch.nn.Module) for module in up_blocks
+        ):
+            raise Sd35BackendError(
+                "differentiable VAE decoder upsampling identity drifted"
+            )
+        modules.extend(
+            (module, identity)
+            for module, identity in zip(up_blocks, up_identities, strict=True)
+        )
+        return tuple(modules)
+
+    def install(self) -> None:
+        for module, operation_identity in self._bounded_modules():
+            self._handles.append(
+                module.register_forward_pre_hook(self._push(operation_identity))
+            )
+            self._handles.append(
+                module.register_forward_hook(self._pop(operation_identity))
+            )
+
+    def finish(self) -> None:
+        if self._operation_stack != ["differentiable_vae_decode_entry"]:
+            raise Sd35BackendError(
+                "differentiable VAE decoder operation stack remained active"
+            )
+
+    def close(self) -> None:
+        for handle in reversed(self._handles):
+            handle.remove()
+        self._handles.clear()
 _RUNTIME_REPORTED_MEMORY_PATTERNS = (
     "out of memory",
     "cannot allocate memory",
@@ -881,19 +1074,29 @@ class Sd35PipelineBackend:
         before = _cuda_memory_snapshot(device)
 
         initial_decode_failure: Exception | None = None
+        initial_decoder_operation_identity: str | None = None
         decode_invocation_count = 0
 
         def decode_forward(value: torch.Tensor) -> torch.Tensor:
-            nonlocal initial_decode_failure, decode_invocation_count
+            nonlocal initial_decode_failure
+            nonlocal initial_decoder_operation_identity
+            nonlocal decode_invocation_count
             decode_invocation_count += 1
+            tracker = _DifferentiableVaeDecoderOperationTracker(pipeline.vae)
             try:
-                return pipeline.vae.decode(
+                tracker.install()
+                decoded_value = pipeline.vae.decode(
                     value,
                     return_dict=True,
                 ).sample
+                tracker.finish()
+                return decoded_value
             except Exception as exc:
                 if decode_invocation_count == 1:
                     initial_decode_failure = exc
+                    initial_decoder_operation_identity = (
+                        tracker.current_operation_identity
+                    )
                     return value
                 raise Sd35BackendDifferentiableVaeCheckpointRecomputationError(
                     cuda_memory_facts=_cuda_failure_facts(
@@ -901,7 +1104,12 @@ class Sd35PipelineBackend:
                         _cuda_memory_snapshot(device),
                     ),
                     runtime_reason_identity=_vae_decode_runtime_reason_identity(exc),
+                    decoder_operation_identity=(
+                        tracker.current_operation_identity
+                    ),
                 ) from exc
+            finally:
+                tracker.close()
 
         try:
             with set_checkpoint_early_stop(False):
@@ -919,6 +1127,9 @@ class Sd35PipelineBackend:
                     ),
                     runtime_reason_identity=_vae_decode_runtime_reason_identity(
                         initial_decode_failure
+                    ),
+                    decoder_operation_identity=(
+                        initial_decoder_operation_identity
                     ),
                 ) from initial_decode_failure
         except (

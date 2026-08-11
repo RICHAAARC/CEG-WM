@@ -40,6 +40,40 @@ from scripts.experiment_execution.build_runtime_qualification_package import (
 pytestmark = pytest.mark.unit
 
 
+class _DecoderLocalizationMiddleBlock(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.resnets = torch.nn.ModuleList((torch.nn.Identity(), torch.nn.Identity()))
+        self.attentions = torch.nn.ModuleList((torch.nn.Identity(),))
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        value = self.resnets[0](value)
+        value = self.attentions[0](value)
+        return self.resnets[1](value)
+
+
+class _DecoderLocalizationPassThrough(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv_in = torch.nn.Identity()
+        self.mid_block = _DecoderLocalizationMiddleBlock()
+        self.up_blocks = torch.nn.ModuleList(
+            torch.nn.Identity() for _index in range(4)
+        )
+        self.conv_norm_out = torch.nn.Identity()
+        self.conv_act = torch.nn.Identity()
+        self.conv_out = torch.nn.Identity()
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        value = self.conv_in(value)
+        value = self.mid_block(value)
+        for up_block in self.up_blocks:
+            value = up_block(value)
+        value = self.conv_norm_out(value)
+        value = self.conv_act(value)
+        return self.conv_out(value)
+
+
 def _runner_storage(
     tmp_path: Path,
     label: str,
@@ -113,7 +147,12 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
             fail_encode: bool = False,
         ):
             self.dtype = torch.float16 if fail_preparation else torch.float32
-            self.config = types.SimpleNamespace(force_upcast=fail_preparation)
+            self.config = types.SimpleNamespace(
+                force_upcast=fail_preparation,
+                use_post_quant_conv=False,
+            )
+            self.post_quant_conv = None
+            self.decoder = _DecoderLocalizationPassThrough()
             self.fail_preparation = fail_preparation
             self.fail_decode = fail_decode
             self.decode_error = decode_error
@@ -654,7 +693,12 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
         def __init__(self, *, fail_on_call: int | None = None) -> None:
             super().__init__()
             self.weight = torch.nn.Parameter(torch.tensor(0.75))
-            self.config = types.SimpleNamespace(force_upcast=False)
+            self.config = types.SimpleNamespace(
+                force_upcast=False,
+                use_post_quant_conv=False,
+            )
+            self.post_quant_conv = None
+            self.decoder = _DecoderLocalizationPassThrough()
             self.dtype = torch.float32
             self.fail_on_call = fail_on_call
             self.call_count = 0
@@ -783,6 +827,9 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     assert initial_error.value.runtime_reason_identity == (
         "runtime_reported_memory_allocation_failure"
     )
+    assert initial_error.value.decoder_operation_identity == (
+        "differentiable_vae_decode_entry"
+    )
 
     initial_failure_vae.fail_on_call = None
     recovered_input = reference_input.detach().clone().requires_grad_(True)
@@ -813,6 +860,9 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     )
     assert recompute_error.value.runtime_reason_identity == (
         "runtime_reported_memory_allocation_failure"
+    )
+    assert recompute_error.value.decoder_operation_identity == (
+        "differentiable_vae_decode_entry"
     )
 
     framework_failure = MemoryError("excluded checkpoint framework detail")
@@ -855,6 +905,425 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     assert not inference_image.requires_grad
     assert inference_vae.call_count == 1
     assert inference_vae.weight.grad is None
+
+
+@pytest.mark.parametrize(
+    "failing_operation_identity",
+    tuple(
+        sorted(
+            sd35_backend_module.DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES
+            - {"differentiable_vae_post_quant_projection"}
+        )
+    ),
+)
+def test_differentiable_vae_decoder_localization_reports_bounded_operation(
+    failing_operation_identity: str,
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+
+    class Operation(torch.nn.Module):
+        def __init__(self, operation_identity: str) -> None:
+            super().__init__()
+            self.operation_identity = operation_identity
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            if self.operation_identity == failing_operation_identity:
+                raise RuntimeError("excluded decoder operation detail")
+            return torch.sin(value * 0.5)
+
+    class Middle(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.resnets = torch.nn.ModuleList(
+                (
+                    Operation(
+                        "differentiable_vae_decoder_middle_input_residual"
+                    ),
+                    Operation(
+                        "differentiable_vae_decoder_middle_output_residual"
+                    ),
+                )
+            )
+            self.attentions = torch.nn.ModuleList(
+                (Operation("differentiable_vae_decoder_middle_attention"),)
+            )
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            if (
+                failing_operation_identity
+                == "differentiable_vae_decoder_middle_block_dispatch"
+            ):
+                raise RuntimeError("excluded middle block detail")
+            value = self.resnets[0](value)
+            value = self.attentions[0](value)
+            return self.resnets[1](value)
+
+    class Decoder(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv_in = Operation(
+                "differentiable_vae_decoder_input_convolution"
+            )
+            self.mid_block = Middle()
+            self.up_blocks = torch.nn.ModuleList(
+                Operation(identity)
+                for identity in (
+                    "differentiable_vae_decoder_lowest_resolution_upsampling",
+                    "differentiable_vae_decoder_lower_middle_resolution_upsampling",
+                    "differentiable_vae_decoder_upper_middle_resolution_upsampling",
+                    "differentiable_vae_decoder_highest_resolution_upsampling",
+                )
+            )
+            self.conv_norm_out = Operation(
+                "differentiable_vae_decoder_output_normalization"
+            )
+            self.conv_act = Operation(
+                "differentiable_vae_decoder_output_activation"
+            )
+            self.conv_out = Operation(
+                "differentiable_vae_decoder_output_convolution"
+            )
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            value = self.conv_in(value)
+            value = self.mid_block(value)
+            for up_block in self.up_blocks:
+                value = up_block(value)
+            value = self.conv_norm_out(value)
+            value = self.conv_act(value)
+            return self.conv_out(value)
+
+    class Vae:
+        dtype = torch.float32
+
+        def __init__(self) -> None:
+            self.config = types.SimpleNamespace(
+                force_upcast=False,
+                use_post_quant_conv=False,
+            )
+            self.post_quant_conv = None
+            self.decoder = Decoder()
+
+        def decode(self, value: torch.Tensor, *, return_dict: bool):
+            assert return_dict is True
+            if failing_operation_identity == "differentiable_vae_decode_entry":
+                raise RuntimeError("excluded decode entry detail")
+            return types.SimpleNamespace(sample=self.decoder(value))
+
+    class ImageProcessor:
+        @staticmethod
+        def postprocess(value: torch.Tensor, *, output_type: str) -> torch.Tensor:
+            assert output_type == "pt"
+            return value
+
+    vae = Vae()
+    backend = Sd35PipelineBackend(
+        cache_root=tmp_path / "cache",
+        persistent_root=tmp_path / "persistent",
+        hf_token=None,
+        prompt="probe",
+    )
+    backend._configuration = configuration
+    backend._device = torch.device("cpu")
+    backend._pipeline = types.SimpleNamespace(
+        vae=vae,
+        image_processor=ImageProcessor(),
+    )
+    latent = torch.ones((1, 16, 2, 2), dtype=torch.float32, requires_grad=True)
+
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
+    ) as failure:
+        backend.vae_decode_differentiable(latent)
+
+    assert failure.value.decoder_operation_identity == failing_operation_identity
+    assert set(
+        sd35_backend_module.DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES
+    ) == {
+        "differentiable_vae_decode_entry",
+        "differentiable_vae_post_quant_projection",
+        "differentiable_vae_decoder_input_convolution",
+        "differentiable_vae_decoder_middle_block_dispatch",
+        "differentiable_vae_decoder_middle_input_residual",
+        "differentiable_vae_decoder_middle_attention",
+        "differentiable_vae_decoder_middle_output_residual",
+        "differentiable_vae_decoder_lowest_resolution_upsampling",
+        "differentiable_vae_decoder_lower_middle_resolution_upsampling",
+        "differentiable_vae_decoder_upper_middle_resolution_upsampling",
+        "differentiable_vae_decoder_highest_resolution_upsampling",
+        "differentiable_vae_decoder_output_normalization",
+        "differentiable_vae_decoder_output_activation",
+        "differentiable_vae_decoder_output_convolution",
+    }
+    for module in vae.decoder.modules():
+        assert not module._forward_pre_hooks
+        assert not module._forward_hooks
+
+
+def test_differentiable_vae_decoder_localization_preserves_values_gradients_and_absent_projection(
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+
+    class InputConvolution(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = False
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            if self.fail:
+                raise RuntimeError("excluded input convolution detail")
+            return torch.tanh(value[:, :3] * 0.75)
+
+    class Decoder(_DecoderLocalizationPassThrough):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv_in = InputConvolution()
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            return self.conv_in(value)
+
+    class Vae:
+        dtype = torch.float32
+        config = types.SimpleNamespace(
+            force_upcast=False,
+            use_post_quant_conv=False,
+        )
+        post_quant_conv = None
+
+        def __init__(self) -> None:
+            self.decoder = Decoder()
+
+        def decode(self, value: torch.Tensor, *, return_dict: bool):
+            assert return_dict is True
+            return types.SimpleNamespace(sample=self.decoder(value))
+
+    class ImageProcessor:
+        @staticmethod
+        def postprocess(value: torch.Tensor, *, output_type: str) -> torch.Tensor:
+            assert output_type == "pt"
+            return value
+
+    vae = Vae()
+    direct_input = torch.linspace(-1.0, 1.0, 64).reshape(1, 16, 2, 2)
+    direct_input.requires_grad_(True)
+    direct_image = vae.decode(direct_input, return_dict=True).sample
+    direct_gradient = torch.autograd.grad(direct_image.square().sum(), direct_input)[0]
+    backend = Sd35PipelineBackend(
+        cache_root=tmp_path / "cache",
+        persistent_root=tmp_path / "persistent",
+        hf_token=None,
+        prompt="probe",
+    )
+    backend._configuration = configuration
+    backend._device = torch.device("cpu")
+    backend._pipeline = types.SimpleNamespace(
+        vae=vae,
+        image_processor=ImageProcessor(),
+    )
+    tracked_input = direct_input.detach().clone().requires_grad_(True)
+
+    tracked_image = backend.vae_decode_differentiable(tracked_input)
+    tracked_gradient = torch.autograd.grad(
+        tracked_image.square().sum(), tracked_input
+    )[0]
+
+    assert torch.equal(tracked_image, direct_image)
+    assert torch.equal(tracked_gradient, direct_gradient)
+    assert not vae.decoder._forward_pre_hooks
+    assert not vae.decoder._forward_hooks
+
+    vae.decoder.conv_in.fail = True
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
+    ) as absent_projection_failure:
+        backend.vae_decode_differentiable(
+            direct_input.detach().clone().requires_grad_(True)
+        )
+    assert absent_projection_failure.value.decoder_operation_identity == (
+        "differentiable_vae_decoder_input_convolution"
+    )
+
+
+@pytest.mark.parametrize(
+    "structure_drift",
+    (
+        "post_quant_configuration_enabled",
+        "post_quant_module_present",
+        "decoder_missing",
+        "input_convolution_missing",
+        "middle_block_missing",
+        "middle_residual_missing",
+        "middle_attention_missing",
+        "middle_attention_extra",
+        "upsampling_block_missing",
+        "upsampling_block_extra",
+        "output_normalization_missing",
+        "output_activation_missing",
+        "output_convolution_missing",
+    ),
+)
+def test_differentiable_vae_decoder_localization_rejects_structure_drift(
+    structure_drift: str,
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+
+    class Vae:
+        dtype = torch.float32
+
+        def __init__(self) -> None:
+            self.config = types.SimpleNamespace(
+                force_upcast=False,
+                use_post_quant_conv=False,
+            )
+            self.post_quant_conv = None
+            self.decoder = _DecoderLocalizationPassThrough()
+
+        def decode(self, value: torch.Tensor, *, return_dict: bool):
+            assert return_dict is True
+            return types.SimpleNamespace(sample=self.decoder(value))
+
+    vae = Vae()
+    if structure_drift == "post_quant_configuration_enabled":
+        vae.config.use_post_quant_conv = True
+    elif structure_drift == "post_quant_module_present":
+        vae.post_quant_conv = torch.nn.Identity()
+    elif structure_drift == "decoder_missing":
+        vae.decoder = None
+    elif structure_drift == "input_convolution_missing":
+        vae.decoder.conv_in = None
+    elif structure_drift == "middle_block_missing":
+        vae.decoder.mid_block = None
+    elif structure_drift == "middle_residual_missing":
+        vae.decoder.mid_block.resnets = torch.nn.ModuleList(
+            (torch.nn.Identity(),)
+        )
+    elif structure_drift == "middle_attention_missing":
+        vae.decoder.mid_block.attentions = torch.nn.ModuleList()
+    elif structure_drift == "middle_attention_extra":
+        vae.decoder.mid_block.attentions = torch.nn.ModuleList(
+            (torch.nn.Identity(), torch.nn.Identity())
+        )
+    elif structure_drift == "upsampling_block_missing":
+        vae.decoder.up_blocks = torch.nn.ModuleList(
+            tuple(vae.decoder.up_blocks)[:-1]
+        )
+    elif structure_drift == "upsampling_block_extra":
+        vae.decoder.up_blocks.append(torch.nn.Identity())
+    elif structure_drift == "output_normalization_missing":
+        vae.decoder.conv_norm_out = None
+    elif structure_drift == "output_activation_missing":
+        vae.decoder.conv_act = None
+    else:
+        vae.decoder.conv_out = None
+
+    backend = Sd35PipelineBackend(
+        cache_root=tmp_path / "cache",
+        persistent_root=tmp_path / "persistent",
+        hf_token=None,
+        prompt="probe",
+    )
+    backend._configuration = configuration
+    backend._device = torch.device("cpu")
+    backend._pipeline = types.SimpleNamespace(
+        vae=vae,
+        image_processor=types.SimpleNamespace(postprocess=lambda value, **_kwargs: value),
+    )
+
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
+    ) as failure:
+        backend.vae_decode_differentiable(
+            torch.ones(
+                (1, 16, 2, 2),
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+        )
+
+    assert type(failure.value.__cause__) is sd35_backend_module.Sd35BackendError
+    assert failure.value.decoder_operation_identity == (
+        "differentiable_vae_decode_entry"
+    )
+
+
+def test_differentiable_vae_decoder_localization_tracks_recomputed_operation(
+    tmp_path: Path,
+) -> None:
+    configuration = load_runtime_configuration()
+
+    class RecomputedAttention(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.call_count = 0
+
+        def forward(self, value: torch.Tensor) -> torch.Tensor:
+            self.call_count += 1
+            if self.call_count == 2:
+                raise RuntimeError("excluded recomputed attention detail")
+            return torch.sin(value)
+
+    class Middle(_DecoderLocalizationMiddleBlock):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attentions = torch.nn.ModuleList((RecomputedAttention(),))
+
+    class Decoder(_DecoderLocalizationPassThrough):
+        def __init__(self) -> None:
+            super().__init__()
+            self.mid_block = Middle()
+
+    class Vae:
+        dtype = torch.float32
+        config = types.SimpleNamespace(
+            force_upcast=False,
+            use_post_quant_conv=False,
+        )
+        post_quant_conv = None
+
+        def __init__(self) -> None:
+            self.decoder = Decoder()
+
+        def decode(self, value: torch.Tensor, *, return_dict: bool):
+            assert return_dict is True
+            return types.SimpleNamespace(sample=self.decoder(value))
+
+    class ImageProcessor:
+        @staticmethod
+        def postprocess(value: torch.Tensor, *, output_type: str) -> torch.Tensor:
+            assert output_type == "pt"
+            return value
+
+    vae = Vae()
+    backend = Sd35PipelineBackend(
+        cache_root=tmp_path / "cache",
+        persistent_root=tmp_path / "persistent",
+        hf_token=None,
+        prompt="probe",
+    )
+    backend._configuration = configuration
+    backend._device = torch.device("cpu")
+    backend._pipeline = types.SimpleNamespace(
+        vae=vae,
+        image_processor=ImageProcessor(),
+    )
+    latent = torch.ones((1, 16, 2, 2), dtype=torch.float32, requires_grad=True)
+
+    image = backend.vae_decode_differentiable(latent)
+    with pytest.raises(
+        sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointRecomputationError
+    ) as failure:
+        torch.autograd.grad(image.square().sum(), latent)
+
+    assert failure.value.decoder_operation_identity == (
+        "differentiable_vae_decoder_middle_attention"
+    )
+    assert vae.decoder.mid_block.attentions[0].call_count == 2
+    for module in vae.decoder.modules():
+        assert not module._forward_pre_hooks
+        assert not module._forward_hooks
 
 
 @pytest.mark.parametrize(
