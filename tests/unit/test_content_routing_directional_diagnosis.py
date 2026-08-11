@@ -49,9 +49,18 @@ def _reference_measurements():
         create_content_routing_reference_measurement(
             cluster_ordinal=ordinal,
             fold_index=ordinal % 4,
-            texture_gradient_value=float(ordinal + 1),
-            latent_response_value=float(ordinal + 101),
-            local_sensitivity_value=float(ordinal + 201),
+            texture_gradient_values=(float(ordinal + 1), float(ordinal + 1.25)),
+            texture_spatial_shape=(1, 2),
+            response_ratio_values=(
+                float(ordinal + 101),
+                float(ordinal + 101.25),
+            ),
+            response_spatial_shape=(1, 2),
+            sensitivity_ratio_values=(
+                float(ordinal + 201),
+                float(ordinal + 201.25),
+            ),
+            sensitivity_spatial_shape=(1, 2),
         )
         for ordinal in range(32)
     )
@@ -59,6 +68,16 @@ def _reference_measurements():
 
 def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRecord:
     value = float(ordinal + 1)
+    if ordinal == 31:
+        texture_values = [100.0] * 100
+        response_values = [200.0] * 100
+        sensitivity_values = [300.0] * 100
+        spatial_shape = [10, 10]
+    else:
+        texture_values = [value, value + 0.25]
+        response_values = [value + 100.0, value + 100.25]
+        sensitivity_values = [value + 200.0, value + 200.25]
+        spatial_shape = [1, 2]
     payload = {
         "schema_version": ROUTING_REFERENCE_RECORD_SCHEMA,
         "collection_role": ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
@@ -91,12 +110,12 @@ def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRec
             "public_probe_values_digest": f"{ordinal + 38:064x}",
             "nominal_relative_probe_step": 0.001,
             "actual_probe_step": 0.001,
-            "texture_gradient_values": [value],
-            "texture_spatial_shape": [1, 1],
-            "response_ratio_values": [value + 100.0],
-            "response_spatial_shape": [1, 1],
-            "sensitivity_ratio_values": [value + 200.0],
-            "sensitivity_spatial_shape": [1, 1],
+            "texture_gradient_values": texture_values,
+            "texture_spatial_shape": spatial_shape,
+            "response_ratio_values": response_values,
+            "response_spatial_shape": spatial_shape,
+            "sensitivity_ratio_values": sensitivity_values,
+            "sensitivity_spatial_shape": spatial_shape,
         },
         "counts_as_scientific_coverage": False,
         "scientific_claim_boundary": DEVELOPMENT_CLAIM_BOUNDARY,
@@ -116,15 +135,12 @@ def _measurement_from_persistent_record(
     return create_content_routing_reference_measurement(
         cluster_ordinal=checked.source_cluster_ordinal,
         fold_index=checked.fold_index,
-        texture_gradient_value=exact_nearest_rank_positive_p95(
-            payload["texture_gradient_values"]
-        ),
-        latent_response_value=exact_nearest_rank_positive_p95(
-            payload["response_ratio_values"]
-        ),
-        local_sensitivity_value=exact_nearest_rank_positive_p95(
-            payload["sensitivity_ratio_values"]
-        ),
+        texture_gradient_values=tuple(payload["texture_gradient_values"]),
+        texture_spatial_shape=tuple(payload["texture_spatial_shape"]),
+        response_ratio_values=tuple(payload["response_ratio_values"]),
+        response_spatial_shape=tuple(payload["response_spatial_shape"]),
+        sensitivity_ratio_values=tuple(payload["sensitivity_ratio_values"]),
+        sensitivity_spatial_shape=tuple(payload["sensitivity_spatial_shape"]),
     )
 
 
@@ -332,36 +348,46 @@ def test_routing_reference_fits_only_texture_response_and_sensitivity() -> None:
     )
     assert len(reference.fit_cluster_ordinals) == 24
     assert all(ordinal % 4 != 0 for ordinal in reference.fit_cluster_ordinals)
-    assert reference.semantic_observation_is_not_fitted is True
-    assert not any(
-        "semantic" in field.name and field.name.endswith("_reference")
-        for field in fields(reference)
-    )
-    assert reference.texture_gradient_reference == 31.0
-    assert reference.latent_response_reference == 131.0
-    assert reference.local_sensitivity_reference == 231.0
+    assert not any("semantic" in field.name for field in fields(reference))
+    assert reference.texture_gradient_reference == 31.25
+    assert reference.latent_response_reference == 131.25
+    assert reference.local_sensitivity_reference == 231.25
 
 
 @pytest.mark.parametrize(
     "changed_field",
     (
-        "texture_gradient_value",
-        "latent_response_value",
-        "local_sensitivity_value",
+        "texture_gradient_values",
+        "texture_spatial_shape",
+        "response_ratio_values",
+        "response_spatial_shape",
+        "sensitivity_ratio_values",
+        "sensitivity_spatial_shape",
     ),
 )
-def test_routing_reference_identity_changes_with_each_fitted_statistic(
+def test_routing_reference_identity_changes_with_each_spatial_statistic(
     changed_field: str,
 ) -> None:
     original_values = {
         "cluster_ordinal": 0,
         "fold_index": 0,
-        "texture_gradient_value": 1.0,
-        "latent_response_value": 2.0,
-        "local_sensitivity_value": 3.0,
+        "texture_gradient_values": (1.0, 1.5),
+        "texture_spatial_shape": (1, 2),
+        "response_ratio_values": (2.0, 2.5),
+        "response_spatial_shape": (1, 2),
+        "sensitivity_ratio_values": (3.0, 3.5),
+        "sensitivity_spatial_shape": (1, 2),
     }
     original = create_content_routing_reference_measurement(**original_values)
-    changed_values = {**original_values, changed_field: original_values[changed_field] + 1.0}
+    changed_value = (
+        (2, 1)
+        if changed_field.endswith("_shape")
+        else (
+            original_values[changed_field][0] + 0.25,
+            original_values[changed_field][1],
+        )
+    )
+    changed_values = {**original_values, changed_field: changed_value}
     changed = create_content_routing_reference_measurement(**changed_values)
     assert changed.observation_identity != original.observation_identity
 
@@ -376,10 +402,66 @@ def test_routing_reference_fit_replays_thirty_two_persistent_records() -> None:
     )
     assert len(reference.fit_cluster_ordinals) == 24
     assert all(ordinal % 4 != 0 for ordinal in reference.fit_cluster_ordinals)
-    assert reference.texture_gradient_reference == 31.0
-    assert reference.latent_response_reference == 131.0
-    assert reference.local_sensitivity_reference == 231.0
+    assert reference.texture_gradient_reference == 100.0
+    assert reference.latent_response_reference == 200.0
+    assert reference.local_sensitivity_reference == 300.0
+    hierarchical_texture_reference = exact_nearest_rank_positive_p95(
+        tuple(
+            exact_nearest_rank_positive_p95(measurement.texture_gradient_values)
+            for measurement in measurements
+            if measurement.fold_index != 0
+        )
+    )
+    assert hierarchical_texture_reference == 31.25
+    assert reference.texture_gradient_reference != hierarchical_texture_reference
     assert not any("semantic" in field.name for field in fields(measurements[0]))
+
+
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    (
+        ("texture_gradient_values", (1.0, 0.0)),
+        ("response_ratio_values", (2.0, float("inf"))),
+        ("sensitivity_ratio_values", (3.0, float("nan"))),
+        ("texture_spatial_shape", (1, 3)),
+        ("response_ratio_values", (2, 2.5)),
+    ),
+)
+def test_routing_reference_spatial_values_fail_closed(
+    changed_field: str,
+    changed_value: object,
+) -> None:
+    values = {
+        "cluster_ordinal": 0,
+        "fold_index": 0,
+        "texture_gradient_values": (1.0, 1.5),
+        "texture_spatial_shape": (1, 2),
+        "response_ratio_values": (2.0, 2.5),
+        "response_spatial_shape": (1, 2),
+        "sensitivity_ratio_values": (3.0, 3.5),
+        "sensitivity_spatial_shape": (1, 2),
+    }
+    with pytest.raises(ContentRoutingDirectionalMetricError, match="measurement drifted"):
+        create_content_routing_reference_measurement(
+            **{**values, changed_field: changed_value}
+        )
+
+
+def test_routing_reference_roster_incomplete_or_duplicated_fails_closed() -> None:
+    measurements = _reference_measurements()
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="roster is incomplete",
+    ):
+        fit_content_routing_fold_reference(measurements[:-1], probe_fold_index=0)
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="roster is duplicated",
+    ):
+        fit_content_routing_fold_reference(
+            (*measurements[:-1], measurements[0]),
+            probe_fold_index=0,
+        )
 
 
 def test_exact_nearest_rank_p95_rejects_nonpositive_reference_values() -> None:

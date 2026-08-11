@@ -70,16 +70,19 @@ def exact_nearest_rank_positive_p95(values: Sequence[float]) -> float:
 class ContentRoutingReferenceMeasurement:
     cluster_ordinal: int
     fold_index: int
-    texture_gradient_value: float
-    latent_response_value: float
-    local_sensitivity_value: float
+    texture_gradient_values: tuple[float, ...]
+    texture_spatial_shape: tuple[int, int]
+    response_ratio_values: tuple[float, ...]
+    response_spatial_shape: tuple[int, int]
+    sensitivity_ratio_values: tuple[float, ...]
+    sensitivity_spatial_shape: tuple[int, int]
     observation_identity: str
 
-    def validate(self) -> None:
-        numeric = (
-            self.texture_gradient_value,
-            self.latent_response_value,
-            self.local_sensitivity_value,
+    def _validate_spatial_values(self) -> None:
+        spatial_axes = (
+            (self.texture_gradient_values, self.texture_spatial_shape),
+            (self.response_ratio_values, self.response_spatial_shape),
+            (self.sensitivity_ratio_values, self.sensitivity_spatial_shape),
         )
         if (
             type(self.cluster_ordinal) is not int
@@ -87,16 +90,29 @@ class ContentRoutingReferenceMeasurement:
             or type(self.fold_index) is not int
             or self.fold_index != self.cluster_ordinal % CROSS_FIT_FOLD_COUNT
             or any(
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not isfinite(float(value))
-                or float(value) <= 0.0
-                for value in numeric
+                type(values) is not tuple
+                or type(shape) is not tuple
+                or len(shape) != 2
+                or any(
+                    type(dimension) is not int or dimension <= 0
+                    for dimension in shape
+                )
+                or len(values) != shape[0] * shape[1]
+                or any(
+                    type(value) is not float
+                    or not isfinite(value)
+                    or value <= 0.0
+                    for value in values
+                )
+                for values, shape in spatial_axes
             )
         ):
             raise ContentRoutingDirectionalMetricError(
                 "routing reference measurement drifted"
             )
+
+    def validate(self) -> None:
+        self._validate_spatial_values()
         payload = asdict(self)
         identity = payload.pop("observation_identity")
         if identity != _digest(payload):
@@ -109,6 +125,11 @@ def create_content_routing_reference_measurement(
     **values: object,
 ) -> ContentRoutingReferenceMeasurement:
     payload = dict(values)
+    unchecked = ContentRoutingReferenceMeasurement(
+        **payload,
+        observation_identity="",
+    )
+    unchecked._validate_spatial_values()
     measurement = ContentRoutingReferenceMeasurement(
         **payload,
         observation_identity=_digest(payload),
@@ -125,7 +146,6 @@ class ContentRoutingFoldReference:
     latent_response_reference: float
     local_sensitivity_reference: float
     quantile_rule: str
-    semantic_observation_is_not_fitted: bool
     reference_identity: str
 
     def validate(self) -> None:
@@ -146,7 +166,6 @@ class ContentRoutingFoldReference:
             or len(self.fit_cluster_ordinals) != REFERENCE_FIT_COUNT_PER_PROBE
             or any(not isfinite(value) or value <= 0.0 for value in numeric)
             or self.quantile_rule != REFERENCE_QUANTILE_RULE
-            or self.semantic_observation_is_not_fitted is not True
         ):
             raise ContentRoutingDirectionalMetricError(
                 "routing fold reference drifted"
@@ -166,7 +185,9 @@ def fit_content_routing_fold_reference(
 ) -> ContentRoutingFoldReference:
     items = tuple(measurements)
     if (
-        len(items) != REFERENCE_FIT_CLUSTER_COUNT
+        type(probe_fold_index) is not int
+        or not 0 <= probe_fold_index < CROSS_FIT_FOLD_COUNT
+        or len(items) != REFERENCE_FIT_CLUSTER_COUNT
         or any(type(item) is not ContentRoutingReferenceMeasurement for item in items)
     ):
         raise ContentRoutingDirectionalMetricError(
@@ -196,16 +217,27 @@ def fit_content_routing_fold_reference(
         "probe_fold_index": probe_fold_index,
         "fit_cluster_ordinals": tuple(item.cluster_ordinal for item in selected),
         "texture_gradient_reference": exact_nearest_rank_positive_p95(
-            tuple(item.texture_gradient_value for item in selected)
+            tuple(
+                value
+                for item in selected
+                for value in item.texture_gradient_values
+            )
         ),
         "latent_response_reference": exact_nearest_rank_positive_p95(
-            tuple(item.latent_response_value for item in selected)
+            tuple(
+                value
+                for item in selected
+                for value in item.response_ratio_values
+            )
         ),
         "local_sensitivity_reference": exact_nearest_rank_positive_p95(
-            tuple(item.local_sensitivity_value for item in selected)
+            tuple(
+                value
+                for item in selected
+                for value in item.sensitivity_ratio_values
+            )
         ),
         "quantile_rule": REFERENCE_QUANTILE_RULE,
-        "semantic_observation_is_not_fitted": True,
     }
     reference = ContentRoutingFoldReference(
         **payload,
