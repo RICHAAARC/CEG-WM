@@ -259,7 +259,7 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_decode=True))
     )
     with pytest.raises(
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
     ) as decode_error:
         decode.vae_decode_differentiable(latent)
     assert decode_error.value.runtime_reason_identity == (
@@ -318,7 +318,7 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
         Pipeline(transformer=Transformer(fail=False), vae=Vae(fail_decode=True))
     )
     with pytest.raises(
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
     ) as no_cuda_error:
         no_cuda_facts.vae_decode_differentiable(latent)
     assert no_cuda_error.value.cuda_memory_facts == ()
@@ -353,7 +353,7 @@ def test_sd35_backend_reports_specific_differentiable_stage_types(
             )
         )
         with pytest.raises(
-            sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+            sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
         ) as reason_error:
             reason_backend.vae_decode_differentiable(latent)
         assert reason_error.value.runtime_reason_identity == expected_reason
@@ -771,12 +771,15 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     initial_failure_vae.requires_grad_(False)
     initial_failure_backend = backend(initial_failure_vae)
     with pytest.raises(
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
     ) as initial_error:
         initial_failure_backend.vae_decode_differentiable(
             reference_input.detach().clone().requires_grad_(True)
         )
     assert isinstance(initial_error.value.__cause__, torch.OutOfMemoryError)
+    assert initial_error.value.operation_identity == (
+        "differentiable_vae_initial_decode_forward"
+    )
     assert initial_error.value.runtime_reason_identity == (
         "runtime_reported_memory_allocation_failure"
     )
@@ -801,11 +804,39 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
         recompute_input
     )
     with pytest.raises(
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+        sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointRecomputationError
     ) as recompute_error:
         torch.autograd.grad(recompute_image.square().sum(), recompute_input)
     assert isinstance(recompute_error.value.__cause__, torch.OutOfMemoryError)
+    assert recompute_error.value.operation_identity == (
+        "differentiable_vae_checkpoint_recomputation"
+    )
     assert recompute_error.value.runtime_reason_identity == (
+        "runtime_reported_memory_allocation_failure"
+    )
+
+    framework_failure = MemoryError("excluded checkpoint framework detail")
+
+    def raise_checkpoint_framework_failure(*_args, **_kwargs):
+        raise framework_failure
+
+    with monkeypatch.context() as checkpoint_patch:
+        checkpoint_patch.setattr(
+            sd35_backend_module,
+            "activation_checkpoint",
+            raise_checkpoint_framework_failure,
+        )
+        with pytest.raises(
+            sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointExecutionError
+        ) as framework_error:
+            backend(Vae()).vae_decode_differentiable(
+                reference_input.detach().clone().requires_grad_(True)
+            )
+    assert framework_error.value.__cause__ is framework_failure
+    assert framework_error.value.operation_identity == (
+        "differentiable_vae_checkpoint_execution"
+    )
+    assert framework_error.value.runtime_reason_identity == (
         "runtime_reported_memory_allocation_failure"
     )
 

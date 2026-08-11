@@ -49,7 +49,9 @@ from main import identify_root_key, key_schedule_sha256_counter
 from runtime import Sd35PipelineBackend, create_runtime_adapter
 from runtime.sd35_backend import (
     Sd35BackendDifferentiableImagePostprocessError,
-    Sd35BackendDifferentiableVaeDecodeForwardError,
+    Sd35BackendDifferentiableVaeCheckpointExecutionError,
+    Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+    Sd35BackendDifferentiableVaeInitialDecodeForwardError,
     Sd35BackendDifferentiableVaeInputPreparationError,
 )
 from scripts.experiment_execution.development_exploration_entrypoint import (
@@ -145,13 +147,26 @@ _RUNTIME_FAILURE_OPERATION_IDENTITIES = {
     Sd35BackendDifferentiableVaeInputPreparationError: (
         "differentiable_vae_input_preparation"
     ),
-    Sd35BackendDifferentiableVaeDecodeForwardError: (
-        "differentiable_vae_decode_forward"
+    Sd35BackendDifferentiableVaeInitialDecodeForwardError: (
+        "differentiable_vae_initial_decode_forward"
+    ),
+    Sd35BackendDifferentiableVaeCheckpointRecomputationError: (
+        "differentiable_vae_checkpoint_recomputation"
+    ),
+    Sd35BackendDifferentiableVaeCheckpointExecutionError: (
+        "differentiable_vae_checkpoint_execution"
     ),
     Sd35BackendDifferentiableImagePostprocessError: (
         "differentiable_image_postprocess"
     ),
 }
+_VAE_DECODE_RUNTIME_FAILURE_TYPES = frozenset(
+    {
+        Sd35BackendDifferentiableVaeInitialDecodeForwardError,
+        Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+        Sd35BackendDifferentiableVaeCheckpointExecutionError,
+    }
+)
 _VAE_DECODE_RUNTIME_REASON_IDENTITIES = frozenset(
     {
         "runtime_reported_memory_allocation_failure",
@@ -173,7 +188,7 @@ def _runtime_failure_safe_attribution(
         if type(raw_facts) is not tuple:
             return None
         runtime_reason_identity = None
-        if type(current) is Sd35BackendDifferentiableVaeDecodeForwardError:
+        if type(current) in _VAE_DECODE_RUNTIME_FAILURE_TYPES:
             observed_reason = getattr(current, "runtime_reason_identity", None)
             if observed_reason not in _VAE_DECODE_RUNTIME_REASON_IDENTITIES:
                 return None

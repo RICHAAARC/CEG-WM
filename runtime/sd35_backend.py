@@ -106,7 +106,7 @@ class Sd35BackendDifferentiableVaeInputPreparationError(
 class Sd35BackendDifferentiableVaeDecodeForwardError(
     _Sd35BackendDifferentiableVaeOperationError
 ):
-    """The differentiable VAE decoder forward failed closed."""
+    """A differentiable VAE checkpointed decode operation failed closed."""
 
     operation_identity = "differentiable_vae_decode_forward"
 
@@ -122,6 +122,30 @@ class Sd35BackendDifferentiableVaeDecodeForwardError(
                 "differentiable VAE runtime reason identity is invalid"
             )
         self.runtime_reason_identity = runtime_reason_identity
+
+
+class Sd35BackendDifferentiableVaeInitialDecodeForwardError(
+    Sd35BackendDifferentiableVaeDecodeForwardError
+):
+    """The initial differentiable VAE decoder forward failed closed."""
+
+    operation_identity = "differentiable_vae_initial_decode_forward"
+
+
+class Sd35BackendDifferentiableVaeCheckpointRecomputationError(
+    Sd35BackendDifferentiableVaeDecodeForwardError
+):
+    """The differentiable VAE checkpoint recomputation failed closed."""
+
+    operation_identity = "differentiable_vae_checkpoint_recomputation"
+
+
+class Sd35BackendDifferentiableVaeCheckpointExecutionError(
+    Sd35BackendDifferentiableVaeDecodeForwardError
+):
+    """The differentiable VAE checkpoint framework execution failed closed."""
+
+    operation_identity = "differentiable_vae_checkpoint_execution"
 
 
 class Sd35BackendDifferentiableImagePostprocessError(
@@ -871,7 +895,7 @@ class Sd35PipelineBackend:
                 if decode_invocation_count == 1:
                     initial_decode_failure = exc
                     return value
-                raise Sd35BackendDifferentiableVaeDecodeForwardError(
+                raise Sd35BackendDifferentiableVaeCheckpointRecomputationError(
                     cuda_memory_facts=_cuda_failure_facts(
                         before,
                         _cuda_memory_snapshot(device),
@@ -888,7 +912,7 @@ class Sd35PipelineBackend:
                     preserve_rng_state=True,
                 )
             if initial_decode_failure is not None:
-                raise Sd35BackendDifferentiableVaeDecodeForwardError(
+                raise Sd35BackendDifferentiableVaeInitialDecodeForwardError(
                     cuda_memory_facts=_cuda_failure_facts(
                         before,
                         _cuda_memory_snapshot(device),
@@ -897,10 +921,14 @@ class Sd35PipelineBackend:
                         initial_decode_failure
                     ),
                 ) from initial_decode_failure
-        except Sd35BackendDifferentiableVaeDecodeForwardError:
+        except (
+            Sd35BackendDifferentiableVaeInitialDecodeForwardError,
+            Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+            Sd35BackendDifferentiableVaeCheckpointExecutionError,
+        ):
             raise
         except Exception as exc:
-            raise Sd35BackendDifferentiableVaeDecodeForwardError(
+            raise Sd35BackendDifferentiableVaeCheckpointExecutionError(
                 cuda_memory_facts=_cuda_failure_facts(
                     before,
                     _cuda_memory_snapshot(device),

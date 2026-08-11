@@ -1048,7 +1048,9 @@ def test_qk_failure_diagnostic_records_only_launch_blocking_identity() -> None:
     (
         sd35_backend_module.Sd35BackendGenerationSuffixTransformerForwardError,
         sd35_backend_module.Sd35BackendGenerationSuffixSchedulerStepError,
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeError,
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError,
+        sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+        sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointExecutionError,
         sd35_backend_module.Sd35BackendDifferentiableVaeEncodeError,
         sd35_backend_module.Sd35BackendDifferentiableDetectionNoiseSchedulingError,
         sd35_backend_module.Sd35BackendDifferentiableQkTransformerForwardError,
@@ -1090,7 +1092,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
         ("after_max_reserved_bytes", 80),
         ("total_device_bytes", 100),
     )
-    stage = sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError(
+    stage = sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError(
         cuda_memory_facts=facts,
         runtime_reason_identity="runtime_reported_memory_allocation_failure",
     )
@@ -1099,7 +1101,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     outer.__cause__ = stage
 
     assert _runtime_failure_safe_attribution(outer) == (
-        "differentiable_vae_decode_forward",
+        "differentiable_vae_initial_decode_forward",
         "runtime_reported_memory_allocation_failure",
         dict(facts),
     )
@@ -1107,7 +1109,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     serialized = json.dumps(diagnostic, sort_keys=True)
 
     assert diagnostic["runtime_failure_operation_identity"] == (
-        "differentiable_vae_decode_forward"
+        "differentiable_vae_initial_decode_forward"
     )
     assert diagnostic["runtime_failure_cuda_memory_facts"] == dict(facts)
     assert diagnostic["runtime_failure_reason_identity"] == (
@@ -1119,12 +1121,12 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
         assert forbidden not in serialized
 
     no_cuda_stage = (
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError()
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError()
     )
     no_cuda_outer = CegWmExperimentAdapterError(secret)
     no_cuda_outer.__cause__ = no_cuda_stage
     assert _runtime_failure_safe_attribution(no_cuda_outer) == (
-        "differentiable_vae_decode_forward",
+        "differentiable_vae_initial_decode_forward",
         "unclassified_runtime_failure",
         None,
     )
@@ -1133,7 +1135,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
         active_binding=None,
     )
     assert no_cuda_diagnostic["runtime_failure_operation_identity"] == (
-        "differentiable_vae_decode_forward"
+        "differentiable_vae_initial_decode_forward"
     )
     assert "runtime_failure_cuda_memory_facts" not in no_cuda_diagnostic
     assert no_cuda_diagnostic["runtime_failure_reason_identity"] == (
@@ -1161,7 +1163,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     assert "unsafe_path_or_secret_sentinel" not in foreign_serialized
 
     class SpoofedTrustedFailure(
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
     ):
         operation_identity = "spoofed_trusted_failure_identity"
 
@@ -1179,7 +1181,7 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
     assert "spoofed_trusted_failure_identity" not in spoofed_serialized
 
     string_reported_memory_stage = (
-        sd35_backend_module.Sd35BackendDifferentiableVaeDecodeForwardError(
+        sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError(
             cuda_memory_facts=facts,
             runtime_reason_identity=(
                 "runtime_reported_memory_allocation_failure"
@@ -1206,6 +1208,78 @@ def test_qk_failure_diagnostic_preserves_only_bounded_cuda_memory_facts() -> Non
         "runtime_reported_memory_allocation_failure"
     )
     assert "secret allocation detail" not in string_reported_serialized
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("trusted_failure_type", "operation_identity"),
+    (
+        (
+            sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError,
+            "differentiable_vae_initial_decode_forward",
+        ),
+        (
+            sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointRecomputationError,
+            "differentiable_vae_checkpoint_recomputation",
+        ),
+        (
+            sd35_backend_module.Sd35BackendDifferentiableVaeCheckpointExecutionError,
+            "differentiable_vae_checkpoint_execution",
+        ),
+    ),
+)
+def test_qk_runtime_failure_attribution_requires_exact_checkpoint_failure_type(
+    trusted_failure_type: type[BaseException],
+    operation_identity: str,
+) -> None:
+    secret = "checkpoint-failure-secret-must-not-be-persisted"
+    facts = (
+        ("before_allocated_bytes", 10),
+        ("before_reserved_bytes", 20),
+        ("before_max_allocated_bytes", 30),
+        ("before_max_reserved_bytes", 40),
+        ("after_allocated_bytes", 50),
+        ("after_reserved_bytes", 60),
+        ("after_max_allocated_bytes", 70),
+        ("after_max_reserved_bytes", 80),
+        ("total_device_bytes", 100),
+    )
+    exact_failure = trusted_failure_type(
+        cuda_memory_facts=facts,
+        runtime_reason_identity="runtime_reported_memory_allocation_failure",
+    )
+    exact_failure.__cause__ = MemoryError(secret)
+    exact_outer = CegWmExperimentAdapterError(secret)
+    exact_outer.__cause__ = exact_failure
+    exact_diagnostic = _failure_diagnostic(exact_outer, active_binding=None)
+
+    assert _runtime_failure_safe_attribution(exact_outer) == (
+        operation_identity,
+        "runtime_reported_memory_allocation_failure",
+        dict(facts),
+    )
+    assert exact_diagnostic["failure_class"] == "resource_failure"
+    assert exact_diagnostic["runtime_failure_operation_identity"] == (
+        operation_identity
+    )
+    assert secret not in json.dumps(exact_diagnostic, sort_keys=True)
+
+    class DerivedCheckpointFailure(trusted_failure_type):
+        pass
+
+    derived_failure = DerivedCheckpointFailure(
+        cuda_memory_facts=facts,
+        runtime_reason_identity="runtime_reported_memory_allocation_failure",
+    )
+    derived_outer = CegWmExperimentAdapterError(secret)
+    derived_outer.__cause__ = derived_failure
+    derived_diagnostic = _failure_diagnostic(derived_outer, active_binding=None)
+
+    assert _runtime_failure_safe_attribution(derived_outer) is None
+    assert "runtime_failure_operation_identity" not in derived_diagnostic
+    assert "runtime_failure_reason_identity" not in derived_diagnostic
+    assert "runtime_failure_cuda_memory_facts" not in derived_diagnostic
+    assert secret not in json.dumps(derived_diagnostic, sort_keys=True)
 
 
 @pytest.mark.unit
