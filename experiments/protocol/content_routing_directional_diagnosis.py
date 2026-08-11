@@ -55,8 +55,20 @@ REFERENCE_STATISTIC_IDENTITIES = (
 ROUTING_SEMANTIC_OBSERVATION_IDENTITY = "clip_patch_prompt_similarity_without_fitted_reference"
 ROUTED_ROUTE_IDENTITY = "routing_stqr"
 UNIFORM_ROUTE_IDENTITY = "routing_uniform_control"
-CONTENT_EMBEDDING_IDENTITY = "content_combination_calibrated"
+CONTENT_EMBEDDING_RESPONSIBILITY_ID = "content_embedder"
+CONTENT_EMBEDDING_BRANCH_IDENTITY = "lf_hf_routed_combination"
 PUBLIC_CONTENT_OPERATION = "FormalHfContentDetectionOperation"
+PUBLIC_SCORE_IDENTITY = "hf_only_public_content_operation"
+PUBLIC_SCORE_SEMANTICS = "content_score_equals_hf_result_hf_score"
+PUBLIC_SCORE_REQUIRED_NULL_RESULT_FIELDS = (
+    "lf_score",
+    "lf_result",
+    "combined_score",
+    "diagnostic_combination",
+    "diagnostic_identity",
+)
+LF_BRANCH_RESPONSIBILITY_IDS = ("lf_carrier", "content_embedder")
+LF_DETECTOR_USAGE = "prohibited"
 FUTURE_SPLIT_EXCLUSION_ROLES = (
     "routing_directional_validation",
     "candidate_selection",
@@ -191,6 +203,40 @@ class ContentRoutingManifest:
 
 
 @dataclass(frozen=True, slots=True)
+class ContentRoutingOperationalUnit:
+    unit_index: int
+    source_cluster_ordinal: int
+    phase: str
+    responsibility_id: str
+    content_branch_id: str
+    geometry_case_id: str
+    operational_role: str
+    case_ids: tuple[str, ...]
+    responsibility_result_digest_keys: tuple[str, ...]
+    counts_as_scientific_coverage: bool
+    scientific_claims_supported: bool
+
+    def validate(self, *, ordinal: int) -> None:
+        if (
+            self.unit_index != ordinal
+            or self.source_cluster_ordinal != ordinal
+            or self.phase != OPERATIONAL_PHASE
+            or self.responsibility_id != OPERATIONAL_RESPONSIBILITY_ID
+            or self.content_branch_id != OPERATIONAL_CONTENT_BRANCH_ID
+            or self.geometry_case_id != NOT_APPLICABLE_GEOMETRY_CASE_ID
+            or self.operational_role != OPERATIONAL_ROLE
+            or self.case_ids != OPERATIONAL_CASE_IDS
+            or self.responsibility_result_digest_keys
+            != (OPERATIONAL_RESULT_RESPONSIBILITY_ID,)
+            or self.counts_as_scientific_coverage is not False
+            or self.scientific_claims_supported is not False
+        ):
+            raise ContentRoutingDirectionalProtocolError(
+                "routing operational unit identity drifted"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class ContentRoutingDirectionalProtocol:
     schema_version: str
     protocol_id: str
@@ -206,8 +252,14 @@ class ContentRoutingDirectionalProtocol:
     future_split_exclusion_roles: tuple[str, ...]
     routing_candidate_identity: str
     uniform_control_identity: str
-    content_embedding_identity: str
+    content_embedding_responsibility_id: str
+    content_embedding_branch_identity: str
     public_content_operation: str
+    public_score_identity: str
+    public_score_semantics: str
+    public_score_required_null_result_fields: tuple[str, ...]
+    lf_branch_responsibility_ids: tuple[str, ...]
+    lf_detector_usage: str
     mixing_coefficient: float
     content_relative_l2_numerator: int
     content_relative_l2_denominator: int
@@ -223,9 +275,7 @@ class ContentRoutingDirectionalProtocol:
     maximum_total_units: int
     maximum_attempts_per_unit: int
     maximum_duration_seconds_per_unit: int
-    operational_role: str
-    operational_case_ids: tuple[str, ...]
-    operational_result_responsibility_id: str
+    operational_units: tuple[ContentRoutingOperationalUnit, ...]
     incremental_indicator_mean_requirement: float
     routing_coverage_requirement: float
     passing_outcome: str
@@ -239,16 +289,16 @@ class ContentRoutingDirectionalProtocol:
     def unit_roster(self) -> tuple[DevelopmentStudyUnit, ...]:
         operational = tuple(
             DevelopmentStudyUnit(
-                unit_index=ordinal,
-                phase=OPERATIONAL_PHASE,
-                responsibility_id=OPERATIONAL_RESPONSIBILITY_ID,
-                source_cluster_ordinal=ordinal,
-                content_branch_id=OPERATIONAL_CONTENT_BRANCH_ID,
-                geometry_case_id=NOT_APPLICABLE_GEOMETRY_CASE_ID,
+                unit_index=authority.unit_index,
+                phase=authority.phase,
+                responsibility_id=authority.responsibility_id,
+                source_cluster_ordinal=authority.source_cluster_ordinal,
+                content_branch_id=authority.content_branch_id,
+                geometry_case_id=authority.geometry_case_id,
                 maximum_record_attempts=MAXIMUM_ATTEMPTS_PER_UNIT,
                 maximum_duration_seconds=MAXIMUM_DURATION_SECONDS,
             )
-            for ordinal in range(OPERATIONAL_UNIT_COUNT)
+            for authority in self.operational_units
         )
         reference = tuple(
             DevelopmentStudyUnit(
@@ -292,8 +342,14 @@ class ContentRoutingDirectionalProtocol:
             "future_split_exclusion_roles": FUTURE_SPLIT_EXCLUSION_ROLES,
             "routing_candidate_identity": ROUTED_ROUTE_IDENTITY,
             "uniform_control_identity": UNIFORM_ROUTE_IDENTITY,
-            "content_embedding_identity": CONTENT_EMBEDDING_IDENTITY,
+            "content_embedding_responsibility_id": CONTENT_EMBEDDING_RESPONSIBILITY_ID,
+            "content_embedding_branch_identity": CONTENT_EMBEDDING_BRANCH_IDENTITY,
             "public_content_operation": PUBLIC_CONTENT_OPERATION,
+            "public_score_identity": PUBLIC_SCORE_IDENTITY,
+            "public_score_semantics": PUBLIC_SCORE_SEMANTICS,
+            "public_score_required_null_result_fields": PUBLIC_SCORE_REQUIRED_NULL_RESULT_FIELDS,
+            "lf_branch_responsibility_ids": LF_BRANCH_RESPONSIBILITY_IDS,
+            "lf_detector_usage": LF_DETECTOR_USAGE,
             "mixing_coefficient": MIXING_COEFFICIENT,
             "content_relative_l2_numerator": CONTENT_RELATIVE_L2_NUMERATOR,
             "content_relative_l2_denominator": CONTENT_RELATIVE_L2_DENOMINATOR,
@@ -309,9 +365,6 @@ class ContentRoutingDirectionalProtocol:
             "maximum_total_units": MAXIMUM_TOTAL_UNITS,
             "maximum_attempts_per_unit": MAXIMUM_ATTEMPTS_PER_UNIT,
             "maximum_duration_seconds_per_unit": MAXIMUM_DURATION_SECONDS,
-            "operational_role": OPERATIONAL_ROLE,
-            "operational_case_ids": OPERATIONAL_CASE_IDS,
-            "operational_result_responsibility_id": OPERATIONAL_RESULT_RESPONSIBILITY_ID,
             "incremental_indicator_mean_requirement": INCREMENTAL_INDICATOR_MEAN_REQUIREMENT,
             "routing_coverage_requirement": ROUTING_COVERAGE_REQUIREMENT,
             "passing_outcome": PASSING_OUTCOME,
@@ -325,6 +378,16 @@ class ContentRoutingDirectionalProtocol:
                 raise ContentRoutingDirectionalProtocolError(
                     f"routing protocol {field_name} drifted"
                 )
+        if len(self.operational_units) != OPERATIONAL_UNIT_COUNT:
+            raise ContentRoutingDirectionalProtocolError(
+                "routing operational unit count drifted"
+            )
+        for ordinal, unit in enumerate(self.operational_units):
+            if type(unit) is not ContentRoutingOperationalUnit:
+                raise ContentRoutingDirectionalProtocolError(
+                    "routing operational unit exact type required"
+                )
+            unit.validate(ordinal=ordinal)
         if (
             not self.prior_authority_bindings
             or any(
@@ -484,7 +547,24 @@ def load_content_routing_directional_protocol(
                 "reference_statistic_identities": tuple(
                     raw["reference_statistic_identities"]
                 ),
-                "operational_case_ids": tuple(raw["operational_case_ids"]),
+                "public_score_required_null_result_fields": tuple(
+                    raw["public_score_required_null_result_fields"]
+                ),
+                "lf_branch_responsibility_ids": tuple(
+                    raw["lf_branch_responsibility_ids"]
+                ),
+                "operational_units": tuple(
+                    ContentRoutingOperationalUnit(
+                        **{
+                            **item,
+                            "case_ids": tuple(item["case_ids"]),
+                            "responsibility_result_digest_keys": tuple(
+                                item["responsibility_result_digest_keys"]
+                            ),
+                        }
+                    )
+                    for item in raw["operational_units"]
+                ),
             }
         )
     except (TypeError, KeyError) as exc:
@@ -570,6 +650,7 @@ __all__ = [
     "ContentRoutingDirectionalProtocolError",
     "ContentRoutingManifest",
     "ContentRoutingManifestEntry",
+    "ContentRoutingOperationalUnit",
     "load_content_routing_directional_protocol",
     "load_content_routing_manifest",
     "reference_entries_for_probe",

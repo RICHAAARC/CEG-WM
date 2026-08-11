@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from experiments.metrics.content_routing_directional_diagnosis import (
+    ContentRoutingBlindScoreObservation,
     ContentRoutingDirectionalMetricError,
     aggregate_content_routing_directional_diagnosis,
+    create_content_routing_blind_score_observation,
     create_content_routing_directional_observation,
     create_content_routing_reference_measurement,
     exact_nearest_rank_positive_p95,
@@ -24,6 +26,7 @@ from experiments.protocol.content_routing_directional_diagnosis import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_routing_directional_diagnosis.json"
+pytestmark = pytest.mark.unit
 
 
 def _protocol_bundle():
@@ -47,22 +50,79 @@ def _reference_measurements():
     )
 
 
-def _observation(ordinal: int, *, routed_wins: bool = True, l2: float = 0.01):
+def _blind_score_rows(
+    ordinal: int,
+    *,
+    routed_wins: bool,
+) -> tuple[ContentRoutingBlindScoreObservation, ...]:
     uniform_score = 0.20 + ordinal * 0.001
     routed_score = uniform_score + (0.01 if routed_wins else -0.01)
+    rows: list[ContentRoutingBlindScoreObservation] = []
+    for arm_id, registered_score, candidate_digest, observation_digest in (
+        ("routed", routed_score, f"{ordinal + 101:064x}", f"{ordinal + 401:064x}"),
+        ("uniform", uniform_score, f"{ordinal + 301:064x}", f"{ordinal + 501:064x}"),
+    ):
+        common = {
+            "arm_id": arm_id,
+            "formal_mode": "hf_only",
+            "content_detector_identity": "main.content_detector",
+            "content_config_digest": "1" * 64,
+            "hf_detector_identity": "main.hf_detector",
+            "hf_detector_config_digest": "2" * 64,
+            "root_key_public_digest": "3" * 64,
+        }
+        rows.append(
+            create_content_routing_blind_score_observation(
+                **common,
+                control_role="registered",
+                wrong_key_index=None,
+                content_score=registered_score,
+                hf_score=registered_score,
+                content_input_image_digest=candidate_digest,
+                hf_observation_digest=observation_digest,
+                hf_template_digest="4" * 64,
+                key_role="registered",
+            )
+        )
+        rows.append(
+            create_content_routing_blind_score_observation(
+                **common,
+                control_role="paired_clean_primary_null",
+                wrong_key_index=None,
+                content_score=-0.08,
+                hf_score=-0.08,
+                content_input_image_digest="5" * 64,
+                hf_observation_digest=f"{ordinal + 601:064x}",
+                hf_template_digest="4" * 64,
+                key_role="registered",
+            )
+        )
+        for wrong_key_index in range(4):
+            wrong_score = -0.03 + wrong_key_index * 0.01
+            rows.append(
+                create_content_routing_blind_score_observation(
+                    **common,
+                    control_role="wrong_key_control",
+                    wrong_key_index=wrong_key_index,
+                    content_score=wrong_score,
+                    hf_score=wrong_score,
+                    content_input_image_digest=candidate_digest,
+                    hf_observation_digest=observation_digest,
+                    hf_template_digest=f"{wrong_key_index + 7:064x}",
+                    key_role="wrong",
+                )
+            )
+    return tuple(rows)
+
+
+def _observation(ordinal: int, *, routed_wins: bool = True, l2: float = 0.01):
     return create_content_routing_directional_observation(
         cluster_ordinal=ordinal,
         fold_index=ordinal % 4,
-        routed_registered_content_score=routed_score,
-        uniform_registered_content_score=uniform_score,
-        routed_registered_hf_score=routed_score,
-        uniform_registered_hf_score=uniform_score,
-        routed_registered_lf_score=0.03 + ordinal * 0.001,
-        uniform_registered_lf_score=0.02 + ordinal * 0.001,
-        routed_primary_null_content_score=-0.08,
-        uniform_primary_null_content_score=-0.08,
-        routed_wrong_key_content_scores=(-0.03, -0.02, -0.01, 0.0),
-        uniform_wrong_key_content_scores=(-0.03, -0.02, -0.01, 0.0),
+        blind_score_observations=_blind_score_rows(
+            ordinal,
+            routed_wins=routed_wins,
+        ),
         routed_mean_mask_lf=0.4,
         routed_mean_mask_hf=0.3,
         uniform_mean_mask_lf=1.0,
@@ -76,8 +136,6 @@ def _observation(ordinal: int, *, routed_wins: bool = True, l2: float = 0.01):
         routed_materialization_budget_status="accepted",
         uniform_materialization_budget_status="accepted",
         public_content_operation="FormalHfContentDetectionOperation",
-        detector_identity="main.hf_detector",
-        detector_config_digest="1" * 64,
         preprocessing_identity="rgb8_public_image_float32_unit_interval",
         routed_route_digest=f"{ordinal + 101:064x}",
         uniform_route_digest=f"{ordinal + 201:064x}",
@@ -106,13 +164,21 @@ def test_content_routing_protocol_freezes_forty_two_attempt_zero_units() -> None
         and unit.geometry_case_id == "geometry_case_not_applicable"
         for unit in operational
     )
-    assert protocol.operational_role == "environment_runtime_throughput_preflight"
-    assert protocol.operational_case_ids == (
-        "environment_identity_preflight",
-        "runtime_identity_preflight",
-        "throughput_preflight",
-    )
-    assert protocol.operational_result_responsibility_id == "content_embedder"
+    assert len(protocol.operational_units) == 2
+    for ordinal, authority in enumerate(protocol.operational_units):
+        assert authority.unit_index == ordinal
+        assert authority.source_cluster_ordinal == ordinal
+        assert authority.operational_role == "environment_runtime_throughput_preflight"
+        assert authority.case_ids == (
+            "environment_identity_preflight",
+            "runtime_identity_preflight",
+            "throughput_preflight",
+        )
+        assert authority.responsibility_result_digest_keys == (
+            "content_embedder",
+        )
+        assert authority.counts_as_scientific_coverage is False
+        assert authority.scientific_claims_supported is False
 
 
 def test_content_routing_cross_fit_excludes_probe_fold_and_uses_twenty_four() -> None:
@@ -169,6 +235,18 @@ def test_content_routing_manifest_digest_drift_fails_closed(tmp_path: Path) -> N
         load_content_routing_directional_protocol(path, repository_root=ROOT)
 
 
+def test_content_routing_operational_authority_drift_fails_closed(tmp_path: Path) -> None:
+    raw = json.loads(CONFIG.read_text(encoding="utf-8"))
+    raw["operational_units"][1]["scientific_claims_supported"] = True
+    path = tmp_path / "routing.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(
+        ContentRoutingDirectionalProtocolError,
+        match="operational unit identity drifted",
+    ):
+        load_content_routing_directional_protocol(path, repository_root=ROOT)
+
+
 def test_routing_reference_fits_only_texture_response_and_sensitivity() -> None:
     reference = fit_content_routing_fold_reference(
         _reference_measurements(),
@@ -201,10 +279,113 @@ def test_routing_observation_preserves_paired_scores_controls_and_identities() -
         observation.routed_clean_to_watermarked_rgb_relative_l2,
         observation.uniform_clean_to_watermarked_rgb_relative_l2,
     )
-    assert len(observation.routed_wrong_key_content_scores) == 4
-    assert len(observation.uniform_wrong_key_content_scores) == 4
-    assert observation.routed_registered_hf_score != observation.routed_registered_lf_score
+    assert len(observation.blind_score_observations) == 12
+    for arm_id in ("routed", "uniform"):
+        rows = tuple(
+            row for row in observation.blind_score_observations if row.arm_id == arm_id
+        )
+        assert len(rows) == 6
+        assert sum(row.control_role == "registered" for row in rows) == 1
+        assert sum(
+            row.control_role == "paired_clean_primary_null" for row in rows
+        ) == 1
+        assert tuple(
+            sorted(
+                row.wrong_key_index
+                for row in rows
+                if row.control_role == "wrong_key_control"
+            )
+        ) == (0, 1, 2, 3)
+        assert all(row.formal_mode == "hf_only" for row in rows)
+        assert all(row.content_score == row.hf_score for row in rows)
     assert observation.failure_class is None
+
+
+def test_routing_blind_score_row_fields_are_the_frozen_hf_only_surface() -> None:
+    assert tuple(field.name for field in fields(ContentRoutingBlindScoreObservation)) == (
+        "arm_id",
+        "control_role",
+        "wrong_key_index",
+        "content_score",
+        "hf_score",
+        "formal_mode",
+        "content_detector_identity",
+        "content_config_digest",
+        "hf_detector_identity",
+        "hf_detector_config_digest",
+        "content_input_image_digest",
+        "hf_observation_digest",
+        "hf_template_digest",
+        "root_key_public_digest",
+        "key_role",
+    )
+
+
+@pytest.mark.parametrize(
+    ("replacement", "match"),
+    (
+        ({"formal_mode": "combined"}, "blind score semantics"),
+        ({"content_score": 0.7}, "blind score semantics"),
+        ({"wrong_key_index": 0}, "blind score semantics"),
+    ),
+)
+def test_routing_blind_registered_score_rejects_non_hf_or_wrong_key_semantics(
+    replacement: dict[str, object],
+    match: str,
+) -> None:
+    values = asdict(_blind_score_rows(0, routed_wins=True)[0])
+    values.update(replacement)
+    with pytest.raises(ContentRoutingDirectionalMetricError, match=match):
+        create_content_routing_blind_score_observation(**values)
+
+
+def test_routing_blind_controls_require_same_candidate_and_registered_clean_key() -> None:
+    values = asdict(_observation(0))
+    for key in (
+        "observation_identity",
+        "incremental_indicator",
+        "routing_coverage",
+        "quality_relative_l2",
+    ):
+        values.pop(key)
+    rows = [ContentRoutingBlindScoreObservation(**row) for row in values["blind_score_observations"]]
+    wrong = asdict(rows[2])
+    wrong["content_input_image_digest"] = "f" * 64
+    rows[2] = ContentRoutingBlindScoreObservation(**wrong)
+    values["blind_score_observations"] = tuple(rows)
+    with pytest.raises(ContentRoutingDirectionalMetricError, match="control pairing"):
+        create_content_routing_directional_observation(**values)
+
+
+def test_routing_protocol_freezes_hf_only_score_and_embedder_responsibility() -> None:
+    protocol, _, _ = _protocol_bundle()
+    assert protocol.content_embedding_responsibility_id == "content_embedder"
+    assert protocol.content_embedding_branch_identity == "lf_hf_routed_combination"
+    assert protocol.public_content_operation == "FormalHfContentDetectionOperation"
+    assert protocol.public_score_identity == "hf_only_public_content_operation"
+    assert protocol.public_score_semantics == "content_score_equals_hf_result_hf_score"
+    assert protocol.public_score_required_null_result_fields == (
+        "lf_score",
+        "lf_result",
+        "combined_score",
+        "diagnostic_combination",
+        "diagnostic_identity",
+    )
+    assert protocol.lf_branch_responsibility_ids == (
+        "lf_carrier",
+        "content_embedder",
+    )
+    assert protocol.lf_detector_usage == "prohibited"
+    for relative in (
+        "configs/experiments/content_routing_directional_diagnosis.json",
+        "experiments/protocol/content_routing_directional_diagnosis.py",
+        "experiments/metrics/content_routing_directional_diagnosis.py",
+        "tests/unit/test_content_routing_directional_diagnosis.py",
+    ):
+        forbidden_identity = "content_" + "combination_calibrated"
+        assert forbidden_identity not in (ROOT / relative).read_text(
+            encoding="utf-8"
+        )
 
 
 def test_routing_observation_rejects_nonuniform_disabled_control() -> None:

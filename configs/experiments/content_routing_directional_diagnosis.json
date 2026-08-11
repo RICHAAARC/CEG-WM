@@ -70,8 +70,23 @@
   ],
   "routing_candidate_identity": "routing_stqr",
   "uniform_control_identity": "routing_uniform_control",
-  "content_embedding_identity": "content_combination_calibrated",
+  "content_embedding_responsibility_id": "content_embedder",
+  "content_embedding_branch_identity": "lf_hf_routed_combination",
   "public_content_operation": "FormalHfContentDetectionOperation",
+  "public_score_identity": "hf_only_public_content_operation",
+  "public_score_semantics": "content_score_equals_hf_result_hf_score",
+  "public_score_required_null_result_fields": [
+    "lf_score",
+    "lf_result",
+    "combined_score",
+    "diagnostic_combination",
+    "diagnostic_identity"
+  ],
+  "lf_branch_responsibility_ids": [
+    "lf_carrier",
+    "content_embedder"
+  ],
+  "lf_detector_usage": "prohibited",
   "mixing_coefficient": 0.5,
   "content_relative_l2_numerator": 3,
   "content_relative_l2_denominator": 250,
@@ -91,13 +106,46 @@
   "maximum_total_units": 42,
   "maximum_attempts_per_unit": 1,
   "maximum_duration_seconds_per_unit": 2700,
-  "operational_role": "environment_runtime_throughput_preflight",
-  "operational_case_ids": [
-    "environment_identity_preflight",
-    "runtime_identity_preflight",
-    "throughput_preflight"
+  "operational_units": [
+    {
+      "unit_index": 0,
+      "source_cluster_ordinal": 0,
+      "phase": "development_environment_preflight",
+      "responsibility_id": "development_environment_preflight",
+      "content_branch_id": "development_environment_preflight",
+      "geometry_case_id": "geometry_case_not_applicable",
+      "operational_role": "environment_runtime_throughput_preflight",
+      "case_ids": [
+        "environment_identity_preflight",
+        "runtime_identity_preflight",
+        "throughput_preflight"
+      ],
+      "responsibility_result_digest_keys": [
+        "content_embedder"
+      ],
+      "counts_as_scientific_coverage": false,
+      "scientific_claims_supported": false
+    },
+    {
+      "unit_index": 1,
+      "source_cluster_ordinal": 1,
+      "phase": "development_environment_preflight",
+      "responsibility_id": "development_environment_preflight",
+      "content_branch_id": "development_environment_preflight",
+      "geometry_case_id": "geometry_case_not_applicable",
+      "operational_role": "environment_runtime_throughput_preflight",
+      "case_ids": [
+        "environment_identity_preflight",
+        "runtime_identity_preflight",
+        "throughput_preflight"
+      ],
+      "responsibility_result_digest_keys": [
+        "content_embedder"
+      ],
+      "counts_as_scientific_coverage": false,
+      "scientific_claims_supported": false
+    }
   ],
-  "operational_result_responsibility_id": "content_embedder",
   "incremental_indicator_mean_requirement": 0.5,
   "routing_coverage_requirement": 0.0,
   "passing_outcome": "routing_directional_signal_observed",
