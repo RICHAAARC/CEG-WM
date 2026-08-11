@@ -511,6 +511,15 @@ def test_sd35_backend_rejects_equal_or_nested_storage_roots(
 
 
 def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: Path) -> None:
+    operation_grad_modes: dict[str, list[bool]] = {
+        "detection_noise": [],
+        "image_postprocess": [],
+        "image_preprocess": [],
+        "qk_transformer": [],
+        "vae_decode": [],
+        "vae_encode": [],
+    }
+
     class Scheduler:
         __module__ = "diffusers"
 
@@ -528,6 +537,9 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def scale_noise(self, sample, timestep, noise):
             assert timestep.numel() == 1
+            operation_grad_modes["detection_noise"].append(
+                torch.is_grad_enabled()
+            )
             return sample + noise
 
     Scheduler.__name__ = "FlowMatchEulerDiscreteScheduler"
@@ -548,6 +560,7 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def decode(self, latent, return_dict):
             assert return_dict is True
+            operation_grad_modes["vae_decode"].append(torch.is_grad_enabled())
             return types.SimpleNamespace(
                 sample=torch_functional.interpolate(
                     latent[:, :3],
@@ -558,6 +571,7 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def encode(self, image, return_dict):
             assert return_dict is True
+            operation_grad_modes["vae_encode"].append(torch.is_grad_enabled())
             mode = torch_functional.interpolate(
                 image,
                 size=(64, 64),
@@ -569,10 +583,16 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
     class ImageProcessor:
         def postprocess(self, value, output_type):
             assert output_type == "pt"
+            operation_grad_modes["image_postprocess"].append(
+                torch.is_grad_enabled()
+            )
             return value
 
         def preprocess(self, value, height, width):
             assert (height, width) == (512, 512)
+            operation_grad_modes["image_preprocess"].append(
+                torch.is_grad_enabled()
+            )
             return value
 
     class Attention(torch.nn.Module):
@@ -599,6 +619,9 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
 
         def forward(self, **kwargs):
             assert kwargs["return_dict"] is False
+            operation_grad_modes["qk_transformer"].append(
+                torch.is_grad_enabled()
+            )
             hidden = kwargs["hidden_states"].flatten(2).transpose(1, 2)
             for index in (0, 23):
                 attention = self.transformer_blocks[index].attn
@@ -742,6 +765,14 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
         parameter.grad is None
         for parameter in backend._pipeline.vae.parameters()
     )
+    assert operation_grad_modes == {
+        "detection_noise": [False, True],
+        "image_postprocess": [False, True],
+        "image_preprocess": [False, True],
+        "qk_transformer": [False, True],
+        "vae_decode": [False, True],
+        "vae_encode": [False, True],
+    }
 
     carrier = hf_carrier("delivery-e2e-key", tuple(latent.shape))
     paired = adapter.execute_content_write_and_vae(
