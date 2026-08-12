@@ -18,7 +18,7 @@ from experiments.protocol.hf_only_detector_directional_validation import (
 
 PROTOCOL_ID = "ceg_wm_content_routing_directional_diagnosis"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_content_routing_registered_key_correction_diagnosis"
+RUN_ID = "ceg_wm_content_routing_backend_binding_correction_diagnosis"
 OPERATIONAL_UNIT_COUNT = 2
 REFERENCE_FIT_CLUSTER_COUNT = 32
 DIRECTIONAL_PROBE_CLUSTER_COUNT = 8
