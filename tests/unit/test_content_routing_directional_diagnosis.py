@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import time
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -60,9 +61,14 @@ from experiments.runners.formal_operations import (
 )
 from main import RoutingObservations, SpatialRoutingObservation, identify_root_key
 from runtime import Sd35RuntimeAdapter, create_runtime_adapter
+from scripts.experiment_execution import (
+    content_routing_directional_diagnosis_entrypoint as entrypoint_module,
+)
 from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
     ContentRoutingDirectionalEntrypointError,
+    ContentRoutingDirectionalStartupError,
     _commit_dependency_blocked_probe_records,
+    _initialize_routing_resources,
     _registered_experiment_root,
     _reference_dependency_failure_class,
     _replay_aggregate,
@@ -1223,6 +1229,262 @@ def test_routing_registered_root_uses_frozen_hf_secret_domain() -> None:
             )
             != root
         )
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "failure_type", "expected_class", "expected_close_count"),
+    (
+        ("backend", MemoryError, "resource_failure", 0),
+        ("runtime", RuntimeError, "implementation_failure", 1),
+        ("semantic", RuntimeError, "implementation_failure", 1),
+    ),
+)
+def test_routing_startup_diagnostic_only_wraps_resource_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure_stage: str,
+    failure_type: type[Exception],
+    expected_class: str,
+    expected_close_count: int,
+) -> None:
+    failure = failure_type("must-not-persist")
+    close_calls: list[str] = []
+
+    class FakeRuntime:
+        def initialize(self, requested_device: str):
+            assert requested_device == "cuda"
+            if failure_stage == "runtime":
+                raise failure
+            return SimpleNamespace(runtime_config_digest="1" * 64)
+
+        def close(self) -> None:
+            close_calls.append("close")
+
+    def backend_factory(**_kwargs):
+        if failure_stage == "backend":
+            raise failure
+        return object()
+
+    monkeypatch.setattr(entrypoint_module, "Sd35PipelineBackend", backend_factory)
+    monkeypatch.setattr(
+        entrypoint_module,
+        "Sd35RuntimeAdapter",
+        lambda _backend, _configuration: FakeRuntime(),
+    )
+
+    def semantic_factory(**_kwargs):
+        if failure_stage == "semantic":
+            raise failure
+        return object()
+
+    monkeypatch.setattr(
+        entrypoint_module,
+        "DevelopmentSemanticObservationProducer",
+        semantic_factory,
+    )
+    with pytest.raises(ContentRoutingDirectionalStartupError) as caught:
+        _initialize_routing_resources(
+            cache=tmp_path / "cache",
+            persistent=tmp_path / "persistent",
+            hf_token="startup-test-token",
+            prompt="startup test prompt",
+            runtime_configuration=object(),
+        )
+    assert caught.value.__cause__ is failure
+    assert caught.value.failure_type == (
+        f"{type(failure).__module__}.{type(failure).__qualname__}"
+    )
+    assert caught.value.failure_class == expected_class
+    assert len(close_calls) == expected_close_count
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    (
+        "protocol_loader",
+        "component_loader",
+        "runtime_configuration",
+        "registered_root",
+    ),
+)
+def test_routing_authority_failures_preserve_original_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure_stage: str,
+) -> None:
+    failure = RuntimeError(f"{failure_stage} failure")
+    if failure_stage == "protocol_loader":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "load_content_routing_directional_protocol",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    elif failure_stage == "component_loader":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "load_ceg_wm_experiment_adapter_configuration",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    elif failure_stage == "runtime_configuration":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "load_runtime_configuration",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    else:
+        monkeypatch.setattr(
+            entrypoint_module,
+            "_registered_experiment_root",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    monkeypatch.setattr(
+        entrypoint_module,
+        "_initialize_routing_resources",
+        lambda **_kwargs: pytest.fail("resource initialization must be unreachable"),
+    )
+    with pytest.raises(RuntimeError) as caught:
+        entrypoint_module.execute_content_routing_directional_diagnosis_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=tmp_path / "persistent",
+            cache_root=tmp_path / "cache",
+            run_id="ceg_wm_content_routing_directional_diagnosis",
+            session_id="routing_authority_failure_session",
+            execution_package_sha256="b" * 64,
+            environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
+        )
+    assert caught.value is failure
+
+
+def test_routing_run_and_root_invariant_failures_are_not_startup_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ContentRoutingDirectionalEntrypointError, match="run identity"):
+        entrypoint_module.execute_content_routing_directional_diagnosis_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=tmp_path / "persistent",
+            cache_root=tmp_path / "cache",
+            run_id="routing_wrong_run",
+            session_id="routing_run_failure_session",
+            execution_package_sha256="b" * 64,
+            environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
+        )
+    monkeypatch.setattr(
+        entrypoint_module,
+        "_registered_experiment_root",
+        lambda root_key, **_kwargs: root_key,
+    )
+    with pytest.raises(ContentRoutingDirectionalEntrypointError, match="must differ"):
+        entrypoint_module.execute_content_routing_directional_diagnosis_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=tmp_path / "persistent",
+            cache_root=tmp_path / "cache",
+            run_id="ceg_wm_content_routing_directional_diagnosis",
+            session_id="routing_root_failure_session",
+            execution_package_sha256="b" * 64,
+            environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
+        )
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    ("candidate", "authority", "runner", "package", "sha", "store"),
+)
+def test_routing_post_initialization_failures_close_once_and_preserve_original(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure_stage: str,
+) -> None:
+    failure = RuntimeError(f"{failure_stage} failure")
+    close_calls: list[str] = []
+
+    class FakeRuntime:
+        def close(self) -> None:
+            close_calls.append("close")
+
+    runtime = FakeRuntime()
+    session = SimpleNamespace(runtime_config_digest="1" * 64)
+    semantic = object()
+    monkeypatch.setattr(
+        entrypoint_module,
+        "_initialize_routing_resources",
+        lambda **_kwargs: (runtime, session, semantic),
+    )
+    original_digest = entrypoint_module.canonical_digest
+
+    def controlled_digest(value):
+        if failure_stage == "candidate" and type(value) is dict and (
+            "routing_candidate_identity" in value
+        ):
+            raise failure
+        if failure_stage == "authority" and type(value) is dict and (
+            "root_key_public_digest" in value and "run_id" in value
+        ):
+            raise failure
+        return original_digest(value)
+
+    monkeypatch.setattr(entrypoint_module, "canonical_digest", controlled_digest)
+
+    class FakeRunner:
+        def create_persistence_unit_bindings(self):
+            return ()
+
+    if failure_stage == "runner":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "ContentRoutingDirectionalDiagnosisRunner",
+            lambda **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    else:
+        monkeypatch.setattr(
+            entrypoint_module,
+            "ContentRoutingDirectionalDiagnosisRunner",
+            lambda **_kwargs: FakeRunner(),
+        )
+    package = tmp_path / "package.zip"
+    package.write_bytes(b"package")
+    if failure_stage == "package":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "_build_or_verify_package",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    else:
+        monkeypatch.setattr(
+            entrypoint_module,
+            "_build_or_verify_package",
+            lambda *_args, **_kwargs: package,
+        )
+    if failure_stage == "sha":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "_sha256_file",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    else:
+        monkeypatch.setattr(entrypoint_module, "_sha256_file", lambda *_args: "b" * 64)
+    if failure_stage == "store":
+        monkeypatch.setattr(
+            entrypoint_module,
+            "DevelopmentPersistentStore",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+        )
+    with pytest.raises(RuntimeError) as caught:
+        entrypoint_module.execute_content_routing_directional_diagnosis_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=tmp_path / "persistent",
+            cache_root=tmp_path / "cache",
+            run_id="ceg_wm_content_routing_directional_diagnosis",
+            session_id="routing_post_initialization_failure_session",
+            execution_package_sha256="b" * 64,
+            environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
+        )
+    assert caught.value is failure
+    assert close_calls == ["close"]
 
 
 def test_routing_runner_calls_real_public_method_surfaces() -> None:

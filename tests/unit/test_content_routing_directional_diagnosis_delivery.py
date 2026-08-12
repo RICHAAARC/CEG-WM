@@ -19,6 +19,7 @@ from experiments.protocol.content_routing_directional_diagnosis import (
     load_content_routing_directional_protocol,
 )
 from scripts.experiment_execution import (
+    content_routing_directional_diagnosis_entrypoint as entrypoint_module,
     content_routing_directional_diagnosis_server as server_module,
 )
 from scripts.experiment_execution.content_routing_directional_diagnosis_server import (
@@ -171,9 +172,24 @@ def test_content_routing_entrypoint_preserves_fixed_execution_boundaries() -> No
     assert "_commit_dependency_blocked_probe_records" in source
     assert "verified_terminal_scientific_evidence" in source
     assert "aggregate_content_routing_directional_diagnosis" in source
-    assert source.index("raise ContentRoutingDirectionalStartupError") < source.index(
-        "store = DevelopmentPersistentStore("
-    )
+    startup_source = inspect.getsource(entrypoint_module._initialize_routing_resources)
+    for required_startup_boundary in (
+        "Sd35PipelineBackend(",
+        "Sd35RuntimeAdapter(",
+        'runtime.initialize("cuda")',
+        "DevelopmentSemanticObservationProducer(",
+        "raise ContentRoutingDirectionalStartupError",
+    ):
+        assert required_startup_boundary in startup_source
+    for forbidden_startup_boundary in (
+        "load_content_routing_directional_protocol",
+        "_registered_experiment_root",
+        "ContentRoutingDirectionalDiagnosisRunner",
+        "_build_or_verify_package",
+        "DevelopmentPersistentStore",
+        "create_session_intent",
+    ):
+        assert forbidden_startup_boundary not in startup_source
     assert "attempt_index" not in source or "create_session_intent" in source
     for forbidden in (
         "detect_lf(",
@@ -477,3 +493,34 @@ def test_content_routing_startup_diagnostic_rejects_subclass_and_existing_run(
             environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
             install_dependencies=False,
         )
+
+
+@pytest.mark.unit
+def test_content_routing_server_does_not_capture_plain_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    persistent, secret = _patch_server(monkeypatch, tmp_path)
+    failure = RuntimeError("ordinary worker failure")
+
+    def fail_plain(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr(
+        server_module,
+        "execute_content_routing_directional_diagnosis_session",
+        fail_plain,
+    )
+    with pytest.raises(RuntimeError) as caught:
+        execute_content_routing_directional_diagnosis_server_session(
+            repository_root=ROOT,
+            expected_revision="7" * 40,
+            persistent_root=persistent,
+            cache_root=tmp_path / "cache",
+            run_id=RUN_ID,
+            session_id="routing_plain_runtime_failure_session",
+            environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+            install_dependencies=False,
+        )
+    assert caught.value is failure
+    assert not (persistent / RUN_ID).exists()

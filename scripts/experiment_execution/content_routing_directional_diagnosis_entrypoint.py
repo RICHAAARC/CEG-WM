@@ -48,7 +48,13 @@ from experiments.runners.development_persistence import (
     SessionReceipt,
 )
 from main import identify_root_key, key_schedule_sha256_counter
-from runtime import Sd35PipelineBackend, create_runtime_adapter
+from runtime import (
+    RuntimeSession,
+    Sd35PipelineBackend,
+    Sd35RuntimeAdapter,
+    Sd35RuntimeConfiguration,
+    load_runtime_configuration,
+)
 from scripts.experiment_execution.development_exploration_entrypoint import (
     _base_latent,
     _build_or_verify_package,
@@ -123,6 +129,55 @@ def _resource_failure(error: BaseException) -> bool:
         visited.add(id(current))
         current = current.__cause__ or current.__context__
     return False
+
+
+def _close_runtime_preserving_failure(runtime: Sd35RuntimeAdapter | None) -> None:
+    if runtime is None:
+        return
+    try:
+        runtime.close()
+    except Exception:
+        pass
+
+
+def _initialize_routing_resources(
+    *,
+    cache: Path,
+    persistent: Path,
+    hf_token: str,
+    prompt: str,
+    runtime_configuration: Sd35RuntimeConfiguration,
+) -> tuple[
+    Sd35RuntimeAdapter,
+    RuntimeSession,
+    DevelopmentSemanticObservationProducer,
+]:
+    """Initialize only the bounded GPU/model resources admitted as startup failures."""
+
+    runtime = None
+    try:
+        backend = Sd35PipelineBackend(
+            cache_root=cache,
+            persistent_root=persistent,
+            hf_token=hf_token,
+            prompt=prompt,
+        )
+        runtime = Sd35RuntimeAdapter(backend, runtime_configuration)
+        session = runtime.initialize("cuda")
+        semantic = DevelopmentSemanticObservationProducer(
+            cache_root=cache,
+            hf_token=hf_token,
+            device="cuda:0",
+        )
+    except Exception as exc:
+        _close_runtime_preserving_failure(runtime)
+        raise ContentRoutingDirectionalStartupError(
+            failure_type=f"{type(exc).__module__}.{type(exc).__qualname__}",
+            failure_class=(
+                "resource_failure" if _resource_failure(exc) else "implementation_failure"
+            ),
+        ) from exc
+    return runtime, session, semantic
 
 
 def _replay_aggregate(records: tuple[DevelopmentScientificRecord, ...]):
@@ -276,47 +331,40 @@ def execute_content_routing_directional_diagnosis_session(
         raise ContentRoutingDirectionalEntrypointError(
             "HF_TOKEN and CEG_WM_ROOT_KEY are required"
         )
-    runtime = None
+    protocol, reference_manifest, probe_manifest = (
+        load_content_routing_directional_protocol(
+            repository / PROTOCOL_PATH,
+            repository_root=repository,
+        )
+    )
+    if run_id != protocol.run_id:
+        raise ContentRoutingDirectionalEntrypointError("run identity drifted")
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH)
+    )
+    runtime_configuration = load_runtime_configuration(repository / RUNTIME_PATH)
+    protocol_digest = protocol.digest()
+    reference_manifest_digest = canonical_digest(asdict(reference_manifest))
+    probe_manifest_digest = canonical_digest(asdict(probe_manifest))
+    registered_root = _registered_experiment_root(
+        root_key,
+        protocol_digest=protocol_digest,
+        reference_manifest_digest=reference_manifest_digest,
+        probe_manifest_digest=probe_manifest_digest,
+    )
+    public_root = identify_root_key(registered_root).root_key_public_digest
+    if public_root == identify_root_key(root_key).root_key_public_digest:
+        raise ContentRoutingDirectionalEntrypointError(
+            "routing registered root must differ from the base root"
+        )
+    runtime, session, semantic = _initialize_routing_resources(
+        cache=cache,
+        persistent=persistent,
+        hf_token=hf_token,
+        prompt=reference_manifest.entries[0].prompt,
+        runtime_configuration=runtime_configuration,
+    )
     try:
-        protocol, reference_manifest, probe_manifest = (
-            load_content_routing_directional_protocol(
-                repository / PROTOCOL_PATH,
-                repository_root=repository,
-            )
-        )
-        if run_id != protocol.run_id:
-            raise ContentRoutingDirectionalEntrypointError("run identity drifted")
-        first_entry = reference_manifest.entries[0]
-        backend = Sd35PipelineBackend(
-            cache_root=cache,
-            persistent_root=persistent,
-            hf_token=hf_token,
-            prompt=first_entry.prompt,
-        )
-        runtime = create_runtime_adapter(backend, repository / RUNTIME_PATH)
-        session = runtime.initialize("cuda")
-        adapter = CegWmExperimentAdapter(
-            load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH)
-        )
-        semantic = DevelopmentSemanticObservationProducer(
-            cache_root=cache,
-            hf_token=hf_token,
-            device="cuda:0",
-        )
-        protocol_digest = protocol.digest()
-        reference_manifest_digest = canonical_digest(asdict(reference_manifest))
-        probe_manifest_digest = canonical_digest(asdict(probe_manifest))
-        registered_root = _registered_experiment_root(
-            root_key,
-            protocol_digest=protocol_digest,
-            reference_manifest_digest=reference_manifest_digest,
-            probe_manifest_digest=probe_manifest_digest,
-        )
-        public_root = identify_root_key(registered_root).root_key_public_digest
-        if public_root == identify_root_key(root_key).root_key_public_digest:
-            raise ContentRoutingDirectionalEntrypointError(
-                "routing registered root must differ from the base root"
-            )
         candidate_digest = canonical_digest(
             {
                 "adapter_config_digest": adapter.configuration.config_digest,
@@ -362,35 +410,29 @@ def execute_content_routing_directional_diagnosis_session(
                 "reference": reference_manifest_digest,
             }
         )
-    except Exception as exc:
-        if runtime is not None:
-            runtime.close()
-        raise ContentRoutingDirectionalStartupError(
-            failure_type=f"{type(exc).__module__}.{type(exc).__qualname__}",
-            failure_class=(
-                "resource_failure" if _resource_failure(exc) else "implementation_failure"
+        store = DevelopmentPersistentStore(
+            persistent,
+            run_id=run_id,
+            worker_identity=FrozenWorkerIdentity(
+                revision=expected_revision,
+                protocol_digest=protocol_digest,
+                execution_intent_authority_digest=authority_digest,
+                input_manifest_digest=input_manifest_digest,
+                candidate_config_digest=candidate_digest,
+                unit_roster_digest=protocol.unit_roster_digest,
             ),
-        ) from exc
-    store = DevelopmentPersistentStore(
-        persistent,
-        run_id=run_id,
-        worker_identity=FrozenWorkerIdentity(
-            revision=expected_revision,
-            protocol_digest=protocol_digest,
-            execution_intent_authority_digest=authority_digest,
-            input_manifest_digest=input_manifest_digest,
-            candidate_config_digest=candidate_digest,
-            unit_roster_digest=protocol.unit_roster_digest,
-        ),
-        registered_unit_bindings=runner.create_persistence_unit_bindings(),
-    )
-    started_epoch = int(time.time())
-    lease = store.acquire_lease(
-        session_id=session_id,
-        now_epoch_seconds=started_epoch,
-        lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1,
-    )
-    cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
+            registered_unit_bindings=runner.create_persistence_unit_bindings(),
+        )
+        started_epoch = int(time.time())
+        lease = store.acquire_lease(
+            session_id=session_id,
+            now_epoch_seconds=started_epoch,
+            lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1,
+        )
+        cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
+    except Exception:
+        _close_runtime_preserving_failure(runtime)
+        raise
     committed_before = cursor.initial_committed_count
     termination_reason = "frozen_roster_complete"
     failure: dict[str, object] | None = None
