@@ -30,6 +30,12 @@ class ContentRoutingDirectionalMetricError(ValueError):
     """A routing directional metric input is invalid."""
 
 
+class ContentRoutingReferencePositiveSupportError(
+    ContentRoutingDirectionalMetricError
+):
+    """A frozen reference fold contains no strictly positive fit values."""
+
+
 def _is_sha256(value: object) -> bool:
     return (
         type(value) is str
@@ -51,17 +57,24 @@ def _digest(value: object) -> str:
 
 
 def exact_nearest_rank_positive_p95(values: Sequence[float]) -> float:
-    items = tuple(float(value) for value in values)
+    items = tuple(values)
+    if any(
+        type(value) is not float or not isfinite(value) or value < 0.0
+        for value in items
+    ):
+        raise ContentRoutingDirectionalMetricError(
+            "routing reference values must be exact finite nonnegative floats"
+        )
     positive = tuple(
         sorted(
             value
             for value in items
-            if isfinite(value) and value > 0.0
+            if value > 0.0
         )
     )
-    if len(positive) != len(items) or not positive:
-        raise ContentRoutingDirectionalMetricError(
-            "routing reference values must all be finite and strictly positive"
+    if not positive:
+        raise ContentRoutingReferencePositiveSupportError(
+            "routing reference positive support is absent"
         )
     return positive[ceil(0.95 * len(positive)) - 1]
 
@@ -101,7 +114,7 @@ class ContentRoutingReferenceMeasurement:
                 or any(
                     type(value) is not float
                     or not isfinite(value)
-                    or value <= 0.0
+                    or value < 0.0
                     for value in values
                 )
                 for values, shape in spatial_axes
@@ -826,6 +839,7 @@ __all__ = [
     "ContentRoutingDirectionalObservation",
     "ContentRoutingFoldReference",
     "ContentRoutingReferenceMeasurement",
+    "ContentRoutingReferencePositiveSupportError",
     "aggregate_content_routing_directional_diagnosis",
     "create_content_routing_blind_score_observation",
     "create_content_routing_directional_observation",

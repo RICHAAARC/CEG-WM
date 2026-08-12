@@ -33,6 +33,7 @@ from experiments.protocol.development_records import (
     DevelopmentScientificRecord,
 )
 from experiments.runners.content_routing_directional_diagnosis import (
+    ContentRoutingReferencePositiveSupportAbsentError,
     ContentRoutingDirectionalDiagnosisRunner,
 )
 from experiments.runners.development_inputs import (
@@ -81,6 +82,31 @@ class ContentRoutingDirectionalStartupError(RuntimeError):
         super().__init__("content routing startup failed")
         self.failure_type = failure_type
         self.failure_class = failure_class
+
+
+def _routing_candidate_config_digest(
+    *,
+    adapter_config_digest: str,
+    protocol,
+    probe_manifest_digest: str,
+    reference_manifest_digest: str,
+    runtime_config_digest: str,
+) -> str:
+    """Bind the frozen routing candidate and reference-support semantics."""
+
+    return canonical_digest(
+        {
+            "adapter_config_digest": adapter_config_digest,
+            "fit_support_rule": protocol.fit_support_rule,
+            "mixing_coefficient": protocol.mixing_coefficient,
+            "probe_manifest_digest": probe_manifest_digest,
+            "raw_reference_support_rule": protocol.raw_reference_support_rule,
+            "reference_manifest_digest": reference_manifest_digest,
+            "reference_quantile_rule": protocol.reference_quantile_rule,
+            "routing_candidate_identity": protocol.routing_candidate_identity,
+            "runtime_config_digest": runtime_config_digest,
+        }
+    )
 
 
 def _registered_experiment_root(
@@ -270,6 +296,7 @@ def _commit_dependency_blocked_probe_records(
     lease,
     runner: ContentRoutingDirectionalDiagnosisRunner,
     failure_class: str,
+    failure_reason: str = "routing_reference_dependency_blocked",
     raw_secret_values: tuple[str, ...],
 ) -> tuple[DevelopmentScientificRecord, ...]:
     """Commit the remaining fixed probe denominator without running observations."""
@@ -277,6 +304,13 @@ def _commit_dependency_blocked_probe_records(
     if failure_class not in {"implementation_failure", "resource_failure"}:
         raise ContentRoutingDirectionalEntrypointError(
             "routing dependency failure class is invalid"
+        )
+    if failure_reason not in {
+        "routing_reference_dependency_blocked",
+        "routing_reference_positive_support_absent",
+    }:
+        raise ContentRoutingDirectionalEntrypointError(
+            "routing dependency failure reason is invalid"
         )
     while cursor.next_unit_index < len(runner.protocol.unit_roster):
         if cursor.next_unit_index < 34:
@@ -288,7 +322,7 @@ def _commit_dependency_blocked_probe_records(
         record = runner.create_failed_probe_record(
             intent=intent,
             failure_class=failure_class,
-            failure_reason="routing_reference_dependency_blocked",
+            failure_reason=failure_reason,
             elapsed_seconds=0.0,
         )
         store.commit_session_unit(
@@ -366,15 +400,12 @@ def execute_content_routing_directional_diagnosis_session(
         runtime_configuration=runtime_configuration,
     )
     try:
-        candidate_digest = canonical_digest(
-            {
-                "adapter_config_digest": adapter.configuration.config_digest,
-                "mixing_coefficient": protocol.mixing_coefficient,
-                "probe_manifest_digest": probe_manifest_digest,
-                "reference_manifest_digest": reference_manifest_digest,
-                "routing_candidate_identity": protocol.routing_candidate_identity,
-                "runtime_config_digest": session.runtime_config_digest,
-            }
+        candidate_digest = _routing_candidate_config_digest(
+            adapter_config_digest=adapter.configuration.config_digest,
+            protocol=protocol,
+            probe_manifest_digest=probe_manifest_digest,
+            reference_manifest_digest=reference_manifest_digest,
+            runtime_config_digest=session.runtime_config_digest,
         )
         authority_digest = canonical_digest(
             {
@@ -461,6 +492,23 @@ def execute_content_routing_directional_diagnosis_session(
                 )
                 aggregate = asdict(_replay_aggregate(records))
                 break
+            if unit.unit_index == 34:
+                try:
+                    runner.validate_reference_positive_support(
+                        cursor.routing_reference_records
+                    )
+                except ContentRoutingReferencePositiveSupportAbsentError:
+                    records = _commit_dependency_blocked_probe_records(
+                        store=store,
+                        cursor=cursor,
+                        lease=lease,
+                        runner=runner,
+                        failure_class="implementation_failure",
+                        failure_reason="routing_reference_positive_support_absent",
+                        raw_secret_values=(root_key, registered_root, hf_token),
+                    )
+                    aggregate = asdict(_replay_aggregate(records))
+                    break
             entry = (
                 reference_manifest.entries[unit.source_cluster_ordinal]
                 if unit.unit_index < 34

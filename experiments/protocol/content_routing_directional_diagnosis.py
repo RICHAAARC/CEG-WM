@@ -46,7 +46,9 @@ OPERATIONAL_CASE_IDS = (
 OPERATIONAL_RESULT_RESPONSIBILITY_ID = "content_embedder"
 REFERENCE_FIT_ROLE = "content_routing_reference_fit"
 DIRECTIONAL_PROBE_ROLE = "content_routing_directional_probe"
-REFERENCE_QUANTILE_RULE = "strictly_positive_exact_nearest_rank_p95"
+RAW_REFERENCE_SUPPORT_RULE = "finite_nonnegative"
+FIT_SUPPORT_RULE = "strictly_positive_values_only"
+REFERENCE_QUANTILE_RULE = "exact_nearest_rank_positive_p95"
 REFERENCE_STATISTIC_IDENTITIES = (
     "texture_gradient_reference",
     "latent_response_reference",
@@ -266,6 +268,8 @@ class ContentRoutingDirectionalProtocol:
     content_relative_l2_denominator: int
     cross_fit_fold_count: int
     reference_fit_count_per_probe: int
+    raw_reference_support_rule: str
+    fit_support_rule: str
     reference_quantile_rule: str
     reference_statistic_identities: tuple[str, ...]
     semantic_observation_identity: str
@@ -356,6 +360,8 @@ class ContentRoutingDirectionalProtocol:
             "content_relative_l2_denominator": CONTENT_RELATIVE_L2_DENOMINATOR,
             "cross_fit_fold_count": CROSS_FIT_FOLD_COUNT,
             "reference_fit_count_per_probe": REFERENCE_FIT_COUNT_PER_PROBE,
+            "raw_reference_support_rule": RAW_REFERENCE_SUPPORT_RULE,
+            "fit_support_rule": FIT_SUPPORT_RULE,
             "reference_quantile_rule": REFERENCE_QUANTILE_RULE,
             "reference_statistic_identities": REFERENCE_STATISTIC_IDENTITIES,
             "semantic_observation_identity": ROUTING_SEMANTIC_OBSERVATION_IDENTITY,

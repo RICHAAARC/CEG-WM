@@ -13,7 +13,9 @@ import torch
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.content_routing_directional_diagnosis import (
     ContentRoutingDirectionalObservation,
+    ContentRoutingFoldReference,
     ContentRoutingReferenceMeasurement,
+    ContentRoutingReferencePositiveSupportError,
     create_content_routing_blind_score_observation,
     create_content_routing_directional_observation,
     create_content_routing_reference_measurement,
@@ -70,6 +72,12 @@ from runtime import Sd35RuntimeAdapter
 
 class ContentRoutingDirectionalRunnerError(RuntimeError):
     """The routing diagnosis violated its frozen public execution contract."""
+
+
+class ContentRoutingReferencePositiveSupportAbsentError(
+    ContentRoutingDirectionalRunnerError
+):
+    """A frozen cross-fit fold lacks positive routing-reference support."""
 
 
 def _rgb8(image: torch.Tensor) -> torch.Tensor:
@@ -316,6 +324,16 @@ class ContentRoutingDirectionalDiagnosisRunner:
             base_latent,
             sample_index=ordinal,
         )
+        create_content_routing_reference_measurement(
+            cluster_ordinal=ordinal,
+            fold_index=ordinal % 4,
+            texture_gradient_values=tuple(measurement.texture_gradient_values),
+            texture_spatial_shape=tuple(measurement.texture_spatial_shape),
+            response_ratio_values=tuple(measurement.response_ratio_values),
+            response_spatial_shape=tuple(measurement.response_spatial_shape),
+            sensitivity_ratio_values=tuple(measurement.sensitivity_ratio_values),
+            sensitivity_spatial_shape=tuple(measurement.sensitivity_spatial_shape),
+        )
         elapsed = float(monotonic() - started)
         if elapsed > intent.maximum_duration_seconds:
             raise ContentRoutingDirectionalRunnerError("reference unit exceeded duration")
@@ -428,6 +446,31 @@ class ContentRoutingDirectionalDiagnosisRunner:
             sensitivity_ratio_values=tuple(payload["sensitivity_ratio_values"]),
             sensitivity_spatial_shape=tuple(payload["sensitivity_spatial_shape"]),
         )
+
+    @classmethod
+    def validate_reference_positive_support(
+        cls,
+        records: Sequence[DevelopmentRoutingReferenceRecord],
+    ) -> tuple[ContentRoutingFoldReference, ...]:
+        """Budget all four frozen cross-fit references before any probe call."""
+
+        measurements = tuple(
+            cls.reference_measurement_from_committed_record(record)
+            for record in records
+        )
+        try:
+            references = tuple(
+                fit_content_routing_fold_reference(
+                    measurements,
+                    probe_fold_index=fold_index,
+                )
+                for fold_index in range(4)
+            )
+        except ContentRoutingReferencePositiveSupportError as exc:
+            raise ContentRoutingReferencePositiveSupportAbsentError(
+                "routing_reference_positive_support_absent"
+            ) from exc
+        return references
 
     def _routing_observations(
         self,

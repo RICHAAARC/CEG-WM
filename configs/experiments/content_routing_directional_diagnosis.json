@@ -92,7 +92,9 @@
   "content_relative_l2_denominator": 250,
   "cross_fit_fold_count": 4,
   "reference_fit_count_per_probe": 24,
-  "reference_quantile_rule": "strictly_positive_exact_nearest_rank_p95",
+  "raw_reference_support_rule": "finite_nonnegative",
+  "fit_support_rule": "strictly_positive_values_only",
+  "reference_quantile_rule": "exact_nearest_rank_positive_p95",
   "reference_statistic_identities": [
     "texture_gradient_reference",
     "latent_response_reference",

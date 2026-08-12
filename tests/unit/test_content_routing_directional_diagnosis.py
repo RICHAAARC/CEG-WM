@@ -5,6 +5,7 @@ from dataclasses import asdict, fields, replace
 import importlib
 import inspect
 import json
+from math import ceil
 from pathlib import Path
 import shutil
 import time
@@ -22,6 +23,7 @@ from experiments.methods import (
 from experiments.metrics.content_routing_directional_diagnosis import (
     ContentRoutingBlindScoreObservation,
     ContentRoutingDirectionalMetricError,
+    ContentRoutingReferencePositiveSupportError,
     aggregate_content_routing_directional_diagnosis,
     create_content_routing_blind_score_observation,
     create_content_routing_directional_observation,
@@ -48,6 +50,7 @@ from experiments.protocol.development_records import (
 )
 from experiments.runners.content_routing_directional_diagnosis import (
     ContentRoutingDirectionalDiagnosisRunner,
+    ContentRoutingReferencePositiveSupportAbsentError,
 )
 from experiments.runners.development_inputs import (
     DevelopmentSemanticObservationProducer,
@@ -192,6 +195,31 @@ def _failed_reference_record(
             "measurement_payload": {},
         }
     )
+    draft = DevelopmentRoutingReferenceRecord(**payload)
+    payload["record_id"] = canonical_development_value_digest(
+        draft.payload_without_record_id()
+    )
+    return DevelopmentRoutingReferenceRecord.from_payload(payload)
+
+
+def _zero_reference_record(
+    ordinal: int,
+    *,
+    axis: str | None = None,
+) -> DevelopmentRoutingReferenceRecord:
+    payload = _persistent_reference_record(ordinal).payload()
+    measurement = dict(payload["measurement_payload"])
+    axis_names = (
+        "texture_gradient_values",
+        "response_ratio_values",
+        "sensitivity_ratio_values",
+    )
+    for field_name in axis_names:
+        if axis is None or field_name == axis:
+            measurement[field_name] = [
+                0.0 for _value in measurement[field_name]
+            ]
+    payload.update(record_id="0" * 64, measurement_payload=measurement)
     draft = DevelopmentRoutingReferenceRecord(**payload)
     payload["record_id"] = canonical_development_value_digest(
         draft.payload_without_record_id()
@@ -508,6 +536,36 @@ def test_routing_reference_fits_only_texture_response_and_sensitivity() -> None:
     assert reference.local_sensitivity_reference == 231.25
 
 
+def test_routing_protocol_freezes_distinct_raw_and_fit_support_rules() -> None:
+    protocol, _reference, _probes = _protocol_bundle()
+    assert protocol.raw_reference_support_rule == "finite_nonnegative"
+    assert protocol.fit_support_rule == "strictly_positive_values_only"
+    assert protocol.reference_quantile_rule == "exact_nearest_rank_positive_p95"
+
+    digest_arguments = {
+        "adapter_config_digest": "1" * 64,
+        "probe_manifest_digest": "2" * 64,
+        "reference_manifest_digest": "3" * 64,
+        "runtime_config_digest": "4" * 64,
+    }
+    identity = entrypoint_module._routing_candidate_config_digest(
+        protocol=protocol,
+        **digest_arguments,
+    )
+    assert identity != entrypoint_module._routing_candidate_config_digest(
+        protocol=replace(protocol, fit_support_rule="drifted_fit_support"),
+        **digest_arguments,
+    )
+    assert identity != entrypoint_module._routing_candidate_config_digest(
+        protocol=replace(protocol, raw_reference_support_rule="drifted_raw_support"),
+        **digest_arguments,
+    )
+    assert identity != entrypoint_module._routing_candidate_config_digest(
+        protocol=replace(protocol, reference_quantile_rule="drifted_quantile"),
+        **digest_arguments,
+    )
+
+
 @pytest.mark.parametrize(
     "changed_field",
     (
@@ -635,6 +693,36 @@ def test_routing_reference_dependency_unknown_missing_or_nonterminal_fails_close
 ) -> None:
     with pytest.raises(expected_error):
         _reference_dependency_failure_class(records)
+
+
+def test_routing_reference_positive_support_budget_validates_all_four_folds() -> None:
+    records = tuple(_persistent_reference_record(index) for index in range(32))
+    references = (
+        ContentRoutingDirectionalDiagnosisRunner.validate_reference_positive_support(
+            records
+        )
+    )
+    assert tuple(reference.probe_fold_index for reference in references) == (
+        0,
+        1,
+        2,
+        3,
+    )
+    assert all(len(reference.fit_cluster_ordinals) == 24 for reference in references)
+
+
+def test_routing_reference_positive_support_budget_fails_before_probe_calls() -> None:
+    records = tuple(
+        _zero_reference_record(index, axis="texture_gradient_values")
+        for index in range(32)
+    )
+    with pytest.raises(
+        ContentRoutingReferencePositiveSupportAbsentError,
+        match="routing_reference_positive_support_absent",
+    ):
+        ContentRoutingDirectionalDiagnosisRunner.validate_reference_positive_support(
+            records
+        )
 
 
 @pytest.mark.parametrize(
@@ -766,6 +854,143 @@ def test_routing_dependency_block_commits_fixed_probe_denominator_and_recovers(
             recovered,
             lease,
             now_epoch_seconds=epoch + 201,
+        )
+
+
+def test_routing_positive_support_block_uses_fixed_denominator_and_stable_reason(
+    tmp_path: Path,
+) -> None:
+    runner = _persistence_runner()
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.protocol.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest="d" * 64,
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=runner.protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_positive_support_block_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    base = torch.ones((1, 16, 2, 2), dtype=torch.float16)
+    for unit_index in range(2):
+        intent = store.create_session_intent(
+            cursor, lease, now_epoch_seconds=epoch + 1 + unit_index * 2
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=runner.execute_operational_unit(
+                unit_index=unit_index,
+                base_latent=base,
+                intent=intent,
+            ),
+            now_epoch_seconds=epoch + 2 + unit_index * 2,
+        )
+    for ordinal in range(32):
+        intent = store.create_session_intent(
+            cursor, lease, now_epoch_seconds=epoch + 10 + ordinal * 2
+        )
+        record = _bound_reference_record(runner, intent)
+        zero_payload = _zero_reference_record(ordinal).payload()
+        record_payload = record.payload()
+        record_payload.update(
+            record_id="0" * 64,
+            measurement_payload=zero_payload["measurement_payload"],
+        )
+        draft = DevelopmentRoutingReferenceRecord(**record_payload)
+        record_payload["record_id"] = canonical_development_value_digest(
+            draft.payload_without_record_id()
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=DevelopmentRoutingReferenceRecord.from_payload(record_payload),
+            now_epoch_seconds=epoch + 11 + ordinal * 2,
+        )
+    assert cursor.next_unit_index == 34
+    with pytest.raises(ContentRoutingReferencePositiveSupportAbsentError):
+        runner.validate_reference_positive_support(cursor.routing_reference_records)
+    records = _commit_dependency_blocked_probe_records(
+        store=store,
+        cursor=cursor,
+        lease=lease,
+        runner=runner,
+        failure_class="implementation_failure",
+        failure_reason="routing_reference_positive_support_absent",
+        raw_secret_values=(),
+    )
+    aggregate = _replay_aggregate(records)
+    recovered = store.open_session_cursor(lease, now_epoch_seconds=epoch + 200)
+    replayed_records = _commit_dependency_blocked_probe_records(
+        store=store,
+        cursor=recovered,
+        lease=lease,
+        runner=runner,
+        failure_class="implementation_failure",
+        failure_reason="routing_reference_positive_support_absent",
+        raw_secret_values=(),
+    )
+    assert len(records) == 8
+    assert all(
+        record.failure_reason == "routing_reference_positive_support_absent"
+        and record.execution_status == "failed"
+        and record.operation_result_payload == {}
+        for record in records
+    )
+    assert aggregate.outcome == "implementation_blocked"
+    assert aggregate.successful_probe_count == 0
+    assert recovered.next_unit_index == 42
+    assert len(recovered.committed_units) == 42
+    assert tuple(record.record_id for record in replayed_records) == tuple(
+        record.record_id for record in records
+    )
+
+
+def test_routing_positive_support_budget_precedes_probe_intent_and_execution() -> None:
+    source = inspect.getsource(
+        entrypoint_module.execute_content_routing_directional_diagnosis_session
+    )
+    budget_call = source.index("runner.validate_reference_positive_support(")
+    next_intent = source.index(
+        "intent = store.create_session_intent",
+        source.index("if unit.unit_index == 34:"),
+    )
+    probe_call = source.index("record = runner.execute_probe_unit(")
+    assert budget_call < next_intent < probe_call
+    assert source.count("runner.validate_reference_positive_support(") == 1
+
+
+def test_routing_dependency_block_rejects_unknown_failure_reason(
+    tmp_path: Path,
+) -> None:
+    runner = _persistence_runner()
+    store = object.__new__(DevelopmentPersistentStore)
+    with pytest.raises(
+        ContentRoutingDirectionalEntrypointError,
+        match="failure reason is invalid",
+    ):
+        _commit_dependency_blocked_probe_records(
+            store=store,
+            cursor=object(),
+            lease=object(),
+            runner=runner,
+            failure_class="implementation_failure",
+            failure_reason="unregistered_reference_reason",
+            raw_secret_values=(),
         )
 
 
@@ -1714,7 +1939,7 @@ def test_routing_runner_source_uses_runtime_semantic_and_public_detector_calls()
 @pytest.mark.parametrize(
     ("changed_field", "changed_value"),
     (
-        ("texture_gradient_values", (1.0, 0.0)),
+        ("texture_gradient_values", (1.0, -0.25)),
         ("response_ratio_values", (2.0, float("inf"))),
         ("sensitivity_ratio_values", (3.0, float("nan"))),
         ("texture_spatial_shape", (1, 3)),
@@ -1758,10 +1983,204 @@ def test_routing_reference_roster_incomplete_or_duplicated_fails_closed() -> Non
         )
 
 
-def test_exact_nearest_rank_p95_rejects_nonpositive_reference_values() -> None:
-    assert exact_nearest_rank_positive_p95((1.0, 2.0, 3.0, 4.0)) == 4.0
-    with pytest.raises(ContentRoutingDirectionalMetricError, match="strictly positive"):
-        exact_nearest_rank_positive_p95((1.0, 0.0, 2.0))
+def test_exact_nearest_rank_p95_excludes_zero_without_interpolation() -> None:
+    assert exact_nearest_rank_positive_p95((0.0, 1.0, 2.0, 0.0, 3.0)) == 3.0
+    with pytest.raises(
+        ContentRoutingReferencePositiveSupportError,
+        match="positive support is absent",
+    ):
+        exact_nearest_rank_positive_p95((0.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    (-0.25, float("nan"), float("inf"), 1),
+)
+def test_exact_nearest_rank_p95_rejects_non_raw_support_values(
+    invalid: object,
+) -> None:
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="exact finite nonnegative floats",
+    ):
+        exact_nearest_rank_positive_p95((0.0, invalid, 1.0))
+
+
+def test_routing_reference_measurement_accepts_zero_and_binds_identity() -> None:
+    values = {
+        "cluster_ordinal": 0,
+        "fold_index": 0,
+        "texture_gradient_values": (0.0, 1.5),
+        "texture_spatial_shape": (1, 2),
+        "response_ratio_values": (0.0, 2.5),
+        "response_spatial_shape": (1, 2),
+        "sensitivity_ratio_values": (0.0, 3.5),
+        "sensitivity_spatial_shape": (1, 2),
+    }
+    accepted = create_content_routing_reference_measurement(**values)
+    changed = create_content_routing_reference_measurement(
+        **{**values, "texture_gradient_values": (0.0, 1.75)}
+    )
+    assert accepted.texture_gradient_values[0] == 0.0
+    assert accepted.observation_identity != changed.observation_identity
+
+
+def test_routing_reference_raw_support_is_validated_before_success_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _persistence_runner()
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.protocol.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=runner.method_code_revision,
+            protocol_digest=runner.protocol_digest,
+            execution_intent_authority_digest=(
+                runner.execution_intent_authority_digest
+            ),
+            input_manifest_digest="d" * 64,
+            candidate_config_digest=runner.candidate_config_digest,
+            unit_roster_digest=runner.protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    epoch = int(time.time())
+    lease = store.acquire_lease(
+        session_id="routing_reference_precommit_validation_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    base = torch.ones((1, 16, 2, 2), dtype=torch.float16)
+    for unit_index in range(2):
+        intent = store.create_session_intent(
+            cursor, lease, now_epoch_seconds=epoch + unit_index * 2 + 1
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=runner.execute_operational_unit(
+                unit_index=unit_index,
+                base_latent=base,
+                intent=intent,
+            ),
+            now_epoch_seconds=epoch + unit_index * 2 + 2,
+        )
+    intent = store.create_session_intent(
+        cursor, lease, now_epoch_seconds=epoch + 10
+    )
+    monkeypatch.setattr(
+        Sd35RuntimeAdapter,
+        "measure_generation_routing_reference_inputs",
+        lambda _self, _latent, *, sample_index: SimpleNamespace(
+            candidate_id="routing_stqr",
+            runtime_config_digest="1" * 64,
+            model_id="registered-routing-model",
+            model_revision="registered-routing-model-revision",
+            callback_indices=tuple(range(20)),
+            public_probe_domain_digest="2" * 64,
+            public_probe_values_float32_be_sha256="3" * 64,
+            nominal_relative_probe_step=0.001,
+            actual_probe_step=0.001,
+            texture_gradient_values=(-0.25, 1.0),
+            texture_spatial_shape=(1, 2),
+            response_ratio_values=(0.0, 1.0),
+            response_spatial_shape=(1, 2),
+            sensitivity_ratio_values=(0.0, 1.0),
+            sensitivity_spatial_shape=(1, 2),
+        ),
+    )
+    with pytest.raises(
+        ContentRoutingDirectionalMetricError,
+        match="measurement drifted",
+    ):
+        runner.execute_reference_fit_unit(
+            unit_index=2,
+            base_latent=base,
+            intent=intent,
+        )
+    assert len(cursor.committed_units) == 2
+    assert not tuple((store.run_root / "markers").glob("*0002*"))
+    assert not tuple((store.run_root / "bundles").glob("*0002*"))
+
+
+def test_routing_reference_fold_pools_only_positive_spatial_support() -> None:
+    measurements = tuple(
+        create_content_routing_reference_measurement(
+            cluster_ordinal=ordinal,
+            fold_index=ordinal % 4,
+            texture_gradient_values=(0.0, float(ordinal + 1)),
+            texture_spatial_shape=(1, 2),
+            response_ratio_values=(0.0, float(ordinal + 101)),
+            response_spatial_shape=(1, 2),
+            sensitivity_ratio_values=(0.0, float(ordinal + 201)),
+            sensitivity_spatial_shape=(1, 2),
+        )
+        for ordinal in range(32)
+    )
+    reference = fit_content_routing_fold_reference(
+        measurements,
+        probe_fold_index=0,
+    )
+    selected = tuple(
+        item for item in measurements if item.fold_index != 0
+    )
+    positive_texture = tuple(
+        value
+        for item in selected
+        for value in item.texture_gradient_values
+        if value > 0.0
+    )
+    assert reference.texture_gradient_reference == exact_nearest_rank_positive_p95(
+        positive_texture
+    )
+    assert reference.texture_gradient_reference == 31.0
+
+
+def test_routing_reference_real_shape_fourfold_oracle_drops_zero_support() -> None:
+    shape = (64, 64)
+    count = shape[0] * shape[1]
+    measurements = tuple(
+        create_content_routing_reference_measurement(
+            cluster_ordinal=ordinal,
+            fold_index=ordinal % 4,
+            texture_gradient_values=(0.0,) * (count - 1) + (float(ordinal + 1),),
+            texture_spatial_shape=shape,
+            response_ratio_values=(0.0,) * (count - 1) + (float(ordinal + 101),),
+            response_spatial_shape=shape,
+            sensitivity_ratio_values=(0.0,) * (count - 1)
+            + (float(ordinal + 201),),
+            sensitivity_spatial_shape=shape,
+        )
+        for ordinal in range(32)
+    )
+    for fold_index in range(4):
+        selected = tuple(
+            ordinal + 1
+            for ordinal in range(32)
+            if ordinal % 4 != fold_index
+        )
+        oracle = float(sorted(selected)[ceil(0.95 * len(selected)) - 1])
+        reference = fit_content_routing_fold_reference(
+            measurements,
+            probe_fold_index=fold_index,
+        )
+        zero_inclusive = sorted(
+            value
+            for item in measurements
+            if item.fold_index != fold_index
+            for value in item.texture_gradient_values
+        )
+        zero_inclusive_p95 = zero_inclusive[
+            ceil(0.95 * len(zero_inclusive)) - 1
+        ]
+        assert zero_inclusive_p95 == 0.0
+        assert reference.texture_gradient_reference == oracle
+        assert reference.texture_gradient_reference != zero_inclusive_p95
+        assert reference.latent_response_reference == oracle + 100.0
+        assert reference.local_sensitivity_reference == oracle + 200.0
 
 
 def test_routing_observation_preserves_paired_scores_controls_and_identities() -> None:
