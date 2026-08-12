@@ -68,6 +68,15 @@ class ContentRoutingDirectionalEntrypointError(RuntimeError):
     """The routing diagnosis worker could not preserve its frozen boundary."""
 
 
+class ContentRoutingDirectionalStartupError(RuntimeError):
+    """The worker failed before its persistent store or first intent existed."""
+
+    def __init__(self, *, failure_type: str, failure_class: str) -> None:
+        super().__init__("content routing startup failed")
+        self.failure_type = failure_type
+        self.failure_class = failure_class
+
+
 def _registered_experiment_root(
     base_root_key: str,
     *,
@@ -78,11 +87,12 @@ def _registered_experiment_root(
     stream = key_schedule_sha256_counter(
         base_root_key,
         {
-            "candidate_id": "routing_stqr",
-            "operator": "content_routing_directional_diagnosis",
-            "responsibility_domain": "content_router",
+            "candidate_id": "hf_sparse_tail",
+            "operator": "carrier_template",
+            "responsibility_domain": "hf_carrier",
             "model_revision": canonical_digest(
                 {
+                    "derivation_identity": "content_routing_registered_key_subdomain_derivation",
                     "probe_manifest_digest": probe_manifest_digest,
                     "protocol_digest": protocol_digest,
                     "reference_manifest_digest": reference_manifest_digest,
@@ -266,92 +276,101 @@ def execute_content_routing_directional_diagnosis_session(
         raise ContentRoutingDirectionalEntrypointError(
             "HF_TOKEN and CEG_WM_ROOT_KEY are required"
         )
-    protocol, reference_manifest, probe_manifest = (
-        load_content_routing_directional_protocol(
-            repository / PROTOCOL_PATH,
-            repository_root=repository,
+    runtime = None
+    try:
+        protocol, reference_manifest, probe_manifest = (
+            load_content_routing_directional_protocol(
+                repository / PROTOCOL_PATH,
+                repository_root=repository,
+            )
         )
-    )
-    if run_id != protocol.run_id:
-        raise ContentRoutingDirectionalEntrypointError("run identity drifted")
-    first_entry = reference_manifest.entries[0]
-    backend = Sd35PipelineBackend(
-        cache_root=cache,
-        persistent_root=persistent,
-        hf_token=hf_token,
-        prompt=first_entry.prompt,
-    )
-    runtime = create_runtime_adapter(backend, repository / RUNTIME_PATH)
-    session = runtime.initialize("cuda")
-    adapter = CegWmExperimentAdapter(
-        load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH)
-    )
-    semantic = DevelopmentSemanticObservationProducer(
-        cache_root=cache,
-        hf_token=hf_token,
-        device="cuda:0",
-    )
-    protocol_digest = protocol.digest()
-    reference_manifest_digest = canonical_digest(asdict(reference_manifest))
-    probe_manifest_digest = canonical_digest(asdict(probe_manifest))
-    registered_root = _registered_experiment_root(
-        root_key,
-        protocol_digest=protocol_digest,
-        reference_manifest_digest=reference_manifest_digest,
-        probe_manifest_digest=probe_manifest_digest,
-    )
-    public_root = identify_root_key(registered_root).root_key_public_digest
-    if public_root == identify_root_key(root_key).root_key_public_digest:
-        runtime.close()
-        raise ContentRoutingDirectionalEntrypointError(
-            "routing registered root must differ from the base root"
+        if run_id != protocol.run_id:
+            raise ContentRoutingDirectionalEntrypointError("run identity drifted")
+        first_entry = reference_manifest.entries[0]
+        backend = Sd35PipelineBackend(
+            cache_root=cache,
+            persistent_root=persistent,
+            hf_token=hf_token,
+            prompt=first_entry.prompt,
         )
-    candidate_digest = canonical_digest(
-        {
-            "adapter_config_digest": adapter.configuration.config_digest,
-            "mixing_coefficient": protocol.mixing_coefficient,
-            "probe_manifest_digest": probe_manifest_digest,
-            "reference_manifest_digest": reference_manifest_digest,
-            "routing_candidate_identity": protocol.routing_candidate_identity,
-            "runtime_config_digest": session.runtime_config_digest,
-        }
-    )
-    authority_digest = canonical_digest(
-        {
-            "probe_manifest_digest": probe_manifest_digest,
-            "protocol_digest": protocol_digest,
-            "reference_manifest_digest": reference_manifest_digest,
-            "root_key_public_digest": public_root,
-            "run_id": run_id,
-        }
-    )
-    runner = ContentRoutingDirectionalDiagnosisRunner(
-        protocol=protocol,
-        reference_manifest=reference_manifest,
-        probe_manifest=probe_manifest,
-        adapter=adapter,
-        runtime_adapter=runtime,
-        semantic_producer=semantic,
-        method_code_revision=expected_revision,
-        registered_root_key=registered_root,
-        root_key_public_digest=public_root,
-        protocol_digest=protocol_digest,
-        execution_intent_authority_digest=authority_digest,
-        candidate_config_digest=candidate_digest,
-    )
-    package = _build_or_verify_package(repository, persistent, expected_revision)
-    package_sha256 = _sha256_file(package)
-    if package_sha256 != execution_package_sha256:
-        runtime.close()
-        raise ContentRoutingDirectionalEntrypointError(
-            "execution package identity drifted"
+        runtime = create_runtime_adapter(backend, repository / RUNTIME_PATH)
+        session = runtime.initialize("cuda")
+        adapter = CegWmExperimentAdapter(
+            load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH)
         )
-    input_manifest_digest = canonical_digest(
-        {
-            "probe": probe_manifest_digest,
-            "reference": reference_manifest_digest,
-        }
-    )
+        semantic = DevelopmentSemanticObservationProducer(
+            cache_root=cache,
+            hf_token=hf_token,
+            device="cuda:0",
+        )
+        protocol_digest = protocol.digest()
+        reference_manifest_digest = canonical_digest(asdict(reference_manifest))
+        probe_manifest_digest = canonical_digest(asdict(probe_manifest))
+        registered_root = _registered_experiment_root(
+            root_key,
+            protocol_digest=protocol_digest,
+            reference_manifest_digest=reference_manifest_digest,
+            probe_manifest_digest=probe_manifest_digest,
+        )
+        public_root = identify_root_key(registered_root).root_key_public_digest
+        if public_root == identify_root_key(root_key).root_key_public_digest:
+            raise ContentRoutingDirectionalEntrypointError(
+                "routing registered root must differ from the base root"
+            )
+        candidate_digest = canonical_digest(
+            {
+                "adapter_config_digest": adapter.configuration.config_digest,
+                "mixing_coefficient": protocol.mixing_coefficient,
+                "probe_manifest_digest": probe_manifest_digest,
+                "reference_manifest_digest": reference_manifest_digest,
+                "routing_candidate_identity": protocol.routing_candidate_identity,
+                "runtime_config_digest": session.runtime_config_digest,
+            }
+        )
+        authority_digest = canonical_digest(
+            {
+                "probe_manifest_digest": probe_manifest_digest,
+                "protocol_digest": protocol_digest,
+                "reference_manifest_digest": reference_manifest_digest,
+                "root_key_public_digest": public_root,
+                "run_id": run_id,
+            }
+        )
+        runner = ContentRoutingDirectionalDiagnosisRunner(
+            protocol=protocol,
+            reference_manifest=reference_manifest,
+            probe_manifest=probe_manifest,
+            adapter=adapter,
+            runtime_adapter=runtime,
+            semantic_producer=semantic,
+            method_code_revision=expected_revision,
+            registered_root_key=registered_root,
+            root_key_public_digest=public_root,
+            protocol_digest=protocol_digest,
+            execution_intent_authority_digest=authority_digest,
+            candidate_config_digest=candidate_digest,
+        )
+        package = _build_or_verify_package(repository, persistent, expected_revision)
+        package_sha256 = _sha256_file(package)
+        if package_sha256 != execution_package_sha256:
+            raise ContentRoutingDirectionalEntrypointError(
+                "execution package identity drifted"
+            )
+        input_manifest_digest = canonical_digest(
+            {
+                "probe": probe_manifest_digest,
+                "reference": reference_manifest_digest,
+            }
+        )
+    except Exception as exc:
+        if runtime is not None:
+            runtime.close()
+        raise ContentRoutingDirectionalStartupError(
+            failure_type=f"{type(exc).__module__}.{type(exc).__qualname__}",
+            failure_class=(
+                "resource_failure" if _resource_failure(exc) else "implementation_failure"
+            ),
+        ) from exc
     store = DevelopmentPersistentStore(
         persistent,
         run_id=run_id,
@@ -550,4 +569,7 @@ def execute_content_routing_directional_diagnosis_session(
     }
 
 
-__all__ = ["execute_content_routing_directional_diagnosis_session"]
+__all__ = [
+    "ContentRoutingDirectionalStartupError",
+    "execute_content_routing_directional_diagnosis_session",
+]

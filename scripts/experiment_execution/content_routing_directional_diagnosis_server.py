@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import sys
 from typing import Mapping, Sequence
-from zipfile import is_zipfile
+from zipfile import ZIP_DEFLATED, ZipFile, is_zipfile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +24,7 @@ from experiments.protocol.content_routing_directional_diagnosis import (
     load_content_routing_directional_protocol,
 )
 from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
+    ContentRoutingDirectionalStartupError,
     execute_content_routing_directional_diagnosis_session,
 )
 from scripts.experiment_execution.development_exploration_entrypoint import (
@@ -44,10 +45,88 @@ from scripts.experiment_execution.development_exploration_server import (
 
 PROTOCOL_PATH = Path("configs/experiments/content_routing_directional_diagnosis.json")
 SAFE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
+SAFE_FAILURE_TYPE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,255}$")
 
 
 class ContentRoutingDirectionalServerError(RuntimeError):
     """The server could not start or verify the routing diagnosis worker."""
+
+
+def _startup_failure_worker(
+    *,
+    error: ContentRoutingDirectionalStartupError,
+    persistent_root: Path,
+    run_id: str,
+    session_id: str,
+    protocol,
+    reference_manifest,
+    probe_manifest,
+    package_sha256: str,
+) -> dict[str, object]:
+    """Create one safe diagnostic only when the frozen run has no evidence."""
+
+    if type(error) is not ContentRoutingDirectionalStartupError:
+        raise ContentRoutingDirectionalServerError(
+            "startup failure exact type is required"
+        )
+    if (
+        error.failure_class not in {"implementation_failure", "resource_failure"}
+        or type(error.failure_type) is not str
+        or SAFE_FAILURE_TYPE_PATTERN.fullmatch(error.failure_type) is None
+    ):
+        raise ContentRoutingDirectionalServerError(
+            "startup failure identity is invalid"
+        )
+    run_root = persistent_root / run_id
+    if run_root.exists():
+        raise ContentRoutingDirectionalServerError(
+            "startup diagnostic requires a fresh run root"
+        )
+    result_root = run_root / "session_results"
+    result_root.mkdir(parents=True, exist_ok=False)
+    archive = result_root / f"{session_id}.zip"
+    diagnostic = {
+        "failure_class": error.failure_class,
+        "failure_type": error.failure_type,
+        "stage": "content_routing_directional_diagnosis_startup",
+        "scientific_claims_supported": False,
+    }
+    with ZipFile(archive, "x", compression=ZIP_DEFLATED) as target:
+        target.writestr(
+            "committed_unit_ids.json",
+            json.dumps([], separators=(",", ":"), sort_keys=True).encode("utf-8"),
+        )
+        target.writestr(
+            "diagnostic.json",
+            json.dumps(diagnostic, separators=(",", ":"), sort_keys=True).encode(
+                "utf-8"
+            ),
+        )
+    return {
+        "artifact_kind": "content_routing_directional_diagnosis_failure",
+        "diagnostic_zip": str(archive),
+        "protocol_digest": protocol.digest(),
+        "reference_manifest_digest": canonical_digest(asdict(reference_manifest)),
+        "probe_manifest_digest": canonical_digest(asdict(probe_manifest)),
+        "input_manifest_digest": canonical_digest(
+            {
+                "probe": canonical_digest(asdict(probe_manifest)),
+                "reference": canonical_digest(asdict(reference_manifest)),
+            }
+        ),
+        "unit_roster_digest": protocol.unit_roster_digest,
+        "package_sha256": package_sha256,
+        "committed_unit_count": 0,
+        "session_committed_unit_count": 0,
+        "termination_reason": "worker_startup_failure",
+        "content_routing_directional_aggregate": None,
+        "failure_class": error.failure_class,
+        "failure_type": error.failure_type,
+        "formal_tau_created": False,
+        "candidate_promoted": False,
+        "scientific_claims_supported": False,
+        "claim_boundary": CLAIM_BOUNDARY,
+    }
 
 
 def _validated_artifact(
@@ -122,16 +201,31 @@ def execute_content_routing_directional_diagnosis_server_session(
     )
     package = _build_or_verify_package(repository, persistent, expected_revision)
     package_sha256 = _file_sha256(package)
-    exit_code, worker = execute_content_routing_directional_diagnosis_session(
-        repository_root=repository,
-        expected_revision=expected_revision,
-        persistent_root=persistent,
-        cache_root=cache,
-        run_id=run_id,
-        session_id=session_id,
-        execution_package_sha256=package_sha256,
-        environment={"HF_TOKEN": hf_token, "CEG_WM_ROOT_KEY": root_key},
-    )
+    try:
+        exit_code, worker = execute_content_routing_directional_diagnosis_session(
+            repository_root=repository,
+            expected_revision=expected_revision,
+            persistent_root=persistent,
+            cache_root=cache,
+            run_id=run_id,
+            session_id=session_id,
+            execution_package_sha256=package_sha256,
+            environment={"HF_TOKEN": hf_token, "CEG_WM_ROOT_KEY": root_key},
+        )
+    except ContentRoutingDirectionalStartupError as exc:
+        if type(exc) is not ContentRoutingDirectionalStartupError:
+            raise
+        exit_code = 3
+        worker = _startup_failure_worker(
+            error=exc,
+            persistent_root=persistent,
+            run_id=run_id,
+            session_id=session_id,
+            protocol=protocol,
+            reference_manifest=reference_manifest,
+            probe_manifest=probe_manifest,
+            package_sha256=package_sha256,
+        )
     if type(exit_code) is not int or isinstance(exit_code, bool):
         raise ContentRoutingDirectionalServerError("worker exit code is invalid")
     artifact = _validated_artifact(

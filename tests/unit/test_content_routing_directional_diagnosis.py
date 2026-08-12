@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, fields, replace
+import importlib
 import inspect
 import json
 from pathlib import Path
@@ -29,6 +30,7 @@ from experiments.metrics.content_routing_directional_diagnosis import (
 from experiments.protocol.content_routing_directional_diagnosis import (
     CLAIM_BOUNDARY,
     ContentRoutingDirectionalProtocolError,
+    canonical_digest,
     load_content_routing_directional_protocol,
     reference_entries_for_probe,
 )
@@ -61,6 +63,7 @@ from runtime import Sd35RuntimeAdapter, create_runtime_adapter
 from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
     ContentRoutingDirectionalEntrypointError,
     _commit_dependency_blocked_probe_records,
+    _registered_experiment_root,
     _reference_dependency_failure_class,
     _replay_aggregate,
 )
@@ -975,7 +978,40 @@ def test_routing_real_public_success_chain_commits_recovers_and_replays(
         "measure_generation_routing_reference_inputs",
         counted_reference_measurement,
     )
-    registered_root = "routing-real-public-success-key"
+    carrier_key_domains: list[tuple[str, str, str]] = []
+    for module_name in (
+        "main.content_chain.hf_carrier",
+        "main.content_chain.lf_carrier",
+    ):
+        carrier_module = importlib.import_module(module_name)
+        original_schedule = carrier_module.key_schedule_sha256_counter
+
+        def traced_schedule(
+            *args,
+            _original=original_schedule,
+            **kwargs,
+        ):
+            domain_fields = args[1]
+            carrier_key_domains.append(
+                (
+                    domain_fields["candidate_id"],
+                    domain_fields["operator"],
+                    domain_fields["responsibility_domain"],
+                )
+            )
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(
+            carrier_module,
+            "key_schedule_sha256_counter",
+            traced_schedule,
+        )
+    registered_root = _registered_experiment_root(
+        "routing-real-public-success-key",
+        protocol_digest=protocol.digest(),
+        reference_manifest_digest=canonical_digest(asdict(reference_manifest)),
+        probe_manifest_digest=canonical_digest(asdict(probe_manifest)),
+    )
 
     def create_runner() -> ContentRoutingDirectionalDiagnosisRunner:
         return ContentRoutingDirectionalDiagnosisRunner(
@@ -1157,6 +1193,36 @@ def test_routing_real_public_success_chain_commits_recovers_and_replays(
     assert calls["execute_content_write_and_vae"] == 18
     assert calls["detect_hf"] == 96
     assert calls["detect_content"] == 96
+    assert ("hf_sparse_tail", "carrier_template", "hf_carrier") in carrier_key_domains
+    assert ("lf_low_pass", "carrier_template", "lf_carrier") in carrier_key_domains
+
+
+def test_routing_registered_root_uses_frozen_hf_secret_domain() -> None:
+    protocol, reference_manifest, probe_manifest = _protocol_bundle()
+    digests = {
+        "protocol_digest": protocol.digest(),
+        "reference_manifest_digest": canonical_digest(asdict(reference_manifest)),
+        "probe_manifest_digest": canonical_digest(asdict(probe_manifest)),
+    }
+    root = _registered_experiment_root(
+        "routing-registered-root-test-key",
+        **digests,
+    )
+    assert root.startswith("ceg-wm-content-routing-registered:")
+    assert root != "routing-registered-root-test-key"
+    assert identify_root_key(root) != identify_root_key(
+        "routing-registered-root-test-key"
+    )
+    for digest_role in digests:
+        changed = dict(digests)
+        changed[digest_role] = "0" * 64
+        assert (
+            _registered_experiment_root(
+                "routing-registered-root-test-key",
+                **changed,
+            )
+            != root
+        )
 
 
 def test_routing_runner_calls_real_public_method_surfaces() -> None:

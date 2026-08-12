@@ -22,7 +22,11 @@ from scripts.experiment_execution import (
     content_routing_directional_diagnosis_server as server_module,
 )
 from scripts.experiment_execution.content_routing_directional_diagnosis_server import (
+    ContentRoutingDirectionalServerError,
     execute_content_routing_directional_diagnosis_server_session,
+)
+from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
+    ContentRoutingDirectionalStartupError,
 )
 from scripts.experiment_execution.development_exploration_entrypoint import (
     _build_or_verify_package,
@@ -167,6 +171,9 @@ def test_content_routing_entrypoint_preserves_fixed_execution_boundaries() -> No
     assert "_commit_dependency_blocked_probe_records" in source
     assert "verified_terminal_scientific_evidence" in source
     assert "aggregate_content_routing_directional_diagnosis" in source
+    assert source.index("raise ContentRoutingDirectionalStartupError") < source.index(
+        "store = DevelopmentPersistentStore("
+    )
     assert "attempt_index" not in source or "create_session_intent" in source
     for forbidden in (
         "detect_lf(",
@@ -342,3 +349,131 @@ def test_content_routing_server_exports_failure_receipt_without_scientific_claim
     assert receipt["scientific_claims_supported"] is False
     assert receipt["termination_reason"] == "worker_execution_failure"
     assert Path(receipt["receipt_path"]).is_file()
+
+
+@pytest.mark.unit
+def test_content_routing_server_exports_safe_fresh_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    persistent, secret = _patch_server(monkeypatch, tmp_path)
+
+    def fail_before_store(**_kwargs):
+        raise ContentRoutingDirectionalStartupError(
+            failure_type="main.shared.key_schedule.KeyScheduleError",
+            failure_class="implementation_failure",
+        )
+
+    monkeypatch.setattr(
+        server_module,
+        "execute_content_routing_directional_diagnosis_session",
+        fail_before_store,
+    )
+    exit_code, receipt = execute_content_routing_directional_diagnosis_server_session(
+        repository_root=ROOT,
+        expected_revision="5" * 40,
+        persistent_root=persistent,
+        cache_root=tmp_path / "cache",
+        run_id=RUN_ID,
+        session_id="routing_startup_failure_session",
+        environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+        install_dependencies=False,
+    )
+    assert exit_code == 3
+    assert receipt["committed_unit_count"] == 0
+    assert receipt["session_committed_unit_count"] == 0
+    assert receipt["content_routing_directional_aggregate"] is None
+    assert receipt["failure_class"] == "implementation_failure"
+    assert receipt["failure_type"] == "main.shared.key_schedule.KeyScheduleError"
+    assert receipt["termination_reason"] == "worker_startup_failure"
+    run_root = persistent / RUN_ID
+    for forbidden_evidence in ("intents", "bundles", "markers", "module_outcomes"):
+        assert not (run_root / forbidden_evidence).exists()
+    artifact = Path(receipt["artifact_path"])
+    with ZipFile(artifact) as archive:
+        assert set(archive.namelist()) == {
+            "committed_unit_ids.json",
+            "diagnostic.json",
+        }
+        assert json.loads(archive.read("committed_unit_ids.json")) == []
+        diagnostic = json.loads(archive.read("diagnostic.json"))
+    assert diagnostic == {
+        "failure_class": "implementation_failure",
+        "failure_type": "main.shared.key_schedule.KeyScheduleError",
+        "scientific_claims_supported": False,
+        "stage": "content_routing_directional_diagnosis_startup",
+    }
+    evidence = artifact.read_bytes() + Path(receipt["receipt_path"]).read_bytes()
+    assert secret.encode("utf-8") not in evidence
+    for forbidden_text in (
+        b"message",
+        b"traceback",
+        b"prompt",
+        b"root_key",
+        b"tensor",
+        b"repr",
+    ):
+        assert forbidden_text not in evidence
+
+
+@pytest.mark.unit
+def test_content_routing_startup_diagnostic_rejects_subclass_and_existing_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    persistent, secret = _patch_server(monkeypatch, tmp_path)
+
+    class DerivedStartupError(ContentRoutingDirectionalStartupError):
+        pass
+
+    def fail_with_subclass(**_kwargs):
+        raise DerivedStartupError(
+            failure_type="builtins.RuntimeError",
+            failure_class="implementation_failure",
+        )
+
+    monkeypatch.setattr(
+        server_module,
+        "execute_content_routing_directional_diagnosis_session",
+        fail_with_subclass,
+    )
+    with pytest.raises(DerivedStartupError):
+        execute_content_routing_directional_diagnosis_server_session(
+            repository_root=ROOT,
+            expected_revision="6" * 40,
+            persistent_root=persistent,
+            cache_root=tmp_path / "cache",
+            run_id=RUN_ID,
+            session_id="routing_startup_subclass_session",
+            environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+            install_dependencies=False,
+        )
+    assert not (persistent / RUN_ID).exists()
+
+    (persistent / RUN_ID / "intents").mkdir(parents=True)
+
+    def fail_exact(**_kwargs):
+        raise ContentRoutingDirectionalStartupError(
+            failure_type="builtins.RuntimeError",
+            failure_class="implementation_failure",
+        )
+
+    monkeypatch.setattr(
+        server_module,
+        "execute_content_routing_directional_diagnosis_session",
+        fail_exact,
+    )
+    with pytest.raises(
+        ContentRoutingDirectionalServerError,
+        match="fresh run root",
+    ):
+        execute_content_routing_directional_diagnosis_server_session(
+            repository_root=ROOT,
+            expected_revision="6" * 40,
+            persistent_root=persistent,
+            cache_root=tmp_path / "cache",
+            run_id=RUN_ID,
+            session_id="routing_existing_run_session",
+            environment={"HF_TOKEN": secret, "CEG_WM_ROOT_KEY": secret},
+            install_dependencies=False,
+        )
