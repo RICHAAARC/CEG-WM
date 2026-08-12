@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "protocol_id": "ceg_wm_content_routing_directional_diagnosis",
   "protocol_version": "1.0.0",
-  "run_id": "ceg_wm_content_routing_backend_binding_correction_diagnosis",
+  "run_id": "ceg_wm_content_routing_positive_reference_support_correction_diagnosis",
   "split": "development",
   "reference_fit_manifest_path": "configs/experiments/content_routing_reference_fit_manifest.json",
   "reference_fit_manifest_file_sha256": "9137d41d67950e91b27391fe45c6927d111ea187959b6f1902987009fc92d027",

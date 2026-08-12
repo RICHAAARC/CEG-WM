@@ -135,7 +135,7 @@ def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRec
         "collection_role": ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
         "record_kind": ROUTING_REFERENCE_RECORD_KIND,
         "record_id": "0" * 64,
-        "run_id": "ceg_wm_content_routing_backend_binding_correction_diagnosis",
+        "run_id": "ceg_wm_content_routing_positive_reference_support_correction_diagnosis",
         "protocol_digest": "1" * 64,
         "method_code_revision": "2" * 40,
         "unit_index": ordinal + 2,
@@ -400,7 +400,7 @@ def test_content_routing_protocol_freezes_forty_two_attempt_zero_units() -> None
     protocol, reference, probes = _protocol_bundle()
     assert (
         protocol.run_id
-        == "ceg_wm_content_routing_backend_binding_correction_diagnosis"
+        == "ceg_wm_content_routing_positive_reference_support_correction_diagnosis"
     )
     assert protocol.mixing_coefficient == 0.50
     assert (
@@ -443,6 +443,31 @@ def test_content_routing_protocol_freezes_forty_two_attempt_zero_units() -> None
         )
         assert authority.counts_as_scientific_coverage is False
         assert authority.scientific_claims_supported is False
+
+
+def test_content_routing_fresh_run_changes_authority_without_manifest_drift() -> None:
+    protocol, reference, probes = _protocol_bundle()
+    old_protocol = replace(
+        protocol,
+        run_id="ceg_wm_content_routing_backend_binding_correction_diagnosis",
+    )
+    reference_digest = canonical_digest(asdict(reference))
+    probe_digest = canonical_digest(asdict(probes))
+    old_protocol_digest = canonical_digest(asdict(old_protocol))
+    assert protocol.digest() != old_protocol_digest
+    assert reference_digest == canonical_digest(asdict(reference))
+    assert probe_digest == canonical_digest(asdict(probes))
+    assert entrypoint_module._registered_experiment_root(
+        "registered-root-fixture",
+        protocol_digest=protocol.digest(),
+        reference_manifest_digest=reference_digest,
+        probe_manifest_digest=probe_digest,
+    ) != entrypoint_module._registered_experiment_root(
+        "registered-root-fixture",
+        protocol_digest=old_protocol_digest,
+        reference_manifest_digest=reference_digest,
+        probe_manifest_digest=probe_digest,
+    )
 
 
 def test_content_routing_cross_fit_excludes_probe_fold_and_uses_twenty_four() -> None:
@@ -1643,7 +1668,7 @@ def test_routing_session_uses_initialized_backend_before_first_intent(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_backend_binding_correction_diagnosis",
+            run_id="ceg_wm_content_routing_positive_reference_support_correction_diagnosis",
             session_id="routing_backend_binding_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1720,7 +1745,7 @@ def test_routing_authority_failures_preserve_original_exception(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_backend_binding_correction_diagnosis",
+            run_id="ceg_wm_content_routing_positive_reference_support_correction_diagnosis",
             session_id="routing_authority_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1738,7 +1763,7 @@ def test_routing_run_and_root_invariant_failures_are_not_startup_diagnostics(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_registered_key_correction_diagnosis",
+            run_id="ceg_wm_content_routing_backend_binding_correction_diagnosis",
             session_id="routing_run_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1754,7 +1779,7 @@ def test_routing_run_and_root_invariant_failures_are_not_startup_diagnostics(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_backend_binding_correction_diagnosis",
+            run_id="ceg_wm_content_routing_positive_reference_support_correction_diagnosis",
             session_id="routing_root_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1851,7 +1876,7 @@ def test_routing_post_initialization_failures_close_once_and_preserve_original(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_backend_binding_correction_diagnosis",
+            run_id="ceg_wm_content_routing_positive_reference_support_correction_diagnosis",
             session_id="routing_post_initialization_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
