@@ -148,6 +148,7 @@
     "content_detector": [
       "hf_sparse_tail",
       "lf_low_pass",
+      "lf_null_whitened_matched_score",
       "content_combination_calibrated"
     ],
     "qk_geometry_sync": [
