@@ -148,6 +148,7 @@ def _initialize_routing_resources(
     prompt: str,
     runtime_configuration: Sd35RuntimeConfiguration,
 ) -> tuple[
+    Sd35PipelineBackend,
     Sd35RuntimeAdapter,
     RuntimeSession,
     DevelopmentSemanticObservationProducer,
@@ -177,7 +178,7 @@ def _initialize_routing_resources(
                 "resource_failure" if _resource_failure(exc) else "implementation_failure"
             ),
         ) from exc
-    return runtime, session, semantic
+    return backend, runtime, session, semantic
 
 
 def _replay_aggregate(records: tuple[DevelopmentScientificRecord, ...]):
@@ -357,7 +358,7 @@ def execute_content_routing_directional_diagnosis_session(
         raise ContentRoutingDirectionalEntrypointError(
             "routing registered root must differ from the base root"
         )
-    runtime, session, semantic = _initialize_routing_resources(
+    backend, runtime, session, semantic = _initialize_routing_resources(
         cache=cache,
         persistent=persistent,
         hf_token=hf_token,

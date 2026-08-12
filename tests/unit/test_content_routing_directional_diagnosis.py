@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import time
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 import torch
@@ -1325,6 +1326,125 @@ def test_routing_startup_diagnostic_only_wraps_resource_initialization(
     assert len(close_calls) == expected_close_count
 
 
+def test_routing_session_uses_initialized_backend_before_first_intent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: list[tuple[str, int | None]] = []
+    created: dict[str, object] = {}
+
+    class FakeBackend:
+        def set_development_generation_prompts(self, prompt: str) -> None:
+            assert prompt
+            events.append(("set_prompt", id(self)))
+
+    def backend_factory(**_kwargs):
+        backend = FakeBackend()
+        created["backend"] = backend
+        return backend
+
+    def runtime_init(self, backend, configuration) -> None:
+        created["runtime_backend"] = backend
+        self._configuration = configuration
+
+    def runtime_initialize(self, requested_device: str):
+        assert requested_device == "cuda"
+        return SimpleNamespace(
+            runtime_config_digest=self._configuration.runtime_config_digest,
+            image_height=8,
+            image_width=8,
+        )
+
+    def runtime_close(self) -> None:
+        events.append(("close", None))
+
+    monkeypatch.setattr(entrypoint_module, "Sd35PipelineBackend", backend_factory)
+    monkeypatch.setattr(Sd35RuntimeAdapter, "__init__", runtime_init)
+    monkeypatch.setattr(Sd35RuntimeAdapter, "initialize", runtime_initialize)
+    monkeypatch.setattr(Sd35RuntimeAdapter, "close", runtime_close)
+    monkeypatch.setattr(
+        DevelopmentSemanticObservationProducer,
+        "__init__",
+        lambda self, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        entrypoint_module,
+        "_base_latent",
+        lambda *_args, **_kwargs: torch.zeros((1, 16, 1, 1), dtype=torch.float16),
+    )
+    package = tmp_path / "execution-package.zip"
+    package.write_bytes(b"routing-package")
+    monkeypatch.setattr(
+        entrypoint_module,
+        "_build_or_verify_package",
+        lambda *_args, **_kwargs: package,
+    )
+    monkeypatch.setattr(entrypoint_module, "_sha256_file", lambda *_args: "b" * 64)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda *_args: "cpu-fixture")
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda *_args: 1)
+
+    original_create_intent = DevelopmentPersistentStore.create_session_intent
+
+    def traced_create_intent(self, cursor, lease, *, now_epoch_seconds: int):
+        events.append(("intent", None))
+        return original_create_intent(
+            self,
+            cursor,
+            lease,
+            now_epoch_seconds=now_epoch_seconds,
+        )
+
+    monkeypatch.setattr(
+        DevelopmentPersistentStore,
+        "create_session_intent",
+        traced_create_intent,
+    )
+
+    def fail_operational(self, *, unit_index, base_latent, intent):
+        assert unit_index == 0
+        assert intent.unit_index == 0
+        events.append(("unit0", None))
+        raise RuntimeError("fixture operational stop")
+
+    monkeypatch.setattr(
+        ContentRoutingDirectionalDiagnosisRunner,
+        "execute_operational_unit",
+        fail_operational,
+    )
+
+    return_code, summary = (
+        entrypoint_module.execute_content_routing_directional_diagnosis_session(
+            repository_root=ROOT,
+            expected_revision="a" * 40,
+            persistent_root=tmp_path / "persistent",
+            cache_root=tmp_path / "cache",
+            run_id="ceg_wm_content_routing_registered_key_correction_diagnosis",
+            session_id="routing_backend_binding_session",
+            execution_package_sha256="b" * 64,
+            environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
+        )
+    )
+
+    assert return_code == 3
+    assert summary["committed_unit_count"] == 0
+    assert created["runtime_backend"] is created["backend"]
+    assert events[:3] == [
+        ("set_prompt", id(created["backend"])),
+        ("intent", None),
+        ("unit0", None),
+    ]
+    assert events.count(("set_prompt", id(created["backend"]))) == 1
+    assert events.count(("close", None)) == 1
+    intent_paths = tuple((tmp_path / "persistent").rglob("intents/*.json"))
+    assert len(intent_paths) == 1
+    assert intent_paths[0].name == "development_unit_0000__attempt_0.json"
+    diagnostic_zip = Path(summary["diagnostic_zip"])
+    with ZipFile(diagnostic_zip) as archive:
+        diagnostic = json.loads(archive.read("diagnostic.json"))
+    assert diagnostic["failure_type"] == "builtins.RuntimeError"
+    assert "NameError" not in json.dumps(diagnostic, sort_keys=True)
+
+
 @pytest.mark.parametrize(
     "failure_stage",
     (
@@ -1433,12 +1553,13 @@ def test_routing_post_initialization_failures_close_once_and_preserve_original(
             close_calls.append("close")
 
     runtime = FakeRuntime()
+    backend = object()
     session = SimpleNamespace(runtime_config_digest="1" * 64)
     semantic = object()
     monkeypatch.setattr(
         entrypoint_module,
         "_initialize_routing_resources",
-        lambda **_kwargs: (runtime, session, semantic),
+        lambda **_kwargs: (backend, runtime, session, semantic),
     )
     original_digest = entrypoint_module.canonical_digest
 
