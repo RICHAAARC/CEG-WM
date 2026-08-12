@@ -28,6 +28,7 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
     ATTRIBUTION_MARGIN_FLOOR,
     COMBINATION_FUNCTIONS,
     COMBINATION_WEIGHTS,
+    ContentUniformCombinationDirectionalProtocolError,
     MIXING_COEFFICIENTS,
     reference_entries_for_probe,
     load_content_uniform_combination_directional_protocol,
@@ -156,7 +157,7 @@ def _observation(index: int, *, passing: bool = True):
 
 def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() -> None:
     protocol, reference, probes = _load()
-    assert protocol.run_id == "ceg_wm_content_uniform_combination_directional_diagnosis"
+    assert protocol.run_id == "ceg_wm_content_uniform_combination_whitening_asset_replay_correction_diagnosis"
     assert (protocol.operational_unit_count, protocol.reference_fit_cluster_count, protocol.directional_probe_cluster_count, protocol.maximum_total_units) == (1, 32, 8, 41)
     assert protocol.maximum_attempts_per_unit == 1
     assert protocol.mixing_coefficients == MIXING_COEFFICIENTS == (0.25, 0.50, 0.75)
@@ -164,6 +165,11 @@ def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() 
     assert set(entry.cluster_identity for entry in reference.entries).isdisjoint(entry.cluster_identity for entry in probes.entries)
     assert len(protocol.unit_roster) == 41
     assert all(unit.maximum_record_attempts == 1 for unit in protocol.unit_roster)
+    with pytest.raises(ContentUniformCombinationDirectionalProtocolError):
+        replace(
+            protocol,
+            run_id="ceg_wm_content_uniform_combination_directional_diagnosis",
+        ).validate()
 
 
 def test_reference_cross_fit_excludes_probe_fold_and_uses_twenty_four() -> None:
