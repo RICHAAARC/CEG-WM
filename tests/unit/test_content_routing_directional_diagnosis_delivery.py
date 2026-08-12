@@ -33,9 +33,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_routing_directional_diagnosis.json"
 SERVER = ROOT / "scripts/experiment_execution/content_routing_directional_diagnosis_server.py"
 NOTEBOOK = ROOT / "notebooks/colab/content_routing_directional_diagnosis.ipynb"
-RUN_ID = "ceg_wm_content_routing_backend_binding_correction_diagnosis"
-EXECUTION_REVISION = "fc6f8ffff8cae8098b38e5c6ee5cb207923df1d9"
-PAUSED_RUN_ID = "ceg_wm_content_routing_registered_key_correction_diagnosis"
+RUN_ID = "ceg_wm_content_routing_positive_reference_support_correction_diagnosis"
+EXECUTION_REVISION = "925c2cbc727e3b18e91c0b3981eeed1b470a955a"
+PAUSED_RUN_ID = "ceg_wm_content_routing_backend_binding_correction_diagnosis"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/content_routing_directional_diagnosis.json",
     "configs/experiments/content_routing_reference_fit_manifest.json",
@@ -350,6 +350,9 @@ def test_content_routing_notebook_is_thin_exact_and_output_free() -> None:
     assert "not alpha selection" in source
     assert "does not generalize across alpha values" in source
     assert "fixed-half routing directional validation" in source
+    assert "Raw T/R/Q records preserve finite nonnegative values" in source
+    assert "only the strictly positive subset enters the exact nearest-rank P95" in source
+    assert "implementation/dependency blocked, never a scientific negative" in source
     assert PAUSED_RUN_ID not in code_source
     export_order = tuple(
         code_source.index(fragment)

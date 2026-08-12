@@ -2591,9 +2591,9 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
         ]
     )
     content_routing_source = content_routing_notebook.read_text(encoding="utf-8")
-    assert "fc6f8ffff8cae8098b38e5c6ee5cb207923df1d9" in content_routing_source
+    assert "925c2cbc727e3b18e91c0b3981eeed1b470a955a" in content_routing_source
     assert (
-        "ceg_wm_content_routing_backend_binding_correction_diagnosis"
+        "ceg_wm_content_routing_positive_reference_support_correction_diagnosis"
         in content_routing_source
     )
     document = json.loads(runtime_notebook.read_text(encoding="utf-8"))
