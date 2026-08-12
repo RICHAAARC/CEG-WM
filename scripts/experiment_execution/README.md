@@ -5,16 +5,19 @@
 `content_routing_directional_diagnosis_server.py` 是当前 Colab 与普通 GPU 服务器共用的
 执行入口；当前唯一授权 Notebook 为
 `notebooks/colab/content_routing_directional_diagnosis.ipynb`，固定绑定 execution revision
-`cd10d86b51f21c8c76bbc920160bc1e792c706a7` 与独立 run ID
-`ceg_wm_content_routing_directional_diagnosis`。服务器执行冻结的 2 个 operational、32 个
+`9691117397a08b0bb6916a37867ba0332de38cbe` 与全新独立 run ID
+`ceg_wm_content_routing_registered_key_correction_diagnosis`。服务器执行冻结的 2 个 operational、32 个
 reference-fit 与 8 个 paired routed/uniform scientific units，共 42 units、每 unit 仅
 attempt zero。它负责依赖、模型、真实 public method/runtime、records、create-only persistence、
 package 与 result/diagnostic ZIP；Notebook 只负责 Drive、Secrets、exact checkout、调用和
 ZIP/receipt/`SHA256SUMS` 导出，失败也必须先保存 diagnostic export。
 
-该 development diagnosis 不拟合 threshold 或 FPR，不形成正式组合、candidate promotion、
-calibration、evaluation、baseline 或论文 claim；历史 run、artifacts 与 records 不迁移、
-不改写、不拼接进本次固定分母。
+全部 42 units 与 8 个 paired probe 的 routed/uniform 两条 arm 都固定使用 `a = 0.50`；
+这是本次 routing 因果控制，不是 alpha selection、组合权重选择或跨 alpha 外推。通过时只
+允许另行申请 fixed-half routing directional validation。该 development diagnosis 不拟合
+threshold 或 FPR，不形成正式组合、candidate promotion、calibration、evaluation、baseline
+或论文 claim。旧 run `ceg_wm_content_routing_directional_diagnosis`、artifacts 与 records
+保持 producer-bound；当前入口不读取、恢复、迁移、改写或拼接进本次全新 run 的固定分母。
 
 ## Q/K synchronization-write diagnosis
 

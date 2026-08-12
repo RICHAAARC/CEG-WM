@@ -29,17 +29,13 @@ from scripts.experiment_execution.content_routing_directional_diagnosis_server i
 from scripts.experiment_execution.content_routing_directional_diagnosis_entrypoint import (
     ContentRoutingDirectionalStartupError,
 )
-from scripts.experiment_execution.development_exploration_entrypoint import (
-    _build_or_verify_package,
-)
-
-
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_routing_directional_diagnosis.json"
 SERVER = ROOT / "scripts/experiment_execution/content_routing_directional_diagnosis_server.py"
 NOTEBOOK = ROOT / "notebooks/colab/content_routing_directional_diagnosis.ipynb"
-RUN_ID = "ceg_wm_content_routing_directional_diagnosis"
-EXECUTION_REVISION = "cd10d86b51f21c8c76bbc920160bc1e792c706a7"
+RUN_ID = "ceg_wm_content_routing_registered_key_correction_diagnosis"
+EXECUTION_REVISION = "9691117397a08b0bb6916a37867ba0332de38cbe"
+PAUSED_RUN_ID = "ceg_wm_content_routing_directional_diagnosis"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/content_routing_directional_diagnosis.json",
     "configs/experiments/content_routing_reference_fit_manifest.json",
@@ -155,6 +151,9 @@ def test_content_routing_server_writes_safe_fixed_roster_receipt(
     assert receipt["formal_tau_created"] is False
     assert receipt["fpr_estimated"] is False
     assert receipt["candidate_promoted"] is False
+    assert receipt["claim_boundary"] == CLAIM_BOUNDARY
+    assert "fixed_half_mixing_only" in receipt["claim_boundary"]
+    assert "no_alpha_generalization" in receipt["claim_boundary"]
     receipt_bytes = Path(receipt["receipt_path"]).read_bytes()
     assert secret.encode("utf-8") not in receipt_bytes
 
@@ -202,33 +201,79 @@ def test_content_routing_entrypoint_preserves_fixed_execution_boundaries() -> No
 
 @pytest.mark.unit
 def test_content_routing_exact_package_contains_execution_closure(tmp_path: Path) -> None:
-    revision = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        cwd=ROOT,
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks exact Git checkout capability")
+    checkout = tmp_path / "exact_checkout"
+    subprocess.run(
+        ("git", "clone", "--no-checkout", "--quiet", str(ROOT), str(checkout)),
+        check=True,
+    )
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(checkout),
+            "checkout",
+            "--detach",
+            "--quiet",
+            EXECUTION_REVISION,
+        ),
+        check=True,
+    )
+    package_root = tmp_path / "package_persistent"
+    build_script = (
+        "from pathlib import Path; import sys; "
+        "sys.path.insert(0, str(Path('.').resolve())); "
+        "from scripts.experiment_execution.development_exploration_entrypoint "
+        "import _build_or_verify_package; "
+        f"print(_build_or_verify_package(Path('.').resolve(), "
+        f"Path({str(package_root)!r}), {EXECUTION_REVISION!r}))"
+    )
+    built = subprocess.run(
+        (sys.executable, "-I", "-c", build_script),
+        cwd=checkout,
         check=True,
         capture_output=True,
         text=True,
-    ).stdout.strip()
-    package = _build_or_verify_package(ROOT, tmp_path, revision)
+    )
+    package = Path(built.stdout.strip())
     with ZipFile(package) as archive:
         names = set(archive.namelist())
+        assert archive.testzip() is None
     assert REQUIRED_PACKAGE_MEMBERS <= names
     extracted = tmp_path / "extracted"
     with ZipFile(package) as archive:
         archive.extractall(extracted)
+    isolated_import = (
+        "from pathlib import Path; import sys; "
+        f"sys.path.insert(0, {str(extracted)!r}); "
+        "import experiments.runners.content_routing_directional_diagnosis; "
+        "import scripts.experiment_execution.content_routing_directional_diagnosis_server"
+    )
     completed = subprocess.run(
-        (
-            sys.executable,
-            "-c",
-            "import experiments.runners.content_routing_directional_diagnosis; "
-            "import scripts.experiment_execution.content_routing_directional_diagnosis_server",
-        ),
-        cwd=extracted,
+        (sys.executable, "-I", "-c", isolated_import),
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+    isolated_help = subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            str(
+                extracted
+                / "scripts/experiment_execution/content_routing_directional_diagnosis_server.py"
+            ),
+            "--help",
+        ),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert isolated_help.returncode == 0, isolated_help.stderr
 
 
 @pytest.mark.unit
@@ -300,6 +345,24 @@ def test_content_routing_notebook_is_thin_exact_and_output_free() -> None:
     assert "two non-scientific operational units" in source
     assert "thirty-two routing-reference fit units" in source
     assert "eight paired routed-versus-uniform scientific probes" in source
+    assert "a = 0.50" in source
+    assert "causal routing control" in source
+    assert "not alpha selection" in source
+    assert "does not generalize across alpha values" in source
+    assert "fixed-half routing directional validation" in source
+    assert PAUSED_RUN_ID not in code_source
+    export_order = tuple(
+        code_source.index(fragment)
+        for fragment in (
+            "assert file_sha256(artifact_source) == receipt['artifact_sha256']",
+            "artifact_export = copy_to_drive_export(",
+            "receipt_export = copy_to_drive_export(",
+            "checksums_path = EXPORT_ROOT / 'SHA256SUMS'",
+            "print(json.dumps(summary, indent=2, sort_keys=True))",
+            "if server_exit_code != 0:",
+        )
+    )
+    assert export_order == tuple(sorted(export_order))
     for forbidden in (
         "pip install",
         "snapshot_download(",
@@ -363,6 +426,7 @@ def test_content_routing_server_exports_failure_receipt_without_scientific_claim
     assert receipt["artifact_kind"] == worker["artifact_kind"]
     assert receipt["content_routing_directional_aggregate"] is None
     assert receipt["scientific_claims_supported"] is False
+    assert receipt["claim_boundary"] == CLAIM_BOUNDARY
     assert receipt["termination_reason"] == "worker_execution_failure"
     assert Path(receipt["receipt_path"]).is_file()
 

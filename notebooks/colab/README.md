@@ -6,18 +6,22 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `content_routing_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`cd10d86b51f21c8c76bbc920160bc1e792c706a7`，使用独立 run ID
-`ceg_wm_content_routing_directional_diagnosis`，并执行冻结的
+`9691117397a08b0bb6916a37867ba0332de38cbe`，使用全新独立 run ID
+`ceg_wm_content_routing_registered_key_correction_diagnosis`，并执行冻结的
 `2 operational + 32 reference fit + 8 paired scientific = 42 total` units；每个 unit
 只允许 attempt zero。Notebook 只挂载 Drive、读取 `HF_TOKEN` 与
 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
 `content_routing_directional_diagnosis_server.py`，并以 create-only 方式导出 result 或
 diagnostic ZIP、execution receipt 与 `SHA256SUMS`。失败时先完成导出再报错。
 
-该入口比较同 prompt/seed/key/base latent、共同实际总预算下的 routed 与 uniform control，
-只形成 development routing directional diagnosis；不拟合 threshold/FPR，不形成正式组合、
-candidate promotion、calibration、evaluation、baseline 或论文 claim。所有历史 run 与 records
-保持 producer-bound，不读取、迁移、改写或拼接到本次 8-probe 分母。
+该入口比较同 prompt/seed/key/base latent、共同实际总预算下的 routed 与 uniform control；
+全部 42 units 以及 8 个 probe 的两条 arm 都使用固定 `a = 0.50`。该系数只作为本次
+routing 因果控制，不是 alpha selection、组合权重选择或跨 alpha 外推。通过时只允许另行
+申请 fixed-half routing directional validation。它只形成 development routing directional
+diagnosis；不拟合 threshold/FPR，不形成正式组合、candidate promotion、calibration、
+evaluation、baseline 或论文 claim。旧 run `ceg_wm_content_routing_directional_diagnosis`
+及全部历史 records 保持 producer-bound；当前入口不读取、恢复、迁移、改写或拼接到本次
+全新 run 的 8-probe 分母。
 
 `qk_synchronization_write_diagnostic.ipynb` 当前为 **paused / not authorized**。它此前是
 唯一授权在收到最终固定链接后执行
