@@ -8,6 +8,7 @@ import json
 from math import ceil
 from pathlib import Path
 import shutil
+from struct import pack, unpack
 import time
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -394,6 +395,32 @@ def _observation(ordinal: int, *, routed_wins: bool = True, l2: float = 0.01):
         paired_clean_observation_digest=f"{ordinal + 601:064x}",
         failure_class=None,
     )
+
+
+def _observation_with_budget_values(
+    ordinal: int,
+    *,
+    routed_wins: bool,
+    routed_quality: float,
+    uniform_quality: float,
+    routed_realized: float,
+    uniform_realized: float,
+):
+    values = asdict(_observation(ordinal, routed_wins=routed_wins))
+    for key in (
+        "observation_identity",
+        "incremental_indicator",
+        "routing_coverage",
+        "quality_relative_l2",
+    ):
+        values.pop(key)
+    values.update(
+        routed_clean_to_watermarked_rgb_relative_l2=routed_quality,
+        uniform_clean_to_watermarked_rgb_relative_l2=uniform_quality,
+        routed_realized_relative_l2=routed_realized,
+        uniform_realized_relative_l2=uniform_realized,
+    )
+    return create_content_routing_directional_observation(**values)
 
 
 def test_content_routing_protocol_freezes_forty_two_attempt_zero_units() -> None:
@@ -2441,6 +2468,138 @@ def test_routing_directional_budget_violation_cannot_pass() -> None:
     assert aggregate.budget_violation_count == 1
     assert aggregate.routing_directional_diagnosis_passed is False
     assert aggregate.outcome == "routing_directional_signal_not_observed"
+
+
+def test_routing_directional_budget_uses_exact_binary32_limit() -> None:
+    binary32_limit = unpack(">f", pack(">f", 3 / 250))[0]
+    limit_bits = unpack(">I", pack(">f", binary32_limit))[0]
+    next_binary32 = unpack(">f", pack(">I", limit_bits + 1))[0]
+
+    accepted = tuple(
+        _observation_with_budget_values(
+            ordinal,
+            routed_wins=ordinal < 5,
+            routed_quality=binary32_limit,
+            uniform_quality=binary32_limit,
+            routed_realized=binary32_limit,
+            uniform_realized=binary32_limit,
+        )
+        for ordinal in range(8)
+    )
+    accepted_aggregate = aggregate_content_routing_directional_diagnosis(accepted)
+    assert binary32_limit > 3 / 250
+    assert accepted_aggregate.budget_violation_count == 0
+    assert accepted_aggregate.routing_directional_diagnosis_passed is True
+
+    rejected = (
+        _observation_with_budget_values(
+            0,
+            routed_wins=True,
+            routed_quality=next_binary32,
+            uniform_quality=next_binary32,
+            routed_realized=next_binary32,
+            uniform_realized=next_binary32,
+        ),
+        *accepted[1:],
+    )
+    rejected_aggregate = aggregate_content_routing_directional_diagnosis(rejected)
+    assert rejected_aggregate.budget_violation_count == 1
+    assert rejected_aggregate.routing_directional_diagnosis_passed is False
+
+
+def test_routing_directional_budget_counts_each_cluster_once() -> None:
+    observations = (
+        _observation_with_budget_values(
+            0,
+            routed_wins=True,
+            routed_quality=0.013,
+            uniform_quality=0.014,
+            routed_realized=0.015,
+            uniform_realized=0.016,
+        ),
+        *tuple(_observation(i, routed_wins=i < 5) for i in range(1, 8)),
+    )
+    aggregate = aggregate_content_routing_directional_diagnosis(
+        observations,
+        budget_violation_count=2,
+    )
+    assert aggregate.budget_violation_count == 3
+
+
+def test_routing_directional_replays_audited_fixed_half_probe_budget() -> None:
+    probe_values = (
+        (
+            0.011833590950137179,
+            0.010253416774162279,
+            0.011999995447695255,
+            0.012000000104308128,
+        ),
+        (
+            0.014392108097900395,
+            0.01080496545331887,
+            0.011999999172985554,
+            0.011999019421637058,
+        ),
+        (
+            0.007240464997045508,
+            0.005132253112110549,
+            0.011999999172985554,
+            0.01199999637901783,
+        ),
+        (
+            0.00882765473212639,
+            0.005528241788487783,
+            0.011999817565083504,
+            0.01199999637901783,
+        ),
+        (
+            0.007601234245559355,
+            0.00663541064070923,
+            0.011999999172985554,
+            0.01199998427182436,
+        ),
+        (
+            0.014163576287288036,
+            0.013837280166945362,
+            0.011999997310340405,
+            0.012000000104308128,
+        ),
+        (
+            0.01274223956593596,
+            0.010593138131441365,
+            0.011999933049082756,
+            0.011999999172985554,
+        ),
+        (
+            0.005026964184956925,
+            0.003663646243179102,
+            0.011999999172985554,
+            0.011999991722404957,
+        ),
+    )
+    observations = tuple(
+        _observation_with_budget_values(
+            ordinal,
+            routed_wins=ordinal < 3,
+            routed_quality=values[0],
+            uniform_quality=values[1],
+            routed_realized=values[2],
+            uniform_realized=values[3],
+        )
+        for ordinal, values in enumerate(probe_values)
+    )
+    aggregate = aggregate_content_routing_directional_diagnosis(observations)
+    assert aggregate.budget_violation_count == 3
+    assert aggregate.incremental_success_count == 3
+    assert aggregate.incremental_indicator_mean == 3 / 8
+    assert aggregate.outcome == "routing_directional_signal_not_observed"
+    assert aggregate.allow_request_for_routing_directional_validation is False
+    replayed = aggregate_content_routing_directional_diagnosis(observations)
+    assert replayed.aggregate_identity == aggregate.aggregate_identity
+    assert (
+        aggregate.aggregate_identity
+        != "e55100049495620d89e8938d8fa90f4c34effecc71a4bd40c8cc5627f1eb0438"
+    )
 
 
 def test_routing_protocol_and_metric_remain_independent_of_execution_layers() -> None:

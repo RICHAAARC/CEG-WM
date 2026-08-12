@@ -7,6 +7,7 @@ from hashlib import sha256
 import json
 from math import ceil, isfinite
 from statistics import mean
+from struct import pack, unpack
 from typing import Sequence
 
 from experiments.protocol.content_routing_directional_diagnosis import (
@@ -753,7 +754,13 @@ def aggregate_content_routing_directional_diagnosis(
         raise ContentRoutingDirectionalMetricError(
             "routing aggregate observations are duplicated"
         )
-    limit = CONTENT_RELATIVE_L2_NUMERATOR / CONTENT_RELATIVE_L2_DENOMINATOR
+    limit = unpack(
+        ">f",
+        pack(
+            ">f",
+            CONTENT_RELATIVE_L2_NUMERATOR / CONTENT_RELATIVE_L2_DENOMINATOR,
+        ),
+    )[0]
     budget_excess = sum(
         any(
             value > limit
