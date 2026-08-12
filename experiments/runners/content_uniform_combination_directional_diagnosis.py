@@ -167,8 +167,44 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         metric={"schema_version":METRIC_SCHEMA_VERSION,"metric_role":"development_exploratory_cluster_level","responsibility_id":"content_detector","source_cluster_id":identity.source_cluster_id,"registered_metric_ids":metric_ids,"candidate_config_digest":self.candidate_config_digest,"paired_ablation_identity":paired,"content_branch_id":branch,"geometry_case_id":"geometry_case_not_applicable","sufficient_statistics":statistics,"result_identity_digests":result_digests,"threshold_role":"not_fitted_content_combination_directional_diagnosis","threshold_identity":None,"threshold_fit_source_cluster_digest":None}
         metric["observation_digest"]=canonical_development_value_digest(metric); return metric
 
-    def _scientific_record(self, *, intent: UnitIntent, identity: AnalysisUnitIdentity, phase: str, case: str, branch: str, status: str, failure_class: str|None, failure_reason: str|None, elapsed: float, operation_payload: dict[str,object], metric: dict[str,object]) -> DevelopmentScientificRecord:
-        record=DevelopmentScientificRecord(schema_version=RECORD_SCHEMA_VERSION,collection_role=DEVELOPMENT_RECORD_COLLECTION_ROLE,record_id="0"*64,run_id=self.protocol.run_id,protocol_id=self.protocol.protocol_id,protocol_version=self.protocol.protocol_version,protocol_digest=self.protocol_digest,execution_intent_authority_digest=self.execution_intent_authority_digest,method_code_revision=self.method_code_revision,unit_index=intent.unit_index,phase=phase,analysis_unit_identity=asdict(identity),responsibility_id="content_detector",scientific_question_id="content_uniform_combination_directional_increment",development_case_id=case,candidate_identity="content_combination_calibrated",candidate_config_digest=self.candidate_config_digest,paired_ablation_identity="same_generation_uniform_route_six_image_control",negative_control_case_ids=("paired_clean_primary_null","wrong_key_control"),metric_ids=("content_combination_branch_scores",) if status=="success" else ("content_combination_failure",),content_branch_id=branch,geometry_case_id="geometry_case_not_applicable",attempt_index=intent.attempt_index,execution_status=status,failure_class=failure_class,failure_reason=failure_reason,retry_parent_intent_digest=intent.parent_attempt_intent_digest,actual_elapsed_seconds=elapsed,maximum_duration_seconds=intent.maximum_duration_seconds,duration_limit_exceeded=elapsed>intent.maximum_duration_seconds,operation_result_payload=operation_payload,operation_result_digest=canonical_development_value_digest(operation_payload),metric_observation=metric,routing_trace={"route_identity":"routing_uniform_control"} if status=="success" else {},branch_score_trace=operation_payload if status=="success" else {},detector_trace={"formal_detector_remains_hf_only":True,"diagnostic_candidate":"content_combination_calibrated"} if status=="success" else {},geometry_trace={"geometry_case_id":"geometry_case_not_applicable"} if status=="success" else {},threshold_trace={"formal_tau_created":False} if status=="success" else {},key_control_trace={"root_key_public_digest":self.root_key_public_digest,"wrong_key_count":4} if status=="success" else {},decision_trace={"candidate_promoted":False,"scientific_claims_supported":False} if status=="success" else {},provenance_trace={"protocol_digest":self.protocol_digest,"execution_intent_authority_digest":self.execution_intent_authority_digest,"method_code_revision":self.method_code_revision,"candidate_config_digest":self.candidate_config_digest},module_outcome=None,candidate_recommendation=None,scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY)
+    def _scientific_record(self, *, intent: UnitIntent, identity: AnalysisUnitIdentity, phase: str, case: str, branch: str, paired: str, status: str, failure_class: str|None, failure_reason: str|None, elapsed: float, operation_payload: dict[str,object], metric: dict[str,object]) -> DevelopmentScientificRecord:
+        expected = {
+            "development_content_combination_reference_fit": (
+                "content_combination_reference_fit",
+                "paired_clean_branch_null_reference",
+                "clean_primary_null_cross_fit_reference",
+            ),
+            "development_content_uniform_combination_directional_probe": (
+                "six_image_uniform_combination_probe",
+                "six_image_uniform_combination_probe",
+                "same_generation_uniform_route_six_image_control",
+            ),
+        }
+        if expected.get(phase) != (case, branch, paired):
+            raise ContentUniformCombinationDirectionalRunnerError(
+                "scientific record responsibility identity drifted"
+            )
+        if (
+            intent.phase != phase
+            or intent.development_case_id != case
+            or intent.content_branch_id != branch
+        ):
+            raise ContentUniformCombinationDirectionalRunnerError(
+                "scientific intent responsibility identity drifted"
+            )
+        if status == "success":
+            if (
+                metric.get("paired_ablation_identity") != paired
+                or metric.get("content_branch_id") != branch
+            ):
+                raise ContentUniformCombinationDirectionalRunnerError(
+                    "scientific metric responsibility identity drifted"
+                )
+        elif metric:
+            raise ContentUniformCombinationDirectionalRunnerError(
+                "failed scientific record carries a metric observation"
+            )
+        record=DevelopmentScientificRecord(schema_version=RECORD_SCHEMA_VERSION,collection_role=DEVELOPMENT_RECORD_COLLECTION_ROLE,record_id="0"*64,run_id=self.protocol.run_id,protocol_id=self.protocol.protocol_id,protocol_version=self.protocol.protocol_version,protocol_digest=self.protocol_digest,execution_intent_authority_digest=self.execution_intent_authority_digest,method_code_revision=self.method_code_revision,unit_index=intent.unit_index,phase=phase,analysis_unit_identity=asdict(identity),responsibility_id="content_detector",scientific_question_id="content_uniform_combination_directional_increment",development_case_id=case,candidate_identity="content_combination_calibrated",candidate_config_digest=self.candidate_config_digest,paired_ablation_identity=paired,negative_control_case_ids=("paired_clean_primary_null","wrong_key_control"),metric_ids=("content_combination_branch_scores",) if status=="success" else ("content_combination_failure",),content_branch_id=branch,geometry_case_id="geometry_case_not_applicable",attempt_index=intent.attempt_index,execution_status=status,failure_class=failure_class,failure_reason=failure_reason,retry_parent_intent_digest=intent.parent_attempt_intent_digest,actual_elapsed_seconds=elapsed,maximum_duration_seconds=intent.maximum_duration_seconds,duration_limit_exceeded=elapsed>intent.maximum_duration_seconds,operation_result_payload=operation_payload,operation_result_digest=canonical_development_value_digest(operation_payload),metric_observation=metric,routing_trace={"route_identity":"routing_uniform_control"} if status=="success" else {},branch_score_trace=operation_payload if status=="success" else {},detector_trace={"formal_detector_remains_hf_only":True,"diagnostic_candidate":"content_combination_calibrated"} if status=="success" else {},geometry_trace={"geometry_case_id":"geometry_case_not_applicable"} if status=="success" else {},threshold_trace={"formal_tau_created":False} if status=="success" else {},key_control_trace={"root_key_public_digest":self.root_key_public_digest,"wrong_key_count":4} if status=="success" else {},decision_trace={"candidate_promoted":False,"scientific_claims_supported":False} if status=="success" else {},provenance_trace={"protocol_digest":self.protocol_digest,"execution_intent_authority_digest":self.execution_intent_authority_digest,"method_code_revision":self.method_code_revision,"candidate_config_digest":self.candidate_config_digest},module_outcome=None,candidate_recommendation=None,scientific_claim_boundary=DEVELOPMENT_CLAIM_BOUNDARY)
         record=_record_id(record); record.validate(); return record
 
     def execute_reference_fit_unit(self, *, unit_index: int, base_latent: torch.Tensor, intent: UnitIntent) -> DevelopmentScientificRecord:
@@ -179,7 +215,7 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         measurement=create_content_combination_reference_measurement(cluster_ordinal=ordinal,fold_index=ordinal%4,hf_score=hf.hf_score,lf_score=lf.lf_score,hf_detector_identity=hf.detector_identity,lf_detector_identity=lf.detector_identity,whitening_asset_digest=lf.whitening_asset_digest,observation_digest=hf.observation_digest)
         payload={"reference_measurement":asdict(measurement),"clean_image_digest":rgb8_image_digest(_rgb8(result.clean_image)),"runtime_config_digest":result.runtime_config_digest}
         metric=self._metric_observation(identity=identity,metric_ids=("content_combination_branch_scores",),paired="clean_primary_null_cross_fit_reference",branch="paired_clean_branch_null_reference",statistics=(("hf_score",measurement.hf_score),("lf_score",measurement.lf_score)),result_digests=(measurement.measurement_identity,))
-        return self._scientific_record(intent=intent,identity=identity,phase="development_content_combination_reference_fit",case="content_combination_reference_fit",branch="paired_clean_branch_null_reference",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
+        return self._scientific_record(intent=intent,identity=identity,phase="development_content_combination_reference_fit",case="content_combination_reference_fit",branch="paired_clean_branch_null_reference",paired="clean_primary_null_cross_fit_reference",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
 
     @staticmethod
     def reference_measurement_from_committed_record(record: DevelopmentScientificRecord) -> ContentCombinationReferenceMeasurement:
@@ -245,12 +281,12 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         observation=create_content_uniform_combination_directional_observation(cluster_ordinal=ordinal,fold_index=ordinal%4,fold_reference_identity=reference.reference_identity,whitening_asset_digest=self.whitening_asset.whitening_asset_digest,score_rows=tuple(all_rows),arm_observations=tuple(arms),failure_class=None)
         identity=self._analysis_identity(unit_index); payload={"combination_observation":asdict(observation),"clean_image_digest":rgb8_image_digest(clean_image)}
         metric=self._metric_observation(identity=identity,metric_ids=("content_combination_branch_scores",),paired="same_generation_uniform_route_six_image_control",branch="six_image_uniform_combination_probe",statistics=(("score_row_count",float(len(all_rows))),),result_digests=(observation.observation_identity,))
-        return self._scientific_record(intent=intent,identity=identity,phase="development_content_uniform_combination_directional_probe",case="six_image_uniform_combination_probe",branch="six_image_uniform_combination_probe",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
+        return self._scientific_record(intent=intent,identity=identity,phase="development_content_uniform_combination_directional_probe",case="six_image_uniform_combination_probe",branch="six_image_uniform_combination_probe",paired="same_generation_uniform_route_six_image_control",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
 
     def create_failed_scientific_record(self, *, intent: UnitIntent, failure_class: str, failure_reason: str, elapsed_seconds: float) -> DevelopmentScientificRecord:
         if intent.unit_index not in range(1,41) or failure_class not in {"implementation_failure","resource_failure"}: raise ContentUniformCombinationDirectionalRunnerError("failure identity drifted")
         reference=intent.unit_index<33; identity=self._analysis_identity(intent.unit_index)
-        return self._scientific_record(intent=intent,identity=identity,phase="development_content_combination_reference_fit" if reference else "development_content_uniform_combination_directional_probe",case="content_combination_reference_fit" if reference else "six_image_uniform_combination_probe",branch="paired_clean_branch_null_reference" if reference else "six_image_uniform_combination_probe",status="failed",failure_class=failure_class,failure_reason=failure_reason,elapsed=elapsed_seconds,operation_payload={},metric={})
+        return self._scientific_record(intent=intent,identity=identity,phase="development_content_combination_reference_fit" if reference else "development_content_uniform_combination_directional_probe",case="content_combination_reference_fit" if reference else "six_image_uniform_combination_probe",branch="paired_clean_branch_null_reference" if reference else "six_image_uniform_combination_probe",paired="clean_primary_null_cross_fit_reference" if reference else "same_generation_uniform_route_six_image_control",status="failed",failure_class=failure_class,failure_reason=failure_reason,elapsed=elapsed_seconds,operation_payload={},metric={})
 
     @staticmethod
     def observation_from_record(record: DevelopmentScientificRecord) -> ContentUniformCombinationDirectionalObservation:

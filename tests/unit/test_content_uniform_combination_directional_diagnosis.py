@@ -393,6 +393,22 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
         intent = store.create_session_intent(
             cursor, lease, now_epoch_seconds=epoch + 3 + ordinal * 2
         )
+        if ordinal == 0:
+            failed_reference = runner.create_failed_scientific_record(
+                intent=intent,
+                failure_class="implementation_failure",
+                failure_reason="public_reference_detection_failure",
+                elapsed_seconds=0.5,
+            )
+            checked_failed_reference = type(failed_reference).from_payload(
+                failed_reference.payload()
+            )
+            assert checked_failed_reference.paired_ablation_identity == (
+                "clean_primary_null_cross_fit_reference"
+            )
+            assert checked_failed_reference.content_branch_id == (
+                "paired_clean_branch_null_reference"
+            )
         record = runner.execute_reference_fit_unit(
             unit_index=ordinal + 1, base_latent=base, intent=intent
         )
@@ -412,6 +428,14 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
         ) if record.unit_index < 33
     )
     assert len(references) == 32
+    assert all(
+        record.paired_ablation_identity == "clean_primary_null_cross_fit_reference"
+        and record.metric_observation["paired_ablation_identity"]
+        == record.paired_ablation_identity
+        and record.content_branch_id == "paired_clean_branch_null_reference"
+        and record.metric_observation["content_branch_id"] == record.content_branch_id
+        for record in references
+    )
     for ordinal in range(8):
         intent = store.create_session_intent(
             cursor, lease, now_epoch_seconds=epoch + 110 + ordinal * 2
@@ -422,6 +446,21 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
             intent=intent,
             reference_records=references,
         )
+        checked = type(record).from_payload(record.payload())
+        observation_payload = checked.operation_result_payload[
+            "combination_observation"
+        ]
+        assert checked.paired_ablation_identity == (
+            "same_generation_uniform_route_six_image_control"
+        )
+        assert checked.metric_observation["paired_ablation_identity"] == (
+            checked.paired_ablation_identity
+        )
+        assert checked.metric_observation["content_branch_id"] == (
+            checked.content_branch_id
+        )
+        assert len(observation_payload["arm_observations"]) == 5
+        assert len({checked.operation_result_payload["clean_image_digest"]}) == 1
         store.commit_session_unit(
             cursor,
             lease,
@@ -442,7 +481,7 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
     assert len(records) == 8
     assert aggregate.scientific_cluster_count == 8
     assert aggregate.failed_cluster_count == 0
-    assert backend.generation_calls == 113
+    assert backend.generation_calls == 114
 
     failure_root = tmp_path / "failure_recovery"
     failure_store = DevelopmentPersistentStore(
@@ -499,6 +538,27 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
             failure_class="resource_failure",
             failure_reason="public_runtime_resource_failure",
             elapsed_seconds=0.5,
+        )
+        if ordinal == 0:
+            with pytest.raises(
+                RuntimeError,
+                match="scientific intent responsibility identity drifted",
+            ):
+                runner.create_failed_scientific_record(
+                    intent=replace(
+                        intent,
+                        phase="development_content_combination_reference_fit",
+                    ),
+                    failure_class="resource_failure",
+                    failure_reason="public_runtime_resource_failure",
+                    elapsed_seconds=0.5,
+                )
+        checked_failure = type(record).from_payload(record.payload())
+        assert checked_failure.paired_ablation_identity == (
+            "same_generation_uniform_route_six_image_control"
+        )
+        assert checked_failure.content_branch_id == (
+            "six_image_uniform_combination_probe"
         )
         failure_store.commit_session_unit(
             failure_cursor,
