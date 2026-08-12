@@ -44,13 +44,80 @@ def test_execution_chain_freezes_real_public_surfaces_and_fixed_denominator() ->
     protocol, _reference, _probes = load_content_uniform_combination_directional_protocol(CONFIG, repository_root=ROOT)
     assert len(protocol.unit_roster) == 41
     source = inspect.getsource(entrypoint.execute_content_uniform_combination_directional_diagnosis_session)
-    assert "_replay_verified_whitening_asset" in source
+    assert "_replay_whitening_asset_for_startup" in source
     assert "runner.execute_operational_unit" in source
     assert "runner.execute_reference_fit_unit" in source
     assert "runner.execute_probe_unit" in source
     assert "runner.replay_aggregate" in source
     assert "successful_references" in source
     assert "cursor.routing_reference_records" not in source
+
+
+def test_whitening_producer_failure_is_the_only_replay_error_wrapped_for_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = entrypoint.LfWhiteningAssetProducerReplayError(
+        "bounded producer replay failure"
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "_replay_verified_whitening_asset",
+        lambda **_arguments: (_ for _ in ()).throw(error),
+    )
+    with pytest.raises(
+        entrypoint.ContentUniformCombinationDirectionalStartupError
+    ) as caught:
+        entrypoint._replay_whitening_asset_for_startup(repository=ROOT)
+    assert caught.value.failure_class == "implementation_failure"
+    assert caught.value.failure_type.endswith("LfWhiteningAssetProducerReplayError")
+    assert str(caught.value) == "content combination startup failed"
+    assert "bounded producer replay failure" not in str(caught.value)
+
+    monkeypatch.setattr(
+        entrypoint,
+        "_replay_verified_whitening_asset",
+        lambda **_arguments: (_ for _ in ()).throw(ValueError("current authority")),
+    )
+    with pytest.raises(ValueError, match="current authority"):
+        entrypoint._replay_whitening_asset_for_startup(repository=ROOT)
+
+
+def test_whitening_producer_startup_diagnostic_is_safe_and_pre_store(
+    tmp_path: Path,
+) -> None:
+    protocol, reference, probes = load_content_uniform_combination_directional_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    failure = entrypoint.ContentUniformCombinationDirectionalStartupError(
+        failure_type=(
+            "scripts.experiment_execution.lf_whitened_directional_validation_entrypoint."
+            "LfWhiteningAssetProducerReplayError"
+        ),
+        failure_class="implementation_failure",
+    )
+    worker = server._startup_failure_worker(
+        error=failure,
+        persistent_root=tmp_path,
+        run_id=protocol.run_id,
+        session_id="whitening_producer_startup_session",
+        protocol=protocol,
+        reference_manifest=reference,
+        probe_manifest=probes,
+        package_sha256="a" * 64,
+    )
+    assert worker["committed_unit_count"] == 0
+    assert worker["content_uniform_combination_directional_aggregate"] is None
+    with ZipFile(worker["diagnostic_zip"]) as archive:
+        payload = json.loads(archive.read("diagnostic.json"))
+    assert payload == {
+        "failure_class": "implementation_failure",
+        "failure_type": failure.failure_type,
+        "scientific_claims_supported": False,
+        "stage": "content_uniform_combination_directional_diagnosis_startup",
+    }
+    serialized = json.dumps(worker, sort_keys=True)
+    for forbidden in ("bounded producer replay failure", "traceback", "root_secret"):
+        assert forbidden not in serialized
 
 
 @pytest.mark.parametrize("exit_code", (0, 3))

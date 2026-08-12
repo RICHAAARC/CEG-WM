@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from hashlib import sha256
 from importlib import import_module
+import inspect
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 import torch
@@ -50,13 +52,21 @@ from experiments.protocol.lf_whitened_score_screening import (
 )
 from experiments.runners.development_persistence import (
     CommittedUnit,
+    DIAGNOSTIC_SCHEMA_VERSION,
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
+    GPU_MIX_POLICY,
+    HARD_SESSION_CAP_SECONDS,
+    SessionReceipt,
+    SOFT_STOP_SECONDS,
 )
 from experiments.runners.lf_whitened_directional_validation import (
     LfWhitenedDirectionalRunnerError,
     LfWhitenedDirectionalValidationRunner,
     _observation,
+)
+from experiments.runners.lf_whitened_score_screening import (
+    LfWhitenedScoreScreeningRunner,
 )
 from main import (
     LfDetectionObservation,
@@ -67,8 +77,20 @@ from main import (
 )
 from runtime import create_runtime_adapter
 from scripts.experiment_execution.lf_whitened_directional_validation_entrypoint import (
+    WHITENING_ASSET_PRODUCER_REVISION,
     _derive_registered_experiment_root,
+    _derive_screening_registered_root,
+    _producer_protocol_from_package,
+    _replay_verified_whitening_asset,
 )
+from scripts.experiment_execution.development_exploration_entrypoint import (
+    _build_or_verify_package,
+    _sha256_file,
+)
+from scripts.experiment_execution import (
+    lf_whitened_directional_validation_entrypoint as directional_entrypoint,
+)
+from experiments.runners import lf_whitened_score_screening as screening_runner_module
 from scripts.experiment_execution.component_source_closure import (
     build_component_source_closure,
 )
@@ -92,6 +114,383 @@ LF_DIRECTIONAL_PRODUCER_PATHS = (
 SCREENING_CONFIG = ROOT / "configs/experiments/lf_whitened_score_screening.json"
 COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
 ROOT_KEY = "ceg-wm-lf-whitened-directional-test-key"
+
+
+def _build_whitening_producer_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, object, tuple[tuple[DevelopmentScientificRecord, CommittedUnit], ...]]:
+    checkout = tmp_path / "producer_checkout"
+    subprocess.run(
+        ["git", "clone", "--no-checkout", str(ROOT), str(checkout)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "checkout",
+            "--detach",
+            WHITENING_ASSET_PRODUCER_REVISION,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    persistent = tmp_path / "producer_persistent"
+    package = _build_or_verify_package(
+        checkout,
+        persistent,
+        WHITENING_ASSET_PRODUCER_REVISION,
+    )
+    protocol, fit, screening, adapter_digest, runtime_digest = (
+        _producer_protocol_from_package(package)
+    )
+    callbacks = tuple(tuple(range(20)) for _ in range(49))
+    backend = FakeContentBackend(callback_sequences=callbacks)  # type: ignore[arg-type]
+    runtime = create_runtime_adapter(backend)
+    runtime.initialize("cpu")
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS)
+    )
+    registered_root = _derive_screening_registered_root(
+        ROOT_KEY,
+        protocol_digest=protocol.digest(),
+        screening_manifest_digest=screening.digest(),
+        key_family_namespace=screening.key_family_namespace,
+    )
+    public_root = identify_root_key(registered_root).root_key_public_digest
+    candidate_digest = canonical_digest(
+        {
+            "adapter_config_digest": adapter_digest,
+            "candidate_identity": protocol.candidate_identity,
+            "null_fit_manifest_digest": fit.digest(),
+            "runtime_config_digest": runtime_digest,
+            "screening_manifest_digest": screening.digest(),
+        }
+    )
+    authority = canonical_digest(
+        {
+            "null_fit_manifest_digest": fit.digest(),
+            "protocol_digest": protocol.digest(),
+            "root_key_public_digest": public_root,
+            "run_id": protocol.run_id,
+            "screening_manifest_digest": screening.digest(),
+        }
+    )
+    runner = LfWhitenedScoreScreeningRunner(
+        protocol=protocol,
+        null_fit_manifest=fit,
+        screening_manifest=screening,
+        adapter=adapter,
+        runtime_adapter=runtime,
+        method_code_revision=WHITENING_ASSET_PRODUCER_REVISION,
+        run_id=protocol.run_id,
+        registered_root_key=registered_root,
+        root_key_public_digest=public_root,
+        protocol_digest=protocol.digest(),
+        execution_intent_authority_digest=authority,
+        candidate_config_digest=candidate_digest,
+    )
+    store = DevelopmentPersistentStore(
+        persistent,
+        run_id=protocol.run_id,
+        worker_identity=FrozenWorkerIdentity(
+            revision=WHITENING_ASSET_PRODUCER_REVISION,
+            protocol_digest=protocol.digest(),
+            execution_intent_authority_digest=authority,
+            input_manifest_digest=canonical_digest(
+                {
+                    "null_fit_manifest_digest": fit.digest(),
+                    "screening_manifest_digest": screening.digest(),
+                }
+            ),
+            candidate_config_digest=candidate_digest,
+            unit_roster_digest=protocol.unit_roster_digest,
+        ),
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    monkeypatch.setattr(
+        screening_runner_module,
+        "clean_null_band_energy_sums",
+        lambda _values: tuple(float(index + 1) for index in range(96)),
+    )
+    lease = store.acquire_lease(
+        session_id="producer_replay_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=10000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+    base = torch.linspace(
+        -1.0, 1.0, steps=16 * 64 * 64, dtype=torch.float32
+    ).reshape(1, 16, 64, 64).to(torch.float16)
+    intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101)
+    store.commit_session_unit(
+        cursor,
+        lease,
+        intent,
+        record=runner.execute_operational_smoke(
+            base_latent=base,
+            attempt_index=0,
+            retry_parent_intent_digest=None,
+            maximum_duration_seconds=2700,
+        ),
+        raw_secret_values=(ROOT_KEY, registered_root),
+        now_epoch_seconds=102,
+    )
+    asset = None
+    for ordinal in range(32):
+        intent = store.create_session_intent(
+            cursor, lease, now_epoch_seconds=103 + ordinal * 2
+        )
+        evidence = store.verified_terminal_scientific_evidence(
+            now_epoch_seconds=103 + ordinal * 2
+        )
+        record = runner.execute_null_fit_cluster(
+            cluster_ordinal=ordinal,
+            base_latent=base,
+            attempt_index=0,
+            retry_parent_intent_digest=None,
+            maximum_duration_seconds=2700,
+            prior_verified_fit_evidence=evidence,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            raw_secret_values=(ROOT_KEY, registered_root),
+            now_epoch_seconds=104 + ordinal * 2,
+        )
+    fit_evidence = store.verified_terminal_scientific_evidence_for_unit_indexes(
+        tuple(range(1, 33)), now_epoch_seconds=200
+    )
+    asset = runner.replay_whitening_asset(fit_evidence)
+    for ordinal in range(8):
+        intent = store.create_session_intent(
+            cursor, lease, now_epoch_seconds=201 + ordinal * 2
+        )
+        record = runner.create_failed_record(
+            unit_index=33 + ordinal,
+            attempt_index=0,
+            retry_parent_intent_digest=None,
+            maximum_duration_seconds=2700,
+            actual_elapsed_seconds=1.0,
+            failure_stage="producer_fixture_screening",
+            resource_failure=False,
+            retryable_resource_failure=False,
+        )
+        store.commit_session_unit(
+            cursor,
+            lease,
+            intent,
+            record=record,
+            raw_secret_values=(ROOT_KEY, registered_root),
+            now_epoch_seconds=202 + ordinal * 2,
+        )
+    package_digest = _sha256_file(package)
+    receipt = SessionReceipt(
+        schema_version=DIAGNOSTIC_SCHEMA_VERSION,
+        session_id="producer_replay_session",
+        run_id=protocol.run_id,
+        started_at_utc="1970-01-01T00:01:40Z",
+        ended_at_utc="1970-01-01T00:08:20Z",
+        gpu_model="producer_test_gpu",
+        cuda_identity="producer_test_cuda",
+        environment_digest="a" * 64,
+        revision=WHITENING_ASSET_PRODUCER_REVISION,
+        package_sha256=package_digest,
+        walltime_seconds=400.0,
+        peak_vram_bytes=1,
+        termination_reason="frozen_roster_complete",
+        soft_stop_seconds=SOFT_STOP_SECONDS,
+        hard_session_cap_seconds=HARD_SESSION_CAP_SECONDS,
+        gpu_mix_policy=GPU_MIX_POLICY,
+        committed_unit_ids=tuple(item.unit_id for item in cursor.committed_units),
+        public_secret_identity_digests=(public_root,),
+    )
+    store.write_session_receipt(
+        receipt,
+        raw_secret_values=(ROOT_KEY, registered_root),
+        session_cursor=cursor,
+    )
+    server_receipt = {
+        "committed_revision": WHITENING_ASSET_PRODUCER_REVISION,
+        "committed_unit_count": 41,
+        "execution_package_sha256": package_digest,
+        "exit_code": 0,
+        "run_id": protocol.run_id,
+        "session_id": receipt.session_id,
+        "termination_reason": "frozen_roster_complete",
+    }
+    server_path = (
+        persistent
+        / protocol.run_id
+        / "server_receipts"
+        / receipt.session_id
+        / "execution_receipt.json"
+    )
+    server_path.parent.mkdir(parents=True)
+    server_path.write_text(
+        json.dumps(server_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    runtime.close()
+    return persistent, asset, fit_evidence
+
+
+def _file_tree_digest(root: Path) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (path.relative_to(root).as_posix(), sha256(path.read_bytes()).hexdigest())
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    )
+
+
+@pytest.mark.unit
+def test_whitening_asset_replay_uses_frozen_producer_package_and_read_only_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persistent, expected, evidence = _build_whitening_producer_evidence(
+        tmp_path, monkeypatch
+    )
+    protocol, _manifest = load_lf_whitened_directional_validation_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    run_root = persistent / protocol.whitening_asset_fit_run_id
+    before = _file_tree_digest(run_root)
+    frozen_identity = json.loads(
+        (run_root / "frozen_worker_identity.json").read_text("utf-8")
+    )
+    assert frozen_identity["candidate_config_digest"] == (
+        "39c3165b790a184ed369979b7b58651e15c16182a6cc220534ac038a2185954d"
+    )
+    replay_source = directional_entrypoint._replay_verified_whitening_asset
+    assert tuple(inspect.signature(replay_source).parameters) == (
+        "repository",
+        "whitening_asset_persistent_root",
+        "base_root_key",
+        "required_protocol",
+    )
+    assert "adapter.configuration" not in inspect.getsource(replay_source)
+    assert "runtime_config_digest=" not in inspect.getsource(replay_source)
+    replayed = _replay_verified_whitening_asset(
+        repository=ROOT,
+        whitening_asset_persistent_root=persistent,
+        base_root_key=ROOT_KEY,
+        required_protocol=protocol,
+    )
+    assert replayed == expected
+    assert _file_tree_digest(run_root) == before
+
+    package = persistent / directional_entrypoint.WHITENING_ASSET_PACKAGE
+    original_package = package.read_bytes()
+    package.write_bytes(original_package + b"tamper")
+    with pytest.raises(directional_entrypoint.LfWhiteningAssetProducerReplayError):
+        _replay_verified_whitening_asset(
+            repository=ROOT,
+            whitening_asset_persistent_root=persistent,
+            base_root_key=ROOT_KEY,
+            required_protocol=protocol,
+        )
+    package.write_bytes(original_package)
+
+    server_receipt = next(run_root.glob("server_receipts/*/execution_receipt.json"))
+    original_receipt = server_receipt.read_bytes()
+    payload = json.loads(original_receipt)
+    payload["execution_package_sha256"] = "0" * 64
+    server_receipt.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(directional_entrypoint.LfWhiteningAssetProducerReplayError):
+        _replay_verified_whitening_asset(
+            repository=ROOT,
+            whitening_asset_persistent_root=persistent,
+            base_root_key=ROOT_KEY,
+            required_protocol=protocol,
+        )
+    server_receipt.write_bytes(original_receipt)
+
+    failed = replace(
+        evidence[0][0],
+        execution_status="failed",
+        failure_class="implementation_failure",
+        failure_reason="producer_test_failure",
+    )
+    with pytest.raises(Exception):
+        directional_entrypoint._replay_asset_from_evidence(
+            ((failed, evidence[0][1]), *evidence[1:]),
+            protocol_digest=evidence[0][0].protocol_digest,
+            candidate_digest=evidence[0][0].candidate_config_digest,
+            fit_manifest_file_sha256=expected.fit_manifest_sha256,
+        )
+    retry = replace(evidence[0][1], attempt_index=1)
+    with pytest.raises(directional_entrypoint.LfWhiteningAssetProducerReplayError):
+        directional_entrypoint._replay_asset_from_evidence(
+            ((evidence[0][0], retry), *evidence[1:]),
+            protocol_digest=evidence[0][0].protocol_digest,
+            candidate_digest=evidence[0][0].candidate_config_digest,
+            fit_manifest_file_sha256=expected.fit_manifest_sha256,
+        )
+
+
+@pytest.mark.unit
+def test_whitening_asset_replay_rejects_incomplete_or_foreign_persistence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persistent, _expected, _evidence = _build_whitening_producer_evidence(
+        tmp_path, monkeypatch
+    )
+    protocol, _manifest = load_lf_whitened_directional_validation_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    run_root = persistent / protocol.whitening_asset_fit_run_id
+    package = persistent / directional_entrypoint.WHITENING_ASSET_PACKAGE
+    package_digest = _sha256_file(package)
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "_verify_producer_package",
+        lambda _repository, _package: package_digest,
+    )
+    marker = next(
+        run_root.glob("markers/development_unit_0032__attempt_0.COMMITTED.json")
+    )
+    marker_bytes = marker.read_bytes()
+    marker.unlink()
+    tamper_cases = (
+        (marker, None),
+        (
+            run_root / "intents" / "development_unit_0040__attempt_1.json",
+            b"{}\n",
+        ),
+        (
+            run_root / "markers" / "development_unit_9999__attempt_0.COMMITTED.json",
+            b"{}\n",
+        ),
+        (
+            run_root / "markers" / "development_unit_0032__attempt_1.COMMITTED.json",
+            marker_bytes,
+        ),
+    )
+    for index, (tamper, payload) in enumerate(tamper_cases):
+        if payload is not None:
+            tamper.write_bytes(payload)
+        with pytest.raises(directional_entrypoint.LfWhiteningAssetProducerReplayError):
+            _replay_verified_whitening_asset(
+                repository=ROOT,
+                whitening_asset_persistent_root=persistent,
+                base_root_key=ROOT_KEY,
+                required_protocol=protocol,
+            )
+        if index:
+            tamper.unlink()
+        else:
+            marker.write_bytes(marker_bytes)
 
 
 def _load_config() -> dict[str, object]:

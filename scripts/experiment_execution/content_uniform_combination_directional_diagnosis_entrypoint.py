@@ -52,6 +52,7 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
     _sha256_file,
 )
 from scripts.experiment_execution.lf_whitened_directional_validation_entrypoint import (
+    LfWhiteningAssetProducerReplayError,
     _replay_verified_whitening_asset,
 )
 
@@ -188,6 +189,21 @@ def _initialize_combination_resources(
             ),
         ) from exc
     return backend, runtime, session
+
+
+def _replay_whitening_asset_for_startup(**arguments):
+    """Translate only the bounded historical-producer replay failure."""
+
+    try:
+        return _replay_verified_whitening_asset(**arguments)
+    except LfWhiteningAssetProducerReplayError as exc:
+        raise ContentUniformCombinationDirectionalStartupError(
+            failure_type=(
+                "scripts.experiment_execution.lf_whitened_directional_validation_entrypoint."
+                "LfWhiteningAssetProducerReplayError"
+            ),
+            failure_class="implementation_failure",
+        ) from exc
 
 
 def _terminal_scientific_records(
@@ -352,12 +368,9 @@ def execute_content_uniform_combination_directional_diagnosis_session(
         runtime_configuration=runtime_configuration,
     )
     try:
-        whitening_asset = _replay_verified_whitening_asset(
+        whitening_asset = _replay_whitening_asset_for_startup(
             repository=repository,
             whitening_asset_persistent_root=fit_persistent,
-            adapter=adapter,
-            runtime_adapter=runtime,
-            runtime_config_digest=session.runtime_config_digest,
             base_root_key=root_key,
             required_protocol=protocol,
         )
