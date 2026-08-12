@@ -38,7 +38,7 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 | `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control` |
 | `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score` |
 | `hf_detector` | `high_frequency_direct_scoring` | `main/content_chain/hf_detector.py` | `key_schedule_sha256_counter`, `hf_sparse_tail` |
-| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated` |
+| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `lf_null_whitened_matched_score`, `content_combination_calibrated` |
 | `qk_geometry_sync` | `keyed_qk_geometry_synchronization_and_relation_observation` | `main/geometry_chain/qk_sync.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `qk_relation_similarity` |
 | `geometric_transform_estimator` | `blind_bounded_geometric_transform_estimation` | `main/geometry_chain/transform_estimator.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
 | `geometry_reliability` | `independent_geometry_reliability_conjunction` | `main/geometry_chain/reliability.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
@@ -786,6 +786,12 @@ SLM-WM 源文件只定义候选算法。其 reference registry、历史固定风
   标量预算、embedder 配对预算不守恒，或无稳定增益。
 
 ## Candidate `content_combination_calibrated`
+
+未晋升的 diagnostic combination 可以显式消费
+`LfNullWhitenedDetectionResult`，但必须绑定 public blind RGB-to-VAE
+observation、冻结的 `W` asset，以及相同 detector/config/preprocess identity；该路径
+不得 fallback 到 raw `lf_low_pass`。这一诊断接线不表示 LF 或组合已经晋升；正式
+`D_M` 仍为 HF-only，formal detector、`tau` 与 joint decision 语义均不改变。
 
 输入是独立保存的 `s_hf`、`s_lf`，以及与当前职责 partition 绑定的两份 primary-null
 经验分布。对任一分支 `b`、null multiset `X_b={x_1,...,x_n}` 和有限查询分数
