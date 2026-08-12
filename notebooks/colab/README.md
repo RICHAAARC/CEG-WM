@@ -6,8 +6,8 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `content_routing_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`9691117397a08b0bb6916a37867ba0332de38cbe`，使用全新独立 run ID
-`ceg_wm_content_routing_registered_key_correction_diagnosis`，并执行冻结的
+`fc6f8ffff8cae8098b38e5c6ee5cb207923df1d9`，使用全新独立 run ID
+`ceg_wm_content_routing_backend_binding_correction_diagnosis`，并执行冻结的
 `2 operational + 32 reference fit + 8 paired scientific = 42 total` units；每个 unit
 只允许 attempt zero。Notebook 只挂载 Drive、读取 `HF_TOKEN` 与
 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
@@ -19,7 +19,7 @@ diagnostic ZIP、execution receipt 与 `SHA256SUMS`。失败时先完成导出�
 routing 因果控制，不是 alpha selection、组合权重选择或跨 alpha 外推。通过时只允许另行
 申请 fixed-half routing directional validation。它只形成 development routing directional
 diagnosis；不拟合 threshold/FPR，不形成正式组合、candidate promotion、calibration、
-evaluation、baseline 或论文 claim。旧 run `ceg_wm_content_routing_directional_diagnosis`
+evaluation、baseline 或论文 claim。旧 run `ceg_wm_content_routing_registered_key_correction_diagnosis`
 及全部历史 records 保持 producer-bound；当前入口不读取、恢复、迁移、改写或拼接到本次
 全新 run 的 8-probe 分母。
 

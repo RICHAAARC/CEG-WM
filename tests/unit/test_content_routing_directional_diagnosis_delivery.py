@@ -33,9 +33,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_routing_directional_diagnosis.json"
 SERVER = ROOT / "scripts/experiment_execution/content_routing_directional_diagnosis_server.py"
 NOTEBOOK = ROOT / "notebooks/colab/content_routing_directional_diagnosis.ipynb"
-RUN_ID = "ceg_wm_content_routing_registered_key_correction_diagnosis"
-EXECUTION_REVISION = "9691117397a08b0bb6916a37867ba0332de38cbe"
-PAUSED_RUN_ID = "ceg_wm_content_routing_directional_diagnosis"
+RUN_ID = "ceg_wm_content_routing_backend_binding_correction_diagnosis"
+EXECUTION_REVISION = "fc6f8ffff8cae8098b38e5c6ee5cb207923df1d9"
+PAUSED_RUN_ID = "ceg_wm_content_routing_registered_key_correction_diagnosis"
 REQUIRED_PACKAGE_MEMBERS = {
     "configs/experiments/content_routing_directional_diagnosis.json",
     "configs/experiments/content_routing_reference_fit_manifest.json",
