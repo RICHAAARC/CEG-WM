@@ -18,7 +18,7 @@ from experiments.protocol.hf_only_detector_directional_validation import (
 
 PROTOCOL_ID = "ceg_wm_content_routing_directional_diagnosis"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_content_routing_directional_diagnosis"
+RUN_ID = "ceg_wm_content_routing_registered_key_correction_diagnosis"
 OPERATIONAL_UNIT_COUNT = 2
 REFERENCE_FIT_CLUSTER_COUNT = 32
 DIRECTIONAL_PROBE_CLUSTER_COUNT = 8
@@ -80,10 +80,11 @@ FUTURE_SPLIT_EXCLUSION_ROLES = (
 )
 PASSING_OUTCOME = "routing_directional_signal_observed"
 NEGATIVE_OUTCOME = "routing_directional_signal_not_observed"
-PASSING_REQUEST = "allow_request_for_routing_directional_validation"
+PASSING_REQUEST = "allow_request_for_fixed_half_routing_directional_validation"
 CLAIM_BOUNDARY = (
-    "development_content_routing_directional_diagnosis_only_no_mechanism_"
-    "promotion_no_threshold_no_fpr_no_combination_conclusion"
+    "development_content_routing_directional_diagnosis_fixed_half_mixing_only_"
+    "no_alpha_generalization_no_mechanism_promotion_no_threshold_no_fpr_no_"
+    "combination_conclusion"
 )
 STOP_RULE = (
     "complete_two_operational_preflights_then_thirty_two_reference_fit_"

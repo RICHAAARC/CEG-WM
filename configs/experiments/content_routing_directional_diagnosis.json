@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "protocol_id": "ceg_wm_content_routing_directional_diagnosis",
   "protocol_version": "1.0.0",
-  "run_id": "ceg_wm_content_routing_directional_diagnosis",
+  "run_id": "ceg_wm_content_routing_registered_key_correction_diagnosis",
   "split": "development",
   "reference_fit_manifest_path": "configs/experiments/content_routing_reference_fit_manifest.json",
   "reference_fit_manifest_file_sha256": "9137d41d67950e91b27391fe45c6927d111ea187959b6f1902987009fc92d027",
@@ -150,8 +150,8 @@
   "routing_coverage_requirement": 0.0,
   "passing_outcome": "routing_directional_signal_observed",
   "negative_outcome": "routing_directional_signal_not_observed",
-  "passing_request": "allow_request_for_routing_directional_validation",
+  "passing_request": "allow_request_for_fixed_half_routing_directional_validation",
   "stop_rule": "complete_two_operational_preflights_then_thirty_two_reference_fit_clusters_then_all_eight_paired_directional_probes_without_adaptive_sampling_or_parameter_change",
-  "claim_boundary": "development_content_routing_directional_diagnosis_only_no_mechanism_promotion_no_threshold_no_fpr_no_combination_conclusion",
+  "claim_boundary": "development_content_routing_directional_diagnosis_fixed_half_mixing_only_no_alpha_generalization_no_mechanism_promotion_no_threshold_no_fpr_no_combination_conclusion",
   "unit_roster_digest": "7365e6fc1d75aa91b97a00663a5a6e900e518fd97a0dca96d52c79cd33e66c9b"
 }

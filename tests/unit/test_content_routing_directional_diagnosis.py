@@ -131,7 +131,7 @@ def _persistent_reference_record(ordinal: int) -> DevelopmentRoutingReferenceRec
         "collection_role": ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
         "record_kind": ROUTING_REFERENCE_RECORD_KIND,
         "record_id": "0" * 64,
-        "run_id": "ceg_wm_content_routing_directional_diagnosis",
+        "run_id": "ceg_wm_content_routing_registered_key_correction_diagnosis",
         "protocol_digest": "1" * 64,
         "method_code_revision": "2" * 40,
         "unit_index": ordinal + 2,
@@ -369,7 +369,22 @@ def _observation(ordinal: int, *, routed_wins: bool = True, l2: float = 0.01):
 
 def test_content_routing_protocol_freezes_forty_two_attempt_zero_units() -> None:
     protocol, reference, probes = _protocol_bundle()
-    assert protocol.run_id == "ceg_wm_content_routing_directional_diagnosis"
+    assert (
+        protocol.run_id
+        == "ceg_wm_content_routing_registered_key_correction_diagnosis"
+    )
+    assert protocol.mixing_coefficient == 0.50
+    assert (
+        protocol.passing_request
+        == "allow_request_for_fixed_half_routing_directional_validation"
+    )
+    assert "fixed_half_mixing_only" in protocol.claim_boundary
+    assert "no_alpha_generalization" in protocol.claim_boundary
+    raw = json.loads(CONFIG.read_text("utf-8"))
+    assert raw["mixing_coefficient"] == 0.50
+    assert {
+        key for key in raw if "alpha" in key or "mixing" in key
+    } == {"mixing_coefficient"}
     assert len(protocol.unit_roster) == 42
     assert len(reference.entries) == 32
     assert len(probes.entries) == 8
@@ -463,6 +478,18 @@ def test_content_routing_operational_authority_drift_fails_closed(tmp_path: Path
     with pytest.raises(
         ContentRoutingDirectionalProtocolError,
         match="operational unit identity drifted",
+    ):
+        load_content_routing_directional_protocol(path, repository_root=ROOT)
+
+
+def test_content_routing_optional_mixing_surface_fails_closed(tmp_path: Path) -> None:
+    raw = json.loads(CONFIG.read_text(encoding="utf-8"))
+    raw["mixing_coefficient_candidates"] = [0.25, 0.50, 0.75]
+    path = tmp_path / "routing.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(
+        ContentRoutingDirectionalProtocolError,
+        match="routing protocol schema drifted",
     ):
         load_content_routing_directional_protocol(path, repository_root=ROOT)
 
@@ -1348,7 +1375,7 @@ def test_routing_authority_failures_preserve_original_exception(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_directional_diagnosis",
+            run_id="ceg_wm_content_routing_registered_key_correction_diagnosis",
             session_id="routing_authority_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1366,7 +1393,7 @@ def test_routing_run_and_root_invariant_failures_are_not_startup_diagnostics(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="routing_wrong_run",
+            run_id="ceg_wm_content_routing_directional_diagnosis",
             session_id="routing_run_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1382,7 +1409,7 @@ def test_routing_run_and_root_invariant_failures_are_not_startup_diagnostics(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_directional_diagnosis",
+            run_id="ceg_wm_content_routing_registered_key_correction_diagnosis",
             session_id="routing_root_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1478,7 +1505,7 @@ def test_routing_post_initialization_failures_close_once_and_preserve_original(
             expected_revision="a" * 40,
             persistent_root=tmp_path / "persistent",
             cache_root=tmp_path / "cache",
-            run_id="ceg_wm_content_routing_directional_diagnosis",
+            run_id="ceg_wm_content_routing_registered_key_correction_diagnosis",
             session_id="routing_post_initialization_failure_session",
             execution_package_sha256="b" * 64,
             environment={"HF_TOKEN": "token", "CEG_WM_ROOT_KEY": "root"},
@@ -1554,8 +1581,13 @@ def test_routing_runner_source_uses_runtime_semantic_and_public_detector_calls()
         "private_state",
         "precomputed_score",
         "content_" + "combination_calibrated",
+        "select_mixing",
     ):
         assert forbidden_call not in source
+    assert source.count(
+        "mixing_coefficient=self.protocol.mixing_coefficient"
+    ) == 2
+    assert "alpha" not in source
 
 
 @pytest.mark.parametrize(
