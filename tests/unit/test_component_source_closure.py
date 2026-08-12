@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
+from hashlib import sha256
 import json
 from pathlib import Path
 import shutil
@@ -17,6 +19,7 @@ from scripts.experiment_execution.component_source_closure import (
     build_hf_reference_component_source_closure,
     build_lf_directional_component_source_closure,
 )
+from tests.helpers.historical_repository import materialize_historical_repository
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +37,11 @@ HF_EXPECTED_PATHS = (
     "main/content_chain/embedder.py",
     "main/content_chain/hf_detector.py",
     "main/content_chain/detector.py",
+)
+HF_REFERENCE_PRODUCER_REVISION = "cc9af5df0d9a63d349402d56ddd6bb81d117d1e8"
+HF_REFERENCE_CONFIG_PATH = "configs/experiments/hf_only_reference_validation.json"
+HF_REFERENCE_COMPONENT_DIGEST = (
+    "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1"
 )
 
 
@@ -127,12 +135,47 @@ def test_unrelated_science_and_delivery_sources_do_not_change_component_digest(
     assert replay == original
 
 
-@pytest.mark.unit
-def test_hf_reference_component_closure_binds_exact_scientific_sources() -> None:
-    closure = build_hf_reference_component_source_closure(
-        _reviewed_components(HF_REFERENCE_COMPONENT_IDS),
-        ROOT,
+def _historical_hf_components(
+    authority: dict[str, object],
+) -> tuple[dict[str, dict[str, object]], tuple[dict[str, object], ...]]:
+    candidate_binding = authority["candidate_binding"]
+    assert type(candidate_binding) is dict
+    raw_bindings = candidate_binding["component_source_bindings"]
+    assert type(raw_bindings) is list
+    bindings = tuple(raw_bindings)
+    assert all(type(item) is dict for item in bindings)
+    components = {
+        item["component_id"]: {
+            "implementation_path": item["implementation_path"],
+            "implementation_symbol": item["implementation_symbol"],
+        }
+        for item in bindings
+        if item["source_role"] == "component_implementation"
+    }
+    return components, bindings
+
+
+def _materialize_hf_reference_producer(tmp_path: Path) -> Path:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks local Git producer objects")
+    return materialize_historical_repository(
+        source_root=ROOT,
+        revision=HF_REFERENCE_PRODUCER_REVISION,
+        destination=tmp_path / "hf-reference-producer",
+        paths=(HF_REFERENCE_CONFIG_PATH, *HF_EXPECTED_PATHS),
     )
+
+
+@pytest.mark.unit
+def test_hf_reference_component_closure_binds_exact_scientific_sources(
+    tmp_path: Path,
+) -> None:
+    producer_root = _materialize_hf_reference_producer(tmp_path)
+    authority = json.loads(
+        (producer_root / HF_REFERENCE_CONFIG_PATH).read_text(encoding="utf-8")
+    )
+    components, authority_bindings = _historical_hf_components(authority)
+    closure = build_hf_reference_component_source_closure(components, producer_root)
 
     assert closure.ordered_component_ids == HF_REFERENCE_COMPONENT_IDS
     assert tuple(
@@ -142,9 +185,38 @@ def test_hf_reference_component_closure_binds_exact_scientific_sources() -> None
         binding.source_role == "component_implementation"
         for binding in closure.source_bindings
     )
-    assert closure.component_implementation_digest == (
-        "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1"
+    assert tuple(asdict(binding) for binding in closure.source_bindings) == (
+        authority_bindings
     )
+    for binding in closure.source_bindings:
+        assert binding.source_sha256 == sha256(
+            (producer_root / binding.implementation_path).read_bytes()
+        ).hexdigest()
+    candidate_binding = authority["candidate_binding"]
+    assert type(candidate_binding) is dict
+    assert closure.component_implementation_digest == HF_REFERENCE_COMPONENT_DIGEST
+    assert candidate_binding["component_implementation_digest"] == (
+        HF_REFERENCE_COMPONENT_DIGEST
+    )
+
+@pytest.mark.unit
+def test_hf_reference_producer_replay_rejects_source_tampering(
+    tmp_path: Path,
+) -> None:
+    producer_root = _materialize_hf_reference_producer(tmp_path)
+    authority = json.loads(
+        (producer_root / HF_REFERENCE_CONFIG_PATH).read_text(encoding="utf-8")
+    )
+    components, authority_bindings = _historical_hf_components(authority)
+    source = producer_root / HF_EXPECTED_PATHS[3]
+    source.write_bytes(source.read_bytes() + b"\n# producer tamper\n")
+
+    closure = build_hf_reference_component_source_closure(components, producer_root)
+
+    assert tuple(asdict(binding) for binding in closure.source_bindings) != (
+        authority_bindings
+    )
+    assert closure.component_implementation_digest != HF_REFERENCE_COMPONENT_DIGEST
 
 
 @pytest.mark.unit

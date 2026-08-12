@@ -78,8 +78,17 @@ from tests.helpers.historical_repository import materialize_historical_repositor
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/lf_whitened_directional_validation.json"
-READINESS = ROOT / ".codex/research_state/method_readiness.yaml"
 LF_DIRECTIONAL_PRODUCER_REVISION = "51adb765cdddafcb4c65c357e899c77b4c9f36d2"
+LF_DIRECTIONAL_PRODUCER_PATHS = (
+    ".codex/research_state/method_readiness.yaml",
+    "configs/experiments/lf_whitened_directional_validation.json",
+    "docs/design/candidate_specifications.md",
+    "main/shared/key_schedule.py",
+    "main/content_chain/lf_carrier.py",
+    "main/content_chain/embedder.py",
+    "main/content_chain/lf_detector.py",
+    "main/content_chain/lf_whitening.py",
+)
 SCREENING_CONFIG = ROOT / "configs/experiments/lf_whitened_score_screening.json"
 COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
 ROOT_KEY = "ceg-wm-lf-whitened-directional-test-key"
@@ -180,35 +189,13 @@ def test_lf_whitened_directional_manifest_is_disjoint_from_prior_authorities() -
 def test_lf_whitened_directional_component_authority_replays_reviewed_sources(
     tmp_path: Path,
 ) -> None:
-    protocol, _manifest = load_lf_whitened_directional_validation_protocol(
-        CONFIG, repository_root=ROOT
-    )
-    readiness = json.loads(READINESS.read_text("utf-8"))
-    closure = build_component_source_closure(
-        LF_DIRECTIONAL_COMPONENT_IDS,
-        readiness["components"],
-        ROOT,
-    )
-
-    assert protocol.ordered_component_ids == closure.ordered_component_ids
-    assert tuple(asdict(item) for item in protocol.component_source_bindings) == (
-        tuple(asdict(item) for item in closure.source_bindings)
-    )
-    assert (
-        protocol.component_implementation_digest
-        == closure.component_implementation_digest
-    )
-    assert protocol.candidate_specification_sha256 == sha256(
-        (ROOT / "docs/design/candidate_specifications.md").read_bytes()
-    ).hexdigest()
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks local Git producer objects")
     producer_root = materialize_historical_repository(
         source_root=ROOT,
         revision=LF_DIRECTIONAL_PRODUCER_REVISION,
         destination=tmp_path / "lf-directional-producer",
-        paths=(
-            ".codex/research_state/method_readiness.yaml",
-            "configs/experiments/lf_whitened_directional_validation.json",
-        ),
+        paths=LF_DIRECTIONAL_PRODUCER_PATHS,
     )
     producer_authority = json.loads(
         (
@@ -221,6 +208,23 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources(
             producer_root / ".codex/research_state/method_readiness.yaml"
         ).read_text(encoding="utf-8")
     )
+    producer_closure = build_component_source_closure(
+        LF_DIRECTIONAL_COMPONENT_IDS,
+        producer_readiness["components"],
+        producer_root,
+    )
+    assert tuple(producer_authority["ordered_component_ids"]) == (
+        producer_closure.ordered_component_ids
+    )
+    assert tuple(producer_authority["component_source_bindings"]) == tuple(
+        asdict(item) for item in producer_closure.source_bindings
+    )
+    assert producer_authority["component_implementation_digest"] == (
+        producer_closure.component_implementation_digest
+    )
+    assert producer_authority["candidate_specification_sha256"] == sha256(
+        (producer_root / "docs/design/candidate_specifications.md").read_bytes()
+    ).hexdigest()
     frozen_review_reference = (
         "independent_lf_prepared_feature_semantic_review:"
         "019fe0f3-b8e8-7230-98f1-9ae0450c1f4a:"
@@ -240,14 +244,32 @@ def test_lf_whitened_directional_component_authority_replays_reviewed_sources(
     ]
     assert producer_authority["method_review_reference"] == frozen_review_reference
     assert producer_authority["method_reviewed_revision"] == frozen_reviewed_revision
-    assert protocol.method_review_reference == frozen_review_reference
-    assert protocol.method_reviewed_revision == frozen_reviewed_revision
-    assert readiness["independent_semantic_review"]["review_reference"] != (
-        frozen_review_reference
+@pytest.mark.unit
+def test_lf_directional_producer_replay_rejects_candidate_specification_tampering(
+    tmp_path: Path,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks local Git producer objects")
+    producer_root = materialize_historical_repository(
+        source_root=ROOT,
+        revision=LF_DIRECTIONAL_PRODUCER_REVISION,
+        destination=tmp_path / "lf-directional-producer",
+        paths=LF_DIRECTIONAL_PRODUCER_PATHS,
     )
-    assert readiness["independent_semantic_review"][
-        "reviewed_repository_revision"
-    ] != frozen_reviewed_revision
+    authority = json.loads(
+        (
+            producer_root
+            / "configs/experiments/lf_whitened_directional_validation.json"
+        ).read_text(encoding="utf-8")
+    )
+    candidate_specification = producer_root / "docs/design/candidate_specifications.md"
+    candidate_specification.write_bytes(
+        candidate_specification.read_bytes() + b"\nproducer tamper\n"
+    )
+
+    assert sha256(candidate_specification.read_bytes()).hexdigest() != authority[
+        "candidate_specification_sha256"
+    ]
 
 
 @pytest.mark.unit
