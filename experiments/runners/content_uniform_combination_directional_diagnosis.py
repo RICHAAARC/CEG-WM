@@ -217,17 +217,96 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         metric=self._metric_observation(identity=identity,metric_ids=("content_combination_branch_scores",),paired="clean_primary_null_cross_fit_reference",branch="paired_clean_branch_null_reference",statistics=(("hf_score",measurement.hf_score),("lf_score",measurement.lf_score)),result_digests=(measurement.measurement_identity,))
         return self._scientific_record(intent=intent,identity=identity,phase="development_content_combination_reference_fit",case="content_combination_reference_fit",branch="paired_clean_branch_null_reference",paired="clean_primary_null_cross_fit_reference",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
 
-    @staticmethod
-    def reference_measurement_from_committed_record(record: DevelopmentScientificRecord) -> ContentCombinationReferenceMeasurement:
-        checked=DevelopmentScientificRecord.from_payload(record.payload())
-        if checked.execution_status!="success" or checked.phase!="development_content_combination_reference_fit": raise ContentUniformCombinationDirectionalRunnerError("reference record is not successful")
+    def _validated_typed_record(
+        self,
+        record: DevelopmentScientificRecord,
+        *,
+        reference: bool,
+    ) -> DevelopmentScientificRecord:
+        if type(record) is not DevelopmentScientificRecord:
+            raise ContentUniformCombinationDirectionalRunnerError(
+                "exact persistent scientific record type is required"
+            )
+        record.validate()
+        expected = (
+            (
+                range(1, 33),
+                "development_content_combination_reference_fit",
+                "content_combination_reference_fit",
+                "clean_primary_null_cross_fit_reference",
+                "paired_clean_branch_null_reference",
+            )
+            if reference
+            else (
+                range(33, 41),
+                "development_content_uniform_combination_directional_probe",
+                "six_image_uniform_combination_probe",
+                "same_generation_uniform_route_six_image_control",
+                "six_image_uniform_combination_probe",
+            )
+        )
+        unit_range, phase, case, paired, branch = expected
+        if (
+            record.run_id != self.protocol.run_id
+            or record.protocol_id != self.protocol.protocol_id
+            or record.protocol_version != self.protocol.protocol_version
+            or record.protocol_digest != self.protocol_digest
+            or record.execution_intent_authority_digest
+            != self.execution_intent_authority_digest
+            or record.method_code_revision != self.method_code_revision
+            or record.candidate_identity != "content_combination_calibrated"
+            or record.candidate_config_digest != self.candidate_config_digest
+            or record.responsibility_id != "content_detector"
+            or record.scientific_question_id
+            != "content_uniform_combination_directional_increment"
+            or record.unit_index not in unit_range
+            or record.phase != phase
+            or record.development_case_id != case
+            or record.paired_ablation_identity != paired
+            or record.content_branch_id != branch
+            or record.attempt_index != 0
+        ):
+            raise ContentUniformCombinationDirectionalRunnerError(
+                "persistent scientific record authority drifted"
+            )
+        if record.execution_status == "success":
+            expected_keys = (
+                {"reference_measurement", "clean_image_digest", "runtime_config_digest"}
+                if reference
+                else {"combination_observation", "clean_image_digest"}
+            )
+            if (
+                record.failure_class is not None
+                or record.failure_reason is not None
+                or set(record.operation_result_payload) != expected_keys
+                or record.metric_observation.get("paired_ablation_identity") != paired
+                or record.metric_observation.get("content_branch_id") != branch
+            ):
+                raise ContentUniformCombinationDirectionalRunnerError(
+                    "successful persistent scientific record payload drifted"
+                )
+        elif (
+            record.execution_status != "failed"
+            or record.failure_class not in {"implementation_failure", "resource_failure"}
+            or type(record.failure_reason) is not str
+            or not record.failure_reason
+            or record.operation_result_payload
+            or record.metric_observation
+        ):
+            raise ContentUniformCombinationDirectionalRunnerError(
+                "failed persistent scientific record payload drifted"
+            )
+        return record
+
+    def reference_measurement_from_committed_record(self, record: DevelopmentScientificRecord) -> ContentCombinationReferenceMeasurement:
+        checked=self._validated_typed_record(record, reference=True)
+        if checked.execution_status!="success": raise ContentUniformCombinationDirectionalRunnerError("reference record is not successful")
         try: measurement=ContentCombinationReferenceMeasurement(**checked.operation_result_payload["reference_measurement"])
         except (KeyError,TypeError) as exc: raise ContentUniformCombinationDirectionalRunnerError("reference payload drifted") from exc
         measurement.validate(); return measurement
 
-    @classmethod
-    def fit_fold_references(cls, records: Sequence[DevelopmentScientificRecord]) -> tuple[ContentCombinationFoldReference,...]:
-        measurements=tuple(cls.reference_measurement_from_committed_record(record) for record in records)
+    def fit_fold_references(self, records: Sequence[DevelopmentScientificRecord]) -> tuple[ContentCombinationFoldReference,...]:
+        measurements=tuple(self.reference_measurement_from_committed_record(record) for record in records)
         return tuple(fit_content_combination_fold_reference(measurements,probe_fold_index=index) for index in range(4))
 
     @staticmethod
@@ -288,20 +367,18 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         reference=intent.unit_index<33; identity=self._analysis_identity(intent.unit_index)
         return self._scientific_record(intent=intent,identity=identity,phase="development_content_combination_reference_fit" if reference else "development_content_uniform_combination_directional_probe",case="content_combination_reference_fit" if reference else "six_image_uniform_combination_probe",branch="paired_clean_branch_null_reference" if reference else "six_image_uniform_combination_probe",paired="clean_primary_null_cross_fit_reference" if reference else "same_generation_uniform_route_six_image_control",status="failed",failure_class=failure_class,failure_reason=failure_reason,elapsed=elapsed_seconds,operation_payload={},metric={})
 
-    @staticmethod
-    def observation_from_record(record: DevelopmentScientificRecord) -> ContentUniformCombinationDirectionalObservation:
-        checked=DevelopmentScientificRecord.from_payload(record.payload()); payload=checked.operation_result_payload.get("combination_observation")
+    def observation_from_record(self, record: DevelopmentScientificRecord) -> ContentUniformCombinationDirectionalObservation:
+        checked=self._validated_typed_record(record, reference=False); payload=checked.operation_result_payload.get("combination_observation")
         if type(payload) is not dict: raise ContentUniformCombinationDirectionalRunnerError("probe observation payload missing")
         from experiments.metrics.content_uniform_combination_directional_diagnosis import ContentCombinationArmObservation,ContentCombinationScoreRow
         observation=ContentUniformCombinationDirectionalObservation(**{**payload,"score_rows":tuple(ContentCombinationScoreRow(**item) for item in payload["score_rows"]),"arm_observations":tuple(ContentCombinationArmObservation(**item) for item in payload["arm_observations"])})
         observation.validate(); return observation
 
-    @classmethod
-    def replay_aggregate(cls, records: Sequence[DevelopmentScientificRecord], **violations: int) -> ContentUniformCombinationDirectionalAggregate:
+    def replay_aggregate(self, records: Sequence[DevelopmentScientificRecord], **violations: int) -> ContentUniformCombinationDirectionalAggregate:
         observations=[]
         for record in records:
-            checked=DevelopmentScientificRecord.from_payload(record.payload())
-            if checked.execution_status=="success": observations.append(cls.observation_from_record(checked))
+            checked=self._validated_typed_record(record, reference=False)
+            if checked.execution_status=="success": observations.append(self.observation_from_record(checked))
             else: observations.append(create_content_uniform_combination_directional_observation(cluster_ordinal=checked.unit_index-33,fold_index=(checked.unit_index-33)%4,fold_reference_identity="0"*64,whitening_asset_digest="0"*64,score_rows=(),arm_observations=(),failure_class=checked.failure_class))
         return aggregate_content_uniform_combination_directional_diagnosis(observations,**violations)
 

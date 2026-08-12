@@ -4,6 +4,7 @@ from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 import inspect
+import json
 import time
 
 import pytest
@@ -31,6 +32,7 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
     reference_entries_for_probe,
     load_content_uniform_combination_directional_protocol,
 )
+from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
     ContentUniformCombinationDirectionalDiagnosisRunner,
 )
@@ -400,8 +402,15 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
                 failure_reason="public_reference_detection_failure",
                 elapsed_seconds=0.5,
             )
-            checked_failed_reference = type(failed_reference).from_payload(
-                failed_reference.payload()
+            checked_failed_reference = DevelopmentScientificRecord.from_payload(
+                json.loads(
+                    json.dumps(
+                        failed_reference.payload(),
+                        separators=(",", ":"),
+                        sort_keys=True,
+                        allow_nan=False,
+                    )
+                )
             )
             assert checked_failed_reference.paired_ablation_identity == (
                 "clean_primary_null_cross_fit_reference"
@@ -446,7 +455,16 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
             intent=intent,
             reference_records=references,
         )
-        checked = type(record).from_payload(record.payload())
+        checked = DevelopmentScientificRecord.from_payload(
+            json.loads(
+                json.dumps(
+                    record.payload(),
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+        )
         observation_payload = checked.operation_result_payload[
             "combination_observation"
         ]
@@ -476,6 +494,20 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
         ) if record.unit_index >= 33
     )
     aggregate = runner.replay_aggregate(records)
+    class DerivedScientificRecord(DevelopmentScientificRecord):
+        pass
+
+    derived = DerivedScientificRecord(**records[0].payload())
+    with pytest.raises(RuntimeError, match="exact persistent scientific record type"):
+        runner.observation_from_record(derived)
+    for drifted in (
+        replace(records[0], phase="development_content_combination_reference_fit"),
+        replace(records[0], paired_ablation_identity="clean_primary_null_cross_fit_reference"),
+        replace(records[0], execution_status="failed"),
+        replace(records[0], operation_result_payload={}),
+    ):
+        with pytest.raises((RuntimeError, ValueError)):
+            runner.replay_aggregate((drifted, *records[1:]))
     assert final_cursor.next_unit_index == 41
     assert len(final_cursor.committed_units) == 41
     assert len(records) == 8
@@ -535,8 +567,14 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
         )
         record = runner.create_failed_scientific_record(
             intent=intent,
-            failure_class="resource_failure",
-            failure_reason="public_runtime_resource_failure",
+            failure_class=(
+                "implementation_failure" if ordinal < 4 else "resource_failure"
+            ),
+            failure_reason=(
+                "public_combination_implementation_failure"
+                if ordinal < 4
+                else "public_runtime_resource_failure"
+            ),
             elapsed_seconds=0.5,
         )
         if ordinal == 0:
@@ -549,11 +587,20 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
                         intent,
                         phase="development_content_combination_reference_fit",
                     ),
-                    failure_class="resource_failure",
-                    failure_reason="public_runtime_resource_failure",
+                    failure_class="implementation_failure",
+                    failure_reason="public_combination_implementation_failure",
                     elapsed_seconds=0.5,
                 )
-        checked_failure = type(record).from_payload(record.payload())
+        checked_failure = DevelopmentScientificRecord.from_payload(
+            json.loads(
+                json.dumps(
+                    record.payload(),
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+        )
         assert checked_failure.paired_ablation_identity == (
             "same_generation_uniform_route_six_image_control"
         )
@@ -583,7 +630,8 @@ def test_real_runner_store_commits_recovers_and_replays_all_forty_one_units(
     blocked = runner.replay_aggregate(failure_records)
     assert len(failure_records) == 8
     assert blocked.failed_cluster_count == 8
-    assert blocked.resource_failure_count == 8
-    assert blocked.outcome == "resource_blocked"
+    assert blocked.implementation_failure_count == 4
+    assert blocked.resource_failure_count == 4
+    assert blocked.outcome == "implementation_blocked"
     assert blocked.allow_request_for_content_combination_candidate_selection is False
     runtime.close()
