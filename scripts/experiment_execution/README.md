@@ -5,11 +5,13 @@
 `content_uniform_combination_directional_diagnosis_server.py` 是当前 Colab 与普通 GPU
 服务器共用的执行入口；当前唯一授权 Notebook 为
 `notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb`，固定绑定
-execution revision `b242261f10a034b541c571afd30b91b77eaddf19` 与全新 run ID
-`ceg_wm_content_uniform_combination_directional_diagnosis`。服务器执行 1 个 operational、
+execution revision `f3dac1bde11d815de478f50bb5c0b2176c9341cc` 与全新 run ID
+`ceg_wm_content_uniform_combination_whitening_asset_replay_correction_diagnosis`。服务器执行 1 个 operational、
 32 个 clean cross-fit reference 与 8 个 six-image scientific probes，共 41 units，每 unit
 仅 attempt zero；Notebook 仅负责 Drive、Secrets、exact checkout、调用及 create-only
 ZIP/receipt/`SHA256SUMS` 导出，失败也先导出再报错。
+新 run 使用独立持久化与导出命名空间；旧 content-combination run 永久只读，不恢复、
+迁移或拼接到当前执行。
 
 每个 probe 分别冻结 `a = 0.25, 0.50, 0.75`，记录 C0、C1(w) 和 C2；其中 `a` 是
 embed coefficient，`w` 仅是 C1 detector weight。本门不选择 `a`、`w` 或组合函数，

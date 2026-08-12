@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 import inspect
 import json
@@ -24,8 +25,8 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_uniform_combination_directional_diagnosis.json"
-EXECUTION_REVISION = "b242261f10a034b541c571afd30b91b77eaddf19"
-RUN_ID = "ceg_wm_content_uniform_combination_directional_diagnosis"
+EXECUTION_REVISION = "f3dac1bde11d815de478f50bb5c0b2176c9341cc"
+RUN_ID = "ceg_wm_content_uniform_combination_whitening_asset_replay_correction_diagnosis"
 NOTEBOOK = ROOT / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
 
 
@@ -199,6 +200,9 @@ def test_server_receipt_contract_preserves_one_thirty_two_eight(monkeypatch, tmp
         install_dependencies=False,
     )
     assert code == exit_code
+    assert receipt["committed_revision"] == "9" * 40
+    assert receipt["run_id"] == RUN_ID
+    assert receipt["execution_package_sha256"] == sha256(b"package").hexdigest()
     assert (receipt["operational_unit_count"], receipt["reference_fit_cluster_count"], receipt["directional_probe_cluster_count"], receipt["total_unit_count"]) == (1, 32, 8, 41)
     assert receipt["maximum_attempts_per_unit"] == 1
     serialized = str(receipt)
@@ -234,6 +238,24 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
     )
     extracted = tmp_path / "extracted_package"
     with ZipFile(package) as archive:
+        names = set(archive.namelist())
+        assert (
+            "scripts/experiment_execution/lf_whitened_directional_validation_entrypoint.py"
+            in names
+        )
+        assert (
+            "scripts/experiment_execution/content_uniform_combination_directional_diagnosis_entrypoint.py"
+            in names
+        )
+        producer_replay_source = archive.read(
+            "scripts/experiment_execution/lf_whitened_directional_validation_entrypoint.py"
+        ).decode("utf-8")
+        combination_source = archive.read(
+            "scripts/experiment_execution/content_uniform_combination_directional_diagnosis_entrypoint.py"
+        ).decode("utf-8")
+        assert "WHITENING_ASSET_PACKAGE_SHA256" in producer_replay_source
+        assert "cat-file" not in producer_replay_source
+        assert "_replay_current_whitening_asset" in combination_source
         archive.extractall(extracted)
     result = subprocess.run(
         [
@@ -260,6 +282,7 @@ def test_notebook_is_thin_exact_output_free_and_exports_before_failure() -> None
     document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     source = "\n".join("".join(cell.get("source", [])) for cell in document["cells"])
     assert EXECUTION_REVISION in source and RUN_ID in source
+    assert "fresh run-specific persistent namespace" in source
     assert "content_uniform_combination_directional_diagnosis_server.py" in source
     assert "--whitening-asset-persistent-root" in source
     assert "SHA256SUMS" in source and "execution_receipt.json" in source
