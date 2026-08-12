@@ -378,8 +378,27 @@ def test_whitening_asset_replay_uses_frozen_producer_package_and_read_only_store
     )
     assert "adapter.configuration" not in inspect.getsource(replay_source)
     assert "runtime_config_digest=" not in inspect.getsource(replay_source)
+    assert "git" not in inspect.getsource(directional_entrypoint._verify_producer_package)
+    current_only = tmp_path / "current_only_repository"
+    current_only.mkdir()
+    subprocess.run(
+        ["git", "init", "-q", str(current_only)], check=True, capture_output=True
+    )
+    historical_lookup = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(current_only),
+            "cat-file",
+            "-e",
+            WHITENING_ASSET_PRODUCER_REVISION,
+        ],
+        check=False,
+        capture_output=True,
+    )
+    assert historical_lookup.returncode != 0
     replayed = _replay_verified_whitening_asset(
-        repository=ROOT,
+        repository=current_only,
         whitening_asset_persistent_root=persistent,
         base_root_key=ROOT_KEY,
         required_protocol=protocol,
@@ -455,7 +474,7 @@ def test_whitening_asset_replay_rejects_incomplete_or_foreign_persistence(
     monkeypatch.setattr(
         directional_entrypoint,
         "_verify_producer_package",
-        lambda _repository, _package: package_digest,
+        lambda _package: package_digest,
     )
     marker = next(
         run_root.glob("markers/development_unit_0032__attempt_0.COMMITTED.json")

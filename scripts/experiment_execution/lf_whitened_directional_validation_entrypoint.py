@@ -5,11 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
-from io import BytesIO
 import json
 from pathlib import Path, PurePosixPath
 import stat
-import subprocess
 from tempfile import TemporaryDirectory
 import time
 from time import monotonic
@@ -68,6 +66,42 @@ WHITENING_ASSET_PRODUCER_REVISION = "a78c47184cf83ad351bb4442ebd31c218726de25"
 WHITENING_ASSET_PACKAGE = Path(
     "development_execution_packages/"
     "ceg_wm_development_a78c47184cf83ad351bb4442ebd31c218726de25.zip"
+)
+WHITENING_ASSET_PACKAGE_SHA256 = (
+    "7d50f476e7e01f664b6fd1fd48220e2618379cc5de6b5e582474e33815142210"
+)
+WHITENING_ASSET_DIGEST = (
+    "d15601a1e58e33bc2a90b9fb56aaab6faea0f80b732ba920466573f4621fb7a4"
+)
+WHITENING_ASSET_REQUIRED_CLOSURE = frozenset(
+    {
+        "configs/experiments/internal_execution_components.json",
+        "configs/experiments/lf_whitened_score_screening.json",
+        "configs/experiments/lf_whitened_score_screening_manifest.json",
+        "configs/experiments/lf_whitening_null_fit_manifest.json",
+        "configs/runtime/runtime_sd35_flowmatch.json",
+        "experiments/metrics/lf_whitened_score_screening.py",
+        "experiments/methods/ceg_wm.py",
+        "experiments/protocol/development_records.py",
+        "experiments/protocol/internal_splits.py",
+        "experiments/protocol/lf_whitened_score_screening.py",
+        "experiments/runners/development_persistence.py",
+        "experiments/runners/lf_whitened_score_screening.py",
+        "main/content_chain/embedder.py",
+        "main/content_chain/__init__.py",
+        "main/content_chain/lf_carrier.py",
+        "main/content_chain/lf_detector.py",
+        "main/content_chain/lf_whitening.py",
+        "main/shared/key_schedule.py",
+        "main/__init__.py",
+        "main/shared/__init__.py",
+        "runtime/__init__.py",
+        "runtime/adapter.py",
+        "runtime/backend.py",
+        "runtime/configuration.py",
+        "runtime/content_write.py",
+        "runtime/sd35_backend.py",
+    }
 )
 
 
@@ -134,41 +168,29 @@ def _safe_json(path: Path, *, role: str, canonical: bool = False) -> dict[str, o
     return payload
 
 
-def _git_bytes(repository: Path, *arguments: str) -> bytes:
-    try:
-        return subprocess.run(
-            ("git", *arguments), cwd=repository, check=True, capture_output=True
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise LfWhiteningAssetProducerReplayError(
-            "whitening producer Git authority is unavailable"
-        ) from exc
-
-
-def _verify_producer_package(repository: Path, package: Path) -> str:
+def _verify_producer_package(package: Path) -> str:
     if not package.is_file() or package.is_symlink():
         raise LfWhiteningAssetProducerReplayError(
             "whitening producer package is unavailable"
         )
-    producer_archive = _git_bytes(
-        repository,
-        "archive",
-        "--format=zip",
-        WHITENING_ASSET_PRODUCER_REVISION,
-    )
+    package_digest = sha256(package.read_bytes()).hexdigest()
+    if package_digest != WHITENING_ASSET_PACKAGE_SHA256:
+        raise LfWhiteningAssetProducerReplayError(
+            "whitening producer package digest drifted"
+        )
     try:
-        with ZipFile(BytesIO(producer_archive), "r") as producer, ZipFile(
-            package, "r"
-        ) as archive:
-            expected_paths = tuple(
-                info.filename for info in producer.infolist() if not info.is_dir()
-            )
+        with ZipFile(package, "r") as archive:
+            if archive.testzip() is not None:
+                raise LfWhiteningAssetProducerReplayError(
+                    "whitening producer package member checksum drifted"
+                )
             infos = archive.infolist()
             names = tuple(info.filename for info in infos)
             if (
-                not expected_paths
-                or names != expected_paths
+                not names
+                or names != tuple(sorted(names))
                 or len({name.casefold() for name in names}) != len(names)
+                or not WHITENING_ASSET_REQUIRED_CLOSURE.issubset(names)
             ):
                 raise LfWhiteningAssetProducerReplayError(
                     "whitening producer package closure drifted"
@@ -180,10 +202,10 @@ def _verify_producer_package(repository: Path, package: Path) -> str:
                     member.is_absolute()
                     or any(part in {"", ".", ".."} for part in member.parts)
                     or info.is_dir()
-                    or not stat.S_ISREG(mode)
+                    or mode != 0o100644
                     or stat.S_ISLNK(mode)
                     or mode & 0o111
-                    or archive.read(info.filename) != producer.read(info.filename)
+                    or info.date_time != (1980, 1, 1, 0, 0, 0)
                 ):
                     raise LfWhiteningAssetProducerReplayError(
                         "whitening producer package member drifted"
@@ -192,7 +214,7 @@ def _verify_producer_package(repository: Path, package: Path) -> str:
         raise LfWhiteningAssetProducerReplayError(
             "whitening producer package is invalid"
         ) from exc
-    return sha256(package.read_bytes()).hexdigest()
+    return package_digest
 
 
 def _producer_protocol_from_package(package: Path):
@@ -333,6 +355,7 @@ def _replay_asset_from_evidence(
             or record.protocol_digest != protocol_digest
             or marker.protocol_digest != protocol_digest
             or record.candidate_config_digest != candidate_digest
+            or record.method_code_revision != WHITENING_ASSET_PRODUCER_REVISION
             or marker.revision != WHITENING_ASSET_PRODUCER_REVISION
             or record.attempt_index != 0
             or marker.attempt_index != 0
@@ -379,7 +402,7 @@ def _replay_verified_whitening_asset(
 ):
     try:
         package = whitening_asset_persistent_root / WHITENING_ASSET_PACKAGE
-        package_digest = _verify_producer_package(repository, package)
+        package_digest = _verify_producer_package(package)
         (
             fit_protocol,
             fit_manifest,
@@ -537,6 +560,14 @@ def _replay_verified_whitening_asset(
             candidate_digest=candidate_digest,
             fit_manifest_file_sha256=fit_protocol.null_fit_manifest_file_sha256,
         )
+        required_asset_digest = getattr(required_protocol, "whitening_asset_digest", None)
+        if required_asset_digest is not None and (
+            required_asset_digest != WHITENING_ASSET_DIGEST
+            or asset.whitening_asset_digest != required_asset_digest
+        ):
+            raise LfWhiteningAssetProducerReplayError(
+                "whitening producer asset digest differs from current frozen authority"
+            )
         after = tuple(
             (path.relative_to(run_root).as_posix(), sha256(path.read_bytes()).hexdigest())
             for path in sorted(run_root.rglob("*"))
