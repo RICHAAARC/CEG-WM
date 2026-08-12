@@ -1,9 +1,15 @@
 from dataclasses import replace
 from hashlib import sha256
 from math import sqrt
+from pathlib import Path
 from struct import pack, unpack
 
 import pytest
+
+from experiments.methods import (
+    CegWmExperimentAdapter,
+    load_ceg_wm_experiment_adapter_configuration,
+)
 
 from main.content_chain.detector import (
     BranchNullCalibration,
@@ -31,7 +37,9 @@ from main.content_chain.lf_carrier import lf_carrier
 from main.content_chain.lf_detector import (
     LfDetectionObservation,
     lf_detector,
+    lf_null_whitened_matched_detector,
 )
+from main.content_chain.lf_whitening import LfNullWhiteningAsset
 from main.content_chain.routing import (
     ContentRouterError,
     ContentRoutingResult,
@@ -48,8 +56,31 @@ from main.shared.key_schedule import (
     stable_json_utf8,
 )
 
+ROOT = Path(__file__).resolve().parents[2]
+COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
 BATCH3_ROOT = "ceg-wm-batch-three-root-π"
 BATCH3_SHAPE = (1, 2, 6, 6)
+WHITENED_SHAPE = (1, 16, 64, 64)
+
+
+def _whitening_asset() -> LfNullWhiteningAsset:
+    payload = {
+        "artifact_role": "lf_clean_null_whitening_operator",
+        "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
+        "candidate_id": "lf_null_whitened_matched_score",
+        "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
+        "fit_manifest_sha256": "a" * 64,
+        "fit_source_cluster_count": 32,
+        "latent_shape": [1, 16, 64, 64],
+        "observation_protocol": "final_image_vae_posterior_mode",
+        "regularization_ratio": "0x1.0000000000000p-10",
+        "transform_identity": "orthonormal_dct_ii",
+        "weights_binary32_be_hex": ["3f800000"] * 96,
+    }
+    return LfNullWhiteningAsset.from_canonical_payload(
+        payload,
+        whitening_asset_digest=sha256(stable_json_utf8(payload)).hexdigest(),
+    )
 
 
 def _source_digest(label: str) -> str:
@@ -1152,24 +1183,25 @@ def test_content_combination_branch_consumption() -> None:
         combination="weighted_hf_lf_standardized_score",
         weight=0.50,
     )
-    hf_only_score_low = content_detector(
+    hf_only_score = content_detector(
         hf_query,
-        lf_low,
-        hf_null=hf_null,
-        combination="hf_only_standardized_score",
-    )
-    hf_only_score_high = content_detector(
-        hf_query,
-        lf_high,
         hf_null=hf_null,
         combination="hf_only_standardized_score",
     )
     assert low.combined_score < high.combined_score
-    assert hf_only_score_low.combined_score == hf_only_score_high.combined_score
+    assert hf_only_score.lf_result is None
+    assert hf_only_score.lf_score is None
     assert low.hf_score == high.hf_score == 0.0
     assert low.lf_score == -0.75
     assert high.lf_score == 0.75
     assert low.content_score == high.content_score == 0.0
+    with pytest.raises(ContentDetectorError, match="does not consume"):
+        content_detector(
+            hf_query,
+            lf_low,
+            hf_null=hf_null,
+            combination="hf_only_standardized_score",
+        )
 
 
 @pytest.mark.unit
@@ -1402,3 +1434,142 @@ def test_content_combination_wrong_key_not_masked() -> None:
     assert result.content_score == result.hf_score
     assert result.formal_mode == "hf_only"
     assert result.diagnostic_combination.promoted is False
+
+
+@pytest.mark.unit
+def test_whitened_lf_combination_uses_public_detector_and_frozen_asset() -> None:
+    asset = _whitening_asset()
+    lf_template = lf_carrier(BATCH3_ROOT, WHITENED_SHAPE)
+    image_encoding = tuple(
+        value + ((index % 17) - 8) / 1000.0
+        for index, value in enumerate(lf_template.template)
+    )
+    lf_observation = LfDetectionObservation.from_public_image_encoding(
+        image_encoding,
+        WHITENED_SHAPE,
+    )
+    whitened = lf_null_whitened_matched_detector(
+        lf_observation,
+        BATCH3_ROOT,
+        asset,
+    )
+    hf_result = hf_detector(
+        HfDetectionObservation.from_public_image_encoding(
+            image_encoding,
+            WHITENED_SHAPE,
+        ),
+        BATCH3_ROOT,
+    )
+    hf_null = _null_calibration(
+        "hf",
+        hf_result.detector_identity,
+        (-1.0, -0.5, 0.0, 0.5, 1.0),
+    )
+    lf_null = _null_calibration(
+        "lf",
+        whitened.detector_identity,
+        (-1.0, -0.5, 0.0, 0.5, 1.0),
+    )
+    assert lf_null.detector_identity == whitened.detector_identity
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS)
+    )
+
+    weighted_call = adapter.detect_content(
+        hf_result,
+        whitened,
+        hf_null=hf_null,
+        lf_null=lf_null,
+        combination="weighted_hf_lf_standardized_score",
+        weight=0.50,
+    )
+    maximum_call = adapter.detect_content(
+        hf_result,
+        whitened,
+        hf_null=hf_null,
+        lf_null=lf_null,
+        combination="maximum_hf_lf_standardized_score",
+    )
+    for call in (weighted_call, maximum_call):
+        result = call.result
+        assert call.public_callable == "main.content_detector"
+        assert result.lf_result is whitened
+        assert result.lf_score == whitened.lf_score
+        assert result.hf_score == hf_result.hf_score
+        assert result.combined_score is not None
+        assert result.content_score == result.hf_score
+        assert result.formal_mode == "hf_only"
+        assert "lf_null_whitened_matched_score" in result.candidate_ids
+        assert result.diagnostic_combination.diagnostic_only is True
+        assert result.diagnostic_combination.promoted is False
+        validate_content_detection_result(result)
+    weighted = weighted_call.result.diagnostic_combination
+    assert weighted.combined_score == pytest.approx(
+        0.50 * weighted.hf_standardization.z_score
+        + sqrt(1.0 - 0.50**2) * weighted.lf_standardization.z_score,
+        abs=1e-15,
+    )
+    maximum = maximum_call.result.diagnostic_combination
+    assert maximum.combined_score == max(
+        maximum.hf_standardization.z_score,
+        maximum.lf_standardization.z_score,
+    )
+
+    with pytest.raises(ContentDetectorError, match="requires independent LF"):
+        adapter.detect_content(
+            hf_result,
+            hf_null=hf_null,
+            lf_null=lf_null,
+            combination="maximum_hf_lf_standardized_score",
+        )
+    raw_lf = lf_detector(lf_observation, BATCH3_ROOT)
+    with pytest.raises(ContentDetectorError, match="detector identities"):
+        adapter.detect_content(
+            hf_result,
+            raw_lf,
+            hf_null=hf_null,
+            lf_null=lf_null,
+            combination="maximum_hf_lf_standardized_score",
+        )
+    with pytest.raises(ContentDetectorError, match="identity mismatch"):
+        adapter.detect_content(
+            hf_result,
+            replace(whitened, whitening_asset_digest="b" * 64),
+            hf_null=hf_null,
+            lf_null=lf_null,
+            combination="maximum_hf_lf_standardized_score",
+        )
+    with pytest.raises(ContentDetectorError, match="identity mismatch"):
+        adapter.detect_content(
+            hf_result,
+            replace(whitened, detector_config_digest="c" * 64),
+            hf_null=hf_null,
+            lf_null=lf_null,
+            combination="maximum_hf_lf_standardized_score",
+        )
+
+    wrong_hf = replace(
+        hf_result,
+        hf_score=-0.25,
+        key_role="wrong",
+        wrong_key_index=0,
+        template_digest="d" * 64,
+    )
+    wrong_lf = replace(
+        whitened,
+        lf_score=10.0,
+        key_role="wrong",
+        wrong_key_index=0,
+        template_digest="e" * 64,
+    )
+    wrong_result = adapter.detect_content(
+        wrong_hf,
+        wrong_lf,
+        hf_null=hf_null,
+        lf_null=lf_null,
+        combination="maximum_hf_lf_standardized_score",
+    ).result
+    assert wrong_result.hf_result.key_role == "wrong"
+    assert wrong_result.lf_result.key_role == "wrong"
+    assert wrong_result.combined_score > wrong_result.hf_score
+    assert wrong_result.content_score == wrong_result.hf_score

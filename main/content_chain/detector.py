@@ -20,11 +20,12 @@ from main.shared.rgb8 import (
 )
 
 from .hf_detector import HfDetectionResult
-from .lf_detector import LfDetectionResult
+from .lf_detector import LfDetectionResult, LfNullWhitenedDetectionResult
 
 CONTENT_DETECTOR_CANDIDATE_IDS = (
     "hf_sparse_tail",
     "lf_low_pass",
+    "lf_null_whitened_matched_score",
     "content_combination_calibrated",
 )
 FROZEN_COMBINATION_WEIGHTS = (0.25, 0.50, 0.75)
@@ -34,6 +35,7 @@ CombinationFunction = Literal[
     "weighted_hf_lf_standardized_score",
     "maximum_hf_lf_standardized_score",
 ]
+LfBranchDetectionResult = LfDetectionResult | LfNullWhitenedDetectionResult
 
 
 class ContentDetectorError(ValueError):
@@ -199,7 +201,7 @@ class ContentDetectionResult:
     detector_identity: str
     content_config_digest: str
     hf_result: HfDetectionResult
-    lf_result: LfDetectionResult | None
+    lf_result: LfBranchDetectionResult | None
     diagnostic_combination: CalibratedCombinationResult | None
     diagnostic_identity: str | None
     content_input_image_digest: str | None
@@ -246,13 +248,27 @@ def _validate_hf_result(result: object) -> HfDetectionResult:
     return result
 
 
-def _validate_lf_result(result: object) -> LfDetectionResult:
-    if type(result) is not LfDetectionResult:
+def _validate_lf_result(result: object) -> LfBranchDetectionResult:
+    if type(result) not in {LfDetectionResult, LfNullWhitenedDetectionResult}:
         raise ContentDetectorError(
-            "LF diagnostic branch requires LfDetectionResult"
+            "LF diagnostic branch requires a registered LF detection result"
         )
+    is_whitened = type(result) is LfNullWhitenedDetectionResult
+    expected_candidate_id = (
+        "lf_null_whitened_matched_score" if is_whitened else "lf_low_pass"
+    )
+    expected_candidate_ids = (
+        (
+            "key_schedule_sha256_counter",
+            "lf_low_pass",
+            "lf_null_whitened_matched_score",
+        )
+        if is_whitened
+        else ("key_schedule_sha256_counter", "lf_low_pass")
+    )
     if (
-        result.candidate_id != "lf_low_pass"
+        result.candidate_id != expected_candidate_id
+        or result.candidate_ids != expected_candidate_ids
         or isinstance(result.lf_score, bool)
         or not isinstance(result.lf_score, (int, float))
         or not isfinite(float(result.lf_score))
@@ -268,6 +284,24 @@ def _validate_lf_result(result: object) -> LfDetectionResult:
             ("template_digest", result.template_digest),
         )
     )
+    if is_whitened:
+        _require_non_empty_identity_strings(
+            (("whitening_asset_digest", result.whitening_asset_digest),)
+        )
+        expected_detector_identity = sha256(
+            stable_json_utf8(
+                {
+                    "candidate_ids": list(result.candidate_ids),
+                    "detector_config_digest": result.detector_config_digest,
+                    "detector_role": "lf_null_whitened_blind_score",
+                    "whitening_asset_digest": result.whitening_asset_digest,
+                }
+            )
+        ).hexdigest()
+        if result.detector_identity != expected_detector_identity:
+            raise ContentDetectorError(
+                "LF whitening asset or detector configuration identity mismatch"
+            )
     if (
         result.key_role not in {"registered", "wrong"}
         or (
@@ -288,7 +322,7 @@ def _validate_lf_result(result: object) -> LfDetectionResult:
 
 def _validate_shared_key_semantics(
     hf_result: HfDetectionResult,
-    lf_result: LfDetectionResult,
+    lf_result: LfBranchDetectionResult,
 ) -> None:
     if (
         hf_result.root_key_public_digest != lf_result.root_key_public_digest
@@ -378,23 +412,28 @@ def _combination_identity(
     formula_identity: str,
     hf_calibration_identity: str,
     lf_calibration_identity: str | None,
+    lf_result: LfBranchDetectionResult | None,
 ) -> str:
-    return sha256(
-        stable_json_utf8(
+    payload = {
+        "formula_identity": formula_identity,
+        "hf_calibration_identity": hf_calibration_identity,
+        "lf_calibration_identity": lf_calibration_identity,
+        "promotion_status": "diagnostic_not_promoted",
+    }
+    if type(lf_result) is LfNullWhitenedDetectionResult:
+        payload.update(
             {
-                "formula_identity": formula_identity,
-                "hf_calibration_identity": hf_calibration_identity,
-                "lf_calibration_identity": lf_calibration_identity,
-                "promotion_status": "diagnostic_not_promoted",
+                "lf_detector_config_digest": lf_result.detector_config_digest,
+                "lf_whitening_asset_digest": lf_result.whitening_asset_digest,
             }
         )
-    ).hexdigest()
+    return sha256(stable_json_utf8(payload)).hexdigest()
 
 
 def _combine_diagnostic(
     *,
     hf_result: HfDetectionResult,
-    lf_result: LfDetectionResult | None,
+    lf_result: LfBranchDetectionResult | None,
     hf_null: BranchNullCalibration,
     lf_null: BranchNullCalibration | None,
     function: CombinationFunction,
@@ -488,6 +527,7 @@ def _combine_diagnostic(
             if lf_standardization is not None
             else None
         ),
+        lf_result=lf_result,
     )
     return CalibratedCombinationResult(
         candidate_id="content_combination_calibrated",
@@ -637,7 +677,7 @@ def _validate_diagnostic_result(
     diagnostic: object,
     *,
     hf_result: HfDetectionResult,
-    lf_result: LfDetectionResult | None,
+    lf_result: LfBranchDetectionResult | None,
 ) -> CalibratedCombinationResult:
     if type(diagnostic) is not CalibratedCombinationResult:
         raise ContentDetectorError(
@@ -752,6 +792,7 @@ def _validate_diagnostic_result(
             if lf_standardization is not None
             else None
         ),
+        lf_result=lf_result,
     )
     if (
         diagnostic.formula_identity != expected_formula_identity
@@ -765,7 +806,7 @@ def _validate_diagnostic_result(
 
 def content_detector(
     hf_result: HfDetectionResult,
-    lf_result: LfDetectionResult | None = None,
+    lf_result: LfBranchDetectionResult | None = None,
     *,
     hf_null: BranchNullCalibration | None = None,
     lf_null: BranchNullCalibration | None = None,
@@ -775,6 +816,12 @@ def content_detector(
     """保持正式 HF-only D_M，同时可计算明确未晋升的组合诊断。"""
 
     hf_result = _validate_hf_result(hf_result)
+    if combination == "hf_only_standardized_score" and (
+        lf_result is not None or lf_null is not None
+    ):
+        raise ContentDetectorError(
+            "hf_only_standardized_score does not consume an LF result or LF CDF"
+        )
     normalized_lf_result = (
         _validate_lf_result(lf_result) if lf_result is not None else None
     )

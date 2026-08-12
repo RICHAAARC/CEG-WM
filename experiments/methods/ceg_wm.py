@@ -687,7 +687,9 @@ class CegWmExperimentAdapter:
     def detect_content(
         self,
         hf_result: HfDetectionResult,
-        lf_result: LfDetectionResult | None = None,
+        lf_result: (
+            LfDetectionResult | LfNullWhitenedDetectionResult | None
+        ) = None,
         *,
         hf_null: BranchNullCalibration | None = None,
         lf_null: BranchNullCalibration | None = None,
