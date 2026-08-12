@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import inspect
 import json
@@ -44,7 +45,7 @@ def test_execution_chain_freezes_real_public_surfaces_and_fixed_denominator() ->
     protocol, _reference, _probes = load_content_uniform_combination_directional_protocol(CONFIG, repository_root=ROOT)
     assert len(protocol.unit_roster) == 41
     source = inspect.getsource(entrypoint.execute_content_uniform_combination_directional_diagnosis_session)
-    assert "_replay_whitening_asset_for_startup" in source
+    assert "_replay_current_whitening_asset" in source
     assert "runner.execute_operational_unit" in source
     assert "runner.execute_reference_fit_unit" in source
     assert "runner.execute_probe_unit" in source
@@ -80,6 +81,36 @@ def test_whitening_producer_failure_is_the_only_replay_error_wrapped_for_startup
     )
     with pytest.raises(ValueError, match="current authority"):
         entrypoint._replay_whitening_asset_for_startup(repository=ROOT)
+
+
+def test_current_whitening_authority_drift_is_not_a_producer_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, _reference, _probes = load_content_uniform_combination_directional_protocol(
+        CONFIG, repository_root=ROOT
+    )
+    calls = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_replay_whitening_asset_for_startup",
+        lambda **arguments: calls.append(arguments) or "verified_asset",
+    )
+    drifted = replace(protocol, whitening_asset_digest="0" * 64)
+    with pytest.raises(
+        entrypoint.ContentUniformCombinationDirectionalEntrypointError,
+        match="current combination whitening authority drifted",
+    ) as caught:
+        entrypoint._replay_current_whitening_asset(
+            protocol=drifted, repository=ROOT
+        )
+    assert type(caught.value) is entrypoint.ContentUniformCombinationDirectionalEntrypointError
+    assert calls == []
+
+    result = entrypoint._replay_current_whitening_asset(
+        protocol=protocol, repository=ROOT
+    )
+    assert result == "verified_asset"
+    assert calls == [{"required_protocol": protocol, "repository": ROOT}]
 
 
 def test_whitening_producer_startup_diagnostic_is_safe_and_pre_store(

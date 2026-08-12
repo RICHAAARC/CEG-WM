@@ -52,6 +52,7 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
     _sha256_file,
 )
 from scripts.experiment_execution.lf_whitened_directional_validation_entrypoint import (
+    WHITENING_ASSET_DIGEST,
     LfWhiteningAssetProducerReplayError,
     _replay_verified_whitening_asset,
 )
@@ -204,6 +205,19 @@ def _replay_whitening_asset_for_startup(**arguments):
             ),
             failure_class="implementation_failure",
         ) from exc
+
+
+def _replay_current_whitening_asset(*, protocol, **arguments):
+    """Check current combination authority before historical producer replay."""
+
+    if protocol.whitening_asset_digest != WHITENING_ASSET_DIGEST:
+        raise ContentUniformCombinationDirectionalEntrypointError(
+            "current combination whitening authority drifted"
+        )
+    return _replay_whitening_asset_for_startup(
+        required_protocol=protocol,
+        **arguments,
+    )
 
 
 def _terminal_scientific_records(
@@ -368,11 +382,11 @@ def execute_content_uniform_combination_directional_diagnosis_session(
         runtime_configuration=runtime_configuration,
     )
     try:
-        whitening_asset = _replay_whitening_asset_for_startup(
+        whitening_asset = _replay_current_whitening_asset(
+            protocol=protocol,
             repository=repository,
             whitening_asset_persistent_root=fit_persistent,
             base_root_key=root_key,
-            required_protocol=protocol,
         )
         candidate_digest = _combination_candidate_config_digest(
             adapter_config_digest=adapter.configuration.config_digest,

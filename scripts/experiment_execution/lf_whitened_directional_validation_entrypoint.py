@@ -560,13 +560,9 @@ def _replay_verified_whitening_asset(
             candidate_digest=candidate_digest,
             fit_manifest_file_sha256=fit_protocol.null_fit_manifest_file_sha256,
         )
-        required_asset_digest = getattr(required_protocol, "whitening_asset_digest", None)
-        if required_asset_digest is not None and (
-            required_asset_digest != WHITENING_ASSET_DIGEST
-            or asset.whitening_asset_digest != required_asset_digest
-        ):
+        if asset.whitening_asset_digest != WHITENING_ASSET_DIGEST:
             raise LfWhiteningAssetProducerReplayError(
-                "whitening producer asset digest differs from current frozen authority"
+                "whitening producer asset digest drifted"
             )
         after = tuple(
             (path.relative_to(run_root).as_posix(), sha256(path.read_bytes()).hexdigest())

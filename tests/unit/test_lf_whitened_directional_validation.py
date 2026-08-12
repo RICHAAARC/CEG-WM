@@ -397,6 +397,11 @@ def test_whitening_asset_replay_uses_frozen_producer_package_and_read_only_store
         capture_output=True,
     )
     assert historical_lookup.returncode != 0
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "WHITENING_ASSET_DIGEST",
+        expected.whitening_asset_digest,
+    )
     replayed = _replay_verified_whitening_asset(
         repository=current_only,
         whitening_asset_persistent_root=persistent,
@@ -405,6 +410,25 @@ def test_whitening_asset_replay_uses_frozen_producer_package_and_read_only_store
     )
     assert replayed == expected
     assert _file_tree_digest(run_root) == before
+
+    monkeypatch.setattr(
+        directional_entrypoint, "WHITENING_ASSET_DIGEST", "0" * 64
+    )
+    with pytest.raises(
+        directional_entrypoint.LfWhiteningAssetProducerReplayError,
+        match="asset digest drifted",
+    ):
+        _replay_verified_whitening_asset(
+            repository=current_only,
+            whitening_asset_persistent_root=persistent,
+            base_root_key=ROOT_KEY,
+            required_protocol=protocol,
+        )
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "WHITENING_ASSET_DIGEST",
+        expected.whitening_asset_digest,
+    )
 
     package = persistent / directional_entrypoint.WHITENING_ASSET_PACKAGE
     original_package = package.read_bytes()
@@ -462,8 +486,13 @@ def test_whitening_asset_replay_rejects_incomplete_or_foreign_persistence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    persistent, _expected, _evidence = _build_whitening_producer_evidence(
+    persistent, expected, _evidence = _build_whitening_producer_evidence(
         tmp_path, monkeypatch
+    )
+    monkeypatch.setattr(
+        directional_entrypoint,
+        "WHITENING_ASSET_DIGEST",
+        expected.whitening_asset_digest,
     )
     protocol, _manifest = load_lf_whitened_directional_validation_protocol(
         CONFIG, repository_root=ROOT
