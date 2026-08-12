@@ -2574,6 +2574,9 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     content_routing_notebook = (
         root / "notebooks/colab/content_routing_directional_diagnosis.ipynb"
     )
+    content_combination_notebook = (
+        root / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
+    )
     notebooks = sorted((root / "notebooks").rglob("*.ipynb"))
     assert notebooks == sorted(
         [
@@ -2587,6 +2590,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
             root / "notebooks/colab/lf_whitened_score_screening.ipynb",
             root / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb",
             content_routing_notebook,
+            content_combination_notebook,
             root / "notebooks/colab/thirteen_module_mechanism_screening.ipynb",
         ]
     )
@@ -2595,6 +2599,14 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     assert (
         "ceg_wm_content_routing_positive_reference_support_correction_diagnosis"
         in content_routing_source
+    )
+    content_combination_source = content_combination_notebook.read_text(
+        encoding="utf-8"
+    )
+    assert "b242261f10a034b541c571afd30b91b77eaddf19" in content_combination_source
+    assert (
+        "ceg_wm_content_uniform_combination_directional_diagnosis"
+        in content_combination_source
     )
     document = json.loads(runtime_notebook.read_text(encoding="utf-8"))
     sources = "\n".join(

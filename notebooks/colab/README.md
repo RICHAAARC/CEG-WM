@@ -4,7 +4,24 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 ## Current authorized entrypoint
 
-`content_routing_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
+`content_uniform_combination_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
+**Run all** 的入口。它固定拉取 execution revision
+`b242261f10a034b541c571afd30b91b77eaddf19`，使用全新独立 run ID
+`ceg_wm_content_uniform_combination_directional_diagnosis`，执行冻结的
+`1 operational + 32 clean reference fit + 8 six-image scientific probes = 41 total`
+units，且每个 unit 只允许 attempt zero。Notebook 只挂载 Drive、读取 `HF_TOKEN` 与
+`CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
+`content_uniform_combination_directional_diagnosis_server.py`，并以 create-only 方式导出
+result 或 diagnostic ZIP、execution receipt 与 `SHA256SUMS`；失败时先完成导出再报错。
+
+每个 probe 的嵌入系数 `a` 分别固定为 0.25、0.50、0.75；诊断同时保存 C0、三个
+`C1(w)`（`w` 为 0.25、0.50、0.75）和 C2，但本门不选择 `a`、`w` 或组合函数。
+LF 分支只使用冻结 W asset 的 public blind whitened detector，禁止回退 raw LF；正式
+detector 继续为 HF-only。通过时仅允许另行申请 candidate selection，不形成 formal
+threshold/FPR、promotion、calibration、evaluation、baseline、joint 或论文 claim。
+
+`content_routing_directional_diagnosis.ipynb` 已完成其独立 routing diagnosis，当前为
+**paused / not authorized**。它此前是唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
 `925c2cbc727e3b18e91c0b3981eeed1b470a955a`，使用全新独立 run ID
 `ceg_wm_content_routing_positive_reference_support_correction_diagnosis`，并执行冻结的
@@ -55,7 +72,7 @@ public-endpoint smoke 与 32 个 LF whitened directional scientific units，当�
 **paused / not authorized**。其 execution revision
 `51adb765cdddafcb4c65c357e899c77b4c9f36d2` 与 run ID
 `ceg_wm_lf_whitened_directional_validation_prepared_feature_execution` 保持
-producer-bound，不读取、不迁移、不改写或混入当前 content-routing 诊断分母。
+producer-bound，不读取、不迁移、不改写或混入当前 content-combination 诊断分母。
 
 依赖安装、基础 GPU 检查、冻结模型 revision 下载、真实方法/runtime 调用、正式
 records、持久化和内部 ZIP 全部属于服务器脚本。该 development-only LF whitened
@@ -67,7 +84,7 @@ formal evaluation、baseline 或论文 claim，也不执行 routing、LF/HF 组�
 旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
 `ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
 **paused / not authorized**，不得作为当前入口运行或与新 run 混合。
-除当前 content-routing 入口外，目录内其余全部 Notebook 均为
+除当前 content-combination 入口外，目录内其余全部 Notebook 均为
 **paused / not authorized**，不得作为当前入口运行。
 
 `lf_whitened_score_screening.ipynb` 已完成 1 个 non-scientific operational smoke、32 个

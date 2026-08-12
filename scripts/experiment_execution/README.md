@@ -1,9 +1,26 @@
 # Experiment execution servers
 
+## Disabled-routing content-combination directional diagnosis
+
+`content_uniform_combination_directional_diagnosis_server.py` 是当前 Colab 与普通 GPU
+服务器共用的执行入口；当前唯一授权 Notebook 为
+`notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb`，固定绑定
+execution revision `b242261f10a034b541c571afd30b91b77eaddf19` 与全新 run ID
+`ceg_wm_content_uniform_combination_directional_diagnosis`。服务器执行 1 个 operational、
+32 个 clean cross-fit reference 与 8 个 six-image scientific probes，共 41 units，每 unit
+仅 attempt zero；Notebook 仅负责 Drive、Secrets、exact checkout、调用及 create-only
+ZIP/receipt/`SHA256SUMS` 导出，失败也先导出再报错。
+
+每个 probe 分别冻结 `a = 0.25, 0.50, 0.75`，记录 C0、C1(w) 和 C2；其中 `a` 是
+embed coefficient，`w` 仅是 C1 detector weight。本门不选择 `a`、`w` 或组合函数，
+正式 detector 仍为 HF-only；通过仅允许另行申请 candidate selection，不拟合 formal
+threshold/FPR，也不形成 promotion、calibration、evaluation、baseline、joint 或论文 claim。
+
 ## Content-routing directional diagnosis
 
-`content_routing_directional_diagnosis_server.py` 是当前 Colab 与普通 GPU 服务器共用的
-执行入口；当前唯一授权 Notebook 为
+`content_routing_directional_diagnosis_server.py` 保留已完成的独立 routing diagnosis，
+当前为 **paused / not authorized**。它此前是 Colab 与普通 GPU 服务器共用的
+执行入口；此前唯一授权 Notebook 为
 `notebooks/colab/content_routing_directional_diagnosis.ipynb`，固定绑定 execution revision
 `925c2cbc727e3b18e91c0b3981eeed1b470a955a` 与全新独立 run ID
 `ceg_wm_content_routing_positive_reference_support_correction_diagnosis`。服务器执行冻结的 2 个 operational、32 个
@@ -54,7 +71,7 @@ Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/Z
 `ceg_wm_lf_whitened_directional_validation_prepared_feature_execution`，已完成冻结的 1 个 non-scientific
 public-endpoint smoke 与 32 个 LF whitened directional scientific units；每 unit 最多
 2 attempts、2700 秒。该入口当前为 **paused / not authorized**；operational unit 不计
-scientific coverage，历史 records 不读取、不迁移、不改写或混入当前 content-routing 诊断分母。
+scientific coverage，历史 records 不读取、不迁移、不改写或混入当前 content-combination 诊断分母。
 
 服务器负责基本 GPU/磁盘检查、冻结依赖安装、配置模型 revision 下载、真实 public
 method/runtime 调用、正式 records、跨 session persistence 和内部 result 或 diagnostic ZIP。
@@ -64,7 +81,7 @@ Notebook 只负责 Drive、Secrets、exact checkout、调用与 export receipt/Z
 `ceg_wm_lf_whitening_asset_fit_and_score_screening` 已冻结的 whitening asset，不重拟合、
 迁移或回写旧 run。它不拟合 threshold，不授权 FPR、candidate promotion、calibration、
 formal evaluation、baseline 或论文 claim；不执行 routing、LF/HF 组合、Q/K、estimator、
-reliability、rectification 或 conditional recovery。除当前 content-routing Notebook 外，其他
+reliability、rectification 或 conditional recovery。除当前 content-combination Notebook 外，其他
 checked-in Notebook 入口均已暂停。
 旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
 `ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
