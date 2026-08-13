@@ -25,8 +25,8 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_uniform_combination_directional_diagnosis.json"
-EXECUTION_REVISION = "f3dac1bde11d815de478f50bb5c0b2176c9341cc"
-RUN_ID = "ceg_wm_content_uniform_combination_whitening_asset_replay_correction_diagnosis"
+EXECUTION_REVISION = "62d7fe5c8ba22c4c3a02bf4fd7aec4f8b5b45eb0"
+RUN_ID = "ceg_wm_content_uniform_combination_observation_construction_localization"
 NOTEBOOK = ROOT / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
 
 
