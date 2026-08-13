@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "protocol_id": "ceg_wm_content_uniform_combination_directional_diagnosis",
   "protocol_version": "1.0.0",
-  "run_id": "ceg_wm_content_uniform_combination_arm_observation_leaf_localization",
+  "run_id": "ceg_wm_content_uniform_combination_arm_budget_field_localization",
   "split": "development",
   "reference_fit_manifest_path": "configs/experiments/content_uniform_combination_reference_fit_manifest.json",
   "reference_fit_manifest_file_sha256": "a1c9a9277552506f078a5bb63a710d59926dd02f860673da685806005bf782dc",

@@ -183,7 +183,7 @@ def _observation(index: int, *, passing: bool = True):
 def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() -> None:
     protocol, reference, probes = _load()
     assert protocol.run_id == (
-        "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
+        "ceg_wm_content_uniform_combination_arm_budget_field_localization"
     )
     assert (protocol.operational_unit_count, protocol.reference_fit_cluster_count, protocol.directional_probe_cluster_count, protocol.maximum_total_units) == (1, 32, 8, 41)
     assert protocol.maximum_attempts_per_unit == 1
@@ -195,7 +195,7 @@ def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() 
     with pytest.raises(ContentUniformCombinationDirectionalProtocolError):
         replace(
             protocol,
-            run_id="ceg_wm_content_uniform_combination_observation_construction_localization",
+            run_id="ceg_wm_content_uniform_combination_arm_observation_leaf_localization",
         ).validate()
 
 
@@ -875,7 +875,7 @@ def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
         allow_nan=False,
     ).encode("utf-8")
     assert sha256(current_record_bytes).hexdigest() == (
-        "449d11c1a8e81156f92f30053ba3a5fbcde18cffce9bde3a8b1dda2f1e8535ef"
+        "e09383d3b4bc134414038d682089c0273bac6ecbd73620ec6c6f6462e97256f9"
     )
     assert current_record.operation_result_payload == parent_record.operation_result_payload
     assert current_record.operation_result_digest == parent_record.operation_result_digest
