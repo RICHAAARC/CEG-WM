@@ -26,8 +26,20 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_uniform_combination_directional_diagnosis.json"
 EXECUTION_REVISION = "7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf"
+BUDGET_LOCALIZATION_REVISION = "01ff7c897d660e295fa832e265eb87b287d37ac6"
 RUN_ID = "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
 NOTEBOOK = ROOT / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
+ARM_IDS = (
+    "hf_only",
+    "lf_only",
+    "uniform_combined_quarter",
+    "uniform_combined_half",
+    "uniform_combined_three_quarters",
+)
+FIELD_IDENTITIES = (
+    "clean_to_watermarked_rgb_relative_l2",
+    "realized_relative_l2",
+)
 
 
 def test_server_help_imports_from_isolated_working_directory(tmp_path: Path) -> None:
@@ -218,6 +230,23 @@ def test_server_and_worker_do_not_claim_selection_or_formal_threshold() -> None:
 
 
 def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
+    budget_cases = tuple(
+        (
+            error_type(arm_id),
+            f"content_combination_{arm_id}_{field_identity}_canonical_budget_exceeded",
+        )
+        for error_type, field_identity in (
+            (
+                entrypoint.ContentCombinationArmRgbQualityBudgetExceededRunnerError,
+                "clean_to_watermarked_rgb_relative_l2",
+            ),
+            (
+                entrypoint.ContentCombinationArmRealizedContentBudgetExceededRunnerError,
+                "realized_relative_l2",
+            ),
+        )
+        for arm_id in ARM_IDS
+    )
     cases = (
         (
             entrypoint.ContentCombinationArmRoleInvalidRunnerError(),
@@ -227,10 +256,7 @@ def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
             entrypoint.ContentCombinationArmMeasurementNonfiniteRunnerError(),
             "content_combination_arm_measurement_nonfinite",
         ),
-        (
-            entrypoint.ContentCombinationArmCanonicalBudgetExceededRunnerError(),
-            "content_combination_arm_canonical_budget_exceeded",
-        ),
+        *budget_cases,
         (
             entrypoint.ContentCombinationArmMaterializationRejectedRunnerError(),
             "content_combination_arm_materialization_rejected",
@@ -252,6 +278,15 @@ def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
         RuntimeError("content_combination_arm_canonical_budget_exceeded")
     ) is None
 
+    class DerivedBudgetFailure(
+        entrypoint.ContentCombinationArmRealizedContentBudgetExceededRunnerError
+    ):
+        pass
+
+    assert entrypoint._content_combination_observation_failure_reason(
+        DerivedBudgetFailure("hf_only")
+    ) is None
+
 
 def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> None:
     if not (ROOT / ".git").exists():
@@ -264,13 +299,20 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
         text=True,
     )
     subprocess.run(
-        ["git", "-C", str(checkout), "checkout", "--detach", EXECUTION_REVISION],
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "checkout",
+            "--detach",
+            BUDGET_LOCALIZATION_REVISION,
+        ],
         check=True,
         capture_output=True,
         text=True,
     )
     package = _build_or_verify_package(
-        checkout, tmp_path / "package_root", EXECUTION_REVISION
+        checkout, tmp_path / "package_root", BUDGET_LOCALIZATION_REVISION
     )
     extracted = tmp_path / "extracted_package"
     with ZipFile(package) as archive:
@@ -292,16 +334,43 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
         assert "WHITENING_ASSET_PACKAGE_SHA256" in producer_replay_source
         assert "cat-file" not in producer_replay_source
         assert "_replay_current_whitening_asset" in combination_source
-        for safe_reason in (
+        safe_reasons = (
             "content_combination_arm_role_invalid",
             "content_combination_arm_measurement_nonfinite",
-            "content_combination_arm_canonical_budget_exceeded",
+            *(
+                f"content_combination_{arm_id}_{field_identity}_canonical_budget_exceeded"
+                for field_identity in FIELD_IDENTITIES
+                for arm_id in ARM_IDS
+            ),
             "content_combination_arm_materialization_rejected",
             "content_combination_arm_image_digest_invalid",
             "content_combination_arm_observation_identity_drift",
-        ):
+        )
+        for safe_reason in safe_reasons:
             assert safe_reason in combination_source
         archive.extractall(extracted)
+    worker_probe = (
+        "import json; "
+        "from scripts.experiment_execution import "
+        "content_uniform_combination_directional_diagnosis_entrypoint as e; "
+        f"arms={ARM_IDS!r}; "
+        "pairs=((e.ContentCombinationArmRgbQualityBudgetExceededRunnerError,"
+        "'clean_to_watermarked_rgb_relative_l2'),"
+        "(e.ContentCombinationArmRealizedContentBudgetExceededRunnerError,"
+        "'realized_relative_l2')); "
+        "reasons=[e._content_combination_observation_failure_reason(t(a)) "
+        "for t,_f in pairs for a in arms]; "
+        "expected=[f'content_combination_{a}_{f}_canonical_budget_exceeded' "
+        "for _t,f in pairs for a in arms]; "
+        "assert reasons == expected; "
+        "assert e._content_combination_observation_failure_reason("
+        "RuntimeError('root_secret traceback sensitive budget')) is None; "
+        "Derived=type('DerivedBudgetFailure',"
+        "(e.ContentCombinationArmRealizedContentBudgetExceededRunnerError,),{}); "
+        "assert e._content_combination_observation_failure_reason("
+        "Derived('hf_only')) is None; "
+        "print(json.dumps(reasons))"
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -311,7 +380,8 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
                 "import experiments.metrics.content_uniform_combination_directional_diagnosis; "
                 "import experiments.runners.content_uniform_combination_directional_diagnosis; "
                 "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_entrypoint; "
-                "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_server"
+                "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_server; "
+                + worker_probe
             ),
         ],
         cwd=tmp_path,
@@ -321,6 +391,13 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
         text=True,
     )
     assert result.returncode == 0, result.stderr
+    package_reasons = json.loads(result.stdout)
+    assert package_reasons == [
+        f"content_combination_{arm_id}_{field_identity}_canonical_budget_exceeded"
+        for field_identity in FIELD_IDENTITIES
+        for arm_id in ARM_IDS
+    ]
+    assert "root_secret" not in result.stdout
 
 
 def test_notebook_is_thin_exact_output_free_and_exports_before_failure() -> None:
