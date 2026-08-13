@@ -2603,9 +2603,9 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     content_combination_source = content_combination_notebook.read_text(
         encoding="utf-8"
     )
-    assert "7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf" in content_combination_source
+    assert "c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36" in content_combination_source
     assert (
-        "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
+        "ceg_wm_content_uniform_combination_arm_budget_field_localization"
         in content_combination_source
     )
     document = json.loads(runtime_notebook.read_text(encoding="utf-8"))

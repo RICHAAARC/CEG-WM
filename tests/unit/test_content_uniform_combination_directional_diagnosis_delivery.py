@@ -25,9 +25,10 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_uniform_combination_directional_diagnosis.json"
-EXECUTION_REVISION = "7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf"
+HISTORICAL_EXECUTION_REVISION = "7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf"
 BUDGET_LOCALIZATION_REVISION = "01ff7c897d660e295fa832e265eb87b287d37ac6"
-RUN_ID = "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
+EXECUTION_REVISION = "c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36"
+RUN_ID = "ceg_wm_content_uniform_combination_arm_budget_field_localization"
 NOTEBOOK = ROOT / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
 ARM_IDS = (
     "hf_only",
@@ -305,14 +306,14 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
             str(checkout),
             "checkout",
             "--detach",
-            EXECUTION_REVISION,
+            HISTORICAL_EXECUTION_REVISION,
         ],
         check=True,
         capture_output=True,
         text=True,
     )
     package = _build_or_verify_package(
-        checkout, tmp_path / "package_root", EXECUTION_REVISION
+        checkout, tmp_path / "package_root", HISTORICAL_EXECUTION_REVISION
     )
     extracted = tmp_path / "extracted_package"
     with ZipFile(package) as archive:
@@ -366,8 +367,13 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
 
 
-def test_budget_localization_exact_package_maps_each_arm_and_field_reason(
+@pytest.mark.parametrize(
+    "execution_revision",
+    (BUDGET_LOCALIZATION_REVISION, EXECUTION_REVISION),
+)
+def test_budget_localization_exact_packages_map_each_arm_and_field_reason(
     tmp_path: Path,
+    execution_revision: str,
 ) -> None:
     if not (ROOT / ".git").exists():
         pytest.skip("detached research copy lacks exact Git checkout capability")
@@ -385,7 +391,7 @@ def test_budget_localization_exact_package_maps_each_arm_and_field_reason(
             str(checkout),
             "checkout",
             "--detach",
-            BUDGET_LOCALIZATION_REVISION,
+            execution_revision,
         ],
         check=True,
         capture_output=True,
@@ -393,8 +399,8 @@ def test_budget_localization_exact_package_maps_each_arm_and_field_reason(
     )
     package = _build_or_verify_package(
         checkout,
-        tmp_path / "budget_localization_package_root",
-        BUDGET_LOCALIZATION_REVISION,
+        tmp_path / f"budget_localization_package_root_{execution_revision}",
+        execution_revision,
     )
     extracted = tmp_path / "budget_localization_extracted_package"
     with ZipFile(package) as archive:
@@ -408,6 +414,11 @@ def test_budget_localization_exact_package_maps_each_arm_and_field_reason(
         )
         assert all(reason in combination_source for reason in expected_reasons)
         assert "content_combination_arm_canonical_budget_exceeded" not in combination_source
+        if execution_revision == EXECUTION_REVISION:
+            protocol_source = archive.read(
+                "experiments/protocol/content_uniform_combination_directional_diagnosis.py"
+            ).decode("utf-8")
+            assert RUN_ID in protocol_source
         archive.extractall(extracted)
 
     worker_probe = (

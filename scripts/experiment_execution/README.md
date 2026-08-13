@@ -5,8 +5,8 @@
 `content_uniform_combination_directional_diagnosis_server.py` 是当前 Colab 与普通 GPU
 服务器共用的执行入口；当前唯一授权 Notebook 为
 `notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb`，固定绑定
-execution revision `7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf` 与全新 run ID
-`ceg_wm_content_uniform_combination_arm_observation_leaf_localization`。服务器执行 1 个 operational、
+execution revision `c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36` 与全新 run ID
+`ceg_wm_content_uniform_combination_arm_budget_field_localization`。服务器执行 1 个 operational、
 32 个 clean cross-fit reference 与 8 个 six-image scientific probes，共 41 units，每 unit
 仅 attempt zero；Notebook 仅负责 Drive、Secrets、exact checkout、调用及 create-only
 ZIP/receipt/`SHA256SUMS` 导出，失败也先导出再报错。

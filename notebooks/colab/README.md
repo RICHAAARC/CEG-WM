@@ -6,8 +6,8 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `content_uniform_combination_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf`，使用全新独立 run ID
-`ceg_wm_content_uniform_combination_arm_observation_leaf_localization`，执行冻结的
+`c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36`，使用全新独立 run ID
+`ceg_wm_content_uniform_combination_arm_budget_field_localization`，执行冻结的
 `1 operational + 32 clean reference fit + 8 six-image scientific probes = 41 total`
 units，且每个 unit 只允许 attempt zero。Notebook 只挂载 Drive、读取 `HF_TOKEN` 与
 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
