@@ -305,14 +305,14 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
             str(checkout),
             "checkout",
             "--detach",
-            BUDGET_LOCALIZATION_REVISION,
+            EXECUTION_REVISION,
         ],
         check=True,
         capture_output=True,
         text=True,
     )
     package = _build_or_verify_package(
-        checkout, tmp_path / "package_root", BUDGET_LOCALIZATION_REVISION
+        checkout, tmp_path / "package_root", EXECUTION_REVISION
     )
     extracted = tmp_path / "extracted_package"
     with ZipFile(package) as archive:
@@ -337,11 +337,7 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
         safe_reasons = (
             "content_combination_arm_role_invalid",
             "content_combination_arm_measurement_nonfinite",
-            *(
-                f"content_combination_{arm_id}_{field_identity}_canonical_budget_exceeded"
-                for field_identity in FIELD_IDENTITIES
-                for arm_id in ARM_IDS
-            ),
+            "content_combination_arm_canonical_budget_exceeded",
             "content_combination_arm_materialization_rejected",
             "content_combination_arm_image_digest_invalid",
             "content_combination_arm_observation_identity_drift",
@@ -349,6 +345,71 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
         for safe_reason in safe_reasons:
             assert safe_reason in combination_source
         archive.extractall(extracted)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import experiments.protocol.content_uniform_combination_directional_diagnosis; "
+                "import experiments.metrics.content_uniform_combination_directional_diagnosis; "
+                "import experiments.runners.content_uniform_combination_directional_diagnosis; "
+                "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_entrypoint; "
+                "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_server"
+            ),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(extracted)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_budget_localization_exact_package_maps_each_arm_and_field_reason(
+    tmp_path: Path,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks exact Git checkout capability")
+    checkout = tmp_path / "budget_localization_checkout"
+    subprocess.run(
+        ["git", "clone", "--no-checkout", str(ROOT), str(checkout)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "checkout",
+            "--detach",
+            BUDGET_LOCALIZATION_REVISION,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    package = _build_or_verify_package(
+        checkout,
+        tmp_path / "budget_localization_package_root",
+        BUDGET_LOCALIZATION_REVISION,
+    )
+    extracted = tmp_path / "budget_localization_extracted_package"
+    with ZipFile(package) as archive:
+        combination_source = archive.read(
+            "scripts/experiment_execution/content_uniform_combination_directional_diagnosis_entrypoint.py"
+        ).decode("utf-8")
+        expected_reasons = tuple(
+            f"content_combination_{arm_id}_{field_identity}_canonical_budget_exceeded"
+            for field_identity in FIELD_IDENTITIES
+            for arm_id in ARM_IDS
+        )
+        assert all(reason in combination_source for reason in expected_reasons)
+        assert "content_combination_arm_canonical_budget_exceeded" not in combination_source
+        archive.extractall(extracted)
+
     worker_probe = (
         "import json; "
         "from scripts.experiment_execution import "
