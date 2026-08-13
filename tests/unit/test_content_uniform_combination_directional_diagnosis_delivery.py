@@ -27,8 +27,10 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_uniform_combination_directional_diagnosis.json"
 HISTORICAL_EXECUTION_REVISION = "7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf"
 BUDGET_LOCALIZATION_REVISION = "01ff7c897d660e295fa832e265eb87b287d37ac6"
-EXECUTION_REVISION = "c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36"
-RUN_ID = "ceg_wm_content_uniform_combination_arm_budget_field_localization"
+BUDGET_FIELD_LOCALIZATION_REVISION = "c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36"
+BUDGET_OBSERVATION_CORRECTION_REVISION = "c18954fdad6074d4172b7f0a7988af6e1a2c8f1e"
+EXECUTION_REVISION = "7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da"
+RUN_ID = "ceg_wm_content_uniform_combination_budget_observation_correction_diagnosis"
 NOTEBOOK = ROOT / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
 ARM_IDS = (
     "hf_only",
@@ -358,7 +360,7 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
 
 @pytest.mark.parametrize(
     "execution_revision",
-    (BUDGET_LOCALIZATION_REVISION, EXECUTION_REVISION),
+    (BUDGET_LOCALIZATION_REVISION, BUDGET_FIELD_LOCALIZATION_REVISION),
 )
 def test_budget_localization_exact_packages_map_each_arm_and_field_reason(
     tmp_path: Path,
@@ -403,11 +405,11 @@ def test_budget_localization_exact_packages_map_each_arm_and_field_reason(
         )
         assert all(reason in combination_source for reason in expected_reasons)
         assert "content_combination_arm_canonical_budget_exceeded" not in combination_source
-        if execution_revision == EXECUTION_REVISION:
+        if execution_revision == BUDGET_FIELD_LOCALIZATION_REVISION:
             protocol_source = archive.read(
                 "experiments/protocol/content_uniform_combination_directional_diagnosis.py"
             ).decode("utf-8")
-            assert RUN_ID in protocol_source
+            assert "ceg_wm_content_uniform_combination_arm_budget_field_localization" in protocol_source
         archive.extractall(extracted)
 
     worker_probe = (
@@ -459,6 +461,81 @@ def test_budget_localization_exact_packages_map_each_arm_and_field_reason(
         for arm_id in ARM_IDS
     ]
     assert "root_secret" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "execution_revision",
+    (BUDGET_OBSERVATION_CORRECTION_REVISION, EXECUTION_REVISION),
+)
+def test_budget_observation_exact_packages_preserve_finite_overage_for_aggregate(
+    tmp_path: Path,
+    execution_revision: str,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("detached research copy lacks exact Git checkout capability")
+    checkout = tmp_path / f"budget_observation_checkout_{execution_revision}"
+    subprocess.run(
+        ["git", "clone", "--no-checkout", str(ROOT), str(checkout)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(checkout), "checkout", "--detach", execution_revision],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    package = _build_or_verify_package(
+        checkout,
+        tmp_path / f"budget_observation_package_root_{execution_revision}",
+        execution_revision,
+    )
+    extracted = tmp_path / f"budget_observation_extracted_{execution_revision}"
+    with ZipFile(package) as archive:
+        metric_source = archive.read(
+            "experiments/metrics/content_uniform_combination_directional_diagnosis.py"
+        ).decode("utf-8")
+        runner_source = archive.read(
+            "experiments/runners/content_uniform_combination_directional_diagnosis.py"
+        ).decode("utf-8")
+        entrypoint_source = archive.read(
+            "scripts/experiment_execution/content_uniform_combination_directional_diagnosis_entrypoint.py"
+        ).decode("utf-8")
+        assert "budget_violation_count = sum(" in metric_source
+        assert "ContentCombinationArmRgbQualityBudgetExceeded" not in metric_source + runner_source + entrypoint_source
+        assert "ContentCombinationArmRealizedContentBudgetExceeded" not in metric_source + runner_source + entrypoint_source
+        if execution_revision == EXECUTION_REVISION:
+            protocol_source = archive.read(
+                "experiments/protocol/content_uniform_combination_directional_diagnosis.py"
+            ).decode("utf-8")
+            assert RUN_ID in protocol_source
+        archive.extractall(extracted)
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import experiments.protocol.content_uniform_combination_directional_diagnosis; "
+                "import experiments.runners.content_uniform_combination_directional_diagnosis; "
+                "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_entrypoint; "
+                "import scripts.experiment_execution.content_uniform_combination_directional_diagnosis_server; "
+                "from experiments.metrics.content_uniform_combination_directional_diagnosis "
+                "import create_content_combination_arm_observation as create; "
+                "item=create(arm_id='hf_only',embedding_coefficient=None,"
+                "clean_to_watermarked_rgb_relative_l2=0.013,realized_relative_l2=0.013,"
+                "materialization_integrity_status='passed',materialization_budget_status='accepted',"
+                "image_digest='a'*64); assert item.clean_to_watermarked_rgb_relative_l2==0.013; "
+                "assert item.realized_relative_l2==0.013"
+            ),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(extracted)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stderr
 
 
 def test_notebook_is_thin_exact_output_free_and_exports_before_failure() -> None:

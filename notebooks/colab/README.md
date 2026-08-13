@@ -6,8 +6,8 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 `content_uniform_combination_directional_diagnosis.ipynb` 是当前唯一授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
-`c30b8a75e69cb0ef7a8515ab9eeb5c75f4314c36`，使用全新独立 run ID
-`ceg_wm_content_uniform_combination_arm_budget_field_localization`，执行冻结的
+`7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da`，使用全新独立 run ID
+`ceg_wm_content_uniform_combination_budget_observation_correction_diagnosis`，执行冻结的
 `1 operational + 32 clean reference fit + 8 six-image scientific probes = 41 total`
 units，且每个 unit 只允许 attempt zero。Notebook 只挂载 Drive、读取 `HF_TOKEN` 与
 `CEG_WM_ROOT_KEY`、核对 detached exact checkout、调用
@@ -15,6 +15,9 @@ units，且每个 unit 只允许 attempt zero。Notebook 只挂载 Drive、读�
 result 或 diagnostic ZIP、execution receipt 与 `SHA256SUMS`；失败时先完成导出再报错。
 该新 run 使用独立持久化与导出命名空间；旧 content-combination run 保持只读，不恢复、
 迁移或拼接到本次执行。
+
+有限的 arm RGB quality 与 realized L2 值保留为 typed observation，再由固定 aggregate
+按 canonical binary32 `3/250` 边界计预算违规；这不是放宽预算，也不产生候选晋升。
 
 每个 probe 的嵌入系数 `a` 分别固定为 0.25、0.50、0.75；诊断同时保存 C0、三个
 `C1(w)`（`w` 为 0.25、0.50、0.75）和 C2，但本门不选择 `a`、`w` 或组合函数。
