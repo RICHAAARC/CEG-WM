@@ -42,10 +42,24 @@ class ContentCombinationArmMeasurementNonfiniteError(
     """An arm budget measurement is nonfinite."""
 
 
-class ContentCombinationArmCanonicalBudgetExceededError(
+class ContentCombinationArmRgbQualityBudgetExceededError(
     ContentUniformCombinationDirectionalMetricError
 ):
-    """An arm exceeds the canonical content budget."""
+    """An arm's RGB quality measurement exceeds the canonical content budget."""
+
+    def __init__(self, arm_id: str) -> None:
+        super().__init__("arm RGB quality exceeds the canonical content budget")
+        self.arm_id = arm_id
+
+
+class ContentCombinationArmRealizedContentBudgetExceededError(
+    ContentUniformCombinationDirectionalMetricError
+):
+    """An arm's realized content measurement exceeds the canonical budget."""
+
+    def __init__(self, arm_id: str) -> None:
+        super().__init__("arm realized content measurement exceeds the canonical budget")
+        self.arm_id = arm_id
 
 
 class ContentCombinationArmMaterializationRejectedError(
@@ -301,12 +315,13 @@ class ContentCombinationArmObservation:
             raise ContentCombinationArmMeasurementNonfiniteError(
                 "content combination arm measurement is nonfinite"
             ) from exc
-        if (
-            self.clean_to_watermarked_rgb_relative_l2 > _BINARY32_CONTENT_LIMIT
-            or self.realized_relative_l2 > _BINARY32_CONTENT_LIMIT
-        ):
-            raise ContentCombinationArmCanonicalBudgetExceededError(
-                "arm exceeds the canonical binary32 content budget"
+        if self.clean_to_watermarked_rgb_relative_l2 > _BINARY32_CONTENT_LIMIT:
+            raise ContentCombinationArmRgbQualityBudgetExceededError(
+                self.arm_id
+            )
+        if self.realized_relative_l2 > _BINARY32_CONTENT_LIMIT:
+            raise ContentCombinationArmRealizedContentBudgetExceededError(
+                self.arm_id
             )
         if self.materialization_integrity_status != "passed" or self.materialization_budget_status != "accepted":
             raise ContentCombinationArmMaterializationRejectedError(
@@ -571,4 +586,4 @@ def aggregate_content_uniform_combination_directional_diagnosis(
     aggregate=ContentUniformCombinationDirectionalAggregate(**payload,aggregate_identity=canonical_digest(payload)); aggregate.validate(); return aggregate
 
 
-__all__=["ContentCombinationArmCanonicalBudgetExceededError","ContentCombinationArmImageDigestInvalidError","ContentCombinationArmMaterializationRejectedError","ContentCombinationArmMeasurementNonfiniteError","ContentCombinationArmObservation","ContentCombinationArmObservationIdentityDriftError","ContentCombinationArmRoleInvalidError","ContentCombinationFoldReference","ContentCombinationReferenceMeasurement","ContentCombinationScoreRow","ContentUniformCombinationDirectionalAggregate","ContentUniformCombinationDirectionalMetricError","ContentUniformCombinationDirectionalObservation","aggregate_content_uniform_combination_directional_diagnosis","create_content_combination_arm_observation","create_content_combination_reference_measurement","create_content_combination_score_row","create_content_uniform_combination_directional_observation","fit_content_combination_fold_reference"]
+__all__=["ContentCombinationArmImageDigestInvalidError","ContentCombinationArmMaterializationRejectedError","ContentCombinationArmMeasurementNonfiniteError","ContentCombinationArmObservation","ContentCombinationArmObservationIdentityDriftError","ContentCombinationArmRealizedContentBudgetExceededError","ContentCombinationArmRgbQualityBudgetExceededError","ContentCombinationArmRoleInvalidError","ContentCombinationFoldReference","ContentCombinationReferenceMeasurement","ContentCombinationScoreRow","ContentUniformCombinationDirectionalAggregate","ContentUniformCombinationDirectionalMetricError","ContentUniformCombinationDirectionalObservation","aggregate_content_uniform_combination_directional_diagnosis","create_content_combination_arm_observation","create_content_combination_reference_measurement","create_content_combination_score_row","create_content_uniform_combination_directional_observation","fit_content_combination_fold_reference"]

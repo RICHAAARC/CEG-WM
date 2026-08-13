@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from hashlib import sha256
+from math import inf, nextafter
 from pathlib import Path
 import inspect
 import json
+from struct import pack, unpack
 import time
 from types import MethodType, SimpleNamespace
 
@@ -17,11 +19,12 @@ from experiments.methods import (
 )
 
 from experiments.metrics.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmCanonicalBudgetExceededError,
+    ContentCombinationArmRgbQualityBudgetExceededError,
     ContentCombinationArmImageDigestInvalidError,
     ContentCombinationArmMaterializationRejectedError,
     ContentCombinationArmMeasurementNonfiniteError,
     ContentCombinationArmObservationIdentityDriftError,
+    ContentCombinationArmRealizedContentBudgetExceededError,
     ContentCombinationArmRoleInvalidError,
     ContentUniformCombinationDirectionalMetricError,
     aggregate_content_uniform_combination_directional_diagnosis,
@@ -43,11 +46,12 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmCanonicalBudgetExceededRunnerError,
+    ContentCombinationArmRgbQualityBudgetExceededRunnerError,
     ContentCombinationArmImageDigestInvalidRunnerError,
     ContentCombinationArmMaterializationRejectedRunnerError,
     ContentCombinationArmMeasurementNonfiniteRunnerError,
     ContentCombinationArmObservationIdentityDriftRunnerError,
+    ContentCombinationArmRealizedContentBudgetExceededRunnerError,
     ContentCombinationArmRoleInvalidRunnerError,
     ContentCombinationArmObservationConstructionError,
     ContentCombinationProbeObservationConstructionError,
@@ -444,14 +448,15 @@ def test_runner_preserves_exact_metric_causes_at_three_construction_boundaries()
 
     arm_runner = _construction_boundary_runner(realized_relative_l2=0.013)
     arm_runner._score_rows = MethodType(lambda _self, **_kwargs: (), arm_runner)
-    with pytest.raises(ContentCombinationArmCanonicalBudgetExceededRunnerError) as arm_error:
+    with pytest.raises(ContentCombinationArmRealizedContentBudgetExceededRunnerError) as arm_error:
         arm_runner.execute_probe_unit(
             unit_index=33,
             base_latent=latent,
             intent=SimpleNamespace(unit_index=33),
             reference_records=(),
         )
-    assert type(arm_error.value.__cause__) is ContentCombinationArmCanonicalBudgetExceededError
+    assert type(arm_error.value.__cause__) is ContentCombinationArmRealizedContentBudgetExceededError
+    assert arm_error.value.arm_id == "hf_only"
 
     probe_runner = _construction_boundary_runner(realized_relative_l2=0.01)
     probe_runner._score_rows = MethodType(lambda _self, **_kwargs: (), probe_runner)
@@ -491,18 +496,6 @@ def test_runner_preserves_exact_metric_causes_at_three_construction_boundaries()
             ContentCombinationArmMeasurementNonfiniteRunnerError,
             ContentCombinationArmMeasurementNonfiniteError,
             "content_combination_arm_measurement_nonfinite",
-        ),
-        (
-            {"clean_to_watermarked_rgb_relative_l2": 0.013},
-            ContentCombinationArmCanonicalBudgetExceededRunnerError,
-            ContentCombinationArmCanonicalBudgetExceededError,
-            "content_combination_arm_canonical_budget_exceeded",
-        ),
-        (
-            {"realized_relative_l2": 0.013},
-            ContentCombinationArmCanonicalBudgetExceededRunnerError,
-            ContentCombinationArmCanonicalBudgetExceededError,
-            "content_combination_arm_canonical_budget_exceeded",
         ),
         (
             {"materialization_integrity_status": "rejected"},
@@ -547,6 +540,59 @@ def test_runner_maps_real_arm_constructor_inputs_to_exact_safe_leaf_reason(
     assert type(caught.value) is runner_error_type
     assert type(caught.value.__cause__) is metric_error_type
     assert _content_combination_observation_failure_reason(caught.value) == safe_reason
+
+
+@pytest.mark.parametrize(("arm_id", "embedding_coefficient"), ARMS)
+@pytest.mark.parametrize(
+    ("measurement_field", "runner_error_type", "metric_error_type"),
+    (
+        (
+            "clean_to_watermarked_rgb_relative_l2",
+            ContentCombinationArmRgbQualityBudgetExceededRunnerError,
+            ContentCombinationArmRgbQualityBudgetExceededError,
+        ),
+        (
+            "realized_relative_l2",
+            ContentCombinationArmRealizedContentBudgetExceededRunnerError,
+            ContentCombinationArmRealizedContentBudgetExceededError,
+        ),
+    ),
+)
+def test_runner_binds_each_arm_and_budget_measurement_to_an_exact_safe_reason(
+    arm_id: str,
+    embedding_coefficient: float | None,
+    measurement_field: str,
+    runner_error_type: type[RuntimeError],
+    metric_error_type: type[ValueError],
+) -> None:
+    canonical_limit = unpack(">f", pack(">f", 3.0 / 250.0))[0]
+    values = {
+        "arm_id": arm_id,
+        "embedding_coefficient": embedding_coefficient,
+        "clean_to_watermarked_rgb_relative_l2": canonical_limit,
+        "realized_relative_l2": canonical_limit,
+        "materialization_integrity_status": "passed",
+        "materialization_budget_status": "accepted",
+        "image_digest": "a" * 64,
+    }
+    boundary = ContentUniformCombinationDirectionalDiagnosisRunner._create_arm_observation(
+        **values
+    )
+    assert boundary.clean_to_watermarked_rgb_relative_l2 == canonical_limit
+    assert boundary.realized_relative_l2 == canonical_limit
+
+    values[measurement_field] = nextafter(canonical_limit, inf)
+    with pytest.raises(runner_error_type) as caught:
+        ContentUniformCombinationDirectionalDiagnosisRunner._create_arm_observation(
+            **values
+        )
+    assert type(caught.value) is runner_error_type
+    assert caught.value.arm_id == arm_id
+    assert type(caught.value.__cause__) is metric_error_type
+    assert caught.value.__cause__.arm_id == arm_id
+    assert _content_combination_observation_failure_reason(caught.value) == (
+        f"content_combination_{arm_id}_{measurement_field}_canonical_budget_exceeded"
+    )
 
 
 def test_runner_maps_real_probe_validation_identity_drift_to_exact_safe_leaf_reason() -> None:
@@ -631,10 +677,26 @@ def test_entrypoint_persists_only_bounded_safe_reasons_with_fixed_failure_denomi
     assert _content_combination_observation_failure_reason(RuntimeError()) is None
     assert _resource_failure(MemoryError()) is True
 
+    budget_leaf_failures = tuple(
+        error_type(arm_id)
+        for error_type in (
+            ContentCombinationArmRgbQualityBudgetExceededRunnerError,
+            ContentCombinationArmRealizedContentBudgetExceededRunnerError,
+        )
+        for arm_id, _ in ARMS
+    )
+    budget_leaf_reasons = tuple(
+        f"content_combination_{arm_id}_{measurement_field}_canonical_budget_exceeded"
+        for measurement_field in (
+            "clean_to_watermarked_rgb_relative_l2",
+            "realized_relative_l2",
+        )
+        for arm_id, _ in ARMS
+    )
     leaf_failures = (
         ContentCombinationArmRoleInvalidRunnerError("sensitive role"),
         ContentCombinationArmMeasurementNonfiniteRunnerError("sensitive measurement"),
-        ContentCombinationArmCanonicalBudgetExceededRunnerError("sensitive budget"),
+        *budget_leaf_failures,
         ContentCombinationArmMaterializationRejectedRunnerError("sensitive status"),
         ContentCombinationArmImageDigestInvalidRunnerError("sensitive digest"),
         ContentCombinationArmObservationIdentityDriftRunnerError("sensitive identity"),
@@ -646,18 +708,20 @@ def test_entrypoint_persists_only_bounded_safe_reasons_with_fixed_failure_denomi
     assert leaf_reasons == (
         "content_combination_arm_role_invalid",
         "content_combination_arm_measurement_nonfinite",
-        "content_combination_arm_canonical_budget_exceeded",
+        *budget_leaf_reasons,
         "content_combination_arm_materialization_rejected",
         "content_combination_arm_image_digest_invalid",
         "content_combination_arm_observation_identity_drift",
     )
 
     class DerivedArmBudgetFailure(
-        ContentCombinationArmCanonicalBudgetExceededRunnerError
+        ContentCombinationArmRealizedContentBudgetExceededRunnerError
     ):
         pass
 
-    assert _content_combination_observation_failure_reason(DerivedArmBudgetFailure()) is None
+    assert _content_combination_observation_failure_reason(
+        DerivedArmBudgetFailure("hf_only")
+    ) is None
 
     runner = _record_boundary_runner()
     bounded_reasons = leaf_reasons

@@ -10,11 +10,12 @@ import torch
 
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmCanonicalBudgetExceededError,
+    ContentCombinationArmRgbQualityBudgetExceededError,
     ContentCombinationArmImageDigestInvalidError,
     ContentCombinationArmMaterializationRejectedError,
     ContentCombinationArmMeasurementNonfiniteError,
     ContentCombinationArmObservationIdentityDriftError,
+    ContentCombinationArmRealizedContentBudgetExceededError,
     ContentCombinationArmRoleInvalidError,
     ContentCombinationFoldReference,
     ContentCombinationReferenceMeasurement,
@@ -101,10 +102,24 @@ class ContentCombinationArmMeasurementNonfiniteRunnerError(
     """The metric rejected a nonfinite arm measurement."""
 
 
-class ContentCombinationArmCanonicalBudgetExceededRunnerError(
+class ContentCombinationArmRgbQualityBudgetExceededRunnerError(
     ContentUniformCombinationDirectionalRunnerError
 ):
-    """The metric rejected an arm above the canonical content budget."""
+    """The metric rejected an arm's RGB quality above the canonical budget."""
+
+    def __init__(self, arm_id: str) -> None:
+        super().__init__("content combination arm RGB quality exceeded the canonical budget")
+        self.arm_id = arm_id
+
+
+class ContentCombinationArmRealizedContentBudgetExceededRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected an arm's realized content measurement above budget."""
+
+    def __init__(self, arm_id: str) -> None:
+        super().__init__("content combination arm realized content measurement exceeded the canonical budget")
+        self.arm_id = arm_id
 
 
 class ContentCombinationArmMaterializationRejectedRunnerError(
@@ -136,9 +151,13 @@ def _translate_arm_observation_metric_error(
         raise ContentCombinationArmMeasurementNonfiniteRunnerError(
             "content combination arm measurement is nonfinite"
         ) from error
-    if type(error) is ContentCombinationArmCanonicalBudgetExceededError:
-        raise ContentCombinationArmCanonicalBudgetExceededRunnerError(
-            "content combination arm canonical budget was exceeded"
+    if type(error) is ContentCombinationArmRgbQualityBudgetExceededError:
+        raise ContentCombinationArmRgbQualityBudgetExceededRunnerError(
+            error.arm_id
+        ) from error
+    if type(error) is ContentCombinationArmRealizedContentBudgetExceededError:
+        raise ContentCombinationArmRealizedContentBudgetExceededRunnerError(
+            error.arm_id
         ) from error
     if type(error) is ContentCombinationArmMaterializationRejectedError:
         raise ContentCombinationArmMaterializationRejectedRunnerError(
@@ -508,11 +527,12 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
 
 __all__=[
     "ContentCombinationArmObservationConstructionError",
-    "ContentCombinationArmCanonicalBudgetExceededRunnerError",
+    "ContentCombinationArmRgbQualityBudgetExceededRunnerError",
     "ContentCombinationArmImageDigestInvalidRunnerError",
     "ContentCombinationArmMaterializationRejectedRunnerError",
     "ContentCombinationArmMeasurementNonfiniteRunnerError",
     "ContentCombinationArmObservationIdentityDriftRunnerError",
+    "ContentCombinationArmRealizedContentBudgetExceededRunnerError",
     "ContentCombinationArmRoleInvalidRunnerError",
     "ContentCombinationProbeObservationConstructionError",
     "ContentCombinationScoreRowConstructionError",
