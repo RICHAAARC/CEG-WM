@@ -24,6 +24,12 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
+    ContentCombinationArmCanonicalBudgetExceededRunnerError,
+    ContentCombinationArmImageDigestInvalidRunnerError,
+    ContentCombinationArmMaterializationRejectedRunnerError,
+    ContentCombinationArmMeasurementNonfiniteRunnerError,
+    ContentCombinationArmObservationIdentityDriftRunnerError,
+    ContentCombinationArmRoleInvalidRunnerError,
     ContentCombinationArmObservationConstructionError,
     ContentCombinationProbeObservationConstructionError,
     ContentCombinationScoreRowConstructionError,
@@ -160,6 +166,18 @@ def _content_combination_observation_failure_reason(
         return "content_combination_arm_observation_construction_failed"
     if type(error) is ContentCombinationProbeObservationConstructionError:
         return "content_combination_probe_observation_construction_failed"
+    if type(error) is ContentCombinationArmRoleInvalidRunnerError:
+        return "content_combination_arm_role_invalid"
+    if type(error) is ContentCombinationArmMeasurementNonfiniteRunnerError:
+        return "content_combination_arm_measurement_nonfinite"
+    if type(error) is ContentCombinationArmCanonicalBudgetExceededRunnerError:
+        return "content_combination_arm_canonical_budget_exceeded"
+    if type(error) is ContentCombinationArmMaterializationRejectedRunnerError:
+        return "content_combination_arm_materialization_rejected"
+    if type(error) is ContentCombinationArmImageDigestInvalidRunnerError:
+        return "content_combination_arm_image_digest_invalid"
+    if type(error) is ContentCombinationArmObservationIdentityDriftRunnerError:
+        return "content_combination_arm_observation_identity_drift"
     return None
 
 

@@ -10,6 +10,12 @@ import torch
 
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.content_uniform_combination_directional_diagnosis import (
+    ContentCombinationArmCanonicalBudgetExceededError,
+    ContentCombinationArmImageDigestInvalidError,
+    ContentCombinationArmMaterializationRejectedError,
+    ContentCombinationArmMeasurementNonfiniteError,
+    ContentCombinationArmObservationIdentityDriftError,
+    ContentCombinationArmRoleInvalidError,
     ContentCombinationFoldReference,
     ContentCombinationReferenceMeasurement,
     ContentUniformCombinationDirectionalMetricError,
@@ -81,6 +87,71 @@ class ContentCombinationProbeObservationConstructionError(
     ContentUniformCombinationDirectionalRunnerError
 ):
     """A validated content-combination probe observation could not be constructed."""
+
+
+class ContentCombinationArmRoleInvalidRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected the arm role or embedding coefficient."""
+
+
+class ContentCombinationArmMeasurementNonfiniteRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected a nonfinite arm measurement."""
+
+
+class ContentCombinationArmCanonicalBudgetExceededRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected an arm above the canonical content budget."""
+
+
+class ContentCombinationArmMaterializationRejectedRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected an arm materialization status."""
+
+
+class ContentCombinationArmImageDigestInvalidRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected an arm image digest."""
+
+
+class ContentCombinationArmObservationIdentityDriftRunnerError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """The metric rejected a drifted arm observation identity."""
+
+
+def _translate_arm_observation_metric_error(
+    error: ContentUniformCombinationDirectionalMetricError,
+) -> None:
+    if type(error) is ContentCombinationArmRoleInvalidError:
+        raise ContentCombinationArmRoleInvalidRunnerError(
+            "content combination arm role is invalid"
+        ) from error
+    if type(error) is ContentCombinationArmMeasurementNonfiniteError:
+        raise ContentCombinationArmMeasurementNonfiniteRunnerError(
+            "content combination arm measurement is nonfinite"
+        ) from error
+    if type(error) is ContentCombinationArmCanonicalBudgetExceededError:
+        raise ContentCombinationArmCanonicalBudgetExceededRunnerError(
+            "content combination arm canonical budget was exceeded"
+        ) from error
+    if type(error) is ContentCombinationArmMaterializationRejectedError:
+        raise ContentCombinationArmMaterializationRejectedRunnerError(
+            "content combination arm materialization was rejected"
+        ) from error
+    if type(error) is ContentCombinationArmImageDigestInvalidError:
+        raise ContentCombinationArmImageDigestInvalidRunnerError(
+            "content combination arm image digest is invalid"
+        ) from error
+    if type(error) is ContentCombinationArmObservationIdentityDriftError:
+        raise ContentCombinationArmObservationIdentityDriftRunnerError(
+            "content combination arm observation identity drifted"
+        ) from error
 
 
 def _record_id(record: object) -> object:
@@ -334,6 +405,30 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         lf=BranchNullCalibration(branch="lf",detector_identity=reference.lf_detector_identity,partition_identity=reference.reference_identity,records=tuple(NullScoreRecord(score=score,source_cluster_id=f"reference_cluster_{ordinal:04d}",sample_id=f"lf_reference_{ordinal:04d}") for ordinal,score in zip(reference.source_cluster_ordinals,reference.lf_scores,strict=True)))
         return hf,lf
 
+    @staticmethod
+    def _create_arm_observation(**values: object):
+        try:
+            return create_content_combination_arm_observation(**values)
+        except ContentUniformCombinationDirectionalMetricError as exc:
+            _translate_arm_observation_metric_error(exc)
+            if type(exc) is not ContentUniformCombinationDirectionalMetricError:
+                raise
+            raise ContentCombinationArmObservationConstructionError(
+                "content combination arm observation construction failed"
+            ) from exc
+
+    @staticmethod
+    def _create_probe_observation(**values: object):
+        try:
+            return create_content_uniform_combination_directional_observation(**values)
+        except ContentUniformCombinationDirectionalMetricError as exc:
+            _translate_arm_observation_metric_error(exc)
+            if type(exc) is not ContentUniformCombinationDirectionalMetricError:
+                raise
+            raise ContentCombinationProbeObservationConstructionError(
+                "content combination probe observation construction failed"
+            ) from exc
+
     def _score_rows(self, *, arm_id: str, coefficient: float|None, image: torch.Tensor, latent: torch.Tensor, clean_image: torch.Tensor, clean_latent: torch.Tensor, reference: ContentCombinationFoldReference):
         hf_null,lf_null=self._calibrations(reference)
         controls=[("registered",None,"registered",latent,image,self.registered_root_key),("paired_clean_primary_null",None,"registered",clean_latent,clean_image,self.registered_root_key)]
@@ -382,24 +477,10 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         for (arm_id,coefficient,*_),result in zip(specs,runtime_results,strict=True):
             image=_rgb8(result.watermarked_image)
             all_rows.extend(self._score_rows(arm_id=arm_id,coefficient=coefficient,image=image,latent=result.watermarked_detection_latent,clean_image=clean_image,clean_latent=clean_latent,reference=reference))
-            try:
-                arm=create_content_combination_arm_observation(arm_id=arm_id,embedding_coefficient=coefficient,clean_to_watermarked_rgb_relative_l2=_relative_l2(clean_image,image),realized_relative_l2=result.content_materialization.realized_relative_l2,materialization_integrity_status=result.content_materialization.integrity_status,materialization_budget_status=result.content_materialization_result.budget_status,image_digest=rgb8_image_digest(image))
-            except ContentUniformCombinationDirectionalMetricError as exc:
-                if type(exc) is not ContentUniformCombinationDirectionalMetricError:
-                    raise
-                raise ContentCombinationArmObservationConstructionError(
-                    "content combination arm observation construction failed"
-                ) from exc
+            arm=self._create_arm_observation(arm_id=arm_id,embedding_coefficient=coefficient,clean_to_watermarked_rgb_relative_l2=_relative_l2(clean_image,image),realized_relative_l2=result.content_materialization.realized_relative_l2,materialization_integrity_status=result.content_materialization.integrity_status,materialization_budget_status=result.content_materialization_result.budget_status,image_digest=rgb8_image_digest(image))
             arms.append(arm)
         elapsed=float(monotonic()-started)
-        try:
-            observation=create_content_uniform_combination_directional_observation(cluster_ordinal=ordinal,fold_index=ordinal%4,fold_reference_identity=reference.reference_identity,whitening_asset_digest=self.whitening_asset.whitening_asset_digest,score_rows=tuple(all_rows),arm_observations=tuple(arms),failure_class=None)
-        except ContentUniformCombinationDirectionalMetricError as exc:
-            if type(exc) is not ContentUniformCombinationDirectionalMetricError:
-                raise
-            raise ContentCombinationProbeObservationConstructionError(
-                "content combination probe observation construction failed"
-            ) from exc
+        observation=self._create_probe_observation(cluster_ordinal=ordinal,fold_index=ordinal%4,fold_reference_identity=reference.reference_identity,whitening_asset_digest=self.whitening_asset.whitening_asset_digest,score_rows=tuple(all_rows),arm_observations=tuple(arms),failure_class=None)
         identity=self._analysis_identity(unit_index); payload={"combination_observation":asdict(observation),"clean_image_digest":rgb8_image_digest(clean_image)}
         metric=self._metric_observation(identity=identity,metric_ids=("content_combination_branch_scores",),paired="same_generation_uniform_route_six_image_control",branch="six_image_uniform_combination_probe",statistics=(("score_row_count",float(len(all_rows))),),result_digests=(observation.observation_identity,))
         return self._scientific_record(intent=intent,identity=identity,phase="development_content_uniform_combination_directional_probe",case="six_image_uniform_combination_probe",branch="six_image_uniform_combination_probe",paired="same_generation_uniform_route_six_image_control",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
@@ -427,6 +508,12 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
 
 __all__=[
     "ContentCombinationArmObservationConstructionError",
+    "ContentCombinationArmCanonicalBudgetExceededRunnerError",
+    "ContentCombinationArmImageDigestInvalidRunnerError",
+    "ContentCombinationArmMaterializationRejectedRunnerError",
+    "ContentCombinationArmMeasurementNonfiniteRunnerError",
+    "ContentCombinationArmObservationIdentityDriftRunnerError",
+    "ContentCombinationArmRoleInvalidRunnerError",
     "ContentCombinationProbeObservationConstructionError",
     "ContentCombinationScoreRowConstructionError",
     "ContentUniformCombinationDirectionalDiagnosisRunner",
