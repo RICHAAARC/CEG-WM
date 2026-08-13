@@ -19,12 +19,10 @@ from experiments.methods import (
 )
 
 from experiments.metrics.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmRgbQualityBudgetExceededError,
     ContentCombinationArmImageDigestInvalidError,
     ContentCombinationArmMaterializationRejectedError,
     ContentCombinationArmMeasurementNonfiniteError,
     ContentCombinationArmObservationIdentityDriftError,
-    ContentCombinationArmRealizedContentBudgetExceededError,
     ContentCombinationArmRoleInvalidError,
     ContentUniformCombinationDirectionalMetricError,
     aggregate_content_uniform_combination_directional_diagnosis,
@@ -46,12 +44,10 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmRgbQualityBudgetExceededRunnerError,
     ContentCombinationArmImageDigestInvalidRunnerError,
     ContentCombinationArmMaterializationRejectedRunnerError,
     ContentCombinationArmMeasurementNonfiniteRunnerError,
     ContentCombinationArmObservationIdentityDriftRunnerError,
-    ContentCombinationArmRealizedContentBudgetExceededRunnerError,
     ContentCombinationArmRoleInvalidRunnerError,
     ContentCombinationArmObservationConstructionError,
     ContentCombinationProbeObservationConstructionError,
@@ -180,6 +176,30 @@ def _observation(index: int, *, passing: bool = True):
     )
 
 
+def _observation_with_budget_measurement(
+    index: int,
+    *,
+    arm_index: int,
+    measurement_field: str,
+    value: float,
+):
+    observation = _observation(index)
+    arms = list(observation.arm_observations)
+    arm_payload = asdict(arms[arm_index])
+    arm_payload.pop("arm_identity")
+    arm_payload[measurement_field] = value
+    arms[arm_index] = create_content_combination_arm_observation(**arm_payload)
+    return create_content_uniform_combination_directional_observation(
+        cluster_ordinal=observation.cluster_ordinal,
+        fold_index=observation.fold_index,
+        fold_reference_identity=observation.fold_reference_identity,
+        whitening_asset_digest=observation.whitening_asset_digest,
+        score_rows=observation.score_rows,
+        arm_observations=tuple(arms),
+        failure_class=None,
+    )
+
+
 def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() -> None:
     protocol, reference, probes = _load()
     assert protocol.run_id == (
@@ -276,15 +296,36 @@ def test_directional_gate_is_fixed_denominator_and_failure_priority() -> None:
     assert blocked.outcome == "implementation_blocked"
 
 
-def test_budget_and_identity_violations_cannot_pass() -> None:
-    observations = tuple(_observation(index) for index in range(8))
-    budget = aggregate_content_uniform_combination_directional_diagnosis(
-        observations, budget_violation_count=1
+def test_budget_violations_are_derived_per_cluster_and_cannot_pass() -> None:
+    canonical_limit = unpack(">f", pack(">f", 3.0 / 250.0))[0]
+    observations = list(_observation(index) for index in range(8))
+    observations[0] = _observation_with_budget_measurement(
+        0,
+        arm_index=0,
+        measurement_field="clean_to_watermarked_rgb_relative_l2",
+        value=nextafter(canonical_limit, inf),
     )
+    observations[1] = _observation_with_budget_measurement(
+        1,
+        arm_index=4,
+        measurement_field="realized_relative_l2",
+        value=0.013,
+    )
+    budget = aggregate_content_uniform_combination_directional_diagnosis(
+        tuple(observations)
+    )
+    assert budget.successful_cluster_count == 8
+    assert budget.failed_cluster_count == 0
+    assert budget.budget_violation_count == 2
     assert budget.allow_request_for_content_combination_candidate_selection is False
     assert budget.outcome == "mechanism_signal_not_observed"
+    with pytest.raises(TypeError):
+        aggregate_content_uniform_combination_directional_diagnosis(
+            tuple(observations), budget_violation_count=0  # type: ignore[call-arg]
+        )
     identity = aggregate_content_uniform_combination_directional_diagnosis(
-        observations, identity_violation_count=1
+        tuple(_observation(index) for index in range(8)),
+        identity_violation_count=1,
     )
     assert identity.outcome == "implementation_blocked"
 
@@ -446,17 +487,16 @@ def test_runner_preserves_exact_metric_causes_at_three_construction_boundaries()
         )
     assert type(score_error.value.__cause__) is ContentUniformCombinationDirectionalMetricError
 
-    arm_runner = _construction_boundary_runner(realized_relative_l2=0.013)
+    arm_runner = _construction_boundary_runner(realized_relative_l2=float("inf"))
     arm_runner._score_rows = MethodType(lambda _self, **_kwargs: (), arm_runner)
-    with pytest.raises(ContentCombinationArmRealizedContentBudgetExceededRunnerError) as arm_error:
+    with pytest.raises(ContentCombinationArmMeasurementNonfiniteRunnerError) as arm_error:
         arm_runner.execute_probe_unit(
             unit_index=33,
             base_latent=latent,
             intent=SimpleNamespace(unit_index=33),
             reference_records=(),
         )
-    assert type(arm_error.value.__cause__) is ContentCombinationArmRealizedContentBudgetExceededError
-    assert arm_error.value.arm_id == "hf_only"
+    assert type(arm_error.value.__cause__) is ContentCombinationArmMeasurementNonfiniteError
 
     probe_runner = _construction_boundary_runner(realized_relative_l2=0.01)
     probe_runner._score_rows = MethodType(lambda _self, **_kwargs: (), probe_runner)
@@ -544,26 +584,16 @@ def test_runner_maps_real_arm_constructor_inputs_to_exact_safe_leaf_reason(
 
 @pytest.mark.parametrize(("arm_id", "embedding_coefficient"), ARMS)
 @pytest.mark.parametrize(
-    ("measurement_field", "runner_error_type", "metric_error_type"),
+    "measurement_field",
     (
-        (
-            "clean_to_watermarked_rgb_relative_l2",
-            ContentCombinationArmRgbQualityBudgetExceededRunnerError,
-            ContentCombinationArmRgbQualityBudgetExceededError,
-        ),
-        (
-            "realized_relative_l2",
-            ContentCombinationArmRealizedContentBudgetExceededRunnerError,
-            ContentCombinationArmRealizedContentBudgetExceededError,
-        ),
+        "clean_to_watermarked_rgb_relative_l2",
+        "realized_relative_l2",
     ),
 )
-def test_runner_binds_each_arm_and_budget_measurement_to_an_exact_safe_reason(
+def test_runner_preserves_each_finite_arm_budget_measurement_for_aggregate(
     arm_id: str,
     embedding_coefficient: float | None,
     measurement_field: str,
-    runner_error_type: type[RuntimeError],
-    metric_error_type: type[ValueError],
 ) -> None:
     canonical_limit = unpack(">f", pack(">f", 3.0 / 250.0))[0]
     values = {
@@ -582,17 +612,10 @@ def test_runner_binds_each_arm_and_budget_measurement_to_an_exact_safe_reason(
     assert boundary.realized_relative_l2 == canonical_limit
 
     values[measurement_field] = nextafter(canonical_limit, inf)
-    with pytest.raises(runner_error_type) as caught:
-        ContentUniformCombinationDirectionalDiagnosisRunner._create_arm_observation(
-            **values
-        )
-    assert type(caught.value) is runner_error_type
-    assert caught.value.arm_id == arm_id
-    assert type(caught.value.__cause__) is metric_error_type
-    assert caught.value.__cause__.arm_id == arm_id
-    assert _content_combination_observation_failure_reason(caught.value) == (
-        f"content_combination_{arm_id}_{measurement_field}_canonical_budget_exceeded"
+    exceeded = ContentUniformCombinationDirectionalDiagnosisRunner._create_arm_observation(
+        **values
     )
+    assert getattr(exceeded, measurement_field) == nextafter(canonical_limit, inf)
 
 
 def test_runner_maps_real_probe_validation_identity_drift_to_exact_safe_leaf_reason() -> None:
@@ -677,26 +700,9 @@ def test_entrypoint_persists_only_bounded_safe_reasons_with_fixed_failure_denomi
     assert _content_combination_observation_failure_reason(RuntimeError()) is None
     assert _resource_failure(MemoryError()) is True
 
-    budget_leaf_failures = tuple(
-        error_type(arm_id)
-        for error_type in (
-            ContentCombinationArmRgbQualityBudgetExceededRunnerError,
-            ContentCombinationArmRealizedContentBudgetExceededRunnerError,
-        )
-        for arm_id, _ in ARMS
-    )
-    budget_leaf_reasons = tuple(
-        f"content_combination_{arm_id}_{measurement_field}_canonical_budget_exceeded"
-        for measurement_field in (
-            "clean_to_watermarked_rgb_relative_l2",
-            "realized_relative_l2",
-        )
-        for arm_id, _ in ARMS
-    )
     leaf_failures = (
         ContentCombinationArmRoleInvalidRunnerError("sensitive role"),
         ContentCombinationArmMeasurementNonfiniteRunnerError("sensitive measurement"),
-        *budget_leaf_failures,
         ContentCombinationArmMaterializationRejectedRunnerError("sensitive status"),
         ContentCombinationArmImageDigestInvalidRunnerError("sensitive digest"),
         ContentCombinationArmObservationIdentityDriftRunnerError("sensitive identity"),
@@ -708,20 +714,10 @@ def test_entrypoint_persists_only_bounded_safe_reasons_with_fixed_failure_denomi
     assert leaf_reasons == (
         "content_combination_arm_role_invalid",
         "content_combination_arm_measurement_nonfinite",
-        *budget_leaf_reasons,
         "content_combination_arm_materialization_rejected",
         "content_combination_arm_image_digest_invalid",
         "content_combination_arm_observation_identity_drift",
     )
-
-    class DerivedArmBudgetFailure(
-        ContentCombinationArmRealizedContentBudgetExceededRunnerError
-    ):
-        pass
-
-    assert _content_combination_observation_failure_reason(
-        DerivedArmBudgetFailure("hf_only")
-    ) is None
 
     runner = _record_boundary_runner()
     bounded_reasons = leaf_reasons
@@ -880,6 +876,112 @@ def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
     assert current_record.operation_result_payload == parent_record.operation_result_payload
     assert current_record.operation_result_digest == parent_record.operation_result_digest
     assert current_record.metric_observation == parent_record.metric_observation
+
+
+def test_lightweight_runner_store_recovery_preserves_budget_observations(
+    tmp_path: Path,
+) -> None:
+    runner = _record_boundary_runner()
+    runner.registered_root_key = "content-combination-lightweight-recovery-root"
+
+    class LightweightAdapter:
+        @staticmethod
+        def route_content(_shape, *, mode):
+            assert mode == "routing_uniform_control"
+            return SimpleNamespace(result=SimpleNamespace(route_identity="routing_uniform_control"))
+
+        @staticmethod
+        def build_lf_carrier(_root, _shape, *, routing_result):
+            assert routing_result.route_identity == "routing_uniform_control"
+            return SimpleNamespace(result=SimpleNamespace())
+
+        @staticmethod
+        def build_hf_carrier(_root, _shape, *, routing_result):
+            assert routing_result.route_identity == "routing_uniform_control"
+            return SimpleNamespace(result=SimpleNamespace())
+
+        @staticmethod
+        def embed_content(_values, _high, *, lf_carrier_result, mixing_coefficient, routing_result):
+            assert lf_carrier_result is not None
+            assert mixing_coefficient == 0.50
+            assert routing_result.route_identity == "routing_uniform_control"
+            return SimpleNamespace(result=SimpleNamespace(embedding_result_identity="e" * 64))
+
+    class LightweightRuntime:
+        @staticmethod
+        def execute_content_write_and_vae(base_latent, embed):
+            embed(base_latent)
+            return SimpleNamespace(
+                content_materialization=SimpleNamespace(
+                    materialization_replay_identity="f" * 64
+                ),
+                runtime_config_digest="9" * 64,
+            )
+
+    runner.adapter = LightweightAdapter()
+    runner.runtime = LightweightRuntime()
+    worker = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest="d" * 64,
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+
+    def new_store() -> DevelopmentPersistentStore:
+        return DevelopmentPersistentStore(
+            tmp_path,
+            run_id=runner.protocol.run_id,
+            worker_identity=worker,
+            registered_unit_bindings=runner.create_persistence_unit_bindings(),
+        )
+
+    epoch = int(time.time())
+    store = new_store()
+    lease = store.acquire_lease(
+        session_id="content_combination_lightweight_recovery_session",
+        now_epoch_seconds=epoch,
+        lease_duration_seconds=1000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=epoch)
+    intent = store.create_session_intent(cursor, lease, now_epoch_seconds=epoch + 1)
+    record = runner.execute_operational_unit(
+        unit_index=0,
+        base_latent=torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+        intent=intent,
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        intent,
+        record=record,
+        now_epoch_seconds=epoch + 2,
+    )
+    recovered = new_store().open_session_cursor(lease, now_epoch_seconds=epoch + 3)
+    assert recovered.next_unit_index == 1
+    assert len(recovered.committed_units) == 1
+    assert recovered.operational_records == (record,)
+
+    canonical_limit = unpack(">f", pack(">f", 3.0 / 250.0))[0]
+    observations = tuple(
+        _observation_with_budget_measurement(
+            index,
+            arm_index=index % len(ARMS),
+            measurement_field=(
+                "clean_to_watermarked_rgb_relative_l2"
+                if index == 0
+                else "realized_relative_l2"
+            ),
+            value=nextafter(canonical_limit, inf) if index == 0 else canonical_limit,
+        )
+        for index in range(8)
+    )
+    aggregate = aggregate_content_uniform_combination_directional_diagnosis(observations)
+    assert aggregate.successful_cluster_count == 8
+    assert aggregate.failed_cluster_count == 0
+    assert aggregate.budget_violation_count == 1
+    assert aggregate.outcome == "mechanism_signal_not_observed"
 
 
 class _CombinationBackend(_RoutingBackend):

@@ -42,26 +42,6 @@ class ContentCombinationArmMeasurementNonfiniteError(
     """An arm budget measurement is nonfinite."""
 
 
-class ContentCombinationArmRgbQualityBudgetExceededError(
-    ContentUniformCombinationDirectionalMetricError
-):
-    """An arm's RGB quality measurement exceeds the canonical content budget."""
-
-    def __init__(self, arm_id: str) -> None:
-        super().__init__("arm RGB quality exceeds the canonical content budget")
-        self.arm_id = arm_id
-
-
-class ContentCombinationArmRealizedContentBudgetExceededError(
-    ContentUniformCombinationDirectionalMetricError
-):
-    """An arm's realized content measurement exceeds the canonical budget."""
-
-    def __init__(self, arm_id: str) -> None:
-        super().__init__("arm realized content measurement exceeds the canonical budget")
-        self.arm_id = arm_id
-
-
 class ContentCombinationArmMaterializationRejectedError(
     ContentUniformCombinationDirectionalMetricError
 ):
@@ -315,14 +295,6 @@ class ContentCombinationArmObservation:
             raise ContentCombinationArmMeasurementNonfiniteError(
                 "content combination arm measurement is nonfinite"
             ) from exc
-        if self.clean_to_watermarked_rgb_relative_l2 > _BINARY32_CONTENT_LIMIT:
-            raise ContentCombinationArmRgbQualityBudgetExceededError(
-                self.arm_id
-            )
-        if self.realized_relative_l2 > _BINARY32_CONTENT_LIMIT:
-            raise ContentCombinationArmRealizedContentBudgetExceededError(
-                self.arm_id
-            )
         if self.materialization_integrity_status != "passed" or self.materialization_budget_status != "accepted":
             raise ContentCombinationArmMaterializationRejectedError(
                 "arm materialization was not accepted"
@@ -544,7 +516,7 @@ def _row(observation: ContentUniformCombinationDirectionalObservation, *, arm_id
 def aggregate_content_uniform_combination_directional_diagnosis(
     observations: Sequence[ContentUniformCombinationDirectionalObservation], *,
     identity_violation_count: int = 0, integrity_violation_count: int = 0,
-    nonfinite_violation_count: int = 0, budget_violation_count: int = 0,
+    nonfinite_violation_count: int = 0,
 ) -> ContentUniformCombinationDirectionalAggregate:
     items=tuple(observations)
     if len(items)!=8 or tuple(sorted(item.cluster_ordinal for item in items))!=tuple(range(8)):
@@ -553,6 +525,15 @@ def aggregate_content_uniform_combination_directional_diagnosis(
     implementation=sum(item.failure_class=="implementation_failure" for item in items)
     resource=sum(item.failure_class=="resource_failure" for item in items)
     successful=8-implementation-resource
+    budget_violation_count = sum(
+        item.failure_class is None
+        and any(
+            arm.clean_to_watermarked_rgb_relative_l2 > _BINARY32_CONTENT_LIMIT
+            or arm.realized_relative_l2 > _BINARY32_CONTENT_LIMIT
+            for arm in item.arm_observations
+        )
+        for item in items
+    )
     statistics=[]
     for embedding_coefficient, arm_id in zip(MIXING_COEFFICIENTS, _ARM_IDENTITIES[2:], strict=True):
         baseline_identity=0
@@ -586,4 +567,4 @@ def aggregate_content_uniform_combination_directional_diagnosis(
     aggregate=ContentUniformCombinationDirectionalAggregate(**payload,aggregate_identity=canonical_digest(payload)); aggregate.validate(); return aggregate
 
 
-__all__=["ContentCombinationArmImageDigestInvalidError","ContentCombinationArmMaterializationRejectedError","ContentCombinationArmMeasurementNonfiniteError","ContentCombinationArmObservation","ContentCombinationArmObservationIdentityDriftError","ContentCombinationArmRealizedContentBudgetExceededError","ContentCombinationArmRgbQualityBudgetExceededError","ContentCombinationArmRoleInvalidError","ContentCombinationFoldReference","ContentCombinationReferenceMeasurement","ContentCombinationScoreRow","ContentUniformCombinationDirectionalAggregate","ContentUniformCombinationDirectionalMetricError","ContentUniformCombinationDirectionalObservation","aggregate_content_uniform_combination_directional_diagnosis","create_content_combination_arm_observation","create_content_combination_reference_measurement","create_content_combination_score_row","create_content_uniform_combination_directional_observation","fit_content_combination_fold_reference"]
+__all__=["ContentCombinationArmImageDigestInvalidError","ContentCombinationArmMaterializationRejectedError","ContentCombinationArmMeasurementNonfiniteError","ContentCombinationArmObservation","ContentCombinationArmObservationIdentityDriftError","ContentCombinationArmRoleInvalidError","ContentCombinationFoldReference","ContentCombinationReferenceMeasurement","ContentCombinationScoreRow","ContentUniformCombinationDirectionalAggregate","ContentUniformCombinationDirectionalMetricError","ContentUniformCombinationDirectionalObservation","aggregate_content_uniform_combination_directional_diagnosis","create_content_combination_arm_observation","create_content_combination_reference_measurement","create_content_combination_score_row","create_content_uniform_combination_directional_observation","fit_content_combination_fold_reference"]

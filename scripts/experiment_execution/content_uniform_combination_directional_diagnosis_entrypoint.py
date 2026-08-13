@@ -24,12 +24,10 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmRgbQualityBudgetExceededRunnerError,
     ContentCombinationArmImageDigestInvalidRunnerError,
     ContentCombinationArmMaterializationRejectedRunnerError,
     ContentCombinationArmMeasurementNonfiniteRunnerError,
     ContentCombinationArmObservationIdentityDriftRunnerError,
-    ContentCombinationArmRealizedContentBudgetExceededRunnerError,
     ContentCombinationArmRoleInvalidRunnerError,
     ContentCombinationArmObservationConstructionError,
     ContentCombinationProbeObservationConstructionError,
@@ -171,22 +169,6 @@ def _content_combination_observation_failure_reason(
         return "content_combination_arm_role_invalid"
     if type(error) is ContentCombinationArmMeasurementNonfiniteRunnerError:
         return "content_combination_arm_measurement_nonfinite"
-    if type(error) is ContentCombinationArmRgbQualityBudgetExceededRunnerError:
-        return {
-            "hf_only": "content_combination_hf_only_clean_to_watermarked_rgb_relative_l2_canonical_budget_exceeded",
-            "lf_only": "content_combination_lf_only_clean_to_watermarked_rgb_relative_l2_canonical_budget_exceeded",
-            "uniform_combined_quarter": "content_combination_uniform_combined_quarter_clean_to_watermarked_rgb_relative_l2_canonical_budget_exceeded",
-            "uniform_combined_half": "content_combination_uniform_combined_half_clean_to_watermarked_rgb_relative_l2_canonical_budget_exceeded",
-            "uniform_combined_three_quarters": "content_combination_uniform_combined_three_quarters_clean_to_watermarked_rgb_relative_l2_canonical_budget_exceeded",
-        }.get(error.arm_id)
-    if type(error) is ContentCombinationArmRealizedContentBudgetExceededRunnerError:
-        return {
-            "hf_only": "content_combination_hf_only_realized_relative_l2_canonical_budget_exceeded",
-            "lf_only": "content_combination_lf_only_realized_relative_l2_canonical_budget_exceeded",
-            "uniform_combined_quarter": "content_combination_uniform_combined_quarter_realized_relative_l2_canonical_budget_exceeded",
-            "uniform_combined_half": "content_combination_uniform_combined_half_realized_relative_l2_canonical_budget_exceeded",
-            "uniform_combined_three_quarters": "content_combination_uniform_combined_three_quarters_realized_relative_l2_canonical_budget_exceeded",
-        }.get(error.arm_id)
     if type(error) is ContentCombinationArmMaterializationRejectedRunnerError:
         return "content_combination_arm_materialization_rejected"
     if type(error) is ContentCombinationArmImageDigestInvalidRunnerError:

@@ -230,24 +230,7 @@ def test_server_and_worker_do_not_claim_selection_or_formal_threshold() -> None:
     assert "content_uniform_combination_directional_aggregate" in source
 
 
-def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
-    budget_cases = tuple(
-        (
-            error_type(arm_id),
-            f"content_combination_{arm_id}_{field_identity}_canonical_budget_exceeded",
-        )
-        for error_type, field_identity in (
-            (
-                entrypoint.ContentCombinationArmRgbQualityBudgetExceededRunnerError,
-                "clean_to_watermarked_rgb_relative_l2",
-            ),
-            (
-                entrypoint.ContentCombinationArmRealizedContentBudgetExceededRunnerError,
-                "realized_relative_l2",
-            ),
-        )
-        for arm_id in ARM_IDS
-    )
+def test_live_worker_exports_only_fail_closed_arm_observation_leaf_reasons() -> None:
     cases = (
         (
             entrypoint.ContentCombinationArmRoleInvalidRunnerError(),
@@ -257,7 +240,6 @@ def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
             entrypoint.ContentCombinationArmMeasurementNonfiniteRunnerError(),
             "content_combination_arm_measurement_nonfinite",
         ),
-        *budget_cases,
         (
             entrypoint.ContentCombinationArmMaterializationRejectedRunnerError(),
             "content_combination_arm_materialization_rejected",
@@ -278,14 +260,21 @@ def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
     assert entrypoint._content_combination_observation_failure_reason(
         RuntimeError("content_combination_arm_canonical_budget_exceeded")
     ) is None
+    assert not hasattr(
+        entrypoint, "ContentCombinationArmRgbQualityBudgetExceededRunnerError"
+    )
+    assert not hasattr(
+        entrypoint, "ContentCombinationArmRealizedContentBudgetExceededRunnerError"
+    )
+    assert "canonical_budget_exceeded" not in inspect.getsource(entrypoint)
 
-    class DerivedBudgetFailure(
-        entrypoint.ContentCombinationArmRealizedContentBudgetExceededRunnerError
+    class DerivedMeasurementFailure(
+        entrypoint.ContentCombinationArmMeasurementNonfiniteRunnerError
     ):
         pass
 
     assert entrypoint._content_combination_observation_failure_reason(
-        DerivedBudgetFailure("hf_only")
+        DerivedMeasurementFailure()
     ) is None
 
 

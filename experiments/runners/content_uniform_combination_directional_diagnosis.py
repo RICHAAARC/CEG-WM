@@ -10,12 +10,10 @@ import torch
 
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.content_uniform_combination_directional_diagnosis import (
-    ContentCombinationArmRgbQualityBudgetExceededError,
     ContentCombinationArmImageDigestInvalidError,
     ContentCombinationArmMaterializationRejectedError,
     ContentCombinationArmMeasurementNonfiniteError,
     ContentCombinationArmObservationIdentityDriftError,
-    ContentCombinationArmRealizedContentBudgetExceededError,
     ContentCombinationArmRoleInvalidError,
     ContentCombinationFoldReference,
     ContentCombinationReferenceMeasurement,
@@ -102,26 +100,6 @@ class ContentCombinationArmMeasurementNonfiniteRunnerError(
     """The metric rejected a nonfinite arm measurement."""
 
 
-class ContentCombinationArmRgbQualityBudgetExceededRunnerError(
-    ContentUniformCombinationDirectionalRunnerError
-):
-    """The metric rejected an arm's RGB quality above the canonical budget."""
-
-    def __init__(self, arm_id: str) -> None:
-        super().__init__("content combination arm RGB quality exceeded the canonical budget")
-        self.arm_id = arm_id
-
-
-class ContentCombinationArmRealizedContentBudgetExceededRunnerError(
-    ContentUniformCombinationDirectionalRunnerError
-):
-    """The metric rejected an arm's realized content measurement above budget."""
-
-    def __init__(self, arm_id: str) -> None:
-        super().__init__("content combination arm realized content measurement exceeded the canonical budget")
-        self.arm_id = arm_id
-
-
 class ContentCombinationArmMaterializationRejectedRunnerError(
     ContentUniformCombinationDirectionalRunnerError
 ):
@@ -150,14 +128,6 @@ def _translate_arm_observation_metric_error(
     if type(error) is ContentCombinationArmMeasurementNonfiniteError:
         raise ContentCombinationArmMeasurementNonfiniteRunnerError(
             "content combination arm measurement is nonfinite"
-        ) from error
-    if type(error) is ContentCombinationArmRgbQualityBudgetExceededError:
-        raise ContentCombinationArmRgbQualityBudgetExceededRunnerError(
-            error.arm_id
-        ) from error
-    if type(error) is ContentCombinationArmRealizedContentBudgetExceededError:
-        raise ContentCombinationArmRealizedContentBudgetExceededRunnerError(
-            error.arm_id
         ) from error
     if type(error) is ContentCombinationArmMaterializationRejectedError:
         raise ContentCombinationArmMaterializationRejectedRunnerError(
@@ -516,23 +486,33 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         observation=ContentUniformCombinationDirectionalObservation(**{**payload,"score_rows":tuple(ContentCombinationScoreRow(**item) for item in payload["score_rows"]),"arm_observations":tuple(ContentCombinationArmObservation(**item) for item in payload["arm_observations"])})
         observation.validate(); return observation
 
-    def replay_aggregate(self, records: Sequence[DevelopmentScientificRecord], **violations: int) -> ContentUniformCombinationDirectionalAggregate:
+    def replay_aggregate(
+        self,
+        records: Sequence[DevelopmentScientificRecord],
+        *,
+        identity_violation_count: int = 0,
+        integrity_violation_count: int = 0,
+        nonfinite_violation_count: int = 0,
+    ) -> ContentUniformCombinationDirectionalAggregate:
         observations=[]
         for record in records:
             checked=self._validated_typed_record(record, reference=False)
             if checked.execution_status=="success": observations.append(self.observation_from_record(checked))
             else: observations.append(create_content_uniform_combination_directional_observation(cluster_ordinal=checked.unit_index-33,fold_index=(checked.unit_index-33)%4,fold_reference_identity="0"*64,whitening_asset_digest="0"*64,score_rows=(),arm_observations=(),failure_class=checked.failure_class))
-        return aggregate_content_uniform_combination_directional_diagnosis(observations,**violations)
+        return aggregate_content_uniform_combination_directional_diagnosis(
+            observations,
+            identity_violation_count=identity_violation_count,
+            integrity_violation_count=integrity_violation_count,
+            nonfinite_violation_count=nonfinite_violation_count,
+        )
 
 
 __all__=[
     "ContentCombinationArmObservationConstructionError",
-    "ContentCombinationArmRgbQualityBudgetExceededRunnerError",
     "ContentCombinationArmImageDigestInvalidRunnerError",
     "ContentCombinationArmMaterializationRejectedRunnerError",
     "ContentCombinationArmMeasurementNonfiniteRunnerError",
     "ContentCombinationArmObservationIdentityDriftRunnerError",
-    "ContentCombinationArmRealizedContentBudgetExceededRunnerError",
     "ContentCombinationArmRoleInvalidRunnerError",
     "ContentCombinationProbeObservationConstructionError",
     "ContentCombinationScoreRowConstructionError",
