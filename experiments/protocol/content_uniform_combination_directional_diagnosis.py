@@ -18,7 +18,7 @@ from experiments.protocol.hf_only_detector_directional_validation import (
 
 PROTOCOL_ID = "ceg_wm_content_uniform_combination_directional_diagnosis"
 PROTOCOL_VERSION = "1.0.0"
-RUN_ID = "ceg_wm_content_uniform_combination_observation_construction_localization"
+RUN_ID = "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
 OPERATIONAL_UNIT_COUNT = 1
 REFERENCE_FIT_CLUSTER_COUNT = 32
 DIRECTIONAL_PROBE_CLUSTER_COUNT = 8

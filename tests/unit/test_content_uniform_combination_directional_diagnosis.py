@@ -179,7 +179,7 @@ def _observation(index: int, *, passing: bool = True):
 def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() -> None:
     protocol, reference, probes = _load()
     assert protocol.run_id == (
-        "ceg_wm_content_uniform_combination_observation_construction_localization"
+        "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
     )
     assert (protocol.operational_unit_count, protocol.reference_fit_cluster_count, protocol.directional_probe_cluster_count, protocol.maximum_total_units) == (1, 32, 8, 41)
     assert protocol.maximum_attempts_per_unit == 1
@@ -191,10 +191,7 @@ def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() 
     with pytest.raises(ContentUniformCombinationDirectionalProtocolError):
         replace(
             protocol,
-            run_id=(
-                "ceg_wm_content_uniform_combination_whitening_asset_replay_"
-                "correction_diagnosis"
-            ),
+            run_id="ceg_wm_content_uniform_combination_observation_construction_localization",
         ).validate()
 
 
@@ -576,16 +573,13 @@ def test_runner_maps_real_probe_validation_identity_drift_to_exact_safe_leaf_rea
 
 
 def _record_boundary_runner(
-    *, parent_authority: bool = False
+    *, authority_run_id: str | None = None
 ) -> ContentUniformCombinationDirectionalDiagnosisRunner:
     protocol, reference_manifest, probe_manifest = _load()
-    if parent_authority:
+    if authority_run_id is not None:
         protocol = replace(
             protocol,
-            run_id=(
-                "ceg_wm_content_uniform_combination_whitening_asset_replay_"
-                "correction_diagnosis"
-            ),
+            run_id=authority_run_id,
         )
     runner = object.__new__(ContentUniformCombinationDirectionalDiagnosisRunner)
     runner.protocol = protocol
@@ -594,7 +588,9 @@ def _record_boundary_runner(
     runner.method_code_revision = "a" * 40
     runner.root_key_public_digest = "8" * 64
     runner.protocol_digest = (
-        canonical_digest(asdict(protocol)) if parent_authority else protocol.digest()
+        canonical_digest(asdict(protocol))
+        if authority_run_id is not None
+        else protocol.digest()
     )
     runner.execution_intent_authority_digest = "b" * 64
     runner.candidate_config_digest = "c" * 64
@@ -689,7 +685,12 @@ def test_entrypoint_persists_only_bounded_safe_reasons_with_fixed_failure_denomi
 
 
 def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
-    runner = _record_boundary_runner(parent_authority=True)
+    runner = _record_boundary_runner(
+        authority_run_id=(
+            "ceg_wm_content_uniform_combination_whitening_asset_replay_"
+            "correction_diagnosis"
+        )
+    )
     observation = _observation(0)
     identity = runner._analysis_identity(33)
     payload = {
@@ -734,6 +735,45 @@ def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
         "4d92e9b5230627f45aae7cf5f99258d533e3c73f553a9ab3058a9658277a6586"
     )
 
+    parent_runner = _record_boundary_runner(
+        authority_run_id=(
+            "ceg_wm_content_uniform_combination_observation_construction_"
+            "localization"
+        )
+    )
+    parent_identity = parent_runner._analysis_identity(33)
+    parent_metric = parent_runner._metric_observation(
+        identity=parent_identity,
+        metric_ids=("content_combination_branch_scores",),
+        paired="same_generation_uniform_route_six_image_control",
+        branch="six_image_uniform_combination_probe",
+        statistics=(("score_row_count", float(len(observation.score_rows))),),
+        result_digests=(observation.observation_identity,),
+    )
+    parent_record = parent_runner._scientific_record(
+        intent=_probe_intent(parent_runner, 33),
+        identity=parent_identity,
+        phase="development_content_uniform_combination_directional_probe",
+        case="six_image_uniform_combination_probe",
+        branch="six_image_uniform_combination_probe",
+        paired="same_generation_uniform_route_six_image_control",
+        status="success",
+        failure_class=None,
+        failure_reason=None,
+        elapsed=0.5,
+        operation_payload=payload,
+        metric=parent_metric,
+    )
+    parent_record_bytes = json.dumps(
+        parent_record.payload(),
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert sha256(parent_record_bytes).hexdigest() == (
+        "9ca68d0fb5a72f98808dad19670dfb7036c2ce647ba2df05169ed93ce8c241a4"
+    )
+
     current_runner = _record_boundary_runner()
     current_identity = current_runner._analysis_identity(33)
     current_metric = current_runner._metric_observation(
@@ -771,8 +811,11 @@ def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
         allow_nan=False,
     ).encode("utf-8")
     assert sha256(current_record_bytes).hexdigest() == (
-        "9ca68d0fb5a72f98808dad19670dfb7036c2ce647ba2df05169ed93ce8c241a4"
+        "449d11c1a8e81156f92f30053ba3a5fbcde18cffce9bde3a8b1dda2f1e8535ef"
     )
+    assert current_record.operation_result_payload == parent_record.operation_result_payload
+    assert current_record.operation_result_digest == parent_record.operation_result_digest
+    assert current_record.metric_observation == parent_record.metric_observation
 
 
 class _CombinationBackend(_RoutingBackend):
