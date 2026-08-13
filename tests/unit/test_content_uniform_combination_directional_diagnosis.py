@@ -31,6 +31,7 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
     COMBINATION_WEIGHTS,
     ContentUniformCombinationDirectionalProtocolError,
     MIXING_COEFFICIENTS,
+    canonical_digest,
     reference_entries_for_probe,
     load_content_uniform_combination_directional_protocol,
 )
@@ -165,7 +166,9 @@ def _observation(index: int, *, passing: bool = True):
 
 def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() -> None:
     protocol, reference, probes = _load()
-    assert protocol.run_id == "ceg_wm_content_uniform_combination_whitening_asset_replay_correction_diagnosis"
+    assert protocol.run_id == (
+        "ceg_wm_content_uniform_combination_observation_construction_localization"
+    )
     assert (protocol.operational_unit_count, protocol.reference_fit_cluster_count, protocol.directional_probe_cluster_count, protocol.maximum_total_units) == (1, 32, 8, 41)
     assert protocol.maximum_attempts_per_unit == 1
     assert protocol.mixing_coefficients == MIXING_COEFFICIENTS == (0.25, 0.50, 0.75)
@@ -176,7 +179,10 @@ def test_protocol_freezes_forty_one_attempt_zero_units_and_disjoint_manifests() 
     with pytest.raises(ContentUniformCombinationDirectionalProtocolError):
         replace(
             protocol,
-            run_id="ceg_wm_content_uniform_combination_directional_diagnosis",
+            run_id=(
+                "ceg_wm_content_uniform_combination_whitening_asset_replay_"
+                "correction_diagnosis"
+            ),
         ).validate()
 
 
@@ -450,15 +456,27 @@ def test_runner_preserves_exact_metric_causes_at_three_construction_boundaries()
     assert type(probe_error.value.__cause__) is ContentUniformCombinationDirectionalMetricError
 
 
-def _record_boundary_runner() -> ContentUniformCombinationDirectionalDiagnosisRunner:
+def _record_boundary_runner(
+    *, parent_authority: bool = False
+) -> ContentUniformCombinationDirectionalDiagnosisRunner:
     protocol, reference_manifest, probe_manifest = _load()
+    if parent_authority:
+        protocol = replace(
+            protocol,
+            run_id=(
+                "ceg_wm_content_uniform_combination_whitening_asset_replay_"
+                "correction_diagnosis"
+            ),
+        )
     runner = object.__new__(ContentUniformCombinationDirectionalDiagnosisRunner)
     runner.protocol = protocol
     runner.reference_manifest = reference_manifest
     runner.probe_manifest = probe_manifest
     runner.method_code_revision = "a" * 40
     runner.root_key_public_digest = "8" * 64
-    runner.protocol_digest = protocol.digest()
+    runner.protocol_digest = (
+        canonical_digest(asdict(protocol)) if parent_authority else protocol.digest()
+    )
     runner.execution_intent_authority_digest = "b" * 64
     runner.candidate_config_digest = "c" * 64
     return runner
@@ -523,7 +541,7 @@ def test_entrypoint_persists_only_three_safe_reasons_with_fixed_failure_denomina
 
 
 def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
-    runner = _record_boundary_runner()
+    runner = _record_boundary_runner(parent_authority=True)
     observation = _observation(0)
     identity = runner._analysis_identity(33)
     payload = {
@@ -567,6 +585,37 @@ def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
     assert sha256(aggregate_bytes).hexdigest() == (
         "4d92e9b5230627f45aae7cf5f99258d533e3c73f553a9ab3058a9658277a6586"
     )
+
+    current_runner = _record_boundary_runner()
+    current_identity = current_runner._analysis_identity(33)
+    current_metric = current_runner._metric_observation(
+        identity=current_identity,
+        metric_ids=("content_combination_branch_scores",),
+        paired="same_generation_uniform_route_six_image_control",
+        branch="six_image_uniform_combination_probe",
+        statistics=(("score_row_count", float(len(observation.score_rows))),),
+        result_digests=(observation.observation_identity,),
+    )
+    current_record = current_runner._scientific_record(
+        intent=_probe_intent(current_runner, 33),
+        identity=current_identity,
+        phase="development_content_uniform_combination_directional_probe",
+        case="six_image_uniform_combination_probe",
+        branch="six_image_uniform_combination_probe",
+        paired="same_generation_uniform_route_six_image_control",
+        status="success",
+        failure_class=None,
+        failure_reason=None,
+        elapsed=0.5,
+        operation_payload=payload,
+        metric=current_metric,
+    )
+    assert current_record.run_id != record.run_id
+    assert current_record.protocol_digest != record.protocol_digest
+    assert current_record.record_id != record.record_id
+    assert current_record.operation_result_payload == record.operation_result_payload
+    assert current_record.operation_result_digest == record.operation_result_digest
+    assert current_record.metric_observation == record.metric_observation
 
 
 class _CombinationBackend(_RoutingBackend):
