@@ -25,8 +25,8 @@ from scripts.experiment_execution.development_exploration_entrypoint import (
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/content_uniform_combination_directional_diagnosis.json"
-EXECUTION_REVISION = "62d7fe5c8ba22c4c3a02bf4fd7aec4f8b5b45eb0"
-RUN_ID = "ceg_wm_content_uniform_combination_observation_construction_localization"
+EXECUTION_REVISION = "7fb29a7c38e2975b1c3e1c76218bb1759f9f94cf"
+RUN_ID = "ceg_wm_content_uniform_combination_arm_observation_leaf_localization"
 NOTEBOOK = ROOT / "notebooks/colab/content_uniform_combination_directional_diagnosis.ipynb"
 
 
@@ -217,6 +217,42 @@ def test_server_and_worker_do_not_claim_selection_or_formal_threshold() -> None:
     assert "content_uniform_combination_directional_aggregate" in source
 
 
+def test_worker_exports_only_bounded_arm_observation_leaf_reasons() -> None:
+    cases = (
+        (
+            entrypoint.ContentCombinationArmRoleInvalidRunnerError(),
+            "content_combination_arm_role_invalid",
+        ),
+        (
+            entrypoint.ContentCombinationArmMeasurementNonfiniteRunnerError(),
+            "content_combination_arm_measurement_nonfinite",
+        ),
+        (
+            entrypoint.ContentCombinationArmCanonicalBudgetExceededRunnerError(),
+            "content_combination_arm_canonical_budget_exceeded",
+        ),
+        (
+            entrypoint.ContentCombinationArmMaterializationRejectedRunnerError(),
+            "content_combination_arm_materialization_rejected",
+        ),
+        (
+            entrypoint.ContentCombinationArmImageDigestInvalidRunnerError(),
+            "content_combination_arm_image_digest_invalid",
+        ),
+        (
+            entrypoint.ContentCombinationArmObservationIdentityDriftRunnerError(),
+            "content_combination_arm_observation_identity_drift",
+        ),
+    )
+    assert tuple(
+        entrypoint._content_combination_observation_failure_reason(error)
+        for error, _reason in cases
+    ) == tuple(reason for _error, reason in cases)
+    assert entrypoint._content_combination_observation_failure_reason(
+        RuntimeError("content_combination_arm_canonical_budget_exceeded")
+    ) is None
+
+
 def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> None:
     if not (ROOT / ".git").exists():
         pytest.skip("detached research copy lacks exact Git checkout capability")
@@ -256,6 +292,15 @@ def test_exact_execution_package_imports_combination_chain(tmp_path: Path) -> No
         assert "WHITENING_ASSET_PACKAGE_SHA256" in producer_replay_source
         assert "cat-file" not in producer_replay_source
         assert "_replay_current_whitening_asset" in combination_source
+        for safe_reason in (
+            "content_combination_arm_role_invalid",
+            "content_combination_arm_measurement_nonfinite",
+            "content_combination_arm_canonical_budget_exceeded",
+            "content_combination_arm_materialization_rejected",
+            "content_combination_arm_image_digest_invalid",
+            "content_combination_arm_observation_identity_drift",
+        ):
+            assert safe_reason in combination_source
         archive.extractall(extracted)
     result = subprocess.run(
         [
