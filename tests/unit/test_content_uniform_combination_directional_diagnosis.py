@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from hashlib import sha256
 from pathlib import Path
 import inspect
 import json
 import time
+from types import MethodType, SimpleNamespace
 
 import pytest
 import torch
@@ -35,6 +36,9 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
+    ContentCombinationArmObservationConstructionError,
+    ContentCombinationProbeObservationConstructionError,
+    ContentCombinationScoreRowConstructionError,
     ContentUniformCombinationDirectionalDiagnosisRunner,
 )
 from experiments.runners.development_persistence import (
@@ -44,6 +48,10 @@ from experiments.runners.development_persistence import (
 from main import LfNullWhiteningAsset, identify_root_key
 from main.shared.key_schedule import stable_json_utf8
 from runtime import RuntimeVaeFactors, create_runtime_adapter
+from scripts.experiment_execution.content_uniform_combination_directional_diagnosis_entrypoint import (
+    _content_combination_observation_failure_reason,
+    _resource_failure,
+)
 from tests.unit.test_runtime_routing_observation import _Posterior, _RoutingBackend
 
 
@@ -286,6 +294,279 @@ def test_runner_source_uses_public_hf_whitened_lf_and_combination_surfaces() -> 
     assert "detect_lf(" not in source
     assert "combination=function" in source
     assert "weight=weight" in source
+
+
+def _construction_boundary_runner(*, realized_relative_l2: float):
+    runner = object.__new__(ContentUniformCombinationDirectionalDiagnosisRunner)
+    runner.registered_root_key = "content-combination-construction-boundary-root"
+    runner.root_key_public_digest = "8" * 64
+    runner.whitening_asset = SimpleNamespace(whitening_asset_digest="7" * 64)
+
+    route = SimpleNamespace(result=SimpleNamespace(route_identity="routing_uniform_control"))
+    carrier = SimpleNamespace(result=SimpleNamespace())
+    embedded = SimpleNamespace(result=SimpleNamespace())
+
+    class BoundaryAdapter:
+        @staticmethod
+        def route_content(*_args, **_kwargs):
+            return route
+
+        @staticmethod
+        def build_lf_carrier(*_args, **_kwargs):
+            return carrier
+
+        @staticmethod
+        def build_hf_carrier(*_args, **_kwargs):
+            return carrier
+
+        @staticmethod
+        def embed_content(*_args, **_kwargs):
+            return embedded
+
+    clean_image = torch.ones((1, 3, 512, 512), dtype=torch.uint8)
+    latent = torch.ones((1, 16, 64, 64), dtype=torch.float32)
+
+    class BoundaryRuntime:
+        @staticmethod
+        def execute_content_write_and_vae(_base_latent, embed):
+            embed(_base_latent)
+            return SimpleNamespace(
+                clean_image=clean_image,
+                watermarked_image=clean_image.clone(),
+                clean_detection_latent=latent,
+                watermarked_detection_latent=latent,
+                content_materialization=SimpleNamespace(
+                    realized_relative_l2=realized_relative_l2,
+                    integrity_status="passed",
+                ),
+                content_materialization_result=SimpleNamespace(
+                    budget_status="accepted"
+                ),
+            )
+
+    runner.adapter = BoundaryAdapter()
+    runner.runtime = BoundaryRuntime()
+    references = tuple(
+        fit_content_combination_fold_reference(
+            _reference_measurements(), probe_fold_index=index
+        )
+        for index in range(4)
+    )
+    runner.fit_fold_references = MethodType(
+        lambda _self, _records: references,
+        runner,
+    )
+    return runner
+
+
+def _score_row_boundary_runner():
+    runner = object.__new__(ContentUniformCombinationDirectionalDiagnosisRunner)
+    runner.registered_root_key = "content-combination-score-row-boundary-root"
+    runner.root_key_public_digest = "8" * 64
+    runner.whitening_asset = SimpleNamespace(whitening_asset_digest="7" * 64)
+    hf = SimpleNamespace(
+        hf_score=0.1,
+        detector_identity="5" * 64,
+        observation_digest="6" * 64,
+        template_digest="9" * 64,
+        root_key_public_digest="8" * 64,
+    )
+    lf = SimpleNamespace(
+        lf_score=0.2,
+        detector_identity="6" * 64,
+        observation_digest="6" * 64,
+        template_digest="9" * 64,
+        whitening_asset_digest="7" * 64,
+    )
+    runner._detect_branches = MethodType(lambda _self, _latent, _key: (hf, lf), runner)
+
+    class BoundaryAdapter:
+        @staticmethod
+        def detect_content(_hf, _lf=None, *, combination, weight=None, **_kwargs):
+            diagnostic = SimpleNamespace(
+                function_id=combination,
+                weight=weight,
+                diagnostic_only=True,
+                promoted=False,
+                hf_standardization=SimpleNamespace(z_score=0.1),
+                lf_standardization=(
+                    None
+                    if combination == "hf_only_standardized_score"
+                    else SimpleNamespace(z_score=0.2)
+                ),
+                combined_score=0.1,
+            )
+            return SimpleNamespace(
+                result=SimpleNamespace(
+                    diagnostic_combination=diagnostic,
+                    detector_identity="3" * 64,
+                    content_config_digest="4" * 64,
+                )
+            )
+
+    runner.adapter = BoundaryAdapter()
+    return runner
+
+
+def test_runner_preserves_exact_metric_causes_at_three_construction_boundaries() -> None:
+    reference = fit_content_combination_fold_reference(
+        _reference_measurements(), probe_fold_index=0
+    )
+    image = torch.ones((1, 3, 512, 512), dtype=torch.uint8)
+    latent = torch.ones((1, 16, 64, 64), dtype=torch.float32)
+    score_runner = _score_row_boundary_runner()
+    with pytest.raises(ContentCombinationScoreRowConstructionError) as score_error:
+        score_runner._score_rows(
+            arm_id="unsupported_arm",
+            coefficient=None,
+            image=image,
+            latent=latent,
+            clean_image=image,
+            clean_latent=latent,
+            reference=reference,
+        )
+    assert type(score_error.value.__cause__) is ContentUniformCombinationDirectionalMetricError
+
+    arm_runner = _construction_boundary_runner(realized_relative_l2=0.013)
+    arm_runner._score_rows = MethodType(lambda _self, **_kwargs: (), arm_runner)
+    with pytest.raises(ContentCombinationArmObservationConstructionError) as arm_error:
+        arm_runner.execute_probe_unit(
+            unit_index=33,
+            base_latent=latent,
+            intent=SimpleNamespace(unit_index=33),
+            reference_records=(),
+        )
+    assert type(arm_error.value.__cause__) is ContentUniformCombinationDirectionalMetricError
+
+    probe_runner = _construction_boundary_runner(realized_relative_l2=0.01)
+    probe_runner._score_rows = MethodType(lambda _self, **_kwargs: (), probe_runner)
+    with pytest.raises(ContentCombinationProbeObservationConstructionError) as probe_error:
+        probe_runner.execute_probe_unit(
+            unit_index=33,
+            base_latent=latent,
+            intent=SimpleNamespace(unit_index=33),
+            reference_records=(),
+        )
+    assert type(probe_error.value.__cause__) is ContentUniformCombinationDirectionalMetricError
+
+
+def _record_boundary_runner() -> ContentUniformCombinationDirectionalDiagnosisRunner:
+    protocol, reference_manifest, probe_manifest = _load()
+    runner = object.__new__(ContentUniformCombinationDirectionalDiagnosisRunner)
+    runner.protocol = protocol
+    runner.reference_manifest = reference_manifest
+    runner.probe_manifest = probe_manifest
+    runner.method_code_revision = "a" * 40
+    runner.root_key_public_digest = "8" * 64
+    runner.protocol_digest = protocol.digest()
+    runner.execution_intent_authority_digest = "b" * 64
+    runner.candidate_config_digest = "c" * 64
+    return runner
+
+
+def _probe_intent(runner, unit_index: int):
+    return SimpleNamespace(
+        unit_index=unit_index,
+        phase="development_content_uniform_combination_directional_probe",
+        development_case_id="six_image_uniform_combination_probe",
+        content_branch_id="six_image_uniform_combination_probe",
+        attempt_index=0,
+        parent_attempt_intent_digest=None,
+        maximum_duration_seconds=1800,
+    )
+
+
+def test_entrypoint_persists_only_three_safe_reasons_with_fixed_failure_denominator() -> None:
+    failures = (
+        ContentCombinationScoreRowConstructionError("sensitive score message"),
+        ContentCombinationArmObservationConstructionError("sensitive arm message"),
+        ContentCombinationProbeObservationConstructionError("sensitive probe message"),
+    )
+    reasons = tuple(
+        _content_combination_observation_failure_reason(error) for error in failures
+    )
+    assert reasons == (
+        "content_combination_score_row_construction_failed",
+        "content_combination_arm_observation_construction_failed",
+        "content_combination_probe_observation_construction_failed",
+    )
+
+    class DerivedScoreRowFailure(ContentCombinationScoreRowConstructionError):
+        pass
+
+    assert _content_combination_observation_failure_reason(DerivedScoreRowFailure()) is None
+    assert _content_combination_observation_failure_reason(RuntimeError()) is None
+    assert _resource_failure(MemoryError()) is True
+
+    runner = _record_boundary_runner()
+    records = tuple(
+        runner.create_failed_scientific_record(
+            intent=_probe_intent(runner, 33 + index),
+            failure_class="implementation_failure",
+            failure_reason=reasons[index % len(reasons)],
+            elapsed_seconds=0.5,
+        )
+        for index in range(8)
+    )
+    assert all(
+        record.operation_result_payload == {}
+        and record.metric_observation == {}
+        and "sensitive" not in json.dumps(record.payload(), sort_keys=True)
+        for record in records
+    )
+    aggregate = runner.replay_aggregate(records)
+    assert aggregate.scientific_cluster_count == 8
+    assert aggregate.failed_cluster_count == 8
+    assert aggregate.implementation_failure_count == 8
+    assert aggregate.outcome == "implementation_blocked"
+    assert aggregate.allow_request_for_content_combination_candidate_selection is False
+
+
+def test_success_record_and_aggregate_bytes_remain_deterministic() -> None:
+    runner = _record_boundary_runner()
+    observation = _observation(0)
+    identity = runner._analysis_identity(33)
+    payload = {
+        "combination_observation": asdict(observation),
+        "clean_image_digest": "d" * 64,
+    }
+    metric = runner._metric_observation(
+        identity=identity,
+        metric_ids=("content_combination_branch_scores",),
+        paired="same_generation_uniform_route_six_image_control",
+        branch="six_image_uniform_combination_probe",
+        statistics=(("score_row_count", float(len(observation.score_rows))),),
+        result_digests=(observation.observation_identity,),
+    )
+    record = runner._scientific_record(
+        intent=_probe_intent(runner, 33),
+        identity=identity,
+        phase="development_content_uniform_combination_directional_probe",
+        case="six_image_uniform_combination_probe",
+        branch="six_image_uniform_combination_probe",
+        paired="same_generation_uniform_route_six_image_control",
+        status="success",
+        failure_class=None,
+        failure_reason=None,
+        elapsed=0.5,
+        operation_payload=payload,
+        metric=metric,
+    )
+    record_bytes = json.dumps(
+        record.payload(), separators=(",", ":"), sort_keys=True, allow_nan=False
+    ).encode("utf-8")
+    aggregate = aggregate_content_uniform_combination_directional_diagnosis(
+        tuple(_observation(index) for index in range(8))
+    )
+    aggregate_bytes = json.dumps(
+        asdict(aggregate), separators=(",", ":"), sort_keys=True, allow_nan=False
+    ).encode("utf-8")
+    assert sha256(record_bytes).hexdigest() == (
+        "98752f655fc225f1d24c982f227372282ec207a4e7aeb0b812a336662f6f889e"
+    )
+    assert sha256(aggregate_bytes).hexdigest() == (
+        "4d92e9b5230627f45aae7cf5f99258d533e3c73f553a9ab3058a9658277a6586"
+    )
 
 
 class _CombinationBackend(_RoutingBackend):

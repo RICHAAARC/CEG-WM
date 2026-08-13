@@ -24,6 +24,9 @@ from experiments.protocol.content_uniform_combination_directional_diagnosis impo
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.runners.content_uniform_combination_directional_diagnosis import (
+    ContentCombinationArmObservationConstructionError,
+    ContentCombinationProbeObservationConstructionError,
+    ContentCombinationScoreRowConstructionError,
     ContentUniformCombinationDirectionalDiagnosisRunner,
 )
 from experiments.runners.development_persistence import (
@@ -146,6 +149,18 @@ def _resource_failure(error: BaseException) -> bool:
         visited.add(id(current))
         current = current.__cause__ or current.__context__
     return False
+
+
+def _content_combination_observation_failure_reason(
+    error: BaseException,
+) -> str | None:
+    if type(error) is ContentCombinationScoreRowConstructionError:
+        return "content_combination_score_row_construction_failed"
+    if type(error) is ContentCombinationArmObservationConstructionError:
+        return "content_combination_arm_observation_construction_failed"
+    if type(error) is ContentCombinationProbeObservationConstructionError:
+        return "content_combination_probe_observation_construction_failed"
+    return None
 
 
 def _close_runtime_preserving_failure(runtime: Sd35RuntimeAdapter | None) -> None:
@@ -522,10 +537,14 @@ def execute_content_uniform_combination_directional_diagnosis_session(
                         reference_records=successful_references,
                     )
             except Exception as exc:
-                failure_class = (
-                    "resource_failure" if _resource_failure(exc) else "implementation_failure"
-                )
-                failure_reason = f"{type(exc).__module__}.{type(exc).__qualname__}"
+                failure_reason = _content_combination_observation_failure_reason(exc)
+                if failure_reason is not None:
+                    failure_class = "implementation_failure"
+                else:
+                    failure_class = (
+                        "resource_failure" if _resource_failure(exc) else "implementation_failure"
+                    )
+                    failure_reason = f"{type(exc).__module__}.{type(exc).__qualname__}"
                 elapsed = float(monotonic() - started)
                 if unit.unit_index < 1:
                     raise

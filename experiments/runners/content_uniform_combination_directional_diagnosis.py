@@ -12,6 +12,7 @@ from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.content_uniform_combination_directional_diagnosis import (
     ContentCombinationFoldReference,
     ContentCombinationReferenceMeasurement,
+    ContentUniformCombinationDirectionalMetricError,
     ContentUniformCombinationDirectionalAggregate,
     ContentUniformCombinationDirectionalObservation,
     aggregate_content_uniform_combination_directional_diagnosis,
@@ -62,6 +63,24 @@ from runtime import Sd35RuntimeAdapter
 
 class ContentUniformCombinationDirectionalRunnerError(RuntimeError):
     """The combination runner violated its frozen execution contract."""
+
+
+class ContentCombinationScoreRowConstructionError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """A validated content-combination score row could not be constructed."""
+
+
+class ContentCombinationArmObservationConstructionError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """A validated content-combination arm observation could not be constructed."""
+
+
+class ContentCombinationProbeObservationConstructionError(
+    ContentUniformCombinationDirectionalRunnerError
+):
+    """A validated content-combination probe observation could not be constructed."""
 
 
 def _record_id(record: object) -> object:
@@ -329,7 +348,15 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
                 diagnostic=result.diagnostic_combination
                 if diagnostic is None or diagnostic.function_id!=function or diagnostic.weight!=weight or diagnostic.diagnostic_only is not True or diagnostic.promoted is not False:
                     raise ContentUniformCombinationDirectionalRunnerError("diagnostic combination drifted")
-                rows.append(create_content_combination_score_row(arm_id=arm_id,embedding_coefficient=coefficient,control_role=role,wrong_key_index=index,key_role=key_role,combination_function=function,detector_weight=weight,hf_raw_score=hf.hf_score,lf_raw_score=None if function=="hf_only_standardized_score" else lf.lf_score,hf_standardized_score=diagnostic.hf_standardization.z_score,lf_standardized_score=None if diagnostic.lf_standardization is None else diagnostic.lf_standardization.z_score,content_score=diagnostic.combined_score,content_detector_identity=result.detector_identity,content_config_digest=result.content_config_digest,hf_detector_identity=hf.detector_identity,lf_detector_identity=None if function=="hf_only_standardized_score" else lf.detector_identity,whitening_asset_digest=None if function=="hf_only_standardized_score" else lf.whitening_asset_digest,input_image_digest=rgb8_image_digest(observed_image),hf_observation_digest=hf.observation_digest,lf_observation_digest=None if function=="hf_only_standardized_score" else lf.observation_digest,hf_template_digest=hf.template_digest,lf_template_digest=None if function=="hf_only_standardized_score" else lf.template_digest,root_key_public_digest=hf.root_key_public_digest))
+                try:
+                    row=create_content_combination_score_row(arm_id=arm_id,embedding_coefficient=coefficient,control_role=role,wrong_key_index=index,key_role=key_role,combination_function=function,detector_weight=weight,hf_raw_score=hf.hf_score,lf_raw_score=None if function=="hf_only_standardized_score" else lf.lf_score,hf_standardized_score=diagnostic.hf_standardization.z_score,lf_standardized_score=None if diagnostic.lf_standardization is None else diagnostic.lf_standardization.z_score,content_score=diagnostic.combined_score,content_detector_identity=result.detector_identity,content_config_digest=result.content_config_digest,hf_detector_identity=hf.detector_identity,lf_detector_identity=None if function=="hf_only_standardized_score" else lf.detector_identity,whitening_asset_digest=None if function=="hf_only_standardized_score" else lf.whitening_asset_digest,input_image_digest=rgb8_image_digest(observed_image),hf_observation_digest=hf.observation_digest,lf_observation_digest=None if function=="hf_only_standardized_score" else lf.observation_digest,hf_template_digest=hf.template_digest,lf_template_digest=None if function=="hf_only_standardized_score" else lf.template_digest,root_key_public_digest=hf.root_key_public_digest)
+                except ContentUniformCombinationDirectionalMetricError as exc:
+                    if type(exc) is not ContentUniformCombinationDirectionalMetricError:
+                        raise
+                    raise ContentCombinationScoreRowConstructionError(
+                        "content combination score row construction failed"
+                    ) from exc
+                rows.append(row)
         return tuple(rows)
 
     def execute_probe_unit(self, *, unit_index: int, base_latent: torch.Tensor, intent: UnitIntent, reference_records: Sequence[DevelopmentScientificRecord]) -> DevelopmentScientificRecord:
@@ -355,9 +382,24 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         for (arm_id,coefficient,*_),result in zip(specs,runtime_results,strict=True):
             image=_rgb8(result.watermarked_image)
             all_rows.extend(self._score_rows(arm_id=arm_id,coefficient=coefficient,image=image,latent=result.watermarked_detection_latent,clean_image=clean_image,clean_latent=clean_latent,reference=reference))
-            arms.append(create_content_combination_arm_observation(arm_id=arm_id,embedding_coefficient=coefficient,clean_to_watermarked_rgb_relative_l2=_relative_l2(clean_image,image),realized_relative_l2=result.content_materialization.realized_relative_l2,materialization_integrity_status=result.content_materialization.integrity_status,materialization_budget_status=result.content_materialization_result.budget_status,image_digest=rgb8_image_digest(image)))
+            try:
+                arm=create_content_combination_arm_observation(arm_id=arm_id,embedding_coefficient=coefficient,clean_to_watermarked_rgb_relative_l2=_relative_l2(clean_image,image),realized_relative_l2=result.content_materialization.realized_relative_l2,materialization_integrity_status=result.content_materialization.integrity_status,materialization_budget_status=result.content_materialization_result.budget_status,image_digest=rgb8_image_digest(image))
+            except ContentUniformCombinationDirectionalMetricError as exc:
+                if type(exc) is not ContentUniformCombinationDirectionalMetricError:
+                    raise
+                raise ContentCombinationArmObservationConstructionError(
+                    "content combination arm observation construction failed"
+                ) from exc
+            arms.append(arm)
         elapsed=float(monotonic()-started)
-        observation=create_content_uniform_combination_directional_observation(cluster_ordinal=ordinal,fold_index=ordinal%4,fold_reference_identity=reference.reference_identity,whitening_asset_digest=self.whitening_asset.whitening_asset_digest,score_rows=tuple(all_rows),arm_observations=tuple(arms),failure_class=None)
+        try:
+            observation=create_content_uniform_combination_directional_observation(cluster_ordinal=ordinal,fold_index=ordinal%4,fold_reference_identity=reference.reference_identity,whitening_asset_digest=self.whitening_asset.whitening_asset_digest,score_rows=tuple(all_rows),arm_observations=tuple(arms),failure_class=None)
+        except ContentUniformCombinationDirectionalMetricError as exc:
+            if type(exc) is not ContentUniformCombinationDirectionalMetricError:
+                raise
+            raise ContentCombinationProbeObservationConstructionError(
+                "content combination probe observation construction failed"
+            ) from exc
         identity=self._analysis_identity(unit_index); payload={"combination_observation":asdict(observation),"clean_image_digest":rgb8_image_digest(clean_image)}
         metric=self._metric_observation(identity=identity,metric_ids=("content_combination_branch_scores",),paired="same_generation_uniform_route_six_image_control",branch="six_image_uniform_combination_probe",statistics=(("score_row_count",float(len(all_rows))),),result_digests=(observation.observation_identity,))
         return self._scientific_record(intent=intent,identity=identity,phase="development_content_uniform_combination_directional_probe",case="six_image_uniform_combination_probe",branch="six_image_uniform_combination_probe",paired="same_generation_uniform_route_six_image_control",status="success",failure_class=None,failure_reason=None,elapsed=elapsed,operation_payload=payload,metric=metric)
@@ -383,4 +425,10 @@ class ContentUniformCombinationDirectionalDiagnosisRunner:
         return aggregate_content_uniform_combination_directional_diagnosis(observations,**violations)
 
 
-__all__=["ContentUniformCombinationDirectionalDiagnosisRunner","ContentUniformCombinationDirectionalRunnerError"]
+__all__=[
+    "ContentCombinationArmObservationConstructionError",
+    "ContentCombinationProbeObservationConstructionError",
+    "ContentCombinationScoreRowConstructionError",
+    "ContentUniformCombinationDirectionalDiagnosisRunner",
+    "ContentUniformCombinationDirectionalRunnerError",
+]
