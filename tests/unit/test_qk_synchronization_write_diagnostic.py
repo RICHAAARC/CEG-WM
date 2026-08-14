@@ -1340,6 +1340,7 @@ def test_qk_failure_diagnostic_rejects_untrusted_decoder_operation() -> None:
         sd35_backend_module.Sd35BackendDifferentiableVaeInitialDecodeForwardError
     )
     valid_identity = "differentiable_vae_decoder_middle_attention"
+    untrusted_decoder_boundary = "unregistered_decoder_operation"
     secret = "untrusted-decoder-operation-message"
 
     class DerivedDecoderFailure(trusted_type):
@@ -1352,7 +1353,7 @@ def test_qk_failure_diagnostic_rejects_untrusted_decoder_operation() -> None:
     derived_diagnostic = _failure_diagnostic(derived_outer, active_binding=None)
 
     mutated = trusted_type(decoder_operation_identity=valid_identity)
-    mutated.decoder_operation_identity = "unregistered_decoder_operation"
+    mutated.decoder_operation_identity = untrusted_decoder_boundary
     mutated.__cause__ = RuntimeError(secret)
     mutated_outer = CegWmExperimentAdapterError(secret)
     mutated_outer.__cause__ = mutated
@@ -1375,7 +1376,7 @@ def test_qk_failure_diagnostic_rejects_untrusted_decoder_operation() -> None:
         assert secret not in json.dumps(diagnostic, sort_keys=True)
 
     with pytest.raises(sd35_backend_module.Sd35BackendError):
-        trusted_type(decoder_operation_identity="unregistered_decoder_operation")
+        trusted_type(decoder_operation_identity=untrusted_decoder_boundary)
 
 
 @pytest.mark.unit

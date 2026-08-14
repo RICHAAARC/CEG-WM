@@ -827,9 +827,8 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     assert initial_error.value.runtime_reason_identity == (
         "runtime_reported_memory_allocation_failure"
     )
-    assert initial_error.value.decoder_operation_identity == (
-        "differentiable_vae_decode_entry"
-    )
+    initial_decoder_boundary = initial_error.value.decoder_operation_identity
+    assert initial_decoder_boundary == "differentiable_vae_decode_entry"
 
     initial_failure_vae.fail_on_call = None
     recovered_input = reference_input.detach().clone().requires_grad_(True)
@@ -861,9 +860,8 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     assert recompute_error.value.runtime_reason_identity == (
         "runtime_reported_memory_allocation_failure"
     )
-    assert recompute_error.value.decoder_operation_identity == (
-        "differentiable_vae_decode_entry"
-    )
+    recomputed_decoder_boundary = recompute_error.value.decoder_operation_identity
+    assert recomputed_decoder_boundary == "differentiable_vae_decode_entry"
 
     framework_failure = MemoryError("excluded checkpoint framework detail")
 
@@ -908,7 +906,7 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
 
 
 @pytest.mark.parametrize(
-    "failing_operation_identity",
+    "failing_decoder_boundary",
     tuple(
         sorted(
             sd35_backend_module.DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES
@@ -917,7 +915,7 @@ def test_sd35_backend_checkpointed_differentiable_vae_decode_preserves_values_gr
     ),
 )
 def test_differentiable_vae_decoder_localization_reports_bounded_operation(
-    failing_operation_identity: str,
+    failing_decoder_boundary: str,
     tmp_path: Path,
 ) -> None:
     configuration = load_runtime_configuration()
@@ -928,7 +926,7 @@ def test_differentiable_vae_decoder_localization_reports_bounded_operation(
             self.operation_identity = operation_identity
 
         def forward(self, value: torch.Tensor) -> torch.Tensor:
-            if self.operation_identity == failing_operation_identity:
+            if self.operation_identity == failing_decoder_boundary:
                 raise RuntimeError("excluded decoder operation detail")
             return torch.sin(value * 0.5)
 
@@ -951,7 +949,7 @@ def test_differentiable_vae_decoder_localization_reports_bounded_operation(
 
         def forward(self, value: torch.Tensor) -> torch.Tensor:
             if (
-                failing_operation_identity
+                failing_decoder_boundary
                 == "differentiable_vae_decoder_middle_block_dispatch"
             ):
                 raise RuntimeError("excluded middle block detail")
@@ -1007,7 +1005,7 @@ def test_differentiable_vae_decoder_localization_reports_bounded_operation(
 
         def decode(self, value: torch.Tensor, *, return_dict: bool):
             assert return_dict is True
-            if failing_operation_identity == "differentiable_vae_decode_entry":
+            if failing_decoder_boundary == "differentiable_vae_decode_entry":
                 raise RuntimeError("excluded decode entry detail")
             return types.SimpleNamespace(sample=self.decoder(value))
 
@@ -1037,7 +1035,7 @@ def test_differentiable_vae_decoder_localization_reports_bounded_operation(
     ) as failure:
         backend.vae_decode_differentiable(latent)
 
-    assert failure.value.decoder_operation_identity == failing_operation_identity
+    assert failure.value.decoder_operation_identity == failing_decoder_boundary
     assert set(
         sd35_backend_module.DIFFERENTIABLE_VAE_DECODER_OPERATION_IDENTITIES
     ) == {
@@ -1141,8 +1139,12 @@ def test_differentiable_vae_decoder_localization_preserves_values_gradients_and_
         backend.vae_decode_differentiable(
             direct_input.detach().clone().requires_grad_(True)
         )
-    assert absent_projection_failure.value.decoder_operation_identity == (
-        "differentiable_vae_decoder_input_convolution"
+    absent_projection_decoder_boundary = (
+        absent_projection_failure.value.decoder_operation_identity
+    )
+    assert (
+        absent_projection_decoder_boundary
+        == "differentiable_vae_decoder_input_convolution"
     )
 
 
@@ -1244,9 +1246,8 @@ def test_differentiable_vae_decoder_localization_rejects_structure_drift(
         )
 
     assert type(failure.value.__cause__) is sd35_backend_module.Sd35BackendError
-    assert failure.value.decoder_operation_identity == (
-        "differentiable_vae_decode_entry"
-    )
+    structure_drift_decoder_boundary = failure.value.decoder_operation_identity
+    assert structure_drift_decoder_boundary == "differentiable_vae_decode_entry"
 
 
 def test_differentiable_vae_decoder_localization_tracks_recomputed_operation(
@@ -1317,8 +1318,10 @@ def test_differentiable_vae_decoder_localization_tracks_recomputed_operation(
     ) as failure:
         torch.autograd.grad(image.square().sum(), latent)
 
-    assert failure.value.decoder_operation_identity == (
-        "differentiable_vae_decoder_middle_attention"
+    recomputed_decoder_boundary = failure.value.decoder_operation_identity
+    assert (
+        recomputed_decoder_boundary
+        == "differentiable_vae_decoder_middle_attention"
     )
     assert vae.decoder.mid_block.attentions[0].call_count == 2
     for module in vae.decoder.modules():
