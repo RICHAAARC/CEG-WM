@@ -8,7 +8,10 @@ import shutil
 
 import pytest
 
-from governance.harness.audits.audit_naming_conventions import run_audit
+from governance.harness.audits.audit_naming_conventions import (
+    _attested_upstream_source_paths,
+    run_audit,
+)
 from governance.harness.audits.audit_placeholder_random_fields import (
     run_audit as run_field_audit,
 )
@@ -4666,3 +4669,52 @@ def test_source_manifest_and_namespace_initializer_are_not_semantically_exempt(
         path="runtime/_vendor/transparent_background/__init__.py",
         reason="weak_semantic_identifier",
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "symlinked_directory",
+    (
+        "runtime",
+        "runtime/_vendor",
+        "runtime/_vendor/transparent_background",
+        "runtime/_vendor/transparent_background/modules",
+        "runtime/_vendor/transparent_background/backbones",
+    ),
+)
+def test_upstream_source_attestation_rejects_every_symlinked_directory_without_following(
+    tmp_path: Path,
+    symlinked_directory: str,
+) -> None:
+    _copy_attested_upstream_source(tmp_path)
+    original = tmp_path / symlinked_directory
+    external_root = tmp_path / "external_source_sentinel"
+    external_root.mkdir()
+    external_directory = external_root / "attested_tree"
+    shutil.move(original.as_posix(), external_directory.as_posix())
+    sentinel = external_directory / "external_sentinel.py"
+    sentinel.write_text("# proxy route_1\n", encoding="utf-8")
+    original.symlink_to(external_directory, target_is_directory=True)
+
+    assert _attested_upstream_source_paths(tmp_path) == frozenset()
+    report = run_audit(tmp_path)
+    assert all(
+        "external_sentinel.py" not in checked_path
+        for checked_path in report["checked_paths"]
+    )
+    assert all(
+        violation["path"] != sentinel.relative_to(tmp_path).as_posix()
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_upstream_source_attestation_is_empty_when_vendor_tree_is_absent(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "runtime")
+
+    assert _attested_upstream_source_paths(tmp_path) == frozenset()
+    report = run_audit(tmp_path)
+    assert report["decision"] == "pass"
+    assert "runtime" in report["checked_paths"]

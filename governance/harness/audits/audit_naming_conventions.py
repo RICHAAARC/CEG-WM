@@ -6,6 +6,7 @@ import ast
 from hashlib import sha256
 import io
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
@@ -167,12 +168,40 @@ _UPSTREAM_SOURCE_STRUCTURAL_PATHS = frozenset(
 def _attested_upstream_source_paths(root_path: Path) -> frozenset[Path]:
     """Return exact upstream files only when the complete closure is authentic."""
 
+    directory_paths = (
+        root_path,
+        root_path / "runtime",
+        root_path / "runtime" / "_vendor",
+        root_path / _UPSTREAM_SOURCE_ROOT,
+        root_path / _UPSTREAM_SOURCE_ROOT / "modules",
+        root_path / _UPSTREAM_SOURCE_ROOT / "backbones",
+    )
+    try:
+        if any(
+            not stat.S_ISDIR(directory_path.lstat().st_mode)
+            for directory_path in directory_paths
+        ):
+            return frozenset()
+    except OSError:
+        return frozenset()
+
+    def read_regular_file_no_follow(path: Path) -> bytes:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError("attested source path is not a regular file")
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                return stream.read()
+        finally:
+            os.close(descriptor)
+
     manifest_path = root_path / _UPSTREAM_SOURCE_MANIFEST
     try:
-        manifest_stat = manifest_path.lstat()
-        if manifest_path.is_symlink() or not stat.S_ISREG(manifest_stat.st_mode):
+        if not stat.S_ISREG(manifest_path.lstat().st_mode):
             return frozenset()
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(
+            read_regular_file_no_follow(manifest_path).decode("utf-8")
+        )
     except (OSError, UnicodeError, json.JSONDecodeError):
         return frozenset()
     if type(manifest) is not dict or set(manifest) != {
@@ -234,10 +263,9 @@ def _attested_upstream_source_paths(root_path: Path) -> frozenset[Path]:
             return frozenset()
         source_path = root_path / _UPSTREAM_SOURCE_ROOT / local_path
         try:
-            source_stat = source_path.lstat()
-            if source_path.is_symlink() or not stat.S_ISREG(source_stat.st_mode):
+            if not stat.S_ISREG(source_path.lstat().st_mode):
                 return frozenset()
-            payload = source_path.read_bytes()
+            payload = read_regular_file_no_follow(source_path)
         except OSError:
             return frozenset()
         if sha256(payload).hexdigest() != local_sha256:
@@ -245,6 +273,23 @@ def _attested_upstream_source_paths(root_path: Path) -> frozenset[Path]:
         if upstream_path is not None:
             attested.add(_UPSTREAM_SOURCE_ROOT / local_path)
     return frozenset(attested)
+
+
+def _contains_symlink_component(root_path: Path, path: Path) -> bool:
+    """Reject scanner results reached through any symlink without resolving it."""
+
+    try:
+        relative = path.relative_to(root_path)
+        current = root_path
+        if stat.S_ISLNK(current.lstat().st_mode):
+            return True
+        for part in relative.parts:
+            current = current / part
+            if stat.S_ISLNK(current.lstat().st_mode):
+                return True
+    except (OSError, ValueError):
+        return True
+    return False
 
 
 def _is_business_production_path(relative: Path) -> bool:
@@ -3543,7 +3588,11 @@ def run_audit(root: str | Path) -> dict:
     )
     violations = list(registry_inspection.violations)
     checked_paths = []
-    for path in iter_governed_paths(root_path):
+    for path in (
+        candidate_path
+        for candidate_path in iter_governed_paths(root_path)
+        if not _contains_symlink_component(root_path, candidate_path)
+    ):
         relative = path.relative_to(root_path)
         checked_paths.append(str(relative))
         upstream_semantic_path = relative in attested_upstream_paths
