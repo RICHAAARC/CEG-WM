@@ -2,7 +2,7 @@
   "method_name": "ceg_wm_dual_chain",
   "design_path": "docs/design/method_architecture.md",
   "candidate_specification_path": "docs/design/candidate_specifications.md",
-  "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1",
+  "candidate_specification_sha256": "7a114b487f4d64ce6a4a47f11216bfc3ef78c7a46e27b5d47f64b59f49a05ba7",
   "components": {
     "key_schedule": {
       "responsibility": "root_key_derivation_and_prg",
@@ -251,8 +251,8 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "independent_qk_content_projection_memory_semantic_review:019fe0f3-b8e8-7230-98f1-9ae0450c1f4a:0258ccb2100bfe8b58d1a12079876841192528b3:APPROVE",
-    "reviewed_repository_revision": "0258ccb2100bfe8b58d1a12079876841192528b3",
-    "candidate_specification_sha256": "dd598a31375265e090658bfd327cdd7d9a54a7b6008fcde438a1b5b5b12725d1"
+    "review_reference": "independent_existing_method_readiness_snapshot_compatibility_review:01a0017e-83dc-7482-9ab2-48e17fef376b:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE",
+    "reviewed_repository_revision": "d88703689a0ea0487ad3a4553d060e5bf1a762cd",
+    "candidate_specification_sha256": "7a114b487f4d64ce6a4a47f11216bfc3ef78c7a46e27b5d47f64b59f49a05ba7"
   }
 }
