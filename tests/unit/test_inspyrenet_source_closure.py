@@ -18,7 +18,7 @@ SOURCE_MANIFEST = VENDOR_ROOT / "SOURCE.json"
 GPU_REQUIREMENTS = ROOT / "requirements_inspyrenet_salient_local_lf_gpu_execution.txt"
 BASE_GPU_REQUIREMENTS = ROOT / "requirements_development_exploration_gpu_execution.txt"
 
-EXPECTED_UPSTREAM_COMMIT = "f0fa91701a98cfc8e955c554e84522f365ec6da3"
+EXPECTED_UPSTREAM_REVISION = "f0fa91701a98cfc8e955c554e84522f365ec6da3"
 EXPECTED_UPSTREAM_TREE = "19c4aae7fe5ca6d77ddbd8cc4a4e0be662bfcb5c"
 EXPECTED_FILE_HASHES = {
     "LICENSE": (
@@ -236,7 +236,7 @@ def test_inspyrenet_source_manifest_binds_upstream_and_local_bytes() -> None:
     assert manifest["source_repository"] == (
         "https://github.com/plemeri/transparent-background"
     )
-    assert manifest["upstream_commit"] == EXPECTED_UPSTREAM_COMMIT
+    assert manifest["upstream_commit"] == EXPECTED_UPSTREAM_REVISION
     assert manifest["upstream_tree"] == EXPECTED_UPSTREAM_TREE
     assert manifest["source_license"] == "MIT"
     assert manifest["vendored_namespace"] == (

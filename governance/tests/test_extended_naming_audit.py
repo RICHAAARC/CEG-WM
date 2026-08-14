@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -57,6 +58,20 @@ def _has_violation(
         violation["path"] == path and violation["reason"] == reason
         for violation in report["violations"]
     )
+
+
+def _copy_attested_upstream_source(tmp_path: Path) -> Path:
+    _write_minimal_audit_fixture(tmp_path, "runtime")
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "runtime"
+        / "_vendor"
+        / "transparent_background"
+    )
+    destination = tmp_path / "runtime" / "_vendor" / "transparent_background"
+    destination.parent.mkdir(parents=True)
+    shutil.copytree(source, destination)
+    return destination
 
 
 @pytest.mark.unit
@@ -4459,3 +4474,195 @@ def test_dynamic_conditional_identity_branch_blocks_local_math_notation(
         and violation.get("identifier") == "C_1"
     }
     assert {"weak_semantic_identifier", "ordinal_identity_identifier"} <= reasons
+
+
+@pytest.mark.unit
+def test_exact_attested_upstream_source_keeps_paths_checked_without_project_renames(
+    tmp_path: Path,
+) -> None:
+    _copy_attested_upstream_source(tmp_path)
+
+    report = run_audit(tmp_path)
+
+    assert report["decision"] == "pass"
+    assert "runtime/_vendor" in report["checked_paths"]
+    assert (
+        "runtime/_vendor/transparent_background/InSPyReNet.py"
+        in report["checked_paths"]
+    )
+    assert "runtime/_vendor/transparent_background/SOURCE.json" in report["checked_paths"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("source_repository", "https://example.invalid/source"),
+        ("upstream_commit", "0" * 40),
+        ("vendored_namespace", "runtime.transparent_background"),
+    ),
+)
+def test_upstream_source_manifest_authority_drift_restores_project_naming_checks(
+    tmp_path: Path,
+    field: str,
+    replacement: str,
+) -> None:
+    vendor_root = _copy_attested_upstream_source(tmp_path)
+    manifest_path = vendor_root / "SOURCE.json"
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest[field] = replacement
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/InSPyReNet.py",
+        reason="file_name_not_snake_case",
+    )
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/InSPyReNet.py",
+        reason="weak_semantic_identifier",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_local_path",
+    (
+        "transparent_background/InSPyReNet.py",
+        "modules/*.py",
+        "../InSPyReNet.py",
+    ),
+)
+def test_upstream_source_manifest_rejects_prefix_glob_and_parent_paths(
+    tmp_path: Path,
+    invalid_local_path: str,
+) -> None:
+    vendor_root = _copy_attested_upstream_source(tmp_path)
+    manifest_path = vendor_root / "SOURCE.json"
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest["files"][2]["local_path"] = invalid_local_path
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/InSPyReNet.py",
+        reason="ordinal_identity_identifier",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("local_sha256", "0" * 64),
+        ("upstream_sha256", "0" * 64),
+        ("transformations", []),
+    ),
+)
+def test_upstream_source_file_attestation_drift_restores_project_naming_checks(
+    tmp_path: Path,
+    field: str,
+    replacement: object,
+) -> None:
+    vendor_root = _copy_attested_upstream_source(tmp_path)
+    manifest_path = vendor_root / "SOURCE.json"
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest["files"][2][field] = replacement
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/InSPyReNet.py",
+        reason="weak_semantic_identifier",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "drift_kind",
+    ("payload", "symlink", "directory"),
+)
+def test_upstream_source_nonregular_or_byte_drift_restores_semantic_checks(
+    tmp_path: Path,
+    drift_kind: str,
+) -> None:
+    vendor_root = _copy_attested_upstream_source(tmp_path)
+    target = vendor_root / "modules" / "context_module.py"
+    if drift_kind == "payload":
+        target.write_bytes(target.read_bytes() + b"\n# proxy route_1\n")
+    elif drift_kind == "symlink":
+        target.unlink()
+        target.symlink_to("layers.py")
+    else:
+        target.unlink()
+        target.mkdir()
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/InSPyReNet.py",
+        reason="weak_semantic_identifier",
+    )
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/InSPyReNet.py",
+        reason="ordinal_identity_identifier",
+    )
+
+
+@pytest.mark.unit
+def test_adjacent_vendor_and_project_paths_remain_normally_audited(
+    tmp_path: Path,
+) -> None:
+    vendor_root = _copy_attested_upstream_source(tmp_path)
+    adjacent = vendor_root / "phase1.py"
+    adjacent.write_text("# proxy route_1\nvalue = 1\n", encoding="utf-8")
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/phase1.py",
+        reason="ordinal_identity_path_component",
+    )
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/phase1.py",
+        reason="weak_semantic_comment",
+    )
+
+
+@pytest.mark.unit
+def test_source_manifest_and_namespace_initializer_are_not_semantically_exempt(
+    tmp_path: Path,
+) -> None:
+    vendor_root = _copy_attested_upstream_source(tmp_path)
+    manifest_path = vendor_root / "SOURCE.json"
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest["stage_1"] = "enabled"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (vendor_root / "__init__.py").write_text(
+        "def proxy_backend():\n    return None\n",
+        encoding="utf-8",
+    )
+
+    report = run_audit(tmp_path)
+
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/SOURCE.json",
+        reason="ordinal_identity_config_key",
+    )
+    assert _has_violation(
+        report,
+        path="runtime/_vendor/transparent_background/__init__.py",
+        reason="weak_semantic_identifier",
+    )

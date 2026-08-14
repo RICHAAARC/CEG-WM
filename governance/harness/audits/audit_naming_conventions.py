@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ast
+from hashlib import sha256
 import io
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
+import stat
 import sys
 import tokenize
 import tomllib
@@ -64,6 +66,185 @@ RESPONSIBILITY_CONTEXT_PATTERN = re.compile(
     rf"(?:^|[_-])(?:{'|'.join(sorted(NUMBERED_RESPONSIBILITY_WORDS))})(?:$|[_-])",
     re.IGNORECASE,
 )
+
+_UPSTREAM_SOURCE_ROOT = Path("runtime/_vendor/transparent_background")
+_UPSTREAM_SOURCE_MANIFEST = _UPSTREAM_SOURCE_ROOT / "SOURCE.json"
+_UPSTREAM_SOURCE_REPOSITORY = (
+    "https://github.com/plemeri/transparent-background"
+)
+_UPSTREAM_SOURCE_REVISION = "f0fa91701a98cfc8e955c554e84522f365ec6da3"
+_UPSTREAM_SOURCE_TREE = "19c4aae7fe5ca6d77ddbd8cc4a4e0be662bfcb5c"
+_UPSTREAM_SOURCE_NAMESPACE = "runtime._vendor.transparent_background"
+_UPSTREAM_SOURCE_FILE_ATTESTATIONS = {
+    "LICENSE": (
+        "LICENSE",
+        "a08a7c43ff8fe90648f889d4f937b178c29ab9be1f92244f685bf7f97cb53f91",
+    ),
+    "__init__.py": (
+        None,
+        "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    ),
+    "InSPyReNet.py": (
+        "transparent_background/InSPyReNet.py",
+        "e2f7d66c37b778ab1fce10553604075a54d93691b4612b952d7d44a8388cf42b",
+    ),
+    "modules/__init__.py": (
+        None,
+        "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    ),
+    "modules/layers.py": (
+        "transparent_background/modules/layers.py",
+        "7f5c6ad133af2234b74ff6d067e95f09022f598abc0d987b8a2d99a1044d66d7",
+    ),
+    "modules/context_module.py": (
+        "transparent_background/modules/context_module.py",
+        "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4",
+    ),
+    "modules/attention_module.py": (
+        "transparent_background/modules/attention_module.py",
+        "30e05975d0e8a9ff9f3dddaf0fa278556d16d9f40b4df8f76d193f4de8c8dcae",
+    ),
+    "modules/decoder_module.py": (
+        "transparent_background/modules/decoder_module.py",
+        "1a0b8d23cace8f68ceee14f76802af8d8762ce4dff9327a97538d26b7e7f936d",
+    ),
+    "backbones/__init__.py": (
+        None,
+        "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    ),
+    "backbones/SwinTransformer.py": (
+        "transparent_background/backbones/SwinTransformer.py",
+        "6f76d560fec382c8526a7230f4bbd95d122b97bdea44de452586a79f8a5ac41d",
+    ),
+}
+_UPSTREAM_SOURCE_ORIGINAL_SHA256 = {
+    "LICENSE": "a08a7c43ff8fe90648f889d4f937b178c29ab9be1f92244f685bf7f97cb53f91",
+    "__init__.py": None,
+    "InSPyReNet.py": "9bf8c73a361200888e48677c1df55b81bb1bdb669cfd91d73a01c01d24efbef4",
+    "modules/__init__.py": None,
+    "modules/layers.py": "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
+    "modules/context_module.py": "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4",
+    "modules/attention_module.py": "7f34d941393fb9dfc69f14ff02f731e5e1487f55cde9e79a7195d328922db2fb",
+    "modules/decoder_module.py": "a6c99bfdfed9cefd4184662b4a093d179e6a0c805d92ad21122ebaf95e05ee20",
+    "backbones/__init__.py": None,
+    "backbones/SwinTransformer.py": "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82",
+}
+_UPSTREAM_SOURCE_TRANSFORMATIONS = {
+    "LICENSE": [],
+    "__init__.py": ["add_empty_namespace_initializer"],
+    "InSPyReNet.py": [
+        "remove_os_sys_imports_and_sys_path_mutation",
+        "rewrite_transparent_background_imports_to_vendored_relative_namespace",
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace",
+    ],
+    "modules/__init__.py": ["add_empty_namespace_initializer"],
+    "modules/layers.py": ["strip_ascii_trailing_whitespace"],
+    "modules/context_module.py": [],
+    "modules/attention_module.py": [
+        "rewrite_transparent_background_import_to_vendored_relative_namespace",
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace",
+    ],
+    "modules/decoder_module.py": [
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace",
+    ],
+    "backbones/__init__.py": ["add_empty_namespace_initializer"],
+    "backbones/SwinTransformer.py": [
+        "strip_ascii_trailing_whitespace",
+        "normalize_terminal_newline",
+    ],
+}
+_UPSTREAM_SOURCE_STRUCTURAL_PATHS = frozenset(
+    {
+        Path("runtime/_vendor"),
+        _UPSTREAM_SOURCE_MANIFEST,
+    }
+)
+
+
+def _attested_upstream_source_paths(root_path: Path) -> frozenset[Path]:
+    """Return exact upstream files only when the complete closure is authentic."""
+
+    manifest_path = root_path / _UPSTREAM_SOURCE_MANIFEST
+    try:
+        manifest_stat = manifest_path.lstat()
+        if manifest_path.is_symlink() or not stat.S_ISREG(manifest_stat.st_mode):
+            return frozenset()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return frozenset()
+    if type(manifest) is not dict or set(manifest) != {
+        "source_repository",
+        "upstream_commit",
+        "upstream_tree",
+        "source_license",
+        "vendored_namespace",
+        "files",
+    }:
+        return frozenset()
+    if (
+        manifest["source_repository"] != _UPSTREAM_SOURCE_REPOSITORY
+        or manifest["upstream_commit"] != _UPSTREAM_SOURCE_REVISION
+        or manifest["upstream_tree"] != _UPSTREAM_SOURCE_TREE
+        or manifest["source_license"] != "MIT"
+        or manifest["vendored_namespace"] != _UPSTREAM_SOURCE_NAMESPACE
+        or type(manifest["files"]) is not list
+    ):
+        return frozenset()
+    entries: dict[str, dict] = {}
+    for entry in manifest["files"]:
+        if type(entry) is not dict or set(entry) != {
+            "upstream_path",
+            "local_path",
+            "upstream_sha256",
+            "local_sha256",
+            "transformations",
+        }:
+            return frozenset()
+        local_path = entry["local_path"]
+        if type(local_path) is not str:
+            return frozenset()
+        pure_path = PurePosixPath(local_path)
+        if (
+            pure_path.is_absolute()
+            or pure_path.as_posix() != local_path
+            or not pure_path.parts
+            or any(part in {"", ".", ".."} for part in pure_path.parts)
+            or local_path in entries
+        ):
+            return frozenset()
+        entries[local_path] = entry
+    if set(entries) != set(_UPSTREAM_SOURCE_FILE_ATTESTATIONS):
+        return frozenset()
+    attested: set[Path] = set()
+    for local_path, (upstream_path, local_sha256) in (
+        _UPSTREAM_SOURCE_FILE_ATTESTATIONS.items()
+    ):
+        entry = entries[local_path]
+        if (
+            entry["upstream_path"] != upstream_path
+            or entry["upstream_sha256"]
+            != _UPSTREAM_SOURCE_ORIGINAL_SHA256[local_path]
+            or entry["local_sha256"] != local_sha256
+            or entry["transformations"]
+            != _UPSTREAM_SOURCE_TRANSFORMATIONS[local_path]
+        ):
+            return frozenset()
+        source_path = root_path / _UPSTREAM_SOURCE_ROOT / local_path
+        try:
+            source_stat = source_path.lstat()
+            if source_path.is_symlink() or not stat.S_ISREG(source_stat.st_mode):
+                return frozenset()
+            payload = source_path.read_bytes()
+        except OSError:
+            return frozenset()
+        if sha256(payload).hexdigest() != local_sha256:
+            return frozenset()
+        if upstream_path is not None:
+            attested.add(_UPSTREAM_SOURCE_ROOT / local_path)
+    return frozenset(attested)
 
 
 def _is_business_production_path(relative: Path) -> bool:
@@ -3346,6 +3527,12 @@ def _text_semantic_violations(path: Path, relative: Path) -> list[dict]:
 
 def run_audit(root: str | Path) -> dict:
     root_path = Path(root)
+    attested_upstream_paths = _attested_upstream_source_paths(root_path)
+    structural_upstream_paths = (
+        _UPSTREAM_SOURCE_STRUCTURAL_PATHS
+        if attested_upstream_paths
+        else frozenset()
+    )
     registry_inspection = inspect_field_registry(root_path)
     field_registry = registry_inspection.rows
     registered_fields = frozenset(field_registry)
@@ -3359,27 +3546,32 @@ def run_audit(root: str | Path) -> dict:
     for path in iter_governed_paths(root_path):
         relative = path.relative_to(root_path)
         checked_paths.append(str(relative))
-        if path.is_dir():
+        upstream_semantic_path = relative in attested_upstream_paths
+        upstream_structural_path = relative in structural_upstream_paths
+        if path.is_dir() and not upstream_structural_path:
             if not is_allowed_directory_name(path.name):
                 violations.append({"path": str(relative), "reason": "directory_name_not_snake_case"})
-        elif path.is_file():
+        elif path.is_file() and not (
+            upstream_semantic_path or upstream_structural_path
+        ):
             if not is_allowed_file_name(path.name):
                 violations.append({"path": str(relative), "reason": "file_name_not_snake_case"})
         path_name = path.stem if path.is_file() else path.name
-        if has_weak_semantic_token(path_name) or (
-            relative.parts
-            and relative.parts[0] in BUSINESS_PATH_ROOTS
-            and has_weak_semantic_path_name(path_name)
-        ):
-            violations.append({"path": str(relative), "reason": "weak_semantic_token"})
-        if has_ordinal_identity_text(path_name):
-            violations.append(
-                {
-                    "path": str(relative),
-                    "reason": "ordinal_identity_path_component",
-                }
-            )
-        if path.is_file() and path.suffix == ".py":
+        if not (upstream_semantic_path or upstream_structural_path):
+            if has_weak_semantic_token(path_name) or (
+                relative.parts
+                and relative.parts[0] in BUSINESS_PATH_ROOTS
+                and has_weak_semantic_path_name(path_name)
+            ):
+                violations.append({"path": str(relative), "reason": "weak_semantic_token"})
+            if has_ordinal_identity_text(path_name):
+                violations.append(
+                    {
+                        "path": str(relative),
+                        "reason": "ordinal_identity_path_component",
+                    }
+                )
+        if path.is_file() and path.suffix == ".py" and not upstream_semantic_path:
             violations.extend(
                 _python_semantic_violations(
                     path,
