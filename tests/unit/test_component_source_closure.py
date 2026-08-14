@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
+from hashlib import sha256
 import json
 from pathlib import Path
 import shutil
@@ -16,6 +18,11 @@ from scripts.experiment_execution.component_source_closure import (
     build_component_source_closure,
     build_hf_reference_component_source_closure,
     build_lf_directional_component_source_closure,
+)
+from tests.helpers.historical_repository import (
+    HF_REFERENCE_PRODUCER_PATHS,
+    HF_REFERENCE_PRODUCER_REVISION,
+    materialize_historical_repository,
 )
 
 
@@ -34,6 +41,13 @@ HF_EXPECTED_PATHS = (
     "main/content_chain/embedder.py",
     "main/content_chain/hf_detector.py",
     "main/content_chain/detector.py",
+)
+LF_DIRECTIONAL_PRODUCER_REVISION = "51adb765cdddafcb4c65c357e899c77b4c9f36d2"
+LF_DIRECTIONAL_PRODUCER_PATHS = (
+    ".codex/research_state/method_readiness.yaml",
+    "configs/experiments/lf_whitened_directional_validation.json",
+    "docs/design/candidate_specifications.md",
+    *LF_EXPECTED_PATHS,
 )
 
 
@@ -57,27 +71,135 @@ def _copy_component_sources(
         shutil.copyfile(ROOT / relative, target)
 
 
-@pytest.mark.unit
-def test_lf_directional_component_closure_binds_only_reviewed_method_sources() -> None:
-    closure = build_lf_directional_component_source_closure(
-        _reviewed_components(),
-        ROOT,
+def _materialize_historical_component_authority(
+    *,
+    tmp_path: Path,
+    revision: str,
+    paths: tuple[str, ...],
+    label: str,
+) -> Path:
+    if not (ROOT / ".git").exists():
+        pytest.skip("local Git metadata is required for historical producer replay")
+    return materialize_historical_repository(
+        source_root=ROOT,
+        revision=revision,
+        destination=tmp_path / label,
+        paths=paths,
     )
 
-    assert closure.ordered_component_ids == LF_DIRECTIONAL_COMPONENT_IDS
+
+def _assert_lf_directional_producer_authority(producer_root: Path) -> None:
+    authority = json.loads(
+        (
+            producer_root
+            / "configs/experiments/lf_whitened_directional_validation.json"
+        ).read_text(encoding="utf-8")
+    )
+    readiness = json.loads(
+        (
+            producer_root / ".codex/research_state/method_readiness.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    ordered_component_ids = tuple(authority["ordered_component_ids"])
+    assert ordered_component_ids == LF_DIRECTIONAL_COMPONENT_IDS
+    closure = build_lf_directional_component_source_closure(
+        readiness["components"],
+        producer_root,
+    )
     assert tuple(
         binding.implementation_path for binding in closure.source_bindings
     ) == LF_EXPECTED_PATHS
-    assert closure.component_implementation_digest == (
-        "9e79aaaadf545966f55fd311a0466f718431c21c39c88addac994149399b41f6"
+    assert tuple(asdict(item) for item in closure.source_bindings) == tuple(
+        authority["component_source_bindings"]
     )
-    assert not any(
-        binding.implementation_path.endswith("/__init__.py")
-        or binding.implementation_path.startswith(
-            ("runtime/", "experiments/", "scripts/")
-        )
+    assert (
+        closure.component_implementation_digest
+        == authority["component_implementation_digest"]
+        == "9e79aaaadf545966f55fd311a0466f718431c21c39c88addac994149399b41f6"
+    )
+    candidate_specification_sha256 = sha256(
+        (producer_root / "docs/design/candidate_specifications.md").read_bytes()
+    ).hexdigest()
+    assert candidate_specification_sha256 == authority[
+        "candidate_specification_sha256"
+    ]
+    assert readiness["candidate_specification_sha256"] == (
+        candidate_specification_sha256
+    )
+    review = readiness["independent_semantic_review"]
+    assert review["review_reference"] == (
+        "independent_lf_prepared_feature_semantic_review:"
+        "019fe0f3-b8e8-7230-98f1-9ae0450c1f4a:"
+        "00bed2baaf60f039868c208291c86b539a54b2f3:APPROVE"
+    )
+    assert review["reviewed_repository_revision"] == (
+        "00bed2baaf60f039868c208291c86b539a54b2f3"
+    )
+    assert authority["method_review_reference"] == review["review_reference"]
+    assert authority["method_reviewed_revision"] == review[
+        "reviewed_repository_revision"
+    ]
+    assert review["candidate_specification_sha256"] == (
+        candidate_specification_sha256
+    )
+
+
+def _assert_hf_reference_producer_authority(producer_root: Path) -> None:
+    authority = json.loads(
+        (
+            producer_root / "configs/experiments/hf_only_reference_validation.json"
+        ).read_text(encoding="utf-8")
+    )["candidate_binding"]
+    ordered_component_ids = tuple(authority["ordered_component_ids"])
+    assert ordered_component_ids == HF_REFERENCE_COMPONENT_IDS
+    components = {
+        binding["component_id"]: {
+            "implementation_path": binding["implementation_path"],
+            "implementation_symbol": binding["implementation_symbol"],
+        }
+        for binding in authority["component_source_bindings"]
+    }
+    closure = build_hf_reference_component_source_closure(
+        components,
+        producer_root,
+    )
+    assert tuple(
+        binding.implementation_path for binding in closure.source_bindings
+    ) == HF_EXPECTED_PATHS
+    assert all(
+        binding.source_role == "component_implementation"
         for binding in closure.source_bindings
     )
+    assert tuple(asdict(item) for item in closure.source_bindings) == tuple(
+        authority["component_source_bindings"]
+    )
+    assert (
+        closure.component_implementation_digest
+        == authority["component_implementation_digest"]
+        == "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1"
+    )
+    candidate_specification_sha256 = sha256(
+        (producer_root / authority["candidate_specification_path"]).read_bytes()
+    ).hexdigest()
+    assert candidate_specification_sha256 == authority[
+        "candidate_specification_sha256"
+    ]
+    assert authority["method_reviewed_revision"] == (
+        "ee512b31917fdf31d76e7237d3bba2b9c8ec4c64"
+    )
+
+
+@pytest.mark.unit
+def test_lf_directional_component_closure_binds_only_reviewed_method_sources(
+    tmp_path: Path,
+) -> None:
+    producer_root = _materialize_historical_component_authority(
+        tmp_path=tmp_path,
+        revision=LF_DIRECTIONAL_PRODUCER_REVISION,
+        paths=LF_DIRECTIONAL_PRODUCER_PATHS,
+        label="lf-directional-component-producer",
+    )
+    _assert_lf_directional_producer_authority(producer_root)
 
 
 @pytest.mark.unit
@@ -128,23 +250,50 @@ def test_unrelated_science_and_delivery_sources_do_not_change_component_digest(
 
 
 @pytest.mark.unit
-def test_hf_reference_component_closure_binds_exact_scientific_sources() -> None:
-    closure = build_hf_reference_component_source_closure(
-        _reviewed_components(HF_REFERENCE_COMPONENT_IDS),
-        ROOT,
+def test_hf_reference_component_closure_binds_exact_scientific_sources(
+    tmp_path: Path,
+) -> None:
+    producer_root = _materialize_historical_component_authority(
+        tmp_path=tmp_path,
+        revision=HF_REFERENCE_PRODUCER_REVISION,
+        paths=HF_REFERENCE_PRODUCER_PATHS,
+        label="hf-reference-component-producer",
     )
+    _assert_hf_reference_producer_authority(producer_root)
 
-    assert closure.ordered_component_ids == HF_REFERENCE_COMPONENT_IDS
-    assert tuple(
-        binding.implementation_path for binding in closure.source_bindings
-    ) == HF_EXPECTED_PATHS
-    assert all(
-        binding.source_role == "component_implementation"
-        for binding in closure.source_bindings
+
+@pytest.mark.unit
+def test_lf_directional_component_closure_rejects_historical_source_tamper(
+    tmp_path: Path,
+) -> None:
+    producer_root = _materialize_historical_component_authority(
+        tmp_path=tmp_path,
+        revision=LF_DIRECTIONAL_PRODUCER_REVISION,
+        paths=LF_DIRECTIONAL_PRODUCER_PATHS,
+        label="lf-directional-component-source-tamper",
     )
-    assert closure.component_implementation_digest == (
-        "4323073f7df88c6e3abb253932fba8ba132062b6b47fba0f1db31ded45fd4de1"
+    source = producer_root / "main/content_chain/lf_detector.py"
+    source.write_bytes(source.read_bytes() + b"\n# historical source tamper\n")
+
+    with pytest.raises(AssertionError):
+        _assert_lf_directional_producer_authority(producer_root)
+
+
+@pytest.mark.unit
+def test_hf_reference_component_closure_rejects_historical_source_tamper(
+    tmp_path: Path,
+) -> None:
+    producer_root = _materialize_historical_component_authority(
+        tmp_path=tmp_path,
+        revision=HF_REFERENCE_PRODUCER_REVISION,
+        paths=HF_REFERENCE_PRODUCER_PATHS,
+        label="hf-reference-component-source-tamper",
     )
+    source = producer_root / "main/content_chain/hf_detector.py"
+    source.write_bytes(source.read_bytes() + b"\n# historical source tamper\n")
+
+    with pytest.raises(AssertionError):
+        _assert_hf_reference_producer_authority(producer_root)
 
 
 @pytest.mark.unit
