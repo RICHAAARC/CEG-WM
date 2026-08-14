@@ -343,7 +343,10 @@ PIL 输入只做 validated contiguous CPU RGB8 的 CHW-to-HWC 值保持排列，
 negative。继任候选的写入只允许
 `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，检测只允许
 `max(z_hf,z_lf_masked)`；两者已获仅限本地独立 revisions 的 implementation admission，
-但尚未实现、未绑定 readiness、未获 runtime qualification、实验执行准入或科学晋升。
+且 CPU/API source implementation 已在
+`d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合并通过独立审核。该闭合不等于
+readiness、真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality、
+科学验证或晋升。
 
 ### Historical Calibrated Candidate Family
 
@@ -555,8 +558,14 @@ registry 共 15 个 ID：14 个具名候选和 1 个强制同预算禁用对照
 
 原有实现与方法行为门保持其 producer-bound 身份；新增显著目标四候选均为
 `design_candidate_implementation_authorized`、`implementation_admission=YES`，这只授权
-本地独立 revisions 实施；四者尚未实现或重绑 readiness，也未获 runtime qualification、
-实验执行准入或科学晋升。仍开放的是这些候选未来经独立语义审核，以及各候选能否通过真实 runtime、
+本地独立 revisions 实施；四者的 CPU/API source implementation 已在
+`d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+`independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+独立审核。该 review 仅覆盖 source/CPU/API，未重绑 readiness，也未验证真实
+checkpoint/runtime smoke、实验 protocol、masked-LF W、quality、科学效果或晋升。
+`content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+仍开放的是各候选能否通过真实 runtime、
 candidate-selection、calibration 和 formal evaluation 门及互斥 calibration 职责拟合的
 阈值数值。设计冻结与效果证据必须保持分离。
 
@@ -564,7 +573,8 @@ candidate-selection、calibration 和 formal evaluation 门及互斥 calibration
 审计。实际 stage/status 已由独立 revisions 同步为
 `experiment_ready / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
 qualification；正式 detector 保持 HF-only，旧 route/combination 为历史负结果，
-新显著目标路线尚未实施，
+新显著目标路线仅完成 CPU/API source implementation，尚未完成候选专属 readiness、
+真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义或科学验证，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环不提供 `tau`、confirmation
 结果、Calibration Locked、正式 evaluation、正式 FPR 或效果证据，也不晋升
 LF/routing/组合/geometry。

@@ -76,9 +76,15 @@ evaluation 或科学证据，也没有 LF/routing/组合/geometry 的实验晋�
 `lf_saliency_masked_null_whitened_matched_score` 和
 `content_combination_saliency_max_standardized` 状态统一为
 `design_candidate_implementation_authorized`，`implementation_admission=YES`。这只授权
-本地独立 revisions 实施；四者尚未实现、未绑定 readiness、未获 runtime qualification、
-实验执行准入或科学晋升。现有全局 `experiment_ready / implemented`、readiness、runtime
+本地独立 revisions 实施；该授权 token 保持不变。四者的 CPU/API source implementation
+已在 revision `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+`independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+独立审核。该 review 只覆盖 source/CPU/API；候选 readiness、真实 checkpoint/runtime
+smoke、实验 protocol、masked-LF W、quality 定义、科学验证与晋升仍未闭合。现有全局
+`experiment_ready / implemented`、readiness、runtime
 qualification 和既有 HF/LF directional evidence 均不覆盖这四个新身份。
+`content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
 
 内容路线的当前研究问题收敛为：全局 HF 提供主密钥归属证据，InSPyReNet 从普通
 RGB8 图像独立重建显著目标内部 mask，局部 LF 只在该支持域写入和盲检测。嵌入端

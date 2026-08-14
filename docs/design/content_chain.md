@@ -30,10 +30,16 @@ LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
 形成 producer-bound development 负证据，不再是 current candidate。继任内容路线
 新增四个 `design_candidate_implementation_authorized` 身份；实施准入来自规格外的独立
 用户授权及其显著目标局部 LF 候选实施准入职责 revision
-`5885d5cd661bc9744480e89603293a5c51af0e26`，仅限本地独立 revisions。四者尚未实现、未绑定 readiness、未获 runtime
-qualification、实验执行准入或科学晋升。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
+`5885d5cd661bc9744480e89603293a5c51af0e26`，仅限本地独立 revisions。四者的 CPU/API
+source implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+`independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+独立审核；候选 readiness、真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、
+quality 定义、科学验证与晋升仍未闭合。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
 固定 channel-band diagonal null operator 做只读白化 matched score；它不改变 carrier，
 也不把 fit images、参考图或私有 latent 引入检测。实验需要回答：
+
+`content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
 
 1. LF 在哪些失真下提供 HF direct score 缺少的互补证据？
 2. LF 是否保持密钥归属，而不是只检测通用低频偏移？
@@ -207,7 +213,9 @@ causal、global-HF+local-LF、LF-disabled 和失败；不含 `A/a/routed/route-d
 
 HF carrier、HF direct score、旧 LF/路由/组合写入与分支检测已完成 CPU/synthetic
 实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；新显著目标局部 LF
-四候选尚未实现或晋升，`full_ceg_wm_eligible=false`。actual-dtype combined content
+四候选仅完成 d887 CPU/API source implementation，尚未完成候选 readiness、真实
+checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义或晋升，
+`full_ceg_wm_eligible=false`。actual-dtype combined content
 写入、完整性和 hard-budget 路径已在冻结 SD3.5 candidate 的真实 GPU
 qualification 中通过；这不构成 LF/routing/组合晋升。当前仍没有正式 calibration、
 完整联合 FPR 或科学效果证据；实际阶段/status 已由独立 revisions 同步为

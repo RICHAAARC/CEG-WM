@@ -11,8 +11,14 @@
   设计 registry 的15个 ID（14个具名候选加1个 mandatory control）、readiness
   绑定的11个旧实现候选与13项职责是三种不同计数；新增显著目标局部 LF 四候选为
   `design_candidate_implementation_authorized` / `implementation_admission=YES`，只授权
-  本地独立 revisions 实施；四者尚未实现、未获 runtime qualification、实验执行准入或
-  科学晋升，policy YAML 和 readiness 本轮均未重绑。
+  本地独立 revisions 实施。四者的 CPU/API source implementation 已在
+  `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+  `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+  完成仅限 source/CPU/API 的独立审核；候选 readiness、真实 checkpoint/runtime smoke、
+  实验 protocol、masked-LF W、quality 定义、科学验证与晋升仍未闭合，policy YAML 和
+  既有 readiness 本轮均未重绑。
+  `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+  `promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
 
 current 内容候选固定 max statistic，不存在 `a/w/function` 或组合参数 selection；
 calibration 只承担分支 primary-null/CDF 标准化、max `tau` 与其他独立职责。

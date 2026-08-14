@@ -13,8 +13,14 @@
   独立语义复核。该 readiness 绑定旧实现的11个候选身份；设计 registry 则为15个
   ID（14个具名候选加1个 mandatory control），二者都不得与13项职责混淆。新增
   显著目标局部 LF 四候选均为 `design_candidate_implementation_authorized`、
-  `implementation_admission=YES`；这只授权本地独立 revisions 实施，四者尚未实现、
-  未写入现有 readiness、未获 runtime qualification、实验执行准入或科学晋升。
+  `implementation_admission=YES`；该授权 token 保持不变。四者的 CPU/API source
+  implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+  `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+  独立审核。该 review 仅证明 CPU/API source closure；四者仍未写入现有 readiness，
+  未完成真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义、
+  科学验证或晋升。
+  `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+  `promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
 - readiness 只记录方法构建闭合，不是阶段文件。experiment_ready_infrastructure_closure 已完成，冻结实验协议与
   可追溯执行入口可用；这只满足 `experiment_ready` 的执行准备边界，不授权
   calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定
@@ -23,7 +29,7 @@
   qualification run `20260729T110628Z` 和 result ZIP SHA-256
   `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`。
   该 `qualification / passed` 结果只支持真实 SD3.5 runtime 边界；正式 detector
-  仍为 HF-only，新 masked-LF/routing/组合未实施或实验晋升，
+  仍为 HF-only，新 masked-LF/routing/组合仅完成 CPU/API source implementation、未实验晋升，
   `full_ceg_wm_eligible=false`，且没有正式
   FPR、鲁棒性、正式 records 或科学效果证据。
 

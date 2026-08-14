@@ -41,11 +41,19 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
   registry 现为 14 个具名候选加 1 个强制 routing 禁用对照，共 15 个 ID。
   新增的显著目标局部 LF 四候选均为 `design_candidate_implementation_authorized`，
-  `implementation_admission=YES`；这只授权在本地独立 revisions 中实施。现有
-  CPU/synthetic 实现、readiness 和 `experiment_ready / implemented` 不覆盖这些新候选；
-  四者仍未实现、未绑定 readiness、未获 runtime qualification、未获实验执行准入或科学晋升。
+  `implementation_admission=YES`；该 token 保留为本地实施授权来源。四者的 CPU/API
+  source implementation 已在 revision `d88703689a0ea0487ad3a4553d060e5bf1a762cd`
+  闭合，并由
+  `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+  独立审核通过。该审核只覆盖 source、CPU 与公共 API 调用链；现有 readiness 和
+  `experiment_ready / implemented` 不自动覆盖四者，且尚未完成候选专属 readiness、
+  真实 checkpoint/runtime smoke、实验 protocol/执行入口、masked-LF 32-clean-null W、
+  quality 定义、科学验证或晋升。
+  `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+  `promoted=false`；正式 detector 保持 HF-only，quality gate 仍未定义。
 - 当前正式 detector 仍为 HF-only；旧 routing/combination 已形成 producer-bound
-  development negative，新显著目标局部 LF 四候选尚未实现或实验晋升，
+  development negative，新显著目标局部 LF 四候选只完成 CPU/API source implementation、
+  尚未实验晋升，
   `full_ceg_wm_eligible=false`。`negative_identity` 只证明 runtime/key identity
   control 与 registered identity 分离，不是 wrong-key FPR、attribution 效果或科学
   证据。readiness、runtime qualification 和阶段转换也不证明固定 FPR、鲁棒性、
@@ -66,8 +74,10 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    当前新增设计候选使用 InSPyReNet 从图像重建显著目标内部 mask，在全局 HF 上叠加
    局部 LF；它不增加第 14 项职责，仍由既有 `content_router`、carrier、
    `content_embedder`、分支 detector 与 `content_detector` 分工。新候选已获得仅限
-   本地独立 revisions 的 implementation admission，但尚未实现、未绑定 readiness、
-   未获 runtime qualification、未获实验执行准入或科学晋升。
+   本地独立 revisions 的 implementation admission。四者的 CPU/API source implementation
+   已在上述 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合并通过上述独立审核，
+   但尚未绑定候选专属 readiness，也未完成真实 checkpoint/runtime smoke、实验协议、
+   masked-LF W、quality 定义、科学验证或晋升。
 5. 当前显著目标候选的 `content_router` 只输出由冻结 InSPyReNet 规则得到的
    `mask_lf`、全一 `mask_hf` 及其 identity/digests；它不决定混合权重或输出能量
    预算。carrier 只输出模板和 masked unit direction。runtime 只物化 embedder 的

@@ -30,7 +30,7 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 实现者只能实现这些身份及其明确列出的有限候选值。增加 relation、objective、write、score、observation、backbone、runtime 或搜索策略，必须先修订本文并重新接受候选规格审计。
 
 候选 registry 与实现职责是两个不同计数：上面的 15 个 ID 描述算法/runtime/key
-候选身份；未来实现固定为 13 项职责组件。每项职责只消费下表列出的现有候选，
+候选身份；实现职责固定为 13 项组件。每项职责只消费下表列出的现有候选，
 不得据此新增候选、别名组件或把多个职责集中到一个代理模块：
 
 | component | responsibility | planned path | candidate binding |
@@ -62,8 +62,14 @@ estimator 代行。候选绑定表示该组件必须实现或消费的规格身�
 新增四候选统一状态为 `design_candidate_implementation_authorized`，
 `implementation_admission=YES`。这只授权本地独立 revisions 实施；现有
 `experiment_ready / implemented`、readiness、runtime qualification 与旧 13 职责实现
-不自动覆盖它们。四者尚未实现、未绑定 readiness、未获实验执行准入或科学晋升；
+不自动覆盖它们。四者的 CPU/API source implementation 已在
+`d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+`independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+独立审核；该 review 仅覆盖 source/CPU/API，未绑定候选 readiness，也未验证真实
+checkpoint/runtime smoke、实验 protocol、masked-LF W、quality、科学效果或晋升；
 本次准入不增加第 14 项职责。
+`content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
 
 ## Provisional Historical Provenance
 
@@ -1410,8 +1416,9 @@ routing observations、backbone/runtime、搜索、可靠性指标、回正和�
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
 方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前为
 `design_candidate_implementation_authorized` 且 implementation admission 为 `YES`，
-只授权本地独立 revisions 实施；四者尚未实现、未绑定 readiness、未获 runtime
-qualification、实验执行准入或科学晋升。仍待实验决定的是明确有限候选中的晋升结果和
+只授权本地独立 revisions 实施；四者已完成上述 d887 CPU/API source closure，但未绑定
+候选 readiness，也未完成真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、
+quality 定义、科学验证或晋升。仍待实验决定的是明确有限候选中的晋升结果和
 calibration 数值，不是实现算法。
 
 ### Frozen Specification Values Versus Evidence Outcomes
@@ -1423,7 +1430,8 @@ S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
 rectification；conditional recovery 控制流；以及已获本地 implementation admission、
-但尚未实现或获实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
+并已完成 CPU/API source implementation、但尚未获候选 readiness、真实 checkpoint/runtime
+smoke 或实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
 独立 32-clean-null masked whitening 与 max-statistic identity。
 
 旧 `a` 与三条历史组合函数已经形成 producer-bound negative，不再是 current 选择面。
@@ -1438,5 +1446,7 @@ rectification；conditional recovery 控制流；以及已获本地 implementati
 候选实施准入职责 revision `5885d5cd661bc9744480e89603293a5c51af0e26` 已在规格外
 单独把四个新候选准入为 `design_candidate_implementation_authorized`。项目全局
 仍是 `experiment_ready / implemented`；新候选的下一步不是再次申请 implementation、
-重建 Git 身份或重走 stage，而是在本地独立 revisions 中完成 CPU/API 实现、定向测试、
-Agent2 独立语义审核与候选专属 readiness，之后才可申请 module-level development 执行。
+重建 Git 身份或重走 stage。CPU/API source implementation、定向测试与独立语义审核已在
+上述 d887 closure 完成；下一步必须先闭合候选专属 readiness、真实 checkpoint/runtime
+smoke、实验 protocol 与 masked-LF W，且在 quality 定义和科学门批准后才可申请
+module-level development 执行。

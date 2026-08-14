@@ -459,9 +459,14 @@ CPU/synthetic 验证与 readiness 审核；独立阶段迁移已经完成。
 - 13 项职责、27 个 CPU/synthetic 行为节点和唯一 method readiness 已完成并审计；
 - 正式 detector 仍为 HF-only；旧 route/combination 是 producer-bound historical
   negative，新显著目标四候选为 `design_candidate_implementation_authorized`、
-  `implementation_admission=YES`；这只授权本地独立 revisions 实施，四者尚未实现、
-  未绑定 readiness、未获 runtime qualification、实验执行准入或科学晋升，
+  `implementation_admission=YES`；该授权 token 保持不变。四者的 CPU/API source
+  implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
+  `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
+  独立审核；该 review 仅覆盖 source/CPU/API，候选 readiness、真实 checkpoint/runtime
+  smoke、实验 protocol、masked-LF W、quality 定义、科学验证与晋升仍未闭合，
   `full_ceg_wm_eligible=false`；
+- `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
+  `promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义；
 - 冻结 SD3.5 candidate 的真实 callback、actual dtype、VAE、两层 Q/K 和基本
   确定性 runtime 边界已经 qualification；
 - 实验准备基础设施闭环仅登记冻结协议与可追溯执行交付，不构成
