@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import asdict, replace
+from hashlib import sha256
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,9 +80,16 @@ from main.shared import identify_root_key, rgb8_image_digest
 from runtime import (
     ContentWriteGeometrySuffixResult,
     ContentWriteVaeResult,
+    InspyrenetSaliencyRuntime,
     RuntimeActualQkSuffixResult,
+    RuntimeBackendIdentity,
+    RuntimeDeviceCapabilities,
     RuntimeDifferentiableQkSuffixResult,
     RuntimeQkObservationResult,
+    RuntimeVaeFactors,
+    SalientLocalLfContentWriteResult,
+    Sd35RuntimeAdapter,
+    create_runtime_adapter,
 )
 
 
@@ -103,17 +111,29 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "LfDetectionResult",
         "LfNullWhitenedDetectionResult",
         "LfNullWhiteningAsset",
+        "LfSaliencyMaskedNullWhitenedDetectionResult",
+        "LfSaliencyMaskedNullWhiteningAsset",
         "PreparedLfWhitenedObservation",
         "PreparedLfWhitenedTemplate",
         "RoutingObservations",
+        "SaliencyBranchNullCalibration",
+        "SaliencyMaskedLfDetectionObservation",
+        "SaliencyMaxStandardizedDetectionResult",
+        "SaliencyProbabilityObservation",
+        "SalientLocalLfEmbeddingResult",
+        "SalientLocalLfRoutingResult",
         "content_detector",
         "content_embedder",
         "content_router",
         "hf_carrier",
         "hf_detector",
+        "inspyrenet_salient_local_lf_router",
         "lf_carrier",
         "lf_detector",
         "lf_null_whitened_matched_detector",
+        "lf_saliency_masked_null_whitened_matched_detector",
+        "saliency_max_standardized_content_detector",
+        "salient_local_lf_content_embedder",
     ),
     main_geometry_chain: (
         "GeometricTransformEstimation",
@@ -148,6 +168,183 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "key_schedule_sha256_counter",
     ),
 }
+
+
+class _SalientRuntimePosterior:
+    def __init__(self, mode_value: torch.Tensor) -> None:
+        self._mode_value = mode_value
+
+    def mode(self) -> torch.Tensor:
+        return self._mode_value.detach().clone()
+
+
+class _SalientExperimentRuntimeBackend:
+    def __init__(self) -> None:
+        self.configuration = None
+        self.run_calls = 0
+        self.decode_calls = 0
+        self.encode_inputs: list[torch.Tensor] = []
+        self.close_calls = 0
+
+    def probe_devices(self) -> RuntimeDeviceCapabilities:
+        return RuntimeDeviceCapabilities(
+            cpu_available=True,
+            cuda_device_count=0,
+        )
+
+    def prepare(self, configuration, selected_device: str) -> RuntimeBackendIdentity:
+        self.configuration = configuration
+        return RuntimeBackendIdentity(
+            candidate_id=configuration.candidate_id,
+            runtime_config_digest=configuration.runtime_config_digest,
+            runtime_backend_name="salient_local_lf_cpu_runtime_fixture",
+            selected_device=selected_device,
+            model_id=configuration.model_id,
+            model_revision=configuration.model_revision,
+            pipeline_class=configuration.pipeline_class,
+            scheduler_class=configuration.scheduler_class,
+            inference_steps=configuration.inference_steps,
+            guidance_scale=configuration.guidance_scale,
+            image_height=configuration.image_height,
+            image_width=configuration.image_width,
+            generation_seed_device=configuration.generation_seed_device,
+            latent_dtype=configuration.latent_dtype,
+            template_dtype=configuration.template_dtype,
+            score_dtype=configuration.score_dtype,
+            callback_index=configuration.callback_index,
+            callback_hold_scheduler_intervals=(
+                configuration.callback_hold_scheduler_intervals
+            ),
+            vae_decode_protocol=configuration.vae_decode_protocol,
+            vae_encode_protocol=configuration.vae_encode_protocol,
+            vae_scaling_factor_source=configuration.vae_scaling_factor_source,
+            vae_shift_factor_source=configuration.vae_shift_factor_source,
+            detection_schedule_index=configuration.detection_schedule_index,
+            detection_conditioning_protocol=(
+                configuration.detection_conditioning_protocol
+            ),
+            qk_layer_names=configuration.qk_layer_names,
+            dependency_lock=configuration.dependency_lock,
+        )
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def run_generation(self, initial_latent, callback):
+        assert self.configuration is not None
+        self.run_calls += 1
+        state = initial_latent.detach().clone()
+        for callback_index in range(self.configuration.inference_steps):
+            state = callback(callback_index, state)
+        return state
+
+    def vae_factors(self) -> RuntimeVaeFactors:
+        return RuntimeVaeFactors(
+            scaling_factor=0.5,
+            shift_factor=0.25,
+        )
+
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        self.decode_calls += 1
+        channel_mean = latent.to(torch.float32).mean(dim=1, keepdim=True)
+        return torch.sigmoid(channel_mean).repeat(1, 3, 1, 1)
+
+    def vae_encode(self, image: torch.Tensor) -> _SalientRuntimePosterior:
+        self.encode_inputs.append(image.detach().clone())
+        channel_mean = image.to(torch.float32).mean(dim=1, keepdim=True)
+        return _SalientRuntimePosterior(channel_mean.repeat(1, 16, 1, 1))
+
+
+class _SalientExperimentObservationModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forward_inputs: list[torch.Tensor] = []
+
+    def forward_inspyre(self, model_input: torch.Tensor) -> dict[str, object]:
+        self.forward_inputs.append(model_input.detach().cpu().clone())
+        raw = torch.full((1, 1, 64, 64), -10.0, dtype=torch.float32)
+        raw[:, :, 16:48, 16:48] = 10.0
+        return {
+            "saliency": [
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                raw,
+            ]
+        }
+
+
+def _salient_experiment_runtime() -> tuple[
+    Sd35RuntimeAdapter,
+    _SalientExperimentRuntimeBackend,
+    InspyrenetSaliencyRuntime,
+    _SalientExperimentObservationModel,
+]:
+    backend = _SalientExperimentRuntimeBackend()
+    runtime_adapter = create_runtime_adapter(backend)
+    runtime_adapter.initialize("cpu")
+    model = _SalientExperimentObservationModel()
+    saliency_runtime = object.__new__(InspyrenetSaliencyRuntime)
+    saliency_runtime._device = torch.device("cpu")
+    saliency_runtime._model = model
+    return runtime_adapter, backend, saliency_runtime, model
+
+
+def _salient_masked_whitening_asset():
+    payload = {
+        "artifact_role": "lf_saliency_masked_clean_null_whitening_operator",
+        "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
+        "candidate_id": "lf_saliency_masked_null_whitened_matched_score",
+        "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
+        "fit_manifest_sha256": "d" * 64,
+        "fit_source_cluster_count": 32,
+        "latent_shape": [1, 16, 64, 64],
+        "observation_protocol": "final_image_vae_posterior_mode",
+        "regularization_ratio": "0x1.0000000000000p-10",
+        "saliency_mask_protocol": (
+            "detect_public_rgb8_inspyrenet_probability_bilinear64_"
+            "threshold_0.5_erosion3"
+        ),
+        "transform_identity": "orthonormal_dct_ii",
+        "weights_binary32_be_hex": ["3f800000"] * 96,
+    }
+    digest = sha256(main_shared.stable_json_utf8(payload)).hexdigest()
+    return main.LfSaliencyMaskedNullWhiteningAsset.from_canonical_payload(
+        payload,
+        whitening_asset_digest=digest,
+    )
+
+
+def _salient_branch_nulls(hf_result, lf_result):
+    partition = "salient_local_lf_independent_primary_null_partition"
+    return (
+        main.SaliencyBranchNullCalibration(
+            branch="hf",
+            detector_identity=hf_result.detector_identity,
+            partition_identity=partition,
+            records=tuple(
+                main.NullScoreRecord(
+                    score=-1.0 + index / 32.0,
+                    source_cluster_id=f"hf-null-source-{index:02d}",
+                    sample_id=f"hf-null-sample-{index:02d}",
+                )
+                for index in range(32)
+            ),
+        ),
+        main.SaliencyBranchNullCalibration(
+            branch="lf",
+            detector_identity=lf_result.detector_identity,
+            partition_identity=partition,
+            records=tuple(
+                main.NullScoreRecord(
+                    score=-1.0 + index / 32.0,
+                    source_cluster_id=f"lf-null-source-{index:02d}",
+                    sample_id=f"lf-null-sample-{index:02d}",
+                )
+                for index in range(32)
+            ),
+        ),
+    )
 
 
 def _unit(index: int, *, case_id: str | None = None) -> AnalysisUnitIdentity:
@@ -320,6 +517,186 @@ def test_adapter_main_symbols_are_identity_preserving_top_level_exports() -> Non
         for symbol in symbols:
             assert symbol in main.__all__
             assert getattr(main, symbol) is getattr(owner, symbol)
+
+
+@pytest.mark.unit
+def test_adapter_runs_public_salient_local_lf_write_and_detection_candidates(
+) -> None:
+    runtime_adapter, backend, saliency_runtime, model = (
+        _salient_experiment_runtime()
+    )
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration, runtime_adapter)
+    detection_key = "salient-local-lf-experiment-public-key"
+    base_latent = torch.linspace(
+        -1.0,
+        1.0,
+        steps=16 * 64 * 64,
+        dtype=torch.float32,
+    ).reshape((1, 16, 64, 64)).to(torch.float16)
+
+    write_call = adapter.execute_global_hf_local_lf_content_write(
+        base_latent,
+        saliency_runtime,
+        detection_key,
+    )
+
+    assert type(write_call.result) is SalientLocalLfContentWriteResult
+    assert write_call.responsibility == "content_embedder"
+    assert write_call.public_callable == (
+        "runtime.Sd35RuntimeAdapter."
+        "execute_salient_local_lf_content_write_and_vae"
+        " -> main.inspyrenet_salient_local_lf_router"
+        " -> main.hf_carrier"
+        " -> main.lf_carrier"
+        " -> main.salient_local_lf_content_embedder"
+    )
+    assert write_call.result.content_embedding_candidate_id == (
+        "content_embedding_global_hf_local_lf"
+    )
+    assert write_call.result_identity == (
+        write_call.result.embedding_result_identity
+    )
+    assert write_call.result.integrity_status == "passed"
+    assert write_call.result.budget_status == "accepted"
+    assert backend.run_calls == 2
+    assert backend.decode_calls == 3
+    assert backend.encode_inputs == []
+    assert len(model.forward_inputs) == 1
+
+    route_call = adapter.route_inspyrenet_salient_local_lf(
+        base_latent.shape,
+        write_call.result.embed_saliency_observation,
+    )
+    assert route_call.result.candidate_id == (
+        "routing_inspyrenet_salient_local_lf"
+    )
+    assert route_call.result_identity == route_call.result.route_identity
+    assert route_call.public_callable == (
+        "main.inspyrenet_salient_local_lf_router"
+    )
+
+    lf_call = adapter.detect_lf_saliency_masked_null_whitened(
+        write_call.result.watermarked_image_rgb8,
+        saliency_runtime,
+        detection_key,
+        _salient_masked_whitening_asset(),
+    )
+    assert lf_call.result.candidate_id == (
+        "lf_saliency_masked_null_whitened_matched_score"
+    )
+    assert lf_call.result_identity == lf_call.result.detector_identity
+    assert lf_call.public_callable == (
+        "runtime.Sd35RuntimeAdapter.observe_salient_local_lf_detection_image"
+        " -> main.inspyrenet_salient_local_lf_router"
+        " -> main.lf_saliency_masked_null_whitened_matched_detector"
+    )
+    assert len(backend.encode_inputs) == 1
+    assert len(model.forward_inputs) == 2
+    assert not hasattr(lf_call.result, "mask_lf")
+    assert not hasattr(lf_call.result, "checkpoint_path")
+
+    runtime_observation = (
+        runtime_adapter.observe_salient_local_lf_detection_image(
+            write_call.result.watermarked_image_rgb8,
+            saliency_runtime,
+        )
+    )
+    detection_latent = runtime_observation.detection_latent.detach().to(
+        device="cpu",
+        dtype=torch.float32,
+    ).contiguous()
+    hf_result = main.hf_detector(
+        main.HfDetectionObservation.from_public_image_encoding(
+            tuple(float(value) for value in detection_latent.reshape(-1).tolist()),
+            tuple(detection_latent.shape),
+        ),
+        detection_key,
+    )
+    hf_null, lf_null = _salient_branch_nulls(hf_result, lf_call.result)
+    combined_call = adapter.detect_content_saliency_max_standardized(
+        hf_result,
+        lf_call.result,
+        hf_null=hf_null,
+        lf_null=lf_null,
+    )
+    assert combined_call.result.candidate_id == (
+        "content_combination_saliency_max_standardized"
+    )
+    assert combined_call.result.combined_score == max(
+        combined_call.result.hf_standardization.z_score,
+        combined_call.result.lf_standardization.z_score,
+    )
+    assert combined_call.result.diagnostic_only
+    assert not combined_call.result.promoted
+    assert combined_call.public_callable == (
+        "main.saliency_max_standardized_content_detector"
+    )
+
+    formal_call = adapter.detect_content(hf_result)
+    assert formal_call.public_callable == "main.content_detector"
+    assert formal_call.result == main.content_detector(hf_result)
+    assert formal_call.result.formal_mode == "hf_only"
+    assert formal_call.result.content_score == hf_result.hf_score
+
+
+@pytest.mark.unit
+def test_adapter_reruns_saliency_runtime_for_raw_and_rectified_public_images(
+) -> None:
+    runtime_adapter, backend, saliency_runtime, model = (
+        _salient_experiment_runtime()
+    )
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration, runtime_adapter)
+    detection_key = "salient-local-lf-raw-rectified-public-key"
+    image = torch.arange(
+        3 * 64 * 64,
+        dtype=torch.int64,
+    ).remainder(256).to(torch.uint8).reshape((1, 3, 64, 64))
+    rectified = torch.flip(image, dims=(3,)).contiguous()
+    asset = _salient_masked_whitening_asset()
+
+    raw_call = adapter.detect_lf_saliency_masked_null_whitened(
+        image,
+        saliency_runtime,
+        detection_key,
+        asset,
+    )
+    rectified_call = adapter.detect_lf_saliency_masked_null_whitened(
+        rectified,
+        saliency_runtime,
+        detection_key,
+        asset,
+    )
+
+    assert len(backend.encode_inputs) == 2
+    assert len(model.forward_inputs) == 2
+    assert torch.equal(
+        backend.encode_inputs[0],
+        image.to(torch.float32) / torch.tensor(255.0, dtype=torch.float32),
+    )
+    assert torch.equal(
+        backend.encode_inputs[1],
+        rectified.to(torch.float32)
+        / torch.tensor(255.0, dtype=torch.float32),
+    )
+    assert raw_call.upstream_runtime_identity == main.rgb8_image_digest(image)
+    assert rectified_call.upstream_runtime_identity == (
+        main.rgb8_image_digest(rectified)
+    )
+    assert raw_call.upstream_runtime_identity != (
+        rectified_call.upstream_runtime_identity
+    )
+    assert raw_call.result.observation_digest != (
+        rectified_call.result.observation_digest
+    )
+    assert raw_call.result.saliency_route_identity != (
+        rectified_call.result.saliency_route_identity
+    )
 
 
 @pytest.mark.unit
@@ -1183,13 +1560,17 @@ def test_method_adapter_all_public_execution_entries_revalidate_configuration() 
         "derive_wrong_key_stream",
         "derive_public_noise",
         "route_content",
+        "route_inspyrenet_salient_local_lf",
         "build_lf_carrier",
         "build_hf_carrier",
         "embed_content",
+        "execute_global_hf_local_lf_content_write",
         "detect_lf",
         "detect_lf_null_whitened",
+        "detect_lf_saliency_masked_null_whitened",
         "detect_hf",
         "detect_content",
+        "detect_content_saliency_max_standardized",
         "observe_qk_geometry",
         "synchronize_qk_observation",
         "estimate_geometric_transform",

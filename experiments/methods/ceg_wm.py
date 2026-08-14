@@ -36,11 +36,19 @@ from main import (
     LfDetectionResult,
     LfNullWhitenedDetectionResult,
     LfNullWhiteningAsset,
+    LfSaliencyMaskedNullWhitenedDetectionResult,
+    LfSaliencyMaskedNullWhiteningAsset,
     PreparedLfWhitenedObservation,
     PreparedLfWhitenedTemplate,
     QkGeometrySyncResult,
     RootKeyIdentity,
     RoutingObservations,
+    SaliencyBranchNullCalibration,
+    SaliencyMaskedLfDetectionObservation,
+    SaliencyMaxStandardizedDetectionResult,
+    SaliencyProbabilityObservation,
+    SalientLocalLfEmbeddingResult,
+    SalientLocalLfRoutingResult,
     content_detector,
     content_embedder,
     content_router,
@@ -56,18 +64,25 @@ from main import (
     hf_detector,
     identify_root_key,
     image_rectifier,
+    inspyrenet_salient_local_lf_router,
     key_schedule_sha256_counter,
     lf_carrier,
     lf_detector,
     lf_null_whitened_matched_detector,
+    lf_saliency_masked_null_whitened_matched_detector,
     qk_geometry_sync,
+    saliency_max_standardized_content_detector,
+    salient_local_lf_content_embedder,
 )
 from runtime import (
     ContentWriteGeometrySuffixResult,
     ContentWriteVaeResult,
+    InspyrenetSaliencyRuntime,
     RuntimeActualQkSuffixResult,
     RuntimeDifferentiableQkSuffixResult,
     RuntimeQkObservationResult,
+    SalientLocalLfContentWriteResult,
+    SalientLocalLfDetectionObservationResult,
     Sd35RuntimeAdapter,
 )
 
@@ -93,6 +108,25 @@ QK_SYNCHRONIZATION_WRITE_PUBLIC_CALLABLE = (
     " -> runtime.Sd35RuntimeAdapter."
     "observe_actual_qk_from_generation_suffix"
     " -> main.qk_geometry_sync"
+)
+SALIENT_LOCAL_LF_ROUTING_PUBLIC_CALLABLE = (
+    "main.inspyrenet_salient_local_lf_router"
+)
+SALIENT_LOCAL_LF_EMBEDDING_PUBLIC_CALLABLE = (
+    "runtime.Sd35RuntimeAdapter."
+    "execute_salient_local_lf_content_write_and_vae"
+    " -> main.inspyrenet_salient_local_lf_router"
+    " -> main.hf_carrier"
+    " -> main.lf_carrier"
+    " -> main.salient_local_lf_content_embedder"
+)
+SALIENT_MASKED_LF_DETECTION_PUBLIC_CALLABLE = (
+    "runtime.Sd35RuntimeAdapter.observe_salient_local_lf_detection_image"
+    " -> main.inspyrenet_salient_local_lf_router"
+    " -> main.lf_saliency_masked_null_whitened_matched_detector"
+)
+SALIENT_MAX_CONTENT_DETECTION_PUBLIC_CALLABLE = (
+    "main.saliency_max_standardized_content_detector"
 )
 REQUIRED_COMPONENT_BINDINGS = (
     ("key_schedule", "main.identify_root_key", "config_digest"),
@@ -592,6 +626,22 @@ class CegWmExperimentAdapter:
         return self._observe("content_router", result)
 
     @_revalidate_configuration_before_call
+    def route_inspyrenet_salient_local_lf(
+        self,
+        latent_shape: Sequence[int],
+        saliency_probability: SaliencyProbabilityObservation,
+    ) -> ComponentCallObservation[SalientLocalLfRoutingResult]:
+        result = inspyrenet_salient_local_lf_router(
+            latent_shape,
+            saliency_probability,
+        )
+        return self._observe(
+            "content_router",
+            result,
+            public_callable=SALIENT_LOCAL_LF_ROUTING_PUBLIC_CALLABLE,
+        )
+
+    @_revalidate_configuration_before_call
     def build_lf_carrier(
         self,
         detection_key: str,
@@ -641,6 +691,58 @@ class CegWmExperimentAdapter:
         return self._observe("content_embedder", result)
 
     @_revalidate_configuration_before_call
+    def execute_global_hf_local_lf_content_write(
+        self,
+        base_latent: torch.Tensor,
+        saliency_runtime: InspyrenetSaliencyRuntime,
+        detection_key: str | DerivedWrongKeyMaterial,
+    ) -> ComponentCallObservation[SalientLocalLfContentWriteResult]:
+        runtime_adapter = self._runtime_adapter
+        if runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "salient local LF content writing requires a prepared runtime adapter"
+            )
+        latent_shape = tuple(base_latent.shape)
+
+        def embed(
+            latent_values: tuple[float, ...],
+            saliency_probability: SaliencyProbabilityObservation,
+        ) -> SalientLocalLfEmbeddingResult:
+            route = inspyrenet_salient_local_lf_router(
+                latent_shape,
+                saliency_probability,
+            )
+            return salient_local_lf_content_embedder(
+                latent_values,
+                hf_carrier(detection_key, latent_shape),
+                lf_carrier(detection_key, latent_shape),
+                route,
+            )
+
+        try:
+            result = (
+                runtime_adapter.execute_salient_local_lf_content_write_and_vae(
+                    base_latent,
+                    saliency_runtime,
+                    embed,
+                )
+            )
+        except Exception as exc:
+            raise CegWmExperimentAdapterError(
+                "salient local LF content write execution failed closed"
+            ) from exc
+        if type(result) is not SalientLocalLfContentWriteResult:
+            raise CegWmExperimentAdapterError(
+                "runtime returned an invalid salient content write result"
+            )
+        return self._observe(
+            "content_embedder",
+            result,
+            result_identity_field="embedding_result_identity",
+            public_callable=SALIENT_LOCAL_LF_EMBEDDING_PUBLIC_CALLABLE,
+        )
+
+    @_revalidate_configuration_before_call
     def detect_lf(
         self,
         observation: LfDetectionObservation,
@@ -675,6 +777,64 @@ class CegWmExperimentAdapter:
         )
 
     @_revalidate_configuration_before_call
+    def detect_lf_saliency_masked_null_whitened(
+        self,
+        image_rgb8: torch.Tensor,
+        saliency_runtime: InspyrenetSaliencyRuntime,
+        detection_key: str | DerivedWrongKeyMaterial,
+        whitening_asset: LfSaliencyMaskedNullWhiteningAsset,
+    ) -> ComponentCallObservation[LfSaliencyMaskedNullWhitenedDetectionResult]:
+        runtime_adapter = self._runtime_adapter
+        if runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "masked LF detection requires a prepared runtime adapter"
+            )
+        try:
+            runtime_result = (
+                runtime_adapter.observe_salient_local_lf_detection_image(
+                    image_rgb8,
+                    saliency_runtime,
+                )
+            )
+            if type(runtime_result) is not SalientLocalLfDetectionObservationResult:
+                raise CegWmExperimentAdapterError(
+                    "runtime returned an invalid salient detection observation"
+                )
+            latent = runtime_result.detection_latent.detach().to(
+                device="cpu",
+                dtype=torch.float32,
+            ).contiguous()
+            observation = (
+                SaliencyMaskedLfDetectionObservation.from_public_image_encoding(
+                    tuple(float(value) for value in latent.reshape(-1).tolist()),
+                    tuple(latent.shape),
+                    public_input_image_digest=runtime_result.input_image_digest,
+                )
+            )
+            route = inspyrenet_salient_local_lf_router(
+                tuple(latent.shape),
+                runtime_result.saliency_observation,
+            )
+            result = lf_saliency_masked_null_whitened_matched_detector(
+                observation,
+                detection_key,
+                whitening_asset,
+                route,
+            )
+        except CegWmExperimentAdapterError:
+            raise
+        except Exception as exc:
+            raise CegWmExperimentAdapterError(
+                "masked LF public detection execution failed closed"
+            ) from exc
+        return self._observe(
+            "lf_detector",
+            result,
+            upstream_runtime_identity=runtime_result.input_image_digest,
+            public_callable=SALIENT_MASKED_LF_DETECTION_PUBLIC_CALLABLE,
+        )
+
+    @_revalidate_configuration_before_call
     def detect_hf(
         self,
         observation: HfDetectionObservation,
@@ -703,6 +863,27 @@ class CegWmExperimentAdapter:
             weight=weight,
         )
         return self._observe("content_detector", result)
+
+    @_revalidate_configuration_before_call
+    def detect_content_saliency_max_standardized(
+        self,
+        hf_result: HfDetectionResult,
+        lf_result: LfSaliencyMaskedNullWhitenedDetectionResult,
+        *,
+        hf_null: SaliencyBranchNullCalibration,
+        lf_null: SaliencyBranchNullCalibration,
+    ) -> ComponentCallObservation[SaliencyMaxStandardizedDetectionResult]:
+        result = saliency_max_standardized_content_detector(
+            hf_result,
+            lf_result,
+            hf_null=hf_null,
+            lf_null=lf_null,
+        )
+        return self._observe(
+            "content_detector",
+            result,
+            public_callable=SALIENT_MAX_CONTENT_DETECTION_PUBLIC_CALLABLE,
+        )
 
     @_revalidate_configuration_before_call
     def observe_qk_geometry(
