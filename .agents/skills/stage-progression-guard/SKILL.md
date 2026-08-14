@@ -13,7 +13,14 @@ description: Evaluate and govern CEG-WM semantic stage changes. Use when changin
 4. For `research_defined` and later stages, verify `.codex/research_state/research_definition.yaml`, all required design roles and every frozen method invariant.
 5. To enter `method_construction_authorized`, verify candidate specification closure, independent review, explicit user authorization and an auditable repository revision, then fill `method_construction_admission.yaml` from its template.
 6. Make the transition to `method_construction_authorized` in a revision that contains no `main/` change; use the research-definition audit to verify that transition from the admission base revision, and begin implementation only in a later authorized revision.
-7. For `method_implemented` and later stages, verify `.codex/research_state/method_readiness.yaml` binds all 13 required responsibility components to their policy-fixed architecture paths, exact candidate IDs, unique implementation symbols and declared responsibilities; do not confuse the 10 candidate IDs with the component count.
+7. For `method_implemented` and later stages, read the required responsibility count and
+   bindings from `governance/policies/method_readiness_rules.yaml`, the actual
+   readiness-bound implementation identities from
+   `.codex/research_state/method_readiness.yaml`, and the design registry identities
+   from `docs/design/candidate_specifications.md`; verify the readiness binds every
+   policy-required component to its fixed architecture path, exact candidate IDs,
+   unique implementation symbol and declared responsibility without conflating these
+   three authority planes.
 8. Verify every required candidate-specific behavior node binds the policy-required component symbols, calls them, and makes data-dependent, non-isomorphic assertions.
 9. Treat the AST audit only as a necessary structure/wiring gate. Require a separate independent semantic review `approve` bound to the same candidate digest and a repository revision after which no candidate, implementation or registered test path changed.
 10. Verify required runtime evidence, protocols, records, reports and harness gates for later stages.
@@ -29,7 +36,7 @@ description: Evaluate and govern CEG-WM semantic stage changes. Use when changin
 - Behavior-check nodes must be in the default suite and must directly import and call the registered implementation with non-constant assertions.
 - Do not treat method-readiness metadata itself as scientific effectiveness evidence.
 - Do not make research code or runtime configuration depend on the outer method-readiness metadata.
-- Do not enter `method_implemented` with any of the 13 responsibility components
+- Do not enter `method_implemented` with any policy-required responsibility component
   missing, aliased or folded together, including content embedder, LF detector and
   geometry reliability.
 - Do not advance beyond `research_defined` merely because design documents exist.

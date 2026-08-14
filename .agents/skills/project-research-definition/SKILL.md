@@ -16,9 +16,12 @@ description: Define or revise CEG-WM's dual-chain research objective, access mod
    authorization; keep empirical promotion outcomes and calibrated numerical thresholds open
    until governed validation.
 6. Update the canonical design documents and outer research-definition manifest together.
-7. Keep the 13 implementation responsibilities distinct from the 10 candidate
-   registry IDs; combined embedding, LF blind scoring and geometry reliability
-   have independent responsibility identities.
+7. Read the design registry identities from `docs/design/candidate_specifications.md`,
+   the readiness-bound implementation identities from
+   `.codex/research_state/method_readiness.yaml`, and the required responsibility count
+   and bindings from `governance/policies/method_readiness_rules.yaml`; keep all three
+   authority planes distinct. Combined embedding, LF blind scoring and geometry
+   reliability have independent responsibility identities.
 8. Give full CEG-WM success, honest negative closure and any reduced-scope method distinct identities and evidence gates.
 9. Align the contract stage and planned evaluation surface without adding project implementation.
 

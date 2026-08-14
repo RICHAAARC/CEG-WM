@@ -318,6 +318,8 @@ negative。继任候选的写入只允许
 
 ### Historical Calibrated Candidate Family
 
+本节的 `a/w/function`、candidate-selection CDF 与 provisional threshold 只服务既有
+producer/package/record 的 historical exact replay，不是 current 候选的参数选择面。
 每个分支按 `content_combination_calibrated` 的有限样本 mid-rank empirical CDF、
 `1/(2n)` 双尾 clipping 和冻结 `2^20` midpoint float32 normal-quantile table
 转换为方向一致的 `z_hf` 与
@@ -341,13 +343,18 @@ primary null，内容统计固定为 `max(z_hf,z_lf_masked)`。其 current matri
 HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 与失败，并在 correct-key、
 wrong-key、unwatermarked 与 invalid-mask 条件保留固定分母。不得要求 adaptive 胜过
 uniform/permuted，也不得把 historical route-disabled 重新引入 selection。
+current 候选不存在 `a`、`w`、function 或其他组合参数 selection。calibration 只允许
+在互斥职责中分别拟合 HF 与 masked-LF 分支的 primary-null/CDF 标准化、固定 max
+statistic 的单一 `tau`，以及 rescue、geometry reliability 和 end-to-end check 各自
+声明的量；不得把这些职责重新解释为组合函数搜索。
 
 ### Promotion Gate
 
 LF/HF 组合只有同时满足以下条件才可以替换 HF-only content detector 成为正式 `D_M`：
 
 - LF 单分支通过 key attribution 和无水印校准门；
-- 组合参数只在 calibration 内确定；
+- HF 与 masked-LF 分支标准化及固定 max statistic 的 `tau` 分别由其预登记、互斥
+  calibration 职责拟合；不存在组合参数选择；
 - candidate-selection manifest 内预登记且未参与拟合的 confirmation partition 中，至少一个预登记核心攻击族出现统计稳定的增量 TPR；
 - identity 和 HF-only 已擅长条件下的退化不超过预登记容忍度；
 - end-to-end FPR、错误密钥误归属和图像质量全部满足边界；
@@ -450,15 +457,24 @@ else:
 
 ## Threshold Calibration Primitive
 
-`tau`、`tau_rescue`、几何可靠性门和候选 LF/HF 组合参数必须只从 calibration 范围获得。正式 calibration 必须用互不重叠的 source-cluster manifests 分离：
+current max-statistic 候选不存在 `a/w/function` 或其他组合参数 calibration。正式
+calibration 只允许在互不重叠的 source-cluster manifests 中分别拟合 HF 与
+masked-LF 分支 primary-null/CDF 标准化、固定 `max(z_hf,z_lf_masked)` 的单一
+`tau`、`tau_rescue`、几何可靠性门和完整联合检测器检查；historical `a/w/function`
+只按原 producer replay：
 
-- LF/HF 或路由候选选择；
-- 内容阈值拟合；
+- HF 与 masked-LF 分支 primary-null/CDF 标准化；
+- fixed max-statistic 内容阈值拟合；
 - rescue 区间拟合；
 - 几何可靠性拟合；
 - 完整联合检测器的 calibration 检查。
 
-候选选择不得读取阈值拟合、rescue、几何可靠性或 end-to-end check 的样本；四类拟合/check 也不得反向选择候选。聚类单位是同一 Prompt、seed、生成图像 lineage 与注册 key family 形成的 source cluster，其所有攻击、回正和多 key 派生样本必须留在同一职责 manifest。每类样本量由预登记的 power/sample-size 或尾部置信计算确定，禁止以一个混合固定总数替代独立职责规模。最终 evaluation 不得再选择参数。任何检测器身份变化都使旧阈值失效，必须重新校准。
+候选身份的独立 confirmation 不得读取上述五类拟合/check 的样本；五类职责也不得
+反向选择候选、`a/w/function` 或组合参数。聚类单位是同一 Prompt、seed、生成图像
+lineage 与注册 key family 形成的 source cluster，其所有攻击、回正和多 key 派生
+样本必须留在同一职责 manifest。每类样本量由预登记的 power/sample-size 或尾部置信
+计算确定，禁止以一个混合固定总数替代独立职责规模。最终 evaluation 不得再选择参数。
+任何检测器身份变化都使旧阈值失效，必须重新校准。
 
 ## Failure Semantics
 
@@ -487,10 +503,11 @@ else:
 - `hf_sparse_tail` 固定 CEG-WM 首个 HF 模板/方向顺序、embedder 使用和 runtime
   物化边界；其 sparse-tail 顺序具有 historical DirectHF 来源，但候选身份和证据
   不继承历史名称；
-- `lf_low_pass` 固定 LF template/direction、embedder 使用、score 与有限 `a` 集合；
+- `lf_low_pass` 固定 LF template/direction、embedder 使用与 score；其有限 `a` 集合
+  只属于 historical exact replay；
 - `lf_null_whitened_matched_score` 固定 32-clean fit、96 参数 stationary
   channel-band diagonal `W`、白化 matched score 与只读 blind detector 边界；
-- `routing_stqr` 固定 S/T/R/Q observations 和路由公式；
+- `routing_stqr` 固定 historical S/T/R/Q observations 和路由公式；
 - `content_combination_calibrated` 固定历史有限组合函数集合；
 - `routing_inspyrenet_salient_local_lf` 固定 exact InSPyReNet source/checkpoint/
   forward 和单一 binary mask；

@@ -29,9 +29,18 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 
 - CEG-WM 已按自有 `HF carrier`、`HF direct score` 和 `content detector` 身份完成
   CPU/synthetic 实现；这不是 runtime 或效果验证。
-- LF 的职责、载体、路由和 LF/HF 组合候选已有实现，但仍需实验晋升，不预设正式权重。
+- 现有 readiness 只绑定旧实现的 11 个候选身份；其中旧 routing/combination 已形成
+  producer-bound development negative，只保留历史精确重放。新增显著目标局部 LF
+  四候选均为 `design_candidate_pending_implementation`、
+  `implementation_admission=NO`，不由既有实现或 readiness 自动覆盖。
 - 方法完成面固定为 13 项职责组件；组合写入、LF 盲分数和几何可靠性各有独立
-  路径。候选 registry 仍是 10 个 ID，两个计数不得混用。
+  路径。设计 registry 为 15 个 ID（14 个具名候选加 1 个 mandatory control），
+  readiness-bound 的旧实现候选11个，三种计数不得混用。
+- current 内容候选固定使用无 `a/w` 的 global-HF+local-LF 写入和
+  `max(z_hf,z_lf_masked)` 检测统计，不存在权重、函数或组合参数 selection。
+  calibration 只在独立职责中拟合分支 primary-null/CDF 标准化、max statistic 的
+  `tau` 及 rescue/geometry/end-to-end 各自声明的量；历史 `a/w/function` 只按原
+  producer replay。
 - 几何链只允许恢复坐标与图像，不得直接给出水印阳性。
 - 检测不得依赖原始参考图、嵌入端 record 或嵌入端私有统计量。
 - 恢复后不得切换到更宽松的救援分类器或阈值。
@@ -48,7 +57,7 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   方法架构与证据边界、内容/几何/联合判定设计、算法与候选冻结、真实方法实现、
   runtime qualification，以及实验协议与可追溯交付入口。该闭环已完成；这只表示实验执行准备就绪，
   不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。
-- 正式 detector 仍为 HF-only；LF/routing 尚未实验晋升，
+- 正式 detector 仍为 HF-only；新 masked-LF/routing/组合尚未实施或实验晋升，
   `full_ceg_wm_eligible=false`。
 - 真实 SD3.5 runtime 边界已由 candidate
   `8b2344756c4c247906ff0d4eab68e46a773e13f5` 的 `qualification / passed` run
