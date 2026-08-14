@@ -1,4 +1,5 @@
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from hashlib import sha256
 from math import sqrt
 from struct import pack, unpack
@@ -16,6 +17,7 @@ from main.content_chain.embedder import (
     ContentEmbeddingResult,
     ContentEmbedderError,
     ContentMaterializationObservation,
+    SalientLocalLfEmbeddingResult,
     content_actual_budget_accepts,
     content_materialization_replay_identity,
     content_embedder,
@@ -128,6 +130,22 @@ def _saliency_probability(role: str) -> SaliencyProbabilityObservation:
     )
 
 
+def _salient_local_lf_embedding() -> SalientLocalLfEmbeddingResult:
+    shape = (1, 1, 64, 64)
+    route = inspyrenet_salient_local_lf_router(
+        shape,
+        _saliency_probability(
+            "embed_nonterminal_content_write_callback_latent_rgb8"
+        ),
+    )
+    return salient_local_lf_content_embedder(
+        (1.0,) * (64 * 64),
+        hf_carrier("salient-local-lf-key", shape),
+        lf_carrier("salient-local-lf-key", shape),
+        route,
+    )
+
+
 @pytest.mark.unit
 def test_salient_local_lf_route_and_fixed_write_have_causal_witness() -> None:
     shape = (1, 1, 64, 64)
@@ -153,6 +171,9 @@ def test_salient_local_lf_route_and_fixed_write_have_causal_witness() -> None:
     assert result.lf_delta_nonzero
     assert result.mask_outside_bitwise_zero
     assert result.mask_inside_has_energy
+    assert result.routing_result == route
+    assert result.hf_direction_digest == _float32_digest(result.hf_direction)
+    assert result.lf_direction_digest == _float32_digest(result.lf_direction)
     assert not hasattr(result, "mixing_coefficient")
     assert not hasattr(result, "routing_map")
     drifted_probability = replace(
@@ -235,7 +256,9 @@ class _MonotoneActualMaterializer:
 
     def __call__(
         self,
-        embedding_result: ContentEmbeddingResult,
+        embedding_result: (
+            ContentEmbeddingResult | SalientLocalLfEmbeddingResult
+        ),
         materialization_scale: float,
         /,
     ) -> ContentMaterializationObservation:
@@ -285,6 +308,133 @@ class _MonotoneActualMaterializer:
             integrity_status=status,
             deterministic_binary16_replay_passed=self.replay_passed,
             materialization_replay_identity=replay_identity,
+        )
+
+
+@pytest.mark.unit
+def test_legacy_materialization_payload_remains_parent_exact() -> None:
+    embedding = content_embedder(
+        _latent(BATCH3_SHAPE[1] * BATCH3_SHAPE[2] * BATCH3_SHAPE[3]),
+        hf_carrier(BATCH3_ROOT, BATCH3_SHAPE),
+    )
+    result = reconcile_content_materialization_budget(
+        embedding,
+        _MonotoneActualMaterializer(
+            greatest_feasible_scale=1.0,
+            feasible_utilization=0.75,
+        ),
+    )
+    payload = json.dumps(
+        asdict(result),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    assert embedding.embedding_result_identity == (
+        "8d5e764f9819b9b73e516ec8831ded25910e1f1fcd0af6e89997d8746d1f9257"
+    )
+    assert embedding.delta_content_digest == (
+        "a7ca015f63fab17dc3488d12c65777ba0fa484a0af8550b298d752fb9fc48401"
+    )
+    assert result.observation.materialization_replay_identity == (
+        "8f4b2b5bfcaebf879046bd045727ed92f5308504e922b7d5fcf217a590bc16e4"
+    )
+    assert result.attempt_count == 1
+    assert result.materialization_scale == 1.0
+    assert sha256(payload).hexdigest() == (
+        "cc1e890e93d2265bd1dafcc609f452b7195c5ded1fa9c736979bb0a300040135"
+    )
+
+
+@pytest.mark.unit
+def test_salient_materialization_accepts_full_scale_and_replays_identity() -> None:
+    embedding = _salient_local_lf_embedding()
+    result = reconcile_content_materialization_budget(
+        embedding,
+        _MonotoneActualMaterializer(
+            greatest_feasible_scale=1.0,
+            feasible_utilization=0.75,
+        ),
+    )
+    assert type(result.embedding_result) is SalientLocalLfEmbeddingResult
+    assert result.embedding_result is embedding
+    assert result.materialization_scale == 1.0
+    assert result.attempt_count == 1
+    assert result.budget_status == "accepted"
+    assert result.observation.scaled_nominal_delta_digest == _float32_digest(
+        embedding.delta_content
+    )
+
+
+@pytest.mark.unit
+def test_salient_materialization_selects_maximal_binary32_budget_scale() -> None:
+    embedding = _salient_local_lf_embedding()
+    materializer = _MonotoneActualMaterializer(
+        greatest_feasible_scale=0.375,
+        zero_through_scale=0.30,
+        feasible_utilization=0.5,
+    )
+    result = reconcile_content_materialization_budget(embedding, materializer)
+    assert result.materialization_scale == _test_float32(0.375)
+    next_scale = _next_positive_float32(result.materialization_scale)
+    next_observation = _MonotoneActualMaterializer(
+        greatest_feasible_scale=0.375,
+        zero_through_scale=0.30,
+        feasible_utilization=0.5,
+    )(embedding, next_scale)
+    assert not content_actual_budget_accepts(
+        next_observation.baseline_norm,
+        next_observation.realized_total_l2,
+    )
+
+
+@pytest.mark.unit
+def test_salient_materialization_failures_preserve_frozen_semantics() -> None:
+    embedding = _salient_local_lf_embedding()
+    with pytest.raises(ContentEmbedderError, match="binary16 replay"):
+        reconcile_content_materialization_budget(
+            embedding,
+            _MonotoneActualMaterializer(
+                greatest_feasible_scale=1.0,
+                replay_passed=False,
+            ),
+        )
+    disappeared = _MonotoneActualMaterializer(
+        greatest_feasible_scale=1.0,
+        zero_through_scale=1.0,
+    )
+    with pytest.raises(ContentEmbedderError, match="full-scale"):
+        reconcile_content_materialization_budget(embedding, disappeared)
+
+    forged_results = (
+        replace(
+            embedding,
+            delta_content=(float("nan"),) + embedding.delta_content[1:],
+        ),
+        replace(embedding, lf_delta_nonzero=False),
+        replace(embedding, candidate_id="content_embedding_untrusted"),
+        replace(embedding, embedder_config_digest="0" * 64),
+        replace(embedding, route_identity="0" * 64),
+        replace(embedding, embedding_result_identity="0" * 64),
+        replace(
+            embedding,
+            routing_result=replace(
+                embedding.routing_result,
+                mask_lf=(0.0,) * len(embedding.routing_result.mask_lf),
+            ),
+        ),
+    )
+    for forged in forged_results:
+        with pytest.raises(ContentEmbedderError):
+            reconcile_content_materialization_budget(
+                forged,
+                _MonotoneActualMaterializer(greatest_feasible_scale=1.0),
+            )
+
+    with pytest.raises(ContentEmbedderError, match="invalid type"):
+        reconcile_content_materialization_budget(
+            object(),  # type: ignore[arg-type]
+            _MonotoneActualMaterializer(greatest_feasible_scale=1.0),
         )
 
 

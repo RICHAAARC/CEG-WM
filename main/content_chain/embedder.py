@@ -92,9 +92,15 @@ class SalientLocalLfEmbeddingResult:
     delta_content: tuple[float, ...]
     delta_content_digest: str
     content_direction: tuple[float, ...]
+    hf_direction: tuple[float, ...]
+    lf_direction: tuple[float, ...]
     masked_lf_direction: tuple[float, ...]
+    lf_direction_digest: str
     masked_lf_direction_digest: str
     hf_direction_digest: str
+    hf_carrier_config_digest: str
+    lf_carrier_config_digest: str
+    routing_result: SalientLocalLfRoutingResult
     route_identity: str
     route_config_digest: str
     latent_norm: float
@@ -138,7 +144,9 @@ class ContentMaterializer(Protocol):
 
     def __call__(
         self,
-        embedding_result: ContentEmbeddingResult,
+        embedding_result: (
+            ContentEmbeddingResult | SalientLocalLfEmbeddingResult
+        ),
         materialization_scale: float,
         /,
     ) -> ContentMaterializationObservation: ...
@@ -148,7 +156,7 @@ class ContentMaterializer(Protocol):
 class ContentMaterializationResult:
     """通过 actual-dtype 完整性门和硬预算门的最终内容写入。"""
 
-    embedding_result: ContentEmbeddingResult
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult
     observation: ContentMaterializationObservation
     content_relative_l2_nominal: float
     content_relative_l2_limit: float
@@ -479,6 +487,247 @@ def _validate_content_embedding_result(
     return result
 
 
+def _salient_local_lf_embedder_config_digest(
+    *,
+    hf_carrier_config_digest: str,
+    lf_carrier_config_digest: str,
+    route_config_digest: str,
+    target_relative_l2: float,
+) -> str:
+    config = {
+        "candidate_id": SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
+        "formula": "normalize(normalize(T_hf)+normalize(M_embed*T_lf))",
+        "hf_carrier_config_digest": hf_carrier_config_digest,
+        "lf_carrier_config_digest": lf_carrier_config_digest,
+        "route_config_digest": route_config_digest,
+        "target_relative_l2_binary32": pack(">f", target_relative_l2).hex(),
+    }
+    return sha256(stable_json_utf8(config)).hexdigest()
+
+
+def _salient_local_lf_embedding_result_identity(
+    result: SalientLocalLfEmbeddingResult,
+) -> str:
+    return sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": result.candidate_id,
+                "delta_content_digest": result.delta_content_digest,
+                "embedder_config_digest": result.embedder_config_digest,
+                "hf_direction_digest": result.hf_direction_digest,
+                "lf_direction_digest": result.lf_direction_digest,
+                "masked_lf_direction_digest": (
+                    result.masked_lf_direction_digest
+                ),
+                "route_identity": result.route_identity,
+            }
+        )
+    ).hexdigest()
+
+
+def _validate_sha256_identity(value: object, role: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ContentEmbedderError(f"{role} is invalid")
+    return value
+
+
+def _validate_salient_local_lf_embedding_result(
+    result: SalientLocalLfEmbeddingResult,
+) -> SalientLocalLfEmbeddingResult:
+    if type(result) is not SalientLocalLfEmbeddingResult:
+        raise ContentEmbedderError(
+            "salient local LF embedding result has an invalid type"
+        )
+    if result.candidate_id != SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID:
+        raise ContentEmbedderError(
+            "salient local LF embedding candidate identity drifted"
+        )
+    try:
+        route = validate_salient_local_lf_routing_result(result.routing_result)
+    except ContentRouterError as exc:
+        raise ContentEmbedderError(
+            "salient local LF embedding route replay failed"
+        ) from exc
+    if route.observation_role != (
+        "embed_nonterminal_content_write_callback_latent_rgb8"
+    ):
+        raise ContentEmbedderError(
+            "salient local LF embedding requires the embed-side mask"
+        )
+    if (
+        result.shape != route.latent_shape
+        or result.route_identity != route.route_identity
+        or result.route_config_digest != route.route_config_digest
+    ):
+        raise ContentEmbedderError(
+            "salient local LF embedding route identity drifted"
+        )
+    expected_size = 1
+    for dimension in result.shape:
+        expected_size *= dimension
+    hf_direction = _vector(result.hf_direction, expected_size, "hf_direction")
+    lf_direction = _vector(result.lf_direction, expected_size, "lf_direction")
+    masked_direction = _vector(
+        result.masked_lf_direction,
+        expected_size,
+        "masked_lf_direction",
+    )
+    content_direction = _vector(
+        result.content_direction,
+        expected_size,
+        "content_direction",
+    )
+    delta_content = _vector(
+        result.delta_content,
+        expected_size,
+        "delta_content",
+    )
+    for direction, digest, role in (
+        (hf_direction, result.hf_direction_digest, "HF direction digest"),
+        (lf_direction, result.lf_direction_digest, "LF direction digest"),
+        (
+            masked_direction,
+            result.masked_lf_direction_digest,
+            "masked LF direction digest",
+        ),
+        (delta_content, result.delta_content_digest, "content delta digest"),
+    ):
+        _validate_sha256_identity(digest, role)
+        if _digest(direction) != digest:
+            raise ContentEmbedderError(f"{role} mismatch")
+    for direction, role in (
+        (hf_direction, "HF direction"),
+        (lf_direction, "LF direction"),
+        (masked_direction, "masked LF direction"),
+        (content_direction, "content direction"),
+    ):
+        if abs(_l2_norm(direction) - 1.0) > 1e-5:
+            raise ContentEmbedderError(f"{role} must be unit L2")
+    masked_raw = tuple(
+        _float32(mask * value)
+        for mask, value in zip(route.mask_lf, lf_direction, strict=True)
+    )
+    masked_norm = _l2_norm(masked_raw)
+    if masked_norm == 0.0:
+        raise ContentEmbedderError(
+            "saliency-masked LF direction has zero L2 energy"
+        )
+    expected_masked_direction = tuple(
+        _float32(value / masked_norm) for value in masked_raw
+    )
+    if masked_direction != expected_masked_direction:
+        raise ContentEmbedderError(
+            "salient local LF masked direction replay drifted"
+        )
+    combined_raw = tuple(
+        _float32(hf_value + lf_value)
+        for hf_value, lf_value in zip(
+            hf_direction,
+            expected_masked_direction,
+            strict=True,
+        )
+    )
+    combined_norm = _l2_norm(combined_raw)
+    if combined_norm == 0.0:
+        raise ContentEmbedderError(
+            "global-HF plus local-LF direction vanished"
+        )
+    expected_content_direction = tuple(
+        _float32(value / combined_norm) for value in combined_raw
+    )
+    if content_direction != expected_content_direction:
+        raise ContentEmbedderError(
+            "salient local LF content direction replay drifted"
+        )
+    latent_norm = _float32(result.latent_norm)
+    if latent_norm <= 0.0:
+        raise ContentEmbedderError(
+            "salient local LF callback latent norm must be positive"
+        )
+    relative_l2 = _float32(result.target_relative_l2)
+    if not _same_float32(relative_l2, _content_relative_l2()):
+        raise ContentEmbedderError(
+            "salient local LF nominal relative L2 drifted"
+        )
+    target_total_norm = _float32(result.target_total_norm)
+    if not _same_float32(
+        target_total_norm,
+        _float32(relative_l2 * latent_norm),
+    ):
+        raise ContentEmbedderError(
+            "salient local LF target total norm drifted"
+        )
+    expected_delta = _target_component(
+        target_total_norm,
+        expected_content_direction,
+    )
+    if delta_content != expected_delta:
+        raise ContentEmbedderError(
+            "salient local LF delta replay drifted"
+        )
+    outside_zero = all(
+        mask != 0.0 or masked == 0.0
+        for mask, masked in zip(route.mask_lf, masked_raw, strict=True)
+    )
+    inside_energy = any(
+        mask == 1.0 and masked != 0.0
+        for mask, masked in zip(route.mask_lf, masked_raw, strict=True)
+    )
+    lf_delta_nonzero = any(value != 0.0 for value in masked_raw)
+    if (
+        result.lf_delta_nonzero is not lf_delta_nonzero
+        or result.mask_outside_bitwise_zero is not outside_zero
+        or result.mask_inside_has_energy is not inside_energy
+        or not lf_delta_nonzero
+        or not outside_zero
+        or not inside_energy
+    ):
+        raise ContentEmbedderError(
+            "salient local LF causal witness replay drifted"
+        )
+    for digest, role in (
+        (result.hf_carrier_config_digest, "HF carrier config digest"),
+        (result.lf_carrier_config_digest, "LF carrier config digest"),
+        (result.route_config_digest, "route config digest"),
+        (result.route_identity, "route identity"),
+        (result.embedder_config_digest, "embedder config digest"),
+        (result.embedding_result_identity, "embedding result identity"),
+    ):
+        _validate_sha256_identity(digest, role)
+    expected_config_digest = _salient_local_lf_embedder_config_digest(
+        hf_carrier_config_digest=result.hf_carrier_config_digest,
+        lf_carrier_config_digest=result.lf_carrier_config_digest,
+        route_config_digest=result.route_config_digest,
+        target_relative_l2=relative_l2,
+    )
+    if result.embedder_config_digest != expected_config_digest:
+        raise ContentEmbedderError(
+            "salient local LF embedder configuration digest mismatch"
+        )
+    if (
+        result.embedding_result_identity
+        != _salient_local_lf_embedding_result_identity(result)
+    ):
+        raise ContentEmbedderError(
+            "salient local LF embedding result identity mismatch"
+        )
+    return result
+
+
+def _validate_materializable_content_embedding_result(
+    result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
+) -> ContentEmbeddingResult | SalientLocalLfEmbeddingResult:
+    if type(result) is ContentEmbeddingResult:
+        return _validate_content_embedding_result(result)
+    if type(result) is SalientLocalLfEmbeddingResult:
+        return _validate_salient_local_lf_embedding_result(result)
+    raise ContentEmbedderError("content embedding result has an invalid type")
+
+
 def _same_float32(left: float, right: float) -> bool:
     return pack(">f", left) == pack(">f", right)
 
@@ -513,12 +762,12 @@ def content_actual_budget_accepts(
 
 
 def scale_content_delta_binary32(
-    embedding_result: ContentEmbeddingResult,
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
     materialization_scale: float,
 ) -> tuple[float, ...]:
     """逐项执行 `f32(delta_content_i * f32(scale))`。"""
 
-    _validate_content_embedding_result(embedding_result)
+    _validate_materializable_content_embedding_result(embedding_result)
     scale = _float32(materialization_scale)
     if not 0.0 < scale <= 1.0:
         raise ContentEmbedderError(
@@ -531,7 +780,7 @@ def scale_content_delta_binary32(
 
 
 def content_materialization_replay_identity(
-    embedding_result: ContentEmbeddingResult,
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
     *,
     materialization_scale: float,
     scaled_nominal_delta_digest: str,
@@ -565,9 +814,14 @@ def content_materialization_replay_identity(
         raise ContentEmbedderError(
             "content materialization integrity status is invalid"
         )
+    embedding_replay_binding = (
+        embedding_result.embedder_config_digest
+        if type(embedding_result) is ContentEmbeddingResult
+        else embedding_result.embedding_result_identity
+    )
     identity = (
         "content-materialization-replay-v1\0"
-        f"{embedding_result.embedder_config_digest}\0"
+        f"{embedding_replay_binding}\0"
         f"{pack('>f', scale).hex()}\0"
         f"{scaled_nominal_delta_digest}\0"
         f"{pack('>f', baseline).hex()}\0"
@@ -579,7 +833,7 @@ def content_materialization_replay_identity(
 
 
 def _materialization_observation(
-    embedding_result: ContentEmbeddingResult,
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
     materializer: ContentMaterializer,
     materialization_scale: float,
 ) -> ContentMaterializationObservation:
@@ -687,7 +941,7 @@ def _binary32_midpoint(lower: float, upper: float) -> float:
 
 
 def _accepted_materialization_result(
-    embedding_result: ContentEmbeddingResult,
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
     observation: ContentMaterializationObservation,
     attempt_count: int,
 ) -> ContentMaterializationResult:
@@ -714,12 +968,12 @@ def _accepted_materialization_result(
 
 
 def reconcile_content_materialization_budget(
-    embedding_result: ContentEmbeddingResult,
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
     materializer: ContentMaterializer,
 ) -> ContentMaterializationResult:
     """选择满足 actual-dtype 硬上限的最大非零 binary32 scale。"""
 
-    _validate_content_embedding_result(embedding_result)
+    _validate_materializable_content_embedding_result(embedding_result)
     if not callable(materializer):
         raise ContentEmbedderError("content materializer must be callable")
 
@@ -1227,38 +1481,29 @@ def salient_local_lf_content_embedder(
     )
     if not outside_zero or not inside_energy:
         raise ContentEmbedderError("saliency-masked LF causal witness failed")
-    config = {
-        "candidate_id": SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
-        "formula": "normalize(normalize(T_hf)+normalize(M_embed*T_lf))",
-        "hf_carrier_config_digest": hf_carrier_value.carrier_config_digest,
-        "lf_carrier_config_digest": lf_carrier_value.carrier_config_digest,
-        "route_config_digest": route.route_config_digest,
-        "target_relative_l2_binary32": pack(">f", target_relative_l2).hex(),
-    }
-    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    config_digest = _salient_local_lf_embedder_config_digest(
+        hf_carrier_config_digest=hf_carrier_value.carrier_config_digest,
+        lf_carrier_config_digest=lf_carrier_value.carrier_config_digest,
+        route_config_digest=route.route_config_digest,
+        target_relative_l2=target_relative_l2,
+    )
     masked_digest = _digest(masked_lf_direction)
     delta_digest = _digest(delta_content)
-    identity = sha256(
-        stable_json_utf8(
-            {
-                "candidate_id": SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
-                "delta_content_digest": delta_digest,
-                "embedder_config_digest": config_digest,
-                "hf_direction_digest": hf_carrier_value.direction_digest,
-                "masked_lf_direction_digest": masked_digest,
-                "route_identity": route.route_identity,
-            }
-        )
-    ).hexdigest()
-    return SalientLocalLfEmbeddingResult(
+    result = SalientLocalLfEmbeddingResult(
         candidate_id=SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
         shape=route.latent_shape,
         delta_content=delta_content,
         delta_content_digest=delta_digest,
         content_direction=content_direction,
+        hf_direction=hf_direction,
+        lf_direction=lf_direction,
         masked_lf_direction=masked_lf_direction,
+        lf_direction_digest=lf_carrier_value.direction_digest,
         masked_lf_direction_digest=masked_digest,
         hf_direction_digest=hf_carrier_value.direction_digest,
+        hf_carrier_config_digest=hf_carrier_value.carrier_config_digest,
+        lf_carrier_config_digest=lf_carrier_value.carrier_config_digest,
+        routing_result=route,
         route_identity=route.route_identity,
         route_config_digest=route.route_config_digest,
         latent_norm=latent_norm,
@@ -1268,5 +1513,12 @@ def salient_local_lf_content_embedder(
         mask_outside_bitwise_zero=outside_zero,
         mask_inside_has_energy=inside_energy,
         embedder_config_digest=config_digest,
-        embedding_result_identity=identity,
+        embedding_result_identity="",
     )
+    result = replace(
+        result,
+        embedding_result_identity=(
+            _salient_local_lf_embedding_result_identity(result)
+        ),
+    )
+    return _validate_salient_local_lf_embedding_result(result)
