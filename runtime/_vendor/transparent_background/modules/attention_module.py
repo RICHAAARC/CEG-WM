@@ -18,7 +18,7 @@ class SICA(nn.Module):
             self.stage_size = (base_size[0] // (2 ** stage), base_size[1] // (2 ** stage))
         else:
             self.stage_size = None
-        
+
         self.conv_query = nn.Sequential(Conv2d(in_channel, depth, 3, relu=True),
                                         Conv2d(depth, depth, 3, relu=True))
         self.conv_key   = nn.Sequential(Conv2d(in_channel, depth, 1, relu=True),
@@ -37,14 +37,14 @@ class SICA(nn.Module):
         self.conv_out4 = Conv2d(depth, out_channel, 1)
 
         self.threshold = Parameter(torch.tensor([0.5]))
-        
+
         if self.lmap_in is True:
             self.lthreshold = Parameter(torch.tensor([0.5]))
 
     def forward(self, x, smap, lmap: Optional[torch.Tensor]=None):
         assert not xor(self.lmap_in is True, lmap is not None)
         b, c, h, w = x.shape
-        
+
         # compute class probability
         smap = F.interpolate(smap, size=x.shape[-2:], mode='bilinear', align_corners=False)
         smap = torch.sigmoid(smap)
@@ -73,11 +73,11 @@ class SICA(nn.Module):
             shape_mul = self.stage_size[0] * self.stage_size[1]
         else:
             shape = (h, w)
-            shape_mul = h * w        
-        
+            shape_mul = h * w
+
         f = F.interpolate(x, size=shape, mode='bilinear', align_corners=False).view(b, shape_mul, -1)
         prob = F.interpolate(prob, size=shape, mode='bilinear', align_corners=False).view(b, self.ctx, shape_mul)
-        
+
         # compute context vector
         context = torch.bmm(prob, f).permute(0, 2, 1).unsqueeze(3) # b, 3, c
 
@@ -94,7 +94,7 @@ class SICA(nn.Module):
         # compute refined feature
         context = torch.bmm(sim, value).permute(0, 2, 1).contiguous().view(b, -1, h, w)
         context = self.conv_out1(context)
-        
+
         x = torch.cat([x, context], dim=1)
         x = self.conv_out2(x)
         x = self.conv_out3(x)

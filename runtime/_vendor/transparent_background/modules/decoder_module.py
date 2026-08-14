@@ -11,10 +11,10 @@ class PAA_d(nn.Module):
         self.conv3 = Conv2d(depth, depth, 3)
         self.conv4 = Conv2d(depth, depth, 3)
         self.conv5 = Conv2d(depth, out_channel, 3, bn=False)
-        
+
         self.base_size = base_size
         self.stage = stage
-        
+
         if base_size is not None and stage is not None:
             self.stage_size = (base_size[0] // (2 ** stage), base_size[1] // (2 ** stage))
         else:

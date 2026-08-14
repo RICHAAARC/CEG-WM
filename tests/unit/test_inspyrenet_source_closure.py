@@ -31,7 +31,7 @@ EXPECTED_FILE_HASHES = {
     ),
     "InSPyReNet.py": (
         "9bf8c73a361200888e48677c1df55b81bb1bdb669cfd91d73a01c01d24efbef4",
-        "90ac812614ed77b98228710e337b2a39f8fe910c06f4b7e1ff932bbd698eb7f4",
+        "e2f7d66c37b778ab1fce10553604075a54d93691b4612b952d7d44a8388cf42b",
     ),
     "modules/__init__.py": (
         None,
@@ -39,7 +39,7 @@ EXPECTED_FILE_HASHES = {
     ),
     "modules/layers.py": (
         "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
-        "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
+        "7f5c6ad133af2234b74ff6d067e95f09022f598abc0d987b8a2d99a1044d66d7",
     ),
     "modules/context_module.py": (
         "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4",
@@ -47,11 +47,11 @@ EXPECTED_FILE_HASHES = {
     ),
     "modules/attention_module.py": (
         "7f34d941393fb9dfc69f14ff02f731e5e1487f55cde9e79a7195d328922db2fb",
-        "461d5e6b697e837a2feec187497bc85b7ec36a348f842323d7c6442669204ad8",
+        "30e05975d0e8a9ff9f3dddaf0fa278556d16d9f40b4df8f76d193f4de8c8dcae",
     ),
     "modules/decoder_module.py": (
         "a6c99bfdfed9cefd4184662b4a093d179e6a0c805d92ad21122ebaf95e05ee20",
-        "09bb1ad2025fb58ffde711f9423f63dae07d12db2fc80b4170d2c2a3c6158e13",
+        "1a0b8d23cace8f68ceee14f76802af8d8762ce4dff9327a97538d26b7e7f936d",
     ),
     "backbones/__init__.py": (
         None,
@@ -59,7 +59,7 @@ EXPECTED_FILE_HASHES = {
     ),
     "backbones/SwinTransformer.py": (
         "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82",
-        "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82",
+        "6f76d560fec382c8526a7230f4bbd95d122b97bdea44de452586a79f8a5ac41d",
     ),
 }
 EXPECTED_TRANSFORMATIONS = {
@@ -69,17 +69,84 @@ EXPECTED_TRANSFORMATIONS = {
         "remove_os_sys_imports_and_sys_path_mutation",
         "rewrite_transparent_background_imports_to_vendored_relative_namespace",
         "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace",
     ],
     "modules/__init__.py": ["add_empty_namespace_initializer"],
-    "modules/layers.py": [],
+    "modules/layers.py": ["strip_ascii_trailing_whitespace"],
     "modules/context_module.py": [],
     "modules/attention_module.py": [
         "rewrite_transparent_background_import_to_vendored_relative_namespace",
         "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace",
     ],
-    "modules/decoder_module.py": ["normalize_terminal_newline"],
+    "modules/decoder_module.py": [
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace",
+    ],
     "backbones/__init__.py": ["add_empty_namespace_initializer"],
-    "backbones/SwinTransformer.py": [],
+    "backbones/SwinTransformer.py": [
+        "strip_ascii_trailing_whitespace",
+        "normalize_terminal_newline",
+    ],
+}
+TRAILING_WHITESPACE_BY_LINE = {
+    "InSPyReNet.py": {
+        21: b"        ",
+        37: b"        ",
+        39: b"        ",
+        43: b"        ",
+        45: b"        ",
+        53: b"    ",
+        57: b"            ",
+        65: b"    ",
+        68: b"    ",
+        70: b"        ",
+        87: b"        ",
+        91: b"        ",
+        95: b"        ",
+        97: b"    ",
+        100: b"        ",
+        105: b"            ",
+        113: b"        ",
+        119: b"                ",
+        124: b"            ",
+        126: b" ",
+        127: b"            ",
+        131: b"            ",
+        135: b"            ",
+        139: b"            ",
+        144: b"    ",
+    },
+    "modules/layers.py": {
+        21: b"        ",
+        25: b"        ",
+        29: b"            ",
+        66: b"        ",
+        70: b"        ",
+        74: b"        ",
+        79: b"        ",
+        116: b"        ",
+        146: b"        ",
+    },
+    "modules/attention_module.py": {
+        21: b"        ",
+        40: b"        ",
+        47: b"        ",
+        76: b"        ",
+        77: b"        ",
+        80: b"        ",
+        97: b"        ",
+    },
+    "modules/decoder_module.py": {
+        14: b"        ",
+        17: b"        ",
+    },
+    "backbones/SwinTransformer.py": {
+        603: b"            ",
+        629: b"        ",
+        636: b"        ",
+        643: b"        ",
+    },
 }
 ADDED_REQUIREMENT_PINS = {
     "kornia==0.8.3",
@@ -102,7 +169,24 @@ def _requirement_lines(path: Path) -> list[str]:
     ]
 
 
+def _restore_normalized_source_bytes(local_path: str, payload: bytes) -> bytes:
+    if local_path not in TRAILING_WHITESPACE_BY_LINE:
+        return payload
+    assert payload.endswith(b"\n") and not payload.endswith(b"\n\n")
+    lines = payload.splitlines(keepends=True)
+    assert all(line.rstrip(b"\n") == line.rstrip(b"\n").rstrip(b" \t") for line in lines)
+    for line_ordinal, suffix in TRAILING_WHITESPACE_BY_LINE[local_path].items():
+        line = lines[line_ordinal - 1]
+        assert line.endswith(b"\n")
+        lines[line_ordinal - 1] = line[:-1] + suffix + b"\n"
+    restored = b"".join(lines)
+    if local_path == "backbones/SwinTransformer.py":
+        restored += b"\n"
+    return restored
+
+
 def _restore_upstream_bytes(local_path: str, payload: bytes) -> bytes:
+    payload = _restore_normalized_source_bytes(local_path, payload)
     if local_path == "InSPyReNet.py":
         local_header = (
             b"import torch\n"

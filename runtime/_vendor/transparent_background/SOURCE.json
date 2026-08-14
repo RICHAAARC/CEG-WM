@@ -25,11 +25,12 @@
       "upstream_path": "transparent_background/InSPyReNet.py",
       "local_path": "InSPyReNet.py",
       "upstream_sha256": "9bf8c73a361200888e48677c1df55b81bb1bdb669cfd91d73a01c01d24efbef4",
-      "local_sha256": "90ac812614ed77b98228710e337b2a39f8fe910c06f4b7e1ff932bbd698eb7f4",
+      "local_sha256": "e2f7d66c37b778ab1fce10553604075a54d93691b4612b952d7d44a8388cf42b",
       "transformations": [
         "remove_os_sys_imports_and_sys_path_mutation",
         "rewrite_transparent_background_imports_to_vendored_relative_namespace",
-        "normalize_terminal_newline"
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace"
       ]
     },
     {
@@ -45,8 +46,10 @@
       "upstream_path": "transparent_background/modules/layers.py",
       "local_path": "modules/layers.py",
       "upstream_sha256": "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
-      "local_sha256": "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
-      "transformations": []
+      "local_sha256": "7f5c6ad133af2234b74ff6d067e95f09022f598abc0d987b8a2d99a1044d66d7",
+      "transformations": [
+        "strip_ascii_trailing_whitespace"
+      ]
     },
     {
       "upstream_path": "transparent_background/modules/context_module.py",
@@ -59,19 +62,21 @@
       "upstream_path": "transparent_background/modules/attention_module.py",
       "local_path": "modules/attention_module.py",
       "upstream_sha256": "7f34d941393fb9dfc69f14ff02f731e5e1487f55cde9e79a7195d328922db2fb",
-      "local_sha256": "461d5e6b697e837a2feec187497bc85b7ec36a348f842323d7c6442669204ad8",
+      "local_sha256": "30e05975d0e8a9ff9f3dddaf0fa278556d16d9f40b4df8f76d193f4de8c8dcae",
       "transformations": [
         "rewrite_transparent_background_import_to_vendored_relative_namespace",
-        "normalize_terminal_newline"
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace"
       ]
     },
     {
       "upstream_path": "transparent_background/modules/decoder_module.py",
       "local_path": "modules/decoder_module.py",
       "upstream_sha256": "a6c99bfdfed9cefd4184662b4a093d179e6a0c805d92ad21122ebaf95e05ee20",
-      "local_sha256": "09bb1ad2025fb58ffde711f9423f63dae07d12db2fc80b4170d2c2a3c6158e13",
+      "local_sha256": "1a0b8d23cace8f68ceee14f76802af8d8762ce4dff9327a97538d26b7e7f936d",
       "transformations": [
-        "normalize_terminal_newline"
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace"
       ]
     },
     {
@@ -87,8 +92,11 @@
       "upstream_path": "transparent_background/backbones/SwinTransformer.py",
       "local_path": "backbones/SwinTransformer.py",
       "upstream_sha256": "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82",
-      "local_sha256": "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82",
-      "transformations": []
+      "local_sha256": "6f76d560fec382c8526a7230f4bbd95d122b97bdea44de452586a79f8a5ac41d",
+      "transformations": [
+        "strip_ascii_trailing_whitespace",
+        "normalize_terminal_newline"
+      ]
     }
   ]
 }

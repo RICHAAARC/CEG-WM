@@ -18,15 +18,15 @@ class ImagePyramid:
         k = np.outer(k, k)
         k = torch.tensor(k).float()
         self.kernel = k.repeat(channels, 1, 1, 1)
-        
+
     def to(self, device):
         self.kernel = self.kernel.to(device)
         return self
-        
+
     def cuda(self, idx=None):
         if idx is None:
             idx = torch.cuda.current_device()
-            
+
         self.to(device="cuda:{}".format(idx))
         return self
 
@@ -63,20 +63,20 @@ class ImagePyramid:
 class Transition:
     def __init__(self, k=3):
         self.kernel = torch.tensor(cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))).float()
-        
+
     def to(self, device):
         self.kernel = self.kernel.to(device)
         return self
-        
+
     def cuda(self, idx=0):
         self.to(device="cuda:{}".format(idx))
         return self
-        
+
     def __call__(self, x):
         x = torch.sigmoid(x)
         dx = dilation(x, self.kernel)
         ex = erosion(x, self.kernel)
-        
+
         return ((dx - ex) > .5).float()
 
 class Conv2d(nn.Module):
@@ -113,7 +113,7 @@ class Conv2d(nn.Module):
             self.bn = nn.BatchNorm2d(out_channels)
         else:
             self.bn = None
-        
+
         if relu is True:
             self.relu = nn.ReLU(inplace=True)
         else:
@@ -143,7 +143,7 @@ class SelfAttention(nn.Module):
 
         self.gamma = Parameter(torch.zeros(1))
         self.softmax = nn.Softmax(dim=-1)
-        
+
         self.stage_size = stage_size
 
     def forward(self, x):
