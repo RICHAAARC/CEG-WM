@@ -28,8 +28,8 @@ CEG-WM 自有 HF carrier 与 HF direct score 当前承担 HF 主检测候选；�
 LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
 `content_combination_calibrated` 保留为既有候选身份；其中后两者对应的执行路线已
 形成 producer-bound development 负证据，不再是 current candidate。继任内容路线
-新增四个 `design_candidate_implementation_authorized` 身份，并获得仅限本地独立
-revisions 的 implementation admission；四者尚未实现、未绑定 readiness、未获 runtime
+新增四个 `design_candidate_implementation_authorized` 身份；实施准入来自规格外的独立
+用户授权及其 A0 revision，仅限本地独立 revisions。四者尚未实现、未绑定 readiness、未获 runtime
 qualification、实验执行准入或科学晋升。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
 固定 channel-band diagonal null operator 做只读白化 matched score；它不改变 carrier，
 也不把 fit images、参考图或私有 latent 引入检测。实验需要回答：
