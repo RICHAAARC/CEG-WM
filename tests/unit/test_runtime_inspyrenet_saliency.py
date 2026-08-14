@@ -11,7 +11,7 @@ from PIL import Image
 import pytest
 import torch
 
-from main import SaliencyProbabilityObservation
+from main import SaliencyProbabilityObservation, rgb8_image_digest
 from runtime import (
     INSPYRENET_CHECKPOINT_ASSET_BASENAME,
     INSPYRENET_CHECKPOINT_ASSET_IDENTITY,
@@ -105,9 +105,15 @@ def test_public_saliency_runtime_applies_frozen_preprocess_selector_and_single_s
 
     monkeypatch.setattr(saliency_runtime.torch, "sigmoid", counted_sigmoid)
     runtime = _runtime(checkpoint_path)
-    image = Image.fromarray(
-        np.asarray([[[255, 0, 127]]], dtype=np.uint8),
-        mode="RGB",
+    image = torch.tensor(
+        [
+            [
+                [[255, 0], [1, 2]],
+                [[0, 255], [3, 4]],
+                [[127, 128], [5, 6]],
+            ]
+        ],
+        dtype=torch.uint8,
     )
 
     observation = runtime.observe(image, observation_role="detect_public_rgb8")
@@ -124,11 +130,31 @@ def test_public_saliency_runtime_applies_frozen_preprocess_selector_and_single_s
     assert observation.values == expected
     assert observation.values != twice_applied
     assert sigmoid_calls == 1
+    assert observation.source_repository == "plemeri/transparent-background"
+    assert observation.source_revision == (
+        "f0fa91701a98cfc8e955c554e84522f365ec6da3"
+    )
+    assert observation.checkpoint_repository == "plemeri/InSPyReNet"
+    assert observation.checkpoint_revision == (
+        "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
+    )
     assert observation.checkpoint_sha256 == INSPYRENET_CHECKPOINT_SHA256
     assert observation.checkpoint_size == INSPYRENET_CHECKPOINT_SIZE
-    assert observation.input_image_digest == sha256(
-        b"ceg-wm-public-rgb8\x00" + b"\x00\x00\x00\x01" * 2 + image.tobytes()
-    ).hexdigest()
+    assert observation.preprocess_identity == (
+        "rgb_static_1024x1024_imagenet_mean_std_float32"
+    )
+    assert observation.forward_identity == (
+        "direct_forward_inspyre_raw_finest_saliency_logit"
+    )
+    assert observation.sigmoid_identity == "torch_sigmoid_exactly_once"
+    assert observation.observation_role == "detect_public_rgb8"
+    assert observation.input_image_digest == rgb8_image_digest(image)
+    pil_image = saliency_runtime._rgb8_tensor_to_pil(image)
+    assert pil_image.mode == "RGB"
+    assert pil_image.size == (2, 2)
+    assert pil_image.tobytes() == bytes(
+        (255, 0, 127, 0, 255, 128, 1, 3, 5, 2, 4, 6)
+    )
     assert not hasattr(observation, "checkpoint_path")
     assert not hasattr(observation, "model")
     assert model.training is False
@@ -166,7 +192,7 @@ def test_public_saliency_runtime_rejects_forward_output_identity_drift(
     model = _ControlledSaliencyModel(output)
     checkpoint_path = _controlled_checkpoint(tmp_path, monkeypatch, model)
     runtime = _runtime(checkpoint_path)
-    image = Image.new("RGB", (2, 2))
+    image = torch.zeros((1, 3, 2, 2), dtype=torch.uint8)
 
     with pytest.raises(InspyrenetSaliencyRuntimeError):
         runtime.observe(image, observation_role="detect_public_rgb8")
@@ -265,13 +291,41 @@ def test_checkpoint_semantic_identity_and_rgb8_role_fail_closed(
         )
 
     runtime = _runtime(checkpoint_path)
-    with pytest.raises(InspyrenetSaliencyRuntimeError, match="RGB8"):
-        runtime.observe(Image.new("L", (2, 2)), observation_role="detect_public_rgb8")
     with pytest.raises(InspyrenetSaliencyRuntimeError, match="role"):
         runtime.observe(
-            Image.new("RGB", (2, 2)),
+            torch.zeros((1, 3, 2, 2), dtype=torch.uint8),
             observation_role="unsupported_role",  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize(
+    "image",
+    (
+        object(),
+        Image.new("RGB", (2, 2)),
+        torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+        torch.zeros((3, 2, 2), dtype=torch.uint8),
+        torch.zeros((2, 3, 2, 2), dtype=torch.uint8),
+        torch.zeros((1, 1, 2, 2), dtype=torch.uint8),
+        torch.zeros((1, 3, 1, 2), dtype=torch.uint8),
+        torch.zeros((1, 3, 2, 1), dtype=torch.uint8),
+    ),
+)
+def test_public_saliency_runtime_rejects_nonordinary_rgb8_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image: object,
+) -> None:
+    model = _ControlledSaliencyModel(_valid_output())
+    checkpoint_path = _controlled_checkpoint(tmp_path, monkeypatch, model)
+    runtime = _runtime(checkpoint_path)
+
+    with pytest.raises(InspyrenetSaliencyRuntimeError, match="ordinary RGB8"):
+        runtime.observe(
+            image,  # type: ignore[arg-type]
+            observation_role="detect_public_rgb8",
+        )
+    assert model.forward_inputs == []
 
 
 @pytest.mark.integration
@@ -287,7 +341,7 @@ def test_real_checkpoint_executes_frozen_public_saliency_observation() -> None:
         selected_device="cuda:0",
     )
     observation = runtime.observe(
-        Image.new("RGB", (32, 32), color=(127, 127, 127)),
+        torch.full((1, 3, 32, 32), 127, dtype=torch.uint8),
         observation_role="detect_public_rgb8",
     )
 

@@ -6,14 +6,13 @@ from hashlib import sha256
 import os
 from pathlib import Path
 import stat
-from struct import pack
 from typing import BinaryIO, Literal
 
 import numpy as np
 from PIL import Image
 import torch
 
-from main import SaliencyProbabilityObservation
+from main import SaliencyProbabilityObservation, rgb8_image_digest
 
 
 INSPYRENET_CHECKPOINT_ASSET_IDENTITY = "inspyrenet_saliency_checkpoint"
@@ -108,13 +107,15 @@ def _construct_inspyrenet_model() -> torch.nn.Module:
     )
 
 
-def _rgb8_digest(image: Image.Image) -> str:
-    width, height = image.size
-    return sha256(
-        b"ceg-wm-public-rgb8\x00"
-        + pack(">II", width, height)
-        + image.tobytes()
-    ).hexdigest()
+def _rgb8_tensor_to_pil(image: torch.Tensor) -> Image.Image:
+    normalized = image.detach().to(device="cpu").contiguous()
+    height, width = normalized.shape[2:]
+    pixels_hwc = normalized[0].permute(1, 2, 0).contiguous()
+    return Image.frombytes(
+        "RGB",
+        (width, height),
+        bytes(pixels_hwc.reshape(-1).tolist()),
+    )
 
 
 def _preprocess_rgb8(image: Image.Image) -> torch.Tensor:
@@ -196,7 +197,7 @@ class InspyrenetSaliencyRuntime:
 
     def observe(
         self,
-        image: Image.Image,
+        image: torch.Tensor,
         *,
         observation_role: SaliencyObservationRole,
     ) -> SaliencyProbabilityObservation:
@@ -205,8 +206,13 @@ class InspyrenetSaliencyRuntime:
             "detect_public_rgb8",
         }:
             raise InspyrenetSaliencyRuntimeError("saliency observation role is invalid")
-        image_digest = _rgb8_digest(image) if type(image) is Image.Image else None
-        model_input = _preprocess_rgb8(image).to(self._device)
+        try:
+            image_digest = rgb8_image_digest(image)
+        except ValueError:
+            raise InspyrenetSaliencyRuntimeError(
+                "saliency input must be ordinary RGB8 [1,3,H,W]"
+            ) from None
+        model_input = _preprocess_rgb8(_rgb8_tensor_to_pil(image)).to(self._device)
         try:
             with torch.no_grad():
                 output = self._model.forward_inspyre(model_input)
