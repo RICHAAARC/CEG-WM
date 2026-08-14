@@ -458,8 +458,9 @@ CPU/synthetic 验证与 readiness 审核；独立阶段迁移已经完成。
 
 - 13 项职责、27 个 CPU/synthetic 行为节点和唯一 method readiness 已完成并审计；
 - 正式 detector 仍为 HF-only；旧 route/combination 是 producer-bound historical
-  negative，新显著目标四候选为 `design_candidate_pending_implementation`、
-  `implementation_admission=NO`，
+  negative，新显著目标四候选为 `design_candidate_implementation_authorized`、
+  `implementation_admission=YES`；这只授权本地独立 revisions 实施，四者尚未实现、
+  未绑定 readiness、未获 runtime qualification、实验执行准入或科学晋升，
   `full_ceg_wm_eligible=false`；
 - 冻结 SD3.5 candidate 的真实 callback、actual dtype、VAE、两层 Q/K 和基本
   确定性 runtime 边界已经 qualification；

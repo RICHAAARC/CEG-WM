@@ -12,8 +12,9 @@ CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印�
 CPU/synthetic readiness 本身不证明 runtime；当前另有独立真实 GPU qualification
 支持冻结 SD3.5 runtime 边界，但不证明正式 FPR 或科学效果；
 正式 detector 仍为 HF-only；旧 routing/combination 只保留 producer-bound historical
-replay，新显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`、
-`implementation_admission=NO`，
+replay，新显著目标局部 LF 四候选均为 `design_candidate_implementation_authorized`、
+`implementation_admission=YES`；这只授权本地独立 revisions 实施，四者尚未实现、
+未绑定 readiness、未获 runtime qualification、实验执行准入或科学晋升，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation
 或科学证据，也不晋升 LF/routing/组合/geometry。

@@ -59,9 +59,11 @@ direction dot/c；current `content_embedding_global_hf_local_lf` 只拥有
 原始指标上的可靠性合取门。这三项不能由 carrier、content detector 或 transform
 estimator 代行。候选绑定表示该组件必须实现或消费的规格身份，不表示候选已经晋升。
 
-新增四候选统一状态为 `design_candidate_pending_implementation`，
-`implementation_admission=NO`。现有 `experiment_ready / implemented`、readiness、
-runtime qualification 与旧 13 职责实现不自动覆盖它们；本次登记不增加第 14 项职责。
+新增四候选统一状态为 `design_candidate_implementation_authorized`，
+`implementation_admission=YES`。这只授权本地独立 revisions 实施；现有
+`experiment_ready / implemented`、readiness、runtime qualification 与旧 13 职责实现
+不自动覆盖它们。四者尚未实现、未绑定 readiness、未获实验执行准入或科学晋升；
+本次准入不增加第 14 项职责。
 
 ## Provisional Historical Provenance
 
@@ -868,10 +870,11 @@ ties、低/高尾 clipping、排列不变性、严格单调区间、分支交换
 - `lf_saliency_masked_null_whitened_matched_score`；
 - `content_combination_saliency_max_standardized`。
 
-四者状态均为 `design_candidate_pending_implementation`，
-`implementation_admission=NO`。全局 `project_stage=experiment_ready`、
-`implementation_status=implemented` 只描述当前已审核方法/交付基础设施，不表示这四个
-候选已实现、已进入 readiness、可执行或已通过科学门。
+四者状态均为 `design_candidate_implementation_authorized`，
+`implementation_admission=YES`，且只授权本地独立 revisions 实施。全局
+`project_stage=experiment_ready`、`implementation_status=implemented` 只描述当前已审核
+方法/交付基础设施，不表示这四个候选已实现、已进入 readiness、已获 runtime qualification、
+实验执行准入或科学晋升。
 
 旧身份全部留在 registry 以保持 producer replay，但不再是 current candidate：
 
@@ -986,8 +989,9 @@ content-threshold-fit primary null 上重新拟合；不得沿用 HF-only、旧 
 
 ### Admission And Falsification Gates
 
-implementation admission 当前明确为 `NO`。未来单独授权必须先完成 external asset
-license/checkpoint/source/API 复核、精确 mask golden、coverage/failure、causal witness、
+implementation admission 当前明确为 `YES`，且只授权本地独立 revisions 实施。
+external asset license/checkpoint/source/API 的只读兼容性复核已经闭合；实现仍必须完成
+精确 strict-load/runtime、mask golden、coverage/failure、causal witness、
 32-clean-null W fit、public blind key attribution、mask-stability、total-budget 与
 max-statistic identity tests。任一环节需要改变 checkpoint、forward path、threshold、
 erosion、coverage、写入公式、W fit 或 max statistic 时，必须登记新候选身份；不得在
@@ -1361,10 +1365,11 @@ CPU 检查三路门控、几何失败、可靠但内容仍负、同 detector/thr
 routing observations、backbone/runtime、搜索、可靠性指标、回正和联合判定的实现
 选择空白。registry 合计 15 个 ID：14 个具名候选，加上
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
-方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前仅为
-`design_candidate_pending_implementation` 且 implementation admission 为 `NO`；
-仍待实验决定的是明确有限候选
-中的晋升结果和 calibration 数值，不是实现算法。
+方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前为
+`design_candidate_implementation_authorized` 且 implementation admission 为 `YES`，
+只授权本地独立 revisions 实施；四者尚未实现、未绑定 readiness、未获 runtime
+qualification、实验执行准入或科学晋升。仍待实验决定的是明确有限候选中的晋升结果和
+calibration 数值，不是实现算法。
 
 ### Frozen Specification Values Versus Evidence Outcomes
 
@@ -1374,8 +1379,8 @@ filter/write/raw score、唯一 clean-null whitening fit/matched score 与有限
 S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
-rectification；conditional recovery 控制流；以及尚未获 implementation admission 的
-InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
+rectification；conditional recovery 控制流；以及已获本地 implementation admission、
+但尚未实现或获实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
 独立 32-clean-null masked whitening 与 max-statistic identity。
 
 旧 `a` 与三条历史组合函数已经形成 producer-bound negative，不再是 current 选择面。

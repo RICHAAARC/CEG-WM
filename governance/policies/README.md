@@ -10,7 +10,9 @@
   readiness-bound 旧实现的11个候选身份、方法特异性验收节点和独立语义复核要求。
   设计 registry 的15个 ID（14个具名候选加1个 mandatory control）、readiness
   绑定的11个旧实现候选与13项职责是三种不同计数；新增显著目标局部 LF 四候选为
-  pending/NO，policy YAML 和 readiness 本轮均未重绑。
+  `design_candidate_implementation_authorized` / `implementation_admission=YES`，只授权
+  本地独立 revisions 实施；四者尚未实现、未获 runtime qualification、实验执行准入或
+  科学晋升，policy YAML 和 readiness 本轮均未重绑。
 
 current 内容候选固定 max statistic，不存在 `a/w/function` 或组合参数 selection；
 calibration 只承担分支 primary-null/CDF 标准化、max `tau` 与其他独立职责。

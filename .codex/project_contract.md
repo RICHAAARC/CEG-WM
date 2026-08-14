@@ -40,9 +40,10 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   backbone/runtime、搜索与回正已经在
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
   registry 现为 14 个具名候选加 1 个强制 routing 禁用对照，共 15 个 ID。
-  新增的显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`，
-  `implementation_admission=NO`；现有 CPU/synthetic 实现、readiness 和
-  `experiment_ready / implemented` 不覆盖这些新候选，也不等于其实现或实验晋升。
+  新增的显著目标局部 LF 四候选均为 `design_candidate_implementation_authorized`，
+  `implementation_admission=YES`；这只授权在本地独立 revisions 中实施。现有
+  CPU/synthetic 实现、readiness 和 `experiment_ready / implemented` 不覆盖这些新候选；
+  四者仍未实现、未绑定 readiness、未获 runtime qualification、未获实验执行准入或科学晋升。
 - 当前正式 detector 仍为 HF-only；旧 routing/combination 已形成 producer-bound
   development negative，新显著目标局部 LF 四候选尚未实现或实验晋升，
   `full_ceg_wm_eligible=false`。`negative_identity` 只证明 runtime/key identity
@@ -64,8 +65,9 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    producer-bound development 负证据，保留作历史复现而不再是当前内容候选。
    当前新增设计候选使用 InSPyReNet 从图像重建显著目标内部 mask，在全局 HF 上叠加
    局部 LF；它不增加第 14 项职责，仍由既有 `content_router`、carrier、
-   `content_embedder`、分支 detector 与 `content_detector` 分工。新候选尚未获得
-   implementation admission。
+   `content_embedder`、分支 detector 与 `content_detector` 分工。新候选已获得仅限
+   本地独立 revisions 的 implementation admission，但尚未实现、未绑定 readiness、
+   未获 runtime qualification、未获实验执行准入或科学晋升。
 5. 当前显著目标候选的 `content_router` 只输出由冻结 InSPyReNet 规则得到的
    `mask_lf`、全一 `mask_hf` 及其 identity/digests；它不决定混合权重或输出能量
    预算。carrier 只输出模板和 masked unit direction。runtime 只物化 embedder 的

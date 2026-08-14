@@ -62,8 +62,10 @@ normalized-correlation 评分时中心化；该顺序具有 historical DirectHF 
 候选的实验晋升结果。`routing_stqr` 与旧 uniform combination 路线已形成
 producer-bound development 负证据，不再是当前候选。继任设计以
 `routing_inspyrenet_salient_local_lf` 重建显著目标内部 mask、以全局 HF 加局部 LF
-写入，并以独立 masked-LF null whitening 和 `max(z_hf,z_lf_masked)` 检测；当前状态
-仅为 `design_candidate_pending_implementation`，implementation admission 为 `NO`。
+写入，并以独立 masked-LF null whitening 和 `max(z_hf,z_lf_masked)` 检测；当前状态为
+`design_candidate_implementation_authorized`，implementation admission 为 `YES`，且只
+授权本地独立 revisions 实施。四者尚未实现、未绑定 readiness、未获 runtime qualification、
+实验执行准入或科学晋升。
 当前冻结的 `D_M` 候选仍是 HF-only 的 HF direct score；只有新组合候选
 通过预登记晋升后，`content_detector` 才可消费 `s_lf` 与 `s_hf` 形成组合 `D_M`。
 

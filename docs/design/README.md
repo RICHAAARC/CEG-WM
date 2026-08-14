@@ -23,8 +23,9 @@ control），该计数不得与 13 项职责混淆。新增的
 `content_embedding_global_hf_local_lf`、
 `lf_saliency_masked_null_whitened_matched_score` 和
 `content_combination_saliency_max_standardized` 统一为
-`design_candidate_pending_implementation`，`implementation_admission=NO`；不增加第
-14 项职责，也不重签当前 readiness、stage 或既有 runtime qualification。
+`design_candidate_implementation_authorized`，`implementation_admission=YES`；这只
+授权本地独立 revisions 实施，不增加第 14 项职责，也不重签当前 readiness、stage 或
+既有 runtime qualification。四者尚未实现、未绑定 readiness、未获实验执行准入或科学晋升。
 
 旧 `routing_stqr` 的 `A`、双 mask、routed/route-disabled 对照与旧
 `content_uniform_combination` 的 `a/u_content(a)`、direction dot/c 和函数族只服务

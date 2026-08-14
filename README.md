@@ -31,8 +31,10 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   CPU/synthetic 实现；这不是 runtime 或效果验证。
 - 现有 readiness 只绑定旧实现的 11 个候选身份；其中旧 routing/combination 已形成
   producer-bound development negative，只保留历史精确重放。新增显著目标局部 LF
-  四候选均为 `design_candidate_pending_implementation`、
-  `implementation_admission=NO`，不由既有实现或 readiness 自动覆盖。
+  四候选均为 `design_candidate_implementation_authorized`、
+  `implementation_admission=YES`；这只授权本地独立 revisions 实施，不由既有实现或
+  readiness 自动覆盖，且尚未实现、未绑定 readiness、未获 runtime qualification、
+  实验执行准入或科学晋升。
 - 方法完成面固定为 13 项职责组件；组合写入、LF 盲分数和几何可靠性各有独立
   路径。设计 registry 为 15 个 ID（14 个具名候选加 1 个 mandatory control），
   readiness-bound 的旧实现候选11个，三种计数不得混用。

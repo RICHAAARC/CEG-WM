@@ -314,7 +314,8 @@ current router 只返回 `M_embed`、全一 HF support、mask identity/digests�
 当前正式 content detector 保持 HF-only。旧 LF/HF 组合路线是 producer-bound 历史
 negative。继任候选的写入只允许
 `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，检测只允许
-`max(z_hf,z_lf_masked)`；两者尚未获 implementation admission。
+`max(z_hf,z_lf_masked)`；两者已获仅限本地独立 revisions 的 implementation admission，
+但尚未实现、未绑定 readiness、未获 runtime qualification、实验执行准入或科学晋升。
 
 ### Historical Calibrated Candidate Family
 
@@ -525,8 +526,9 @@ registry 共 15 个 ID：14 个具名候选和 1 个强制同预算禁用对照
 13 项实现职责，也不把对照视为方法候选。
 
 原有实现与方法行为门保持其 producer-bound 身份；新增显著目标四候选均为
-`design_candidate_pending_implementation`、`implementation_admission=NO`，尚未实施
-或重绑 readiness。仍开放的是这些候选未来经单独授权的实现/独立语义审核，以及各候选能否通过真实 runtime、
+`design_candidate_implementation_authorized`、`implementation_admission=YES`，这只授权
+本地独立 revisions 实施；四者尚未实现或重绑 readiness，也未获 runtime qualification、
+实验执行准入或科学晋升。仍开放的是这些候选未来经独立语义审核，以及各候选能否通过真实 runtime、
 candidate-selection、calibration 和 formal evaluation 门及互斥 calibration 职责拟合的
 阈值数值。设计冻结与效果证据必须保持分离。
 

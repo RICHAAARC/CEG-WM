@@ -12,8 +12,9 @@
   责任、唯一实现 symbol、27 个非同构行为节点、候选摘要和 revision-bound
   独立语义复核。该 readiness 绑定旧实现的11个候选身份；设计 registry 则为15个
   ID（14个具名候选加1个 mandatory control），二者都不得与13项职责混淆。新增
-  显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`、
-  `implementation_admission=NO`，未写入现有 readiness。
+  显著目标局部 LF 四候选均为 `design_candidate_implementation_authorized`、
+  `implementation_admission=YES`；这只授权本地独立 revisions 实施，四者尚未实现、
+  未写入现有 readiness、未获 runtime qualification、实验执行准入或科学晋升。
 - readiness 只记录方法构建闭合，不是阶段文件。experiment_ready_infrastructure_closure 已完成，冻结实验协议与
   可追溯执行入口可用；这只满足 `experiment_ready` 的执行准备边界，不授权
   calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定
