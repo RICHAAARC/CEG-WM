@@ -1390,18 +1390,26 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
             return self.value
 
     class Vae(torch.nn.Module):
-        config = types.SimpleNamespace(scaling_factor=1.5, shift_factor=0.25)
+        config = types.SimpleNamespace(
+            scaling_factor=1.5,
+            shift_factor=0.25,
+            force_upcast=False,
+            use_post_quant_conv=False,
+        )
+        post_quant_conv = None
 
         def __init__(self) -> None:
             super().__init__()
             self.frozen_parameter = torch.nn.Parameter(torch.ones(()))
+            self.decoder = _DecoderLocalizationPassThrough()
 
         def decode(self, latent, return_dict):
             assert return_dict is True
             operation_grad_modes["vae_decode"].append(torch.is_grad_enabled())
+            decoded = self.decoder(latent)
             return types.SimpleNamespace(
                 sample=torch_functional.interpolate(
-                    latent[:, :3],
+                    decoded[:, :3],
                     size=(512, 512),
                     mode="nearest",
                 )
@@ -1502,9 +1510,16 @@ def test_sd35_backend_preparation_binds_frozen_identity(monkeypatch, tmp_path: P
         StableDiffusion3Pipeline=Pipeline,
         FlowMatchEulerDiscreteScheduler=Scheduler,
     )
+    actual_import_module = sd35_backend_module.importlib.import_module
+
+    def import_runtime_dependency(name, package=None):
+        if name == "diffusers":
+            return module
+        return actual_import_module(name, package)
+
     monkeypatch.setattr(
         "runtime.sd35_backend.importlib.import_module",
-        lambda name: module,
+        import_runtime_dependency,
     )
     class CpuTestBackend(Sd35PipelineBackend):
         def prepare(self, configuration, selected_device):
