@@ -49,7 +49,8 @@ revision `5885d5cd661bc9744480e89603293a5c51af0e26` 准入为
 `design_candidate_implementation_authorized`；当前流程从该 `experiment_ready / implemented`
 基线直接在本地独立 revisions 中完成 CPU/API 实现，不再申请 implementation，也不重建
 Git 身份、不回退或重走既有 stage。CPU/API source implementation、定向测试和上述
-独立语义审核现已闭合；只有候选专属 readiness、真实 checkpoint/runtime smoke、实验
+独立语义审核和仅限 source/CPU/API 的候选专属 readiness overlay 现已闭合；正式
+checkpoint/runtime qualification、实验
 protocol、masked-LF W 与 quality 定义继续闭合后，才可申请新的 module-level development。
 
 ## Paper Research Target
@@ -170,7 +171,8 @@ audit 必须从 authorization base revision
 
 以上按唯一的 13 项正式职责和固定路径实施；readiness 审核绑定的既有候选 ID
 不是组件计数。此后设计新增的显著目标局部 LF 四候选已完成 d887 CPU/API source
-implementation 与独立审核，但在候选专属 readiness 完整闭合前不得写入 readiness。
+implementation、独立审核与候选专属 source/CPU/API overlay；不得写入或改写既有
+11-candidate readiness。
 同时建立的
 `.codex/research_state/method_readiness.yaml` 逐组件连接已实现候选 ID、
 架构规定路径、声明责任、具体且唯一的实现 symbol、方法特异性验收测试和实现完成后

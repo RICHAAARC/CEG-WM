@@ -16,8 +16,9 @@
   `implementation_admission=YES`；该授权 token 保持不变。四者的 CPU/API source
   implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
   `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-  独立审核。该 review 仅证明 CPU/API source closure；四者仍未写入现有 readiness，
-  未完成真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义、
+  独立审核。候选专属 `salient_local_lf_candidate_readiness.yaml` overlay 只记录四者
+  `source_cpu_api_implementation_ready=true`，不把四者写入既有 11-candidate readiness；
+  正式 checkpoint/runtime qualification、实验 protocol、masked-LF W、quality 定义、
   科学验证或晋升。
   `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
   `promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。

@@ -8,12 +8,19 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 import pytest
 
 from governance.harness.audits.audit_method_readiness import run_audit
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SALIENT_OVERLAY_PATH = Path(
+    ".codex/research_state/salient_local_lf_candidate_readiness.yaml"
+)
 
 
 RESPONSIBILITIES = {
@@ -994,6 +1001,29 @@ def _run_fixture_behavior(root: Path, check_name: str) -> subprocess.CompletedPr
     )
 
 
+def _salient_overlay_repository(tmp_path: Path) -> Path:
+    destination = tmp_path / "salient-overlay-repository"
+    subprocess.run(
+        ["git", "clone", "-q", "--shared", str(REPOSITORY_ROOT), str(destination)],
+        check=True,
+    )
+    for relative in (
+        Path("governance/harness/audits/audit_method_readiness.py"),
+        Path("governance/policies/method_readiness_rules.yaml"),
+        Path("docs/design/candidate_specifications.md"),
+        SALIENT_OVERLAY_PATH,
+    ):
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPOSITORY_ROOT / relative, target)
+    return destination
+
+
+def _salient_overlay(root: Path) -> tuple[Path, dict]:
+    path = root / SALIENT_OVERLAY_PATH
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+
 @pytest.mark.unit
 def test_research_stage_does_not_require_method_evidence(tmp_path: Path) -> None:
     _write_authority(tmp_path, "research_defined")
@@ -1463,4 +1493,163 @@ def test_review_binding_fails_after_registered_test_change(tmp_path: Path) -> No
     assert any(
         violation["reason"] == "method_independent_review_binding_stale"
         for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_candidate_overlay_binds_only_source_cpu_api_readiness(
+    tmp_path: Path,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    report = run_audit(root)
+    _, overlay = _salient_overlay(root)
+
+    assert report["decision"] == "pass"
+    assert overlay["source_cpu_api_implementation_ready"] is True
+    assert overlay["candidate_runtime_qualified"] is False
+    assert overlay["experiment_protocol_admitted"] is False
+    assert overlay["masked_lf_whitening_asset_ready"] is False
+    assert overlay["rgb_quality_gate_defined"] is False
+    assert overlay["scientific_mechanism_validated"] is False
+    assert overlay["promoted"] is False
+    assert overlay["formal_detector"] is False
+    assert overlay["diagnostic_only"] is True
+    assert len(set(overlay["responsibility_bindings"].values())) == 4
+    assert all(
+        binding["plane"] != "runtime"
+        for binding in overlay["implementation_bindings"]
+        if binding["candidate_id"]
+        == "content_combination_saliency_max_standardized"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("candidate_runtime_qualified", True, "salient_local_lf_readiness_status_mismatch"),
+        ("experiment_protocol_admitted", True, "salient_local_lf_readiness_status_mismatch"),
+        ("scientific_mechanism_validated", True, "salient_local_lf_readiness_status_mismatch"),
+        ("promoted", True, "salient_local_lf_readiness_status_mismatch"),
+    ],
+)
+def test_salient_local_lf_overlay_rejects_unearned_status(
+    tmp_path: Path,
+    field: str,
+    value: bool,
+    reason: str,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    path, overlay = _salient_overlay(root)
+    overlay[field] = value
+    _write(path, json.dumps(overlay))
+
+    report = run_audit(root)
+    assert any(item["reason"] == reason for item in report["violations"])
+
+
+@pytest.mark.unit
+def test_salient_local_lf_overlay_rejects_unregistered_status_field(
+    tmp_path: Path,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    path, overlay = _salient_overlay(root)
+    overlay["paper_evidence_ready"] = True
+    _write(path, json.dumps(overlay))
+
+    report = run_audit(root)
+    assert any(
+        item["reason"] == "salient_local_lf_candidate_readiness_field_mismatch"
+        for item in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_overlay_rejects_qualified_symbol_drift(
+    tmp_path: Path,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    path, overlay = _salient_overlay(root)
+    overlay["implementation_bindings"][1]["qualified_symbol"] = (
+        "runtime.inspyrenet_saliency.InspyrenetSaliencyRuntime.missing_observer"
+    )
+    _write(path, json.dumps(overlay))
+
+    report = run_audit(root)
+    assert any(
+        item["reason"] == "salient_local_lf_implementation_binding_mismatch"
+        for item in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_overlay_rejects_review_identity_and_digest_drift(
+    tmp_path: Path,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    path, overlay = _salient_overlay(root)
+    overlay["independent_candidate_readiness_review"]["review_reference"] = (
+        "independent_candidate_readiness_review:not-a-uuid:APPROVE"
+    )
+    overlay["independent_candidate_readiness_review"][
+        "candidate_specification_sha256"
+    ] = "0" * 64
+    _write(path, json.dumps(overlay))
+
+    report = run_audit(root)
+    assert any(
+        item["reason"] == "salient_local_lf_independent_review_invalid"
+        for item in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_overlay_rejects_live_formula_loss(tmp_path: Path) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    candidate_path = root / "docs/design/candidate_specifications.md"
+    _write(
+        candidate_path,
+        candidate_path.read_text(encoding="utf-8").replace(
+            "D_saliency_max = max(z_hf, z_lf_masked)",
+            "D_saliency_max formula removed",
+        ),
+    )
+
+    report = run_audit(root)
+    assert any(
+        item["reason"] == "salient_local_lf_live_candidate_authority_incomplete"
+        for item in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_overlay_rejects_protected_runtime_drift(
+    tmp_path: Path,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    path = root / "runtime/inspyrenet_saliency.py"
+    _write(path, path.read_text(encoding="utf-8") + "\n# protected drift\n")
+
+    report = run_audit(root)
+    assert any(
+        item["reason"] == "salient_local_lf_candidate_review_binding_stale"
+        for item in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_overlay_rejects_behavior_node_drift(
+    tmp_path: Path,
+) -> None:
+    root = _salient_overlay_repository(tmp_path)
+    path, overlay = _salient_overlay(root)
+    overlay["behavioral_checks"][
+        "salient_local_lf_route_and_fixed_write_have_causal_witness"
+    ] = "tests/unit/test_lf_routing_combination.py::test_missing_salient_behavior"
+    _write(path, json.dumps(overlay))
+
+    report = run_audit(root)
+    assert any(
+        item["reason"] == "salient_local_lf_behavior_binding_mismatch"
+        for item in report["violations"]
     )

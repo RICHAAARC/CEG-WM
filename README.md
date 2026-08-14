@@ -64,7 +64,8 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   runtime qualification，以及实验协议与可追溯交付入口。该闭环已完成；这只表示实验执行准备就绪，
   不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。
 - 正式 detector 仍为 HF-only；新 masked-LF/routing/组合只完成 CPU/API source
-  implementation，尚未完成候选 readiness、真实 checkpoint/runtime smoke、实验协议、
+  implementation，并已由候选专属 overlay 绑定为仅限 source/CPU/API readiness；尚未完成
+  正式 checkpoint/runtime qualification、实验协议、
   masked-LF W、quality 定义或实验晋升，
   `full_ceg_wm_eligible=false`。
 - 真实 SD3.5 runtime 边界已由 candidate

@@ -213,7 +213,7 @@ causal、global-HF+local-LF、LF-disabled 和失败；不含 `A/a/routed/route-d
 
 HF carrier、HF direct score、旧 LF/路由/组合写入与分支检测已完成 CPU/synthetic
 实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；新显著目标局部 LF
-四候选仅完成 d887 CPU/API source implementation，尚未完成候选 readiness、真实
+四候选已完成 d887 CPU/API source implementation 及候选专属 overlay；仍未完成正式
 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义或晋升，
 `full_ceg_wm_eligible=false`。actual-dtype combined content
 写入、完整性和 hard-budget 路径已在冻结 SD3.5 candidate 的真实 GPU

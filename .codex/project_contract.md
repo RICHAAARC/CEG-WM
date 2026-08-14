@@ -45,8 +45,10 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   source implementation 已在 revision `d88703689a0ea0487ad3a4553d060e5bf1a762cd`
   闭合，并由
   `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-  独立审核通过。该审核只覆盖 source、CPU 与公共 API 调用链；现有 readiness 和
-  `experiment_ready / implemented` 不自动覆盖四者，且尚未完成候选专属 readiness、
+  独立审核通过。候选专属 overlay
+  `.codex/research_state/salient_local_lf_candidate_readiness.yaml` 仅将四者绑定为
+  `source_cpu_api_implementation_ready=true`；它不改写既有 11-candidate readiness，且
+  `experiment_ready / implemented` 不自动覆盖四者。四者尚未完成
   真实 checkpoint/runtime smoke、实验 protocol/执行入口、masked-LF 32-clean-null W、
   quality 定义、科学验证或晋升。
   `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
@@ -76,7 +78,8 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    `content_embedder`、分支 detector 与 `content_detector` 分工。新候选已获得仅限
    本地独立 revisions 的 implementation admission。四者的 CPU/API source implementation
    已在上述 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合并通过上述独立审核，
-   但尚未绑定候选专属 readiness，也未完成真实 checkpoint/runtime smoke、实验协议、
+   并已绑定上述仅限 source/CPU/API 的候选专属 readiness overlay，但尚未完成正式
+   checkpoint/runtime qualification、实验协议、
    masked-LF W、quality 定义、科学验证或晋升。
 5. 当前显著目标候选的 `content_router` 只输出由冻结 InSPyReNet 规则得到的
    `mask_lf`、全一 `mask_hf` 及其 identity/digests；它不决定混合权重或输出能量

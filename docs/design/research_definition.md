@@ -4,6 +4,11 @@
 `experiment_ready_infrastructure_closure`；该身份描述职责闭环，不替代
 `project_stage`，也不自动形成科学证据。
 
+显著目标局部 LF 四候选的独立 overlay 只把 source/CPU/API implementation 标为 ready，
+并复用四项既有职责；全局 `experiment_ready / implemented` 不因此扩张。runtime、
+experiment、masked-LF W、quality、science 与 promotion 均未闭合，正式 detector 仍为
+HF-only。
+
 ## Research Objective
 
 CEG-WM 研究生成式图像中的密钥归属水印。目标是在常规内容失真和 crop、scale、rotation 等几何变换后，以受校准的内容检测统计判断水印是否属于给定密钥，并在必要时通过独立几何链恢复检测坐标。

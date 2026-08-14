@@ -186,7 +186,7 @@ geometry/total budget 仍是独立职责。
 callback、actual dtype、VAE、两层真实 Q/K、registered-key 重复确定性和
 negative-key identity control 已通过真实 GPU qualification。当前正式 detector
 仍为 HF-only；旧 routing/combination 是 producer-bound 历史负结果，新显著目标
-四候选只完成 d887 CPU/API source implementation，尚未闭合候选 readiness、真实
+四候选只完成 d887 CPU/API source implementation 及候选专属 overlay，尚未闭合正式
 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义或科学晋升，
 `full_ceg_wm_eligible=false`。既有 runtime 证据与实验准备基础设施都不是 `tau`、
 confirmation 结果、Calibration Locked、完整联合 FPR、几何恢复效果、正式 evaluation

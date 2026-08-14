@@ -65,7 +65,8 @@ estimator 代行。候选绑定表示该组件必须实现或消费的规格身�
 不自动覆盖它们。四者的 CPU/API source implementation 已在
 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核；该 review 仅覆盖 source/CPU/API，未绑定候选 readiness，也未验证真实
+独立审核；候选专属 overlay 仅绑定 source/CPU/API readiness，不改写既有 11-candidate
+readiness，也未验证正式
 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality、科学效果或晋升；
 本次准入不增加第 14 项职责。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
@@ -1417,7 +1418,8 @@ routing observations、backbone/runtime、搜索、可靠性指标、回正和�
 方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前为
 `design_candidate_implementation_authorized` 且 implementation admission 为 `YES`，
 只授权本地独立 revisions 实施；四者已完成上述 d887 CPU/API source closure，但未绑定
-候选 readiness，也未完成真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、
+候选专属 source/CPU/API readiness overlay；仍未完成正式 checkpoint/runtime qualification、
+实验 protocol、masked-LF W、
 quality 定义、科学验证或晋升。仍待实验决定的是明确有限候选中的晋升结果和
 calibration 数值，不是实现算法。
 
@@ -1430,7 +1432,7 @@ S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
 rectification；conditional recovery 控制流；以及已获本地 implementation admission、
-并已完成 CPU/API source implementation、但尚未获候选 readiness、真实 checkpoint/runtime
+并已完成 CPU/API source implementation 及候选专属 overlay、但尚未获正式 checkpoint/runtime
 smoke 或实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
 独立 32-clean-null masked whitening 与 max-statistic identity。
 
@@ -1447,6 +1449,6 @@ smoke 或实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mas
 单独把四个新候选准入为 `design_candidate_implementation_authorized`。项目全局
 仍是 `experiment_ready / implemented`；新候选的下一步不是再次申请 implementation、
 重建 Git 身份或重走 stage。CPU/API source implementation、定向测试与独立语义审核已在
-上述 d887 closure 完成；下一步必须先闭合候选专属 readiness、真实 checkpoint/runtime
+上述 d887 closure 和 source/CPU/API readiness overlay 已完成；下一步必须闭合正式 checkpoint/runtime
 smoke、实验 protocol 与 masked-LF W，且在 quality 定义和科学门批准后才可申请
 module-level development 执行。

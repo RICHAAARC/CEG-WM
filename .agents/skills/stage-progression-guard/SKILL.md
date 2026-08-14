@@ -43,6 +43,10 @@ description: Evaluate and govern CEG-WM semantic stage changes. Use when changin
 - Do not use an unregistered stage name to bypass an active gate.
 - Behavior-check nodes must be in the default suite and must directly import and call the registered implementation with non-constant assertions.
 - Do not treat method-readiness metadata itself as scientific effectiveness evidence.
+- When a candidate-family readiness overlay exists, read its authority from the candidate
+  specification and readiness policy instead of hard-coding registry counts. Treat a
+  source/CPU/API-ready overlay as separate from the existing method-readiness snapshot,
+  runtime qualification, experiment admission, scientific validation, and promotion.
 - Do not make research code or runtime configuration depend on the outer method-readiness metadata.
 - Do not enter `method_implemented` with any policy-required responsibility component
   missing, aliased or folded together, including content embedder, LF detector and

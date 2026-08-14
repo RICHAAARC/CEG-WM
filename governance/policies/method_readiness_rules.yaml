@@ -1,5 +1,5 @@
 {
-  "policy_version": 10,
+  "policy_version": 11,
   "project_name": "ceg_wm",
   "stage_order": [
     "project_constraint_framework",
@@ -274,5 +274,71 @@
       "conditional_recovery_decision"
     ]
   },
-  "independent_semantic_review_required": true
+  "independent_semantic_review_required": true,
+  "salient_local_lf_candidate_readiness_overlay": {
+    "manifest_path": ".codex/research_state/salient_local_lf_candidate_readiness.yaml",
+    "candidate_ids": [
+      "routing_inspyrenet_salient_local_lf",
+      "content_embedding_global_hf_local_lf",
+      "lf_saliency_masked_null_whitened_matched_score",
+      "content_combination_saliency_max_standardized"
+    ],
+    "responsibility_bindings": {
+      "routing_inspyrenet_salient_local_lf": "content_router",
+      "content_embedding_global_hf_local_lf": "content_embedder",
+      "lf_saliency_masked_null_whitened_matched_score": "lf_detector",
+      "content_combination_saliency_max_standardized": "content_detector"
+    },
+    "behavioral_checks": {
+      "salient_local_lf_route_and_fixed_write_have_causal_witness": "tests/unit/test_lf_routing_combination.py::test_salient_local_lf_route_and_fixed_write_have_causal_witness",
+      "saliency_masked_whitened_detector_binds_mask_asset_and_wrong_key": "tests/unit/test_lf_null_whitened_detector.py::test_saliency_masked_whitened_detector_binds_mask_asset_and_wrong_key",
+      "public_saliency_runtime_applies_frozen_preprocess_selector_and_single_sigmoid": "tests/unit/test_runtime_inspyrenet_saliency.py::test_public_saliency_runtime_applies_frozen_preprocess_selector_and_single_sigmoid",
+      "salient_content_execution_observes_registered_callback": "tests/unit/test_runtime_content_write_and_vae.py::test_salient_content_execution_observes_registered_callback",
+      "salient_raw_and_rectified_detection_observations_are_fresh_and_image_bound": "tests/unit/test_runtime_content_write_and_vae.py::test_salient_raw_and_rectified_detection_observations_are_fresh_and_image_bound",
+      "public_runtime_surface_exposes_frozen_inspyrenet_saliency_owner": "tests/unit/test_runtime_configuration_and_adapter.py::test_public_runtime_surface_exposes_frozen_inspyrenet_saliency_owner",
+      "adapter_runs_public_salient_local_lf_write_and_detection_candidates": "tests/unit/test_internal_experiment_components.py::test_adapter_runs_public_salient_local_lf_write_and_detection_candidates"
+    },
+    "status": {
+      "source_cpu_api_implementation_ready": true,
+      "candidate_runtime_qualified": false,
+      "experiment_protocol_admitted": false,
+      "masked_lf_whitening_asset_ready": false,
+      "rgb_quality_gate_defined": false,
+      "scientific_mechanism_validated": false,
+      "promoted": false,
+      "formal_detector": false,
+      "diagnostic_only": true
+    },
+    "implementation_review_provenance": "independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE",
+    "review_reference": "independent_candidate_readiness_review:01a001dd-b222-7fe2-9f1e-7983e0821a1b:2908c24939393c8f18416429ee6030b1fc9530ed:APPROVE",
+    "reviewed_repository_revision": "2908c24939393c8f18416429ee6030b1fc9530ed",
+    "candidate_specification_sha256": "5f0b308a2615b2191be128ce7c3d839ad7b185266e823a89b0a0b5767791fe16",
+    "protected_paths": [
+      "main/content_chain/routing.py",
+      "main/content_chain/embedder.py",
+      "main/content_chain/lf_detector.py",
+      "main/content_chain/detector.py",
+      "main/content_chain/__init__.py",
+      "main/__init__.py",
+      "runtime/inspyrenet_saliency.py",
+      "runtime/content_write.py",
+      "runtime/adapter.py",
+      "runtime/__init__.py",
+      "experiments/methods/ceg_wm.py",
+      "runtime/_vendor/transparent_background/SOURCE.json",
+      "requirements_inspyrenet_salient_local_lf_gpu_execution.txt",
+      "tests/unit/test_lf_routing_combination.py",
+      "tests/unit/test_lf_null_whitened_detector.py",
+      "tests/functional/test_lf_null_whitened_detector.py",
+      "tests/unit/test_runtime_inspyrenet_saliency.py",
+      "tests/unit/test_runtime_content_write_and_vae.py",
+      "tests/unit/test_runtime_configuration_and_adapter.py",
+      "tests/unit/test_internal_experiment_components.py"
+    ],
+    "formula_fragments": [
+      "u_content = normalize(u_hf + u_lf)",
+      "D_saliency_max = max(z_hf, z_lf_masked)",
+      "canonical binary32 `3/250`"
+    ]
+  }
 }

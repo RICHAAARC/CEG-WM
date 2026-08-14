@@ -561,7 +561,8 @@ registry 共 15 个 ID：14 个具名候选和 1 个强制同预算禁用对照
 本地独立 revisions 实施；四者的 CPU/API source implementation 已在
 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核。该 review 仅覆盖 source/CPU/API，未重绑 readiness，也未验证真实
+独立审核。候选专属 overlay 仅把 source/CPU/API implementation 绑定为 ready，未重绑
+既有 11-candidate readiness，也未验证正式
 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality、科学效果或晋升。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
 `promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
@@ -573,7 +574,7 @@ candidate-selection、calibration 和 formal evaluation 门及互斥 calibration
 审计。实际 stage/status 已由独立 revisions 同步为
 `experiment_ready / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
 qualification；正式 detector 保持 HF-only，旧 route/combination 为历史负结果，
-新显著目标路线仅完成 CPU/API source implementation，尚未完成候选专属 readiness、
+新显著目标路线仅完成 CPU/API source implementation 及其候选专属 overlay，尚未完成正式
 真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义或科学验证，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环不提供 `tau`、confirmation
 结果、Calibration Locked、正式 evaluation、正式 FPR 或效果证据，也不晋升

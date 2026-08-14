@@ -38,7 +38,26 @@ REQUIRED_MANIFEST_FIELDS = (
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 REVISION_PATTERN = re.compile(r"[0-9a-f]{40,64}")
+REVIEW_REFERENCE_PATTERN = re.compile(
+    r"independent_candidate_readiness_review:"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:"
+    r"[0-9a-f]{40}:APPROVE"
+)
 HISTORICAL_HF_NAME_TOKENS = ("direct" + "_hf", "direct" + "hf")
+
+SALIENT_LOCAL_LF_IMPLEMENTATION_BINDINGS = (
+    ("routing_inspyrenet_salient_local_lf", "main/content_chain/routing.py", "main.content_chain.routing.inspyrenet_salient_local_lf_router", "main"),
+    ("routing_inspyrenet_salient_local_lf", "runtime/inspyrenet_saliency.py", "runtime.inspyrenet_saliency.InspyrenetSaliencyRuntime.observe", "runtime"),
+    ("routing_inspyrenet_salient_local_lf", "experiments/methods/ceg_wm.py", "experiments.methods.ceg_wm.CegWmExperimentAdapter.route_inspyrenet_salient_local_lf", "experiment_adapter"),
+    ("content_embedding_global_hf_local_lf", "main/content_chain/embedder.py", "main.content_chain.embedder.salient_local_lf_content_embedder", "main"),
+    ("content_embedding_global_hf_local_lf", "runtime/adapter.py", "runtime.adapter.Sd35RuntimeAdapter.execute_salient_local_lf_content_write_and_vae", "runtime"),
+    ("content_embedding_global_hf_local_lf", "experiments/methods/ceg_wm.py", "experiments.methods.ceg_wm.CegWmExperimentAdapter.execute_global_hf_local_lf_content_write", "experiment_adapter"),
+    ("lf_saliency_masked_null_whitened_matched_score", "main/content_chain/lf_detector.py", "main.content_chain.lf_detector.lf_saliency_masked_null_whitened_matched_detector", "main"),
+    ("lf_saliency_masked_null_whitened_matched_score", "runtime/adapter.py", "runtime.adapter.Sd35RuntimeAdapter.observe_salient_local_lf_detection_image", "runtime"),
+    ("lf_saliency_masked_null_whitened_matched_score", "experiments/methods/ceg_wm.py", "experiments.methods.ceg_wm.CegWmExperimentAdapter.detect_lf_saliency_masked_null_whitened", "experiment_adapter"),
+    ("content_combination_saliency_max_standardized", "main/content_chain/detector.py", "main.content_chain.detector.saliency_max_standardized_content_detector", "main"),
+    ("content_combination_saliency_max_standardized", "experiments/methods/ceg_wm.py", "experiments.methods.ceg_wm.CegWmExperimentAdapter.detect_content_saliency_max_standardized", "experiment_adapter"),
+)
 
 
 def _is_within(relative: Path, root: Path) -> bool:
@@ -321,6 +340,25 @@ def _has_default_marker(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return False
 
 
+def _module_has_default_marker(tree: ast.Module | None) -> bool:
+    if tree is None:
+        return False
+    return any(
+        isinstance(node, (ast.Assign, ast.AnnAssign))
+        and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+        )
+        and any(
+            isinstance(child, ast.Attribute) and child.attr in {"unit", "quick"}
+            for child in ast.walk(node.value)
+        )
+        for node in tree.body
+    )
+
+
 def _registered_symbol_bindings(
     tree: ast.Module,
     registered_symbols: set[str],
@@ -457,6 +495,305 @@ def _normalized_test_shape(
     normalized = _TestShapeNormalizer().visit(ast.Module(body=body, type_ignores=[]))
     ast.fix_missing_locations(normalized)
     return ast.dump(normalized, include_attributes=False)
+
+
+def _qualified_symbol_exists(
+    path: Path,
+    relative: Path,
+    qualified_symbol: str,
+) -> bool:
+    """Resolve one exact module function or class method without importing it."""
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeError):
+        return False
+    module_name = _module_name(relative)
+    if not qualified_symbol.startswith(module_name + "."):
+        return False
+    suffix = qualified_symbol[len(module_name) + 1 :]
+    parts = suffix.split(".")
+    if len(parts) == 1:
+        return any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == parts[0]
+            for node in tree.body
+        )
+    if len(parts) == 2:
+        return any(
+            isinstance(node, ast.ClassDef)
+            and node.name == parts[0]
+            and any(
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child.name == parts[1]
+                for child in node.body
+            )
+            for node in tree.body
+        )
+    return False
+
+
+def _audit_salient_local_lf_candidate_overlay(
+    root: Path,
+    policy: dict,
+    checked_paths: list[str],
+    violations: list[dict],
+) -> None:
+    overlay_policy = policy.get("salient_local_lf_candidate_readiness_overlay")
+    if overlay_policy is None:
+        return
+    if not isinstance(overlay_policy, dict):
+        violations.append({"reason": "salient_local_lf_overlay_policy_invalid"})
+        return
+    manifest_relative = Path(str(overlay_policy.get("manifest_path", "")))
+    manifest_path = root / manifest_relative
+    checked_paths.append(manifest_relative.as_posix())
+    try:
+        overlay = load_json_compatible_yaml(manifest_path)
+    except (OSError, ValueError, UnicodeError):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_candidate_readiness_unreadable",
+            }
+        )
+        return
+    expected_fields = {
+        "candidate_family",
+        "candidate_specification_path",
+        "candidate_specification_sha256",
+        "candidate_ids",
+        "responsibility_bindings",
+        "implementation_bindings",
+        "behavioral_checks",
+        "source_cpu_api_implementation_ready",
+        "candidate_runtime_qualified",
+        "experiment_protocol_admitted",
+        "masked_lf_whitening_asset_ready",
+        "rgb_quality_gate_defined",
+        "scientific_mechanism_validated",
+        "promoted",
+        "formal_detector",
+        "diagnostic_only",
+        "implementation_review_provenance",
+        "independent_candidate_readiness_review",
+    }
+    if set(overlay) != expected_fields:
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_candidate_readiness_field_mismatch",
+            }
+        )
+
+    candidate_ids = overlay_policy.get("candidate_ids")
+    responsibilities = overlay_policy.get("responsibility_bindings")
+    if (
+        overlay.get("candidate_family")
+        != "inspyrenet_salient_local_lf_content_candidate_family"
+        or overlay.get("candidate_ids") != candidate_ids
+        or overlay.get("responsibility_bindings") != responsibilities
+        or not isinstance(candidate_ids, list)
+        or len(candidate_ids) != 4
+        or len(set(candidate_ids)) != 4
+        or not isinstance(responsibilities, dict)
+        or set(responsibilities) != set(candidate_ids)
+        or set(responsibilities.values())
+        != {"content_router", "content_embedder", "lf_detector", "content_detector"}
+    ):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_candidate_binding_mismatch",
+            }
+        )
+
+    expected_bindings = [
+        {
+            "candidate_id": candidate_id,
+            "path": path,
+            "qualified_symbol": qualified_symbol,
+            "plane": plane,
+        }
+        for candidate_id, path, qualified_symbol, plane in (
+            SALIENT_LOCAL_LF_IMPLEMENTATION_BINDINGS
+        )
+    ]
+    bindings = overlay.get("implementation_bindings")
+    if bindings != expected_bindings:
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_implementation_binding_mismatch",
+            }
+        )
+    else:
+        for binding in bindings:
+            relative = Path(binding["path"])
+            path = root / relative
+            checked_paths.append(relative.as_posix())
+            if not path.is_file() or not _qualified_symbol_exists(
+                path,
+                relative,
+                binding["qualified_symbol"],
+            ):
+                violations.append(
+                    {
+                        "path": relative.as_posix(),
+                        "reason": "salient_local_lf_qualified_symbol_missing",
+                        "qualified_symbol": binding["qualified_symbol"],
+                    }
+                )
+        max_runtime = [
+            binding
+            for binding in bindings
+            if binding["candidate_id"]
+            == "content_combination_saliency_max_standardized"
+            and binding["plane"] == "runtime"
+        ]
+        if max_runtime:
+            violations.append(
+                {
+                    "path": manifest_relative.as_posix(),
+                    "reason": "salient_local_lf_max_runtime_binding_forbidden",
+                }
+            )
+
+    status = overlay_policy.get("status")
+    if not isinstance(status, dict) or any(
+        overlay.get(name) is not expected for name, expected in status.items()
+    ):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_readiness_status_mismatch",
+            }
+        )
+    if overlay.get("implementation_review_provenance") != overlay_policy.get(
+        "implementation_review_provenance"
+    ):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_implementation_review_provenance_mismatch",
+            }
+        )
+
+    expected_checks = overlay_policy.get("behavioral_checks")
+    declared_checks = overlay.get("behavioral_checks")
+    if declared_checks != expected_checks or not isinstance(expected_checks, dict):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_behavior_binding_mismatch",
+            }
+        )
+    else:
+        for node_id in expected_checks.values():
+            relative_text, function_name = node_id.rsplit("::", 1)
+            relative = Path(relative_text)
+            checked_paths.append(relative.as_posix())
+            tree, functions = _test_functions(root / relative)
+            function = functions.get(function_name)
+            if function is None or not (
+                _has_default_marker(function) or _module_has_default_marker(tree)
+            ):
+                violations.append(
+                    {
+                        "path": node_id,
+                        "reason": "salient_local_lf_behavior_test_not_bound",
+                    }
+                )
+
+    review = overlay.get("independent_candidate_readiness_review")
+    expected_reference = overlay_policy.get("review_reference")
+    reviewed_revision = overlay_policy.get("reviewed_repository_revision")
+    candidate_digest = overlay_policy.get("candidate_specification_sha256")
+    candidate_relative = Path(str(overlay.get("candidate_specification_path", "")))
+    candidate_path = root / candidate_relative
+    checked_paths.append(candidate_relative.as_posix())
+    if (
+        not isinstance(review, dict)
+        or review.get("decision") != "approve"
+        or review.get("review_reference") != expected_reference
+        or not isinstance(expected_reference, str)
+        or not REVIEW_REFERENCE_PATTERN.fullmatch(expected_reference)
+        or review.get("reviewed_repository_revision") != reviewed_revision
+        or review.get("candidate_specification_sha256") != candidate_digest
+        or overlay.get("candidate_specification_sha256") != candidate_digest
+        or not isinstance(candidate_digest, str)
+        or not SHA256_PATTERN.fullmatch(candidate_digest)
+    ):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_independent_review_invalid",
+            }
+        )
+        return
+
+    reviewed_blob = _git_blob(root, str(reviewed_revision), candidate_relative)
+    revision_check = _git(root, "rev-parse", "--verify", f"{reviewed_revision}^{{commit}}")
+    if revision_check.returncode != 0 or reviewed_blob.returncode != 0:
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_review_revision_unverifiable",
+            }
+        )
+        return
+    if hashlib.sha256(reviewed_blob.stdout).hexdigest() != candidate_digest:
+        violations.append(
+            {
+                "path": candidate_relative.as_posix(),
+                "reason": "salient_local_lf_reviewed_candidate_digest_mismatch",
+            }
+        )
+    try:
+        candidate_text = candidate_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        candidate_text = ""
+    required_fragments = [*candidate_ids, *overlay_policy.get("formula_fragments", [])]
+    if any(fragment not in candidate_text for fragment in required_fragments):
+        violations.append(
+            {
+                "path": candidate_relative.as_posix(),
+                "reason": "salient_local_lf_live_candidate_authority_incomplete",
+            }
+        )
+
+    protected_paths = overlay_policy.get("protected_paths")
+    if not isinstance(protected_paths, list) or len(protected_paths) != len(
+        set(protected_paths)
+    ):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_protected_paths_invalid",
+            }
+        )
+        return
+    changed = _git(
+        root,
+        "diff",
+        "--name-only",
+        f"{reviewed_revision}..HEAD",
+        "--",
+        *protected_paths,
+    )
+    uncommitted = _git(root, "status", "--porcelain", "--", *protected_paths)
+    if (
+        changed.returncode != 0
+        or changed.stdout.strip()
+        or uncommitted.returncode != 0
+        or uncommitted.stdout.strip()
+    ):
+        violations.append(
+            {
+                "path": manifest_relative.as_posix(),
+                "reason": "salient_local_lf_candidate_review_binding_stale",
+            }
+        )
 
 
 def run_audit(root: str | Path) -> dict:
@@ -1150,6 +1487,13 @@ def run_audit(root: str | Path) -> dict:
                             "reason": "method_independent_review_binding_stale",
                         }
                     )
+
+    _audit_salient_local_lf_candidate_overlay(
+        root_path,
+        policy,
+        checked_paths,
+        violations,
+    )
 
     return build_report(
         "audit_method_readiness",

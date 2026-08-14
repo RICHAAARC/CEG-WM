@@ -1,0 +1,110 @@
+{
+  "candidate_family": "inspyrenet_salient_local_lf_content_candidate_family",
+  "candidate_specification_path": "docs/design/candidate_specifications.md",
+  "candidate_specification_sha256": "5f0b308a2615b2191be128ce7c3d839ad7b185266e823a89b0a0b5767791fe16",
+  "candidate_ids": [
+    "routing_inspyrenet_salient_local_lf",
+    "content_embedding_global_hf_local_lf",
+    "lf_saliency_masked_null_whitened_matched_score",
+    "content_combination_saliency_max_standardized"
+  ],
+  "responsibility_bindings": {
+    "routing_inspyrenet_salient_local_lf": "content_router",
+    "content_embedding_global_hf_local_lf": "content_embedder",
+    "lf_saliency_masked_null_whitened_matched_score": "lf_detector",
+    "content_combination_saliency_max_standardized": "content_detector"
+  },
+  "implementation_bindings": [
+    {
+      "candidate_id": "routing_inspyrenet_salient_local_lf",
+      "path": "main/content_chain/routing.py",
+      "qualified_symbol": "main.content_chain.routing.inspyrenet_salient_local_lf_router",
+      "plane": "main"
+    },
+    {
+      "candidate_id": "routing_inspyrenet_salient_local_lf",
+      "path": "runtime/inspyrenet_saliency.py",
+      "qualified_symbol": "runtime.inspyrenet_saliency.InspyrenetSaliencyRuntime.observe",
+      "plane": "runtime"
+    },
+    {
+      "candidate_id": "routing_inspyrenet_salient_local_lf",
+      "path": "experiments/methods/ceg_wm.py",
+      "qualified_symbol": "experiments.methods.ceg_wm.CegWmExperimentAdapter.route_inspyrenet_salient_local_lf",
+      "plane": "experiment_adapter"
+    },
+    {
+      "candidate_id": "content_embedding_global_hf_local_lf",
+      "path": "main/content_chain/embedder.py",
+      "qualified_symbol": "main.content_chain.embedder.salient_local_lf_content_embedder",
+      "plane": "main"
+    },
+    {
+      "candidate_id": "content_embedding_global_hf_local_lf",
+      "path": "runtime/adapter.py",
+      "qualified_symbol": "runtime.adapter.Sd35RuntimeAdapter.execute_salient_local_lf_content_write_and_vae",
+      "plane": "runtime"
+    },
+    {
+      "candidate_id": "content_embedding_global_hf_local_lf",
+      "path": "experiments/methods/ceg_wm.py",
+      "qualified_symbol": "experiments.methods.ceg_wm.CegWmExperimentAdapter.execute_global_hf_local_lf_content_write",
+      "plane": "experiment_adapter"
+    },
+    {
+      "candidate_id": "lf_saliency_masked_null_whitened_matched_score",
+      "path": "main/content_chain/lf_detector.py",
+      "qualified_symbol": "main.content_chain.lf_detector.lf_saliency_masked_null_whitened_matched_detector",
+      "plane": "main"
+    },
+    {
+      "candidate_id": "lf_saliency_masked_null_whitened_matched_score",
+      "path": "runtime/adapter.py",
+      "qualified_symbol": "runtime.adapter.Sd35RuntimeAdapter.observe_salient_local_lf_detection_image",
+      "plane": "runtime"
+    },
+    {
+      "candidate_id": "lf_saliency_masked_null_whitened_matched_score",
+      "path": "experiments/methods/ceg_wm.py",
+      "qualified_symbol": "experiments.methods.ceg_wm.CegWmExperimentAdapter.detect_lf_saliency_masked_null_whitened",
+      "plane": "experiment_adapter"
+    },
+    {
+      "candidate_id": "content_combination_saliency_max_standardized",
+      "path": "main/content_chain/detector.py",
+      "qualified_symbol": "main.content_chain.detector.saliency_max_standardized_content_detector",
+      "plane": "main"
+    },
+    {
+      "candidate_id": "content_combination_saliency_max_standardized",
+      "path": "experiments/methods/ceg_wm.py",
+      "qualified_symbol": "experiments.methods.ceg_wm.CegWmExperimentAdapter.detect_content_saliency_max_standardized",
+      "plane": "experiment_adapter"
+    }
+  ],
+  "behavioral_checks": {
+    "salient_local_lf_route_and_fixed_write_have_causal_witness": "tests/unit/test_lf_routing_combination.py::test_salient_local_lf_route_and_fixed_write_have_causal_witness",
+    "saliency_masked_whitened_detector_binds_mask_asset_and_wrong_key": "tests/unit/test_lf_null_whitened_detector.py::test_saliency_masked_whitened_detector_binds_mask_asset_and_wrong_key",
+    "public_saliency_runtime_applies_frozen_preprocess_selector_and_single_sigmoid": "tests/unit/test_runtime_inspyrenet_saliency.py::test_public_saliency_runtime_applies_frozen_preprocess_selector_and_single_sigmoid",
+    "salient_content_execution_observes_registered_callback": "tests/unit/test_runtime_content_write_and_vae.py::test_salient_content_execution_observes_registered_callback",
+    "salient_raw_and_rectified_detection_observations_are_fresh_and_image_bound": "tests/unit/test_runtime_content_write_and_vae.py::test_salient_raw_and_rectified_detection_observations_are_fresh_and_image_bound",
+    "public_runtime_surface_exposes_frozen_inspyrenet_saliency_owner": "tests/unit/test_runtime_configuration_and_adapter.py::test_public_runtime_surface_exposes_frozen_inspyrenet_saliency_owner",
+    "adapter_runs_public_salient_local_lf_write_and_detection_candidates": "tests/unit/test_internal_experiment_components.py::test_adapter_runs_public_salient_local_lf_write_and_detection_candidates"
+  },
+  "source_cpu_api_implementation_ready": true,
+  "candidate_runtime_qualified": false,
+  "experiment_protocol_admitted": false,
+  "masked_lf_whitening_asset_ready": false,
+  "rgb_quality_gate_defined": false,
+  "scientific_mechanism_validated": false,
+  "promoted": false,
+  "formal_detector": false,
+  "diagnostic_only": true,
+  "implementation_review_provenance": "independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE",
+  "independent_candidate_readiness_review": {
+    "decision": "approve",
+    "review_reference": "independent_candidate_readiness_review:01a001dd-b222-7fe2-9f1e-7983e0821a1b:2908c24939393c8f18416429ee6030b1fc9530ed:APPROVE",
+    "reviewed_repository_revision": "2908c24939393c8f18416429ee6030b1fc9530ed",
+    "candidate_specification_sha256": "5f0b308a2615b2191be128ce7c3d839ad7b185266e823a89b0a0b5767791fe16"
+  }
+}

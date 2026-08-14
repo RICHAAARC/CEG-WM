@@ -13,6 +13,11 @@
 admission、readiness 和阶段转换本身都不提供 runtime 或科学效果证据；当前
 runtime 结论只来自独立 qualification。
 
+显著目标局部 LF 候选专属 overlay 只约束 source/CPU/API 调用闭包与四项既有职责
+绑定；它不把 runtime qualification、experiment admission、masked-LF W、RGB quality、
+mechanism science 或 promotion 标记为完成。max statistic 保持 diagnostic-only，正式
+detector 仍为 HF-only。
+
 ## Method Identity
 
 一个正式 CEG-WM 方法身份必须同时绑定：
