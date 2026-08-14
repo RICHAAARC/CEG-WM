@@ -10,6 +10,7 @@ import pytest
 
 from governance.harness.audits.audit_naming_conventions import (
     _attested_upstream_source_paths,
+    _upstream_source_directory_preflight,
     run_audit,
 )
 from governance.harness.audits.audit_placeholder_random_fields import (
@@ -4485,6 +4486,9 @@ def test_exact_attested_upstream_source_keeps_paths_checked_without_project_rena
 ) -> None:
     _copy_attested_upstream_source(tmp_path)
 
+    preflight = _upstream_source_directory_preflight(tmp_path)
+    assert not preflight.source_tree_absent
+    assert preflight.nonreal_directory_path is None
     report = run_audit(tmp_path)
 
     assert report["decision"] == "pass"
@@ -4696,16 +4700,80 @@ def test_upstream_source_attestation_rejects_every_symlinked_directory_without_f
     sentinel.write_text("# proxy route_1\n", encoding="utf-8")
     original.symlink_to(external_directory, target_is_directory=True)
 
+    preflight = _upstream_source_directory_preflight(tmp_path)
+    assert not preflight.source_tree_absent
+    assert preflight.nonreal_directory_path == Path(symlinked_directory)
     assert _attested_upstream_source_paths(tmp_path) == frozenset()
     report = run_audit(tmp_path)
+    assert report["decision"] == "fail"
+    assert report["checked_paths"].count(symlinked_directory) == 1
+    assert len(report["checked_paths"]) == len(set(report["checked_paths"]))
+    assert sum(
+        violation["path"] == symlinked_directory
+        and violation["reason"] == "attested_upstream_source_directory_not_real"
+        for violation in report["violations"]
+    ) == 1
+    serialized_report = json.dumps(report, sort_keys=True)
+    assert "external_source_sentinel" not in serialized_report
+    assert "external_sentinel.py" not in serialized_report
+    assert "proxy route_1" not in serialized_report
     assert all(
-        "external_sentinel.py" not in checked_path
+        not checked_path.startswith(f"{symlinked_directory}/")
         for checked_path in report["checked_paths"]
     )
-    assert all(
-        violation["path"] != sentinel.relative_to(tmp_path).as_posix()
-        for violation in report["violations"]
+    if symlinked_directory in {
+        "runtime/_vendor/transparent_background/modules",
+        "runtime/_vendor/transparent_background/backbones",
+    }:
+        assert _has_violation(
+            report,
+            path="runtime/_vendor/transparent_background/InSPyReNet.py",
+            reason="file_name_not_snake_case",
+        )
+
+
+@pytest.mark.unit
+def test_invalid_upstream_directory_is_appended_when_scanner_does_not_yield_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_attested_upstream_source(tmp_path)
+    modules = tmp_path / "runtime" / "_vendor" / "transparent_background" / "modules"
+    external_modules = tmp_path / "outside_modules"
+    shutil.move(modules.as_posix(), external_modules.as_posix())
+    modules.symlink_to(external_modules, target_is_directory=True)
+    visible = tmp_path / "runtime" / "generic_visibility.py"
+    visible.write_text("value = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "governance.harness.audits.audit_naming_conventions.iter_governed_paths",
+        lambda _root: iter((tmp_path / "runtime", visible)),
     )
+
+    report = run_audit(tmp_path)
+
+    failed_path = "runtime/_vendor/transparent_background/modules"
+    assert report["checked_paths"].count(failed_path) == 1
+    assert "runtime/generic_visibility.py" in report["checked_paths"]
+    assert _has_violation(
+        report,
+        path=failed_path,
+        reason="attested_upstream_source_directory_not_real",
+    )
+
+
+@pytest.mark.unit
+def test_generic_governed_symlink_candidate_remains_visible_without_global_policy(
+    tmp_path: Path,
+) -> None:
+    _write_minimal_audit_fixture(tmp_path, "runtime")
+    target = tmp_path / "visible_reference.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    candidate = tmp_path / "runtime" / "visible_reference.py"
+    candidate.symlink_to(target)
+
+    report = run_audit(tmp_path)
+
+    assert "runtime/visible_reference.py" in report["checked_paths"]
 
 
 @pytest.mark.unit
@@ -4714,6 +4782,9 @@ def test_upstream_source_attestation_is_empty_when_vendor_tree_is_absent(
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "runtime")
 
+    preflight = _upstream_source_directory_preflight(tmp_path)
+    assert preflight.source_tree_absent
+    assert preflight.nonreal_directory_path is None
     assert _attested_upstream_source_paths(tmp_path) == frozenset()
     report = run_audit(tmp_path)
     assert report["decision"] == "pass"

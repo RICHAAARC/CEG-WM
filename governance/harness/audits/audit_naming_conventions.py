@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
+from dataclasses import dataclass
 from hashlib import sha256
 import io
 import json
@@ -20,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from governance.harness.lib.file_scanner import iter_governed_paths
+from governance.harness.lib.file_scanner import iter_governed_paths, should_skip_path
 from governance.harness.lib.field_rules import inspect_field_registry
 from governance.harness.lib.json_report import build_report, exit_with_report
 from governance.harness.lib.naming_rules import (
@@ -43,6 +45,7 @@ from governance.harness.lib.naming_rules import (
     is_explicit_version_context,
     is_noncanonical_version_context,
 )
+from governance.harness.lib.project_policy import governed_roots, load_root_policy
 
 
 CONFIG_KEY_PATTERN = re.compile(r"^\s*[\"']?(?P<key>[A-Za-z][A-Za-z0-9_-]*)[\"']?\s*[:=]")
@@ -165,24 +168,47 @@ _UPSTREAM_SOURCE_STRUCTURAL_PATHS = frozenset(
 )
 
 
-def _attested_upstream_source_paths(root_path: Path) -> frozenset[Path]:
-    """Return exact upstream files only when the complete closure is authentic."""
+@dataclass(frozen=True)
+class _UpstreamSourceDirectoryPreflight:
+    source_tree_absent: bool
+    nonreal_directory_path: Path | None
+
+
+def _upstream_source_directory_preflight(
+    root_path: Path,
+) -> _UpstreamSourceDirectoryPreflight:
+    """Inspect only the finite vendored-source directory ancestry without following it."""
 
     directory_paths = (
-        root_path,
-        root_path / "runtime",
-        root_path / "runtime" / "_vendor",
-        root_path / _UPSTREAM_SOURCE_ROOT,
-        root_path / _UPSTREAM_SOURCE_ROOT / "modules",
-        root_path / _UPSTREAM_SOURCE_ROOT / "backbones",
+        Path("runtime"),
+        Path("runtime/_vendor"),
+        _UPSTREAM_SOURCE_ROOT,
+        _UPSTREAM_SOURCE_ROOT / "modules",
+        _UPSTREAM_SOURCE_ROOT / "backbones",
     )
-    try:
-        if any(
-            not stat.S_ISDIR(directory_path.lstat().st_mode)
-            for directory_path in directory_paths
-        ):
-            return frozenset()
-    except OSError:
+    source_root_index = directory_paths.index(_UPSTREAM_SOURCE_ROOT)
+    for index, relative in enumerate(directory_paths):
+        try:
+            mode = (root_path / relative).lstat().st_mode
+        except FileNotFoundError:
+            if index <= source_root_index:
+                return _UpstreamSourceDirectoryPreflight(True, None)
+            return _UpstreamSourceDirectoryPreflight(False, relative)
+        except OSError:
+            return _UpstreamSourceDirectoryPreflight(False, relative)
+        if not stat.S_ISDIR(mode):
+            return _UpstreamSourceDirectoryPreflight(False, relative)
+    return _UpstreamSourceDirectoryPreflight(False, None)
+
+
+def _attested_upstream_source_paths(
+    root_path: Path,
+    directory_preflight: _UpstreamSourceDirectoryPreflight | None = None,
+) -> frozenset[Path]:
+    """Return exact upstream files only when the complete closure is authentic."""
+
+    preflight = directory_preflight or _upstream_source_directory_preflight(root_path)
+    if preflight.source_tree_absent or preflight.nonreal_directory_path is not None:
         return frozenset()
 
     def read_regular_file_no_follow(path: Path) -> bytes:
@@ -275,21 +301,30 @@ def _attested_upstream_source_paths(root_path: Path) -> frozenset[Path]:
     return frozenset(attested)
 
 
-def _contains_symlink_component(root_path: Path, path: Path) -> bool:
-    """Reject scanner results reached through any symlink without resolving it."""
+def _iter_governed_paths_without_following_invalid_runtime(
+    root_path: Path,
+) -> Iterator[Path]:
+    """Preserve ordinary candidates while treating one invalid governed root as opaque."""
 
-    try:
-        relative = path.relative_to(root_path)
-        current = root_path
-        if stat.S_ISLNK(current.lstat().st_mode):
-            return True
-        for part in relative.parts:
-            current = current / part
-            if stat.S_ISLNK(current.lstat().st_mode):
-                return True
-    except (OSError, ValueError):
-        return True
-    return False
+    policy = load_root_policy(root_path)
+    for relative_root in governed_roots(root_path):
+        candidate = root_path / relative_root
+        if relative_root == "runtime":
+            yield candidate
+            continue
+        if not candidate.exists() or should_skip_path(candidate):
+            continue
+        if candidate.is_file():
+            yield candidate
+        else:
+            yield candidate
+            for path in candidate.rglob("*"):
+                if not should_skip_path(path):
+                    yield path
+    for relative_file in policy.get("governed_files", []):
+        candidate = root_path / relative_file
+        if candidate.exists() and not should_skip_path(candidate):
+            yield candidate
 
 
 def _is_business_production_path(relative: Path) -> bool:
@@ -3572,7 +3607,11 @@ def _text_semantic_violations(path: Path, relative: Path) -> list[dict]:
 
 def run_audit(root: str | Path) -> dict:
     root_path = Path(root)
-    attested_upstream_paths = _attested_upstream_source_paths(root_path)
+    directory_preflight = _upstream_source_directory_preflight(root_path)
+    attested_upstream_paths = _attested_upstream_source_paths(
+        root_path,
+        directory_preflight,
+    )
     structural_upstream_paths = (
         _UPSTREAM_SOURCE_STRUCTURAL_PATHS
         if attested_upstream_paths
@@ -3587,14 +3626,29 @@ def run_audit(root: str | Path) -> dict:
         if row.category in {"method_identity", "runtime_identity"}
     )
     violations = list(registry_inspection.violations)
+    invalid_upstream_directory = directory_preflight.nonreal_directory_path
+    if invalid_upstream_directory is not None:
+        violations.append(
+            {
+                "path": invalid_upstream_directory.as_posix(),
+                "reason": "attested_upstream_source_directory_not_real",
+            }
+        )
     checked_paths = []
-    for path in (
-        candidate_path
-        for candidate_path in iter_governed_paths(root_path)
-        if not _contains_symlink_component(root_path, candidate_path)
-    ):
+    checked_path_set: set[str] = set()
+    governed_paths = (
+        _iter_governed_paths_without_following_invalid_runtime(root_path)
+        if invalid_upstream_directory == Path("runtime")
+        else iter_governed_paths(root_path)
+    )
+    for path in governed_paths:
         relative = path.relative_to(root_path)
-        checked_paths.append(str(relative))
+        relative_text = relative.as_posix()
+        if relative_text not in checked_path_set:
+            checked_paths.append(relative_text)
+            checked_path_set.add(relative_text)
+        if relative == invalid_upstream_directory:
+            continue
         upstream_semantic_path = relative in attested_upstream_paths
         upstream_structural_path = relative in structural_upstream_paths
         if path.is_dir() and not upstream_structural_path:
@@ -3640,6 +3694,11 @@ def run_audit(root: str | Path) -> dict:
             )
         if path.is_file() and path.suffix.lower() in {".md", ".ipynb", ".svg", ".drawio"}:
             violations.extend(_text_semantic_violations(path, relative))
+    if (
+        invalid_upstream_directory is not None
+        and invalid_upstream_directory.as_posix() not in checked_path_set
+    ):
+        checked_paths.append(invalid_upstream_directory.as_posix())
     return build_report("audit_naming_conventions", "fail" if violations else "pass", violations, checked_paths)
 
 
