@@ -20,9 +20,17 @@ description: Evaluate and govern CEG-WM semantic stage changes. Use when changin
    from `docs/design/candidate_specifications.md`; verify the readiness binds every
    policy-required component to its fixed architecture path, exact candidate IDs,
    unique implementation symbol and declared responsibility without conflating these
-   three authority planes.
+   three authority planes. Treat the readiness candidate digest as the reviewed
+   implementation snapshot and verify it from the candidate-specification Git blob at
+   the recorded review revision; treat the current candidate specification as the live
+   design authority, which must retain all policy/readiness-bound identities but may
+   additionally describe candidates that remain pending implementation admission.
 8. Verify every required candidate-specific behavior node binds the policy-required component symbols, calls them, and makes data-dependent, non-isomorphic assertions.
-9. Treat the AST audit only as a necessary structure/wiring gate. Require a separate independent semantic review `approve` bound to the same candidate digest and a repository revision after which no candidate, implementation or registered test path changed.
+9. Treat the AST audit only as a necessary structure/wiring gate. Require a separate
+   independent semantic review `approve` bound to the same reviewed candidate snapshot
+   digest and repository revision. After review, keep implementation paths and
+   registered behavior-test paths stale-protected; do not require later live-design
+   additions to rewrite or re-sign the historical readiness snapshot.
 10. Verify required runtime evidence, protocols, records, reports and harness gates for later stages.
 11. Distinguish full CEG-WM evidence from `research_question_closed_negative` and a separately named, separately authorized reduced-scope method.
 12. Change the stage only when all declared gates are satisfied.

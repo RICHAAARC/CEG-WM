@@ -18,7 +18,7 @@ replay，新显著目标局部 LF 四候选均为 `design_candidate_pending_impl
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation
 或科学证据，也不晋升 LF/routing/组合/geometry。
 
-`method_implemented` 的 readiness AST 审计只承担候选绑定、固定模块路径、symbol 调用和断言接线检查；它不能单独证明非代理实现。该阶段还必须有绑定候选规格摘要、实现路径、方法特异性测试节点和 repository revision 的独立语义复核 `approve`，且复核后这些受保护路径没有变化。
+`method_implemented` 的 readiness AST 审计只承担候选绑定、固定模块路径、symbol 调用和断言接线检查；它不能单独证明非代理实现。readiness 中的候选规格摘要是独立语义复核 revision 上的实现快照，必须从该 exact Git blob 重放，不能用当前工作树字节重签。当前候选规格仍是 live design authority，必须继续保留 policy/readiness 已绑定的全部实现身份，但可在不改写旧 readiness 快照的前提下登记尚未准入实现的设计候选。独立复核后的实现路径和方法特异性登记测试仍是 stale-protected surface；live candidate-spec 文件本身不因此成为旧 readiness 的不可变源码路径。
 
 ## 方法层
 

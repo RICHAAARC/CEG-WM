@@ -49,14 +49,6 @@ def _module_name(relative: Path) -> str:
     return ".".join(relative.with_suffix("").parts)
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _git(
     root: Path,
     *arguments: str,
@@ -66,6 +58,25 @@ def _git(
         check=False,
         capture_output=True,
         text=True,
+    )
+
+
+def _git_blob(
+    root: Path,
+    revision: str,
+    relative: Path,
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "cat-file",
+            "blob",
+            f"{revision}:{relative.as_posix()}",
+        ],
+        check=False,
+        capture_output=True,
     )
 
 
@@ -596,10 +607,7 @@ def run_audit(root: str | Path) -> dict:
                 "expected_path": expected_candidate_relative.as_posix(),
             }
         )
-    elif (
-        not SHA256_PATTERN.fullmatch(candidate_digest)
-        or _sha256(candidate_path) != candidate_digest
-    ):
+    elif not SHA256_PATTERN.fullmatch(candidate_digest):
         violations.append(
             {
                 "path": candidate_relative.as_posix(),
@@ -608,12 +616,28 @@ def run_audit(root: str | Path) -> dict:
         )
     else:
         candidate_text = candidate_path.read_text(encoding="utf-8")
+        manifest_components = manifest.get("components")
+        readiness_candidate_ids = {
+            str(candidate_id)
+            for component in (
+                manifest_components.values()
+                if isinstance(manifest_components, dict)
+                else ()
+            )
+            if isinstance(component, dict)
+            for candidate_id in (
+                component.get("candidate_ids")
+                if isinstance(component.get("candidate_ids"), list)
+                else ()
+            )
+        }
         expected_candidate_ids = sorted(
             {
                 candidate_id
                 for values in policy["required_component_candidate_ids"].values()
                 for candidate_id in values
             }
+            | readiness_candidate_ids
         )
         missing_candidate_ids = [
             candidate_id
@@ -1068,9 +1092,30 @@ def run_audit(root: str | Path) -> dict:
                     }
                 )
             else:
+                reviewed_candidate_blob = _git_blob(
+                    root_path,
+                    reviewed_revision,
+                    candidate_relative,
+                )
+                if reviewed_candidate_blob.returncode != 0:
+                    violations.append(
+                        {
+                            "path": manifest_relative,
+                            "reason": "method_independent_review_revision_unverifiable",
+                        }
+                    )
+                elif (
+                    hashlib.sha256(reviewed_candidate_blob.stdout).hexdigest()
+                    != candidate_digest
+                ):
+                    violations.append(
+                        {
+                            "path": candidate_relative.as_posix(),
+                            "reason": "method_candidate_specification_digest_mismatch",
+                        }
+                    )
                 protected_paths = sorted(
                     {
-                        candidate_relative.as_posix(),
                         *[
                             component["implementation_path"]
                             for component in registered_components.values()

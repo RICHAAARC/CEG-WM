@@ -1110,6 +1110,81 @@ def test_schema_complete_candidate_fixture_passes_structural_gate(
 
 
 @pytest.mark.unit
+def test_live_candidate_design_can_extend_without_resigning_readiness_snapshot(
+    tmp_path: Path,
+) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    candidate_path = tmp_path / "docs/design/candidate_specifications.md"
+    _write(
+        candidate_path,
+        candidate_path.read_text(encoding="utf-8")
+        + "- `saliency_local_lf_design_candidate`\n",
+    )
+
+    assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_live_candidate_design_must_retain_readiness_bound_identity(
+    tmp_path: Path,
+) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    candidate_path = tmp_path / "docs/design/candidate_specifications.md"
+    candidate_text = candidate_path.read_text(encoding="utf-8")
+    _write(candidate_path, candidate_text.replace("- `hf_sparse_tail`\n", ""))
+
+    report = run_audit(tmp_path)
+    assert any(
+        violation["reason"] == "method_candidate_specification_id_missing"
+        and "hf_sparse_tail" in violation["candidate_ids"]
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_readiness_snapshot_digest_must_match_reviewed_git_blob(
+    tmp_path: Path,
+) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    manifest_path, manifest = _manifest(tmp_path)
+    unreviewed_digest = hashlib.sha256(
+        b"unreviewed candidate specification"
+    ).hexdigest()
+    manifest["candidate_specification_sha256"] = unreviewed_digest
+    manifest["independent_semantic_review"][
+        "candidate_specification_sha256"
+    ] = unreviewed_digest
+    _write(manifest_path, json.dumps(manifest))
+
+    report = run_audit(tmp_path)
+    assert any(
+        violation["reason"] == "method_candidate_specification_digest_mismatch"
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_unverifiable_reviewed_revision_uses_existing_failure_identity(
+    tmp_path: Path,
+) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    manifest_path, manifest = _manifest(tmp_path)
+    manifest["independent_semantic_review"][
+        "reviewed_repository_revision"
+    ] = "f" * 40
+    _write(manifest_path, json.dumps(manifest))
+
+    report = run_audit(tmp_path)
+    assert {
+        violation["reason"] for violation in report["violations"]
+    } == {"method_independent_review_revision_unverifiable"}
+
+
+@pytest.mark.unit
 def test_legacy_arithmetic_proxy_is_fail_closed(tmp_path: Path) -> None:
     _write_authority(tmp_path, "method_implemented")
     _write_legacy_arithmetic_proxy_fixture(tmp_path)
@@ -1151,6 +1226,32 @@ def test_component_must_bind_exact_candidate_ids(tmp_path: Path) -> None:
     report = run_audit(tmp_path)
     assert any(
         violation["reason"] == "method_component_candidate_binding_mismatch"
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_pending_candidate_cannot_extend_readiness_component_binding(
+    tmp_path: Path,
+) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    candidate_path = tmp_path / "docs/design/candidate_specifications.md"
+    _write(
+        candidate_path,
+        candidate_path.read_text(encoding="utf-8")
+        + "- `saliency_local_lf_design_candidate`\n",
+    )
+    manifest_path, manifest = _manifest(tmp_path)
+    manifest["components"]["content_router"]["candidate_ids"].append(
+        "saliency_local_lf_design_candidate"
+    )
+    _write(manifest_path, json.dumps(manifest))
+
+    report = run_audit(tmp_path)
+    assert any(
+        violation["reason"] == "method_component_candidate_binding_mismatch"
+        and violation["component"] == "content_router"
         for violation in report["violations"]
     )
 
@@ -1313,6 +1414,25 @@ def test_independent_semantic_review_is_mandatory(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_readiness_manifest_and_independent_review_digest_must_match(
+    tmp_path: Path,
+) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    manifest_path, manifest = _manifest(tmp_path)
+    manifest["independent_semantic_review"][
+        "candidate_specification_sha256"
+    ] = hashlib.sha256(b"different reviewed snapshot").hexdigest()
+    _write(manifest_path, json.dumps(manifest))
+
+    report = run_audit(tmp_path)
+    assert any(
+        violation["reason"] == "method_independent_semantic_review_invalid"
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
 def test_review_binding_fails_after_protected_change(tmp_path: Path) -> None:
     _write_authority(tmp_path, "method_implemented")
     _write_schema_complete_method_fixture(tmp_path)
@@ -1321,6 +1441,24 @@ def test_review_binding_fails_after_protected_change(tmp_path: Path) -> None:
         path,
         path.read_text(encoding="utf-8") + "\n# changed after independent review\n",
     )
+    report = run_audit(tmp_path)
+    assert any(
+        violation["reason"] == "method_independent_review_binding_stale"
+        for violation in report["violations"]
+    )
+
+
+@pytest.mark.unit
+def test_review_binding_fails_after_registered_test_change(tmp_path: Path) -> None:
+    _write_authority(tmp_path, "method_implemented")
+    _write_schema_complete_method_fixture(tmp_path)
+    path = tmp_path / "tests/unit/test_candidate_specific_method.py"
+    _write(
+        path,
+        path.read_text(encoding="utf-8")
+        + "\n# changed after independent review\n",
+    )
+
     report = run_audit(tmp_path)
     assert any(
         violation["reason"] == "method_independent_review_binding_stale"
