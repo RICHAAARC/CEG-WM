@@ -88,6 +88,20 @@ pixels；无支持或非局部支持 fail closed 并保留固定分母，禁止 
 raw 与 rectified 图像分别重跑模型和 mask；detector 不得读取 embed mask。
 development mask-stability 门固定为 IoU `>=0.5`，8-unit pilot 至少 `7/8`。
 
+callback 18 临时 decode 到 RGB8 的唯一 materialization 是：先要求 exact floating
+`[1,3,H,W]`、`H,W>1`，并在任何 cast/clamp 前拒绝非有限或 `[0,1]` 外的值；然后
+`detach -> CPU -> float32 -> contiguous`，逐值执行
+`uint8(floor(clamp(value,0,1)*float32(255)))`，结果保持 contiguous CPU CHW。
+binary32 中 `0/1/0.5` 分别得到 `0/255/127`；`0` 向上的 nextafter 得到 `0`，
+`0.5` 两侧相邻 binary32 都得到 `127`，`1` 向下的 nextafter 得到 `254`；`0` 向下
+或 `1` 向上的 nextafter、NaN 和正负 infinity 都在 clamp 前拒绝。完整输入和乘法
+中间位模式以 candidate specification 的 golden table 为权威。
+
+该量化只允许 embed callback 使用；detect 侧直接验证 ordinary public RGB8，不重复
+量化。两侧只能使用 `main.rgb8_image_digest`。送入 InSPyReNet 的 CHW-to-PIL 转换
+必须逐值保持 uint8 bytes（去 batch、CHW-to-HWC、mode `RGB`、size `(W,H)`），不得
+产生第二 digest。该边界不改变 RGB quality、coverage、gate、固定分母或科学结论。
+
 写入身份 `content_embedding_global_hf_local_lf` 唯一为：
 
 ```text

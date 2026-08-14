@@ -303,6 +303,34 @@ development mask stability 固定为至少 `7/8` 的 IoU `>=0.5`。
 current router 只返回 `M_embed`、全一 HF support、mask identity/digests，不返回 `A`、
 互补双 mask、disabled-uniform route、`a` 或预算。
 
+#### Callback RGB8 Quantization Primitive
+
+embed 侧临时 decode 必须先产生 exact floating `[1,3,H,W]`，`H,W>1`。任何 cast
+或 clamp 之前逐值要求 finite 且位于 `[0,1]`；越界、NaN 或正负 infinity 直接拒绝。
+随后唯一顺序是 `detach -> CPU -> float32 -> contiguous`，再执行
+
+```text
+Q_rgb8(I) = uint8(floor(clamp(I,0,1) * float32(255)))
+```
+
+并得到 contiguous CPU RGB8。乘法按 binary32 舍入。固定 scalar replay 为：
+`0:00000000 -> 00000000 -> 0`；
+`nextafter32(0,+infinity):00000001 -> 000000ff -> 0`；
+`nextafter32(0.5,-infinity):3effffff -> 42feffff -> 127`；
+`0.5:3f000000 -> 42ff0000 -> 127`；
+`nextafter32(0.5,+infinity):3f000001 -> 42ff0002 -> 127`；
+`nextafter32(1,-infinity):3f7fffff -> 437effff -> 254`；
+`1:3f800000 -> 437f0000 -> 255`。箭头中间值是乘 `float32(255)` 后的
+big-endian binary32 bits。`nextafter32(0,-infinity)=80000001` 与
+`nextafter32(1,+infinity)=3f800001` 必须在 clamp 前拒绝。
+
+该 primitive 只服务 callback 18 embed-side 临时图；detect-side 输入已经是 ordinary
+RGB8，不调用 `Q_rgb8`。两侧唯一摘要均为 `main.rgb8_image_digest`。InSPyReNet 的
+PIL 输入只做 validated contiguous CPU RGB8 的 CHW-to-HWC 值保持排列，mode 为
+`RGB`、size 为 `(W,H)`，PIL bytes 必须与排列后的 tensor bytes 完全相同；不得建立
+第二摘要或执行隐式数值变换。本 primitive 不拥有 RGB quality、mask coverage、
+实验 gate 或科学判定。
+
 ## LF/HF Combination Primitive
 
 ### Current Authority

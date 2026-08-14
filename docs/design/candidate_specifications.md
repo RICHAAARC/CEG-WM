@@ -926,6 +926,49 @@ mask rule。detector 不得读取 embed mask。development mask-stability protoc
 比较同一预登记单位的 embed/detect mask IoU `>=0.5`，8-unit pilot 至少 `7/8`；该门
 不是 formal reliability 或 threshold evidence。
 
+#### Callback-18 Temporary RGB8 Materialization
+
+只有 embed 侧 callback 18 non-terminal latent 的临时 VAE decode 使用本节量化；
+detect 侧始终消费已经是 ordinary public RGB8 的 exact `torch.uint8 [1,3,H,W]`
+输入，不重新量化。embed 侧 VAE decode 输入量化前必须是 exact floating tensor
+`[1,3,H,W]`，且 `H>1`、`W>1`。在任何 dtype cast 或 clamp 之前，全部元素必须
+finite 且已经位于闭区间 `[0,1]`；任一值越界或为 NaN、正负 infinity 都直接
+fail closed，禁止依靠 clamp 修复。
+
+通过上述门后，唯一值路径为：detach，复制到 CPU，转换为 contiguous binary32，
+然后逐值执行
+
+```text
+I_rgb8 = uint8(floor(clamp(I_callback_float32, 0, 1) * float32(255)))
+```
+
+结果必须是 contiguous CPU `torch.uint8 [1,3,H,W]`。乘法结果按 binary32 舍入后
+再 floor；不允许 round-to-nearest、乘 256、Pillow 隐式量化、先转 binary16、
+结果相关 clipping 或 tolerance。下列 binary32 golden 是该规则的固定中间位模式，
+十六进制均为 big-endian IEEE-754 binary32：
+
+| 输入 | 输入 bits | 乘 `float32(255)` 后 bits | RGB8 |
+| --- | --- | --- | ---: |
+| `0` | `00000000` | `00000000` | `0` |
+| `nextafter32(0,+infinity)` | `00000001` | `000000ff` | `0` |
+| `nextafter32(0.5,-infinity)` | `3effffff` | `42feffff` | `127` |
+| `0.5` | `3f000000` | `42ff0000` | `127` |
+| `nextafter32(0.5,+infinity)` | `3f000001` | `42ff0002` | `127` |
+| `nextafter32(1,-infinity)` | `3f7fffff` | `437effff` | `254` |
+| `1` | `3f800000` | `437f0000` | `255` |
+
+`nextafter32(0,-infinity)`（`80000001`）和
+`nextafter32(1,+infinity)`（`3f800001`）都必须在 clamp 前拒绝；NaN 和正负
+infinity 同样拒绝。量化结果唯一图像摘要是 `main.rgb8_image_digest`；runtime
+不得另立 PIL、VAE 或 InSPyReNet 专用 RGB8 digest。
+
+送入 InSPyReNet 时，只允许从已验证的 contiguous CPU CHW RGB8 精确移除 batch
+维并做 CHW-to-HWC 排列，按原 uint8 值构造 mode `RGB`、size `(W,H)` 的 PIL
+图像；PIL bytes 必须逐值等于排列后的 tensor bytes，不得归一化、缩放或再次量化。
+该 PIL 对象只是同一 `main.rgb8_image_digest` 图像的临时模型输入，不建立第二图像
+身份。此冻结只关闭 callback RGB8 构造和输入身份，不修改 RGB quality、mask
+coverage、development gate、固定分母或任何科学结论。
+
 ### Global-HF Plus Local-LF Write
 
 `routing_inspyrenet_salient_local_lf` 只提供 `M_embed`、全一 HF support 和 mask
