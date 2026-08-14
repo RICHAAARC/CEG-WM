@@ -38,14 +38,19 @@ revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑�
 `tau`、confirmation 结果、Calibration Locked、正式 evaluation、完整联合 FPR、
 正式 records 或科学效果证据，也没有 LF/routing/组合/geometry 晋升。
 
+新显著目标四候选的当前流程从该 `experiment_ready / implemented` 基线申请独立
+CPU/API implementation；不重建 Git 身份、不回退或重走既有 stage。只有候选专属
+实现、测试、独立语义审核与 readiness 闭合后，才可申请新的 module-level
+development protocol。
+
 ## Paper Research Target
 
 最终目标是形成一套可独立重建的 CEG-WM 论文证据，至少支持以下问题：
 
 - CEG-WM HF direct score 是否能在本项目中保持正确密钥归属；
 - LF 是否在 HF 易受损条件下提供独立且互补的密钥证据；
-- 内容自适应路由是否在相同总能量下优于无路由；
-- LF/HF 组合是否优于 HF-only，且不掩盖错误密钥失败；
+- 显著目标内部局部 LF 是否在相同总能量下提供非零、mask 外逐位为零的因果贡献；
+- 固定 HF/masked-LF max statistic 是否保留 HF-only 归属、增加 masked-LF 证据且不掩盖错误密钥失败；
 - Q/K 几何链是否能盲估计 crop、scale、rotation 并可靠拒绝不可恢复样本；
 - 条件几何恢复是否提高同一内容检测器的 TPR，同时保持同一阈值和 FPR；
 - 完整方法在预登记攻击、baseline、图像质量和资源成本下是否具有论文价值；
@@ -92,15 +97,16 @@ revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑�
   counter、normal table、职责域、wrong-key/public-noise 与 golden vectors；
 - 在不要求 CEG-WM 已有 Git 的前提下，只读登记历史源真实 revision、逐文件摘要、许可证缺口、候选/偏离边界和逐参数映射，形成 provisional provenance；
 - 把 CEG-WM `hf_sparse_tail` 候选冻结为 `sparse tail → direct L2 normalize → score-time centering`，并只在 provenance 中注明 historical DirectHF 来源；任何 template-time centering 变体使用新的 CEG-WM HF 候选身份且不继承旧证据；
-- 冻结候选 HF 模板/单位方向、content embedder 的 mixing coefficients、
-  combined pre-normalization geometry、`3/250` nominal 与 actual hard limit、
+- 把旧 content embedder 的 mixing coefficients、`A`/双-mask、routed/
+  route-disabled 与 calibrated-function 只冻结为 historical exact replay；
+- 冻结 current HF 模板/全一 support、InSPyReNet `M_embed`、
+  `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`、current direction identity、
+  `3/250` nominal 与 actual hard limit、
   nominal delta、runtime 物化位置/realized combined total norm/relative L2
   返回边界、binary32 最大非零可行 scale 选择和 HF direct score；
 - 预登记 LF 模板/单位方向、embedder 使用、runtime 物化边界和 score 候选集合；
-- 预登记内容路由的 observations、`A`、两 mask、identity/digests 和不读取观测的
-  disabled uniform control；相同预算由 embedder/实验配对约束；
-- 预登记 LF/HF empirical-CDF/normal-quantile 组合的有限候选族、candidate-selection
-  provisional operating point、正式 content-threshold-fit 边界和晋升门；
+- 预登记 current mask identity/digests、独立 masked-LF 32-clean-null W、分支独立
+  primary null、fixed max statistic、正式 content-threshold-fit 边界和晋升门；
 - 预登记 Q/K 层、头、image-only empty-condition 条件、四通道关系、非正交 content
   subspace 投影、actual-dtype budget、变换支持域、W/V 采样、搜索平局和可靠性候选；
 - 定义小型 synthetic/CPU 行为检查与真实 runtime 检查的边界。
@@ -169,11 +175,11 @@ audit 必须从 authorization base revision
 - 相同通用函数不得冒充多个组件，集中式代理模块、常量/输入无关返回和重复同构测试必须被 readiness audit 拒绝；
 - 验收节点必须覆盖 key root/domain、counter/quantile golden、wrong/public derivation、
   HF sparse support/模板归一顺序/单位 L2、HF score-time centering、LF carrier 与
-  独立盲 score、routing mask partition/range 与 disabled uniform control、
-  router masks 经 carrier directions 进入 content embedder、embedder 的冻结
-  mixing coefficients/非正交交叉项/共同 nominal/actual hard limit/
-  HF-only-LF-only-combined nominal delta/零方向、LF/HF/combined 独立可观测
-  与冻结组合、真实 Q/K relation、synthetic transform、独立 reliability、
+  独立盲 score、current InSPyReNet mask/coverage 与全一 HF support、
+  mask 经 carrier direction 进入 content embedder、无 `a/w` write、共同
+  nominal/actual hard limit、clean/HF-only/masked-LF causal/global-HF+local-LF/
+  LF-disabled nominal delta/零方向、HF/masked-LF/max 独立可观测、真实 Q/K relation、
+  synthetic transform、独立 reliability、
   rectification 和 same-detector joint decision；actual-dtype 的冻结算术、
   integrity、单调预算谓词、终止、最大可行 scale、plateau/subnormal/轻微超限与
   无非零可行写入先由 CPU property tests 覆盖，真实 SD3.5 物化仍必须留到真实
@@ -256,6 +262,10 @@ geometry reliability 折回其他组件，都不得推进；机械 readiness pas
   同时成立；
 - 组合在 candidate-selection confirmation partition 中满足晋升门；
 - 组合完整检测器重新校准，不沿用 HF-only 阈值。
+- current fixed denominator 同时覆盖 clean、HF-only、masked-LF causal、
+  global-HF+local-LF、LF-disabled、correct-key、wrong-key、unwatermarked、invalid-mask
+  与所有失败；不要求 adaptive 胜过 uniform/permuted，也不重新引入 route-disabled
+  selection。
 
 ### Pass Result
 
@@ -578,13 +588,15 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 
 ### Content Mechanism
 
-- HF-only、LF-only、route-disabled、routed 和 combined；
-- LF/HF 分数分布和组合贡献；
-- 内容路由覆盖、mixing coefficients、方向内积/组合归一因子，以及
+- clean、HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 和失败；
+- HF、masked-LF 与 max-statistic 分数分布、correct/wrong/unwatermarked attribution；
+- mask coverage、embed/detect IoU、raw/rectified mask drift、LF-only causal witness，以及
   `content_embedder` 核验的 nominal/limit、materialization scale、attempt/integrity/
   budget status、diagnostic utilization 与 realized combined total norm/relative
   L2；
 - LF 失败或未晋升时的完整负结果。
+- historical `A/a/routed/route-disabled/uniform` 结果只进入 negative appendix，不进入
+  current candidate table、selection 或主方法贡献。
 
 ### Geometry Mechanism
 

@@ -36,7 +36,7 @@ fields、dependency stop rule、四项 module outcome 和独立的两项 candida
 recommendation。outcome 只描述 mechanism signal、implementation block 或
 resource block；recommendation 不等于晋升，也不授权 candidate-selection。
 
-当前活动协议为 `ceg_wm_thirteen_module_mechanism_screening`。先执行 2-cluster
+historical `ceg_wm_thirteen_module_mechanism_screening` 只保留 producer-bound replay。其原始设计先执行 2-cluster
 环境、身份和吞吐 preflight；8-cluster wiring smoke 也不计入科学覆盖。冻结顺序为
 key schedule；HF carrier 与 HF detector；LF carrier 与 LF detector；Q/K sync；
 32 个不计科学覆盖的 routing reference；router；embedder；content detector；
@@ -60,14 +60,14 @@ detector 各增加 16 个 paired units，合计增加 192 个 scientific units�
 扩展补偿；该未来扩展目前没有入口、没有执行包且不得执行。历史 314-unit 部分诊断
 也不属于当前 240-unit 分母或未来扩展分母。
 
-routing 的 adaptive/uniform 两臂复用同一 HF-only public content operation；该门
+该 historical routing 的 adaptive/uniform 两臂复用同一 HF-only public content operation；该门
 不读取尚未拟合的 LF/HF combined null/CDF，也不替代后续 content combination。
 routing reference 只在持久 cursor 到达其冻结局部 phase 时准备；在此之前 key、HF、
 LF 与 Q/K unit 必须已经各自形成可验证的 `COMMITTED` 记录。跨会话恢复身份绑定 exact
 revision、protocol、config、manifest、roster 与 run；package/bootstrap 的传输摘要不
 属于 development 科学恢复身份，session receipt 仍可记录当前 package 的普通 SHA-256。
 
-内容只含 clean、HF-only、LF-only、disabled-uniform LF/HF control 和 routed
+historical 内容矩阵只含 clean、HF-only、LF-only、disabled-uniform LF/HF control 和 routed
 LF/HF combination 五个分支。几何只含一个 identity、crop、scale、rotation 和
 compound case，另冻结 ambiguous、boundary、extreme-crop 三个 negative-control
 case；不展开无约束笛卡尔积。
@@ -111,20 +111,29 @@ unavailable，不能用 role metadata 的摘要冒充 roster。本阶段只允�
 confirmation 映射 untouched-confirmation/combined，HF-only reference confirmation
 映射 untouched-confirmation/HF-only 且要求冻结 HF-only tau，三者本批均不执行。
 
-## Content Validation Matrix
+## Current Salient-Object Content Validation Matrix
 
+current InSPyReNet candidate 的固定记录/对照矩阵只允许：
+
+- clean；
 - HF-only；
-- LF-only；
-- LF/HF routing；
-- LF/HF combined；
-- route-disabled；
+- masked-LF causal witness；
+- global-HF + local-LF；
 - LF-disabled；
-- HF-disabled；
+- invalid-mask、implementation、resource、identity、integrity、nonfinite failure；
 - correct key；
 - wrong key；
-- unwatermarked negative。
+- unwatermarked primary null。
 
-固定权重只能作为明确历史 baseline，不能作为默认项目方法。
+全部预登记单位保留固定分母。不得要求 adaptive 胜过 uniform/permuted，不得重新引入
+route-disabled/routed selection，也不得把 historical `A/a`、mixing coefficients 或
+旧函数族作为 current baseline。masked-LF causal witness 必须分别报告 actual LF
+delta 非零、mask 外逐 bit 零和 mask 内能量；global-HF+local-LF 不伪造实际分支分解。
+
+current 指标固定覆盖 mask coverage、embed/detect IoU、raw/rectified mask drift、
+LF causal witness、correct/wrong/unwatermarked attribution、HF/masked-LF/max statistic、
+canonical binary32 `3/250` budget 与质量。historical `A/a/routed/route-disabled/uniform`
+只进入 negative appendix，不进入 current candidate selection 或主结果。
 
 ## Geometry Validation Matrix
 
@@ -161,7 +170,8 @@ confirmation 映射 untouched-confirmation/combined，HF-only reference confirma
 - 固定 FPR `0.001` 级别下的 TPR；
 - ROC/AUC 作为补充，不替代固定 FPR；
 - correct-key 与 wrong-key 分离；
-- LF、HF 和组合分数分布；
+- HF、masked-LF 和 fixed max-statistic 分数分布；
+- mask coverage、embed/detect IoU、raw/rectified drift 与 LF causal witness；
 - rotation、scale、crop/translation 估计误差；
 - 几何可靠性校准；
 - 图像质量和感知指标；

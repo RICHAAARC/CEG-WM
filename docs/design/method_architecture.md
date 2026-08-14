@@ -37,10 +37,12 @@ CEG-WM 内容链的七项正式职责是 `content_router`、`lf_carrier`、
 分支 detector 独立产生盲分数，content detector 只组合检测统计；runtime 只在冻结
 callback/model/dtype 边界物化 embedder 给出的更新并把实际张量与 realized
 combined total norm/relative L2 返回给
-embedder 判定，不拥有路由、组合写入、预算判定或检测算法。router 只输出
-observations、`A`、两 mask 和 identity/digests；`a`、方向内积/组合归一因子、
+embedder 判定，不拥有路由、组合写入、预算判定或检测算法。current router 只输出
+`M_embed`、全一 HF support、mask identity/digests；current embedder 只按
+`normalize(normalize(T_hf)+normalize(M_embed*T_lf))` 构造方向并拥有
 nominal/limit、materialization reconciliation 与 realized combined total
-norm/relative L2 属于 embedder。
+norm/relative L2。`A`、互补双 mask、`a`、direction dot/c(a) 和 routed/
+route-disabled records 只属于 historical exact replay。
 
 当前 actual-dtype 内容预算把 nominal 与 hard limit 同时冻结为 `3/250`。对
 callback 18 actual baseline `z0`，runtime 只实现
@@ -131,8 +133,9 @@ main/joint_decision/detector.py             conditional_recovery_decision
 ```
 
 `content_router` 仍是唯一 mask/route 职责；继任候选只允许其拥有冻结 InSPyReNet
-mask 与 identity/digests，不增加组件职责。`content_embedder` 独占 LF/HF 组合写入、共同总预算、
-方向内积/组合归一因子、nominal/limit、materialization scale/attempt/integrity/
+`M_embed`、全一 HF support 与 identity/digests，不增加组件职责。
+`content_embedder` 独占无 `a/w` 的 global-HF/local-LF 写入、共同总预算、
+nominal/limit、materialization scale/attempt/integrity/
 budget status 与 realized combined total norm/relative L2，以及 active/combined
 零方向失败；
 `lf_detector` 独占盲 LF 分数；旧 `lf_null_whitened_matched_score` 与新
@@ -141,6 +144,11 @@ budget status 与 realized combined total norm/relative L2，以及 active/combi
 不改变 `lf_carrier` 或现有 readiness；`geometry_reliability` 独占 estimator 原始指标上的
 合取门。候选 registry 现在是 15 个 ID（14 个具名候选加 1 个 routing 强制对照）；
 CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现职责不是同一计数。
+
+current records/controls 固定为 clean、HF-only、masked-LF causal、
+global-HF+local-LF、LF-disabled 和失败。historical `routing_stqr` 的 `A`/双-mask/
+disabled-uniform 与旧 combination 的 `a/u_content(a)/dot/c/routed` 只可按原 producer
+和 package/record identity 重放，不得重签为 current readiness、stage 或 control。
 
 `content_direction`、`active_lf_direction`、`active_hf_direction` 及 target
 components 只绑定 nominal 组合公式；actual hard limit 只作用于最终 combined

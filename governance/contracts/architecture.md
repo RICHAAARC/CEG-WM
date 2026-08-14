@@ -11,7 +11,9 @@ CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印�
 实际阶段/status 已由独立 revisions 同步为 `experiment_ready / implemented`。
 CPU/synthetic readiness 本身不证明 runtime；当前另有独立真实 GPU qualification
 支持冻结 SD3.5 runtime 边界，但不证明正式 FPR 或科学效果；
-正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+正式 detector 仍为 HF-only；旧 routing/combination 只保留 producer-bound historical
+replay，新显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`、
+`implementation_admission=NO`，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation
 或科学证据，也不晋升 LF/routing/组合/geometry。
@@ -39,14 +41,22 @@ KDF/PRG、职责域、wrong-key/public-noise 和 golden-vector 责任。LF、HF 
 方法完成面固定为 13 项职责组件：共享 1 项、内容链 7 项、几何链 4 项、联合判定
 1 项。`content_embedder`、`lf_detector`、`geometry_reliability` 各有独立路径，
 不得折回 carrier、content detector 或 transform estimator。候选 registry 的
-10 个 ID 与这 13 项职责是不同计数。
+15 个 ID（14 个具名候选加 1 个 mandatory control）与这 13 项职责是不同计数；
+新增四候选不增加第 14 项职责，也不重签当前 readiness 或 stage。
 
-内容侧所有权固定为：`content_router` 只输出 observations、`A`、两 mask、
-route identity/digests 和 disabled uniform control；LF/HF carrier 只输出模板和
-masked unit direction；`content_embedder` 独占冻结 `a`、方向组合、共同总预算、
-HF-only/LF-only/combined delta、方向内积/组合归一因子、target total 与 realized
-combined total norm/relative L2 核验及零方向失败。mixing coefficients 不是可加
-方向份额。
+当前内容侧所有权固定为：`content_router` 只输出 `M_embed`、全一 HF support、
+mask identity/digests；不输出 `A`、互补双 mask、`a` 或预算。
+`content_embedder` 只按
+`normalize(normalize(T_hf)+normalize(M_embed*T_lf))` 形成 current combined
+direction，独占共同总预算、HF-only/masked-LF/global-HF+local-LF/LF-disabled delta
+与 realized total norm/relative-L2 核验及零方向失败；不存在 `a/w` grid。
+clean、HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 和显式失败是
+current control/record surface。
+
+历史 `routing_stqr` 的 observations、`A`、互补双 mask、disabled-uniform control，
+以及旧组合的 `a`、`u_content(a)`、direction dot/product 与 routed/route-disabled
+records 只服务 exact producer replay；不得重新成为 current method authority、
+readiness 或 candidate-selection surface。
 runtime 只在冻结 callback/model/dtype 边界物化 delta，并把实际张量及 combined
 delta 的 total norm/relative L2 返回给 embedder 判定，不得改变预算或方向，也不得
 声称可观测分支级实际写入量。

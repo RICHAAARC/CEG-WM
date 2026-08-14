@@ -49,9 +49,12 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 | `image_rectifier` | `image_coordinate_rectification` | `main/geometry_chain/rectifier.py` | `rectification_similarity` |
 | `conditional_recovery_decision` | `conditional_same_detector_recovery` | `main/joint_decision/detector.py` | `joint_conditional_recovery` |
 
-`content_embedder` 独占 `u_content(a)`、nominal/actual hard limit、mixing
-coefficients、组合 delta 的 materialization reconciliation 与 realized
-norm/relative L2 和 active 零方向失败；`lf_detector`
+`content_embedder` 独占 combined direction、nominal/actual hard limit、组合 delta 的
+materialization reconciliation、realized norm/relative L2 和 active 零方向失败。
+其中 historical exact replay 才拥有 `a/u_content(a)`、mixing coefficients 与
+direction dot/c；current `content_embedding_global_hf_local_lf` 只拥有
+`normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，不存在 `a/w` grid。
+`lf_detector`
 独占盲 `s_lf`；`geometry_reliability` 独占 estimator
 原始指标上的可靠性合取门。这三项不能由 carrier、content detector 或 transform
 estimator 代行。候选绑定表示该组件必须实现或消费的规格身份，不表示候选已经晋升。
@@ -874,8 +877,8 @@ ties、低/高尾 clipping、排列不变性、严格单调区间、分支交换
 
 | historical route | exact producer | immutable evidence | status |
 | --- | --- | --- | --- |
-| `routing_stqr` fixed-half directional diagnosis | `925c2cbc727e3b18e91c0b3981eeed1b470a955a` | `42/42` terminal；incremental indicator `3/8` at clusters `1`, `5`, `6` | producer-bound development negative; not current candidate |
-| `content_uniform_combination` directional diagnosis | `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da` | `41/41` terminal；budget violations `2` at clusters `1`, `6`；`mechanism_signal_not_observed`；`candidate_not_recommended_for_selection`；allow request false | producer-bound development negative; not current candidate |
+| `routing_stqr` fixed-half directional diagnosis | producer `925c2cbc727e3b18e91c0b3981eeed1b470a955a`; run `ceg_wm_content_routing_positive_reference_support_correction_diagnosis` | `42/42` terminal；ordered incremental indicators `1,1,1,0,0,0,0,0`，即 `3/8=0.375`，未满足 strict `>0.5`；clusters `1`,`5`,`6` 的 RGB relative-L2 超限，因此不是 successful clusters | producer-bound development negative; not current candidate |
+| `content_uniform_combination` directional diagnosis | producer `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da`; run `ceg_wm_content_uniform_combination_budget_observation_correction_diagnosis` | `1+32+8=41` attempt-0 `COMMITTED`；canonical binary32 `3/250`；budget violations `2` at clusters `1`,`6`；`mechanism_signal_not_observed`；`candidate_not_recommended_for_selection`；allow request false | producer-bound development negative; not current candidate |
 
 旧 routed `content_embedder`、旧 combined detector 及其 conditional-recovery 内容依赖
 均为 closed/paused。现存实现只服务 producer reproduction、failure provenance、
@@ -1375,16 +1378,15 @@ rectification；conditional recovery 控制流；以及尚未获 implementation 
 InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
 独立 32-clean-null masked whitening 与 max-statistic identity。
 
-仍只能由预登记 calibration/实证晋升决定的是：哪个 `a`、哪条语义化组合函数、
+旧 `a` 与三条历史组合函数已经形成 producer-bound negative，不再是 current 选择面。
+新 write 没有 `a/w` grid，新检测统计固定为 max。仍只能由未来预登记实证决定的是：
+新候选是否通过 module-level development 与独立 confirmation、
 `alpha_selection`、formal branch CDF、`tau`、`tau_rescue`、七个 geometry reliability
 `gamma` 与 `epsilon_inlier`、各职责样本量、候选是否晋升/淘汰、runtime 是否可复现，
 以及 FPR/TPR、鲁棒性、质量、成本和完整/负结果/reduced-scope outcome。文档中的历史
 参数级来源值是待验证候选值，不是 CEG-WM 已验证事实。
 
-因此，本文可以在未来用户授权后直接指导实现；它本身不授权实施。下一步顺序是：
-
-1. 独立审计本文的完整性与历史边界；
-2. 用户决定历史代码复用权处理，并授权建立 CEG-WM 可审计版本身份；
-3. 以不含 `main/` 的独立 revision 进入 `method_construction_authorized`；
-4. 后续 revision 严格按候选 ID 实现和迁移；
-5. 实现测试与独立语义审计通过后才可进入 `method_implemented`。
+因此，本文可以在未来用户授权后指导实现，但本身不授权实施。项目全局已是
+`experiment_ready / implemented`；新候选的下一步不是重建 Git 身份或重走 stage，
+而是在独立授权中申请 CPU/API implementation，绑定四个新候选 ID 完成实现、测试、
+独立语义审核与候选专属 readiness 后，才申请 module-level development 执行。

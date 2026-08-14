@@ -17,9 +17,21 @@
 
 当前 CPU/synthetic 方法实现采用唯一的 13 项职责组件口径；精确 responsibility、
 固定路径和候选绑定见 [candidate_specifications.md](candidate_specifications.md)。
-候选 registry 现在是 11 个 ID（10 个具名候选加 1 个 routing 对照）；新增的
-`lf_null_whitened_matched_score` 仅完成设计冻结，尚未实施或重绑 readiness。实现不等于
-LF/routing 的实验晋升，该计数不得与组件数混淆。
+候选 registry 现在固定为 15 个 ID（14 个具名候选加 1 个 mandatory routing
+control），该计数不得与 13 项职责混淆。新增的
+`routing_inspyrenet_salient_local_lf`、
+`content_embedding_global_hf_local_lf`、
+`lf_saliency_masked_null_whitened_matched_score` 和
+`content_combination_saliency_max_standardized` 统一为
+`design_candidate_pending_implementation`，`implementation_admission=NO`；不增加第
+14 项职责，也不重签当前 readiness、stage 或既有 runtime qualification。
+
+旧 `routing_stqr` 的 `A`、双 mask、routed/route-disabled 对照与旧
+`content_uniform_combination` 的 `a/u_content(a)`、direction dot/c 和函数族只服务
+原 producer/package/record 的 historical exact replay。它们的代码或历史证据存在，
+不表示 current candidate、执行授权或 downstream dependency；current 显著目标路线
+仅使用 `M_embed`、全一 HF support、无 `a/w` 的 global-HF+local-LF 写入和独立
+masked-LF/max-statistic 检测身份。
 
 ## Derived Method Diagrams
 

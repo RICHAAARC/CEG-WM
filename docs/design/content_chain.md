@@ -36,8 +36,9 @@ admission。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observat
 1. LF 在哪些失真下提供 HF direct score 缺少的互补证据？
 2. LF 是否保持密钥归属，而不是只检测通用低频偏移？
 3. LF 对图像质量、可见性和错误密钥 FPR 的代价是什么？
-4. LF 是否需要内容路由，路由是嵌入时、检测时还是共享确定性规则？
-5. LF 与 HF 的组合是否优于独立选择或条件路由？
+4. 显著目标内部局部 LF 是否在固定总预算下提供可审计的因果贡献？
+5. 独立 primary-null 标准化后的固定 max statistic 是否保留 HF 证据并增加
+   masked-LF attribution？
 
 在这些问题以真实证据关闭前，不得把任一组合定义为正式内容检测器；这不允许实现者偏离已登记候选。
 
@@ -45,11 +46,12 @@ admission。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observat
 
 内容自适应路由必须：
 
-- 由可复现的图像或模型观测决定；
-- 明确嵌入端与检测端如何获得一致路由；
+- 由冻结 InSPyReNet 对各自普通 RGB8 输入独立得到唯一显著目标 mask；
+- 明确嵌入端与检测端重跑同一模型/规则且不得共享私有 mask；
 - 不读取攻击后的不可获得私有状态；
 - 保存可审计的路由身份与分支覆盖；
-- 允许 LF-only、HF-only、route-disabled 和组合消融。
+- 以 masked-LF causal witness、HF-only、global-HF+local-LF、LF-disabled 和失败
+  构成 current 固定分母。
 
 历史首个 `routing_stqr` 只在嵌入端消费已登记 S/T/R/Q 观测；检测使用未 mask 模板并不重建私有 route。其公式、reference 拟合职责和同预算控制见候选规格。
 
@@ -107,7 +109,8 @@ mask 内有能量；combined arm 不得伪分解 actual branch contribution。
 
 ## Combination Requirements
 
-组合写入和统计组合是两个独立职责。`content_embedder` 只消费 router 与 LF/HF
+以下 `a/u_content(a)` 与 calibrated-function 语义只服务 historical exact replay。
+组合写入和统计组合仍是两个独立职责。旧 `content_embedder` 只消费 router 与 LF/HF
 carrier 方向，按冻结 `a` 构造 `u_content(a)`，保持共同总能量预算并在任一 active
 方向或 combined 方向为零时 fail closed；`a` 与 `1-a` 是 mixing coefficients，
 combined norm 包含两方向的交叉项。它独占 HF-only/LF-only/combined delta、
@@ -165,8 +168,8 @@ content-threshold-fit 重新拟合，不能跨五类 calibration 职责复用。
 
 | route | producer | frozen result | current authority |
 | --- | --- | --- | --- |
-| `routing_stqr` fixed-half directional diagnosis | `925c2cbc727e3b18e91c0b3981eeed1b470a955a` | `42/42` terminal; incremental indicator `3/8` at clusters `1`, `5`, `6` | historical development negative; not current candidate |
-| `content_uniform_combination` directional diagnosis | `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da` | `41/41` terminal; budget violations `2` at clusters `1`, `6`; `mechanism_signal_not_observed`; `candidate_not_recommended_for_selection`; request false | historical development negative; not current candidate |
+| `routing_stqr` fixed-half directional diagnosis | producer `925c2cbc727e3b18e91c0b3981eeed1b470a955a`; run `ceg_wm_content_routing_positive_reference_support_correction_diagnosis` | `42/42`; ordered indicator sequence `1,1,1,0,0,0,0,0`; `3/8=0.375` does not satisfy strict `>0.5`; RGB relative-L2 violations at clusters `1`,`5`,`6`, so they are not successful clusters | historical development negative; not current candidate |
+| `content_uniform_combination` directional diagnosis | producer `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da`; run `ceg_wm_content_uniform_combination_budget_observation_correction_diagnosis` | `1+32+8=41` attempt-0 `COMMITTED`; canonical binary32 `3/250`; budget violations `2` at clusters `1`,`6`; `mechanism_signal_not_observed`; `candidate_not_recommended_for_selection`; request false | historical development negative; not current candidate |
 
 不得从旧 8-probe 结果选择 mask、threshold、erosion、coverage、`a`、`w` 或 function；
 不得补样、删 cluster、重跑、增加 attempt、放宽 `3/250`、重写 artifact，或只用
@@ -179,8 +182,10 @@ record replay 和与新候选的语义 diff；代码存在不等于 current cand
 
 ## Output Semantics
 
-当前 CPU/synthetic 内容检测结果独立携带 LF、HF、combined 分支统计及路由、组合、
+historical CPU/synthetic 内容检测结果独立携带 LF、HF、combined 分支统计及旧路由、组合、
 密钥和失败身份；正式 calibration 阈值与实验 records schema 仍在后续协议阶段登记。
+current pending candidate 的 record/control matrix 固定为 clean、HF-only、masked-LF
+causal、global-HF+local-LF、LF-disabled 和失败；不含 `A/a/routed/route-disabled`。
 
 ## Current Status
 

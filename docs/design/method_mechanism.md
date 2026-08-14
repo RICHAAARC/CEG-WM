@@ -89,6 +89,8 @@ joint_decision
 
 ### Content Observation And Routing
 
+#### Historical Exact Replay
+
 在登记的生成时刻提取候选内容观测。旧 `routing_stqr` 的 `content_router` 只据此输出 `A`、
 `mask_lf`、`mask_hf`、route identity/digests 和 disabled uniform control。
 路由计算属于内容链；模型执行和张量捕获属于 runtime。router 不决定 `a`，不输出
@@ -103,11 +105,15 @@ joint_decision
 
 路由不得读取攻击标签或 evaluation 结果。
 
+#### Current InSPyReNet Candidate
+
 旧 `routing_stqr` 已是 producer-bound historical negative。当前继任设计不新增
 职责：`content_router` 对 callback-18 临时 VAE decode RGB8 运行冻结 InSPyReNet，
 通过 raw finest `d0 -> sigmoid once -> bilinear 64x64 -> p>=0.5 -> one 3x3
 zero-padded erosion` 得到 `M_embed`；coverage 只允许 `64..3072`。检测端对普通
 待检 RGB8 独立得到 `M_detect`，raw/rectified 分别重跑，永不读取 embed mask。
+current router 的完整输出仅为 `M_embed`、全一 HF support、mask identity/digests；
+不输出 `A`、互补双 mask、disabled-uniform route、`a` 或标量预算。
 
 ### Content Carrier Directions And Embedder Write
 
@@ -116,7 +122,9 @@ HF 写入方向独立使用 CEG-WM HF carrier 职责域密钥。LF 候选写入�
 必要 identity，并且必须能够单独启用；它们不产生 delta、不物化写入，也不拥有实际
 写入能量。
 
-独立 `content_embedder` 消费两条单位方向和 router masks，独占配置中的冻结 `a`、
+#### Historical Exact Replay
+
+旧 `content_embedder` 消费两条单位方向和 historical router masks，独占配置中的冻结 `a`、
 `u_content(a)`、`content_relative_l2_nominal=3/250`、
 `content_relative_l2_limit=3/250`、HF-only/LF-only/combined
 `delta_content_nominal`、nominal total norm/relative L2 与 active/combined
@@ -126,6 +134,8 @@ HF 写入方向独立使用 CEG-WM HF carrier 职责域密钥。LF 候选写入�
 该 delta，并把实际张量及 realized combined total norm/relative L2 返回给 embedder
 判定；runtime 不改变预算或方向。carrier、router、runtime 或 detector 不得代行
 组合与预算判定。
+
+#### Shared Actual-Dtype Materialization
 
 对 callback 18 actual baseline `z0` 和一个正 binary32 scale `s<=1`，runtime
 只执行
@@ -142,6 +152,8 @@ HF 写入方向独立使用 CEG-WM HF carrier 职责域密钥。LF 候选写入�
 midpoint；zero plateau 不作为可行写入，最终返回最大非零可行 scale 或 fail closed。
 runtime 不拥有 accept/retry/scale/final-failure 语义。
 
+#### Current Global-HF Plus Local-LF Write
+
 对 `content_embedding_global_hf_local_lf`，上述职责分离保持不变，但唯一 nominal
 方向改为：
 
@@ -156,25 +168,34 @@ budget 仍是 canonical binary32 `3/250`。科学 probe 必须以 LF-only arm �
 LF delta 非零、mask 外逐 bit 零、mask 内有能量；combined actual delta 不声明 branch
 分解。
 
-因此正式候选的组合记录归 `content_embedder`：包括冻结 `a`、方向/支持 identity、
+current records/controls 固定为 clean、HF-only、masked-LF causal、
+global-HF+local-LF、LF-disabled 和显式失败。masked-LF causal record 必须证明
+actual LF delta 非零、mask 外逐 bit 为零、mask 内有能量；其余 current records 保存
+mask identity/digests、coverage、nominal/limit、runtime materialization、realized
+combined total norm/relative L2、integrity/budget/failure，不保存 `A`、`a`、
+`dot(u_lf,u_hf)` 或 routed/route-disabled 身份。
+
+historical exact replay 的组合记录仍包括冻结 `a`、方向/支持 identity、
 `dot(u_lf,u_hf)`、combined pre-normalization norm、nominal 与 limit、runtime
 返回的 realized combined total norm/relative L2、materialization scale、
 attempt count、integrity/budget status 和仅诊断的 utilization。若记录 target
 component vectors/norms，必须注明它们只是 nominal formula witnesses 且不可相加
 为 total；`content_direction`、`active_lf_direction`、`active_hf_direction` 也不
 构成 actual branch decomposition。低 utilization 不得在未来实验中被事后筛除。
-route record 只保留 observations、`A`、masks、覆盖和 identity/digests。
+historical route record 只保留 observations、`A`、masks、覆盖和 identity/digests；
+这些字段不得重签为 current records 或 readiness。
 
-正式比较至少保持以下因果对照：
+current 比较只保持以下因果对照：
 
 - clean；
 - HF-only；
-- LF-only；
-- LF/HF route-disabled；
-- LF/HF routed；
-- 分支禁用控制。
+- masked-LF causal；
+- global-HF + local-LF；
+- LF-disabled；
+- mask/support/runtime failure。
 
-不得把不同总能量候选的效果差异直接解释为路由或组合增益。
+不得重新引入 adaptive-vs-uniform、permuted、routed-vs-route-disabled 或权重/function
+selection；不同总能量候选的效果差异也不得解释为局部路由增益。
 
 ### Geometry Synchronization Write
 

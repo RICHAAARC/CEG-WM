@@ -81,18 +81,24 @@ T_hf = S_hf / norm(S_hf)
 
 ### HF Carrier Direction
 
-`hf_carrier` 只把 router 的 `mask_hf` 施加到稀疏模板，并输出单位写入方向：
+current `hf_carrier` 的 support 恒为全一并输出：
+
+```text
+u_hf = normalize(T_hf)
+```
+
+historical `routing_stqr` exact replay 才把 `mask_hf` 施加到稀疏模板：
 
 ```text
 u_hf = normalize(mask_hf * T_hf)
 ```
 
-HF-only 对照令 `mask_hf = 1`。模板、稀疏支持、mask identity 和单位方向属于
+HF-only 对照与 current global-HF 都令 `mask_hf = 1`。模板、稀疏支持、mask identity 和单位方向属于
 `hf_carrier`；它不产生 `delta_content`，不物化 latent，也不拥有实际写入能量。
 
 ### Content Embedder Write
 
-`content_embedder` 独占配置中的冻结 `a`、LF/HF 方向组合、名义相对能量
+historical exact replay 的 `content_embedder` 独占配置中的冻结 `a`、LF/HF 方向组合、名义相对能量
 `content_relative_l2_nominal=3/250` 和 actual-dtype combined content hard limit
 `content_relative_l2_limit=3/250`。HF-only、LF-only 和 combined 都由它产生统一的
 `delta_content_nominal`；combined 情形为：
@@ -112,6 +118,18 @@ delta_content_nominal =
 为零/非有限、nominal formula replay 不符或 `a` 非法都由 `content_embedder`
 fail closed。方向、交叉项和 target components 都是 nominal formula witnesses；
 它们不定义 actual branch decomposition。
+
+current `content_embedding_global_hf_local_lf` 只允许：
+
+```text
+u_hf = normalize(T_hf)
+u_lf = normalize(M_embed*T_lf)
+u_content = normalize(u_hf+u_lf)
+```
+
+不存在 `a/w`、direction dot/c(a) 或 routed/route-disabled selection。current records
+固定为 clean、HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 与失败；
+historical `a/u_content(a)/dot/c(a)` records 只供 exact replay。
 
 ### Runtime Materialization
 
@@ -232,6 +250,8 @@ latent。只有正确密钥、错误密钥、无水印负样本和图像质量�
 
 ## Content-Adaptive Routing Primitive
 
+### Historical `routing_stqr` Exact Replay
+
 以下 `A`/双-mask 原语只描述 producer-bound historical `routing_stqr`。它只输出生成时内容观测结果、空间 mask 和身份，不拥有检测阳性语义、
 `a` 或任何能量预算。
 
@@ -262,6 +282,8 @@ router 不返回 `budget_lf`、`budget_hf` 或其他标量预算。首轮必须�
 基线、公开图像观测路由和被允许的共享确定性路由候选。任何依赖私有嵌入状态且
 检测端无法复现或边缘化的候选直接失败。
 
+### Current InSPyReNet Mask
+
 `routing_stqr` 已形成 producer-bound development negative，不再是 current route。
 继任 `routing_inspyrenet_salient_local_lf` 不再输出 `A` 或互补 soft masks；它保持
 同一 `content_router` 职责，并按唯一规则输出 binary `M` 与全一 HF support：
@@ -278,12 +300,14 @@ valid iff 64 <= count(M) <= 3072
 待检 RGB8，两侧独立运行。不存在 connected-component selection、soft fallback 或
 per-image min-max。raw/rectified 分别重算；detector 不读取 embed mask。8-unit
 development mask stability 固定为至少 `7/8` 的 IoU `>=0.5`。
+current router 只返回 `M_embed`、全一 HF support、mask identity/digests，不返回 `A`、
+互补双 mask、disabled-uniform route、`a` 或预算。
 
 ## LF/HF Combination Primitive
 
 ### Current Authority
 
-原语责任分为两部分：`content_embedder` 负责 `u_content(a)` 和共同总预算写入；
+原语责任分为两部分：`content_embedder` 负责 current `u_content` 和共同总预算写入；
 `content_detector` 负责 `s_lf`、`s_hf` 的冻结标准化与组合。独立 `lf_detector`
 必须直接实现盲 `s_lf`，不得把 LF score 隐藏在 carrier 或组合器中。
 
@@ -292,7 +316,7 @@ negative。继任候选的写入只允许
 `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，检测只允许
 `max(z_hf,z_lf_masked)`；两者尚未获 implementation admission。
 
-### Calibrated Candidate Family
+### Historical Calibrated Candidate Family
 
 每个分支按 `content_combination_calibrated` 的有限样本 mid-rank empirical CDF、
 `1/(2n)` 双尾 clipping 和冻结 `2^20` midpoint float32 normal-quantile table
@@ -309,6 +333,14 @@ confirmation，随后丢弃；正式 branch CDF 与 `tau` 只能由独立
 content-threshold-fit 重新拟合。两者不得跨五类 calibration 职责复用。
 
 不得把历史固定权重作为默认候选，不得按攻击类别切换组合函数，不得为回正图拟合第二套权重。
+
+### Current Max-Statistic Candidate
+
+current masked-LF 必须独立完成 32-clean-null W fit；`z_hf` 与 `z_lf_masked` 使用各自
+primary null，内容统计固定为 `max(z_hf,z_lf_masked)`。其 current matrix 只含 clean、
+HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 与失败，并在 correct-key、
+wrong-key、unwatermarked 与 invalid-mask 条件保留固定分母。不得要求 adaptive 胜过
+uniform/permuted，也不得把 historical route-disabled 重新引入 selection。
 
 ### Promotion Gate
 
