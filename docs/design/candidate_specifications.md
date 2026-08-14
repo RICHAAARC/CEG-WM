@@ -1417,7 +1417,7 @@ routing observations、backbone/runtime、搜索、可靠性指标、回正和�
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
 方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前为
 `design_candidate_implementation_authorized` 且 implementation admission 为 `YES`，
-只授权本地独立 revisions 实施；四者已完成上述 d887 CPU/API source closure，但未绑定
+只授权本地独立 revisions 实施；四者已完成上述 d887 CPU/API source closure，且已绑定
 候选专属 source/CPU/API readiness overlay；仍未完成正式 checkpoint/runtime qualification、
 实验 protocol、masked-LF W、
 quality 定义、科学验证或晋升。仍待实验决定的是明确有限候选中的晋升结果和
