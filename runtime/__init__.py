@@ -64,6 +64,15 @@ from .geometry_synchronization import (
     observe_actual_qk_from_generation_suffix,
     observe_differentiable_qk_from_generation_suffix,
 )
+from .inspyrenet_saliency import (
+    INSPYRENET_CHECKPOINT_ASSET_BASENAME,
+    INSPYRENET_CHECKPOINT_ASSET_IDENTITY,
+    INSPYRENET_CHECKPOINT_SHA256,
+    INSPYRENET_CHECKPOINT_SIZE,
+    INSPYRENET_PREPROCESS_SPATIAL_SIZE,
+    InspyrenetSaliencyRuntime,
+    InspyrenetSaliencyRuntimeError,
+)
 from .qk_observation import (
     RuntimeQkObservationError,
     RuntimeQkObservationResult,
@@ -87,6 +96,11 @@ from .sd35_backend import (
 
 __all__ = [
     "DEFAULT_RUNTIME_CONFIG_PATH",
+    "INSPYRENET_CHECKPOINT_ASSET_BASENAME",
+    "INSPYRENET_CHECKPOINT_ASSET_IDENTITY",
+    "INSPYRENET_CHECKPOINT_SHA256",
+    "INSPYRENET_CHECKPOINT_SIZE",
+    "INSPYRENET_PREPROCESS_SPATIAL_SIZE",
     "CleanImageVaeObservationResult",
     "ContentEmbeddingOperation",
     "ContentWriteGeometrySuffixResult",
@@ -94,6 +108,8 @@ __all__ = [
     "ContentMaterializationMeasurement",
     "ContentWriteVaeResult",
     "GenerationCallback",
+    "InspyrenetSaliencyRuntime",
+    "InspyrenetSaliencyRuntimeError",
     "RUNTIME_CANDIDATE_ID",
     "RuntimeAdapterError",
     "RuntimeAdapterState",

@@ -8,6 +8,12 @@ from pathlib import Path
 import pytest
 
 from runtime import (
+    INSPYRENET_CHECKPOINT_ASSET_BASENAME,
+    INSPYRENET_CHECKPOINT_ASSET_IDENTITY,
+    INSPYRENET_CHECKPOINT_SHA256,
+    INSPYRENET_CHECKPOINT_SIZE,
+    InspyrenetSaliencyRuntime,
+    InspyrenetSaliencyRuntimeError,
     RuntimeAdapterError,
     RuntimeAdapterState,
     RuntimeBackendIdentity,
@@ -19,6 +25,19 @@ from runtime import (
     parse_runtime_configuration,
     select_runtime_device,
 )
+
+
+@pytest.mark.unit
+def test_public_runtime_surface_exposes_frozen_inspyrenet_saliency_owner() -> None:
+    assert InspyrenetSaliencyRuntime.__module__ == "runtime.inspyrenet_saliency"
+    assert InspyrenetSaliencyRuntimeError.__module__ == "runtime.inspyrenet_saliency"
+    assert INSPYRENET_CHECKPOINT_ASSET_IDENTITY == "inspyrenet_saliency_checkpoint"
+    assert INSPYRENET_CHECKPOINT_ASSET_BASENAME == "ckpt_base.pth"
+    assert INSPYRENET_CHECKPOINT_SIZE == 367_520_613
+    assert (
+        INSPYRENET_CHECKPOINT_SHA256
+        == "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
+    )
 
 
 def _config_mapping() -> dict[str, object]:
