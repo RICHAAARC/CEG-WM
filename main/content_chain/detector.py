@@ -20,7 +20,10 @@ from main.shared.rgb8 import (
 )
 
 from .hf_detector import HfDetectionResult
-from .lf_detector import LfDetectionResult
+from .lf_detector import (
+    LfDetectionResult,
+    LfSaliencyMaskedNullWhitenedDetectionResult,
+)
 
 CONTENT_DETECTOR_CANDIDATE_IDS = (
     "hf_sparse_tail",
@@ -206,6 +209,84 @@ class ContentDetectionResult:
     content_replay_operation: ContentResultReplayOperation | None
 
 
+@dataclass(frozen=True, slots=True)
+class SaliencyBranchNullCalibration:
+    """Independent primary-null calibration for the fixed max statistic."""
+
+    branch: BranchName
+    detector_identity: str
+    partition_identity: str
+    records: tuple[NullScoreRecord, ...]
+    calibration_identity: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.branch not in {"hf", "lf"}:
+            raise ContentDetectorError("saliency max branch must be hf or lf")
+        if not self.detector_identity or not self.partition_identity:
+            raise ContentDetectorError("saliency max calibration identity is empty")
+        if len(self.records) != 32 or any(
+            type(record) is not NullScoreRecord for record in self.records
+        ):
+            raise ContentDetectorError(
+                "saliency max CDF requires exactly 32 clean primary-null records"
+            )
+        ordered = tuple(
+            sorted(
+                self.records,
+                key=lambda record: (
+                    record.score,
+                    record.source_cluster_id,
+                    record.sample_id,
+                ),
+            )
+        )
+        identities = tuple(
+            (record.source_cluster_id, record.sample_id) for record in ordered
+        )
+        if len(set(identities)) != len(identities):
+            raise ContentDetectorError("saliency max null identities must be unique")
+        object.__setattr__(self, "records", ordered)
+        object.__setattr__(
+            self,
+            "calibration_identity",
+            sha256(
+                stable_json_utf8(
+                    {
+                        "branch": self.branch,
+                        "candidate_id": "content_combination_saliency_max_standardized",
+                        "detector_identity": self.detector_identity,
+                        "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
+                        "partition_identity": self.partition_identity,
+                        "records": [
+                            {
+                                "sample_id": record.sample_id,
+                                "score_float64_hex": record.score.hex(),
+                                "source_cluster_id": record.source_cluster_id,
+                            }
+                            for record in ordered
+                        ],
+                    }
+                )
+            ).hexdigest(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SaliencyMaxStandardizedDetectionResult:
+    """Development-only max(z_hf,z_lf_masked); formal D_M stays HF-only."""
+
+    candidate_id: str
+    hf_standardization: BranchStandardizationResult
+    lf_standardization: BranchStandardizationResult
+    combined_score: float
+    formula_identity: str
+    detector_identity: str
+    hf_result: HfDetectionResult
+    lf_result: LfSaliencyMaskedNullWhitenedDetectionResult
+    diagnostic_only: bool
+    promoted: bool
+
+
 def _validate_hf_result(result: object) -> HfDetectionResult:
     if type(result) is not HfDetectionResult:
         raise ContentDetectorError(
@@ -349,6 +430,120 @@ def _standardize_branch(
         quantile_index=quantile_index,
         z_score=z_score,
         calibration_identity=calibration.calibration_identity,
+    )
+
+
+def _standardize_saliency_branch(
+    *,
+    branch: BranchName,
+    score: float,
+    detector_identity: str,
+    calibration: SaliencyBranchNullCalibration,
+) -> BranchStandardizationResult:
+    if type(calibration) is not SaliencyBranchNullCalibration:
+        raise ContentDetectorError("saliency max requires its independent branch CDF")
+    if calibration.branch != branch or calibration.detector_identity != detector_identity:
+        raise ContentDetectorError("saliency max branch CDF identity mismatch")
+    query = float(score)
+    if not isfinite(query):
+        raise ContentDetectorError("saliency max branch score must be finite")
+    less_count = sum(record.score < query for record in calibration.records)
+    equal_count = sum(record.score == query for record in calibration.records)
+    null_count = len(calibration.records)
+    u_raw = (less_count + 0.5 * equal_count) / null_count
+    epsilon_n = 1.0 / (2.0 * null_count)
+    u_clipped = min(max(u_raw, epsilon_n), 1.0 - epsilon_n)
+    quantile_index = min((1 << 20) - 1, floor(u_clipped * (1 << 20)))
+    try:
+        z_score = float(normal_quantile_table_lookup(quantile_index))
+    except KeyScheduleError as exc:
+        raise ContentDetectorError("saliency max quantile lookup failed") from exc
+    return BranchStandardizationResult(
+        branch=branch,
+        raw_score=query,
+        less_count=less_count,
+        equal_count=equal_count,
+        null_count=null_count,
+        u_raw=u_raw,
+        epsilon_n=epsilon_n,
+        u_clipped=u_clipped,
+        quantile_index=quantile_index,
+        z_score=z_score,
+        calibration_identity=calibration.calibration_identity,
+    )
+
+
+def saliency_max_standardized_content_detector(
+    hf_result: HfDetectionResult,
+    lf_result: LfSaliencyMaskedNullWhitenedDetectionResult,
+    *,
+    hf_null: SaliencyBranchNullCalibration,
+    lf_null: SaliencyBranchNullCalibration,
+) -> SaliencyMaxStandardizedDetectionResult:
+    """Compute the sole pending max statistic without changing formal HF-only D_M."""
+
+    hf = _validate_hf_result(hf_result)
+    if type(lf_result) is not LfSaliencyMaskedNullWhitenedDetectionResult:
+        raise ContentDetectorError("saliency max requires masked-LF result")
+    if lf_result.candidate_id != "lf_saliency_masked_null_whitened_matched_score":
+        raise ContentDetectorError("masked-LF candidate identity drifted")
+    if (
+        not isfinite(float(lf_result.lf_score))
+        or hf.root_key_public_digest != lf_result.root_key_public_digest
+        or hf.key_role != lf_result.key_role
+        or hf.wrong_key_index != lf_result.wrong_key_index
+        or hf.observation_digest != lf_result.observation_digest
+    ):
+        raise ContentDetectorError("saliency max branch image or key identity mismatch")
+    if hf_null.partition_identity != lf_null.partition_identity:
+        raise ContentDetectorError("saliency max CDF partitions differ")
+    hf_standardization = _standardize_saliency_branch(
+        branch="hf",
+        score=hf.hf_score,
+        detector_identity=hf.detector_identity,
+        calibration=hf_null,
+    )
+    lf_standardization = _standardize_saliency_branch(
+        branch="lf",
+        score=lf_result.lf_score,
+        detector_identity=lf_result.detector_identity,
+        calibration=lf_null,
+    )
+    combined_score = max(
+        hf_standardization.z_score,
+        lf_standardization.z_score,
+    )
+    formula_identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": "content_combination_saliency_max_standardized",
+                "formula": "max(z_hf,z_lf_masked)",
+                "hf_calibration_identity": hf_standardization.calibration_identity,
+                "lf_calibration_identity": lf_standardization.calibration_identity,
+                "promotion_status": "diagnostic_not_promoted",
+            }
+        )
+    ).hexdigest()
+    detector_identity = sha256(
+        stable_json_utf8(
+            {
+                "formula_identity": formula_identity,
+                "hf_detector_identity": hf.detector_identity,
+                "lf_detector_identity": lf_result.detector_identity,
+            }
+        )
+    ).hexdigest()
+    return SaliencyMaxStandardizedDetectionResult(
+        candidate_id="content_combination_saliency_max_standardized",
+        hf_standardization=hf_standardization,
+        lf_standardization=lf_standardization,
+        combined_score=combined_score,
+        formula_identity=formula_identity,
+        detector_identity=detector_identity,
+        hf_result=hf,
+        lf_result=lf_result,
+        diagnostic_only=True,
+        promoted=False,
     )
 
 
@@ -994,6 +1189,9 @@ __all__ = [
     "ContentDetectorError",
     "ContentResultReplayOperation",
     "NullScoreRecord",
+    "SaliencyBranchNullCalibration",
+    "SaliencyMaxStandardizedDetectionResult",
     "content_detector",
+    "saliency_max_standardized_content_detector",
     "validate_content_detection_result",
 ]

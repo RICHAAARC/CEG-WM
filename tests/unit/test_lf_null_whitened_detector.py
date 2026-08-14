@@ -13,9 +13,16 @@ from struct import pack
 import numpy as np
 import pytest
 
+from main.content_chain.detector import (
+    NullScoreRecord,
+    SaliencyBranchNullCalibration,
+    saliency_max_standardized_content_detector,
+)
+from main.content_chain.hf_detector import HfDetectionObservation, hf_detector
 from main.content_chain.lf_carrier import lf_carrier
 from main.content_chain.lf_detector import (
     LfDetectionObservation,
+    SaliencyMaskedLfDetectionObservation,
     LfDetectorError,
     PreparedLfWhitenedObservation,
     _affine_detrended_dct,
@@ -23,11 +30,18 @@ from main.content_chain.lf_detector import (
     lf_null_whitened_matched_detector,
     prepare_lf_null_whitened_observation,
     prepare_lf_null_whitened_template,
+    lf_saliency_masked_null_whitened_matched_detector,
 )
 from main.content_chain.lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
     LfNullWhiteningAsset,
     LfNullWhiteningAssetError,
+    LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+    LfSaliencyMaskedNullWhiteningAsset,
+)
+from main.content_chain.routing import (
+    SaliencyProbabilityObservation,
+    inspyrenet_salient_local_lf_router,
 )
 from main.shared.key_schedule import (
     derive_wrong_key_material,
@@ -64,6 +78,152 @@ def _asset(
         payload,
         whitening_asset_digest=declared_digest or digest,
     )
+
+
+def _masked_asset() -> LfSaliencyMaskedNullWhiteningAsset:
+    payload = {
+        "artifact_role": "lf_saliency_masked_clean_null_whitening_operator",
+        "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
+        "candidate_id": LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+        "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
+        "fit_manifest_sha256": "d" * 64,
+        "fit_source_cluster_count": 32,
+        "latent_shape": [1, 16, 64, 64],
+        "observation_protocol": "final_image_vae_posterior_mode",
+        "regularization_ratio": "0x1.0000000000000p-10",
+        "saliency_mask_protocol": (
+            "detect_public_rgb8_inspyrenet_probability_bilinear64_threshold_0.5_erosion3"
+        ),
+        "transform_identity": "orthonormal_dct_ii",
+        "weights_binary32_be_hex": ["3f800000"] * 96,
+    }
+    return LfSaliencyMaskedNullWhiteningAsset.from_canonical_payload(
+        payload,
+        whitening_asset_digest=sha256(stable_json_utf8(payload)).hexdigest(),
+    )
+
+
+def _detect_route():
+    image_digest = sha256(b"masked-lf-public-image").hexdigest()
+    probability = SaliencyProbabilityObservation(
+        values=tuple(
+            0.75 if 8 <= row < 56 and 8 <= column < 56 else 0.25
+            for row in range(64)
+            for column in range(64)
+        ),
+        spatial_shape=(64, 64),
+        observation_role="detect_public_rgb8",
+        input_image_digest=image_digest,
+    )
+    return inspyrenet_salient_local_lf_router(LATENT_SHAPE, probability)
+
+
+@pytest.mark.unit
+def test_saliency_masked_whitened_detector_binds_mask_asset_and_wrong_key() -> None:
+    asset = _masked_asset()
+    route = _detect_route()
+    carrier = lf_carrier(ROOT_KEY, LATENT_SHAPE)
+    observation = SaliencyMaskedLfDetectionObservation.from_public_image_encoding(
+        carrier.template,
+        LATENT_SHAPE,
+        public_input_image_digest=route.input_image_digest,
+    )
+    registered = lf_saliency_masked_null_whitened_matched_detector(
+        observation,
+        ROOT_KEY,
+        asset,
+        route,
+    )
+    wrong = lf_saliency_masked_null_whitened_matched_detector(
+        observation,
+        derive_wrong_key_material(identify_root_key(ROOT_KEY).root_key_public_digest, 0),
+        asset,
+        route,
+    )
+    primary_null_observation = SaliencyMaskedLfDetectionObservation.from_public_image_encoding(
+        tuple(((index % 37) - 18) / 37.0 for index in range(16 * 64 * 64)),
+        LATENT_SHAPE,
+        public_input_image_digest=route.input_image_digest,
+    )
+    primary_null = lf_saliency_masked_null_whitened_matched_detector(
+        primary_null_observation,
+        ROOT_KEY,
+        asset,
+        route,
+    )
+    assert registered.candidate_id == LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID
+    assert registered.whitening_asset_digest == asset.whitening_asset_digest
+    assert registered.saliency_route_identity == route.route_identity
+    assert primary_null.whitening_asset_digest == asset.whitening_asset_digest
+    assert primary_null.detector_config_digest == registered.detector_config_digest
+    assert registered.masked_observation_digest != registered.observation_digest
+    assert registered.lf_score > wrong.lf_score
+    hf_result = hf_detector(
+        HfDetectionObservation.from_public_image_encoding(
+            observation.values,
+            LATENT_SHAPE,
+        ),
+        ROOT_KEY,
+    )
+    hf_null = SaliencyBranchNullCalibration(
+        branch="hf",
+        detector_identity=hf_result.detector_identity,
+        partition_identity="masked-lf-null-fit-partition",
+        records=tuple(
+            NullScoreRecord(
+                -1.0 + index / 32.0,
+                f"null-{index:02d}",
+                f"hf-{index:02d}",
+            )
+            for index in range(32)
+        ),
+    )
+    lf_null = SaliencyBranchNullCalibration(
+        branch="lf",
+        detector_identity=registered.detector_identity,
+        partition_identity="masked-lf-null-fit-partition",
+        records=tuple(
+            NullScoreRecord(
+                -1.0 + index / 32.0,
+                f"null-{index:02d}",
+                f"lf-{index:02d}",
+            )
+            for index in range(32)
+        ),
+    )
+    combined = saliency_max_standardized_content_detector(
+        hf_result,
+        registered,
+        hf_null=hf_null,
+        lf_null=lf_null,
+    )
+    assert combined.candidate_id == "content_combination_saliency_max_standardized"
+    assert combined.combined_score == max(
+        combined.hf_standardization.z_score,
+        combined.lf_standardization.z_score,
+    )
+    assert combined.diagnostic_only and not combined.promoted
+    with pytest.raises(LfDetectorError):
+        lf_saliency_masked_null_whitened_matched_detector(
+            observation,
+            ROOT_KEY,
+            _asset(),
+            route,
+        )
+    cross_image_observation = (
+        SaliencyMaskedLfDetectionObservation.from_public_image_encoding(
+            observation.values,
+            LATENT_SHAPE,
+            public_input_image_digest=sha256(b"different-public-image").hexdigest(),
+        )
+    )
+    with pytest.raises(LfDetectorError):
+        lf_saliency_masked_null_whitened_matched_detector(
+            cross_image_observation,
+            ROOT_KEY,
+            asset,
+            route,
+        )
 
 
 def _template_with_affine_plane() -> tuple[float, ...]:

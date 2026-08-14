@@ -19,6 +19,7 @@ from main.content_chain.embedder import (
     content_actual_budget_accepts,
     content_materialization_replay_identity,
     content_embedder,
+    salient_local_lf_content_embedder,
     reconcile_content_materialization_budget,
     scale_content_delta_binary32,
 )
@@ -39,6 +40,8 @@ from main.content_chain.routing import (
     SpatialRoutingObservation,
     content_router,
     validate_content_routing_result,
+    SaliencyProbabilityObservation,
+    inspyrenet_salient_local_lf_router,
 )
 from main.shared.key_schedule import (
     KeyScheduleError,
@@ -109,6 +112,79 @@ def _test_float32(value: float) -> float:
 def _next_positive_float32(value: float) -> float:
     bits = int.from_bytes(pack(">f", value), byteorder="big", signed=False)
     return unpack(">f", (bits + 1).to_bytes(4, byteorder="big"))[0]
+
+
+def _saliency_probability(role: str) -> SaliencyProbabilityObservation:
+    values = tuple(
+        _test_float32(0.75 if 8 <= row < 56 and 8 <= column < 56 else 0.25)
+        for row in range(64)
+        for column in range(64)
+    )
+    return SaliencyProbabilityObservation(
+        values=values,
+        spatial_shape=(64, 64),
+        observation_role=role,
+        input_image_digest=_source_digest(f"saliency-{role}"),
+    )
+
+
+@pytest.mark.unit
+def test_salient_local_lf_route_and_fixed_write_have_causal_witness() -> None:
+    shape = (1, 1, 64, 64)
+    route = inspyrenet_salient_local_lf_router(
+        shape,
+        _saliency_probability(
+            "embed_nonterminal_content_write_callback_latent_rgb8"
+        ),
+    )
+    assert route.coverage_spatial_pixels == 46 * 46
+    assert set(route.mask_hf) == {1.0}
+    assert set(route.mask_lf) == {0.0, 1.0}
+    hf = hf_carrier("salient-local-lf-key", shape)
+    lf = lf_carrier("salient-local-lf-key", shape)
+    result = salient_local_lf_content_embedder(
+        (1.0,) * (64 * 64),
+        hf,
+        lf,
+        route,
+    )
+    assert result.candidate_id == "content_embedding_global_hf_local_lf"
+    assert result.target_relative_l2 == _test_float32(3 / 250)
+    assert result.lf_delta_nonzero
+    assert result.mask_outside_bitwise_zero
+    assert result.mask_inside_has_energy
+    assert not hasattr(result, "mixing_coefficient")
+    assert not hasattr(result, "routing_map")
+    drifted_probability = replace(
+        route.saliency_probability,
+        input_image_digest=_source_digest("different-embed-image"),
+    )
+    with pytest.raises(ContentEmbedderError):
+        salient_local_lf_content_embedder(
+            (1.0,) * (64 * 64),
+            hf,
+            lf,
+            replace(route, saliency_probability=drifted_probability),
+        )
+
+
+@pytest.mark.unit
+def test_saliency_probability_rejects_noncanonical_binary32_and_identity_drift() -> None:
+    with pytest.raises(ContentRouterError):
+        SaliencyProbabilityObservation(
+            values=(0.1,) * (64 * 64),
+            spatial_shape=(64, 64),
+            observation_role="detect_public_rgb8",
+            input_image_digest=_source_digest("noncanonical-probability"),
+        )
+    with pytest.raises(ContentRouterError):
+        SaliencyProbabilityObservation(
+            values=(_test_float32(0.5),) * (64 * 64),
+            spatial_shape=(64, 64),
+            observation_role="detect_public_rgb8",
+            input_image_digest=_source_digest("sigmoid-identity-drift"),
+            sigmoid_identity="torch_sigmoid_twice",
+        )
 
 
 def _test_l2_float32(values: tuple[float, ...]) -> float:

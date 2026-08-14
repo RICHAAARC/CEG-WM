@@ -27,6 +27,15 @@ LF_NULL_WHITENING_BAND_IDENTITY = (
 LF_NULL_WHITENING_REGULARIZATION_RATIO = "0x1.0000000000000p-10"
 LF_NULL_WHITENING_WEIGHT_COUNT = 96
 LF_NULL_WHITENING_OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
+LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID = (
+    "lf_saliency_masked_null_whitened_matched_score"
+)
+LF_SALIENCY_MASKED_NULL_WHITENING_ARTIFACT_ROLE = (
+    "lf_saliency_masked_clean_null_whitening_operator"
+)
+LF_SALIENCY_MASK_PROTOCOL = (
+    "detect_public_rgb8_inspyrenet_probability_bilinear64_threshold_0.5_erosion3"
+)
 
 
 class LfNullWhiteningAssetError(ValueError):
@@ -193,6 +202,103 @@ class LfNullWhiteningAsset:
         )
 
 
+def _masked_canonical_payload(
+    *,
+    fit_manifest_sha256: str,
+    weights_binary32_be_hex: tuple[str, ...],
+) -> dict[str, object]:
+    payload = _canonical_payload(
+        fit_manifest_sha256=fit_manifest_sha256,
+        weights_binary32_be_hex=weights_binary32_be_hex,
+    )
+    payload["artifact_role"] = LF_SALIENCY_MASKED_NULL_WHITENING_ARTIFACT_ROLE
+    payload["candidate_id"] = (
+        LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID
+    )
+    payload["saliency_mask_protocol"] = LF_SALIENCY_MASK_PROTOCOL
+    return payload
+
+
+@dataclass(frozen=True, slots=True)
+class LfSaliencyMaskedNullWhiteningAsset:
+    """Independent clean-null W fitted only for the public masked-LF score."""
+
+    fit_manifest_sha256: str
+    weights_binary32_be_hex: tuple[str, ...]
+    whitening_asset_digest: str
+    weights: tuple[float, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        fit_manifest = _sha256_text(
+            self.fit_manifest_sha256,
+            "masked LF whitening fit manifest digest",
+        )
+        words = _weight_words(self.weights_binary32_be_hex)
+        declared = _sha256_text(
+            self.whitening_asset_digest,
+            "masked LF whitening asset digest",
+        )
+        payload = _masked_canonical_payload(
+            fit_manifest_sha256=fit_manifest,
+            weights_binary32_be_hex=words,
+        )
+        if sha256(stable_json_utf8(payload)).hexdigest() != declared:
+            raise LfNullWhiteningAssetError(
+                "masked LF whitening asset digest does not match its canonical payload"
+            )
+        object.__setattr__(self, "fit_manifest_sha256", fit_manifest)
+        object.__setattr__(self, "weights_binary32_be_hex", words)
+        object.__setattr__(
+            self,
+            "weights",
+            tuple(unpack(">f", bytes.fromhex(word))[0] for word in words),
+        )
+
+    @property
+    def canonical_payload(self) -> dict[str, object]:
+        return _masked_canonical_payload(
+            fit_manifest_sha256=self.fit_manifest_sha256,
+            weights_binary32_be_hex=self.weights_binary32_be_hex,
+        )
+
+    def validate(self) -> None:
+        type(self)(
+            fit_manifest_sha256=self.fit_manifest_sha256,
+            weights_binary32_be_hex=self.weights_binary32_be_hex,
+            whitening_asset_digest=self.whitening_asset_digest,
+        )
+
+    @classmethod
+    def from_canonical_payload(
+        cls,
+        payload: Mapping[str, object],
+        *,
+        whitening_asset_digest: str,
+    ) -> LfSaliencyMaskedNullWhiteningAsset:
+        if type(payload) is not dict:
+            raise LfNullWhiteningAssetError(
+                "masked LF whitening payload must be a plain mapping"
+            )
+        words = _weight_words(payload.get("weights_binary32_be_hex"))
+        fit_manifest = _sha256_text(
+            payload.get("fit_manifest_sha256"),
+            "masked LF whitening fit manifest digest",
+        )
+        expected = _masked_canonical_payload(
+            fit_manifest_sha256=fit_manifest,
+            weights_binary32_be_hex=words,
+        )
+        if payload != expected:
+            raise LfNullWhiteningAssetError(
+                "masked LF whitening payload identities drifted"
+            )
+        return cls(
+            fit_manifest_sha256=fit_manifest,
+            weights_binary32_be_hex=words,
+            whitening_asset_digest=whitening_asset_digest,
+        )
+
+
 __all__ = [
     "LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID",
     "LF_NULL_WHITENING_ARTIFACT_ROLE",
@@ -204,6 +310,10 @@ __all__ = [
     "LF_NULL_WHITENING_REGULARIZATION_RATIO",
     "LF_NULL_WHITENING_TRANSFORM_IDENTITY",
     "LF_NULL_WHITENING_WEIGHT_COUNT",
+    "LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID",
+    "LF_SALIENCY_MASKED_NULL_WHITENING_ARTIFACT_ROLE",
+    "LF_SALIENCY_MASK_PROTOCOL",
     "LfNullWhiteningAsset",
     "LfNullWhiteningAssetError",
+    "LfSaliencyMaskedNullWhiteningAsset",
 ]

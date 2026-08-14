@@ -23,7 +23,9 @@ from .lf_carrier import (
 from .routing import (
     ContentRouterError,
     ContentRoutingResult,
+    SalientLocalLfRoutingResult,
     validate_content_routing_result,
+    validate_salient_local_lf_routing_result,
 )
 
 CONTENT_RELATIVE_L2_NUMERATOR = 3
@@ -35,6 +37,9 @@ EMBEDDER_CANDIDATE_IDS = (
     "lf_low_pass",
     "routing_stqr",
     "routing_uniform_control",
+)
+SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID = (
+    "content_embedding_global_hf_local_lf"
 )
 EmbeddingMode = Literal["hf_only", "lf_only", "combined"]
 ContentMaterializationIntegrityStatus = Literal[
@@ -74,6 +79,30 @@ class ContentEmbeddingResult:
     hf_carrier_config_digest: str | None
     route_identity: str | None
     route_config_digest: str | None
+    embedder_config_digest: str
+    embedding_result_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class SalientLocalLfEmbeddingResult:
+    """Fixed global-HF plus local-LF unit direction and causal witness."""
+
+    candidate_id: str
+    shape: tuple[int, int, int, int]
+    delta_content: tuple[float, ...]
+    delta_content_digest: str
+    content_direction: tuple[float, ...]
+    masked_lf_direction: tuple[float, ...]
+    masked_lf_direction_digest: str
+    hf_direction_digest: str
+    route_identity: str
+    route_config_digest: str
+    latent_norm: float
+    target_total_norm: float
+    target_relative_l2: float
+    lf_delta_nonzero: bool
+    mask_outside_bitwise_zero: bool
+    mask_inside_has_energy: bool
     embedder_config_digest: str
     embedding_result_identity: str
 
@@ -1114,3 +1143,130 @@ def content_embedder(
         embedding_result_identity=_embedding_result_identity(result),
     )
     return _validate_content_embedding_result(result)
+
+
+def salient_local_lf_content_embedder(
+    latent_values: Sequence[float],
+    hf_carrier_result: HfCarrierResult,
+    lf_carrier_result: LfCarrierResult,
+    routing_result: SalientLocalLfRoutingResult,
+) -> SalientLocalLfEmbeddingResult:
+    """Write normalize(normalize(T_hf)+normalize(M_embed*T_lf)) at 3/250."""
+
+    hf_carrier_value, hf_direction = _validated_hf_direction(hf_carrier_result)
+    lf_carrier_value, lf_direction = _validated_lf_direction(lf_carrier_result)
+    try:
+        route = validate_salient_local_lf_routing_result(routing_result)
+    except ContentRouterError as exc:
+        raise ContentEmbedderError("salient LF routing validation failed") from exc
+    if (
+        route.observation_role
+        != "embed_nonterminal_content_write_callback_latent_rgb8"
+    ):
+        raise ContentEmbedderError("content writing requires the embed-side saliency mask")
+    if (
+        hf_carrier_value.shape != lf_carrier_value.shape
+        or hf_carrier_value.shape != route.latent_shape
+        or hf_carrier_value.root_key_public_digest
+        != lf_carrier_value.root_key_public_digest
+        or hf_carrier_value.key_role != lf_carrier_value.key_role
+        or hf_carrier_value.wrong_key_index != lf_carrier_value.wrong_key_index
+    ):
+        raise ContentEmbedderError("salient LF carriers and route identities differ")
+    if (
+        hf_carrier_value.route_identity is not None
+        or lf_carrier_value.route_identity is not None
+        or hf_carrier_value.route_config_digest is not None
+        or lf_carrier_value.route_config_digest is not None
+    ):
+        raise ContentEmbedderError(
+            "salient LF embedding requires unmasked carrier templates"
+        )
+    latent = _vector(latent_values, len(hf_direction), "latent_values")
+    latent_norm = _l2_norm(latent)
+    if latent_norm == 0.0:
+        raise ContentEmbedderError("callback latent has zero L2 energy")
+    masked_raw = tuple(
+        _float32(mask * value)
+        for mask, value in zip(route.mask_lf, lf_direction, strict=True)
+    )
+    masked_norm = _l2_norm(masked_raw)
+    if masked_norm == 0.0:
+        raise ContentEmbedderError("saliency-masked LF direction has zero L2 energy")
+    masked_lf_direction = tuple(
+        _float32(value / masked_norm) for value in masked_raw
+    )
+    combined_raw = tuple(
+        _float32(hf_value + lf_value)
+        for hf_value, lf_value in zip(
+            hf_direction,
+            masked_lf_direction,
+            strict=True,
+        )
+    )
+    combined_norm = _l2_norm(combined_raw)
+    if combined_norm == 0.0:
+        raise ContentEmbedderError("global-HF plus local-LF direction vanished")
+    content_direction = tuple(
+        _float32(value / combined_norm) for value in combined_raw
+    )
+    target_relative_l2 = _float32(
+        CONTENT_RELATIVE_L2_NUMERATOR / CONTENT_RELATIVE_L2_DENOMINATOR
+    )
+    target_total_norm = _float32(target_relative_l2 * latent_norm)
+    if target_total_norm == 0.0:
+        raise ContentEmbedderError("target content update vanished in float32")
+    delta_content = _target_component(target_total_norm, content_direction)
+    outside_zero = all(
+        mask != 0.0 or masked == 0.0
+        for mask, masked in zip(route.mask_lf, masked_raw, strict=True)
+    )
+    inside_energy = any(
+        mask == 1.0 and masked != 0.0
+        for mask, masked in zip(route.mask_lf, masked_raw, strict=True)
+    )
+    if not outside_zero or not inside_energy:
+        raise ContentEmbedderError("saliency-masked LF causal witness failed")
+    config = {
+        "candidate_id": SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
+        "formula": "normalize(normalize(T_hf)+normalize(M_embed*T_lf))",
+        "hf_carrier_config_digest": hf_carrier_value.carrier_config_digest,
+        "lf_carrier_config_digest": lf_carrier_value.carrier_config_digest,
+        "route_config_digest": route.route_config_digest,
+        "target_relative_l2_binary32": pack(">f", target_relative_l2).hex(),
+    }
+    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    masked_digest = _digest(masked_lf_direction)
+    delta_digest = _digest(delta_content)
+    identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
+                "delta_content_digest": delta_digest,
+                "embedder_config_digest": config_digest,
+                "hf_direction_digest": hf_carrier_value.direction_digest,
+                "masked_lf_direction_digest": masked_digest,
+                "route_identity": route.route_identity,
+            }
+        )
+    ).hexdigest()
+    return SalientLocalLfEmbeddingResult(
+        candidate_id=SALIENT_LOCAL_LF_EMBEDDER_CANDIDATE_ID,
+        shape=route.latent_shape,
+        delta_content=delta_content,
+        delta_content_digest=delta_digest,
+        content_direction=content_direction,
+        masked_lf_direction=masked_lf_direction,
+        masked_lf_direction_digest=masked_digest,
+        hf_direction_digest=hf_carrier_value.direction_digest,
+        route_identity=route.route_identity,
+        route_config_digest=route.route_config_digest,
+        latent_norm=latent_norm,
+        target_total_norm=target_total_norm,
+        target_relative_l2=target_relative_l2,
+        lf_delta_nonzero=any(value != 0.0 for value in masked_raw),
+        mask_outside_bitwise_zero=outside_zero,
+        mask_inside_has_energy=inside_energy,
+        embedder_config_digest=config_digest,
+        embedding_result_identity=identity,
+    )

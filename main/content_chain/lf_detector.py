@@ -20,8 +20,16 @@ from .lf_whitening import (
     LF_NULL_WHITENING_DETREND_IDENTITY,
     LF_NULL_WHITENING_LATENT_SHAPE,
     LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+    LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+    LF_SALIENCY_MASK_PROTOCOL,
     LfNullWhiteningAsset,
     LfNullWhiteningAssetError,
+    LfSaliencyMaskedNullWhiteningAsset,
+)
+from .routing import (
+    ContentRouterError,
+    SalientLocalLfRoutingResult,
+    validate_salient_local_lf_routing_result,
 )
 
 OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
@@ -121,6 +129,40 @@ class LfDetectionObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class SaliencyMaskedLfDetectionObservation:
+    """Public RGB-bound VAE observation for the masked-LF detector only."""
+
+    values: tuple[float, ...]
+    shape: tuple[int, int, int, int]
+    public_input_image_digest: str
+    observation_protocol: str = field(default=OBSERVATION_PROTOCOL, init=False)
+    observation_digest: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        shape = _validate_shape(self.shape)
+        values = _vector(self.values, int(np.prod(shape)), "masked LF observation")
+        if not _is_sha256_digest(self.public_input_image_digest):
+            raise LfDetectorError("masked LF public input image digest is invalid")
+        object.__setattr__(self, "shape", shape)
+        object.__setattr__(self, "values", values)
+        object.__setattr__(self, "observation_digest", _digest(values))
+
+    @classmethod
+    def from_public_image_encoding(
+        cls,
+        values: Sequence[float],
+        shape: Sequence[int],
+        *,
+        public_input_image_digest: str,
+    ) -> SaliencyMaskedLfDetectionObservation:
+        return cls(
+            values=tuple(values),
+            shape=tuple(shape),
+            public_input_image_digest=public_input_image_digest,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LfDetectionResult:
     """独立可观测的 LF blind score 与检测身份。"""
 
@@ -150,6 +192,26 @@ class LfNullWhitenedDetectionResult:
     key_role: str
     wrong_key_index: int | None
     observation_digest: str
+    template_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class LfSaliencyMaskedNullWhitenedDetectionResult:
+    """Public-image masked observation/template score with independent W."""
+
+    candidate_id: str
+    candidate_ids: tuple[str, ...]
+    lf_score: float
+    detector_identity: str
+    detector_config_digest: str
+    whitening_asset_digest: str
+    saliency_route_identity: str
+    saliency_probability_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    observation_digest: str
+    masked_observation_digest: str
     template_digest: str
 
 
@@ -594,7 +656,7 @@ def prepare_lf_null_whitened_template(
 def _whitened_cosine(
     observation_coefficients: np.ndarray,
     template_coefficients: np.ndarray,
-    asset: LfNullWhiteningAsset,
+    asset: LfNullWhiteningAsset | LfSaliencyMaskedNullWhiteningAsset,
 ) -> float:
     observation_whitened: list[float] = []
     template_whitened: list[float] = []
@@ -801,4 +863,114 @@ def lf_null_whitened_matched_detector(
         wrong_key_index=carrier.wrong_key_index,
         observation_digest=observation.observation_digest,
         template_digest=carrier.template_digest,
+    )
+
+
+def lf_saliency_masked_null_whitened_matched_detector(
+    observation: SaliencyMaskedLfDetectionObservation,
+    detection_key: str | DerivedWrongKeyMaterial,
+    whitening_asset: LfSaliencyMaskedNullWhiteningAsset,
+    saliency_route: SalientLocalLfRoutingResult,
+    *,
+    model_revision: str = MODEL_REVISION,
+) -> LfSaliencyMaskedNullWhitenedDetectionResult:
+    """Apply one detect-side public mask to both observation and key template."""
+
+    if type(observation) is not SaliencyMaskedLfDetectionObservation:
+        raise LfDetectorError("masked LF detector requires RGB-bound public observation")
+    if observation.shape != LF_NULL_WHITENING_LATENT_SHAPE:
+        raise LfDetectorError("masked LF detector requires shape [1,16,64,64]")
+    if _digest(observation.values) != observation.observation_digest:
+        raise LfDetectorError("masked LF observation digest mismatch")
+    if type(whitening_asset) is not LfSaliencyMaskedNullWhiteningAsset:
+        raise LfDetectorError("masked LF detector requires its independent W asset")
+    try:
+        whitening_asset.validate()
+        route = validate_salient_local_lf_routing_result(saliency_route)
+    except (LfNullWhiteningAssetError, ContentRouterError) as exc:
+        raise LfDetectorError("masked LF asset or route validation failed") from exc
+    if route.observation_role != "detect_public_rgb8":
+        raise LfDetectorError("masked LF detector forbids embed-side saliency masks")
+    if route.input_image_digest != observation.public_input_image_digest:
+        raise LfDetectorError("masked LF observation and saliency image identities differ")
+    if route.latent_shape != observation.shape:
+        raise LfDetectorError("masked LF detector route shape mismatch")
+    try:
+        carrier = lf_carrier(
+            detection_key,
+            observation.shape,
+            mask_lf=None,
+            model_revision=model_revision,
+        )
+    except LfCarrierError as exc:
+        raise LfDetectorError("masked LF template reconstruction failed") from exc
+    masked_observation = tuple(
+        _float32(value * mask)
+        for value, mask in zip(observation.values, route.mask_lf, strict=True)
+    )
+    masked_template = tuple(
+        _float32(value * mask)
+        for value, mask in zip(carrier.template, route.mask_lf, strict=True)
+    )
+    observation_coefficients = _affine_detrended_dct(
+        masked_observation,
+        role="saliency-masked LF observation",
+    )
+    template_coefficients = _affine_detrended_dct(
+        masked_template,
+        role="saliency-masked LF template",
+    )
+    score = _whitened_cosine(
+        observation_coefficients,
+        template_coefficients,
+        whitening_asset,
+    )
+    candidate_ids = (
+        "key_schedule_sha256_counter",
+        "lf_low_pass",
+        "routing_inspyrenet_salient_local_lf",
+        LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+    )
+    config = {
+        "band_identity": LF_NULL_WHITENING_BAND_IDENTITY,
+        "candidate_ids": list(candidate_ids),
+        "carrier_config_digest": carrier.carrier_config_digest,
+        "computation_dtype": "float64",
+        "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
+        "input_dtype": "float32",
+        "model_revision": model_revision,
+        "observation_protocol": OBSERVATION_PROTOCOL,
+        "saliency_mask_protocol": LF_SALIENCY_MASK_PROTOCOL,
+        "saliency_route_identity": route.route_identity,
+        "score_operator": LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+        "template_mask": "same_detect_public_mask_as_observation",
+        "transform_identity": LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+        "whitening_asset_digest": whitening_asset.whitening_asset_digest,
+    }
+    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    detector_identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_ids": list(candidate_ids),
+                "detector_config_digest": config_digest,
+                "detector_role": "lf_saliency_masked_null_whitened_blind_score",
+                "whitening_asset_digest": whitening_asset.whitening_asset_digest,
+            }
+        )
+    ).hexdigest()
+    return LfSaliencyMaskedNullWhitenedDetectionResult(
+        candidate_id=LF_SALIENCY_MASKED_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
+        candidate_ids=candidate_ids,
+        lf_score=score,
+        detector_identity=detector_identity,
+        detector_config_digest=config_digest,
+        whitening_asset_digest=whitening_asset.whitening_asset_digest,
+        saliency_route_identity=route.route_identity,
+        saliency_probability_digest=route.saliency_probability_digest,
+        root_key_public_digest=carrier.root_key_public_digest,
+        key_role=carrier.key_role,
+        wrong_key_index=carrier.wrong_key_index,
+        observation_digest=observation.observation_digest,
+        masked_observation_digest=_digest(masked_observation),
+        template_digest=_digest(masked_template),
     )
