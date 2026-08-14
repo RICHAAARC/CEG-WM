@@ -38,7 +38,8 @@ revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑�
 `tau`、confirmation 结果、Calibration Locked、正式 evaluation、完整联合 FPR、
 正式 records 或科学效果证据，也没有 LF/routing/组合/geometry 晋升。
 
-新显著目标四候选已由规格外的独立用户授权及其 A0 revision 准入为
+新显著目标四候选已由规格外的独立用户授权及其显著目标局部 LF 候选实施准入职责
+revision `5885d5cd661bc9744480e89603293a5c51af0e26` 准入为
 `design_candidate_implementation_authorized`；当前流程从该 `experiment_ready / implemented`
 基线直接在本地独立 revisions 中完成 CPU/API 实现，不再申请 implementation，也不重建
 Git 身份、不回退或重走既有 stage。只有候选专属实现、定向测试、Agent2 独立语义审核与

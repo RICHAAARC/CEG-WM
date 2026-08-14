@@ -29,7 +29,8 @@ LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
 `content_combination_calibrated` 保留为既有候选身份；其中后两者对应的执行路线已
 形成 producer-bound development 负证据，不再是 current candidate。继任内容路线
 新增四个 `design_candidate_implementation_authorized` 身份；实施准入来自规格外的独立
-用户授权及其 A0 revision，仅限本地独立 revisions。四者尚未实现、未绑定 readiness、未获 runtime
+用户授权及其显著目标局部 LF 候选实施准入职责 revision
+`5885d5cd661bc9744480e89603293a5c51af0e26`，仅限本地独立 revisions。四者尚未实现、未绑定 readiness、未获 runtime
 qualification、实验执行准入或科学晋升。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
 固定 channel-band diagonal null operator 做只读白化 matched score；它不改变 carrier，
 也不把 fit images、参考图或私有 latent 引入检测。实验需要回答：
@@ -185,7 +186,7 @@ record replay 和与新候选的语义 diff；代码存在不等于 current cand
 
 historical CPU/synthetic 内容检测结果独立携带 LF、HF、combined 分支统计及旧路由、组合、
 密钥和失败身份；正式 calibration 阈值与实验 records schema 仍在后续协议阶段登记。
-current pending candidate 的 record/control matrix 固定为 clean、HF-only、masked-LF
+current `design_candidate_implementation_authorized` candidate 的 record/control matrix 固定为 clean、HF-only、masked-LF
 causal、global-HF+local-LF、LF-disabled 和失败；不含 `A/a/routed/route-disabled`。
 
 ## Current Status

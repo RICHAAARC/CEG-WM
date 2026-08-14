@@ -1391,8 +1391,9 @@ rectification；conditional recovery 控制流；以及已获本地 implementati
 以及 FPR/TPR、鲁棒性、质量、成本和完整/负结果/reduced-scope outcome。文档中的历史
 参数级来源值是待验证候选值，不是 CEG-WM 已验证事实。
 
-本文作为一般候选规格权威本身不产生实施授权；本轮独立用户授权及其 A0 revision 已在
-规格外单独把四个新候选准入为 `design_candidate_implementation_authorized`。项目全局
+本文作为一般候选规格权威本身不产生实施授权；本轮独立用户授权及其显著目标局部 LF
+候选实施准入职责 revision `5885d5cd661bc9744480e89603293a5c51af0e26` 已在规格外
+单独把四个新候选准入为 `design_candidate_implementation_authorized`。项目全局
 仍是 `experiment_ready / implemented`；新候选的下一步不是再次申请 implementation、
 重建 Git 身份或重走 stage，而是在本地独立 revisions 中完成 CPU/API 实现、定向测试、
 Agent2 独立语义审核与候选专属 readiness，之后才可申请 module-level development 执行。
