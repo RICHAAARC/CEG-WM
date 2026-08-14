@@ -8,7 +8,7 @@
 
 本文关闭“实现时由 Codex 自行发明算法”的空白。这里登记的是可实施、可证伪的候选规格，不是已验证项目参数、有效性结论或实施授权。
 
-当前 registry 固定为 **11 个候选 ID**：其中 10 个是待实施与晋升的
+当前 registry 固定为 **15 个候选 ID**：其中 14 个是具名的
 method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得晋升为方法的
 同预算禁用对照。计数如下：
 
@@ -19,26 +19,30 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 - `lf_null_whitened_matched_score`；
 - `routing_stqr`，并以 `routing_uniform_control` 为同预算禁用对照；
 - `content_combination_calibrated`；
+- `routing_inspyrenet_salient_local_lf`；
+- `content_embedding_global_hf_local_lf`；
+- `lf_saliency_masked_null_whitened_matched_score`；
+- `content_combination_saliency_max_standardized`；
 - `qk_relation_similarity`；
 - `rectification_similarity`；
 - `joint_conditional_recovery`。
 
 实现者只能实现这些身份及其明确列出的有限候选值。增加 relation、objective、write、score、observation、backbone、runtime 或搜索策略，必须先修订本文并重新接受候选规格审计。
 
-候选 registry 与实现职责是两个不同计数：上面的 11 个 ID 描述算法/runtime/key
+候选 registry 与实现职责是两个不同计数：上面的 15 个 ID 描述算法/runtime/key
 候选身份；未来实现固定为 13 项职责组件。每项职责只消费下表列出的现有候选，
 不得据此新增候选、别名组件或把多个职责集中到一个代理模块：
 
 | component | responsibility | planned path | candidate binding |
 | --- | --- | --- | --- |
 | `key_schedule` | `root_key_derivation_and_prg` | `main/shared/key_schedule.py` | `key_schedule_sha256_counter` |
-| `content_router` | `content_observation_and_adaptive_routing` | `main/content_chain/routing.py` | `key_schedule_sha256_counter`, `routing_stqr`, `routing_uniform_control` |
+| `content_router` | `content_observation_and_adaptive_routing` | `main/content_chain/routing.py` | `key_schedule_sha256_counter`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf` |
 | `lf_carrier` | `low_frequency_carrier_template_and_write_direction` | `main/content_chain/lf_carrier.py` | `key_schedule_sha256_counter`, `lf_low_pass` |
 | `hf_carrier` | `high_frequency_carrier_template_and_write_direction` | `main/content_chain/hf_carrier.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `hf_sparse_tail` |
-| `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control` |
-| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score` |
+| `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `content_embedding_global_hf_local_lf` |
+| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score`, `routing_inspyrenet_salient_local_lf`, `lf_saliency_masked_null_whitened_matched_score` |
 | `hf_detector` | `high_frequency_direct_scoring` | `main/content_chain/hf_detector.py` | `key_schedule_sha256_counter`, `hf_sparse_tail` |
-| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated` |
+| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated`, `content_combination_saliency_max_standardized` |
 | `qk_geometry_sync` | `keyed_qk_geometry_synchronization_and_relation_observation` | `main/geometry_chain/qk_sync.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `qk_relation_similarity` |
 | `geometric_transform_estimator` | `blind_bounded_geometric_transform_estimation` | `main/geometry_chain/transform_estimator.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
 | `geometry_reliability` | `independent_geometry_reliability_conjunction` | `main/geometry_chain/reliability.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
@@ -51,6 +55,10 @@ norm/relative L2 和 active 零方向失败；`lf_detector`
 独占盲 `s_lf`；`geometry_reliability` 独占 estimator
 原始指标上的可靠性合取门。这三项不能由 carrier、content detector 或 transform
 estimator 代行。候选绑定表示该组件必须实现或消费的规格身份，不表示候选已经晋升。
+
+新增四候选统一状态为 `design_candidate_pending_implementation`，
+`implementation_admission=NO`。现有 `experiment_ready / implemented`、readiness、
+runtime qualification 与旧 13 职责实现不自动覆盖它们；本次登记不增加第 14 项职责。
 
 ## Provisional Historical Provenance
 
@@ -729,6 +737,9 @@ preprocess 和 detector config identity 一起进入后续 records。raw fit ima
 
 ## Candidates `routing_stqr` And `routing_uniform_control`
 
+本节冻结旧 producer-bound route 以支持历史精确重放；`routing_stqr` 已不是 current
+candidate，`routing_uniform_control` 仍作为 registry 的 mandatory causal control。
+
 ### Observations
 
 `routing_stqr` 只允许以下四个生成时内容观测：
@@ -787,6 +798,9 @@ SLM-WM 源文件只定义候选算法。其 reference registry、历史固定风
 
 ## Candidate `content_combination_calibrated`
 
+本节冻结旧组合候选以支持 historical package/record replay 与语义对照；它已不是
+current content-combination candidate，不得恢复其 execution authority。
+
 输入是独立保存的 `s_hf`、`s_lf`，以及与当前职责 partition 绑定的两份 primary-null
 经验分布。对任一分支 `b`、null multiset `X_b={x_1,...,x_n}` 和有限查询分数
 `s_b`，唯一变换为：
@@ -839,6 +853,142 @@ evaluation 均不得重拟合 CDF、组合函数或 `tau`。每个函数有自�
 ties、低/高尾 clipping、排列不变性、严格单调区间、分支交换/权重身份、缺失分支失败
 和分数独立持久化。真实检查 LF 增益、HF-only 非退化、wrong-key、primary null、质量
 和完整联合 FPR。
+
+## Salient-Object Local-LF Candidate Family
+
+### Status, Supersession And Historical Evidence
+
+以下四个身份构成一个不可拆分但仍由既有 13 项职责实现的设计候选：
+
+- `routing_inspyrenet_salient_local_lf`；
+- `content_embedding_global_hf_local_lf`；
+- `lf_saliency_masked_null_whitened_matched_score`；
+- `content_combination_saliency_max_standardized`。
+
+四者状态均为 `design_candidate_pending_implementation`，
+`implementation_admission=NO`。全局 `project_stage=experiment_ready`、
+`implementation_status=implemented` 只描述当前已审核方法/交付基础设施，不表示这四个
+候选已实现、已进入 readiness、可执行或已通过科学门。
+
+旧身份全部留在 registry 以保持 producer replay，但不再是 current candidate：
+
+| historical route | exact producer | immutable evidence | status |
+| --- | --- | --- | --- |
+| `routing_stqr` fixed-half directional diagnosis | `925c2cbc727e3b18e91c0b3981eeed1b470a955a` | `42/42` terminal；incremental indicator `3/8` at clusters `1`, `5`, `6` | producer-bound development negative; not current candidate |
+| `content_uniform_combination` directional diagnosis | `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da` | `41/41` terminal；budget violations `2` at clusters `1`, `6`；`mechanism_signal_not_observed`；`candidate_not_recommended_for_selection`；allow request false | producer-bound development negative; not current candidate |
+
+旧 routed `content_embedder`、旧 combined detector 及其 conditional-recovery 内容依赖
+均为 closed/paused。现存实现只服务 producer reproduction、failure provenance、
+historical exact-package/record replay 与新旧语义 diff，不构成 current candidate 或
+执行授权。
+
+### Frozen InSPyReNet Authority And Forward
+
+模型资产唯一绑定 Hugging Face repo `plemeri/InSPyReNet` exact revision
+`d94c2baaa4d023ab018c6f97be6ef37548e3bd1f` 的 `ckpt_base.pth`：LFS oid
+SHA-256 `0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd`，
+size `367520613` bytes，MIT。source 唯一绑定 `plemeri/transparent-background`
+exact revision `f0fa91701a98cfc8e955c554e84522f365ec6da3`，MIT，入口为
+`transparent_background/InSPyReNet.py`。Windows `Zone.Identifier`、下载 URL、
+本地路径和文件时间永久排除于 checkpoint、package、config 与 record identity。
+
+checkpoint 必须 strict `state_dict` load。唯一前向为直接调用
+`InSPyReNet.forward_inspyre(x)`，确认返回 dict 且
+`out["saliency"]=[d3,d2,d1,d0]` 后取 `out["saliency"][-1]` 的 finest raw `d0`
+logit，再执行 `torch.sigmoid` 恰一次。
+禁止 `Remover.process`、`model.forward` 或 `forward_inference`；尤其禁止其 sigmoid
+后的 per-image min-max normalization。模型、revision、checkpoint、预处理、raw-output
+selector、sigmoid count、resize、threshold、erosion 与 coverage rule 全部进入 mask
+identity。
+
+### Single Mask Construction Rule
+
+embed 输入只允许 callback 18 non-terminal latent 的临时 VAE decode RGB8；detect
+输入只允许普通待检 RGB8。两侧分别、独立运行同一规则：
+
+1. 以 static `1024 x 1024` RGB、ImageNet mean/std、float32 构造模型输入；
+2. 按上一节取得 raw finest `d0` 并 sigmoid exactly once；
+3. probability 以 bilinear、`align_corners=false` resize 到 latent grid `64 x 64`；
+4. hard threshold `p>=0.5`；
+5. 在 `64 x 64` 上执行固定 `3 x 3` square erosion 恰一次，边界 zero padding；
+6. eroded mask coverage 必须为 `64..3072` spatial pixels（含端点）。
+
+不存在 connected-component/object selection、soft mask、adaptive threshold、第二次
+erosion、dilation 或结果后 coverage 调整。无支持、非局部支持、coverage 越界或 mask 非有限均为
+固定分母内失败；禁止 global LF fallback。raw 和 rectified 图必须分别重跑同一模型与
+mask rule。detector 不得读取 embed mask。development mask-stability protocol 固定
+比较同一预登记单位的 embed/detect mask IoU `>=0.5`，8-unit pilot 至少 `7/8`；该门
+不是 formal reliability 或 threshold evidence。
+
+### Global-HF Plus Local-LF Write
+
+`routing_inspyrenet_salient_local_lf` 只提供 `M_embed`、全一 HF support 和 mask
+identity。`hf_carrier` 与 `lf_carrier` 仍按原职责生成 `T_hf` 与 `T_lf`；
+`content_embedding_global_hf_local_lf` 由既有 `content_embedder` 唯一定义：
+
+```text
+u_hf = normalize(T_hf)
+u_lf = normalize(M_embed * T_lf)
+u_content = normalize(u_hf + u_lf)
+```
+
+masked LF 或 sum 为零/非有限即 fail closed。不存在 `a`、`w`、`0.70/0.30`、
+`0.50/0.50`、权重 grid 或按 cluster/result 改系数。runtime 按现有 actual-dtype
+materialization 执行；最终 combined actual delta 仍受 canonical binary32 `3/250`
+total relative-L2 hard limit，不得建立分支预算或放宽总预算。
+
+每个科学 probe 必须有独立 LF-only causal witness：actual LF delta 非零、mask 外
+逐 bit 为零、mask 内具有非零能量。witness 只证明局部写入因果边界，不是检测阳性。
+combined arm 的 actual delta 含非正交与 actual-dtype 物化效应，不得伪造或声称可
+分解为 HF/LF branch contributions。
+
+### Blind Masked-LF Score And Null Fit
+
+`lf_saliency_masked_null_whitened_matched_score` 在检测侧从 ordinary public RGB8
+重新构造 `M_detect`；该 mask 同时作用于 public VAE posterior observation 与由检测
+key 重构的 LF template。检测不得消费 reference image、Prompt、embed record、private
+latent、Q/K、embed mask 或任何生成时 mask state。
+
+masked-LF 必须在新的、预登记且与旧 fit/screening/directional/candidate-selection/
+calibration/evaluation source clusters 零交集的 32-clean-null manifest 上重新拟合
+自己的 whitening `W`。fit 使用 masked public observation，固定分母 32；不得继承、
+转换或 fallback 到旧 unmasked `lf_null_whitened_matched_score` 的 `W`。新的 W、fit
+manifest、InSPyReNet/mask identity、VAE/preprocess、LF template 与 detector identity
+共同进入 artifact digest。registered、primary-null 和 wrong-key 均使用同一新 W、
+同一 mask rule 和同一 public scoring operator。
+
+### Max-Statistic Content Detection
+
+`z_hf` 与 `z_lf_masked` 必须分别从其 detector identity 专属、互不替代的 primary-null
+分布标准化。`content_combination_saliency_max_standardized` 唯一统计为：
+
+```text
+D_saliency_max = max(z_hf, z_lf_masked)
+```
+
+不存在 weight/function search、attack-conditioned switching 或用 LF failure 回退 HF-only
+后仍声称同一候选。未来 formal threshold 必须直接对 max statistic 自身，在独立
+content-threshold-fit primary null 上重新拟合；不得沿用 HF-only、旧 unmasked LF 或
+旧 `content_combination_calibrated` 的 CDF/threshold。raw 与 rectified image 必须使用
+同一 max-statistic detector identity、key、preprocess、mask rule 和 threshold。
+
+### Permanent Result-Separation Rules
+
+- 不从旧 8 probes 选择 mask、threshold、erosion、coverage、`a`、`w` 或 function；
+- 不补样、删 cluster、重跑、增加 attempt、放宽 `3/250` 或重写历史 artifact；
+- 不用 margin-only 子集形成 winner、promotion 或 candidate selection；
+- 既有 HF/LF 各 32-unit directional 证据保持 producer-bound 有效，但不自动传递到
+  新 masked-LF、max statistic 或完整内容链；
+- 不把代码存在、旧 package 可重放或历史负证据解释为 current execution authority。
+
+### Admission And Falsification Gates
+
+implementation admission 当前明确为 `NO`。未来单独授权必须先完成 external asset
+license/checkpoint/source/API 复核、精确 mask golden、coverage/failure、causal witness、
+32-clean-null W fit、public blind key attribution、mask-stability、total-budget 与
+max-statistic identity tests。任一环节需要改变 checkpoint、forward path、threshold、
+erosion、coverage、写入公式、W fit 或 max statistic 时，必须登记新候选身份；不得在
+实现或 GPU 结果后静默调参。
 
 ## Candidate `qk_relation_similarity`
 
@@ -1206,9 +1356,11 @@ CPU 检查三路门控、几何失败、可靠但内容仍负、同 detector/thr
 
 本文已经为当前候选集合关闭 key/KDF/PRG、relation/objective、LF write/score、
 routing observations、backbone/runtime、搜索、可靠性指标、回正和联合判定的实现
-选择空白。registry 合计 11 个 ID：10 个待实施/晋升候选，加上
+选择空白。registry 合计 15 个 ID：14 个具名候选，加上
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
-方法晋升，也不把 11 个候选 ID 误写为 13 项实现职责。仍待实验决定的是明确有限候选
+方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前仅为
+`design_candidate_pending_implementation` 且 implementation admission 为 `NO`；
+仍待实验决定的是明确有限候选
 中的晋升结果和 calibration 数值，不是实现算法。
 
 ### Frozen Specification Values Versus Evidence Outcomes
@@ -1219,7 +1371,9 @@ filter/write/raw score、唯一 clean-null whitening fit/matched score 与有限
 S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
-rectification；conditional recovery 控制流。
+rectification；conditional recovery 控制流；以及尚未获 implementation admission 的
+InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
+独立 32-clean-null masked whitening 与 max-statistic identity。
 
 仍只能由预登记 calibration/实证晋升决定的是：哪个 `a`、哪条语义化组合函数、
 `alpha_selection`、formal branch CDF、`tau`、`tau_rescue`、七个 geometry reliability

@@ -13,9 +13,9 @@ CEG-WM 由内容链、几何链和联合判定组成。内容链拥有水印证�
 
 ```text
 嵌入侧：
-生成时内容观测 ──> content_router
-                         ├──> lf_carrier ──> LF direction ──┐
-                         └──> hf_carrier ──> HF direction ──┤
+callback-18 临时 RGB8 ──> content_router / InSPyReNet mask
+                         ├──> lf_carrier ──> local LF direction ──┐
+                         └──> hf_carrier ──> global HF direction ─┤
                                                            v
                                                    content_embedder
                                                            |
@@ -25,7 +25,7 @@ CEG-WM 由内容链、几何链和联合判定组成。内容链拥有水印证�
 
 检测侧：
 普通待检图像 + key + 公共资产
-             ├──> lf_detector ──> s_lf ──┐
+             ├──> InSPyReNet mask ──> lf_detector ──> s_lf_masked ──┐
              └──> hf_detector ──> s_hf ──┤
                                          v
                                  content_detector ──> D_M
@@ -57,7 +57,12 @@ normalized-correlation 评分时中心化；该顺序具有 historical DirectHF 
 名称与成功证据不进入本项目身份。LF 的新白化 matched-score 设计、路由、组合、Q/K
 与 runtime 的具体候选已在
 [candidate_specifications.md](candidate_specifications.md) 中关闭；尚未冻结的是
-候选的实验晋升结果。当前冻结的 `D_M` 候选仍是 HF-only 的 HF direct score；只有组合候选
+候选的实验晋升结果。`routing_stqr` 与旧 uniform combination 路线已形成
+producer-bound development 负证据，不再是当前候选。继任设计以
+`routing_inspyrenet_salient_local_lf` 重建显著目标内部 mask、以全局 HF 加局部 LF
+写入，并以独立 masked-LF null whitening 和 `max(z_hf,z_lf_masked)` 检测；当前状态
+仅为 `design_candidate_pending_implementation`，implementation admission 为 `NO`。
+当前冻结的 `D_M` 候选仍是 HF-only 的 HF direct score；只有新组合候选
 通过预登记晋升后，`content_detector` 才可消费 `s_lf` 与 `s_hf` 形成组合 `D_M`。
 
 两链共享的 root-key、KDF、PRG、wrong-key 与 public-noise 语义由 CEG-WM 自有
@@ -125,14 +130,16 @@ main/geometry_chain/rectifier.py            image_rectifier
 main/joint_decision/detector.py             conditional_recovery_decision
 ```
 
-`content_router` 只拥有 observations、`A`、两 mask、identity/digests 和 disabled
-uniform control；`content_embedder` 独占冻结 `a`、LF/HF 组合写入、共同总预算、
+`content_router` 仍是唯一 mask/route 职责；继任候选只允许其拥有冻结 InSPyReNet
+mask 与 identity/digests，不增加组件职责。`content_embedder` 独占 LF/HF 组合写入、共同总预算、
 方向内积/组合归一因子、nominal/limit、materialization scale/attempt/integrity/
 budget status 与 realized combined total norm/relative L2，以及 active/combined
 零方向失败；
-`lf_detector` 独占盲 LF 分数；`lf_null_whitened_matched_score` 只增加其未来评分候选，
+`lf_detector` 独占盲 LF 分数；旧 `lf_null_whitened_matched_score` 与新
+`lf_saliency_masked_null_whitened_matched_score` 是不同身份，后者必须独立拟合
+32-clean null `W`，
 不改变 `lf_carrier` 或现有 readiness；`geometry_reliability` 独占 estimator 原始指标上的
-合取门。候选 registry 现在是 11 个 ID（10 个具名候选加 1 个 routing 强制对照）；
+合取门。候选 registry 现在是 15 个 ID（14 个具名候选加 1 个 routing 强制对照）；
 CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现职责不是同一计数。
 
 `content_direction`、`active_lf_direction`、`active_hf_direction` 及 target
@@ -163,7 +170,8 @@ geometry/total budget 仍是独立职责。
 独立 revisions 同步为 `experiment_ready / implemented`。冻结 SD3.5 candidate 的
 callback、actual dtype、VAE、两层真实 Q/K、registered-key 重复确定性和
 negative-key identity control 已通过真实 GPU qualification。当前正式 detector
-仍为 HF-only；LF/routing 未实验晋升，`full_ceg_wm_eligible=false`。该 runtime
+仍为 HF-only；旧 routing/combination 是 producer-bound 历史负结果，新显著目标
+四候选尚未实现，`full_ceg_wm_eligible=false`。该 runtime
 证据和实验准备基础设施闭环都不是 `tau`、confirmation 结果、Calibration Locked、
 完整联合 FPR、几何恢复效果、正式 evaluation 或科学效果证据，也不晋升
 LF/routing/组合/geometry。后续门序见

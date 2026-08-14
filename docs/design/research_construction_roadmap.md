@@ -32,7 +32,8 @@ formal_evidence_available
 SD3.5 runtime qualification 已分别完成并审计；实际 stage/status 已由独立
 revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑定 candidate
 `8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 qualification run
-`20260729T110628Z`。正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+`20260729T110628Z`。正式 detector 仍为 HF-only；旧 routing/uniform-combination
+路线已有 producer-bound development negative，新显著目标局部 LF 四候选尚未实现，
 `full_ceg_wm_eligible=false`。实验准备基础设施已冻结协议与可追溯执行交付，但没有
 `tau`、confirmation 结果、Calibration Locked、正式 evaluation、完整联合 FPR、
 正式 records 或科学效果证据，也没有 LF/routing/组合/geometry 晋升。
@@ -107,7 +108,7 @@ revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑�
 ### Validation
 
 - 每个候选都有明确输入、输出、身份、失败语义和可证伪指标；
-- registry 计数固定为 11 个 ID：10 个具名候选和 1 个 mandatory
+- registry 计数固定为 15 个 ID：14 个具名候选和 1 个 mandatory
   `routing_uniform_control`；不得把对照计入方法候选数；
 - 不存在固定历史 LF/HF 权重；
 - 不存在 reference image、embed record 或私有嵌入状态检测依赖；
@@ -152,8 +153,8 @@ audit 必须从 authorization base revision
 - image rectifier；
 - conditional recovery decision。
 
-以上按唯一的 13 项正式职责和固定路径实施；当时 readiness 审核绑定的 10 个候选 ID
-不是组件计数。此后设计新增的第 11 项 `lf_null_whitened_matched_score` 尚未实现，
+以上按唯一的 13 项正式职责和固定路径实施；readiness 审核绑定的既有候选 ID
+不是组件计数。此后设计新增的显著目标局部 LF 四候选均尚未实现，
 不得在对应实现与独立语义审核完成前写入 readiness。同时建立的
 `.codex/research_state/method_readiness.yaml` 逐组件连接已实现候选 ID、
 架构规定路径、声明责任、具体且唯一的实现 symbol、方法特异性验收测试和实现完成后
@@ -222,37 +223,44 @@ geometry reliability 折回其他组件，都不得推进；机械 readiness pas
 
 ### LF-Only Work
 
-- 比较多个预登记 LF 候选；
-- 使用 LF-only 正确密钥、错误密钥和无水印负样本；
-- 测量 identity、JPEG、blur、resize 和其他 HF 易受损条件；
-- 报告图像质量、可见性、实际能量和计算成本。
+- 先为 `lf_saliency_masked_null_whitened_matched_score` 冻结与全部既有 split 零交集的
+  32-clean-null manifest，重新拟合 masked-LF 专属 W；禁止继承旧 unmasked W；
+- 使用 LF-only registered、四个 wrong keys、paired clean primary-null 与 public blind
+  RGB-to-VAE observation，验证 key attribution；
+- 保存 causal witness：actual LF delta 非零、mask 外逐 bit 零、mask 内有能量；
+- 失败、无支持、coverage 越界、budget/quality 违规全部保留固定分母。
 
 ### Routing Work
 
-- 在相同 Prompt、seed、key 和总能量下比较 route-disabled 与 routed；
-- 分别运行 HF-only、LF-only 和组合载体；
-- 检查攻击前后路由可解释性和覆盖退化；
-- 拒绝检测端需要私有嵌入路由的候选。
+- 只实现 `routing_inspyrenet_salient_local_lf` 的 exact source/checkpoint/strict-load/
+  `forward_inspyre` raw d0/sigmoid-once 规则；
+- 冻结 static 1024、ImageNet、bilinear 64、threshold 0.5、one 3x3 zero-padded erosion
+  与 coverage `64..3072`，不做 connected-component selection；
+- 在预登记 8-unit pilot 上要求至少 `7/8` 的 embed/detect mask IoU `>=0.5`；
+- raw/rectified 分别重跑；拒绝检测端需要 embed mask、Prompt、record 或 private latent。
 
 ### Combination Work
 
-- 只让已经通过 LF-only 门的候选进入组合；
-- 在 candidate-selection manifest 的 selection partition 中冻结分支标准化和组合参数；
-- 在该 manifest 预登记且未参与拟合的 confirmation partition 中评价组合 TPR、wrong-key attribution 和 HF-only 退化；
+- 只让通过上述 mask、causal witness 与 masked-LF attribution 门的候选进入组合；
+- 写入仅用 `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，不搜索 `a/w`；
+- 对独立 primary-null 的 `z_hf`、`z_lf_masked` 只计算
+  `max(z_hf,z_lf_masked)`，在 untouched confirmation 上评价；
 - formal evaluation 对已经冻结的方法同时保留 LF、HF 和组合分数，但不再承担候选选择；
-- 不为不同攻击或回正图拟合不同组合。
+- max statistic 的 formal threshold 必须独立拟合；不为不同攻击或回正图拟合不同组合。
 
 ### Validation
 
 - LF 提供至少一个预登记攻击族的稳定增量；
 - LF 的 key attribution 和 unwatermarked FPR 独立成立；
-- routing 增益不是总能量差异造成；
+- mask stability、局部 causal witness 和共同 canonical binary32 `3/250` total budget
+  同时成立；
 - 组合在 candidate-selection confirmation partition 中满足晋升门；
 - 组合完整检测器重新校准，不沿用 HF-only 阈值。
 
 ### Pass Result
 
-- 组合通过：正式 `D_M` 晋升为冻结 LF/HF 组合检测器；
+- 组合通过：在独立 confirmation 后才允许申请把正式 `D_M` 晋升为冻结
+  salient-max LF/HF 组合检测器；
 - 组合未通过：登记 `content_branch_research_question_closed_negative`，LF 与 routing 作为可报告的负结果，完整 CEG-WM 成功路径在此关闭；
 - 若要继续 HF-only + geometry，必须建立重新命名、缩小主张且单独授权的 `reduced_scope_method_candidate`，不得沿用完整 CEG-WM 的方法成功或完成门；
 - 两种结果都必须形成诚实研究结论，不允许无限调参，但只有组合通过才可继续申请完整 CEG-WM 方法成功。
@@ -643,6 +651,31 @@ n_per_condition >= ceil(log(0.05 / A) / log(0.999))
 ### Pass Result
 
 只有此门通过后，项目才完成“论文所有数据结果”的目标。`formal_evidence_available` 表示已有真实证据，不自动表示论文主张、artifact 和 release 已全部闭合。
+
+## Deferred Failed-Route Cleanup
+
+当前只登记可清理 inventory，不删除、不移动、不建立 deprecated alias，也不改变
+import/package closure：
+
+1. 旧 `routing_stqr` candidate 的 implementation、config、protocol、metrics、runner、
+   server、Notebook 与 tests；
+2. 旧 `content_uniform_combination` 的对应执行面；
+3. 只服务上述失败候选、且经 impact map 证明不承担 producer replay 或 shared
+   dependency 的代码；
+4. historical artifact/record/package replay 所需路径永久排除于删除 inventory。
+
+只有以下五项同时满足，才可由用户另行授权 `移除失败路线代码` 任务：
+
+1. 本轮“模块级科学可行性验证与候选晋升”完成；
+2. 新内容候选通过 module-level development gate 并完成独立 confirmation；
+3. 项目准备进入 external baseline 和论文级结果产出；
+4. 独立 impact map 证明删除不破坏 historical producer replay、current candidate、
+   Q/K/geometry chain 或 package rebuild；
+5. 用户再次明确授权。
+
+固定顺序为：模块科学可行性 → 冻结候选/confirmation → 清理旧失败代码 → clean
+exact → external baseline/论文结果。未同时满足五项时，旧代码存在只表示可重放历史
+provenance，不得恢复为 current candidate、执行授权或 downstream dependency。
 
 ## Governance Freeze And Extension Rule
 

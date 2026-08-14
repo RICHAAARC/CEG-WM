@@ -89,12 +89,12 @@ joint_decision
 
 ### Content Observation And Routing
 
-在登记的生成时刻提取候选内容观测。`content_router` 只据此输出 `A`、
+在登记的生成时刻提取候选内容观测。旧 `routing_stqr` 的 `content_router` 只据此输出 `A`、
 `mask_lf`、`mask_hf`、route identity/digests 和 disabled uniform control。
 路由计算属于内容链；模型执行和张量捕获属于 runtime。router 不决定 `a`，不输出
 标量预算，也不拥有 target/realized 写入量。
 
-正式候选必须记录：
+该历史候选必须记录：
 
 - 路由输入来源和公共可用性；
 - `A` 与两 mask 的覆盖、范围、partition identity 和退化；
@@ -102,6 +102,12 @@ joint_decision
 - disabled control 的 `A=mask_lf=mask_hf=1`，以及它不读取 observations。
 
 路由不得读取攻击标签或 evaluation 结果。
+
+旧 `routing_stqr` 已是 producer-bound historical negative。当前继任设计不新增
+职责：`content_router` 对 callback-18 临时 VAE decode RGB8 运行冻结 InSPyReNet，
+通过 raw finest `d0 -> sigmoid once -> bilinear 64x64 -> p>=0.5 -> one 3x3
+zero-padded erosion` 得到 `M_embed`；coverage 只允许 `64..3072`。检测端对普通
+待检 RGB8 独立得到 `M_detect`，raw/rectified 分别重跑，永不读取 embed mask。
 
 ### Content Carrier Directions And Embedder Write
 
@@ -135,6 +141,20 @@ HF 写入方向独立使用 CEG-WM HF carrier 职责域密钥。LF 候选写入�
 超限时，它在 binary32 `[0,1]` 上以冻结 midpoint 二分到没有新 representable
 midpoint；zero plateau 不作为可行写入，最终返回最大非零可行 scale 或 fail closed。
 runtime 不拥有 accept/retry/scale/final-failure 语义。
+
+对 `content_embedding_global_hf_local_lf`，上述职责分离保持不变，但唯一 nominal
+方向改为：
+
+```text
+u_hf = normalize(T_hf)
+u_lf = normalize(M_embed*T_lf)
+u_content = normalize(u_hf+u_lf)
+```
+
+不存在 `a/w` grid；masked LF/sum 零或非有限 fail closed。final actual-dtype total
+budget 仍是 canonical binary32 `3/250`。科学 probe 必须以 LF-only arm 证明 actual
+LF delta 非零、mask 外逐 bit 零、mask 内有能量；combined actual delta 不声明 branch
+分解。
 
 因此正式候选的组合记录归 `content_embedder`：包括冻结 `a`、方向/支持 identity、
 `dot(u_lf,u_hf)`、combined pre-normalization norm、nominal 与 limit、runtime
@@ -186,13 +206,18 @@ geometry/content budget ratio 只在 `qk_relation_similarity` 登记的有限集
 
 ### Raw Content Detection
 
-检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。LF 的
+检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。新 masked-LF
+检测必须重跑同一 InSPyReNet mask，将 `M_detect` 同时施加于 public VAE posterior
+observation 与 key-only template，并用独立 32-clean-null manifest 重新拟合 W；禁止
+继承旧 W 或读取 embed mask。LF 的
 `lf_low_pass` raw score 与 `lf_null_whitened_matched_score` 是两个独立候选身份；
 后者只读消费由独立 32-clean partition 冻结的 96 参数 channel-band diagonal `W`，
 不得在检测时读取 fit images 或重拟合。
 `lf_detector` 和 `hf_detector` 必须是独立可调用责任，三类 `s_lf`、`s_hf`、
 `s_combined` 必须独立可观测。`content_detector` 消费两个分支统计并形成
-`D_M(I, K)`；在 LF/HF 组合晋升前，`D_M` 等于 CEG-WM HF direct score。组合不得
+`D_M(I, K)`；新组合唯一统计是独立 primary-null 标准化后的
+`max(z_hf,z_lf_masked)`，未来 formal threshold 必须对该 max statistic 自身拟合。
+在 LF/HF 组合晋升前，`D_M` 等于 CEG-WM HF direct score。组合不得
 掩盖任一分支的错误密钥失败。
 
 原图检测必须首先完成，几何链不能预先改变所有输入，也不能成为默认前处理。
@@ -387,13 +412,14 @@ runtime 不负责：
 
 1. CEG-WM HF candidate identity、HF direct score 和 raw content detector 可复现；
 2. LF-only 具备独立 key attribution；
-3. 内容路由在相同预算下提供增益；
-4. LF/HF 组合通过晋升门；若未通过，则关闭完整 CEG-WM 成功路径并形成内容分支负结果；
-5. Q/K 同步在真实 runtime 可观测；
-6. 变换估计与可靠性在 identity、单变换、组合变换和错误密钥下通过；
-7. 回正能改善同一内容检测器；
-8. 条件恢复相对 raw-only 提供增益且不突破 FPR；
-9. 完整方法在冻结 calibration/evaluation 和攻击矩阵下形成 formal records。
+3. 新显著目标 mask 在冻结 coverage 与 8-unit `7/8` IoU `>=0.5` 门下稳定；
+4. local-LF causal witness、独立 32-clean-null W 与盲 key attribution 通过；
+5. global-HF/local-LF max statistic 通过独立 confirmation；若未通过，则关闭完整 CEG-WM 成功路径并形成内容分支负结果；
+6. Q/K 同步在真实 runtime 可观测；
+7. 变换估计与可靠性在 identity、单变换、组合变换和错误密钥下通过；
+8. 回正能改善同一内容检测器；
+9. 条件恢复相对 raw-only 提供增益且不突破 FPR；
+10. 完整方法在冻结 calibration/evaluation 和攻击矩阵下形成 formal records。
 
 前一项未通过时，不得用后一项的复杂度掩盖根因。
 
@@ -410,7 +436,9 @@ CPU/synthetic 验证与 readiness 审核；独立阶段迁移已经完成。
 `experiment_ready / implemented`：
 
 - 13 项职责、27 个 CPU/synthetic 行为节点和唯一 method readiness 已完成并审计；
-- 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
+- 正式 detector 仍为 HF-only；旧 route/combination 是 producer-bound historical
+  negative，新显著目标四候选为 `design_candidate_pending_implementation`、
+  `implementation_admission=NO`，
   `full_ceg_wm_eligible=false`；
 - 冻结 SD3.5 candidate 的真实 callback、actual dtype、VAE、两层 Q/K 和基本
   确定性 runtime 边界已经 qualification；

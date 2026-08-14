@@ -70,9 +70,20 @@ stage/status 已由独立 revisions 同步为 `experiment_ready / implemented`�
 登记冻结实验协议与可追溯执行交付的基础设施闭环。真实 qualification 只验证冻结
 runtime 边界；当前没有 `tau`、confirmation 结果、Calibration Locked、正式
 evaluation 或科学证据，也没有 LF/routing/组合/geometry 的实验晋升。
-候选 registry 的 11 个 ID 是算法身份计数，不是组件计数；第 11 项
-`lf_null_whitened_matched_score` 当前仅完成设计冻结，尚未进入 implementation
-readiness、正式 detector 或科学晋升。
+候选 registry 现有 15 个 ID（14 个具名候选和 1 个 mandatory control），是算法
+身份计数，不是 13 项组件职责计数。新增的
+`routing_inspyrenet_salient_local_lf`、`content_embedding_global_hf_local_lf`、
+`lf_saliency_masked_null_whitened_matched_score` 和
+`content_combination_saliency_max_standardized` 状态统一为
+`design_candidate_pending_implementation`，`implementation_admission=NO`。
+现有全局 `experiment_ready / implemented`、readiness、runtime qualification 和既有
+HF/LF directional evidence 均不覆盖这四个新身份。
+
+内容路线的当前研究问题收敛为：全局 HF 提供主密钥归属证据，InSPyReNet 从普通
+RGB8 图像独立重建显著目标内部 mask，局部 LF 只在该支持域写入和盲检测。嵌入端
+mask 来自 callback 18 非 terminal latent 的临时 VAE decode RGB8；检测端对普通待检
+RGB8 重新运行同一冻结模型与规则，不得读取嵌入 mask、Prompt、record、私有 latent
+或参考图。raw 与 rectified 图分别重新运行 mask，不共享私有状态。
 
 ## Success Conditions
 
@@ -90,6 +101,12 @@ readiness、正式 detector 或科学晋升。
 - 不使用原始参考图做正式注册。
 - 不把 payload 恢复或系统级 attestation 作为当前主方法链。
 - 不继承历史项目的固定 LF/HF 权重。
+- 不从既有 routing 8 probes 或 uniform-combination 8 probes 选择 mask threshold、
+  erosion、coverage、混合权重或组合函数；不补样、删 cluster、重跑、增加 attempt、
+  放宽 `3/250` 或重写既有 artifact。
+- 不用 margin-only 子集形成 winner、promotion 或 candidate selection。
+- 不把既有 HF/LF 各自 32-unit directional 证据自动传递给新 masked-LF、max
+  combination 或完整内容链；它们只保持各自 producer-bound 结论。
 - 不以治理通过、代码数量或示例输出支持科研结论。
 - 不把 CPU/synthetic 实现与行为通过误写成 LF/routing 实验晋升、runtime/GPU、
   正式 FPR 或科学效果验证。

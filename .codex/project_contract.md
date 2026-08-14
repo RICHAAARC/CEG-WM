@@ -39,9 +39,12 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 - root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
-  registry 是 9 个具名候选加 1 个强制 routing 禁用对照。CPU/synthetic 实现不
-  等于实验晋升；仍开放的是 LF/routing/组合晋升结果和 calibration 数值。
-- 当前正式 detector 仍为 HF-only，LF/routing 尚未实验晋升，
+  registry 现为 14 个具名候选加 1 个强制 routing 禁用对照，共 15 个 ID。
+  新增的显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`，
+  `implementation_admission=NO`；现有 CPU/synthetic 实现、readiness 和
+  `experiment_ready / implemented` 不覆盖这些新候选，也不等于其实现或实验晋升。
+- 当前正式 detector 仍为 HF-only；旧 routing/combination 已形成 producer-bound
+  development negative，新显著目标局部 LF 四候选尚未实现或实验晋升，
   `full_ceg_wm_eligible=false`。`negative_identity` 只证明 runtime/key identity
   control 与 registered identity 分离，不是 wrong-key FPR、attribution 效果或科学
   证据。readiness、runtime qualification 和阶段转换也不证明固定 FPR、鲁棒性、
@@ -57,11 +60,14 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    `content_embedder`、`lf_detector`、`hf_detector` 和正式联合入口
    `content_detector`；组合写入、LF 盲分数和统计组合不得互相代行。
 3. 当前冻结的 HF 主检测候选使用 CEG-WM 自有身份；其稀疏尾部算法具有 historical DirectHF 来源的 provisional provenance。当前实现按 CEG-WM 候选规格独立完成，不声明历史源码已迁移、复用权已关闭或继承历史效果证据。
-4. LF、路由和 LF/HF 组合已有明确有限候选；`content_embedder` 独占共同总预算
-   与冻结 `a` 的组合写入，`lf_detector` 独占 `s_lf`。它们仍属于本项目设计验证
-   问题，不是已晋升方法事实。
-5. `content_router` 只输出生成时 observations、`A`、`mask_lf`、`mask_hf`、
-   route identity/digests 和 disabled uniform control；它不决定 `a` 或输出能量
+4. `routing_stqr` 与 `content_combination_calibrated` 的既有执行路线已经形成
+   producer-bound development 负证据，保留作历史复现而不再是当前内容候选。
+   当前新增设计候选使用 InSPyReNet 从图像重建显著目标内部 mask，在全局 HF 上叠加
+   局部 LF；它不增加第 14 项职责，仍由既有 `content_router`、carrier、
+   `content_embedder`、分支 detector 与 `content_detector` 分工。新候选尚未获得
+   implementation admission。
+5. 当前显著目标候选的 `content_router` 只输出由冻结 InSPyReNet 规则得到的
+   `mask_lf`、全一 `mask_hf` 及其 identity/digests；它不决定混合权重或输出能量
    预算。carrier 只输出模板和 masked unit direction。runtime 只物化 embedder 的
    delta 并返回 actual-dtype 张量与 realized combined total norm/relative L2，
    预算合格与否仍由 embedder 判定；不得把 mixing coefficients 解释为可加分支
@@ -77,7 +83,8 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 7. 上述 actual hard limit 只约束 LF/HF/routing 最终合成并物化后的 combined
    content delta；nominal directions/components 只用于公式重放，不构成 actual
    branch decomposition。geometry delta 与现有 geometry/total budget 独立。
-8. 不得从历史项目继承固定 `0.7/0.3`、`0.5/0.5` 或其他未经 calibration/evaluation 验证的组合规则。
+8. 不得从历史项目继承固定 `0.7/0.3`、`0.5/0.5` 或其他未经 calibration/evaluation 验证的组合规则；新候选唯一写入方向为
+   `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，不是权重网格。
 9. 错误密钥、分支消融和组件分数必须可独立观测，组合分数不得掩盖密钥归属失败。
 
 ### Geometry Chain
@@ -131,7 +138,7 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 2. `research_defined` 及以后阶段必须提供 `.codex/research_state/research_definition.yaml`，连接具体设计文档和冻结方法不变量。
 3. `method_construction_authorized` 是唯一允许开始实质 `main/` 实施的在建阶段。进入该阶段必须同时满足：候选规格已关闭并独立审计通过、用户明确授权、已有用户授权建立的可审计 repository revision、按模板登记 construction admission、阶段变更本身不包含 `main/` 实现；research-definition audit 必须从 admission 绑定的 base revision 验证该独立转换。
 4. `method_construction_authorized` 本身只表示允许实施，不自动表示组件完成；当前组件完成事实由后续独立 revisions、唯一 readiness 和独立语义复核另行记录。
-5. `method_implemented` 及以后阶段必须提供 `.codex/research_state/method_readiness.yaml`，逐项连接唯一的 13 个正式职责组件、固定架构路径、候选 ID、具体实现 symbol、责任和方法特异性行为测试。候选 registry 的 10 个 ID 与 13 项职责不得混淆。
+5. `method_implemented` 及以后阶段必须提供 `.codex/research_state/method_readiness.yaml`，逐项连接唯一的 13 个正式职责组件、固定架构路径、候选 ID、具体实现 symbol、责任和方法特异性行为测试。候选 registry 的 15 个 ID 与 13 项职责不得混淆；现有 readiness 只绑定已审核实现，不得被解释为新显著目标四候选的 readiness。
 6. 只有全部必需组件、候选特异性非同构行为测试以及绑定同一候选摘要和受保护 revision 的独立语义复核通过后，才允许从 `method_construction_authorized` 进入 `method_implemented`。
 7. readiness AST 审计只检查必要的结构和接线；空目录、placeholder、单一通用函数、集中式代理模块、重复同构测试、机械 audit pass 或 readiness 元数据不能替代项目实现与独立语义复核。
 8. `runtime_verified` 必须有真实 runtime 边界证据；`experiment_ready` 必须有冻结协议与可追溯执行入口；`formal_evidence_available` 必须有真实 records。

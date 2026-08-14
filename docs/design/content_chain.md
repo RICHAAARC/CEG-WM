@@ -26,8 +26,10 @@ CEG-WM 自有 HF carrier 与 HF direct score 当前承担 HF 主检测候选；�
 ## LF Validation Questions
 
 LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
-`content_combination_calibrated` 候选算法已经关闭，但仍是待证伪内容载体，不预设
-已经晋升。新增 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
+`content_combination_calibrated` 保留为既有候选身份；其中后两者对应的执行路线已
+形成 producer-bound development 负证据，不再是 current candidate。继任内容路线
+新增四个 `design_candidate_pending_implementation` 身份，但尚无 implementation
+admission。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
 固定 channel-band diagonal null operator 做只读白化 matched score；它不改变 carrier，
 也不把 fit images、参考图或私有 latent 引入检测。实验需要回答：
 
@@ -49,12 +51,59 @@ LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
 - 保存可审计的路由身份与分支覆盖；
 - 允许 LF-only、HF-only、route-disabled 和组合消融。
 
-首个 `routing_stqr` 只在嵌入端消费已登记 S/T/R/Q 观测；检测使用未 mask 模板并不重建私有 route。其公式、reference 拟合职责和同预算控制见候选规格。
+历史首个 `routing_stqr` 只在嵌入端消费已登记 S/T/R/Q 观测；检测使用未 mask 模板并不重建私有 route。其公式、reference 拟合职责和同预算控制见候选规格。
 
-`content_router` 的权威输出只包括生成时观测结果、`A`、`mask_lf`、`mask_hf`、
+旧 `routing_stqr` 的权威输出只包括生成时观测结果、`A`、`mask_lf`、`mask_hf`、
 route identity/digests 和不读取 observations 的 disabled uniform control。它不选择
 `a`，不返回标量预算，也不记录 target/realized 写入量。同预算 routed/disabled 比较由
 `content_embedder` 的共同总预算和实验配对共同保证。
+
+### Current Salient-Object Local-LF Candidate
+
+当前内容自适应候选为 `routing_inspyrenet_salient_local_lf`。其外部资产只允许：
+
+- Hugging Face `plemeri/InSPyReNet` revision
+  `d94c2baaa4d023ab018c6f97be6ef37548e3bd1f` 的 `ckpt_base.pth`，LFS object
+  SHA-256 `0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd`、
+  size `367520613` bytes、MIT；
+- source `plemeri/transparent-background` revision
+  `f0fa91701a98cfc8e955c554e84522f365ec6da3`、MIT。
+
+Windows `Zone.Identifier`、下载路径和本地文件时间不属于 checkpoint 或方法身份，
+不得打包、哈希进候选或传播到 records。checkpoint 必须 strict `state_dict` load。
+唯一前向调用是 `InSPyReNet.forward_inspyre(x)`，取返回
+`out["saliency"][-1]` 的 raw finest `d0` logit，再调用 `torch.sigmoid` 恰一次；禁止
+`Remover.process`、`model.forward`、`forward_inference` 及其逐图 min-max。
+
+嵌入 mask 输入是 callback 18 非 terminal latent 的临时 VAE decode RGB8；检测 mask
+输入是普通待检 RGB8。两侧分别执行同一冻结规则：RGB/static `1024 x 1024`、ImageNet
+mean/std、float32；probability bilinear resize 到 `64 x 64`，
+`align_corners=false`；hard threshold `p>=0.5`；固定 3x3 square erosion 一次并使用
+zero padding。不存在连通域选择。eroded mask coverage 必须在 `64..3072` spatial
+pixels；无支持或非局部支持 fail closed 并保留固定分母，禁止 global LF fallback。
+raw 与 rectified 图像分别重跑模型和 mask；detector 不得读取 embed mask。
+development mask-stability 门固定为 IoU `>=0.5`，8-unit pilot 至少 `7/8`。
+
+写入身份 `content_embedding_global_hf_local_lf` 唯一为：
+
+```text
+u_hf = normalize(T_hf)
+u_lf = normalize(M_embed * T_lf)
+u_content = normalize(u_hf + u_lf)
+```
+
+最终 actual-dtype total budget 仍为 canonical binary32 `3/250`。masked LF 或 sum
+为零/非有限均 fail closed；不存在 `0.70/0.30`、`0.50/0.50`、`a/w` grid。scientific
+probe 必须包含 LF-only causal witness：actual LF delta 非零、mask 外逐 bit 为零、
+mask 内有能量；combined arm 不得伪分解 actual branch contribution。
+
+检测身份 `lf_saliency_masked_null_whitened_matched_score` 在检测侧重新得到
+`M_detect`，并把它同时作用于 public VAE posterior observation 与 key-only template。
+它必须从独立的 32 clean null fit 重新拟合自己的 `W`，不得继承旧 unmasked `W`。
+`z_hf` 与 `z_lf_masked` 来自相互独立的 primary-null 标准化；
+`content_combination_saliency_max_standardized` 唯一统计为
+`max(z_hf,z_lf_masked)`。未来 formal threshold 必须直接对该 max statistic 独立拟合。
+检测不得读取 reference、Prompt、embed record、private latent、Q/K 或 embed mask。
 
 ## Combination Requirements
 
@@ -97,7 +146,10 @@ geometry delta 与现有 geometry/total budget 独立。`budget_utilization` 仅
 - 证明组合不会通过 LF 分数掩盖 HF 错误密钥失败；
 - 不使用针对回正图单独拟合的权重或阈值。
 
-当前正式 content detector 候选仍为 HF-only。候选组合应先把 LF、HF 分支统计分别映射到 calibration null 下方向一致的统计，再比较冻结、单调且攻击无关的组合函数。LF 必须先独立通过 key attribution 和无水印校准门，才允许参与组合选择。
+当前正式 content detector 仍为 HF-only。旧 `content_combination_calibrated` 只作
+producer-bound 历史复现；当前新设计不重新搜索旧函数族，而只允许上述 max statistic。
+新 masked-LF 必须先独立通过 key attribution、32-clean null fit、mask stability 与
+causal witness 门，才允许新 max statistic 进入 confirmation。
 
 该映射唯一采用 `content_combination_calibrated` 的有限样本 mid-rank empirical CDF、
 `1/(2n)` tail clipping 和与 key schedule 同摘要的 `2^20` midpoint float32 normal
@@ -109,6 +161,22 @@ content-threshold-fit 重新拟合，不能跨五类 calibration 职责复用。
 
 若 LF 或 routing 未晋升，应登记为内容分支 `research_question_closed_negative`。该负结果可发表、可进入消融和失败分析，但不能通过与完整方法相同的成功门。HF-only 加 geometry 不是“完整 CEG-WM”；若要继续为 reduced-scope 方法，必须重新命名、缩小论文主张并独立获得研究定义与构建授权。
 
+### Producer-Bound Historical Negatives
+
+| route | producer | frozen result | current authority |
+| --- | --- | --- | --- |
+| `routing_stqr` fixed-half directional diagnosis | `925c2cbc727e3b18e91c0b3981eeed1b470a955a` | `42/42` terminal; incremental indicator `3/8` at clusters `1`, `5`, `6` | historical development negative; not current candidate |
+| `content_uniform_combination` directional diagnosis | `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da` | `41/41` terminal; budget violations `2` at clusters `1`, `6`; `mechanism_signal_not_observed`; `candidate_not_recommended_for_selection`; request false | historical development negative; not current candidate |
+
+不得从旧 8-probe 结果选择 mask、threshold、erosion、coverage、`a`、`w` 或 function；
+不得补样、删 cluster、重跑、增加 attempt、放宽 `3/250`、重写 artifact，或只用
+margin-passing 子集形成 winner/promotion。既有 HF 与 LF 各自 32-unit directional
+证据继续 producer-bound 有效，但不自动证明新 masked-LF、max statistic 或完整内容
+链。旧代码只可用于 producer replay、failure provenance、historical exact-package /
+record replay 和与新候选的语义 diff；代码存在不等于 current candidate 或执行授权。
+旧 routed content embedder、旧 combined detector 与 conditional-recovery 内容依赖
+保持 closed/paused，不得凭现存实现恢复。
+
 ## Output Semantics
 
 当前 CPU/synthetic 内容检测结果独立携带 LF、HF、combined 分支统计及路由、组合、
@@ -116,9 +184,9 @@ content-threshold-fit 重新拟合，不能跨五类 calibration 职责复用。
 
 ## Current Status
 
-HF carrier、HF direct score、LF、路由、组合写入与分支检测已完成 CPU/synthetic
-实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；LF/routing/组合
-尚未通过实验晋升，`full_ceg_wm_eligible=false`。actual-dtype combined content
+HF carrier、HF direct score、旧 LF/路由/组合写入与分支检测已完成 CPU/synthetic
+实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；新显著目标局部 LF
+四候选尚未实现或晋升，`full_ceg_wm_eligible=false`。actual-dtype combined content
 写入、完整性和 hard-budget 路径已在冻结 SD3.5 candidate 的真实 GPU
 qualification 中通过；这不构成 LF/routing/组合晋升。当前仍没有正式 calibration、
 完整联合 FPR 或科学效果证据；实际阶段/status 已由独立 revisions 同步为

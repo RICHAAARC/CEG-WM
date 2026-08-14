@@ -232,7 +232,7 @@ latent。只有正确密钥、错误密钥、无水印负样本和图像质量�
 
 ## Content-Adaptive Routing Primitive
 
-内容路由只输出生成时内容观测结果、空间 mask 和身份，不拥有检测阳性语义、
+以下 `A`/双-mask 原语只描述 producer-bound historical `routing_stqr`。它只输出生成时内容观测结果、空间 mask 和身份，不拥有检测阳性语义、
 `a` 或任何能量预算。
 
 候选路由函数记为：
@@ -262,6 +262,23 @@ router 不返回 `budget_lf`、`budget_hf` 或其他标量预算。首轮必须�
 基线、公开图像观测路由和被允许的共享确定性路由候选。任何依赖私有嵌入状态且
 检测端无法复现或边缘化的候选直接失败。
 
+`routing_stqr` 已形成 producer-bound development negative，不再是 current route。
+继任 `routing_inspyrenet_salient_local_lf` 不再输出 `A` 或互补 soft masks；它保持
+同一 `content_router` 职责，并按唯一规则输出 binary `M` 与全一 HF support：
+
+```text
+raw_d0 = InSPyReNet.forward_inspyre(preprocess(rgb))["saliency"][-1]
+p64 = bilinear(sigmoid_once(raw_d0), size=(64,64), align_corners=false)
+M = erode_square_3x3_zero_pad(p64 >= 0.5, exactly_once)
+valid iff 64 <= count(M) <= 3072
+```
+
+输入预处理固定为 static RGB `1024 x 1024`、ImageNet mean/std、float32。embed 的
+`rgb` 来自 callback 18 non-terminal latent 临时 VAE decode；detect 的 `rgb` 是普通
+待检 RGB8，两侧独立运行。不存在 connected-component selection、soft fallback 或
+per-image min-max。raw/rectified 分别重算；detector 不读取 embed mask。8-unit
+development mask stability 固定为至少 `7/8` 的 IoU `>=0.5`。
+
 ## LF/HF Combination Primitive
 
 ### Current Authority
@@ -270,7 +287,10 @@ router 不返回 `budget_lf`、`budget_hf` 或其他标量预算。首轮必须�
 `content_detector` 负责 `s_lf`、`s_hf` 的冻结标准化与组合。独立 `lf_detector`
 必须直接实现盲 `s_lf`，不得把 LF score 隐藏在 carrier 或组合器中。
 
-当前正式 content detector 保持 HF-only。LF/HF 组合是待晋升候选，不是已经冻结的方法。
+当前正式 content detector 保持 HF-only。旧 LF/HF 组合路线是 producer-bound 历史
+negative。继任候选的写入只允许
+`normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，检测只允许
+`max(z_hf,z_lf_masked)`；两者尚未获 implementation admission。
 
 ### Calibrated Candidate Family
 
@@ -439,25 +459,33 @@ else:
 - `lf_null_whitened_matched_score` 固定 32-clean fit、96 参数 stationary
   channel-band diagonal `W`、白化 matched score 与只读 blind detector 边界；
 - `routing_stqr` 固定 S/T/R/Q observations 和路由公式；
-- `content_combination_calibrated` 固定有限组合函数集合；
+- `content_combination_calibrated` 固定历史有限组合函数集合；
+- `routing_inspyrenet_salient_local_lf` 固定 exact InSPyReNet source/checkpoint/
+  forward 和单一 binary mask；
+- `content_embedding_global_hf_local_lf` 固定 global HF + local LF 无权重网格写入；
+- `lf_saliency_masked_null_whitened_matched_score` 固定检测端重算 mask、独立
+  32-clean-null W 与盲 masked score；
+- `content_combination_saliency_max_standardized` 固定分支独立 primary-null
+  标准化与 max statistic；
 - `qk_relation_similarity` 固定 Q/K 层、直接 relation、keyed objective 和同步写入；
 - `rectification_similarity` 固定搜索域、目标、可靠性指标和回正规则；
 - `joint_conditional_recovery` 固定联合判定。
 
-registry 共 11 个 ID：10 个具名候选和 1 个强制同预算禁用对照
+registry 共 15 个 ID：14 个具名候选和 1 个强制同预算禁用对照
 `routing_uniform_control`。CPU/synthetic 实现不等于实验晋升；该计数不等于固定的
 13 项实现职责，也不把对照视为方法候选。
 
-原 10-ID registry 的 CPU/synthetic 实现与方法行为门已经闭合；新增的第 11 项
-`lf_null_whitened_matched_score` 当前只有设计冻结，尚未实施或重绑 readiness。
-仍开放的是该候选的实现/独立语义审核，以及各候选能否通过真实 runtime、
+原有实现与方法行为门保持其 producer-bound 身份；新增显著目标四候选均为
+`design_candidate_pending_implementation`、`implementation_admission=NO`，尚未实施
+或重绑 readiness。仍开放的是这些候选未来经单独授权的实现/独立语义审核，以及各候选能否通过真实 runtime、
 candidate-selection、calibration 和 formal evaluation 门及互斥 calibration 职责拟合的
 阈值数值。设计冻结与效果证据必须保持分离。
 
 13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
 审计。实际 stage/status 已由独立 revisions 同步为
 `experiment_ready / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
-qualification；正式 detector 保持 HF-only，LF/routing 尚未实验晋升，
+qualification；正式 detector 保持 HF-only，旧 route/combination 为历史负结果，
+新显著目标路线尚未实施，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环不提供 `tau`、confirmation
 结果、Calibration Locked、正式 evaluation、正式 FPR 或效果证据，也不晋升
 LF/routing/组合/geometry。
