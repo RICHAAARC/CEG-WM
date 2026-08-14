@@ -15,8 +15,11 @@ from main import (
     ContentEmbedderError,
     ContentMaterializationObservation,
     ContentMaterializationResult,
+    SaliencyProbabilityObservation,
+    SalientLocalLfEmbeddingResult,
     content_materialization_replay_identity,
     reconcile_content_materialization_budget,
+    rgb8_image_digest,
     scale_content_delta_binary32,
 )
 
@@ -30,11 +33,19 @@ from .backend import (
     RuntimeVaePosterior,
 )
 from .configuration import Sd35RuntimeConfiguration
+from .inspyrenet_saliency import (
+    InspyrenetSaliencyRuntime,
+    InspyrenetSaliencyRuntimeError,
+)
 
 
 ContentEmbeddingOperation = Callable[
     [tuple[float, ...]],
     ContentEmbeddingResult,
+]
+SalientLocalLfEmbeddingOperation = Callable[
+    [tuple[float, ...], SaliencyProbabilityObservation],
+    SalientLocalLfEmbeddingResult,
 ]
 MaterializationIntegrityStatus = Literal[
     "passed",
@@ -134,6 +145,67 @@ class ContentWriteGeometrySuffixResult:
     suffix_context: RuntimeGenerationSuffixContext
 
 
+@dataclass(frozen=True, slots=True)
+class SalientLocalLfContentWriteResult:
+    """Public RGB8 outputs and actual-dtype evidence for the salient candidate."""
+
+    runtime_candidate_id: str
+    runtime_config_digest: str
+    selected_device: str
+    callback_index: int
+    content_embedding_candidate_id: str
+    embed_saliency_observation: SaliencyProbabilityObservation
+    embedding_result_identity: str
+    embedder_config_digest: str
+    delta_content_digest: str
+    accepted_materialization: ContentMaterializationAttempt
+    content_materialization_attempts: tuple[ContentMaterializationAttempt, ...]
+    materialization_scale: float
+    materialization_attempt_count: int
+    realized_total_l2: float
+    realized_relative_l2: float
+    budget_utilization: float
+    integrity_status: Literal["passed"]
+    budget_status: Literal["accepted"]
+    clean_image_rgb8: torch.Tensor
+    watermarked_image_rgb8: torch.Tensor
+    clean_image_digest: str
+    watermarked_image_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class SalientLocalLfDetectionObservationResult:
+    """Public RGB8-bound VAE and saliency observations without scores."""
+
+    runtime_candidate_id: str
+    runtime_config_digest: str
+    selected_device: str
+    input_image_digest: str
+    saliency_observation: SaliencyProbabilityObservation
+    detection_latent: torch.Tensor
+    vae_scaling_factor_actual: float
+    vae_shift_factor_actual: float
+
+
+@dataclass(frozen=True, slots=True)
+class _ContentWriteExecution:
+    candidate_id: str
+    runtime_config_digest: str
+    selected_device: str
+    paired_base_latent_digest: str
+    clean_callback_indices: tuple[int, ...]
+    watermarked_callback_indices: tuple[int, ...]
+    content_materialization: ContentMaterializationMeasurement
+    content_materialization_result: ContentMaterializationResult
+    content_materialization_attempts: tuple[ContentMaterializationAttempt, ...]
+    clean_generation_terminal_latent: torch.Tensor
+    watermarked_generation_terminal_latent: torch.Tensor
+    factors: RuntimeVaeFactors
+    clean_image: torch.Tensor
+    watermarked_image: torch.Tensor
+    embed_saliency_observation: SaliencyProbabilityObservation | None
+
+
 def _float32(value: float, role: str) -> float:
     if not isfinite(value):
         raise RuntimeContentExecutionError(f"{role} must be finite")
@@ -171,6 +243,96 @@ def _tensor(
     if not bool(torch.isfinite(value).all().item()):
         raise RuntimeContentExecutionError(f"{role} contains non-finite values")
     return value
+
+
+def _quantize_public_rgb8(
+    image: object,
+    role: str,
+) -> torch.Tensor:
+    if (
+        not isinstance(image, torch.Tensor)
+        or image.ndim != 4
+        or tuple(image.shape[:2]) != (1, 3)
+        or image.shape[2] <= 1
+        or image.shape[3] <= 1
+        or not image.is_floating_point()
+    ):
+        raise RuntimeContentExecutionError(
+            f"{role} must be floating [1,3,H,W] with H,W > 1"
+        )
+    if not bool(torch.isfinite(image).all().item()):
+        raise RuntimeContentExecutionError(
+            f"{role} contains non-finite values"
+        )
+    if bool((image < 0.0).any().item()) or bool((image > 1.0).any().item()):
+        raise RuntimeContentExecutionError(
+            f"{role} must remain within [0,1] before RGB8 quantization"
+        )
+    normalized = image.detach().to(
+        device="cpu",
+        dtype=torch.float32,
+    ).contiguous()
+    return torch.floor(
+        torch.clamp(normalized, 0.0, 1.0)
+        * torch.tensor(255.0, dtype=torch.float32)
+    ).to(dtype=torch.uint8).contiguous()
+
+
+def _observe_public_saliency(
+    saliency_runtime: InspyrenetSaliencyRuntime,
+    image_rgb8: torch.Tensor,
+    observation_role: Literal[
+        "embed_nonterminal_content_write_callback_latent_rgb8",
+        "detect_public_rgb8",
+    ],
+) -> SaliencyProbabilityObservation:
+    if type(saliency_runtime) is not InspyrenetSaliencyRuntime:
+        raise RuntimeContentExecutionError(
+            "saliency observation requires the frozen InSPyReNet runtime"
+        )
+    input_image_digest = rgb8_image_digest(image_rgb8)
+    try:
+        observation = saliency_runtime.observe(
+            image_rgb8,
+            observation_role=observation_role,
+        )
+    except InspyrenetSaliencyRuntimeError as exc:
+        raise RuntimeContentExecutionError(
+            "public InSPyReNet saliency observation failed"
+        ) from exc
+    if type(observation) is not SaliencyProbabilityObservation:
+        raise RuntimeContentExecutionError(
+            "public saliency observation type drifted"
+        )
+    try:
+        replayed = SaliencyProbabilityObservation(
+            values=observation.values,
+            spatial_shape=observation.spatial_shape,
+            observation_role=observation.observation_role,
+            input_image_digest=observation.input_image_digest,
+            source_repository=observation.source_repository,
+            source_revision=observation.source_revision,
+            checkpoint_repository=observation.checkpoint_repository,
+            checkpoint_revision=observation.checkpoint_revision,
+            checkpoint_sha256=observation.checkpoint_sha256,
+            checkpoint_size=observation.checkpoint_size,
+            preprocess_identity=observation.preprocess_identity,
+            forward_identity=observation.forward_identity,
+            sigmoid_identity=observation.sigmoid_identity,
+        )
+    except ValueError as exc:
+        raise RuntimeContentExecutionError(
+            "public saliency observation identity replay failed"
+        ) from exc
+    if (
+        replayed != observation
+        or observation.observation_role != observation_role
+        or observation.input_image_digest != input_image_digest
+    ):
+        raise RuntimeContentExecutionError(
+            "public saliency observation input identity drifted"
+        )
+    return observation
 
 
 def _float32_values(
@@ -258,7 +420,7 @@ def _actual_float16_bits(value: torch.Tensor) -> tuple[int, ...]:
 
 
 def measure_content_materialization(
-    embedding_result: ContentEmbeddingResult,
+    embedding_result: ContentEmbeddingResult | SalientLocalLfEmbeddingResult,
     baseline_latent_actual: torch.Tensor,
     written_latent_actual: torch.Tensor,
     *,
@@ -270,7 +432,10 @@ def measure_content_materialization(
 ) -> ContentMaterializationMeasurement:
     """Independently replay and measure one deterministic binary16 write."""
 
-    if type(embedding_result) is not ContentEmbeddingResult:
+    if type(embedding_result) not in {
+        ContentEmbeddingResult,
+        SalientLocalLfEmbeddingResult,
+    }:
         raise RuntimeContentExecutionError(
             "materialization requires ContentEmbeddingResult"
         )
@@ -494,6 +659,17 @@ def _attempt_record(
     )
 
 
+def _validated_vae_factors(
+    backend: RuntimeContentBackend,
+) -> RuntimeVaeFactors:
+    factors = backend.vae_factors()
+    if type(factors) is not RuntimeVaeFactors:
+        raise RuntimeContentExecutionError(
+            "backend VAE factors do not match the execution protocol"
+        )
+    return factors
+
+
 def _decode_generation_latent(
     backend: RuntimeContentBackend,
     latent: torch.Tensor,
@@ -536,12 +712,11 @@ def _encode_detection_image(
     ).detach().clone()
 
 
-def _validated_content_execution_latent(
+def _validate_content_runtime_identity(
     backend: RuntimeContentBackend,
     configuration: Sd35RuntimeConfiguration,
     session: RuntimeSession,
-    base_latent: torch.Tensor,
-) -> torch.Tensor:
+) -> None:
     if not isinstance(backend, RuntimeContentBackend):
         raise RuntimeContentExecutionError(
             "prepared backend lacks the content_write_and_vae execution protocol"
@@ -563,6 +738,15 @@ def _validated_content_execution_latent(
         raise RuntimeContentExecutionError(
             "runtime session does not match the frozen execution identity"
         )
+
+
+def _validated_content_execution_latent(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+) -> torch.Tensor:
+    _validate_content_runtime_identity(backend, configuration, session)
     latent = _tensor(
         base_latent,
         role="base_latent",
@@ -696,10 +880,13 @@ def _execute_content_write_and_vae_core(
     configuration: Sd35RuntimeConfiguration,
     session: RuntimeSession,
     base_latent: torch.Tensor,
-    content_embedding_operation: ContentEmbeddingOperation,
+    content_embedding_operation: (
+        ContentEmbeddingOperation | SalientLocalLfEmbeddingOperation
+    ),
     *,
     capture_geometry_suffix: bool,
-) -> tuple[ContentWriteVaeResult, RuntimeGenerationSuffixContext | None]:
+    saliency_runtime: InspyrenetSaliencyRuntime | None = None,
+) -> tuple[_ContentWriteExecution, RuntimeGenerationSuffixContext | None]:
     """让 main 驱动 actual-dtype 预算闭环并执行一对生成。"""
 
     latent = _validated_content_execution_latent(
@@ -741,13 +928,16 @@ def _execute_content_write_and_vae_core(
     materialization: ContentMaterializationMeasurement | None = None
     materialization_result: ContentMaterializationResult | None = None
     materialization_attempts: list[ContentMaterializationMeasurement] = []
+    embed_saliency_observation: SaliencyProbabilityObservation | None = None
+    vae_factors: RuntimeVaeFactors | None = None
     target_index = configuration.callback_index
 
     def watermarked_callback(
         index: int,
         callback_latent: torch.Tensor,
     ) -> torch.Tensor:
-        nonlocal materialization, materialization_result
+        nonlocal embed_saliency_observation
+        nonlocal materialization, materialization_result, vae_factors
         if type(index) is not int or not 0 <= index < configuration.inference_steps:
             raise RuntimeContentExecutionError(
                 "watermarked generation reported a wrong callback index"
@@ -778,17 +968,47 @@ def _execute_content_write_and_vae_core(
             raise RuntimeContentExecutionError(
                 "content callback index was triggered more than once"
             )
-        embedding_result = content_embedding_operation(
-            _float32_values(current, "watermarked_callback_latent")
+        callback_values = _float32_values(
+            current,
+            "watermarked_callback_latent",
         )
-        if type(embedding_result) is not ContentEmbeddingResult:
-            raise RuntimeContentExecutionError(
-                "content embedding operation returned an invalid result"
+        if saliency_runtime is None:
+            embedding_result = content_embedding_operation(callback_values)
+            if type(embedding_result) is not ContentEmbeddingResult:
+                raise RuntimeContentExecutionError(
+                    "content embedding operation returned an invalid result"
+                )
+        else:
+            vae_factors = _validated_vae_factors(backend)
+            callback_image = _decode_generation_latent(
+                backend,
+                current,
+                vae_factors,
+                "salient_embed_callback",
             )
+            callback_image_rgb8 = _quantize_public_rgb8(
+                callback_image,
+                "salient_embed_callback_image",
+            )
+            embed_saliency_observation = _observe_public_saliency(
+                saliency_runtime,
+                callback_image_rgb8,
+                "embed_nonterminal_content_write_callback_latent_rgb8",
+            )
+            embedding_result = content_embedding_operation(
+                callback_values,
+                embed_saliency_observation,
+            )
+            if type(embedding_result) is not SalientLocalLfEmbeddingResult:
+                raise RuntimeContentExecutionError(
+                    "salient embedding operation returned an invalid result"
+                )
         baseline = current.detach().clone()
 
         def materializer(
-            requested_embedding: ContentEmbeddingResult,
+            requested_embedding: (
+                ContentEmbeddingResult | SalientLocalLfEmbeddingResult
+            ),
             requested_scale: float,
             /,
         ) -> ContentMaterializationObservation:
@@ -918,11 +1138,7 @@ def _execute_content_write_and_vae_core(
             "actual-dtype content write disappeared after scheduler suffix"
         )
 
-    factors = backend.vae_factors()
-    if type(factors) is not RuntimeVaeFactors:
-        raise RuntimeContentExecutionError(
-            "backend VAE factors do not match the execution protocol"
-        )
+    factors = vae_factors or _validated_vae_factors(backend)
     clean_image = _decode_generation_latent(
         backend,
         clean_terminal,
@@ -935,19 +1151,7 @@ def _execute_content_write_and_vae_core(
         factors,
         "watermarked",
     )
-    clean_detection_latent = _encode_detection_image(
-        backend,
-        clean_image,
-        factors,
-        "clean",
-    )
-    watermarked_detection_latent = _encode_detection_image(
-        backend,
-        watermarked_image,
-        factors,
-        "watermarked",
-    )
-    result = ContentWriteVaeResult(
+    result = _ContentWriteExecution(
         candidate_id=session.candidate_id,
         runtime_config_digest=session.runtime_config_digest,
         selected_device=session.selected_device,
@@ -962,14 +1166,61 @@ def _execute_content_write_and_vae_core(
         ),
         clean_generation_terminal_latent=clean_terminal,
         watermarked_generation_terminal_latent=watermarked_terminal,
-        vae_scaling_factor_actual=float(factors.scaling_factor),
-        vae_shift_factor_actual=float(factors.shift_factor),
+        factors=factors,
         clean_image=clean_image,
         watermarked_image=watermarked_image,
+        embed_saliency_observation=embed_saliency_observation,
+    )
+    return result, suffix_context
+
+
+def _legacy_content_write_result(
+    backend: RuntimeContentBackend,
+    execution: _ContentWriteExecution,
+) -> ContentWriteVaeResult:
+    if execution.embed_saliency_observation is not None:
+        raise RuntimeContentExecutionError(
+            "legacy content execution retained a salient observation"
+        )
+    clean_detection_latent = _encode_detection_image(
+        backend,
+        execution.clean_image,
+        execution.factors,
+        "clean",
+    )
+    watermarked_detection_latent = _encode_detection_image(
+        backend,
+        execution.watermarked_image,
+        execution.factors,
+        "watermarked",
+    )
+    return ContentWriteVaeResult(
+        candidate_id=execution.candidate_id,
+        runtime_config_digest=execution.runtime_config_digest,
+        selected_device=execution.selected_device,
+        paired_base_latent_digest=execution.paired_base_latent_digest,
+        clean_callback_indices=execution.clean_callback_indices,
+        watermarked_callback_indices=execution.watermarked_callback_indices,
+        content_materialization=execution.content_materialization,
+        content_materialization_result=(
+            execution.content_materialization_result
+        ),
+        content_materialization_attempts=(
+            execution.content_materialization_attempts
+        ),
+        clean_generation_terminal_latent=(
+            execution.clean_generation_terminal_latent
+        ),
+        watermarked_generation_terminal_latent=(
+            execution.watermarked_generation_terminal_latent
+        ),
+        vae_scaling_factor_actual=float(execution.factors.scaling_factor),
+        vae_shift_factor_actual=float(execution.factors.shift_factor),
+        clean_image=execution.clean_image,
+        watermarked_image=execution.watermarked_image,
         clean_detection_latent=clean_detection_latent,
         watermarked_detection_latent=watermarked_detection_latent,
     )
-    return result, suffix_context
 
 
 def execute_content_write_and_vae(
@@ -981,7 +1232,7 @@ def execute_content_write_and_vae(
 ) -> ContentWriteVaeResult:
     """Run the established paired path without exposing suffix state."""
 
-    result, suffix_context = _execute_content_write_and_vae_core(
+    execution, suffix_context = _execute_content_write_and_vae_core(
         backend,
         configuration,
         session,
@@ -993,7 +1244,7 @@ def execute_content_write_and_vae(
         raise RuntimeContentExecutionError(
             "ordinary content execution unexpectedly retained suffix state"
         )
-    return result
+    return _legacy_content_write_result(backend, execution)
 
 
 def execute_content_write_and_capture_geometry_suffix(
@@ -1009,7 +1260,7 @@ def execute_content_write_and_capture_geometry_suffix(
         raise RuntimeContentExecutionError(
             "prepared backend lacks generation suffix execution"
         )
-    result, suffix_context = _execute_content_write_and_vae_core(
+    execution, suffix_context = _execute_content_write_and_vae_core(
         backend,
         configuration,
         session,
@@ -1029,6 +1280,139 @@ def execute_content_write_and_capture_geometry_suffix(
             "geometry synchronization suffix context identity drifted"
         )
     return ContentWriteGeometrySuffixResult(
-        content_write_result=result,
+        content_write_result=_legacy_content_write_result(
+            backend,
+            execution,
+        ),
         suffix_context=suffix_context,
+    )
+
+
+def execute_salient_local_lf_content_write_and_vae(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+    saliency_runtime: InspyrenetSaliencyRuntime,
+    content_embedding_operation: SalientLocalLfEmbeddingOperation,
+) -> SalientLocalLfContentWriteResult:
+    """Run the registered nonterminal saliency observation and actual-dtype write."""
+
+    execution, suffix_context = _execute_content_write_and_vae_core(
+        backend,
+        configuration,
+        session,
+        base_latent,
+        content_embedding_operation,
+        capture_geometry_suffix=False,
+        saliency_runtime=saliency_runtime,
+    )
+    if suffix_context is not None:
+        raise RuntimeContentExecutionError(
+            "salient content execution unexpectedly retained suffix state"
+        )
+    observation = execution.embed_saliency_observation
+    materialization_result = execution.content_materialization_result
+    embedding_result = materialization_result.embedding_result
+    if (
+        type(observation) is not SaliencyProbabilityObservation
+        or type(embedding_result) is not SalientLocalLfEmbeddingResult
+        or embedding_result.routing_result.saliency_probability != observation
+    ):
+        raise RuntimeContentExecutionError(
+            "salient embedding operation did not consume its public observation"
+        )
+    accepted_identity = (
+        materialization_result.observation.materialization_replay_identity
+    )
+    accepted = tuple(
+        attempt
+        for attempt in execution.content_materialization_attempts
+        if attempt.materialization_replay_identity == accepted_identity
+    )
+    if len(accepted) != 1:
+        raise RuntimeContentExecutionError(
+            "salient accepted materialization identity is not unique"
+        )
+    clean_rgb8 = _quantize_public_rgb8(
+        execution.clean_image,
+        "salient_clean_image",
+    )
+    watermarked_rgb8 = _quantize_public_rgb8(
+        execution.watermarked_image,
+        "salient_watermarked_image",
+    )
+    return SalientLocalLfContentWriteResult(
+        runtime_candidate_id=execution.candidate_id,
+        runtime_config_digest=execution.runtime_config_digest,
+        selected_device=execution.selected_device,
+        callback_index=configuration.callback_index,
+        content_embedding_candidate_id=embedding_result.candidate_id,
+        embed_saliency_observation=observation,
+        embedding_result_identity=embedding_result.embedding_result_identity,
+        embedder_config_digest=embedding_result.embedder_config_digest,
+        delta_content_digest=embedding_result.delta_content_digest,
+        accepted_materialization=accepted[0],
+        content_materialization_attempts=(
+            execution.content_materialization_attempts
+        ),
+        materialization_scale=materialization_result.materialization_scale,
+        materialization_attempt_count=materialization_result.attempt_count,
+        realized_total_l2=materialization_result.realized_total_l2,
+        realized_relative_l2=materialization_result.realized_relative_l2,
+        budget_utilization=materialization_result.budget_utilization,
+        integrity_status=materialization_result.integrity_status,
+        budget_status=materialization_result.budget_status,
+        clean_image_rgb8=clean_rgb8,
+        watermarked_image_rgb8=watermarked_rgb8,
+        clean_image_digest=rgb8_image_digest(clean_rgb8),
+        watermarked_image_digest=rgb8_image_digest(watermarked_rgb8),
+    )
+
+
+def observe_salient_local_lf_detection_image(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    image_rgb8: torch.Tensor,
+    saliency_runtime: InspyrenetSaliencyRuntime,
+) -> SalientLocalLfDetectionObservationResult:
+    """Observe one ordinary RGB8 image through public VAE and saliency paths."""
+
+    _validate_content_runtime_identity(backend, configuration, session)
+    try:
+        input_image_digest = rgb8_image_digest(image_rgb8)
+    except ValueError:
+        raise RuntimeContentExecutionError(
+            "salient detection input must be ordinary RGB8 [1,3,H,W]"
+        ) from None
+    public_image = image_rgb8.detach().to(
+        device="cpu",
+        dtype=torch.float32,
+    ).contiguous() / torch.tensor(255.0, dtype=torch.float32)
+    factors = _validated_vae_factors(backend)
+    detection_latent = _encode_detection_image(
+        backend,
+        public_image,
+        factors,
+        "salient_public",
+    )
+    saliency_observation = _observe_public_saliency(
+        saliency_runtime,
+        image_rgb8,
+        "detect_public_rgb8",
+    )
+    if saliency_observation.input_image_digest != input_image_digest:
+        raise RuntimeContentExecutionError(
+            "salient public detection observations use different images"
+        )
+    return SalientLocalLfDetectionObservationResult(
+        runtime_candidate_id=session.candidate_id,
+        runtime_config_digest=session.runtime_config_digest,
+        selected_device=session.selected_device,
+        input_image_digest=input_image_digest,
+        saliency_observation=saliency_observation,
+        detection_latent=detection_latent,
+        vae_scaling_factor_actual=float(factors.scaling_factor),
+        vae_shift_factor_actual=float(factors.shift_factor),
     )

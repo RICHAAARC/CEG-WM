@@ -9,11 +9,18 @@ import torch
 import runtime.content_write as runtime_content_write
 from main import (
     ContentEmbeddingResult,
+    SaliencyProbabilityObservation,
+    SalientLocalLfEmbeddingResult,
     content_actual_budget_accepts,
     content_embedder,
+    hf_carrier,
+    inspyrenet_salient_local_lf_router,
+    lf_carrier,
+    rgb8_image_digest,
+    salient_local_lf_content_embedder,
 )
-from main.content_chain.hf_carrier import hf_carrier
 from runtime import (
+    InspyrenetSaliencyRuntime,
     RuntimeAdapterError,
     RuntimeAdapterState,
     RuntimeBackendIdentity,
@@ -96,6 +103,7 @@ class FakeContentBackend:
         nonfinite_posterior_mode: bool = False,
         invalid_vae_factors: bool = False,
         generation_failure: bool = False,
+        bounded_decode_output: bool = False,
     ) -> None:
         default = tuple(range(20))
         self.callback_sequences = callback_sequences or (default, default)
@@ -105,11 +113,14 @@ class FakeContentBackend:
         self.nonfinite_posterior_mode = nonfinite_posterior_mode
         self.invalid_vae_factors = invalid_vae_factors
         self.generation_failure = generation_failure
+        self.bounded_decode_output = bounded_decode_output
         self.run_calls = 0
         self.suffix_capture_calls = 0
         self.suffix_callback_latents: list[torch.Tensor] = []
         self.close_calls = 0
         self.decode_inputs: list[torch.Tensor] = []
+        self.encode_inputs: list[torch.Tensor] = []
+        self.vae_factor_calls = 0
         self.posteriors: list[FakePosterior] = []
         self.configuration = None
 
@@ -186,6 +197,7 @@ class FakeContentBackend:
         return callback_latent.clone()
 
     def vae_factors(self) -> RuntimeVaeFactors:
+        self.vae_factor_calls += 1
         if self.invalid_vae_factors:
             return object()
         return RuntimeVaeFactors(
@@ -195,12 +207,15 @@ class FakeContentBackend:
 
     def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
         self.decode_inputs.append(latent.detach().clone())
+        if self.bounded_decode_output:
+            return torch.sigmoid(latent[:, :1]).repeat(1, 3, 1, 1)
         return latent.detach().clone() * 2.0
 
     def vae_decode_differentiable(self, latent: torch.Tensor) -> torch.Tensor:
         return latent.clone() * 2.0
 
     def vae_encode(self, image: torch.Tensor):
+        self.encode_inputs.append(image.detach().clone())
         if self.invalid_posterior:
             return object()
         mode_value = image.detach().clone() / 4.0
@@ -258,6 +273,326 @@ def _initialized_adapter(backend: FakeContentBackend):
     adapter = create_runtime_adapter(backend)
     adapter.initialize("cpu")
     return adapter
+
+
+class _RuntimeSaliencyModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forward_inputs: list[torch.Tensor] = []
+
+    def forward_inspyre(self, model_input: torch.Tensor) -> dict[str, object]:
+        self.forward_inputs.append(model_input.detach().cpu().clone())
+        raw = torch.full((1, 1, 64, 64), -10.0, dtype=torch.float32)
+        raw[:, :, 16:48, 16:48] = 10.0
+        return {
+            "saliency": [
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                raw,
+            ],
+        }
+
+
+def _saliency_runtime() -> tuple[InspyrenetSaliencyRuntime, _RuntimeSaliencyModel]:
+    model = _RuntimeSaliencyModel()
+    saliency = object.__new__(InspyrenetSaliencyRuntime)
+    saliency._device = torch.device("cpu")
+    saliency._model = model
+    return saliency, model
+
+
+def _salient_base_latent() -> torch.Tensor:
+    return torch.linspace(
+        -1.0,
+        1.0,
+        steps=64 * 64,
+        dtype=torch.float32,
+    ).reshape((1, 1, 64, 64)).to(torch.float16)
+
+
+def _salient_embedding_operation(
+    calls: list[tuple[tuple[float, ...], SaliencyProbabilityObservation]],
+):
+    shape = (1, 1, 64, 64)
+
+    def operation(
+        values: tuple[float, ...],
+        probability: SaliencyProbabilityObservation,
+    ) -> SalientLocalLfEmbeddingResult:
+        calls.append((values, probability))
+        route = inspyrenet_salient_local_lf_router(shape, probability)
+        return salient_local_lf_content_embedder(
+            values,
+            hf_carrier(TEST_ROOT_KEY, shape),
+            lf_carrier(TEST_ROOT_KEY, shape),
+            route,
+        )
+
+    return operation
+
+
+@pytest.mark.unit
+def test_callback_rgb8_quantization_uses_frozen_floor_semantics() -> None:
+    half = torch.tensor(0.5, dtype=torch.float32)
+    above_half = torch.nextafter(
+        half,
+        torch.tensor(float("inf"), dtype=torch.float32),
+    )
+    image = torch.tensor(
+        (
+            0.0,
+            1.0,
+            0.5,
+            float(above_half),
+            1.0 / 255.0,
+            254.0 / 255.0,
+            0.25,
+            0.75,
+            0.0,
+            1.0,
+            0.5,
+            float(above_half),
+        ),
+        dtype=torch.float32,
+    ).reshape((1, 3, 2, 2))
+
+    quantized = runtime_content_write._quantize_public_rgb8(image, "callback")
+
+    assert quantized.dtype is torch.uint8
+    assert quantized.device.type == "cpu"
+    assert quantized.is_contiguous()
+    assert tuple(quantized.reshape(-1).tolist()) == (
+        0,
+        255,
+        127,
+        127,
+        1,
+        254,
+        63,
+        191,
+        0,
+        255,
+        127,
+        127,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_value",
+    (
+        torch.nextafter(
+            torch.tensor(0.0, dtype=torch.float32),
+            torch.tensor(float("-inf"), dtype=torch.float32),
+        ).item(),
+        torch.nextafter(
+            torch.tensor(1.0, dtype=torch.float32),
+            torch.tensor(float("inf"), dtype=torch.float32),
+        ).item(),
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ),
+)
+def test_callback_rgb8_quantization_rejects_invalid_values_before_cast(
+    invalid_value: float,
+) -> None:
+    image = torch.full((1, 3, 2, 2), 0.5, dtype=torch.float32)
+    image.reshape(-1)[0] = invalid_value
+
+    with pytest.raises(RuntimeError):
+        runtime_content_write._quantize_public_rgb8(image, "callback")
+
+
+@pytest.mark.unit
+def test_salient_content_execution_observes_registered_callback(
+) -> None:
+    backend = FakeContentBackend(bounded_decode_output=True)
+    adapter = _initialized_adapter(backend)
+    saliency, model = _saliency_runtime()
+    calls: list[
+        tuple[tuple[float, ...], SaliencyProbabilityObservation]
+    ] = []
+    base = _salient_base_latent()
+
+    result = adapter.execute_salient_local_lf_content_write_and_vae(
+        base,
+        saliency,
+        _salient_embedding_operation(calls),
+    )
+
+    assert adapter.state is RuntimeAdapterState.READY
+    assert result.callback_index == 18
+    assert result.embed_saliency_observation.observation_role == (
+        "embed_nonterminal_content_write_callback_latent_rgb8"
+    )
+    assert len(calls) == 1
+    assert calls[0][1] is result.embed_saliency_observation
+    assert calls[0][0] == tuple(float(value) for value in base.float().flatten())
+    assert result.content_embedding_candidate_id == (
+        "content_embedding_global_hf_local_lf"
+    )
+    assert result.integrity_status == "passed"
+    assert result.budget_status == "accepted"
+    assert result.realized_relative_l2 <= unpack(
+        ">f",
+        pack(">f", 3.0 / 250.0),
+    )[0]
+    assert result.materialization_attempt_count == len(
+        result.content_materialization_attempts
+    )
+    assert result.materialization_attempt_count > 1
+    assert result.accepted_materialization.materialization_scale == (
+        result.materialization_scale
+    )
+    assert result.clean_image_rgb8.dtype is torch.uint8
+    assert result.watermarked_image_rgb8.dtype is torch.uint8
+    assert result.clean_image_digest == rgb8_image_digest(
+        result.clean_image_rgb8
+    )
+    assert result.watermarked_image_digest == rgb8_image_digest(
+        result.watermarked_image_rgb8
+    )
+    assert len(model.forward_inputs) == 1
+    assert len(backend.decode_inputs) == 3
+    expected_callback_rgb8 = runtime_content_write._quantize_public_rgb8(
+        torch.sigmoid(backend.decode_inputs[0][:, :1]).repeat(1, 3, 1, 1),
+        "expected_callback_image",
+    )
+    assert result.embed_saliency_observation.input_image_digest == (
+        rgb8_image_digest(expected_callback_rgb8)
+    )
+    assert backend.posteriors == []
+    assert backend.vae_factor_calls == 1
+    assert not hasattr(result, "callback_latent")
+    assert not hasattr(result, "clean_generation_terminal_latent")
+    assert not hasattr(result, "content_materialization_result")
+    assert not hasattr(result, "routing_result")
+    assert not hasattr(result, "checkpoint_path")
+
+
+@pytest.mark.unit
+def test_salient_raw_and_rectified_detection_observations_are_fresh_and_image_bound(
+) -> None:
+    backend = FakeContentBackend()
+    adapter = _initialized_adapter(backend)
+    saliency, model = _saliency_runtime()
+    raw = torch.tensor(
+        [[[[0, 64], [128, 255]]]],
+        dtype=torch.uint8,
+    ).repeat(1, 3, 1, 1)
+    rectified = torch.flip(raw, dims=(3,)).contiguous()
+
+    raw_result = adapter.observe_salient_local_lf_detection_image(
+        raw,
+        saliency,
+    )
+    rectified_result = adapter.observe_salient_local_lf_detection_image(
+        rectified,
+        saliency,
+    )
+
+    assert len(model.forward_inputs) == 2
+    assert len(backend.encode_inputs) == 2
+    assert len(backend.posteriors) == 2
+    assert torch.equal(
+        backend.encode_inputs[0],
+        raw.to(torch.float32) / torch.tensor(255.0, dtype=torch.float32),
+    )
+    assert torch.equal(
+        backend.encode_inputs[1],
+        rectified.to(torch.float32) / torch.tensor(255.0, dtype=torch.float32),
+    )
+    assert raw_result.input_image_digest == rgb8_image_digest(raw)
+    assert rectified_result.input_image_digest == rgb8_image_digest(rectified)
+    assert raw_result.input_image_digest != rectified_result.input_image_digest
+    assert raw_result.saliency_observation.observation_role == "detect_public_rgb8"
+    assert rectified_result.saliency_observation.observation_role == (
+        "detect_public_rgb8"
+    )
+    assert raw_result.saliency_observation.input_image_digest == (
+        raw_result.input_image_digest
+    )
+    assert rectified_result.saliency_observation.input_image_digest == (
+        rectified_result.input_image_digest
+    )
+    assert not hasattr(raw_result, "score")
+    assert not hasattr(raw_result, "key")
+    assert not hasattr(raw_result, "mask")
+    assert not hasattr(raw_result, "checkpoint_path")
+
+
+@pytest.mark.unit
+def test_salient_detection_rejects_image_and_saliency_asset_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_backend = FakeContentBackend()
+    invalid_adapter = _initialized_adapter(invalid_backend)
+    saliency, _model = _saliency_runtime()
+    with pytest.raises(RuntimeAdapterError, match="failed closed"):
+        invalid_adapter.observe_salient_local_lf_detection_image(
+            torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+            saliency,
+        )
+    assert invalid_backend.encode_inputs == []
+
+    backend = FakeContentBackend()
+    adapter = _initialized_adapter(backend)
+    trusted_saliency, _trusted_model = _saliency_runtime()
+    original_observe = InspyrenetSaliencyRuntime.observe
+
+    def drifted_observe(
+        self: InspyrenetSaliencyRuntime,
+        image: torch.Tensor,
+        *,
+        observation_role: str,
+    ) -> SaliencyProbabilityObservation:
+        observation = original_observe(
+            self,
+            image,
+            observation_role=observation_role,
+        )
+        object.__setattr__(observation, "checkpoint_sha256", "0" * 64)
+        return observation
+
+    monkeypatch.setattr(InspyrenetSaliencyRuntime, "observe", drifted_observe)
+    with pytest.raises(RuntimeAdapterError, match="failed closed"):
+        adapter.observe_salient_local_lf_detection_image(
+            torch.zeros((1, 3, 2, 2), dtype=torch.uint8),
+            trusted_saliency,
+        )
+    assert adapter.state is RuntimeAdapterState.FAILED
+
+
+@pytest.mark.unit
+def test_salient_content_execution_rejects_cross_key_carrier_identity() -> None:
+    backend = FakeContentBackend(bounded_decode_output=True)
+    adapter = _initialized_adapter(backend)
+    saliency, _model = _saliency_runtime()
+    shape = (1, 1, 64, 64)
+
+    def cross_key_operation(
+        values: tuple[float, ...],
+        probability: SaliencyProbabilityObservation,
+    ) -> SalientLocalLfEmbeddingResult:
+        return salient_local_lf_content_embedder(
+            values,
+            hf_carrier(TEST_ROOT_KEY, shape),
+            lf_carrier("ceg-wm-runtime-foreign-root", shape),
+            inspyrenet_salient_local_lf_router(shape, probability),
+        )
+
+    with pytest.raises(RuntimeAdapterError, match="failed closed") as exc_info:
+        adapter.execute_salient_local_lf_content_write_and_vae(
+            _salient_base_latent(),
+            saliency,
+            cross_key_operation,
+        )
+
+    assert "salient content execution failed closed" in str(exc_info.value)
+    assert adapter.state is RuntimeAdapterState.FAILED
+    assert backend.close_calls == 1
 
 
 @pytest.mark.unit

@@ -14,15 +14,20 @@ from runtime import (
     INSPYRENET_CHECKPOINT_SIZE,
     InspyrenetSaliencyRuntime,
     InspyrenetSaliencyRuntimeError,
+    SalientLocalLfContentWriteResult,
+    SalientLocalLfDetectionObservationResult,
     RuntimeAdapterError,
     RuntimeAdapterState,
     RuntimeBackendIdentity,
     RuntimeConfigurationError,
     RuntimeDeviceCapabilities,
     RuntimeExecutionIdentity,
+    Sd35RuntimeAdapter,
     create_runtime_adapter,
+    execute_salient_local_lf_content_write_and_vae,
     load_runtime_configuration,
     parse_runtime_configuration,
+    observe_salient_local_lf_detection_image,
     select_runtime_device,
 )
 
@@ -38,6 +43,18 @@ def test_public_runtime_surface_exposes_frozen_inspyrenet_saliency_owner() -> No
         INSPYRENET_CHECKPOINT_SHA256
         == "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
     )
+    assert SalientLocalLfContentWriteResult.__module__ == "runtime.content_write"
+    assert SalientLocalLfDetectionObservationResult.__module__ == (
+        "runtime.content_write"
+    )
+    assert execute_salient_local_lf_content_write_and_vae.__module__ == (
+        "runtime.content_write"
+    )
+    assert observe_salient_local_lf_detection_image.__module__ == (
+        "runtime.content_write"
+    )
+    assert callable(Sd35RuntimeAdapter.execute_salient_local_lf_content_write_and_vae)
+    assert callable(Sd35RuntimeAdapter.observe_salient_local_lf_detection_image)
 
 
 def _config_mapping() -> dict[str, object]:

@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 import torch
 
-from main import ContentEmbeddingResult
+from main import (
+    ContentEmbeddingResult,
+    SaliencyProbabilityObservation,
+    SalientLocalLfEmbeddingResult,
+)
 
 from .backend import (
     RuntimeBackend,
@@ -41,7 +45,10 @@ if TYPE_CHECKING:
         CleanImageVaeObservationResult,
         ContentWriteGeometrySuffixResult,
         ContentWriteVaeResult,
+        SalientLocalLfContentWriteResult,
+        SalientLocalLfDetectionObservationResult,
     )
+    from .inspyrenet_saliency import InspyrenetSaliencyRuntime
     from .geometry_synchronization import (
         RuntimeActualQkSuffixResult,
         RuntimeDifferentiableQkSuffixResult,
@@ -430,6 +437,95 @@ class Sd35RuntimeAdapter:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected clean observation error"
+            ) from exc
+
+    def execute_salient_local_lf_content_write_and_vae(
+        self,
+        base_latent: torch.Tensor,
+        saliency_runtime: InspyrenetSaliencyRuntime,
+        content_embedding_operation: Callable[
+            [tuple[float, ...], SaliencyProbabilityObservation],
+            SalientLocalLfEmbeddingResult,
+        ],
+    ) -> SalientLocalLfContentWriteResult:
+        """Run the candidate-specific public saliency callback/write path."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before salient content execution"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the salient content execution protocol"
+            )
+        from .content_write import (
+            RuntimeContentExecutionError,
+            execute_salient_local_lf_content_write_and_vae,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = execute_salient_local_lf_content_write_and_vae(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+                saliency_runtime,
+                content_embedding_operation,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeContentExecutionError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime salient content execution failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime raised an unexpected salient content execution error"
+            ) from exc
+
+    def observe_salient_local_lf_detection_image(
+        self,
+        image_rgb8: torch.Tensor,
+        saliency_runtime: InspyrenetSaliencyRuntime,
+    ) -> SalientLocalLfDetectionObservationResult:
+        """Observe one ordinary RGB8 image without producing detection scores."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before salient detection observation"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks the salient detection observation protocol"
+            )
+        from .content_write import (
+            RuntimeContentExecutionError,
+            observe_salient_local_lf_detection_image,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = observe_salient_local_lf_detection_image(
+                self._backend,
+                self._configuration,
+                self.session,
+                image_rgb8,
+                saliency_runtime,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeContentExecutionError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime salient detection observation failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime raised an unexpected salient detection observation error"
             ) from exc
 
     def execute_content_write_and_capture_geometry_suffix(
