@@ -196,9 +196,11 @@ Locked、candidate promotion、final-held-out evaluation、external baseline 或
 ## Salient-local-LF mask/write validation
 
 `salient_local_lf_mask_write_validation.ipynb` is the output-free delivery entrypoint for
-execution revision `b2aea883eff21c959c1684bd86a4af1890ca9f15` and run
-`ceg_wm_salient_local_lf_mask_write_validation`. It runs exactly two operational
+execution revision `bbf66617fec64842260066afdfec1169a8cf1688` and fresh run
+`ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation`. It runs exactly two operational
 preflights plus eight fixed scientific observations and exports the result or bounded
-failure artifact, receipt, and `SHA256SUMS` before surfacing a failure. The protocol
+failure artifact, receipt, and `SHA256SUMS` before surfacing a failure. A startup failure
+before package construction is exported from its relative diagnostic ZIP receipt with
+the package identity explicitly unavailable. The protocol
 defines the signed-integer FLOOR RGB8 quality gate; it does not fit masked-LF W,
 execute the detector/max statistic, estimate tau/FPR, or promote a candidate.

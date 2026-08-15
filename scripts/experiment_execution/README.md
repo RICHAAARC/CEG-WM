@@ -250,8 +250,9 @@ access held-out evaluation, or support scientific claims.
 
 `salient_local_lf_mask_write_validation_server.py` owns the exact-package and public
 GPU execution boundary for the two-operational/eight-scientific pilot. Its thin Colab
-entrypoint binds execution revision `b2aea883eff21c959c1684bd86a4af1890ca9f15`,
+entrypoint binds execution revision `bbf66617fec64842260066afdfec1169a8cf1688`,
 deterministic package SHA-256
-`f6bfa1a2acb64fca0ebc9a667101e89b14e7de27359d1742b4b9ab6811016bd1`, and
-package size `4132169`. Both success and bounded worker failure persist an artifact and
-receipt; authority errors remain fail-closed and do not forge receipts.
+`d0814b2ac907391a9213cbe108d2be1916f3ff71b835fcb298ec32f49cca6f4c`, and
+package size `4134799`. Success, bounded worker failure, and pre-package startup failure
+persist an artifact and receipt; startup receipts mark the package unavailable rather
+than forging its SHA-256.

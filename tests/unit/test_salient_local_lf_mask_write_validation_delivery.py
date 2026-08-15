@@ -28,10 +28,10 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks/colab/salient_local_lf_mask_write_validation.ipynb"
 PROTOCOL_PATH = ROOT / "configs/experiments/salient_local_lf_mask_write_validation.json"
-EXECUTION_REVISION = "b2aea883eff21c959c1684bd86a4af1890ca9f15"
-RUN_ID = "ceg_wm_salient_local_lf_mask_write_validation"
-EXPECTED_PACKAGE_SHA256 = "f6bfa1a2acb64fca0ebc9a667101e89b14e7de27359d1742b4b9ab6811016bd1"
-EXPECTED_PACKAGE_SIZE_BYTES = 4132169
+EXECUTION_REVISION = "bbf66617fec64842260066afdfec1169a8cf1688"
+RUN_ID = "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation"
+EXPECTED_PACKAGE_SHA256 = "d0814b2ac907391a9213cbe108d2be1916f3ff71b835fcb298ec32f49cca6f4c"
+EXPECTED_PACKAGE_SIZE_BYTES = 4134799
 SERVER_RELATIVE = Path("scripts/experiment_execution/salient_local_lf_mask_write_validation_server.py")
 
 
@@ -352,6 +352,9 @@ def test_salient_local_lf_notebook_is_thin_exact_and_exports_before_failure() ->
     assert "CEG_WM_INSPYRENET_CHECKPOINT_PATH" in code_source
     assert "checkout', '--detach', 'FETCH_HEAD'" in code_source
     assert "SHA256SUMS" in code_source
+    assert "receipt.get('execution_package_available', True)" in code_source
+    assert "receipt['diagnostic_zip_relative_path']" in code_source
+    assert "salient_local_lf_mask_write_validation_startup_failure" in code_source
     assert code_source.index("copy_create_only(artifact_source") < code_source.index("if server_exit_code != 0")
     assert "two operational preflights and eight fixed scientific" in source
     assert "does not fit the masked-LF whitening asset" in source

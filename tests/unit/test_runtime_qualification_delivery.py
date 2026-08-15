@@ -3058,6 +3058,9 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
     runtime_notebook = (
         root / "notebooks/colab/runtime_qualification.ipynb"
     )
+    salient_local_lf_notebook = (
+        root / "notebooks/colab/salient_local_lf_mask_write_validation.ipynb"
+    )
     notebooks = sorted((root / "notebooks").rglob("*.ipynb"))
     assert notebooks == sorted(
         [
@@ -3070,10 +3073,21 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
             root / "notebooks/colab/lf_whitened_directional_validation.ipynb",
             root / "notebooks/colab/lf_whitened_score_screening.ipynb",
             root / "notebooks/colab/qk_synchronization_write_diagnostic.ipynb",
-            root / "notebooks/colab/salient_local_lf_mask_write_validation.ipynb",
+            salient_local_lf_notebook,
             root / "notebooks/colab/thirteen_module_mechanism_screening.ipynb",
         ]
     )
+    salient_document = json.loads(salient_local_lf_notebook.read_text(encoding="utf-8"))
+    salient_sources = "\n".join(
+        "".join(cell.get("source", [])) for cell in salient_document["cells"]
+    )
+    assert all(
+        cell.get("execution_count") is None
+        for cell in salient_document["cells"] if cell["cell_type"] == "code"
+    )
+    assert all(cell.get("outputs", []) == [] for cell in salient_document["cells"])
+    assert "bbf66617fec64842260066afdfec1169a8cf1688" in salient_sources
+    assert "diagnostic_zip_relative_path" in salient_sources
     document = json.loads(runtime_notebook.read_text(encoding="utf-8"))
     sources = "\n".join(
         "".join(cell.get("source", []))
