@@ -10,7 +10,11 @@ from experiments.protocol.internal_record_registry import (
     INTERNAL_RECORD_FIELD_NAMES,
     INTERNAL_RECORD_SCHEMA_BINDINGS,
 )
-from governance.harness.lib.field_rules import FieldRegistryRow, validate_registry_rows
+from governance.harness.lib.field_rules import (
+    FieldRegistryRow,
+    load_field_registry,
+    validate_registry_rows,
+)
 from governance.harness.lib.naming_rules import (
     has_generic_mechanical_numeric_suffix,
     ALLOWED_NARROW_SEMANTIC_LITERALS,
@@ -253,6 +257,59 @@ def test_internal_executable_record_registry_is_mirrored_in_docs() -> None:
         schema_identity in document
         for schema_identity in INTERNAL_RECORD_SCHEMA_BINDINGS.values()
     )
+
+
+@pytest.mark.unit
+def test_callback_mask_witness_fields_are_nonclaiming_cross_boundary_facts(
+) -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    rows = load_field_registry(repository_root)
+    descriptions = {
+        "mask_outside_bitwise_zero": (
+            "从实际 callback18 的 `SalientLocalLfEmbeddingResult` 复制的 mask 外逐 bit "
+            "为零布尔事实；不暴露 latent 或 mask 数值，且单独不能支持科学结论。"
+        ),
+        "mask_inside_has_energy": (
+            "从实际 callback18 的 `SalientLocalLfEmbeddingResult` 复制的 mask 内存在"
+            "能量布尔事实；不暴露 latent 或 mask 数值，且单独不能支持科学结论。"
+        ),
+    }
+    for field_name, description in descriptions.items():
+        assert rows[field_name] == FieldRegistryRow(
+            field_name=field_name,
+            governance_level="cross_boundary",
+            category="method_status",
+            required_suffix="none",
+            allowed_in_claims="false",
+            description=description,
+        )
+
+    document = (
+        repository_root / "docs" / "reference" / "field_registry.md"
+    ).read_text(encoding="utf-8")
+    table_rows: dict[str, tuple[str, ...]] = {}
+    for line in document.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = tuple(
+            cell.strip()
+            for cell in line.strip().strip("|").split("|")
+        )
+        if len(cells) == 8:
+            field_name = cells[0].strip("`")
+            table_rows[field_name] = (field_name, *cells[1:])
+    for field_name, description in descriptions.items():
+        assert table_rows[field_name] == (
+            field_name,
+            "cross_boundary",
+            "method_status",
+            "none",
+            "false",
+            "false",
+            "false",
+            description,
+        )
+        assert table_rows[field_name][7]
 
 
 @pytest.mark.parametrize(

@@ -1037,4 +1037,6 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | embed_mask_coverage | persisted_protocol | method_statistic | none | true | false | false | callback18 public RGB8 fresh saliency mask 的 64x64 支持像素数。 |
 | detect_mask_coverage | persisted_protocol | method_statistic | none | true | false | false | ordinary marked RGB8 fresh saliency mask 的 64x64 支持像素数。 |
 | mask_intersection_over_union | persisted_protocol | method_statistic | none | true | false | false | fresh embed/detect masks 的 fixed development IoU。 |
+| mask_outside_bitwise_zero | cross_boundary | method_status | none | false | false | false | 从实际 callback18 的 `SalientLocalLfEmbeddingResult` 复制的 mask 外逐 bit 为零布尔事实；不暴露 latent 或 mask 数值，且单独不能支持科学结论。 |
+| mask_inside_has_energy | cross_boundary | method_status | none | false | false | false | 从实际 callback18 的 `SalientLocalLfEmbeddingResult` 复制的 mask 内存在能量布尔事实；不暴露 latent 或 mask 数值，且单独不能支持科学结论。 |
 | nominal_masked_lf_consumed_by_materialization | persisted_protocol | method_status | none | true | false | false | nominal masked-LF direction 已绑定到真实 accepted materialization replay 的 causal witness。 |
