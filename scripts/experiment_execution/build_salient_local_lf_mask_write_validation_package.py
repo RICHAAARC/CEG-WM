@@ -38,10 +38,63 @@ _PREFIXES = (
     "scripts/experiment_execution/salient_local_lf_mask_write_validation",
 )
 _README_SOURCE = "templates/release_readmes/salient_local_lf_mask_write_validation_package.md"
+_CURRENT_AUTHORITY_IDENTITY = (
+    "current_experiment_inputs_at_salient_local_lf_authorization_base"
+)
+_HISTORICAL_AUTHORITY_IDENTITIES = (
+    "historical_content_routing_directional_negative",
+    "historical_content_uniform_combination_negative",
+)
 
 
 class SalientLocalLfPackageBuildError(RuntimeError):
     """The exact source tree cannot produce the frozen package."""
+
+
+def resolve_required_git_authority_revisions(
+    *, execution_revision: str, config_payload: bytes | str,
+) -> tuple[str, ...]:
+    """Resolve the exact execution/current/historical commits from frozen config."""
+
+    if type(execution_revision) is not str or REVISION.fullmatch(execution_revision) is None:
+        raise SalientLocalLfPackageBuildError("execution revision is invalid")
+    try:
+        config = json.loads(
+            config_payload.decode("utf-8")
+            if type(config_payload) is bytes
+            else config_payload
+        )
+    except (AttributeError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
+        raise SalientLocalLfPackageBuildError("package protocol config is invalid") from exc
+    if type(config) is not dict:
+        raise SalientLocalLfPackageBuildError("package protocol config is invalid")
+
+    current = config.get("current_experiment_authority")
+    historical = config.get("historical_prior_authorities")
+    if (
+        type(current) is not dict
+        or current.get("authority_identity") != _CURRENT_AUTHORITY_IDENTITY
+        or type(historical) is not list
+        or len(historical) != len(_HISTORICAL_AUTHORITY_IDENTITIES)
+    ):
+        raise SalientLocalLfPackageBuildError("required Git authority identity drifted")
+    observed_historical_identities = tuple(
+        item.get("authority_identity") if type(item) is dict else None
+        for item in historical
+    )
+    if observed_historical_identities != _HISTORICAL_AUTHORITY_IDENTITIES:
+        raise SalientLocalLfPackageBuildError("required Git authority identity drifted")
+
+    revisions = (
+        execution_revision,
+        current.get("producer_revision"),
+        *(item.get("producer_revision") for item in historical),
+    )
+    if any(type(value) is not str or REVISION.fullmatch(value) is None for value in revisions):
+        raise SalientLocalLfPackageBuildError("required Git authority revision is invalid")
+    if len(revisions) != len(set(revisions)):
+        raise SalientLocalLfPackageBuildError("required Git authority revision is duplicated")
+    return revisions
 
 
 def _git(root: Path, *args: str, text: bool = True) -> str | bytes:
@@ -89,6 +142,10 @@ def _tree(root: Path, revision: str) -> tuple[tuple[tuple[str, str, bytes], ...]
         config = json.loads(config_payload.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise SalientLocalLfPackageBuildError("package protocol config is invalid") from exc
+    resolve_required_git_authority_revisions(
+        execution_revision=revision,
+        config_payload=config_payload,
+    )
     for authority in config.get("historical_prior_authorities", []):
         if type(authority) is not dict or type(authority.get("paths")) is not list:
             raise SalientLocalLfPackageBuildError("historical package authority is invalid")

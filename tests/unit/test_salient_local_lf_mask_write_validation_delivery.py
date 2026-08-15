@@ -187,6 +187,129 @@ def test_salient_local_lf_server_writes_bounded_success_or_failure_receipt(
         assert secret.encode() not in receipt_bytes
 
 
+def test_remote_authority_fetch_failure_exports_zero_unit_startup_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("local Git authority objects unavailable")
+    branch = subprocess.run(
+        ("git", "symbolic-ref", "--short", "HEAD"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    shallow = tmp_path / "shallow-repository"
+    subprocess.run(
+        (
+            "git",
+            "clone",
+            "--no-local",
+            "--no-hardlinks",
+            "--depth",
+            "1",
+            "--branch",
+            branch,
+            f"file://{ROOT}",
+            str(shallow),
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    execution_revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=shallow,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    unavailable_origin = tmp_path / "unavailable-origin.git"
+    subprocess.run(
+        ("git", "remote", "set-url", "origin", f"file://{unavailable_origin}"),
+        cwd=shallow,
+        check=True,
+    )
+    forbidden_calls = []
+
+    def reject_later_stage(*_args: object, **_kwargs: object) -> None:
+        forbidden_calls.append(True)
+        raise AssertionError("startup failure advanced past Git authority hydration")
+
+    monkeypatch.setattr(server, "_probe_resources", reject_later_stage)
+    monkeypatch.setattr(server, "_install_dependencies", reject_later_stage)
+    monkeypatch.setattr(server, "_verify_locked_dependencies", reject_later_stage)
+    monkeypatch.setattr(server, "_download_configured_model", reject_later_stage)
+    monkeypatch.setattr(server, "_execute_worker", reject_later_stage)
+    persistent = tmp_path / "persistent"
+    cache = tmp_path / "cache"
+    persistent.mkdir()
+    cache.mkdir()
+    secret_environment = {
+        "HF_TOKEN": "startup-hf-secret",
+        "CEG_WM_ROOT_KEY": "startup-root-secret",
+        "CEG_WM_INSPYRENET_CHECKPOINT_PATH": (
+            "/content/drive/private/checkpoint/ckpt_base.pth"
+        ),
+    }
+    code, receipt = server.execute_salient_local_lf_mask_write_validation_server_session(
+        repository_root=shallow,
+        expected_revision=execution_revision,
+        persistent_root=persistent,
+        cache_root=cache,
+        run_id=RUN_ID,
+        session_id="salient_local_lf_remote_authority_failure",
+        environment=secret_environment,
+        install_dependencies=False,
+    )
+    assert forbidden_calls == []
+    assert code == 3
+    assert receipt["failure_class"] == "identity_blocked"
+    assert receipt["failure_operation_identity"] == (
+        "salient_local_lf_required_git_authority_hydration"
+    )
+    assert receipt["execution_package_available"] is False
+    assert receipt["execution_package_relative_path"] is None
+    assert receipt["execution_package_sha256"] is None
+    assert receipt["committed_unit_count"] == 0
+    assert receipt["session_committed_unit_count"] == 0
+    assert receipt["salient_local_lf_mask_write_aggregate"] is None
+    assert receipt["scientific_claims_supported"] is False
+    assert receipt["completed_steps"] == (
+        "repository_identity_verified",
+        "required_git_authority_revisions_resolved",
+    )
+    assert "required_git_authority_objects_hydrated" in receipt["not_executed_steps"]
+    assert "worker_execution" in receipt["not_executed_steps"]
+    assert "operational_units" in receipt["not_executed_steps"]
+    assert "scientific_units" in receipt["not_executed_steps"]
+
+    receipt_path = persistent / str(receipt["receipt_relative_path"])
+    diagnostic_zip = persistent / str(receipt["diagnostic_zip_relative_path"])
+    assert receipt_path.is_file()
+    assert diagnostic_zip.is_file()
+    persisted = receipt_path.read_bytes()
+    with ZipFile(diagnostic_zip) as archive:
+        assert set(archive.namelist()) == {
+            "diagnostic.json",
+            "execution_receipt.json",
+            "SHA256SUMS",
+        }
+        diagnostic = json.loads(archive.read("diagnostic.json"))
+        artifact_receipt = json.loads(archive.read("execution_receipt.json"))
+        assert archive.read("SHA256SUMS")
+    assert diagnostic["failure_class"] == "identity_blocked"
+    assert diagnostic["return_code"] == 3
+    assert len(diagnostic["failure_message_redacted"].encode("utf-8")) <= 512
+    assert len(diagnostic["package_relative_frames"]) <= 8
+    assert artifact_receipt["committed_unit_count"] == 0
+    assert artifact_receipt["scientific_claims_supported"] is False
+    protected = persisted + diagnostic_zip.read_bytes()
+    for secret in (*secret_environment.values(), str(tmp_path), "/content/drive"):
+        assert secret.encode("utf-8") not in protected
+
+
 def test_salient_local_lf_notebook_is_thin_exact_and_exports_before_failure() -> None:
     notebook = json.loads(NOTEBOOK.read_text("utf-8"))
     code_cells = tuple(cell for cell in notebook["cells"] if cell["cell_type"] == "code")

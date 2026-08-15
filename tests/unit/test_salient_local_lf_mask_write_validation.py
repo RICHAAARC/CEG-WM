@@ -58,12 +58,14 @@ from scripts.experiment_execution.salient_local_lf_mask_write_validation_entrypo
 from scripts.experiment_execution.build_salient_local_lf_mask_write_validation_package import (
     SalientLocalLfPackageBuildError,
     build_salient_local_lf_mask_write_validation_package,
+    resolve_required_git_authority_revisions,
     verify_extracted_salient_local_lf_mask_write_validation_package,
     verify_salient_local_lf_mask_write_validation_package,
 )
 from scripts.experiment_execution.salient_local_lf_mask_write_validation_server import (
     _extract_verified_execution_package,
     _verify_locked_dependencies,
+    hydrate_required_git_authority_revisions,
 )
 from tests.helpers.historical_repository import materialize_historical_repository
 
@@ -411,6 +413,125 @@ def test_current_authority_inventory_tamper_fails_closed(tmp_path: Path) -> None
     config_path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(SalientLocalLfMaskWriteProtocolError):
         load_salient_local_lf_mask_write_validation_protocol(config_path, repository_root=ROOT)
+
+
+def test_required_git_authority_revision_resolution_is_exact_and_fail_closed() -> None:
+    config_payload = CONFIG.read_bytes()
+    execution_revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert resolve_required_git_authority_revisions(
+        execution_revision=execution_revision,
+        config_payload=config_payload,
+    ) == (
+        execution_revision,
+        "061991c67bb0ceb3fbfe3359a2d86b78f301f171",
+        "925c2cbc727e3b18e91c0b3981eeed1b470a955a",
+        "7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da",
+    )
+
+    invalid_documents = []
+    missing = json.loads(config_payload)
+    del missing["current_experiment_authority"]
+    invalid_documents.append(missing)
+    duplicated = json.loads(config_payload)
+    duplicated["historical_prior_authorities"][1]["producer_revision"] = (
+        duplicated["historical_prior_authorities"][0]["producer_revision"]
+    )
+    invalid_documents.append(duplicated)
+    malformed = json.loads(config_payload)
+    malformed["current_experiment_authority"]["producer_revision"] = "x" * 40
+    invalid_documents.append(malformed)
+    drifted = json.loads(config_payload)
+    drifted["historical_prior_authorities"][0]["authority_identity"] = (
+        "historical_authority_drifted"
+    )
+    invalid_documents.append(drifted)
+    for document in invalid_documents:
+        with pytest.raises(SalientLocalLfPackageBuildError):
+            resolve_required_git_authority_revisions(
+                execution_revision=execution_revision,
+                config_payload=json.dumps(document),
+            )
+
+
+def test_shallow_checkout_hydrates_exact_authorities_before_protocol_package_load(
+    tmp_path: Path,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("local Git authority objects unavailable")
+    branch = subprocess.run(
+        ("git", "symbolic-ref", "--short", "HEAD"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    shallow = tmp_path / "shallow-repository"
+    subprocess.run(
+        (
+            "git",
+            "clone",
+            "--no-local",
+            "--no-hardlinks",
+            "--depth",
+            "1",
+            "--branch",
+            branch,
+            f"file://{ROOT}",
+            str(shallow),
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    execution_revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=shallow,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    required = resolve_required_git_authority_revisions(
+        execution_revision=execution_revision,
+        config_payload=(shallow / CONFIG.relative_to(ROOT)).read_bytes(),
+    )
+    for revision in required[1:]:
+        missing = subprocess.run(
+            ("git", "cat-file", "-e", f"{revision}^{{commit}}"),
+            cwd=shallow,
+            check=False,
+            capture_output=True,
+        )
+        assert missing.returncode != 0
+
+    assert hydrate_required_git_authority_revisions(shallow, required) == required
+    for revision in required:
+        observed = subprocess.run(
+            ("git", "rev-parse", "--verify", f"{revision}^{{commit}}"),
+            cwd=shallow,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert observed == revision
+    protocol = load_salient_local_lf_mask_write_validation_protocol(
+        shallow / CONFIG.relative_to(ROOT),
+        repository_root=shallow,
+    )
+    assert protocol.run_id == "ceg_wm_salient_local_lf_mask_write_validation"
+    package = tmp_path / "shallow-execution-package.zip"
+    built = build_salient_local_lf_mask_write_validation_package(
+        shallow,
+        package,
+        execution_revision,
+    )
+    assert built["committed_revision"] == execution_revision
+    assert package.is_file()
 
 
 def test_exact_package_replays_current_and_historical_authority_without_git(
