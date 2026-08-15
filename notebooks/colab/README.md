@@ -196,8 +196,8 @@ Locked、candidate promotion、final-held-out evaluation、external baseline 或
 ## Salient-local-LF mask/write validation
 
 `salient_local_lf_mask_write_validation.ipynb` is the output-free delivery entrypoint for
-execution revision `7be93ef1e6047907069aab922ee4b32745ea2ce3` and fresh run
-`ceg_wm_salient_local_lf_mask_write_registered_dual_carrier_key_correction_validation`. It runs exactly two operational
+execution revision `f9ae7652aa77cbc66a7ee47cdf4f67fe8ea19583` and fresh run
+`ceg_wm_salient_local_lf_mask_write_callback_witness_correction_validation`. It runs exactly two operational
 preflights plus eight fixed scientific observations and exports the result or bounded
 failure artifact, receipt, and `SHA256SUMS` before surfacing a failure. A startup failure
 before package construction is exported from its relative diagnostic ZIP receipt with

@@ -3086,7 +3086,7 @@ def test_notebook_is_unique_thin_and_output_free() -> None:
         for cell in salient_document["cells"] if cell["cell_type"] == "code"
     )
     assert all(cell.get("outputs", []) == [] for cell in salient_document["cells"])
-    assert "7be93ef1e6047907069aab922ee4b32745ea2ce3" in salient_sources
+    assert "f9ae7652aa77cbc66a7ee47cdf4f67fe8ea19583" in salient_sources
     assert "diagnostic_zip_relative_path" in salient_sources
     document = json.loads(runtime_notebook.read_text(encoding="utf-8"))
     sources = "\n".join(
