@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from struct import pack, unpack
 import subprocess
+import sys
 
 import pytest
 import torch
@@ -70,6 +71,15 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/salient_local_lf_mask_write_validation.json"
 COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
+SERVER_MODULE = "scripts.experiment_execution.salient_local_lf_mask_write_validation_server"
+SERVER_STARTUP_MEMBERS = {
+    "scripts/experiment_execution/__init__.py",
+    "scripts/experiment_execution/build_salient_local_lf_mask_write_validation_package.py",
+    "scripts/experiment_execution/development_exploration_entrypoint.py",
+    "scripts/experiment_execution/development_exploration_server.py",
+    "scripts/experiment_execution/salient_local_lf_mask_write_validation_entrypoint.py",
+    "scripts/experiment_execution/salient_local_lf_mask_write_validation_server.py",
+}
 
 
 def struct_binary32(value: float) -> float:
@@ -400,6 +410,8 @@ def test_exact_package_replays_current_and_historical_authority_without_git(
         extracted, revision,
     )
     assert extracted_manifest["committed_revision"] == revision
+    extracted_paths = {entry["path"] for entry in extracted_manifest["entries"]}
+    assert SERVER_STARTUP_MEMBERS <= extracted_paths
     replayed = load_salient_local_lf_mask_write_validation_protocol(
         extracted / "configs/experiments/salient_local_lf_mask_write_validation.json",
         repository_root=extracted,
@@ -407,6 +419,28 @@ def test_exact_package_replays_current_and_historical_authority_without_git(
     assert replayed.digest() == _protocol().digest()
     assert replayed.current_experiment_authority.tracked_path_count == 27
     assert tuple(len(authority.paths) for authority in replayed.historical_prior_authorities) == (3, 3)
+    isolated_environment = dict(os.environ)
+    isolated_environment.pop("PYTHONPATH", None)
+    isolated_environment["PYTHONNOUSERSITE"] = "1"
+    isolated_import = subprocess.run(
+        (
+            sys.executable, "-I", "-c",
+            "import sys; "
+            f"sys.path.insert(0, {str(extracted)!r}); "
+            f"import {SERVER_MODULE} as server; "
+            "assert callable(server.main)",
+        ),
+        cwd=tmp_path, env=isolated_environment, check=False,
+        capture_output=True, text=True,
+    )
+    assert isolated_import.returncode == 0, isolated_import.stderr
+    isolated_help = subprocess.run(
+        (sys.executable, "-m", SERVER_MODULE, "--help"),
+        cwd=extracted, env=isolated_environment, check=False,
+        capture_output=True, text=True,
+    )
+    assert isolated_help.returncode == 0, isolated_help.stderr
+    assert "--expected-revision" in isolated_help.stdout
 
     corrupted_package = tmp_path / "corrupted-execution-package.zip"
     corrupted_bytes = bytearray(package.read_bytes())
@@ -415,6 +449,36 @@ def test_exact_package_replays_current_and_historical_authority_without_git(
     with pytest.raises(SalientLocalLfPackageBuildError):
         verify_salient_local_lf_mask_write_validation_package(
             ROOT, corrupted_package, revision,
+        )
+
+    builder_tampered = _extract_verified_execution_package(
+        package, tmp_path / "builder-tampered-repository",
+    )
+    builder_member = builder_tampered / (
+        "scripts/experiment_execution/build_salient_local_lf_mask_write_validation_package.py"
+    )
+    builder_member.write_bytes(builder_member.read_bytes() + b"tampered")
+    with pytest.raises(SalientLocalLfPackageBuildError):
+        verify_extracted_salient_local_lf_mask_write_validation_package(
+            builder_tampered, revision,
+        )
+
+    manifest_tampered = _extract_verified_execution_package(
+        package, tmp_path / "manifest-tampered-repository",
+    )
+    manifest_member = manifest_tampered / "PACKAGE_MANIFEST.json"
+    manifest_payload = json.loads(manifest_member.read_text("utf-8"))
+    manifest_payload["committed_revision"] = "0" * 40
+    manifest_member.write_text(
+        json.dumps(
+            manifest_payload, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SalientLocalLfPackageBuildError):
+        verify_extracted_salient_local_lf_mask_write_validation_package(
+            manifest_tampered, revision,
         )
 
     current_tampered = _extract_verified_execution_package(

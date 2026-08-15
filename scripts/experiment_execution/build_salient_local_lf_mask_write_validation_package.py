@@ -21,6 +21,14 @@ _EXACT_ROOT_FILES = {
     "requirements_inspyrenet_salient_local_lf_gpu_execution.txt",
     "requirements_sd35_gpu_execution.txt",
 }
+_SERVER_STARTUP_FILES = {
+    "scripts/experiment_execution/__init__.py",
+    "scripts/experiment_execution/build_salient_local_lf_mask_write_validation_package.py",
+    "scripts/experiment_execution/development_exploration_entrypoint.py",
+    "scripts/experiment_execution/development_exploration_server.py",
+    "scripts/experiment_execution/salient_local_lf_mask_write_validation_entrypoint.py",
+    "scripts/experiment_execution/salient_local_lf_mask_write_validation_server.py",
+}
 _PREFIXES = (
     "main/", "runtime/", "experiments/", "configs/runtime/",
     "configs/experiments/internal_execution_components.json",
@@ -45,7 +53,8 @@ def _git(root: Path, *args: str, text: bool = True) -> str | bytes:
 
 
 def _included(path: str) -> bool:
-    return path in _EXACT_ROOT_FILES or path == _README_SOURCE or any(path.startswith(prefix) for prefix in _PREFIXES)
+    return (path in _EXACT_ROOT_FILES or path in _SERVER_STARTUP_FILES
+            or path == _README_SOURCE or any(path.startswith(prefix) for prefix in _PREFIXES))
 
 
 def _tree(root: Path, revision: str) -> tuple[tuple[tuple[str, str, bytes], ...], dict[str, str]]:
@@ -168,7 +177,7 @@ def _tree(root: Path, revision: str) -> tuple[tuple[tuple[str, str, bytes], ...]
         "historical_authorities/7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da/configs/experiments/content_uniform_combination_directional_diagnosis.json",
         "historical_authorities/7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da/configs/experiments/content_uniform_combination_directional_diagnosis_manifest.json",
         "historical_authorities/7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da/configs/experiments/content_uniform_combination_reference_fit_manifest.json",
-    }
+    } | _SERVER_STARTUP_FILES
     current_members = {item.get("package_member_path") for item in current["paths"]}
     if (not required.issubset(names) or not current_members.issubset(names)
             or len(names) != len(set(names))):
