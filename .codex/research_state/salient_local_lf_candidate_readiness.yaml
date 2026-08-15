@@ -1,7 +1,7 @@
 {
   "candidate_family": "inspyrenet_salient_local_lf_content_candidate_family",
   "candidate_specification_path": "docs/design/candidate_specifications.md",
-  "candidate_specification_sha256": "5f0b308a2615b2191be128ce7c3d839ad7b185266e823a89b0a0b5767791fe16",
+  "candidate_specification_sha256": "d0f8627dd124531b8407a22199d7a550e3eebe1bb9f107d6802652f0257bdbd2",
   "candidate_ids": [
     "routing_inspyrenet_salient_local_lf",
     "content_embedding_global_hf_local_lf",
@@ -103,8 +103,8 @@
   "implementation_review_provenance": "independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE",
   "independent_candidate_readiness_review": {
     "decision": "approve",
-    "review_reference": "independent_candidate_readiness_review:01a001dd-b222-7fe2-9f1e-7983e0821a1b:2908c24939393c8f18416429ee6030b1fc9530ed:APPROVE",
-    "reviewed_repository_revision": "2908c24939393c8f18416429ee6030b1fc9530ed",
-    "candidate_specification_sha256": "5f0b308a2615b2191be128ce7c3d839ad7b185266e823a89b0a0b5767791fe16"
+    "review_reference": "independent_candidate_readiness_review:8eee7fa0-b703-4f08-b5be-e5bb7055d4e8:d88669124fde53f389d68aa0d1cfbd840a71ebac:APPROVE",
+    "reviewed_repository_revision": "d88669124fde53f389d68aa0d1cfbd840a71ebac",
+    "candidate_specification_sha256": "d0f8627dd124531b8407a22199d7a550e3eebe1bb9f107d6802652f0257bdbd2"
   }
 }
