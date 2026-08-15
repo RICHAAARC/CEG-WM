@@ -158,6 +158,8 @@ class SalientLocalLfContentWriteResult:
     embedding_result_identity: str
     embedder_config_digest: str
     delta_content_digest: str
+    mask_outside_bitwise_zero: bool
+    mask_inside_has_energy: bool
     accepted_materialization: ContentMaterializationAttempt
     content_materialization_attempts: tuple[ContentMaterializationAttempt, ...]
     materialization_scale: float
@@ -1352,6 +1354,8 @@ def execute_salient_local_lf_content_write_and_vae(
         embedding_result_identity=embedding_result.embedding_result_identity,
         embedder_config_digest=embedding_result.embedder_config_digest,
         delta_content_digest=embedding_result.delta_content_digest,
+        mask_outside_bitwise_zero=embedding_result.mask_outside_bitwise_zero,
+        mask_inside_has_energy=embedding_result.mask_inside_has_energy,
         accepted_materialization=accepted[0],
         content_materialization_attempts=(
             execution.content_materialization_attempts

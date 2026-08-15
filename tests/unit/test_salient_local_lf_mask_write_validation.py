@@ -246,6 +246,7 @@ class _PublicRunnerBackend:
         self.run_calls = 0
         self.decode_calls = 0
         self.encode_calls = 0
+        self.callback_input_latents: list[torch.Tensor] = []
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
         return RuntimeDeviceCapabilities(cpu_available=True, cuda_device_count=0)
@@ -289,6 +290,9 @@ class _PublicRunnerBackend:
         self.run_calls += 1
         state = initial_latent.detach().clone()
         for callback_index in range(self.configuration.inference_steps):
+            state = (state.to(torch.float32) + 0.03125).to(torch.float16)
+            if callback_index == self.configuration.callback_index:
+                self.callback_input_latents.append(state.detach().clone())
             state = callback(callback_index, state)
         return state
 
@@ -1145,6 +1149,11 @@ def test_public_cpu_runner_executes_all_units_through_store_without_record_proxi
     assert aggregate.successful_observation_count == 8
     assert aggregate_supports_scientific_claim(aggregate) is True
     assert backend.run_calls == 18
+    assert len(backend.callback_input_latents) == 18
+    assert all(
+        not torch.equal(callback_latent, latent)
+        for callback_latent in backend.callback_input_latents
+    )
     assert backend.encode_calls == 9
     assert model.forward_count == 19
 

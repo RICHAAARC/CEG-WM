@@ -104,6 +104,7 @@ class FakeContentBackend:
         invalid_vae_factors: bool = False,
         generation_failure: bool = False,
         bounded_decode_output: bool = False,
+        evolve_callback_state: bool = False,
     ) -> None:
         default = tuple(range(20))
         self.callback_sequences = callback_sequences or (default, default)
@@ -114,6 +115,7 @@ class FakeContentBackend:
         self.invalid_vae_factors = invalid_vae_factors
         self.generation_failure = generation_failure
         self.bounded_decode_output = bounded_decode_output
+        self.evolve_callback_state = evolve_callback_state
         self.run_calls = 0
         self.suffix_capture_calls = 0
         self.suffix_callback_latents: list[torch.Tensor] = []
@@ -122,6 +124,7 @@ class FakeContentBackend:
         self.encode_inputs: list[torch.Tensor] = []
         self.vae_factor_calls = 0
         self.posteriors: list[FakePosterior] = []
+        self.callback_input_latents: list[torch.Tensor] = []
         self.configuration = None
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
@@ -144,6 +147,8 @@ class FakeContentBackend:
         self.run_calls += 1
         state = initial_latent.detach().clone()
         for callback_index in self.callback_sequences[run_index]:
+            if self.evolve_callback_state:
+                state = (state.to(torch.float32) + 0.03125).to(torch.float16)
             if (
                 self.erase_second_suffix
                 and run_index == 1
@@ -156,6 +161,8 @@ class FakeContentBackend:
                 and callback_index == 0
             ):
                 state = (state.to(torch.float32) + 0.25).to(torch.float16)
+            if callback_index == 18:
+                self.callback_input_latents.append(state.detach().clone())
             state = callback(callback_index, state)
         return state
 
@@ -408,7 +415,10 @@ def test_callback_rgb8_quantization_rejects_invalid_values_before_cast(
 @pytest.mark.unit
 def test_salient_content_execution_observes_registered_callback(
 ) -> None:
-    backend = FakeContentBackend(bounded_decode_output=True)
+    backend = FakeContentBackend(
+        bounded_decode_output=True,
+        evolve_callback_state=True,
+    )
     adapter = _initialized_adapter(backend)
     saliency, model = _saliency_runtime()
     calls: list[
@@ -429,12 +439,23 @@ def test_salient_content_execution_observes_registered_callback(
     )
     assert len(calls) == 1
     assert calls[0][1] is result.embed_saliency_observation
-    assert calls[0][0] == tuple(float(value) for value in base.float().flatten())
+    assert len(backend.callback_input_latents) == 2
+    assert torch.equal(
+        backend.callback_input_latents[0],
+        backend.callback_input_latents[1],
+    )
+    assert not torch.equal(backend.callback_input_latents[0], base)
+    assert calls[0][0] == tuple(
+        float(value)
+        for value in backend.callback_input_latents[1].float().flatten()
+    )
     assert result.content_embedding_candidate_id == (
         "content_embedding_global_hf_local_lf"
     )
     assert result.integrity_status == "passed"
     assert result.budget_status == "accepted"
+    assert result.mask_outside_bitwise_zero is True
+    assert result.mask_inside_has_energy is True
     assert result.realized_relative_l2 <= unpack(
         ">f",
         pack(">f", 3.0 / 250.0),
@@ -469,6 +490,9 @@ def test_salient_content_execution_observes_registered_callback(
     assert not hasattr(result, "clean_generation_terminal_latent")
     assert not hasattr(result, "content_materialization_result")
     assert not hasattr(result, "routing_result")
+    assert not hasattr(result, "callback_latent")
+    assert not hasattr(result, "masked_lf_direction")
+    assert not hasattr(result, "spatial_mask")
     assert not hasattr(result, "checkpoint_path")
 
 

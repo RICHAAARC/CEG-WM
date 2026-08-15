@@ -46,11 +46,7 @@ from experiments.runners.development_persistence import (
     canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
-from main import (
-    SalientLocalLfEmbeddingResult,
-    identify_root_key,
-    salient_local_lf_content_embedder,
-)
+from main import identify_root_key
 from runtime import InspyrenetSaliencyRuntime, Sd35RuntimeAdapter
 
 
@@ -248,14 +244,6 @@ class SalientLocalLfMaskWriteValidationRunner:
         embed_route = self.adapter.route_inspyrenet_salient_local_lf(
             tuple(base_latent.shape), write.embed_saliency_observation,
         ).result
-        hf = self.adapter.build_hf_carrier(self.registered_root_key, tuple(base_latent.shape)).result
-        lf = self.adapter.build_lf_carrier(self.registered_root_key, tuple(base_latent.shape)).result
-        reconstructed = salient_local_lf_content_embedder(
-            tuple(float(value) for value in base_latent.detach().to(device="cpu", dtype=torch.float32).reshape(-1).tolist()),
-            hf, lf, embed_route,
-        )
-        if type(reconstructed) is not SalientLocalLfEmbeddingResult or reconstructed.embedding_result_identity != write.embedding_result_identity:
-            raise SalientLocalLfMaskWriteRunnerError("nominal embedding public replay drifted")
         detected = self.runtime.observe_salient_local_lf_detection_image(
             write.watermarked_image_rgb8, self.saliency_runtime,
         )
@@ -283,11 +271,10 @@ class SalientLocalLfMaskWriteValidationRunner:
             embed_mask_coverage=embed_route.coverage_spatial_pixels,
             detect_mask_coverage=detect_route.coverage_spatial_pixels,
             mask_intersection_over_union=intersection / float(union),
-            nominal_masked_lf_outside_bitwise_zero=reconstructed.mask_outside_bitwise_zero,
-            nominal_masked_lf_inside_nonzero=reconstructed.mask_inside_has_energy,
+            nominal_masked_lf_outside_bitwise_zero=write.mask_outside_bitwise_zero,
+            nominal_masked_lf_inside_nonzero=write.mask_inside_has_energy,
             nominal_masked_lf_consumed_by_materialization=(
-                reconstructed.delta_content_digest == write.delta_content_digest
-                and write.accepted_materialization.integrity_status == "passed"
+                write.accepted_materialization.integrity_status == "passed"
             ),
             accepted_materialization_replay_identity=write.accepted_materialization.materialization_replay_identity,
             realized_relative_l2=write.realized_relative_l2,
