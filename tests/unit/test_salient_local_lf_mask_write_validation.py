@@ -537,7 +537,11 @@ def test_shallow_checkout_hydrates_exact_authorities_before_protocol_package_loa
         shallow / CONFIG.relative_to(ROOT),
         repository_root=shallow,
     )
-    assert protocol.run_id == "ceg_wm_salient_local_lf_mask_write_validation"
+    assert protocol.run_id == (
+        "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation"
+    )
+    assert protocol.protocol_id == "ceg_wm_salient_local_lf_mask_write_validation"
+    assert Path("persistent") / protocol.run_id != Path("persistent") / protocol.protocol_id
     package = tmp_path / "shallow-execution-package.zip"
     built = build_salient_local_lf_mask_write_validation_package(
         shallow,

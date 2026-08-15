@@ -2,7 +2,7 @@
   "schema_version": "ceg_wm_salient_local_lf_mask_write_validation_protocol_v1",
   "protocol_id": "ceg_wm_salient_local_lf_mask_write_validation",
   "protocol_version": "1.0.0",
-  "run_id": "ceg_wm_salient_local_lf_mask_write_validation",
+  "run_id": "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation",
   "split": "development",
   "responsibility_id": "content_embedder",
   "candidate_identity": "content_embedding_global_hf_local_lf",
