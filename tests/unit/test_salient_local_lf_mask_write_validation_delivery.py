@@ -28,10 +28,10 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks/colab/salient_local_lf_mask_write_validation.ipynb"
 PROTOCOL_PATH = ROOT / "configs/experiments/salient_local_lf_mask_write_validation.json"
-EXECUTION_REVISION = "3b7fed49e2f13900dbcef86fe2de2aab7dc7551c"
-RUN_ID = "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis"
-EXPECTED_PACKAGE_SHA256 = "d30a453b858971bb009d1a0cd4dfdddd742c5d6cfcb3c66fca05114b421185b1"
-EXPECTED_PACKAGE_SIZE_BYTES = 4136989
+EXECUTION_REVISION = "7be93ef1e6047907069aab922ee4b32745ea2ce3"
+RUN_ID = "ceg_wm_salient_local_lf_mask_write_registered_dual_carrier_key_correction_validation"
+EXPECTED_PACKAGE_SHA256 = "a0b4480e7d9172ebdfdfd04a1053f916eeba56e24ae3c576d81dcd0c85aed6e4"
+EXPECTED_PACKAGE_SIZE_BYTES = 4137274
 SERVER_RELATIVE = Path("scripts/experiment_execution/salient_local_lf_mask_write_validation_server.py")
 
 
