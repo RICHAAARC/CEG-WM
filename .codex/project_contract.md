@@ -46,13 +46,16 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   闭合，并由
   `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
   独立审核通过。候选专属 overlay
-  `.codex/research_state/salient_local_lf_candidate_readiness.yaml` 仅将四者绑定为
-  `source_cpu_api_implementation_ready=true`；它不改写既有 11-candidate readiness，且
-  `experiment_ready / implemented` 不自动覆盖四者。四者尚未完成
-  真实 checkpoint/runtime smoke、实验 protocol/执行入口、masked-LF 32-clean-null W、
-  quality 定义、科学验证或晋升。
+  `.codex/research_state/salient_local_lf_candidate_readiness.yaml` 将四者绑定为
+  `source_cpu_api_implementation_ready=true`；并把 exact revision
+  `b2aea883eff21c959c1684bd86a4af1890ca9f15` 上冻结的 2-operational/8-scientific
+  mask/write validation protocol 与 signed-int64 FLOOR RGB8 quality gate 分别登记为
+  `experiment_protocol_admitted=true`、`rgb_quality_gate_defined=true`。它不改写既有
+  11-candidate readiness，且 `experiment_ready / implemented` 不自动覆盖四者。四者仍未完成
+  候选专属 runtime qualification、masked-LF 32-clean-null W、科学验证或晋升。
   `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-  `promoted=false`；正式 detector 保持 HF-only，quality gate 仍未定义。
+  `promoted=false`；正式 detector 保持 HF-only；已定义的 quality gate 仅约束本次
+  mask/write validation，不构成科学效果或晋升。
 - 当前正式 detector 仍为 HF-only；旧 routing/combination 已形成 producer-bound
   development negative，新显著目标局部 LF 四候选只完成 CPU/API source implementation、
   尚未实验晋升，
@@ -78,9 +81,9 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
    `content_embedder`、分支 detector 与 `content_detector` 分工。新候选已获得仅限
    本地独立 revisions 的 implementation admission。四者的 CPU/API source implementation
    已在上述 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合并通过上述独立审核，
-   并已绑定上述仅限 source/CPU/API 的候选专属 readiness overlay，但尚未完成正式
-   checkpoint/runtime qualification、实验协议、
-   masked-LF W、quality 定义、科学验证或晋升。
+   并已绑定候选专属 readiness overlay；mask/write validation protocol 与 FLOOR RGB8
+   quality gate 已在上述 exact execution authority 冻结。候选专属 runtime qualification、
+   masked-LF W、科学验证或晋升仍未完成。
 5. 当前显著目标候选的 `content_router` 只输出由冻结 InSPyReNet 规则得到的
    `mask_lf`、全一 `mask_hf` 及其 identity/digests；它不决定混合权重或输出能量
    预算。carrier 只输出模板和 masked unit direction。runtime 只物化 embedder 的

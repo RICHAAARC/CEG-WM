@@ -16,13 +16,15 @@ replay，新显著目标局部 LF 四候选均为 `design_candidate_implementati
 `implementation_admission=YES`；该授权 token 保持不变。四者的 CPU/API source
 implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核。该 review 只覆盖 source/CPU/API；候选 readiness、真实 checkpoint/runtime
-smoke、实验 protocol、masked-LF W、quality 定义、科学验证与晋升仍未闭合，
+独立审核。该 review 只覆盖 source/CPU/API；候选专属 overlay 已登记 revision
+`b2aea883eff21c959c1684bd86a4af1890ca9f15` 的 mask/write validation protocol 与
+signed-int64 FLOOR RGB8 quality gate；候选专属 runtime qualification、masked-LF W、
+科学验证与晋升仍未闭合，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation
 或科学证据，也不晋升 LF/routing/组合/geometry。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+`promoted=false`；正式 detector 保持 HF-only。
 
 `method_implemented` 的 readiness AST 审计只承担候选绑定、固定模块路径、symbol 调用和断言接线检查；它不能单独证明非代理实现。readiness 中的候选规格摘要是独立语义复核 revision 上的实现快照，必须从该 exact Git blob 重放，不能用当前工作树字节重签。当前候选规格仍是 live design authority，必须继续保留 policy/readiness 已绑定的全部实现身份，但可在不改写旧 readiness 快照的前提下登记尚未准入实现的设计候选。独立复核后的实现路径和方法特异性登记测试仍是 stale-protected surface；live candidate-spec 文件本身不因此成为旧 readiness 的不可变源码路径。
 

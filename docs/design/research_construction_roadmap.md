@@ -36,22 +36,24 @@ revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑�
 路线已有 producer-bound development negative，新显著目标局部 LF 四候选的 CPU/API
 source implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-完成仅限 source/CPU/API 的独立审核；候选 readiness、真实 checkpoint/runtime smoke、
-实验 protocol、masked-LF W、quality 定义、科学验证与晋升仍未闭合，
+完成仅限 source/CPU/API 的独立审核；候选专属 overlay 已登记 revision
+`b2aea883eff21c959c1684bd86a4af1890ca9f15` 的 mask/write validation protocol 与
+signed-int64 FLOOR RGB8 quality gate；候选专属 runtime qualification、masked-LF W、
+科学验证与晋升仍未闭合，
 `full_ceg_wm_eligible=false`。实验准备基础设施已冻结协议与可追溯执行交付，但没有
 `tau`、confirmation 结果、Calibration Locked、正式 evaluation、完整联合 FPR、
 正式 records 或科学效果证据，也没有 LF/routing/组合/geometry 晋升。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+`promoted=false`；正式 detector 保持 HF-only。
 
 新显著目标四候选已由规格外的独立用户授权及其显著目标局部 LF 候选实施准入职责
 revision `5885d5cd661bc9744480e89603293a5c51af0e26` 准入为
 `design_candidate_implementation_authorized`；当前流程从该 `experiment_ready / implemented`
 基线直接在本地独立 revisions 中完成 CPU/API 实现，不再申请 implementation，也不重建
 Git 身份、不回退或重走既有 stage。CPU/API source implementation、定向测试和上述
-独立语义审核和仅限 source/CPU/API 的候选专属 readiness overlay 现已闭合；正式
-checkpoint/runtime qualification、实验
-protocol、masked-LF W 与 quality 定义继续闭合后，才可申请新的 module-level development。
+独立语义审核、候选专属 readiness overlay、mask/write validation protocol 与 FLOOR
+RGB8 quality gate 现已闭合；完成候选专属 operational/scientific validation 后，才可
+另行申请 masked-LF W 与新的 module-level development。
 
 ## Paper Research Target
 

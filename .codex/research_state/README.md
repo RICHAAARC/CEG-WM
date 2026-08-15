@@ -17,11 +17,14 @@
   implementation 已在 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
   `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
   独立审核。候选专属 `salient_local_lf_candidate_readiness.yaml` overlay 只记录四者
-  `source_cpu_api_implementation_ready=true`，不把四者写入既有 11-candidate readiness；
-  正式 checkpoint/runtime qualification、实验 protocol、masked-LF W、quality 定义、
-  科学验证或晋升。
+  `source_cpu_api_implementation_ready=true`，并把 revision
+  `b2aea883eff21c959c1684bd86a4af1890ca9f15` 上冻结的 mask/write validation protocol
+  与 signed-int64 FLOOR RGB8 quality gate 登记为 `experiment_protocol_admitted=true`、
+  `rgb_quality_gate_defined=true`；它不把四者写入既有 11-candidate readiness。候选专属
+  runtime qualification、masked-LF W、科学验证或晋升仍未闭合。
   `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-  `promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+  `promoted=false`；正式 detector 保持 HF-only；该 quality gate 只服务预登记的
+  mask/write validation。
 - readiness 只记录方法构建闭合，不是阶段文件。experiment_ready_infrastructure_closure 已完成，冻结实验协议与
   可追溯执行入口可用；这只满足 `experiment_ready` 的执行准备边界，不授权
   calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定

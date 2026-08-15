@@ -28,11 +28,13 @@ control），该计数不得与 13 项职责混淆。新增的
 既有 runtime qualification。四者的 CPU/API source implementation 已在
 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核。候选专属 overlay 只将 source/CPU/API implementation 标为 ready，不改写
-既有 11-candidate readiness；正式 checkpoint/runtime qualification、实验 protocol、
-masked-LF W、quality 定义、科学验证与晋升仍未闭合。
+独立审核。候选专属 overlay 将 source/CPU/API implementation 标为 ready，并将 revision
+`b2aea883eff21c959c1684bd86a4af1890ca9f15` 的 mask/write validation protocol 与
+signed-int64 FLOOR RGB8 quality gate 登记为 admitted/defined；它不改写既有
+11-candidate readiness。候选专属 runtime qualification、masked-LF W、科学验证与晋升
+仍未闭合。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+`promoted=false`；正式 detector 保持 HF-only。
 
 旧 `routing_stqr` 的 `A`、双 mask、routed/route-disabled 对照与旧
 `content_uniform_combination` 的 `a/u_content(a)`、direction dot/c 和函数族只服务

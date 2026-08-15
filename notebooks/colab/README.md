@@ -192,3 +192,13 @@ repository server 按确定性顺序执行完整的 240 scientific + 42 operatio
 依赖、不下载模型、不实现 runner、records、预算、协议或科学判定。提交副本保持 outputs
 为空、execution count 为 null。本筛查仍属 development，不创建 formal tau、Calibration
 Locked、candidate promotion、final-held-out evaluation、external baseline 或论文 claim。
+
+## Salient-local-LF mask/write validation
+
+`salient_local_lf_mask_write_validation.ipynb` is the output-free delivery entrypoint for
+execution revision `b2aea883eff21c959c1684bd86a4af1890ca9f15` and run
+`ceg_wm_salient_local_lf_mask_write_validation`. It runs exactly two operational
+preflights plus eight fixed scientific observations and exports the result or bounded
+failure artifact, receipt, and `SHA256SUMS` before surfacing a failure. The protocol
+defines the signed-integer FLOOR RGB8 quality gate; it does not fit masked-LF W,
+execute the detector/max statistic, estimate tau/FPR, or promote a candidate.

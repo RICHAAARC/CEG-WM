@@ -71,3 +71,6 @@ PyTorch 的 `.venv`。
 
 该环境只证明 CPU/synthetic 方法行为，不替代冻结 SD3.5 revision、真实登记层 Q/K
 捕获或 GPU/runtime qualification。
+
+| `tests/unit/test_salient_local_lf_mask_write_validation.py` | `unit` | yes | 冻结 authored 8-unit roster、historical/current producer authority、signed-int64 FLOOR RGB8 quality、固定分母、真实 public CPU 2+8 编排、Store 恢复与 typed record replay；外部模型/GPU边界为受控 fixture，不构成科学结果。 |
+| `tests/unit/test_salient_local_lf_mask_write_validation_delivery.py` | `unit` | yes | 真实 C2 exact package 双构建、Git-less isolated server import、success/failure receipt、secret 排除与薄 Notebook exact binding；不运行模型或 GPU。 |

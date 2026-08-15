@@ -35,10 +35,12 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   `implementation_admission=YES`；该授权 token 保持不变。四者的 CPU/API source
   implementation 已在 revision `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，
   并由 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-  独立审核；该 review 不重绑既有 readiness，也不证明真实 checkpoint/runtime smoke、
-  实验 protocol、masked-LF W、quality、科学效果或晋升。
+  独立审核；该 review 不重绑既有 readiness。候选专属 overlay 已把 revision
+  `b2aea883eff21c959c1684bd86a4af1890ca9f15` 的 mask/write validation protocol 与
+  signed-int64 FLOOR RGB8 quality gate 分别登记为 protocol-admitted 和 quality-defined，
+  但这不证明候选专属 runtime qualification、masked-LF W、科学效果或晋升。
   `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-  `promoted=false`；正式 detector 仍为 HF-only，quality gate 尚未定义。
+  `promoted=false`；正式 detector 仍为 HF-only。
 - 方法完成面固定为 13 项职责组件；组合写入、LF 盲分数和几何可靠性各有独立
   路径。设计 registry 为 15 个 ID（14 个具名候选加 1 个 mandatory control），
   readiness-bound 的旧实现候选11个，三种计数不得混用。
@@ -63,10 +65,10 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   方法架构与证据边界、内容/几何/联合判定设计、算法与候选冻结、真实方法实现、
   runtime qualification，以及实验协议与可追溯交付入口。该闭环已完成；这只表示实验执行准备就绪，
   不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。
-- 正式 detector 仍为 HF-only；新 masked-LF/routing/组合只完成 CPU/API source
-  implementation，并已由候选专属 overlay 绑定为仅限 source/CPU/API readiness；尚未完成
-  正式 checkpoint/runtime qualification、实验协议、
-  masked-LF W、quality 定义或实验晋升，
+- 正式 detector 仍为 HF-only；新 masked-LF/routing/组合已完成 CPU/API source
+  implementation，并由候选专属 overlay 绑定 source/CPU/API readiness、mask/write
+  validation protocol 与 signed-int64 FLOOR RGB8 quality gate；尚未完成候选专属
+  runtime qualification、masked-LF W、科学验证或实验晋升，
   `full_ceg_wm_eligible=false`。
 - 真实 SD3.5 runtime 边界已由 candidate
   `8b2344756c4c247906ff0d4eab68e46a773e13f5` 的 `qualification / passed` run

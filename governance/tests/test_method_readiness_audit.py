@@ -1497,7 +1497,7 @@ def test_review_binding_fails_after_registered_test_change(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
-def test_salient_local_lf_candidate_overlay_binds_only_source_cpu_api_readiness(
+def test_salient_local_lf_candidate_overlay_binds_protocol_and_rgb_quality_readiness(
     tmp_path: Path,
 ) -> None:
     root = _salient_overlay_repository(tmp_path)
@@ -1507,9 +1507,9 @@ def test_salient_local_lf_candidate_overlay_binds_only_source_cpu_api_readiness(
     assert report["decision"] == "pass"
     assert overlay["source_cpu_api_implementation_ready"] is True
     assert overlay["candidate_runtime_qualified"] is False
-    assert overlay["experiment_protocol_admitted"] is False
+    assert overlay["experiment_protocol_admitted"] is True
     assert overlay["masked_lf_whitening_asset_ready"] is False
-    assert overlay["rgb_quality_gate_defined"] is False
+    assert overlay["rgb_quality_gate_defined"] is True
     assert overlay["scientific_mechanism_validated"] is False
     assert overlay["promoted"] is False
     assert overlay["formal_detector"] is False
@@ -1528,7 +1528,8 @@ def test_salient_local_lf_candidate_overlay_binds_only_source_cpu_api_readiness(
     ("field", "value", "reason"),
     [
         ("candidate_runtime_qualified", True, "salient_local_lf_readiness_status_mismatch"),
-        ("experiment_protocol_admitted", True, "salient_local_lf_readiness_status_mismatch"),
+        ("experiment_protocol_admitted", False, "salient_local_lf_readiness_status_mismatch"),
+        ("rgb_quality_gate_defined", False, "salient_local_lf_readiness_status_mismatch"),
         ("scientific_mechanism_validated", True, "salient_local_lf_readiness_status_mismatch"),
         ("promoted", True, "salient_local_lf_readiness_status_mismatch"),
     ],

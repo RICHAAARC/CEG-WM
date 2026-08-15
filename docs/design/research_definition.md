@@ -4,10 +4,12 @@
 `experiment_ready_infrastructure_closure`；该身份描述职责闭环，不替代
 `project_stage`，也不自动形成科学证据。
 
-显著目标局部 LF 四候选的独立 overlay 只把 source/CPU/API implementation 标为 ready，
-并复用四项既有职责；全局 `experiment_ready / implemented` 不因此扩张。runtime、
-experiment、masked-LF W、quality、science 与 promotion 均未闭合，正式 detector 仍为
-HF-only。
+显著目标局部 LF 四候选的独立 overlay 把 source/CPU/API implementation 标为 ready，
+并复用四项既有职责；revision `b2aea883eff21c959c1684bd86a4af1890ca9f15` 冻结的
+mask/write validation protocol 与 signed-int64 FLOOR RGB8 quality gate 已分别登记为
+protocol-admitted、quality-defined。全局 `experiment_ready / implemented` 不因此扩张；
+候选专属 runtime qualification、masked-LF W、science 与 promotion 均未闭合，正式 detector
+仍为 HF-only。
 
 ## Research Objective
 
@@ -84,12 +86,13 @@ evaluation 或科学证据，也没有 LF/routing/组合/geometry 的实验晋�
 本地独立 revisions 实施；该授权 token 保持不变。四者的 CPU/API source implementation
 已在 revision `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核。该 review 只覆盖 source/CPU/API；候选 readiness、真实 checkpoint/runtime
-smoke、实验 protocol、masked-LF W、quality 定义、科学验证与晋升仍未闭合。现有全局
+独立审核。该 review 只覆盖 source/CPU/API；候选专属 mask/write validation protocol 与
+quality gate 已按上述 exact revision 冻结并登记，候选专属 runtime qualification、
+masked-LF W、科学验证与晋升仍未闭合。现有全局
 `experiment_ready / implemented`、readiness、runtime
 qualification 和既有 HF/LF directional evidence 均不覆盖这四个新身份。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+`promoted=false`；正式 detector 保持 HF-only。
 
 内容路线的当前研究问题收敛为：全局 HF 提供主密钥归属证据，InSPyReNet 从普通
 RGB8 图像独立重建显著目标内部 mask，局部 LF 只在该支持域写入和盲检测。嵌入端

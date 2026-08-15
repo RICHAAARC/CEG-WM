@@ -65,12 +65,13 @@ estimator 代行。候选绑定表示该组件必须实现或消费的规格身�
 不自动覆盖它们。四者的 CPU/API source implementation 已在
 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核；候选专属 overlay 仅绑定 source/CPU/API readiness，不改写既有 11-candidate
-readiness，也未验证正式
-checkpoint/runtime smoke、实验 protocol、masked-LF W、quality、科学效果或晋升；
+独立审核；候选专属 overlay 绑定 source/CPU/API readiness，并把 revision
+`b2aea883eff21c959c1684bd86a4af1890ca9f15` 的 mask/write validation protocol 与
+signed-int64 FLOOR RGB8 quality gate 登记为 admitted/defined；它不改写既有
+11-candidate readiness，也未验证候选专属 runtime qualification、masked-LF W、科学效果或晋升；
 本次准入不增加第 14 项职责。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+`promoted=false`；正式 detector 保持 HF-only。
 
 ## Provisional Historical Provenance
 
@@ -1418,9 +1419,10 @@ routing observations、backbone/runtime、搜索、可靠性指标、回正和�
 方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前为
 `design_candidate_implementation_authorized` 且 implementation admission 为 `YES`，
 只授权本地独立 revisions 实施；四者已完成上述 d887 CPU/API source closure，且已绑定
-候选专属 source/CPU/API readiness overlay；仍未完成正式 checkpoint/runtime qualification、
-实验 protocol、masked-LF W、
-quality 定义、科学验证或晋升。仍待实验决定的是明确有限候选中的晋升结果和
+候选专属 source/CPU/API readiness overlay；mask/write validation protocol 与
+signed-int64 FLOOR RGB8 quality gate 已由 revision
+`b2aea883eff21c959c1684bd86a4af1890ca9f15` 冻结并登记，仍未完成候选专属 runtime
+qualification、masked-LF W、科学验证或晋升。仍待实验决定的是明确有限候选中的晋升结果和
 calibration 数值，不是实现算法。
 
 ### Frozen Specification Values Versus Evidence Outcomes
@@ -1432,8 +1434,9 @@ S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
 rectification；conditional recovery 控制流；以及已获本地 implementation admission、
-并已完成 CPU/API source implementation 及候选专属 overlay、但尚未获正式 checkpoint/runtime
-smoke 或实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
+并已完成 CPU/API source implementation、候选专属 overlay、mask/write validation protocol
+及其 FLOOR RGB8 quality gate、但尚未获候选专属 runtime qualification 的 InSPyReNet
+exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
 独立 32-clean-null masked whitening 与 max-statistic identity。
 
 旧 `a` 与三条历史组合函数已经形成 producer-bound negative，不再是 current 选择面。
@@ -1449,6 +1452,7 @@ smoke 或实验准入的 InSPyReNet exact source/checkpoint/forward、单一 mas
 单独把四个新候选准入为 `design_candidate_implementation_authorized`。项目全局
 仍是 `experiment_ready / implemented`；新候选的下一步不是再次申请 implementation、
 重建 Git 身份或重走 stage。CPU/API source implementation、定向测试与独立语义审核已在
-上述 d887 closure 和 source/CPU/API readiness overlay 已完成；下一步必须闭合正式 checkpoint/runtime
-smoke、实验 protocol 与 masked-LF W，且在 quality 定义和科学门批准后才可申请
+上述 d887 closure、source/CPU/API readiness overlay、mask/write validation protocol 与
+quality gate 已完成；下一步必须运行候选专属 operational/scientific validation，并在其后
+另行闭合 masked-LF W；只有科学门批准后才可申请
 module-level development 执行。

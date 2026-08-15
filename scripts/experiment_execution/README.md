@@ -245,3 +245,13 @@ The stdout JSON receipt identifies the result or diagnostic ZIP, its SHA-256,
 the revision/run/shard, the package trust digests, and the frozen model
 identity. This entrypoint does not fit or approve tau, unlock confirmation,
 access held-out evaluation, or support scientific claims.
+
+## Salient-local-LF mask/write validation
+
+`salient_local_lf_mask_write_validation_server.py` owns the exact-package and public
+GPU execution boundary for the two-operational/eight-scientific pilot. Its thin Colab
+entrypoint binds execution revision `b2aea883eff21c959c1684bd86a4af1890ca9f15`,
+deterministic package SHA-256
+`f6bfa1a2acb64fca0ebc9a667101e89b14e7de27359d1742b4b9ab6811016bd1`, and
+package size `4132169`. Both success and bounded worker failure persist an artifact and
+receipt; authority errors remain fail-closed and do not forge receipts.

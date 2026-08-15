@@ -67,10 +67,11 @@ producer-bound development 负证据，不再是当前候选。继任设计以
 授权本地独立 revisions 实施。四者的 CPU/API source implementation 已在
 `d88703689a0ea0487ad3a4553d060e5bf1a762cd` 闭合，并由
 `independent_salient_local_lf_experiment_adapter_review:019fed21-be70-7803-aca0-6049bb279dfd:d88703689a0ea0487ad3a4553d060e5bf1a762cd:APPROVE`
-独立审核；候选 readiness、真实 checkpoint/runtime smoke、实验 protocol、masked-LF W、
-quality 定义、科学验证与晋升仍未闭合。
+独立审核；候选专属 mask/write validation protocol 与 signed-int64 FLOOR RGB8 quality
+gate 已在 revision `b2aea883eff21c959c1684bd86a4af1890ca9f15` 冻结并登记；候选专属
+runtime qualification、masked-LF W、科学验证与晋升仍未闭合。
 `content_combination_saliency_max_standardized` 保持 `diagnostic_only=true`、
-`promoted=false`；正式 detector 保持 HF-only，quality gate 尚未定义。
+`promoted=false`；正式 detector 保持 HF-only。
 当前冻结的 `D_M` 候选仍是 HF-only 的 HF direct score；只有新组合候选
 通过预登记晋升后，`content_detector` 才可消费 `s_lf` 与 `s_hf` 形成组合 `D_M`。
 
@@ -186,8 +187,9 @@ geometry/total budget 仍是独立职责。
 callback、actual dtype、VAE、两层真实 Q/K、registered-key 重复确定性和
 negative-key identity control 已通过真实 GPU qualification。当前正式 detector
 仍为 HF-only；旧 routing/combination 是 producer-bound 历史负结果，新显著目标
-四候选只完成 d887 CPU/API source implementation 及候选专属 overlay，尚未闭合正式
-checkpoint/runtime smoke、实验 protocol、masked-LF W、quality 定义或科学晋升，
+四候选已完成 d887 CPU/API source implementation、候选专属 overlay、mask/write
+validation protocol 与 FLOOR RGB8 quality gate，尚未闭合候选专属 runtime qualification、
+masked-LF W 或科学晋升，
 `full_ceg_wm_eligible=false`。既有 runtime 证据与实验准备基础设施都不是 `tau`、
 confirmation 结果、Calibration Locked、完整联合 FPR、几何恢复效果、正式 evaluation
 或科学效果证据，也不晋升
