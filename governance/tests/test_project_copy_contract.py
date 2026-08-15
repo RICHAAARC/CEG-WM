@@ -64,6 +64,10 @@ def test_governed_project_copy_without_revision_fails_revision_bound_provenance(
                 {
                     "path": ".codex/research_state/method_readiness.yaml",
                     "reason": "method_independent_review_revision_unverifiable",
+                },
+                {
+                    "path": ".codex/research_state/salient_local_lf_candidate_readiness.yaml",
+                    "reason": "salient_local_lf_review_revision_unverifiable",
                 }
             ],
         },
