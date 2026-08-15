@@ -17,7 +17,7 @@ from experiments.protocol.development_exploration import DevelopmentStudyUnit
 from experiments.protocol.internal_splits import AnalysisUnitIdentity, derive_source_cluster_id
 
 
-RUN_ID = "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation"
+RUN_ID = "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis"
 PROTOCOL_ID = "ceg_wm_salient_local_lf_mask_write_validation"
 PROTOCOL_VERSION = "1.0.0"
 OPERATIONAL_UNIT_COUNT = 2

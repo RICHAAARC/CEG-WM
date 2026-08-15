@@ -542,7 +542,7 @@ def test_shallow_checkout_hydrates_exact_authorities_before_protocol_package_loa
         repository_root=shallow,
     )
     assert protocol.run_id == (
-        "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation"
+        "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis"
     )
     assert protocol.protocol_id == "ceg_wm_salient_local_lf_mask_write_validation"
     assert Path("persistent") / protocol.run_id != Path("persistent") / protocol.protocol_id
@@ -1162,7 +1162,7 @@ raise SystemExit(entry.main([
     "--expected-revision", "f25d9ba8fe65a52f1369fb7bab2db3d17628805e",
     "--persistent-root", __import__("os").environ["CEG_WM_TEST_PERSISTENT"],
     "--cache-root", __import__("os").environ["CEG_WM_TEST_CACHE"],
-    "--run-id", "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation",
+    "--run-id", "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis",
     "--session-id", __import__("os").environ["CEG_WM_TEST_SESSION"],
     "--execution-package-sha256", "d" * 64,
 ]))
