@@ -70,6 +70,46 @@ class SalientLocalLfRemoteAuthorityError(SalientLocalLfMaskWriteServerError):
         self.failure_class = failure_class
 
 
+class SalientLocalLfWorkerProcessError(SalientLocalLfMaskWriteServerError):
+    """The worker process ended without one canonical bounded result."""
+
+    def __init__(
+        self, reason_identity: str, *, return_code: int,
+        stdout: str, stderr: str,
+    ) -> None:
+        if reason_identity not in {
+            "unexpected_return_code",
+            "worker_result_missing",
+            "worker_result_duplicated",
+            "worker_result_invalid_json",
+            "worker_result_invalid_type",
+        }:
+            raise ValueError("worker process reason identity is invalid")
+        super().__init__("worker did not return one bounded result")
+        self.reason_identity = reason_identity
+        self.return_code = return_code
+        self.signal_number = -return_code if return_code < 0 else None
+        self.failure_class = (
+            "resource_blocked"
+            if self.signal_number is not None
+            else (
+                "integrity_blocked"
+                if reason_identity != "unexpected_return_code"
+                else "implementation_blocked"
+            )
+        )
+        self.stdout_summary = _bounded_stream_summary(stdout)
+        self.stderr_summary = _bounded_stream_summary(stderr)
+
+
+def _bounded_stream_summary(value: str) -> str:
+    payload = value.encode("utf-8", errors="replace")
+    return (
+        "redacted_worker_stream:"
+        f"bytes={len(payload)}:sha256={sha256(payload).hexdigest()}"
+    )[:4096]
+
+
 def _run_git_authority_command(
     repository: Path, arguments: tuple[str, ...],
 ) -> subprocess.CompletedProcess[str]:
@@ -136,6 +176,8 @@ def _canonical_bytes(payload: Mapping[str, object]) -> bytes:
 
 
 def _startup_failure_class(error: BaseException) -> str:
+    if type(error) is SalientLocalLfWorkerProcessError:
+        return error.failure_class
     if type(error) is SalientLocalLfRemoteAuthorityError:
         return error.failure_class
     if type(error) is SalientLocalLfPackageBuildError:
@@ -152,6 +194,9 @@ def _write_startup_failure_evidence(
     expected_revision: str, run_id: str, session_id: str,
     operation_identity: str, completed_steps: Sequence[str],
     package_path: Path | None, package_sha256: str | None,
+    failure_stage: str = "server_startup",
+    return_code: int = 3,
+    artifact_kind: str = "salient_local_lf_mask_write_validation_startup_failure",
 ) -> tuple[int, dict[str, object]]:
     failure_class = _startup_failure_class(error)
     completed = tuple(completed_steps)
@@ -167,12 +212,21 @@ def _write_startup_failure_evidence(
     diagnostic.update(
         {
             "failure_class": failure_class,
-            "failure_stage": "server_startup",
-            "return_code": 3,
+            "failure_stage": failure_stage,
+            "return_code": return_code,
             "completed_steps": completed,
             "not_executed_steps": not_executed,
         }
     )
+    if type(error) is SalientLocalLfWorkerProcessError:
+        diagnostic.update(
+            {
+                "worker_process_reason_identity": error.reason_identity,
+                "worker_signal_number": error.signal_number,
+                "sanitized_stdout": error.stdout_summary,
+                "sanitized_stderr": error.stderr_summary,
+            }
+        )
     package_relative = None
     if (
         package_path is not None
@@ -186,13 +240,13 @@ def _write_startup_failure_evidence(
                 "startup package path is outside persistent root"
             ) from exc
     receipt_base: dict[str, object] = {
-        "artifact_kind": "salient_local_lf_mask_write_validation_startup_failure",
+        "artifact_kind": artifact_kind,
         "committed_revision": expected_revision,
         "run_id": run_id,
         "session_id": session_id,
         "exit_code": 3,
         "failure_class": failure_class,
-        "failure_stage": "server_startup",
+        "failure_stage": failure_stage,
         "failure_operation_identity": operation_identity,
         "completed_steps": completed,
         "not_executed_steps": not_executed,
@@ -239,6 +293,11 @@ def _write_startup_failure_evidence(
         "artifact_sha256": _file_sha256(artifact),
         "artifact_size_bytes": artifact.stat().st_size,
     }
+    if artifact_kind == "salient_local_lf_mask_write_validation_failure":
+        receipt["artifact_path"] = str(artifact)
+        receipt["execution_package_path"] = (
+            str(package_path) if package_relative is not None else None
+        )
     receipt_path = (
         persistent / run_id / "server_receipts" / session_id / "execution_receipt.json"
     )
@@ -320,18 +379,105 @@ def _execute_worker(*, repository: Path, expected_revision: str, persistent: Pat
         cwd=repository, env=dict(environment), capture_output=True, text=True, check=False,
     )
     if completed.returncode not in {0, 3}:
-        raise SalientLocalLfMaskWriteServerError("worker did not return a bounded result")
+        raise SalientLocalLfWorkerProcessError(
+            "unexpected_return_code",
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     payloads = [line.removeprefix(WORKER_RESULT_PREFIX) for line in completed.stdout.splitlines()
                 if line.startswith(WORKER_RESULT_PREFIX)]
+    if not payloads:
+        raise SalientLocalLfWorkerProcessError(
+            "worker_result_missing",
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     if len(payloads) != 1:
-        raise SalientLocalLfMaskWriteServerError("worker result identity is unavailable")
+        raise SalientLocalLfWorkerProcessError(
+            "worker_result_duplicated",
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     try:
         value = json.loads(payloads[0])
     except json.JSONDecodeError as exc:
-        raise SalientLocalLfMaskWriteServerError("worker result identity is invalid") from exc
+        raise SalientLocalLfWorkerProcessError(
+            "worker_result_invalid_json",
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        ) from exc
     if type(value) is not dict:
-        raise SalientLocalLfMaskWriteServerError("worker result identity is invalid")
+        raise SalientLocalLfWorkerProcessError(
+            "worker_result_invalid_type",
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     return completed.returncode, value
+
+
+def _validate_worker_result(
+    *, worker: Mapping[str, object], exit_code: int, persistent: Path,
+    protocol: object, package_sha256: str,
+) -> tuple[Path, object]:
+    artifact_key = "diagnostic_zip" if exit_code else "result_zip"
+    artifact_value = worker.get(artifact_key)
+    if type(artifact_value) is not str:
+        raise SalientLocalLfMaskWriteServerError("worker artifact identity is missing")
+    artifact = Path(artifact_value).resolve()
+    if not artifact.is_file() or persistent not in artifact.parents or not is_zipfile(artifact):
+        raise SalientLocalLfMaskWriteServerError("worker artifact is invalid")
+    aggregate = worker.get("salient_local_lf_mask_write_aggregate")
+    bootstrap_failure = worker.get("worker_failure_stage") == "worker_bootstrap"
+    if bootstrap_failure:
+        observed_authority = (
+            worker.get("protocol_digest"),
+            worker.get("input_manifest_digest"),
+            worker.get("unit_roster_digest"),
+        )
+        expected_authority = (
+            protocol.digest(), protocol.manifest.digest(), protocol.unit_roster_digest,
+        )
+        if (
+            exit_code != 3
+            or worker.get("package_sha256") != package_sha256
+            or observed_authority not in {expected_authority, (None, None, None)}
+            or worker.get("committed_unit_count") != 0
+            or worker.get("session_committed_unit_count") != 0
+            or aggregate is not None
+            or worker.get("scientific_claims_supported") is not False
+        ):
+            raise SalientLocalLfMaskWriteServerError(
+                "worker bootstrap failure authority drifted"
+            )
+        return artifact, aggregate
+    if (
+        worker.get("protocol_digest") != protocol.digest()
+        or worker.get("input_manifest_digest") != protocol.manifest.digest()
+        or worker.get("unit_roster_digest") != protocol.unit_roster_digest
+        or worker.get("package_sha256") != package_sha256
+    ):
+        raise SalientLocalLfMaskWriteServerError("worker frozen authority drifted")
+    if exit_code and aggregate is not None:
+        raise SalientLocalLfMaskWriteServerError("failed worker cannot forge an aggregate")
+    expected_claim = (
+        type(aggregate) is dict
+        and aggregate.get("successful_observation_count") == 8
+        and all(aggregate.get(key) == 0 for key in (
+            "identity_failure_count", "integrity_failure_count",
+            "implementation_failure_count", "resource_failure_count",
+            "environment_failure_count",
+        ))
+    )
+    if worker.get("scientific_claims_supported") is not expected_claim:
+        raise SalientLocalLfMaskWriteServerError(
+            "worker scientific claim authority drifted"
+        )
+    return artifact, aggregate
 
 
 def execute_salient_local_lf_mask_write_validation_server_session(
@@ -464,9 +610,15 @@ def execute_salient_local_lf_mask_write_validation_server_session(
                 package_sha256=package_sha,
                 environment=env,
             )
+            completed_steps.append("worker_execution")
+            artifact, aggregate = _validate_worker_result(
+                worker=worker,
+                exit_code=exit_code,
+                persistent=persistent,
+                protocol=protocol,
+                package_sha256=package_sha,
+            )
     except Exception as exc:
-        if worker_started:
-            raise
         return _write_startup_failure_evidence(
             error=exc,
             repository=repository,
@@ -478,33 +630,18 @@ def execute_salient_local_lf_mask_write_validation_server_session(
             completed_steps=completed_steps,
             package_path=package_path,
             package_sha256=package_sha,
+            failure_stage=("worker_process" if worker_started else "server_startup"),
+            return_code=(
+                exc.return_code
+                if type(exc) is SalientLocalLfWorkerProcessError
+                else 3
+            ),
+            artifact_kind=(
+                "salient_local_lf_mask_write_validation_failure"
+                if worker_started
+                else "salient_local_lf_mask_write_validation_startup_failure"
+            ),
         )
-    artifact_key = "diagnostic_zip" if exit_code else "result_zip"
-    artifact_value = worker.get(artifact_key)
-    if type(artifact_value) is not str:
-        raise SalientLocalLfMaskWriteServerError("worker artifact identity is missing")
-    artifact = Path(artifact_value).resolve()
-    if not artifact.is_file() or persistent not in artifact.parents or not is_zipfile(artifact):
-        raise SalientLocalLfMaskWriteServerError("worker artifact is invalid")
-    if (worker.get("protocol_digest") != protocol.digest()
-            or worker.get("input_manifest_digest") != protocol.manifest.digest()
-            or worker.get("unit_roster_digest") != protocol.unit_roster_digest
-            or worker.get("package_sha256") != package_sha):
-        raise SalientLocalLfMaskWriteServerError("worker frozen authority drifted")
-    aggregate = worker.get("salient_local_lf_mask_write_aggregate")
-    if exit_code and aggregate is not None:
-        raise SalientLocalLfMaskWriteServerError("failed worker cannot forge an aggregate")
-    expected_claim = (
-        type(aggregate) is dict
-        and aggregate.get("successful_observation_count") == 8
-        and all(aggregate.get(key) == 0 for key in (
-            "identity_failure_count", "integrity_failure_count",
-            "implementation_failure_count", "resource_failure_count",
-            "environment_failure_count",
-        ))
-    )
-    if worker.get("scientific_claims_supported") is not expected_claim:
-        raise SalientLocalLfMaskWriteServerError("worker scientific claim authority drifted")
     receipt_path = persistent / run_id / "server_receipts" / session_id / "execution_receipt.json"
     receipt = {
         **worker, "artifact_path": str(artifact), "artifact_sha256": _file_sha256(artifact),

@@ -188,6 +188,194 @@ def test_salient_local_lf_server_writes_bounded_success_or_failure_receipt(
         assert secret.encode() not in receipt_bytes
 
 
+@pytest.mark.parametrize(
+    ("process_case", "expected_return_code", "expected_failure_class"),
+    (
+        ("import_before_main", 1, "implementation_blocked"),
+        ("unexpected_return_code", 7, "implementation_blocked"),
+        ("signal_termination", -15, "resource_blocked"),
+        ("missing_result", 0, "integrity_blocked"),
+    ),
+)
+def test_real_worker_process_failures_are_exported_as_bounded_server_evidence(
+    tmp_path: Path,
+    process_case: str,
+    expected_return_code: int,
+    expected_failure_class: str,
+) -> None:
+    repository = tmp_path / "worker-repository"
+    module_root = repository / "scripts/experiment_execution"
+    module_root.mkdir(parents=True)
+    (repository / "scripts/__init__.py").write_text("", encoding="utf-8")
+    (module_root / "__init__.py").write_text("", encoding="utf-8")
+    entrypoint = module_root / "salient_local_lf_mask_write_validation_entrypoint.py"
+    if process_case == "import_before_main":
+        entrypoint.write_text("def broken(:\n", encoding="utf-8")
+    elif process_case == "unexpected_return_code":
+        entrypoint.write_text(
+            "import sys\n"
+            "sys.stderr.write('secret-token /content/drive/private prompt key tensor\\n')\n"
+            "raise SystemExit(7)\n",
+            encoding="utf-8",
+        )
+    elif process_case == "signal_termination":
+        entrypoint.write_text(
+            "import os, signal\n"
+            "os.kill(os.getpid(), signal.SIGTERM)\n",
+            encoding="utf-8",
+        )
+    else:
+        entrypoint.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    persistent = tmp_path / "persistent"
+    cache = tmp_path / "cache"
+    persistent.mkdir()
+    cache.mkdir()
+    package = persistent / "execution.zip"
+    with ZipFile(package, "x") as archive:
+        archive.writestr("member.txt", "bounded package")
+    package_sha = sha256(package.read_bytes()).hexdigest()
+    environment = {
+        **os.environ,
+        "HF_TOKEN": "server-process-hf-secret",
+        "CEG_WM_ROOT_KEY": "server-process-root-secret",
+        "CEG_WM_INSPYRENET_CHECKPOINT_PATH": (
+            "/content/drive/private/checkpoint/ckpt_base.pth"
+        ),
+    }
+    with pytest.raises(server.SalientLocalLfWorkerProcessError) as captured:
+        server._execute_worker(
+            repository=repository,
+            expected_revision="f" * 40,
+            persistent=persistent,
+            cache=cache,
+            run_id=RUN_ID,
+            session_id=f"worker_process_{process_case}",
+            package_sha256=package_sha,
+            environment=environment,
+        )
+    error = captured.value
+    assert error.return_code == expected_return_code
+    code, receipt = server._write_startup_failure_evidence(
+        error=error,
+        repository=repository,
+        persistent=persistent,
+        expected_revision="f" * 40,
+        run_id=RUN_ID,
+        session_id=f"worker_process_{process_case}",
+        operation_identity="salient_local_lf_worker_execution",
+        completed_steps=(
+            "repository_identity_verified",
+            "required_git_authority_revisions_resolved",
+            "required_git_authority_objects_hydrated",
+            "protocol_authority_loaded",
+            "execution_inputs_verified",
+            "resource_preflight_completed",
+            "dependency_lock_verified",
+            "model_asset_prepared",
+            "execution_package_verified",
+            "packaged_protocol_verified",
+        ),
+        package_path=package,
+        package_sha256=package_sha,
+        failure_stage="worker_process",
+        return_code=error.return_code,
+        artifact_kind="salient_local_lf_mask_write_validation_failure",
+    )
+    assert code == 3
+    assert receipt["failure_class"] == expected_failure_class
+    assert receipt["failure_stage"] == "worker_process"
+    assert receipt["committed_unit_count"] == 0
+    assert receipt["session_committed_unit_count"] == 0
+    assert receipt["salient_local_lf_mask_write_aggregate"] is None
+    assert receipt["scientific_claims_supported"] is False
+    diagnostic_zip = persistent / str(receipt["diagnostic_zip_relative_path"])
+    receipt_path = persistent / str(receipt["receipt_relative_path"])
+    with ZipFile(diagnostic_zip) as archive:
+        diagnostic = json.loads(archive.read("diagnostic.json"))
+        protected = diagnostic_zip.read_bytes() + receipt_path.read_bytes()
+    assert diagnostic["return_code"] == expected_return_code
+    assert diagnostic["worker_signal_number"] == (
+        15 if process_case == "signal_termination" else None
+    )
+    assert diagnostic["sanitized_stdout"].startswith("redacted_worker_stream:")
+    assert diagnostic["sanitized_stderr"].startswith("redacted_worker_stream:")
+    assert len(diagnostic["sanitized_stdout"].encode("utf-8")) <= 4096
+    assert len(diagnostic["sanitized_stderr"].encode("utf-8")) <= 4096
+    for forbidden in (
+        "server-process-hf-secret",
+        "server-process-root-secret",
+        "/content/drive",
+        "secret-token",
+        " prompt ",
+        " key ",
+        " tensor",
+    ):
+        assert forbidden.encode("utf-8") not in protected
+
+
+def test_server_session_converts_missing_worker_payload_to_downloadable_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    salient_local_lf_exact_package: Path,
+) -> None:
+    protocol = load_salient_local_lf_mask_write_validation_protocol(
+        PROTOCOL_PATH, repository_root=ROOT
+    )
+    persistent = tmp_path / "persistent"
+    cache = tmp_path / "cache"
+    persistent.mkdir()
+    cache.mkdir()
+    monkeypatch.setattr(server, "_verify_repository", lambda *_args: None)
+    monkeypatch.setattr(server, "resolve_required_git_authority_revisions", lambda **_kwargs: (EXECUTION_REVISION,))
+    monkeypatch.setattr(server, "hydrate_required_git_authority_revisions", lambda *_args: (EXECUTION_REVISION,))
+    monkeypatch.setattr(server, "_probe_resources", lambda **_kwargs: {"gpu": "bounded-test-gpu"})
+    monkeypatch.setattr(server, "_verify_locked_dependencies", lambda _repository: "d" * 64)
+    monkeypatch.setattr(server, "_download_configured_model", lambda **_kwargs: None)
+    monkeypatch.setattr(server, "_extract_verified_execution_package", lambda _package, _destination: ROOT)
+    monkeypatch.setattr(server, "verify_extracted_salient_local_lf_mask_write_validation_package", lambda *_args: None)
+    monkeypatch.setattr(
+        server,
+        "build_salient_local_lf_mask_write_validation_package",
+        lambda _root, destination, _revision: (
+            destination.write_bytes(salient_local_lf_exact_package.read_bytes())
+            and {"package_sha256": EXPECTED_PACKAGE_SHA256}
+        ),
+    )
+    process_error = server.SalientLocalLfWorkerProcessError(
+        "worker_result_missing",
+        return_code=1,
+        stdout="secret stdout /content/drive/private prompt key tensor",
+        stderr="secret stderr /content/drive/private prompt key tensor",
+    )
+    monkeypatch.setattr(
+        server,
+        "_execute_worker",
+        lambda **_kwargs: (_ for _ in ()).throw(process_error),
+    )
+    code, receipt = server.execute_salient_local_lf_mask_write_validation_server_session(
+        repository_root=ROOT,
+        expected_revision=EXECUTION_REVISION,
+        persistent_root=persistent,
+        cache_root=cache,
+        run_id=protocol.run_id,
+        session_id="missing_worker_payload_receipt",
+        environment={
+            "HF_TOKEN": "missing-payload-hf-secret",
+            "CEG_WM_ROOT_KEY": "missing-payload-root-secret",
+            "CEG_WM_INSPYRENET_CHECKPOINT_PATH": "/content/drive/private/ckpt.pth",
+        },
+        install_dependencies=False,
+    )
+    assert code == 3
+    assert receipt["failure_stage"] == "worker_process"
+    assert receipt["failure_class"] == "integrity_blocked"
+    assert receipt["committed_unit_count"] == 0
+    assert receipt["salient_local_lf_mask_write_aggregate"] is None
+    assert receipt["scientific_claims_supported"] is False
+    assert (persistent / str(receipt["diagnostic_zip_relative_path"])).is_file()
+    assert (persistent / str(receipt["receipt_relative_path"])).is_file()
+
+
 def test_remote_authority_fetch_failure_exports_zero_unit_startup_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

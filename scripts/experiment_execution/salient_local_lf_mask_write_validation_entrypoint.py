@@ -44,6 +44,20 @@ PROTOCOL_PATH = Path("configs/experiments/salient_local_lf_mask_write_validation
 COMPONENT_PATH = Path("configs/experiments/internal_execution_components.json")
 RUNTIME_PATH = Path("configs/runtime/runtime_sd35_flowmatch.json")
 WORKER_RESULT_PREFIX = "CEG_WM_SALIENT_LOCAL_LF_WORKER_RESULT="
+WORKER_BOOTSTRAP_STEP_ORDER = (
+    "execution_inputs_verified",
+    "protocol_authority_loaded",
+    "sd35_backend_constructed",
+    "runtime_adapter_constructed",
+    "runtime_session_initialized",
+    "saliency_checkpoint_strict_loaded",
+    "experiment_adapter_initialized",
+    "registered_key_authority_derived",
+    "runner_initialized",
+    "persistent_store_initialized",
+    "session_lease_acquired",
+    "session_cursor_opened",
+)
 
 
 class SalientLocalLfMaskWriteEntrypointError(RuntimeError):
@@ -118,6 +132,81 @@ def _safe_failure(error: BaseException, *, repository: Path, operation_identity:
     }
 
 
+def _write_worker_bootstrap_failure_evidence(
+    *, error: BaseException, repository: Path, persistent: Path,
+    expected_revision: str, run_id: str, session_id: str,
+    execution_package_sha256: str, operation_identity: str,
+    completed_steps: Sequence[str], protocol_digest: str | None,
+    manifest_digest: str | None, unit_roster_digest: str | None,
+    candidate_config_digest: str | None,
+) -> tuple[int, dict[str, object]]:
+    completed = tuple(completed_steps)
+    if any(step not in WORKER_BOOTSTRAP_STEP_ORDER for step in completed):
+        raise SalientLocalLfMaskWriteEntrypointError(
+            "worker bootstrap completion identity is invalid"
+        )
+    not_executed = tuple(
+        step for step in WORKER_BOOTSTRAP_STEP_ORDER if step not in completed
+    )
+    diagnostic = _safe_failure(
+        error,
+        repository=repository,
+        operation_identity=operation_identity,
+        unit_index=None,
+    )
+    diagnostic.update(
+        {
+            "failure_stage": "worker_bootstrap",
+            "return_code": 3,
+            "completed_steps": completed,
+            "not_executed_steps": not_executed,
+        }
+    )
+    archive = persistent / run_id / "session_results" / f"{session_id}.zip"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    result: dict[str, object] = {
+        "artifact_kind": "salient_local_lf_mask_write_validation_failure",
+        "worker_failure_stage": "worker_bootstrap",
+        "diagnostic_zip": str(archive),
+        "protocol_digest": protocol_digest,
+        "input_manifest_digest": manifest_digest,
+        "candidate_config_digest": candidate_config_digest,
+        "unit_roster_digest": unit_roster_digest,
+        "package_sha256": execution_package_sha256,
+        "committed_unit_count": 0,
+        "session_committed_unit_count": 0,
+        "termination_reason": "worker_bootstrap_failed",
+        "salient_local_lf_mask_write_aggregate": None,
+        "formal_tau_created": False,
+        "fpr_estimated": False,
+        "candidate_promoted": False,
+        "scientific_claims_supported": False,
+        "worker_failure_operation_identity": operation_identity,
+        "worker_completed_steps": completed,
+        "worker_not_executed_steps": not_executed,
+        "committed_revision": expected_revision,
+        "run_id": run_id,
+        "session_id": session_id,
+    }
+    diagnostic_bytes = _canonical_bytes(diagnostic)
+    artifact_result = {
+        key: value for key, value in result.items() if key != "diagnostic_zip"
+    }
+    artifact_result["diagnostic_zip_relative_path"] = archive.relative_to(
+        persistent
+    ).as_posix()
+    result_bytes = _canonical_bytes(artifact_result)
+    checksums = (
+        f"{sha256(diagnostic_bytes).hexdigest()}  diagnostic.json\n"
+        f"{sha256(result_bytes).hexdigest()}  worker_result.json\n"
+    ).encode("ascii")
+    with ZipFile(archive, "x", compression=ZIP_DEFLATED, compresslevel=9) as target:
+        target.writestr("diagnostic.json", diagnostic_bytes)
+        target.writestr("worker_result.json", result_bytes)
+        target.writestr("SHA256SUMS", checksums)
+    return 3, result
+
+
 def execute_salient_local_lf_mask_write_validation_session(
     *, repository_root: str | Path, expected_revision: str,
     persistent_root: str | Path, cache_root: str | Path,
@@ -130,66 +219,144 @@ def execute_salient_local_lf_mask_write_validation_session(
     root_secret = environment.get("CEG_WM_ROOT_KEY")
     hf_token = environment.get("HF_TOKEN")
     checkpoint_text = environment.get("CEG_WM_INSPYRENET_CHECKPOINT_PATH")
-    if not root_secret or not hf_token or not checkpoint_text:
-        raise SalientLocalLfMaskWriteEntrypointError("required execution secret or checkpoint path is unavailable")
-    if len(expected_revision) != 40 or len(execution_package_sha256) != 64:
-        raise SalientLocalLfMaskWriteEntrypointError("execution authority is invalid")
-    protocol = load_salient_local_lf_mask_write_validation_protocol(
-        repository / PROTOCOL_PATH, repository_root=repository,
-    )
-    if run_id != protocol.run_id:
-        raise SalientLocalLfMaskWriteEntrypointError("run identity drifted")
-    backend = Sd35PipelineBackend(cache_root=cache, persistent_root=persistent,
-                                  hf_token=hf_token, prompt=protocol.operational_prompt)
-    runtime = create_runtime_adapter(backend, repository / RUNTIME_PATH)
-    runtime_session = runtime.initialize("cuda")
-    saliency = InspyrenetSaliencyRuntime(
-        checkpoint_path=Path(checkpoint_text),
-        checkpoint_asset_identity=str(protocol.raw["checkpoint_asset_identity"]),
-        checkpoint_asset_basename=str(protocol.raw["checkpoint_asset_basename"]),
-        selected_device="cuda",
-    )
-    adapter = CegWmExperimentAdapter(
-        load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH),
-        runtime_adapter=runtime,
-    )
-    protocol_digest = protocol.digest()
-    registered_root = _registered_root(root_secret, protocol_digest=protocol_digest,
-                                       manifest_digest=protocol.manifest.digest())
-    public_root = identify_root_key(registered_root).root_key_public_digest
-    candidate_digest = canonical_digest({
-        "adapter_config_digest": adapter.configuration.config_digest,
-        "candidate_identity": protocol.raw["candidate_identity"],
-        "manifest_digest": protocol.manifest.digest(),
-        "package_identity": execution_package_sha256,
-        "runtime_config_digest": runtime_session.runtime_config_digest,
-    })
-    authority_digest = canonical_digest({
-        "protocol_digest": protocol_digest, "manifest_digest": protocol.manifest.digest(),
-        "root_key_public_digest": public_root, "run_id": run_id,
-    })
-    runner = SalientLocalLfMaskWriteValidationRunner(
-        protocol=protocol, adapter=adapter, runtime_adapter=runtime,
-        saliency_runtime=saliency, method_code_revision=expected_revision,
-        registered_root_key=registered_root, protocol_digest=protocol_digest,
-        execution_intent_authority_digest=authority_digest,
-        candidate_config_digest=candidate_digest, package_identity=execution_package_sha256,
-    )
-    bindings = runner.create_persistence_unit_bindings()
-    store = DevelopmentPersistentStore(
-        persistent, run_id=run_id,
-        worker_identity=FrozenWorkerIdentity(
-            revision=expected_revision, protocol_digest=protocol_digest,
-            execution_intent_authority_digest=authority_digest,
-            input_manifest_digest=protocol.manifest.digest(),
-            candidate_config_digest=candidate_digest,
-            unit_roster_digest=protocol.unit_roster_digest,
-        ), registered_unit_bindings=bindings,
-    )
     started_epoch = int(time.time())
-    lease = store.acquire_lease(session_id=session_id, now_epoch_seconds=started_epoch,
-                                lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1)
-    cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
+    runtime = None
+    protocol = None
+    protocol_digest: str | None = None
+    manifest_digest: str | None = None
+    unit_roster_digest: str | None = None
+    candidate_digest: str | None = None
+    completed_bootstrap_steps: list[str] = []
+    operation_identity = "salient_local_lf_worker_execution_input_verification"
+    try:
+        if not root_secret or not hf_token or not checkpoint_text:
+            raise SalientLocalLfMaskWriteEntrypointError(
+                "required execution secret or checkpoint path is unavailable"
+            )
+        if len(expected_revision) != 40 or len(execution_package_sha256) != 64:
+            raise SalientLocalLfMaskWriteEntrypointError("execution authority is invalid")
+        completed_bootstrap_steps.append("execution_inputs_verified")
+
+        operation_identity = "salient_local_lf_worker_protocol_authority_load"
+        protocol = load_salient_local_lf_mask_write_validation_protocol(
+            repository / PROTOCOL_PATH, repository_root=repository,
+        )
+        if run_id != protocol.run_id:
+            raise SalientLocalLfMaskWriteEntrypointError("run identity drifted")
+        protocol_digest = protocol.digest()
+        manifest_digest = protocol.manifest.digest()
+        unit_roster_digest = protocol.unit_roster_digest
+        completed_bootstrap_steps.append("protocol_authority_loaded")
+
+        operation_identity = "salient_local_lf_worker_sd35_backend_construction"
+        backend = Sd35PipelineBackend(
+            cache_root=cache, persistent_root=persistent,
+            hf_token=hf_token, prompt=protocol.operational_prompt,
+        )
+        completed_bootstrap_steps.append("sd35_backend_constructed")
+
+        operation_identity = "salient_local_lf_worker_runtime_adapter_construction"
+        runtime = create_runtime_adapter(backend, repository / RUNTIME_PATH)
+        completed_bootstrap_steps.append("runtime_adapter_constructed")
+
+        operation_identity = "salient_local_lf_worker_runtime_initialization"
+        runtime_session = runtime.initialize("cuda")
+        completed_bootstrap_steps.append("runtime_session_initialized")
+
+        operation_identity = "salient_local_lf_worker_saliency_checkpoint_strict_load"
+        saliency = InspyrenetSaliencyRuntime(
+            checkpoint_path=Path(checkpoint_text),
+            checkpoint_asset_identity=str(protocol.raw["checkpoint_asset_identity"]),
+            checkpoint_asset_basename=str(protocol.raw["checkpoint_asset_basename"]),
+            selected_device="cuda",
+        )
+        completed_bootstrap_steps.append("saliency_checkpoint_strict_loaded")
+
+        operation_identity = "salient_local_lf_worker_experiment_adapter_initialization"
+        adapter = CegWmExperimentAdapter(
+            load_ceg_wm_experiment_adapter_configuration(repository / COMPONENT_PATH),
+            runtime_adapter=runtime,
+        )
+        completed_bootstrap_steps.append("experiment_adapter_initialized")
+
+        operation_identity = "salient_local_lf_worker_registered_key_authority_derivation"
+        registered_root = _registered_root(
+            root_secret,
+            protocol_digest=protocol_digest,
+            manifest_digest=manifest_digest,
+        )
+        public_root = identify_root_key(registered_root).root_key_public_digest
+        candidate_digest = canonical_digest({
+            "adapter_config_digest": adapter.configuration.config_digest,
+            "candidate_identity": protocol.raw["candidate_identity"],
+            "manifest_digest": manifest_digest,
+            "package_identity": execution_package_sha256,
+            "runtime_config_digest": runtime_session.runtime_config_digest,
+        })
+        authority_digest = canonical_digest({
+            "protocol_digest": protocol_digest,
+            "manifest_digest": manifest_digest,
+            "root_key_public_digest": public_root,
+            "run_id": run_id,
+        })
+        completed_bootstrap_steps.append("registered_key_authority_derived")
+        operation_identity = "salient_local_lf_worker_runner_initialization"
+        runner = SalientLocalLfMaskWriteValidationRunner(
+            protocol=protocol, adapter=adapter, runtime_adapter=runtime,
+            saliency_runtime=saliency, method_code_revision=expected_revision,
+            registered_root_key=registered_root, protocol_digest=protocol_digest,
+            execution_intent_authority_digest=authority_digest,
+            candidate_config_digest=candidate_digest,
+            package_identity=execution_package_sha256,
+        )
+        bindings = runner.create_persistence_unit_bindings()
+        completed_bootstrap_steps.append("runner_initialized")
+
+        operation_identity = "salient_local_lf_worker_persistent_store_initialization"
+        store = DevelopmentPersistentStore(
+            persistent, run_id=run_id,
+            worker_identity=FrozenWorkerIdentity(
+                revision=expected_revision, protocol_digest=protocol_digest,
+                execution_intent_authority_digest=authority_digest,
+                input_manifest_digest=manifest_digest,
+                candidate_config_digest=candidate_digest,
+                unit_roster_digest=unit_roster_digest,
+            ), registered_unit_bindings=bindings,
+        )
+        completed_bootstrap_steps.append("persistent_store_initialized")
+
+        operation_identity = "salient_local_lf_worker_session_lease_acquisition"
+        lease = store.acquire_lease(
+            session_id=session_id,
+            now_epoch_seconds=started_epoch,
+            lease_duration_seconds=HARD_SESSION_CAP_SECONDS - 1,
+        )
+        completed_bootstrap_steps.append("session_lease_acquired")
+
+        operation_identity = "salient_local_lf_worker_session_cursor_open"
+        cursor = store.open_session_cursor(lease, now_epoch_seconds=started_epoch)
+        completed_bootstrap_steps.append("session_cursor_opened")
+    except Exception as exc:
+        if runtime is not None:
+            try:
+                runtime.close()
+            except Exception:
+                pass
+        return _write_worker_bootstrap_failure_evidence(
+            error=exc,
+            repository=repository,
+            persistent=persistent,
+            expected_revision=expected_revision,
+            run_id=run_id,
+            session_id=session_id,
+            execution_package_sha256=execution_package_sha256,
+            operation_identity=operation_identity,
+            completed_steps=completed_bootstrap_steps,
+            protocol_digest=protocol_digest,
+            manifest_digest=manifest_digest,
+            unit_roster_digest=unit_roster_digest,
+            candidate_config_digest=candidate_digest,
+        )
     committed_before = cursor.initial_committed_count
     failure_diagnostic = None
     aggregate = None
@@ -247,7 +414,17 @@ def execute_salient_local_lf_mask_write_validation_session(
         )
         termination_reason = "operational_preflight_failed" if active_unit in {None, 0, 1} else "scientific_execution_failed"
     finally:
-        runtime.close()
+        try:
+            runtime.close()
+        except Exception as close_error:
+            if failure_diagnostic is None:
+                failure_diagnostic = _safe_failure(
+                    close_error,
+                    repository=repository,
+                    operation_identity="salient_local_lf_worker_runtime_close",
+                    unit_index=active_unit,
+                )
+                termination_reason = "runtime_close_failed"
     ended_epoch = int(time.time())
     session_commits = tuple(item.unit_id for item in cursor.committed_units if item.session_id == session_id)
     receipt = SessionReceipt(

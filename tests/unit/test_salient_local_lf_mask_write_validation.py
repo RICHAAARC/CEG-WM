@@ -10,6 +10,7 @@ from pathlib import Path
 from struct import pack, unpack
 import subprocess
 import sys
+from zipfile import ZipFile
 
 import pytest
 import torch
@@ -958,6 +959,133 @@ def test_safe_failure_is_package_relative_bounded_and_secret_free() -> None:
     assert "/content/" not in encoded
     assert len(diagnostic["failure_message_redacted"].encode()) <= 512
     assert len(diagnostic["package_relative_frames"]) <= 8
+
+
+@pytest.mark.parametrize(
+    ("failure_phase", "operation_identity"),
+    (
+        ("runtime", "salient_local_lf_worker_runtime_initialization"),
+        ("saliency", "salient_local_lf_worker_saliency_checkpoint_strict_load"),
+        ("store", "salient_local_lf_worker_persistent_store_initialization"),
+        ("lease", "salient_local_lf_worker_session_lease_acquisition"),
+    ),
+)
+def test_worker_bootstrap_failures_emit_zero_unit_bounded_results_in_real_subprocess(
+    tmp_path: Path,
+    failure_phase: str,
+    operation_identity: str,
+) -> None:
+    persistent = tmp_path / "persistent"
+    cache = tmp_path / "cache"
+    persistent.mkdir()
+    cache.mkdir()
+    session_id = f"worker_bootstrap_{failure_phase}"
+    script = r'''
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from scripts.experiment_execution import salient_local_lf_mask_write_validation_entrypoint as entry
+
+phase = __import__("os").environ["CEG_WM_TEST_FAILURE_PHASE"]
+
+class Runtime:
+    def initialize(self, device):
+        if phase == "runtime":
+            raise RuntimeError("secret runtime /content/drive/private")
+        return SimpleNamespace(
+            runtime_config_digest="a" * 64, image_height=512, image_width=512,
+        )
+    def close(self):
+        return None
+
+class Adapter:
+    def __init__(self, *_args, **_kwargs):
+        self.configuration = SimpleNamespace(config_digest="b" * 64)
+
+class Runner:
+    def __init__(self, **_kwargs):
+        return None
+    def create_persistence_unit_bindings(self):
+        return ()
+
+class Store:
+    def __init__(self, *_args, **_kwargs):
+        if phase == "store":
+            raise RuntimeError("secret store /content/drive/private")
+    def acquire_lease(self, **_kwargs):
+        if phase == "lease":
+            raise RuntimeError("secret lease /content/drive/private")
+        raise AssertionError("test must stop before cursor execution")
+
+entry.Sd35PipelineBackend = lambda **_kwargs: object()
+entry.create_runtime_adapter = lambda *_args, **_kwargs: Runtime()
+entry.InspyrenetSaliencyRuntime = lambda **_kwargs: (
+    (_ for _ in ()).throw(RuntimeError("secret saliency /content/drive/private"))
+    if phase == "saliency" else object()
+)
+entry.CegWmExperimentAdapter = Adapter
+entry.load_ceg_wm_experiment_adapter_configuration = lambda _path: object()
+entry.SalientLocalLfMaskWriteValidationRunner = Runner
+entry.DevelopmentPersistentStore = Store
+entry._registered_root = lambda *_args, **_kwargs: "worker-bootstrap-test-root"
+raise SystemExit(entry.main([
+    "--repository-root", __import__("os").environ["CEG_WM_TEST_REPOSITORY"],
+    "--expected-revision", "f25d9ba8fe65a52f1369fb7bab2db3d17628805e",
+    "--persistent-root", __import__("os").environ["CEG_WM_TEST_PERSISTENT"],
+    "--cache-root", __import__("os").environ["CEG_WM_TEST_CACHE"],
+    "--run-id", "ceg_wm_salient_local_lf_mask_write_remote_authority_correction_validation",
+    "--session-id", __import__("os").environ["CEG_WM_TEST_SESSION"],
+    "--execution-package-sha256", "d" * 64,
+]))
+'''
+    secret_values = (
+        "worker-bootstrap-hf-secret",
+        "worker-bootstrap-root-secret",
+        "/content/drive/private/checkpoint/ckpt_base.pth",
+    )
+    environment = {
+        **os.environ,
+        "CEG_WM_TEST_FAILURE_PHASE": failure_phase,
+        "CEG_WM_TEST_REPOSITORY": str(ROOT),
+        "CEG_WM_TEST_PERSISTENT": str(persistent),
+        "CEG_WM_TEST_CACHE": str(cache),
+        "CEG_WM_TEST_SESSION": session_id,
+        "HF_TOKEN": secret_values[0],
+        "CEG_WM_ROOT_KEY": secret_values[1],
+        "CEG_WM_INSPYRENET_CHECKPOINT_PATH": secret_values[2],
+    }
+    completed = subprocess.run(
+        (sys.executable, "-c", script),
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 3, completed.stderr
+    result_lines = tuple(
+        line.removeprefix("CEG_WM_SALIENT_LOCAL_LF_WORKER_RESULT=")
+        for line in completed.stdout.splitlines()
+        if line.startswith("CEG_WM_SALIENT_LOCAL_LF_WORKER_RESULT=")
+    )
+    assert len(result_lines) == 1
+    result = json.loads(result_lines[0])
+    assert result["committed_unit_count"] == 0
+    assert result["session_committed_unit_count"] == 0
+    assert result["salient_local_lf_mask_write_aggregate"] is None
+    assert result["scientific_claims_supported"] is False
+    assert result["worker_failure_operation_identity"] == operation_identity
+    archive = Path(result["diagnostic_zip"])
+    with ZipFile(archive) as evidence:
+        assert set(evidence.namelist()) == {
+            "diagnostic.json", "worker_result.json", "SHA256SUMS",
+        }
+        diagnostic = json.loads(evidence.read("diagnostic.json"))
+        assert diagnostic["operation_identity"] == operation_identity
+        assert diagnostic["failure_stage"] == "worker_bootstrap"
+        protected = b"".join(evidence.read(name) for name in evidence.namelist())
+    for secret in (*secret_values, str(tmp_path)):
+        assert secret.encode("utf-8") not in protected
 
 
 def test_historical_candidate_overlay_preserves_pre_delivery_status_authority(
