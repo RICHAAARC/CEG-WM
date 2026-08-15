@@ -197,11 +197,18 @@ def _write_startup_failure_evidence(
     failure_stage: str = "server_startup",
     return_code: int = 3,
     artifact_kind: str = "salient_local_lf_mask_write_validation_startup_failure",
+    commit_authority_status: str = "verified_pre_worker_zero",
 ) -> tuple[int, dict[str, object]]:
     failure_class = _startup_failure_class(error)
     completed = tuple(completed_steps)
     if any(step not in STARTUP_STEP_ORDER for step in completed):
         raise SalientLocalLfMaskWriteServerError("startup completion identity is invalid")
+    if commit_authority_status not in {
+        "verified_pre_worker_zero", "unavailable",
+    }:
+        raise SalientLocalLfMaskWriteServerError(
+            "startup commit authority status is invalid"
+        )
     not_executed = tuple(step for step in STARTUP_STEP_ORDER if step not in completed)
     diagnostic = _safe_failure(
         error,
@@ -227,6 +234,8 @@ def _write_startup_failure_evidence(
                 "sanitized_stderr": error.stderr_summary,
             }
         )
+    if commit_authority_status == "unavailable":
+        diagnostic["commit_authority_status"] = commit_authority_status
     package_relative = None
     if (
         package_path is not None
@@ -239,6 +248,9 @@ def _write_startup_failure_evidence(
             raise SalientLocalLfMaskWriteServerError(
                 "startup package path is outside persistent root"
             ) from exc
+    committed_count: int | None = (
+        0 if commit_authority_status == "verified_pre_worker_zero" else None
+    )
     receipt_base: dict[str, object] = {
         "artifact_kind": artifact_kind,
         "committed_revision": expected_revision,
@@ -256,8 +268,8 @@ def _write_startup_failure_evidence(
         "protocol_digest": None,
         "input_manifest_digest": None,
         "unit_roster_digest": None,
-        "committed_unit_count": 0,
-        "session_committed_unit_count": 0,
+        "committed_unit_count": committed_count,
+        "session_committed_unit_count": committed_count,
         "operational_unit_count": 2,
         "scientific_unit_count": 8,
         "total_unit_count": 10,
@@ -268,6 +280,8 @@ def _write_startup_failure_evidence(
         "fpr_estimated": False,
         "candidate_promoted": False,
     }
+    if commit_authority_status == "unavailable":
+        receipt_base["commit_authority_status"] = commit_authority_status
     diagnostic_bytes = _canonical_bytes(diagnostic)
     receipt_bytes = _canonical_bytes(receipt_base)
     checksum_bytes = (
@@ -442,12 +456,19 @@ def _validate_worker_result(
         expected_authority = (
             protocol.digest(), protocol.manifest.digest(), protocol.unit_roster_digest,
         )
+        commit_authority_status = worker.get("commit_authority_status")
+        expected_committed_count = (
+            0 if commit_authority_status == "verified_pre_store_zero" else None
+        )
         if (
             exit_code != 3
             or worker.get("package_sha256") != package_sha256
             or observed_authority not in {expected_authority, (None, None, None)}
-            or worker.get("committed_unit_count") != 0
-            or worker.get("session_committed_unit_count") != 0
+            or commit_authority_status not in {
+                "verified_pre_store_zero", "unavailable",
+            }
+            or worker.get("committed_unit_count") != expected_committed_count
+            or worker.get("session_committed_unit_count") != expected_committed_count
             or aggregate is not None
             or worker.get("scientific_claims_supported") is not False
         ):
@@ -640,6 +661,9 @@ def execute_salient_local_lf_mask_write_validation_server_session(
                 "salient_local_lf_mask_write_validation_failure"
                 if worker_started
                 else "salient_local_lf_mask_write_validation_startup_failure"
+            ),
+            commit_authority_status=(
+                "unavailable" if worker_started else "verified_pre_worker_zero"
             ),
         )
     receipt_path = persistent / run_id / "server_receipts" / session_id / "execution_receipt.json"

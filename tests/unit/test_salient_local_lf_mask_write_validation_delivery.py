@@ -280,12 +280,14 @@ def test_real_worker_process_failures_are_exported_as_bounded_server_evidence(
         failure_stage="worker_process",
         return_code=error.return_code,
         artifact_kind="salient_local_lf_mask_write_validation_failure",
+        commit_authority_status="unavailable",
     )
     assert code == 3
     assert receipt["failure_class"] == expected_failure_class
     assert receipt["failure_stage"] == "worker_process"
-    assert receipt["committed_unit_count"] == 0
-    assert receipt["session_committed_unit_count"] == 0
+    assert receipt["committed_unit_count"] is None
+    assert receipt["session_committed_unit_count"] is None
+    assert receipt["commit_authority_status"] == "unavailable"
     assert receipt["salient_local_lf_mask_write_aggregate"] is None
     assert receipt["scientific_claims_supported"] is False
     diagnostic_zip = persistent / str(receipt["diagnostic_zip_relative_path"])
@@ -294,6 +296,7 @@ def test_real_worker_process_failures_are_exported_as_bounded_server_evidence(
         diagnostic = json.loads(archive.read("diagnostic.json"))
         protected = diagnostic_zip.read_bytes() + receipt_path.read_bytes()
     assert diagnostic["return_code"] == expected_return_code
+    assert diagnostic["commit_authority_status"] == "unavailable"
     assert diagnostic["worker_signal_number"] == (
         15 if process_case == "signal_termination" else None
     )
@@ -369,7 +372,9 @@ def test_server_session_converts_missing_worker_payload_to_downloadable_receipt(
     assert code == 3
     assert receipt["failure_stage"] == "worker_process"
     assert receipt["failure_class"] == "integrity_blocked"
-    assert receipt["committed_unit_count"] == 0
+    assert receipt["committed_unit_count"] is None
+    assert receipt["session_committed_unit_count"] is None
+    assert receipt["commit_authority_status"] == "unavailable"
     assert receipt["salient_local_lf_mask_write_aggregate"] is None
     assert receipt["scientific_claims_supported"] is False
     assert (persistent / str(receipt["diagnostic_zip_relative_path"])).is_file()

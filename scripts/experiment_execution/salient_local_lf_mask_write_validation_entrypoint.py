@@ -139,6 +139,7 @@ def _write_worker_bootstrap_failure_evidence(
     completed_steps: Sequence[str], protocol_digest: str | None,
     manifest_digest: str | None, unit_roster_digest: str | None,
     candidate_config_digest: str | None,
+    store_construction_started: bool,
 ) -> tuple[int, dict[str, object]]:
     completed = tuple(completed_steps)
     if any(step not in WORKER_BOOTSTRAP_STEP_ORDER for step in completed):
@@ -164,6 +165,11 @@ def _write_worker_bootstrap_failure_evidence(
     )
     archive = persistent / run_id / "session_results" / f"{session_id}.zip"
     archive.parent.mkdir(parents=True, exist_ok=True)
+    commit_authority_status = (
+        "unavailable" if store_construction_started else "verified_pre_store_zero"
+    )
+    diagnostic["commit_authority_status"] = commit_authority_status
+    committed_count: int | None = None if store_construction_started else 0
     result: dict[str, object] = {
         "artifact_kind": "salient_local_lf_mask_write_validation_failure",
         "worker_failure_stage": "worker_bootstrap",
@@ -173,8 +179,9 @@ def _write_worker_bootstrap_failure_evidence(
         "candidate_config_digest": candidate_config_digest,
         "unit_roster_digest": unit_roster_digest,
         "package_sha256": execution_package_sha256,
-        "committed_unit_count": 0,
-        "session_committed_unit_count": 0,
+        "committed_unit_count": committed_count,
+        "session_committed_unit_count": committed_count,
+        "commit_authority_status": commit_authority_status,
         "termination_reason": "worker_bootstrap_failed",
         "salient_local_lf_mask_write_aggregate": None,
         "formal_tau_created": False,
@@ -219,7 +226,6 @@ def execute_salient_local_lf_mask_write_validation_session(
     root_secret = environment.get("CEG_WM_ROOT_KEY")
     hf_token = environment.get("HF_TOKEN")
     checkpoint_text = environment.get("CEG_WM_INSPYRENET_CHECKPOINT_PATH")
-    started_epoch = int(time.time())
     runtime = None
     protocol = None
     protocol_digest: str | None = None
@@ -227,6 +233,7 @@ def execute_salient_local_lf_mask_write_validation_session(
     unit_roster_digest: str | None = None
     candidate_digest: str | None = None
     completed_bootstrap_steps: list[str] = []
+    store_construction_started = False
     operation_identity = "salient_local_lf_worker_execution_input_verification"
     try:
         if not root_secret or not hf_token or not checkpoint_text:
@@ -313,6 +320,7 @@ def execute_salient_local_lf_mask_write_validation_session(
         completed_bootstrap_steps.append("runner_initialized")
 
         operation_identity = "salient_local_lf_worker_persistent_store_initialization"
+        store_construction_started = True
         store = DevelopmentPersistentStore(
             persistent, run_id=run_id,
             worker_identity=FrozenWorkerIdentity(
@@ -325,6 +333,7 @@ def execute_salient_local_lf_mask_write_validation_session(
         )
         completed_bootstrap_steps.append("persistent_store_initialized")
 
+        started_epoch = int(time.time())
         operation_identity = "salient_local_lf_worker_session_lease_acquisition"
         lease = store.acquire_lease(
             session_id=session_id,
@@ -356,6 +365,7 @@ def execute_salient_local_lf_mask_write_validation_session(
             manifest_digest=manifest_digest,
             unit_roster_digest=unit_roster_digest,
             candidate_config_digest=candidate_digest,
+            store_construction_started=store_construction_started,
         )
     committed_before = cursor.initial_committed_count
     failure_diagnostic = None

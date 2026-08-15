@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
@@ -64,8 +65,10 @@ from scripts.experiment_execution.build_salient_local_lf_mask_write_validation_p
     verify_salient_local_lf_mask_write_validation_package,
 )
 from scripts.experiment_execution.salient_local_lf_mask_write_validation_server import (
+    SalientLocalLfWorkerProcessError,
     _extract_verified_execution_package,
     _verify_locked_dependencies,
+    _write_startup_failure_evidence,
     hydrate_required_git_authority_revisions,
 )
 from tests.helpers.historical_repository import materialize_historical_repository
@@ -887,6 +890,102 @@ def test_real_persistent_store_commits_recovers_and_replays_fixed_ten(
         runner.replay_aggregate(((first_record, replace(first_marker, unit_id="development_unit_0003")), *evidence[1:]))
 
 
+def test_opaque_worker_failure_does_not_guess_zero_from_real_partial_store(
+    tmp_path: Path,
+) -> None:
+    runner = _runner()
+    worker = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest=runner.protocol.manifest.digest(),
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.protocol.run_id,
+        worker_identity=worker,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    lease = store.acquire_lease(
+        session_id="partial_store_session",
+        now_epoch_seconds=100,
+        lease_duration_seconds=1000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+    intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101)
+    record = runner._operational_record(
+        unit_index=0,
+        operation={
+            "operational_role": "environment_runtime_throughput_preflight",
+            "case_ids": ["salient_local_lf_partial_store_preflight"],
+            "responsibility_result_digests": [["content_embedder", "8" * 64]],
+            "runtime_config_digest": "9" * 64,
+            "counts_as_scientific_coverage": False,
+            "scientific_claims_supported": False,
+        },
+        elapsed=0.25,
+        attempt_index=0,
+    )
+    store.commit_session_unit(
+        cursor,
+        lease,
+        intent,
+        record=record,
+        raw_secret_values=("partial-store-secret", runner.registered_root_key),
+        now_epoch_seconds=102,
+    )
+    package = tmp_path / "execution.zip"
+    with ZipFile(package, "x") as archive:
+        archive.writestr("member.txt", "bounded package")
+    package_sha = sha256(package.read_bytes()).hexdigest()
+    error = SalientLocalLfWorkerProcessError(
+        "unexpected_return_code",
+        return_code=7,
+        stdout="partial-store-secret",
+        stderr="/content/drive/private prompt key tensor",
+    )
+    code, receipt = _write_startup_failure_evidence(
+        error=error,
+        repository=ROOT,
+        persistent=tmp_path,
+        expected_revision=runner.method_code_revision,
+        run_id=runner.protocol.run_id,
+        session_id="partial_store_worker_process_diagnostic",
+        operation_identity="salient_local_lf_worker_execution",
+        completed_steps=(
+            "repository_identity_verified",
+            "required_git_authority_revisions_resolved",
+            "required_git_authority_objects_hydrated",
+            "protocol_authority_loaded",
+            "execution_inputs_verified",
+            "resource_preflight_completed",
+            "dependency_lock_verified",
+            "model_asset_prepared",
+            "execution_package_verified",
+            "packaged_protocol_verified",
+        ),
+        package_path=package,
+        package_sha256=package_sha,
+        failure_stage="worker_process",
+        return_code=7,
+        artifact_kind="salient_local_lf_mask_write_validation_failure",
+        commit_authority_status="unavailable",
+    )
+    assert code == 3
+    assert receipt["committed_unit_count"] is None
+    assert receipt["session_committed_unit_count"] is None
+    assert receipt["commit_authority_status"] == "unavailable"
+    recovered = DevelopmentPersistentStore(
+        tmp_path,
+        run_id=runner.protocol.run_id,
+        worker_identity=worker,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    ).recover(now_epoch_seconds=200)
+    assert tuple(marker.unit_index for marker in recovered.committed_units) == (0,)
+
+
 def test_public_cpu_runner_executes_all_units_through_store_without_record_proxies(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -962,24 +1061,43 @@ def test_safe_failure_is_package_relative_bounded_and_secret_free() -> None:
 
 
 @pytest.mark.parametrize(
-    ("failure_phase", "operation_identity"),
+    ("failure_phase", "operation_identity", "commit_authority_status"),
     (
-        ("runtime", "salient_local_lf_worker_runtime_initialization"),
-        ("saliency", "salient_local_lf_worker_saliency_checkpoint_strict_load"),
-        ("store", "salient_local_lf_worker_persistent_store_initialization"),
-        ("lease", "salient_local_lf_worker_session_lease_acquisition"),
+        (
+            "runtime", "salient_local_lf_worker_runtime_initialization",
+            "verified_pre_store_zero",
+        ),
+        (
+            "saliency", "salient_local_lf_worker_saliency_checkpoint_strict_load",
+            "verified_pre_store_zero",
+        ),
+        (
+            "store", "salient_local_lf_worker_persistent_store_initialization",
+            "unavailable",
+        ),
+        (
+            "lease", "salient_local_lf_worker_session_lease_acquisition",
+            "unavailable",
+        ),
+        (
+            "cursor", "salient_local_lf_worker_session_cursor_open",
+            "unavailable",
+        ),
     ),
 )
 def test_worker_bootstrap_failures_emit_zero_unit_bounded_results_in_real_subprocess(
     tmp_path: Path,
     failure_phase: str,
     operation_identity: str,
+    commit_authority_status: str,
 ) -> None:
     persistent = tmp_path / "persistent"
     cache = tmp_path / "cache"
     persistent.mkdir()
     cache.mkdir()
     session_id = f"worker_bootstrap_{failure_phase}"
+    store_marker = tmp_path / "store-construction-called"
+    lease_time_marker = tmp_path / "lease-started-epoch"
     script = r'''
 import json
 from pathlib import Path
@@ -987,16 +1105,19 @@ from types import SimpleNamespace
 from scripts.experiment_execution import salient_local_lf_mask_write_validation_entrypoint as entry
 
 phase = __import__("os").environ["CEG_WM_TEST_FAILURE_PHASE"]
+clock = [100]
+entry.time = SimpleNamespace(time=lambda: clock[0])
 
 class Runtime:
     def initialize(self, device):
         if phase == "runtime":
             raise RuntimeError("secret runtime /content/drive/private")
+        clock[0] = 10000
         return SimpleNamespace(
             runtime_config_digest="a" * 64, image_height=512, image_width=512,
         )
     def close(self):
-        return None
+        raise RuntimeError("secondary close failure must not replace primary")
 
 class Adapter:
     def __init__(self, *_args, **_kwargs):
@@ -1010,12 +1131,20 @@ class Runner:
 
 class Store:
     def __init__(self, *_args, **_kwargs):
+        Path(__import__("os").environ["CEG_WM_TEST_STORE_MARKER"]).write_text("called")
         if phase == "store":
             raise RuntimeError("secret store /content/drive/private")
     def acquire_lease(self, **_kwargs):
+        Path(__import__("os").environ["CEG_WM_TEST_LEASE_TIME_MARKER"]).write_text(
+            str(_kwargs["now_epoch_seconds"])
+        )
         if phase == "lease":
             raise RuntimeError("secret lease /content/drive/private")
-        raise AssertionError("test must stop before cursor execution")
+        return object()
+    def open_session_cursor(self, *_args, **_kwargs):
+        if phase == "cursor":
+            raise RuntimeError("secret cursor /content/drive/private")
+        raise AssertionError("test must stop after cursor execution")
 
 entry.Sd35PipelineBackend = lambda **_kwargs: object()
 entry.create_runtime_adapter = lambda *_args, **_kwargs: Runtime()
@@ -1050,6 +1179,8 @@ raise SystemExit(entry.main([
         "CEG_WM_TEST_PERSISTENT": str(persistent),
         "CEG_WM_TEST_CACHE": str(cache),
         "CEG_WM_TEST_SESSION": session_id,
+        "CEG_WM_TEST_STORE_MARKER": str(store_marker),
+        "CEG_WM_TEST_LEASE_TIME_MARKER": str(lease_time_marker),
         "HF_TOKEN": secret_values[0],
         "CEG_WM_ROOT_KEY": secret_values[1],
         "CEG_WM_INSPYRENET_CHECKPOINT_PATH": secret_values[2],
@@ -1070,11 +1201,18 @@ raise SystemExit(entry.main([
     )
     assert len(result_lines) == 1
     result = json.loads(result_lines[0])
-    assert result["committed_unit_count"] == 0
-    assert result["session_committed_unit_count"] == 0
+    expected_count = 0 if commit_authority_status == "verified_pre_store_zero" else None
+    assert result["committed_unit_count"] == expected_count
+    assert result["session_committed_unit_count"] == expected_count
+    assert result["commit_authority_status"] == commit_authority_status
     assert result["salient_local_lf_mask_write_aggregate"] is None
     assert result["scientific_claims_supported"] is False
     assert result["worker_failure_operation_identity"] == operation_identity
+    assert store_marker.exists() is (commit_authority_status == "unavailable")
+    if failure_phase in {"lease", "cursor"}:
+        assert lease_time_marker.read_text(encoding="utf-8") == "10000"
+    else:
+        assert not lease_time_marker.exists()
     archive = Path(result["diagnostic_zip"])
     with ZipFile(archive) as evidence:
         assert set(evidence.namelist()) == {
@@ -1083,9 +1221,55 @@ raise SystemExit(entry.main([
         diagnostic = json.loads(evidence.read("diagnostic.json"))
         assert diagnostic["operation_identity"] == operation_identity
         assert diagnostic["failure_stage"] == "worker_bootstrap"
+        assert diagnostic["commit_authority_status"] == commit_authority_status
         protected = b"".join(evidence.read(name) for name in evidence.namelist())
     for secret in (*secret_values, str(tmp_path)):
         assert secret.encode("utf-8") not in protected
+
+
+def test_normal_worker_receipt_and_result_payload_preserve_session_authority() -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("local Git authority objects unavailable")
+    relative = (
+        "scripts/experiment_execution/"
+        "salient_local_lf_mask_write_validation_entrypoint.py"
+    )
+    historical = subprocess.run(
+        ("git", "show", f"f25d9ba8fe65a52f1369fb7bab2db3d17628805e:{relative}"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    current = (ROOT / relative).read_text(encoding="utf-8")
+
+    def normal_output_authority(source: str) -> tuple[str, str, str]:
+        tree = ast.parse(source)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "execute_salient_local_lf_mask_write_validation_session"
+        )
+        assignments = {
+            target.id: statement.value
+            for statement in function.body
+            if isinstance(statement, ast.Assign)
+            for target in statement.targets
+            if isinstance(target, ast.Name) and target.id in {"receipt", "result"}
+        }
+        returns = tuple(
+            statement.value
+            for statement in function.body
+            if isinstance(statement, ast.Return)
+        )
+        assert set(assignments) == {"receipt", "result"}
+        assert len(returns) == 1
+        return tuple(
+            ast.dump(value, include_attributes=False)
+            for value in (assignments["receipt"], assignments["result"], returns[0])
+        )
+
+    assert normal_output_authority(current) == normal_output_authority(historical)
 
 
 def test_historical_candidate_overlay_preserves_pre_delivery_status_authority(
