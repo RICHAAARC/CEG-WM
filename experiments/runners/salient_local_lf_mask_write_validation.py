@@ -15,6 +15,7 @@ import torch
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.salient_local_lf_mask_write_validation import (
     SalientLocalLfMaskWriteAggregate,
+    SalientLocalLfMaskWriteMetricError,
     SalientLocalLfMaskWriteObservation,
     SalientLocalLfTerminalFailure,
     aggregate_salient_local_lf_mask_write_validation,
@@ -301,9 +302,32 @@ class SalientLocalLfMaskWriteValidationRunner:
     def _scientific_record(self, *, unit_index: int, attempt_index: int,
                            elapsed: float, observation: SalientLocalLfMaskWriteObservation | None,
                            failure_class: str | None = None, failure_reason: str | None = None) -> DevelopmentScientificRecord:
+        if (type(unit_index) is not int
+                or not OPERATIONAL_UNIT_COUNT <= unit_index < len(self.protocol.unit_roster)):
+            raise SalientLocalLfMaskWriteIdentityError("scientific unit identity is invalid")
         unit = self.protocol.unit_roster[unit_index]
         identity = self.protocol.analysis_identity(unit_index)
         success = observation is not None
+        if success:
+            if type(observation) is not SalientLocalLfMaskWriteObservation:
+                raise SalientLocalLfMaskWriteIdentityError("exact typed scientific observation is required")
+            try:
+                observation.validate()
+            except SalientLocalLfMaskWriteMetricError as exc:
+                raise SalientLocalLfMaskWriteIdentityError(
+                    "scientific observation identity validation failed"
+                ) from exc
+            entry = self.protocol.manifest.entries[unit_index - OPERATIONAL_UNIT_COUNT]
+            if (observation.cluster_ordinal != entry.cluster_ordinal
+                    or observation.source_cluster_id != entry.source_cluster_id
+                    or identity.source_cluster_id != entry.source_cluster_id):
+                raise SalientLocalLfMaskWriteIdentityError(
+                    "scientific unit and observation identity drifted"
+                )
+            if not observation.identity_pass:
+                raise SalientLocalLfMaskWriteIdentityError("public observation identity drifted")
+            if not observation.integrity_pass:
+                raise SalientLocalLfMaskWriteIntegrityError("public materialization integrity drifted")
         operation = {"mask_write_observation": asdict(observation)} if success else {}
         metric = _metric_observation_payload(
             observation,
@@ -360,10 +384,6 @@ class SalientLocalLfMaskWriteValidationRunner:
                                 attempt_index: int = 0) -> DevelopmentScientificRecord:
         started = monotonic()
         observation = self.execute_scientific_observation(unit_index=unit_index, base_latent=base_latent)
-        if not observation.identity_pass:
-            raise SalientLocalLfMaskWriteIdentityError("public observation identity drifted")
-        if not observation.integrity_pass:
-            raise SalientLocalLfMaskWriteIntegrityError("public materialization integrity drifted")
         return self._scientific_record(unit_index=unit_index, attempt_index=attempt_index,
                                        elapsed=float(monotonic() - started), observation=observation)
 

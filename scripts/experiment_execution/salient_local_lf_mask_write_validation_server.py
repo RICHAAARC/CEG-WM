@@ -8,17 +8,20 @@ from importlib import metadata
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 from typing import Mapping, Sequence
-from zipfile import is_zipfile
+from zipfile import is_zipfile, ZipFile
 
 from experiments.protocol.salient_local_lf_mask_write_validation import (
     load_salient_local_lf_mask_write_validation_protocol,
 )
 from scripts.experiment_execution.build_salient_local_lf_mask_write_validation_package import (
     build_salient_local_lf_mask_write_validation_package,
+    verify_extracted_salient_local_lf_mask_write_validation_package,
     verify_salient_local_lf_mask_write_validation_package,
 )
 from scripts.experiment_execution.development_exploration_server import (
@@ -35,6 +38,32 @@ SAFE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 
 class SalientLocalLfMaskWriteServerError(RuntimeError):
     """The server could not preserve exact package and worker authority."""
+
+
+def _extract_verified_execution_package(package_path: Path, destination: Path) -> Path:
+    """Materialize the already exact-verified package without consulting Git."""
+
+    if destination.exists():
+        raise SalientLocalLfMaskWriteServerError("package extraction destination already exists")
+    destination.mkdir(parents=True)
+    with ZipFile(package_path, "r") as archive:
+        infos = archive.infolist()
+        names = tuple(info.filename for info in infos)
+        if len(names) != len(set(names)):
+            raise SalientLocalLfMaskWriteServerError("package member identity is duplicated")
+        for info in infos:
+            pure = PurePosixPath(info.filename)
+            if (pure.is_absolute() or not pure.parts or ".." in pure.parts
+                    or "." in pure.parts or "\\" in info.filename
+                    or info.is_dir() or info.external_attr >> 16 != 0o100644):
+                raise SalientLocalLfMaskWriteServerError("package member identity is unsafe")
+            target = destination.joinpath(*pure.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("xb") as stream:
+                stream.write(archive.read(info))
+    if (destination / ".git").exists():
+        raise SalientLocalLfMaskWriteServerError("execution package cannot contain Git authority")
+    return destination
 
 
 def _install_dependencies(repository: Path) -> None:
@@ -136,11 +165,25 @@ def execute_salient_local_lf_mask_write_validation_server_session(
     else:
         package_sha = str(build_salient_local_lf_mask_write_validation_package(
             repository, package_path, expected_revision)["package_sha256"])
-    exit_code, worker = _execute_worker(
-        repository=repository, expected_revision=expected_revision,
-        persistent=persistent, cache=cache, run_id=run_id, session_id=session_id,
-        package_sha256=package_sha, environment=env,
-    )
+    with TemporaryDirectory(prefix="ceg-wm-salient-local-lf-package-") as temporary:
+        execution_repository = _extract_verified_execution_package(
+            package_path, Path(temporary) / "repository",
+        )
+        verify_extracted_salient_local_lf_mask_write_validation_package(
+            execution_repository, expected_revision,
+        )
+        packaged_protocol = load_salient_local_lf_mask_write_validation_protocol(
+            execution_repository / PROTOCOL_PATH, repository_root=execution_repository,
+        )
+        if (packaged_protocol.digest() != protocol.digest()
+                or packaged_protocol.manifest.digest() != protocol.manifest.digest()
+                or packaged_protocol.unit_roster_digest != protocol.unit_roster_digest):
+            raise SalientLocalLfMaskWriteServerError("packaged protocol authority drifted")
+        exit_code, worker = _execute_worker(
+            repository=execution_repository, expected_revision=expected_revision,
+            persistent=persistent, cache=cache, run_id=run_id, session_id=session_id,
+            package_sha256=package_sha, environment=env,
+        )
     artifact_key = "diagnostic_zip" if exit_code else "result_zip"
     artifact_value = worker.get(artifact_key)
     if type(artifact_value) is not str:

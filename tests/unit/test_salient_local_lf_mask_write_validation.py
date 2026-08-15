@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 from struct import pack, unpack
+import subprocess
 
 import pytest
 import torch
@@ -25,6 +27,7 @@ from experiments.protocol.salient_local_lf_mask_write_validation import (
     SCIENTIFIC_ROSTER_AUTHORITY_DIGEST,
     SalientLocalLfMaskWriteProtocolError,
     canonical_digest,
+    _collect_deny_axes,
     load_salient_local_lf_mask_write_validation_protocol,
 )
 from experiments.runners.salient_local_lf_mask_write_validation import (
@@ -41,11 +44,26 @@ from experiments.runners.development_persistence import (
 )
 from main import identify_root_key, rgb8_image_digest
 from runtime import InspyrenetSaliencyRuntime, Sd35RuntimeAdapter
+from runtime import (
+    RuntimeBackendIdentity,
+    RuntimeDeviceCapabilities,
+    RuntimeVaeFactors,
+    create_runtime_adapter,
+)
 from scripts.experiment_execution.salient_local_lf_mask_write_validation_entrypoint import (
     _classify_scientific_failure,
     _safe_failure,
 )
-from scripts.experiment_execution.salient_local_lf_mask_write_validation_server import _verify_locked_dependencies
+from scripts.experiment_execution.build_salient_local_lf_mask_write_validation_package import (
+    SalientLocalLfPackageBuildError,
+    build_salient_local_lf_mask_write_validation_package,
+    verify_extracted_salient_local_lf_mask_write_validation_package,
+    verify_salient_local_lf_mask_write_validation_package,
+)
+from scripts.experiment_execution.salient_local_lf_mask_write_validation_server import (
+    _extract_verified_execution_package,
+    _verify_locked_dependencies,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -67,6 +85,45 @@ def _protocol():
     return load_salient_local_lf_mask_write_validation_protocol(CONFIG, repository_root=ROOT)
 
 
+def _exact_commit_for_current_strict_sources(tmp_path: Path) -> str:
+    index = tmp_path / "salient_local_lf_exact_package.index"
+    environment = {
+        **os.environ,
+        "GIT_INDEX_FILE": str(index),
+        "GIT_AUTHOR_NAME": "CEG-WM package test",
+        "GIT_AUTHOR_EMAIL": "ceg-wm-package-test@example.invalid",
+        "GIT_COMMITTER_NAME": "CEG-WM package test",
+        "GIT_COMMITTER_EMAIL": "ceg-wm-package-test@example.invalid",
+    }
+    subprocess.run(("git", "read-tree", "HEAD"), cwd=ROOT, env=environment, check=True)
+    subprocess.run(
+        (
+            "git", "add", "--",
+            "configs/experiments/salient_local_lf_mask_write_validation.json",
+            "configs/experiments/salient_local_lf_mask_write_validation_manifest.json",
+            "experiments/protocol/salient_local_lf_mask_write_validation.py",
+            "experiments/runners/salient_local_lf_mask_write_validation.py",
+            "scripts/experiment_execution/build_salient_local_lf_mask_write_validation_package.py",
+            "scripts/experiment_execution/salient_local_lf_mask_write_validation_server.py",
+            "tests/unit/test_salient_local_lf_mask_write_validation.py",
+        ),
+        cwd=ROOT, env=environment, check=True,
+    )
+    tree = subprocess.run(
+        ("git", "write-tree"), cwd=ROOT, env=environment,
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    parent = subprocess.run(
+        ("git", "rev-parse", "HEAD"), cwd=ROOT, env=environment,
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    return subprocess.run(
+        ("git", "commit-tree", tree, "-p", parent), cwd=ROOT, env=environment,
+        input="test: materialize exact salient local LF package authority\n",
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
 def _quality(*, over_limit: bool = False):
     clean = torch.full((1, 3, 512, 512), 100, dtype=torch.uint8)
     marked = torch.full_like(clean, 101)
@@ -86,6 +143,8 @@ def _observation(
     mechanism: bool = True,
     quality_pass: bool = True,
     source_cluster_id: str | None = None,
+    identity_pass: bool = True,
+    integrity_pass: bool = True,
 ):
     quality = _quality(over_limit=not quality_pass)
     return create_mask_write_observation(
@@ -106,8 +165,8 @@ def _observation(
         accepted_materialization_replay_identity=f"{cluster + 51:064x}",
         realized_relative_l2=0.01,
         actual_dtype_budget_pass=True,
-        identity_pass=True,
-        integrity_pass=True,
+        identity_pass=identity_pass,
+        integrity_pass=integrity_pass,
         quality=quality,
     )
 
@@ -127,6 +186,132 @@ def _runner() -> SalientLocalLfMaskWriteValidationRunner:
         protocol_digest=protocol.digest(), execution_intent_authority_digest="2" * 64,
         candidate_config_digest="3" * 64, package_identity="4" * 64,
     )
+
+
+class _PublicRunnerPosterior:
+    def __init__(self, mode_value: torch.Tensor) -> None:
+        self._mode_value = mode_value
+
+    def mode(self) -> torch.Tensor:
+        return self._mode_value.detach().clone()
+
+
+class _PublicRunnerBackend:
+    def __init__(self) -> None:
+        self.configuration = None
+        self.run_calls = 0
+        self.decode_calls = 0
+        self.encode_calls = 0
+
+    def probe_devices(self) -> RuntimeDeviceCapabilities:
+        return RuntimeDeviceCapabilities(cpu_available=True, cuda_device_count=0)
+
+    def prepare(self, configuration, selected_device: str) -> RuntimeBackendIdentity:
+        self.configuration = configuration
+        return RuntimeBackendIdentity(
+            candidate_id=configuration.candidate_id,
+            runtime_config_digest=configuration.runtime_config_digest,
+            runtime_backend_name="salient_local_lf_public_runner_cpu_fixture",
+            selected_device=selected_device,
+            model_id=configuration.model_id,
+            model_revision=configuration.model_revision,
+            pipeline_class=configuration.pipeline_class,
+            scheduler_class=configuration.scheduler_class,
+            inference_steps=configuration.inference_steps,
+            guidance_scale=configuration.guidance_scale,
+            image_height=configuration.image_height,
+            image_width=configuration.image_width,
+            generation_seed_device=configuration.generation_seed_device,
+            latent_dtype=configuration.latent_dtype,
+            template_dtype=configuration.template_dtype,
+            score_dtype=configuration.score_dtype,
+            callback_index=configuration.callback_index,
+            callback_hold_scheduler_intervals=configuration.callback_hold_scheduler_intervals,
+            vae_decode_protocol=configuration.vae_decode_protocol,
+            vae_encode_protocol=configuration.vae_encode_protocol,
+            vae_scaling_factor_source=configuration.vae_scaling_factor_source,
+            vae_shift_factor_source=configuration.vae_shift_factor_source,
+            detection_schedule_index=configuration.detection_schedule_index,
+            detection_conditioning_protocol=configuration.detection_conditioning_protocol,
+            qk_layer_names=configuration.qk_layer_names,
+            dependency_lock=configuration.dependency_lock,
+        )
+
+    def close(self) -> None:
+        return None
+
+    def run_generation(self, initial_latent, callback):
+        assert self.configuration is not None
+        self.run_calls += 1
+        state = initial_latent.detach().clone()
+        for callback_index in range(self.configuration.inference_steps):
+            state = callback(callback_index, state)
+        return state
+
+    def vae_factors(self) -> RuntimeVaeFactors:
+        return RuntimeVaeFactors(scaling_factor=0.5, shift_factor=0.25)
+
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        self.decode_calls += 1
+        image = torch.sigmoid(latent.to(torch.float32).mean(dim=1, keepdim=True))
+        return torch.nn.functional.interpolate(
+            image.repeat(1, 3, 1, 1), size=(512, 512), mode="bilinear", align_corners=False,
+        )
+
+    def vae_encode(self, image: torch.Tensor) -> _PublicRunnerPosterior:
+        self.encode_calls += 1
+        downsampled = torch.nn.functional.interpolate(
+            image.to(torch.float32).mean(dim=1, keepdim=True),
+            size=(64, 64), mode="bilinear", align_corners=False,
+        )
+        return _PublicRunnerPosterior(downsampled.repeat(1, 16, 1, 1))
+
+
+class _PublicRunnerSaliencyModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forward_count = 0
+
+    def forward_inspyre(self, model_input: torch.Tensor) -> dict[str, object]:
+        self.forward_count += 1
+        assert tuple(model_input.shape) == (1, 3, 1024, 1024)
+        raw = torch.full((1, 1, 64, 64), -10.0, dtype=torch.float32)
+        raw[:, :, 16:48, 16:48] = 10.0
+        return {
+            "saliency": [
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                torch.zeros((1, 1, 1, 1), dtype=torch.float32),
+                raw,
+            ]
+        }
+
+
+def _public_runner() -> tuple[
+    SalientLocalLfMaskWriteValidationRunner,
+    _PublicRunnerBackend,
+    _PublicRunnerSaliencyModel,
+]:
+    protocol = _protocol()
+    backend = _PublicRunnerBackend()
+    runtime = create_runtime_adapter(backend)
+    runtime.initialize("cpu")
+    model = _PublicRunnerSaliencyModel()
+    saliency = object.__new__(InspyrenetSaliencyRuntime)
+    saliency._device = torch.device("cpu")
+    saliency._model = model
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENTS),
+        runtime_adapter=runtime,
+    )
+    runner = SalientLocalLfMaskWriteValidationRunner(
+        protocol=protocol, adapter=adapter, runtime_adapter=runtime,
+        saliency_runtime=saliency, method_code_revision="1" * 40,
+        registered_root_key="salient-local-lf-public-runner-root",
+        protocol_digest=protocol.digest(), execution_intent_authority_digest="2" * 64,
+        candidate_config_digest="3" * 64, package_identity="4" * 64,
+    )
+    return runner, backend, model
 
 
 def test_authored_roster_and_historical_producer_authorities_are_exact() -> None:
@@ -198,6 +383,98 @@ def test_current_authority_inventory_tamper_fails_closed(tmp_path: Path) -> None
     config_path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(SalientLocalLfMaskWriteProtocolError):
         load_salient_local_lf_mask_write_validation_protocol(config_path, repository_root=ROOT)
+
+
+def test_exact_package_replays_current_and_historical_authority_without_git(
+    tmp_path: Path,
+) -> None:
+    revision = _exact_commit_for_current_strict_sources(tmp_path)
+    package = tmp_path / "execution-package.zip"
+    built = build_salient_local_lf_mask_write_validation_package(ROOT, package, revision)
+    verified = verify_salient_local_lf_mask_write_validation_package(ROOT, package, revision)
+    assert verified == built
+
+    extracted = _extract_verified_execution_package(package, tmp_path / "gitless-repository")
+    assert not (extracted / ".git").exists()
+    extracted_manifest = verify_extracted_salient_local_lf_mask_write_validation_package(
+        extracted, revision,
+    )
+    assert extracted_manifest["committed_revision"] == revision
+    replayed = load_salient_local_lf_mask_write_validation_protocol(
+        extracted / "configs/experiments/salient_local_lf_mask_write_validation.json",
+        repository_root=extracted,
+    )
+    assert replayed.digest() == _protocol().digest()
+    assert replayed.current_experiment_authority.tracked_path_count == 27
+    assert tuple(len(authority.paths) for authority in replayed.historical_prior_authorities) == (3, 3)
+
+    corrupted_package = tmp_path / "corrupted-execution-package.zip"
+    corrupted_bytes = bytearray(package.read_bytes())
+    corrupted_bytes[-1] ^= 1
+    corrupted_package.write_bytes(corrupted_bytes)
+    with pytest.raises(SalientLocalLfPackageBuildError):
+        verify_salient_local_lf_mask_write_validation_package(
+            ROOT, corrupted_package, revision,
+        )
+
+    current_tampered = _extract_verified_execution_package(
+        package, tmp_path / "current-authority-tampered-repository",
+    )
+    current_member = current_tampered / replayed.current_experiment_authority.paths[0].package_member_path
+    current_member.write_bytes(current_member.read_bytes() + b"tampered")
+    with pytest.raises(SalientLocalLfPackageBuildError):
+        verify_extracted_salient_local_lf_mask_write_validation_package(
+            current_tampered, revision,
+        )
+    with pytest.raises(SalientLocalLfMaskWriteProtocolError):
+        load_salient_local_lf_mask_write_validation_protocol(
+            current_tampered / "configs/experiments/salient_local_lf_mask_write_validation.json",
+            repository_root=current_tampered,
+        )
+
+    historical_tampered = _extract_verified_execution_package(
+        package, tmp_path / "historical-authority-tampered-repository",
+    )
+    historical_member = historical_tampered / replayed.historical_prior_authorities[0].paths[0].package_member_path
+    historical_member.write_bytes(historical_member.read_bytes() + b"tampered")
+    with pytest.raises(SalientLocalLfPackageBuildError):
+        verify_extracted_salient_local_lf_mask_write_validation_package(
+            historical_tampered, revision,
+        )
+    with pytest.raises(SalientLocalLfMaskWriteProtocolError):
+        load_salient_local_lf_mask_write_validation_protocol(
+            historical_tampered / "configs/experiments/salient_local_lf_mask_write_validation.json",
+            repository_root=historical_tampered,
+        )
+
+
+def test_prior_authority_collision_collector_covers_all_eight_axes() -> None:
+    protocol = _protocol()
+    entry = protocol.manifest.entries[0]
+    axes = {
+        name: set() for name in (
+            "prompt_digests", "generation_seeds", "cluster_identities",
+            "source_cluster_ids", "key_lineage_digests", "image_lineage_digests",
+            "namespaces", "lineage_authorities",
+        )
+    }
+    _collect_deny_axes({
+        "prompt_digest": entry.prompt_digest,
+        "generation_seed": entry.generation_seed,
+        "cluster_identity": entry.cluster_identity,
+        "source_cluster_id": entry.source_cluster_id,
+        "key_lineage_digest": entry.key_lineage_digest,
+        "image_lineage_digest": entry.image_lineage_digest,
+        "seed_namespace": protocol.manifest.seed_namespace,
+        "registered_key_derivation_identity": (
+            protocol.manifest.registered_key_derivation_identity
+        ),
+    }, axes)
+    assert all(axes[name] for name in axes)
+    assert protocol.manifest.seed_namespace in axes["namespaces"]
+    assert protocol.manifest.registered_key_derivation_identity in axes[
+        "lineage_authorities"
+    ]
 
 
 def test_actual_dtype_budget_uses_exact_binary32_boundary() -> None:
@@ -274,13 +551,49 @@ def test_scientific_failure_classification_is_exact_and_prioritized() -> None:
 
 def test_scientific_record_roundtrip_preserves_typed_observation() -> None:
     runner = _runner()
+    source_cluster_id = runner.protocol.manifest.entries[0].source_cluster_id
     record = runner._scientific_record(
-        unit_index=2, attempt_index=0, elapsed=0.25, observation=_observation(0),
+        unit_index=2, attempt_index=0, elapsed=0.25,
+        observation=_observation(0, source_cluster_id=source_cluster_id),
     )
     replay = DevelopmentScientificRecord.from_payload(json.loads(json.dumps(record.payload())))
     assert replay == record
     assert replay.operation_result_payload["mask_write_observation"]["quality"]["squared_code_delta_sum"] == 786432
     assert replay.metric_observation["source_cluster_id"] == runner.protocol.analysis_identity(2).source_cluster_id
+
+
+def test_precommit_scientific_observation_authority_fails_closed() -> None:
+    runner = _runner()
+    source_cluster_id = runner.protocol.manifest.entries[0].source_cluster_id
+    with pytest.raises(SalientLocalLfMaskWriteIdentityError):
+        runner._scientific_record(
+            unit_index=1, attempt_index=0, elapsed=0.25,
+            observation=_observation(0, source_cluster_id=source_cluster_id),
+        )
+    with pytest.raises(SalientLocalLfMaskWriteIdentityError):
+        runner._scientific_record(
+            unit_index=2, attempt_index=0, elapsed=0.25,
+            observation=_observation(1, source_cluster_id=source_cluster_id),
+        )
+    with pytest.raises(SalientLocalLfMaskWriteIdentityError):
+        runner._scientific_record(
+            unit_index=2, attempt_index=0, elapsed=0.25,
+            observation=_observation(0, source_cluster_id="f" * 64),
+        )
+    with pytest.raises(SalientLocalLfMaskWriteIdentityError):
+        runner._scientific_record(
+            unit_index=2, attempt_index=0, elapsed=0.25,
+            observation=_observation(
+                0, source_cluster_id=source_cluster_id, identity_pass=False,
+            ),
+        )
+    with pytest.raises(SalientLocalLfMaskWriteIntegrityError):
+        runner._scientific_record(
+            unit_index=2, attempt_index=0, elapsed=0.25,
+            observation=_observation(
+                0, source_cluster_id=source_cluster_id, integrity_pass=False,
+            ),
+        )
 
 
 def test_real_persistent_store_commits_recovers_and_replays_fixed_ten(
@@ -350,6 +663,66 @@ def test_real_persistent_store_commits_recovers_and_replays_fixed_ten(
     first_record, first_marker = evidence[0]
     with pytest.raises(SalientLocalLfMaskWriteRunnerError):
         runner.replay_aggregate(((first_record, replace(first_marker, unit_id="development_unit_0003")), *evidence[1:]))
+
+
+def test_public_cpu_runner_executes_all_units_through_store_without_record_proxies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, backend, model = _public_runner()
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _index: "public_cpu_fixture")
+    latent = torch.linspace(
+        -1.0, 1.0, steps=16 * 64 * 64, dtype=torch.float32,
+    ).reshape((1, 16, 64, 64)).to(torch.float16)
+    worker = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest=runner.protocol.manifest.digest(),
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path, run_id=runner.protocol.run_id, worker_identity=worker,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    lease = store.acquire_lease(
+        session_id="salient_local_lf_public_runner_session",
+        now_epoch_seconds=1000, lease_duration_seconds=1000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=1000)
+    for unit_index in range(10):
+        intent = store.create_session_intent(cursor, lease, now_epoch_seconds=1001 + unit_index * 2)
+        if unit_index == 0:
+            record = runner.execute_checkpoint_runtime_preflight(attempt_index=0)
+        elif unit_index == 1:
+            record = runner.execute_public_runtime_preflight(base_latent=latent, attempt_index=0)
+        else:
+            record = runner.execute_scientific_unit(
+                unit_index=unit_index, base_latent=latent, attempt_index=0,
+            )
+        store.commit_session_unit(
+            cursor, lease, intent, record=record,
+            raw_secret_values=(
+                "salient-local-lf-public-runner-root", runner.registered_root_key,
+            ),
+            now_epoch_seconds=1002 + unit_index * 2,
+        )
+    reopened = DevelopmentPersistentStore(
+        tmp_path, run_id=runner.protocol.run_id, worker_identity=worker,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    recovery = reopened.recover(now_epoch_seconds=1200)
+    evidence = reopened.verified_terminal_scientific_evidence_for_unit_indexes(
+        tuple(range(2, 10)), now_epoch_seconds=1200,
+    )
+    aggregate = runner.replay_aggregate(evidence)
+    assert tuple(item.unit_index for item in recovery.committed_units) == tuple(range(10))
+    assert aggregate.successful_observation_count == 8
+    assert aggregate_supports_scientific_claim(aggregate) is True
+    assert backend.run_calls == 18
+    assert backend.encode_calls == 9
+    assert model.forward_count == 19
 
 
 def test_safe_failure_is_package_relative_bounded_and_secret_free() -> None:

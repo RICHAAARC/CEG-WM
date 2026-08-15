@@ -48,9 +48,51 @@ class SalientLocalLfMaskWriteProtocolError(ValueError):
     """The frozen protocol, roster, or producer authority drifted."""
 
 
+_DENY_AXIS_NAMES = (
+    "prompt_digests", "generation_seeds", "cluster_identities",
+    "source_cluster_ids", "key_lineage_digests", "image_lineage_digests",
+    "namespaces", "lineage_authorities",
+)
+
+
 def canonical_digest(value: object) -> str:
     return sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
                              separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _collect_deny_axes(value: object, axes: dict[str, set[object]]) -> None:
+    if tuple(axes) != _DENY_AXIS_NAMES:
+        raise SalientLocalLfMaskWriteProtocolError("deny-axis collector identity drifted")
+    if type(value) is dict:
+        for key, item in value.items():
+            lowered = key.lower()
+            scalars = item if type(item) is list else [item]
+            for scalar in scalars:
+                if lowered in {"prompt", "prompt_text"} and type(scalar) is str:
+                    axes["prompt_digests"].add(sha256(scalar.encode("utf-8")).hexdigest())
+                elif lowered == "prompt_digest" and type(scalar) is str:
+                    axes["prompt_digests"].add(scalar)
+                elif lowered == "generation_seed" and type(scalar) is int:
+                    axes["generation_seeds"].add(scalar)
+                elif lowered == "cluster_identity" and type(scalar) is str:
+                    axes["cluster_identities"].add(scalar)
+                elif lowered == "source_cluster_id" and type(scalar) is str:
+                    axes["source_cluster_ids"].add(scalar)
+                elif lowered == "key_lineage_digest" and type(scalar) is str:
+                    axes["key_lineage_digests"].add(scalar)
+                elif lowered == "image_lineage_digest" and type(scalar) is str:
+                    axes["image_lineage_digests"].add(scalar)
+                elif lowered.endswith("_namespace") and type(scalar) is str:
+                    axes["namespaces"].add(scalar)
+                elif lowered in {
+                    "key_lineage_identity", "image_lineage_identity",
+                    "registered_key_derivation_identity", "registered_key_family_digest",
+                } and type(scalar) is str:
+                    axes["lineage_authorities"].add(scalar)
+            _collect_deny_axes(item, axes)
+    elif type(value) is list:
+        for item in value:
+            _collect_deny_axes(item, axes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +333,7 @@ class FutureSplitDenyAuthority:
     image_lineage_identity: str
     key_lineage_namespace: str
     key_lineage_identity: str
+    registered_key_derivation_identity: str
     registered_key_family_digest: str
     scientific_roster_authority_digest: str
 
@@ -311,6 +354,7 @@ class FutureSplitDenyAuthority:
             "image_lineage_identity": roster.image_lineage_identity,
             "key_lineage_namespace": roster.key_lineage_namespace,
             "key_lineage_identity": roster.key_lineage_identity,
+            "registered_key_derivation_identity": roster.registered_key_derivation_identity,
             "registered_key_family_digest": roster.registered_key_family_digest,
             "scientific_roster_authority_digest": roster.scientific_roster_authority_digest,
         }
@@ -491,36 +535,10 @@ class SalientLocalLfMaskWriteProtocol:
             for authority in self.historical_prior_authorities
             for document in authority.validate(repository_root)
         )
-        prior_axes = {name: set() for name in (
-            "prompt_digests", "generation_seeds", "source_clusters",
-            "image_lineages", "key_lineages",
-        )}
-
-        def collect(value: object) -> None:
-            if type(value) is dict:
-                for key, item in value.items():
-                    lowered = key.lower()
-                    scalars = item if type(item) is list else [item]
-                    for scalar in scalars:
-                        if lowered in {"prompt", "prompt_text"} and type(scalar) is str:
-                            prior_axes["prompt_digests"].add(sha256(scalar.encode("utf-8")).hexdigest())
-                        elif lowered == "prompt_digest" and type(scalar) is str:
-                            prior_axes["prompt_digests"].add(scalar)
-                        elif lowered == "generation_seed" and type(scalar) is int:
-                            prior_axes["generation_seeds"].add(scalar)
-                        elif ("source_cluster" in lowered or lowered == "cluster_identity") and type(scalar) is str:
-                            prior_axes["source_clusters"].add(scalar)
-                        elif "image_lineage" in lowered and type(scalar) is str:
-                            prior_axes["image_lineages"].add(scalar)
-                        elif ("key_lineage" in lowered or "key_family" in lowered) and type(scalar) is str:
-                            prior_axes["key_lineages"].add(scalar)
-                    collect(item)
-            elif type(value) is list:
-                for item in value:
-                    collect(item)
+        prior_axes = {name: set() for name in _DENY_AXIS_NAMES}
 
         for document in historical_documents:
-            collect(document)
+            _collect_deny_axes(document, prior_axes)
         current_prompt_digests: set[str] = set()
         for path, payload in current_payloads:
             if path.endswith(".json"):
@@ -528,7 +546,7 @@ class SalientLocalLfMaskWriteProtocol:
                     document = json.loads(payload.decode("utf-8"))
                 except (UnicodeError, json.JSONDecodeError) as exc:
                     raise SalientLocalLfMaskWriteProtocolError("current experiment JSON is invalid") from exc
-                collect(document)
+                _collect_deny_axes(document, prior_axes)
 
                 def collect_explicit_prompt_digests(value: object) -> None:
                     if type(value) is dict:
@@ -549,32 +567,22 @@ class SalientLocalLfMaskWriteProtocol:
         new_axes = {
             "prompt_digests": {item.prompt_digest for item in self.manifest.entries},
             "generation_seeds": {item.generation_seed for item in self.manifest.entries},
-            "source_clusters": {
-                *(item.cluster_identity for item in self.manifest.entries),
-                *(item.source_cluster_id for item in self.manifest.entries),
-                self.manifest.source_cluster_namespace,
+            "cluster_identities": {item.cluster_identity for item in self.manifest.entries},
+            "source_cluster_ids": {item.source_cluster_id for item in self.manifest.entries},
+            "key_lineage_digests": {item.key_lineage_digest for item in self.manifest.entries},
+            "image_lineage_digests": {item.image_lineage_digest for item in self.manifest.entries},
+            "namespaces": {
+                self.manifest.seed_namespace, self.manifest.source_cluster_namespace,
+                self.manifest.image_lineage_namespace, self.manifest.key_lineage_namespace,
             },
-            "image_lineages": {
-                *(item.image_lineage_digest for item in self.manifest.entries),
-                self.manifest.image_lineage_identity,
-                self.manifest.image_lineage_namespace,
-            },
-            "key_lineages": {
-                *(item.key_lineage_digest for item in self.manifest.entries),
-                self.manifest.key_lineage_identity,
-                self.manifest.key_lineage_namespace,
+            "lineage_authorities": {
+                self.manifest.image_lineage_identity, self.manifest.key_lineage_identity,
+                self.manifest.registered_key_derivation_identity,
                 self.manifest.registered_key_family_digest,
             },
         }
         if any(new_axes[name] & prior_axes[name] for name in new_axes):
             raise SalientLocalLfMaskWriteProtocolError("scientific roster overlaps historical authority")
-        deny = self.manifest.future_split_deny_authority
-        if (set(deny.prompt_digests) & prior_axes["prompt_digests"]
-                or set(deny.generation_seeds) & prior_axes["generation_seeds"]
-                or (set(deny.cluster_identities) | set(deny.source_cluster_ids)) & prior_axes["source_clusters"]
-                or set(deny.image_lineage_digests) & prior_axes["image_lineages"]
-                or set(deny.key_lineage_digests) & prior_axes["key_lineages"]):
-            raise SalientLocalLfMaskWriteProtocolError("future split deny authority overlaps prior inputs")
 
     def analysis_identity(self, unit_index: int) -> AnalysisUnitIdentity:
         unit = self.unit_roster[unit_index]

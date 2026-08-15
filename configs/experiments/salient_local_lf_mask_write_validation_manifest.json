@@ -12,7 +12,7 @@
   "registered_key_derivation_identity": "salient_local_lf_mask_write_validation_registered_content_key_derivation",
   "registered_key_family_digest": "524a6c2ff671220c5e318d818db5e75488741ff83189cb74e2e5c0acdc3adcf5",
   "scientific_roster_authority_digest": "193702e27508436b4b5545470faeaf7eb1cd494533f1355b6c6cf9d70f16e0de",
-  "future_split_deny_authority_digest": "f7589952f4fc28d19578f52b41331992fade9a093fa6dd460774efdaf0dd4015",
+  "future_split_deny_authority_digest": "cac7bf64a1af5a9e70a5eaaa2048acbb6f609a4ca9255caef8569284fd10ad58",
   "future_split_deny_authority": {
     "schema_version": "ceg_wm_salient_local_lf_future_split_deny_authority_v1",
     "exclusion_roles": ["masked_lf_whitening_fit", "independent_confirmation", "candidate_selection", "calibration", "evaluation"],
@@ -28,6 +28,7 @@
     "image_lineage_identity": "paired_clean_marked_salient_local_lf_public_rgb8_lineage",
     "key_lineage_namespace": "salient_local_lf_mask_write_validation_registered_key_lineages_20260815",
     "key_lineage_identity": "salient_local_lf_mask_write_validation_registered_content_key_lineage",
+    "registered_key_derivation_identity": "salient_local_lf_mask_write_validation_registered_content_key_derivation",
     "registered_key_family_digest": "524a6c2ff671220c5e318d818db5e75488741ff83189cb74e2e5c0acdc3adcf5",
     "scientific_roster_authority_digest": "193702e27508436b4b5545470faeaf7eb1cd494533f1355b6c6cf9d70f16e0de"
   },

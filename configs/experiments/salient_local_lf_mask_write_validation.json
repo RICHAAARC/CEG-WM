@@ -10,7 +10,7 @@
   "public_runtime_callable": "runtime.Sd35RuntimeAdapter.execute_salient_local_lf_content_write_and_vae",
   "public_detection_callable": "runtime.Sd35RuntimeAdapter.observe_salient_local_lf_detection_image",
   "manifest_path": "configs/experiments/salient_local_lf_mask_write_validation_manifest.json",
-  "manifest_file_sha256": "ce296628b5880f69cc1d6586f1d9b838dc1de221267ff50223bebfb0f1ab7d34",
+  "manifest_file_sha256": "26c77909cf0f1a4e8ddc591ee30751809bc1941a34299f7a81b6cdb663c9c64c",
   "runtime_configuration_path": "configs/runtime/runtime_sd35_flowmatch.json",
   "runtime_configuration_file_sha256": "a097e826551dfa74601defef406d027cd6428946894f85012d2c65268b0bff1f",
   "internal_execution_components_path": "configs/experiments/internal_execution_components.json",

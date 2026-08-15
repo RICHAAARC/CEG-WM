@@ -240,6 +240,62 @@ def verify_salient_local_lf_mask_write_validation_package(
     }
 
 
+def verify_extracted_salient_local_lf_mask_write_validation_package(
+    repository_root: str | Path, revision: str,
+) -> dict[str, object]:
+    """Verify the extracted package from its frozen internal byte manifest."""
+
+    root = Path(repository_root)
+    manifest_path = root / "PACKAGE_MANIFEST.json"
+    if not root.is_dir() or manifest_path.is_symlink() or not manifest_path.is_file():
+        raise SalientLocalLfPackageBuildError("extracted package manifest is unavailable")
+    manifest_bytes = manifest_path.read_bytes()
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SalientLocalLfPackageBuildError("extracted package manifest is invalid") from exc
+    if (type(manifest) is not dict
+            or manifest.get("schema_version") != PACKAGE_SCHEMA_VERSION
+            or manifest.get("package_profile") != PACKAGE_PROFILE
+            or manifest.get("committed_revision") != revision
+            or json.dumps(
+                manifest, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"), allow_nan=False,
+            ).encode("utf-8") != manifest_bytes):
+        raise SalientLocalLfPackageBuildError("extracted package identity drifted")
+    entries = manifest.get("entries")
+    if type(entries) is not list:
+        raise SalientLocalLfPackageBuildError("extracted package inventory is invalid")
+    expected_paths = []
+    for entry in entries:
+        if type(entry) is not dict:
+            raise SalientLocalLfPackageBuildError("extracted package inventory is invalid")
+        path = entry.get("path")
+        pure = PurePosixPath(path) if type(path) is str else None
+        if (pure is None or pure.is_absolute() or not pure.parts or ".." in pure.parts
+                or "." in pure.parts or entry.get("mode") != "100644"):
+            raise SalientLocalLfPackageBuildError("extracted package member identity is unsafe")
+        member = root.joinpath(*pure.parts)
+        if member.is_symlink() or not member.is_file():
+            raise SalientLocalLfPackageBuildError("extracted package member is unavailable")
+        payload = member.read_bytes()
+        digest = sha256(payload).hexdigest()
+        if (entry.get("size") != len(payload) or entry.get("raw_sha256") != digest
+                or entry.get("sha256") != digest):
+            raise SalientLocalLfPackageBuildError("extracted package member bytes drifted")
+        expected_paths.append(path)
+    if expected_paths != sorted(expected_paths) or len(expected_paths) != len(set(expected_paths)):
+        raise SalientLocalLfPackageBuildError("extracted package inventory order drifted")
+    observed_paths = sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+    )
+    if observed_paths != sorted((*expected_paths, "PACKAGE_MANIFEST.json")):
+        raise SalientLocalLfPackageBuildError("extracted package file set drifted")
+    return manifest
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository-root", required=True)
