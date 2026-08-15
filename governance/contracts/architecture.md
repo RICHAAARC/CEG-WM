@@ -29,10 +29,13 @@ signed-int64 FLOOR RGB8 quality gate；候选专属 runtime qualification、mask
 `method_implemented` 的 readiness AST 审计只承担候选绑定、固定模块路径、symbol 调用和断言接线检查；它不能单独证明非代理实现。readiness 中的候选规格摘要是独立语义复核 revision 上的实现快照，必须从该 exact Git blob 重放，不能用当前工作树字节重签。当前候选规格仍是 live design authority，必须继续保留 policy/readiness 已绑定的全部实现身份，但可在不改写旧 readiness 快照的前提下登记尚未准入实现的设计候选。独立复核后的实现路径和方法特异性登记测试仍是 stale-protected surface；live candidate-spec 文件本身不因此成为旧 readiness 的不可变源码路径。
 
 显著目标局部 LF 候选使用独立 overlay 绑定四个现有职责的 source/CPU/API 实现；它不增加
-第 14 项职责，也不改写既有 11-candidate readiness。overlay 的唯一 true 状态是
-`source_cpu_api_implementation_ready`；runtime qualification、experiment admission、
-masked-LF W、RGB quality、science 与 promotion 均保持 false，max statistic 仍为
-diagnostic-only，正式 detector 仍为 HF-only。
+第 14 项职责，也不改写既有 11-candidate readiness。overlay 的 true 状态为
+`source_cpu_api_implementation_ready`、`experiment_protocol_admitted` 与
+`rgb_quality_gate_defined`；`candidate_runtime_qualified`、
+`masked_lf_whitening_asset_ready`、`scientific_mechanism_validated`、`promoted` 与
+`formal_detector` 均保持 false，`diagnostic_only=true`，正式 detector 仍为 HF-only。
+协议准入与质量门定义只表示可追溯执行边界已经冻结，不等于 runtime/GPU qualification，
+也不构成科学验证或晋升证据。
 
 ## 方法层
 
