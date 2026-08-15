@@ -17,9 +17,18 @@ from experiments.protocol.development_exploration import DevelopmentStudyUnit
 from experiments.protocol.internal_splits import AnalysisUnitIdentity, derive_source_cluster_id
 
 
-RUN_ID = "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis"
+RUN_ID = "ceg_wm_salient_local_lf_mask_write_registered_dual_carrier_key_correction_validation"
 PROTOCOL_ID = "ceg_wm_salient_local_lf_mask_write_validation"
 PROTOCOL_VERSION = "1.0.0"
+REGISTERED_ROOT_DERIVATION_IDENTITY = (
+    "salient_local_lf_mask_write_registered_dual_carrier_key_derivation"
+)
+REGISTERED_HF_DOMAIN_DERIVATION_IDENTITY = (
+    "salient_local_lf_mask_write_registered_hf_carrier_domain_derivation"
+)
+REGISTERED_LF_DOMAIN_DERIVATION_IDENTITY = (
+    "salient_local_lf_mask_write_registered_lf_carrier_domain_derivation"
+)
 OPERATIONAL_UNIT_COUNT = 2
 SCIENTIFIC_UNIT_COUNT = 8
 MAXIMUM_TOTAL_UNITS = 10
@@ -506,6 +515,9 @@ class SalientLocalLfMaskWriteProtocol:
     def validate(self, repository_root: Path) -> None:
         expected = {
             "run_id": RUN_ID, "protocol_id": PROTOCOL_ID,
+            "registered_root_derivation_identity": REGISTERED_ROOT_DERIVATION_IDENTITY,
+            "registered_hf_domain_derivation_identity": REGISTERED_HF_DOMAIN_DERIVATION_IDENTITY,
+            "registered_lf_domain_derivation_identity": REGISTERED_LF_DOMAIN_DERIVATION_IDENTITY,
             "operational_unit_count": OPERATIONAL_UNIT_COUNT,
             "scientific_unit_count": SCIENTIFIC_UNIT_COUNT,
             "maximum_total_units": MAXIMUM_TOTAL_UNITS,

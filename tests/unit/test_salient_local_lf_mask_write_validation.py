@@ -45,7 +45,8 @@ from experiments.runners.development_persistence import (
     DevelopmentPersistentStore,
     FrozenWorkerIdentity,
 )
-from main import identify_root_key, rgb8_image_digest
+from main import identify_root_key, key_schedule_sha256_counter, rgb8_image_digest
+from main.shared.key_schedule import KeyScheduleError
 from runtime import InspyrenetSaliencyRuntime, Sd35RuntimeAdapter
 from runtime import (
     RuntimeBackendIdentity,
@@ -54,6 +55,10 @@ from runtime import (
     create_runtime_adapter,
 )
 from scripts.experiment_execution.salient_local_lf_mask_write_validation_entrypoint import (
+    REGISTERED_HF_DOMAIN_DERIVATION_IDENTITY,
+    REGISTERED_LF_DOMAIN_DERIVATION_IDENTITY,
+    REGISTERED_ROOT_DERIVATION_IDENTITY,
+    _registered_root,
     _classify_scientific_failure,
     _safe_failure,
 )
@@ -207,6 +212,11 @@ def _observation(
 
 def _runner() -> SalientLocalLfMaskWriteValidationRunner:
     protocol = _protocol()
+    registered_root = _registered_root(
+        "salient-mask-write-test-root",
+        protocol_digest=protocol.digest(),
+        manifest_digest=protocol.manifest.digest(),
+    )
     runtime = object.__new__(Sd35RuntimeAdapter)
     saliency = object.__new__(InspyrenetSaliencyRuntime)
     adapter = CegWmExperimentAdapter(
@@ -216,7 +226,7 @@ def _runner() -> SalientLocalLfMaskWriteValidationRunner:
     return SalientLocalLfMaskWriteValidationRunner(
         protocol=protocol, adapter=adapter, runtime_adapter=runtime,
         saliency_runtime=saliency, method_code_revision="1" * 40,
-        registered_root_key="salient-mask-write-test-root",
+        registered_root_key=registered_root,
         protocol_digest=protocol.digest(), execution_intent_authority_digest="2" * 64,
         candidate_config_digest="3" * 64, package_identity="4" * 64,
     )
@@ -327,6 +337,11 @@ def _public_runner() -> tuple[
     _PublicRunnerSaliencyModel,
 ]:
     protocol = _protocol()
+    registered_root = _registered_root(
+        "salient-local-lf-public-runner-root",
+        protocol_digest=protocol.digest(),
+        manifest_digest=protocol.manifest.digest(),
+    )
     backend = _PublicRunnerBackend()
     runtime = create_runtime_adapter(backend)
     runtime.initialize("cpu")
@@ -341,7 +356,7 @@ def _public_runner() -> tuple[
     runner = SalientLocalLfMaskWriteValidationRunner(
         protocol=protocol, adapter=adapter, runtime_adapter=runtime,
         saliency_runtime=saliency, method_code_revision="1" * 40,
-        registered_root_key="salient-local-lf-public-runner-root",
+        registered_root_key=registered_root,
         protocol_digest=protocol.digest(), execution_intent_authority_digest="2" * 64,
         candidate_config_digest="3" * 64, package_identity="4" * 64,
     )
@@ -378,6 +393,94 @@ def test_authored_roster_and_historical_producer_authorities_are_exact() -> None
     assert canonical_digest(asdict(protocol.manifest.future_split_deny_authority)) == (
         protocol.manifest.future_split_deny_authority_digest
     )
+
+
+def test_registered_root_uses_distinct_registered_hf_and_lf_carrier_domains() -> None:
+    base_root = "salient-local-lf-dual-carrier-test-secret"
+    protocol_digest = "1" * 64
+    manifest_digest = "2" * 64
+    hf_model_revision = canonical_digest(
+        {
+            "derivation_identity": REGISTERED_HF_DOMAIN_DERIVATION_IDENTITY,
+            "manifest_digest": manifest_digest,
+            "protocol_digest": protocol_digest,
+        }
+    )
+    lf_model_revision = canonical_digest(
+        {
+            "derivation_identity": REGISTERED_LF_DOMAIN_DERIVATION_IDENTITY,
+            "manifest_digest": manifest_digest,
+            "protocol_digest": protocol_digest,
+        }
+    )
+    hf_stream = key_schedule_sha256_counter(
+        base_root,
+        {
+            "candidate_id": "hf_sparse_tail",
+            "operator": "carrier_template",
+            "responsibility_domain": "hf_carrier",
+            "model_revision": hf_model_revision,
+            "tensor_role": "base_gaussian",
+        },
+        (8,),
+    )
+    lf_stream = key_schedule_sha256_counter(
+        base_root,
+        {
+            "candidate_id": "lf_low_pass",
+            "operator": "carrier_template",
+            "responsibility_domain": "lf_carrier",
+            "model_revision": lf_model_revision,
+            "tensor_role": "base_gaussian",
+        },
+        (8,),
+    )
+    expected = "ceg-wm-salient-local-lf-mask-write:" + canonical_digest(
+        {
+            "derivation_identity": REGISTERED_ROOT_DERIVATION_IDENTITY,
+            "ordered_carrier_domains": [
+                {"domain_digest": hf_stream.domain_digest, "role": "global_hf_carrier"},
+                {"domain_digest": lf_stream.domain_digest, "role": "local_lf_carrier"},
+            ],
+        }
+    )
+    observed = _registered_root(
+        base_root,
+        protocol_digest=protocol_digest,
+        manifest_digest=manifest_digest,
+    )
+    assert observed == expected
+    assert observed == _registered_root(
+        base_root,
+        protocol_digest=protocol_digest,
+        manifest_digest=manifest_digest,
+    )
+    assert hf_stream.domain_digest != lf_stream.domain_digest
+    assert base_root not in observed
+    assert hf_stream.domain_digest not in observed
+    assert lf_stream.domain_digest not in observed
+    assert observed != _registered_root(
+        base_root,
+        protocol_digest="3" * 64,
+        manifest_digest=manifest_digest,
+    )
+    assert observed != _registered_root(
+        base_root,
+        protocol_digest=protocol_digest,
+        manifest_digest="4" * 64,
+    )
+    with pytest.raises(KeyScheduleError, match="unregistered"):
+        key_schedule_sha256_counter(
+            base_root,
+            {
+                "candidate_id": "content_embedding_global_hf_local_lf",
+                "operator": "carrier_template",
+                "responsibility_domain": "content_embedder",
+                "model_revision": "5" * 64,
+                "tensor_role": "base_gaussian",
+            },
+            (8,),
+        )
 
 
 def test_roster_authority_and_derived_identity_tamper_fail_closed(tmp_path: Path) -> None:
@@ -542,7 +645,7 @@ def test_shallow_checkout_hydrates_exact_authorities_before_protocol_package_loa
         repository_root=shallow,
     )
     assert protocol.run_id == (
-        "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis"
+        "ceg_wm_salient_local_lf_mask_write_registered_dual_carrier_key_correction_validation"
     )
     assert protocol.protocol_id == "ceg_wm_salient_local_lf_mask_write_validation"
     assert Path("persistent") / protocol.run_id != Path("persistent") / protocol.protocol_id
@@ -1162,7 +1265,7 @@ raise SystemExit(entry.main([
     "--expected-revision", "f25d9ba8fe65a52f1369fb7bab2db3d17628805e",
     "--persistent-root", __import__("os").environ["CEG_WM_TEST_PERSISTENT"],
     "--cache-root", __import__("os").environ["CEG_WM_TEST_CACHE"],
-    "--run-id", "ceg_wm_salient_local_lf_mask_write_worker_bootstrap_diagnosis",
+    "--run-id", "ceg_wm_salient_local_lf_mask_write_registered_dual_carrier_key_correction_validation",
     "--session-id", __import__("os").environ["CEG_WM_TEST_SESSION"],
     "--execution-package-sha256", "d" * 64,
 ]))

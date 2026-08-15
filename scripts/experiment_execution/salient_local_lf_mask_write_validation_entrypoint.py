@@ -19,7 +19,11 @@ import torch
 
 from experiments.methods import CegWmExperimentAdapter, load_ceg_wm_experiment_adapter_configuration
 from experiments.protocol.salient_local_lf_mask_write_validation import (
-    OPERATIONAL_UNIT_COUNT, canonical_digest,
+    OPERATIONAL_UNIT_COUNT,
+    REGISTERED_HF_DOMAIN_DERIVATION_IDENTITY,
+    REGISTERED_LF_DOMAIN_DERIVATION_IDENTITY,
+    REGISTERED_ROOT_DERIVATION_IDENTITY,
+    canonical_digest,
     load_salient_local_lf_mask_write_validation_protocol,
 )
 from experiments.runners.development_persistence import (
@@ -65,15 +69,56 @@ class SalientLocalLfMaskWriteEntrypointError(RuntimeError):
 
 
 def _registered_root(base_root: str, *, protocol_digest: str, manifest_digest: str) -> str:
-    stream = key_schedule_sha256_counter(base_root, {
-        "candidate_id": "content_embedding_global_hf_local_lf",
-        "operator": "carrier_template", "responsibility_domain": "content_embedder",
-        "model_revision": canonical_digest({
-            "derivation_identity": "salient_local_lf_mask_write_validation_registered_content_key_derivation",
-            "protocol_digest": protocol_digest, "manifest_digest": manifest_digest,
-        }), "tensor_role": "base_gaussian",
-    }, (8,))
-    return "ceg-wm-salient-local-lf-mask-write:" + stream.domain_digest
+    hf_stream = key_schedule_sha256_counter(
+        base_root,
+        {
+            "candidate_id": "hf_sparse_tail",
+            "operator": "carrier_template",
+            "responsibility_domain": "hf_carrier",
+            "model_revision": canonical_digest(
+                {
+                    "derivation_identity": REGISTERED_HF_DOMAIN_DERIVATION_IDENTITY,
+                    "manifest_digest": manifest_digest,
+                    "protocol_digest": protocol_digest,
+                }
+            ),
+            "tensor_role": "base_gaussian",
+        },
+        (8,),
+    )
+    lf_stream = key_schedule_sha256_counter(
+        base_root,
+        {
+            "candidate_id": "lf_low_pass",
+            "operator": "carrier_template",
+            "responsibility_domain": "lf_carrier",
+            "model_revision": canonical_digest(
+                {
+                    "derivation_identity": REGISTERED_LF_DOMAIN_DERIVATION_IDENTITY,
+                    "manifest_digest": manifest_digest,
+                    "protocol_digest": protocol_digest,
+                }
+            ),
+            "tensor_role": "base_gaussian",
+        },
+        (8,),
+    )
+    opaque_root_digest = canonical_digest(
+        {
+            "derivation_identity": REGISTERED_ROOT_DERIVATION_IDENTITY,
+            "ordered_carrier_domains": [
+                {
+                    "domain_digest": hf_stream.domain_digest,
+                    "role": "global_hf_carrier",
+                },
+                {
+                    "domain_digest": lf_stream.domain_digest,
+                    "role": "local_lf_carrier",
+                },
+            ],
+        }
+    )
+    return "ceg-wm-salient-local-lf-mask-write:" + opaque_root_digest
 
 
 def _exception_chain(error: BaseException) -> tuple[BaseException, ...]:
