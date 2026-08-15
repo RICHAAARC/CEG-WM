@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+from io import BytesIO
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -47,7 +48,7 @@ def _included(path: str) -> bool:
     return path in _EXACT_ROOT_FILES or path == _README_SOURCE or any(path.startswith(prefix) for prefix in _PREFIXES)
 
 
-def _tree(root: Path, revision: str) -> tuple[tuple[str, str, bytes], ...]:
+def _tree(root: Path, revision: str) -> tuple[tuple[tuple[str, str, bytes], ...], dict[str, str]]:
     raw = _git(root, "ls-tree", "-r", "-z", revision, text=False)
     if type(raw) is not bytes:
         raise SalientLocalLfPackageBuildError("Git tree output is invalid")
@@ -103,6 +104,52 @@ def _tree(root: Path, revision: str) -> tuple[tuple[str, str, bytes], ...]:
             if pure.is_absolute() or ".." in pure.parts or not archive_path.startswith("historical_authorities/"):
                 raise SalientLocalLfPackageBuildError("historical package member path is unsafe")
             entries.append((archive_path, tree_line[2], historical_payload))
+    current = config.get("current_experiment_authority")
+    if type(current) is not dict or type(current.get("paths")) is not list:
+        raise SalientLocalLfPackageBuildError("current experiment package authority is invalid")
+    current_revision = current.get("producer_revision")
+    expected_tree_oid = current.get("configs_experiments_tree_oid")
+    if (type(current_revision) is not str or REVISION.fullmatch(current_revision) is None
+            or type(expected_tree_oid) is not str or REVISION.fullmatch(expected_tree_oid) is None):
+        raise SalientLocalLfPackageBuildError("current experiment package authority is invalid")
+    root_tree = str(_git(root, "ls-tree", current_revision, "--", "configs/experiments")).split()
+    if len(root_tree) != 4 or root_tree[:2] != ["040000", "tree"] or root_tree[2] != expected_tree_oid:
+        raise SalientLocalLfPackageBuildError("current experiment root tree drifted")
+    raw_current_tree = _git(root, "ls-tree", "-r", "-z", current_revision, "--", "configs/experiments", text=False)
+    if type(raw_current_tree) is not bytes:
+        raise SalientLocalLfPackageBuildError("current experiment tree output is invalid")
+    observed_current = []
+    for item in raw_current_tree.split(b"\0"):
+        if not item:
+            continue
+        metadata, encoded_path = item.split(b"\t", 1)
+        mode, kind, blob = metadata.decode("ascii").split()
+        if kind != "blob":
+            raise SalientLocalLfPackageBuildError("current experiment tree contains a non-blob")
+        observed_current.append((encoded_path.decode("utf-8"), mode, blob))
+    expected_current = [
+        (item.get("path"), item.get("mode"), item.get("git_blob_sha"))
+        for item in current["paths"] if type(item) is dict
+    ]
+    if (len(expected_current) != current.get("tracked_path_count")
+            or observed_current != expected_current):
+        raise SalientLocalLfPackageBuildError("current experiment Git inventory drifted")
+    for binding in current["paths"]:
+        source_path = binding.get("path")
+        archive_path = binding.get("package_member_path")
+        blob = binding.get("git_blob_sha")
+        if (type(source_path) is not str or type(archive_path) is not str or type(blob) is not str
+                or binding.get("mode") != "100644"):
+            raise SalientLocalLfPackageBuildError("current experiment package binding is invalid")
+        payload = _git(root, "cat-file", "blob", blob, text=False)
+        if type(payload) is not bytes or sha256(payload).hexdigest() != binding.get("raw_sha256"):
+            raise SalientLocalLfPackageBuildError("current experiment bytes drifted")
+        expected_prefix = f"authority_inputs/current_{current_revision}/"
+        pure = PurePosixPath(archive_path)
+        if (pure.is_absolute() or ".." in pure.parts
+                or archive_path != expected_prefix + source_path):
+            raise SalientLocalLfPackageBuildError("current experiment package member path is unsafe")
+        entries.append((archive_path, blob, payload))
     entries.sort(key=lambda item: item[0])
     names = tuple(item[0] for item in entries)
     required = {
@@ -117,12 +164,41 @@ def _tree(root: Path, revision: str) -> tuple[tuple[str, str, bytes], ...]:
         "runtime/_vendor/transparent_background/SOURCE.json",
         "historical_authorities/925c2cbc727e3b18e91c0b3981eeed1b470a955a/configs/experiments/content_routing_directional_diagnosis.json",
         "historical_authorities/925c2cbc727e3b18e91c0b3981eeed1b470a955a/configs/experiments/content_routing_directional_diagnosis_manifest.json",
+        "historical_authorities/925c2cbc727e3b18e91c0b3981eeed1b470a955a/configs/experiments/content_routing_reference_fit_manifest.json",
         "historical_authorities/7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da/configs/experiments/content_uniform_combination_directional_diagnosis.json",
         "historical_authorities/7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da/configs/experiments/content_uniform_combination_directional_diagnosis_manifest.json",
+        "historical_authorities/7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da/configs/experiments/content_uniform_combination_reference_fit_manifest.json",
     }
-    if not required.issubset(names) or len(names) != len(set(names)):
+    current_members = {item.get("package_member_path") for item in current["paths"]}
+    if (not required.issubset(names) or not current_members.issubset(names)
+            or len(names) != len(set(names))):
         raise SalientLocalLfPackageBuildError("package source closure is incomplete")
-    return tuple(entries)
+    return tuple(entries), {current_revision: expected_tree_oid}
+
+
+def _package_bytes(root: Path, revision: str) -> tuple[bytes, bytes]:
+    entries, authority_roots = _tree(root, revision)
+    manifest_entries = [
+        {"path": path, "mode": "100644", "git_blob_sha": blob,
+         "raw_sha256": sha256(payload).hexdigest(), "sha256": sha256(payload).hexdigest(),
+         "size": len(payload)}
+        for path, blob, payload in entries
+    ]
+    manifest = {
+        "schema_version": PACKAGE_SCHEMA_VERSION, "package_profile": PACKAGE_PROFILE,
+        "committed_revision": revision, "authority_root_tree_oids": authority_roots,
+        "entries": manifest_entries,
+    }
+    manifest_bytes = json.dumps(manifest, ensure_ascii=False, sort_keys=True,
+                                separators=(",", ":"), allow_nan=False).encode("utf-8")
+    stream = BytesIO()
+    with ZipFile(stream, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
+        for path, _blob, payload in (*entries, ("PACKAGE_MANIFEST.json", "", manifest_bytes)):
+            info = ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = ZIP_DEFLATED
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, payload)
+    return stream.getvalue(), manifest_bytes
 
 
 def build_salient_local_lf_mask_write_validation_package(
@@ -132,31 +208,36 @@ def build_salient_local_lf_mask_write_validation_package(
     destination = Path(output_path)
     if REVISION.fullmatch(revision) is None or _git(root, "rev-parse", f"{revision}^{{commit}}") != revision:
         raise SalientLocalLfPackageBuildError("revision is not an exact commit")
-    entries = _tree(root, revision)
-    manifest_entries = [
-        {"path": path, "git_blob_sha": blob, "sha256": sha256(payload).hexdigest(), "size": len(payload)}
-        for path, blob, payload in entries
-    ]
-    manifest = {
-        "schema_version": PACKAGE_SCHEMA_VERSION, "package_profile": PACKAGE_PROFILE,
-        "committed_revision": revision, "entries": manifest_entries,
-    }
-    manifest_bytes = json.dumps(manifest, ensure_ascii=False, sort_keys=True,
-                                separators=(",", ":"), allow_nan=False).encode("utf-8")
+    package_bytes, manifest_bytes = _package_bytes(root, revision)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         raise SalientLocalLfPackageBuildError("package destination already exists")
-    with ZipFile(destination, "x", compression=ZIP_DEFLATED, compresslevel=9) as archive:
-        for path, _blob, payload in (*entries, ("PACKAGE_MANIFEST.json", "", manifest_bytes)):
-            info = ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
-            info.compress_type = ZIP_DEFLATED
-            info.external_attr = 0o100644 << 16
-            archive.writestr(info, payload)
+    with destination.open("xb") as stream:
+        stream.write(package_bytes)
     package_sha = sha256(destination.read_bytes()).hexdigest()
     return {"package_path": str(destination), "package_sha256": package_sha,
             "package_size_bytes": destination.stat().st_size,
             "package_manifest_sha256": sha256(manifest_bytes).hexdigest(),
             "committed_revision": revision, "package_profile": PACKAGE_PROFILE}
+
+
+def verify_salient_local_lf_mask_write_validation_package(
+    repository_root: str | Path, package_path: str | Path, revision: str,
+) -> dict[str, object]:
+    root = Path(repository_root)
+    package = Path(package_path)
+    if not package.is_file():
+        raise SalientLocalLfPackageBuildError("execution package is unavailable")
+    expected, manifest_bytes = _package_bytes(root, revision)
+    actual = package.read_bytes()
+    if actual != expected:
+        raise SalientLocalLfPackageBuildError("existing execution package bytes drifted")
+    return {
+        "package_path": str(package), "package_sha256": sha256(actual).hexdigest(),
+        "package_size_bytes": len(actual),
+        "package_manifest_sha256": sha256(manifest_bytes).hexdigest(),
+        "committed_revision": revision, "package_profile": PACKAGE_PROFILE,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:

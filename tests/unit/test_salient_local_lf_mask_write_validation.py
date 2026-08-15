@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from hashlib import sha256
 import json
 from pathlib import Path
+from struct import pack, unpack
 
 import pytest
 import torch
@@ -19,17 +21,30 @@ from experiments.metrics.salient_local_lf_mask_write_validation import (
 )
 from experiments.protocol.development_records import DevelopmentScientificRecord
 from experiments.protocol.salient_local_lf_mask_write_validation import (
+    CANONICAL_CONTENT_RELATIVE_L2_LIMIT,
     SCIENTIFIC_ROSTER_AUTHORITY_DIGEST,
     SalientLocalLfMaskWriteProtocolError,
     canonical_digest,
     load_salient_local_lf_mask_write_validation_protocol,
 )
 from experiments.runners.salient_local_lf_mask_write_validation import (
+    SalientLocalLfMaskWriteIdentityError,
+    SalientLocalLfMaskWriteIntegrityError,
+    SalientLocalLfMaskWriteRunnerError,
     SalientLocalLfMaskWriteValidationRunner,
+    aggregate_supports_scientific_claim,
+    _actual_dtype_budget_pass,
+)
+from experiments.runners.development_persistence import (
+    DevelopmentPersistentStore,
+    FrozenWorkerIdentity,
 )
 from main import identify_root_key, rgb8_image_digest
 from runtime import InspyrenetSaliencyRuntime, Sd35RuntimeAdapter
-from scripts.experiment_execution.salient_local_lf_mask_write_validation_entrypoint import _safe_failure
+from scripts.experiment_execution.salient_local_lf_mask_write_validation_entrypoint import (
+    _classify_scientific_failure,
+    _safe_failure,
+)
 from scripts.experiment_execution.salient_local_lf_mask_write_validation_server import _verify_locked_dependencies
 
 
@@ -37,6 +52,15 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/experiments/salient_local_lf_mask_write_validation.json"
 COMPONENTS = ROOT / "configs/experiments/internal_execution_components.json"
+
+
+def struct_binary32(value: float) -> float:
+    return unpack(">f", pack(">f", value))[0]
+
+
+def next_binary32(value: float) -> float:
+    bits = unpack(">I", pack(">f", value))[0]
+    return unpack(">f", pack(">I", bits + 1))[0]
 
 
 def _protocol():
@@ -56,11 +80,17 @@ def _quality(*, over_limit: bool = False):
     )
 
 
-def _observation(cluster: int, *, mechanism: bool = True, quality_pass: bool = True):
+def _observation(
+    cluster: int,
+    *,
+    mechanism: bool = True,
+    quality_pass: bool = True,
+    source_cluster_id: str | None = None,
+):
     quality = _quality(over_limit=not quality_pass)
     return create_mask_write_observation(
         cluster_ordinal=cluster,
-        source_cluster_id=f"{cluster + 1:064x}",
+        source_cluster_id=source_cluster_id or f"{cluster + 1:064x}",
         clean_image_digest=quality.clean_image_digest,
         marked_image_digest=quality.marked_image_digest,
         embed_saliency_observation_identity=f"{cluster + 11:064x}",
@@ -119,6 +149,16 @@ def test_authored_roster_and_historical_producer_authorities_are_exact() -> None
         "925c2cbc727e3b18e91c0b3981eeed1b470a955a",
         "7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da",
     )
+    assert tuple(len(item.paths) for item in protocol.historical_prior_authorities) == (3, 3)
+    assert protocol.current_experiment_authority.tracked_path_count == 27
+    assert protocol.current_experiment_authority.current_unique_prompt_digest_count == 1724
+    assert protocol.manifest.future_split_deny_authority.exclusion_roles == (
+        "masked_lf_whitening_fit", "independent_confirmation", "candidate_selection",
+        "calibration", "evaluation",
+    )
+    assert canonical_digest(asdict(protocol.manifest.future_split_deny_authority)) == (
+        protocol.manifest.future_split_deny_authority_digest
+    )
 
 
 def test_roster_authority_and_derived_identity_tamper_fail_closed(tmp_path: Path) -> None:
@@ -133,6 +173,43 @@ def test_roster_authority_and_derived_identity_tamper_fail_closed(tmp_path: Path
     config_path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(SalientLocalLfMaskWriteProtocolError):
         load_salient_local_lf_mask_write_validation_protocol(config_path, repository_root=ROOT)
+
+
+def test_future_split_deny_axis_and_digest_tamper_fail_closed(tmp_path: Path) -> None:
+    manifest = json.loads((ROOT / "configs/experiments/salient_local_lf_mask_write_validation_manifest.json").read_text())
+    manifest["future_split_deny_authority"]["key_lineage_digests"] = manifest[
+        "future_split_deny_authority"
+    ]["key_lineage_digests"][:-1]
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(manifest), encoding="utf-8")
+    config = json.loads(CONFIG.read_text())
+    config["manifest_path"] = str(target)
+    config["manifest_file_sha256"] = sha256(target.read_bytes()).hexdigest()
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(SalientLocalLfMaskWriteProtocolError):
+        load_salient_local_lf_mask_write_validation_protocol(config_path, repository_root=ROOT)
+
+
+def test_current_authority_inventory_tamper_fails_closed(tmp_path: Path) -> None:
+    config = json.loads(CONFIG.read_text())
+    config["current_experiment_authority"]["paths"][0]["raw_sha256"] = "0" * 64
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(SalientLocalLfMaskWriteProtocolError):
+        load_salient_local_lf_mask_write_validation_protocol(config_path, repository_root=ROOT)
+
+
+def test_actual_dtype_budget_uses_exact_binary32_boundary() -> None:
+    assert CANONICAL_CONTENT_RELATIVE_L2_LIMIT == struct_binary32(3 / 250)
+    assert _actual_dtype_budget_pass(
+        budget_status="accepted",
+        realized_relative_l2=CANONICAL_CONTENT_RELATIVE_L2_LIMIT,
+    ) is True
+    assert _actual_dtype_budget_pass(
+        budget_status="accepted",
+        realized_relative_l2=next_binary32(CANONICAL_CONTENT_RELATIVE_L2_LIMIT),
+    ) is False
 
 
 def test_signed_integer_quality_accepts_exact_boundary_and_rejects_next() -> None:
@@ -183,6 +260,18 @@ def test_failure_priority_and_fixed_denominator_are_stable() -> None:
     assert aggregate.scientific_denominator == 8
 
 
+def test_scientific_failure_classification_is_exact_and_prioritized() -> None:
+    assert _classify_scientific_failure(SalientLocalLfMaskWriteIdentityError("private")) == (
+        "identity_failure", "salient_local_lf_public_observation_identity_drift",
+    )
+    assert _classify_scientific_failure(SalientLocalLfMaskWriteIntegrityError("private")) == (
+        "integrity_failure", "salient_local_lf_public_materialization_integrity_drift",
+    )
+    assert _classify_scientific_failure(RuntimeError("private"))[0] == "implementation_failure"
+    assert _classify_scientific_failure(MemoryError("private"))[0] == "resource_failure"
+    assert _classify_scientific_failure(OSError("private"))[0] == "environment_failure"
+
+
 def test_scientific_record_roundtrip_preserves_typed_observation() -> None:
     runner = _runner()
     record = runner._scientific_record(
@@ -192,6 +281,75 @@ def test_scientific_record_roundtrip_preserves_typed_observation() -> None:
     assert replay == record
     assert replay.operation_result_payload["mask_write_observation"]["quality"]["squared_code_delta_sum"] == 786432
     assert replay.metric_observation["source_cluster_id"] == runner.protocol.analysis_identity(2).source_cluster_id
+
+
+def test_real_persistent_store_commits_recovers_and_replays_fixed_ten(
+    tmp_path: Path,
+) -> None:
+    runner = _runner()
+    worker = FrozenWorkerIdentity(
+        revision=runner.method_code_revision,
+        protocol_digest=runner.protocol_digest,
+        execution_intent_authority_digest=runner.execution_intent_authority_digest,
+        input_manifest_digest=runner.protocol.manifest.digest(),
+        candidate_config_digest=runner.candidate_config_digest,
+        unit_roster_digest=runner.protocol.unit_roster_digest,
+    )
+    store = DevelopmentPersistentStore(
+        tmp_path, run_id=runner.protocol.run_id, worker_identity=worker,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    lease = store.acquire_lease(
+        session_id="salient_local_lf_persistence_session",
+        now_epoch_seconds=100, lease_duration_seconds=1000,
+    )
+    cursor = store.open_session_cursor(lease, now_epoch_seconds=100)
+    for unit_index in range(10):
+        intent = store.create_session_intent(cursor, lease, now_epoch_seconds=101 + unit_index * 2)
+        if unit_index < 2:
+            record = runner._operational_record(
+                unit_index=unit_index,
+                operation={
+                    "operational_role": "environment_runtime_throughput_preflight",
+                    "case_ids": [f"salient_local_lf_operational_preflight_{unit_index}"],
+                    "responsibility_result_digests": [["content_embedder", f"{unit_index + 80:064x}"]],
+                    "runtime_config_digest": f"{unit_index + 90:064x}",
+                    "counts_as_scientific_coverage": False,
+                    "scientific_claims_supported": False,
+                },
+                elapsed=0.25, attempt_index=0,
+            )
+        else:
+            entry = runner.protocol.manifest.entries[unit_index - 2]
+            record = runner._scientific_record(
+                unit_index=unit_index, attempt_index=0, elapsed=0.25,
+                observation=_observation(
+                    unit_index - 2, source_cluster_id=entry.source_cluster_id,
+                ),
+            )
+        marker = store.commit_session_unit(
+            cursor, lease, intent, record=record,
+            raw_secret_values=("salient-mask-write-test-root", runner.registered_root_key),
+            now_epoch_seconds=102 + unit_index * 2,
+        )
+        assert marker.unit_index == unit_index
+        assert marker.attempt_index == 0
+    reopened = DevelopmentPersistentStore(
+        tmp_path, run_id=runner.protocol.run_id, worker_identity=worker,
+        registered_unit_bindings=runner.create_persistence_unit_bindings(),
+    )
+    recovery = reopened.recover(now_epoch_seconds=500)
+    evidence = reopened.verified_terminal_scientific_evidence_for_unit_indexes(
+        tuple(range(2, 10)), now_epoch_seconds=500,
+    )
+    aggregate = runner.replay_aggregate(evidence)
+    assert len(recovery.committed_units) == 10
+    assert tuple(item.unit_index for item in recovery.committed_units) == tuple(range(10))
+    assert aggregate.successful_observation_count == 8
+    assert aggregate_supports_scientific_claim(aggregate) is True
+    first_record, first_marker = evidence[0]
+    with pytest.raises(SalientLocalLfMaskWriteRunnerError):
+        runner.replay_aggregate(((first_record, replace(first_marker, unit_id="development_unit_0003")), *evidence[1:]))
 
 
 def test_safe_failure_is_package_relative_bounded_and_secret_free() -> None:

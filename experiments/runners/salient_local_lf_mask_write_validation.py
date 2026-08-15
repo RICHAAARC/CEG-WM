@@ -14,6 +14,7 @@ import torch
 
 from experiments.methods import CegWmExperimentAdapter
 from experiments.metrics.salient_local_lf_mask_write_validation import (
+    SalientLocalLfMaskWriteAggregate,
     SalientLocalLfMaskWriteObservation,
     SalientLocalLfTerminalFailure,
     aggregate_salient_local_lf_mask_write_validation,
@@ -33,6 +34,7 @@ from experiments.protocol.development_records import (
     canonical_development_value_digest,
 )
 from experiments.protocol.salient_local_lf_mask_write_validation import (
+    CANONICAL_CONTENT_RELATIVE_L2_LIMIT,
     OPERATIONAL_UNIT_COUNT,
     SalientLocalLfMaskWriteProtocol,
     canonical_digest,
@@ -40,6 +42,7 @@ from experiments.protocol.salient_local_lf_mask_write_validation import (
 from experiments.runners.development_persistence import (
     CommittedUnit,
     FrozenDevelopmentUnitBinding,
+    canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
 from main import (
@@ -52,6 +55,24 @@ from runtime import InspyrenetSaliencyRuntime, Sd35RuntimeAdapter
 
 class SalientLocalLfMaskWriteRunnerError(RuntimeError):
     """The public pilot execution or persistent replay drifted."""
+
+
+class SalientLocalLfMaskWriteIdentityError(SalientLocalLfMaskWriteRunnerError):
+    """A public observation identity failed before persistent success."""
+
+
+class SalientLocalLfMaskWriteIntegrityError(SalientLocalLfMaskWriteRunnerError):
+    """A public materialization integrity check failed before persistent success."""
+
+
+def _actual_dtype_budget_pass(*, budget_status: str, realized_relative_l2: float) -> bool:
+    if (type(realized_relative_l2) is not float or not isfinite(realized_relative_l2)
+            or realized_relative_l2 < 0.0):
+        raise SalientLocalLfMaskWriteRunnerError("actual-dtype budget observation is invalid")
+    return bool(
+        budget_status == "accepted"
+        and realized_relative_l2 <= CANONICAL_CONTENT_RELATIVE_L2_LIMIT
+    )
 
 
 def _metric_observation_payload(
@@ -134,6 +155,11 @@ class SalientLocalLfMaskWriteValidationRunner:
 
     def _operational_record(self, *, unit_index: int, operation: dict[str, object],
                             elapsed: float, attempt_index: int) -> DevelopmentOperationalRecord:
+        operation = {
+            **operation,
+            "source_cluster_ordinal": unit_index,
+            "elapsed_seconds": elapsed,
+        }
         record = DevelopmentOperationalRecord(
             schema_version=OPERATIONAL_RECORD_SCHEMA,
             collection_role=OPERATIONAL_RECORD_COLLECTION_ROLE,
@@ -159,9 +185,9 @@ class SalientLocalLfMaskWriteValidationRunner:
             observation_role="detect_public_rgb8",
         )
         operation = {
-            "operational_role": "inspyrenet_checkpoint_and_public_api_preflight",
+            "operational_role": "environment_runtime_throughput_preflight",
             "case_ids": ["package_source_lock_runtime_checkpoint_public_saliency_preflight"],
-            "responsibility_result_digests": [["content_router", canonical_digest({
+            "responsibility_result_digests": [["content_embedder", canonical_digest({
                 "checkpoint_asset_identity": self.protocol.raw["checkpoint_asset_identity"],
                 "checkpoint_size_bytes": self.protocol.raw["checkpoint_size_bytes"],
                 "checkpoint_sha256": self.protocol.raw["checkpoint_sha256"],
@@ -177,6 +203,7 @@ class SalientLocalLfMaskWriteValidationRunner:
                 "torch_runtime": torch.__version__,
                 "cuda_runtime": torch.version.cuda,
             })]],
+            "runtime_config_digest": self.protocol.raw["runtime_configuration_file_sha256"],
             "counts_as_scientific_coverage": False,
             "scientific_claims_supported": False,
         }
@@ -193,12 +220,14 @@ class SalientLocalLfMaskWriteValidationRunner:
             result.watermarked_image_rgb8, self.saliency_runtime,
         )
         operation = {
-            "operational_role": "salient_local_lf_public_runtime_throughput_preflight",
+            "operational_role": "environment_runtime_throughput_preflight",
             "case_ids": ["nonterminal_content_write_vae_floor_rgb8_saliency_materialization_detection_preflight"],
-            "responsibility_result_digests": [["content_embedder", result.embedding_result_identity]],
+            "responsibility_result_digests": [["content_embedder", canonical_digest({
+                "embedding_result_identity": result.embedding_result_identity,
+                "embed_observation_identity": result.embed_saliency_observation.observation_identity,
+                "detect_observation_identity": detection.saliency_observation.observation_identity,
+            })]],
             "runtime_config_digest": result.runtime_config_digest,
-            "embed_observation_identity": result.embed_saliency_observation.observation_identity,
-            "detect_observation_identity": detection.saliency_observation.observation_identity,
             "counts_as_scientific_coverage": False,
             "scientific_claims_supported": False,
         }
@@ -261,7 +290,10 @@ class SalientLocalLfMaskWriteValidationRunner:
             ),
             accepted_materialization_replay_identity=write.accepted_materialization.materialization_replay_identity,
             realized_relative_l2=write.realized_relative_l2,
-            actual_dtype_budget_pass=(write.budget_status == "accepted" and write.realized_relative_l2 <= 3.0 / 250.0),
+            actual_dtype_budget_pass=_actual_dtype_budget_pass(
+                budget_status=write.budget_status,
+                realized_relative_l2=write.realized_relative_l2,
+            ),
             identity_pass=(detected.input_image_digest == write.watermarked_image_digest),
             integrity_pass=(write.integrity_status == "passed"), quality=quality,
         )
@@ -328,6 +360,10 @@ class SalientLocalLfMaskWriteValidationRunner:
                                 attempt_index: int = 0) -> DevelopmentScientificRecord:
         started = monotonic()
         observation = self.execute_scientific_observation(unit_index=unit_index, base_latent=base_latent)
+        if not observation.identity_pass:
+            raise SalientLocalLfMaskWriteIdentityError("public observation identity drifted")
+        if not observation.integrity_pass:
+            raise SalientLocalLfMaskWriteIntegrityError("public materialization integrity drifted")
         return self._scientific_record(unit_index=unit_index, attempt_index=attempt_index,
                                        elapsed=float(monotonic() - started), observation=observation)
 
@@ -340,22 +376,85 @@ class SalientLocalLfMaskWriteValidationRunner:
     def replay_aggregate(self, evidence: Sequence[tuple[DevelopmentScientificRecord, CommittedUnit]]):
         observations = []
         failures = []
+        seen: set[int] = set()
         for record, marker in evidence:
+            if type(record) is not DevelopmentScientificRecord or type(marker) is not CommittedUnit:
+                raise SalientLocalLfMaskWriteRunnerError("exact persistent evidence types are required")
             record.validate()
+            unit_index = record.unit_index
+            if (unit_index in seen or not OPERATIONAL_UNIT_COUNT <= unit_index < len(self.protocol.unit_roster)
+                    or marker.unit_index != unit_index or marker.unit_id != f"development_unit_{unit_index:04d}"
+                    or marker.protocol_digest != self.protocol_digest
+                    or marker.revision != self.method_code_revision or marker.run_id != self.protocol.run_id
+                    or marker.attempt_index != record.attempt_index or marker.record_id != record.record_id
+                    or marker.record_digest != sha256(canonical_json_bytes(record.payload())).hexdigest()
+                    or marker.record_kind != "development_scientific_record"
+                    or record.protocol_digest != self.protocol_digest
+                    or record.method_code_revision != self.method_code_revision
+                    or record.run_id != self.protocol.run_id
+                    or record.protocol_id != self.protocol.protocol_id
+                    or record.protocol_version != self.protocol.protocol_version
+                    or record.execution_intent_authority_digest != self.execution_intent_authority_digest
+                    or record.candidate_config_digest != self.candidate_config_digest
+                    or record.analysis_unit_identity != asdict(self.protocol.analysis_identity(unit_index))):
+                raise SalientLocalLfMaskWriteRunnerError("persistent scientific authority drifted")
+            unit = self.protocol.unit_roster[unit_index]
+            if (record.phase != unit.phase or record.responsibility_id != "content_embedder"
+                    or record.content_branch_id != unit.content_branch_id
+                    or record.geometry_case_id != unit.geometry_case_id):
+                raise SalientLocalLfMaskWriteRunnerError("persistent scientific responsibility drifted")
+            seen.add(unit_index)
             if marker.attempt_disposition == "success":
+                if (record.execution_status != "success" or record.failure_class is not None
+                        or record.failure_reason is not None):
+                    raise SalientLocalLfMaskWriteRunnerError("successful scientific record drifted")
                 raw = record.operation_result_payload.get("mask_write_observation")
                 if type(raw) is not dict or type(raw.get("quality")) is not dict:
                     raise SalientLocalLfMaskWriteRunnerError("scientific observation payload is missing")
                 from experiments.metrics.salient_local_lf_mask_write_validation import PublicRgb8QualityObservation
-                observations.append(SalientLocalLfMaskWriteObservation(**{
+                observation = SalientLocalLfMaskWriteObservation(**{
                     **raw, "quality": PublicRgb8QualityObservation(**raw["quality"]),
-                }))
+                })
+                observation.validate()
+                entry = self.protocol.manifest.entries[unit_index - OPERATIONAL_UNIT_COUNT]
+                if (observation.cluster_ordinal != entry.cluster_ordinal
+                        or observation.source_cluster_id != entry.source_cluster_id
+                        or record.operation_result_digest != canonical_digest(record.operation_result_payload)
+                        or tuple(record.metric_observation.get("result_identity_digests", ()))
+                        != (observation.observation_identity, observation.quality.observation_identity)):
+                    raise SalientLocalLfMaskWriteRunnerError("scientific observation binding drifted")
+                observations.append(observation)
             else:
+                if (marker.attempt_disposition != "final_failure" or record.execution_status != "failed"
+                        or record.operation_result_payload or record.metric_observation
+                        or record.failure_class not in {
+                            "identity_failure", "integrity_failure", "implementation_failure",
+                            "resource_failure", "environment_failure",
+                        } or type(record.failure_reason) is not str or not record.failure_reason):
+                    raise SalientLocalLfMaskWriteRunnerError("failed scientific record drifted")
                 failures.append(SalientLocalLfTerminalFailure(
-                    record.analysis_unit_identity["source_cluster_id"] and record.unit_index - OPERATIONAL_UNIT_COUNT,
+                    record.unit_index - OPERATIONAL_UNIT_COUNT,
                     str(record.failure_class), str(record.failure_reason),
                 ))
+        if seen != set(range(OPERATIONAL_UNIT_COUNT, len(self.protocol.unit_roster))):
+            raise SalientLocalLfMaskWriteRunnerError("persistent scientific denominator is incomplete")
         return aggregate_salient_local_lf_mask_write_validation(observations, failures)
 
 
-__all__ = ["SalientLocalLfMaskWriteValidationRunner", "SalientLocalLfMaskWriteRunnerError"]
+def aggregate_supports_scientific_claim(aggregate: object) -> bool:
+    return bool(
+        type(aggregate) is SalientLocalLfMaskWriteAggregate
+        and getattr(aggregate, "successful_observation_count", None) == 8
+        and all(getattr(aggregate, field, None) == 0 for field in (
+            "identity_failure_count", "integrity_failure_count",
+            "implementation_failure_count", "resource_failure_count",
+            "environment_failure_count",
+        ))
+    )
+
+
+__all__ = [
+    "SalientLocalLfMaskWriteValidationRunner", "SalientLocalLfMaskWriteRunnerError",
+    "SalientLocalLfMaskWriteIdentityError", "SalientLocalLfMaskWriteIntegrityError",
+    "aggregate_supports_scientific_claim",
+]

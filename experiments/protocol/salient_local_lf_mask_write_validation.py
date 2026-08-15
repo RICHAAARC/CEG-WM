@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import csv
 from hashlib import sha256
+import io
 import json
 from pathlib import Path, PurePosixPath
 import re
+from struct import pack, unpack
 import subprocess
 from typing import Mapping
 
@@ -24,6 +27,9 @@ MAXIMUM_ATTEMPTS_PER_UNIT = 1
 MAXIMUM_DURATION_SECONDS = 2700
 CONTENT_RELATIVE_L2_NUMERATOR = 3
 CONTENT_RELATIVE_L2_DENOMINATOR = 250
+CANONICAL_CONTENT_RELATIVE_L2_LIMIT = unpack(
+    ">f", pack(">f", CONTENT_RELATIVE_L2_NUMERATOR / CONTENT_RELATIVE_L2_DENOMINATOR)
+)[0]
 QUALITY_PIXEL_COUNT = 786432
 QUALITY_SQUARED_CODE_DELTA_LIMIT = 786432
 MINIMUM_MECHANISM_SUCCESS_COUNT = 7
@@ -75,21 +81,23 @@ class HistoricalProducerAuthority:
         if not self.authority_identity or _REVISION.fullmatch(self.producer_revision) is None or not self.paths:
             raise SalientLocalLfMaskWriteProtocolError("historical producer authority is invalid")
         documents = []
-        git_available = subprocess.run(
+        package_manifest_path = repository_root / "PACKAGE_MANIFEST.json"
+        package_available = package_manifest_path.is_file()
+        git_available = not package_available and subprocess.run(
             ("git", "rev-parse", "--git-dir"), cwd=repository_root,
             check=False, capture_output=True, text=True,
         ).returncode == 0
         package_manifest = None
-        if not git_available:
+        if package_available:
             try:
-                package_manifest = json.loads((repository_root / "PACKAGE_MANIFEST.json").read_text("utf-8"))
+                package_manifest = json.loads(package_manifest_path.read_text("utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 raise SalientLocalLfMaskWriteProtocolError("packaged historical authority manifest is unavailable") from exc
             if type(package_manifest) is not dict or type(package_manifest.get("entries")) is not list:
                 raise SalientLocalLfMaskWriteProtocolError("packaged historical authority manifest is invalid")
         for binding in self.paths:
             binding.validate()
-            if git_available:
+            if not package_available and git_available:
                 try:
                     tree = subprocess.run(
                         ("git", "ls-tree", self.producer_revision, "--", binding.path),
@@ -105,17 +113,21 @@ class HistoricalProducerAuthority:
                     ) from exc
                 if len(tree) != 4 or tree[:2] != ["100644", "blob"] or tree[2] != binding.git_blob_sha:
                     raise SalientLocalLfMaskWriteProtocolError("historical producer Git blob drifted")
-            else:
+            elif package_available:
                 member = repository_root / binding.package_member_path
                 try:
+                    if not member.is_file() or member.is_symlink():
+                        raise OSError("packaged historical producer member is not regular")
                     payload = member.read_bytes()
                 except OSError as exc:
                     raise SalientLocalLfMaskWriteProtocolError("packaged historical producer bytes are unavailable") from exc
                 matching = [item for item in package_manifest["entries"] if type(item) is dict and item.get("path") == binding.package_member_path]
                 if (len(matching) != 1 or matching[0].get("git_blob_sha") != binding.git_blob_sha
-                        or matching[0].get("sha256") != binding.raw_sha256
+                        or matching[0].get("raw_sha256", matching[0].get("sha256")) != binding.raw_sha256
                         or matching[0].get("size") != len(payload)):
                     raise SalientLocalLfMaskWriteProtocolError("packaged historical producer binding drifted")
+            else:
+                raise SalientLocalLfMaskWriteProtocolError("historical producer authority is unavailable")
             if sha256(payload).hexdigest() != binding.raw_sha256:
                 raise SalientLocalLfMaskWriteProtocolError("historical producer bytes drifted")
             try:
@@ -126,6 +138,186 @@ class HistoricalProducerAuthority:
                 raise SalientLocalLfMaskWriteProtocolError("historical producer JSON must be a mapping")
             documents.append(document)
         return tuple(documents)
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentExperimentPathBinding:
+    path: str
+    mode: str
+    git_blob_sha: str
+    raw_sha256: str
+    package_member_path: str
+
+    def validate(self, revision: str) -> None:
+        source = PurePosixPath(self.path)
+        packaged = PurePosixPath(self.package_member_path)
+        prefix = f"authority_inputs/current_{revision}/"
+        if (source.is_absolute() or ".." in source.parts
+                or not self.path.startswith("configs/experiments/")
+                or self.mode != "100644" or _REVISION.fullmatch(self.git_blob_sha) is None
+                or _DIGEST.fullmatch(self.raw_sha256) is None
+                or packaged.is_absolute() or ".." in packaged.parts
+                or self.package_member_path != prefix + self.path):
+            raise SalientLocalLfMaskWriteProtocolError("current experiment path binding is invalid")
+
+
+def _package_manifest(repository_root: Path) -> dict[str, object] | None:
+    path = repository_root / "PACKAGE_MANIFEST.json"
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SalientLocalLfMaskWriteProtocolError("execution package manifest is invalid") from exc
+    if type(value) is not dict or type(value.get("entries")) is not list:
+        raise SalientLocalLfMaskWriteProtocolError("execution package manifest is invalid")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentExperimentAuthority:
+    authority_identity: str
+    producer_revision: str
+    configs_experiments_tree_oid: str
+    tracked_path_count: int
+    parti_prompt_asset_path: str
+    parti_prompt_asset_data_row_count: int
+    parti_prompt_asset_unique_prompt_digest_count: int
+    current_unique_prompt_digest_count: int
+    paths: tuple[CurrentExperimentPathBinding, ...]
+
+    def validate_and_read(self, repository_root: Path) -> tuple[tuple[str, bytes], ...]:
+        if (self.authority_identity != "current_experiment_inputs_at_salient_local_lf_authorization_base"
+                or self.producer_revision != "061991c67bb0ceb3fbfe3359a2d86b78f301f171"
+                or self.configs_experiments_tree_oid != "829bf5200754c6f54c6ee422188e9184776793ab"
+                or self.tracked_path_count != 27 or len(self.paths) != 27
+                or self.parti_prompt_asset_data_row_count != 1632
+                or self.parti_prompt_asset_unique_prompt_digest_count != 1632
+                or self.current_unique_prompt_digest_count != 1724):
+            raise SalientLocalLfMaskWriteProtocolError("current experiment authority drifted")
+        if tuple(item.path for item in self.paths) != tuple(sorted(item.path for item in self.paths)):
+            raise SalientLocalLfMaskWriteProtocolError("current experiment inventory is not sorted")
+        package = _package_manifest(repository_root)
+        payloads: list[tuple[str, bytes]] = []
+        if package is None:
+            try:
+                tree_line = subprocess.run(
+                    ("git", "ls-tree", self.producer_revision, "--", "configs/experiments"),
+                    cwd=repository_root, check=True, capture_output=True, text=True,
+                ).stdout.strip().split()
+                tree_bytes = subprocess.run(
+                    ("git", "ls-tree", "-r", "-z", self.producer_revision, "--", "configs/experiments"),
+                    cwd=repository_root, check=True, capture_output=True,
+                ).stdout
+            except (OSError, subprocess.CalledProcessError) as exc:
+                raise SalientLocalLfMaskWriteProtocolError("current experiment Git authority is unavailable") from exc
+            if len(tree_line) != 4 or tree_line[:2] != ["040000", "tree"] or tree_line[2] != self.configs_experiments_tree_oid:
+                raise SalientLocalLfMaskWriteProtocolError("current experiment root tree drifted")
+            observed: list[tuple[str, str, str]] = []
+            for item in tree_bytes.split(b"\0"):
+                if not item:
+                    continue
+                metadata, encoded = item.split(b"\t", 1)
+                mode, kind, blob = metadata.decode("ascii").split()
+                if kind != "blob":
+                    raise SalientLocalLfMaskWriteProtocolError("current experiment tree contains a non-blob")
+                observed.append((encoded.decode("utf-8"), mode, blob))
+            expected = [(item.path, item.mode, item.git_blob_sha) for item in self.paths]
+            if observed != expected:
+                raise SalientLocalLfMaskWriteProtocolError("current experiment Git inventory drifted")
+            for binding in self.paths:
+                binding.validate(self.producer_revision)
+                try:
+                    payload = subprocess.run(
+                        ("git", "cat-file", "blob", binding.git_blob_sha), cwd=repository_root,
+                        check=True, capture_output=True,
+                    ).stdout
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    raise SalientLocalLfMaskWriteProtocolError("current experiment Git blob is unavailable") from exc
+                payloads.append((binding.path, payload))
+        else:
+            roots = package.get("authority_root_tree_oids")
+            if type(roots) is not dict or roots.get(self.producer_revision) != self.configs_experiments_tree_oid:
+                raise SalientLocalLfMaskWriteProtocolError("packaged current authority root tree drifted")
+            entries = package["entries"]
+            for binding in self.paths:
+                binding.validate(self.producer_revision)
+                matches = [item for item in entries if type(item) is dict and item.get("path") == binding.package_member_path]
+                member = repository_root / binding.package_member_path
+                try:
+                    if not member.is_file() or member.is_symlink():
+                        raise OSError("packaged current authority member is not regular")
+                    payload = member.read_bytes()
+                except OSError as exc:
+                    raise SalientLocalLfMaskWriteProtocolError("packaged current authority bytes are unavailable") from exc
+                if (len(matches) != 1 or matches[0].get("mode") != binding.mode
+                        or matches[0].get("git_blob_sha") != binding.git_blob_sha
+                        or matches[0].get("raw_sha256", matches[0].get("sha256")) != binding.raw_sha256
+                        or matches[0].get("size") != len(payload)):
+                    raise SalientLocalLfMaskWriteProtocolError("packaged current authority binding drifted")
+                payloads.append((binding.path, payload))
+        if any(sha256(payload).hexdigest() != binding.raw_sha256
+               for binding, (_path, payload) in zip(self.paths, payloads, strict=True)):
+            raise SalientLocalLfMaskWriteProtocolError("current experiment bytes drifted")
+        asset = dict(payloads).get(self.parti_prompt_asset_path)
+        if asset is None:
+            raise SalientLocalLfMaskWriteProtocolError("current prompt asset is unavailable")
+        try:
+            rows = list(csv.reader(io.StringIO(asset.decode("utf-8")), delimiter="\t"))
+        except UnicodeError as exc:
+            raise SalientLocalLfMaskWriteProtocolError("current prompt asset is invalid") from exc
+        if (not rows or rows[0] != ["Prompt", "Category", "Challenge", "Note"]
+                or len(rows[1:]) != self.parti_prompt_asset_data_row_count
+                or any(len(row) != 4 or not row[0] for row in rows[1:])
+                or len({sha256(row[0].encode("utf-8")).hexdigest() for row in rows[1:]})
+                != self.parti_prompt_asset_unique_prompt_digest_count):
+            raise SalientLocalLfMaskWriteProtocolError("current prompt asset authority drifted")
+        return tuple(payloads)
+
+
+@dataclass(frozen=True, slots=True)
+class FutureSplitDenyAuthority:
+    schema_version: str
+    exclusion_roles: tuple[str, ...]
+    prompt_digests: tuple[str, ...]
+    generation_seeds: tuple[int, ...]
+    cluster_identities: tuple[str, ...]
+    source_cluster_ids: tuple[str, ...]
+    key_lineage_digests: tuple[str, ...]
+    image_lineage_digests: tuple[str, ...]
+    seed_namespace: str
+    source_cluster_namespace: str
+    image_lineage_namespace: str
+    image_lineage_identity: str
+    key_lineage_namespace: str
+    key_lineage_identity: str
+    registered_key_family_digest: str
+    scientific_roster_authority_digest: str
+
+    def validate(self, roster: "SalientLocalLfScientificRoster", expected_digest: str) -> None:
+        entries = roster.entries
+        expected = {
+            "schema_version": "ceg_wm_salient_local_lf_future_split_deny_authority_v1",
+            "exclusion_roles": ("masked_lf_whitening_fit", "independent_confirmation", "candidate_selection", "calibration", "evaluation"),
+            "prompt_digests": tuple(item.prompt_digest for item in entries),
+            "generation_seeds": tuple(item.generation_seed for item in entries),
+            "cluster_identities": tuple(item.cluster_identity for item in entries),
+            "source_cluster_ids": tuple(item.source_cluster_id for item in entries),
+            "key_lineage_digests": tuple(item.key_lineage_digest for item in entries),
+            "image_lineage_digests": tuple(item.image_lineage_digest for item in entries),
+            "seed_namespace": roster.seed_namespace,
+            "source_cluster_namespace": roster.source_cluster_namespace,
+            "image_lineage_namespace": roster.image_lineage_namespace,
+            "image_lineage_identity": roster.image_lineage_identity,
+            "key_lineage_namespace": roster.key_lineage_namespace,
+            "key_lineage_identity": roster.key_lineage_identity,
+            "registered_key_family_digest": roster.registered_key_family_digest,
+            "scientific_roster_authority_digest": roster.scientific_roster_authority_digest,
+        }
+        if any(getattr(self, key) != value for key, value in expected.items()):
+            raise SalientLocalLfMaskWriteProtocolError("future split deny authority drifted")
+        if _DIGEST.fullmatch(expected_digest) is None or canonical_digest(asdict(self)) != expected_digest:
+            raise SalientLocalLfMaskWriteProtocolError("future split deny authority digest drifted")
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +390,8 @@ class SalientLocalLfScientificRoster:
     registered_key_derivation_identity: str
     registered_key_family_digest: str
     scientific_roster_authority_digest: str
+    future_split_deny_authority_digest: str
+    future_split_deny_authority: FutureSplitDenyAuthority
     entries: tuple[SalientLocalLfScientificRosterEntry, ...]
 
     def authority_payload(self) -> dict[str, object]:
@@ -226,6 +420,9 @@ class SalientLocalLfScientificRoster:
             raise SalientLocalLfMaskWriteProtocolError("scientific roster authority drifted")
         for entry in self.entries:
             entry.validate(self)
+        self.future_split_deny_authority.validate(
+            self, self.future_split_deny_authority_digest,
+        )
         axes = (
             tuple(item.cluster_identity for item in self.entries),
             tuple(item.source_cluster_id for item in self.entries),
@@ -242,6 +439,7 @@ class SalientLocalLfScientificRoster:
 class SalientLocalLfMaskWriteProtocol:
     raw: Mapping[str, object]
     manifest: SalientLocalLfScientificRoster
+    current_experiment_authority: CurrentExperimentAuthority
     historical_prior_authorities: tuple[HistoricalProducerAuthority, ...]
     unit_roster: tuple[DevelopmentStudyUnit, ...]
 
@@ -285,6 +483,7 @@ class SalientLocalLfMaskWriteProtocol:
             digest_key = key.replace("_path", "_file_sha256")
             if not path.is_file() or sha256(path.read_bytes()).hexdigest() != self.raw[digest_key]:
                 raise SalientLocalLfMaskWriteProtocolError(f"{key} bytes drifted")
+        current_payloads = self.current_experiment_authority.validate_and_read(repository_root)
         if len(self.historical_prior_authorities) != 2:
             raise SalientLocalLfMaskWriteProtocolError("historical producer authority count drifted")
         historical_documents = tuple(
@@ -322,6 +521,31 @@ class SalientLocalLfMaskWriteProtocol:
 
         for document in historical_documents:
             collect(document)
+        current_prompt_digests: set[str] = set()
+        for path, payload in current_payloads:
+            if path.endswith(".json"):
+                try:
+                    document = json.loads(payload.decode("utf-8"))
+                except (UnicodeError, json.JSONDecodeError) as exc:
+                    raise SalientLocalLfMaskWriteProtocolError("current experiment JSON is invalid") from exc
+                collect(document)
+
+                def collect_explicit_prompt_digests(value: object) -> None:
+                    if type(value) is dict:
+                        for key, item in value.items():
+                            if key == "prompt_digest" and type(item) is str:
+                                current_prompt_digests.add(item)
+                            collect_explicit_prompt_digests(item)
+                    elif type(value) is list:
+                        for item in value:
+                            collect_explicit_prompt_digests(item)
+
+                collect_explicit_prompt_digests(document)
+            elif path == self.current_experiment_authority.parti_prompt_asset_path:
+                rows = list(csv.reader(io.StringIO(payload.decode("utf-8")), delimiter="\t"))[1:]
+                current_prompt_digests.update(sha256(row[0].encode("utf-8")).hexdigest() for row in rows)
+        if len(current_prompt_digests) != self.current_experiment_authority.current_unique_prompt_digest_count:
+            raise SalientLocalLfMaskWriteProtocolError("current prompt digest authority count drifted")
         new_axes = {
             "prompt_digests": {item.prompt_digest for item in self.manifest.entries},
             "generation_seeds": {item.generation_seed for item in self.manifest.entries},
@@ -344,6 +568,13 @@ class SalientLocalLfMaskWriteProtocol:
         }
         if any(new_axes[name] & prior_axes[name] for name in new_axes):
             raise SalientLocalLfMaskWriteProtocolError("scientific roster overlaps historical authority")
+        deny = self.manifest.future_split_deny_authority
+        if (set(deny.prompt_digests) & prior_axes["prompt_digests"]
+                or set(deny.generation_seeds) & prior_axes["generation_seeds"]
+                or (set(deny.cluster_identities) | set(deny.source_cluster_ids)) & prior_axes["source_clusters"]
+                or set(deny.image_lineage_digests) & prior_axes["image_lineages"]
+                or set(deny.key_lineage_digests) & prior_axes["key_lineages"]):
+            raise SalientLocalLfMaskWriteProtocolError("future split deny authority overlaps prior inputs")
 
     def analysis_identity(self, unit_index: int) -> AnalysisUnitIdentity:
         unit = self.unit_roster[unit_index]
@@ -386,9 +617,23 @@ def load_salient_local_lf_mask_write_validation_protocol(
     root = Path(repository_root)
     raw = _load_json(Path(path))
     manifest_raw = _load_json(root / str(raw["manifest_path"]))
-    manifest = SalientLocalLfScientificRoster(
-        **{**manifest_raw, "entries": tuple(SalientLocalLfScientificRosterEntry(**item) for item in manifest_raw["entries"])}
-    )
+    future_raw = manifest_raw["future_split_deny_authority"]
+    manifest = SalientLocalLfScientificRoster(**{
+        **manifest_raw,
+        "future_split_deny_authority": FutureSplitDenyAuthority(**{
+            **future_raw,
+            **{key: tuple(future_raw[key]) for key in (
+                "exclusion_roles", "prompt_digests", "generation_seeds", "cluster_identities",
+                "source_cluster_ids", "key_lineage_digests", "image_lineage_digests",
+            )},
+        }),
+        "entries": tuple(SalientLocalLfScientificRosterEntry(**item) for item in manifest_raw["entries"]),
+    })
+    current_raw = raw["current_experiment_authority"]
+    current_authority = CurrentExperimentAuthority(**{
+        **current_raw,
+        "paths": tuple(CurrentExperimentPathBinding(**item) for item in current_raw["paths"]),
+    })
     authorities = tuple(
         HistoricalProducerAuthority(**{**item, "paths": tuple(HistoricalProducerPathBinding(**binding) for binding in item["paths"])})
         for item in raw["historical_prior_authorities"]
@@ -396,13 +641,13 @@ def load_salient_local_lf_mask_write_validation_protocol(
     units = (
         DevelopmentStudyUnit(0, "development_environment_preflight", "development_environment_preflight", 0,
                              "inspyrenet_checkpoint_runtime_preflight", "geometry_case_not_applicable", 1, MAXIMUM_DURATION_SECONDS),
-        DevelopmentStudyUnit(1, "development_full_chain_wiring", "development_full_chain_wiring", 1,
+        DevelopmentStudyUnit(1, "development_environment_preflight", "development_environment_preflight", 1,
                              "salient_local_lf_public_write_observation_preflight", "geometry_case_not_applicable", 1, MAXIMUM_DURATION_SECONDS),
         *(DevelopmentStudyUnit(index + OPERATIONAL_UNIT_COUNT, "development_scientific_responsibility_case", "content_embedder", index,
                                "global_hf_local_lf_mask_write_public_rgb8", "geometry_case_not_applicable", 1, MAXIMUM_DURATION_SECONDS)
           for index in range(SCIENTIFIC_UNIT_COUNT)),
     )
-    protocol = SalientLocalLfMaskWriteProtocol(raw, manifest, authorities, tuple(units))
+    protocol = SalientLocalLfMaskWriteProtocol(raw, manifest, current_authority, authorities, tuple(units))
     protocol.validate(root)
     return protocol
 
@@ -410,6 +655,8 @@ def load_salient_local_lf_mask_write_validation_protocol(
 __all__ = [
     "SalientLocalLfMaskWriteProtocolError", "SalientLocalLfMaskWriteProtocol",
     "SalientLocalLfScientificRoster", "SalientLocalLfScientificRosterEntry",
+    "CurrentExperimentAuthority", "CurrentExperimentPathBinding", "FutureSplitDenyAuthority",
     "load_salient_local_lf_mask_write_validation_protocol", "canonical_digest",
     "OPERATIONAL_UNIT_COUNT", "SCIENTIFIC_UNIT_COUNT", "MAXIMUM_TOTAL_UNITS",
+    "CANONICAL_CONTENT_RELATIVE_L2_LIMIT",
 ]

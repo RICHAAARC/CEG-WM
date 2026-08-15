@@ -19,6 +19,7 @@ from experiments.protocol.salient_local_lf_mask_write_validation import (
 )
 from scripts.experiment_execution.build_salient_local_lf_mask_write_validation_package import (
     build_salient_local_lf_mask_write_validation_package,
+    verify_salient_local_lf_mask_write_validation_package,
 )
 from scripts.experiment_execution.development_exploration_server import (
     RUNTIME_CONFIG_PATH, _absolute_directory, _download_configured_model,
@@ -129,7 +130,9 @@ def execute_salient_local_lf_mask_write_validation_server_session(
     package_path = persistent / run_id / "execution_packages" / f"{expected_revision}.zip"
     package_path.parent.mkdir(parents=True, exist_ok=True)
     if package_path.exists():
-        package_sha = _file_sha256(package_path)
+        package_sha = str(verify_salient_local_lf_mask_write_validation_package(
+            repository, package_path, expected_revision,
+        )["package_sha256"])
     else:
         package_sha = str(build_salient_local_lf_mask_write_validation_package(
             repository, package_path, expected_revision)["package_sha256"])
@@ -153,6 +156,17 @@ def execute_salient_local_lf_mask_write_validation_server_session(
     aggregate = worker.get("salient_local_lf_mask_write_aggregate")
     if exit_code and aggregate is not None:
         raise SalientLocalLfMaskWriteServerError("failed worker cannot forge an aggregate")
+    expected_claim = (
+        type(aggregate) is dict
+        and aggregate.get("successful_observation_count") == 8
+        and all(aggregate.get(key) == 0 for key in (
+            "identity_failure_count", "integrity_failure_count",
+            "implementation_failure_count", "resource_failure_count",
+            "environment_failure_count",
+        ))
+    )
+    if worker.get("scientific_claims_supported") is not expected_claim:
+        raise SalientLocalLfMaskWriteServerError("worker scientific claim authority drifted")
     receipt_path = persistent / run_id / "server_receipts" / session_id / "execution_receipt.json"
     receipt = {
         **worker, "artifact_path": str(artifact), "artifact_sha256": _file_sha256(artifact),

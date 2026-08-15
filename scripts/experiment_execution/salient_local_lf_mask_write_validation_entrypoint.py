@@ -28,7 +28,10 @@ from experiments.runners.development_persistence import (
     SessionReceipt,
 )
 from experiments.runners.salient_local_lf_mask_write_validation import (
+    SalientLocalLfMaskWriteIdentityError,
+    SalientLocalLfMaskWriteIntegrityError,
     SalientLocalLfMaskWriteValidationRunner,
+    aggregate_supports_scientific_claim,
 )
 from main import identify_root_key, key_schedule_sha256_counter
 from runtime import InspyrenetSaliencyRuntime, Sd35PipelineBackend, create_runtime_adapter
@@ -73,6 +76,18 @@ def _is_resource_failure(error: BaseException) -> bool:
     kinds = tuple(dict.fromkeys((MemoryError, getattr(torch, "OutOfMemoryError", MemoryError),
                                 getattr(torch.cuda, "OutOfMemoryError", MemoryError))))
     return any(isinstance(item, kinds) for item in _exception_chain(error))
+
+
+def _classify_scientific_failure(error: BaseException) -> tuple[str, str]:
+    if type(error) is SalientLocalLfMaskWriteIdentityError:
+        return "identity_failure", "salient_local_lf_public_observation_identity_drift"
+    if type(error) is SalientLocalLfMaskWriteIntegrityError:
+        return "integrity_failure", "salient_local_lf_public_materialization_integrity_drift"
+    if _is_resource_failure(error):
+        return "resource_failure", "salient_local_lf_resource_failure"
+    if type(error) is OSError:
+        return "environment_failure", "salient_local_lf_environment_failure"
+    return "implementation_failure", "salient_local_lf_implementation_failure"
 
 
 def _safe_failure(error: BaseException, *, repository: Path, operation_identity: str,
@@ -178,6 +193,7 @@ def execute_salient_local_lf_mask_write_validation_session(
     committed_before = cursor.initial_committed_count
     failure_diagnostic = None
     aggregate = None
+    scientific_claims_supported = False
     termination_reason = "frozen_roster_incomplete"
     active_unit: int | None = None
     try:
@@ -205,11 +221,11 @@ def execute_salient_local_lf_mask_write_validation_session(
             except Exception as exc:
                 if active_unit < OPERATIONAL_UNIT_COUNT:
                     raise
-                failure_class = "resource_failure" if _is_resource_failure(exc) else "implementation_failure"
+                failure_class, failure_reason = _classify_scientific_failure(exc)
                 record = runner.create_failed_scientific_record(
                     unit_index=active_unit, attempt_index=intent.attempt_index,
                     elapsed=float(monotonic() - started), failure_class=failure_class,
-                    failure_reason=f"salient_local_lf_{failure_class}",
+                    failure_reason=failure_reason,
                 )
             store.commit_session_unit(cursor, lease, intent, record=record,
                                       raw_secret_values=(root_secret, registered_root, hf_token, checkpoint_text),
@@ -219,7 +235,9 @@ def execute_salient_local_lf_mask_write_validation_session(
                 tuple(range(OPERATIONAL_UNIT_COUNT, len(protocol.unit_roster))),
                 now_epoch_seconds=int(time.time()),
             )
-            aggregate = asdict(runner.replay_aggregate(evidence))
+            aggregate_value = runner.replay_aggregate(evidence)
+            aggregate = asdict(aggregate_value)
+            scientific_claims_supported = aggregate_supports_scientific_claim(aggregate_value)
             termination_reason = "frozen_roster_complete"
     except Exception as exc:
         failure_diagnostic = _safe_failure(
@@ -267,7 +285,9 @@ def execute_salient_local_lf_mask_write_validation_session(
         "termination_reason": termination_reason,
         "salient_local_lf_mask_write_aggregate": aggregate,
         "formal_tau_created": False, "fpr_estimated": False, "candidate_promoted": False,
-        "scientific_claims_supported": aggregate is not None,
+        "scientific_claims_supported": bool(
+            aggregate is not None and scientific_claims_supported
+        ),
     }
     return (3 if is_failure else 0), result
 
