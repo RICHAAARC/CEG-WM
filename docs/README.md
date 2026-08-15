@@ -10,7 +10,8 @@
 
 | path | responsibility | current_contents |
 | --- | --- | --- |
-| [design/](design/README.md) | CEG-WM 研究定义、算法原语、双链机制、评估设计、构建路线及派生方法图。 | 十份登记设计文档；两张派生方法图不增加 design path。 |
+| [design/](design/README.md) | 只保存 CEG-WM 方法定义、算法原语、双链机制、评估设计、验证门和纯方法图。 | 十份登记设计文档；不保存实施或证据状态。 |
+| [project_state/](project_state/README.md) | 保存阶段、采用路线、已认证负结果、待验证、资源阻断和禁止回流规则。 | 方法路线状态台账；不得修改算法公式。 |
 | [guides/](guides/README.md) | 项目推进、历史迁移、readiness、Colab 和 artifact rebuild 操作。 | 薄操作指引及一张论文证据生产 guide 图。 |
 | [reference/](reference/README.md) | 字段、测试、baseline、迁移来源/计划、拆包 profile 和 artifact evidence 参考。 | 稳定登记与边界参考。 |
 | [decisions/](decisions/README.md) | 改变架构权威的语义化决策记录。 | 当前没有独立 decision record。 |

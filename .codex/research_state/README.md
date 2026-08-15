@@ -10,10 +10,10 @@
   阶段转换均不含方法实现混入；既有独立 experiment-stage revision 只同步阶段/status。
 - 唯一 `method_readiness.yaml` 已从模板实例化，逐项连接固定路径、候选 ID、
   责任、唯一实现 symbol、27 个非同构行为节点、候选摘要和 revision-bound
-  独立语义复核。该 readiness 绑定旧实现的11个候选身份；设计 registry 则为15个
-  ID（14个具名候选加1个 mandatory control），二者都不得与13项职责混淆。新增
-  显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`、
-  `implementation_admission=NO`，未写入现有 readiness。
+  独立语义复核。该 readiness 绑定旧实现的11个候选身份；设计 registry 则为20个
+  ID（19个具名候选加1个 mandatory control），二者都不得与13项职责混淆。语义—
+  纹理软路由五候选未写入现有 readiness；hard salient-object local-LF 四候选已由
+  方法设计替代，但不据此作科学失败裁决。
 - readiness 只记录方法构建闭合，不是阶段文件。experiment_ready_infrastructure_closure 已完成，冻结实验协议与
   可追溯执行入口可用；这只满足 `experiment_ready` 的执行准备边界，不授权
   calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定

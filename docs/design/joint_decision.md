@@ -1,8 +1,9 @@
 # Joint Decision Design
 
-联合判定只消费三条已登记语义组合身份：`hf_only_standardized_score`、
-`weighted_hf_lf_standardized_score`、
-`maximum_hf_lf_standardized_score`；局部推导可写 `C_0`、`C_1(w)`、`C_2`。
+联合判定唯一消费
+`content_combination_semantic_texture_max_standardized` 定义的内容检测器：两条
+soft-route 分支分别以各自冻结的 primary-null 标准化后，计算
+`D_soft_route=max(z_hf_soft,z_lf_soft)`。联合判定不得切换到其他组合身份。
 
 ## Decision Authority
 
@@ -20,7 +21,8 @@
 6. 几何可靠时回正图像并计算 `s_rectified = D(rectified_image, key)`。
 7. 仅当 `s_rectified >= tau` 时，由回正后的内容证据判阳性。
 
-当前 `D` 冻结为 CEG-WM HF direct score 形成的 content detector。未来若经设计验证采用 LF/HF 组合 content detector，必须通过权威设计变更同时替换原图和回正图的 `D`，不得只替换救援路径。
+`D` 冻结为语义—纹理软路由 LF/HF 分支独立标准化后的
+`max(z_hf_soft,z_lf_soft)`。原图和回正图不得只在一条路径切换 detector。
 
 ## Invariants
 
@@ -52,14 +54,3 @@
 - rectification with detector disabled control。
 
 oracle transform 不能进入正式方法结果。
-
-## Current Status
-
-近阈值门控、几何不直接阳性、同 detector/key/preprocess/threshold 回正重判已完成
-CPU/synthetic 实现和行为验证。正式 detector 仍为 HF-only，LF/routing 未实验晋升，
-`full_ceg_wm_eligible=false`；`tau`、`tau_rescue` 与 reliability 尚未正式 calibration，
-真实 GPU qualification 只关闭 SD3.5 runtime、VAE 和 Q/K observation 边界，没有
-执行或证明完整 raw+rescue FPR 与联合恢复效果。实际阶段/status 已由独立 revisions
-同步为 `experiment_ready / implemented`。该阶段只登记冻结实验协议与可追溯执行交付；
-当前没有 `tau`、confirmation 结果、Calibration Locked、正式 evaluation 或科学证据，
-也没有 LF/routing/组合/geometry 晋升。

@@ -13,9 +13,9 @@ CEG-WM 由内容链、几何链和联合判定组成。内容链拥有水印证�
 
 ```text
 嵌入侧：
-callback-18 临时 RGB8 ──> content_router / InSPyReNet mask
-                         ├──> lf_carrier ──> local LF direction ──┐
-                         └──> hf_carrier ──> global HF direction ─┤
+callback-18 临时 RGB8 ──> content_router / semantic M + texture T
+                         ├──> m_lf ──> lf_carrier ──> LF direction ──┐
+                         └──> m_hf ──> hf_carrier ──> HF direction ──┤
                                                            v
                                                    content_embedder
                                                            |
@@ -25,10 +25,11 @@ callback-18 临时 RGB8 ──> content_router / InSPyReNet mask
 
 检测侧：
 普通待检图像 + key + 公共资产
-             ├──> InSPyReNet mask ──> lf_detector ──> s_lf_masked ──┐
-             └──> hf_detector ──> s_hf ──┤
-                                         v
-                                 content_detector ──> D_M
+             └──> 重建 M/T 与 m_lf/m_hf
+                         ├──> lf_detector ──> z_lf_soft ──┐
+                         └──> hf_detector ──> z_hf_soft ──┤
+                                                         v
+                                      content_detector / max ──> D_M
 ```
 
 CEG-WM 内容链的七项正式职责是 `content_router`、`lf_carrier`、
@@ -37,12 +38,11 @@ CEG-WM 内容链的七项正式职责是 `content_router`、`lf_carrier`、
 分支 detector 独立产生盲分数，content detector 只组合检测统计；runtime 只在冻结
 callback/model/dtype 边界物化 embedder 给出的更新并把实际张量与 realized
 combined total norm/relative L2 返回给
-embedder 判定，不拥有路由、组合写入、预算判定或检测算法。current router 只输出
-`M_embed`、全一 HF support、mask identity/digests；current embedder 只按
-`normalize(normalize(T_hf)+normalize(M_embed*T_lf))` 构造方向并拥有
+embedder 判定，不拥有路由、组合写入、预算判定或检测算法。router 只输出
+`M/T`、`m_lf/m_hf` 和 identity/digests；embedder 只按
+`normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))` 构造方向并拥有
 nominal/limit、materialization reconciliation 与 realized combined total
-norm/relative L2。`A`、互补双 mask、`a`、direction dot/c(a) 和 routed/
-route-disabled records 只属于 historical exact replay。
+norm/relative L2。`m_lf/m_hf` 是空间调制，不是 actual branch energy。
 
 当前 actual-dtype 内容预算把 nominal 与 hard limit 同时冻结为 `3/250`。对
 callback 18 actual baseline `z0`，runtime 只实现
@@ -58,20 +58,17 @@ budget policy。
 normalized-correlation 评分时中心化；该顺序具有 historical DirectHF 来源，但历史
 名称与成功证据不进入本项目身份。LF 的新白化 matched-score 设计、路由、组合、Q/K
 与 runtime 的具体候选已在
-[candidate_specifications.md](candidate_specifications.md) 中关闭；尚未冻结的是
-候选的实验晋升结果。`routing_stqr` 与旧 uniform combination 路线已形成
-producer-bound development 负证据，不再是当前候选。继任设计以
-`routing_inspyrenet_salient_local_lf` 重建显著目标内部 mask、以全局 HF 加局部 LF
-写入，并以独立 masked-LF null whitening 和 `max(z_hf,z_lf_masked)` 检测；当前状态
-仅为 `design_candidate_pending_implementation`，implementation admission 为 `NO`。
-当前冻结的 `D_M` 候选仍是 HF-only 的 HF direct score；只有新组合候选
-通过预登记晋升后，`content_detector` 才可消费 `s_lf` 与 `s_hf` 形成组合 `D_M`。
+[candidate_specifications.md](candidate_specifications.md) 中关闭。内容路线使用
+InSPyReNet soft probability `M`、deterministic Sobel/P95 texture `T`、两张和为一的
+正软路由图、soft-routed LF/HF branch scores 和
+`max(z_hf_soft,z_lf_soft)` 内容统计。
 
 两链共享的 root-key、KDF、PRG、wrong-key 与 public-noise 语义由 CEG-WM 自有
 `key_schedule_sha256_counter` 候选统一定义。内容链与几何链只消费该共享责任的
 派生结果，不得各自实现不兼容的随机协议。
 
-完整 CEG-WM 身份要求内容自适应路由、LF、HF、Q/K、回正与联合判定全部通过各自门禁。LF/路由未晋升可以形成诚实负结果，但 HF-only + geometry 不得以完整 CEG-WM 方法成功发布；缩减方法需要重新命名和独立授权。
+完整 CEG-WM 身份要求内容自适应路由、LF、HF、Q/K、回正与联合判定共同存在；
+任一缩减方法都必须使用不同的方法身份。
 
 ## Geometry Chain
 
@@ -93,7 +90,8 @@ producer-bound development 负证据，不再是当前候选。继任设计以
 
 联合判定先运行冻结内容检测器。只有近阈值负样本才进入几何资格检查；只有可靠几何才允许回正；回正后使用同一检测器和同一阈值。
 
-当前 content detector 候选冻结为 HF direct score。LF/HF 组合成为正式 content detector 之前，LF 不得静默改变 near-threshold 或 rescue 语义。
+content detector 冻结为 `max(z_hf_soft,z_lf_soft)`。原图与回正图必须共同调用该
+统计及同一阈值，不得在 rescue 路径切换为 HF-only 或其他组合。
 
 ## Dependency Direction
 
@@ -113,7 +111,7 @@ main.shared
 
 `main.content_chain` 与 `main.geometry_chain` 不互相依赖。runtime 不得拥有最终判定规则；experiment adapter 不得复制方法算法。
 
-当前已实现并登记的 readiness 责任固定为以下 13 项，不允许别名、职责折叠或用
+方法责任固定为以下 13 项，不允许别名、职责折叠或用
 单个集中代理文件代替：
 
 ```text
@@ -132,30 +130,27 @@ main/geometry_chain/rectifier.py            image_rectifier
 main/joint_decision/detector.py             conditional_recovery_decision
 ```
 
-`content_router` 仍是唯一 mask/route 职责；继任候选只允许其拥有冻结 InSPyReNet
-`M_embed`、全一 HF support 与 identity/digests，不增加组件职责。
-`content_embedder` 独占无 `a/w` 的 global-HF/local-LF 写入、共同总预算、
+`content_router` 是唯一 observation/route 职责；它拥有 `M/T`、`m_lf/m_hf` 与
+identity/digests，不增加组件职责。
+`content_embedder` 独占无 `a/w` 的 soft-routed LF/HF 写入、共同总预算、
 nominal/limit、materialization scale/attempt/integrity/
 budget status 与 realized combined total norm/relative L2，以及 active/combined
 零方向失败；
-`lf_detector` 独占盲 LF 分数；旧 `lf_null_whitened_matched_score` 与新
-`lf_saliency_masked_null_whitened_matched_score` 是不同身份，后者必须独立拟合
-32-clean null `W`，
-不改变 `lf_carrier` 或现有 readiness；`geometry_reliability` 独占 estimator 原始指标上的
-合取门。候选 registry 现在是 15 个 ID（14 个具名候选加 1 个 routing 强制对照）；
-CPU/synthetic 实现不等于实验晋升，该计数与这里的 13 项实现职责不是同一计数。
+`lf_detector` 独占盲 LF 分数和 soft-route 专属 32-clean null `W` 消费；
+`hf_detector` 独占盲 soft-routed HF 分数；`geometry_reliability` 独占 estimator
+原始指标上的合取门。候选 registry 是 20 个 ID（19 个具名候选加 1 个 routing
+强制对照），与这里的 13 项职责不是同一计数。
 
-current records/controls 固定为 clean、HF-only、masked-LF causal、
-global-HF+local-LF、LF-disabled 和失败。historical `routing_stqr` 的 `A`/双-mask/
-disabled-uniform 与旧 combination 的 `a/u_content(a)/dot/c/routed` 只可按原 producer
-和 package/record identity 重放，不得重签为 current readiness、stage 或 control。
+records/controls 固定为 clean、HF-only、LF-only、soft-routed LF/HF、
+route-disabled 和显式失败。
 
 `content_direction`、`active_lf_direction`、`active_hf_direction` 及 target
 components 只绑定 nominal 组合公式；actual hard limit 只作用于最终 combined
 content delta，不定义或观测 LF/HF actual branch decomposition。geometry 写入与
 geometry/total budget 仍是独立职责。
 
-每个责任还必须绑定 `candidate_specifications.md` 中 policy 规定的候选 ID 和独立方法特异性验收节点；路径存在或 AST 结构通过都不等于方法完成。
+每个责任必须绑定 `candidate_specifications.md` 中规定的候选 ID，并以方法特异性行为
+检查验证；路径存在或 AST 结构本身不能代替职责实现。
 
 ## Configuration Identity
 
@@ -171,16 +166,5 @@ geometry/total budget 仍是独立职责。
 
 不同配置摘要产生的分数和阈值不得混用。
 
-## Current Implementation Status
-
-固定 13 项职责与 27 个 CPU/synthetic 方法行为节点已经实现，并由唯一 readiness
-绑定候选摘要、真实 symbol、测试节点和独立语义审核。实际 stage/status 已由
-独立 revisions 同步为 `experiment_ready / implemented`。冻结 SD3.5 candidate 的
-callback、actual dtype、VAE、两层真实 Q/K、registered-key 重复确定性和
-negative-key identity control 已通过真实 GPU qualification。当前正式 detector
-仍为 HF-only；旧 routing/combination 是 producer-bound 历史负结果，新显著目标
-四候选尚未实现，`full_ceg_wm_eligible=false`。该 runtime
-证据和实验准备基础设施闭环都不是 `tau`、confirmation 结果、Calibration Locked、
-完整联合 FPR、几何恢复效果、正式 evaluation 或科学效果证据，也不晋升
-LF/routing/组合/geometry。后续门序见
+方法验证门序见
 [research_construction_roadmap.md](research_construction_roadmap.md)。

@@ -35,3 +35,7 @@ dist/
 audit_reports/
 outputs/
 release_packages/
+
+# Local, non-authoritative model assets and download metadata
+models/
+*:Zone.Identifier

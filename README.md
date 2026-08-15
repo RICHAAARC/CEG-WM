@@ -19,7 +19,7 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 └── 几何恢复与图像回正
 
 联合判定
-├── HF direct score 与 content detector 原图检测
+├── soft-route max content detector 原图检测
 ├── 近阈值判断
 ├── 必要时启动几何恢复
 └── 回正后使用同一检测器与同一阈值重判
@@ -30,14 +30,14 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 - CEG-WM 已按自有 `HF carrier`、`HF direct score` 和 `content detector` 身份完成
   CPU/synthetic 实现；这不是 runtime 或效果验证。
 - 现有 readiness 只绑定旧实现的 11 个候选身份；其中旧 routing/combination 已形成
-  producer-bound development negative，只保留历史精确重放。新增显著目标局部 LF
-  四候选均为 `design_candidate_pending_implementation`、
-  `implementation_admission=NO`，不由既有实现或 readiness 自动覆盖。
+  producer-bound development negative，只保留历史精确重放。语义—纹理软路由
+  五候选为 `adopted_design_unimplemented`，不由既有实现或 readiness 自动覆盖。
 - 方法完成面固定为 13 项职责组件；组合写入、LF 盲分数和几何可靠性各有独立
-  路径。设计 registry 为 15 个 ID（14 个具名候选加 1 个 mandatory control），
+  路径。设计 registry 为 20 个 ID（19 个具名候选加 1 个 mandatory control），
   readiness-bound 的旧实现候选11个，三种计数不得混用。
-- current 内容候选固定使用无 `a/w` 的 global-HF+local-LF 写入和
-  `max(z_hf,z_lf_masked)` 检测统计，不存在权重、函数或组合参数 selection。
+- 方法设计固定使用 InSPyReNet soft `M` + Sobel/P95 `T` 的逐图软路由、无 `a/w`
+  的 `normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))` 写入和
+  `max(z_hf_soft,z_lf_soft)` 检测统计，不存在权重、函数或攻击条件 selection。
   calibration 只在独立职责中拟合分支 primary-null/CDF 标准化、max statistic 的
   `tau` 及 rescue/geometry/end-to-end 各自声明的量；历史 `a/w/function` 只按原
   producer replay。
@@ -45,7 +45,8 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 - 检测不得依赖原始参考图、嵌入端 record 或嵌入端私有统计量。
 - 恢复后不得切换到更宽松的救援分类器或阈值。
 
-详细研究定义见 [docs/design/](docs/design/README.md)。
+详细方法定义见 [docs/design/](docs/design/README.md)；采用/失败/待验证状态见
+[docs/project_state/](docs/project_state/README.md)。
 
 ## 当前阶段
 
@@ -57,7 +58,9 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   方法架构与证据边界、内容/几何/联合判定设计、算法与候选冻结、真实方法实现、
   runtime qualification，以及实验协议与可追溯交付入口。该闭环已完成；这只表示实验执行准备就绪，
   不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。
-- 正式 detector 仍为 HF-only；新 masked-LF/routing/组合尚未实施或实验晋升，
+- 正式 detector 仍为 HF-only；语义—纹理 soft-route 五候选为
+  `adopted_design_unimplemented`，尚未实现或实验晋升。hard salient-object
+  local-LF 四候选只作为 `superseded_without_scientific_adjudication` 历史候选保留；
   `full_ceg_wm_eligible=false`。
 - 真实 SD3.5 runtime 边界已由 candidate
   `8b2344756c4c247906ff0d4eab68e46a773e13f5` 的 `qualification / passed` run
@@ -80,6 +83,7 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 | `experiments/metrics/` | 内容检测、几何估计、图像质量和资源指标。 |
 | `experiments/runners/` | 唯一实验组合层和 governed records 写入层。 |
 | `paper_artifacts/` | 从冻结 records 与 manifests 重建论文产物。 |
+| `models/` | 本地、非权威、不审计的模型资产/缓存；checkpoint 不进入 Git。 |
 | `docs/` | 研究定义、方法设计、决策、协议与证据说明。 |
 | `governance/` | 可拆卸的外层契约、policy、harness 和控制平面自测。 |
 | `.agents/skills/` | 随项目维护的 Codex 工作流。 |

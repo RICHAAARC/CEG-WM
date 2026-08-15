@@ -1,14 +1,16 @@
 # CEG-WM Candidate Specifications
 
-候选规格中的组合身份只使用 `hf_only_standardized_score`、
+历史兼容组合候选的输出标签只使用 `hf_only_standardized_score`、
 `weighted_hf_lf_standardized_score`、`maximum_hf_lf_standardized_score`；
-`C_0`、`C_1(w)`、`C_2` 仅保留为本地数学记号。
+`C_0`、`C_1(w)`、`C_2` 仅保留为本地数学记号。语义—纹理软路由方法的组合身份唯一为
+`content_combination_semantic_texture_max_standardized`，不使用上述历史输出标签替代
+新 detector identity。
 
-## Authority And Status
+## Authority And Scope
 
-本文关闭“实现时由 Codex 自行发明算法”的空白。这里登记的是可实施、可证伪的候选规格，不是已验证项目参数、有效性结论或实施授权。
+本文关闭“实现时自行发明算法”的空白，登记可实施、可证伪的候选规格。
 
-当前 registry 固定为 **15 个候选 ID**：其中 14 个是具名的
+registry 固定为 **20 个候选 ID**：其中 19 个是具名的
 method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得晋升为方法的
 同预算禁用对照。计数如下：
 
@@ -23,26 +25,31 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 - `content_embedding_global_hf_local_lf`；
 - `lf_saliency_masked_null_whitened_matched_score`；
 - `content_combination_saliency_max_standardized`；
+- `routing_semantic_texture_soft`；
+- `content_embedding_semantic_texture_soft_lf_hf`；
+- `lf_semantic_texture_soft_whitened_matched_score`；
+- `hf_semantic_texture_soft_direct_score`；
+- `content_combination_semantic_texture_max_standardized`；
 - `qk_relation_similarity`；
 - `rectification_similarity`；
 - `joint_conditional_recovery`。
 
 实现者只能实现这些身份及其明确列出的有限候选值。增加 relation、objective、write、score、observation、backbone、runtime 或搜索策略，必须先修订本文并重新接受候选规格审计。
 
-候选 registry 与实现职责是两个不同计数：上面的 15 个 ID 描述算法/runtime/key
+候选 registry 与实现职责是两个不同计数：上面的 20 个 ID 描述算法/runtime/key
 候选身份；未来实现固定为 13 项职责组件。每项职责只消费下表列出的现有候选，
 不得据此新增候选、别名组件或把多个职责集中到一个代理模块：
 
-| component | responsibility | planned path | candidate binding |
+| component | responsibility | method path | candidate binding |
 | --- | --- | --- | --- |
 | `key_schedule` | `root_key_derivation_and_prg` | `main/shared/key_schedule.py` | `key_schedule_sha256_counter` |
-| `content_router` | `content_observation_and_adaptive_routing` | `main/content_chain/routing.py` | `key_schedule_sha256_counter`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf` |
+| `content_router` | `content_observation_and_adaptive_routing` | `main/content_chain/routing.py` | `key_schedule_sha256_counter`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `routing_semantic_texture_soft` |
 | `lf_carrier` | `low_frequency_carrier_template_and_write_direction` | `main/content_chain/lf_carrier.py` | `key_schedule_sha256_counter`, `lf_low_pass` |
 | `hf_carrier` | `high_frequency_carrier_template_and_write_direction` | `main/content_chain/hf_carrier.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `hf_sparse_tail` |
-| `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `content_embedding_global_hf_local_lf` |
-| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score`, `routing_inspyrenet_salient_local_lf`, `lf_saliency_masked_null_whitened_matched_score` |
-| `hf_detector` | `high_frequency_direct_scoring` | `main/content_chain/hf_detector.py` | `key_schedule_sha256_counter`, `hf_sparse_tail` |
-| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated`, `content_combination_saliency_max_standardized` |
+| `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `content_embedding_global_hf_local_lf`, `routing_semantic_texture_soft`, `content_embedding_semantic_texture_soft_lf_hf` |
+| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score`, `routing_inspyrenet_salient_local_lf`, `lf_saliency_masked_null_whitened_matched_score`, `routing_semantic_texture_soft`, `lf_semantic_texture_soft_whitened_matched_score` |
+| `hf_detector` | `high_frequency_direct_scoring` | `main/content_chain/hf_detector.py` | `key_schedule_sha256_counter`, `hf_sparse_tail`, `routing_semantic_texture_soft`, `hf_semantic_texture_soft_direct_score` |
+| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated`, `content_combination_saliency_max_standardized`, `content_combination_semantic_texture_max_standardized` |
 | `qk_geometry_sync` | `keyed_qk_geometry_synchronization_and_relation_observation` | `main/geometry_chain/qk_sync.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `qk_relation_similarity` |
 | `geometric_transform_estimator` | `blind_bounded_geometric_transform_estimation` | `main/geometry_chain/transform_estimator.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
 | `geometry_reliability` | `independent_geometry_reliability_conjunction` | `main/geometry_chain/reliability.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
@@ -51,73 +58,16 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 
 `content_embedder` 独占 combined direction、nominal/actual hard limit、组合 delta 的
 materialization reconciliation、realized norm/relative L2 和 active 零方向失败。
-其中 historical exact replay 才拥有 `a/u_content(a)`、mixing coefficients 与
-direction dot/c；current `content_embedding_global_hf_local_lf` 只拥有
-`normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，不存在 `a/w` grid。
+兼容 `a/u_content(a)` 身份拥有 mixing coefficients 与 direction dot/c；
+语义—纹理路线只拥有
+`normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))`，不存在 `a/w` grid。
 `lf_detector`
 独占盲 `s_lf`；`geometry_reliability` 独占 estimator
 原始指标上的可靠性合取门。这三项不能由 carrier、content detector 或 transform
-estimator 代行。候选绑定表示该组件必须实现或消费的规格身份，不表示候选已经晋升。
+estimator 代行。候选绑定表示该组件必须实现或消费的规格身份。
 
-新增四候选统一状态为 `design_candidate_pending_implementation`，
-`implementation_admission=NO`。现有 `experiment_ready / implemented`、readiness、
-runtime qualification 与旧 13 职责实现不自动覆盖它们；本次登记不增加第 14 项职责。
-
-## Provisional Historical Provenance
-
-### Read-Only Revisions
-
-| source | read-only revision | state observed | authority |
-| --- | --- | --- | --- |
-| `SLM-WM-FlowHF` | `a7f33825d0913d4707af5723b236beb65f53f4e5` | tracked worktree clean | historical DirectHF source for the CEG-WM HF candidate only |
-| `SLM-WM` | `47bd9a1850c434aa47ee03caa7377706f4d283de` | tracked files clean; `.codex/config.toml` and `docs/ceg_wm_direct_hf_scope_decision.md` untracked | LF/routing/QK candidate source only |
-| `SLM-WM` FlowHF baseline | `34825098553d22f68f188afcd938d0aa72132caf` | Git object verified | upstream identity referenced by FlowHF |
-
-本表是 provisional provenance：它证明读过哪个历史 Git object，不证明任何代码已经迁入 CEG-WM，也不替代未来 CEG-WM revision。
-
-两个历史仓库根目录均未发现许可证或 copying 文件。用户可以在此缺口仍存在时授权建立 CEG-WM 版本身份，但在实际复制历史代码前必须由用户确认复用权，或明确授权按本文公式进行不复制源码的独立重写。缺口未关闭时，代码迁移 fail closed。
-
-### Historical DirectHF Source Files
-
-`SLM-WM-FlowHF` revision `a7f33825...`：
-
-| path | SHA-256 |
-| --- | --- |
-| `flowhf/hf_injector.py` | `03dab6c32d801b712362264584c8b30567e2ab44b88678af2e0c44f27c433cf4` |
-| `flowhf/direct_detector.py` | `ea5c5d8ffa34faea4cf7b88d03f78296a3ddd9e44cfbc3e767c366898ea9fd1c` |
-| `flowhf/evaluate_keys.py` | `3ce54b65f72f59ac0cde7c132cb58947c05f3af2a1012a1f8b1d78b49a5f372d` |
-| `flowhf/key_plan.py` | `c83808d07a6400cfeb3405be5faaeb893d5cb408485a18fb58661ab48f3a9837` |
-| `flowhf/model_runtime.py` | `35fcb73c5c78250fc7ea11620f8d1ceb360c13dd298d81a2bbe914c39d7f6de9` |
-| `flowhf/run_spec.py` | `cccd166439f0f0be5cfa5281ce8d6eaf9a61005dd8f8452b22516c14a19aee9c` |
-| `tests/fixtures/hf_template_golden.json` | `d3f7e9c77ffeecd6f0a5615582bb09b1a2aa170169a71ef4da30ed7ad5483b25` |
-
-FlowHF 只提供 historical DirectHF 的四 Prompt 小样本来源证据。它不提供 CEG-WM HF 成功结论，也不提供 population、fixed-FPR、攻击鲁棒性、LF、路由或 Q/K 成功证据。
-
-### LF, Routing And Q/K Candidate Files
-
-`SLM-WM` revision `47bd9a...`：
-
-| responsibility | path | SHA-256 |
-| --- | --- | --- |
-| LF template | `main/methods/carrier/low_frequency.py` | `c5d2a4f7cf0879987801372e135e5e537ea2bbe28b3c505300e2759add95bf24` |
-| routed composition | `main/methods/carrier/content_update.py` | `f85f2bee8efa5019f1cf34b9e02035b2bf50baec4b81a5cfe87faa22e9f1d170` |
-| S/T/R/Q routing | `main/methods/content/routing.py` | `37bf9eac26f85ff667d99dc23678486d9e7ee2962c53547211de18a4d4f3a97a` |
-| semantic observation | `main/methods/content/saliency.py` | `07ff1e94fea816333269ca77a3fc89ce54463e92d31e0ce067326b63a82578dc` |
-| semantic runtime | `main/methods/content/prompt_saliency_runtime.py` | `47dcd16391a46142dafd8058a414866d672b12b92fb33d2e5093bbe24eeba1b0` |
-| texture observation | `main/methods/content/texture.py` | `584d3f6ce24d6a86bacc2f5a46f7a3d69cc2362133c79aa0c4ade5df6b8e2122` |
-| response observation | `main/methods/content/latent_response.py` | `947af3114806c50984123b6f6b475ad9de753ea007b7675d4067619b9711f736` |
-| sensitivity observation | `main/methods/content/local_sensitivity.py` | `de0eee215e1fe77ba7559c99a7fed7747d09d22da40328690516e7ddf4316331` |
-| reference P95 rule | `experiments/protocol/content_routing_reference_quantile.py` | `a9f1d407b08e3ba59a7354a3b804048e5ab823350230f572072400295ae538fd` |
-| historical runtime config | `configs/model_sd35.yaml` | `dabebea3fa5c9c06fdc880f093debec6913bf5ce4da31f00be51578bfe2e1670` |
-| direct Q/K relation | `main/methods/geometry/differentiable_attention.py` | `6c48f69e005b2c3f450de1ec2531910b9f076d25a60e03bee1ac2db61ee138b3` |
-| Q/K synchronization write | `main/methods/geometry/sync_update.py` | `1590ac04e9bcdbc265e62383469808a06cefbd68457903e86a63afbc557863cc` |
-| affine estimation and rectification | `main/methods/geometry/attention_alignment.py` | `134fd1e32b4542c7904540093a1279b85a36908c44dc2f37f36c5ac9bae2c8c2` |
-| Q/K runtime protocol | `experiments/protocol/method_runtime_config.py` | `8619aa4e4ec3e87d1b80558878ff1e91e6f6c501c2c70534dd59b59df16a2da9` |
-| image-only Q/K extraction source | `experiments/runners/semantic_watermark_runtime.py` | `87ec13fc86b843289505cb855f232fd6a6cea494265c2ab16370ba1295866424` |
-| keyed PRG | `main/core/keyed_prg.py` | `9fd5f24023862afef4743dc6aca1cf0b4401f1ffb8d848c4d52f86616945cea2` |
-| normal quantile table | `main/core/normal_quantile_table.py` | `e98c2a0d76080d5080b8d22eb20cb7559c8291a668cf810aa508d89bc7b8776e` |
-
-FlowHF 明确把旧 LF/HF 双载体和 Q/K coupled route 记为 historical non-passing route。因此这些文件只提供具体候选语义，不能向 CEG-WM 传递成功、阈值或论文证据。
+候选身份与 13 项职责分离；增加候选不增加组件职责，也不允许一个实现 symbol 代行
+多个职责。
 
 ## Candidate `key_schedule_sha256_counter`
 
@@ -391,8 +341,8 @@ geometry delta 与已有 geometry/total budget 保持独立，不并入
   router 输出；
 - `hf_detector` 只消费普通待检图像、检测 key 和公共 identity/资产，独立重构
   `T_hf` 并输出盲分数 `s_hf`；
-- `content_detector` 只消费 `s_hf`（当前 HF-only `D_M`），组合候选晋升后才同时
-  消费 `s_lf`；它不读取 carrier direction、callback latent 或写入记录；
+- `content_detector` 消费独立标准化的 soft-routed `s_hf` 与 `s_lf` 并形成固定 max
+  statistic；它不读取 carrier direction、callback latent 或写入记录；
 - runtime 只在冻结 callback/model/dtype 边界物化 `content_embedder` 给出的更新，
   并把实际 dtype latent 与 combined delta 的 realized total norm/relative L2 测量
   返回给 embedder 判定；不拥有模板、组合、预算判定或评分算法。
@@ -413,8 +363,7 @@ u_hf = normalize(mask_hf * T_hf)
 ```
 
 模板构造不得中心化；tail 外必须保持精确零。tail `0.20`、5x5 zero-padded
-average、平局顺序、callback 18 与 `3/250` 都已冻结为当前 CEG-WM 候选语义；
-其中参数来源具有历史 provenance，但真实模型/runtime 可执行性与科学效果仍未验证。
+average、平局顺序、callback 18 与 `3/250` 构成该候选语义。
 
 ### Content Embedder And Runtime Boundary
 
@@ -560,9 +509,8 @@ actual 下限。
 s_lf_raw = normalized_correlation(center(Y), center(T_lf))
 ```
 
-该 raw score 仍绑定 `lf_low_pass`，保留为已实现的历史候选和后续独立比较 control；
-既有 8-cluster transmission diagnostic 的阴性/部分信号结果不被改写，也不能用于
-拟合下面的新候选。新增候选并不使当前 readiness、正式 detector 或科学结论自动变化。
+该 raw score 仍绑定 `lf_low_pass`，只作为独立比较 control；它不得与 whitened score
+组成结果后 ensemble，也不得用于拟合 soft-routed LF candidate。
 
 ### Identity And Source Boundary
 
@@ -601,8 +549,7 @@ operator。历史固定
 该候选只改变 `lf_detector` 的盲评分统计，不改变 `lf_low_pass` 的 carrier、模板、
 写入方向、`3/250` 内容 hard budget、runtime 或 key schedule。它要检验的唯一问题是：
 在公共 clean-null LF 观测的低维二阶结构下白化后，registered `T_lf` 是否比 wrong-key
-模板获得稳定更高的 matched score。登记候选不表示实现完成、机制有效、可晋升、已有
-`tau` 或支持 FPR 声明。
+模板获得稳定更高的 matched score。
 
 检测观测固定为普通 `512 x 512` RGB8 待检图像，经
 `runtime_sd35_flowmatch` 同一 public VAE encode 和 posterior `mode()` 得到
@@ -733,15 +680,15 @@ preprocess 和 detector config identity 一起进入后续 records。raw fit ima
   serialization/digest、有限值/零 norm fail-closed 和 raw-score 非回退。
 - 真实 GPU fit 必须在任何候选验证结果之前一次性冻结 32-clean manifest 与 artifact；
   该 fit 不得消费旧 8-cluster artifact，也不得输出 mechanism outcome。
-- 随后的全新 validation 才能比较 registered/wrong-key/paired primary-null；本候选
-  当前没有效果证据、阈值、FPR、candidate promotion 或论文 claim。
+- 随后的全新 validation 比较 registered/wrong-key/paired primary-null；不得由 fit
+  本身推导效果、阈值、FPR 或论文 claim。
 - `lf_low_pass` raw normalized-correlation 继续作为独立 historical/control score，
   但不得与本候选组成结果后 ensemble，也不得充当本候选失败时的静默 fallback。
 
 ## Candidates `routing_stqr` And `routing_uniform_control`
 
-本节冻结旧 producer-bound route 以支持历史精确重放；`routing_stqr` 已不是 current
-candidate，`routing_uniform_control` 仍作为 registry 的 mandatory causal control。
+本节冻结 `routing_stqr` 兼容身份及 `routing_uniform_control` causal control 的公式，
+仅用于重放对应方法身份，不改变语义—纹理软路由方法。
 
 ### Observations
 
@@ -859,7 +806,7 @@ ties、低/高尾 clipping、排列不变性、严格单调区间、分支交换
 
 ## Salient-Object Local-LF Candidate Family
 
-### Status, Supersession And Historical Evidence
+### Candidate Identities
 
 以下四个身份构成一个不可拆分但仍由既有 13 项职责实现的设计候选：
 
@@ -868,22 +815,7 @@ ties、低/高尾 clipping、排列不变性、严格单调区间、分支交换
 - `lf_saliency_masked_null_whitened_matched_score`；
 - `content_combination_saliency_max_standardized`。
 
-四者状态均为 `design_candidate_pending_implementation`，
-`implementation_admission=NO`。全局 `project_stage=experiment_ready`、
-`implementation_status=implemented` 只描述当前已审核方法/交付基础设施，不表示这四个
-候选已实现、已进入 readiness、可执行或已通过科学门。
-
-旧身份全部留在 registry 以保持 producer replay，但不再是 current candidate：
-
-| historical route | exact producer | immutable evidence | status |
-| --- | --- | --- | --- |
-| `routing_stqr` fixed-half directional diagnosis | producer `925c2cbc727e3b18e91c0b3981eeed1b470a955a`; run `ceg_wm_content_routing_positive_reference_support_correction_diagnosis` | `42/42` terminal；ordered incremental indicators `1,1,1,0,0,0,0,0`，即 `3/8=0.375`，未满足 strict `>0.5`；clusters `1`,`5`,`6` 的 RGB relative-L2 超限，因此不是 successful clusters | producer-bound development negative; not current candidate |
-| `content_uniform_combination` directional diagnosis | producer `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da`; run `ceg_wm_content_uniform_combination_budget_observation_correction_diagnosis` | `1+32+8=41` attempt-0 `COMMITTED`；canonical binary32 `3/250`；budget violations `2` at clusters `1`,`6`；`mechanism_signal_not_observed`；`candidate_not_recommended_for_selection`；allow request false | producer-bound development negative; not current candidate |
-
-旧 routed `content_embedder`、旧 combined detector 及其 conditional-recovery 内容依赖
-均为 closed/paused。现存实现只服务 producer reproduction、failure provenance、
-historical exact-package/record replay 与新旧语义 diff，不构成 current candidate 或
-执行授权。
+这些身份完整定义 hard salient-object local-LF 方法变体。
 
 ### Frozen InSPyReNet Authority And Forward
 
@@ -980,18 +912,125 @@ content-threshold-fit primary null 上重新拟合；不得沿用 HF-only、旧 
 - 不从旧 8 probes 选择 mask、threshold、erosion、coverage、`a`、`w` 或 function；
 - 不补样、删 cluster、重跑、增加 attempt、放宽 `3/250` 或重写历史 artifact；
 - 不用 margin-only 子集形成 winner、promotion 或 candidate selection；
-- 既有 HF/LF 各 32-unit directional 证据保持 producer-bound 有效，但不自动传递到
-  新 masked-LF、max statistic 或完整内容链；
-- 不把代码存在、旧 package 可重放或历史负证据解释为 current execution authority。
+- hard-mask、unmasked 或其他 detector 的 null/threshold 不得传递到该候选；
+- 不把代码存在或其他身份可重放解释为本候选效果证据。
 
-### Admission And Falsification Gates
+### Falsification Gates
 
-implementation admission 当前明确为 `NO`。未来单独授权必须先完成 external asset
-license/checkpoint/source/API 复核、精确 mask golden、coverage/failure、causal witness、
+验证必须覆盖 external asset license/checkpoint/source/API、精确 mask golden、
+coverage/failure、causal witness、
 32-clean-null W fit、public blind key attribution、mask-stability、total-budget 与
 max-statistic identity tests。任一环节需要改变 checkpoint、forward path、threshold、
 erosion、coverage、写入公式、W fit 或 max statistic 时，必须登记新候选身份；不得在
 实现或 GPU 结果后静默调参。
+
+## Semantic-Texture Soft-Routing Candidate Family
+
+以下五个身份共同定义 CEG-WM 的语义—纹理软路由内容链：
+
+- `routing_semantic_texture_soft`；
+- `content_embedding_semantic_texture_soft_lf_hf`；
+- `lf_semantic_texture_soft_whitened_matched_score`；
+- `hf_semantic_texture_soft_direct_score`；
+- `content_combination_semantic_texture_max_standardized`。
+
+五者仍由既有 `content_router`、LF/HF carrier、`content_embedder`、LF/HF detector 和
+`content_detector` 分工，不增加方法组件。
+
+### Public Semantic And Texture Observations
+
+嵌入端输入是 callback 18 non-terminal latent 的临时 VAE decode RGB8；原图检测与
+回正检测输入都是各自的普通 RGB8 图像。每次调用都独立重建观察量，不共享 Prompt、
+embed record、private latent、embed-side map 或参考图。
+
+语义图 `M` 复用本文件登记的 InSPyReNet source/checkpoint/strict-load 和
+`forward_inspyre` finest raw `d0`/sigmoid-once 规则。输入为 static `1024 x 1024`
+RGB、ImageNet mean/std、float32；probability 以 bilinear、`align_corners=false`
+映射到 `64 x 64`。输出直接作为 `M in [0,1]`；禁止 hard threshold、erosion、
+connected-component selection、per-image min-max 和 coverage fallback。
+
+纹理图 `T` 从同一个 RGB8 构造。按 `(0.299,0.587,0.114)` 转为 binary32 灰度，
+replicate-pad 1 pixel，执行标准 3x3 Sobel x/y，令
+`G=sqrt(gx^2+gy^2)`，再以 area downsample 映射到 `64 x 64`。对严格正的 `G`
+按 `(value, flat_index)` 稳定升序，取 `q95=sorted[ceil(0.95*n)-1]`；若 `n=0`，
+令 `T=0`，否则 `T=clamp(G/q95,0,1)`。不从跨样本 reference、攻击标签、分数或
+evaluation 结果拟合纹理尺度。
+
+### Soft Route And Causal Control
+
+`content_router` 唯一输出：
+
+```text
+m_hf = (1 + M*T) / (2 + M)
+m_lf = (1 + M*(1-T)) / (2 + M)
+```
+
+逐元素要求 finite、`M,T in [0,1]`、`m_hf,m_lf>0` 且按 binary32 协议验证
+`m_hf+m_lf=1`。router 返回四张 map 的 identity/digests，但不返回标量预算或攻击
+类别。route-disabled causal control 固定 `m_hf=m_lf=0.5` 且不得读取 `M/T`。
+
+### Dual-Frequency Embedding
+
+carrier 仍按独立职责域生成 `T_hf` 与 `T_lf`。`content_embedder` 唯一构造：
+
+```text
+u_hf = normalize(m_hf_embed*T_hf)
+u_lf = normalize(m_lf_embed*T_lf)
+u_content = normalize(u_hf+u_lf)
+delta_content_nominal =
+  (3/250)*norm32(fp32(z0))*u_content
+```
+
+`m_hf/m_lf` 是空间调制，不是 branch energy。不存在 `a/w`、固定 `0.70/0.30`、
+攻击条件切换或结果后分配。actual-dtype materialization、binary32 hard comparison、
+最大非零可行 scale 和最终 `3/250` combined total limit 完全复用
+`runtime_sd35_flowmatch` 规格。任一 active direction 或 combined direction 为零、
+非有限或身份不一致时 fail closed。
+
+### Blind Branch Scores
+
+检测端从待检 RGB8 独立重建 `m_hf_detect/m_lf_detect`。HF 分数固定为对
+`m_hf_detect*Y` 与 `m_hf_detect*T_hf` 做 score-time centered normalized
+correlation。LF 分数沿用 affine detrend、orthonormal DCT-II 和 six dyadic
+Chebyshev bands，但在 observation/template 进入该算子前同时施加
+`m_lf_detect`；其 `W` 必须由专属、互斥的 32-clean primary-null fit 产生，不能
+继承 unmasked 或 hard-mask candidate 的 `W`。
+
+registered、wrong-key 与 unwatermarked 调用必须使用同一 public route、detector、
+`W` 和预处理。任一 route、artifact、shape、norm 或 finite 检查失败均显式失败，
+不得回退 global HF 或 unmasked LF 后仍声称同一候选。
+
+### Fixed Content Statistic
+
+HF 与 LF 分支分别从各自专属 primary-null 分布标准化为 `z_hf_soft` 和
+`z_lf_soft`。组合唯一为：
+
+```text
+D_soft_route = max(z_hf_soft, z_lf_soft)
+```
+
+每个分支的标准化算子固定使用有限样本 mid-rank empirical CDF、`1/(2n)` tail
+clipping 和与 key schedule 同摘要的 `2^20` midpoint float32 normal quantile
+table。这里只复用共享算法原语；该原语和 table digest 进入
+`content_combination_semantic_texture_max_standardized` 身份。旧
+`content_combination_calibrated` 的 candidate identity、CDF artifact、split、
+threshold、选择结果和效果证据均不得继承。
+
+不搜索 weight/function，不按攻击类型切换。candidate-selection 的两条 provisional
+branch CDF 必须从 soft-route 候选专属 primary null 拟合，并在 confirmation 后
+丢弃。formal branch CDF 与 `tau` 必须对该 max statistic 身份在独立
+content-threshold-fit 上重新拟合；raw 与 rectified 调用共享完全相同的 route、
+detector、key、preprocessing、`W`、标准化身份和 `tau`。
+
+### Falsification Gates
+
+- `M/T` 及软路由必须确定、可从普通 RGB8 盲重建，并通过 route-disabled 因果对照；
+- LF/HF 两条分支都必须单独具有 registered/wrong-key 与 primary-null 可校准性；
+- soft-routed combination 必须在同一总预算下提供预登记增益，且不降低 HF-only
+  归属、质量或 FPR；
+- route、branch scores、budget、quality 和所有失败保留固定分母；
+- 任一公式、观察量、纹理 normalization、InSPyReNet forward、总预算或 max statistic
+  改变都产生新候选身份。
 
 ## Candidate `qk_relation_similarity`
 
@@ -1357,36 +1396,26 @@ CPU 检查三路门控、几何失败、可靠但内容仍负、同 detector/thr
 
 ## Candidate Specification Closure
 
-本文已经为当前候选集合关闭 key/KDF/PRG、relation/objective、LF write/score、
+本文为候选集合关闭 key/KDF/PRG、relation/objective、LF/HF write/score、
 routing observations、backbone/runtime、搜索、可靠性指标、回正和联合判定的实现
-选择空白。registry 合计 15 个 ID：14 个具名候选，加上
+选择空白。registry 合计 20 个 ID：19 个具名候选，加上
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
-方法晋升，也不把 15 个候选 ID 误写为 13 项实现职责。新增显著目标四候选当前仅为
-`design_candidate_pending_implementation` 且 implementation admission 为 `NO`；
-仍待实验决定的是明确有限候选
-中的晋升结果和 calibration 数值，不是实现算法。
+方法身份，也不把 20 个候选 ID 误写为 13 项实现职责。
 
-### Frozen Specification Values Versus Evidence Outcomes
+### Frozen Specification Values And Empirical Quantities
 
-现在已成为候选规格值的是：key encoding/KDF/PRG 与 golden bits；SD3.5 revision 和
+候选规格固定：key encoding/KDF/PRG 与 golden bits；SD3.5 revision 和
 runtime protocol；HF sparse-tail/filter/write/score 顺序与候选强度；LF
 filter/write/raw score、唯一 clean-null whitening fit/matched score 与有限 `a` 集；
 S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
 search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 与
-rectification；conditional recovery 控制流；以及尚未获 implementation admission 的
-InSPyReNet exact source/checkpoint/forward、单一 mask rule、global-HF/local-LF write、
-独立 32-clean-null masked whitening 与 max-statistic identity。
+rectification；conditional recovery 控制流；InSPyReNet soft `M`、Sobel/P95 `T`、
+正软路由图、soft-routed LF/HF write、两条盲 branch scores、独立 null fit 与固定
+max-statistic identity。
 
-旧 `a` 与三条历史组合函数已经形成 producer-bound negative，不再是 current 选择面。
-新 write 没有 `a/w` grid，新检测统计固定为 max。仍只能由未来预登记实证决定的是：
-新候选是否通过 module-level development 与独立 confirmation、
+软路由 write 没有 `a/w` grid，检测统计固定为 max。只能由预登记实证决定的是：
+候选是否通过 mechanism validation 与独立 confirmation、
 `alpha_selection`、formal branch CDF、`tau`、`tau_rescue`、七个 geometry reliability
 `gamma` 与 `epsilon_inlier`、各职责样本量、候选是否晋升/淘汰、runtime 是否可复现，
-以及 FPR/TPR、鲁棒性、质量、成本和完整/负结果/reduced-scope outcome。文档中的历史
-参数级来源值是待验证候选值，不是 CEG-WM 已验证事实。
-
-因此，本文可以在未来用户授权后指导实现，但本身不授权实施。项目全局已是
-`experiment_ready / implemented`；新候选的下一步不是重建 Git 身份或重走 stage，
-而是在独立授权中申请 CPU/API implementation，绑定四个新候选 ID 完成实现、测试、
-独立语义审核与候选专属 readiness 后，才申请 module-level development 执行。
+以及 FPR/TPR、鲁棒性、质量、成本和完整/负结果/reduced-scope outcome。

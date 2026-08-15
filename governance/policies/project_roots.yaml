@@ -15,6 +15,7 @@
     "governance": {"kind": "control_plane", "audited": false},
     "infrastructure": {"kind": "entrypoint", "audited": true},
     "main": {"kind": "governed_code", "audited": true},
+    "models": {"kind": "generated_asset", "audited": false},
     "outputs": {"kind": "generated_asset", "audited": false},
     "paper_artifacts": {"kind": "derived_artifact_code", "audited": true},
     "notebooks": {"kind": "entrypoint", "audited": true},

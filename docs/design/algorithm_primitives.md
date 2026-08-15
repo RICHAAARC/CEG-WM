@@ -6,7 +6,7 @@ runtime 原语按 `runtime_configuration_and_adapter`、`content_write_and_vae`�
 
 ## Document Authority
 
-本文档定义 CEG-WM 在进入方法实现前必须冻结或通过设计验证关闭的算法原语。它规定数学职责、输入输出语义、身份绑定、候选选择边界和失败规则，不表示任何原语已经实现、通过真实模型验证或能够支撑论文结论。
+本文档规定 CEG-WM 算法原语的数学职责、输入输出语义、身份绑定、候选选择边界和失败规则。
 
 本项目的阳性证据只能来自内容检测统计。几何原语只能估计变换、判断可靠性和生成回正图像。
 
@@ -20,7 +20,7 @@ runtime 原语按 `runtime_configuration_and_adapter`、`content_write_and_vae`�
 - `E_M(I)`：由冻结公共模型和预处理定义的图像观测编码。
 - `s_hf`：CEG-WM HF direct score。
 - `s_lf`：LF 分支分数。
-- `D_M(I, K)`：当前正式内容检测器。
+- `D_M(I, K)`：由方法身份 `M` 冻结的内容检测器。
 - `tau`：由 calibration 数据冻结的内容阳性阈值。
 - `tau_rescue`：由 calibration 数据冻结的近阈值负区间下界。
 - `g`：几何估计结果。
@@ -93,7 +93,8 @@ historical `routing_stqr` exact replay 才把 `mask_hf` 施加到稀疏模板：
 u_hf = normalize(mask_hf * T_hf)
 ```
 
-HF-only 对照与 current global-HF 都令 `mask_hf = 1`。模板、稀疏支持、mask identity 和单位方向属于
+HF-only 对照令 `mask_hf = 1`；语义—纹理路线改用 `m_hf`。模板、稀疏支持、
+route identity 和单位方向属于
 `hf_carrier`；它不产生 `delta_content`，不物化 latent，也不拥有实际写入能量。
 
 ### Content Embedder Write
@@ -119,17 +120,16 @@ delta_content_nominal =
 fail closed。方向、交叉项和 target components 都是 nominal formula witnesses；
 它们不定义 actual branch decomposition。
 
-current `content_embedding_global_hf_local_lf` 只允许：
+语义—纹理软路由内容嵌入只允许：
 
 ```text
-u_hf = normalize(T_hf)
-u_lf = normalize(M_embed*T_lf)
+u_hf = normalize(m_hf_embed*T_hf)
+u_lf = normalize(m_lf_embed*T_lf)
 u_content = normalize(u_hf+u_lf)
 ```
 
-不存在 `a/w`、direction dot/c(a) 或 routed/route-disabled selection。current records
-固定为 clean、HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 与失败；
-historical `a/u_content(a)/dot/c(a)` records 只供 exact replay。
+不存在 `a/w`、direction dot/c(a) 或攻击条件切换。`m_hf/m_lf` 是空间调制，
+不是分支实际能量；route-disabled 因果对照固定两图均为 `0.5` 且不读取内容观察。
 
 ### Runtime Materialization
 
@@ -178,10 +178,9 @@ utilization 不得成为未来实验的结果后排除规则。
 注入位置、调度器、剩余生成区间、latent 变换和模型 revision 必须在 runtime 验证前
 冻结。
 
-SD3.5、二十步 FlowMatch、callback index 18 与上述 `3/250` nominal/limit 已登记为
-当前项目候选身份；该精确 candidate 的真实模型执行已通过独立 runtime/GPU
-qualification。任何模型、revision、配置或方法身份变化仍须重新 qualification，
-不能由 CPU/mock 或历史结果替代。
+SD3.5、二十步 FlowMatch、callback index 18 与上述 `3/250` nominal/limit 构成
+runtime candidate identity。任何模型、revision、配置或方法身份变化都产生新身份并
+要求独立 runtime qualification。
 
 ### Direct Score
 
@@ -194,7 +193,8 @@ s_hf = dot(center(Y), center(T_hf))
 
 正式检测不得访问生成 latent、注入时模板实例、原始参考图或 embed record。模板只能由检测密钥和公共方法身份重新构造。
 
-HF direct score 在 LF/HF 组合通过晋升门之前是 `D_M` 的唯一原始内容检测统计。
+HF direct score 是 HF 分支统计；语义—纹理方法的 `D_M` 对 LF/HF 分支分别作
+primary-null 标准化后使用 `max(z_hf_soft,z_lf_soft)`。
 
 ## LF Candidate Primitive
 
@@ -232,10 +232,9 @@ Chebyshev rings 精确为 `r=max(u,v)` 的 `{1}`、`{2,3}`、`{4,...,7}`、
 affine least-squares、DCT-II normalization、fit 分母/顺序、binary32 RNE、big-endian
 hex artifact 和 score 分母。它不是 full covariance、per-pixel diagonal 或候选网格。
 
-fit partition 禁止旧 8-cluster transmission diagnostic 和 development screening；
+fit partition 与 development、candidate selection、calibration 和 evaluation 零交集；
 detector 只读公开 `W` artifact，不读取 clean fit images、参考图、embed record 或私有
-latent。只有正确密钥、错误密钥、无水印负样本和图像质量证据共同通过后，才可考虑
-冻结哪一个 LF score 为后续方法；本设计登记本身不改 readiness 或正式 detector。
+latent。LF score 必须独立通过正确密钥、错误密钥、无水印负样本和图像质量门。
 
 ### LF Rejection Conditions
 
@@ -282,26 +281,22 @@ router 不返回 `budget_lf`、`budget_hf` 或其他标量预算。首轮必须�
 基线、公开图像观测路由和被允许的共享确定性路由候选。任何依赖私有嵌入状态且
 检测端无法复现或边缘化的候选直接失败。
 
-### Current InSPyReNet Mask
+### Semantic-Texture Soft Route
 
-`routing_stqr` 已形成 producer-bound development negative，不再是 current route。
-继任 `routing_inspyrenet_salient_local_lf` 不再输出 `A` 或互补 soft masks；它保持
-同一 `content_router` 职责，并按唯一规则输出 binary `M` 与全一 HF support：
+语义观察使用 InSPyReNet finest raw `d0`、sigmoid exactly once 和 bilinear
+`64 x 64` 得到 `M in [0,1]`；纹理观察从同一 public RGB8 的灰度 Sobel 幅值、
+area downsample 与逐图 strictly-positive exact nearest-rank P95 映射得到
+`T in [0,1]`。完整预处理和资产身份见候选规格。
 
 ```text
-raw_d0 = InSPyReNet.forward_inspyre(preprocess(rgb))["saliency"][-1]
-p64 = bilinear(sigmoid_once(raw_d0), size=(64,64), align_corners=false)
-M = erode_square_3x3_zero_pad(p64 >= 0.5, exactly_once)
-valid iff 64 <= count(M) <= 3072
+m_hf = (1 + M*T) / (2 + M)
+m_lf = (1 + M*(1-T)) / (2 + M)
 ```
 
-输入预处理固定为 static RGB `1024 x 1024`、ImageNet mean/std、float32。embed 的
-`rgb` 来自 callback 18 non-terminal latent 临时 VAE decode；detect 的 `rgb` 是普通
-待检 RGB8，两侧独立运行。不存在 connected-component selection、soft fallback 或
-per-image min-max。raw/rectified 分别重算；detector 不读取 embed mask。8-unit
-development mask stability 固定为至少 `7/8` 的 IoU `>=0.5`。
-current router 只返回 `M_embed`、全一 HF support、mask identity/digests，不返回 `A`、
-互补双 mask、disabled-uniform route、`a` 或预算。
+两张 map 逐元素严格为正且和为 1。embed 的 RGB 来自 callback 18 non-terminal
+latent 临时 VAE decode；raw/rectified detection 分别从当前普通 RGB8 重算。不存在
+hard threshold、erosion、connected component、coverage fallback、private map 共享、
+`a/w` 或标量预算。route-disabled control 固定 `m_hf=m_lf=0.5` 且不读取 `M/T`。
 
 ## LF/HF Combination Primitive
 
@@ -311,10 +306,9 @@ current router 只返回 `M_embed`、全一 HF support、mask identity/digests�
 `content_detector` 负责 `s_lf`、`s_hf` 的冻结标准化与组合。独立 `lf_detector`
 必须直接实现盲 `s_lf`，不得把 LF score 隐藏在 carrier 或组合器中。
 
-当前正式 content detector 保持 HF-only。旧 LF/HF 组合路线是 producer-bound 历史
-negative。继任候选的写入只允许
-`normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，检测只允许
-`max(z_hf,z_lf_masked)`；两者尚未获 implementation admission。
+CEG-WM 的双分支写入只允许
+`normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))`，检测只允许
+`max(z_hf_soft,z_lf_soft)`。组合写入与统计组合仍由两个独立职责完成。
 
 ### Historical Calibrated Candidate Family
 
@@ -336,24 +330,24 @@ content-threshold-fit 重新拟合。两者不得跨五类 calibration 职责复
 
 不得把历史固定权重作为默认候选，不得按攻击类别切换组合函数，不得为回正图拟合第二套权重。
 
-### Current Max-Statistic Candidate
+### Semantic-Texture Max-Statistic Candidate
 
-current masked-LF 必须独立完成 32-clean-null W fit；`z_hf` 与 `z_lf_masked` 使用各自
-primary null，内容统计固定为 `max(z_hf,z_lf_masked)`。其 current matrix 只含 clean、
-HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 与失败，并在 correct-key、
-wrong-key、unwatermarked 与 invalid-mask 条件保留固定分母。不得要求 adaptive 胜过
-uniform/permuted，也不得把 historical route-disabled 重新引入 selection。
-current 候选不存在 `a`、`w`、function 或其他组合参数 selection。calibration 只允许
-在互斥职责中分别拟合 HF 与 masked-LF 分支的 primary-null/CDF 标准化、固定 max
-statistic 的单一 `tau`，以及 rescue、geometry reliability 和 end-to-end check 各自
-声明的量；不得把这些职责重新解释为组合函数搜索。
+soft-routed LF 必须独立完成 32-clean-null W fit；`z_hf_soft` 与 `z_lf_soft` 使用各自
+primary null，内容统计固定为 `max(z_hf_soft,z_lf_soft)`。固定分母包含 clean、
+HF-only、LF-only、soft-routed LF/HF、route-disabled、correct-key、wrong-key、
+unwatermarked 与 route/runtime failure。候选不存在 `a`、`w`、function 或攻击条件
+切换。分支标准化可以复用 mid-rank empirical CDF、tail clipping 与冻结 quantile
+table 的共享算法原语，但不得继承历史 `content_combination_calibrated` 的 candidate
+identity、CDF artifact、split、threshold 或效果证据。calibration 只允许在互斥职责
+中分别拟合 formal branch CDF 与 max statistic 的单一 `tau`、rescue、geometry
+reliability 和 end-to-end check 各自声明的量。
 
 ### Promotion Gate
 
 LF/HF 组合只有同时满足以下条件才可以替换 HF-only content detector 成为正式 `D_M`：
 
 - LF 单分支通过 key attribution 和无水印校准门；
-- HF 与 masked-LF 分支标准化及固定 max statistic 的 `tau` 分别由其预登记、互斥
+- soft-routed HF/LF 分支标准化及固定 max statistic 的 `tau` 分别由其预登记、互斥
   calibration 职责拟合；不存在组合参数选择；
 - candidate-selection manifest 内预登记且未参与拟合的 confirmation partition 中，至少一个预登记核心攻击族出现统计稳定的增量 TPR；
 - identity 和 HF-only 已擅长条件下的退化不超过预登记容忍度；
@@ -457,13 +451,13 @@ else:
 
 ## Threshold Calibration Primitive
 
-current max-statistic 候选不存在 `a/w/function` 或其他组合参数 calibration。正式
+soft-route max-statistic 候选不存在 `a/w/function` 或其他组合参数 calibration。正式
 calibration 只允许在互不重叠的 source-cluster manifests 中分别拟合 HF 与
-masked-LF 分支 primary-null/CDF 标准化、固定 `max(z_hf,z_lf_masked)` 的单一
+soft-routed LF 分支 primary-null/CDF 标准化、固定 `max(z_hf_soft,z_lf_soft)` 的单一
 `tau`、`tau_rescue`、几何可靠性门和完整联合检测器检查；historical `a/w/function`
 只按原 producer replay：
 
-- HF 与 masked-LF 分支 primary-null/CDF 标准化；
+- soft-routed HF 与 LF 分支 primary-null/CDF 标准化；
 - fixed max-statistic 内容阈值拟合；
 - rescue 区间拟合；
 - 几何可靠性拟合；
@@ -509,32 +503,18 @@ lineage 与注册 key family 形成的 source cluster，其所有攻击、回正
   channel-band diagonal `W`、白化 matched score 与只读 blind detector 边界；
 - `routing_stqr` 固定 historical S/T/R/Q observations 和路由公式；
 - `content_combination_calibrated` 固定历史有限组合函数集合；
-- `routing_inspyrenet_salient_local_lf` 固定 exact InSPyReNet source/checkpoint/
-  forward 和单一 binary mask；
-- `content_embedding_global_hf_local_lf` 固定 global HF + local LF 无权重网格写入；
-- `lf_saliency_masked_null_whitened_matched_score` 固定检测端重算 mask、独立
-  32-clean-null W 与盲 masked score；
-- `content_combination_saliency_max_standardized` 固定分支独立 primary-null
+- `routing_semantic_texture_soft` 固定 InSPyReNet soft `M`、Sobel/P95 `T` 与两张
+  和为一的正软路由图；
+- `content_embedding_semantic_texture_soft_lf_hf` 固定 soft-routed LF/HF 无权重网格写入；
+- `lf_semantic_texture_soft_whitened_matched_score` 固定检测端重算 route、独立
+  32-clean-null W 与盲 LF score；
+- `hf_semantic_texture_soft_direct_score` 固定检测端重算 route 与盲 HF direct score；
+- `content_combination_semantic_texture_max_standardized` 固定分支独立 primary-null
   标准化与 max statistic；
 - `qk_relation_similarity` 固定 Q/K 层、直接 relation、keyed objective 和同步写入；
 - `rectification_similarity` 固定搜索域、目标、可靠性指标和回正规则；
 - `joint_conditional_recovery` 固定联合判定。
 
-registry 共 15 个 ID：14 个具名候选和 1 个强制同预算禁用对照
-`routing_uniform_control`。CPU/synthetic 实现不等于实验晋升；该计数不等于固定的
-13 项实现职责，也不把对照视为方法候选。
-
-原有实现与方法行为门保持其 producer-bound 身份；新增显著目标四候选均为
-`design_candidate_pending_implementation`、`implementation_admission=NO`，尚未实施
-或重绑 readiness。仍开放的是这些候选未来经单独授权的实现/独立语义审核，以及各候选能否通过真实 runtime、
-candidate-selection、calibration 和 formal evaluation 门及互斥 calibration 职责拟合的
-阈值数值。设计冻结与效果证据必须保持分离。
-
-13 项职责、27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并经独立语义
-审计。实际 stage/status 已由独立 revisions 同步为
-`experiment_ready / implemented`。冻结 SD3.5 runtime 已通过真实 GPU
-qualification；正式 detector 保持 HF-only，旧 route/combination 为历史负结果，
-新显著目标路线尚未实施，
-`full_ceg_wm_eligible=false`。实验准备基础设施闭环不提供 `tau`、confirmation
-结果、Calibration Locked、正式 evaluation、正式 FPR 或效果证据，也不晋升
-LF/routing/组合/geometry。
+registry 共 20 个 ID：19 个具名候选和 1 个强制同预算禁用对照
+`routing_uniform_control`。该计数不等于固定的 13 项方法职责，也不把对照视为
+方法候选。

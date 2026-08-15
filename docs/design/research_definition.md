@@ -1,8 +1,6 @@
 # CEG-WM Research Definition
 
-本研究定义将实验准备基础设施整体登记为
-`experiment_ready_infrastructure_closure`；该身份描述职责闭环，不替代
-`project_stage`，也不自动形成科学证据。
+本文件定义研究对象、方法身份、访问边界和成功条件。
 
 ## Research Objective
 
@@ -14,11 +12,9 @@ CEG-WM 研究生成式图像中的密钥归属水印。目标是在常规内容�
 
 - 研究介质是生成式图像。
 - 生成与检测所用模型族必须能够提供 CEG-WM HF carrier/direct score 所需能力以及可复现的 Q/K 观测。
-- 首个 backbone/runtime 候选已限定为 `candidate_specifications.md` 的
+- backbone/runtime 限定为 `candidate_specifications.md` 的
   `runtime_sd35_flowmatch`，包含具体 model revision、调度器、精度、尺寸、steps、
-  VAE 与依赖锁。该候选的真实 SD3.5 runtime 边界已由独立审核的 qualification
-  结果复现；这不把模型可执行性扩展为方法效果。未来候选失败或身份变化时必须先
-  修订规格并重新 qualification，不能在实现中静默换模型。
+  VAE 与依赖锁。任何身份变化必须先修订规格，不能在实现中静默换模型。
 - 项目方法 API 不得依赖具体设备、远程服务或 Notebook 状态。
 
 ## Access Model
@@ -59,31 +55,16 @@ root key 的 UTF-8 语义、职责域派生、wrong-key 和 public-noise 由
 - 回正后由同一检测器产生的分数；
 - 最终内容判定。
 
-当前 CPU/synthetic 方法结果已覆盖其中的方法级分支统计、门控、几何、回正和判定
-身份；正式 calibration 阈值与持久化 records 字段仍是未来协议要求。
-
-当前方法实现按 13 项正式职责分层：共享 key schedule；内容链的 router、LF/HF
+方法按 13 项正式职责分层：共享 key schedule；内容链的 router、LF/HF
 carrier、content embedder、LF/HF detector、content detector；几何链的 Q/K sync、
 transform estimator、独立 geometry reliability、rectifier；以及 conditional recovery
-decision。27 个 CPU/synthetic 行为节点和唯一 readiness 已完成并审计；实际
-stage/status 已由独立 revisions 同步为 `experiment_ready / implemented`；该阶段只
-登记冻结实验协议与可追溯执行交付的基础设施闭环。真实 qualification 只验证冻结
-runtime 边界；当前没有 `tau`、confirmation 结果、Calibration Locked、正式
-evaluation 或科学证据，也没有 LF/routing/组合/geometry 的实验晋升。
-候选 registry 现有 15 个 ID（14 个具名候选和 1 个 mandatory control），是算法
-身份计数，不是 13 项组件职责计数。新增的
-`routing_inspyrenet_salient_local_lf`、`content_embedding_global_hf_local_lf`、
-`lf_saliency_masked_null_whitened_matched_score` 和
-`content_combination_saliency_max_standardized` 状态统一为
-`design_candidate_pending_implementation`，`implementation_admission=NO`。
-现有全局 `experiment_ready / implemented`、readiness、runtime qualification 和既有
-HF/LF directional evidence 均不覆盖这四个新身份。
+decision。
 
-内容路线的当前研究问题收敛为：全局 HF 提供主密钥归属证据，InSPyReNet 从普通
-RGB8 图像独立重建显著目标内部 mask，局部 LF 只在该支持域写入和盲检测。嵌入端
-mask 来自 callback 18 非 terminal latent 的临时 VAE decode RGB8；检测端对普通待检
-RGB8 重新运行同一冻结模型与规则，不得读取嵌入 mask、Prompt、record、私有 latent
-或参考图。raw 与 rectified 图分别重新运行 mask，不共享私有状态。
+内容路线使用 InSPyReNet soft semantic probability `M` 与 deterministic Sobel/P95
+texture `T` 形成逐图 LF/HF 正软路由；两条 keyed carrier 在共同 `3/250` 总预算下
+组合写入，检测端从普通 RGB8 独立重建路由并计算
+`max(z_hf_soft,z_lf_soft)`。嵌入端、raw 检测端和 rectified 检测端不共享 route、
+Prompt、record、私有 latent 或参考图。
 
 ## Success Conditions
 
@@ -101,12 +82,9 @@ RGB8 重新运行同一冻结模型与规则，不得读取嵌入 mask、Prompt�
 - 不使用原始参考图做正式注册。
 - 不把 payload 恢复或系统级 attestation 作为当前主方法链。
 - 不继承历史项目的固定 LF/HF 权重。
-- 不从既有 routing 8 probes 或 uniform-combination 8 probes 选择 mask threshold、
-  erosion、coverage、混合权重或组合函数；不补样、删 cluster、重跑、增加 attempt、
-  放宽 `3/250` 或重写既有 artifact。
-- 不用 margin-only 子集形成 winner、promotion 或 candidate selection。
-- 不把既有 HF/LF 各自 32-unit directional 证据自动传递给新 masked-LF、max
-  combination 或完整内容链；它们只保持各自 producer-bound 结论。
+- 不使用 hard saliency threshold、erosion、coverage fallback、固定 LF/HF 权重或
+  attack-conditioned combination。
+- 不把 `m_lf/m_hf` 解释为 actual branch energy。
 - 不以治理通过、代码数量或示例输出支持科研结论。
 - 不把 CPU/synthetic 实现与行为通过误写成 LF/routing 实验晋升、runtime/GPU、
   正式 FPR 或科学效果验证。
@@ -124,4 +102,7 @@ RGB8 重新运行同一冻结模型与规则，不得读取嵌入 mask、Prompt�
 
 ## Evidence Boundary
 
-本文件和其他登记设计文档只支持“项目已定义”的阶段判断。算法原语见 [algorithm_primitives.md](algorithm_primitives.md)，端到端机制见 [method_mechanism.md](method_mechanism.md)，实施和证据门见 [research_construction_roadmap.md](research_construction_roadmap.md)。方法有效性、鲁棒性、比较优势和论文结论必须等待实质实现、冻结协议、真实 records 和可重建 artifacts。
+算法原语见 [algorithm_primitives.md](algorithm_primitives.md)，端到端机制见
+[method_mechanism.md](method_mechanism.md)，证据门见
+[research_construction_roadmap.md](research_construction_roadmap.md)。方法有效性、
+鲁棒性、比较优势和论文结论只能由冻结协议、真实 records 和可重建 artifacts 支持；

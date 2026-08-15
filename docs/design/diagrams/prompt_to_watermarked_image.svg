@@ -22,8 +22,8 @@
     </style>
   </defs>
   <rect width="1800" height="1180" fill="#ffffff"/>
-  <text x="40" y="48" class="title">Prompt → Watermarked Image (planned CEG-WM generation path)</text>
-  <text x="40" y="76" class="sub">Scope: experiment_ready / implemented; frozen SD3.5 runtime qualification passed. No LF/routing promotion, tau, confirmation result, Calibration Locked, formal evaluation, or scientific evidence.</text>
+  <text x="40" y="48" class="title">Prompt → Watermarked Image (CEG-WM generation path)</text>
+  <text x="40" y="76" class="sub">Method-only view: semantic-texture soft routing + keyed LF/HF content write + independent Q/K geometry sync.</text>
   <text x="40" y="98" class="sub">Sources: ../candidate_specifications.md · ../algorithm_primitives.md · ../method_mechanism.md · ../../../.codex/project_contract.md</text>
 
   <rect x="40" y="140" width="270" height="205" class="box"/>
@@ -32,38 +32,38 @@
 
   <rect x="40" y="390" width="270" height="175" class="key"/>
   <text x="60" y="420" class="hdr">Secret input boundary</text>
-  <text x="60" y="450" class="txt"><tspan x="60">root_key_text (input only)</tspan><tspan x="60" dy="24">planned shared key_schedule</tspan><tspan x="60" dy="24">stable KDF / counter PRG</tspan><tspan x="60" dy="24">public digest only may persist</tspan></text>
+  <text x="60" y="450" class="txt"><tspan x="60">root_key_text (input only)</tspan><tspan x="60" dy="24">shared key_schedule</tspan><tspan x="60" dy="24">stable KDF / counter PRG</tspan><tspan x="60" dy="24">public digest only may persist</tspan></text>
 
   <rect x="350" y="140" width="300" height="205" class="runtime"/>
-  <text x="370" y="170" class="hdr">Paired runtime setup (planned)</text>
+  <text x="370" y="170" class="hdr">Paired runtime setup</text>
   <text x="370" y="200" class="txt"><tspan x="370">same prompt / seed / model config</tspan><tspan x="370" dy="24">base latent generated once</tspan><tspan x="370" dy="24">clean branch: no method update</tspan><tspan x="370" dy="24">watermarked branch: governed updates</tspan><tspan x="370" dy="24">identity and failure propagated</tspan></text>
 
   <rect x="350" y="390" width="300" height="175" class="key"/>
-  <text x="370" y="420" class="hdr">Domain-separated outputs (planned)</text>
+  <text x="370" y="420" class="hdr">Domain-separated outputs</text>
   <text x="370" y="450" class="txt"><tspan x="370">LF carrier domain</tspan><tspan x="370" dy="24">HF carrier domain</tspan><tspan x="370" dy="24">Q/K geometry domain</tspan><tspan x="370" dy="24">routing public-noise domain</tspan></text>
 
   <rect x="700" y="140" width="430" height="180" class="content"/>
-  <text x="720" y="170" class="hdr">Content observation + router (planned)</text>
-  <text x="720" y="200" class="txt"><tspan x="720">S / T / R / Q_sens observations</tspan><tspan x="720" dy="24">A, mask_lf, mask_hf + identity/digests</tspan><tspan x="720" dy="24">mask_lf + mask_hf = A; each in [0,1]</tspan><tspan x="720" dy="24">router does not choose a or budgets</tspan></text>
+  <text x="720" y="170" class="hdr">Semantic-texture soft router</text>
+  <text x="720" y="200" class="txt"><tspan x="720">InSPyReNet soft M + Sobel/P95 T</tspan><tspan x="720" dy="24">m_hf=(1+M*T)/(2+M)</tspan><tspan x="720" dy="24">m_lf=(1+M*(1-T))/(2+M)</tspan><tspan x="720" dy="24">positive maps sum to 1; no scalar budget</tspan></text>
 
   <rect x="700" y="355" width="200" height="165" class="content"/>
-  <text x="720" y="385" class="hdr">LF carrier (planned)</text>
-  <text x="720" y="415" class="txt"><tspan x="720">keyed T_lf</tspan><tspan x="720" dy="24">mask_lf support</tspan><tspan x="720" dy="24">unit direction u_lf</tspan><tspan x="720" dy="24">no delta / no score</tspan></text>
+  <text x="720" y="385" class="hdr">LF carrier</text>
+  <text x="720" y="415" class="txt"><tspan x="720">keyed T_lf × m_lf</tspan><tspan x="720" dy="24">soft-routed support</tspan><tspan x="720" dy="24">unit direction u_lf</tspan><tspan x="720" dy="24">no delta / no score</tspan></text>
 
   <rect x="930" y="355" width="200" height="165" class="content"/>
-  <text x="950" y="385" class="hdr">HF carrier (planned)</text>
-  <text x="950" y="415" class="txt"><tspan x="950">sparse-tail T_hf</tspan><tspan x="950" dy="24">mask_hf support</tspan><tspan x="950" dy="24">unit direction u_hf</tspan><tspan x="950" dy="24">no delta / no score</tspan></text>
+  <text x="950" y="385" class="hdr">HF carrier</text>
+  <text x="950" y="415" class="txt"><tspan x="950">sparse-tail T_hf × m_hf</tspan><tspan x="950" dy="24">soft-routed support</tspan><tspan x="950" dy="24">unit direction u_hf</tspan><tspan x="950" dy="24">no delta / no score</tspan></text>
 
   <rect x="700" y="560" width="430" height="205" class="content"/>
-  <text x="720" y="590" class="hdr">Content embedder (planned responsibility)</text>
-  <text x="720" y="620" class="txt"><tspan x="720">frozen a ∈ {0.25, 0.50, 0.75}</tspan><tspan x="720" dy="24">v = a·u_lf + (1-a)·u_hf; c = ||v||</tspan><tspan x="720" dy="24">u_content = v/c (non-orthogonal cross term)</tspan><tspan x="720" dy="24">common target total relative-L2 budget</tspan><tspan x="720" dy="24">delta_content; zero/non-finite → fail closed</tspan></text>
+  <text x="720" y="590" class="hdr">Content embedder</text>
+  <text x="720" y="620" class="txt"><tspan x="720">u_content = normalize(u_lf + u_hf)</tspan><tspan x="720" dy="24">no a/w or attack-conditioned switch</tspan><tspan x="720" dy="24">combined total relative-L2 = 3/250</tspan><tspan x="720" dy="24">actual-dtype hard-budget reconciliation</tspan><tspan x="720" dy="24">zero/non-finite → fail closed</tspan></text>
 
   <rect x="1190" y="140" width="540" height="280" class="geometry"/>
-  <text x="1210" y="170" class="hdr">Q/K geometry synchronization write (planned)</text>
+  <text x="1210" y="170" class="hdr">Q/K geometry synchronization write</text>
   <text x="1210" y="200" class="txt"><tspan x="1210">image-only, empty-condition Q/K observation identity</tspan><tspan x="1210" dy="24">registered layers / heads / token coordinates</tspan><tspan x="1210" dy="24">keyed relation target from geometry domain</tspan><tspan x="1210" dy="24">sync update projected outside content span</tspan><tspan x="1210" dy="24">span{u_lf,u_hf}; no LF/HF content-budget theft</tspan><tspan x="1210" dy="24">actual-dtype bounded line search; failure retained</tspan><tspan x="1210" dy="24">geometry update never defines watermark evidence</tspan></text>
 
   <rect x="1190" y="470" width="540" height="185" class="runtime"/>
-  <text x="1210" y="500" class="hdr">Frozen callback/model materialization (planned runtime)</text>
+  <text x="1210" y="500" class="hdr">Frozen callback/model materialization</text>
   <text x="1210" y="530" class="txt"><tspan x="1210">materialize content + geometry updates at registered boundary</tspan><tspan x="1210" dy="24">return actual-dtype tensor and delta_content_actual</tspan><tspan x="1210" dy="24">measure realized combined total norm / relative L2</tspan><tspan x="1210" dy="24">embedder judges target vs realized; runtime owns no budget</tspan></text>
 
   <rect x="1190" y="700" width="260" height="135" class="runtime"/>
@@ -80,7 +80,7 @@
 
   <rect x="1480" y="885" width="250" height="115" class="out"/>
   <text x="1500" y="920" class="hdr">Watermarked RGB image</text>
-  <text x="1500" y="950" class="txt"><tspan x="1500">ordinary image only</tspan><tspan x="1500" dy="22">planned output, not evidence</tspan></text>
+  <text x="1500" y="950" class="txt"><tspan x="1500">ordinary image only</tspan><tspan x="1500" dy="22">method output; no private state</tspan></text>
 
   <rect x="40" y="880" width="1030" height="160" class="fail"/>
   <text x="60" y="910" class="hdr">Fail-closed propagation and forbidden outputs</text>

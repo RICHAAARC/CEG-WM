@@ -7,11 +7,8 @@
 ## Purpose
 
 本文档把 [algorithm_primitives.md](algorithm_primitives.md) 中的算法原语和
-[candidate_specifications.md](candidate_specifications.md) 中已关闭的有限候选组织为
-可实现、可验证且不越过当前 `experiment_ready` 阶段的端到端机制。
-当前 13 项职责已按它实现并经 CPU/synthetic readiness 审核；本文档自身、
-admission、readiness 和阶段转换本身都不提供 runtime 或科学效果证据；当前
-runtime 结论只来自独立 qualification。
+[candidate_specifications.md](candidate_specifications.md) 中的有限候选组织为
+可实现、可验证的端到端机制。
 
 ## Method Identity
 
@@ -105,15 +102,15 @@ joint_decision
 
 路由不得读取攻击标签或 evaluation 结果。
 
-#### Current InSPyReNet Candidate
+#### Semantic-Texture Soft Route
 
-旧 `routing_stqr` 已是 producer-bound historical negative。当前继任设计不新增
-职责：`content_router` 对 callback-18 临时 VAE decode RGB8 运行冻结 InSPyReNet，
-通过 raw finest `d0 -> sigmoid once -> bilinear 64x64 -> p>=0.5 -> one 3x3
-zero-padded erosion` 得到 `M_embed`；coverage 只允许 `64..3072`。检测端对普通
-待检 RGB8 独立得到 `M_detect`，raw/rectified 分别重跑，永不读取 embed mask。
-current router 的完整输出仅为 `M_embed`、全一 HF support、mask identity/digests；
-不输出 `A`、互补双 mask、disabled-uniform route、`a` 或标量预算。
+`content_router` 对 callback-18 临时 VAE decode RGB8 构造 InSPyReNet soft semantic
+probability `M_embed` 和 deterministic Sobel/P95 texture `T_embed`。检测端对普通待检
+RGB8 独立重建 `M_detect/T_detect`，raw/rectified 分别重跑，永不读取 embed-side map。
+router 唯一输出两张观察图、
+`m_hf=(1+M*T)/(2+M)`、`m_lf=(1+M*(1-T))/(2+M)` 及 identity/digests；
+不输出攻击标签、`a/w` 或标量预算。route-disabled control 固定两张 map 为 `0.5`
+且不读取内容观察。
 
 ### Content Carrier Directions And Embedder Write
 
@@ -152,28 +149,25 @@ HF 写入方向独立使用 CEG-WM HF carrier 职责域密钥。LF 候选写入�
 midpoint；zero plateau 不作为可行写入，最终返回最大非零可行 scale 或 fail closed。
 runtime 不拥有 accept/retry/scale/final-failure 语义。
 
-#### Current Global-HF Plus Local-LF Write
+#### Semantic-Texture Soft LF/HF Write
 
-对 `content_embedding_global_hf_local_lf`，上述职责分离保持不变，但唯一 nominal
+对 `content_embedding_semantic_texture_soft_lf_hf`，上述职责分离保持不变，但唯一 nominal
 方向改为：
 
 ```text
-u_hf = normalize(T_hf)
-u_lf = normalize(M_embed*T_lf)
+u_hf = normalize(m_hf_embed*T_hf)
+u_lf = normalize(m_lf_embed*T_lf)
 u_content = normalize(u_hf+u_lf)
 ```
 
-不存在 `a/w` grid；masked LF/sum 零或非有限 fail closed。final actual-dtype total
-budget 仍是 canonical binary32 `3/250`。科学 probe 必须以 LF-only arm 证明 actual
-LF delta 非零、mask 外逐 bit 零、mask 内有能量；combined actual delta 不声明 branch
-分解。
+不存在 `a/w` grid；active direction/sum 零或非有限 fail closed。final actual-dtype
+total budget 是 canonical binary32 `3/250`。`m_hf/m_lf` 不解释为 actual branch
+energy；combined actual delta 不声明 branch 分解。
 
-current records/controls 固定为 clean、HF-only、masked-LF causal、
-global-HF+local-LF、LF-disabled 和显式失败。masked-LF causal record 必须证明
-actual LF delta 非零、mask 外逐 bit 为零、mask 内有能量；其余 current records 保存
-mask identity/digests、coverage、nominal/limit、runtime materialization、realized
-combined total norm/relative L2、integrity/budget/failure，不保存 `A`、`a`、
-`dot(u_lf,u_hf)` 或 routed/route-disabled 身份。
+records/controls 固定为 clean、HF-only、LF-only、soft-routed LF/HF、
+route-disabled 和显式失败。records 保存 `M/T` 与 route digests、nominal/limit、
+runtime materialization、realized combined total norm/relative L2、
+integrity/budget/failure；不把路由图解释为 actual branch decomposition。
 
 historical exact replay 的组合记录仍包括冻结 `a`、方向/支持 identity、
 `dot(u_lf,u_hf)`、combined pre-normalization norm、nominal 与 limit、runtime
@@ -185,14 +179,14 @@ component vectors/norms，必须注明它们只是 nominal formula witnesses 且
 historical route record 只保留 observations、`A`、masks、覆盖和 identity/digests；
 这些字段不得重签为 current records 或 readiness。
 
-current 比较只保持以下因果对照：
+软路由比较只保持以下因果对照：
 
 - clean；
 - HF-only；
-- masked-LF causal；
-- global-HF + local-LF；
-- LF-disabled；
-- mask/support/runtime failure。
+- LF-only；
+- semantic-texture soft-routed LF/HF；
+- route-disabled `m_hf=m_lf=0.5`；
+- route/runtime failure。
 
 不得重新引入 adaptive-vs-uniform、permuted、routed-vs-route-disabled 或权重/function
 selection；不同总能量候选的效果差异也不得解释为局部路由增益。
@@ -227,18 +221,17 @@ geometry/content budget ratio 只在 `qk_relation_similarity` 登记的有限集
 
 ### Raw Content Detection
 
-检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。新 masked-LF
-检测必须重跑同一 InSPyReNet mask，将 `M_detect` 同时施加于 public VAE posterior
-observation 与 key-only template，并用独立 32-clean-null manifest 重新拟合 W；禁止
-继承旧 W 或读取 embed mask。LF 的
+检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。软路由检测
+必须重跑同一 `M/T` 公共规则，将 `m_lf_detect`、`m_hf_detect` 分别同时施加于
+对应 public VAE posterior observation 与 key-only template，并为 soft-routed LF
+使用独立 32-clean-null manifest 拟合 W；禁止继承其他 route 的 W 或读取 embed map。LF 的
 `lf_low_pass` raw score 与 `lf_null_whitened_matched_score` 是两个独立候选身份；
 后者只读消费由独立 32-clean partition 冻结的 96 参数 channel-band diagonal `W`，
 不得在检测时读取 fit images 或重拟合。
 `lf_detector` 和 `hf_detector` 必须是独立可调用责任，三类 `s_lf`、`s_hf`、
 `s_combined` 必须独立可观测。`content_detector` 消费两个分支统计并形成
-`D_M(I, K)`；新组合唯一统计是独立 primary-null 标准化后的
-`max(z_hf,z_lf_masked)`，未来 formal threshold 必须对该 max statistic 自身拟合。
-在 LF/HF 组合晋升前，`D_M` 等于 CEG-WM HF direct score。组合不得
+`D_M(I, K)`；组合唯一统计是独立 primary-null 标准化后的
+`max(z_hf_soft,z_lf_soft)`，formal threshold 必须对该 max statistic 自身拟合。组合不得
 掩盖任一分支的错误密钥失败。
 
 原图检测必须首先完成，几何链不能预先改变所有输入，也不能成为默认前处理。
@@ -366,7 +359,7 @@ method identity
 
 ## Public Interfaces
 
-当前实现按权威 13 项职责提供独立 symbol；接口语义覆盖：
+方法 API 按权威 13 项职责提供独立接口；接口语义覆盖：
 
 - 构造内容载体候选；
 - 组合 LF/HF 写入并保持共同总预算；
@@ -433,9 +426,9 @@ runtime 不负责：
 
 1. CEG-WM HF candidate identity、HF direct score 和 raw content detector 可复现；
 2. LF-only 具备独立 key attribution；
-3. 新显著目标 mask 在冻结 coverage 与 8-unit `7/8` IoU `>=0.5` 门下稳定；
-4. local-LF causal witness、独立 32-clean-null W 与盲 key attribution 通过；
-5. global-HF/local-LF max statistic 通过独立 confirmation；若未通过，则关闭完整 CEG-WM 成功路径并形成内容分支负结果；
+3. `M/T` 观察和两张软路由图在普通 RGB8 上可确定性重建；
+4. route-disabled 因果对照、独立 32-clean-null W 与两分支盲 key attribution 通过；
+5. soft-routed LF/HF max statistic 通过独立 confirmation；
 6. Q/K 同步在真实 runtime 可观测；
 7. 变换估计与可靠性在 identity、单变换、组合变换和错误密钥下通过；
 8. 回正能改善同一内容检测器；
@@ -444,28 +437,6 @@ runtime 不负责：
 
 前一项未通过时，不得用后一项的复杂度掩盖根因。
 
-root-key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
-backbone/runtime 已由具名候选关闭，后续 method/runtime 工作必须按候选 ID 工作，不能自行发明
-替代方案。候选规格已独立复审批准，CEG-WM 版本身份和 construction admission
-已绑定，项目已以不含 `main/` 变更的独立 revision 进入
-`method_construction_authorized`。随后独立 revisions 已按候选完成方法实现、
-CPU/synthetic 验证与 readiness 审核；独立阶段迁移已经完成。
-
-## Current Status
-
-当前项目登记为
-`experiment_ready / implemented`：
-
-- 13 项职责、27 个 CPU/synthetic 行为节点和唯一 method readiness 已完成并审计；
-- 正式 detector 仍为 HF-only；旧 route/combination 是 producer-bound historical
-  negative，新显著目标四候选为 `design_candidate_pending_implementation`、
-  `implementation_admission=NO`，
-  `full_ceg_wm_eligible=false`；
-- 冻结 SD3.5 candidate 的真实 callback、actual dtype、VAE、两层 Q/K 和基本
-  确定性 runtime 边界已经 qualification；
-- 实验准备基础设施闭环仅登记冻结协议与可追溯执行交付，不构成
-  `hf_only_reference_validation` 晋升；
-- 没有本项目 calibration 阈值；
-- 没有 confirmation 结果或 Calibration Locked；
-- 没有正式实验或论文 records；
-- 没有 FPR、鲁棒性或比较优势结论。
+root-key/KDF/PRG、Q/K relation/objective、LF/HF write/score、routing observations、
+backbone/runtime 由具名候选关闭，method/runtime 工作必须按候选 ID 工作，不能自行
+发明替代方案。

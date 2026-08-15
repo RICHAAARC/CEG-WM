@@ -12,8 +12,8 @@ CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印�
 CPU/synthetic readiness 本身不证明 runtime；当前另有独立真实 GPU qualification
 支持冻结 SD3.5 runtime 边界，但不证明正式 FPR 或科学效果；
 正式 detector 仍为 HF-only；旧 routing/combination 只保留 producer-bound historical
-replay，新显著目标局部 LF 四候选均为 `design_candidate_pending_implementation`、
-`implementation_admission=NO`，
+replay，语义—纹理软路由五候选为 `adopted_design_unimplemented`，hard salient-object
+local-LF 四候选为 `superseded_without_scientific_adjudication`，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation
 或科学证据，也不晋升 LF/routing/组合/geometry。
@@ -41,16 +41,16 @@ KDF/PRG、职责域、wrong-key/public-noise 和 golden-vector 责任。LF、HF 
 方法完成面固定为 13 项职责组件：共享 1 项、内容链 7 项、几何链 4 项、联合判定
 1 项。`content_embedder`、`lf_detector`、`geometry_reliability` 各有独立路径，
 不得折回 carrier、content detector 或 transform estimator。候选 registry 的
-15 个 ID（14 个具名候选加 1 个 mandatory control）与这 13 项职责是不同计数；
-新增四候选不增加第 14 项职责，也不重签当前 readiness 或 stage。
+20 个 ID（19 个具名候选加 1 个 mandatory control）与这 13 项职责是不同计数；
+新增候选不增加第 14 项职责，也不重签当前 readiness 或 stage。
 
-当前内容侧所有权固定为：`content_router` 只输出 `M_embed`、全一 HF support、
-mask identity/digests；不输出 `A`、互补双 mask、`a` 或预算。
+当前内容侧所有权固定为：`content_router` 只输出 `M/T`、`m_lf/m_hf` 与
+identity/digests；不输出攻击标签、`a/w` 或预算。
 `content_embedder` 只按
-`normalize(normalize(T_hf)+normalize(M_embed*T_lf))` 形成 current combined
-direction，独占共同总预算、HF-only/masked-LF/global-HF+local-LF/LF-disabled delta
+`normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))` 形成 combined
+direction，独占共同总预算、HF-only/LF-only/soft-routed/route-disabled delta
 与 realized total norm/relative-L2 核验及零方向失败；不存在 `a/w` grid。
-clean、HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 和显式失败是
+clean、HF-only、LF-only、soft-routed LF/HF、route-disabled 和显式失败是
 current control/record surface。
 
 历史 `routing_stqr` 的 observations、`A`、互补双 mask、disabled-uniform control，
@@ -99,6 +99,8 @@ runtime 只提供执行能力，不决定 near-threshold、几何救援或最终
 - `paper_artifacts/` 只从冻结 records 和 manifests 重建 tables、figures 和 reports。
 - `notebooks/` 只保存薄编排入口。
 - `infrastructure/` 保存环境、调度和远程执行入口。
+- `models/` 是本地、非权威、不审计的模型资产/缓存根；checkpoint 与下载附属
+  元数据不得进入 Git，也不得作为方法、readiness 或科学结论的权威证据。
 - `.agents/`、`.codex/` 与 `governance/` 可整体删除；研究和交付代码不得导入它们。
 
 ## 协议与证据链

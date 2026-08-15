@@ -1,720 +1,268 @@
 # CEG-WM Research Construction Roadmap
 
-`experiment_ready_infrastructure_closure` 的七项职责为：研究范围与阶段治理、方法架构
-与证据边界、内容/几何/联合判定设计、算法与候选冻结、真实方法实现、runtime
-qualification、实验协议与可追溯交付。后续参考验证统一称为
-`hf_only_reference_validation`。
+## Purpose
 
-## Roadmap Authority
+本路线图定义方法从规格、实现、机制验证、校准到论文证据的依赖顺序。
 
-本文档定义从当前 `experiment_ready` 到论文全部数据、可重建产物和
-受支持结论的构建路线。它是研究与工程准入顺序，不是完成状态报告。
+## Method Success Conjunction
 
-文中的语义化名称是证据门，不是新的 `project_stage`。正式阶段仍以 `governance/policies/method_readiness_rules.yaml` 登记的顺序为准：
+完整 CEG-WM 成功是下列硬门的合取：
 
 ```text
-research_defined
-    ↓
-method_construction_authorized
-    ↓
-method_implemented
-    ↓
-runtime_verified
-    ↓
-experiment_ready
-    ↓
-formal_evidence_available
+G_full = G_route
+       and G_lf
+       and G_hf
+       and G_content
+       and G_qk
+       and G_geometry
+       and G_joint
+       and G_quality_fpr
 ```
 
-任何证据门未通过时，必须停在当前阶段、保存失败事实并修订对应设计，不能跳过、放宽门禁或用后续实验掩盖失败。`method_construction_authorized` 是实施准入/在建阶段，不是完成结论：候选规格关闭并独立审计通过后，用户先授权建立可审计版本身份与阶段变更；阶段变更本身不得包含 `main/` 实现，方法实施只能在之后的独立变更中开始。
+不得以“通过模块数 / 模块总数”计算完整方法成功率。任何必需门失败都关闭完整方法
+成功身份；缩减方法必须重新命名、重新限定主张并独立校准/评估。
 
-当前检查点：13 项职责、27 个 CPU/synthetic 方法行为节点、唯一 readiness 和真实
-SD3.5 runtime qualification 已分别完成并审计；实际 stage/status 已由独立
-revisions 同步为 `experiment_ready / implemented`。runtime 证据精确绑定 candidate
-`8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 qualification run
-`20260729T110628Z`。正式 detector 仍为 HF-only；旧 routing/uniform-combination
-路线已有 producer-bound development negative，新显著目标局部 LF 四候选尚未实现，
-`full_ceg_wm_eligible=false`。实验准备基础设施已冻结协议与可追溯执行交付，但没有
-`tau`、confirmation 结果、Calibration Locked、正式 evaluation、完整联合 FPR、
-正式 records 或科学效果证据，也没有 LF/routing/组合/geometry 晋升。
+## Gate 1: Research And Candidate Specification
 
-新显著目标四候选的当前流程从该 `experiment_ready / implemented` 基线申请独立
-CPU/API implementation；不重建 Git 身份、不回退或重走既有 stage。只有候选专属
-实现、测试、独立语义审核与 readiness 闭合后，才可申请新的 module-level
-development protocol。
+### Required Work
 
-## Paper Research Target
-
-最终目标是形成一套可独立重建的 CEG-WM 论文证据，至少支持以下问题：
-
-- CEG-WM HF direct score 是否能在本项目中保持正确密钥归属；
-- LF 是否在 HF 易受损条件下提供独立且互补的密钥证据；
-- 显著目标内部局部 LF 是否在相同总能量下提供非零、mask 外逐位为零的因果贡献；
-- 固定 HF/masked-LF max statistic 是否保留 HF-only 归属、增加 masked-LF 证据且不掩盖错误密钥失败；
-- Q/K 几何链是否能盲估计 crop、scale、rotation 并可靠拒绝不可恢复样本；
-- 条件几何恢复是否提高同一内容检测器的 TPR，同时保持同一阈值和 FPR；
-- 完整方法在预登记攻击、baseline、图像质量和资源成本下是否具有论文价值；
-- 完整联合检测器是否达到固定 FPR `0.001` 级别。
-
-“达到 FPR=0.001 级别”必须同时满足：
-
-- operating point 在 calibration 中预先冻结；
-- evaluation 使用独立主负样本；
-- 报告经验 FPR 和精确置信区间；
-- 若声称 `FPR <= 0.001`，单侧置信上界也必须不超过 `0.001`；
-- wrong-key null 与 unwatermarked-image null 分开报告；
-- raw 与 rectified 路径共同计入完整联合检测器 FPR。
-
-## Evidence Gate: Research Specification Closed
-
-### Work
-
-- 冻结研究目标、访问模型、攻击者能力和非目标；
 - 冻结内容证据唯一阳性权；
-- 冻结 HF direct score 形成的 content detector 原始入口；
-- 冻结几何盲检测和 conditional recovery；
-- 定义算法原语、方法机制、评估设计和本路线图；
-- 明确 key schedule、LF、路由、组合和 Q/K 的有限候选与验证门；阈值数值仍由后续互斥 calibration 职责拟合。
-
-### Validation
-
-- research-definition audit 通过；
-- 所有登记设计路径存在、内容实质且互不矛盾；
-- 该门关闭时 `implementation_status` 为 `not_implemented`；
-- 该门关闭 revision 的 `main/` 不包含实质方法实现；
-- 默认测试、治理自测和全量 harness 通过。
-
-### Pass Result
-
-通过后只允许关闭方法候选规格，不自动获得实施授权，也不自动进入 `method_construction_authorized` 或 `method_implemented`。
-
-## Evidence Gate: Method Candidate Specification Closed
-
-### Work
-
-- 登记候选生成 backbone、checkpoint、revision、scheduler、dtype 和图像尺寸；
-- 冻结 `key_schedule_sha256_counter` 的 root-key/UTF-8、stable JSON、KDF/PRG、
-  counter、normal table、职责域、wrong-key/public-noise 与 golden vectors；
-- 在不要求 CEG-WM 已有 Git 的前提下，只读登记历史源真实 revision、逐文件摘要、许可证缺口、候选/偏离边界和逐参数映射，形成 provisional provenance；
-- 把 CEG-WM `hf_sparse_tail` 候选冻结为 `sparse tail → direct L2 normalize → score-time centering`，并只在 provenance 中注明 historical DirectHF 来源；任何 template-time centering 变体使用新的 CEG-WM HF 候选身份且不继承旧证据；
-- 把旧 content embedder 的 mixing coefficients、`A`/双-mask、routed/
-  route-disabled 与 calibrated-function 只冻结为 historical exact replay；
-- 冻结 current HF 模板/全一 support、InSPyReNet `M_embed`、
-  `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`、current direction identity、
-  `3/250` nominal 与 actual hard limit、
-  nominal delta、runtime 物化位置/realized combined total norm/relative L2
-  返回边界、binary32 最大非零可行 scale 选择和 HF direct score；
-- 预登记 LF 模板/单位方向、embedder 使用、runtime 物化边界和 score 候选集合；
-- 预登记 current mask identity/digests、独立 masked-LF 32-clean-null W、分支独立
-  primary null、fixed max statistic、正式 content-threshold-fit 边界和晋升门；
-- 预登记 Q/K 层、头、image-only empty-condition 条件、四通道关系、非正交 content
-  subspace 投影、actual-dtype budget、变换支持域、W/V 采样、搜索平局和可靠性候选；
-- 定义小型 synthetic/CPU 行为检查与真实 runtime 检查的边界。
-
-### Validation
-
-- 每个候选都有明确输入、输出、身份、失败语义和可证伪指标；
-- registry 计数固定为 15 个 ID：14 个具名候选和 1 个 mandatory
-  `routing_uniform_control`；不得把对照计入方法候选数；
-- 不存在固定历史 LF/HF 权重；
-- 不存在 reference image、embed record 或私有嵌入状态检测依赖；
-- 组合候选不按攻击类型切换；
-- 回正前后 detector 和 threshold 身份保持一致；
-- 候选选择只使用 development 或 calibration 职责数据。
-- 在 CEG-WM baseline revision 建立前，允许独立审计候选规格和历史源 provisional
-  provenance；不得声称已迁移、已有 CEG-WM method revision 或完整 migration
-  provenance。
-- key/KDF/PRG、Q/K relation/objective、LF write/score、routing observations、
-  backbone/runtime 均已有明确、可证伪且无隐式选择的候选规格。
-
-### Pass Result
-
-本门在无 CEG-WM Git 时即可提交独立审计。该流程已完成候选审计、基线版本身份和
-construction admission；以下是此前进入 `method_construction_authorized` 所遵循的
-两项分离授权：
-
-1. 建立 CEG-WM 可审计版本身份，并把当前已审候选规格保存为 authorization base revision；
-2. 按 `method_construction_admission.yaml` 绑定审计/用户授权引用，以一个不含任何 `main/` 变更的独立 revision 进入 `method_construction_authorized`，随后才在后续 revision 开始迁移/实现。
-
-历史源 revision 或许可证无法确认时记录 fail-closed migration gap；它不阻止提出
-CEG-WM 版本身份授权，但缺口关闭前不得实际复制历史代码。construction admission 的
-research-definition
-audit 必须从 authorization base revision
-`e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9` 验证阶段转换。这一步只开放后续
-实施，不表示方法已实现；实际实现和 readiness 已在更后的独立 revisions 完成。
-
-## Evidence Gate: Method Implementation Ready
-
-### Work
-
-该门要求项目先在更早的独立变更中进入 `method_construction_authorized`，再于后续
-变更实现：
-
-- `main/shared/key_schedule.py` 的独占 root-key/KDF/PRG 责任和不可变结果类型；
-- content router、LF/HF carrier 与独立 content embedder；
-- 独立 LF detector、HF detector/direct score 与 content detector；
-- Q/K 几何同步；
-- transform estimator；
-- 独立 geometry reliability gate；
-- image rectifier；
-- conditional recovery decision。
-
-以上按唯一的 13 项正式职责和固定路径实施；readiness 审核绑定的既有候选 ID
-不是组件计数。此后设计新增的显著目标局部 LF 四候选均尚未实现，
-不得在对应实现与独立语义审核完成前写入 readiness。同时建立的
-`.codex/research_state/method_readiness.yaml` 逐组件连接已实现候选 ID、
-架构规定路径、声明责任、具体且唯一的实现 symbol、方法特异性验收测试和实现完成后
-的独立语义审计 revision。
-
-### Validation
-
-- 13 个必需组件都有非 placeholder 实现；
-- unit tests 检查 stable serialization、counter/quantile golden、wrong/public
-  derivation、数学性质、密钥域分离、确定性、dtype 和失败边界；
-- functional tests 直接导入真实实现并使用非恒定断言；
-- 相同通用函数不得冒充多个组件，集中式代理模块、常量/输入无关返回和重复同构测试必须被 readiness audit 拒绝；
-- 验收节点必须覆盖 key root/domain、counter/quantile golden、wrong/public derivation、
-  HF sparse support/模板归一顺序/单位 L2、HF score-time centering、LF carrier 与
-  独立盲 score、current InSPyReNet mask/coverage 与全一 HF support、
-  mask 经 carrier direction 进入 content embedder、无 `a/w` write、共同
-  nominal/actual hard limit、clean/HF-only/masked-LF causal/global-HF+local-LF/
-  LF-disabled nominal delta/零方向、HF/masked-LF/max 独立可观测、真实 Q/K relation、
-  synthetic transform、独立 reliability、
-  rectification 和 same-detector joint decision；actual-dtype 的冻结算术、
-  integrity、单调预算谓词、终止、最大可行 scale、plateau/subnormal/轻微超限与
-  无非零可行写入先由 CPU property tests 覆盖，真实 SD3.5 物化仍必须留到真实
-  runtime gate；不得由 CPU 节点或可加分支伪字段冒充 GPU evidence；
-- AST 审计只构成结构/接线必要门；独立语义审计必须审阅实现 revision、候选规格摘要和真实测试，且审阅后受保护代码不得变化；
-- `main.content_chain` 与 `main.geometry_chain` 无互相依赖；
-- 方法代码不导入 runtime、experiments 或 governance；
-- 默认测试和全量 audits 通过。
-
-### Pass Result
-
-只有全部组件、方法特异性验收节点和独立语义审计通过，才可以进入
-`method_implemented`。缺少任一 13 项职责，或把 content embedder、LF detector、
-geometry reliability 折回其他组件，都不得推进；机械 readiness pass
-单独不证明非代理实现。
-
-当前该实现/readiness 门已由 13 项职责、27 个非同构 CPU/synthetic 节点、候选摘要、
-受保护 revision 和三任务独立语义复核闭合；独立阶段迁移已经完成。
-
-## Evidence Gate: HF Candidate Identity Reproduced
-
-### Work
-
-- 建立本项目 model/runtime adapter；
-- 从同一基础随机状态运行 clean 与 watermarked 配对生成；
-- 对迁移候选逐参数核对模板、名义写入、actual-dtype hard-budget
-  scale/replay/integrity/status、realized combined total norm/relative L2、
-  最终图像重编码和评分；
-- 使用预登记正确密钥与错误密钥 roster；
-- 保存普通图像、最小必要数值记录和 provenance；
-- 禁止把 inversion 设为主检测路径。
-
-### Validation
-
-- CPU golden vectors 证明 PRG、模板和 score 的确定性；
-- 真实模型 smoke 证明 callback、调度器和 dtype 身份；
-- 小型 development roster 只用于排错；
-- 独立 holdout roster 复验正确密钥排序、margin、clean negative 和图像质量；
-- 迁移偏差全部显式记录；
-- 失败 Prompt 保留在分母。
-
-### Pass Result
-
-通过后冻结 CEG-WM HF direct score 作为 HF-only content detector baseline。未通过时停止 LF、几何和正式攻击扩展，先修复或重新定义 HF 候选。
-
-## Evidence Gate: Content Branch Decision Closed
-
-### LF-Only Work
-
-- 先为 `lf_saliency_masked_null_whitened_matched_score` 冻结与全部既有 split 零交集的
-  32-clean-null manifest，重新拟合 masked-LF 专属 W；禁止继承旧 unmasked W；
-- 使用 LF-only registered、四个 wrong keys、paired clean primary-null 与 public blind
-  RGB-to-VAE observation，验证 key attribution；
-- 保存 causal witness：actual LF delta 非零、mask 外逐 bit 零、mask 内有能量；
-- 失败、无支持、coverage 越界、budget/quality 违规全部保留固定分母。
-
-### Routing Work
-
-- 只实现 `routing_inspyrenet_salient_local_lf` 的 exact source/checkpoint/strict-load/
-  `forward_inspyre` raw d0/sigmoid-once 规则；
-- 冻结 static 1024、ImageNet、bilinear 64、threshold 0.5、one 3x3 zero-padded erosion
-  与 coverage `64..3072`，不做 connected-component selection；
-- 在预登记 8-unit pilot 上要求至少 `7/8` 的 embed/detect mask IoU `>=0.5`；
-- raw/rectified 分别重跑；拒绝检测端需要 embed mask、Prompt、record 或 private latent。
-
-### Combination Work
-
-- 只让通过上述 mask、causal witness 与 masked-LF attribution 门的候选进入组合；
-- 写入仅用 `normalize(normalize(T_hf)+normalize(M_embed*T_lf))`，不搜索 `a/w`；
-- 对独立 primary-null 的 `z_hf`、`z_lf_masked` 只计算
-  `max(z_hf,z_lf_masked)`，在 untouched confirmation 上评价；
-- formal evaluation 对已经冻结的方法同时保留 LF、HF 和组合分数，但不再承担候选选择；
-- max statistic 的 formal threshold 必须独立拟合；不为不同攻击或回正图拟合不同组合。
-
-### Validation
-
-- LF 提供至少一个预登记攻击族的稳定增量；
-- LF 的 key attribution 和 unwatermarked FPR 独立成立；
-- mask stability、局部 causal witness 和共同 canonical binary32 `3/250` total budget
-  同时成立；
-- 组合在 candidate-selection confirmation partition 中满足晋升门；
-- 组合完整检测器重新校准，不沿用 HF-only 阈值。
-- current fixed denominator 同时覆盖 clean、HF-only、masked-LF causal、
-  global-HF+local-LF、LF-disabled、correct-key、wrong-key、unwatermarked、invalid-mask
-  与所有失败；不要求 adaptive 胜过 uniform/permuted，也不重新引入 route-disabled
-  selection。
+- 冻结盲检测边界和同 detector/key/preprocessing/threshold 回正重判；
+- 冻结 root key、KDF/PRG、LF/HF carrier、语义—纹理软路由、组合统计、Q/K relation、
+  变换支持域、可靠性和回正；
+- 规定所有输入、输出、身份、失败语义和 falsification gate；
+- 把历史项目限定为 provenance，不继承固定权重、私有状态或效果证据。
 
-### Pass Result
-
-- 组合通过：在独立 confirmation 后才允许申请把正式 `D_M` 晋升为冻结
-  salient-max LF/HF 组合检测器；
-- 组合未通过：登记 `content_branch_research_question_closed_negative`，LF 与 routing 作为可报告的负结果，完整 CEG-WM 成功路径在此关闭；
-- 若要继续 HF-only + geometry，必须建立重新命名、缩小主张且单独授权的 `reduced_scope_method_candidate`，不得沿用完整 CEG-WM 的方法成功或完成门；
-- 两种结果都必须形成诚实研究结论，不允许无限调参，但只有组合通过才可继续申请完整 CEG-WM 方法成功。
-
-## Evidence Gate: Geometry Chain Verified
-
-### Synthetic Geometry Work
-
-- 使用合成 Q/K 关系验证坐标约定和 estimator；
-- 覆盖 identity、单一 rotation、scale、translation/crop 和组合变换；
-- 注入多候选歧义、低覆盖、高残差和越界条件；
-- 验证可靠性 fail closed。
-
-### Real Q/K Work
-
-- 在冻结模型中捕获真实 Q/K；
-- 验证层、头、token 网格和关系摘要稳定；
-- 比较无几何同步、正确密钥同步和错误密钥同步；
-- 评价 Q/K 同步写入对内容质量和 HF direct score 的干扰。
+### Pass Condition
 
-### Rectification Work
+所有候选有限、可实施、可证伪，没有实现时补空、reference image、embed record、
+private latent、geometry direct positive 或 attack-conditioned detector。
 
-- 对真实图像攻击执行盲估计；
-- 按冻结逆变换回正；
-- 报告 rotation error、scale error、translation/crop error、coverage、reliability 和 rectification quality；
-- 使用同一个内容检测器测量回正前后变化；
-- 使用 oracle transform 仅计算诊断上界。
+## Gate 2: Implementation And API Readiness
 
-### Validation
+### Required Components
 
-- identity 条件接近恒等；
-- 支持域内变换误差满足预登记容忍度；
-- 错误密钥和不可辨识条件可靠拒绝；
-- 几何可靠性不直接产生阳性；
-- 回正增益来自同一内容 detector；
-- extreme crop 等不可恢复条件保持失败，不使用生成式补全。
+```text
+shared:    key_schedule
+content:   content_router, lf_carrier, hf_carrier, content_embedder,
+           lf_detector, hf_detector, content_detector
+geometry:  qk_geometry_sync, geometric_transform_estimator,
+           geometry_reliability, image_rectifier
+joint:     conditional_recovery_decision
+```
 
-### Pass Result
+### Required Checks
 
-通过后冻结 Q/K observation、estimator、support domain、reliability 和 rectifier。未通过时不得通过扩大 rescue 区间或降低内容阈值补偿。
+- 13 项职责具有不同真实 symbol，不能折叠为代理；
+- key/domain/golden、carrier、route、combined budget、blind scores、Q/K relation、
+  transform、reliability、rectification 和 same-detector joint flow 都有数据依赖检查；
+- research code 不依赖 governance，内容链和几何链不互相导入；
+- CPU/synthetic 检查只证明结构和数学行为，不冒充 runtime 或科学效果。
 
-## Evidence Gate: Joint Detector Verified
+## Gate 3: Runtime Qualification
 
-### Work
+### Required Work
 
-- 冻结 `D_M`；
-- 在 calibration 中冻结 `tau`；
-- 在独立 calibration 职责数据中冻结 `tau_rescue` 和几何可靠性；
-- 对 raw-only、geometry-always、conditional recovery 和 oracle upper bound 做消融；
-- 完整运行 unwatermarked negatives、wrong keys、watermarked positives 和攻击样本；
-- 保存每个样本的 raw 分数、触发、估计、可靠性、回正状态、rectified 分数和最终判定。
+- 锁定 SD3.5 model revision、scheduler、steps、callback、VAE、dtype 和依赖；
+- 验证 clean/watermarked paired trajectory、actual-dtype content materialization、
+  binary32 `3/250` hard budget 和 image decode/encode；
+- 捕获登记层真实 `to_q/to_k`；
+- 验证 registered/wrong/public key-domain determinism；
+- 明确资源、身份、完整性、非有限量和恢复失败。
 
-### Validation
+### Pass Condition
 
-- raw 与 rectified detector identity、key semantics 和 `tau` 完全一致；
-- 远离阈值样本不触发几何；
-- 几何失败保留原负判定；
-- 可靠几何但 rectified 内容未达阈值时仍为负；
-- conditional recovery 相对 raw-only 提供预登记增益；
-- geometry-always 不被默认解释为更强方法；
-- 完整联合检测器满足预设 FPR 预算。
+冻结 runtime 身份可执行且失败可审计。该门不证明路由、LF/HF 检测、几何恢复或固定
+FPR 的科学有效性。
 
-### Pass Result
+## Gate 4: Content Route And Carrier Mechanism
 
-通过后方法机制冻结。此后任何内容 detector、组合、几何或阈值语义变化都需要新方法身份、重新 calibration 和新的 formal run。
+### Step 4.1: Public Route Reconstruction
 
-## Evidence Gate: Runtime Verified
+- embed、raw detect、rectified detect 分别从当前 RGB8 重建 `M/T`；
+- `M` 使用冻结 InSPyReNet soft probability；
+- `T` 使用冻结 grayscale Sobel/area/P95 映射；
+- 验证 `m_hf=(1+M*T)/(2+M)`、`m_lf=(1+M*(1-T))/(2+M)` 的确定性、正值与和为一；
+- route-disabled control 固定 `m_hf=m_lf=0.5` 且不读取 `M/T`。
 
-### Work
+### Step 4.2: Same-Budget Causal Write
 
-- 固定模型与依赖来源；
-- 锁定 Python、框架、CUDA、dtype 和关键算子；
-- 建立 CPU property tests、真实模型 smoke 和 GPU runtime qualification；
-- 验证 deterministic seed policy、OOM/资源失败和 restart 语义；
-- 验证普通图像输入输出与密钥不落盘；
-- 建立最小 Colab 或服务器薄入口，但不在 Notebook 中定义方法。
+- clean、HF-only、LF-only、soft-routed LF/HF、route-disabled 和失败保留固定分母；
+- 每个写入都使用相同 key/Prompt/seed/callback 和 combined `3/250` hard limit；
+- 验证 active directions 非零、combined formula、actual-dtype integrity 和质量；
+- 不把 route map 或 nominal components解释为 actual branch energy。
 
-### Validation
+### Step 4.3: Blind Branch Attribution
 
-- 真实模型加载、生成、图像编码和 Q/K 捕获完成；
-- 运行身份和代码 revision 可追溯；
-- CPU 通过不冒充 GPU 通过；
-- 失败运行产生显式失败记录；
-- runtime 不拥有判定语义；
-- 同一冻结输入能够按协议复现。
+- HF 与 LF 检测端从普通 RGB8 和 key 独立重建 route/template；
+- soft-routed LF 使用专属 32-clean-null whitening fit；
+- registered、wrong-key、unwatermarked primary null 共用同一 detector identity；
+- 两分支分别通过 key attribution、primary-null calibration 和质量门。
 
-### Pass Result
+### Step 4.4: Fixed Content Statistic
 
-满足正式 runtime 边界后进入 `runtime_verified`，随后才能冻结实验协议和高成本执行入口。
+- 分别标准化为 `z_hf_soft`、`z_lf_soft`；
+- 组合只计算 `max(z_hf_soft,z_lf_soft)`；
+- 不搜索权重、函数或 attack-conditioned switch；
+- 在 untouched confirmation 中验证增量 TPR、HF 非退化、wrong-key、FPR 和质量。
 
-## Evidence Gate: Experiment Protocol Frozen
+### Content Gate Outcomes
 
-### Work
+- 全部通过：冻结内容机制候选并进入 Gate 5；此时不得拟合 formal `tau`、
+  `tau_rescue` 或 formal geometry reliability；
+- 任一必需机制失败：保存固定分母负结果，停止完整方法晋升；
+- 证据不足：增加样本只允许按预登记规则，不得调参后沿用原确认集。
 
-- 分离 development、calibration 和 evaluation；
-- 冻结 Prompt、seed、key、图像、攻击和 baseline manifests；
-- 冻结 calibration 子职责；
-- 冻结完整 records schema、失败和排除策略；
-- 冻结攻击矩阵、指标集合、compute budget 和 tuning budget；
-- 登记外部 baseline 的不可变来源、许可证、配置和偏差；
-- 为每个正式结果定义 artifact rebuild 路径。
+## Gate 5: Q/K Geometry Mechanism
 
-### Validation
+### Step 5.1: Synchronization Write
 
-- calibration/evaluation 无样本、Prompt、seed、key 或近重复内容泄漏；
-- 同一源样本派生攻击不跨 split；
-- evaluation 不再调参；
-- internal design validation 与 external comparison 分开；
-- 项目方法和 baseline 共享公平的样本、攻击和指标条件；
-- protocol preflight、schema tests、field registry、dependency audits 和失败 fixtures 通过。
+- 从真实 Q/K 构造冻结 relation；
+- geometry key projection 与 content key domain 分离；
+- 写入改善 correct-key relation，不改善 wrong-key relation；
+- actual-dtype geometry/total budget、content-subspace projection 和质量同时通过。
 
-### Pass Result
+### Step 5.2: Bounded Transform Estimation
 
-通过后进入 `experiment_ready`。只有这个阶段才允许执行正式 calibration、攻击矩阵和论文实验。
+覆盖 identity、crop、scale、rotation 及其组合。estimator 只输出 best/second、
+coverage、uniqueness、gap、key margin、inlier、residual、boundary 和 identity margin，
+不输出阳性。
 
-## Fixed-FPR Statistical Design
-
-### Primary Null
-
-固定 FPR 的主要单位是一个独立的：
+### Step 5.3: Reliability And Rectification
+
+- reliability 独立执行冻结合取门；
+- wrong-key、多峰、低 coverage、高 residual、边界和非有限量 fail closed；
+- 可靠时按冻结 inverse warp 回正；
+- crop 删除信息不做生成式补全；
+- 回正价值只能由同一个内容检测器的变化衡量。
+
+### Geometry Gate Outcomes
+
+- 全部通过：冻结 Q/K、transform、reliability procedure 与 rectification 候选，进入
+  Gate 6；此时只允许保留机制 selection/confirmation 参数，不得把它们重签为
+  formal calibration artifact；
+- Q/K、estimator、reliability 或 rectification 任一必需机制失败：保存固定分母负
+  结果，停止依赖该机制的完整方法路径；
+- 实现或 runtime 身份失败：返回 Gate 2 或 Gate 3，不得解释为科学负结果。
+
+## Gate 6: Joint Detector
+
+冻结唯一流程：
+
+```text
+s_raw = D_soft_route(image, key)
+
+if s_raw >= tau:
+    positive_by_raw_content
+elif s_raw < tau_rescue:
+    negative_without_geometry
+else:
+    estimate_and_check_geometry
+    if unreliable:
+        negative_with_geometry_failure
+    else:
+        rectified = rectify(image)
+        s_rectified = D_soft_route(rectified, key)
+        positive iff s_rectified >= tau
+```
+
+### Pass Condition
+
+- raw/rectified detector object identity、key semantics、route、preprocessing、branch
+  standardization 和 `tau` 相同；
+- 远负样本不调用几何；
+- 几何失败保留内容负判定；
+- geometry confidence 不进入阳性统计；
+- conditional recovery 提供预登记 TPR 增益且完整 raw+rescue FPR 不超预算。
+
+Gate 6 冻结的是联合控制流、raw/rectified detector 同一性、拟合职责和 artifact
+schema；`tau`、`tau_rescue` 与 formal reliability 数值仍保持未拟合。只有 Gate 4、
+Gate 5 和 Gate 6 的算法身份均冻结后，才允许进入 Gate 7 的职责分离校准。
+
+## Gate 7: Calibration Separation
+
+Gate 4 的 route/content candidate selection、soft-LF 专属 whitening `W` fit、
+provisional branch CDF 和 Gate 5 的 provisional reliability selection 只服务各自机制
+确认；它们不得被重签为 formal calibration artifact。Gate 6 冻结联合算法身份后，
+互不重叠的正式职责依次为：
+
+1. `content_threshold_fit`：只读消费 Gate 4 已冻结的 `W`，拟合 formal branch CDF
+   和 content `tau`，不得重新拟合 whitening；
+2. `rescue_window_fit`：拟合 `tau_rescue`；
+3. `geometry_reliability_fit`：拟合 formal geometry reliability；
+4. `end_to_end_calibration_check`：只检查冻结联合路径，不再拟合；
+5. `formal evaluation`：只评估，不调参。
+
+同一 source cluster 的所有攻击、回正和多 key 派生样本留在同一职责。任何 detector
+identity 变化都使旧 threshold 失效。
+
+## Gate 8: Fixed-FPR Statistical Design
+
+primary null 为独立的：
 
 ```text
 unwatermarked generated image + preregistered detection key
 ```
 
-每个主负样本必须有独立样本身份。若同一图像配多个 key 或同一 key 配多个图像，这些扩展试验必须按 image/key 聚类处理，不能简单当作完全独立样本扩大 `n`。
+wrong-key null 单独报告。完整联合 FPR 同时计入 raw 阳性和 rescue 后阳性。
 
-wrong-key on watermarked image 是 attribution null，单独报告，不能与 primary null 混池。
-
-### End-To-End Error
-
-完整联合检测器的假阳性包括：
-
-- raw 内容分数直接越过 `tau`；
-- raw 未越阈值但进入 rescue，并在回正后越过同一 `tau`。
-
-因此只校准 raw HF direct score FPR 不足以证明完整方法 FPR。formal calibration check 和 evaluation 必须运行完整联合路径。
-
-### Error Budget
-
-正式目标：
-
-```text
-alpha_total = 0.001
-```
-
-在查看 calibration/evaluation 结果前预登记：
-
-```text
-alpha_raw + alpha_rescue <= alpha_total
-```
-
-`alpha_raw` 与 `alpha_rescue` 的分配必须由预登记的 tail、触发率和统计 power 假设说明，不预设无证据的固定对半数字。最终裁决只看完整联合检测器是否满足 `alpha_total`，不允许用预算拆分掩盖总 FPR 超标。
-
-若 LF/HF 组合替换 HF-only content detector，全部预算和阈值必须重新拟合。
-
-### Calibration Separation
-
-正式 calibration 必须分成互不重叠的 source-cluster manifests：
-
-- LF/HF and routing selection；
-- content-threshold fit；
-- rescue-window fit；
-- geometry-reliability fit；
-- end-to-end calibration check。
-
-候选选择只可读 candidate-selection manifest，不能读取阈值、rescue、geometry reliability 或 end-to-end check 数据；其余职责也不能反向选择候选。默认不跨职责 cross-fit；若未来确需 cross-fitting，必须在查看数据前登记 fold 级角色、聚类约束与独立 end-to-end check，且 evaluation 样本始终只能用于最终评估。
-
-source cluster 由同一 Prompt、seed、生成图像 lineage 与注册 key family 定义。同一 source cluster 的全部攻击、回正、多 key 派生样本必须落入同一职责和 split；不能通过把派生行当独立样本扩大 `n`。
-
-### Negative Sample Planning
-
-每个职责单独登记样本量或规模确定规则：
-
-- candidate selection：由最小相关增益、候选数、错误选择率与预登记 power 确定；
-- content-threshold fit：由目标尾部概率、阈值估计容忍度与 raw 路径误差预算确定；
-- rescue-window fit：由触发率、预登记增量 TPR/FPR 效应与 power 确定；
-- geometry-reliability fit：由变换支持域、key/null 分层覆盖与可靠性校准精度确定；
-- end-to-end calibration check 与 formal evaluation：由完整联合检测器的单侧置信上界、核心攻击数量与 simultaneous confidence 方案确定；
-- 任何核心攻击条件若单独声称 `FPR <= 0.001`，必须有满足该条件置信要求的独立负样本量。
-
-规模必须在访问对应职责数据前冻结。development/pilot 摘要可触发新的预登记并上调规模；不能看到该职责或 evaluation 结果后缩减规模、改变停止规则或把多个职责合并成一个虚假的总样本量。
-
-### Confidence Requirement
-
-对 `n` 个独立 primary negatives 观察到 `k` 个假阳性时，报告：
-
-- empirical FPR `k / n`；
-- 单侧 `95%` Clopper-Pearson 上界；
-- 分母、失败、排除和聚类信息。
-
-若 `k = 0`，要使单侧 `95%` 上界不超过 `0.001`，至少需要：
+对 `n` 个独立 primary negatives 的 `k` 个假阳性，报告经验 FPR 和单侧 `95%`
+Clopper-Pearson 上界。声明 `FPR <= 0.001` 时二者都必须不超过 `0.001`。零误报、单
+条件、无聚类情况下的数学下限为：
 
 ```text
 n >= ceil(log(0.05) / log(0.999)) = 2995
 ```
 
-这只是零假阳性时的数学最低值，不足以稳定刻画尾部，也不自动满足攻击分层、多重比较或聚类要求。正式规模由上述预登记计算决定。
+多攻击条件需要 simultaneous confidence；样本规模还需由聚类、tail tolerance、
+最小相关效应和 power 预登记。
 
-若同时对 `A` 个核心攻击条件声称相同上界，必须使用预登记 simultaneous confidence 控制。零假阳性时的保守下限可按：
+## Gate 9: Formal Evaluation
 
-```text
-n_per_condition >= ceil(log(0.05 / A) / log(0.999))
-```
+### Core Matrix
 
-或使用预登记的等价 family-wise 方法。未达到样本量或上界要求时，只能报告观察值，不能声称达到 `FPR <= 0.001`。
-
-## Evidence Gate: Calibration Locked
-
-### Work
-
-- 在 content-threshold fit 上冻结 `tau`；
-- 在 candidate-selection manifest 上冻结通过晋升门的 LF/HF 与 routing；若未通过则关闭完整 CEG-WM 成功路径，不进入其 calibration；
-- 在 rescue-window-fit 上冻结 `tau_rescue`；
-- 在 geometry-reliability-fit 上冻结 geometry reliability；
-- 在 calibration check 上运行完整联合检测器；
-- 生成不可变 split、threshold 和 method manifests；
-- 独立审核所有摘要、样本计数和失败状态。
-
-### Validation
-
-- 没有 evaluation 数据访问；
-- 完整 detector 的 calibration FPR 满足预算；
-- raw/rectified 使用同一 `tau`；
-- 任何 detector identity 变化都会使 calibration 失效；
-- candidate selection、threshold、rescue、geometry reliability 和 end-to-end check 有互斥 source-cluster manifests 与独立 provenance；
-- calibration 失败时不允许进入 evaluation。
-
-### Pass Result
-
-通过后冻结 formal method package 与 calibration package，只允许按同一身份运行 evaluation。
-
-## Evidence Gate: Formal Evaluation Complete
-
-### Core Evaluation
-
-- identity 下的 watermarked positives 和 primary negatives；
-- correct-key 与 wrong-key attribution；
+- identity positives 与 primary negatives；
+- correct-key/wrong-key attribution；
 - fixed-FPR TPR；
-- LF、HF 和 combined score distributions；
-- image quality；
-- latency、GPU memory、geometry trigger rate 和 failure rate。
+- route、LF、HF、combined 消融；
+- raw-only、geometry-always diagnostic、conditional recovery 和 oracle upper bound；
+- image quality、latency、GPU memory、trigger/failure rate。
 
-### Attack Evaluation
+### Attack Matrix
 
-至少覆盖：
-
-- JPEG 与其他压缩；
-- Gaussian blur；
-- resize/down-up；
-- noise；
-- color、brightness 和 contrast；
-- crop；
-- scale；
-- rotation；
-- crop + scale；
-- crop + rotation；
-- scale + rotation；
-- crop + scale + rotation；
+- JPEG/compression、blur、resize、noise、color/brightness/contrast；
+- crop、scale、rotation 及其组合；
 - 几何与非几何组合；
-- 预登记生成式攻击；
-- 独立自适应攻击协议。
+- 独立预登记的生成式攻击与自适应攻击。
 
-每个攻击样本都保留成功、方法失败、几何拒绝、runtime 失败或按预先规则排除状态。
+evaluation 全程不得修改方法、阈值、attack 或排除规则。所有 method/runtime/resource
+失败保留在分母。
 
-### Generalization Evaluation
+## Gate 10: Paper Evidence Closure
 
-- 不同 Prompt 类别和复杂度；
-- 多 seed；
-- 多注册 key；
-- 错误 key roster；
-- 若论文主张包含，则覆盖不同尺寸、scheduler 或模型；否则明确限制；
-- 不能把同一 Prompt/seed 的派生样本跨 calibration/evaluation。
-
-### Baseline Comparison
-
-- 登记并复现外部生成式图像水印 baseline；
-- 使用相同 sample manifest、攻击、质量和计算预算；
-- 分别报告本项目完整方法、HF-only、LF-only、geometry-disabled 和 baseline；
-- baseline 失败必须区分源码、环境、资源和科学结果。
-
-### Validation
-
-- evaluation 全程不改方法、阈值或攻击；
-- formal records 通过 schema 和 provenance 验证；
-- primary FPR 与 simultaneous confidence 满足目标；
-- 所有攻击和失败保留在分母；
-- 统计分析脚本只读 frozen records；
-- 独立复算关键表格和置信区间。
-
-### Pass Result
-
-通过后进入 `formal_evidence_available`。未通过的指标必须如实形成限制或负结果，不能回写方法参数后继续沿用同一 evaluation。
-
-## Distinct Research Outcomes
-
-以下终态不能共用完成门或论文措辞：
-
-- `full_ceg_wm_evidence_available`：内容自适应路由、LF、HF、Q/K、回正和联合判定全部存在、通过各自机制门，并由完整联合检测器证据支持；
-- `content_branch_research_question_closed_negative`：LF、routing 或组合未晋升，形成可发表的负结果，但完整 CEG-WM 方法成功未成立；
-- `reduced_scope_method_evidence_available`：仅在重新命名、重新定义贡献范围、重新授权并独立校准/评估后，才可用于 HF-only + geometry 等缩减方法。
-
-`formal_evidence_available` 只说明某个已登记研究身份拥有冻结记录；论文和 artifacts 必须同时标明上述 outcome identity。任何缩减方法不得被包装成完整 CEG-WM。
-
-## Paper Result Inventory
-
-若 outcome 为完整 CEG-WM，最终论文至少需要以下可重建结果；若为负结果或 reduced-scope 方法，清单必须按真实身份缩减并明确缺失的完整方法结论：
-
-### Main Results
-
-- 固定 FPR `0.001` 下 identity 与核心攻击 TPR；
-- empirical FPR、单侧置信上界和负样本数；
-- 与外部 baseline 的公平比较；
-- correct-key 与 wrong-key attribution。
-
-### Content Mechanism
-
-- clean、HF-only、masked-LF causal、global-HF+local-LF、LF-disabled 和失败；
-- HF、masked-LF 与 max-statistic 分数分布、correct/wrong/unwatermarked attribution；
-- mask coverage、embed/detect IoU、raw/rectified mask drift、LF-only causal witness，以及
-  `content_embedder` 核验的 nominal/limit、materialization scale、attempt/integrity/
-  budget status、diagnostic utilization 与 realized combined total norm/relative
-  L2；
-- LF 失败或未晋升时的完整负结果。
-- historical `A/a/routed/route-disabled/uniform` 结果只进入 negative appendix，不进入
-  current candidate table、selection 或主方法贡献。
-
-### Geometry Mechanism
-
-- rotation、scale、translation/crop 参数误差；
-- reliability、coverage、inlier、residual 和拒绝率；
-- raw、rectified 和 oracle upper bound；
-- wrong-key geometry 与 unreliable controls。
-
-### Joint Decision
-
-- raw-only、geometry-always 和 conditional recovery；
-- rescue trigger rate、rescue success、false rescue 和增量 FPR；
-- 同检测器同阈值身份核对；
-- 几何可靠但内容仍失败的样本统计。
-
-### Quality And Cost
-
-- PSNR、SSIM、LPIPS 或预登记感知指标；
-- 生成和检测延迟；
-- GPU memory；
-- 几何触发带来的平均和尾部成本；
-- runtime 与资源失败率。
-
-### Robustness And Generalization
-
-- 非几何攻击；
-- 几何与组合攻击；
-- 生成式攻击；
-- 自适应攻击；
-- Prompt、seed 和 key 分层结果；
-- 预登记范围外的限制。
-
-### Failure Analysis
-
-- false positives；
-- false negatives；
-- key attribution failures；
-- geometry ambiguity；
-- extreme crop；
-- rectification degradation；
-- runtime/resource failures。
-
-## Evidence Gate: Paper Evidence Closed
-
-### Work
-
-- 从 frozen records 和 manifests 重建所有 tables、figures 和 reports；
-- 每个 supported claim 绑定 artifact 和 source records；
+- records 是事实来源；
+- tables/figures/reports 从 frozen records 和 manifests 重建；
+- 每项 supported claim 映射到 exact artifact、sample scope、threshold、metric、
+  uncertainty 和 revision；
 - 独立复算 FPR、TPR、置信区间和主要消融；
-- 生成 artifact inventory、checksums 和 rebuild commands；
-- 准备 minimal method、experiment execution 和 paper artifact rebuild packages；
-- 对论文文字执行 claim audit。
-
-### Validation
-
-- 删除临时输出后仍能从 frozen inputs 重建；
-- Notebook 不保存唯一方法或统计逻辑；
-- artifact builder 不读取开发日志或 harness 报告作为科学数据；
-- 表格、图和正文数字一致；
-- unsupported、insufficient-evidence 和 failed 结论明确区分；
-- release package 不包含原始密钥、私有路径、缓存或历史 outputs；
-- 独立环境按 README 完成重建。
-
-### Pass Result
-
-只有此门通过后，项目才完成“论文所有数据结果”的目标。`formal_evidence_available` 表示已有真实证据，不自动表示论文主张、artifact 和 release 已全部闭合。
-
-## Deferred Failed-Route Cleanup
-
-当前只登记可清理 inventory，不删除、不移动、不建立 deprecated alias，也不改变
-import/package closure：
-
-1. 旧 `routing_stqr` candidate 的 implementation、config、protocol、metrics、runner、
-   server、Notebook 与 tests；
-2. 旧 `content_uniform_combination` 的对应执行面；
-3. 只服务上述失败候选、且经 impact map 证明不承担 producer replay 或 shared
-   dependency 的代码；
-4. historical artifact/record/package replay 所需路径永久排除于删除 inventory。
-
-只有以下五项同时满足，才可由用户另行授权 `移除失败路线代码` 任务：
-
-1. 本轮“模块级科学可行性验证与候选晋升”完成；
-2. 新内容候选通过 module-level development gate 并完成独立 confirmation；
-3. 项目准备进入 external baseline 和论文级结果产出；
-4. 独立 impact map 证明删除不破坏 historical producer replay、current candidate、
-   Q/K/geometry chain 或 package rebuild；
-5. 用户再次明确授权。
-
-固定顺序为：模块科学可行性 → 冻结候选/confirmation → 清理旧失败代码 → clean
-exact → external baseline/论文结果。未同时满足五项时，旧代码存在只表示可重放历史
-provenance，不得恢复为 current candidate、执行授权或 downstream dependency。
-
-## Governance Freeze And Extension Rule
-
-方法 readiness、真实 runtime qualification、实验协议与可追溯执行交付以及独立
-`experiment_ready` 阶段迁移完成后，通用治理平面继续冻结。下一步真实运行、
-candidate-selection、confirmation、calibration、Calibration Locked 和正式
-evaluation 必须按冻结协议及后续授权执行；本段不授权这些工作。后续主线仍须按
-既定门序进入 experiment 和 evidence 工作。
-除非这些真实工作暴露可复现的具体缺口，否则不得新增通用 policy、
-skill、schema 或 harness；存在缺口时优先对现有规则做最小、可测试的增量修订。
-治理文件数量、机械 audit 数量或文档篇幅都不能替代研究实现和证据推进。
+- unsupported、insufficient-evidence、negative 和 reduced-scope 结论明确区分；
+- release 不包含原始密钥、private path、cache 或非权威历史输出。
 
 ## Stop And Return Rules
 
-以下情况必须停止并回到对应证据门：
+以下情况返回对应上游门并建立新的方法/协议身份：
 
-- CEG-WM HF 候选无法在本项目复现；
-- LF 不具备独立 key attribution；
-- 组合掩盖错误密钥失败或降低 HF-only；
-- Q/K 不可稳定观测；
+- content route 不能从普通 RGB8 盲重建；
+- LF 或 HF 不具备独立 key attribution；
+- max statistic 掩盖 wrong-key 或降低 HF-only；
+- Q/K 不可稳定观察或 synchronization write 无 correct-key-specific gain；
 - geometry reliability 不能 fail closed；
-- 回正需要私有嵌入状态；
-- raw/rectified detector 或阈值身份不同；
-- end-to-end FPR 超过预算；
+- rectification 需要 reference/private embed state；
+- raw/rectified detector 或 threshold 不同；
+- end-to-end FPR 超预算；
 - calibration/evaluation 泄漏；
-- formal run 修改了方法或协议；
-- 样本量不足以支持 `0.001` 级别结论；
-- artifacts 无法从 frozen records 重建。
+- 正式运行中修改方法或协议；
+- 样本量不足；
+- artifacts 不能从 frozen records 重建。
 
-返回意味着形成新的设计或协议 revision、重新 calibration，并使用全新的 evaluation；不得覆盖旧失败记录。
+返回不得覆盖旧记录，也不得通过降阈值、放宽预算、删失败样本或后续复杂度掩盖根因。

@@ -1,8 +1,11 @@
 # Content Chain Design
 
-未晋升组合函数的正式身份仅为 `hf_only_standardized_score`、
+历史 exact-replay 兼容身份仅限 `hf_only_standardized_score`、
 `weighted_hf_lf_standardized_score` 和
-`maximum_hf_lf_standardized_score`；冻结权重保存在独立 `weight` 字段中。
+`maximum_hf_lf_standardized_score`；历史冻结权重保存在独立 `weight`
+字段中。这三个函数只用于历史生产者结果的精确重放，不是语义—纹理
+soft-route 方法的可选 detector 身份。本方法的内容统计唯一为
+`max(z_hf_soft,z_lf_soft)`。
 
 ## Frozen Responsibility
 
@@ -12,7 +15,8 @@ LF/HF template、wrong-key roster 和 routing public probe 统一消费
 
 ## HF Carrier And Detector Boundary
 
-CEG-WM 自有 HF carrier 与 HF direct score 当前承担 HF 主检测候选；正式联合判定入口始终称为 content detector。冻结要求包括：
+CEG-WM 自有 HF carrier 与 soft-routed HF direct score 承担 HF 分支检测；正式联合
+判定入口始终称为 content detector。冻结要求包括：
 
 - 给定检测密钥产生可校准分数；
 - 正确密钥与错误密钥可独立比较；
@@ -25,20 +29,14 @@ CEG-WM 自有 HF carrier 与 HF direct score 当前承担 HF 主检测候选；�
 
 ## LF Validation Questions
 
-LF 的 `lf_low_pass`、`lf_null_whitened_matched_score`、`routing_stqr` 和
-`content_combination_calibrated` 保留为既有候选身份；其中后两者对应的执行路线已
-形成 producer-bound development 负证据，不再是 current candidate。继任内容路线
-新增四个 `design_candidate_pending_implementation` 身份，但尚无 implementation
-admission。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observations 的
-固定 channel-band diagonal null operator 做只读白化 matched score；它不改变 carrier，
-也不把 fit images、参考图或私有 latent 引入检测。实验需要回答：
+LF 采用独立职责域 keyed 低通模板，并以普通待检图像上的盲分数回答下列问题：
 
 1. LF 在哪些失真下提供 HF direct score 缺少的互补证据？
 2. LF 是否保持密钥归属，而不是只检测通用低频偏移？
 3. LF 对图像质量、可见性和错误密钥 FPR 的代价是什么？
-4. 显著目标内部局部 LF 是否在固定总预算下提供可审计的因果贡献？
+4. 语义—纹理软路由后的 LF 是否在固定总预算下提供可审计的因果贡献？
 5. 独立 primary-null 标准化后的固定 max statistic 是否保留 HF 证据并增加
-   masked-LF attribution？
+   routed-LF attribution？
 
 在这些问题以真实证据关闭前，不得把任一组合定义为正式内容检测器；这不允许实现者偏离已登记候选。
 
@@ -46,12 +44,12 @@ admission。既有 LF score 只对 32 个独立 clean public RGB-to-VAE observat
 
 内容自适应路由必须：
 
-- 由冻结 InSPyReNet 对各自普通 RGB8 输入独立得到唯一显著目标 mask；
-- 明确嵌入端与检测端重跑同一模型/规则且不得共享私有 mask；
+- 从普通 RGB8 独立构造语义显著性 `M` 和纹理复杂度 `T`；
+- 明确嵌入端、原图检测端和回正检测端分别重跑同一公共规则，不共享私有 route；
 - 不读取攻击后的不可获得私有状态；
-- 保存可审计的路由身份与分支覆盖；
-- 以 masked-LF causal witness、HF-only、global-HF+local-LF、LF-disabled 和失败
-  构成 current 固定分母。
+- 保存可审计的输入、route identity、map digests 和分支方向；
+- 以 clean、HF-only、LF-only、soft-routed LF/HF、route-disabled causal control 和
+  显式失败构成固定分母。
 
 历史首个 `routing_stqr` 只在嵌入端消费已登记 S/T/R/Q 观测；检测使用未 mask 模板并不重建私有 route。其公式、reference 拟合职责和同预算控制见候选规格。
 
@@ -60,9 +58,9 @@ route identity/digests 和不读取 observations 的 disabled uniform control。
 `a`，不返回标量预算，也不记录 target/realized 写入量。同预算 routed/disabled 比较由
 `content_embedder` 的共同总预算和实验配对共同保证。
 
-### Current Salient-Object Local-LF Candidate
+### Semantic-Texture Soft Routing
 
-当前内容自适应候选为 `routing_inspyrenet_salient_local_lf`。其外部资产只允许：
+语义图 `M` 使用冻结 InSPyReNet public probability：
 
 - Hugging Face `plemeri/InSPyReNet` revision
   `d94c2baaa4d023ab018c6f97be6ef37548e3bd1f` 的 `ckpt_base.pth`，LFS object
@@ -77,35 +75,58 @@ Windows `Zone.Identifier`、下载路径和本地文件时间不属于 checkpoin
 `out["saliency"][-1]` 的 raw finest `d0` logit，再调用 `torch.sigmoid` 恰一次；禁止
 `Remover.process`、`model.forward`、`forward_inference` 及其逐图 min-max。
 
-嵌入 mask 输入是 callback 18 非 terminal latent 的临时 VAE decode RGB8；检测 mask
-输入是普通待检 RGB8。两侧分别执行同一冻结规则：RGB/static `1024 x 1024`、ImageNet
-mean/std、float32；probability bilinear resize 到 `64 x 64`，
-`align_corners=false`；hard threshold `p>=0.5`；固定 3x3 square erosion 一次并使用
-zero padding。不存在连通域选择。eroded mask coverage 必须在 `64..3072` spatial
-pixels；无支持或非局部支持 fail closed 并保留固定分母，禁止 global LF fallback。
-raw 与 rectified 图像分别重跑模型和 mask；detector 不得读取 embed mask。
-development mask-stability 门固定为 IoU `>=0.5`，8-unit pilot 至少 `7/8`。
+嵌入路由输入是 callback 18 非 terminal latent 的临时 VAE decode RGB8；检测路由输入
+是普通待检 RGB8。各侧分别执行 RGB/static `1024 x 1024`、ImageNet mean/std、
+float32、raw finest `d0`、sigmoid exactly once，并以 bilinear、
+`align_corners=false` 映射到 `64 x 64`，得到 `M in [0,1]`。不执行 hard threshold、
+erosion、connected-component selection、per-image min-max 或 coverage fallback。
 
-写入身份 `content_embedding_global_hf_local_lf` 唯一为：
+纹理图 `T` 从同一个公共 RGB8 输入确定性构造：按 `(0.299,0.587,0.114)` 转灰度，
+replicate-pad 1 pixel，使用标准 3x3 Sobel x/y，计算梯度幅值，以 area downsample
+映射到 `64 x 64`。对严格正幅值按 row-major、值升序和 flat-index 平局求 exact
+nearest-rank P95 `q95`，再令：
 
 ```text
-u_hf = normalize(T_hf)
-u_lf = normalize(M_embed * T_lf)
+T = clamp(G / q95, 0, 1)
+```
+
+若不存在严格正幅值，则 `T=0`；不得用攻击标签、分数、全数据 reference 或
+evaluation 结果替代。`M`、`T` 都在检测端从当前普通图像重建。
+
+逐像素软路由唯一为：
+
+```text
+m_hf = (1 + M*T) / (2 + M)
+m_lf = (1 + M*(1-T)) / (2 + M)
+m_hf + m_lf = 1
+```
+
+两条 map 始终非零；它们是空间调制，不是实际分支能量或可相加预算。
+
+双分支写入唯一为：
+
+```text
+u_hf = normalize(m_hf_embed * T_hf)
+u_lf = normalize(m_lf_embed * T_lf)
 u_content = normalize(u_hf + u_lf)
 ```
 
-最终 actual-dtype total budget 仍为 canonical binary32 `3/250`。masked LF 或 sum
-为零/非有限均 fail closed；不存在 `0.70/0.30`、`0.50/0.50`、`a/w` grid。scientific
-probe 必须包含 LF-only causal witness：actual LF delta 非零、mask 外逐 bit 为零、
-mask 内有能量；combined arm 不得伪分解 actual branch contribution。
+最终 actual-dtype total budget 为 canonical binary32 `3/250`。任一 active direction
+或 sum 为零/非有限均 fail closed；不存在 `0.70/0.30`、`0.50/0.50`、`a/w` grid。
+route-disabled causal control 固定 `m_hf=m_lf=0.5`，且不得读取 `M/T`；它与软路由
+使用相同 key、Prompt、seed、write position 和总预算。
 
-检测身份 `lf_saliency_masked_null_whitened_matched_score` 在检测侧重新得到
-`M_detect`，并把它同时作用于 public VAE posterior observation 与 key-only template。
-它必须从独立的 32 clean null fit 重新拟合自己的 `W`，不得继承旧 unmasked `W`。
-`z_hf` 与 `z_lf_masked` 来自相互独立的 primary-null 标准化；
-`content_combination_saliency_max_standardized` 唯一统计为
-`max(z_hf,z_lf_masked)`。未来 formal threshold 必须直接对该 max statistic 独立拟合。
-检测不得读取 reference、Prompt、embed record、private latent、Q/K 或 embed mask。
+检测端分别重建 `m_hf_detect` 与 `m_lf_detect`。HF 分数把 `m_hf_detect` 同时作用于
+public VAE observation 和 key-only HF template；LF whitened matched score把
+`m_lf_detect` 同时作用于 observation 和 key-only LF template。二者各自使用专属
+primary null 标准化，内容统计唯一为：
+
+```text
+D_soft_route = max(z_hf_soft, z_lf_soft)
+```
+
+正式阈值必须直接在该 max statistic 上独立拟合。检测不得读取 reference、Prompt、
+embed record、private latent、Q/K 或 embed-side `M/T/route`。
 
 ## Combination Requirements
 
@@ -149,52 +170,23 @@ geometry delta 与现有 geometry/total budget 独立。`budget_utilization` 仅
 - 证明组合不会通过 LF 分数掩盖 HF 错误密钥失败；
 - 不使用针对回正图单独拟合的权重或阈值。
 
-当前正式 content detector 仍为 HF-only。旧 `content_combination_calibrated` 只作
-producer-bound 历史复现；当前新设计不重新搜索旧函数族，而只允许上述 max statistic。
-新 masked-LF 必须先独立通过 key attribution、32-clean null fit、mask stability 与
-causal witness 门，才允许新 max statistic 进入 confirmation。
+方法内容统计不搜索旧函数族，只允许上述 max statistic。两条软路由分支必须先分别
+通过 key attribution、独立 primary null、路由因果性与总预算门，才允许 max
+statistic 进入 confirmation。
 
-该映射唯一采用 `content_combination_calibrated` 的有限样本 mid-rank empirical CDF、
-`1/(2n)` tail clipping 和与 key schedule 同摘要的 `2^20` midpoint float32 normal
-quantile table。candidate-selection 的 provisional
-CDF/threshold 在 confirmation 后丢弃；正式 CDF 与 `tau` 只从独立
-content-threshold-fit 重新拟合，不能跨五类 calibration 职责复用。
+soft-route 分支标准化只复用有限样本 mid-rank empirical CDF、`1/(2n)` tail
+clipping 和 `2^20` midpoint float32 normal quantile table 这些共享统计原语；共享
+原语及其 table digest 必须进入
+`content_combination_semantic_texture_max_standardized` 的新 detector identity。
+不得继承 `content_combination_calibrated` 的 candidate identity、CDF artifact、split、
+threshold、选择结果或效果证据。两条 soft-route 分支必须从本候选专属且互斥的
+primary-null 数据重新拟合 provisional CDF；confirmation 后丢弃 provisional CDF
+与 threshold。正式 branch CDF 与 `tau` 只能从独立 content-threshold-fit 重新拟合，
+不能跨 calibration 职责复用。
 
 组合只有在 candidate-selection manifest 内预登记、未参与拟合的 confirmation partition 中证明攻击增益、HF-only 非退化和错误密钥分离，随后在独立职责数据上完成阈值、rescue、geometry reliability 与 end-to-end calibration check，才能替换 HF-only content detector。formal evaluation 只报告冻结方法，不再决定选择哪个候选。替换后必须为原图和回正图共同定义一个新的 content detector 身份并重新 calibration；不得沿用 HF-only 阈值。
 
-若 LF 或 routing 未晋升，应登记为内容分支 `research_question_closed_negative`。该负结果可发表、可进入消融和失败分析，但不能通过与完整方法相同的成功门。HF-only 加 geometry 不是“完整 CEG-WM”；若要继续为 reduced-scope 方法，必须重新命名、缩小论文主张并独立获得研究定义与构建授权。
-
-### Producer-Bound Historical Negatives
-
-| route | producer | frozen result | current authority |
-| --- | --- | --- | --- |
-| `routing_stqr` fixed-half directional diagnosis | producer `925c2cbc727e3b18e91c0b3981eeed1b470a955a`; run `ceg_wm_content_routing_positive_reference_support_correction_diagnosis` | `42/42`; ordered indicator sequence `1,1,1,0,0,0,0,0`; `3/8=0.375` does not satisfy strict `>0.5`; RGB relative-L2 violations at clusters `1`,`5`,`6`, so they are not successful clusters | historical development negative; not current candidate |
-| `content_uniform_combination` directional diagnosis | producer `7c0d86d6eac5ffcfc4a30f2f5fb22884aaa848da`; run `ceg_wm_content_uniform_combination_budget_observation_correction_diagnosis` | `1+32+8=41` attempt-0 `COMMITTED`; canonical binary32 `3/250`; budget violations `2` at clusters `1`,`6`; `mechanism_signal_not_observed`; `candidate_not_recommended_for_selection`; request false | historical development negative; not current candidate |
-
-不得从旧 8-probe 结果选择 mask、threshold、erosion、coverage、`a`、`w` 或 function；
-不得补样、删 cluster、重跑、增加 attempt、放宽 `3/250`、重写 artifact，或只用
-margin-passing 子集形成 winner/promotion。既有 HF 与 LF 各自 32-unit directional
-证据继续 producer-bound 有效，但不自动证明新 masked-LF、max statistic 或完整内容
-链。旧代码只可用于 producer replay、failure provenance、historical exact-package /
-record replay 和与新候选的语义 diff；代码存在不等于 current candidate 或执行授权。
-旧 routed content embedder、旧 combined detector 与 conditional-recovery 内容依赖
-保持 closed/paused，不得凭现存实现恢复。
-
 ## Output Semantics
 
-historical CPU/synthetic 内容检测结果独立携带 LF、HF、combined 分支统计及旧路由、组合、
-密钥和失败身份；正式 calibration 阈值与实验 records schema 仍在后续协议阶段登记。
-current pending candidate 的 record/control matrix 固定为 clean、HF-only、masked-LF
-causal、global-HF+local-LF、LF-disabled 和失败；不含 `A/a/routed/route-disabled`。
-
-## Current Status
-
-HF carrier、HF direct score、旧 LF/路由/组合写入与分支检测已完成 CPU/synthetic
-实现和 27 节点内的对应行为验证。正式 detector 仍为 HF-only；新显著目标局部 LF
-四候选尚未实现或晋升，`full_ceg_wm_eligible=false`。actual-dtype combined content
-写入、完整性和 hard-budget 路径已在冻结 SD3.5 candidate 的真实 GPU
-qualification 中通过；这不构成 LF/routing/组合晋升。当前仍没有正式 calibration、
-完整联合 FPR 或科学效果证据；实际阶段/status 已由独立 revisions 同步为
-`experiment_ready / implemented`。该阶段只登记冻结协议与可追溯执行交付的基础设施
-闭环，不提供 `tau`、confirmation 结果、Calibration Locked 或正式 evaluation，也不
-晋升 LF/routing/组合/geometry。
+内容检测结果必须独立携带 LF、HF、combined 分支统计、route identity、`M/T` digests、
+密钥身份、预算和失败语义。
