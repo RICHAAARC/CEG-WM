@@ -47,3 +47,8 @@ Notebook、GPU 调度、calibration、held-out evaluation 或 stage 推进。
 
 CPU/synthetic runner tests 只证明编排、身份绑定、原子写入、resume/replay 和失败
 语义，不构成候选晋升、runtime/GPU 或科学效果证据。
+
+`salient_local_lf_mask_write_validation.py` 只编排公开 adapter/runtime/main 路径：
+callback18 临时 VAE decode 的 fresh embed saliency、全局 HF/局部 LF actual write、
+ordinary RGB8 的 fresh detect saliency，以及 typed quality/causal observation。
+embed/detect mask 不共享、不缓存；持久化继续使用既有 operational/scientific records。

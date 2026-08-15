@@ -56,3 +56,8 @@ HF-only `content_threshold_fit` 需要 `hf_reference_candidate_frozen`，combine
 
 每条 record 必须追溯 comparison protocol、sample manifest、方法配置、方法代码、模型 revision、seed 和执行状态。`success` 只能保存有限数值且不得携带失败/排除原因；`failed` 与 `excluded` 不得保存 metric value，并分别只允许对应的原因字段。当前实现是通用协议结构，不是具体实验设计或实验结果。
 `held_out_evaluation` 表示最终 held-out evaluation 职责；该语义化名称不含阶段编号。
+
+`salient_local_lf_mask_write_validation.py` 验证 authored 8-cluster roster 的 canonical
+authority、2+8/max1 unit roster、future deny axes 与两项 producer-bound historical
+negative。它只准入 mask/write/quality development pilot，不准入 masked-LF
+whitening、detector、max statistic、Q/K、threshold、FPR、promotion 或 formal stage。

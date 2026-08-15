@@ -42,3 +42,10 @@ source clusters，prompt 完全互斥、并集覆盖全部 roster，且每个
 三个 loader 都拒绝未登记配置键，并分别重算 adapter、attack 和 metric registry
 摘要。该配置不包含固定 LF/HF 权重，不授权 runner、Notebook、GPU、baseline 或
 held-out 执行。
+
+`salient_local_lf_mask_write_validation.json` 与同名 manifest 冻结新的
+InSPyReNet 全局 HF/显著目标局部 LF development pilot：2 个 operational 加 8 个
+固定 scientific clusters、attempt0-only、canonical binary32 `3/250` actual-dtype
+预算与 signed-int64 RGB8 quality 门。authored roster 同时绑定 prompt/seed/source、
+registered-key 与 paired-image lineage；历史 routing/uniform negative authority 仅从
+其 producer Git blobs 重放，禁止 live fallback、补样、替换或结果后选择。

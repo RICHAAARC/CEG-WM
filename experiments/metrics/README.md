@@ -53,3 +53,9 @@ case/threshold identity 纳入 `cross_input_digest`；hf_only_threshold_fit_gpu_
 `configs/experiments/hf_only_reference_metrics.json` 固定 hf_only_reference_validation spec、完整 hf_only_reference_protocol
 authority bundle、七项 split/formula、metric registry、实现 symbols 与源码
 SHA-256。该实现不写 records、不执行 promotion decision，也不产生科学结果。
+
+`salient_local_lf_mask_write_validation.py` 对 public uint8 `[1,3,512,512]` pair
+计算 signed-int64 `sum((marked-clean)^2)`；唯一 quality pass 为
+`S_delta <= 786432`。coverage、IoU、nominal masked-LF causal witness、actual-dtype
+budget 与 identity/integrity 独立合取；quality violation 仍是完整 scientific
+observation。aggregate 固定 8 分母，quality 要求 8/8、mechanism 要求至少 7/8。

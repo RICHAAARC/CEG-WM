@@ -1031,3 +1031,10 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | wrong_key_geometry_reliability_status | persisted_protocol | method_status | none | true | false | false | wrong-key reliability 的 fail-closed 状态。 |
 | wrong_key_geometry_reliability_failure_reasons | persisted_protocol | method_status | none | true | false | false | wrong-key reliability 的完整拒绝原因。 |
 | ambiguous_control_realized | persisted_protocol | method_status | none | true | false | false | ambiguous control 是否满足冻结 top-two gap 结构判据。 |
+| scientific_roster_authority_digest | persisted_protocol | provenance | none | true | false | false | InSPyReNet mask/write authored 8-cluster roster 的 canonical authority 摘要。 |
+| squared_code_delta_sum | persisted_protocol | method_statistic | none | true | false | false | public RGB8 clean/marked pair 以 signed int64 计算的逐 code 平方差总和。 |
+| quality_pass | persisted_protocol | method_status | none | true | false | false | `squared_code_delta_sum <= 786432` 的精确判定，无 epsilon 或 tolerance。 |
+| embed_mask_coverage | persisted_protocol | method_statistic | none | true | false | false | callback18 public RGB8 fresh saliency mask 的 64x64 支持像素数。 |
+| detect_mask_coverage | persisted_protocol | method_statistic | none | true | false | false | ordinary marked RGB8 fresh saliency mask 的 64x64 支持像素数。 |
+| mask_intersection_over_union | persisted_protocol | method_statistic | none | true | false | false | fresh embed/detect masks 的 fixed development IoU。 |
+| nominal_masked_lf_consumed_by_materialization | persisted_protocol | method_status | none | true | false | false | nominal masked-LF direction 已绑定到真实 accepted materialization replay 的 causal witness。 |
