@@ -65,6 +65,7 @@ from scripts.experiment_execution.salient_local_lf_mask_write_validation_server 
     _extract_verified_execution_package,
     _verify_locked_dependencies,
 )
+from tests.helpers.historical_repository import materialize_historical_repository
 
 
 pytestmark = pytest.mark.unit
@@ -80,6 +81,23 @@ SERVER_STARTUP_MEMBERS = {
     "scripts/experiment_execution/salient_local_lf_mask_write_validation_entrypoint.py",
     "scripts/experiment_execution/salient_local_lf_mask_write_validation_server.py",
 }
+HISTORICAL_CANDIDATE_OVERLAY_REVISION = (
+    "19fe5e42ba782ee604c801875fd2e330f9312abb"
+)
+CANDIDATE_OVERLAY_PATH = (
+    ".codex/research_state/salient_local_lf_candidate_readiness.yaml"
+)
+CANDIDATE_OVERLAY_STATUS_FIELDS = (
+    "source_cpu_api_implementation_ready",
+    "candidate_runtime_qualified",
+    "experiment_protocol_admitted",
+    "masked_lf_whitening_asset_ready",
+    "rgb_quality_gate_defined",
+    "scientific_mechanism_validated",
+    "promoted",
+    "formal_detector",
+    "diagnostic_only",
+)
 
 
 def struct_binary32(value: float) -> float:
@@ -803,13 +821,61 @@ def test_safe_failure_is_package_relative_bounded_and_secret_free() -> None:
     assert len(diagnostic["package_relative_frames"]) <= 8
 
 
-def test_overlay_remains_unqualified_until_cumulative_delivery() -> None:
-    state = __import__("yaml").safe_load((ROOT / ".codex/research_state/salient_local_lf_candidate_readiness.yaml").read_text())
-    assert state["source_cpu_api_implementation_ready"] is True
-    assert state["rgb_quality_gate_defined"] is False
-    assert state["experiment_protocol_admitted"] is False
-    assert state["candidate_runtime_qualified"] is False
-    assert state["scientific_mechanism_validated"] is False
+def test_historical_candidate_overlay_preserves_pre_delivery_status_authority(
+    tmp_path: Path,
+) -> None:
+    if not (ROOT / ".git").exists():
+        pytest.skip("local Git producer objects unavailable")
+    historical_root = materialize_historical_repository(
+        source_root=ROOT,
+        revision=HISTORICAL_CANDIDATE_OVERLAY_REVISION,
+        destination=tmp_path / "historical-candidate-overlay",
+        paths=(CANDIDATE_OVERLAY_PATH,),
+    )
+    historical_state = json.loads(
+        (historical_root / CANDIDATE_OVERLAY_PATH).read_text(encoding="utf-8")
+    )
+
+    assert {
+        field: historical_state[field] for field in CANDIDATE_OVERLAY_STATUS_FIELDS
+    } == {
+        "source_cpu_api_implementation_ready": True,
+        "candidate_runtime_qualified": False,
+        "experiment_protocol_admitted": False,
+        "masked_lf_whitening_asset_ready": False,
+        "rgb_quality_gate_defined": False,
+        "scientific_mechanism_validated": False,
+        "promoted": False,
+        "formal_detector": False,
+        "diagnostic_only": True,
+    }
+
+
+def test_current_candidate_overlay_matches_policy_status_authority() -> None:
+    current_state = json.loads(
+        (ROOT / CANDIDATE_OVERLAY_PATH).read_text(encoding="utf-8")
+    )
+    policy = json.loads(
+        (ROOT / "governance/policies/method_readiness_rules.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    current_status = {
+        field: current_state[field] for field in CANDIDATE_OVERLAY_STATUS_FIELDS
+    }
+
+    assert current_status == {
+        "source_cpu_api_implementation_ready": True,
+        "candidate_runtime_qualified": False,
+        "experiment_protocol_admitted": True,
+        "masked_lf_whitening_asset_ready": False,
+        "rgb_quality_gate_defined": True,
+        "scientific_mechanism_validated": False,
+        "promoted": False,
+        "formal_detector": False,
+        "diagnostic_only": True,
+    }
+    assert policy["salient_local_lf_candidate_readiness_overlay"]["status"] == current_status
 
 
 def test_sixty_seven_distribution_lock_is_verified(monkeypatch: pytest.MonkeyPatch) -> None:
