@@ -18,6 +18,7 @@ from experiments.protocol.salient_local_lf_mask_write_validation import (
 )
 from scripts.experiment_execution.build_salient_local_lf_mask_write_validation_package import (
     build_salient_local_lf_mask_write_validation_package,
+    resolve_required_git_authority_revisions,
 )
 from scripts.experiment_execution import salient_local_lf_mask_write_validation_server as server
 
@@ -193,13 +194,32 @@ def test_remote_authority_fetch_failure_exports_zero_unit_startup_evidence(
 ) -> None:
     if not (ROOT / ".git").exists():
         pytest.skip("local Git authority objects unavailable")
-    branch = subprocess.run(
-        ("git", "symbolic-ref", "--short", "HEAD"),
+    execution_revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
         cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+    required = resolve_required_git_authority_revisions(
+        execution_revision=execution_revision,
+        config_payload=PROTOCOL_PATH.read_bytes(),
+    )
+    remote = tmp_path / "exact-authority-remote.git"
+    subprocess.run(("git", "init", "--bare", str(remote)), check=True, capture_output=True)
+    subprocess.run(
+        (
+            "git",
+            "push",
+            f"file://{remote}",
+            f"{execution_revision}:refs/heads/execution",
+            *(f"{revision}:refs/heads/authority-{index}"
+              for index, revision in enumerate(required[1:], start=1)),
+        ),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
     shallow = tmp_path / "shallow-repository"
     subprocess.run(
         (
@@ -209,22 +229,24 @@ def test_remote_authority_fetch_failure_exports_zero_unit_startup_evidence(
             "--no-hardlinks",
             "--depth",
             "1",
+            "--single-branch",
             "--branch",
-            branch,
-            f"file://{ROOT}",
+            "execution",
+            f"file://{remote}",
             str(shallow),
         ),
         check=True,
         capture_output=True,
         text=True,
     )
-    execution_revision = subprocess.run(
+    observed_execution_revision = subprocess.run(
         ("git", "rev-parse", "HEAD"),
         cwd=shallow,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+    assert observed_execution_revision == execution_revision
     unavailable_origin = tmp_path / "unavailable-origin.git"
     subprocess.run(
         ("git", "remote", "set-url", "origin", f"file://{unavailable_origin}"),
