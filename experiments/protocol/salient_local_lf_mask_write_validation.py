@@ -17,7 +17,7 @@ from experiments.protocol.development_exploration import DevelopmentStudyUnit
 from experiments.protocol.internal_splits import AnalysisUnitIdentity, derive_source_cluster_id
 
 
-RUN_ID = "ceg_wm_salient_local_lf_mask_write_registered_dual_carrier_key_correction_validation"
+RUN_ID = "ceg_wm_salient_local_lf_mask_write_callback_witness_correction_validation"
 PROTOCOL_ID = "ceg_wm_salient_local_lf_mask_write_validation"
 PROTOCOL_VERSION = "1.0.0"
 REGISTERED_ROOT_DERIVATION_IDENTITY = (
