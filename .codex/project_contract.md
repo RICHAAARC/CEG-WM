@@ -91,9 +91,13 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 7. 上述 actual hard limit 只约束 LF/HF/routing 最终合成并物化后的 combined
    content delta；nominal directions/components 只用于公式重放，不构成 actual
    branch decomposition。geometry delta 与现有 geometry/total budget 独立。
-8. 不得从历史项目继承固定 `0.7/0.3`、`0.5/0.5` 或其他未经 calibration/evaluation 验证的组合规则；方法唯一写入方向为
-   `normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))`，不是权重网格；
-   content statistic 唯一为 `max(z_hf_soft,z_lf_soft)`。
+8. 不得从历史项目继承固定 `0.7/0.3`、`0.5/0.5` 或其他未经 calibration/evaluation 验证的组合规则；语义—纹理候选唯一写入方向为
+   `normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))`，不是权重网格；其
+   `max(z_hf_soft,z_lf_soft)` 仅为已实现、未科学验证且未晋升的 diagnostic。
+   当前正式/default/joint `D_M` 仍为 HF-only 和既有阈值。未来晋升必须完成独立分支
+   calibration、max threshold fit、固定 FPR/科学确认与显式 promotion，并让原图与
+   回正图共同使用一个新的 detector/config identity 和新阈值；不得继承旧 W/CDF、
+   `tau` 或 HF-only threshold。
 9. 错误密钥、分支消融和组件分数必须可独立观测，组合分数不得掩盖密钥归属失败。
 
 ### Geometry Chain

@@ -29,7 +29,7 @@ callback-18 临时 RGB8 ──> content_router / semantic M + texture T
                          ├──> lf_detector ──> z_lf_soft ──┐
                          └──> hf_detector ──> z_hf_soft ──┤
                                                          v
-                                      content_detector / max ──> D_M
+              content_detector / soft max ──> diagnostic candidate（formal/default/joint D_M 仍为 HF-only）
 ```
 
 CEG-WM 内容链的七项正式职责是 `content_router`、`lf_carrier`、
@@ -90,8 +90,12 @@ InSPyReNet soft probability `M`、deterministic Sobel/P95 texture `T`、两张�
 
 联合判定先运行冻结内容检测器。只有近阈值负样本才进入几何资格检查；只有可靠几何才允许回正；回正后使用同一检测器和同一阈值。
 
-content detector 冻结为 `max(z_hf_soft,z_lf_soft)`。原图与回正图必须共同调用该
-统计及同一阈值，不得在 rescue 路径切换为 HF-only 或其他组合。
+当前正式/default/joint `D_M` 仍冻结为 HF-only 和既有阈值；原图与回正图共同调用
+同一 HF-only detector/config identity 和同一阈值。语义—纹理 soft max 仅为
+`implemented_not_scientifically_validated` diagnostic、未晋升候选，不进入正式判定。
+未来晋升必须先完成独立分支 calibration、max threshold fit、固定 FPR/科学确认与
+显式 promotion；晋升后的原图/回正图必须使用同一个新的 detector/config identity
+和新阈值，不得继承旧 W/CDF、`tau` 或 HF-only threshold。
 
 ## Dependency Direction
 

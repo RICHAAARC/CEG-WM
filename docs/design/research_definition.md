@@ -45,14 +45,14 @@ root key 的 UTF-8 语义、职责域派生、wrong-key 和 public-noise 由
 
 ## Detector Output
 
-正式检测输出至少应区分：
+当前正式/default/joint `D_M` 是 HF-only，并使用既有 detector/config identity 与
+threshold；正式检测输出至少应区分：
 
-- 内容原始分数、校准阈值和 margin；
-- LF/HF 分支可观测统计与内容路由；
+- HF-only 内容原始分数、校准阈值和 margin；
 - 是否满足近阈值救援资格；
 - 几何估计、可靠性和失败原因；
 - 是否执行回正；
-- 回正后由同一检测器产生的分数；
+- 回正后由同一 HF-only detector/config identity 和同一阈值产生的分数；
 - 最终内容判定。
 
 方法按 13 项正式职责分层：共享 key schedule；内容链的 router、LF/HF
@@ -60,11 +60,16 @@ carrier、content embedder、LF/HF detector、content detector；几何链的 Q/
 transform estimator、独立 geometry reliability、rectifier；以及 conditional recovery
 decision。
 
-内容路线使用 InSPyReNet soft semantic probability `M` 与 deterministic Sobel/P95
-texture `T` 形成逐图 LF/HF 正软路由；两条 keyed carrier 在共同 `3/250` 总预算下
-组合写入，检测端从普通 RGB8 独立重建路由并计算
-`max(z_hf_soft,z_lf_soft)`。嵌入端、raw 检测端和 rectified 检测端不共享 route、
-Prompt、record、私有 latent 或参考图。
+语义—纹理候选使用 InSPyReNet soft semantic probability `M` 与 deterministic
+Sobel/P95 texture `T` 形成逐图 LF/HF 正软路由；两条 keyed carrier 在共同 `3/250`
+总预算下组合写入，检测端从普通 RGB8 独立重建路由并计算
+`max(z_hf_soft,z_lf_soft)`。该 soft max 已实现但仅为
+`implemented_not_scientifically_validated` diagnostic、未晋升且没有 formal
+threshold，不进入当前正式判定；其 diagnostic 输出可独立暴露 LF/HF 分支统计与内容
+路由。嵌入端、raw 检测端和 rectified 检测端不共享 route、Prompt、record、私有
+latent 或参考图。未来晋升必须完成独立分支 calibration、max threshold fit、固定
+FPR/科学确认与显式 promotion；晋升后的原图/回正图必须共享一个新的
+detector/config identity 和新阈值，不得继承旧 W/CDF、`tau` 或 HF-only threshold。
 
 ## Success Conditions
 

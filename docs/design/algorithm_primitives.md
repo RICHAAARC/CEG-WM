@@ -193,8 +193,9 @@ s_hf = dot(center(Y), center(T_hf))
 
 正式检测不得访问生成 latent、注入时模板实例、原始参考图或 embed record。模板只能由检测密钥和公共方法身份重新构造。
 
-HF direct score 是 HF 分支统计；语义—纹理方法的 `D_M` 对 LF/HF 分支分别作
-primary-null 标准化后使用 `max(z_hf_soft,z_lf_soft)`。
+HF direct score 既是 HF 分支统计，也是当前正式/default/joint `D_M`，使用既有
+HF-only threshold。`max(z_hf_soft,z_lf_soft)` 仅是已实现、未科学验证且未晋升的
+语义—纹理 diagnostic 候选，不进入当前正式判定。
 
 ## LF Candidate Primitive
 
@@ -302,13 +303,16 @@ hard threshold、erosion、connected component、coverage fallback、private map
 
 ### Current Authority
 
-原语责任分为两部分：`content_embedder` 负责 current `u_content` 和共同总预算写入；
-`content_detector` 负责 `s_lf`、`s_hf` 的冻结标准化与组合。独立 `lf_detector`
-必须直接实现盲 `s_lf`，不得把 LF score 隐藏在 carrier 或组合器中。
+原语责任分为两部分：`content_embedder` 负责语义—纹理候选的 `u_content` 和共同总预算
+写入；`content_detector` 负责 diagnostic 候选的 `s_lf`、`s_hf` 冻结标准化与组合。
+独立 `lf_detector` 必须直接实现盲 `s_lf`，不得把 LF score 隐藏在 carrier 或组合器中。
 
-CEG-WM 的双分支写入只允许
-`normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))`，检测只允许
-`max(z_hf_soft,z_lf_soft)`。组合写入与统计组合仍由两个独立职责完成。
+当前正式/default/joint `D_M` 仍为 HF-only 并使用既有阈值。语义—纹理双分支候选的
+写入只允许 `normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))`，其 diagnostic
+检测只允许 `max(z_hf_soft,z_lf_soft)`；实现与诊断不构成科学验证或晋升。未来替换
+HF-only 必须通过独立分支 calibration、max threshold fit、固定 FPR/科学确认与显式
+promotion，并为原图/回正图建立同一个新的 detector/config identity 和新阈值，不得
+继承旧 W/CDF、`tau` 或 HF-only threshold。组合写入与统计组合仍由两个独立职责完成。
 
 ### Historical Calibrated Candidate Family
 
@@ -451,10 +455,12 @@ else:
 
 ## Threshold Calibration Primitive
 
-soft-route max-statistic 候选不存在 `a/w/function` 或其他组合参数 calibration。正式
-calibration 只允许在互不重叠的 source-cluster manifests 中分别拟合 HF 与
-soft-routed LF 分支 primary-null/CDF 标准化、固定 `max(z_hf_soft,z_lf_soft)` 的单一
-`tau`、`tau_rescue`、几何可靠性门和完整联合检测器检查；historical `a/w/function`
+soft-route max-statistic 候选不存在 `a/w/function`，当前仅为已实现、未科学验证且未
+晋升的 diagnostic，没有 formal decision 或 threshold。未来只有在独立分支
+calibration、max threshold fit、固定 FPR/科学确认与显式 promotion 完成后，才允许在
+互不重叠的 source-cluster manifests 中把下列职责作为 formal calibration；晋升后的
+原图/回正图必须共享一个新的 detector/config identity 和新 `tau`，不得继承旧 W/CDF、
+`tau` 或 HF-only threshold。historical `a/w/function`
 只按原 producer replay：
 
 - soft-routed HF 与 LF 分支 primary-null/CDF 标准化；

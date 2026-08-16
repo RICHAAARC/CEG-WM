@@ -221,18 +221,20 @@ geometry/content budget ratio 只在 `qk_relation_similarity` 登记的有限集
 
 ### Raw Content Detection
 
-检测从待检图像、检测密钥和公共冻结资产分别构造盲 `s_lf` 与 `s_hf`。软路由检测
-必须重跑同一 `M/T` 公共规则，将 `m_lf_detect`、`m_hf_detect` 分别同时施加于
-对应 public VAE posterior observation 与 key-only template，并为 soft-routed LF
-使用独立 32-clean-null manifest 拟合 W；禁止继承其他 route 的 W 或读取 embed map。LF 的
-`lf_low_pass` raw score 与 `lf_null_whitened_matched_score` 是两个独立候选身份；
-后者只读消费由独立 32-clean partition 冻结的 96 参数 channel-band diagonal `W`，
-不得在检测时读取 fit images 或重拟合。
-`lf_detector` 和 `hf_detector` 必须是独立可调用责任，三类 `s_lf`、`s_hf`、
-`s_combined` 必须独立可观测。`content_detector` 消费两个分支统计并形成
-`D_M(I, K)`；组合唯一统计是独立 primary-null 标准化后的
-`max(z_hf_soft,z_lf_soft)`，formal threshold 必须对该 max statistic 自身拟合。组合不得
-掩盖任一分支的错误密钥失败。
+当前正式/default/joint `D_M(I,K)` 仍是 HF-only，并使用既有 detector/config identity
+与 threshold。已实现的语义—纹理 diagnostic 候选从待检图像、检测密钥和公共冻结
+资产分别构造盲 `s_lf` 与 `s_hf`；它必须重跑同一 `M/T` 公共规则，将
+`m_lf_detect`、`m_hf_detect` 分别同时施加于对应 public VAE posterior observation
+与 key-only template，并为 soft-routed LF 使用独立 32-clean-null manifest 拟合 W；
+禁止继承其他 route 的 W 或读取 embed map。LF 的 `lf_low_pass` raw score 与
+`lf_null_whitened_matched_score` 是两个独立候选身份；后者只读消费由独立 32-clean
+partition 冻结的 96 参数 channel-band diagonal `W`，不得在检测时读取 fit images 或
+重拟合。`lf_detector` 和 `hf_detector` 必须独立可调用，`s_lf`、`s_hf` 与
+`s_combined` 独立可观测；diagnostic 组合唯一为独立 primary-null 标准化后的
+`max(z_hf_soft,z_lf_soft)`，但当前未科学验证、未晋升且没有 formal threshold，不进入
+正式判定。未来晋升必须完成独立分支 calibration、max threshold fit、固定 FPR/科学
+确认与显式 promotion，并让原图/回正图共享一个新的 detector/config identity 和新
+阈值；不得继承旧 W/CDF、`tau` 或 HF-only threshold，也不得掩盖分支错误密钥失败。
 
 原图检测必须首先完成，几何链不能预先改变所有输入，也不能成为默认前处理。
 

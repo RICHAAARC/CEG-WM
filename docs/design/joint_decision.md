@@ -1,9 +1,10 @@
 # Joint Decision Design
 
-联合判定唯一消费
-`content_combination_semantic_texture_max_standardized` 定义的内容检测器：两条
-soft-route 分支分别以各自冻结的 primary-null 标准化后，计算
-`D_soft_route=max(z_hf_soft,z_lf_soft)`。联合判定不得切换到其他组合身份。
+联合判定当前唯一消费既有 HF-only content detector/config identity 及其阈值；原图
+与回正图不得切换 detector、配置或 threshold。语义—纹理
+`content_combination_semantic_texture_max_standardized` 已实现，但其
+`D_soft_route=max(z_hf_soft,z_lf_soft)` 仅为未科学验证、未晋升的 diagnostic 候选，
+不进入当前正式/default/joint 判定。
 
 ## Decision Authority
 
@@ -21,8 +22,10 @@ soft-route 分支分别以各自冻结的 primary-null 标准化后，计算
 6. 几何可靠时回正图像并计算 `s_rectified = D(rectified_image, key)`。
 7. 仅当 `s_rectified >= tau` 时，由回正后的内容证据判阳性。
 
-`D` 冻结为语义—纹理软路由 LF/HF 分支独立标准化后的
-`max(z_hf_soft,z_lf_soft)`。原图和回正图不得只在一条路径切换 detector。
+当前 `D` 冻结为 HF-only 和既有阈值。未来只有在独立分支 calibration、max threshold
+fit、固定 FPR/科学确认与显式 promotion 全部完成后，soft max 才可成为新的 `D`；届时
+原图与回正图必须共同采用同一个新的 detector/config identity 和新阈值，不得继承旧
+W/CDF、`tau` 或 HF-only threshold。
 
 ## Invariants
 
