@@ -8,7 +8,7 @@
 .codex/research_state/method_readiness.yaml
 ```
 
-当前该文件已在 13 项职责、27 个 CPU/synthetic 方法行为节点和 revision-bound
+当前该文件已在 13 项职责、12 个唯一候选身份、17 个 CPU/synthetic 方法行为节点和 revision-bound
 独立语义复核完成后从模板唯一实例化。实际 stage/status 已由独立 revision 同步为
 `experiment_ready / implemented`；readiness 本身未自动修改任何阶段。外层权威
 `governance/templates/method_readiness.yaml` 和
@@ -44,7 +44,7 @@
 - revision-bound 独立语义复核结论。
 
 同一 symbol 不得代理多个职责；carrier、embedder、detector、estimator、
-reliability 和 joint decision 不得折叠。27 个行为节点的精确清单与组件绑定只以
+reliability 和 joint decision 不得折叠。17 个行为节点的精确清单与组件绑定只以
 `governance/policies/method_readiness_rules.yaml` 为准，本指南
 不复制第二份清单。
 
@@ -62,10 +62,15 @@ readiness 只证明“登记候选已由真实项目组件实现并通过规定�
 真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。当前另有独立
 真实 GPU qualification 支持 runtime 边界，但不改变 readiness 的职责。正式
 detector 仍为 HF-only；LF/routing 尚未实验晋升，`full_ceg_wm_eligible=false`。
+当前 soft-route 五候选的 producer 为
+`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`，状态仅为
+`implemented_not_scientifically_validated`；soft max 仍是 diagnostic/unpromoted，
+不提供 calibration、固定 FPR、GPU、runtime 或科学效果证据。旧11候选/28节点快照由
+`0258ccb2100bfe8b58d1a12079876841192528b3` 保留为历史 exact-replay 来源。
 
 ## Fail-Closed Conditions
 
-- 13/27 实现或独立语义复核完成前提前创建 readiness YAML；
+- 13职责/12候选身份/17行为节点实现或独立语义复核完成前提前创建 readiness YAML；
 - 任一职责缺失、路径错置、symbol 复用、alias-only 或集中代理；
 - 候选 ID、摘要或 implementation revision 缺失；
 - 测试只验证 API 形状、常量、通用算术或重复同构行为；

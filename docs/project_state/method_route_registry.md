@@ -22,7 +22,21 @@
 
 ## Adopted Method Route
 
-状态：`adopted_design_unimplemented`。
+状态：`implemented_not_scientifically_validated`。
+
+当前五候选实现身份为：
+
+- `routing_semantic_texture_soft`；
+- `content_embedding_semantic_texture_soft_lf_hf`；
+- `lf_semantic_texture_soft_whitened_matched_score`；
+- `hf_semantic_texture_soft_direct_score`；
+- `content_combination_semantic_texture_max_standardized`。
+
+producer revision：`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`。独立复核绑定：
+`independent_semantic_texture_soft_candidate_semantic_review:01a00740-db8c-7b81-b370-3b0fd5db8285:02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb:independent_exact_audit_approve+cumulative_method_runtime_api_gate_approve`。
+该状态只表示实现/API/CPU-synthetic 语义已审核；soft max 仍是 diagnostic、未晋升，
+正式 detector 仍为 HF-only，`full_ceg_wm_eligible=false`。它不提供 runtime
+qualification、机制成功、calibration、固定 FPR、GPU 或科学效果证据。
 
 采用的方法路线是：
 
@@ -50,7 +64,12 @@
 设计采用 InSPyReNet soft probability 作为 `M`，采用确定性灰度 Sobel/P95 映射作为
 `T`，不要求逐图 Jacobian、SVD、显式零空间或 Self-Attention 几何锚点。准确公式和
 身份见 `docs/design`。这一路线是对开题“内容自适应潜空间水印 + 几何条件恢复”的
-最小忠实实现，不宣称已经实现、晋升或形成效果证据。
+最小忠实实现。当前已实现但未实验晋升，也未形成效果证据。
+
+历史 readiness 快照在 revision
+`0258ccb2100bfe8b58d1a12079876841192528b3` 绑定 11 个唯一候选身份和 28 个行为节点；
+它继续作为旧实现 exact-replay 的历史来源保留，但不再是当前 readiness 权威，也不向
+soft-route 五候选传递 CDF、threshold、calibration 或效果证据。
 
 ## Authenticated Development Negatives
 

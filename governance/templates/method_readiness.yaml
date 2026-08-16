@@ -12,11 +12,7 @@
     },
     "content_router": {
       "responsibility": "content_observation_and_adaptive_routing",
-      "candidate_ids": [
-        "key_schedule_sha256_counter",
-        "routing_stqr",
-        "routing_uniform_control"
-      ],
+      "candidate_ids": ["routing_semantic_texture_soft"],
       "implementation_path": "main/content_chain/routing.py",
       "implementation_symbol": ""
     },
@@ -42,8 +38,8 @@
         "runtime_sd35_flowmatch",
         "hf_sparse_tail",
         "lf_low_pass",
-        "routing_stqr",
-        "routing_uniform_control"
+        "routing_semantic_texture_soft",
+        "content_embedding_semantic_texture_soft_lf_hf"
       ],
       "implementation_path": "main/content_chain/embedder.py",
       "implementation_symbol": ""
@@ -53,23 +49,29 @@
       "candidate_ids": [
         "key_schedule_sha256_counter",
         "lf_low_pass",
-        "lf_null_whitened_matched_score"
+        "routing_semantic_texture_soft",
+        "lf_semantic_texture_soft_whitened_matched_score"
       ],
       "implementation_path": "main/content_chain/lf_detector.py",
       "implementation_symbol": ""
     },
     "hf_detector": {
       "responsibility": "high_frequency_direct_scoring",
-      "candidate_ids": ["key_schedule_sha256_counter", "hf_sparse_tail"],
+      "candidate_ids": [
+        "key_schedule_sha256_counter",
+        "hf_sparse_tail",
+        "routing_semantic_texture_soft",
+        "hf_semantic_texture_soft_direct_score"
+      ],
       "implementation_path": "main/content_chain/hf_detector.py",
       "implementation_symbol": ""
     },
     "content_detector": {
       "responsibility": "lf_hf_score_standardization_and_content_detection",
       "candidate_ids": [
-        "hf_sparse_tail",
-        "lf_low_pass",
-        "content_combination_calibrated"
+        "lf_semantic_texture_soft_whitened_matched_score",
+        "hf_semantic_texture_soft_direct_score",
+        "content_combination_semantic_texture_max_standardized"
       ],
       "implementation_path": "main/content_chain/detector.py",
       "implementation_symbol": ""
@@ -139,35 +141,11 @@
       "test_node": "",
       "components": ["hf_carrier"]
     },
-    "hf_direct_score_time_centering": {
-      "test_node": "",
-      "components": ["hf_detector"]
-    },
     "lf_domain_and_independent_key": {
       "test_node": "",
       "components": ["lf_carrier"]
     },
-    "lf_blind_score_time_centering": {
-      "test_node": "",
-      "components": ["lf_detector"]
-    },
-    "lf_wrong_key_rejection": {
-      "test_node": "",
-      "components": ["lf_carrier", "lf_detector"]
-    },
-    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": {
-      "test_node": "",
-      "components": ["lf_detector"]
-    },
-    "routing_mask_partition_and_range": {
-      "test_node": "",
-      "components": ["content_router"]
-    },
-    "routing_disabled_uniform_control": {
-      "test_node": "",
-      "components": ["content_router"]
-    },
-    "content_embedding_branch_consumption": {
+    "semantic_texture_soft_route_and_no_weight_embedding": {
       "test_node": "",
       "components": [
         "content_router",
@@ -176,33 +154,13 @@
         "content_embedder"
       ]
     },
-    "content_embedding_total_budget_and_frozen_allocation": {
-      "test_node": "",
-      "components": ["content_embedder"]
-    },
-    "content_embedding_active_zero_direction_fail_closed": {
-      "test_node": "",
-      "components": ["content_embedder"]
-    },
-    "content_wrong_key_rejection": {
-      "test_node": "",
-      "components": ["hf_carrier", "hf_detector", "lf_carrier", "lf_detector"]
-    },
-    "content_scores_independently_observable": {
+    "semantic_texture_blind_branches_require_dedicated_assets_and_cdfs": {
       "test_node": "",
       "components": ["lf_detector", "hf_detector", "content_detector"]
     },
-    "content_combination_branch_consumption": {
+    "semantic_texture_detector_config_branch_key_model_and_whitening_mismatches_fail_closed": {
       "test_node": "",
-      "components": ["lf_detector", "hf_detector", "content_detector"]
-    },
-    "content_combination_frozen_formula_identity": {
-      "test_node": "",
-      "components": ["content_detector"]
-    },
-    "content_combination_wrong_key_not_masked": {
-      "test_node": "",
-      "components": ["lf_detector", "hf_detector", "content_detector"]
+      "components": ["lf_detector", "hf_detector"]
     },
     "qk_relation_consumption": {
       "test_node": "",
@@ -235,7 +193,6 @@
     "joint_same_detector_threshold": {
       "test_node": "",
       "components": [
-        "content_detector",
         "image_rectifier",
         "conditional_recovery_decision"
       ]

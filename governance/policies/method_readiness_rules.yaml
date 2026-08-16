@@ -1,5 +1,5 @@
 {
-  "policy_version": 10,
+  "policy_version": 11,
   "project_name": "ceg_wm",
   "stage_order": [
     "project_constraint_framework",
@@ -121,11 +121,7 @@
   },
   "required_component_candidate_ids": {
     "key_schedule": ["key_schedule_sha256_counter"],
-    "content_router": [
-      "key_schedule_sha256_counter",
-      "routing_stqr",
-      "routing_uniform_control"
-    ],
+    "content_router": ["routing_semantic_texture_soft"],
     "lf_carrier": ["key_schedule_sha256_counter", "lf_low_pass"],
     "hf_carrier": [
       "key_schedule_sha256_counter",
@@ -136,19 +132,25 @@
       "runtime_sd35_flowmatch",
       "hf_sparse_tail",
       "lf_low_pass",
-      "routing_stqr",
-      "routing_uniform_control"
+      "routing_semantic_texture_soft",
+      "content_embedding_semantic_texture_soft_lf_hf"
     ],
     "lf_detector": [
       "key_schedule_sha256_counter",
       "lf_low_pass",
-      "lf_null_whitened_matched_score"
+      "routing_semantic_texture_soft",
+      "lf_semantic_texture_soft_whitened_matched_score"
     ],
-    "hf_detector": ["key_schedule_sha256_counter", "hf_sparse_tail"],
-    "content_detector": [
+    "hf_detector": [
+      "key_schedule_sha256_counter",
       "hf_sparse_tail",
-      "lf_low_pass",
-      "content_combination_calibrated"
+      "routing_semantic_texture_soft",
+      "hf_semantic_texture_soft_direct_score"
+    ],
+    "content_detector": [
+      "lf_semantic_texture_soft_whitened_matched_score",
+      "hf_semantic_texture_soft_direct_score",
+      "content_combination_semantic_texture_max_standardized"
     ],
     "qk_geometry_sync": [
       "key_schedule_sha256_counter",
@@ -174,21 +176,10 @@
     "key_schedule_wrong_key_and_public_noise",
     "hf_sparse_support",
     "hf_template_normalization_order_and_unit_l2",
-    "hf_direct_score_time_centering",
     "lf_domain_and_independent_key",
-    "lf_blind_score_time_centering",
-    "lf_wrong_key_rejection",
-    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates",
-    "routing_mask_partition_and_range",
-    "routing_disabled_uniform_control",
-    "content_embedding_branch_consumption",
-    "content_embedding_total_budget_and_frozen_allocation",
-    "content_embedding_active_zero_direction_fail_closed",
-    "content_wrong_key_rejection",
-    "content_scores_independently_observable",
-    "content_combination_branch_consumption",
-    "content_combination_frozen_formula_identity",
-    "content_combination_wrong_key_not_masked",
+    "semantic_texture_soft_route_and_no_weight_embedding",
+    "semantic_texture_blind_branches_require_dedicated_assets_and_cdfs",
+    "semantic_texture_detector_config_branch_key_model_and_whitening_mismatches_fail_closed",
     "qk_relation_consumption",
     "qk_similarity_transform_identifiability",
     "geometry_reliability_fail_closed",
@@ -204,48 +195,21 @@
     "key_schedule_wrong_key_and_public_noise": ["key_schedule"],
     "hf_sparse_support": ["hf_carrier"],
     "hf_template_normalization_order_and_unit_l2": ["hf_carrier"],
-    "hf_direct_score_time_centering": ["hf_detector"],
     "lf_domain_and_independent_key": ["lf_carrier"],
-    "lf_blind_score_time_centering": ["lf_detector"],
-    "lf_wrong_key_rejection": ["lf_carrier", "lf_detector"],
-    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": [
-      "lf_detector"
-    ],
-    "routing_mask_partition_and_range": ["content_router"],
-    "routing_disabled_uniform_control": ["content_router"],
-    "content_embedding_branch_consumption": [
+    "semantic_texture_soft_route_and_no_weight_embedding": [
       "content_router",
       "lf_carrier",
       "hf_carrier",
       "content_embedder"
     ],
-    "content_embedding_total_budget_and_frozen_allocation": [
-      "content_embedder"
-    ],
-    "content_embedding_active_zero_direction_fail_closed": [
-      "content_embedder"
-    ],
-    "content_wrong_key_rejection": [
-      "hf_carrier",
-      "hf_detector",
-      "lf_carrier",
-      "lf_detector"
-    ],
-    "content_scores_independently_observable": [
+    "semantic_texture_blind_branches_require_dedicated_assets_and_cdfs": [
       "lf_detector",
       "hf_detector",
       "content_detector"
     ],
-    "content_combination_branch_consumption": [
+    "semantic_texture_detector_config_branch_key_model_and_whitening_mismatches_fail_closed": [
       "lf_detector",
-      "hf_detector",
-      "content_detector"
-    ],
-    "content_combination_frozen_formula_identity": ["content_detector"],
-    "content_combination_wrong_key_not_masked": [
-      "lf_detector",
-      "hf_detector",
-      "content_detector"
+      "hf_detector"
     ],
     "qk_relation_consumption": ["qk_geometry_sync"],
     "qk_similarity_transform_identifiability": [
@@ -269,7 +233,6 @@
       "conditional_recovery_decision"
     ],
     "joint_same_detector_threshold": [
-      "content_detector",
       "image_rectifier",
       "conditional_recovery_decision"
     ]

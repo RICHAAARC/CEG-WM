@@ -238,7 +238,7 @@ parent 的重复完整 default pytest 基线为 `439.65s`；收敛后的定向�
 | governance_policy | `governance/tests/test_governance_policy.py` | unit, constraint | 12/12 | CPU, policy reads | none | policy structure only | project roots/state read-only | G:path | governance policy change |
 | harness_contract | `governance/tests/test_harness_contract.py` | constraint | 3/3 | CPU, audit reads | tmp reports | harness behavior only | all audited planes read-only | G:path | harness runner change |
 | harness_registry | `governance/tests/test_harness_registry.py` | constraint | 1/1 | CPU | none | audit registry only | governance only | G:path | audit list change |
-| method_readiness_audit | `governance/tests/test_method_readiness_audit.py` | unit | 24/24 | CPU, AST/tmp trees | tmp audit reports | readiness structure only | main/tests/state read-only | G:path | readiness audit change |
+| method_readiness_audit | `governance/tests/test_method_readiness_audit.py` | unit | 31/31 (27 top-level function selectors) | CPU, AST/tmp trees | tmp audit reports | readiness structure only | main/tests/state read-only | G:path | readiness audit change |
 | naming_and_field_rules | `governance/tests/test_naming_and_field_rules.py` | unit | 24/24 | CPU | none | matcher behavior only | governance rules only | G:path | naming/field rule change |
 | notebook_governance | `governance/tests/test_notebook_governance.py` | unit, constraint | 3/3 | CPU, Notebook reads | none | Notebook boundary only | notebooks/project imports read-only | G:path | Notebook audit change |
 | project_copy_contract | `governance/tests/test_project_copy_contract.py` | constraint | 1/1 | CPU, project copy | tmp copy | copy contract only | all project planes read-only | G:path | detachability/copy change |

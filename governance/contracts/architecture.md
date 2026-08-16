@@ -3,8 +3,10 @@
 ## 项目定位
 
 CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印研究项目。此前已合法
-进入 `method_construction_authorized`；随后独立 revisions 已完成固定 13 项职责、
-27 个 CPU/synthetic 方法行为节点和唯一 readiness，并经独立语义审计。
+进入 `method_construction_authorized`；当前 readiness 已在固定 13 项职责上绑定
+12 个唯一候选身份、17 个 CPU/synthetic 方法行为节点和唯一 readiness，并经独立
+语义审计。旧的 11 候选/28 节点 readiness 快照继续保留在 exact revision
+`0258ccb2100bfe8b58d1a12079876841192528b3`，不再是当前权威。
 
 阶段实施路径继续为
 `research_defined → method_construction_authorized → method_implemented → runtime_verified → experiment_ready`。
@@ -12,7 +14,10 @@ CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印�
 CPU/synthetic readiness 本身不证明 runtime；当前另有独立真实 GPU qualification
 支持冻结 SD3.5 runtime 边界，但不证明正式 FPR 或科学效果；
 正式 detector 仍为 HF-only；旧 routing/combination 只保留 producer-bound historical
-replay，语义—纹理软路由五候选为 `adopted_design_unimplemented`，hard salient-object
+replay。语义—纹理软路由五候选已由 producer
+`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 实现并经 revision-bound independent
+exact audit 批准，状态为 `implemented_not_scientifically_validated`；soft max 仅为
+diagnostic 且未晋升。hard salient-object
 local-LF 四候选为 `superseded_without_scientific_adjudication`，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation

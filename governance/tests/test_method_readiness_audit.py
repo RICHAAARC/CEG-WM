@@ -48,11 +48,7 @@ COMPONENT_PATHS = {
 }
 CANDIDATE_IDS = {
     "key_schedule": ["key_schedule_sha256_counter"],
-    "content_router": [
-        "key_schedule_sha256_counter",
-        "routing_stqr",
-        "routing_uniform_control",
-    ],
+    "content_router": ["routing_semantic_texture_soft"],
     "lf_carrier": ["key_schedule_sha256_counter", "lf_low_pass"],
     "hf_carrier": [
         "key_schedule_sha256_counter",
@@ -63,19 +59,25 @@ CANDIDATE_IDS = {
         "runtime_sd35_flowmatch",
         "hf_sparse_tail",
         "lf_low_pass",
-        "routing_stqr",
-        "routing_uniform_control",
+        "routing_semantic_texture_soft",
+        "content_embedding_semantic_texture_soft_lf_hf",
     ],
     "lf_detector": [
         "key_schedule_sha256_counter",
         "lf_low_pass",
-        "lf_null_whitened_matched_score",
+        "routing_semantic_texture_soft",
+        "lf_semantic_texture_soft_whitened_matched_score",
     ],
-    "hf_detector": ["key_schedule_sha256_counter", "hf_sparse_tail"],
-    "content_detector": [
+    "hf_detector": [
+        "key_schedule_sha256_counter",
         "hf_sparse_tail",
-        "lf_low_pass",
-        "content_combination_calibrated",
+        "routing_semantic_texture_soft",
+        "hf_semantic_texture_soft_direct_score",
+    ],
+    "content_detector": [
+        "lf_semantic_texture_soft_whitened_matched_score",
+        "hf_semantic_texture_soft_direct_score",
+        "content_combination_semantic_texture_max_standardized",
     ],
     "qk_geometry_sync": [
         "key_schedule_sha256_counter",
@@ -97,13 +99,13 @@ CANDIDATE_IDS = {
 }
 SYMBOLS = {
     "key_schedule": "key_schedule_sha256_counter",
-    "content_router": "content_router",
+    "content_router": "semantic_texture_content_router",
     "lf_carrier": "lf_carrier",
     "hf_carrier": "hf_carrier",
-    "content_embedder": "content_embedder",
-    "lf_detector": "lf_detector",
-    "hf_detector": "hf_detector",
-    "content_detector": "content_detector",
+    "content_embedder": "semantic_texture_content_embedder",
+    "lf_detector": "semantic_texture_lf_detector",
+    "hf_detector": "semantic_texture_hf_detector",
+    "content_detector": "semantic_texture_content_detector",
     "qk_geometry_sync": "qk_geometry_sync",
     "geometric_transform_estimator": "geometric_transform_estimator",
     "geometry_reliability": "geometry_reliability",
@@ -116,44 +118,21 @@ BEHAVIOR_BINDINGS = {
     "key_schedule_wrong_key_and_public_noise": ["key_schedule"],
     "hf_sparse_support": ["hf_carrier"],
     "hf_template_normalization_order_and_unit_l2": ["hf_carrier"],
-    "hf_direct_score_time_centering": ["hf_detector"],
     "lf_domain_and_independent_key": ["lf_carrier"],
-    "lf_blind_score_time_centering": ["lf_detector"],
-    "lf_wrong_key_rejection": ["lf_carrier", "lf_detector"],
-    "lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates": [
-        "lf_detector"
-    ],
-    "routing_mask_partition_and_range": ["content_router"],
-    "routing_disabled_uniform_control": ["content_router"],
-    "content_embedding_branch_consumption": [
+    "semantic_texture_soft_route_and_no_weight_embedding": [
         "content_router",
         "lf_carrier",
         "hf_carrier",
         "content_embedder",
     ],
-    "content_embedding_total_budget_and_frozen_allocation": ["content_embedder"],
-    "content_embedding_active_zero_direction_fail_closed": ["content_embedder"],
-    "content_wrong_key_rejection": [
-        "hf_carrier",
-        "hf_detector",
-        "lf_carrier",
-        "lf_detector",
-    ],
-    "content_scores_independently_observable": [
+    "semantic_texture_blind_branches_require_dedicated_assets_and_cdfs": [
         "lf_detector",
         "hf_detector",
         "content_detector",
     ],
-    "content_combination_branch_consumption": [
+    "semantic_texture_detector_config_branch_key_model_and_whitening_mismatches_fail_closed": [
         "lf_detector",
         "hf_detector",
-        "content_detector",
-    ],
-    "content_combination_frozen_formula_identity": ["content_detector"],
-    "content_combination_wrong_key_not_masked": [
-        "lf_detector",
-        "hf_detector",
-        "content_detector",
     ],
     "qk_relation_consumption": ["qk_geometry_sync"],
     "qk_similarity_transform_identifiability": [
@@ -175,7 +154,6 @@ BEHAVIOR_BINDINGS = {
         "conditional_recovery_decision",
     ],
     "joint_same_detector_threshold": [
-        "content_detector",
         "image_rectifier",
         "conditional_recovery_decision",
     ],
@@ -253,6 +231,15 @@ def _method_sources() -> dict[str, str]:
             "    mask_lf = tuple(a * (1.0 - t) for a, t in zip(attention, texture))\n"
             "    mask_hf = tuple(a * t for a, t in zip(attention, texture))\n"
             "    return {'A': attention, 'mask_lf': mask_lf, 'mask_hf': mask_hf, 'route_identity': 'routing_stqr'}\n"
+            "def semantic_texture_content_router(semantic, texture, enabled=True):\n"
+            "    if not enabled:\n"
+            "        return {'m_hf': (0.5,) * len(semantic), 'm_lf': (0.5,) * len(semantic), 'candidate_id': 'routing_semantic_texture_soft'}\n"
+            "    if len(semantic) != len(texture):\n"
+            "        raise ValueError('semantic texture shape mismatch')\n"
+            "    denominator = tuple(2.0 + value for value in semantic)\n"
+            "    m_hf = tuple((1.0 + m * t) / d for m, t, d in zip(semantic, texture, denominator))\n"
+            "    m_lf = tuple((1.0 + m * (1.0 - t)) / d for m, t, d in zip(semantic, texture, denominator))\n"
+            "    return {'m_hf': m_hf, 'm_lf': m_lf, 'candidate_id': 'routing_semantic_texture_soft'}\n"
         ),
         "main/content_chain/lf_carrier.py": (
             "def lf_carrier(values, key_signs, mask=None):\n"
@@ -282,6 +269,12 @@ def _method_sources() -> dict[str, str]:
             "    whitened_observed = tuple(value * weight for value, weight in zip(observed, weights))\n"
             "    whitened_template = tuple(value * weight for value, weight in zip(template, weights))\n"
             "    return lf_detector(whitened_observed, whitened_template)\n"
+            "def semantic_texture_lf_detector(observed, template, route, whitening):\n"
+            "    if not whitening:\n"
+            "        raise ValueError('dedicated whitening required')\n"
+            "    weighted_observed = tuple(value * mask * weight for value, mask, weight in zip(observed, route['m_lf'], whitening))\n"
+            "    weighted_template = tuple(value * mask * weight for value, mask, weight in zip(template, route['m_lf'], whitening))\n"
+            "    return {'score': lf_detector(weighted_observed, weighted_template), 'identity': 'lf_semantic_texture_soft_whitened_matched_score'}\n"
         ),
         "main/content_chain/hf_carrier.py": (
             "def hf_carrier(tail_values, key_signs, keep, mask=None):\n"
@@ -318,6 +311,17 @@ def _method_sources() -> dict[str, str]:
             "        raise ValueError('combined zero direction')\n"
             "    delta = tuple(target_total_l2 * value / combined_norm for value in combined)\n"
             "    return {'delta': delta, 'allocation': allocation, 'mode': mode, 'target_total_l2': target_total_l2, 'combined_pre_norm': combined_norm, 'direction_cosine': direction_cosine}\n"
+            "def semantic_texture_content_embedder(lf_direction, hf_direction, target_total_l2):\n"
+            "    lf_norm = sum(value * value for value in lf_direction) ** 0.5\n"
+            "    hf_norm = sum(value * value for value in hf_direction) ** 0.5\n"
+            "    if lf_norm == 0 or hf_norm == 0:\n"
+            "        raise ValueError('active zero direction')\n"
+            "    combined = tuple(lf / lf_norm + hf / hf_norm for lf, hf in zip(lf_direction, hf_direction))\n"
+            "    combined_norm = sum(value * value for value in combined) ** 0.5\n"
+            "    if combined_norm == 0:\n"
+            "        raise ValueError('combined zero direction')\n"
+            "    delta = tuple(target_total_l2 * value / combined_norm for value in combined)\n"
+            "    return {'delta': delta, 'target_total_l2': target_total_l2, 'candidate_id': 'content_embedding_semantic_texture_soft_lf_hf'}\n"
         ),
         "main/content_chain/hf_detector.py": (
             "def hf_detector(observed, template):\n"
@@ -328,6 +332,12 @@ def _method_sources() -> dict[str, str]:
             "    numerator = sum(a * b for a, b in zip(left, right))\n"
             "    denominator = (sum(a * a for a in left) * sum(b * b for b in right)) ** 0.5\n"
             "    return numerator / denominator\n"
+            "def semantic_texture_hf_detector(observed, template, route, model_revision='registered-model'):\n"
+            "    if model_revision != 'registered-model':\n"
+            "        raise ValueError('model revision mismatch')\n"
+            "    weighted_observed = tuple(value * mask for value, mask in zip(observed, route['m_hf']))\n"
+            "    weighted_template = tuple(value * mask for value, mask in zip(template, route['m_hf']))\n"
+            "    return {'score': hf_detector(weighted_observed, weighted_template), 'identity': 'hf_semantic_texture_soft_direct_score'}\n"
         ),
         "main/content_chain/detector.py": (
             "def _midrank_normal_score(score, null_scores, normal_table):\n"
@@ -353,6 +363,11 @@ def _method_sources() -> dict[str, str]:
             "    else:\n"
             "        raise ValueError('unregistered combination')\n"
             "    return {'lf': lf_score, 'hf': hf_score, 'combined': combined, 'z_lf': z_lf, 'z_hf': z_hf}\n"
+            "def semantic_texture_content_detector(lf_result, hf_result, lf_null, hf_null):\n"
+            "    if lf_null.get('identity') != lf_result['identity'] or hf_null.get('identity') != hf_result['identity']:\n"
+            "        raise ValueError('CDF identity mismatch')\n"
+            "    combined = max(lf_result['score'], hf_result['score'])\n"
+            "    return {'lf': lf_result['score'], 'hf': hf_result['score'], 'combined': combined, 'candidate_id': 'content_combination_semantic_texture_max_standardized'}\n"
         ),
         "main/geometry_chain/qk_sync.py": (
             "def qk_geometry_sync(query, key):\n"
@@ -398,13 +413,13 @@ def _method_sources() -> dict[str, str]:
 def _behavior_test_source() -> str:
     return """import pytest
 from main.shared.key_schedule import key_schedule_sha256_counter
-from main.content_chain.detector import content_detector
-from main.content_chain.embedder import content_embedder
+from main.content_chain.detector import content_detector, semantic_texture_content_detector
+from main.content_chain.embedder import content_embedder, semantic_texture_content_embedder
 from main.content_chain.hf_carrier import hf_carrier
-from main.content_chain.hf_detector import hf_detector
+from main.content_chain.hf_detector import hf_detector, semantic_texture_hf_detector
 from main.content_chain.lf_carrier import lf_carrier
-from main.content_chain.lf_detector import lf_detector, lf_null_whitened_matched_detector
-from main.content_chain.routing import content_router
+from main.content_chain.lf_detector import lf_detector, lf_null_whitened_matched_detector, semantic_texture_lf_detector
+from main.content_chain.routing import content_router, semantic_texture_content_router
 from main.geometry_chain.qk_sync import qk_geometry_sync
 from main.geometry_chain.reliability import geometry_reliability
 from main.geometry_chain.rectifier import image_rectifier
@@ -459,6 +474,64 @@ def test_lf_domain_and_independent_key():
     wrong = lf_carrier((1.0, 2.0, 4.0, 8.0), (-1, 1, -1, 1))
     assert len(registered) == 4
     assert registered != wrong
+
+@pytest.mark.unit
+def test_semantic_texture_soft_route_and_no_weight_embedding():
+    route = semantic_texture_content_router(
+        (0.2, 0.8, 0.4, 0.6),
+        (0.8, 0.2, 0.6, 0.4),
+    )
+    lf = lf_carrier((1.0, 2.0, 4.0, 8.0), (1, -1, 1, -1), route["m_lf"])
+    hf = hf_carrier((4.0, -3.0, 0.2, 0.1), (1, 1, 1, 1), 2, route["m_hf"])
+    embedded = semantic_texture_content_embedder(lf, hf, 0.012)
+    lf_norm = sum(value * value for value in lf) ** 0.5
+    hf_norm = sum(value * value for value in hf) ** 0.5
+    combined = tuple(
+        left / lf_norm + right / hf_norm for left, right in zip(lf, hf)
+    )
+    combined_norm = sum(value * value for value in combined) ** 0.5
+    expected_delta = tuple(0.012 * value / combined_norm for value in combined)
+    assert all(h + l == pytest.approx(1.0) for h, l in zip(route["m_hf"], route["m_lf"]))
+    assert lf != hf
+    assert embedded["candidate_id"] == "content_embedding_semantic_texture_soft_lf_hf"
+    assert embedded["delta"] == pytest.approx(expected_delta)
+
+@pytest.mark.unit
+def test_semantic_texture_blind_branches_require_dedicated_assets_and_cdfs():
+    route = semantic_texture_content_router((0.3, 0.7, 0.4), (0.9, 0.1, 0.5))
+    hf = semantic_texture_hf_detector((1.0, -1.0, 2.0), (2.0, -1.0, 1.0), route)
+    lf = semantic_texture_lf_detector((2.0, -1.0, 1.0), (2.0, -1.0, 1.0), route, (1.0, 2.0, 1.0))
+    combined = semantic_texture_content_detector(
+        lf,
+        hf,
+        {"identity": lf["identity"]},
+        {"identity": hf["identity"]},
+    )
+    assert lf["score"] == pytest.approx(1.0)
+    assert hf["score"] < lf["score"]
+    assert combined["combined"] == max(lf["score"], hf["score"])
+
+@pytest.mark.unit
+def test_semantic_texture_detector_config_branch_key_model_and_whitening_mismatches_fail_closed():
+    route = semantic_texture_content_router((0.4, 0.6, 0.5), (0.7, 0.3, 0.5))
+    hf = semantic_texture_hf_detector((1.0, -1.0, 2.0), (2.0, -1.0, 1.0), route)
+    lf = semantic_texture_lf_detector((2.0, -1.0, 1.0), (2.0, -1.0, 1.0), route, (1.0, 2.0, 1.0))
+    combined = semantic_texture_content_detector(
+        lf,
+        hf,
+        {"identity": lf["identity"]},
+        {"identity": hf["identity"]},
+    )
+    with pytest.raises(ValueError, match="CDF identity mismatch"):
+        semantic_texture_content_detector(
+            lf,
+            hf,
+            {"identity": "wrong-lf-identity"},
+            {"identity": hf["identity"]},
+        )
+    assert lf["identity"] != hf["identity"]
+    assert hf["score"] < lf["score"]
+    assert combined["combined"] == pytest.approx(1.0)
 
 @pytest.mark.unit
 def test_lf_blind_score_time_centering():
@@ -1280,7 +1353,7 @@ def test_component_alias_only_symbol_is_rejected(tmp_path: Path) -> None:
     _write(
         path,
         "from main.content_chain.hf_carrier import hf_carrier\n"
-        "def content_embedder(values, signs, keep, target_total_l2):\n"
+        "def semantic_texture_content_embedder(values, signs, keep, target_total_l2):\n"
         "    return hf_carrier(values, signs, keep)\n",
     )
     _commit_fixture_change_and_refresh_review(tmp_path)
@@ -1314,18 +1387,20 @@ def test_embedder_that_ignores_lf_branch_fails_candidate_behavior(
     path = tmp_path / COMPONENT_PATHS["content_embedder"]
     _write(
         path,
-        "def content_embedder(lf_direction, hf_direction, allocation, target_total_l2):\n"
+        "def content_embedder(lf_direction, hf_direction, allocation, target_total_l2, mode='combined'):\n"
+        "    return {'delta': tuple(hf_direction), 'allocation': allocation, 'mode': mode, 'target_total_l2': target_total_l2}\n"
+        "def semantic_texture_content_embedder(lf_direction, hf_direction, target_total_l2):\n"
         "    hf_norm = sum(value * value for value in hf_direction) ** 0.5\n"
         "    if hf_norm == 0:\n"
         "        raise ValueError('active zero direction')\n"
         "    delta = tuple(target_total_l2 * value / hf_norm for value in hf_direction)\n"
-        "    return {'delta': delta, 'allocation': allocation, 'mode': 'combined', 'target_total_l2': target_total_l2, 'combined_pre_norm': hf_norm, 'direction_cosine': 0.0}\n",
+        "    return {'delta': delta, 'target_total_l2': target_total_l2, 'candidate_id': 'content_embedding_semantic_texture_soft_lf_hf'}\n",
     )
     _commit_fixture_change_and_refresh_review(tmp_path)
     assert run_audit(tmp_path)["decision"] == "pass"
     behavior = _run_fixture_behavior(
         tmp_path,
-        "content_embedding_branch_consumption",
+        "semantic_texture_soft_route_and_no_weight_embedding",
     )
     assert behavior.returncode != 0
     assert "FAILED" in behavior.stdout
@@ -1341,15 +1416,17 @@ def test_wrong_content_combination_formula_fails_candidate_behavior(
     _write(
         path,
         "def content_detector(lf_score, hf_score, lf_null, hf_null, combination, normal_table):\n"
-        "    combined = (lf_score + hf_score) / 2.0\n"
-        "    observed = {'lf': lf_score, 'hf': hf_score, 'combined': combined}\n"
+        "    return {'lf': lf_score, 'hf': hf_score, 'combined': hf_score}\n"
+        "def semantic_texture_content_detector(lf_result, hf_result, lf_null, hf_null):\n"
+        "    combined = (lf_result['score'] + hf_result['score']) / 2.0\n"
+        "    observed = {'lf': lf_result['score'], 'hf': hf_result['score'], 'combined': combined, 'candidate_id': 'content_combination_semantic_texture_max_standardized'}\n"
         "    return observed\n",
     )
     _commit_fixture_change_and_refresh_review(tmp_path)
     assert run_audit(tmp_path)["decision"] == "pass"
     behavior = _run_fixture_behavior(
         tmp_path,
-        "content_combination_frozen_formula_identity",
+        "semantic_texture_blind_branches_require_dedicated_assets_and_cdfs",
     )
     assert behavior.returncode != 0
     assert "FAILED" in behavior.stdout

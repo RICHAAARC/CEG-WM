@@ -17,10 +17,14 @@ runtime 验证或论文证据。
   `e325c5efa3f35d0881e4d1d1743ab9d1ce87dbb9`；
 - method transition base revision 为
   `15e138ecf99e75084c6862b1f291b1747986123b`；
-- construction admission、13 项职责、27 个 CPU/synthetic 行为节点、唯一 readiness
+- construction admission、13 项职责、12 个唯一候选身份、17 个 CPU/synthetic 行为节点、唯一 readiness
   和 revision-bound 独立语义复核均已登记；
 - 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
   `full_ceg_wm_eligible=false`；
+- soft-route 五候选已由 producer
+  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 实现并经独立 exact audit 批准，
+  但只处于 `implemented_not_scientifically_validated`；soft max 是 diagnostic、未晋升，
+  没有 calibration、固定 FPR、GPU、runtime 或科学效果主张；
 - 真实 SD3.5 runtime qualification 与独立阶段迁移已经完成，证据绑定 candidate
   `8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 run `20260729T110628Z`；
 - 实验协议与可追溯执行交付基础设施已经闭环，但尚无 `tau`、confirmation 结果、
@@ -32,7 +36,7 @@ runtime 验证或论文证据。
 | current → requested stage | allowed work | required inputs | required output | admission and stop rule |
 | --- | --- | --- | --- | --- |
 | `research_defined → method_construction_authorized` | 关闭候选规格审计；核验历史来源与复用权；准备版本身份和独立阶段变更。 | 十份登记设计；候选规格独立 `approve`；用户明确授权；用户授权建立的 CEG-WM revision。 | 从模板创建的 construction admission；不含 `main/` 实现的独立阶段 revision。 | 任一输入缺失即停止；不得把本文档授权解释为版本、阶段或实现授权。 |
-| `method_construction_authorized → method_implemented` | 当前实现/readiness 已闭合；只准备独立阶段迁移。 | 已批准 admission；固定候选摘要；受保护实现/测试路径；已审 readiness。 | 全部真实组件、27 个非同构行为测试、唯一 readiness YAML 和 revision-bound 独立语义复核。 | 阶段迁移前再次核验受保护路径；缺组件、候选漂移或复核失效即停止在在建阶段。 |
+| `method_construction_authorized → method_implemented` | 当前实现/readiness 已闭合；只准备独立阶段迁移。 | 已批准 admission；固定候选摘要；受保护实现/测试路径；已审 readiness。 | 全部13项真实组件、12个唯一候选身份、17个非同构行为测试、唯一 readiness YAML 和 revision-bound 独立语义复核。 | 阶段迁移前再次核验受保护路径；缺组件、候选漂移或复核失效即停止在在建阶段。 |
 | `method_implemented → runtime_verified` | 接入冻结真实模型、callback、VAE、Q/K、device/dtype 边界并验证。 | 已批准方法 revision；冻结 runtime candidate 与依赖。 | 真实 runtime identity、determinism、actual-dtype combined delta、Q/K observation 和失败记录。 | CPU fixture、mock 或 dry run 不能替代真实 runtime；资源或身份失败保持 fail closed。 |
 | `runtime_verified → experiment_ready` | 实现并冻结内部设计验证、外部 comparison、互斥 calibration、runner 和 records 协议。 | runtime 证据；预登记样本/split/攻击/指标；baseline 来源与许可。 | preflight 通过的冻结协议、唯一 governed runner、可追溯配置和空白 evaluation admission。 | 数据泄漏、不公平预算、baseline 权限未闭合或 rescue/FPR 口径不完整即停止。 |
 | `experiment_ready → formal_evidence_available` | 运行正式矩阵并冻结全部成功、失败、排除 records 与 manifests。 | 未被 evaluation 使用过的冻结方法、协议、数据和 revision。 | governed records、provenance、frozen manifests；可重建 artifacts 的事实输入。 | 运行中改方法/协议、失败丢分母或 FPR 样本量不足时不得宣称正式证据。 |
