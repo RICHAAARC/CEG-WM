@@ -80,6 +80,7 @@ from runtime import (
     RuntimeQkObservationResult,
     InspyrenetSemanticRuntime,
     RuntimeSemanticTextureDetectionObservationResult,
+    RuntimeSemanticTextureObservationResult,
     Sd35RuntimeAdapter,
 )
 
@@ -112,6 +113,13 @@ SEMANTIC_TEXTURE_DETECTION_PUBLIC_CALLABLE = (
     " -> main.semantic_texture_hf_detector"
     " + main.semantic_texture_lf_detector"
     " -> main.semantic_texture_content_detector"
+)
+SEMANTIC_TEXTURE_EMBEDDING_PUBLIC_CALLABLE = (
+    "runtime.Sd35RuntimeAdapter callback-18 transient VAE RGB8 observation"
+    " -> main.semantic_texture_content_router"
+    " -> main.hf_carrier + main.lf_carrier"
+    " -> main.semantic_texture_content_embedder"
+    " -> runtime actual-dtype reconciliation"
 )
 REQUIRED_COMPONENT_BINDINGS = (
     ("key_schedule", "main.identify_root_key", "config_digest"),
@@ -679,35 +687,78 @@ class CegWmExperimentAdapter:
         return self._observe("content_embedder", result)
 
     @_revalidate_configuration_before_call
-    def embed_semantic_texture(
+    def execute_semantic_texture_content_write_and_vae(
         self,
-        latent_values: Sequence[float],
+        base_latent: torch.Tensor,
         detection_key: str,
-        routing_result: SemanticTextureRoutingResult,
-    ) -> ComponentCallObservation[ContentEmbeddingResult]:
-        hf = hf_carrier(
-            detection_key,
-            routing_result.latent_shape,
-            routing_result=routing_result,
+        semantic_runtime: InspyrenetSemanticRuntime,
+    ) -> ComponentCallObservation[object]:
+        """At the registered write callback index, decode the current callback
+        latent once through the transient VAE to ordinary RGB8, strictly observe
+        semantic texture from that same RGB8, compose the existing main router,
+        independent HF/LF carriers and embedder, and preserve the existing
+        embedder-owned actual-dtype reconciliation boundary.
+        """
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture embedding requires a prepared runtime adapter"
+            )
+
+        def compose_from_runtime_observation(
+            latent_values: tuple[float, ...],
+            latent_shape: tuple[int, ...],
+            runtime_observation: object,
+        ) -> tuple[SemanticTextureRoutingResult, ContentEmbeddingResult]:
+            if (
+                type(runtime_observation)
+                is not RuntimeSemanticTextureObservationResult
+            ):
+                raise CegWmExperimentAdapterError(
+                    "semantic-texture composition requires the runtime observation"
+                )
+            route = semantic_texture_content_router(
+                latent_shape,
+                mode="routing_semantic_texture_soft",
+                observations=runtime_observation.observations,
+            )
+            hf_carrier_result = hf_carrier(
+                detection_key,
+                route.latent_shape,
+                routing_result=route,
+            )
+            lf_carrier_result = lf_carrier(
+                detection_key,
+                route.latent_shape,
+                routing_result=route,
+            )
+            embedding = semantic_texture_content_embedder(
+                latent_values,
+                hf_carrier_result,
+                lf_carrier_result=lf_carrier_result,
+                routing_result=route,
+            )
+            return route, embedding
+
+        result = (
+            self._runtime_adapter._execute_semantic_texture_content_write_and_vae(
+                base_latent,
+                semantic_runtime,
+                compose_from_runtime_observation,
+            )
         )
-        lf = lf_carrier(
-            detection_key,
-            routing_result.latent_shape,
-            routing_result=routing_result,
-        )
-        result = semantic_texture_content_embedder(
-            latent_values,
-            hf,
-            lf_carrier_result=lf,
-            routing_result=routing_result,
+        witness = getattr(result, "witness", None)
+        upstream_runtime_identity = getattr(
+            witness,
+            "semantic_observation_identity",
+            None,
         )
         return self._observe(
             "content_embedder",
             result,
-            public_callable=(
-                "main.hf_carrier + main.lf_carrier"
-                " -> main.semantic_texture_content_embedder"
-            ),
+            upstream_runtime_identity=upstream_runtime_identity,
+            result_identity_field="witness_identity",
+            public_callable=SEMANTIC_TEXTURE_EMBEDDING_PUBLIC_CALLABLE,
         )
 
     @_revalidate_configuration_before_call

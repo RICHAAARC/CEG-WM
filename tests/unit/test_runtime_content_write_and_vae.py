@@ -9,8 +9,6 @@ import torch
 import runtime.content_write as runtime_content_write
 from main import (
     ContentEmbeddingResult,
-    SemanticTextureRoutingObservations,
-    SpatialRoutingObservation,
     content_actual_budget_accepts,
     content_embedder,
     semantic_texture_content_embedder,
@@ -25,6 +23,7 @@ from runtime import (
     RuntimeDeviceCapabilities,
     RuntimeGenerationWithSuffixContextResult,
     RuntimeVaeFactors,
+    InspyrenetSemanticRuntime,
     create_runtime_adapter,
     measure_content_materialization,
 )
@@ -259,42 +258,56 @@ def _embedding_operation(calls: list[tuple[float, ...]]):
     return operation
 
 
-def _semantic_texture_embedding_operation(calls: list[tuple[float, ...]]):
-    route = semantic_texture_content_router(
-        TEST_SHAPE,
-        mode="routing_semantic_texture_soft",
-        observations=SemanticTextureRoutingObservations(
-            semantic_probability=SpatialRoutingObservation(
-                values=(0.5,) * 16,
-                spatial_shape=(4, 4),
-                source_identity_digest=sha256(b"runtime-semantic-M").hexdigest(),
-            ),
-            texture_complexity=SpatialRoutingObservation(
-                values=tuple((index % 4) / 3.0 for index in range(16)),
-                spatial_shape=(4, 4),
-                source_identity_digest=sha256(b"runtime-texture-T").hexdigest(),
-            ),
-        ),
-    )
-    hf_result = hf_carrier(TEST_ROOT_KEY, TEST_SHAPE, routing_result=route)
-    lf_result = lf_carrier(TEST_ROOT_KEY, TEST_SHAPE, routing_result=route)
-
-    def operation(values: tuple[float, ...]) -> ContentEmbeddingResult:
-        calls.append(values)
-        return semantic_texture_content_embedder(
-            values,
-            hf_result,
-            lf_carrier_result=lf_result,
-            routing_result=route,
-        )
-
-    return operation
-
-
 def _initialized_adapter(backend: FakeContentBackend):
     adapter = create_runtime_adapter(backend)
     adapter.initialize("cpu")
     return adapter
+
+
+class _InputDependentSemanticModel(torch.nn.Module):
+    def forward_inspyre(self, value: torch.Tensor) -> dict[str, object]:
+        finest_saliency_logit = value[:, :1]
+        return {
+            "saliency": [finest_saliency_logit] * 4,
+            "laplacian": [finest_saliency_logit] * 3,
+        }
+
+
+class _SemanticTextureContentBackend(FakeContentBackend):
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        self.decode_inputs.append(latent.detach().clone())
+        return torch.sigmoid(latent[:, :3].to(dtype=torch.float32))
+
+
+def _semantic_texture_base_latent() -> torch.Tensor:
+    spatial_values = torch.linspace(
+        -1.0,
+        1.0,
+        steps=64 * 64,
+        dtype=torch.float32,
+    ).reshape(1, 1, 64, 64)
+    return spatial_values.repeat(1, 16, 1, 1).to(dtype=torch.float16)
+
+
+def _semantic_texture_composition(
+    values: tuple[float, ...],
+    shape: tuple[int, ...],
+    runtime_observation: object,
+):
+    route = semantic_texture_content_router(
+        shape,
+        mode="routing_semantic_texture_soft",
+        observations=runtime_observation.observations,
+    )
+    hf_result = hf_carrier(TEST_ROOT_KEY, shape, routing_result=route)
+    lf_result = lf_carrier(TEST_ROOT_KEY, shape, routing_result=route)
+    embedding = semantic_texture_content_embedder(
+        values,
+        hf_result,
+        lf_carrier_result=lf_result,
+        routing_result=route,
+    )
+    return route, embedding
 
 
 @pytest.mark.unit
@@ -414,27 +427,94 @@ def test_clean_image_observation_matches_existing_paired_clean_path() -> None:
 
 
 @pytest.mark.unit
-def test_semantic_texture_write_reuses_actual_dtype_combined_budget() -> None:
-    backend = FakeContentBackend()
+def test_semantic_texture_production_traversal_rejects_missing_registered_write_callback_index() -> None:
+    full_sequence = tuple(range(20))
+    missing_callback = tuple(index for index in full_sequence if index != 18)
+    backend = _SemanticTextureContentBackend(
+        callback_sequences=(full_sequence, missing_callback)
+    )
     adapter = _initialized_adapter(backend)
-    calls: list[tuple[float, ...]] = []
-
-    result = adapter.execute_content_write_and_vae(
-        _base_latent(),
-        _semantic_texture_embedding_operation(calls),
+    semantic_runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(
+        _InputDependentSemanticModel()
     )
 
-    method_result = result.content_materialization_result
-    assert len(calls) == 1
-    assert method_result.embedding_result.mode == "semantic_texture_soft_combined"
-    assert method_result.embedding_result.mixing_coefficient is None
-    assert method_result.content_relative_l2_nominal == pytest.approx(3.0 / 250.0)
-    assert method_result.content_relative_l2_limit == pytest.approx(3.0 / 250.0)
-    assert method_result.budget_status == "accepted"
-    assert method_result.integrity_status == "passed"
-    assert method_result.materialization_scale > 0.0
-    assert method_result.budget_utilization <= 1.0
-    assert result.content_materialization.delta_content_actual.dtype is torch.float32
+    with pytest.raises(
+        runtime_content_write.RuntimeContentExecutionError,
+        match="missing or out of order",
+    ):
+        runtime_content_write.execute_semantic_texture_content_write_and_vae(
+            backend,
+            adapter.configuration,
+            adapter.session,
+            _semantic_texture_base_latent(),
+            semantic_runtime,
+            _semantic_texture_composition,
+        )
+
+    assert backend.decode_inputs == []
+
+
+@pytest.mark.unit
+def test_semantic_texture_traversal_rejects_rgb8_witness_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _SemanticTextureContentBackend()
+    adapter = _initialized_adapter(backend)
+    semantic_runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(
+        _InputDependentSemanticModel()
+    )
+    monkeypatch.setattr(
+        runtime_content_write,
+        "rgb8_image_digest",
+        lambda _image: "0" * 64,
+    )
+
+    with pytest.raises(
+        runtime_content_write.RuntimeContentExecutionError,
+        match="RGB8 identity mismatched callback",
+    ):
+        runtime_content_write.execute_semantic_texture_content_write_and_vae(
+            backend,
+            adapter.configuration,
+            adapter.session,
+            _semantic_texture_base_latent(),
+            semantic_runtime,
+            _semantic_texture_composition,
+        )
+
+    assert len(backend.decode_inputs) == 1
+
+
+@pytest.mark.unit
+def test_semantic_texture_traversal_rejects_route_observation_mismatch() -> None:
+    backend = _SemanticTextureContentBackend()
+    adapter = _initialized_adapter(backend)
+    semantic_runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(
+        _InputDependentSemanticModel()
+    )
+
+    def stale_route_composition(values, shape, runtime_observation):
+        route, embedding = _semantic_texture_composition(
+            values,
+            shape,
+            runtime_observation,
+        )
+        return replace(route, observations=None), embedding
+
+    with pytest.raises(
+        runtime_content_write.RuntimeContentExecutionError,
+        match="did not consume the callback observation",
+    ):
+        runtime_content_write.execute_semantic_texture_content_write_and_vae(
+            backend,
+            adapter.configuration,
+            adapter.session,
+            _semantic_texture_base_latent(),
+            semantic_runtime,
+            stale_route_composition,
+        )
+
+    assert len(backend.decode_inputs) == 1
 
 
 @pytest.mark.unit

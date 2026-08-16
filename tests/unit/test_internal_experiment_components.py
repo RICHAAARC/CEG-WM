@@ -349,6 +349,7 @@ class _SemanticTexturePosterior:
 class _SemanticTextureRuntimeBackend:
     def __init__(self) -> None:
         self.configuration = None
+        self.decode_inputs: list[torch.Tensor] = []
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
         return RuntimeDeviceCapabilities(cpu_available=True, cuda_device_count=0)
@@ -392,10 +393,14 @@ class _SemanticTextureRuntimeBackend:
         return None
 
     def run_generation(self, initial_latent, callback):
-        return initial_latent.detach().clone()
+        state = initial_latent.detach().clone()
+        for callback_index in range(20):
+            state = callback(callback_index, state)
+        return state
 
     def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
-        return latent.detach().clone()
+        self.decode_inputs.append(latent.detach().clone())
+        return torch.sigmoid(latent[:, :3].to(dtype=torch.float32))
 
     def vae_factors(self) -> RuntimeVaeFactors:
         return RuntimeVaeFactors(scaling_factor=1.0, shift_factor=0.0)
@@ -406,8 +411,15 @@ class _SemanticTextureRuntimeBackend:
 
 
 class _InjectedSemanticTextureModel(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.finest_saliency_logit_range: float | None = None
+
     def forward_inspyre(self, value: torch.Tensor) -> dict[str, object]:
         finest = value[:, :1]
+        self.finest_saliency_logit_range = float(
+            finest.max().item() - finest.min().item()
+        )
         return {
             "saliency": [finest, finest, finest, finest],
             "laplacian": [finest, finest, finest],
@@ -435,6 +447,109 @@ def _semantic_texture_whitening_asset():
             main_shared.stable_json_utf8(payload)
         ).hexdigest(),
     )
+
+
+@pytest.mark.unit
+def test_semantic_texture_embedding_traverses_live_callback_runtime_and_main(
+) -> None:
+    backend = _SemanticTextureRuntimeBackend()
+    runtime_adapter = create_runtime_adapter(backend)
+    runtime_adapter.initialize("cpu")
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration, runtime_adapter)
+    model = _InjectedSemanticTextureModel()
+    semantic_runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(
+        model
+    )
+    spatial_values = torch.linspace(
+        -1.0,
+        1.0,
+        steps=64 * 64,
+        dtype=torch.float32,
+    ).reshape(1, 1, 64, 64)
+    base_latent = spatial_values.repeat(1, 16, 1, 1).to(torch.float16)
+
+    observed = adapter.execute_semantic_texture_content_write_and_vae(
+        base_latent,
+        "semantic-texture-live-callback-embedding-key",
+        semantic_runtime,
+    )
+
+    runtime_result = observed.result
+    witness = runtime_result.witness
+    content_result = runtime_result.content_write_result
+    embedding = content_result.content_materialization_result.embedding_result
+    callback_rgb8 = torch.floor(
+        torch.clamp(
+            torch.sigmoid(backend.decode_inputs[0][:, :3]),
+            min=0.0,
+            max=1.0,
+        )
+        * 255.0
+    ).to(torch.uint8)
+    assert len(backend.decode_inputs) == 3
+    assert witness.callback_index == 18
+    assert witness.callback_rgb8_digest == rgb8_image_digest(callback_rgb8)
+    assert (
+        witness.semantic_observation_input_rgb8_digest
+        == witness.callback_rgb8_digest
+    )
+    assert witness.semantic_observation_identity == observed.upstream_runtime_identity
+    assert witness.route_identity == embedding.route_identity
+    assert witness.embedding_result_identity == embedding.embedding_result_identity
+    witnessed_content = content_result.content_materialization_result
+    assert witnessed_content.embedding_result.mode == "semantic_texture_soft_combined"
+    assert witnessed_content.content_relative_l2_nominal == pytest.approx(3.0 / 250.0)
+    assert witnessed_content.content_relative_l2_limit == pytest.approx(3.0 / 250.0)
+    assert witnessed_content.budget_status == "accepted"
+    assert witnessed_content.integrity_status == "passed"
+    assert (
+        content_result.content_materialization.delta_content_actual.dtype
+        is torch.float32
+    )
+    assert model.finest_saliency_logit_range is not None
+    assert model.finest_saliency_logit_range > 0.0
+    assert observed.public_callable == (
+        "runtime.Sd35RuntimeAdapter callback-18 transient VAE RGB8 observation"
+        " -> main.semantic_texture_content_router"
+        " -> main.hf_carrier + main.lf_carrier"
+        " -> main.semantic_texture_content_embedder"
+        " -> runtime actual-dtype reconciliation"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "forbidden_argument",
+    (
+        "semantic_probability",
+        "texture_complexity",
+        "routing_result",
+        "content_embedding_result",
+    ),
+)
+def test_semantic_texture_embedding_public_entry_rejects_prebuilt_injection(
+    forbidden_argument: str,
+) -> None:
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration)
+    arguments = {forbidden_argument: object()}
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        adapter.execute_semantic_texture_content_write_and_vae(
+            torch.ones((1, 16, 64, 64), dtype=torch.float16),
+            "semantic-texture-reject-prebuilt-injection-key",
+            InspyrenetSemanticRuntime.from_injected_model_for_test(
+                _InjectedSemanticTextureModel()
+            ),
+            **arguments,
+        )
+
+    assert not hasattr(adapter, "embed_semantic_texture")
 
 
 @pytest.mark.unit
@@ -1385,6 +1500,7 @@ def test_method_adapter_all_public_execution_entries_revalidate_configuration() 
         "build_lf_carrier",
         "build_hf_carrier",
         "embed_content",
+        "execute_semantic_texture_content_write_and_vae",
         "detect_lf",
         "detect_lf_null_whitened",
         "detect_hf",

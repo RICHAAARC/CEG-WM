@@ -15,8 +15,10 @@ from main import (
     ContentEmbedderError,
     ContentMaterializationObservation,
     ContentMaterializationResult,
+    SemanticTextureRoutingResult,
     content_materialization_replay_identity,
     reconcile_content_materialization_budget,
+    rgb8_image_digest,
     scale_content_delta_binary32,
 )
 
@@ -35,6 +37,10 @@ from .configuration import Sd35RuntimeConfiguration
 ContentEmbeddingOperation = Callable[
     [tuple[float, ...]],
     ContentEmbeddingResult,
+]
+SemanticTextureEmbeddingOperation = Callable[
+    [tuple[float, ...], tuple[int, ...], object],
+    tuple[SemanticTextureRoutingResult, ContentEmbeddingResult],
 ]
 MaterializationIntegrityStatus = Literal[
     "passed",
@@ -132,6 +138,33 @@ class ContentWriteGeometrySuffixResult:
 
     content_write_result: ContentWriteVaeResult
     suffix_context: RuntimeGenerationSuffixContext
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureEmbeddingWitness:
+    """Immutable callback-to-observation-to-embedding identity chain."""
+
+    candidate_id: str
+    callback_index: int
+    callback_latent_digest: str
+    callback_rgb8_digest: str
+    semantic_observation_input_rgb8_digest: str
+    semantic_observation_identity: str
+    route_identity: str
+    embedding_result_identity: str
+    witness_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureContentWriteExecutionResult:
+    """Semantic-texture traversal result plus its immutable callback witness."""
+
+    content_write_result: ContentWriteVaeResult
+    witness: SemanticTextureEmbeddingWitness
+
+    @property
+    def witness_identity(self) -> str:
+        return self.witness.witness_identity
 
 
 def _float32(value: float, role: str) -> float:
@@ -511,6 +544,146 @@ def _decode_generation_latent(
     ).detach().clone()
 
 
+def _ordinary_rgb8_snapshot(
+    decoded_image: torch.Tensor,
+) -> torch.Tensor:
+    image = _tensor(
+        decoded_image,
+        role="semantic_texture_callback_image",
+    )
+    if image.ndim != 4 or tuple(image.shape[:2]) != (1, 3):
+        raise RuntimeContentExecutionError(
+            "semantic-texture callback decode must have shape [1,3,H,W]"
+        )
+    return torch.floor(
+        torch.clamp(
+            image.detach().to(device="cpu", dtype=torch.float32),
+            min=0.0,
+            max=1.0,
+        )
+        * 255.0
+    ).to(dtype=torch.uint8).contiguous()
+
+
+def _semantic_texture_embedding_at_callback(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    callback_latent: torch.Tensor,
+    semantic_runtime: object,
+    semantic_texture_embedding_operation: SemanticTextureEmbeddingOperation,
+) -> tuple[ContentEmbeddingResult, SemanticTextureEmbeddingWitness]:
+    from .routing_observation import (
+        InspyrenetSemanticRuntime,
+        RuntimeSemanticTextureObservationResult,
+    )
+
+    if type(semantic_runtime) is not InspyrenetSemanticRuntime:
+        raise RuntimeContentExecutionError(
+            "semantic runtime identity is invalid"
+        )
+    if not callable(semantic_texture_embedding_operation):
+        raise RuntimeContentExecutionError(
+            "semantic-texture embedding operation must be callable"
+        )
+    factors = backend.vae_factors()
+    if type(factors) is not RuntimeVaeFactors:
+        raise RuntimeContentExecutionError(
+            "backend VAE factors do not match the execution protocol"
+        )
+    callback_image = _decode_generation_latent(
+        backend,
+        callback_latent,
+        factors,
+        "semantic_texture_callback",
+    )
+    callback_rgb8 = _ordinary_rgb8_snapshot(callback_image)
+    try:
+        semantic_texture = semantic_runtime.observe(callback_rgb8)
+    except Exception as exc:
+        raise RuntimeContentExecutionError(
+            "semantic-texture callback observation failed closed"
+        ) from exc
+    if type(semantic_texture) is not RuntimeSemanticTextureObservationResult:
+        raise RuntimeContentExecutionError(
+            "semantic-texture callback observation type drifted"
+        )
+    callback_rgb8_digest = rgb8_image_digest(callback_rgb8)
+    if semantic_texture.input_image_digest != callback_rgb8_digest:
+        raise RuntimeContentExecutionError(
+            "semantic-texture observation RGB8 identity mismatched callback"
+        )
+    try:
+        route, embedding_result = semantic_texture_embedding_operation(
+            _float32_values(
+                callback_latent,
+                "semantic_texture_callback_latent",
+            ),
+            tuple(callback_latent.shape),
+            semantic_texture,
+        )
+    except RuntimeContentExecutionError:
+        raise
+    except Exception as exc:
+        raise RuntimeContentExecutionError(
+            "semantic-texture method composition failed closed"
+        ) from exc
+    if type(route) is not SemanticTextureRoutingResult:
+        raise RuntimeContentExecutionError(
+            "semantic-texture method composition route type drifted"
+        )
+    if route.observations is not semantic_texture.observations:
+        raise RuntimeContentExecutionError(
+            "semantic-texture route did not consume the callback observation"
+        )
+    if (
+        route.semantic_source_identity_digest
+        != semantic_texture.observations.semantic_probability.source_identity_digest
+        or route.texture_source_identity_digest
+        != semantic_texture.observations.texture_complexity.source_identity_digest
+    ):
+        raise RuntimeContentExecutionError(
+            "semantic-texture route source identity mismatched observation"
+        )
+    if type(embedding_result) is not ContentEmbeddingResult:
+        raise RuntimeContentExecutionError(
+            "semantic-texture method composition embedding type drifted"
+        )
+    if (
+        route.mode != route.candidate_id
+        or route.candidate_id not in embedding_result.candidate_ids
+        or embedding_result.shape != route.latent_shape
+        or embedding_result.route_identity != route.route_identity
+    ):
+        raise RuntimeContentExecutionError(
+            "semantic-texture route and embedding identity mismatched"
+        )
+    callback_latent_digest = _tensor_digest(callback_latent)
+    witness_identity = sha256(
+        (
+            f"semantic-texture-callback-witness-v1\0"
+            f"{configuration.candidate_id}\0"
+            f"{configuration.callback_index}\0"
+            f"{callback_latent_digest}\0{callback_rgb8_digest}\0"
+            f"{semantic_texture.input_image_digest}\0"
+            f"{semantic_texture.observation_identity}\0"
+            f"{route.route_identity}\0{embedding_result.embedding_result_identity}"
+        ).encode("ascii")
+    ).hexdigest()
+    return embedding_result, SemanticTextureEmbeddingWitness(
+        candidate_id=configuration.candidate_id,
+        callback_index=configuration.callback_index,
+        callback_latent_digest=callback_latent_digest,
+        callback_rgb8_digest=callback_rgb8_digest,
+        semantic_observation_input_rgb8_digest=(
+            semantic_texture.input_image_digest
+        ),
+        semantic_observation_identity=semantic_texture.observation_identity,
+        route_identity=route.route_identity,
+        embedding_result_identity=embedding_result.embedding_result_identity,
+        witness_identity=witness_identity,
+    )
+
+
 def _encode_detection_image(
     backend: RuntimeContentBackend,
     image: torch.Tensor,
@@ -696,10 +869,18 @@ def _execute_content_write_and_vae_core(
     configuration: Sd35RuntimeConfiguration,
     session: RuntimeSession,
     base_latent: torch.Tensor,
-    content_embedding_operation: ContentEmbeddingOperation,
+    content_embedding_operation: ContentEmbeddingOperation | None,
     *,
     capture_geometry_suffix: bool,
-) -> tuple[ContentWriteVaeResult, RuntimeGenerationSuffixContext | None]:
+    semantic_runtime: object | None = None,
+    semantic_texture_embedding_operation: (
+        SemanticTextureEmbeddingOperation | None
+    ) = None,
+) -> tuple[
+    ContentWriteVaeResult,
+    RuntimeGenerationSuffixContext | None,
+    SemanticTextureEmbeddingWitness | None,
+]:
     """让 main 驱动 actual-dtype 预算闭环并执行一对生成。"""
 
     latent = _validated_content_execution_latent(
@@ -708,9 +889,19 @@ def _execute_content_write_and_vae_core(
         session,
         base_latent,
     )
-    if not callable(content_embedding_operation):
+    ordinary_embedding_traversal_selected = callable(
+        content_embedding_operation
+    )
+    semantic_texture_embedding_traversal_selected = (
+        semantic_runtime is not None
+        and callable(semantic_texture_embedding_operation)
+    )
+    if (
+        ordinary_embedding_traversal_selected
+        == semantic_texture_embedding_traversal_selected
+    ):
         raise RuntimeContentExecutionError(
-            "content_embedding_operation must be callable"
+            "exactly one content embedding traversal must be selected"
         )
 
     clean_initial = latent.detach().clone()
@@ -741,13 +932,14 @@ def _execute_content_write_and_vae_core(
     materialization: ContentMaterializationMeasurement | None = None
     materialization_result: ContentMaterializationResult | None = None
     materialization_attempts: list[ContentMaterializationMeasurement] = []
+    semantic_texture_witness: SemanticTextureEmbeddingWitness | None = None
     target_index = configuration.callback_index
 
     def watermarked_callback(
         index: int,
         callback_latent: torch.Tensor,
     ) -> torch.Tensor:
-        nonlocal materialization, materialization_result
+        nonlocal materialization, materialization_result, semantic_texture_witness
         if type(index) is not int or not 0 <= index < configuration.inference_steps:
             raise RuntimeContentExecutionError(
                 "watermarked generation reported a wrong callback index"
@@ -778,9 +970,28 @@ def _execute_content_write_and_vae_core(
             raise RuntimeContentExecutionError(
                 "content callback index was triggered more than once"
             )
-        embedding_result = content_embedding_operation(
-            _float32_values(current, "watermarked_callback_latent")
-        )
+        if semantic_texture_embedding_traversal_selected:
+            if semantic_texture_embedding_operation is None:
+                raise RuntimeContentExecutionError(
+                    "semantic-texture embedding operation is missing"
+                )
+            embedding_result, semantic_texture_witness = (
+                _semantic_texture_embedding_at_callback(
+                    backend,
+                    configuration,
+                    current,
+                    semantic_runtime,
+                    semantic_texture_embedding_operation,
+                )
+            )
+        else:
+            if content_embedding_operation is None:
+                raise RuntimeContentExecutionError(
+                    "ordinary content embedding operation is missing"
+                )
+            embedding_result = content_embedding_operation(
+                _float32_values(current, "watermarked_callback_latent")
+            )
         if type(embedding_result) is not ContentEmbeddingResult:
             raise RuntimeContentExecutionError(
                 "content embedding operation returned an invalid result"
@@ -969,7 +1180,7 @@ def _execute_content_write_and_vae_core(
         clean_detection_latent=clean_detection_latent,
         watermarked_detection_latent=watermarked_detection_latent,
     )
-    return result, suffix_context
+    return result, suffix_context, semantic_texture_witness
 
 
 def execute_content_write_and_vae(
@@ -981,19 +1192,53 @@ def execute_content_write_and_vae(
 ) -> ContentWriteVaeResult:
     """Run the established paired path without exposing suffix state."""
 
-    result, suffix_context = _execute_content_write_and_vae_core(
+    result, suffix_context, semantic_texture_witness = (
+        _execute_content_write_and_vae_core(
+            backend,
+            configuration,
+            session,
+            base_latent,
+            content_embedding_operation,
+            capture_geometry_suffix=False,
+        )
+    )
+    if suffix_context is not None or semantic_texture_witness is not None:
+        raise RuntimeContentExecutionError(
+            "ordinary content execution unexpectedly retained private state"
+        )
+    return result
+
+
+def execute_semantic_texture_content_write_and_vae(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    base_latent: torch.Tensor,
+    semantic_runtime: object,
+    semantic_texture_embedding_operation: SemanticTextureEmbeddingOperation,
+) -> SemanticTextureContentWriteExecutionResult:
+    """Observe and compose semantic texture only at the live write callback."""
+
+    result, suffix_context, witness = _execute_content_write_and_vae_core(
         backend,
         configuration,
         session,
         base_latent,
-        content_embedding_operation,
+        None,
         capture_geometry_suffix=False,
+        semantic_runtime=semantic_runtime,
+        semantic_texture_embedding_operation=(
+            semantic_texture_embedding_operation
+        ),
     )
-    if suffix_context is not None:
+    if suffix_context is not None or witness is None:
         raise RuntimeContentExecutionError(
-            "ordinary content execution unexpectedly retained suffix state"
+            "semantic-texture content execution witness is missing"
         )
-    return result
+    return SemanticTextureContentWriteExecutionResult(
+        content_write_result=result,
+        witness=witness,
+    )
 
 
 def execute_content_write_and_capture_geometry_suffix(
@@ -1009,14 +1254,20 @@ def execute_content_write_and_capture_geometry_suffix(
         raise RuntimeContentExecutionError(
             "prepared backend lacks generation suffix execution"
         )
-    result, suffix_context = _execute_content_write_and_vae_core(
-        backend,
-        configuration,
-        session,
-        base_latent,
-        content_embedding_operation,
-        capture_geometry_suffix=True,
+    result, suffix_context, semantic_texture_witness = (
+        _execute_content_write_and_vae_core(
+            backend,
+            configuration,
+            session,
+            base_latent,
+            content_embedding_operation,
+            capture_geometry_suffix=True,
+        )
     )
+    if semantic_texture_witness is not None:
+        raise RuntimeContentExecutionError(
+            "geometry suffix execution unexpectedly retained semantic witness"
+        )
     if suffix_context is None:
         raise RuntimeContentExecutionError(
             "geometry synchronization suffix context is missing"

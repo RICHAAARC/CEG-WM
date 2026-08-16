@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 import torch
 
-from main import ContentEmbeddingResult
+from main import ContentEmbeddingResult, SemanticTextureRoutingResult
 
 from .backend import (
     RuntimeBackend,
@@ -398,6 +398,57 @@ class Sd35RuntimeAdapter:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected content_write_and_vae error"
+            ) from exc
+
+    def _execute_semantic_texture_content_write_and_vae(
+        self,
+        base_latent: torch.Tensor,
+        semantic_runtime: InspyrenetSemanticRuntime,
+        semantic_texture_embedding_operation: Callable[
+            [tuple[float, ...], tuple[int, ...], object],
+            tuple[SemanticTextureRoutingResult, ContentEmbeddingResult],
+        ],
+    ) -> object:
+        """Run the live callback traversal for the experiment method adapter."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before semantic-texture content write"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks semantic-texture content write execution"
+            )
+        from .routing_observation import InspyrenetSemanticRuntime
+
+        if type(semantic_runtime) is not InspyrenetSemanticRuntime:
+            raise RuntimeAdapterError("semantic runtime identity is invalid")
+        from .content_write import (
+            RuntimeContentExecutionError,
+            execute_semantic_texture_content_write_and_vae,
+        )
+
+        try:
+            self.revalidate_execution_identity()
+            result = execute_semantic_texture_content_write_and_vae(
+                self._backend,
+                self._configuration,
+                self.session,
+                base_latent,
+                semantic_runtime,
+                semantic_texture_embedding_operation,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeContentExecutionError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime semantic-texture content write failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime raised an unexpected semantic-texture content write error"
             ) from exc
 
     def execute_clean_image_and_vae_observation(
