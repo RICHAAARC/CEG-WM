@@ -1,0 +1,23 @@
+{
+  "asset_authority_status": "identity_blocked",
+  "inspyrenet_checkpoint_revision": "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f",
+  "inspyrenet_checkpoint_sha256": "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd",
+  "inspyrenet_checkpoint_size_bytes": 367520613,
+  "inspyrenet_source_revision": "f0fa91701a98cfc8e955c554e84522f365ec6da3",
+  "model_id": "stabilityai/stable-diffusion-3.5-medium",
+  "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+  "profile_id": "semantic_texture_operational_preflight",
+  "schema_version": 1,
+  "unit_roster": [
+    "semantic_texture_write_operational",
+    "semantic_texture_blind_detection_operational"
+  ],
+  "zero_science_boundary": {
+    "aggregate": null,
+    "candidate_promoted": false,
+    "formal_tau_created": false,
+    "science_started": false,
+    "scientific_claims_supported": false,
+    "scientific_unit_count": 0
+  }
+}

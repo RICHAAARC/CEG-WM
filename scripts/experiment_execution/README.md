@@ -1,5 +1,36 @@
 # Experiment execution servers
 
+## Semantic-texture operational preflight Phase A
+
+`build_semantic_texture_operational_preflight_package.py` and the separately
+distributed `semantic_texture_operational_preflight_bootstrap.py` define the
+exact-revision, deterministic, Git-less delivery boundary for the current
+two-unit operational preflight. The archive includes the package-internal
+entrypoint, server, runner, fixed configuration, requirements, package README,
+and only their exact method/runtime dependencies. It excludes its builder and
+bootstrap, governance, Notebooks, outer documentation, tests outside necessary
+package support, outputs, caches, secrets, model bytes, and checkpoints.
+
+Phase A runs no real model, network, GPU, Drive, Notebook, or science. The fixed
+roster is `semantic_texture_write_operational` followed by
+`semantic_texture_blind_detection_operational`. A later separately authorized
+Colab run may exercise the first unit through only
+`CegWmExperimentAdapter.execute_semantic_texture_content_write_and_vae`. The
+second unit is currently `identity_blocked` before
+`CegWmExperimentAdapter.detect_semantic_texture_candidate` because no dedicated
+semantic-texture LF whitening asset or branch-null CDF authority is registered;
+the runner accepts no asset, route, M/T, latent-cache, or prebuilt result
+override for that unit.
+
+Every Phase A result is package-local and non-scientific: `aggregate=null`,
+`scientific_unit_count=0`, `science_started=false`,
+`formal_tau_created=false`, `candidate_promoted=false`, and
+`scientific_claims_supported=false`. The server persists result JSON, then a
+bounded deterministic ZIP that excludes the receipt, then computes the ZIP
+SHA-256, and finally creates one immutable external receipt. This does not
+change the current formal/default/joint HF-only detector or authorize Golden,
+Colab, asset hydration, or scientific execution.
+
 ## Q/K synchronization-write diagnosis
 
 `qk_synchronization_write_diagnostic_server.py` 是当前 Colab 与普通 GPU 服务器共用的
