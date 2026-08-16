@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,8 +22,16 @@ PACKAGE_IDENTITY = "2" * 64
 
 
 class _PublicAdapter:
-    def __init__(self, write_error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        write_error: BaseException | None = None,
+        *,
+        public_result_identity: str = "4" * 64,
+        witness_identity: str = "3" * 64,
+    ) -> None:
         self.write_error = write_error
+        self.public_result_identity = public_result_identity
+        self.witness_identity = witness_identity
         self.write_calls = 0
         self.detector_calls = 0
 
@@ -38,9 +47,9 @@ class _PublicAdapter:
         assert semantic_runtime is _SEMANTIC_RUNTIME
         if self.write_error is not None:
             raise self.write_error
-        witness = SimpleNamespace(witness_identity="3" * 64)
+        witness = SimpleNamespace(witness_identity=self.witness_identity)
         return SimpleNamespace(
-            result_identity="4" * 64,
+            result_identity=self.public_result_identity,
             result=SimpleNamespace(witness=witness),
         )
 
@@ -120,25 +129,49 @@ def test_semantic_texture_operational_preflight_uses_public_adapter_only() -> No
 def test_semantic_texture_operational_preflight_faults_are_blocked_and_aggregate_null(
     blocked_class: str,
 ) -> None:
+    private_error_text = (
+        "Drive credential token=secret-token account=private-account "
+        "root_key=private-root-key prompt=private-prompt "
+        "private_state=private-state /home/private/checkpoint-secret.bin"
+    )
+    chained_error = RuntimeError(f"chained failure: {private_error_text}")
+    blocked_error = preflight.SemanticTextureOperationalBlockedError(
+        blocked_class,
+        private_error_text,
+    )
+    blocked_error.__cause__ = chained_error
     adapter = _PublicAdapter(
-        preflight.SemanticTextureOperationalBlockedError(
-            blocked_class,
-            "/home/private/secret failure detail",
-            category="injected_operational_fault",
-        )
+        blocked_error
     )
     result = _execute(adapter)
     write, detector = result.unit_outcomes
     assert write.started is True and write.status == "blocked"
     assert write.blocked_class == blocked_class
-    assert "/home/" not in (write.sanitized_error_message or "")
+    assert write.sanitized_error_category == blocked_class
+    assert write.sanitized_error_message is None
+    assert write.sanitized_trace_tail == ()
     assert detector.started is False
     assert detector.blocked_class == blocked_class
+    assert detector.sanitized_error_category == blocked_class
+    assert detector.sanitized_error_message is None
+    assert detector.sanitized_trace_tail == ()
     assert result.blocked_class == blocked_class
     assert result.aggregate is None
     assert result.science_started is False
     assert result.scientific_unit_count == 0
     assert adapter.detector_calls == 0
+    persisted_result = json.dumps(result.as_dict(), sort_keys=True)
+    for private_fragment in (
+        private_error_text,
+        "chained failure",
+        "secret-token",
+        "private-account",
+        "private-root-key",
+        "private-prompt",
+        "private-state",
+        "/home/private/checkpoint-secret.bin",
+    ):
+        assert private_fragment not in persisted_result
 
 
 def test_semantic_texture_preflight_rejects_asset_override_private_state_and_live_detector_call(
@@ -170,6 +203,19 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
             semantic_runtime=_SEMANTIC_RUNTIME,
             whitening_asset_override=object(),
         )
+    invalid_identity_adapters = (
+        _PublicAdapter(public_result_identity="A" * 64),
+        _PublicAdapter(witness_identity="3" * 63),
+    )
+    for invalid_identity_adapter in invalid_identity_adapters:
+        invalid_result = _execute(invalid_identity_adapter)
+        invalid_write, invalid_detector = invalid_result.unit_outcomes
+        assert invalid_write.blocked_class == "integrity_blocked"
+        assert invalid_write.public_result_identity is None
+        assert invalid_write.witness_identity is None
+        assert invalid_detector.started is False
+        assert invalid_detector.blocked_class == "integrity_blocked"
+        assert invalid_identity_adapter.detector_calls == 0
     result = _execute(adapter)
     assert result.unit_outcomes[1].blocked_class == "identity_blocked"
     assert adapter.detector_calls == 0

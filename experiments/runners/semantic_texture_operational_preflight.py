@@ -31,11 +31,6 @@ ALLOWED_BLOCKED_CLASSES = frozenset(
 ASSET_AUTHORITY_STATUS = "identity_blocked"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
-_LOCAL_ABSOLUTE_PATH = re.compile(
-    r"(?<![A-Za-z0-9_])(?:/(?:home|Users|mnt|tmp|var|opt|root)/|[A-Za-z]:[\\/])"
-)
-_MAX_ERROR_TEXT = 240
-_MAX_TRACE_ITEMS = 3
 
 
 class SemanticTextureOperationalPreflightError(RuntimeError):
@@ -49,8 +44,6 @@ class SemanticTextureOperationalBlockedError(RuntimeError):
         self,
         blocked_class: str,
         message: str,
-        *,
-        category: str = "operational_failure",
     ) -> None:
         if blocked_class not in ALLOWED_BLOCKED_CLASSES:
             raise SemanticTextureOperationalPreflightError(
@@ -58,7 +51,6 @@ class SemanticTextureOperationalBlockedError(RuntimeError):
             )
         super().__init__(message)
         self.blocked_class = blocked_class
-        self.category = category
 
 
 @dataclass(frozen=True)
@@ -181,35 +173,12 @@ def _digest(value: object) -> str:
     return sha256(_canonical_bytes(value)).hexdigest()
 
 
-def _sanitize_text(value: object) -> str:
-    text = " ".join(str(value).split())
-    text = _LOCAL_ABSOLUTE_PATH.sub("[local-path]/", text)
-    return text[:_MAX_ERROR_TEXT]
-
-
-def _sanitized_failure(
-    error: BaseException,
-) -> tuple[str, str, str, tuple[str, ...]]:
+def _blocked_class(error: BaseException) -> str:
     if isinstance(error, SemanticTextureOperationalBlockedError):
-        blocked_class = error.blocked_class
-        category = _sanitize_text(error.category)
-    elif isinstance(error, (MemoryError, OSError)):
-        blocked_class = "resource_blocked"
-        category = type(error).__name__
-    else:
-        blocked_class = "implementation_blocked"
-        category = type(error).__name__
-    message = _sanitize_text(error)
-    chain: list[str] = []
-    current: BaseException | None = error
-    visited: set[int] = set()
-    while current is not None and id(current) not in visited:
-        visited.add(id(current))
-        chain.append(
-            f"{type(current).__name__}: {_sanitize_text(current)}"
-        )
-        current = current.__cause__ or current.__context__
-    return blocked_class, category, message, tuple(chain[-_MAX_TRACE_ITEMS:])
+        return error.blocked_class
+    if isinstance(error, (MemoryError, OSError)):
+        return "resource_blocked"
+    return "implementation_blocked"
 
 
 def load_semantic_texture_operational_configuration(
@@ -286,20 +255,24 @@ def load_semantic_texture_operational_configuration(
 
 def _public_identity(observation: object) -> tuple[str, str | None]:
     result_identity = getattr(observation, "result_identity", None)
-    if type(result_identity) is not str or not result_identity:
+    if (
+        type(result_identity) is not str
+        or _DIGEST.fullmatch(result_identity) is None
+    ):
         raise SemanticTextureOperationalBlockedError(
             "integrity_blocked",
             "public adapter result identity is unavailable",
-            category="public_result_identity",
         )
     result = getattr(observation, "result", None)
     witness = getattr(result, "witness", None)
     witness_identity = getattr(witness, "witness_identity", None)
-    if type(witness_identity) is not str or not witness_identity:
+    if (
+        type(witness_identity) is not str
+        or _DIGEST.fullmatch(witness_identity) is None
+    ):
         raise SemanticTextureOperationalBlockedError(
             "integrity_blocked",
             "semantic-texture write witness identity is unavailable",
-            category="write_witness_identity",
         )
     return result_identity, witness_identity
 
@@ -333,15 +306,15 @@ def _unit_failure(
     elapsed_seconds: float,
     error: BaseException,
 ) -> OperationalUnitOutcome:
-    blocked_class, category, message, trace_tail = _sanitized_failure(error)
+    blocked_class = _blocked_class(error)
     return OperationalUnitOutcome(
         unit_id=unit_id,
         started=started,
         status="blocked",
         blocked_class=blocked_class,
-        sanitized_error_category=category,
-        sanitized_error_message=message,
-        sanitized_trace_tail=trace_tail,
+        sanitized_error_category=blocked_class,
+        sanitized_error_message=None,
+        sanitized_trace_tail=(),
         elapsed_seconds=max(0.0, elapsed_seconds),
         public_result_identity=None,
         witness_identity=None,
@@ -413,7 +386,6 @@ def execute_semantic_texture_operational_preflight(
         inherited = SemanticTextureOperationalBlockedError(
             write_outcome.blocked_class or "implementation_blocked",
             "blind detection was not started because the write unit blocked",
-            category="upstream_write_blocked",
         )
         detector_outcome = _unit_failure(
             BLIND_DETECTION_UNIT_ID,
@@ -430,7 +402,6 @@ def execute_semantic_texture_operational_preflight(
             error=SemanticTextureOperationalBlockedError(
                 "identity_blocked",
                 "dedicated semantic-texture detector assets are not authorized",
-                category="detector_asset_authority",
             ),
         )
 

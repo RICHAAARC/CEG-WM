@@ -5,20 +5,71 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
-from pathlib import Path, PurePosixPath
+import math
+from pathlib import Path
 import re
-from typing import Mapping, Sequence
+from typing import Sequence
 from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
 
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 MAX_RESULT_BYTES = 256 * 1024
-MAX_DIAGNOSTIC_FILES = 8
-MAX_DIAGNOSTIC_BYTES = 64 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024
 RESULT_FILENAME = "semantic_texture_operational_result.json"
 RECEIPT_FILENAME = "semantic_texture_operational_receipt.json"
+WRITE_UNIT_ID = "semantic_texture_write_operational"
+BLIND_DETECTION_UNIT_ID = "semantic_texture_blind_detection_operational"
+BLOCKED_CLASSES = frozenset(
+    {
+        "environment_blocked",
+        "resource_blocked",
+        "implementation_blocked",
+        "identity_blocked",
+        "integrity_blocked",
+    }
+)
+RESULT_FIELDS = frozenset(
+    {
+        "aggregate",
+        "asset_authority_status",
+        "blocked_class",
+        "candidate_promoted",
+        "configuration_digest",
+        "formal_tau_created",
+        "inspyrenet_checkpoint_revision",
+        "inspyrenet_checkpoint_sha256",
+        "inspyrenet_checkpoint_size_bytes",
+        "inspyrenet_source_revision",
+        "model_id",
+        "model_revision",
+        "package_identity",
+        "profile_id",
+        "result_identity",
+        "run_id",
+        "schema_version",
+        "science_started",
+        "scientific_claims_supported",
+        "scientific_unit_count",
+        "source_revision",
+        "status",
+        "unit_outcomes",
+    }
+)
+UNIT_OUTCOME_FIELDS = frozenset(
+    {
+        "blocked_class",
+        "elapsed_seconds",
+        "public_result_identity",
+        "sanitized_error_category",
+        "sanitized_error_message",
+        "sanitized_trace_tail",
+        "started",
+        "status",
+        "unit_id",
+        "witness_identity",
+    }
+)
 
 
 class SemanticTextureOperationalServerError(RuntimeError):
@@ -54,51 +105,131 @@ def _zip_info(path_text: str) -> ZipInfo:
     return info
 
 
-def _safe_diagnostic_name(path_text: str) -> str:
-    path = PurePosixPath(path_text)
-    if (
-        path.is_absolute()
-        or ".." in path.parts
-        or len(path.parts) != 2
-        or path.parts[0] != "diagnostics"
-        or not path.parts[1].endswith(".json")
-        or "\\" in path_text
-    ):
-        raise SemanticTextureOperationalServerError(
-            "diagnostic archive path is invalid"
-        )
-    return path.as_posix()
-
-
 def _validated_result(result: object) -> dict[str, object]:
-    if not hasattr(result, "as_dict"):
+    as_dict = getattr(result, "as_dict", None)
+    if not callable(as_dict):
         raise SemanticTextureOperationalServerError(
             "operational result object is invalid"
         )
-    value = result.as_dict()
+    value = as_dict()
     if (
         type(value) is not dict
+        or set(value) != RESULT_FIELDS
         or value.get("profile_id") != "semantic_texture_operational_preflight"
+        or type(value.get("schema_version")) is not int
+        or value.get("schema_version") != 1
         or value.get("status") != "blocked"
         or value.get("aggregate") is not None
+        or value.get("asset_authority_status") != "identity_blocked"
+        or type(value.get("scientific_unit_count")) is not int
         or value.get("scientific_unit_count") != 0
         or value.get("science_started") is not False
         or value.get("formal_tau_created") is not False
         or value.get("candidate_promoted") is not False
         or value.get("scientific_claims_supported") is not False
-        or value.get("blocked_class")
-        not in {
-            "environment_blocked",
-            "resource_blocked",
-            "implementation_blocked",
-            "identity_blocked",
-            "integrity_blocked",
-        }
+        or type(value.get("blocked_class")) is not str
+        or value.get("blocked_class") not in BLOCKED_CLASSES
+        or value.get("model_id")
+        != "stabilityai/stable-diffusion-3.5-medium"
+        or value.get("model_revision")
+        != "b940f670f0eda2d07fbb75229e779da1ad11eb80"
+        or value.get("inspyrenet_source_revision")
+        != "f0fa91701a98cfc8e955c554e84522f365ec6da3"
+        or value.get("inspyrenet_checkpoint_revision")
+        != "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
+        or value.get("inspyrenet_checkpoint_sha256")
+        != "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
+        or type(value.get("inspyrenet_checkpoint_size_bytes")) is not int
+        or value.get("inspyrenet_checkpoint_size_bytes") != 367520613
+        or type(value.get("run_id")) is not str
+        or RUN_ID.fullmatch(value["run_id"]) is None
+        or type(value.get("source_revision")) is not str
+        or re.fullmatch(r"[0-9a-f]{40}", value["source_revision"]) is None
+        or any(
+            type(value.get(field)) is not str
+            or DIGEST.fullmatch(value[field]) is None
+            for field in (
+                "configuration_digest",
+                "package_identity",
+                "result_identity",
+            )
+        )
         or type(value.get("unit_outcomes")) is not list
         or len(value["unit_outcomes"]) != 2
     ):
         raise SemanticTextureOperationalServerError(
             "operational result boundary drifted"
+        )
+    write_outcome, detector_outcome = value["unit_outcomes"]
+    if any(
+        type(outcome) is not dict
+        or set(outcome) != UNIT_OUTCOME_FIELDS
+        or type(outcome.get("started")) is not bool
+        or type(outcome.get("elapsed_seconds")) not in (int, float)
+        or isinstance(outcome.get("elapsed_seconds"), bool)
+        or not math.isfinite(outcome["elapsed_seconds"])
+        or outcome["elapsed_seconds"] < 0
+        or outcome.get("sanitized_error_message") is not None
+        or outcome.get("sanitized_trace_tail") != []
+        for outcome in value["unit_outcomes"]
+    ):
+        raise SemanticTextureOperationalServerError(
+            "operational unit outcome boundary drifted"
+        )
+    if (
+        write_outcome["unit_id"] != WRITE_UNIT_ID
+        or detector_outcome["unit_id"] != BLIND_DETECTION_UNIT_ID
+        or write_outcome["started"] is not True
+        or detector_outcome["status"] != "blocked"
+        or detector_outcome["blocked_class"] not in BLOCKED_CLASSES
+        or detector_outcome["sanitized_error_category"]
+        != detector_outcome["blocked_class"]
+        or detector_outcome["public_result_identity"] is not None
+        or detector_outcome["witness_identity"] is not None
+    ):
+        raise SemanticTextureOperationalServerError(
+            "operational unit roster drifted"
+        )
+    if write_outcome["status"] == "passed":
+        if (
+            write_outcome["blocked_class"] is not None
+            or write_outcome["sanitized_error_category"] is not None
+            or type(write_outcome["public_result_identity"]) is not str
+            or DIGEST.fullmatch(write_outcome["public_result_identity"]) is None
+            or type(write_outcome["witness_identity"]) is not str
+            or DIGEST.fullmatch(write_outcome["witness_identity"]) is None
+            or detector_outcome["started"] is not True
+            or detector_outcome["blocked_class"] != "identity_blocked"
+        ):
+            raise SemanticTextureOperationalServerError(
+                "passed write unit boundary drifted"
+            )
+    elif write_outcome["status"] == "blocked":
+        if (
+            write_outcome["blocked_class"] not in BLOCKED_CLASSES
+            or write_outcome["sanitized_error_category"]
+            != write_outcome["blocked_class"]
+            or write_outcome["public_result_identity"] is not None
+            or write_outcome["witness_identity"] is not None
+            or detector_outcome["started"] is not False
+            or detector_outcome["blocked_class"]
+            != write_outcome["blocked_class"]
+        ):
+            raise SemanticTextureOperationalServerError(
+                "blocked write unit boundary drifted"
+            )
+    else:
+        raise SemanticTextureOperationalServerError(
+            "write unit status drifted"
+        )
+    expected_blocked_class = (
+        write_outcome["blocked_class"]
+        if write_outcome["status"] == "blocked"
+        else detector_outcome["blocked_class"]
+    )
+    if value["blocked_class"] != expected_blocked_class:
+        raise SemanticTextureOperationalServerError(
+            "result blocked classification drifted"
         )
     return value
 
@@ -107,22 +238,12 @@ def finalize_semantic_texture_operational_preflight_delivery(
     result: object,
     *,
     output_root: str | Path,
-    diagnostics: Mapping[str, object] | None = None,
 ) -> tuple[int, dict[str, object]]:
     """Create result JSON, deterministic ZIP, and one final external receipt."""
 
     result_value = _validated_result(result)
-    run_id = result_value.get("run_id")
-    result_identity = result_value.get("result_identity")
-    if (
-        type(run_id) is not str
-        or RUN_ID.fullmatch(run_id) is None
-        or type(result_identity) is not str
-        or DIGEST.fullmatch(result_identity) is None
-    ):
-        raise SemanticTextureOperationalServerError(
-            "result delivery identity is invalid"
-        )
+    run_id = result_value["run_id"]
+    result_identity = result_value["result_identity"]
     root = Path(output_root).resolve()
     if root.exists():
         raise SemanticTextureOperationalServerError(
@@ -140,23 +261,8 @@ def finalize_semantic_texture_operational_preflight_delivery(
     with result_path.open("xb") as handle:
         handle.write(result_blob)
 
-    diagnostic_entries: list[tuple[str, bytes]] = []
-    for path_text, value in sorted((diagnostics or {}).items()):
-        path_name = _safe_diagnostic_name(path_text)
-        blob = _canonical_bytes(value)
-        if len(blob) > MAX_DIAGNOSTIC_BYTES:
-            raise SemanticTextureOperationalServerError(
-                "diagnostic exceeds its bound"
-            )
-        diagnostic_entries.append((path_name, blob))
-    if len(diagnostic_entries) > MAX_DIAGNOSTIC_FILES:
-        raise SemanticTextureOperationalServerError(
-            "diagnostic count exceeds its bound"
-        )
     with ZipFile(archive_path, mode="x", compression=ZIP_STORED) as archive:
         archive.writestr(_zip_info(RESULT_FILENAME), result_blob)
-        for path_text, blob in diagnostic_entries:
-            archive.writestr(_zip_info(path_text), blob)
     if archive_path.stat().st_size > MAX_ARCHIVE_BYTES:
         raise SemanticTextureOperationalServerError(
             "operational archive exceeds its bound"

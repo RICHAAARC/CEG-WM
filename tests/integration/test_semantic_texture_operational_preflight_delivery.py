@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import inspect
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -183,35 +184,69 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     run_id = "semantic-texture-phase-a"
     value = {
         "aggregate": None,
+        "asset_authority_status": "identity_blocked",
         "blocked_class": "identity_blocked",
         "candidate_promoted": False,
         "configuration_digest": "1" * 64,
         "formal_tau_created": False,
+        "inspyrenet_checkpoint_revision": (
+            "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
+        ),
+        "inspyrenet_checkpoint_sha256": (
+            "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
+        ),
+        "inspyrenet_checkpoint_size_bytes": 367520613,
+        "inspyrenet_source_revision": (
+            "f0fa91701a98cfc8e955c554e84522f365ec6da3"
+        ),
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
         "package_identity": "2" * 64,
         "profile_id": "semantic_texture_operational_preflight",
         "result_identity": "3" * 64,
         "run_id": run_id,
+        "schema_version": 1,
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
         "source_revision": "4" * 40,
         "status": "blocked",
         "unit_outcomes": [
-            {"started": True, "status": "passed"},
+            {
+                "blocked_class": None,
+                "elapsed_seconds": 0.5,
+                "public_result_identity": "5" * 64,
+                "sanitized_error_category": None,
+                "sanitized_error_message": None,
+                "sanitized_trace_tail": [],
+                "started": True,
+                "status": "passed",
+                "unit_id": "semantic_texture_write_operational",
+                "witness_identity": "6" * 64,
+            },
             {
                 "blocked_class": "identity_blocked",
+                "elapsed_seconds": 0.25,
+                "public_result_identity": None,
+                "sanitized_error_category": "identity_blocked",
+                "sanitized_error_message": None,
+                "sanitized_trace_tail": [],
                 "started": True,
                 "status": "blocked",
+                "unit_id": "semantic_texture_blind_detection_operational",
+                "witness_identity": None,
             },
         ],
     }
+    assert "diagnostics" not in inspect.signature(
+        server.finalize_semantic_texture_operational_preflight_delivery
+    ).parameters
     output_root = tmp_path / "delivery"
     receipt: dict[str, object] = {}
     with pytest.raises(_DeliveredBlocked):
         exit_code, receipt = server.finalize_semantic_texture_operational_preflight_delivery(
             _BlockedResult(value),
             output_root=output_root,
-            diagnostics={"diagnostics/asset_authority.json": {"status": "identity_blocked"}},
         )
         assert exit_code != 0
         raise _DeliveredBlocked("raise only after complete delivery")
@@ -221,9 +256,7 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     assert result_path.is_file() and archive_path.is_file() and receipt_path.is_file()
     assert receipt["archive_sha256"] == sha256(archive_path.read_bytes()).hexdigest()
     with zipfile.ZipFile(archive_path) as archive:
-        assert server.RESULT_FILENAME in archive.namelist()
-        assert server.RECEIPT_FILENAME not in archive.namelist()
-        assert "diagnostics/asset_authority.json" in archive.namelist()
+        assert archive.namelist() == [server.RESULT_FILENAME]
     persisted_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert persisted_receipt["archive_sha256"] == receipt["archive_sha256"]
     assert not any(
@@ -233,3 +266,51 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
             persisted_receipt,
         )
     )
+    invalid_values: list[dict[str, object]] = []
+    unknown_top_level = json.loads(json.dumps(value))
+    unknown_top_level["private_error_text"] = "Drive token"
+    invalid_values.append(unknown_top_level)
+    missing_top_level = json.loads(json.dumps(value))
+    del missing_top_level["configuration_digest"]
+    invalid_values.append(missing_top_level)
+    unknown_nested = json.loads(json.dumps(value))
+    unknown_nested["unit_outcomes"][0]["private_state"] = "secret"
+    invalid_values.append(unknown_nested)
+    persisted_message = json.loads(json.dumps(value))
+    persisted_message["unit_outcomes"][1]["sanitized_error_message"] = (
+        "local failure"
+    )
+    invalid_values.append(persisted_message)
+    persisted_trace = json.loads(json.dumps(value))
+    persisted_trace["unit_outcomes"][1]["sanitized_trace_tail"] = [
+        "chained secret"
+    ]
+    invalid_values.append(persisted_trace)
+    mismatched_category = json.loads(json.dumps(value))
+    mismatched_category["unit_outcomes"][1]["sanitized_error_category"] = (
+        "implementation_blocked"
+    )
+    invalid_values.append(mismatched_category)
+    malformed_top_identity = json.loads(json.dumps(value))
+    malformed_top_identity["configuration_digest"] = "A" * 64
+    invalid_values.append(malformed_top_identity)
+    malformed_unit_identity = json.loads(json.dumps(value))
+    malformed_unit_identity["unit_outcomes"][0]["witness_identity"] = "6" * 63
+    invalid_values.append(malformed_unit_identity)
+    malformed_status = json.loads(json.dumps(value))
+    malformed_status["unit_outcomes"][1]["status"] = "passed"
+    invalid_values.append(malformed_status)
+    malformed_roster = json.loads(json.dumps(value))
+    malformed_roster["unit_outcomes"].reverse()
+    invalid_values.append(malformed_roster)
+    malformed_timing = json.loads(json.dumps(value))
+    malformed_timing["unit_outcomes"][0]["elapsed_seconds"] = -0.1
+    invalid_values.append(malformed_timing)
+    for invalid_index, invalid_value in enumerate(invalid_values):
+        invalid_output_root = tmp_path / f"invalid-delivery-{invalid_index}"
+        with pytest.raises(server.SemanticTextureOperationalServerError):
+            server.finalize_semantic_texture_operational_preflight_delivery(
+                _BlockedResult(invalid_value),
+                output_root=invalid_output_root,
+            )
+        assert not invalid_output_root.exists()
