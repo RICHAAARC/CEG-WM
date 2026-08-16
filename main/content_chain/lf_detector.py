@@ -911,7 +911,7 @@ def semantic_texture_lf_detector(
         "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
         "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
-        "route_identity": route.route_identity,
+        "route_config_digest": route.route_config_digest,
         "score_operator": SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,
         "symmetric_route_application": "m_lf_on_observation_and_template_before_detrend",
         "transform_identity": LF_NULL_WHITENING_TRANSFORM_IDENTITY,

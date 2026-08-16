@@ -563,75 +563,192 @@ def test_semantic_texture_candidate_traverses_public_runtime_and_method_adapters
     semantic_runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(
         _InjectedSemanticTextureModel()
     )
-    image = torch.arange(3 * 64 * 64, dtype=torch.int64).remainder(256).to(
+    raw_image = torch.arange(3 * 64 * 64, dtype=torch.int64).remainder(256).to(
         dtype=torch.uint8
     ).reshape(1, 3, 64, 64)
+    rectified_image = torch.flip(raw_image, dims=(3,)).contiguous()
+    identity_anchor_image = (
+        torch.arange(3 * 64 * 64, dtype=torch.int64)
+        .mul(7)
+        .add(19)
+        .remainder(256)
+        .to(dtype=torch.uint8)
+        .reshape(1, 3, 64, 64)
+    )
     detection_key = "semantic-texture-public-adapter-test-key"
     asset = _semantic_texture_whitening_asset()
 
-    prepared = runtime_adapter.observe_semantic_texture_detection(
-        image,
-        semantic_runtime,
-    )
-    route = main_content_chain.semantic_texture_content_router(
-        prepared.hf_observation.shape,
-        mode="routing_semantic_texture_soft",
-        observations=prepared.semantic_texture.observations,
-    )
-    hf_result = main_content_chain.semantic_texture_hf_detector(
-        prepared.hf_observation,
-        detection_key,
-        route,
-    )
-    lf_result = main_content_chain.semantic_texture_lf_detector(
-        prepared.lf_observation,
-        detection_key,
-        route,
-        asset,
-    )
+    def branch_results(image_rgb8: torch.Tensor):
+        prepared = runtime_adapter.observe_semantic_texture_detection(
+            image_rgb8,
+            semantic_runtime,
+        )
+        route = main_content_chain.semantic_texture_content_router(
+            prepared.hf_observation.shape,
+            mode="routing_semantic_texture_soft",
+            observations=prepared.semantic_texture.observations,
+        )
+        hf_result = main_content_chain.semantic_texture_hf_detector(
+            prepared.hf_observation,
+            detection_key,
+            route,
+        )
+        lf_result = main_content_chain.semantic_texture_lf_detector(
+            prepared.lf_observation,
+            detection_key,
+            route,
+            asset,
+        )
+        return prepared, route, hf_result, lf_result
 
-    def calibration(branch: str, detector_identity: str, score: float):
+    identity_prepared, identity_route, identity_hf, identity_lf = branch_results(
+        identity_anchor_image
+    )
+    raw_prepared, raw_route, raw_hf, raw_lf = branch_results(raw_image)
+    (
+        rectified_prepared,
+        rectified_route,
+        rectified_hf,
+        rectified_lf,
+    ) = branch_results(rectified_image)
+
+    def fixed_primary_null_calibration(
+        branch: str,
+        detector_identity: str,
+    ):
         return main_content_chain.SemanticTextureBranchNullCalibration(
             branch=branch,
             detector_identity=detector_identity,
             partition_identity=f"public-adapter-{branch}-primary-null",
             records=(
                 main_content_chain.NullScoreRecord(
-                    score=score - 0.25,
+                    score=-0.75,
                     source_cluster_id=f"{branch}-cluster-0",
                     sample_id=f"{branch}-sample-0",
                 ),
                 main_content_chain.NullScoreRecord(
-                    score=score + 0.25,
+                    score=-0.25,
                     source_cluster_id=f"{branch}-cluster-1",
                     sample_id=f"{branch}-sample-1",
+                ),
+                main_content_chain.NullScoreRecord(
+                    score=0.25,
+                    source_cluster_id=f"{branch}-cluster-2",
+                    sample_id=f"{branch}-sample-2",
+                ),
+                main_content_chain.NullScoreRecord(
+                    score=0.75,
+                    source_cluster_id=f"{branch}-cluster-3",
+                    sample_id=f"{branch}-sample-3",
                 ),
             ),
         )
 
-    observed = adapter.detect_semantic_texture_candidate(
-        image,
+    hf_null = fixed_primary_null_calibration(
+        "hf",
+        identity_hf.detector_identity,
+    )
+    lf_null = fixed_primary_null_calibration(
+        "lf",
+        identity_lf.detector_identity,
+    )
+    raw_observed = adapter.detect_semantic_texture_candidate(
+        raw_image,
         detection_key,
         semantic_runtime,
         asset,
-        hf_null=calibration("hf", hf_result.detector_identity, hf_result.hf_score),
-        lf_null=calibration("lf", lf_result.detector_identity, lf_result.lf_score),
+        hf_null=hf_null,
+        lf_null=lf_null,
+    )
+    rectified_observed = adapter.detect_semantic_texture_candidate(
+        rectified_image,
+        detection_key,
+        semantic_runtime,
+        asset,
+        hf_null=hf_null,
+        lf_null=lf_null,
     )
 
-    assert observed.public_callable == (
+    assert raw_route.route_identity != rectified_route.route_identity
+    assert identity_route.route_config_digest == raw_route.route_config_digest
+    assert identity_route.route_config_digest == rectified_route.route_config_digest
+    assert {
+        identity_hf.detector_config_digest,
+        raw_hf.detector_config_digest,
+        rectified_hf.detector_config_digest,
+    } == {identity_hf.detector_config_digest}
+    assert {
+        identity_hf.detector_identity,
+        raw_hf.detector_identity,
+        rectified_hf.detector_identity,
+    } == {identity_hf.detector_identity}
+    assert {
+        identity_lf.detector_config_digest,
+        raw_lf.detector_config_digest,
+        rectified_lf.detector_config_digest,
+    } == {identity_lf.detector_config_digest}
+    assert {
+        identity_lf.detector_identity,
+        raw_lf.detector_identity,
+        rectified_lf.detector_identity,
+    } == {identity_lf.detector_identity}
+    assert {
+        identity_lf.whitening_asset_digest,
+        raw_lf.whitening_asset_digest,
+        rectified_lf.whitening_asset_digest,
+    } == {asset.whitening_asset_digest}
+    assert raw_observed.public_callable == (
         "runtime.Sd35RuntimeAdapter.observe_semantic_texture_detection"
         " -> main.semantic_texture_content_router"
         " -> main.semantic_texture_hf_detector"
         " + main.semantic_texture_lf_detector"
         " -> main.semantic_texture_content_detector"
     )
-    assert observed.upstream_runtime_identity == prepared.observation_identity
-    assert observed.result.candidate_status == (
-        "implemented_not_scientifically_validated"
+    assert raw_observed.upstream_runtime_identity == raw_prepared.observation_identity
+    assert rectified_observed.upstream_runtime_identity == (
+        rectified_prepared.observation_identity
     )
-    assert observed.result.diagnostic_only is True
-    assert observed.result.promoted is False
-    assert prepared.semantic_texture.execution_evidence == (
+    assert raw_observed.result.route_identity == raw_route.route_identity
+    assert rectified_observed.result.route_identity == rectified_route.route_identity
+    assert raw_observed.result.route_identity != (
+        rectified_observed.result.route_identity
+    )
+    assert raw_observed.result.content_config_digest == (
+        rectified_observed.result.content_config_digest
+    )
+    assert raw_observed.result.detector_identity == (
+        rectified_observed.result.detector_identity
+    )
+    assert raw_observed.result.hf_standardization.calibration_identity == (
+        hf_null.calibration_identity
+    )
+    assert rectified_observed.result.hf_standardization.calibration_identity == (
+        hf_null.calibration_identity
+    )
+    assert raw_observed.result.lf_standardization.calibration_identity == (
+        lf_null.calibration_identity
+    )
+    assert rectified_observed.result.lf_standardization.calibration_identity == (
+        lf_null.calibration_identity
+    )
+    assert raw_observed.result.content_score == max(
+        raw_observed.result.hf_standardization.z_score,
+        raw_observed.result.lf_standardization.z_score,
+    )
+    assert rectified_observed.result.content_score == max(
+        rectified_observed.result.hf_standardization.z_score,
+        rectified_observed.result.lf_standardization.z_score,
+    )
+    assert all(
+        observed.result.candidate_status
+        == "implemented_not_scientifically_validated"
+        for observed in (raw_observed, rectified_observed)
+    )
+    assert raw_observed.result.diagnostic_only is True
+    assert rectified_observed.result.diagnostic_only is True
+    assert raw_observed.result.promoted is False
+    assert rectified_observed.result.promoted is False
+    assert identity_prepared.semantic_texture.execution_evidence == (
         "injected_minimal_model_test_only_not_production"
     )
 

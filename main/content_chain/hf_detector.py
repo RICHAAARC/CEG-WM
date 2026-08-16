@@ -290,7 +290,7 @@ def semantic_texture_hf_detector(
         "carrier_config_digest": carrier.carrier_config_digest,
         "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
-        "route_identity": route.route_identity,
+        "route_config_digest": route.route_config_digest,
         "score_operator": "centered_normalized_correlation_after_symmetric_m_hf",
     }
     config_digest = sha256(stable_json_utf8(config)).hexdigest()

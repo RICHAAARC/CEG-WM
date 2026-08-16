@@ -1029,7 +1029,6 @@ def semantic_texture_content_detector(
         "lf_calibration_identity": lf_standardization.calibration_identity,
         "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
         "promotion_status": "not_promoted",
-        "route_identity": hf_result.route_identity,
     }
     config_digest = sha256(stable_json_utf8(config)).hexdigest()
     identity = sha256(
