@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import asdict, replace
+from hashlib import sha256
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,9 +80,14 @@ from main.shared import identify_root_key, rgb8_image_digest
 from runtime import (
     ContentWriteGeometrySuffixResult,
     ContentWriteVaeResult,
+    InspyrenetSemanticRuntime,
     RuntimeActualQkSuffixResult,
+    RuntimeBackendIdentity,
+    RuntimeDeviceCapabilities,
     RuntimeDifferentiableQkSuffixResult,
     RuntimeQkObservationResult,
+    RuntimeVaeFactors,
+    create_runtime_adapter,
 )
 
 
@@ -106,6 +112,11 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "PreparedLfWhitenedObservation",
         "PreparedLfWhitenedTemplate",
         "RoutingObservations",
+        "SemanticTextureBranchNullCalibration",
+        "SemanticTextureContentDetectionResult",
+        "SemanticTextureLfWhiteningAsset",
+        "SemanticTextureRoutingObservations",
+        "SemanticTextureRoutingResult",
         "content_detector",
         "content_embedder",
         "content_router",
@@ -114,6 +125,11 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "lf_carrier",
         "lf_detector",
         "lf_null_whitened_matched_detector",
+        "semantic_texture_content_detector",
+        "semantic_texture_content_embedder",
+        "semantic_texture_content_router",
+        "semantic_texture_hf_detector",
+        "semantic_texture_lf_detector",
     ),
     main_geometry_chain: (
         "GeometricTransformEstimation",
@@ -320,6 +336,189 @@ def test_adapter_main_symbols_are_identity_preserving_top_level_exports() -> Non
         for symbol in symbols:
             assert symbol in main.__all__
             assert getattr(main, symbol) is getattr(owner, symbol)
+
+
+class _SemanticTexturePosterior:
+    def __init__(self, value: torch.Tensor) -> None:
+        self._value = value
+
+    def mode(self) -> torch.Tensor:
+        return self._value.detach().clone()
+
+
+class _SemanticTextureRuntimeBackend:
+    def __init__(self) -> None:
+        self.configuration = None
+
+    def probe_devices(self) -> RuntimeDeviceCapabilities:
+        return RuntimeDeviceCapabilities(cpu_available=True, cuda_device_count=0)
+
+    def prepare(self, configuration, selected_device: str) -> RuntimeBackendIdentity:
+        self.configuration = configuration
+        return RuntimeBackendIdentity(
+            candidate_id=configuration.candidate_id,
+            runtime_config_digest=configuration.runtime_config_digest,
+            runtime_backend_name="synthetic_semantic_texture_vae_backend",
+            selected_device=selected_device,
+            model_id=configuration.model_id,
+            model_revision=configuration.model_revision,
+            pipeline_class=configuration.pipeline_class,
+            scheduler_class=configuration.scheduler_class,
+            inference_steps=configuration.inference_steps,
+            guidance_scale=configuration.guidance_scale,
+            image_height=configuration.image_height,
+            image_width=configuration.image_width,
+            generation_seed_device=configuration.generation_seed_device,
+            latent_dtype=configuration.latent_dtype,
+            template_dtype=configuration.template_dtype,
+            score_dtype=configuration.score_dtype,
+            callback_index=configuration.callback_index,
+            callback_hold_scheduler_intervals=(
+                configuration.callback_hold_scheduler_intervals
+            ),
+            vae_decode_protocol=configuration.vae_decode_protocol,
+            vae_encode_protocol=configuration.vae_encode_protocol,
+            vae_scaling_factor_source=configuration.vae_scaling_factor_source,
+            vae_shift_factor_source=configuration.vae_shift_factor_source,
+            detection_schedule_index=configuration.detection_schedule_index,
+            detection_conditioning_protocol=(
+                configuration.detection_conditioning_protocol
+            ),
+            qk_layer_names=configuration.qk_layer_names,
+            dependency_lock=configuration.dependency_lock,
+        )
+
+    def close(self) -> None:
+        return None
+
+    def run_generation(self, initial_latent, callback):
+        return initial_latent.detach().clone()
+
+    def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
+        return latent.detach().clone()
+
+    def vae_factors(self) -> RuntimeVaeFactors:
+        return RuntimeVaeFactors(scaling_factor=1.0, shift_factor=0.0)
+
+    def vae_encode(self, image: torch.Tensor) -> _SemanticTexturePosterior:
+        value = image.to(dtype=torch.float32).mean(dim=1, keepdim=True)
+        return _SemanticTexturePosterior(value.repeat(1, 16, 1, 1))
+
+
+class _InjectedSemanticTextureModel(torch.nn.Module):
+    def forward_inspyre(self, value: torch.Tensor) -> dict[str, object]:
+        finest = value[:, :1]
+        return {
+            "saliency": [finest, finest, finest, finest],
+            "laplacian": [finest, finest, finest],
+        }
+
+
+def _semantic_texture_whitening_asset():
+    payload = {
+        "artifact_role": "lf_semantic_texture_soft_clean_null_whitening_operator",
+        "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
+        "candidate_id": "lf_semantic_texture_soft_whitened_matched_score",
+        "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
+        "fit_manifest_sha256": "c" * 64,
+        "fit_source_cluster_count": 32,
+        "latent_shape": [1, 16, 64, 64],
+        "observation_protocol": "final_image_vae_posterior_mode",
+        "regularization_ratio": "0x1.0000000000000p-10",
+        "route_candidate_id": "routing_semantic_texture_soft",
+        "transform_identity": "orthonormal_dct_ii",
+        "weights_binary32_be_hex": ["3f800000"] * 96,
+    }
+    return main_content_chain.SemanticTextureLfWhiteningAsset.from_canonical_payload(
+        payload,
+        whitening_asset_digest=sha256(
+            main_shared.stable_json_utf8(payload)
+        ).hexdigest(),
+    )
+
+
+@pytest.mark.unit
+def test_semantic_texture_candidate_traverses_public_runtime_and_method_adapters() -> None:
+    runtime_adapter = create_runtime_adapter(_SemanticTextureRuntimeBackend())
+    runtime_adapter.initialize("cpu")
+    configuration = load_ceg_wm_experiment_adapter_configuration(
+        COMPONENT_CONFIG_PATH
+    )
+    adapter = CegWmExperimentAdapter(configuration, runtime_adapter)
+    semantic_runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(
+        _InjectedSemanticTextureModel()
+    )
+    image = torch.arange(3 * 64 * 64, dtype=torch.int64).remainder(256).to(
+        dtype=torch.uint8
+    ).reshape(1, 3, 64, 64)
+    detection_key = "semantic-texture-public-adapter-test-key"
+    asset = _semantic_texture_whitening_asset()
+
+    prepared = runtime_adapter.observe_semantic_texture_detection(
+        image,
+        semantic_runtime,
+    )
+    route = main_content_chain.semantic_texture_content_router(
+        prepared.hf_observation.shape,
+        mode="routing_semantic_texture_soft",
+        observations=prepared.semantic_texture.observations,
+    )
+    hf_result = main_content_chain.semantic_texture_hf_detector(
+        prepared.hf_observation,
+        detection_key,
+        route,
+    )
+    lf_result = main_content_chain.semantic_texture_lf_detector(
+        prepared.lf_observation,
+        detection_key,
+        route,
+        asset,
+    )
+
+    def calibration(branch: str, detector_identity: str, score: float):
+        return main_content_chain.SemanticTextureBranchNullCalibration(
+            branch=branch,
+            detector_identity=detector_identity,
+            partition_identity=f"public-adapter-{branch}-primary-null",
+            records=(
+                main_content_chain.NullScoreRecord(
+                    score=score - 0.25,
+                    source_cluster_id=f"{branch}-cluster-0",
+                    sample_id=f"{branch}-sample-0",
+                ),
+                main_content_chain.NullScoreRecord(
+                    score=score + 0.25,
+                    source_cluster_id=f"{branch}-cluster-1",
+                    sample_id=f"{branch}-sample-1",
+                ),
+            ),
+        )
+
+    observed = adapter.detect_semantic_texture_candidate(
+        image,
+        detection_key,
+        semantic_runtime,
+        asset,
+        hf_null=calibration("hf", hf_result.detector_identity, hf_result.hf_score),
+        lf_null=calibration("lf", lf_result.detector_identity, lf_result.lf_score),
+    )
+
+    assert observed.public_callable == (
+        "runtime.Sd35RuntimeAdapter.observe_semantic_texture_detection"
+        " -> main.semantic_texture_content_router"
+        " -> main.semantic_texture_hf_detector"
+        " + main.semantic_texture_lf_detector"
+        " -> main.semantic_texture_content_detector"
+    )
+    assert observed.upstream_runtime_identity == prepared.observation_identity
+    assert observed.result.candidate_status == (
+        "implemented_not_scientifically_validated"
+    )
+    assert observed.result.diagnostic_only is True
+    assert observed.result.promoted is False
+    assert prepared.semantic_texture.execution_evidence == (
+        "injected_minimal_model_test_only_not_production"
+    )
 
 
 @pytest.mark.unit

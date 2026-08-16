@@ -8,13 +8,17 @@ from .detector import (
     ContentDetectorError,
     ContentResultReplayOperation,
     NullScoreRecord,
+    SemanticTextureBranchNullCalibration,
+    SemanticTextureContentDetectionResult,
     content_detector,
+    semantic_texture_content_detector,
     validate_content_detection_result,
 )
 from .embedder import (
     ContentEmbeddingResult,
     ContentEmbedderError,
     content_embedder,
+    semantic_texture_content_embedder,
 )
 from .hf_carrier import (
     HfCarrierError,
@@ -29,8 +33,10 @@ from .lf_carrier import (
 from .hf_detector import (
     HfDetectionObservation,
     HfDetectionResult,
+    SemanticTextureHfDetectionResult,
     HfDetectorError,
     hf_detector,
+    semantic_texture_hf_detector,
 )
 from .lf_detector import (
     LfDetectionObservation,
@@ -39,8 +45,10 @@ from .lf_detector import (
     LfNullWhitenedDetectionResult,
     PreparedLfWhitenedObservation,
     PreparedLfWhitenedTemplate,
+    SemanticTextureLfDetectionResult,
     lf_detector,
     lf_null_whitened_matched_detector,
+    semantic_texture_lf_detector,
     prepare_lf_null_whitened_observation,
     prepare_lf_null_whitened_template,
 )
@@ -48,13 +56,17 @@ from .lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
     LfNullWhiteningAsset,
     LfNullWhiteningAssetError,
+    SemanticTextureLfWhiteningAsset,
 )
 from .routing import (
     ContentRouterError,
     ContentRoutingResult,
     RoutingObservations,
     SpatialRoutingObservation,
+    SemanticTextureRoutingObservations,
+    SemanticTextureRoutingResult,
     content_router,
+    semantic_texture_content_router,
 )
 
 __all__ = [
@@ -87,9 +99,21 @@ __all__ = [
     "NullScoreRecord",
     "RoutingObservations",
     "SpatialRoutingObservation",
+    "SemanticTextureBranchNullCalibration",
+    "SemanticTextureContentDetectionResult",
+    "SemanticTextureHfDetectionResult",
+    "SemanticTextureLfDetectionResult",
+    "SemanticTextureLfWhiteningAsset",
+    "SemanticTextureRoutingObservations",
+    "SemanticTextureRoutingResult",
     "content_detector",
     "content_embedder",
     "content_router",
+    "semantic_texture_content_detector",
+    "semantic_texture_content_embedder",
+    "semantic_texture_content_router",
+    "semantic_texture_hf_detector",
+    "semantic_texture_lf_detector",
     "hf_carrier",
     "hf_detector",
     "lf_carrier",

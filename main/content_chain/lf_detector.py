@@ -22,6 +22,13 @@ from .lf_whitening import (
     LF_NULL_WHITENING_TRANSFORM_IDENTITY,
     LfNullWhiteningAsset,
     LfNullWhiteningAssetError,
+    SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,
+    SemanticTextureLfWhiteningAsset,
+)
+from .routing import (
+    SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+    SemanticTextureRoutingResult,
+    validate_semantic_texture_routing_result,
 )
 
 OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
@@ -151,6 +158,25 @@ class LfNullWhitenedDetectionResult:
     wrong_key_index: int | None
     observation_digest: str
     template_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureLfDetectionResult:
+    """Dedicated-W blind soft-routed LF score with no legacy fallback."""
+
+    candidate_id: str
+    candidate_status: str
+    candidate_ids: tuple[str, ...]
+    lf_score: float
+    detector_identity: str
+    detector_config_digest: str
+    whitening_asset_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    observation_digest: str
+    template_digest: str
+    route_identity: str
 
 
 def _center(values: Sequence[float]) -> tuple[float, ...]:
@@ -801,4 +827,119 @@ def lf_null_whitened_matched_detector(
         wrong_key_index=carrier.wrong_key_index,
         observation_digest=observation.observation_digest,
         template_digest=carrier.template_digest,
+    )
+
+
+def semantic_texture_lf_detector(
+    observation: LfDetectionObservation,
+    detection_key: str | DerivedWrongKeyMaterial,
+    routing_result: SemanticTextureRoutingResult,
+    whitening_asset: SemanticTextureLfWhiteningAsset | None,
+    *,
+    model_revision: str = MODEL_REVISION,
+) -> SemanticTextureLfDetectionResult:
+    """Score symmetric ``m_lf`` features using only the dedicated soft-route W."""
+
+    if type(observation) is not LfDetectionObservation:
+        raise LfDetectorError(
+            "semantic-texture LF detector requires a public-image observation"
+        )
+    if observation.shape != LF_NULL_WHITENING_LATENT_SHAPE:
+        raise LfDetectorError(
+            "semantic-texture LF detector requires shape [1,16,64,64]"
+        )
+    if observation.observation_protocol != OBSERVATION_PROTOCOL or (
+        _digest(observation.values) != observation.observation_digest
+    ):
+        raise LfDetectorError("semantic-texture LF observation identity mismatch")
+    if type(whitening_asset) is not SemanticTextureLfWhiteningAsset:
+        raise LfDetectorError(
+            "semantic-texture LF detector requires its dedicated whitening W"
+        )
+    try:
+        whitening_asset.validate()
+    except LfNullWhiteningAssetError as exc:
+        raise LfDetectorError(
+            "semantic-texture LF whitening asset validation failed"
+        ) from exc
+    try:
+        route = validate_semantic_texture_routing_result(routing_result)
+    except ValueError as exc:
+        raise LfDetectorError("semantic-texture LF route validation failed") from exc
+    if route.latent_shape != observation.shape:
+        raise LfDetectorError("semantic-texture LF route shape mismatch")
+    try:
+        carrier = lf_carrier(
+            detection_key,
+            observation.shape,
+            model_revision=model_revision,
+        )
+    except LfCarrierError as exc:
+        raise LfDetectorError("semantic-texture LF template reconstruction failed") from exc
+    routed_observation = tuple(
+        _float32(value * weight)
+        for value, weight in zip(observation.values, route.mask_lf, strict=True)
+    )
+    routed_template = tuple(
+        _float32(value * weight)
+        for value, weight in zip(carrier.template, route.mask_lf, strict=True)
+    )
+    observation_coefficients = _affine_detrended_dct(
+        routed_observation,
+        role="semantic-texture LF observation",
+    )
+    template_coefficients = _affine_detrended_dct(
+        routed_template,
+        role="semantic-texture LF template",
+    )
+    score = _whitened_cosine(
+        observation_coefficients,
+        template_coefficients,
+        whitening_asset,
+    )
+    candidate_ids = (
+        "key_schedule_sha256_counter",
+        "lf_low_pass",
+        "routing_semantic_texture_soft",
+        SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,
+    )
+    config = {
+        "band_identity": LF_NULL_WHITENING_BAND_IDENTITY,
+        "candidate_ids": list(candidate_ids),
+        "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        "carrier_config_digest": carrier.carrier_config_digest,
+        "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
+        "model_revision": model_revision,
+        "observation_protocol": OBSERVATION_PROTOCOL,
+        "route_identity": route.route_identity,
+        "score_operator": SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,
+        "symmetric_route_application": "m_lf_on_observation_and_template_before_detrend",
+        "transform_identity": LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+        "whitening_asset_digest": whitening_asset.whitening_asset_digest,
+    }
+    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_ids": list(candidate_ids),
+                "detector_config_digest": config_digest,
+                "detector_role": "semantic_texture_soft_lf_blind_score",
+                "whitening_asset_digest": whitening_asset.whitening_asset_digest,
+            }
+        )
+    ).hexdigest()
+    return SemanticTextureLfDetectionResult(
+        candidate_id=SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,
+        candidate_status=SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        candidate_ids=candidate_ids,
+        lf_score=score,
+        detector_identity=identity,
+        detector_config_digest=config_digest,
+        whitening_asset_digest=whitening_asset.whitening_asset_digest,
+        root_key_public_digest=carrier.root_key_public_digest,
+        key_role=carrier.key_role,
+        wrong_key_index=carrier.wrong_key_index,
+        observation_digest=observation.observation_digest,
+        template_digest=carrier.template_digest,
+        route_identity=route.route_identity,
     )

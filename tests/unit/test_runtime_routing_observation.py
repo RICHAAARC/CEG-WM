@@ -2,12 +2,21 @@ from __future__ import annotations
 
 from math import ceil, sqrt
 from pathlib import Path
+import struct
 from types import SimpleNamespace
 
 import pytest
 import torch
 
 from runtime import (
+    INSPYRENET_CHECKPOINT_REVISION,
+    INSPYRENET_CHECKPOINT_SHA256,
+    INSPYRENET_CHECKPOINT_SIZE,
+    INSPYRENET_CLASS_MODULE,
+    INSPYRENET_CLASS_NAME,
+    INSPYRENET_FACTORY_NAME,
+    INSPYRENET_SOURCE_REVISION,
+    InspyrenetSemanticRuntime,
     ROUTING_OBSERVATION_CANDIDATE_ID,
     ROUTING_PROBE_RELATIVE_STEP,
     RuntimeAdapterError,
@@ -17,6 +26,7 @@ from runtime import (
     RuntimeVaeFactors,
     create_runtime_adapter,
 )
+from main import semantic_texture_content_router
 from runtime.configuration import load_runtime_configuration
 from runtime.sd35_backend import Sd35PipelineBackend
 
@@ -172,6 +182,112 @@ def _nearest_rank_positive_p95(values: tuple[float, ...]) -> float:
     assert values
     ordered = sorted(values)
     return ordered[ceil(0.95 * len(ordered)) - 1]
+
+
+class _InjectedInspyrenet(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forward_inspyre_calls = 0
+
+    def forward_inspyre(self, value: torch.Tensor) -> dict[str, list[torch.Tensor]]:
+        self.forward_inspyre_calls += 1
+        raw = value[:, :1, :, :]
+        return {
+            "saliency": [raw, raw, raw, raw],
+            "laplacian": [raw, raw, raw],
+        }
+
+
+@pytest.mark.unit
+def test_semantic_texture_runtime_uses_raw_finest_saliency_logit_sigmoid_once_and_public_rgb8() -> None:
+    model = _InjectedInspyrenet()
+    runtime = InspyrenetSemanticRuntime.from_injected_model_for_test(model)
+    image = torch.zeros((1, 3, 128, 128), dtype=torch.uint8)
+    image[:, 0, :, 64:] = 255
+
+    result = runtime.observe(image)
+    changed_image = image.detach().clone()
+    changed_image[:, 1, 0, 0] = 255
+    changed = runtime.observe(changed_image)
+    route = semantic_texture_content_router(
+        (1, 16, 64, 64),
+        mode="routing_semantic_texture_soft",
+        observations=result.observations,
+    )
+
+    assert model.forward_inspyre_calls == 2
+    assert result.source_revision == INSPYRENET_SOURCE_REVISION
+    assert result.source_class == (
+        f"{INSPYRENET_CLASS_MODULE}.{INSPYRENET_CLASS_NAME}"
+    )
+    assert result.forward_api == "InSPyReNet.forward_inspyre"
+    assert INSPYRENET_FACTORY_NAME == "InSPyReNet_SwinB"
+    assert len(result.source_file_sha256) == 6
+    assert result.checkpoint_revision == INSPYRENET_CHECKPOINT_REVISION
+    assert result.checkpoint_sha256 == INSPYRENET_CHECKPOINT_SHA256
+    assert result.checkpoint_size == INSPYRENET_CHECKPOINT_SIZE
+    assert result.execution_evidence == "injected_minimal_model_test_only_not_production"
+    assert result.observations.semantic_probability.spatial_shape == (64, 64)
+    assert result.observations.texture_complexity.spatial_shape == (64, 64)
+    assert min(result.observations.semantic_probability.values) < 0.2
+    assert max(result.observations.semantic_probability.values) > 0.8
+    assert any(value > 0.0 for value in result.observations.texture_complexity.values)
+    assert changed.observations is not result.observations
+    assert changed.observation_identity != result.observation_identity
+    assert changed.input_image_digest != result.input_image_digest
+    rgb = image.to(dtype=torch.float32) / 255.0
+    grayscale_weights = torch.tensor(
+        (0.299, 0.587, 0.114),
+        dtype=torch.float32,
+    ).view(1, 3, 1, 1)
+    grayscale = (rgb * grayscale_weights).sum(dim=1, keepdim=True)
+    padded = torch.nn.functional.pad(grayscale, (1, 1, 1, 1), mode="replicate")
+    sobel_x = torch.tensor(
+        ((-1.0, 0.0, 1.0), (-2.0, 0.0, 2.0), (-1.0, 0.0, 1.0)),
+        dtype=torch.float32,
+    ).view(1, 1, 3, 3)
+    magnitude = torch.sqrt(
+        torch.nn.functional.conv2d(padded, sobel_x).square()
+        + torch.nn.functional.conv2d(
+            padded,
+            sobel_x.transpose(2, 3),
+        ).square()
+    )
+    downsampled = torch.nn.functional.interpolate(
+        magnitude,
+        size=(64, 64),
+        mode="area",
+    )
+    positive = tuple(
+        value for value in downsampled.reshape(-1).tolist() if value > 0.0
+    )
+    q95 = _nearest_rank_positive_p95(positive)
+    expected_texture = tuple(
+        float(value)
+        for value in torch.clamp(downsampled / q95, 0.0, 1.0)
+        .reshape(-1)
+        .tolist()
+    )
+    assert result.observations.texture_complexity.values == expected_texture
+    assert all(value > 0.0 for value in (*route.mask_hf, *route.mask_lf))
+    assert all(
+        struct.pack(">f", hf + lf) == struct.pack(">f", 1.0)
+        for hf, lf in zip(route.mask_hf, route.mask_lf, strict=True)
+    )
+
+
+@pytest.mark.unit
+def test_inspyrenet_production_loader_has_frozen_source_checkpoint_boundary(
+    tmp_path: Path,
+) -> None:
+    import inspect
+
+    signature = inspect.signature(InspyrenetSemanticRuntime)
+    assert tuple(signature.parameters) == ("checkpoint_path", "selected_device")
+    assert INSPYRENET_CHECKPOINT_SIZE == 367_520_613
+    assert len(INSPYRENET_CHECKPOINT_SHA256) == 64
+    with pytest.raises(RuntimeError, match="source|class|checkpoint"):
+        InspyrenetSemanticRuntime(tmp_path / "ckpt_base.pth")
 
 
 @pytest.mark.unit

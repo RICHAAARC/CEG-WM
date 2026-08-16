@@ -49,6 +49,11 @@ if TYPE_CHECKING:
     from .qk_observation import RuntimeQkObservationResult
     from .routing_observation import RuntimeRoutingObservationResult
     from .routing_observation import RuntimeRoutingReferenceMeasurement
+    from .routing_observation import (
+        InspyrenetSemanticRuntime,
+        RuntimeSemanticTextureDetectionObservationResult,
+        RuntimeSemanticTextureObservationResult,
+    )
 
 
 class RuntimeAdapterError(RuntimeError):
@@ -679,6 +684,83 @@ class Sd35RuntimeAdapter:
             self._transition_to_failed(exc)
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected routing observation error"
+            ) from exc
+
+    def observe_semantic_texture_rgb8(
+        self,
+        image_rgb8: torch.Tensor,
+        semantic_runtime: InspyrenetSemanticRuntime,
+    ) -> RuntimeSemanticTextureObservationResult:
+        """Rebuild public M/T from one current ordinary RGB8 image."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before semantic-texture observation"
+            )
+        from .routing_observation import (
+            InspyrenetSemanticRuntime,
+            RuntimeRoutingObservationError,
+        )
+        if type(semantic_runtime) is not InspyrenetSemanticRuntime:
+            raise RuntimeAdapterError("semantic runtime identity is invalid")
+        try:
+            self.revalidate_execution_identity()
+            result = semantic_runtime.observe(image_rgb8)
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeRoutingObservationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime semantic-texture observation failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected semantic-texture error"
+            ) from exc
+
+    def observe_semantic_texture_detection(
+        self,
+        image_rgb8: torch.Tensor,
+        semantic_runtime: InspyrenetSemanticRuntime,
+    ) -> RuntimeSemanticTextureDetectionObservationResult:
+        """Run same-image M/T reconstruction and public posterior-mode VAE."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError(
+                "runtime adapter must be ready before semantic-texture detection"
+            )
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError(
+                "runtime backend lacks semantic-texture detection execution"
+            )
+        from .routing_observation import (
+            InspyrenetSemanticRuntime,
+            RuntimeRoutingObservationError,
+            observe_semantic_texture_detection,
+        )
+        if type(semantic_runtime) is not InspyrenetSemanticRuntime:
+            raise RuntimeAdapterError("semantic runtime identity is invalid")
+        try:
+            self.revalidate_execution_identity()
+            result = observe_semantic_texture_detection(
+                self._backend,
+                self._configuration,
+                self.session,
+                image_rgb8,
+                semantic_runtime,
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeRoutingObservationError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime semantic-texture detection failed closed"
+            ) from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError(
+                "runtime backend raised an unexpected semantic-texture detection error"
             ) from exc
 
     def measure_generation_routing_reference_inputs(

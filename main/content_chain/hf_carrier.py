@@ -21,7 +21,9 @@ from main.shared.key_schedule import (
 from .routing import (
     ContentRouterError,
     ContentRoutingResult,
+    SemanticTextureRoutingResult,
     validate_content_routing_result,
+    validate_semantic_texture_routing_result,
 )
 
 HF_CANDIDATE_ID = "hf_sparse_tail"
@@ -234,7 +236,7 @@ def hf_carrier(
     shape: Sequence[int],
     *,
     mask_hf: Sequence[float] | None = None,
-    routing_result: ContentRoutingResult | None = None,
+    routing_result: ContentRoutingResult | SemanticTextureRoutingResult | None = None,
     model_revision: str = MODEL_REVISION,
 ) -> HfCarrierResult:
     """构造未中心化 sparse-tail 模板及 mask 后单位 HF 写入方向。"""
@@ -251,7 +253,14 @@ def hf_carrier(
                 "HF carrier accepts either routing_result or mask_hf, not both"
             )
         try:
-            validated_route = validate_content_routing_result(routing_result)
+            if type(routing_result) is ContentRoutingResult:
+                validated_route = validate_content_routing_result(routing_result)
+            elif type(routing_result) is SemanticTextureRoutingResult:
+                validated_route = validate_semantic_texture_routing_result(
+                    routing_result
+                )
+            else:
+                raise ContentRouterError("HF routing result type is unsupported")
         except ContentRouterError as exc:
             raise HfCarrierError("HF routing result validation failed") from exc
         if validated_route.latent_shape != normalized_shape:
@@ -379,4 +388,40 @@ def validate_hf_carrier_routing_binding(
     ).hexdigest()
     if carrier.carrier_config_digest != expected_config_digest:
         raise HfCarrierError("HF carrier config digest does not match route binding")
+    return carrier
+
+
+def validate_hf_carrier_semantic_texture_binding(
+    carrier: object,
+    routing_result: object,
+) -> HfCarrierResult:
+    """Verify that the HF direction consumes this exact public soft route."""
+
+    if type(carrier) is not HfCarrierResult:
+        raise HfCarrierError("HF soft-route binding requires HfCarrierResult")
+    try:
+        route = validate_semantic_texture_routing_result(routing_result)
+    except ContentRouterError as exc:
+        raise HfCarrierError("HF semantic-texture route validation failed") from exc
+    if (
+        carrier.shape != route.latent_shape
+        or carrier.route_identity != route.route_identity
+        or carrier.route_config_digest != route.route_config_digest
+        or carrier.mask_digest != route.mask_hf_digest
+    ):
+        raise HfCarrierError("HF semantic-texture route binding mismatch")
+    template = _float32_vector(
+        carrier.template,
+        prod(carrier.shape),
+        "HF carrier template",
+    )
+    expected = _normalize_float32(
+        tuple(
+            _float32(value * weight)
+            for value, weight in zip(template, route.mask_hf, strict=True)
+        ),
+        "HF semantic-texture direction",
+    )
+    if carrier.direction != expected or carrier.direction_digest != _float32_digest(expected):
+        raise HfCarrierError("HF semantic-texture direction mismatch")
     return carrier

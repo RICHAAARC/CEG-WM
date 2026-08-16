@@ -14,6 +14,16 @@ ROUTING_CANDIDATE_ID = "routing_stqr"
 UNIFORM_CONTROL_CANDIDATE_ID = "routing_uniform_control"
 ROUTING_KEY_CANDIDATE_ID = "key_schedule_sha256_counter"
 RoutingMode = Literal["routing_stqr", "routing_uniform_control"]
+SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID = "routing_semantic_texture_soft"
+SEMANTIC_TEXTURE_EMBEDDING_CANDIDATE_ID = (
+    "content_embedding_semantic_texture_soft_lf_hf"
+)
+SEMANTIC_TEXTURE_CANDIDATE_STATUS = "implemented_not_scientifically_validated"
+SEMANTIC_TEXTURE_ROUTE_DISABLED_MODE = "semantic_texture_route_disabled"
+SemanticTextureRoutingMode = Literal[
+    "routing_semantic_texture_soft",
+    "semantic_texture_route_disabled",
+]
 
 
 class ContentRouterError(ValueError):
@@ -130,6 +140,38 @@ class ContentRoutingResult:
     mean_mask_hf: float
     route_config_digest: str
     route_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureRoutingObservations:
+    """Public RGB8-derived semantic probability and texture maps."""
+
+    semantic_probability: SpatialRoutingObservation
+    texture_complexity: SpatialRoutingObservation
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureRoutingResult:
+    """Positive sum-one soft maps for the unpromoted five-candidate family."""
+
+    candidate_id: str
+    candidate_status: str
+    mode: SemanticTextureRoutingMode
+    latent_shape: tuple[int, int, int, int]
+    observations: SemanticTextureRoutingObservations | None
+    semantic_probability: tuple[float, ...] | None
+    texture_complexity: tuple[float, ...] | None
+    mask_hf: tuple[float, ...]
+    mask_lf: tuple[float, ...]
+    semantic_probability_digest: str | None
+    texture_complexity_digest: str | None
+    semantic_source_identity_digest: str | None
+    texture_source_identity_digest: str | None
+    mask_hf_digest: str
+    mask_lf_digest: str
+    route_config_digest: str
+    route_identity: str
+    route_disabled_reads_observations: bool
 
 
 def _resize_bilinear_align_corners_false(
@@ -546,4 +588,240 @@ def content_router(
         mode=mode,
         latent_shape=normalized_shape,
         routing_observations=observations,
+    )
+
+
+def _semantic_texture_route_config(
+    mode: SemanticTextureRoutingMode,
+    latent_shape: tuple[int, int, int, int],
+) -> dict[str, object]:
+    return {
+        "candidate_id": SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
+        "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        "formula": (
+            "m_hf=(1+M*T)/(2+M);m_lf=(1+M*(1-T))/(2+M)"
+            if mode == SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID
+            else "m_hf=m_lf=0.5_without_reading_M_or_T"
+        ),
+        "latent_shape": list(latent_shape),
+        "mode": mode,
+        "route_disabled_reads_observations": False,
+    }
+
+
+def _validate_semantic_texture_observations(
+    observations: object,
+    spatial_shape: tuple[int, int],
+) -> SemanticTextureRoutingObservations:
+    if type(observations) is not SemanticTextureRoutingObservations:
+        raise ContentRouterError(
+            "semantic-texture routing requires immutable public observations"
+        )
+    semantic = _validate_spatial_observation(
+        observations.semantic_probability,
+        "semantic probability M",
+    )
+    texture = _validate_spatial_observation(
+        observations.texture_complexity,
+        "texture complexity T",
+    )
+    if semantic.spatial_shape != spatial_shape or texture.spatial_shape != spatial_shape:
+        raise ContentRouterError(
+            "semantic-texture maps must match the latent spatial shape"
+        )
+    return observations
+
+
+def validate_semantic_texture_routing_result(
+    result: object,
+) -> SemanticTextureRoutingResult:
+    """Replay the soft formula, digests, disabled isolation, and identity."""
+
+    if type(result) is not SemanticTextureRoutingResult:
+        raise ContentRouterError(
+            "semantic-texture binding requires SemanticTextureRoutingResult"
+        )
+    shape = _validate_latent_shape(result.latent_shape)
+    if (
+        result.candidate_id != SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID
+        or result.candidate_status != SEMANTIC_TEXTURE_CANDIDATE_STATUS
+        or result.mode
+        not in {
+            SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
+            SEMANTIC_TEXTURE_ROUTE_DISABLED_MODE,
+        }
+        or result.route_disabled_reads_observations is not False
+    ):
+        raise ContentRouterError("semantic-texture route identity drifted")
+    element_count = prod(shape)
+    mask_hf = _validate_result_vector(result.mask_hf, element_count, "m_hf")
+    mask_lf = _validate_result_vector(result.mask_lf, element_count, "m_lf")
+    if any(value <= 0.0 for value in (*mask_hf, *mask_lf)):
+        raise ContentRouterError("semantic-texture route maps must be positive")
+    for hf_value, lf_value in zip(mask_hf, mask_lf, strict=True):
+        if _float32(hf_value + lf_value) != _float32(1.0):
+            raise ContentRouterError("semantic-texture route maps must sum to one")
+    if result.mode == SEMANTIC_TEXTURE_ROUTE_DISABLED_MODE:
+        if (
+            result.observations is not None
+            or result.semantic_probability is not None
+            or result.texture_complexity is not None
+            or result.semantic_probability_digest is not None
+            or result.texture_complexity_digest is not None
+            or result.semantic_source_identity_digest is not None
+            or result.texture_source_identity_digest is not None
+            or any(value != _float32(0.5) for value in (*mask_hf, *mask_lf))
+        ):
+            raise ContentRouterError(
+                "route-disabled control must retain no M/T state"
+            )
+    else:
+        observations = _validate_semantic_texture_observations(
+            result.observations,
+            (shape[2], shape[3]),
+        )
+        semantic = observations.semantic_probability.values
+        texture = observations.texture_complexity.values
+        expected_hf_spatial: list[float] = []
+        expected_lf_spatial: list[float] = []
+        for semantic_value, texture_value in zip(semantic, texture, strict=True):
+            denominator = _float32(2.0 + semantic_value)
+            hf_value = _float32(
+                _float32(1.0 + _float32(semantic_value * texture_value))
+                / denominator
+            )
+            # The complementary construction preserves the exact sum-one invariant
+            # while remaining the registered algebraic LF expression.
+            lf_value = _float32(1.0 - hf_value)
+            expected_hf_spatial.append(hf_value)
+            expected_lf_spatial.append(lf_value)
+        expected_hf = _broadcast_spatial(expected_hf_spatial, shape[1])
+        expected_lf = _broadcast_spatial(expected_lf_spatial, shape[1])
+        if (
+            result.semantic_probability != tuple(semantic)
+            or result.texture_complexity != tuple(texture)
+            or mask_hf != expected_hf
+            or mask_lf != expected_lf
+            or result.semantic_probability_digest
+            != observations.semantic_probability.values_digest
+            or result.texture_complexity_digest
+            != observations.texture_complexity.values_digest
+            or result.semantic_source_identity_digest
+            != observations.semantic_probability.source_identity_digest
+            or result.texture_source_identity_digest
+            != observations.texture_complexity.source_identity_digest
+        ):
+            raise ContentRouterError(
+                "semantic-texture result does not match public M/T observations"
+            )
+    if result.mask_hf_digest != _digest_float32(mask_hf) or (
+        result.mask_lf_digest != _digest_float32(mask_lf)
+    ):
+        raise ContentRouterError("semantic-texture mask digest mismatch")
+    config_digest = _identity_digest(
+        _semantic_texture_route_config(result.mode, shape)
+    )
+    if result.route_config_digest != config_digest:
+        raise ContentRouterError("semantic-texture route config digest mismatch")
+    identity = _identity_digest(
+        {
+            "candidate_status": result.candidate_status,
+            "mask_hf_digest": result.mask_hf_digest,
+            "mask_lf_digest": result.mask_lf_digest,
+            "route_config_digest": config_digest,
+            "semantic_probability_digest": result.semantic_probability_digest,
+            "semantic_source_identity_digest": result.semantic_source_identity_digest,
+            "texture_complexity_digest": result.texture_complexity_digest,
+            "texture_source_identity_digest": result.texture_source_identity_digest,
+        }
+    )
+    if result.route_identity != identity:
+        raise ContentRouterError("semantic-texture route identity mismatch")
+    return result
+
+
+def semantic_texture_content_router(
+    latent_shape: Sequence[int],
+    *,
+    mode: SemanticTextureRoutingMode,
+    observations: object | None = None,
+) -> SemanticTextureRoutingResult:
+    """Build the soft route or a causal control that never reads ``observations``."""
+
+    shape = _validate_latent_shape(latent_shape)
+    config_digest = _identity_digest(_semantic_texture_route_config(mode, shape))
+    if mode == SEMANTIC_TEXTURE_ROUTE_DISABLED_MODE:
+        mask_hf = (_float32(0.5),) * prod(shape)
+        mask_lf = mask_hf
+        retained_observations = None
+        semantic = None
+        texture = None
+        semantic_digest = None
+        texture_digest = None
+        semantic_source_digest = None
+        texture_source_digest = None
+    elif mode == SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID:
+        retained_observations = _validate_semantic_texture_observations(
+            observations,
+            (shape[2], shape[3]),
+        )
+        semantic = retained_observations.semantic_probability.values
+        texture = retained_observations.texture_complexity.values
+        hf_spatial: list[float] = []
+        lf_spatial: list[float] = []
+        for semantic_value, texture_value in zip(semantic, texture, strict=True):
+            denominator = _float32(2.0 + semantic_value)
+            hf_value = _float32(
+                _float32(1.0 + _float32(semantic_value * texture_value))
+                / denominator
+            )
+            hf_spatial.append(hf_value)
+            lf_spatial.append(_float32(1.0 - hf_value))
+        mask_hf = _broadcast_spatial(hf_spatial, shape[1])
+        mask_lf = _broadcast_spatial(lf_spatial, shape[1])
+        semantic_digest = retained_observations.semantic_probability.values_digest
+        texture_digest = retained_observations.texture_complexity.values_digest
+        semantic_source_digest = (
+            retained_observations.semantic_probability.source_identity_digest
+        )
+        texture_source_digest = (
+            retained_observations.texture_complexity.source_identity_digest
+        )
+    else:
+        raise ContentRouterError("unsupported semantic-texture routing mode")
+    mask_hf_digest = _digest_float32(mask_hf)
+    mask_lf_digest = _digest_float32(mask_lf)
+    route_identity = _identity_digest(
+        {
+            "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+            "mask_hf_digest": mask_hf_digest,
+            "mask_lf_digest": mask_lf_digest,
+            "route_config_digest": config_digest,
+            "semantic_probability_digest": semantic_digest,
+            "semantic_source_identity_digest": semantic_source_digest,
+            "texture_complexity_digest": texture_digest,
+            "texture_source_identity_digest": texture_source_digest,
+        }
+    )
+    return validate_semantic_texture_routing_result(
+        SemanticTextureRoutingResult(
+            candidate_id=SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
+            candidate_status=SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+            mode=mode,
+            latent_shape=shape,
+            observations=retained_observations,
+            semantic_probability=tuple(semantic) if semantic is not None else None,
+            texture_complexity=tuple(texture) if texture is not None else None,
+            mask_hf=mask_hf,
+            mask_lf=mask_lf,
+            semantic_probability_digest=semantic_digest,
+            texture_complexity_digest=texture_digest,
+            semantic_source_identity_digest=semantic_source_digest,
+            texture_source_identity_digest=texture_source_digest,
+            mask_hf_digest=mask_hf_digest,
+            mask_lf_digest=mask_lf_digest,
+            route_config_digest=config_digest,
+            route_identity=route_identity,
+            route_disabled_reads_observations=False,
+        )
     )

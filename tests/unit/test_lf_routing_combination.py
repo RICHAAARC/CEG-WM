@@ -20,6 +20,7 @@ from main.content_chain.embedder import (
     content_materialization_replay_identity,
     content_embedder,
     reconcile_content_materialization_budget,
+    semantic_texture_content_embedder,
     scale_content_delta_binary32,
 )
 from main.content_chain.hf_carrier import hf_carrier
@@ -36,8 +37,10 @@ from main.content_chain.routing import (
     ContentRouterError,
     ContentRoutingResult,
     RoutingObservations,
+    SemanticTextureRoutingObservations,
     SpatialRoutingObservation,
     content_router,
+    semantic_texture_content_router,
     validate_content_routing_result,
 )
 from main.shared.key_schedule import (
@@ -405,6 +408,108 @@ def test_routing_disabled_uniform_control() -> None:
     assert set(result.mask_lf) == {1.0}
     assert set(result.mask_hf) == {1.0}
     assert result.route_identity != routed.route_identity
+
+
+@pytest.mark.unit
+def test_semantic_texture_soft_route_and_no_weight_embedding() -> None:
+    observations = SemanticTextureRoutingObservations(
+        semantic_probability=_spatial(
+            tuple((index % 5) / 4.0 for index in range(36)),
+            (6, 6),
+            "M",
+        ),
+        texture_complexity=_spatial(
+            tuple((index % 4) / 3.0 for index in range(36)),
+            (6, 6),
+            "T",
+        ),
+    )
+    route = semantic_texture_content_router(
+        BATCH3_SHAPE,
+        mode="routing_semantic_texture_soft",
+        observations=observations,
+    )
+    source_rebound = semantic_texture_content_router(
+        BATCH3_SHAPE,
+        mode="routing_semantic_texture_soft",
+        observations=SemanticTextureRoutingObservations(
+            semantic_probability=_spatial(
+                observations.semantic_probability.values,
+                (6, 6),
+                "different-M-source",
+            ),
+            texture_complexity=_spatial(
+                observations.texture_complexity.values,
+                (6, 6),
+                "different-T-source",
+            ),
+        ),
+    )
+
+    class ExplodingObservations:
+        def __getattribute__(self, name: str):
+            raise AssertionError(f"disabled route read M/T: {name}")
+
+    disabled = semantic_texture_content_router(
+        BATCH3_SHAPE,
+        mode="semantic_texture_route_disabled",
+        observations=ExplodingObservations(),
+    )
+    assert disabled.observations is None
+    assert disabled.semantic_probability is None
+    assert disabled.texture_complexity is None
+    assert set(disabled.mask_hf) == {0.5}
+    assert set(disabled.mask_lf) == {0.5}
+    assert disabled.route_disabled_reads_observations is False
+    assert source_rebound.mask_hf == route.mask_hf
+    assert source_rebound.mask_lf == route.mask_lf
+    assert source_rebound.route_identity != route.route_identity
+
+    for hf_value, lf_value in zip(route.mask_hf, route.mask_lf, strict=True):
+        assert hf_value > 0.0
+        assert lf_value > 0.0
+        assert _test_float32(hf_value + lf_value) == 1.0
+    lf_result = lf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        routing_result=route,
+    )
+    hf_result = hf_carrier(
+        BATCH3_ROOT,
+        BATCH3_SHAPE,
+        routing_result=route,
+    )
+    embedding = semantic_texture_content_embedder(
+        _latent(len(hf_result.direction)),
+        hf_result,
+        lf_carrier_result=lf_result,
+        routing_result=route,
+    )
+    pre_normalized = tuple(
+        _test_float32(lf_value + hf_value)
+        for lf_value, hf_value in zip(
+            lf_result.direction,
+            hf_result.direction,
+            strict=True,
+        )
+    )
+    pre_norm = _test_l2_float32(pre_normalized)
+    expected_direction = tuple(
+        _test_float32(value / pre_norm) for value in pre_normalized
+    )
+
+    assert embedding.mode == "semantic_texture_soft_combined"
+    assert embedding.content_direction == expected_direction
+    assert embedding.mixing_coefficient is None
+    assert embedding.gamma_lh is None
+    assert embedding.target_component_lf is None
+    assert embedding.target_component_hf is None
+    assert embedding.target_relative_l2 == pytest.approx(3.0 / 250.0)
+    assert embedding.route_identity == route.route_identity
+    assert embedding.candidate_ids[-2:] == (
+        "routing_semantic_texture_soft",
+        "content_embedding_semantic_texture_soft_lf_hf",
+    )
 
 
 @pytest.mark.unit

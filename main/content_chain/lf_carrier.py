@@ -22,7 +22,9 @@ from .hf_carrier import MODEL_REVISION
 from .routing import (
     ContentRouterError,
     ContentRoutingResult,
+    SemanticTextureRoutingResult,
     validate_content_routing_result,
+    validate_semantic_texture_routing_result,
 )
 
 LF_CANDIDATE_ID = "lf_low_pass"
@@ -216,7 +218,7 @@ def lf_carrier(
     shape: Sequence[int],
     *,
     mask_lf: Sequence[float] | None = None,
-    routing_result: ContentRoutingResult | None = None,
+    routing_result: ContentRoutingResult | SemanticTextureRoutingResult | None = None,
     model_revision: str = MODEL_REVISION,
 ) -> LfCarrierResult:
     """构造 center-per-sample 的 LF 单位模板与 mask 后单位方向。"""
@@ -233,7 +235,14 @@ def lf_carrier(
                 "LF carrier accepts either routing_result or mask_lf, not both"
             )
         try:
-            validated_route = validate_content_routing_result(routing_result)
+            if type(routing_result) is ContentRoutingResult:
+                validated_route = validate_content_routing_result(routing_result)
+            elif type(routing_result) is SemanticTextureRoutingResult:
+                validated_route = validate_semantic_texture_routing_result(
+                    routing_result
+                )
+            else:
+                raise ContentRouterError("LF routing result type is unsupported")
         except ContentRouterError as exc:
             raise LfCarrierError("LF routing result validation failed") from exc
         if validated_route.latent_shape != normalized_shape:
@@ -362,4 +371,40 @@ def validate_lf_carrier_routing_binding(
     ).hexdigest()
     if carrier.carrier_config_digest != expected_config_digest:
         raise LfCarrierError("LF carrier config digest does not match route binding")
+    return carrier
+
+
+def validate_lf_carrier_semantic_texture_binding(
+    carrier: object,
+    routing_result: object,
+) -> LfCarrierResult:
+    """Verify that the LF direction consumes this exact public soft route."""
+
+    if type(carrier) is not LfCarrierResult:
+        raise LfCarrierError("LF soft-route binding requires LfCarrierResult")
+    try:
+        route = validate_semantic_texture_routing_result(routing_result)
+    except ContentRouterError as exc:
+        raise LfCarrierError("LF semantic-texture route validation failed") from exc
+    if (
+        carrier.shape != route.latent_shape
+        or carrier.route_identity != route.route_identity
+        or carrier.route_config_digest != route.route_config_digest
+        or carrier.mask_digest != route.mask_lf_digest
+    ):
+        raise LfCarrierError("LF semantic-texture route binding mismatch")
+    template = _vector(
+        carrier.template,
+        prod(carrier.shape),
+        "LF carrier template",
+    )
+    expected = _normalize(
+        tuple(
+            _float32(value * weight)
+            for value, weight in zip(template, route.mask_lf, strict=True)
+        ),
+        "LF semantic-texture direction",
+    )
+    if carrier.direction != expected or carrier.direction_digest != _digest(expected):
+        raise LfCarrierError("LF semantic-texture direction mismatch")
     return carrier

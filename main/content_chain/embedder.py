@@ -14,16 +14,21 @@ from .hf_carrier import (
     HfCarrierError,
     HfCarrierResult,
     validate_hf_carrier_routing_binding,
+    validate_hf_carrier_semantic_texture_binding,
 )
 from .lf_carrier import (
     LfCarrierError,
     LfCarrierResult,
     validate_lf_carrier_routing_binding,
+    validate_lf_carrier_semantic_texture_binding,
 )
 from .routing import (
     ContentRouterError,
     ContentRoutingResult,
+    SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+    SemanticTextureRoutingResult,
     validate_content_routing_result,
+    validate_semantic_texture_routing_result,
 )
 
 CONTENT_RELATIVE_L2_NUMERATOR = 3
@@ -36,7 +41,19 @@ EMBEDDER_CANDIDATE_IDS = (
     "routing_stqr",
     "routing_uniform_control",
 )
-EmbeddingMode = Literal["hf_only", "lf_only", "combined"]
+SEMANTIC_TEXTURE_EMBEDDER_CANDIDATE_IDS = (
+    "runtime_sd35_flowmatch",
+    "hf_sparse_tail",
+    "lf_low_pass",
+    "routing_semantic_texture_soft",
+    "content_embedding_semantic_texture_soft_lf_hf",
+)
+EmbeddingMode = Literal[
+    "hf_only",
+    "lf_only",
+    "combined",
+    "semantic_texture_soft_combined",
+]
 ContentMaterializationIntegrityStatus = Literal[
     "passed",
     "write_disappeared",
@@ -255,6 +272,24 @@ def _embedder_config_digest_from_fields(
 def _expected_embedder_config_digest(
     result: ContentEmbeddingResult,
 ) -> str:
+    if result.mode == "semantic_texture_soft_combined":
+        return sha256(
+            stable_json_utf8(
+                {
+                    "candidate_ids": list(SEMANTIC_TEXTURE_EMBEDDER_CANDIDATE_IDS),
+                    "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+                    "formula": "normalize(normalize(m_hf*T_hf)+normalize(m_lf*T_lf))",
+                    "hf_carrier_config_digest": result.hf_carrier_config_digest,
+                    "lf_carrier_config_digest": result.lf_carrier_config_digest,
+                    "mixing_coefficient": None,
+                    "rho_content_denominator": CONTENT_RELATIVE_L2_DENOMINATOR,
+                    "rho_content_numerator": CONTENT_RELATIVE_L2_NUMERATOR,
+                    "route_config_digest": result.route_config_digest,
+                    "route_identity": result.route_identity,
+                    "shape": list(result.shape),
+                }
+            )
+        ).hexdigest()
     return _embedder_config_digest_from_fields(
         shape=result.shape,
         mode=result.mode,
@@ -273,7 +308,12 @@ def _validate_content_embedding_result(
         raise ContentEmbedderError(
             "content embedding result has an invalid type"
         )
-    if result.candidate_ids != EMBEDDER_CANDIDATE_IDS:
+    expected_candidate_ids = (
+        SEMANTIC_TEXTURE_EMBEDDER_CANDIDATE_IDS
+        if result.mode == "semantic_texture_soft_combined"
+        else EMBEDDER_CANDIDATE_IDS
+    )
+    if result.candidate_ids != expected_candidate_ids:
         raise ContentEmbedderError(
             "content embedding candidate identity drifted"
         )
@@ -305,7 +345,12 @@ def _validate_content_embedding_result(
         raise ContentEmbedderError(
             "content embedding target total norm drifted"
         )
-    if result.mode not in ("hf_only", "lf_only", "combined"):
+    if result.mode not in (
+        "hf_only",
+        "lf_only",
+        "combined",
+        "semantic_texture_soft_combined",
+    ):
         raise ContentEmbedderError("content embedding mode is invalid")
     content_direction = _vector(
         result.content_direction,
@@ -360,7 +405,7 @@ def _validate_content_embedding_result(
             and result.route_identity is None
             and result.route_config_digest is None
         )
-    else:
+    elif result.mode == "combined":
         consistent = (
             lf_direction is not None
             and hf_direction is not None
@@ -370,6 +415,21 @@ def _validate_content_embedding_result(
             and result.target_component_hf is not None
             and result.target_component_lf_norm is not None
             and result.target_component_hf_norm is not None
+            and result.lf_carrier_config_digest is not None
+            and result.hf_carrier_config_digest is not None
+            and result.route_identity is not None
+            and result.route_config_digest is not None
+        )
+    else:
+        consistent = (
+            lf_direction is not None
+            and hf_direction is not None
+            and result.mixing_coefficient is None
+            and result.gamma_lh is None
+            and result.target_component_lf is None
+            and result.target_component_hf is None
+            and result.target_component_lf_norm is None
+            and result.target_component_hf_norm is None
             and result.lf_carrier_config_digest is not None
             and result.hf_carrier_config_digest is not None
             and result.route_identity is not None
@@ -390,7 +450,11 @@ def _validate_content_embedding_result(
         raise ContentEmbedderError(
             "content direction failed frozen formula replay"
         )
-    direction_tolerance = 2e-5 if result.mode == "combined" else 1e-5
+    direction_tolerance = (
+        2e-5
+        if result.mode in {"combined", "semantic_texture_soft_combined"}
+        else 1e-5
+    )
     if abs(_l2_norm(content_direction) - 1.0) > direction_tolerance:
         raise ContentEmbedderError(
             "content direction failed frozen unit-L2 structure"
@@ -892,6 +956,38 @@ def _derive_nominal_embedding(
             )
         lf_scale = mixing_coefficient / combined_norm
         hf_scale = one_minus_a / combined_norm
+    elif mode == "semantic_texture_soft_combined":
+        if (
+            lf_direction is None
+            or hf_direction is None
+            or mixing_coefficient is not None
+        ):
+            raise ContentEmbedderError(
+                "semantic-texture nominal derivation requires two directions and no a/w"
+            )
+        combined_raw = tuple(
+            _float32(lf_value + hf_value)
+            for lf_value, hf_value in zip(
+                lf_direction,
+                hf_direction,
+                strict=True,
+            )
+        )
+        combined_norm = _l2_norm(combined_raw)
+        if combined_norm == 0.0:
+            raise ContentEmbedderError(
+                "semantic-texture combined direction has zero L2 energy"
+            )
+        content_direction = tuple(
+            _float32(value / combined_norm) for value in combined_raw
+        )
+        if abs(_l2_norm(content_direction) - 1.0) > 2e-5:
+            raise ContentEmbedderError(
+                "semantic-texture combined direction failed unit normalization"
+            )
+        gamma_lh = None
+        lf_scale = None
+        hf_scale = None
     else:
         raise ContentEmbedderError("content embedding mode is invalid")
 
@@ -1108,6 +1204,88 @@ def content_embedder(
         route_config_digest=route_config_digest,
         embedder_config_digest=embedder_config_digest,
         embedding_result_identity="",
+    )
+    result = replace(
+        result,
+        embedding_result_identity=_embedding_result_identity(result),
+    )
+    return _validate_content_embedding_result(result)
+
+
+def semantic_texture_content_embedder(
+    latent_values: Sequence[float],
+    hf_carrier_result: HfCarrierResult,
+    *,
+    lf_carrier_result: LfCarrierResult,
+    routing_result: SemanticTextureRoutingResult,
+) -> ContentEmbeddingResult:
+    """Build the no-a/w soft-routed direction under the shared 3/250 budget."""
+
+    hf_carrier_value, hf_direction = _validated_hf_direction(hf_carrier_result)
+    lf_carrier_value, lf_direction = _validated_lf_direction(lf_carrier_result)
+    try:
+        route = validate_semantic_texture_routing_result(routing_result)
+        validate_hf_carrier_semantic_texture_binding(hf_carrier_value, route)
+        validate_lf_carrier_semantic_texture_binding(lf_carrier_value, route)
+    except (ContentRouterError, HfCarrierError, LfCarrierError) as exc:
+        raise ContentEmbedderError(
+            "semantic-texture carrier route binding failed"
+        ) from exc
+    if (
+        hf_carrier_value.shape != lf_carrier_value.shape
+        or hf_carrier_value.shape != route.latent_shape
+        or hf_carrier_value.root_key_public_digest
+        != lf_carrier_value.root_key_public_digest
+        or hf_carrier_value.key_role != lf_carrier_value.key_role
+        or hf_carrier_value.wrong_key_index != lf_carrier_value.wrong_key_index
+    ):
+        raise ContentEmbedderError(
+            "semantic-texture carriers must share shape, route, and key semantics"
+        )
+    latent = _vector(latent_values, len(hf_direction), "latent_values")
+    latent_norm = _l2_norm(latent)
+    if latent_norm == 0.0:
+        raise ContentEmbedderError("callback latent has zero L2 energy")
+    target_relative_l2 = _content_relative_l2()
+    target_total_norm = _float32(target_relative_l2 * latent_norm)
+    if target_total_norm == 0.0:
+        raise ContentEmbedderError("target content update vanished in float32")
+    nominal = _derive_nominal_embedding(
+        mode="semantic_texture_soft_combined",
+        lf_direction=lf_direction,
+        hf_direction=hf_direction,
+        mixing_coefficient=None,
+        target_total_norm=target_total_norm,
+    )
+    result = ContentEmbeddingResult(
+        candidate_ids=SEMANTIC_TEXTURE_EMBEDDER_CANDIDATE_IDS,
+        mode="semantic_texture_soft_combined",
+        shape=route.latent_shape,
+        delta_content=nominal.delta_content,
+        delta_content_digest=_digest(nominal.delta_content),
+        latent_norm=latent_norm,
+        target_total_norm=target_total_norm,
+        target_relative_l2=target_relative_l2,
+        content_direction=nominal.content_direction,
+        active_lf_direction=lf_direction,
+        active_hf_direction=hf_direction,
+        mixing_coefficient=None,
+        gamma_lh=None,
+        combined_pre_normalization_norm=nominal.combined_pre_normalization_norm,
+        target_component_lf=None,
+        target_component_hf=None,
+        target_component_lf_norm=None,
+        target_component_hf_norm=None,
+        lf_carrier_config_digest=lf_carrier_value.carrier_config_digest,
+        hf_carrier_config_digest=hf_carrier_value.carrier_config_digest,
+        route_identity=route.route_identity,
+        route_config_digest=route.route_config_digest,
+        embedder_config_digest="",
+        embedding_result_identity="",
+    )
+    result = replace(
+        result,
+        embedder_config_digest=_expected_embedder_config_digest(result),
     )
     result = replace(
         result,

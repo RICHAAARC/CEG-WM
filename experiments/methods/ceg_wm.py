@@ -41,9 +41,19 @@ from main import (
     QkGeometrySyncResult,
     RootKeyIdentity,
     RoutingObservations,
+    SemanticTextureBranchNullCalibration,
+    SemanticTextureContentDetectionResult,
+    SemanticTextureLfWhiteningAsset,
+    SemanticTextureRoutingObservations,
+    SemanticTextureRoutingResult,
     content_detector,
     content_embedder,
     content_router,
+    semantic_texture_content_detector,
+    semantic_texture_content_embedder,
+    semantic_texture_content_router,
+    semantic_texture_hf_detector,
+    semantic_texture_lf_detector,
     conditional_recovery_decision,
     differentiable_qk_relation_objective,
     derive_public_noise_stream,
@@ -68,6 +78,8 @@ from runtime import (
     RuntimeActualQkSuffixResult,
     RuntimeDifferentiableQkSuffixResult,
     RuntimeQkObservationResult,
+    InspyrenetSemanticRuntime,
+    RuntimeSemanticTextureDetectionObservationResult,
     Sd35RuntimeAdapter,
 )
 
@@ -93,6 +105,13 @@ QK_SYNCHRONIZATION_WRITE_PUBLIC_CALLABLE = (
     " -> runtime.Sd35RuntimeAdapter."
     "observe_actual_qk_from_generation_suffix"
     " -> main.qk_geometry_sync"
+)
+SEMANTIC_TEXTURE_DETECTION_PUBLIC_CALLABLE = (
+    "runtime.Sd35RuntimeAdapter.observe_semantic_texture_detection"
+    " -> main.semantic_texture_content_router"
+    " -> main.semantic_texture_hf_detector"
+    " + main.semantic_texture_lf_detector"
+    " -> main.semantic_texture_content_detector"
 )
 REQUIRED_COMPONENT_BINDINGS = (
     ("key_schedule", "main.identify_root_key", "config_digest"),
@@ -592,6 +611,25 @@ class CegWmExperimentAdapter:
         return self._observe("content_router", result)
 
     @_revalidate_configuration_before_call
+    def route_semantic_texture(
+        self,
+        latent_shape: Sequence[int],
+        *,
+        mode: str,
+        observations: SemanticTextureRoutingObservations | object | None = None,
+    ) -> ComponentCallObservation[SemanticTextureRoutingResult]:
+        result = semantic_texture_content_router(
+            latent_shape,
+            mode=mode,
+            observations=observations,
+        )
+        return self._observe(
+            "content_router",
+            result,
+            public_callable="main.semantic_texture_content_router",
+        )
+
+    @_revalidate_configuration_before_call
     def build_lf_carrier(
         self,
         detection_key: str,
@@ -639,6 +677,38 @@ class CegWmExperimentAdapter:
             routing_result=routing_result,
         )
         return self._observe("content_embedder", result)
+
+    @_revalidate_configuration_before_call
+    def embed_semantic_texture(
+        self,
+        latent_values: Sequence[float],
+        detection_key: str,
+        routing_result: SemanticTextureRoutingResult,
+    ) -> ComponentCallObservation[ContentEmbeddingResult]:
+        hf = hf_carrier(
+            detection_key,
+            routing_result.latent_shape,
+            routing_result=routing_result,
+        )
+        lf = lf_carrier(
+            detection_key,
+            routing_result.latent_shape,
+            routing_result=routing_result,
+        )
+        result = semantic_texture_content_embedder(
+            latent_values,
+            hf,
+            lf_carrier_result=lf,
+            routing_result=routing_result,
+        )
+        return self._observe(
+            "content_embedder",
+            result,
+            public_callable=(
+                "main.hf_carrier + main.lf_carrier"
+                " -> main.semantic_texture_content_embedder"
+            ),
+        )
 
     @_revalidate_configuration_before_call
     def detect_lf(
@@ -703,6 +773,60 @@ class CegWmExperimentAdapter:
             weight=weight,
         )
         return self._observe("content_detector", result)
+
+    @_revalidate_configuration_before_call
+    def detect_semantic_texture_candidate(
+        self,
+        detection_image_rgb8: torch.Tensor,
+        detection_key: str | DerivedWrongKeyMaterial,
+        semantic_runtime: InspyrenetSemanticRuntime,
+        whitening_asset: SemanticTextureLfWhiteningAsset,
+        *,
+        hf_null: SemanticTextureBranchNullCalibration,
+        lf_null: SemanticTextureBranchNullCalibration,
+    ) -> ComponentCallObservation[SemanticTextureContentDetectionResult]:
+        """Traverse the real public runtime and the fixed candidate max API."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture detection requires a prepared runtime adapter"
+            )
+        runtime_result = self._runtime_adapter.observe_semantic_texture_detection(
+            detection_image_rgb8,
+            semantic_runtime,
+        )
+        if type(runtime_result) is not RuntimeSemanticTextureDetectionObservationResult:
+            raise CegWmExperimentAdapterError(
+                "runtime returned an invalid semantic-texture observation"
+            )
+        route = semantic_texture_content_router(
+            runtime_result.hf_observation.shape,
+            mode="routing_semantic_texture_soft",
+            observations=runtime_result.semantic_texture.observations,
+        )
+        hf_result = semantic_texture_hf_detector(
+            runtime_result.hf_observation,
+            detection_key,
+            route,
+        )
+        lf_result = semantic_texture_lf_detector(
+            runtime_result.lf_observation,
+            detection_key,
+            route,
+            whitening_asset,
+        )
+        result = semantic_texture_content_detector(
+            hf_result,
+            lf_result,
+            hf_null=hf_null,
+            lf_null=lf_null,
+        )
+        return self._observe(
+            "content_detector",
+            result,
+            upstream_runtime_identity=runtime_result.observation_identity,
+            public_callable=SEMANTIC_TEXTURE_DETECTION_PUBLIC_CALLABLE,
+        )
 
     @_revalidate_configuration_before_call
     def observe_qk_geometry(

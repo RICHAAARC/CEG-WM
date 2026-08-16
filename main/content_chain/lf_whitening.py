@@ -27,6 +27,12 @@ LF_NULL_WHITENING_BAND_IDENTITY = (
 LF_NULL_WHITENING_REGULARIZATION_RATIO = "0x1.0000000000000p-10"
 LF_NULL_WHITENING_WEIGHT_COUNT = 96
 LF_NULL_WHITENING_OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
+SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID = (
+    "lf_semantic_texture_soft_whitened_matched_score"
+)
+SEMANTIC_TEXTURE_LF_WHITENING_ARTIFACT_ROLE = (
+    "lf_semantic_texture_soft_clean_null_whitening_operator"
+)
 
 
 class LfNullWhiteningAssetError(ValueError):
@@ -193,6 +199,121 @@ class LfNullWhiteningAsset:
         )
 
 
+def _semantic_texture_canonical_payload(
+    *,
+    fit_manifest_sha256: str,
+    weights_binary32_be_hex: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "artifact_role": SEMANTIC_TEXTURE_LF_WHITENING_ARTIFACT_ROLE,
+        "band_identity": LF_NULL_WHITENING_BAND_IDENTITY,
+        "candidate_id": SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,
+        "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
+        "fit_manifest_sha256": fit_manifest_sha256,
+        "fit_source_cluster_count": LF_NULL_WHITENING_FIT_SOURCE_CLUSTER_COUNT,
+        "latent_shape": list(LF_NULL_WHITENING_LATENT_SHAPE),
+        "observation_protocol": LF_NULL_WHITENING_OBSERVATION_PROTOCOL,
+        "regularization_ratio": LF_NULL_WHITENING_REGULARIZATION_RATIO,
+        "route_candidate_id": "routing_semantic_texture_soft",
+        "transform_identity": LF_NULL_WHITENING_TRANSFORM_IDENTITY,
+        "weights_binary32_be_hex": list(weights_binary32_be_hex),
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureLfWhiteningAsset:
+    """Dedicated soft-route W identity; never aliases an older LF asset."""
+
+    fit_manifest_sha256: str
+    weights_binary32_be_hex: tuple[str, ...]
+    whitening_asset_digest: str
+    weights: tuple[float, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        manifest = _sha256_text(
+            self.fit_manifest_sha256,
+            "semantic-texture LF fit manifest digest",
+        )
+        words = _weight_words(self.weights_binary32_be_hex)
+        declared = _sha256_text(
+            self.whitening_asset_digest,
+            "semantic-texture LF whitening asset digest",
+        )
+        payload = _semantic_texture_canonical_payload(
+            fit_manifest_sha256=manifest,
+            weights_binary32_be_hex=words,
+        )
+        if sha256(stable_json_utf8(payload)).hexdigest() != declared:
+            raise LfNullWhiteningAssetError(
+                "semantic-texture LF asset digest does not match its payload"
+            )
+        object.__setattr__(self, "fit_manifest_sha256", manifest)
+        object.__setattr__(self, "weights_binary32_be_hex", words)
+        object.__setattr__(
+            self,
+            "weights",
+            tuple(unpack(">f", bytes.fromhex(word))[0] for word in words),
+        )
+
+    @property
+    def canonical_payload(self) -> dict[str, object]:
+        return _semantic_texture_canonical_payload(
+            fit_manifest_sha256=self.fit_manifest_sha256,
+            weights_binary32_be_hex=self.weights_binary32_be_hex,
+        )
+
+    def validate(self) -> None:
+        replay = type(self)(
+            fit_manifest_sha256=self.fit_manifest_sha256,
+            weights_binary32_be_hex=self.weights_binary32_be_hex,
+            whitening_asset_digest=self.whitening_asset_digest,
+        )
+        if replay.weights != self.weights:
+            raise LfNullWhiteningAssetError(
+                "semantic-texture LF decoded weights drifted"
+            )
+
+    @classmethod
+    def from_canonical_payload(
+        cls,
+        payload: Mapping[str, object],
+        *,
+        whitening_asset_digest: str,
+    ) -> SemanticTextureLfWhiteningAsset:
+        if type(payload) is not dict:
+            raise LfNullWhiteningAssetError(
+                "semantic-texture LF payload must be a plain mapping"
+            )
+        expected_keys = set(
+            _semantic_texture_canonical_payload(
+                fit_manifest_sha256="0" * 64,
+                weights_binary32_be_hex=("3f800000",) * 96,
+            )
+        )
+        if set(payload) != expected_keys:
+            raise LfNullWhiteningAssetError(
+                "semantic-texture LF payload fields drifted"
+            )
+        words = _weight_words(payload["weights_binary32_be_hex"])
+        manifest = _sha256_text(
+            payload["fit_manifest_sha256"],
+            "semantic-texture LF fit manifest digest",
+        )
+        expected = _semantic_texture_canonical_payload(
+            fit_manifest_sha256=manifest,
+            weights_binary32_be_hex=words,
+        )
+        if payload != expected:
+            raise LfNullWhiteningAssetError(
+                "semantic-texture LF payload identity drifted"
+            )
+        return cls(
+            fit_manifest_sha256=manifest,
+            weights_binary32_be_hex=words,
+            whitening_asset_digest=whitening_asset_digest,
+        )
+
+
 __all__ = [
     "LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID",
     "LF_NULL_WHITENING_ARTIFACT_ROLE",
@@ -206,4 +327,7 @@ __all__ = [
     "LF_NULL_WHITENING_WEIGHT_COUNT",
     "LfNullWhiteningAsset",
     "LfNullWhiteningAssetError",
+    "SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID",
+    "SEMANTIC_TEXTURE_LF_WHITENING_ARTIFACT_ROLE",
+    "SemanticTextureLfWhiteningAsset",
 ]

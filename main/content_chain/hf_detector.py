@@ -14,6 +14,11 @@ from main.shared.key_schedule import (
 )
 
 from .hf_carrier import MODEL_REVISION, HfCarrierError, hf_carrier
+from .routing import (
+    SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+    SemanticTextureRoutingResult,
+    validate_semantic_texture_routing_result,
+)
 
 OBSERVATION_PROTOCOL = "final_image_vae_posterior_mode"
 
@@ -73,6 +78,23 @@ class HfDetectionResult:
     wrong_key_index: int | None
     observation_digest: str
     template_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureHfDetectionResult:
+    """Blind soft-routed HF score for the unpromoted candidate family."""
+
+    candidate_id: str
+    candidate_status: str
+    hf_score: float
+    detector_identity: str
+    detector_config_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    observation_digest: str
+    template_digest: str
+    route_identity: str
 
 
 def _element_count(shape: tuple[int, int, int, int]) -> int:
@@ -210,4 +232,87 @@ def hf_detector(
         wrong_key_index=carrier.wrong_key_index,
         observation_digest=observation.observation_digest,
         template_digest=carrier.template_digest,
+    )
+
+
+def semantic_texture_hf_detector(
+    observation: HfDetectionObservation,
+    detection_key: str | DerivedWrongKeyMaterial,
+    routing_result: SemanticTextureRoutingResult,
+    *,
+    model_revision: str = MODEL_REVISION,
+) -> SemanticTextureHfDetectionResult:
+    """Apply current-image ``m_hf`` to both observation and key-only template."""
+
+    if type(observation) is not HfDetectionObservation:
+        raise HfDetectorError(
+            "semantic-texture HF detector requires a public-image observation"
+        )
+    if observation.observation_protocol != OBSERVATION_PROTOCOL or (
+        _digest(observation.values) != observation.observation_digest
+    ):
+        raise HfDetectorError("semantic-texture HF observation identity mismatch")
+    try:
+        route = validate_semantic_texture_routing_result(routing_result)
+    except ValueError as exc:
+        raise HfDetectorError("semantic-texture HF route validation failed") from exc
+    if route.latent_shape != observation.shape:
+        raise HfDetectorError("semantic-texture HF route shape mismatch")
+    try:
+        carrier = hf_carrier(
+            detection_key,
+            observation.shape,
+            model_revision=model_revision,
+        )
+    except HfCarrierError as exc:
+        raise HfDetectorError("semantic-texture HF template reconstruction failed") from exc
+    routed_observation = tuple(
+        _float32(value * weight)
+        for value, weight in zip(
+            observation.values,
+            route.mask_hf,
+            strict=True,
+        )
+    )
+    routed_template = tuple(
+        _float32(value * weight)
+        for value, weight in zip(carrier.template, route.mask_hf, strict=True)
+    )
+    observation_unit = _normalize(_center(routed_observation), "soft-routed HF observation")
+    template_unit = _normalize(_center(routed_template), "soft-routed HF template")
+    score = 0.0
+    for observed, template in zip(observation_unit, template_unit, strict=True):
+        score = _float32(score + _float32(observed * template))
+    candidate_id = "hf_semantic_texture_soft_direct_score"
+    config = {
+        "candidate_id": candidate_id,
+        "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        "carrier_config_digest": carrier.carrier_config_digest,
+        "model_revision": model_revision,
+        "observation_protocol": OBSERVATION_PROTOCOL,
+        "route_identity": route.route_identity,
+        "score_operator": "centered_normalized_correlation_after_symmetric_m_hf",
+    }
+    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": candidate_id,
+                "detector_config_digest": config_digest,
+                "detector_role": "semantic_texture_soft_hf_blind_score",
+            }
+        )
+    ).hexdigest()
+    return SemanticTextureHfDetectionResult(
+        candidate_id=candidate_id,
+        candidate_status=SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        hf_score=score,
+        detector_identity=identity,
+        detector_config_digest=config_digest,
+        root_key_public_digest=carrier.root_key_public_digest,
+        key_role=carrier.key_role,
+        wrong_key_index=carrier.wrong_key_index,
+        observation_digest=observation.observation_digest,
+        template_digest=carrier.template_digest,
+        route_identity=route.route_identity,
     )

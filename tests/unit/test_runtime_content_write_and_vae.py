@@ -9,10 +9,15 @@ import torch
 import runtime.content_write as runtime_content_write
 from main import (
     ContentEmbeddingResult,
+    SemanticTextureRoutingObservations,
+    SpatialRoutingObservation,
     content_actual_budget_accepts,
     content_embedder,
+    semantic_texture_content_embedder,
+    semantic_texture_content_router,
 )
 from main.content_chain.hf_carrier import hf_carrier
+from main.content_chain.lf_carrier import lf_carrier
 from runtime import (
     RuntimeAdapterError,
     RuntimeAdapterState,
@@ -254,6 +259,38 @@ def _embedding_operation(calls: list[tuple[float, ...]]):
     return operation
 
 
+def _semantic_texture_embedding_operation(calls: list[tuple[float, ...]]):
+    route = semantic_texture_content_router(
+        TEST_SHAPE,
+        mode="routing_semantic_texture_soft",
+        observations=SemanticTextureRoutingObservations(
+            semantic_probability=SpatialRoutingObservation(
+                values=(0.5,) * 16,
+                spatial_shape=(4, 4),
+                source_identity_digest=sha256(b"runtime-semantic-M").hexdigest(),
+            ),
+            texture_complexity=SpatialRoutingObservation(
+                values=tuple((index % 4) / 3.0 for index in range(16)),
+                spatial_shape=(4, 4),
+                source_identity_digest=sha256(b"runtime-texture-T").hexdigest(),
+            ),
+        ),
+    )
+    hf_result = hf_carrier(TEST_ROOT_KEY, TEST_SHAPE, routing_result=route)
+    lf_result = lf_carrier(TEST_ROOT_KEY, TEST_SHAPE, routing_result=route)
+
+    def operation(values: tuple[float, ...]) -> ContentEmbeddingResult:
+        calls.append(values)
+        return semantic_texture_content_embedder(
+            values,
+            hf_result,
+            lf_carrier_result=lf_result,
+            routing_result=route,
+        )
+
+    return operation
+
+
 def _initialized_adapter(backend: FakeContentBackend):
     adapter = create_runtime_adapter(backend)
     adapter.initialize("cpu")
@@ -374,6 +411,30 @@ def test_clean_image_observation_matches_existing_paired_clean_path() -> None:
     assert clean_backend.run_calls == 1
     assert paired_backend.run_calls == 2
     assert paired_backend.suffix_capture_calls == 0
+
+
+@pytest.mark.unit
+def test_semantic_texture_write_reuses_actual_dtype_combined_budget() -> None:
+    backend = FakeContentBackend()
+    adapter = _initialized_adapter(backend)
+    calls: list[tuple[float, ...]] = []
+
+    result = adapter.execute_content_write_and_vae(
+        _base_latent(),
+        _semantic_texture_embedding_operation(calls),
+    )
+
+    method_result = result.content_materialization_result
+    assert len(calls) == 1
+    assert method_result.embedding_result.mode == "semantic_texture_soft_combined"
+    assert method_result.embedding_result.mixing_coefficient is None
+    assert method_result.content_relative_l2_nominal == pytest.approx(3.0 / 250.0)
+    assert method_result.content_relative_l2_limit == pytest.approx(3.0 / 250.0)
+    assert method_result.budget_status == "accepted"
+    assert method_result.integrity_status == "passed"
+    assert method_result.materialization_scale > 0.0
+    assert method_result.budget_utilization <= 1.0
+    assert result.content_materialization.delta_content_actual.dtype is torch.float32
 
 
 @pytest.mark.unit

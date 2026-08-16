@@ -19,8 +19,9 @@ from main.shared.rgb8 import (
     validate_rgb8_image_digest,
 )
 
-from .hf_detector import HfDetectionResult
-from .lf_detector import LfDetectionResult
+from .hf_detector import HfDetectionResult, SemanticTextureHfDetectionResult
+from .lf_detector import LfDetectionResult, SemanticTextureLfDetectionResult
+from .routing import SEMANTIC_TEXTURE_CANDIDATE_STATUS
 
 CONTENT_DETECTOR_CANDIDATE_IDS = (
     "hf_sparse_tail",
@@ -204,6 +205,97 @@ class ContentDetectionResult:
     diagnostic_identity: str | None
     content_input_image_digest: str | None
     content_replay_operation: ContentResultReplayOperation | None
+
+
+SEMANTIC_TEXTURE_FIVE_CANDIDATE_FAMILY = (
+    "routing_semantic_texture_soft",
+    "content_embedding_semantic_texture_soft_lf_hf",
+    "lf_semantic_texture_soft_whitened_matched_score",
+    "hf_semantic_texture_soft_direct_score",
+    "content_combination_semantic_texture_max_standardized",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureBranchNullCalibration:
+    """Candidate-local primary-null CDF that cannot alias historical CDFs."""
+
+    branch: BranchName
+    detector_identity: str
+    partition_identity: str
+    records: tuple[NullScoreRecord, ...]
+    calibration_identity: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.branch not in {"hf", "lf"}:
+            raise ContentDetectorError("soft-route CDF branch must be hf or lf")
+        if (
+            type(self.detector_identity) is not str
+            or not self.detector_identity
+            or type(self.partition_identity) is not str
+            or not self.partition_identity
+            or len(self.records) < 2
+            or any(type(record) is not NullScoreRecord for record in self.records)
+        ):
+            raise ContentDetectorError("soft-route branch CDF identity is invalid")
+        ordered = tuple(
+            sorted(
+                self.records,
+                key=lambda record: (
+                    record.score,
+                    record.source_cluster_id,
+                    record.sample_id,
+                ),
+            )
+        )
+        identities = tuple(
+            (record.source_cluster_id, record.sample_id) for record in ordered
+        )
+        if len(set(identities)) != len(identities):
+            raise ContentDetectorError("soft-route CDF records must be unique")
+        object.__setattr__(self, "records", ordered)
+        object.__setattr__(
+            self,
+            "calibration_identity",
+            sha256(
+                stable_json_utf8(
+                    {
+                        "branch": self.branch,
+                        "candidate_id": "content_combination_semantic_texture_max_standardized",
+                        "detector_identity": self.detector_identity,
+                        "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
+                        "partition_identity": self.partition_identity,
+                        "records": [
+                            {
+                                "sample_id": record.sample_id,
+                                "score_float64_hex": record.score.hex(),
+                                "source_cluster_id": record.source_cluster_id,
+                            }
+                            for record in ordered
+                        ],
+                    }
+                )
+            ).hexdigest(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureContentDetectionResult:
+    """Five-candidate-bound max statistic, explicitly not a formal promotion."""
+
+    candidate_id: str
+    candidate_status: str
+    candidate_family: tuple[str, ...]
+    hf_standardization: BranchStandardizationResult
+    lf_standardization: BranchStandardizationResult
+    content_score: float
+    hf_score: float
+    lf_score: float
+    detector_identity: str
+    content_config_digest: str
+    route_identity: str
+    diagnostic_only: bool
+    promoted: bool
 
 
 def _validate_hf_result(result: object) -> HfDetectionResult:
@@ -833,6 +925,136 @@ def content_detector(
         diagnostic_identity=diagnostic_identity,
         content_input_image_digest=None,
         content_replay_operation=None,
+    )
+
+
+def _standardize_semantic_texture_branch(
+    *,
+    branch: BranchName,
+    score: float,
+    detector_identity: str,
+    calibration: SemanticTextureBranchNullCalibration,
+) -> BranchStandardizationResult:
+    if type(calibration) is not SemanticTextureBranchNullCalibration:
+        raise ContentDetectorError(
+            "semantic-texture max requires both dedicated branch CDFs"
+        )
+    if calibration.branch != branch or calibration.detector_identity != detector_identity:
+        raise ContentDetectorError("semantic-texture branch CDF identity mismatch")
+    query = float(score)
+    if not isfinite(query):
+        raise ContentDetectorError("semantic-texture branch score must be finite")
+    less_count = sum(record.score < query for record in calibration.records)
+    equal_count = sum(record.score == query for record in calibration.records)
+    null_count = len(calibration.records)
+    u_raw = (less_count + 0.5 * equal_count) / null_count
+    epsilon_n = 1.0 / (2.0 * null_count)
+    u_clipped = min(max(u_raw, epsilon_n), 1.0 - epsilon_n)
+    index = min((1 << 20) - 1, floor(u_clipped * (1 << 20)))
+    try:
+        z_score = float(normal_quantile_table_lookup(index))
+    except KeyScheduleError as exc:
+        raise ContentDetectorError("semantic-texture normal table lookup failed") from exc
+    if not isfinite(z_score):
+        raise ContentDetectorError(
+            "semantic-texture standardized branch score must be finite"
+        )
+    return BranchStandardizationResult(
+        branch=branch,
+        raw_score=query,
+        less_count=less_count,
+        equal_count=equal_count,
+        null_count=null_count,
+        u_raw=u_raw,
+        epsilon_n=epsilon_n,
+        u_clipped=u_clipped,
+        quantile_index=index,
+        z_score=z_score,
+        calibration_identity=calibration.calibration_identity,
+    )
+
+
+def semantic_texture_content_detector(
+    hf_result: SemanticTextureHfDetectionResult,
+    lf_result: SemanticTextureLfDetectionResult,
+    *,
+    hf_null: SemanticTextureBranchNullCalibration,
+    lf_null: SemanticTextureBranchNullCalibration,
+) -> SemanticTextureContentDetectionResult:
+    """Compute only ``max(z_hf_soft,z_lf_soft)`` without formal promotion."""
+
+    if type(hf_result) is not SemanticTextureHfDetectionResult or (
+        type(lf_result) is not SemanticTextureLfDetectionResult
+    ):
+        raise ContentDetectorError(
+            "semantic-texture max requires its two dedicated branch results"
+        )
+    if (
+        hf_result.candidate_id != "hf_semantic_texture_soft_direct_score"
+        or lf_result.candidate_id
+        != "lf_semantic_texture_soft_whitened_matched_score"
+        or hf_result.candidate_status != SEMANTIC_TEXTURE_CANDIDATE_STATUS
+        or lf_result.candidate_status != SEMANTIC_TEXTURE_CANDIDATE_STATUS
+        or hf_result.root_key_public_digest != lf_result.root_key_public_digest
+        or hf_result.key_role != lf_result.key_role
+        or hf_result.wrong_key_index != lf_result.wrong_key_index
+        or hf_result.observation_digest != lf_result.observation_digest
+        or hf_result.route_identity != lf_result.route_identity
+    ):
+        raise ContentDetectorError(
+            "semantic-texture branch identity, image, route, or key semantics differ"
+        )
+    hf_standardization = _standardize_semantic_texture_branch(
+        branch="hf",
+        score=hf_result.hf_score,
+        detector_identity=hf_result.detector_identity,
+        calibration=hf_null,
+    )
+    lf_standardization = _standardize_semantic_texture_branch(
+        branch="lf",
+        score=lf_result.lf_score,
+        detector_identity=lf_result.detector_identity,
+        calibration=lf_null,
+    )
+    content_score = max(
+        hf_standardization.z_score,
+        lf_standardization.z_score,
+    )
+    candidate_id = "content_combination_semantic_texture_max_standardized"
+    config = {
+        "candidate_family": list(SEMANTIC_TEXTURE_FIVE_CANDIDATE_FAMILY),
+        "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        "formula": "max(z_hf_soft,z_lf_soft)",
+        "hf_calibration_identity": hf_standardization.calibration_identity,
+        "lf_calibration_identity": lf_standardization.calibration_identity,
+        "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
+        "promotion_status": "not_promoted",
+        "route_identity": hf_result.route_identity,
+    }
+    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": candidate_id,
+                "content_config_digest": config_digest,
+                "detector_role": "semantic_texture_max_candidate_diagnostic",
+            }
+        )
+    ).hexdigest()
+    return SemanticTextureContentDetectionResult(
+        candidate_id=candidate_id,
+        candidate_status=SEMANTIC_TEXTURE_CANDIDATE_STATUS,
+        candidate_family=SEMANTIC_TEXTURE_FIVE_CANDIDATE_FAMILY,
+        hf_standardization=hf_standardization,
+        lf_standardization=lf_standardization,
+        content_score=content_score,
+        hf_score=hf_result.hf_score,
+        lf_score=lf_result.lf_score,
+        detector_identity=identity,
+        content_config_digest=config_digest,
+        route_identity=hf_result.route_identity,
+        diagnostic_only=True,
+        promoted=False,
     )
 
 

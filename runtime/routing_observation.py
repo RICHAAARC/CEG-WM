@@ -4,14 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import importlib
 import json
 from math import isfinite
+import os
+from pathlib import Path
+import stat
+from typing import Mapping
 
 import torch
 from torch.nn import functional as functional
 from torch.nn.functional import conv2d as spatial_convolution
 
-from main import SpatialRoutingObservation, derive_public_noise_stream
+from main import (
+    HfDetectionObservation,
+    LfDetectionObservation,
+    SemanticTextureRoutingObservations,
+    SpatialRoutingObservation,
+    derive_public_noise_stream,
+    rgb8_image_digest,
+)
 
 from .adapter import RuntimeSession
 from .backend import RuntimeContentBackend, RuntimeVaeFactors
@@ -19,6 +31,7 @@ from .configuration import Sd35RuntimeConfiguration
 from .content_write import (
     RuntimeContentExecutionError,
     _decode_generation_latent,
+    _encode_detection_image,
     _tensor,
 )
 
@@ -27,10 +40,403 @@ ROUTING_OBSERVATION_CANDIDATE_ID = "routing_stqr"
 ROUTING_PROBE_RELATIVE_STEP = 1.0e-3
 _PREVIOUS_WRITE_CALLBACK_INDEX = 17
 _ROUTING_WRITE_CALLBACK_INDEX = 18
+SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID = "routing_semantic_texture_soft"
+INSPYRENET_SOURCE_REVISION = "f0fa91701a98cfc8e955c554e84522f365ec6da3"
+INSPYRENET_CHECKPOINT_REVISION = "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
+INSPYRENET_CHECKPOINT_SHA256 = (
+    "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
+)
+INSPYRENET_CHECKPOINT_SIZE = 367_520_613
+INSPYRENET_CHECKPOINT_BASENAME = "ckpt_base.pth"
+INSPYRENET_CLASS_MODULE = "transparent_background.InSPyReNet"
+INSPYRENET_CLASS_NAME = "InSPyReNet"
+INSPYRENET_FACTORY_NAME = "InSPyReNet_SwinB"
+_INSPYRENET_SOURCE_FILE_SHA256 = {
+    "InSPyReNet.py": "9bf8c73a361200888e48677c1df55b81bb1bdb669cfd91d73a01c01d24efbef4",
+    "modules/layers.py": "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
+    "modules/context_module.py": (
+        "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4"
+    ),
+    "modules/attention_module.py": (
+        "7f34d941393fb9dfc69f14ff02f731e5e1487f55cde9e79a7195d328922db2fb"
+    ),
+    "modules/decoder_module.py": (
+        "a6c99bfdfed9cefd4184662b4a093d179e6a0c805d92ad21122ebaf95e05ee20"
+    ),
+    "backbones/SwinTransformer.py": (
+        "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82"
+    ),
+}
 
 
 class RuntimeRoutingObservationError(RuntimeError):
     """A generation-time routing observation violated its frozen boundary."""
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSemanticTextureObservationResult:
+    """Current ordinary RGB8-derived public M/T observations only."""
+
+    candidate_id: str
+    input_image_digest: str
+    observations: SemanticTextureRoutingObservations
+    source_revision: str
+    source_class: str
+    source_file_sha256: tuple[tuple[str, str], ...]
+    forward_api: str
+    checkpoint_revision: str
+    checkpoint_sha256: str
+    checkpoint_size: int
+    execution_evidence: str
+    observation_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSemanticTextureDetectionObservationResult:
+    """One-image runtime output for blind route plus public VAE observation."""
+
+    semantic_texture: RuntimeSemanticTextureObservationResult
+    hf_observation: HfDetectionObservation
+    lf_observation: LfDetectionObservation
+    runtime_config_digest: str
+    observation_identity: str
+
+
+def _sha256_regular_file(path: Path, role: str) -> str:
+    try:
+        path_stat = path.lstat()
+    except OSError:
+        raise RuntimeRoutingObservationError(f"{role} is unavailable") from None
+    if not stat.S_ISREG(path_stat.st_mode):
+        raise RuntimeRoutingObservationError(f"{role} must be a regular non-symlink file")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_dev != path_stat.st_dev
+            or opened.st_ino != path_stat.st_ino
+            or opened.st_size != path_stat.st_size
+        ):
+            raise RuntimeRoutingObservationError(f"{role} changed during verification")
+        digest = sha256()
+        while payload := os.read(descriptor, 1024 * 1024):
+            digest.update(payload)
+        return digest.hexdigest()
+    except OSError:
+        raise RuntimeRoutingObservationError(f"{role} verification failed") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _load_registered_inspyrenet_class() -> tuple[type[torch.nn.Module], object]:
+    try:
+        module = importlib.import_module(INSPYRENET_CLASS_MODULE)
+    except Exception as exc:
+        raise RuntimeRoutingObservationError(
+            "registered transparent-background source dependency is unavailable"
+        ) from exc
+    module_file = getattr(module, "__file__", None)
+    if type(module_file) is not str or Path(module_file).name != "InSPyReNet.py":
+        raise RuntimeRoutingObservationError("InSPyReNet source module has no regular file")
+    package_root = Path(module_file).parent
+    for relative_path, expected_digest in _INSPYRENET_SOURCE_FILE_SHA256.items():
+        actual_digest = _sha256_regular_file(
+            package_root / relative_path,
+            f"InSPyReNet source {relative_path}",
+        )
+        if actual_digest != expected_digest:
+            raise RuntimeRoutingObservationError(
+                "InSPyReNet source revision content drifted"
+            )
+    model_class = getattr(module, INSPYRENET_CLASS_NAME, None)
+    factory = getattr(module, INSPYRENET_FACTORY_NAME, None)
+    if (
+        not isinstance(model_class, type)
+        or model_class.__module__ != INSPYRENET_CLASS_MODULE
+        or model_class.__name__ != INSPYRENET_CLASS_NAME
+        or "forward_inspyre" not in model_class.__dict__
+        or not callable(model_class.__dict__["forward_inspyre"])
+        or not callable(factory)
+    ):
+        raise RuntimeRoutingObservationError(
+            "registered InSPyReNet class/factory/forward_inspyre API drifted"
+        )
+    return model_class, factory
+
+
+def _load_registered_checkpoint(path: Path) -> Mapping[str, torch.Tensor]:
+    if not isinstance(path, Path) or path.name != INSPYRENET_CHECKPOINT_BASENAME:
+        raise RuntimeRoutingObservationError("InSPyReNet checkpoint path identity drifted")
+    try:
+        checkpoint_stat = path.lstat()
+    except OSError:
+        raise RuntimeRoutingObservationError("InSPyReNet checkpoint is unavailable") from None
+    if (
+        not stat.S_ISREG(checkpoint_stat.st_mode)
+        or checkpoint_stat.st_size != INSPYRENET_CHECKPOINT_SIZE
+    ):
+        raise RuntimeRoutingObservationError("InSPyReNet checkpoint size or SHA-256 drifted")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_dev != checkpoint_stat.st_dev
+            or opened.st_ino != checkpoint_stat.st_ino
+            or opened.st_size != checkpoint_stat.st_size
+        ):
+            raise RuntimeRoutingObservationError(
+                "InSPyReNet checkpoint changed during verification"
+            )
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            digest = sha256()
+            while payload := stream.read(1024 * 1024):
+                digest.update(payload)
+            if digest.hexdigest() != INSPYRENET_CHECKPOINT_SHA256:
+                raise RuntimeRoutingObservationError(
+                    "InSPyReNet checkpoint size or SHA-256 drifted"
+                )
+            stream.seek(0)
+            state_dict = torch.load(stream, map_location="cpu", weights_only=True)
+    except RuntimeRoutingObservationError:
+        raise
+    except Exception as exc:
+        raise RuntimeRoutingObservationError("InSPyReNet checkpoint load failed") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if (
+        not isinstance(state_dict, Mapping)
+        or not state_dict
+        or any(type(key) is not str for key in state_dict)
+        or any(type(value) is not torch.Tensor for value in state_dict.values())
+    ):
+        raise RuntimeRoutingObservationError(
+            "InSPyReNet checkpoint is not a strict tensor state_dict"
+        )
+    return state_dict
+
+
+def _validate_inspyrenet_output(output: object) -> torch.Tensor:
+    if type(output) is not dict or set(output) != {"saliency", "laplacian"}:
+        raise RuntimeRoutingObservationError("forward_inspyre output identity drifted")
+    saliency = output["saliency"]
+    laplacian = output["laplacian"]
+    if (
+        type(saliency) is not list
+        or len(saliency) != 4
+        or type(laplacian) is not list
+        or len(laplacian) != 3
+    ):
+        raise RuntimeRoutingObservationError("forward_inspyre saliency pyramid drifted")
+    for tensor in (*saliency, *laplacian):
+        if (
+            type(tensor) is not torch.Tensor
+            or tensor.ndim != 4
+            or tuple(tensor.shape[:2]) != (1, 1)
+            or tensor.shape[2] <= 0
+            or tensor.shape[3] <= 0
+            or not tensor.is_floating_point()
+            or not bool(torch.isfinite(tensor).all().item())
+        ):
+            raise RuntimeRoutingObservationError(
+                "forward_inspyre pyramid tensor identity drifted"
+            )
+    raw_finest = saliency[-1]
+    if tuple(raw_finest.shape[2:]) != (1024, 1024):
+        raise RuntimeRoutingObservationError("raw finest d0 saliency output is invalid")
+    return raw_finest
+
+
+class InspyrenetSemanticRuntime:
+    """Strict production InSPyReNet loader; injection is explicitly test-only."""
+
+    __slots__ = ("_device", "_execution_evidence", "_model")
+
+    def __init__(self, checkpoint_path: Path, *, selected_device: str = "cpu") -> None:
+        try:
+            device = torch.device(selected_device)
+        except (RuntimeError, TypeError, ValueError):
+            raise RuntimeRoutingObservationError("InSPyReNet device is invalid") from None
+        model_class, factory = _load_registered_inspyrenet_class()
+        state_dict = _load_registered_checkpoint(checkpoint_path)
+        try:
+            model = factory(depth=64, pretrained=False, base_size=[384, 384])
+            if type(model) is not model_class:
+                raise RuntimeRoutingObservationError("InSPyReNet factory class drifted")
+            incompatible = model.load_state_dict(state_dict, strict=True)
+            if incompatible.missing_keys or incompatible.unexpected_keys:
+                raise RuntimeRoutingObservationError(
+                    "strict state_dict returned incompatibilities"
+                )
+            model.to(device)
+            model.eval()
+        except RuntimeRoutingObservationError:
+            raise
+        except Exception as exc:
+            raise RuntimeRoutingObservationError(
+                "strict InSPyReNet model initialization failed"
+            ) from exc
+        self._device = device
+        self._model = model
+        self._execution_evidence = "registered_source_checkpoint_strict_production"
+
+    @classmethod
+    def from_injected_model_for_test(
+        cls,
+        model: torch.nn.Module,
+        *,
+        selected_device: str = "cpu",
+    ) -> InspyrenetSemanticRuntime:
+        """Create explicit non-production evidence for lightweight boundary tests."""
+
+        if not isinstance(model, torch.nn.Module) or not callable(
+            getattr(model, "forward_inspyre", None)
+        ):
+            raise RuntimeRoutingObservationError(
+                "injected test model must be a torch module with forward_inspyre"
+            )
+        instance = object.__new__(cls)
+        instance._device = torch.device(selected_device)
+        instance._model = model.to(instance._device).eval()
+        instance._execution_evidence = "injected_minimal_model_test_only_not_production"
+        return instance
+
+    def observe(self, image_rgb8: torch.Tensor) -> RuntimeSemanticTextureObservationResult:
+        image = image_rgb8.detach().to(device="cpu").contiguous().clone()
+        try:
+            input_digest = rgb8_image_digest(image)
+        except ValueError:
+            raise RuntimeRoutingObservationError(
+                "semantic-texture input must be ordinary RGB8 [1,3,H,W]"
+            ) from None
+        normalized = image.to(dtype=torch.float32) / 255.0
+        normalized = functional.interpolate(
+            normalized,
+            size=(1024, 1024),
+            mode="bilinear",
+            align_corners=False,
+        )
+        mean = torch.tensor((0.485, 0.456, 0.406), dtype=torch.float32).view(1, 3, 1, 1)
+        std = torch.tensor((0.229, 0.224, 0.225), dtype=torch.float32).view(1, 3, 1, 1)
+        model_input = ((normalized - mean) / std).to(self._device)
+        try:
+            with torch.no_grad():
+                raw_finest = _validate_inspyrenet_output(
+                    self._model.forward_inspyre(model_input)
+                )
+                semantic = torch.sigmoid(raw_finest)
+        except RuntimeRoutingObservationError:
+            raise
+        except Exception as exc:
+            raise RuntimeRoutingObservationError(
+                "direct forward_inspyre raw-d0 execution failed"
+            ) from exc
+        semantic = functional.interpolate(
+            semantic.to(dtype=torch.float32),
+            size=(64, 64),
+            mode="bilinear",
+            align_corners=False,
+        ).to(device="cpu")
+        if not bool(torch.isfinite(semantic).all().item()) or bool(
+            ((semantic < 0.0) | (semantic > 1.0)).any().item()
+        ):
+            raise RuntimeRoutingObservationError("semantic probability M is invalid")
+
+        rgb = image.to(dtype=torch.float32) / 255.0
+        weights = torch.tensor((0.299, 0.587, 0.114), dtype=torch.float32).view(1, 3, 1, 1)
+        grayscale = (rgb * weights).sum(dim=1, keepdim=True)
+        padded = functional.pad(grayscale, (1, 1, 1, 1), mode="replicate")
+        sobel_x = torch.tensor(
+            ((-1.0, 0.0, 1.0), (-2.0, 0.0, 2.0), (-1.0, 0.0, 1.0)),
+            dtype=torch.float32,
+        ).view(1, 1, 3, 3)
+        sobel_y = sobel_x.transpose(2, 3).contiguous()
+        magnitude = torch.sqrt(
+            spatial_convolution(padded, sobel_x).square()
+            + spatial_convolution(padded, sobel_y).square()
+        )
+        downsampled = functional.interpolate(magnitude, size=(64, 64), mode="area")
+        flattened = tuple(float(value) for value in downsampled.reshape(-1).tolist())
+        positive = sorted(
+            ((value, index) for index, value in enumerate(flattened) if value > 0.0),
+            key=lambda item: (item[0], item[1]),
+        )
+        if positive:
+            rank = (95 * len(positive) + 99) // 100
+            positive_gradient_nearest_rank_p95 = positive[rank - 1][0]
+            texture = torch.clamp(
+                downsampled / positive_gradient_nearest_rank_p95,
+                0.0,
+                1.0,
+            )
+        else:
+            texture = torch.zeros_like(downsampled)
+        source_base = {
+            "candidate_id": SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
+            "checkpoint_revision": INSPYRENET_CHECKPOINT_REVISION,
+            "checkpoint_sha256": INSPYRENET_CHECKPOINT_SHA256,
+            "checkpoint_size": INSPYRENET_CHECKPOINT_SIZE,
+            "class_module": INSPYRENET_CLASS_MODULE,
+            "class_name": INSPYRENET_CLASS_NAME,
+            "execution_evidence": self._execution_evidence,
+            "factory_name": INSPYRENET_FACTORY_NAME,
+            "forward_api": "InSPyReNet.forward_inspyre",
+            "forward_output_selector": "out['saliency'][-1]_raw_finest_d0",
+            "input_image_digest": input_digest,
+            "model_preprocess": (
+                "rgb8_to_float32_div255_static_1024_bilinear_align_corners_false_"
+                "imagenet_mean_0.485_0.456_0.406_std_0.229_0.224_0.225"
+            ),
+            "probability_operator": "torch.sigmoid_exactly_once",
+            "probability_resize": "bilinear_align_corners_false_to_64x64",
+            "source_file_sha256": dict(sorted(_INSPYRENET_SOURCE_FILE_SHA256.items())),
+            "source_revision": INSPYRENET_SOURCE_REVISION,
+            "texture_operator": (
+                "rgb8_float32_grayscale_0.299_0.587_0.114_replicate_pad1_"
+                "sobel3x3_magnitude_area_64x64_positive_nearest_rank_p95_clamp"
+            ),
+        }
+        semantic_observation = _spatial_observation(
+            semantic.squeeze(1),
+            source_identity={**source_base, "observation_role": "semantic_probability_M"},
+            role="semantic_probability_M",
+        )
+        texture_observation = _spatial_observation(
+            texture.squeeze(1),
+            source_identity={**source_base, "observation_role": "texture_complexity_T"},
+            role="texture_complexity_T",
+        )
+        observations = SemanticTextureRoutingObservations(
+            semantic_probability=semantic_observation,
+            texture_complexity=texture_observation,
+        )
+        identity = _canonical_digest(
+            {
+                **source_base,
+                "semantic_probability_digest": semantic_observation.values_digest,
+                "texture_complexity_digest": texture_observation.values_digest,
+            }
+        )
+        return RuntimeSemanticTextureObservationResult(
+            candidate_id=SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
+            input_image_digest=input_digest,
+            observations=observations,
+            source_revision=INSPYRENET_SOURCE_REVISION,
+            source_class=f"{INSPYRENET_CLASS_MODULE}.{INSPYRENET_CLASS_NAME}",
+            source_file_sha256=tuple(sorted(_INSPYRENET_SOURCE_FILE_SHA256.items())),
+            forward_api="InSPyReNet.forward_inspyre",
+            checkpoint_revision=INSPYRENET_CHECKPOINT_REVISION,
+            checkpoint_sha256=INSPYRENET_CHECKPOINT_SHA256,
+            checkpoint_size=INSPYRENET_CHECKPOINT_SIZE,
+            execution_evidence=self._execution_evidence,
+            observation_identity=identity,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -746,4 +1152,73 @@ def observe_generation_routing(
         reference_gradient=reference_gradient,
         reference_response=reference_response,
         reference_sensitivity=reference_sensitivity,
+    )
+
+
+def observe_semantic_texture_detection(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    detection_image_rgb8: torch.Tensor,
+    semantic_runtime: InspyrenetSemanticRuntime,
+) -> RuntimeSemanticTextureDetectionObservationResult:
+    """Rebuild M/T and the VAE observation from the same current RGB8 image."""
+
+    if not isinstance(backend, RuntimeContentBackend):
+        raise RuntimeRoutingObservationError(
+            "semantic-texture detection requires the public VAE backend"
+        )
+    _validate_session(configuration, session)
+    if type(semantic_runtime) is not InspyrenetSemanticRuntime:
+        raise RuntimeRoutingObservationError(
+            "semantic-texture detection requires InspyrenetSemanticRuntime"
+        )
+    current_rgb8 = detection_image_rgb8.detach().to(device="cpu").contiguous().clone()
+    semantic_texture = semantic_runtime.observe(current_rgb8)
+    if semantic_texture.input_image_digest != rgb8_image_digest(current_rgb8):
+        raise RuntimeRoutingObservationError(
+            "semantic-texture current RGB8 snapshot identity drifted"
+        )
+    image = current_rgb8.to(
+        device=session.selected_device,
+        dtype=torch.float32,
+    ) / 255.0
+    factors = backend.vae_factors()
+    if type(factors) is not RuntimeVaeFactors:
+        raise RuntimeRoutingObservationError(
+            "semantic-texture detection VAE factors drifted"
+        )
+    try:
+        latent = _encode_detection_image(
+            backend,
+            image,
+            factors,
+            "semantic_texture_detection",
+        )
+    except RuntimeContentExecutionError as exc:
+        raise RuntimeRoutingObservationError(
+            "semantic-texture public RGB-to-VAE observation failed"
+        ) from exc
+    values = _float32_values(latent, "semantic_texture_detection_latent")
+    shape = tuple(int(size) for size in latent.shape)
+    hf_observation = HfDetectionObservation.from_public_image_encoding(values, shape)
+    lf_observation = LfDetectionObservation.from_public_image_encoding(values, shape)
+    if hf_observation.observation_digest != lf_observation.observation_digest:
+        raise RuntimeRoutingObservationError(
+            "semantic-texture LF/HF public VAE observations diverged"
+        )
+    identity = _canonical_digest(
+        {
+            "input_image_digest": semantic_texture.input_image_digest,
+            "runtime_config_digest": configuration.runtime_config_digest,
+            "semantic_texture_observation_identity": semantic_texture.observation_identity,
+            "vae_observation_digest": hf_observation.observation_digest,
+        }
+    )
+    return RuntimeSemanticTextureDetectionObservationResult(
+        semantic_texture=semantic_texture,
+        hf_observation=hf_observation,
+        lf_observation=lf_observation,
+        runtime_config_digest=configuration.runtime_config_digest,
+        observation_identity=identity,
     )

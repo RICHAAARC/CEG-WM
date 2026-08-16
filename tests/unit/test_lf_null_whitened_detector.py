@@ -13,6 +13,17 @@ from struct import pack
 import numpy as np
 import pytest
 
+from main.content_chain.detector import (
+    ContentDetectorError,
+    NullScoreRecord,
+    SemanticTextureBranchNullCalibration,
+    semantic_texture_content_detector,
+)
+from main.content_chain.hf_carrier import hf_carrier
+from main.content_chain.hf_detector import (
+    HfDetectionObservation,
+    semantic_texture_hf_detector,
+)
 from main.content_chain.lf_carrier import lf_carrier
 from main.content_chain.lf_detector import (
     LfDetectionObservation,
@@ -23,11 +34,18 @@ from main.content_chain.lf_detector import (
     lf_null_whitened_matched_detector,
     prepare_lf_null_whitened_observation,
     prepare_lf_null_whitened_template,
+    semantic_texture_lf_detector,
 )
 from main.content_chain.lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
     LfNullWhiteningAsset,
     LfNullWhiteningAssetError,
+    SemanticTextureLfWhiteningAsset,
+)
+from main.content_chain.routing import (
+    SemanticTextureRoutingObservations,
+    SpatialRoutingObservation,
+    semantic_texture_content_router,
 )
 from main.shared.key_schedule import (
     derive_wrong_key_material,
@@ -63,6 +81,35 @@ def _asset(
     return LfNullWhiteningAsset.from_canonical_payload(
         payload,
         whitening_asset_digest=declared_digest or digest,
+    )
+
+
+def _semantic_texture_asset() -> SemanticTextureLfWhiteningAsset:
+    payload = {
+        "artifact_role": "lf_semantic_texture_soft_clean_null_whitening_operator",
+        "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
+        "candidate_id": "lf_semantic_texture_soft_whitened_matched_score",
+        "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
+        "fit_manifest_sha256": "b" * 64,
+        "fit_source_cluster_count": 32,
+        "latent_shape": [1, 16, 64, 64],
+        "observation_protocol": "final_image_vae_posterior_mode",
+        "regularization_ratio": "0x1.0000000000000p-10",
+        "route_candidate_id": "routing_semantic_texture_soft",
+        "transform_identity": "orthonormal_dct_ii",
+        "weights_binary32_be_hex": ["3f800000"] * 96,
+    }
+    return SemanticTextureLfWhiteningAsset.from_canonical_payload(
+        payload,
+        whitening_asset_digest=sha256(stable_json_utf8(payload)).hexdigest(),
+    )
+
+
+def _constant_spatial(value: float, role: str) -> SpatialRoutingObservation:
+    return SpatialRoutingObservation(
+        values=(value,) * (64 * 64),
+        spatial_shape=(64, 64),
+        source_identity_digest=sha256(role.encode("utf-8")).hexdigest(),
     )
 
 
@@ -124,6 +171,118 @@ def test_lf_whitened_asset_and_detector_are_explicit_no_fallback_candidates() ->
     assert not hasattr(whitened, "raw_score")
     assert not hasattr(observation, "reference_image")
     assert not hasattr(observation, "embed_record")
+
+
+@pytest.mark.unit
+def test_semantic_texture_blind_branches_require_dedicated_assets_and_cdfs() -> None:
+    route = semantic_texture_content_router(
+        LATENT_SHAPE,
+        mode="routing_semantic_texture_soft",
+        observations=SemanticTextureRoutingObservations(
+            semantic_probability=_constant_spatial(0.5, "semantic-M"),
+            texture_complexity=_constant_spatial(0.5, "texture-T"),
+        ),
+    )
+    hf_template = hf_carrier(ROOT_KEY, LATENT_SHAPE).template
+    lf_template = lf_carrier(ROOT_KEY, LATENT_SHAPE).template
+    values = tuple(
+        hf_value + lf_value + ((index % 11) - 5) / 1000.0
+        for index, (hf_value, lf_value) in enumerate(
+            zip(hf_template, lf_template, strict=True)
+        )
+    )
+    hf_observation = HfDetectionObservation.from_public_image_encoding(
+        values,
+        LATENT_SHAPE,
+    )
+    lf_observation = LfDetectionObservation.from_public_image_encoding(
+        values,
+        LATENT_SHAPE,
+    )
+    dedicated_asset = _semantic_texture_asset()
+    hf_result = semantic_texture_hf_detector(
+        hf_observation,
+        ROOT_KEY,
+        route,
+    )
+    lf_result = semantic_texture_lf_detector(
+        lf_observation,
+        ROOT_KEY,
+        route,
+        dedicated_asset,
+    )
+
+    def calibration(
+        branch: str,
+        detector_identity: str,
+        score: float,
+    ) -> SemanticTextureBranchNullCalibration:
+        return SemanticTextureBranchNullCalibration(
+            branch=branch,  # type: ignore[arg-type]
+            detector_identity=detector_identity,
+            partition_identity=f"semantic-texture-{branch}-primary-null",
+            records=(
+                NullScoreRecord(
+                    score=score - 0.25,
+                    source_cluster_id=f"{branch}-cluster-0",
+                    sample_id=f"{branch}-sample-0",
+                ),
+                NullScoreRecord(
+                    score=score + 0.25,
+                    source_cluster_id=f"{branch}-cluster-1",
+                    sample_id=f"{branch}-sample-1",
+                ),
+            ),
+        )
+
+    hf_null = calibration("hf", hf_result.detector_identity, hf_result.hf_score)
+    lf_null = calibration("lf", lf_result.detector_identity, lf_result.lf_score)
+    combined = semantic_texture_content_detector(
+        hf_result,
+        lf_result,
+        hf_null=hf_null,
+        lf_null=lf_null,
+    )
+
+    assert combined.candidate_status == "implemented_not_scientifically_validated"
+    assert combined.candidate_family == (
+        "routing_semantic_texture_soft",
+        "content_embedding_semantic_texture_soft_lf_hf",
+        "lf_semantic_texture_soft_whitened_matched_score",
+        "hf_semantic_texture_soft_direct_score",
+        "content_combination_semantic_texture_max_standardized",
+    )
+    assert combined.content_score == max(
+        combined.hf_standardization.z_score,
+        combined.lf_standardization.z_score,
+    )
+    assert combined.diagnostic_only is True
+    assert combined.promoted is False
+    assert hf_result.observation_digest == lf_result.observation_digest
+    assert not hasattr(hf_result, "threshold")
+    assert not hasattr(lf_result, "threshold")
+
+    with pytest.raises(LfDetectorError, match="dedicated whitening W"):
+        semantic_texture_lf_detector(
+            lf_observation,
+            ROOT_KEY,
+            route,
+            _asset(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(LfDetectorError, match="dedicated whitening W"):
+        semantic_texture_lf_detector(
+            lf_observation,
+            ROOT_KEY,
+            route,
+            None,
+        )
+    with pytest.raises(ContentDetectorError, match="dedicated branch CDFs"):
+        semantic_texture_content_detector(
+            hf_result,
+            lf_result,
+            hf_null=hf_null,
+            lf_null=None,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.unit
