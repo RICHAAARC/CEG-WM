@@ -19,7 +19,7 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 └── 几何恢复与图像回正
 
 联合判定
-├── soft-route max content detector 原图检测
+├── HF-only 正式/default/joint content detector 原图检测；semantic-texture soft max 仅为 diagnostic、未晋升候选面
 ├── 近阈值判断
 ├── 必要时启动几何恢复
 └── 回正后使用同一检测器与同一阈值重判
