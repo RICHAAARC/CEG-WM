@@ -12,10 +12,12 @@ import sys
 from time import perf_counter
 
 PROFILE_NAMES = ("governance", "method", "full")
-VALIDATION_ENVIRONMENT_OVERRIDES = {
+VALIDATION_TEMPORARY_DIRECTORY_DEFAULTS = {
     "TMPDIR": "/tmp",
     "TEMP": "/tmp",
     "TMP": "/tmp",
+}
+VALIDATION_ENVIRONMENT_OVERRIDES = {
     "OMP_NUM_THREADS": "1",
     "MKL_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",
@@ -81,6 +83,8 @@ def run_profile(
     """从仓库根目录运行档位；首个失败立即停止。"""
     commands = commands_for_profile(profile)
     environment = dict(os.environ)
+    for variable_name, default_value in VALIDATION_TEMPORARY_DIRECTORY_DEFAULTS.items():
+        environment.setdefault(variable_name, default_value)
     environment.update(VALIDATION_ENVIRONMENT_OVERRIDES)
     for command in commands:
         identity = command_identity(command)
