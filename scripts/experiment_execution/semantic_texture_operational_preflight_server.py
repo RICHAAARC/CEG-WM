@@ -1,4 +1,4 @@
-"""Persist the semantic-texture operational result, ZIP, then receipt."""
+"""Persist the semantic-texture operational result, result-only archive, external receipt, and final completion checksums."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ MAX_RESULT_BYTES = 256 * 1024
 MAX_ARCHIVE_BYTES = 1024 * 1024
 RESULT_FILENAME = "semantic_texture_operational_result.json"
 RECEIPT_FILENAME = "semantic_texture_operational_receipt.json"
+DELIVERY_COMPLETION_CHECKSUMS_FILENAME = "SHA256SUMS"
 WRITE_UNIT_ID = "semantic_texture_write_operational"
 BLIND_DETECTION_UNIT_ID = "semantic_texture_blind_detection_operational"
 BLOCKED_CLASSES = frozenset(
@@ -179,7 +180,6 @@ def _validated_result(result: object) -> dict[str, object]:
     if (
         write_outcome["unit_id"] != WRITE_UNIT_ID
         or detector_outcome["unit_id"] != BLIND_DETECTION_UNIT_ID
-        or write_outcome["started"] is not True
         or detector_outcome["status"] != "blocked"
         or detector_outcome["blocked_class"] not in BLOCKED_CLASSES
         or detector_outcome["sanitized_error_category"]
@@ -190,7 +190,29 @@ def _validated_result(result: object) -> dict[str, object]:
         raise SemanticTextureOperationalServerError(
             "operational unit roster drifted"
         )
-    if write_outcome["status"] == "passed":
+    pre_execution_failure = (
+        write_outcome["started"] is False
+        and detector_outcome["started"] is False
+    )
+    if pre_execution_failure:
+        if (
+            write_outcome["status"] != "blocked"
+            or write_outcome["blocked_class"] not in BLOCKED_CLASSES
+            or write_outcome["sanitized_error_category"]
+            != write_outcome["blocked_class"]
+            or write_outcome["public_result_identity"] is not None
+            or write_outcome["witness_identity"] is not None
+            or detector_outcome["blocked_class"]
+            != write_outcome["blocked_class"]
+        ):
+            raise SemanticTextureOperationalServerError(
+                "pre-execution unit boundary drifted"
+            )
+    elif write_outcome["started"] is not True:
+        raise SemanticTextureOperationalServerError(
+            "write unit start identity drifted"
+        )
+    elif write_outcome["status"] == "passed":
         if (
             write_outcome["blocked_class"] is not None
             or write_outcome["sanitized_error_category"] is not None
@@ -239,7 +261,7 @@ def finalize_semantic_texture_operational_preflight_delivery(
     *,
     output_root: str | Path,
 ) -> tuple[int, dict[str, object]]:
-    """Create result JSON, deterministic ZIP, and one final external receipt."""
+    """Create result, ZIP, external receipt, and the final completion marker."""
 
     result_value = _validated_result(result)
     run_id = result_value["run_id"]
@@ -253,6 +275,9 @@ def finalize_semantic_texture_operational_preflight_delivery(
     result_path = root / RESULT_FILENAME
     archive_path = root / f"semantic_texture_operational_{run_id}.zip"
     receipt_path = root / RECEIPT_FILENAME
+    delivery_completion_checksums_path = (
+        root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME
+    )
     result_blob = _canonical_bytes(result_value)
     if len(result_blob) > MAX_RESULT_BYTES:
         raise SemanticTextureOperationalServerError(
@@ -273,10 +298,25 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "archive_filename": archive_path.name,
         "archive_sha256": archive_sha256,
         "archive_size_bytes": archive_path.stat().st_size,
+        "asset_authority_status": result_value["asset_authority_status"],
         "blocked_class": result_value["blocked_class"],
         "candidate_promoted": False,
         "configuration_digest": result_value["configuration_digest"],
         "formal_tau_created": False,
+        "inspyrenet_checkpoint_revision": result_value[
+            "inspyrenet_checkpoint_revision"
+        ],
+        "inspyrenet_checkpoint_sha256": result_value[
+            "inspyrenet_checkpoint_sha256"
+        ],
+        "inspyrenet_checkpoint_size_bytes": result_value[
+            "inspyrenet_checkpoint_size_bytes"
+        ],
+        "inspyrenet_source_revision": result_value[
+            "inspyrenet_source_revision"
+        ],
+        "model_id": result_value["model_id"],
+        "model_revision": result_value["model_revision"],
         "package_identity": result_value["package_identity"],
         "profile_id": result_value["profile_id"],
         "result_filename": result_path.name,
@@ -290,11 +330,23 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "status": "blocked",
     }
     with receipt_path.open("xb") as handle:
-        handle.write(_canonical_bytes(receipt))
+        receipt_blob = _canonical_bytes(receipt)
+        handle.write(receipt_blob)
+    delivery_completion_checksums_blob = (
+        f"{sha256(result_blob).hexdigest()}  {result_path.name}\n"
+        f"{archive_sha256}  {archive_path.name}\n"
+        f"{sha256(receipt_blob).hexdigest()}  {receipt_path.name}\n"
+    ).encode("ascii")
+    with delivery_completion_checksums_path.open("xb") as handle:
+        handle.write(delivery_completion_checksums_blob)
     return 2, {
         **receipt,
         "receipt_filename": receipt_path.name,
         "receipt_sha256": _sha256_file(receipt_path),
+        "sha256sums_filename": delivery_completion_checksums_path.name,
+        "sha256sums_sha256": sha256(
+            delivery_completion_checksums_blob
+        ).hexdigest(),
     }
 
 
@@ -316,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "bounded_deterministic_zip",
                         "zip_sha256",
                         "immutable_external_receipt",
+                        "sha256sums_completion_marker",
                     ],
                     "science_started": False,
                 },
