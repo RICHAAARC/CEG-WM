@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from hashlib import sha256
 import inspect
@@ -632,7 +633,24 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
         "37990",
     ):
         assert exact_identity in code_source
-    assert 'drive.mount("/content/drive")' in code_source
+    notebook_syntax = ast.parse(code_source)
+    drive_mount_calls = [
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "drive"
+        and node.func.attr == "mount"
+    ]
+    assert len(drive_mount_calls) == 1
+    drive_mount_call = drive_mount_calls[0]
+    assert len(drive_mount_call.args) == 1
+    assert drive_mount_call.keywords == []
+    drive_mount_argument = drive_mount_call.args[0]
+    assert isinstance(drive_mount_argument, ast.Constant)
+    assert isinstance(drive_mount_argument.value, str)
+    assert Path(drive_mount_argument.value).parts == ("/", "content", "drive")
     assert 'userdata.get("HF_TOKEN")' in code_source
     assert 'userdata.get("CEG_WM_ROOT_KEY")' in code_source
     assert code_source.count("subprocess.run(") == 1
