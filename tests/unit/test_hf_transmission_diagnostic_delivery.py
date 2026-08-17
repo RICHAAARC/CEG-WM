@@ -101,9 +101,13 @@ def test_hf_transmission_notebook_is_thin_historical_and_scientific_only() -> No
     assert "hf_transmission_diagnostic_result" in code_source
     assert "hf_transmission_diagnostic_failure" in code_source
     assert source.count("eight-cluster development HF transmission diagnostic") == 1
+    assert (
+        "**PAUSED / NOT AUTHORIZED:** Do not use **Run all**. The sole current "
+        "Run-all entrypoint is `semantic_texture_operational_preflight.ipynb`."
+    ) in source
+    assert "semantic_texture_operational_preflight.ipynb" in source
     assert "fitted no threshold" in source
-    assert "paused and is not authorized to run" in source
-    assert "hf_only_detector_directional_validation.ipynb" in source
+    assert "hf_only_detector_directional_validation.ipynb" not in source
     for forbidden in (
         "pip install",
         "snapshot_download(",

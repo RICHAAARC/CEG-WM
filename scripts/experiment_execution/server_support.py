@@ -87,7 +87,6 @@ def _probe_resources(*, persistent_root: Path, cache_root: Path) -> dict[str, ob
             (
                 "nvidia-smi",
                 "--query-gpu=name,memory.total",
-                "--query-gpu=name,memory.total",
                 "--format=csv,noheader,nounits",
             ),
             check=True,
