@@ -2,7 +2,7 @@
   "method_name": "ceg_wm_dual_chain",
   "design_path": "docs/design/method_architecture.md",
   "candidate_specification_path": "docs/design/candidate_specifications.md",
-  "candidate_specification_sha256": "9416ab5bdd8bb400b1253b1e70d2e4d2fe5ea790bce346c652cf3f25f95b07b1",
+  "candidate_specification_sha256": "d8846a731e7a32280d58cf801f4215a0f3f474ae4aa97bafd6162e9c1d998526",
   "components": {
     "key_schedule": {
       "responsibility": "root_key_derivation_and_prg",
@@ -207,8 +207,8 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "independent_semantic_domain_method_runtime_delivery_review:01a00740-db8c-7b81-b370-3b0fd5db8285:cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9:independent_exact_audit_approve+cumulative_method_runtime_delivery_gate_approve",
-    "reviewed_repository_revision": "cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9",
-    "candidate_specification_sha256": "9416ab5bdd8bb400b1253b1e70d2e4d2fe5ea790bce346c652cf3f25f95b07b1"
+    "review_reference": "independent_qk_axis_safeguard_v2_method_readiness_review:01a00740-db8c-7b81-b370-3b0fd5db8285:3efc76c32790b28a9f2775238a0e7586ba249ac4:independent_exact_semantic_audit_approve+source_authority_rebind_approve",
+    "reviewed_repository_revision": "3efc76c32790b28a9f2775238a0e7586ba249ac4",
+    "candidate_specification_sha256": "d8846a731e7a32280d58cf801f4215a0f3f474ae4aa97bafd6162e9c1d998526"
   }
 }

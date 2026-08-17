@@ -39,9 +39,12 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   registry 现为 19 个具名候选加 1 个强制 routing 禁用对照，共 20 个 ID。
   语义—纹理软路由五候选采用 InSPyReNet soft `M`、Sobel/P95 `T`、soft-routed
   LF/HF write、两条盲分支分数和固定 max statistic；当前 reviewed revision 为
-  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，状态为
+  `3efc76c32790b28a9f2775238a0e7586ba249ac4`，状态为
   `implemented_not_scientifically_validated`，并由登记的 revision-bound independent
-  exact audit 批准。`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为
+  exact audit 批准。当前 Q/K search identity 为 v2：joint-first 后四个 coarse-anchored
+  axes 依次为 `rotation_degrees`、`log_scale`、`translation_x`、`translation_y`；旧
+  joint/pre-axis search、reliability、threshold 和 geometry evidence 均只保留为历史。
+  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为
   semantic-domain 变更前的历史 exact provenance，不是当前 readiness 权威。本次
   authority rebinding 的 completion profile 状态为 `profile_pending`。
   hard salient-object local-LF 四候选状态为

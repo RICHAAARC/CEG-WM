@@ -15,8 +15,11 @@ CPU/synthetic readiness 本身不证明 runtime；既有真实 GPU qualification
 原 producer/revision 上的历史窄证据，不是当前 semantic-domain authority；
 正式 detector 仍为 HF-only；旧 routing/combination 只保留 producer-bound historical
 replay。语义—纹理软路由五候选的当前 reviewed revision 为
-`cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经 revision-bound independent exact
-audit 批准，状态为 `implemented_not_scientifically_validated`；soft max 仅为
+`3efc76c32790b28a9f2775238a0e7586ba249ac4`，并经 revision-bound independent exact
+audit 批准，状态为 `implemented_not_scientifically_validated`；当前 Q/K search identity
+为 v2：joint-first 后依次保护四个 coarse-anchored axes（`rotation_degrees`、`log_scale`、
+`translation_x`、`translation_y`），旧 joint/pre-axis search、reliability、threshold 和
+geometry evidence 仅为历史；soft max 仅为
 diagnostic 且未晋升。`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为
 semantic-domain 变更前的历史 exact provenance，不是当前 readiness 权威；本次
 authority rebinding 的 completion profile 状态为 `profile_pending`。hard salient-object

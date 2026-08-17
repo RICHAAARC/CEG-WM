@@ -63,8 +63,10 @@ readiness 只证明“登记候选已由真实项目组件实现并通过规定�
 qualification 只保留为原 producer/revision 上的历史窄证据，不是当前 authority。正式
 detector 仍为 HF-only；LF/routing 尚未实验晋升，`full_ceg_wm_eligible=false`。
 当前 soft-route 五候选的 reviewed revision 为
-`cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，状态仅为
-`implemented_not_scientifically_validated`；soft max 仍是 diagnostic/unpromoted，
+`3efc76c32790b28a9f2775238a0e7586ba249ac4`，状态仅为
+`implemented_not_scientifically_validated`；当前 Q/K search identity 为 v2，joint-first
+后四个 coarse-anchored axes 依序保护，旧 joint/pre-axis search、reliability、threshold
+和 geometry evidence 仅为历史；soft max 仍是 diagnostic/unpromoted，
 不提供 calibration、固定 FPR、GPU、runtime 或科学效果证据。
 `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
 历史 exact provenance；completion profile 为 `profile_pending`。旧11候选/28节点快照由

@@ -22,8 +22,10 @@ runtime 验证或论文证据。
 - 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
   `full_ceg_wm_eligible=false`；
 - soft-route 五候选的当前 reviewed revision 为
-  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立 exact audit 批准，
-  但只处于 `implemented_not_scientifically_validated`；soft max 是 diagnostic、未晋升，
+  `3efc76c32790b28a9f2775238a0e7586ba249ac4`，并经独立 exact audit 批准，
+  但只处于 `implemented_not_scientifically_validated`；当前 Q/K search identity 为 v2，
+  joint-first 后四个 coarse-anchored axes 依序保护，旧 joint/pre-axis search、reliability、
+  threshold 和 geometry evidence 仅为历史；soft max 是 diagnostic、未晋升，
   没有 calibration、固定 FPR、GPU、runtime 或科学效果主张；
 - `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
   历史 exact provenance；既有 runtime qualification 也只保留为原 producer/revision

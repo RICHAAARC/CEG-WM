@@ -10,8 +10,10 @@
   readiness-bound 当前12个唯一候选身份、17个方法特异性验收节点和独立语义复核要求。
   设计 registry 的20个 ID（19个具名候选加1个 mandatory control）、readiness
   绑定的12个候选身份与13项职责是三种不同计数。语义—纹理软路由五候选的当前
-  reviewed revision 为 `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立复核，但只处于
-  `implemented_not_scientifically_validated`；旧的11候选/28节点 readiness 快照在
+  reviewed revision 为 `3efc76c32790b28a9f2775238a0e7586ba249ac4`，并经独立复核，但只处于
+  `implemented_not_scientifically_validated`；当前 Q/K search identity 为 v2，joint-first
+  后四个 coarse-anchored axes 依序保护，旧 joint/pre-axis search、reliability、threshold
+  和 geometry evidence 仅为历史；旧的11候选/28节点 readiness 快照在
   `0258ccb2100bfe8b58d1a12079876841192528b3` 保留为历史事实。
   `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
   历史 exact provenance，不是当前 readiness 权威；completion profile 为

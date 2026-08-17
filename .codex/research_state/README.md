@@ -13,8 +13,10 @@
   独立语义复核。当前 readiness 在13项职责上绑定12个唯一候选身份；设计 registry
   则为20个 ID（19个具名候选加1个 mandatory control），二者不得混淆。语义—纹理
   软路由五候选的当前 reviewed revision 为
-  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立 exact audit 批准，但状态仅为
-  `implemented_not_scientifically_validated`。旧的11候选/28节点 readiness 快照仍在
+  `3efc76c32790b28a9f2775238a0e7586ba249ac4`，并经独立 exact audit 批准，但状态仅为
+  `implemented_not_scientifically_validated`。当前 Q/K search identity 为 v2：joint-first
+  后四个 coarse-anchored axes 依序更新，旧 joint/pre-axis search、reliability、threshold
+  和 geometry evidence 仅为历史。旧的11候选/28节点 readiness 快照仍在
   exact revision `0258ccb2100bfe8b58d1a12079876841192528b3` 保留为历史事实。
   `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
   历史 exact provenance，不是当前 readiness 权威；completion profile 为

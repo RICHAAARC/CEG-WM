@@ -31,8 +31,10 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   CPU/synthetic 实现；这不是 runtime 或效果验证。
 - 当前 readiness 在 13 项职责上绑定 12 个唯一候选身份和 17 个行为节点。语义—纹理
   软路由五候选的当前 reviewed revision 为
-  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立 exact audit 批准，状态为
-  `implemented_not_scientifically_validated`；旧 routing/combination 已形成
+  `3efc76c32790b28a9f2775238a0e7586ba249ac4`，并经独立 exact audit 批准，状态为
+  `implemented_not_scientifically_validated`；当前 Q/K search identity 为 v2，joint-first
+  后保护四个 coarse-anchored axes；旧 joint/pre-axis search、reliability、threshold 和
+  geometry evidence 仅为历史。旧 routing/combination 已形成
   producer-bound development negative，只保留历史精确重放。
   `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
   历史 exact provenance，不是当前 readiness 权威；completion profile 为

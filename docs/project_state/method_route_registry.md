@@ -32,8 +32,11 @@
 - `hf_semantic_texture_soft_direct_score`；
 - `content_combination_semantic_texture_max_standardized`。
 
-当前 reviewed revision：`cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`。独立复核绑定：
-`independent_semantic_domain_method_runtime_delivery_review:01a00740-db8c-7b81-b370-3b0fd5db8285:cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9:independent_exact_audit_approve+cumulative_method_runtime_delivery_gate_approve`。
+当前 reviewed revision：`3efc76c32790b28a9f2775238a0e7586ba249ac4`。独立复核绑定：
+`independent_qk_axis_safeguard_v2_method_readiness_review:01a00740-db8c-7b81-b370-3b0fd5db8285:3efc76c32790b28a9f2775238a0e7586ba249ac4:independent_exact_semantic_audit_approve+source_authority_rebind_approve`。
+当前 Q/K search identity 是 v2：joint-first 后按 `rotation_degrees`、`log_scale`、
+`translation_x`、`translation_y` 四轴各自从 current 与 coarse anchor 的有序并集更新；
+旧 joint/pre-axis search、reliability、threshold 和 geometry evidence 仅为历史事实。
 `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的历史
 exact provenance，不是当前 readiness 或方法身份权威。本次 authority rebinding 的
 completion profile 状态为 `profile_pending`。
