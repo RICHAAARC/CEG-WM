@@ -221,7 +221,7 @@ seed_envelope = {
     "responsibility_domain": "key_schedule_test",
     "tensor_role": "gaussian"
   },
-  "distribution": "normal",
+  "distribution": "gaussian",
   "shape": [2,3],
   "key_role": "registered",
   "root_key_public_digest":
@@ -356,7 +356,10 @@ geometry delta 与已有 geometry/total budget 保持独立，不并入
   保留一个 scheduler interval；HF-only 也走同一 embedder/runtime 边界；
 - Q/K observation 使用同一已准备 runtime：待检图像经 VAE posterior mode 编码，在重新建立的 20-step scheduler 上以 index 7 的 timestep 加入公开确定性噪声，再以三路空字符串条件、无 classifier-free guidance 做一次 Transformer 前向；不读取生成缓存。
 
-候选依赖锁来自 FlowHF：Python `>=3.12`、diffusers `0.38.0`、torch `2.11.0`、transformers `5.12.1`、accelerate `1.14.0`、numpy `2.0.2`、Pillow `11.3.0`、safetensors `0.8.0`、huggingface-hub `1.20.1`。若该组合不能在获授权环境解析，不允许实现者自行升级；应登记 runtime candidate failure 并先修订候选规格。
+FlowHF 记录的 Python、CUDA/GPU 与 dependency 版本只作为环境 locator/observed
+metadata，不进入 KDF、方法/config/result 强身份或相等性门。强约束保留实际
+pipeline/scheduler、callback/VAE/Q/K、dtype/尺寸/steps、依赖/API/CUDA/resource
+capability；能力缺失必须 fail closed，不得用版本字符串代替行为验证。
 
 ### Configuration Identity
 
@@ -401,7 +404,7 @@ latent/VAE dtype、VAE scaling/shift、callback index、检测 schedule/conditio
   `T_hf` 并输出盲分数 `s_hf`；
 - `content_detector` 消费独立标准化的 soft-routed `s_hf` 与 `s_lf` 并形成固定 max
   statistic；它不读取 carrier direction、callback latent 或写入记录；
-- runtime 只在冻结 callback/model/dtype 边界物化 `content_embedder` 给出的更新，
+- runtime 只在冻结 callback/pipeline-behavior/dtype 边界物化 `content_embedder` 给出的更新，
   并把实际 dtype latent 与 combined delta 的 realized total norm/relative L2 测量
   返回给 embedder 判定；不拥有模板、组合、预算判定或评分算法。
 
@@ -457,9 +460,9 @@ s_hf = dot(center(float32(Y)) / ||center(float32(Y))||,
 和模板归一顺序及 mask identity；`content_embedder` 拥有 nominal/limit、
 hard-budget direct comparison、retry/scale/final failure 和 combined realized
 记录；runtime candidate 拥有
-callback/model/dtype 物化边界；
-`hf_detector` 拥有 VAE encode 与 score operator；model
-identity 和必要公共预处理身份由三者一致引用。该 CEG-WM 候选的算法顺序来自
+callback/pipeline-behavior/dtype 物化边界；
+  `hf_detector` 拥有 VAE encode 与 score operator；必要公共预处理与行为身份由三者
+一致引用，model/repository/name/revision 只单独记录为 observed metadata。该 CEG-WM 候选的算法顺序来自
 historical DirectHF，来源边界是 FlowHF 的逐文件 SHA；历史名称、inversion、oracle
 callback latent、32 wrong-key roster 大小和四 Prompt 结果不进入当前 detector 身份。
 
@@ -485,7 +488,7 @@ callback latent、32 wrong-key roster 大小和四 Prompt 结果不进入当前 
 这是一个跨 `lf_carrier`、`content_embedder`、`lf_detector` 的候选，不表示候选由
 单一模块实施：
 
-- `lf_carrier` 消费 latent 形状、独立 LF 派生密钥、model identity 和
+- `lf_carrier` 消费 latent 形状、独立 LF 派生密钥、候选职责域和公共预处理身份，并把 model metadata 仅作观测；
   `mask_lf`，只输出 `T_lf`、masked unit direction `u_lf` 及必要载体身份元数据；
 - `content_embedder` 消费 `u_lf`、由 `hf_carrier` 提供的 `u_hf` 和 router 输出，
   独占 `a`、`u_content(a)`、nominal/limit、`delta_content_nominal`、hard-budget
@@ -496,7 +499,7 @@ callback latent、32 wrong-key roster 大小和四 Prompt 结果不进入当前 
   `T_lf`，并输出盲分数 `s_lf`；
 - `content_detector` 只有在组合候选晋升后才消费 `s_lf`；它不读取 `u_lf`、
   routing mask、callback latent 或实际写入记录；
-- runtime 只在冻结 callback/model 边界物化 `content_embedder` 的
+- runtime 只在冻结 callback/pipeline-behavior 边界物化 `content_embedder` 的
   `delta_content`，不拥有 LF/HF 组合算法。
 
 ### LF Carrier Template And Direction
@@ -612,7 +615,7 @@ operator。历史固定
 检测观测固定为普通 `512 x 512` RGB8 待检图像，经
 `runtime_sd35_flowmatch` 同一 public VAE encode 和 posterior `mode()` 得到
 binary32 latent `Y`，shape 必须精确为 `[1,16,64,64]`。检测只允许消费该 RGB8、
-检测 key、冻结 model/preprocess identity 和下面的公开 whitening artifact；不得读取
+检测 key、冻结 preprocessing behavior identity、observed model metadata 和下面的公开 whitening artifact；不得读取
 参考图、fit images、embed record、callback latent、写入模板记录、routing mask 或
 其他私有生成状态。
 
@@ -728,8 +731,8 @@ weights_binary32_be_hex = <channel-major list of exactly 96 eight-hex words>
 
 每个权重先按 IEEE-754 round-to-nearest-ties-to-even 物化为 binary32，再序列化为
 4-byte big-endian 的 8 位小写 hex；不得用十进制文本重新决定数值。artifact digest
-唯一为 `SHA256(stable_json_utf8(payload))` 的 64 位小写 hex，并与 candidate、model、
-preprocess 和 detector config identity 一起进入后续 records。raw fit images 不属于
+唯一为 `SHA256(stable_json_utf8(payload))` 的 64 位小写 hex，并与 candidate、
+preprocess、detector config identity 和独立记录的 observed model metadata 一起进入后续 records。raw fit images 不属于
 正式检测资产。
 
 ### Checks And Evidence Boundary
@@ -752,12 +755,12 @@ preprocess 和 detector config identity 一起进入后续 records。raw fit ima
 
 `routing_stqr` 只允许以下四个生成时内容观测：
 
-- `S`：使用 `openai/clip-vit-base-patch32` revision `3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268`。把 callback 18 写入前 latent 解码为 `[0,1]` RGB，经官方 image processor 以 `do_rescale=false` 形成 `224 x 224` float32；取 vision `last_hidden_state` 去 CLS 后的 49 个 patch，经 `post_layernorm` 和 `visual_projection` 得到 512 维单位向量。Prompt 以 max length 77、padding、truncation 编码，取 text `pooler_output` 经 `text_projection` 得到单位向量。逐 patch cosine `c` 唯一映射为 `S=clamp((c+1)/2,0,1)` 的 `7 x 7` 图。
+- `S`：使用 `openai/clip-vit-base-patch32` 作为 locator，revision 仅作 observed provenance metadata。把 callback 18 写入前 latent 解码为 `[0,1]` RGB，经官方 image processor 以 `do_rescale=false` 形成 `224 x 224` float32；取 vision `last_hidden_state` 去 CLS 后的 49 个 patch，经 `post_layernorm` 和 `visual_projection` 得到 512 维单位向量。Prompt 以 max length 77、padding、truncation 编码，取 text `pooler_output` 经 `text_projection` 得到单位向量。逐 patch cosine `c` 唯一映射为 `S=clamp((c+1)/2,0,1)` 的 `7 x 7` 图。
 - `T`：对同一 RGB 以固定亮度权重 `(0.299,0.587,0.114)` 转灰度，replicate-pad 1 pixel，使用标准 3x3 Sobel x/y，取 `sqrt(gx^2+gy^2)`，除以冻结 `reference_gradient` 后 clamp `[0,1]`。
 - `R`：只消费 callback 17 与 callback 18 写入前 scheduler latent。逐空间位置计算 channel RMS difference，除以两帧各自 channel RMS 之和加 `1e-12`，再除以冻结 `reference_response` 后 clamp `[0,1]`。
 - `Q_sens`：在 callback 18 写入前 latent 上按
-  `key_schedule_sha256_counter` 的 routing public-noise domain 生成绑定 SD3.5
-  revision 与 manifest `sample_index` 的公开 Gaussian probe；全 CHW 去均值并归一到
+  `key_schedule_sha256_counter` 的 routing public-noise domain 生成绑定冻结
+  schedule/conditioning/tensor-role behavior 与 manifest `sample_index` 的公开 Gaussian probe；SD3.5 revision 仅为 observed metadata。全 CHW 去均值并归一到
   单位 RMS，以相对 latent RMS 的 `1e-3` 步长扰动一次。分别 VAE 解码原 latent与
   扰动 latent，逐空间位置取 RGB RMS difference 除以实际 probe step，再除以冻结
   `reference_sensitivity` 后 clamp `[0,1]`。
@@ -975,7 +978,7 @@ content-threshold-fit primary null 上重新拟合；不得沿用 HF-only、旧 
 验证必须覆盖 external asset license/checkpoint/source/API、精确 mask golden、
 coverage/failure、causal witness、
 32-clean-null W fit、public blind key attribution、mask-stability、total-budget 与
-max-statistic identity tests。任一环节需要改变 checkpoint、forward path、threshold、
+max-statistic identity tests。任一环节需要改变 strict-load/forward behavior、threshold、
 erosion、coverage、写入公式、W fit 或 max statistic 时，必须登记新候选身份；不得在
 实现或 GPU 结果后静默调参。
 
@@ -998,7 +1001,7 @@ erosion、coverage、写入公式、W fit 或 max statistic 时，必须登记�
 回正检测输入都是各自的普通 RGB8 图像。每次调用都独立重建观察量，不共享 Prompt、
 embed record、private latent、embed-side map 或参考图。
 
-语义图 `M` 复用本文件登记的 InSPyReNet source/checkpoint/strict-load 和
+语义图 `M` 复用本文件登记的 InSPyReNet locator metadata、checkpoint input 与 strict-load behavior 和
 `forward_inspyre` finest raw `d0`/sigmoid-once 规则。输入为 static `1024 x 1024`
 RGB、ImageNet mean/std、float32；probability 以 bilinear、`align_corners=false`
 映射到 `64 x 64`。输出直接作为 `M in [0,1]`；禁止 hard threshold、erosion、
@@ -1463,8 +1466,8 @@ routing observations、backbone/runtime、搜索、可靠性指标、回正和�
 
 ### Frozen Specification Values And Empirical Quantities
 
-候选规格固定：key encoding/KDF/PRG 与 golden bits；SD3.5 revision 和
-runtime protocol；HF sparse-tail/filter/write/score 顺序与候选强度；LF
+候选规格固定：key encoding/KDF/PRG 与 golden bits；SD3.5 runtime behavior
+protocol；HF sparse-tail/filter/write/score 顺序与候选强度；LF
 filter/write/raw score、唯一 clean-null whitening fit/matched score 与有限 `a` 集；
 S/T/R/Q observations；empirical-CDF/tie/clip/table
 规则与三条语义化组合函数；Q/K 层、前向、四通道、projection、聚合、subspace 和 line
@@ -1472,6 +1475,11 @@ search；similarity/dihedral 搜索、W/V、objective、raw reliability metrics 
 rectification；conditional recovery 控制流；InSPyReNet soft `M`、Sobel/P95 `T`、
 正软路由图、soft-routed LF/HF write、两条盲 branch scores、独立 null fit 与固定
 max-statistic identity。
+
+model/repository/name/revision/checkpoint/source 以及 Python/CUDA/GPU/dependency 版本
+统一只作 locator/observed metadata。方法强身份继续绑定上述 behavior-changing
+protocol、科学 W/CDF/`tau` 等资产摘要与实现 revision；旧身份的 threshold/records
+不得因 locator metadata 相同而继承。
 
 软路由 write 没有 `a/w` grid，检测统计固定为 max。只能由预登记实证决定的是：
 候选是否通过 mechanism validation 与独立 confirmation、

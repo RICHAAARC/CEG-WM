@@ -16,8 +16,9 @@ runtime 原语按 `runtime_configuration_and_adapter`、`content_write_and_vae`�
 
 - `I`：待检测 RGB 图像。
 - `K`：检测密钥；正式 records 只保存不可逆密钥身份摘要，不保存原始密钥。
-- `M`：冻结的方法配置身份，包含行为协议、预处理、载体、检测和几何配置；模型名称、
-  repository、revision、环境版本和设备只作为选择或观察元数据。
+- `M`：冻结的方法配置身份，包含行为协议、预处理、载体、检测、科学资产摘要、实现
+  revision 和几何配置；model/repository/name/revision/checkpoint/source 以及
+  Python/CUDA/GPU/dependency 版本只作为选择或观察元数据。
 - `E_M(I)`：由冻结公共模型和预处理定义的图像观测编码。
 - `s_hf`：CEG-WM HF direct score。
 - `s_lf`：LF 分支分数。
@@ -135,7 +136,7 @@ u_content = normalize(u_hf+u_lf)
 ### Runtime Materialization
 
 令 `z0` 为 callback 18 已按登记 binary16 dtype 物化的 baseline。runtime 只在冻结
-callback/model/dtype 边界，按 `content_embedder` 请求的正 binary32 scale `s<=1`
+callback/runtime-behavior/dtype 边界，按 `content_embedder` 请求的正 binary32 scale `s<=1`
 逐项物化：
 
 ```text
@@ -176,12 +177,13 @@ runtime 不得改变 `a`、方向、nominal/limit 或重新分配能量，也不
 nominal target component vectors/norms；它们因交叉项存在而不可加为 total。actual
 hard limit 只约束最终 combined content delta；geometry delta 与其独立。低
 utilization 不得成为未来实验的结果后排除规则。
-注入位置、调度器、剩余生成区间、latent 变换和模型 revision 必须在 runtime 验证前
-冻结。
+注入位置、调度器、剩余生成区间和 latent 变换必须在 runtime 验证前冻结；model
+revision 只记录为 observed metadata。
 
-SD3.5、二十步 FlowMatch、callback index 18 与上述 `3/250` nominal/limit 构成
-runtime candidate identity。任何模型、revision、配置或方法身份变化都产生新身份并
-要求独立 runtime qualification。
+二十步 FlowMatch behavior、callback index 18 与上述 `3/250` nominal/limit 构成
+runtime candidate identity。行为配置、科学资产或 implementation revision 变化产生
+新身份并要求独立 runtime qualification；model/repository/name/revision/checkpoint/
+source 与环境版本变化只更新 observed metadata，不能单独重签或通过身份门。
 
 ### Direct Score
 

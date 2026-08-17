@@ -621,24 +621,49 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert "os.replace(pending, drive_export_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME)" in code_source
     assert "completed.returncode != 0" in code_source
     assert "sys.tracebacklimit = 0" in code_source
-    assert code_source.index('run_id = "semantic-texture-operational-"') < code_source.index(
+    assert code_source.index('mount_run_id = "semantic-texture-operational-mount-"') < code_source.index(
         'drive.mount("/content/drive")'
     )
-    assert code_source.index("local_root.mkdir(parents=True)") < code_source.index(
+    assert code_source.index("mount_local_root.mkdir(parents=True)") < code_source.index(
         'drive.mount("/content/drive")'
     )
     assert "fresh local root is required" in code_source
-    assert "fresh Drive root is required" in code_source
     assert (
-        '_persist_preclone_transport_failure(local_root / "transport-delivery", '
-        'run_id, "environment_blocked", drive_delivery_complete=False)'
+        '_persist_preclone_transport_failure(mount_local_root / "transport-delivery", '
+        'mount_run_id, "environment_blocked", drive_delivery_complete=False)'
+        in code_source
+    )
+    assert "for run_root_attempt in range(8):" in code_source
+    assert 'run_id = "semantic-texture-operational-" + uuid4().hex' in code_source
+    assert "exports_parent.mkdir(parents=True, exist_ok=True)" in code_source
+    assert "drive_export_root.mkdir(parents=False, exist_ok=False)" in code_source
+    assert code_source.count("except FileExistsError:") == 2
+    assert "drive_export_root.exists()" not in code_source
+    assert "if root_precreated:" in code_source
+    assert "any(root.iterdir())" in code_source
+    assert 'result_handle.write(result_blob)' in code_source
+    assert 'archive.writestr(result_name, result_blob)' in code_source
+    assert 'receipt_handle.write(receipt_blob)' in code_source
+    assert 'checksums_handle.write(checksum_blob)' in code_source
+    assert code_source.index("result_handle.write(result_blob)") < code_source.index(
+        "archive.writestr(result_name, result_blob)"
+    ) < code_source.index("receipt_handle.write(receipt_blob)") < code_source.index(
+        "checksums_handle.write(checksum_blob)"
+    )
+    assert "sanitized_error_message" not in code_source
+    assert "sanitized_trace_tail" not in code_source
+    assert (
+        'local_root / "transport-delivery", run_id, "resource_blocked", '
+        "drive_delivery_complete=False"
         in code_source
     )
     assert (
         "_persist_preclone_transport_failure(drive_export_root, run_id, "
-        "blocked_class, drive_delivery_complete=True)"
+        "blocked_class, drive_delivery_complete=True, root_precreated=True)"
         in code_source
     )
+    assert "except (MemoryError, OSError, subprocess.SubprocessError) as error:" in code_source
+    assert 'raise RuntimeError("operational bootstrap launch blocked") from None' in code_source
     assert '"drive_delivery_complete": drive_delivery_complete' in code_source
     assert '"--run-id", run_id' in code_source
     assert "bootstrap-unbound" not in code_source

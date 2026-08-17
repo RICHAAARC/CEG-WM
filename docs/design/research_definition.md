@@ -14,8 +14,10 @@ CEG-WM 研究生成式图像中的密钥归属水印。目标是在常规内容�
 - 生成与检测所用模型族必须能够提供 CEG-WM HF carrier/direct score 所需能力以及可复现的 Q/K 观测。
 - runtime 使用 `candidate_specifications.md` 的 `runtime_sd35_flowmatch` 行为协议：
   pipeline/scheduler capability、精度、尺寸、steps、callback、VAE、Q/K 与依赖/API
-  capability 是强约束；model/repository/name/revision 与环境版本/设备只作选择 locator
-  或观测元数据，不进入方法强身份。
+  capability 是强约束；model/repository/name/revision/checkpoint/source 与
+  Python/CUDA/GPU/dependency 版本只作选择 locator 或观测元数据，不进入方法强身份。
+- 科学 W/CDF/`tau` 等资产摘要与 implementation revision 仍属于强身份；metadata
+  相同不允许旧 threshold/records 继承。
 - 项目方法 API 不得依赖具体设备、远程服务或 Notebook 状态。
 
 ## Access Model
@@ -102,7 +104,8 @@ detector/config identity 和新阈值，不得继承旧 W/CDF、`tau` 或 HF-onl
 - crop 删除了关键同步或内容证据；
 - LF/HF 组合掩盖错误密钥或造成 calibration 漂移；
 - 几何恢复引入额外内容失真；
-- 模型 revision、预处理或图像尺寸变化破坏统计同一性。
+- behavior-changing pipeline/preprocessing、科学资产或图像尺寸变化破坏统计同一性；
+  observed model revision 变化本身不作强身份失败门。
 
 这些失败必须在 records 中显式保存，不能被静默排除。
 

@@ -63,8 +63,10 @@ joint:     conditional_recovery_decision
 
 ### Required Work
 
-- 记录 SD3.5 model locator 与 observed revision，并锁定 behavior-changing
-  pipeline/scheduler capability、steps、callback、VAE、dtype 和依赖/API capability；
+- 记录 model/repository/name/revision/checkpoint/source 与 Python/CUDA/GPU/dependency
+  版本 locator/observed metadata，并锁定 behavior-changing pipeline/scheduler
+  capability、steps、callback、VAE、dtype、依赖/API/resource capability、科学资产和
+  implementation revision；
 - 验证 clean/watermarked paired trajectory、actual-dtype content materialization、
   binary32 `3/250` hard budget 和 image decode/encode；
 - 捕获登记层真实 `to_q/to_k`；
@@ -150,8 +152,11 @@ coverage、uniqueness、gap、key margin、inlier、residual、boundary 和 iden
 
 冻结唯一流程：
 
+其中当前 `D_M` 唯一指现有 HF-only detector/config identity 与既有 threshold，不指向
+尚未校准的 semantic-texture soft max。
+
 ```text
-s_raw = D_soft_route(image, key)
+s_raw = D_M(image, key)
 
 if s_raw >= tau:
     positive_by_raw_content
@@ -163,21 +168,22 @@ else:
         negative_with_geometry_failure
     else:
         rectified = rectify(image)
-        s_rectified = D_soft_route(rectified, key)
+        s_rectified = D_M(rectified, key)
         positive iff s_rectified >= tau
 ```
 
 ### Pass Condition
 
-- raw/rectified detector object identity、key semantics、route、preprocessing、branch
-  standardization 和 `tau` 相同；
+- raw/rectified 使用现有同一 HF-only detector/config identity、key semantics、
+  preprocessing 和既有 `tau`；
 - 远负样本不调用几何；
 - 几何失败保留内容负判定；
 - geometry confidence 不进入阳性统计；
 - conditional recovery 提供预登记 TPR 增益且完整 raw+rescue FPR 不超预算。
 
 Gate 6 冻结的是联合控制流、raw/rectified detector 同一性、拟合职责和 artifact
-schema；`tau`、`tau_rescue` 与 formal reliability 数值仍保持未拟合。只有 Gate 4、
+schema；当前 formal/default/joint `D_M` 继续使用既有 HF-only `tau`。未来 soft-max
+候选自己的 `tau`、`tau_rescue` 与 formal reliability 数值仍保持未拟合。只有 Gate 4、
 Gate 5 和 Gate 6 的算法身份均冻结后，才允许进入 Gate 7 的职责分离校准。
 
 ## Gate 7: Calibration Separation
@@ -194,11 +200,13 @@ provisional branch CDF 和 Gate 5 的 provisional reliability selection 只服�
 4. `end_to_end_calibration_check`：只检查冻结联合路径，不再拟合；
 5. `formal evaluation`：只评估，不调参。
 
-当前 formal/default/joint `D_M` 仍为 HF-only 并使用既有 threshold。语义—纹理
+当前 formal/default/joint `D_M` 仍为现有 HF-only detector/config identity 并使用既有
+threshold。语义—纹理
 `max(z_hf_soft,z_lf_soft)` 只是未校准、未科学验证、未晋升的 diagnostic；它没有
 formal decision。未来晋升必须重新完成独立分支 calibration、max threshold fit、固定
-FPR/科学确认和显式 promotion，并为 raw/rectified 共享新的 detector/config identity
-与新阈值；不得继承旧 W/CDF、`tau` 或 HF-only threshold。
+FPR/科学确认和显式 promotion，并以未来独立新拟合的 W/CDF/`tau` 为 raw/rectified
+共享新的 detector/config identity 与新阈值；不得继承旧 W/CDF、`tau` 或 HF-only
+threshold。完成这些门前 soft max 不得替换现有正式/default/joint `D_M`。
 
 同一 source cluster 的所有攻击、回正和多 key 派生样本留在同一职责。任何 detector
 identity 变化都使旧 threshold 失效。
