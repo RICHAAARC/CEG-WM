@@ -188,8 +188,10 @@ def test_runtime_configuration_rejects_extra_fields_and_retains_dependency_metad
     observed = parse_runtime_configuration(dependency_metadata_change)
 
     assert observed.dependency_lock.diffusers == "0.39.0"
+    assert observed.dependency_lock != baseline.dependency_lock
     assert observed.configuration_mapping()["dependency_lock"] == dependency_lock
     assert "dependency_lock" not in observed.identity_mapping()
+    assert observed == baseline
     assert observed.runtime_config_digest == baseline.runtime_config_digest
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 from math import isfinite
@@ -215,7 +215,7 @@ class Sd35RuntimeConfiguration:
     detection_schedule_index: int
     detection_conditioning_protocol: str
     qk_layer_names: tuple[str, str]
-    dependency_lock: RuntimeDependencyLock
+    dependency_lock: RuntimeDependencyLock = field(compare=False)
     runtime_config_digest: str
 
     def identity_mapping(self) -> dict[str, object]:

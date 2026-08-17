@@ -61,10 +61,14 @@ _BASE_LATENT = object()
 _SEMANTIC_RUNTIME = object()
 
 
-def _execute(adapter: _PublicAdapter):
-    configuration = preflight.load_semantic_texture_operational_configuration(
-        CONFIG_PATH
-    )
+def _execute(
+    adapter: _PublicAdapter,
+    configuration: preflight.SemanticTextureOperationalConfiguration | None = None,
+):
+    if configuration is None:
+        configuration = preflight.load_semantic_texture_operational_configuration(
+            CONFIG_PATH
+        )
     ticks = iter((10.0, 10.5, 11.0, 11.25))
     return preflight.execute_semantic_texture_operational_preflight(
         adapter,
@@ -205,6 +209,29 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
         configuration.configuration_digest
     )
     assert observed_configuration == configuration
+    observed_requirements = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    observed_requirements["requirements_lock_sha256"] = "5" * 64
+    observed_requirements_path = tmp_path / "observed-requirements.json"
+    observed_requirements_path.write_text(
+        json.dumps(observed_requirements),
+        encoding="utf-8",
+    )
+    observed_requirements_configuration = (
+        preflight.load_semantic_texture_operational_configuration(
+            observed_requirements_path
+        )
+    )
+    assert observed_requirements_configuration.requirements_lock_sha256 == "5" * 64
+    assert observed_requirements_configuration == configuration
+    assert observed_requirements_configuration.configuration_digest == (
+        configuration.configuration_digest
+    )
+    baseline_result = _execute(_PublicAdapter(), configuration)
+    observed_requirements_result = _execute(
+        _PublicAdapter(),
+        observed_requirements_configuration,
+    )
+    assert observed_requirements_result.result_identity == baseline_result.result_identity
     adapter = _PublicAdapter()
     with pytest.raises(TypeError):
         preflight.execute_semantic_texture_operational_preflight(

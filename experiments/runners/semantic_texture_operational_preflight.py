@@ -68,7 +68,7 @@ class SemanticTextureOperationalConfiguration:
     model_revision: str = field(compare=False)
     minimum_cuda_vram_bytes: int
     minimum_free_ephemeral_bytes: int
-    requirements_lock_sha256: str
+    requirements_lock_sha256: str = field(compare=False)
     seeded_latent_protocol: str
     inspyrenet_source_repository: str = field(compare=False)
     inspyrenet_checkpoint_filename: str = field(compare=False)
@@ -220,8 +220,8 @@ def load_semantic_texture_operational_configuration(
         or raw["generation_seed"] != 2026081701
         or raw["minimum_cuda_vram_bytes"] != 23622320128
         or raw["minimum_free_ephemeral_bytes"] != 34359738368
-        or raw["requirements_lock_sha256"]
-        != "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
+        or type(raw["requirements_lock_sha256"]) is not str
+        or _DIGEST.fullmatch(raw["requirements_lock_sha256"]) is None
         or raw["seeded_latent_protocol"]
         != "cpu_float32_generator_shape_1x16xheight_div8xwidth_div8_then_available_cuda_float16_once"
         or any(
@@ -258,6 +258,7 @@ def load_semantic_texture_operational_configuration(
             "inspyrenet_checkpoint_filename",
             "model_id",
             "model_revision",
+            "requirements_lock_sha256",
         }
     }
     return SemanticTextureOperationalConfiguration(
