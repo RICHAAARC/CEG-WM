@@ -77,6 +77,7 @@ def test_lf_whitened_screening_server_help_imports_from_isolated_cwd(
 
     assert completed.returncode == 0, completed.stderr
     assert "ModuleNotFoundError" not in completed.stderr
+    assert "server_support" in SERVER.read_text("utf-8")
 
 
 @pytest.mark.quick

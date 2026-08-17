@@ -56,7 +56,7 @@ from runtime.sd35_backend import (
     Sd35BackendDifferentiableVaeInitialDecodeForwardError,
     Sd35BackendDifferentiableVaeInputPreparationError,
 )
-from scripts.experiment_execution.development_exploration_entrypoint import (
+from scripts.experiment_execution.delivery_support import (
     _base_latent,
     _canonical_bytes,
     _environment_digest,

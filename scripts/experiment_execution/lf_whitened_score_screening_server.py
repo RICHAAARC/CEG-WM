@@ -22,10 +22,10 @@ from experiments.protocol.lf_whitened_score_screening import (
     CLAIM_BOUNDARY,
     load_lf_whitened_score_screening_protocol,
 )
-from scripts.experiment_execution.development_exploration_entrypoint import (
+from scripts.experiment_execution.delivery_support import (
     _build_or_verify_package,
 )
-from scripts.experiment_execution.development_exploration_server import (
+from scripts.experiment_execution.server_support import (
     RUNTIME_CONFIG_PATH,
     _absolute_directory,
     _download_configured_model,

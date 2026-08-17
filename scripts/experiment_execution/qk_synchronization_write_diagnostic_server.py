@@ -22,8 +22,8 @@ from experiments.protocol.qk_synchronization_write_diagnostic import (
     CLAIM_BOUNDARY,
     load_qk_synchronization_write_protocol,
 )
-from scripts.experiment_execution.development_exploration_entrypoint import _build_or_verify_package
-from scripts.experiment_execution.development_exploration_server import (
+from scripts.experiment_execution.delivery_support import _build_or_verify_package
+from scripts.experiment_execution.server_support import (
     RUNTIME_CONFIG_PATH,
     _absolute_directory,
     _download_configured_model,

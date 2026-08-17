@@ -20,7 +20,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from experiments.protocol.lf_transmission_diagnostic import (
     load_lf_transmission_protocol,
 )
-from scripts.experiment_execution.development_exploration_server import (
+from scripts.experiment_execution.server_support import (
     RUNTIME_CONFIG_PATH,
     _absolute_directory,
     _download_configured_model,

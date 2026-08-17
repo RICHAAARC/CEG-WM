@@ -75,6 +75,7 @@ def test_lf_transmission_server_help_imports_from_an_isolated_cwd(
 
     assert completed.returncode == 0, completed.stderr
     assert "ModuleNotFoundError" not in completed.stderr
+    assert "server_support" in SERVER.read_text("utf-8")
 
 
 @pytest.mark.quick

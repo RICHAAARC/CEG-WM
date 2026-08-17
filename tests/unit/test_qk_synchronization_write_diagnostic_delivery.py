@@ -82,6 +82,7 @@ def test_qk_diagnosis_server_help_imports_from_isolated_cwd(tmp_path: Path) -> N
     assert "--expected-revision" in completed.stdout
     assert "--persistent-root" in completed.stdout
     assert "--cache-root" in completed.stdout
+    assert "server_support" in SERVER.read_text("utf-8")
 
 
 @pytest.mark.quick

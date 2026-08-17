@@ -16,7 +16,8 @@ import pytest
 from experiments.protocol.lf_whitened_directional_validation import (
     load_lf_whitened_directional_validation_protocol,
 )
-from scripts.experiment_execution.development_exploration_entrypoint import (
+from scripts.experiment_execution import delivery_support
+from scripts.experiment_execution.delivery_support import (
     _build_or_verify_package,
 )
 from scripts.experiment_execution import lf_whitened_directional_validation_server as server
@@ -65,7 +66,31 @@ def lf_whitened_directional_exact_package(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
     package_root = tmp_path_factory.mktemp("lf_whitened_directional_exact_package")
-    return _build_or_verify_package(ROOT, package_root, "a" * 40)
+
+    def _future_worktree_git(root: Path, *arguments: str) -> str:
+        assert arguments == ("ls-files",)
+        completed = subprocess.run(
+            (
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ),
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return "\n".join(
+            relative
+            for relative in completed.stdout.splitlines()
+            if (root / relative).is_file() and not (root / relative).is_symlink()
+        )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(delivery_support, "_git", _future_worktree_git)
+        return _build_or_verify_package(ROOT, package_root, "a" * 40)
 
 
 @pytest.mark.quick

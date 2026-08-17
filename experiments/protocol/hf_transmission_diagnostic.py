@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from typing import Mapping
 
-from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.development_support import DevelopmentStudyUnit
 
 
 PROTOCOL_ID = "ceg_wm_hf_transmission_diagnostic"

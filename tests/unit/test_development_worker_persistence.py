@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -13,21 +12,13 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.runners.development_inputs import replay_branch_null_calibration
-
-from experiments.metrics.development_exploration import (
-    DEVELOPMENT_METRIC_ROLE,
-    METRIC_SCHEMA_VERSION,
-)
-
-from experiments.protocol.development_exploration import DevelopmentStudyUnit
-from experiments.protocol.development_exploration import (
-    DEVELOPMENT_CLAIM_BOUNDARY,
-    RECORD_SCHEMA_VERSION,
-)
+from experiments.runners.development_support import replay_branch_null_calibration
+from experiments.protocol.development_support import DevelopmentStudyUnit
 from experiments.protocol.development_records import (
+    DEVELOPMENT_CLAIM_BOUNDARY,
     DEVELOPMENT_RECORD_COLLECTION_ROLE,
     DEVELOPMENT_RECORD_MEMBER_PATH,
+    RECORD_SCHEMA_VERSION,
     ROUTING_REFERENCE_RECORD_COLLECTION_ROLE,
     ROUTING_REFERENCE_RECORD_KIND,
     ROUTING_REFERENCE_RECORD_MEMBER_PATH,
@@ -53,40 +44,14 @@ from experiments.runners.development_persistence import (
     canonical_json_bytes,
     create_frozen_development_unit_binding,
 )
-from scripts.experiment_execution.development_exploration_entrypoint import (
+from scripts.experiment_execution.delivery_support import (
     _session_runtime_identity,
 )
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEVELOPMENT_NOTEBOOK_PATH = ROOT / "notebooks/colab/development_exploration.ipynb"
 LEGACY_SESSION_ID_FORMAT = "colab-%Y%m%dT%H%M%S%fZ"
-
-
-def _notebook_session_id_format() -> str:
-    notebook = json.loads(DEVELOPMENT_NOTEBOOK_PATH.read_text(encoding="utf-8"))
-    formats: list[str] = []
-    for cell in notebook["cells"]:
-        if cell["cell_type"] != "code":
-            continue
-        tree = ast.parse("".join(cell.get("source", [])))
-        for statement in tree.body:
-            if not isinstance(statement, ast.Assign) or not any(
-                isinstance(target, ast.Name) and target.id == "SESSION_ID"
-                for target in statement.targets
-            ):
-                continue
-            value = statement.value
-            assert isinstance(value, ast.Call)
-            assert isinstance(value.func, ast.Attribute)
-            assert value.func.attr == "strftime"
-            assert len(value.args) == 1
-            format_value = value.args[0]
-            assert isinstance(format_value, ast.Constant)
-            assert isinstance(format_value.value, str)
-            formats.append(format_value.value)
-    assert len(formats) == 1
-    return formats[0]
+SESSION_ID_FORMAT = "colab_%Y%m%dt%H%M%S%fz"
 
 
 def _utc(epoch_seconds: int) -> str:
@@ -228,8 +193,8 @@ def _record(
         "rectified_preprocessing_identity": "rgb8_public_preprocessing",
     }
     metric_payload = {
-        "schema_version": METRIC_SCHEMA_VERSION,
-        "metric_role": DEVELOPMENT_METRIC_ROLE,
+        "schema_version": "ceg_wm_development_metric_observation_v1",
+        "metric_role": "development_exploratory_cluster_level",
         "responsibility_id": intent.responsibility_id,
         "source_cluster_id": intent.analysis_unit_identity["source_cluster_id"],
         "registered_metric_ids": ("registered_identity_separation_metric",),
@@ -398,11 +363,11 @@ def _receipt(store: DevelopmentPersistentStore, *, session_id: str, start: int, 
 
 
 @pytest.mark.quick
-def test_notebook_session_identity_crosses_persistent_lease_boundary(
+def test_session_identity_crosses_persistent_lease_boundary(
     tmp_path: Path,
 ) -> None:
     fixed_utc = datetime(2026, 8, 4, 8, 12, 7, 484422, tzinfo=timezone.utc)
-    notebook_session_id = fixed_utc.strftime(_notebook_session_id_format())
+    notebook_session_id = fixed_utc.strftime(SESSION_ID_FORMAT)
     accepted_root = tmp_path / "accepted"
     accepted_root.mkdir()
     accepted_store = _store(accepted_root)

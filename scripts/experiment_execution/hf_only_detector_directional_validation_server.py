@@ -22,7 +22,7 @@ from experiments.protocol.hf_only_detector_directional_validation import (
     SCIENTIFIC_CLUSTER_COUNT,
     load_hf_only_detector_directional_protocol,
 )
-from scripts.experiment_execution.development_exploration_server import (
+from scripts.experiment_execution.server_support import (
     RUNTIME_CONFIG_PATH,
     _absolute_directory,
     _download_configured_model,

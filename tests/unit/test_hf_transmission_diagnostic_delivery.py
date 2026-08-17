@@ -63,6 +63,7 @@ def test_hf_transmission_server_help_imports_from_an_isolated_cwd(
 
     assert completed.returncode == 0, completed.stderr
     assert "ModuleNotFoundError" not in completed.stderr
+    assert "server_support" in SERVER.read_text("utf-8")
 
 
 @pytest.mark.quick
@@ -142,14 +143,10 @@ def test_hf_transmission_notebook_is_thin_historical_and_scientific_only() -> No
 
 
 @pytest.mark.quick
-def test_historical_development_notebook_is_explicitly_paused() -> None:
-    notebook = json.loads(HISTORICAL_DEVELOPMENT_NOTEBOOK.read_text("utf-8"))
-    source = "\n".join(
-        "".join(cell.get("source", [])) for cell in notebook["cells"]
-    )
-
-    assert "only development entrypoint currently authorized" not in source
-    assert "historical development entrypoint" in source
-    assert "paused and is not authorized to run" in source
-    assert "do not use **Run all**" in source
-    assert "hf_transmission_diagnostic.ipynb" in source
+def test_retired_development_notebook_is_absent_and_history_is_preserved() -> None:
+    assert not HISTORICAL_DEVELOPMENT_NOTEBOOK.exists()
+    history = (
+        ROOT / "scripts/experiment_execution/README.md"
+    ).read_text("utf-8")
+    assert "retired development-exploration" in history
+    assert "Git ancestry" in history

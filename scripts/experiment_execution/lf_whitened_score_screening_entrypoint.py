@@ -38,7 +38,7 @@ from experiments.runners.lf_whitened_score_screening import (
 )
 from main import identify_root_key, key_schedule_sha256_counter
 from runtime import Sd35PipelineBackend, create_runtime_adapter
-from scripts.experiment_execution.development_exploration_entrypoint import (
+from scripts.experiment_execution.delivery_support import (
     _base_latent,
     _canonical_bytes,
     _environment_digest,

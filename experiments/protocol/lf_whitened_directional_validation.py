@@ -8,7 +8,7 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 
-from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.development_support import DevelopmentStudyUnit
 from experiments.protocol.hf_only_detector_directional_validation import (
     AuthorityDenyAxes,
     PriorDevelopmentManifestBinding,

@@ -325,9 +325,14 @@ def test_formal_operations_declare_complete_configuration(
     assert geometry_declaration["runtime_config_digest"] == (
         runtime_adapter.configuration.runtime_config_digest
     )
-    assert geometry_declaration["runtime_configuration"]["model_id"] == (
+    assert geometry_declaration["runtime_model_id"] == (
         runtime_adapter.configuration.model_id
     )
+    assert geometry_declaration["runtime_model_revision"] == (
+        runtime_adapter.configuration.model_revision
+    )
+    assert "model_id" not in geometry_declaration["runtime_configuration"]
+    assert "model_revision" not in geometry_declaration["runtime_configuration"]
     assert geometry_declaration["runtime_qk_layer_names"] == [
         "transformer_blocks.0.attn",
         "transformer_blocks.23.attn",

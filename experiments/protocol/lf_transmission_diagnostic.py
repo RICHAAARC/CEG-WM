@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from typing import Mapping
 
-from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.development_support import DevelopmentStudyUnit
 from experiments.protocol.internal_splits import (
     AnalysisUnitIdentity,
     derive_source_cluster_id,

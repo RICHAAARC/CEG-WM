@@ -621,12 +621,33 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert "os.replace(pending, drive_export_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME)" in code_source
     assert "completed.returncode != 0" in code_source
     assert "sys.tracebacklimit = 0" in code_source
-    assert code_source.index('mount_run_id = "semantic-texture-operational-mount-"') < code_source.index(
-        'drive.mount("/content/drive")'
-    )
-    assert code_source.index("mount_local_root.mkdir(parents=True)") < code_source.index(
-        'drive.mount("/content/drive")'
-    )
+    mount_run_id_assignments = [
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "mount_run_id"
+    ]
+    assert len(mount_run_id_assignments) == 1
+    mount_local_root_mkdir_calls = [
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "mount_local_root"
+        and node.func.attr == "mkdir"
+    ]
+    assert len(mount_local_root_mkdir_calls) == 1
+    for node in (
+        mount_run_id_assignments[0],
+        mount_local_root_mkdir_calls[0],
+    ):
+        assert (node.lineno, node.col_offset) < (
+            drive_mount_call.lineno,
+            drive_mount_call.col_offset,
+        )
     assert "fresh local root is required" in code_source
     assert (
         '_persist_preclone_transport_failure(mount_local_root / "transport-delivery", '

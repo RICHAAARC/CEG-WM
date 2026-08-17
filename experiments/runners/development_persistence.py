@@ -20,7 +20,7 @@ import time
 from typing import Mapping, Sequence
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
-from experiments.protocol.development_exploration import DevelopmentStudyUnit
+from experiments.protocol.development_support import DevelopmentStudyUnit
 from experiments.protocol.development_records import (
     ATTEMPT_DISPOSITIONS,
     DEVELOPMENT_RECORD_MEMBER_PATH,
