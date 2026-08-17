@@ -603,3 +603,64 @@ def test_semantic_texture_operational_pre_execution_fault_classes_persist_zero_s
         server.DELIVERY_COMPLETION_CHECKSUMS_FILENAME,
         f"semantic_texture_operational_pre-execution-{blocked_class}.zip",
     }
+
+
+def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive_delivery_bound() -> None:
+    notebook_path = (
+        ROOT / "notebooks/colab/semantic_texture_operational_preflight.ipynb"
+    )
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    code_cells = [
+        cell for cell in notebook["cells"] if cell["cell_type"] == "code"
+    ]
+    code_source = "\n".join(
+        "".join(cell.get("source", [])) for cell in code_cells
+    )
+    assert notebook["nbformat"] == 4
+    assert notebook["metadata"]["accelerator"] == "GPU"
+    assert len(code_cells) == 3
+    assert all(cell["execution_count"] is None for cell in code_cells)
+    assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
+    for exact_identity in (
+        "9136303fcc8c72648e6c4fbc365776af4f8dd35c",
+        "063a0b5eac30e94bfbe85222bc6c8da81064e51a801563d98bd0ff28144c525e",
+        "fb5e5678a4a695af281625baf4d408ea0d1742a2c78bf2ec5bf593dcd36f41b6",
+        "9efd4299598e7bcc1a2003720f4e93c7be82d762d98496041ed0c4dc37906061",
+        "82ba552bda3394dac0348e9d07c1bcb9a7c6e221451f9279673a91a3c43c85c4",
+        "6371404",
+        "665",
+        "37990",
+    ):
+        assert exact_identity in code_source
+    assert 'drive.mount("/content/drive")' in code_source
+    assert 'userdata.get("HF_TOKEN")' in code_source
+    assert 'userdata.get("CEG_WM_ROOT_KEY")' in code_source
+    assert code_source.count("subprocess.run(") == 1
+    assert '"--entrypoint-args"' in code_source
+    assert '"--execute"' in code_source
+    assert "--describe-boundary" not in code_source
+    assert "env=bootstrap_environment" in code_source
+    assert "capture_output=True" in code_source
+    assert "secret_values" not in code_source
+    assert "operational_delivery_exists == transport_delivery_exists" in code_source
+    assert "archive.namelist() != [result_name]" in code_source
+    assert "artifact_names[:3]" in code_source
+    assert "completion_checksums_blob = local_completion_checksums.read_bytes()" in code_source
+    assert "os.replace(pending_completion_checksums, drive_completion_checksums)" in code_source
+    assert "bootstrap_completed.returncode != 0" in code_source
+    assert "sys.tracebacklimit = 0" in code_source
+    assert "fresh local and Drive roots are required" in code_source
+    assert "pip install" not in code_source
+    assert "git clone" not in code_source
+    assert "hf_hub_download" not in code_source
+    assert "from main" not in code_source
+    assert "from runtime" not in code_source
+    assert "from experiments" not in code_source
+    assert "governance" not in code_source
+    readme = (ROOT / "notebooks/colab/README.md").read_text(encoding="utf-8")
+    current_section = readme.split("## Current authorized entrypoint", 1)[1]
+    assert current_section.count(
+        "`semantic_texture_operational_preflight.ipynb` 是当前唯一授权执行 **Run all** 的入口"
+    ) == 1
+    assert "semantic_texture_operational_preflight/inputs/9136303" in current_section
+    assert "semantic_texture_operational_preflight/exports/<revision>/<fresh-run-id>/" in current_section

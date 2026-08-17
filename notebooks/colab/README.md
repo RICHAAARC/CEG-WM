@@ -4,7 +4,28 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 
 ## Current authorized entrypoint
 
-`qk_synchronization_write_diagnostic.ipynb` 是当前唯一授权在收到最终固定链接后执行
+`semantic_texture_operational_preflight.ipynb` 是当前唯一授权执行 **Run all** 的入口。
+它只从 Drive 固定输入目录
+`MyDrive/CEG-WM/semantic_texture_operational_preflight/inputs/9136303fcc8c72648e6c4fbc365776af4f8dd35c/`
+读取 `semantic-texture-phase-a.zip`、同名 `.manifest.json` 和外部
+`semantic_texture_operational_preflight_bootstrap.py`，逐一核对冻结 revision、大小、
+SHA-256 与 package identity。用户只需选择 GPU runtime、设置 `HF_TOKEN` 与
+`CEG_WM_ROOT_KEY` 两个 Colab Secrets、挂载 Drive 并 **Run all**；Secrets 只进入外部
+bootstrap 子进程环境。每次运行生成新的 run ID、新的 `/content` 根和新的 Drive export
+根，不恢复、迁移或覆盖既有 namespace。
+
+Notebook 仅以 `--execute` 调用已认证外部 bootstrap。package 产生的 operational 或
+transport quartet 必须恰有一种完整存在，且保持 `aggregate=null`、零 scientific units、
+无 formal tau、无 candidate promotion。Notebook 逐项复核 result-only ZIP、外部 receipt
+及 package 原始 `SHA256SUMS`，把 result、ZIP、receipt create-only 复制到
+`MyDrive/CEG-WM/semantic_texture_operational_preflight/exports/<revision>/<fresh-run-id>/`，
+最后才逐字节、原子落位同一 `SHA256SUMS`，随后复核完整 Drive quartet；bootstrap 非零
+也只在完整落盘后报告失败。Notebook 不实现或构造方法、runtime、runner、record、科学
+判定或 checksum，不持久化或输出 Secrets、prompt、seed、latent、M/T、mask、private state、
+绝对路径或 traceback。提交副本保持 outputs 为空、execution count 为 null。
+
+`qk_synchronization_write_diagnostic.ipynb` 保留其此前入口说明作为历史记录，当前为
+**paused / not authorized**；下文“当前入口”仅指它当时的执行身份。它曾获授权在收到最终固定链接后执行
 **Run all** 的入口。它固定拉取 execution revision
 `1c1ff50d56a81bccb8b1f738d5b5f2792251246d`，使用独立 run ID
 `ceg_wm_qk_vae_decoder_internal_operation_localization`。当前入口仅用于验证已审核的
@@ -43,7 +64,7 @@ formal evaluation、baseline 或论文 claim，也不执行 routing、LF/HF 组�
 旧 execution revision `194eccdd1f16c295528a4d9e1d7c75c2748f061a` 与旧 run ID
 `ceg_wm_lf_whitened_directional_validation` 保持 producer-bound 历史身份，当前为
 **paused / not authorized**，不得作为当前入口运行或与新 run 混合。
-除当前 Q/K 入口外，目录内其余全部 Notebook 均为
+除当前 semantic-texture operational preflight 入口外，目录内其余全部 Notebook 均为
 **paused / not authorized**，不得作为当前入口运行。
 
 `lf_whitened_score_screening.ipynb` 已完成 1 个 non-scientific operational smoke、32 个
