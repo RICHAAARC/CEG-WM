@@ -30,10 +30,13 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
 - CEG-WM 已按自有 `HF carrier`、`HF direct score` 和 `content detector` 身份完成
   CPU/synthetic 实现；这不是 runtime 或效果验证。
 - 当前 readiness 在 13 项职责上绑定 12 个唯一候选身份和 17 个行为节点。语义—纹理
-  软路由五候选由 producer `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`
-  实现并经独立 exact audit 批准，状态为
+  软路由五候选的当前 reviewed revision 为
+  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立 exact audit 批准，状态为
   `implemented_not_scientifically_validated`；旧 routing/combination 已形成
   producer-bound development negative，只保留历史精确重放。
+  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
+  历史 exact provenance，不是当前 readiness 权威；completion profile 为
+  `profile_pending`。
 - 方法完成面固定为 13 项职责组件；组合写入、LF 盲分数和几何可靠性各有独立
   路径。设计 registry 为 20 个 ID（19 个具名候选加 1 个 mandatory control），
   readiness-bound 当前候选身份12个，三种计数不得混用。旧的11候选/28节点
@@ -67,12 +70,10 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   晋升，没有 calibration、固定 FPR、GPU 或科学效果证据。hard salient-object
   local-LF 四候选只作为 `superseded_without_scientific_adjudication` 历史候选保留；
   `full_ceg_wm_eligible=false`。
-- 真实 SD3.5 runtime 边界已由 candidate
-  `8b2344756c4c247906ff0d4eab68e46a773e13f5` 的 `qualification / passed` run
-  `20260729T110628Z` 验证；result ZIP SHA-256 为
-  `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`。
-  这不表示 LF/routing/组合、几何恢复效果、完整联合 FPR、攻击鲁棒性、正式实验
-  records 或论文效果已经成立。
+- 既有 SD3.5 runtime qualification 只保留为原 producer/revision 上的历史窄证据，
+  不是当前 semantic-domain 方法、runtime 或 delivery authority；stage/readiness
+  不据此主张 runtime、LF/routing/组合、几何恢复效果、完整联合 FPR、攻击鲁棒性、
+  正式实验 records 或论文效果已经成立。
 
 `SLM-WM`、`SLM-WM-FlowHF`、`CEG-WM-OLD-main` 和 `CEG-O-master` 仅作为历史来源与偏离案例；它们的固定 LF/HF 融合、reference-based 几何、嵌入端私有状态依赖和系统级 attestation 路线不自动成为本项目方法。
 

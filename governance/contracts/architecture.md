@@ -11,15 +11,15 @@ CEG-WM 是内容证据主判、几何条件恢复的双链生成式图像水印�
 阶段实施路径继续为
 `research_defined → method_construction_authorized → method_implemented → runtime_verified → experiment_ready`。
 实际阶段/status 已由独立 revisions 同步为 `experiment_ready / implemented`。
-CPU/synthetic readiness 本身不证明 runtime；当前另有独立真实 GPU qualification
-支持冻结 SD3.5 runtime 边界，但不证明正式 FPR 或科学效果；
+CPU/synthetic readiness 本身不证明 runtime；既有真实 GPU qualification 只保留为
+原 producer/revision 上的历史窄证据，不是当前 semantic-domain authority；
 正式 detector 仍为 HF-only；旧 routing/combination 只保留 producer-bound historical
-replay。语义—纹理软路由五候选已由 producer
-`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 实现并经 revision-bound independent
-exact audit 批准，状态为 `implemented_not_scientifically_validated`；soft max 仅为
-diagnostic 且未晋升。该 revision、对应 readiness/review 与 route registry 只保存
-historical v1 key-schedule-bound snapshot，不能授权当前 v2 bytes 或 readiness；v2 实现
-当前为 `implementation-under-independent-review`，不得预填未来审核 SHA。hard salient-object
+replay。语义—纹理软路由五候选的当前 reviewed revision 为
+`cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经 revision-bound independent exact
+audit 批准，状态为 `implemented_not_scientifically_validated`；soft max 仅为
+diagnostic 且未晋升。`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为
+semantic-domain 变更前的历史 exact provenance，不是当前 readiness 权威；本次
+authority rebinding 的 completion profile 状态为 `profile_pending`。hard salient-object
 local-LF 四候选为 `superseded_without_scientific_adjudication`，
 `full_ceg_wm_eligible=false`。实验准备基础设施闭环仅表示冻结协议与可追溯执行交付
 已经就位，不提供 `tau`、confirmation 结果、Calibration Locked、正式 evaluation

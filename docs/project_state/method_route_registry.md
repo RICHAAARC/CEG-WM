@@ -32,8 +32,11 @@
 - `hf_semantic_texture_soft_direct_score`；
 - `content_combination_semantic_texture_max_standardized`。
 
-producer revision：`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`。独立复核绑定：
-`independent_semantic_texture_soft_candidate_semantic_review:01a00740-db8c-7b81-b370-3b0fd5db8285:02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb:independent_exact_audit_approve+cumulative_method_runtime_api_gate_approve`。
+当前 reviewed revision：`cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`。独立复核绑定：
+`independent_semantic_domain_method_runtime_delivery_review:01a00740-db8c-7b81-b370-3b0fd5db8285:cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9:independent_exact_audit_approve+cumulative_method_runtime_delivery_gate_approve`。
+`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的历史
+exact provenance，不是当前 readiness 或方法身份权威。本次 authority rebinding 的
+completion profile 状态为 `profile_pending`。
 该状态只表示实现/API/CPU-synthetic 语义已审核；soft max 仍是 diagnostic、未晋升，
 正式 detector 仍为 HF-only，`full_ceg_wm_eligible=false`。它不提供 runtime
 qualification、机制成功、calibration、固定 FPR、GPU 或科学效果证据。

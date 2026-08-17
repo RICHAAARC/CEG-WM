@@ -21,12 +21,13 @@ runtime 验证或论文证据。
   和 revision-bound 独立语义复核均已登记；
 - 正式 detector 仍为 HF-only，LF/routing 未实验晋升，
   `full_ceg_wm_eligible=false`；
-- soft-route 五候选已由 producer
-  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 实现并经独立 exact audit 批准，
+- soft-route 五候选的当前 reviewed revision 为
+  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立 exact audit 批准，
   但只处于 `implemented_not_scientifically_validated`；soft max 是 diagnostic、未晋升，
   没有 calibration、固定 FPR、GPU、runtime 或科学效果主张；
-- 真实 SD3.5 runtime qualification 与独立阶段迁移已经完成，证据绑定 candidate
-  `8b2344756c4c247906ff0d4eab68e46a773e13f5` 和 run `20260729T110628Z`；
+- `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
+  历史 exact provenance；既有 runtime qualification 也只保留为原 producer/revision
+  上的历史窄证据，二者都不是当前 authority；completion profile 为 `profile_pending`；
 - 实验协议与可追溯执行交付基础设施已经闭环，但尚无 `tau`、confirmation 结果、
   Calibration Locked、正式 evaluation 或正式实验 records；
 - 未完成 LF/routing/组合/geometry 晋升、完整联合 FPR、攻击鲁棒性或科学效果。

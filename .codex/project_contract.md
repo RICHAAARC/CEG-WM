@@ -27,14 +27,9 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 - 用户已基于 experiment_ready_infrastructure_closure 全部完成、冻结实验协议和可追溯执行入口明确授权本次独立
   阶段迁移。本 revision 只把实际阶段同步为 `experiment_ready / implemented`，
   不修改方法、runtime、Notebook、登记测试、候选规格或 readiness 语义。
-- 已独立核验的 runtime 边界精确绑定 candidate
-  `8b2344756c4c247906ff0d4eab68e46a773e13f5`、execution package SHA-256
-  `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`、
-  `qualification / passed` run `20260729T110628Z` 及 result ZIP SHA-256
-  `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`。
-  该结果证明冻结 SD3.5 runtime 的 callback 18、actual dtype/integrity/budget、
-  VAE、两层真实 Q/K、registered-key 重复确定性和 negative-key identity control
-  可执行；Optional Replay 在没有具体缺口时不强制。
+- 既有 runtime qualification 只保留为其原 producer/revision 上的历史窄证据，不是
+  当前 semantic-domain 方法、runtime 或 delivery authority；当前 stage/readiness
+  不据此主张 runtime 已验证。
 - 当前 `experiment_ready` 只表示 experiment_ready_infrastructure_closure 已完成且冻结协议与可追溯执行入口可用；
   不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行、正式攻击矩阵或论文实验，也不构成
   科学效果结论。
@@ -43,12 +38,12 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
   registry 现为 19 个具名候选加 1 个强制 routing 禁用对照，共 20 个 ID。
   语义—纹理软路由五候选采用 InSPyReNet soft `M`、Sobel/P95 `T`、soft-routed
-  LF/HF write、两条盲分支分数和固定 max statistic；五候选实现 producer 为
-  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`，状态为
-  `implemented_not_scientifically_validated`，并由登记的 independent exact audit
-  批准其当时的 v1 实现语义。该 revision、对应 readiness/review 与 route registry
-  只保存 historical v1 key-schedule-bound snapshot，不能授权当前 v2 bytes 或 readiness。
-  v2 实现当前为 `implementation-under-independent-review`，不得预填未来审核 SHA。
+  LF/HF write、两条盲分支分数和固定 max statistic；当前 reviewed revision 为
+  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，状态为
+  `implemented_not_scientifically_validated`，并由登记的 revision-bound independent
+  exact audit 批准。`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为
+  semantic-domain 变更前的历史 exact provenance，不是当前 readiness 权威。本次
+  authority rebinding 的 completion profile 状态为 `profile_pending`。
   hard salient-object local-LF 四候选状态为
   `superseded_without_scientific_adjudication`。状态权威见
   `docs/project_state/method_route_registry.md`。

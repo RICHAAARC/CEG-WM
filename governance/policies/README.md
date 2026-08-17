@@ -9,10 +9,13 @@
 - `method_readiness_rules.yaml`：研究定义阶段、13 项双链职责组件、固定实现路径、
   readiness-bound 当前12个唯一候选身份、17个方法特异性验收节点和独立语义复核要求。
   设计 registry 的20个 ID（19个具名候选加1个 mandatory control）、readiness
-  绑定的12个候选身份与13项职责是三种不同计数。语义—纹理软路由五候选已由
-  producer `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 实现并独立复核，但只处于
+  绑定的12个候选身份与13项职责是三种不同计数。语义—纹理软路由五候选的当前
+  reviewed revision 为 `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立复核，但只处于
   `implemented_not_scientifically_validated`；旧的11候选/28节点 readiness 快照在
   `0258ccb2100bfe8b58d1a12079876841192528b3` 保留为历史事实。
+  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
+  历史 exact provenance，不是当前 readiness 权威；completion profile 为
+  `profile_pending`。
 
 current 内容候选固定 max statistic，不存在 `a/w/function` 或组合参数 selection；
 calibration 只承担分支 primary-null/CDF 标准化、max `tau` 与其他独立职责。

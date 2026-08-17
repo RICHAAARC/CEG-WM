@@ -57,15 +57,17 @@ reliability 和 joint decision 不得折叠。17 个行为节点的精确清单�
 5. 审计后候选、实现或登记测试路径发生变化时，批准失效并重新复核。
 6. 全部门禁通过后，才可单独申请 `method_implemented` 阶段转换。
 
-当前已完成步骤 1–6，并通过三任务独立复核及独立阶段迁移。
+当前已完成步骤 1–6，并通过 revision-bound 独立复核及独立阶段迁移。
 readiness 只证明“登记候选已由真实项目组件实现并通过规定门禁”。它不证明 runtime
-真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。当前另有独立
-真实 GPU qualification 支持 runtime 边界，但不改变 readiness 的职责。正式
+真实可用、固定 FPR、攻击鲁棒性、论文有效性或完整 CEG-WM 科学成功。既有 runtime
+qualification 只保留为原 producer/revision 上的历史窄证据，不是当前 authority。正式
 detector 仍为 HF-only；LF/routing 尚未实验晋升，`full_ceg_wm_eligible=false`。
-当前 soft-route 五候选的 producer 为
-`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`，状态仅为
+当前 soft-route 五候选的 reviewed revision 为
+`cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，状态仅为
 `implemented_not_scientifically_validated`；soft max 仍是 diagnostic/unpromoted，
-不提供 calibration、固定 FPR、GPU、runtime 或科学效果证据。旧11候选/28节点快照由
+不提供 calibration、固定 FPR、GPU、runtime 或科学效果证据。
+`02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
+历史 exact provenance；completion profile 为 `profile_pending`。旧11候选/28节点快照由
 `0258ccb2100bfe8b58d1a12079876841192528b3` 保留为历史 exact-replay 来源。
 
 ## Fail-Closed Conditions

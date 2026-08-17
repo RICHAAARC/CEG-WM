@@ -12,19 +12,19 @@
   责任、唯一实现 symbol、17 个非同构行为节点、候选摘要和 revision-bound
   独立语义复核。当前 readiness 在13项职责上绑定12个唯一候选身份；设计 registry
   则为20个 ID（19个具名候选加1个 mandatory control），二者不得混淆。语义—纹理
-  软路由五候选已由 producer `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`
-  实现并经独立 exact audit 批准，但状态仅为
+  软路由五候选的当前 reviewed revision 为
+  `cd541e5fa7ffeabc1db1f74a3e9f5a925e0112d9`，并经独立 exact audit 批准，但状态仅为
   `implemented_not_scientifically_validated`。旧的11候选/28节点 readiness 快照仍在
   exact revision `0258ccb2100bfe8b58d1a12079876841192528b3` 保留为历史事实。
+  `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的
+  历史 exact provenance，不是当前 readiness 权威；completion profile 为
+  `profile_pending`。
   hard salient-object local-LF 四候选已由方法设计替代，但不据此作科学失败裁决。
 - readiness 只记录方法构建闭合，不是阶段文件。experiment_ready_infrastructure_closure 已完成，冻结实验协议与
   可追溯执行入口可用；这只满足 `experiment_ready` 的执行准备边界，不授权
-  calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。当前 runtime 边界证据绑定
-  candidate `8b2344756c4c247906ff0d4eab68e46a773e13f5`、package SHA-256
-  `8290abeed79931eb7208ac9ca280f1ea401f4725abfead35f12617a0ef54dd38`、
-  qualification run `20260729T110628Z` 和 result ZIP SHA-256
-  `d9b7d91d41cc963098c077268445ad80e9994c809227ca2f68615a37ac93ac37`。
-  该 `qualification / passed` 结果只支持真实 SD3.5 runtime 边界；正式 detector
+  calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。既有
+  runtime qualification 只保留为原 producer/revision 上的历史窄证据，不是当前
+  method/runtime/delivery authority。正式 detector
   仍为 HF-only，soft-route max 只作 diagnostic、未实验晋升且没有 formal threshold，
   `full_ceg_wm_eligible=false`，且没有正式
   FPR、鲁棒性、正式 records 或科学效果证据。
