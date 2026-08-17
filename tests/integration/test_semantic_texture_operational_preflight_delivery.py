@@ -661,7 +661,7 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
         for node in ast.walk(notebook_syntax)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "_copy_create_only"
+        and getattr(node.func, "id", None) == "_copy_create_only"
     )
     secret_reads = [
         node
