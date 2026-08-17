@@ -36,6 +36,7 @@ from main.geometry_chain.reliability import (
     validate_geometry_reliability_result,
 )
 from main.geometry_chain.transform_estimator import (
+    GeometricTransformEstimatorError,
     GeometricTransformEstimation,
     SimilarityTransform,
     geometric_transform_estimator,
@@ -46,6 +47,7 @@ from main.shared.key_schedule import (
     derive_wrong_key_material,
     identify_root_key,
 )
+from main.shared import stable_json_utf8
 
 _REGISTERED_KEY = "geometry-cpu-synthetic-key"
 _LAYER_NAMES = (
@@ -93,14 +95,39 @@ def _relation_digest(values: tuple[float, ...]) -> str:
 
 
 def _synthetic_transformed_observation(base, matrix: torch.Tensor):
-    geometry_layer = base.layers[0]
+    projection_matched_layers = []
+    for layer in base.layers:
+        projection_tensor = layer.projection_tensor()
+        projection_values = tuple(
+            float(value) for value in projection_tensor.reshape(-1)
+        )
+        projection_matched_layers.append(
+            replace(
+                layer,
+                relation_values=projection_values,
+                descriptor_digest=layer.projection_digest,
+                relation_score=row_normalized_relation_score(
+                    projection_tensor,
+                    projection_tensor,
+                ),
+            )
+        )
+    matched_layers = tuple(projection_matched_layers)
+    projection_matched_base = replace(
+        base,
+        layers=matched_layers,
+        relation_score=sum(layer.relation_score for layer in matched_layers)
+        / len(matched_layers),
+        descriptor_digest=_aggregate_descriptor_digest(matched_layers),
+    )
+    geometry_layer = projection_matched_base.layers[0]
     backward, _ = sampling_matrix(
         _inverse_affine(matrix),
         original_grid_side=geometry_layer.original_grid_side,
         token_indices=geometry_layer.token_indices,
     )
     layers = []
-    for layer in base.layers:
+    for layer in projection_matched_base.layers:
         transformed = _warp_relation(backward, layer.projection_tensor())
         values = tuple(float(value) for value in transformed.reshape(-1))
         layers.append(
@@ -116,7 +143,7 @@ def _synthetic_transformed_observation(base, matrix: torch.Tensor):
         )
     layer_values = tuple(layers)
     return replace(
-        base,
+        projection_matched_base,
         layers=layer_values,
         relation_score=sum(layer.relation_score for layer in layer_values)
         / len(layer_values),
@@ -124,7 +151,53 @@ def _synthetic_transformed_observation(base, matrix: torch.Tensor):
     )
 
 
-def _identity_estimation_record() -> GeometricTransformEstimation:
+def _synthetic_search_config_digest(epsilon_inlier: float | None) -> str:
+    return sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": "rectification_similarity",
+                "coarse_log_scale": ["0", "-log_sqrt2", "+log_sqrt2"],
+                "coarse_rotation_degrees": [0, -32, -16, 16, 32],
+                "coarse_translation": ["0", "-0.28", "+0.28"],
+                "dihedral_order": [
+                    "identity",
+                    "x_flip",
+                    "y_flip",
+                    "xy_flip",
+                    "rot90",
+                    "rot_minus90",
+                    "diag",
+                    "anti_diag",
+                ],
+                "epsilon_inlier_decimal": (
+                    None
+                    if epsilon_inlier is None
+                    else format(epsilon_inlier, ".17g")
+                ),
+                "objective_weights": ["0.10", "0.90", "-0.01_deficits"],
+                "refinement_rounds": 3,
+                "wrong_key_indices": list(range(8)),
+                "refinement_strategy": (
+                    "joint_greedy_with_axis_isolated_safeguards_v2"
+                ),
+                "axis_safeguard_order": [
+                    "rotation_degrees",
+                    "log_scale",
+                    "translation_x",
+                    "translation_y",
+                ],
+                "axis_safeguard_initialization": "coarse_selected",
+                "candidate_matrix_protocol": (
+                    "float64_parameter_math_then_single_float32_cast"
+                ),
+            }
+        )
+    ).hexdigest()
+
+
+def _identity_estimation_record(
+    epsilon_inlier: float | None = 0.8,
+) -> GeometricTransformEstimation:
     transform = SimilarityTransform(
         dihedral="identity",
         residual_rotation_degrees=0.0,
@@ -157,9 +230,9 @@ def _identity_estimation_record() -> GeometricTransformEstimation:
         gap=0.2,
         identity_margin=0.0,
         key_margin=0.8,
-        inlier_ratio=1.0,
+        inlier_ratio=None if epsilon_inlier is None else 1.0,
         mean_residual=0.0,
-        epsilon_inlier=0.8,
+        epsilon_inlier=epsilon_inlier,
         anchor_residuals=tuple(0.0 for _ in range(12)),
         registered_root_key_public_digest=identify_root_key(
             _REGISTERED_KEY
@@ -167,7 +240,7 @@ def _identity_estimation_record() -> GeometricTransformEstimation:
         observation_descriptor_digest="1" * 64,
         observation_projection_digest="2" * 64,
         observation_geometry_config_digest="3" * 64,
-        search_config_digest="4" * 64,
+        search_config_digest=_synthetic_search_config_digest(epsilon_inlier),
     )
 
 
@@ -574,23 +647,31 @@ def test_qk_similarity_transform_identifiability():
         translation_x: float,
         translation_y: float,
     ) -> torch.Tensor:
-        angle = rotation_degrees * pi / 180.0
-        scale_value = torch.exp(torch.tensor(log_scale_value)).item()
-        return torch.tensor(
+        angle = torch.tensor(
+            rotation_degrees * pi / 180.0,
+            dtype=torch.float64,
+        )
+        scale_value = torch.exp(
+            torch.tensor(log_scale_value, dtype=torch.float64)
+        )
+        cosine = torch.cos(angle)
+        sine = torch.sin(angle)
+        linear = scale_value * torch.stack(
             (
-                (
-                    scale_value * cos(angle),
-                    -scale_value * sin(angle),
-                    translation_x,
-                ),
-                (
-                    scale_value * sin(angle),
-                    scale_value * cos(angle),
-                    translation_y,
+                torch.stack((cosine, -sine)),
+                torch.stack((sine, cosine)),
+            )
+        )
+        return torch.cat(
+            (
+                linear,
+                torch.tensor(
+                    ((translation_x,), (translation_y,)),
+                    dtype=torch.float64,
                 ),
             ),
-            dtype=torch.float32,
-        )
+            dim=1,
+        ).to(dtype=torch.float32)
 
     cases = (
         ("identity", base_small, 0.0, 0.0, 0.0, 0.0, False),
@@ -599,7 +680,7 @@ def test_qk_similarity_transform_identifiability():
             "scale",
             base_scale,
             0.0,
-            -3.0 * finest_log_scale_resolution,
+            -log(sqrt(2.0)) / 6.0,
             0.0,
             0.0,
             True,
@@ -903,6 +984,17 @@ def test_transform_estimator_returns_raw_residuals_before_reliability_fit():
     )
 
     validate_geometric_transform_estimation(unfitted)
+    for stale_search_config_digest in ("4" * 64, "0" * 64):
+        with pytest.raises(
+            GeometricTransformEstimatorError,
+            match="search config digest mismatch",
+        ):
+            validate_geometric_transform_estimation(
+                replace(
+                    unfitted,
+                    search_config_digest=stale_search_config_digest,
+                )
+            )
     assert len(unfitted.anchor_residuals) == 12
     assert unfitted.mean_residual >= 0.0
     assert unfitted.epsilon_inlier is None
@@ -918,11 +1010,7 @@ def test_transform_estimator_returns_raw_residuals_before_reliability_fit():
 
 @pytest.mark.quick
 def test_unfitted_estimator_cannot_be_relabelled_by_fitted_thresholds():
-    unfitted = replace(
-        _identity_estimation_record(),
-        epsilon_inlier=None,
-        inlier_ratio=None,
-    )
+    unfitted = _identity_estimation_record(epsilon_inlier=None)
 
     result = geometry_reliability(unfitted, _thresholds())
     assert not result.reliable

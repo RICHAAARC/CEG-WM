@@ -680,9 +680,19 @@ def test_full_scale_actual_write_can_be_accepted_without_retry() -> None:
     backend = FakeContentBackend()
     adapter = _initialized_adapter(backend)
     calls: list[tuple[float, ...]] = []
+    shape = (1, 1, 1, 1)
+    carrier = hf_carrier(TEST_ROOT_KEY, shape)
+    baseline = torch.tensor(
+        carrier.direction, dtype=torch.float32
+    ).reshape(shape).to(torch.float16)
+
+    def operation(values: tuple[float, ...]) -> ContentEmbeddingResult:
+        calls.append(values)
+        return content_embedder(values, carrier)
+
     result = adapter.execute_content_write_and_vae(
-        _full_scale_accepted_latent(),
-        _embedding_operation(calls),
+        baseline,
+        operation,
     )
 
     method_result = result.content_materialization_result

@@ -38,6 +38,7 @@ from experiments.runners.hf_only_detector_directional_validation import (
     HfOnlyDetectorDirectionalRunner,
 )
 from main import identify_root_key, key_schedule_sha256_counter
+from main.shared.key_schedule import stable_json_utf8
 from runtime import Sd35PipelineBackend, create_runtime_adapter
 from scripts.experiment_execution.delivery_support import (
     _base_latent,
@@ -63,24 +64,27 @@ class HfDetectorDirectionalEntrypointError(RuntimeError):
 def _derive_registered_experiment_root(
     base_root_key: str, *, protocol_digest: str, manifest_digest: str
 ) -> str:
+    root_material_envelope = {
+        "base_root_key_text": base_root_key,
+        "derivation_version": "ceg_wm_registered_experiment_root_v2",
+        "family": "hf_only_detector_directional_validation",
+        "manifest_digest": manifest_digest,
+        "protocol_digest": protocol_digest,
+    }
+    registered_root_material = stable_json_utf8(root_material_envelope).decode(
+        "utf-8", errors="strict"
+    )
     stream = key_schedule_sha256_counter(
-        base_root_key,
+        registered_root_material,
         {
             "candidate_id": "hf_sparse_tail",
             "operator": "carrier_template",
             "responsibility_domain": "hf_carrier",
-            "model_revision": canonical_digest(
-                {
-                    "derivation_identity": "hf_detector_directional_registered_key_subdomain_derivation",
-                    "manifest_digest": manifest_digest,
-                    "protocol_digest": protocol_digest,
-                }
-            ),
             "tensor_role": "base_gaussian",
         },
         (8,),
     )
-    return "ceg-wm-hf-directional-registered:" + stream.domain_digest
+    return "ceg-wm-hf-directional-registered-v2:" + stream.domain_digest
 
 
 def _is_resource_failure(error: BaseException) -> bool:

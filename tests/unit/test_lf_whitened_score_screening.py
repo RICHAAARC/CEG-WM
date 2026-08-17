@@ -423,11 +423,28 @@ def test_lf_whitening_entrypoint_derives_separate_screening_key_family() -> None
         screening_manifest_digest=screening.digest(),
         key_family_namespace=screening.key_family_namespace,
     )
-
+    derive = lambda **overrides: _derive_registered_experiment_root(
+        overrides.get("base_root_key", ROOT_KEY),
+        protocol_digest=overrides.get("protocol_digest", protocol.digest()),
+        screening_manifest_digest=overrides.get(
+            "screening_manifest_digest", screening.digest()
+        ),
+        key_family_namespace=overrides.get(
+            "key_family_namespace", screening.key_family_namespace
+        ),
+    )
+    assert derived == derive()
+    assert derived.startswith("ceg-wm-lf-whitened-screening-registered-v2:")
+    for field in (
+        "base_root_key",
+        "protocol_digest",
+        "screening_manifest_digest",
+        "key_family_namespace",
+    ):
+        assert derived != derive(**{field: "v2-authority-change"})
     assert identify_root_key(derived).root_key_public_digest != identify_root_key(
         ROOT_KEY
     ).root_key_public_digest
-    assert derived.startswith("ceg-wm-lf-whitened-screening-registered:")
 
 
 @pytest.mark.unit

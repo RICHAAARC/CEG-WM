@@ -509,16 +509,21 @@ def _run_search(
     observation: QkGeometrySyncResult,
     key_projections: Sequence[torch.Tensor],
 ) -> tuple[_CandidateEvaluation, _CandidateEvaluation, _CandidateEvaluation]:
-    seen: set[bytes] = set()
+    evaluation_cache: dict[bytes, _CandidateEvaluation | None] = {}
     evaluations: list[_CandidateEvaluation] = []
-    for candidate in _coarse_candidates():
+
+    def evaluate_once(candidate: _SearchCandidate) -> _CandidateEvaluation | None:
         key = _matrix_key(candidate.matrix)
-        if key in seen:
-            continue
-        seen.add(key)
+        if key in evaluation_cache:
+            return evaluation_cache[key]
         evaluation = _evaluate_candidate(candidate, observation, key_projections)
+        evaluation_cache[key] = evaluation
         if evaluation is not None:
             evaluations.append(evaluation)
+        return evaluation
+
+    for candidate in _coarse_candidates():
+        evaluate_once(candidate)
     coarse_selected_evaluation = _highest_objective_evaluation(evaluations)
     exact_identity = next(
         evaluation
@@ -530,17 +535,22 @@ def _run_search(
         and evaluation.candidate.translation_y == 0.0
     )
 
-    current = coarse_selected_evaluation
+    joint_current = coarse_selected_evaluation
+    axis_currents = {
+        "rotation_degrees": coarse_selected_evaluation,
+        "log_scale": coarse_selected_evaluation,
+        "translation_x": coarse_selected_evaluation,
+        "translation_y": coarse_selected_evaluation,
+    }
     deltas = [
         (8.0, LOG_SCALE_LIMIT / 2.0, 0.14, 0.14),
         (8.0 / 3.0, LOG_SCALE_LIMIT / 6.0, 0.14 / 3.0, 0.14 / 3.0),
         (8.0 / 9.0, LOG_SCALE_LIMIT / 18.0, 0.14 / 9.0, 0.14 / 9.0),
     ]
     for rotation_delta, scale_delta, x_delta, y_delta in deltas:
-        # The all-zero offset is the current candidate.  Its matrix was already
-        # retained at its first occurrence, but it still participates in this
-        # round so a worse neighborhood cannot move the next-round center.
-        round_evaluations: list[_CandidateEvaluation] = [current]
+        # The all-zero offset is the current candidate. Its first evaluation is
+        # retained in the cache, while it still participates in every round.
+        joint_round_evaluations: list[_CandidateEvaluation] = [joint_current]
         for rotation_offset, scale_offset, x_offset, y_offset in product(
             (0.0, -rotation_delta, rotation_delta),
             (0.0, -scale_delta, scale_delta),
@@ -548,23 +558,53 @@ def _run_search(
             (0.0, -y_delta, y_delta),
         ):
             candidate = _candidate(
-                current.candidate.dihedral,
-                current.candidate.rotation_degrees + rotation_offset,
-                current.candidate.log_scale + scale_offset,
-                current.candidate.translation_x + x_offset,
-                current.candidate.translation_y + y_offset,
+                joint_current.candidate.dihedral,
+                joint_current.candidate.rotation_degrees + rotation_offset,
+                joint_current.candidate.log_scale + scale_offset,
+                joint_current.candidate.translation_x + x_offset,
+                joint_current.candidate.translation_y + y_offset,
             )
             if not _within_search_bounds(candidate):
                 continue
-            key = _matrix_key(candidate.matrix)
-            if key in seen:
-                continue
-            seen.add(key)
-            evaluation = _evaluate_candidate(candidate, observation, key_projections)
+            evaluation = evaluate_once(candidate)
             if evaluation is not None:
-                evaluations.append(evaluation)
-                round_evaluations.append(evaluation)
-        current = _highest_objective_evaluation(round_evaluations)
+                joint_round_evaluations.append(evaluation)
+        joint_current = _highest_objective_evaluation(joint_round_evaluations)
+
+        for axis_name, axis_delta in (
+            ("rotation_degrees", rotation_delta),
+            ("log_scale", scale_delta),
+            ("translation_x", x_delta),
+            ("translation_y", y_delta),
+        ):
+            axis_current = axis_currents[axis_name]
+            axis_round_evaluations: list[_CandidateEvaluation] = []
+            for axis_anchor in (axis_current, coarse_selected_evaluation):
+                for axis_offset in (0.0, -axis_delta, axis_delta):
+                    candidate_values = {
+                        "rotation_degrees": coarse_selected_evaluation.candidate.rotation_degrees,
+                        "log_scale": coarse_selected_evaluation.candidate.log_scale,
+                        "translation_x": coarse_selected_evaluation.candidate.translation_x,
+                        "translation_y": coarse_selected_evaluation.candidate.translation_y,
+                    }
+                    candidate_values[axis_name] = (
+                        getattr(axis_anchor.candidate, axis_name) + axis_offset
+                    )
+                    candidate = _candidate(
+                        coarse_selected_evaluation.candidate.dihedral,
+                        candidate_values["rotation_degrees"],
+                        candidate_values["log_scale"],
+                        candidate_values["translation_x"],
+                        candidate_values["translation_y"],
+                    )
+                    if not _within_search_bounds(candidate):
+                        continue
+                    evaluation = evaluate_once(candidate)
+                    if evaluation is not None:
+                        axis_round_evaluations.append(evaluation)
+            axis_currents[axis_name] = _highest_objective_evaluation(
+                axis_round_evaluations
+            )
 
     selected_evaluation = _highest_objective_evaluation(evaluations)
     second_candidates = [
@@ -657,6 +697,17 @@ def _search_config_digest(epsilon_inlier: float | None) -> str:
         "objective_weights": ["0.10", "0.90", "-0.01_deficits"],
         "refinement_rounds": 3,
         "wrong_key_indices": list(range(8)),
+        "refinement_strategy": "joint_greedy_with_axis_isolated_safeguards_v2",
+        "axis_safeguard_order": [
+            "rotation_degrees",
+            "log_scale",
+            "translation_x",
+            "translation_y",
+        ],
+        "axis_safeguard_initialization": "coarse_selected",
+        "candidate_matrix_protocol": (
+            "float64_parameter_math_then_single_float32_cast"
+        ),
     }
     return sha256(stable_json_utf8(identity)).hexdigest()
 
@@ -964,6 +1015,15 @@ def validate_geometric_transform_estimation(
             raise GeometricTransformEstimatorError(
                 "fitted epsilon or inlier ratio is invalid"
             )
+    expected_search_config_digest = _search_config_digest(
+        None
+        if estimation.epsilon_inlier is None
+        else float(estimation.epsilon_inlier)
+    )
+    if estimation.search_config_digest != expected_search_config_digest:
+        raise GeometricTransformEstimatorError(
+            "transform estimation search config digest mismatch"
+        )
     derived_metrics = (
         (
             estimation.gap,

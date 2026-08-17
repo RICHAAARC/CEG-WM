@@ -1049,7 +1049,18 @@ def test_content_embedding_active_zero_direction_fail_closed() -> None:
         content_embedder(latent, forged_zero_hf)
 
     zero_shape = (1, 1, 6, 6)
-    zero_support_index = 14
+    zero_root_key = "ceg-wm-combined-zero-root-001"
+    unmasked_hf = hf_carrier(zero_root_key, zero_shape)
+    unmasked_lf = lf_carrier(zero_root_key, zero_shape)
+    opposite_indices = tuple(
+        index
+        for index, (hf_value, lf_value) in enumerate(
+            zip(unmasked_hf.direction, unmasked_lf.direction, strict=True)
+        )
+        if hf_value != 0.0 and lf_value != 0.0 and hf_value * lf_value < 0.0
+    )
+    assert opposite_indices
+    zero_support_index = opposite_indices[0]
     zero_route = content_router(
         zero_shape,
         mode="routing_stqr",
@@ -1080,19 +1091,23 @@ def test_content_embedding_active_zero_direction_fail_closed() -> None:
         ),
     )
     routed_hf = hf_carrier(
-        "ceg-wm-combined-zero-root-001",
+        zero_root_key,
         zero_shape,
         routing_result=zero_route,
     )
     routed_lf = lf_carrier(
-        "ceg-wm-combined-zero-root-001",
+        zero_root_key,
         zero_shape,
         routing_result=zero_route,
     )
     zero_latent = _latent(len(routed_hf.direction))
-    assert routed_lf.direction == tuple(
-        -value for value in routed_hf.direction
-    )
+    assert routed_hf.route_identity == zero_route.route_identity
+    assert routed_lf.route_identity == zero_route.route_identity
+    assert sum(value * value for value in routed_hf.direction) == pytest.approx(1.0)
+    assert sum(value * value for value in routed_lf.direction) == pytest.approx(1.0)
+    assert any(value != 0.0 for value in routed_hf.direction)
+    assert any(value != 0.0 for value in routed_lf.direction)
+    assert routed_lf.direction == tuple(-value for value in routed_hf.direction)
     with pytest.raises(
         ContentEmbedderError,
         match="combined content direction",

@@ -265,7 +265,43 @@ def _identity_estimation_record(
         observation_descriptor_digest="1" * 64,
         observation_projection_digest="2" * 64,
         observation_geometry_config_digest="3" * 64,
-        search_config_digest="4" * 64,
+        search_config_digest=sha256(
+            main_shared.stable_json_utf8(
+                {
+                    "candidate_id": "rectification_similarity",
+                    "coarse_log_scale": ["0", "-log_sqrt2", "+log_sqrt2"],
+                    "coarse_rotation_degrees": [0, -32, -16, 16, 32],
+                    "coarse_translation": ["0", "-0.28", "+0.28"],
+                    "dihedral_order": [
+                        "identity",
+                        "x_flip",
+                        "y_flip",
+                        "xy_flip",
+                        "rot90",
+                        "rot_minus90",
+                        "diag",
+                        "anti_diag",
+                    ],
+                    "epsilon_inlier_decimal": format(0.8, ".17g"),
+                    "objective_weights": ["0.10", "0.90", "-0.01_deficits"],
+                    "refinement_rounds": 3,
+                    "wrong_key_indices": list(range(8)),
+                    "refinement_strategy": (
+                        "joint_greedy_with_axis_isolated_safeguards_v2"
+                    ),
+                    "axis_safeguard_order": [
+                        "rotation_degrees",
+                        "log_scale",
+                        "translation_x",
+                        "translation_y",
+                    ],
+                    "axis_safeguard_initialization": "coarse_selected",
+                    "candidate_matrix_protocol": (
+                        "float64_parameter_math_then_single_float32_cast"
+                    ),
+                }
+            )
+        ).hexdigest(),
     )
 
 
@@ -426,7 +462,7 @@ class _InjectedSemanticTextureModel(torch.nn.Module):
         }
 
 
-def _semantic_texture_whitening_asset():
+def _semantic_texture_whitening_asset(detection_key: str):
     payload = {
         "artifact_role": "lf_semantic_texture_soft_clean_null_whitening_operator",
         "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
@@ -434,6 +470,9 @@ def _semantic_texture_whitening_asset():
         "detrend_identity": "per_channel_affine_plane_normalized_coordinates",
         "fit_manifest_sha256": "c" * 64,
         "fit_source_cluster_count": 32,
+        "lf_carrier_config_digest": main_content_chain.lf_carrier(
+            detection_key, (1, 16, 64, 64)
+        ).carrier_config_digest,
         "latent_shape": [1, 16, 64, 64],
         "observation_protocol": "final_image_vae_posterior_mode",
         "regularization_ratio": "0x1.0000000000000p-10",
@@ -576,7 +615,7 @@ def test_semantic_texture_candidate_traverses_public_runtime_and_method_adapters
         .reshape(1, 3, 64, 64)
     )
     detection_key = "semantic-texture-public-adapter-test-key"
-    asset = _semantic_texture_whitening_asset()
+    asset = _semantic_texture_whitening_asset(detection_key)
 
     def branch_results(image_rgb8: torch.Tensor):
         prepared = runtime_adapter.observe_semantic_texture_detection(

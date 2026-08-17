@@ -747,13 +747,18 @@ def test_experiment_execution_readme_excludes_non_hf_only_threshold_fit_gpu_exec
     readme = (
         ROOT / "scripts/experiment_execution/README.md"
     ).read_text(encoding="utf-8")
-    assert "HF-only threshold-fit GPU execution" in readme
-    assert "schema-v2" in readme
-    assert "requirements_hf_only_threshold_fit_gpu_execution.txt" in readme
-    assert "complete transitive" in readme
-    assert "--no-deps" in readme
+    assert "semantic_texture_operational_preflight.ipynb" in readme
+    assert "当前唯一授权 entrypoint" in readme
+    assert "paused / not authorized" in readme
+    assert "producer-bound records are not current science authority" in readme
+    assert "remain only in Git ancestry" in readme
     for forbidden in (
+        "HF-only threshold-fit GPU execution",
         "schema-v1",
+        "schema-v2",
+        "requirements_hf_only_threshold_fit_gpu_execution.txt",
+        "complete transitive",
+        "--no-deps",
         "runtime_qualification_bootstrap.py",
         "build_runtime_qualification_package.py",
         "python -m pip",

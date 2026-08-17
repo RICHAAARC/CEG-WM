@@ -340,6 +340,34 @@ def test_lf_transport_entrypoint_uses_derived_registered_root_for_public_calls(
         registered_key_domain_identity=manifest.registered_key_domain_identity,
         registered_key_family_namespace=manifest.registered_key_family_namespace,
     )
+    derive = lambda **overrides: _derive_registered_experiment_root(
+        overrides.get("base_root_key", ROOT_KEY),
+        protocol_digest=overrides.get("protocol_digest", protocol.digest()),
+        manifest_digest=overrides.get("manifest_digest", manifest.digest()),
+        registered_key_derivation_identity=overrides.get(
+            "registered_key_derivation_identity",
+            manifest.registered_key_derivation_identity,
+        ),
+        registered_key_domain_identity=overrides.get(
+            "registered_key_domain_identity",
+            manifest.registered_key_domain_identity,
+        ),
+        registered_key_family_namespace=overrides.get(
+            "registered_key_family_namespace",
+            manifest.registered_key_family_namespace,
+        ),
+    )
+    assert derived_root == derive()
+    assert derived_root.startswith("ceg-wm-lf-transmission-registered-v2:")
+    for field in (
+        "base_root_key",
+        "protocol_digest",
+        "manifest_digest",
+        "registered_key_derivation_identity",
+        "registered_key_domain_identity",
+        "registered_key_family_namespace",
+    ):
+        assert derived_root != derive(**{field: "v2-authority-change"})
     assert identify_root_key(derived_root).root_key_public_digest != (
         identify_root_key(ROOT_KEY).root_key_public_digest
     )

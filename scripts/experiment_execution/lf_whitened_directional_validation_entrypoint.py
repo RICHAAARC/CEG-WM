@@ -36,6 +36,7 @@ from experiments.runners.lf_whitened_directional_validation import (
 )
 from experiments.runners.lf_whitened_score_screening import LfWhitenedScoreScreeningRunner
 from main import identify_root_key, key_schedule_sha256_counter
+from main.shared.key_schedule import stable_json_utf8
 from runtime import Sd35PipelineBackend, create_runtime_adapter
 from scripts.experiment_execution.delivery_support import (
     _base_latent,
@@ -65,23 +66,28 @@ def _derive_registered_experiment_root(
     manifest_digest: str,
     key_family_namespace: str,
 ) -> str:
+    root_material_envelope = {
+        "base_root_key_text": base_root_key,
+        "derivation_version": "ceg_wm_registered_experiment_root_v2",
+        "family": "lf_whitened_directional_validation",
+        "key_family_namespace": key_family_namespace,
+        "manifest_digest": manifest_digest,
+        "protocol_digest": protocol_digest,
+    }
+    registered_root_material = stable_json_utf8(root_material_envelope).decode(
+        "utf-8", errors="strict"
+    )
     stream = key_schedule_sha256_counter(
-        base_root_key,
+        registered_root_material,
         {
             "candidate_id": "lf_low_pass",
             "operator": "carrier_template",
             "responsibility_domain": "lf_carrier",
-            "model_revision": canonical_digest({
-                "derivation_identity": "lf_whitened_directional_registered_key_derivation",
-                "key_family_namespace": key_family_namespace,
-                "manifest_digest": manifest_digest,
-                "protocol_digest": protocol_digest,
-            }),
             "tensor_role": "base_gaussian",
         },
         (8,),
     )
-    return "ceg-wm-lf-whitened-directional-registered:" + stream.domain_digest
+    return "ceg-wm-lf-whitened-directional-registered-v2:" + stream.domain_digest
 
 
 def _is_resource_failure(error: BaseException) -> bool:

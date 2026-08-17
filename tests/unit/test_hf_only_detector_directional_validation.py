@@ -486,6 +486,27 @@ def test_hf_detector_directional_registered_subdomain_differs_from_base_and_wron
         protocol_digest=protocol.digest(),
         manifest_digest=manifest.digest(),
     )
+    assert registered == _derive_registered_experiment_root(
+        ROOT_KEY,
+        protocol_digest=protocol.digest(),
+        manifest_digest=manifest.digest(),
+    )
+    assert registered.startswith("ceg-wm-hf-directional-registered-v2:")
+    assert registered != _derive_registered_experiment_root(
+        ROOT_KEY + "-other",
+        protocol_digest=protocol.digest(),
+        manifest_digest=manifest.digest(),
+    )
+    assert registered != _derive_registered_experiment_root(
+        ROOT_KEY,
+        protocol_digest=protocol.digest() + "-other",
+        manifest_digest=manifest.digest(),
+    )
+    assert registered != _derive_registered_experiment_root(
+        ROOT_KEY,
+        protocol_digest=protocol.digest(),
+        manifest_digest=manifest.digest() + "-other",
+    )
     base_digest = identify_root_key(ROOT_KEY).root_key_public_digest
     registered_digest = identify_root_key(registered).root_key_public_digest
     assert registered_digest != base_digest

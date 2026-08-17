@@ -560,6 +560,28 @@ def test_lf_whitened_directional_runner_uses_public_detector_and_four_wrong_cont
 @pytest.mark.unit
 def test_lf_whitened_directional_prepared_record_payload_matches_legacy_calls() -> None:
     runner, runtime = _directional_runner()
+    registered = _derive_registered_experiment_root(
+        ROOT_KEY,
+        protocol_digest=runner.protocol.digest(),
+        manifest_digest=runner.manifest.digest(),
+        key_family_namespace=runner.manifest.key_family_namespace,
+    )
+    assert registered == runner.registered_root_key
+    assert registered.startswith("ceg-wm-lf-whitened-directional-registered-v2:")
+    assert registered != _derive_registered_experiment_root(
+        ROOT_KEY + "-other",
+        protocol_digest=runner.protocol.digest(),
+        manifest_digest=runner.manifest.digest(),
+        key_family_namespace=runner.manifest.key_family_namespace,
+    )
+    for field in ("protocol_digest", "manifest_digest", "key_family_namespace"):
+        arguments = {
+            "protocol_digest": runner.protocol.digest(),
+            "manifest_digest": runner.manifest.digest(),
+            "key_family_namespace": runner.manifest.key_family_namespace,
+        }
+        arguments[field] = "v2-authority-change"
+        assert registered != _derive_registered_experiment_root(ROOT_KEY, **arguments)
     runtime_result = runner._execute_paired_runtime(_lf_base_latent())
     _measurement, prepared_payload = runner._detect_public_pair(
         runtime_result,
@@ -698,7 +720,7 @@ def test_lf_whitened_directional_runner_reuses_deterministic_features(
     monkeypatch.setattr(
         lf_detector_module,
         "lf_carrier",
-        lambda detection_key, shape, mask_lf, model_revision: (
+        lambda detection_key, shape, mask_lf: (
             carrier_by_wrong_index[
                 None
                 if isinstance(detection_key, str)

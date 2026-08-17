@@ -1289,14 +1289,28 @@ tx = [0,-0.28,+0.28]
 ty = [0,-0.28,+0.28]
 ```
 
-五层循环按上述从左到右，重复 matrix 只保留第一次出现。随后固定 `d` 做 3 轮
-局部细化；每轮相对当前 best 枚举 offsets
-`[0,-delta,+delta]` 的 `phi,ell,tx,ty` 全笛卡尔积，组合仍按
-`exp(dell)R(dphi)` 左乘当前连续 linear part、translation 直接相加。第一轮
-`delta=(8 degrees, log(sqrt(2))/2, 0.14, 0.14)`，后两轮依次除以 3。越界候选在
-评分前删除。每轮只用本轮 best 进入下一轮；最终 best 从 coarse 与三轮全部候选中
-选择。score 严格 `>` 才替换，float32 完全相等时保留枚举中首次出现者；不能使用
-攻击参数、随机重启或库排序平局。
+五层循环按上述从左到右，重复 matrix 只保留第一次出现。coarse selected 初始化五个
+current：joint、`rotation_degrees`、`log_scale`、`translation_x` 与
+`translation_y`。随后固定 coarse-selected `d` 做 3 轮局部细化；每轮先按原规则相对
+joint current 枚举 offsets `[0,-delta,+delta]` 的 `phi,ell,tx,ty` 全笛卡尔积，组合
+仍按 `exp(dell)R(dphi)` 左乘当前连续 linear part、translation 直接相加，再分别按
+`[rotation_degrees,log_scale,translation_x,translation_y]` 的顺序做轴隔离保护：每个轴
+只从该轴 current 枚举 `[0,-delta,+delta]`，其它连续坐标与 `d` 固定为 coarse selected。
+第一轮 `delta=(8 degrees, log(sqrt(2))/2, 0.14, 0.14)`，后两轮依次除以 3。越界候选
+在评分前删除；同一个 insertion-ordered matrix-key cache 保留第一次评分，joint 后再按
+上述轴顺序追加候选。最终 best/second 从 coarse 与全部三轮候选累计严格 `>` 选择，float32
+完全相等时保留枚举中首次出现者；不能使用攻击参数、随机重启或库排序平局。
+
+搜索配置 identity 的完整映射为 `candidate_id=rectification_similarity`、上述
+`coarse_log_scale`、`coarse_rotation_degrees`、`coarse_translation`、`dihedral_order`、
+`epsilon_inlier_decimal`、`objective_weights`、`refinement_rounds=3`、
+`wrong_key_indices=[0,1,2,3,4,5,6,7]`、
+`refinement_strategy=joint_greedy_with_axis_isolated_safeguards_v2`、
+`axis_safeguard_order=[rotation_degrees,log_scale,translation_x,translation_y]`、
+`axis_safeguard_initialization=coarse_selected` 与
+`candidate_matrix_protocol=float64_parameter_math_then_single_float32_cast`；验证时必须从
+`epsilon_inlier` 重新计算该 digest。此前仅 joint-greedy refinement 的证据属于旧 identity，
+不构成当前 safeguard identity 的证据。
 
 ### Sampling Matrices And Objective
 

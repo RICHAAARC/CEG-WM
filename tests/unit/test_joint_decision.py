@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from hashlib import sha256
 
 import pytest
 import torch
@@ -30,7 +31,7 @@ from main.joint_decision import (
     validate_conditional_recovery_result,
 )
 from main.joint_decision.detector import conditional_recovery_decision
-from main.shared import identify_root_key, rgb8_image_digest
+from main.shared import identify_root_key, rgb8_image_digest, stable_json_utf8
 
 _ROOT_KEY = "joint-decision-cpu-key"
 _SHAPE = (1, 3, 9, 9)
@@ -143,7 +144,43 @@ def _estimation(translation_x: float = 0.0) -> GeometricTransformEstimation:
         observation_descriptor_digest="1" * 64,
         observation_projection_digest="2" * 64,
         observation_geometry_config_digest="3" * 64,
-        search_config_digest="4" * 64,
+        search_config_digest=sha256(
+            stable_json_utf8(
+                {
+                    "candidate_id": "rectification_similarity",
+                    "coarse_log_scale": ["0", "-log_sqrt2", "+log_sqrt2"],
+                    "coarse_rotation_degrees": [0, -32, -16, 16, 32],
+                    "coarse_translation": ["0", "-0.28", "+0.28"],
+                    "dihedral_order": [
+                        "identity",
+                        "x_flip",
+                        "y_flip",
+                        "xy_flip",
+                        "rot90",
+                        "rot_minus90",
+                        "diag",
+                        "anti_diag",
+                    ],
+                    "epsilon_inlier_decimal": format(0.8, ".17g"),
+                    "objective_weights": ["0.10", "0.90", "-0.01_deficits"],
+                    "refinement_rounds": 3,
+                    "wrong_key_indices": list(range(8)),
+                    "refinement_strategy": (
+                        "joint_greedy_with_axis_isolated_safeguards_v2"
+                    ),
+                    "axis_safeguard_order": [
+                        "rotation_degrees",
+                        "log_scale",
+                        "translation_x",
+                        "translation_y",
+                    ],
+                    "axis_safeguard_initialization": "coarse_selected",
+                    "candidate_matrix_protocol": (
+                        "float64_parameter_math_then_single_float32_cast"
+                    ),
+                }
+            )
+        ).hexdigest(),
     )
 
 
