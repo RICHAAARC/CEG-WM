@@ -851,6 +851,10 @@ def semantic_texture_lf_detector(
         )
     except LfCarrierError as exc:
         raise LfDetectorError("semantic-texture LF template reconstruction failed") from exc
+    if whitening_asset.lf_carrier_config_digest != carrier.carrier_config_digest:
+        raise LfDetectorError(
+            "semantic-texture LF whitening asset carrier configuration mismatch"
+        )
     routed_observation = tuple(
         _float32(value * weight)
         for value, weight in zip(observation.values, route.mask_lf, strict=True)
@@ -882,7 +886,7 @@ def semantic_texture_lf_detector(
         "band_identity": LF_NULL_WHITENING_BAND_IDENTITY,
         "candidate_ids": list(candidate_ids),
         "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
-        "carrier_config_digest": carrier.carrier_config_digest,
+        "lf_carrier_config_digest": carrier.carrier_config_digest,
         "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
         "observation_protocol": OBSERVATION_PROTOCOL,
         "route_config_digest": route.route_config_digest,

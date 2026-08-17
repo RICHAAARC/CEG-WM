@@ -63,7 +63,8 @@ joint:     conditional_recovery_decision
 
 ### Required Work
 
-- 锁定 SD3.5 model revision、scheduler、steps、callback、VAE、dtype 和依赖；
+- 记录 SD3.5 model locator 与 observed revision，并锁定 behavior-changing
+  pipeline/scheduler capability、steps、callback、VAE、dtype 和依赖/API capability；
 - 验证 clean/watermarked paired trajectory、actual-dtype content materialization、
   binary32 `3/250` hard budget 和 image decode/encode；
 - 捕获登记层真实 `to_q/to_k`；
@@ -192,6 +193,12 @@ provisional branch CDF 和 Gate 5 的 provisional reliability selection 只服�
 3. `geometry_reliability_fit`：拟合 formal geometry reliability；
 4. `end_to_end_calibration_check`：只检查冻结联合路径，不再拟合；
 5. `formal evaluation`：只评估，不调参。
+
+当前 formal/default/joint `D_M` 仍为 HF-only 并使用既有 threshold。语义—纹理
+`max(z_hf_soft,z_lf_soft)` 只是未校准、未科学验证、未晋升的 diagnostic；它没有
+formal decision。未来晋升必须重新完成独立分支 calibration、max threshold fit、固定
+FPR/科学确认和显式 promotion，并为 raw/rectified 共享新的 detector/config identity
+与新阈值；不得继承旧 W/CDF、`tau` 或 HF-only threshold。
 
 同一 source cluster 的所有攻击、回正和多 key 派生样本留在同一职责。任何 detector
 identity 变化都使旧 threshold 失效。

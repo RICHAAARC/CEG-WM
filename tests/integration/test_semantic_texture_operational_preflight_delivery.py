@@ -621,8 +621,25 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert "os.replace(pending, drive_export_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME)" in code_source
     assert "completed.returncode != 0" in code_source
     assert "sys.tracebacklimit = 0" in code_source
-    assert "fresh roots are required" in code_source
-    assert "_persist_preclone_transport_failure(drive_export_root, run_id, blocked_class)" in code_source
+    assert code_source.index('run_id = "semantic-texture-operational-"') < code_source.index(
+        'drive.mount("/content/drive")'
+    )
+    assert code_source.index("local_root.mkdir(parents=True)") < code_source.index(
+        'drive.mount("/content/drive")'
+    )
+    assert "fresh local root is required" in code_source
+    assert "fresh Drive root is required" in code_source
+    assert (
+        '_persist_preclone_transport_failure(local_root / "transport-delivery", '
+        'run_id, "environment_blocked", drive_delivery_complete=False)'
+        in code_source
+    )
+    assert (
+        "_persist_preclone_transport_failure(drive_export_root, run_id, "
+        "blocked_class, drive_delivery_complete=True)"
+        in code_source
+    )
+    assert '"drive_delivery_complete": drive_delivery_complete' in code_source
     assert '"--run-id", run_id' in code_source
     assert "bootstrap-unbound" not in code_source
     assert "pip install" not in code_source

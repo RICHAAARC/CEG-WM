@@ -202,6 +202,7 @@ class LfNullWhiteningAsset:
 def _semantic_texture_canonical_payload(
     *,
     fit_manifest_sha256: str,
+    lf_carrier_config_digest: str,
     weights_binary32_be_hex: tuple[str, ...],
 ) -> dict[str, object]:
     return {
@@ -212,6 +213,7 @@ def _semantic_texture_canonical_payload(
         "fit_manifest_sha256": fit_manifest_sha256,
         "fit_source_cluster_count": LF_NULL_WHITENING_FIT_SOURCE_CLUSTER_COUNT,
         "latent_shape": list(LF_NULL_WHITENING_LATENT_SHAPE),
+        "lf_carrier_config_digest": lf_carrier_config_digest,
         "observation_protocol": LF_NULL_WHITENING_OBSERVATION_PROTOCOL,
         "regularization_ratio": LF_NULL_WHITENING_REGULARIZATION_RATIO,
         "route_candidate_id": "routing_semantic_texture_soft",
@@ -225,6 +227,7 @@ class SemanticTextureLfWhiteningAsset:
     """Dedicated soft-route W identity; never aliases an older LF asset."""
 
     fit_manifest_sha256: str
+    lf_carrier_config_digest: str
     weights_binary32_be_hex: tuple[str, ...]
     whitening_asset_digest: str
     weights: tuple[float, ...] = field(init=False, repr=False)
@@ -234,6 +237,10 @@ class SemanticTextureLfWhiteningAsset:
             self.fit_manifest_sha256,
             "semantic-texture LF fit manifest digest",
         )
+        carrier_config = _sha256_text(
+            self.lf_carrier_config_digest,
+            "semantic-texture LF carrier configuration digest",
+        )
         words = _weight_words(self.weights_binary32_be_hex)
         declared = _sha256_text(
             self.whitening_asset_digest,
@@ -241,6 +248,7 @@ class SemanticTextureLfWhiteningAsset:
         )
         payload = _semantic_texture_canonical_payload(
             fit_manifest_sha256=manifest,
+            lf_carrier_config_digest=carrier_config,
             weights_binary32_be_hex=words,
         )
         if sha256(stable_json_utf8(payload)).hexdigest() != declared:
@@ -248,6 +256,7 @@ class SemanticTextureLfWhiteningAsset:
                 "semantic-texture LF asset digest does not match its payload"
             )
         object.__setattr__(self, "fit_manifest_sha256", manifest)
+        object.__setattr__(self, "lf_carrier_config_digest", carrier_config)
         object.__setattr__(self, "weights_binary32_be_hex", words)
         object.__setattr__(
             self,
@@ -259,12 +268,14 @@ class SemanticTextureLfWhiteningAsset:
     def canonical_payload(self) -> dict[str, object]:
         return _semantic_texture_canonical_payload(
             fit_manifest_sha256=self.fit_manifest_sha256,
+            lf_carrier_config_digest=self.lf_carrier_config_digest,
             weights_binary32_be_hex=self.weights_binary32_be_hex,
         )
 
     def validate(self) -> None:
         replay = type(self)(
             fit_manifest_sha256=self.fit_manifest_sha256,
+            lf_carrier_config_digest=self.lf_carrier_config_digest,
             weights_binary32_be_hex=self.weights_binary32_be_hex,
             whitening_asset_digest=self.whitening_asset_digest,
         )
@@ -287,6 +298,7 @@ class SemanticTextureLfWhiteningAsset:
         expected_keys = set(
             _semantic_texture_canonical_payload(
                 fit_manifest_sha256="0" * 64,
+                lf_carrier_config_digest="0" * 64,
                 weights_binary32_be_hex=("3f800000",) * 96,
             )
         )
@@ -299,8 +311,13 @@ class SemanticTextureLfWhiteningAsset:
             payload["fit_manifest_sha256"],
             "semantic-texture LF fit manifest digest",
         )
+        carrier_config = _sha256_text(
+            payload["lf_carrier_config_digest"],
+            "semantic-texture LF carrier configuration digest",
+        )
         expected = _semantic_texture_canonical_payload(
             fit_manifest_sha256=manifest,
+            lf_carrier_config_digest=carrier_config,
             weights_binary32_be_hex=words,
         )
         if payload != expected:
@@ -309,6 +326,7 @@ class SemanticTextureLfWhiteningAsset:
             )
         return cls(
             fit_manifest_sha256=manifest,
+            lf_carrier_config_digest=carrier_config,
             weights_binary32_be_hex=words,
             whitening_asset_digest=whitening_asset_digest,
         )

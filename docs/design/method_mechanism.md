@@ -19,14 +19,16 @@
 - 内容检测器身份；
 - HF 与可选 LF 载体、模板和评分身份；
 - 内容路由身份；
-- 生成模型、图像编码、预处理、尺寸和 dtype；
+- behavior-changing pipeline/scheduler capability、图像编码、预处理、尺寸和 dtype；
 - Q/K 观测位置与几何关系身份；
 - 变换支持域、估计器、可靠性和回正规则；
 - 内容阈值、近阈值区间和 calibration provenance；
 - 密钥派生与职责域；
-- 实现 revision 和依赖锁。
+- 实现行为协议和依赖/API capability。
 
 任一项变化都产生新的方法身份。新身份不得消费旧身份的阈值、分数分布或 formal records。
+模型/repository/name/revision、checkpoint SHA/size、环境版本和设备仅为 selection locator
+或 observed metadata，不进入 KDF、方法/result 强身份或相等性门。
 
 ## Shared Key Mechanism
 
@@ -229,7 +231,10 @@ geometry/content budget ratio 只在 `qk_relation_similarity` 登记的有限集
 禁止继承其他 route 的 W 或读取 embed map。LF 的 `lf_low_pass` raw score 与
 `lf_null_whitened_matched_score` 是两个独立候选身份；后者只读消费由独立 32-clean
 partition 冻结的 96 参数 channel-band diagonal `W`，不得在检测时读取 fit images 或
-重拟合。`lf_detector` 和 `hf_detector` 必须独立可调用，`s_lf`、`s_hf` 与
+重拟合。soft-LF W 的 canonical payload 与 asset digest 必须绑定 required lowercase-64
+`lf_carrier_config_digest`；检测器重建 query carrier 后、白化与评分前精确匹配，且不
+额外绑定 model、route、query、CDF、`tau` 或 result。缺失、旧字段或不匹配 fail
+closed。`lf_detector` 和 `hf_detector` 必须独立可调用，`s_lf`、`s_hf` 与
 `s_combined` 独立可观测；diagnostic 组合唯一为独立 primary-null 标准化后的
 `max(z_hf_soft,z_lf_soft)`，但当前未科学验证、未晋升且没有 formal threshold，不进入
 正式判定。未来晋升必须完成独立分支 calibration、max threshold fit、固定 FPR/科学

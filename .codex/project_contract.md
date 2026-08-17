@@ -46,7 +46,10 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   LF/HF write、两条盲分支分数和固定 max statistic；五候选实现 producer 为
   `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb`，状态为
   `implemented_not_scientifically_validated`，并由登记的 independent exact audit
-  批准其实现语义。hard salient-object local-LF 四候选状态为
+  批准其当时的 v1 实现语义。该 revision、对应 readiness/review 与 route registry
+  只保存 historical v1 key-schedule-bound snapshot，不能授权当前 v2 bytes 或 readiness。
+  v2 实现当前为 `implementation-under-independent-review`，不得预填未来审核 SHA。
+  hard salient-object local-LF 四候选状态为
   `superseded_without_scientific_adjudication`。状态权威见
   `docs/project_state/method_route_registry.md`。
 - 当前正式 detector 仍为 HF-only；旧 routing/combination 已形成 producer-bound

@@ -55,7 +55,7 @@ qk_observation 的本地 CPU/mock 路径当前已实现：
 
 runtime_qualification_delivery 的本地交付代码当前提供：
 
-- 只在 `prepare()` 时导入 diffusers、加载固定 model revision 并要求 `cuda:0`
+- 只在 `prepare()` 时导入 diffusers、记录所选 model locator，并要求可用且已选择的 CUDA 设备
   的 `Sd35PipelineBackend`，真实连接 content_write_and_vae callback/VAE 与 qk_observation
   schedule/attention/QK 接口；
 - `smoke`、`qualification` 和可选 `replay` runner；qualification 对登记 key

@@ -16,7 +16,8 @@ runtime 原语按 `runtime_configuration_and_adapter`、`content_write_and_vae`�
 
 - `I`：待检测 RGB 图像。
 - `K`：检测密钥；正式 records 只保存不可逆密钥身份摘要，不保存原始密钥。
-- `M`：冻结的方法配置身份，包含模型、预处理、载体、检测和几何配置。
+- `M`：冻结的方法配置身份，包含行为协议、预处理、载体、检测和几何配置；模型名称、
+  repository、revision、环境版本和设备只作为选择或观察元数据。
 - `E_M(I)`：由冻结公共模型和预处理定义的图像观测编码。
 - `s_hf`：CEG-WM HF direct score。
 - `s_lf`：LF 分支分数。
@@ -232,6 +233,10 @@ Chebyshev rings 精确为 `r=max(u,v)` 的 `{1}`、`{2,3}`、`{4,...,7}`、
 `lambda=2^-10` 乘 coefficient-count-weighted global clean energy。候选规格唯一规定
 affine least-squares、DCT-II normalization、fit 分母/顺序、binary32 RNE、big-endian
 hex artifact 和 score 分母。它不是 full covariance、per-pixel diagonal 或候选网格。
+semantic-texture soft-LF W 还必须在 canonical payload 与 asset digest 中绑定 required
+lowercase-64 `lf_carrier_config_digest`；盲检测重建 query carrier 后必须在白化/评分前
+精确匹配。该字段不绑定 model、route、query、CDF、`tau` 或 result，缺失、旧字段或
+不匹配 fail closed。
 
 fit partition 与 development、candidate selection、calibration 和 evaluation 零交集；
 detector 只读公开 `W` artifact，不读取 clean fit images、参考图、embed record 或私有

@@ -114,14 +114,31 @@ root_key_public_digest =
 `sha256_counter_semantic_domain_v2_normal_icdf_table20_float32`。对输出 shape、根材料和职责字段：
 
 ```text
-domain_digest = SHA256(stable_json_utf8({
-  "keyed_prg_version": "sha256_counter_semantic_domain_v2_normal_icdf_table20_float32",
-  "key_material": key_material,
-  "domain_fields": domain_fields,
-  "shape": shape
-}))
-block_c = SHA256(domain_digest || uint128_be(c)), c = 0,1,2,...
+seed_envelope = {
+  "version": "sha256_counter_semantic_domain_v2_normal_icdf_table20_float32",
+  "semantic_domain": {
+    "candidate_id": candidate_id,
+    "operator": operator,
+    "responsibility_domain": responsibility_domain,
+    "tensor_role": tensor_role
+  },
+  "distribution": distribution,
+  "shape": canonical_integer_sequence(shape),
+  "key_role": key_role,
+  "root_key_public_digest": root_key_public_digest,
+  "wrong_key_index": null_or_nonnegative_integer,
+  "normal_quantile_table_sha256":
+    "70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a"
+}
+domain_digest = SHA256(UTF8(key_material) || 0x00 || stable_json_utf8(seed_envelope))
+block_c = SHA256(domain_digest || uint128_be(c)), c is each nonnegative counter integer
 ```
+
+`semantic_domain` 的 common keys 只允许上述四项；Q/K 域只额外加入
+`layer_name`、`token_count`，public detection noise 只额外加入
+`schedule_index`、`conditioning_protocol`。顶层字段、嵌套字段、nullable
+`wrong_key_index` 与整数 shape 均参与完整 envelope serialization；缺失、未知、
+不适用或漂移字段 fail closed。
 
 计数器从 0 开始，恰为 16-byte unsigned big-endian；溢出 fail closed。uniform
 输出按每个 SHA-256 block 的 byte offsets `0,8,16,24` 读取四个 uint64 big-endian
@@ -190,21 +207,53 @@ wrong_key_material_j =
 ```text
 shape = [2,3]
 root_key_text = "ceg-wm-golden-root-π"
-domain_fields = {
+semantic_domain = {
   "candidate_id": "key_schedule_sha256_counter",
   "operator": "golden_vector",
   "responsibility_domain": "key_schedule_test",
   "tensor_role": "gaussian"
 }
+seed_envelope = {
+  "version": "sha256_counter_semantic_domain_v2_normal_icdf_table20_float32",
+  "semantic_domain": {
+    "candidate_id": "key_schedule_sha256_counter",
+    "operator": "golden_vector",
+    "responsibility_domain": "key_schedule_test",
+    "tensor_role": "gaussian"
+  },
+  "distribution": "normal",
+  "shape": [2,3],
+  "key_role": "registered",
+  "root_key_public_digest":
+    "51ad81701f05213fbd7ee5cecc0987ffca7d8be76cff58394dc0da4fe8e1423d",
+  "wrong_key_index": null,
+  "normal_quantile_table_sha256":
+    "70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a"
+}
 domain_digest =
-  e5b8e35d13815c1d23a09286da0bfe661e0330e38eda19e239f19224f7b1998f
-indices = [172059,964892,707530,322430,968250,915318]
+  8a70d7d728e57077123b2df8092dc4a7608030af3105d6bf6d0f4ff376a20ecc
+indices = [609925,291593,478679,1031076,435951,227847]
 float32_be_bits =
-  [bf7a508b,3fb40402,3ee7f9d3,bf00c274,3fb6d22b,3f91f4c9]
+  [3e531dca,bf16aa80,bddfbb80,40082924,be59dea7,bf4807e6]
 concatenated_float32_be_sha256 =
-  c82e2f254ab05f4502d397aa444d8facefaa64e0c4df4f1617e12948acecb8d0
+  216538d38ea0453bf8c20f77f08c7a08f76cc69c23339a149da1e69151ff073a
 uniform_float32_be_bits_from_same_domain =
-  [3e2806fb,3f6b7eec,3f1ca35d,3e6af2b7,3f213aef,3ef25444]
+  [3eaec2aa,3f5cbcf4,3f130075,3e70cd8e,3e0a0b24,3f6d4553]
+uniform_domain_digest =
+  be10715769426aa1e2bb9fc9ef452836f1133aff944ca3cad3dfc1b1029b8d0e
+uniform_seed_envelope_change = distribution:"uniform"
+uniform_concatenated_float32_be_sha256 =
+  ff8ea13ad276ce8fb1ce9a25f5c7d49541ec389892787930545a42bec07b1636
+cross_block_shape = [1,14]
+cross_block_seed_envelope_change = shape:[1,14]
+cross_block_domain_digest =
+  5b6fb9e957687b4ead04c587b6bb300c11687ccd872b5e7f2a1b42a4ef9ac155
+cross_block_indices =
+  [989210,206028,844962,125147,357930,574565,499012,177947,11892,156803,676679,221429,60515,664296]
+cross_block_float32_be_bits =
+  [3fcabb30,bf5aafed,3f5cd2d1,bf96d0a7,bed14c20,3df6bdfb,bd77a2e2,bf7490e3,c011d6b5,bf84eaa3,3ebed8c7,bf4d67a2,bfc981ce,3eaeb16d]
+cross_block_concatenated_float32_be_sha256 =
+  3d8e0913586b66cb5e564ba965908528a5585e061bb3c3141450cc13034a79f2
 root_key_public_digest =
   51ad81701f05213fbd7ee5cecc0987ffca7d8be76cff58394dc0da4fe8e1423d
 wrong_key_material_0 =
@@ -311,18 +360,29 @@ geometry delta 与已有 geometry/total budget 保持独立，不并入
 
 ### Configuration Identity
 
-身份必须包含上述 model/revision、pipeline/scheduler 类、steps、guidance、尺寸、latent/VAE dtype、VAE scaling/shift、callback index、检测 schedule/conditioning、Q/K 层名、依赖锁和张量预处理。
+强身份只包含 behavior-changing pipeline/scheduler capability、steps、guidance、尺寸、
+latent/VAE dtype、VAE scaling/shift、callback index、检测 schedule/conditioning、Q/K
+层协议、依赖/API capability 和张量预处理。`model_id`、model/repository/name/revision、
+环境版本与设备只作为选择 locator 或 observed metadata，不进入 KDF、方法/result 强
+身份或相等性门。
 
 ### Failure Semantics
 
-模型或 revision 不可解析、scheduler 类漂移、随机状态不确定、callback 未触发或重复触发、VAE mode 编码失败、Q/K 层不存在、Q/K 非真实投影输出、非有限张量或实际 dtype 写入消失均 fail closed。
+模型 locator 不可解析、pipeline/scheduler capability 漂移、随机状态不确定、callback
+未触发或重复触发、VAE mode 编码失败、Q/K 层协议不存在、Q/K 非真实投影输出、非有限
+张量或实际 dtype 写入消失均 fail closed；observed model/revision/name 或环境版本本身不作
+强身份相等性门。
 
 ### Checks And Gate
 
 - CPU：配置摘要稳定、FlowHF golden vector 可读取、VAE scaling/shift 公式和 callback 状态机的纯函数检查。
-- 真实 runtime：模型/revision/类身份、同 seed clean 配对、callback index、实际 dtype、final-image VAE mode latent、指定层真实 Q/K 内容和重复运行确定性。
+- 真实 runtime：model locator 观测、pipeline/scheduler behavior capability、同 seed clean
+  配对、callback index、实际 dtype、final-image VAE mode latent、指定层真实 Q/K 内容和
+  重复运行确定性。
 - 晋升：全部身份相符且 CEG-WM HF candidate holdout 复现通过。
-- 淘汰：任何身份无法复现；不得静默换 backbone、revision、scheduler、steps 或写入位置。
+- 淘汰：任何强行为身份无法复现；不得静默改变 pipeline/scheduler capability、steps、
+  写入位置或 preprocessing/output protocol。locator/revision 改变必须记录，但不单独构成
+  方法身份相等性失败。
 
 ## Candidate `hf_sparse_tail`
 
@@ -330,7 +390,7 @@ geometry delta 与已有 geometry/total budget 保持独立，不并入
 
 这是一个跨职责候选，不表示由单一模块包办载体、写入和检测：
 
-- `hf_carrier` 消费 `[1,C,H,W]` latent 形状、HF 派生密钥、model identity 和
+- `hf_carrier` 消费 `[1,C,H,W]` latent 形状、HF 派生密钥、候选职责域和
   `mask_hf`，只输出单位 L2 稀疏模板 `T_hf`、masked unit direction `u_hf`、支持集
   和必要身份元数据/摘要；HF-only 对照的 `mask_hf` 恒为全 1；
 - `content_embedder` 消费 `u_hf`。HF-only 时它仍独占 nominal/limit、
@@ -989,7 +1049,11 @@ delta_content_nominal =
 correlation。LF 分数沿用 affine detrend、orthonormal DCT-II 和 six dyadic
 Chebyshev bands，但在 observation/template 进入该算子前同时施加
 `m_lf_detect`；其 `W` 必须由专属、互斥的 32-clean primary-null fit 产生，不能
-继承 unmasked 或 hard-mask candidate 的 `W`。
+继承 unmasked 或 hard-mask candidate 的 `W`。该 semantic-texture W canonical
+payload 必须含 required lowercase-64 `lf_carrier_config_digest`，asset digest 覆盖
+该字段；检测器重建 query LF carrier 后、白化与评分前必须精确匹配。该绑定只连接 W
+与 LF carrier 配置，不绑定 model、route、query、CDF、`tau` 或 result。缺失、旧字段
+或不匹配均 fail closed，不得 fallback。
 
 registered、wrong-key 与 unwatermarked 调用必须使用同一 public route、detector、
 `W` 和预处理。任一 route、artifact、shape、norm 或 finite 检查失败均显式失败，

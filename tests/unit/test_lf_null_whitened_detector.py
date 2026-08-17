@@ -38,6 +38,7 @@ from main.content_chain.lf_detector import (
     semantic_texture_lf_detector,
 )
 from main.content_chain.lf_whitening import (
+    LF_NULL_WHITENING_LATENT_SHAPE,
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
     LfNullWhiteningAsset,
     LfNullWhiteningAssetError,
@@ -94,6 +95,10 @@ def _semantic_texture_asset() -> SemanticTextureLfWhiteningAsset:
         "fit_manifest_sha256": "b" * 64,
         "fit_source_cluster_count": 32,
         "latent_shape": [1, 16, 64, 64],
+        "lf_carrier_config_digest": lf_carrier(
+            ROOT_KEY,
+            LF_NULL_WHITENING_LATENT_SHAPE,
+        ).carrier_config_digest,
         "observation_protocol": "final_image_vae_posterior_mode",
         "regularization_ratio": "0x1.0000000000000p-10",
         "route_candidate_id": "routing_semantic_texture_soft",
@@ -557,6 +562,10 @@ def test_semantic_texture_detector_config_branch_key_model_and_whitening_mismatc
         "fit_manifest_sha256": "b" * 64,
         "fit_source_cluster_count": 32,
         "latent_shape": [1, 16, 64, 64],
+        "lf_carrier_config_digest": lf_carrier(
+            ROOT_KEY,
+            LF_NULL_WHITENING_LATENT_SHAPE,
+        ).carrier_config_digest,
         "observation_protocol": "final_image_vae_posterior_mode",
         "regularization_ratio": "0x1.0000000000000p-10",
         "route_candidate_id": "routing_semantic_texture_soft",
@@ -582,6 +591,26 @@ def test_semantic_texture_detector_config_branch_key_model_and_whitening_mismatc
             alternate_lf_result,
             hf_null=hf_null,
             lf_null=lf_null,
+        )
+
+    mismatched_carrier_asset_payload = {
+        **asset.canonical_payload,
+        "lf_carrier_config_digest": sha256(
+            b"mismatched-semantic-texture-lf-carrier-config"
+        ).hexdigest(),
+    }
+    mismatched_carrier_asset = SemanticTextureLfWhiteningAsset.from_canonical_payload(
+        mismatched_carrier_asset_payload,
+        whitening_asset_digest=sha256(
+            stable_json_utf8(mismatched_carrier_asset_payload)
+        ).hexdigest(),
+    )
+    with pytest.raises(LfDetectorError, match="carrier configuration mismatch"):
+        semantic_texture_lf_detector(
+            lf_observation,
+            ROOT_KEY,
+            route,
+            mismatched_carrier_asset,
         )
 
     root_identity = identify_root_key(ROOT_KEY)

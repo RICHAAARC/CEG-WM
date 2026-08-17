@@ -49,6 +49,7 @@ Notebook 与 repository module 的跨边界数据
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | run_id | persisted_protocol | protocol | none | true | false | false | 一次运行的稳定标识。 |
+| drive_delivery_complete | persisted_protocol | provenance | none | true | false | false | Notebook transport quartet 是否已完整 create-only 落位到 Drive 的证据；仅描述交付完成，不表示 unit、science、promotion 或方法成功。 |
 | record_id | persisted_protocol | protocol | none | true | false | false | 单条记录的稳定标识。 |
 | split | persisted_protocol | protocol | none | true | false | false | 数据或事件划分。 |
 | method_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的方法名称。 |
@@ -127,7 +128,7 @@ Notebook 与 repository module 的跨边界数据
 | target_component_hf | cross_boundary | method_state | none | true | false | false | 可重建的理论 HF target component vector；不得作为实际 dtype 分支能量。 |
 | target_component_lf_norm | cross_boundary | method_statistic | none | true | false | false | 理论 LF target component 的 L2 norm；不得与 HF component norm 相加冒充 total。 |
 | target_component_hf_norm | cross_boundary | method_statistic | none | true | false | false | 理论 HF target component 的 L2 norm；不得与 LF component norm 相加冒充 total。 |
-| lf_carrier_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 实际消费的 LF carrier 配置摘要；LF 未启用时为空。 |
+| lf_carrier_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 实际消费的 LF carrier 配置摘要；semantic-texture LF whitening asset 还必须用该 required lowercase-64 字段绑定 W 与 query LF carrier 配置，LF 未启用时为空。 |
 | hf_carrier_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 实际消费的 HF carrier 配置摘要；HF 未启用时为空。 |
 | embedder_config_digest | cross_boundary | method_identity | none | false | false | false | content embedder 候选、模式和共同总预算身份摘要。 |
 | paired_base_latent_digest | cross_boundary | provenance | none | false | false | false | clean/watermarked 两条生成路径共享且各自 clone 的同一基础 float16 latent 身份摘要。 |
@@ -340,7 +341,7 @@ Notebook 与 repository module 的跨边界数据
 | observed_repository_revision | persisted_protocol | observed_metadata | none | false | false | false | operational checkout 实际观察到的 40-hex HEAD；不作 exact revision authority 或方法身份。 |
 | runtime_schema_version | persisted_protocol | runtime_identity | none | false | false | false | runtime 配置 JSON 的严格 schema 版本。 |
 | runtime_config_digest | cross_boundary | runtime_identity | none | false | false | false | 冻结 runtime 配置按 canonical JSON 计算的 SHA-256 身份。 |
-| model_id | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际加载的公开模型仓库身份。 |
+| model_id | persisted_protocol | observed_metadata | none | true | false | false | runtime 选择或观察到的公开模型 locator；不进入 KDF、方法/result 强身份或相等性门。 |
 | pipeline_class | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际使用的完整 pipeline 类身份。 |
 | scheduler_class | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际使用的完整 scheduler 类身份。 |
 | inference_steps | persisted_protocol | runtime_identity | none | true | false | false | 生成和检测 schedule 绑定的冻结 inference step 数。 |
