@@ -2795,8 +2795,100 @@ def _python_semantic_violations(
                 }
             )
 
-    identity_strings: list[tuple[str, int, str]] = []
+    identity_strings: list[tuple[str, int, str, bool]] = []
     local_class_fields = _python_local_class_fields(tree)
+
+    def _normalized_conditioning_protocol_value(
+        node: ast.Dict,
+        key: ast.expr,
+        value: ast.expr,
+    ) -> str | None:
+        if not (
+            isinstance(key, ast.Constant)
+            and key.value == "conditioning_protocol"
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+        ):
+            return None
+        schedule_values = [
+            candidate_value
+            for candidate_key, candidate_value in zip(
+                node.keys,
+                node.values,
+                strict=True,
+            )
+            if (
+                isinstance(candidate_key, ast.Constant)
+                and candidate_key.value == "schedule_index"
+            )
+        ]
+        if len(schedule_values) != 1:
+            return None
+        schedule_value = schedule_values[0]
+        if isinstance(schedule_value, ast.Constant) and type(schedule_value.value) is int:
+            schedule_index = schedule_value.value
+        elif isinstance(schedule_value, ast.Name):
+            assignments = [
+                statement
+                for statement in tree.body
+                if (
+                    isinstance(statement, ast.Assign)
+                    and any(
+                        isinstance(target, ast.Name)
+                        and target.id == schedule_value.id
+                        for target in statement.targets
+                    )
+                )
+                or (
+                    isinstance(statement, ast.AnnAssign)
+                    and isinstance(statement.target, ast.Name)
+                    and statement.target.id == schedule_value.id
+                )
+            ]
+            if len(assignments) != 1:
+                return None
+            assignment = assignments[0]
+            assignment_targets = (
+                assignment.targets
+                if isinstance(assignment, ast.Assign)
+                else [assignment.target]
+            )
+            assignment_value = assignment.value
+            if not (
+                len(assignment_targets) == 1
+                and isinstance(assignment_targets[0], ast.Name)
+                and assignment_targets[0].id == schedule_value.id
+                and isinstance(assignment_value, ast.Constant)
+                and type(assignment_value.value) is int
+            ):
+                return None
+            schedule_index = assignment_value.value
+        else:
+            return None
+        callback_tokens = list(
+            re.finditer(
+                r"(?:^|_)(callback(?:0|[1-9][0-9]*))(?=_|$)",
+                value.value,
+            )
+        )
+        if len(callback_tokens) != 1:
+            return None
+        callback_token = callback_tokens[0]
+        callback_value = callback_token.group(1)
+        if int(callback_value[len("callback") :]) != schedule_index:
+            return None
+        rewritten_literal = (
+            value.value[: callback_token.start(1)]
+            + "callback_index"
+            + value.value[callback_token.end(1) :]
+        )
+        if has_weak_semantic_identity_value(
+            rewritten_literal,
+            version_context="conditioning_protocol",
+        ) or has_ordinal_identity_text(rewritten_literal):
+            return None
+        return rewritten_literal
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -2817,7 +2909,7 @@ def _python_semantic_violations(
             }
             for formal_name in formal_names:
                 identity_strings.extend(
-                    (literal, line, formal_name)
+                    (literal, line, formal_name, False)
                     for literal, line in _python_string_literals(value)
                 )
         elif (
@@ -2830,7 +2922,7 @@ def _python_semantic_violations(
             )
         ):
             identity_strings.extend(
-                (literal, line, node.arg)
+                (literal, line, node.arg, False)
                 for literal, line in _python_string_literals(node.value)
             )
         elif (
@@ -2849,7 +2941,7 @@ def _python_semantic_violations(
                     registered_fields,
                 ):
                     identity_strings.extend(
-                        (literal, line, field_name)
+                        (literal, line, field_name, False)
                         for literal, line in _python_string_literals(argument)
                     )
         elif isinstance(node, ast.Dict):
@@ -2863,16 +2955,28 @@ def _python_semantic_violations(
                         registered_fields,
                     )
                 ):
+                    normalized_value = _normalized_conditioning_protocol_value(
+                        node,
+                        key,
+                        value,
+                    )
                     identity_strings.extend(
-                        (literal, line, key.value)
+                        (
+                            normalized_value if normalized_value is not None else literal,
+                            line,
+                            key.value,
+                            normalized_value is not None,
+                        )
                         for literal, line in _python_string_literals(value)
                     )
         elif isinstance(node, ast.Compare):
-            left_names = {
-                child.id if isinstance(child, ast.Name) else child.attr
-                for child in ast.walk(node.left)
-                if isinstance(child, (ast.Name, ast.Attribute))
-            }
+            left_names = (
+                {node.left.id}
+                if isinstance(node.left, ast.Name)
+                else {node.left.attr}
+                if isinstance(node.left, ast.Attribute)
+                else set()
+            )
             formal_names = {
                 name
                 for name in left_names
@@ -2886,10 +2990,10 @@ def _python_semantic_violations(
                 for comparator in node.comparators:
                     for formal_name in formal_names:
                         identity_strings.extend(
-                            (literal, line, formal_name)
+                            (literal, line, formal_name, False)
                             for literal, line in _python_string_literals(comparator)
                         )
-    for value, line, context in sorted(
+    for value, line, context, suppress_identity_checks in sorted(
         set(identity_strings),
         key=lambda item: (item[1], item[0], item[2]),
     ):
@@ -2903,7 +3007,10 @@ def _python_semantic_violations(
                     "line": line,
                 }
             )
-        if has_weak_semantic_identity_value(value, version_context=context):
+        if not suppress_identity_checks and has_weak_semantic_identity_value(
+            value,
+            version_context=context,
+        ):
             violations.append(
                 {
                     "path": str(relative),
@@ -2912,7 +3019,7 @@ def _python_semantic_violations(
                     "line": line,
                 }
             )
-        if has_ordinal_identity_text(value):
+        if not suppress_identity_checks and has_ordinal_identity_text(value):
             violations.append(
                 {
                     "path": str(relative),
@@ -2921,7 +3028,7 @@ def _python_semantic_violations(
                 }
             )
     if has_ordinal_identity_polysemy(
-        [(value, context) for value, _, context in identity_strings]
+        [(value, context) for value, _, context, _ in identity_strings]
     ):
         violations.append(
             {

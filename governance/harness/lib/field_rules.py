@@ -62,17 +62,14 @@ EXPECTED_RUNTIME_IDENTITY_FIELDS = frozenset(
     """
     clean_callback_indices watermarked_callback_indices tensor_replay_identity
     materialization_replay_identity vae_scaling_factor_actual vae_shift_factor_actual
-    runtime_schema_version runtime_config_digest model_id pipeline_class
+    runtime_schema_version runtime_config_digest pipeline_class
     scheduler_class inference_steps guidance_scale image_height image_width
     generation_seed_device latent_dtype template_dtype score_dtype callback_index
     callback_hold_scheduler_intervals vae_decode_protocol vae_encode_protocol
     vae_scaling_factor_source vae_shift_factor_source detection_schedule_index
     detection_conditioning_protocol qk_layer_names prompt prompt_2 prompt_3
     do_classifier_free_guidance detection_timestep qk_actual_dtype key_control
-    qk_operator_identities key_controls python torch diffusers transformers accelerate
-    numpy pillow safetensors cuda_runtime cuda_available gpu_name
-    dependency_lock_evidence expected_version actual_version huggingface_hub
-    dependency_lock package_name version_specifier cpu_available cuda_device_count
+    qk_operator_identities key_controls cuda_available cpu_available cuda_device_count
     runtime_backend_name selected_device backend_type_identity
     qk_observation_callable_identity resource_identity_digest
     """.split()

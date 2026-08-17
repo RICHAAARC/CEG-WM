@@ -211,7 +211,14 @@ def test_python_label_letter_number_is_rejected_as_formal_identity_value(
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
     path = tmp_path / "main" / "method.py"
-    path.write_text('label = "A1"\n', encoding="utf-8")
+    path.write_text(
+        'label = "A1"\n'
+        'if candidate_id == "gpu_nvidia_a100":\n'
+        '    pass\n'
+        'if resolve_result_identity() == "gpu_nvidia_a100":\n'
+        '    pass\n',
+        encoding="utf-8",
+    )
 
     report = run_audit(tmp_path)
 
@@ -221,6 +228,21 @@ def test_python_label_letter_number_is_rejected_as_formal_identity_value(
         path="main/method.py",
         reason="ordinal_identity_python_string",
     )
+    direct_reasons = {
+        violation["reason"]
+        for violation in report["violations"]
+        if violation.get("line") == 2
+    }
+    assert {
+        "weak_semantic_python_string",
+        "ordinal_identity_python_string",
+    } <= direct_reasons
+    assert not any(
+        violation.get("line") == 4
+        and violation.get("reason")
+        in {"weak_semantic_python_string", "ordinal_identity_python_string"}
+        for violation in report["violations"]
+    )
 
 
 @pytest.mark.unit
@@ -229,7 +251,13 @@ def test_python_dictionary_letter_number_is_rejected_as_formal_identity_value(
 ) -> None:
     _write_minimal_audit_fixture(tmp_path, "main")
     path = tmp_path / "main" / "method.py"
-    path.write_text('metadata = {"name": "C1"}\n', encoding="utf-8")
+    path.write_text(
+        'metadata = {"name": "C1"}\n'
+        "SCHEDULE_INDEX = 18\n"
+        'matched_protocol = {"conditioning_protocol": "generation_callback18_vae_local_sensitivity", "schedule_index": SCHEDULE_INDEX}\n'
+        'mismatched_protocol = {"conditioning_protocol": "generation_callback18_vae_local_sensitivity", "schedule_index": 17}\n',
+        encoding="utf-8",
+    )
 
     report = run_audit(tmp_path)
 
@@ -238,6 +266,17 @@ def test_python_dictionary_letter_number_is_rejected_as_formal_identity_value(
         report,
         path="main/method.py",
         reason="ordinal_identity_python_string",
+    )
+    assert not any(
+        violation.get("line") == 3
+        and violation.get("reason")
+        in {"weak_semantic_python_string", "ordinal_identity_python_string"}
+        for violation in report["violations"]
+    )
+    assert any(
+        violation.get("line") == 4
+        and violation.get("reason") == "weak_semantic_python_string"
+        for violation in report["violations"]
     )
 
 
