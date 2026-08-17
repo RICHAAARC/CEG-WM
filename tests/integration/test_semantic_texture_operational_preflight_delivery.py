@@ -586,6 +586,9 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
     assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
     assert 'PROJECT_BRANCH = "main"' in code_source
+    assert code_source.count(
+        'PROJECT_REVISION = "4c9194aec40133495a66a6e29538dcfe50ee53bc"'
+    ) == 1
     assert "MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth" in code_source
     notebook_syntax = ast.parse(code_source)
     drive_mount_calls = [
@@ -607,7 +610,91 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert Path(drive_mount_argument.value).parts == ("/", "content", "drive")
     assert 'userdata.get("HF_TOKEN")' in code_source
     assert 'userdata.get("CEG_WM_ROOT_KEY")' in code_source
-    assert code_source.count("subprocess.run(") == 3
+    assert code_source.count("subprocess.run(") == 4
+    subprocess_calls = [
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    clone_call = next(
+        node
+        for node in subprocess_calls
+        if len(node.args) == 1
+        and isinstance(node.args[0], ast.List)
+        and len(node.args[0].elts) >= 2
+        and isinstance(node.args[0].elts[0], ast.Constant)
+        and node.args[0].elts[0].value == "git"
+        and isinstance(node.args[0].elts[1], ast.Constant)
+        and node.args[0].elts[1].value == "clone"
+    )
+    reset_call = next(
+        node
+        for node in subprocess_calls
+        if len(node.args) == 1
+        and isinstance(node.args[0], ast.List)
+        and [
+            item.value if isinstance(item, ast.Constant) else item.id if isinstance(item, ast.Name) else None
+            for item in node.args[0].elts
+        ] == ["git", "reset", "--hard", "PROJECT_REVISION"]
+    )
+    reset_keywords = {keyword.arg: keyword.value for keyword in reset_call.keywords}
+    assert isinstance(reset_keywords["cwd"], ast.Name)
+    assert reset_keywords["cwd"].id == "checkout_root"
+    assert isinstance(reset_keywords["check"], ast.Constant)
+    assert reset_keywords["check"].value is True
+    assert isinstance(reset_keywords["capture_output"], ast.Constant)
+    assert reset_keywords["capture_output"].value is True
+    observed_revision_assignment = next(
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "observed_repository_revision"
+    )
+    checkpoint_copy_call = next(
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_copy_create_only"
+    )
+    secret_reads = [
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "userdata"
+        and node.func.attr == "get"
+    ]
+    bootstrap_assignment = next(
+        node
+        for node in ast.walk(notebook_syntax)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "bootstrap_command"
+    )
+    assert clone_call.lineno < reset_call.lineno < observed_revision_assignment.lineno
+    assert observed_revision_assignment.lineno < checkpoint_copy_call.lineno
+    assert observed_revision_assignment.lineno < min(node.lineno for node in secret_reads)
+    assert observed_revision_assignment.lineno < bootstrap_assignment.lineno
+    assert "if observed_repository_revision != PROJECT_REVISION:" in code_source
+    assert (
+        '_persist_preclone_transport_failure(drive_export_root, run_id, "identity_blocked", '
+        "drive_delivery_complete=True, root_precreated=True)"
+        in code_source
+    )
+    assert 'raise RuntimeError("repository revision identity blocked") from None' in code_source
+    assert '"git", "pull"' not in code_source
+    assert '"git", "fetch"' not in code_source
+    assert "retry" not in code_source
+    assert "fallback" not in code_source
     assert '"--entrypoint-args"' in code_source
     assert '"--execute"' in code_source
     assert "--describe-boundary" not in code_source
