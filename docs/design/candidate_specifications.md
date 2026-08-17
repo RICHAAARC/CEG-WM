@@ -1295,7 +1295,9 @@ current：joint、`rotation_degrees`、`log_scale`、`translation_x` 与
 joint current 枚举 offsets `[0,-delta,+delta]` 的 `phi,ell,tx,ty` 全笛卡尔积，组合
 仍按 `exp(dell)R(dphi)` 左乘当前连续 linear part、translation 直接相加，再分别按
 `[rotation_degrees,log_scale,translation_x,translation_y]` 的顺序做轴隔离保护：每个轴
-只从该轴 current 枚举 `[0,-delta,+delta]`，其它连续坐标与 `d` 固定为 coarse selected。
+先从该轴 current 枚举 `[0,-delta,+delta]`，再从 coarse-selected anchor 按相同顺序枚举
+`[0,-delta,+delta]`；其它连续坐标与 `d` 固定为 coarse selected，并从该有序并集更新轴
+current。
 第一轮 `delta=(8 degrees, log(sqrt(2))/2, 0.14, 0.14)`，后两轮依次除以 3。越界候选
 在评分前删除；同一个 insertion-ordered matrix-key cache 保留第一次评分，joint 后再按
 上述轴顺序追加候选。最终 best/second 从 coarse 与全部三轮候选累计严格 `>` 选择，float32
