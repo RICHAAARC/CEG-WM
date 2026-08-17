@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from math import isfinite
 from typing import Callable, Protocol, runtime_checkable
@@ -72,7 +72,7 @@ class RuntimeDeviceCapabilities:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeBackendIdentity:
-    """Actual backend identity observed after preparation."""
+    """Actual backend behavior identity and metadata observed after preparation."""
 
     candidate_id: str
     runtime_config_digest: str
@@ -99,7 +99,7 @@ class RuntimeBackendIdentity:
     detection_schedule_index: int
     detection_conditioning_protocol: str
     qk_layer_names: tuple[str, ...]
-    dependency_lock: RuntimeDependencyLock
+    dependency_lock: RuntimeDependencyLock = field(compare=False)
 
 
 @runtime_checkable
@@ -367,7 +367,6 @@ def validate_backend_identity(
             configuration.detection_conditioning_protocol
         ),
         "qk_layer_names": configuration.qk_layer_names,
-        "dependency_lock": configuration.dependency_lock,
     }
     for field, expected_value in expected.items():
         if getattr(identity, field) != expected_value:

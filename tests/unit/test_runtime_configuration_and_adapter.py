@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -173,20 +172,25 @@ def test_runtime_configuration_rejects_candidate_drift(
 
 
 @pytest.mark.unit
-def test_runtime_configuration_rejects_extra_fields_and_dependency_drift() -> None:
+def test_runtime_configuration_rejects_extra_fields_and_retains_dependency_metadata() -> None:
     with_extra = _config_mapping()
     with_extra["fallback_model_id"] = "forbidden"
     with pytest.raises(RuntimeConfigurationError, match="extra"):
         parse_runtime_configuration(with_extra)
 
-    dependency_drift = deepcopy(_config_mapping())
-    dependency_lock = dependency_drift["dependency_lock"]
+    baseline = parse_runtime_configuration(_config_mapping())
+    dependency_metadata_change = _config_mapping()
+    dependency_lock = dependency_metadata_change["dependency_lock"]
     assert isinstance(dependency_lock, list)
     diffusers_entry = dependency_lock[1]
     assert isinstance(diffusers_entry, dict)
     diffusers_entry["version_specifier"] = "0.39.0"
-    with pytest.raises(RuntimeConfigurationError, match="dependency_lock"):
-        parse_runtime_configuration(dependency_drift)
+    observed = parse_runtime_configuration(dependency_metadata_change)
+
+    assert observed.dependency_lock.diffusers == "0.39.0"
+    assert observed.configuration_mapping()["dependency_lock"] == dependency_lock
+    assert "dependency_lock" not in observed.identity_mapping()
+    assert observed.runtime_config_digest == baseline.runtime_config_digest
 
 
 @pytest.mark.unit
@@ -247,6 +251,30 @@ def test_mock_backend_initialization_preserves_frozen_identity() -> None:
     assert backend.prepare_calls == [
         (adapter.configuration.runtime_config_digest, "cpu")
     ]
+    observed_dependency_lock = replace(
+        adapter.configuration.dependency_lock,
+        diffusers="0.39.0",
+    )
+    observed_backend = MockBackend(
+        RuntimeDeviceCapabilities(
+            cpu_available=True,
+            cuda_device_count=0,
+        ),
+        drift_field="dependency_lock",
+        drift_value=observed_dependency_lock,
+    )
+    observed_adapter = create_runtime_adapter(observed_backend)
+    observed_session = observed_adapter.initialize("cpu")
+    observed_execution_identity = observed_adapter.revalidate_execution_identity()
+    assert observed_session.dependency_lock == observed_dependency_lock
+    assert (
+        observed_execution_identity.runtime_config_digest
+        == execution_identity.runtime_config_digest
+    )
+    assert (
+        observed_execution_identity.runtime_session_identity_digest
+        == execution_identity.runtime_session_identity_digest
+    )
     with pytest.raises(RuntimeAdapterError, match="cannot initialize"):
         adapter.initialize("cpu")
 
@@ -255,6 +283,8 @@ def test_mock_backend_initialization_preserves_frozen_identity() -> None:
     assert backend.close_calls == 1
     adapter.close()
     assert backend.close_calls == 1
+    observed_adapter.close()
+    assert observed_backend.close_calls == 1
 
 
 @pytest.mark.unit
@@ -340,7 +370,6 @@ def test_failed_runtime_residual_state_is_rejected_and_close_cleans_it(
         ("detection_schedule_index", 8),
         ("detection_conditioning_protocol", "cfg_enabled"),
         ("qk_layer_names", ("transformer_blocks.0.attn",)),
-        ("dependency_lock", None),
     ],
 )
 def test_mock_backend_identity_drift_fails_and_releases_resources(

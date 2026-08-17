@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from hashlib import sha256
 import json
@@ -69,7 +69,7 @@ class RuntimeAdapterState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class RuntimeSession:
-    """Prepared runtime identity; no model outputs or method decisions."""
+    """Prepared runtime behavior identity and observed metadata."""
 
     candidate_id: str
     runtime_config_digest: str
@@ -96,7 +96,7 @@ class RuntimeSession:
     detection_schedule_index: int
     detection_conditioning_protocol: str
     qk_layer_names: tuple[str, ...]
-    dependency_lock: RuntimeDependencyLock
+    dependency_lock: RuntimeDependencyLock = field(compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -977,9 +977,7 @@ def _runtime_session_identity_mapping(
     identity = asdict(session)
     del identity["model_id"]
     del identity["model_revision"]
-    identity["dependency_lock"] = (
-        session.dependency_lock.as_config_entries()
-    )
+    del identity["dependency_lock"]
     identity["qk_layer_names"] = list(session.qk_layer_names)
     return identity
 

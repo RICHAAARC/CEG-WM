@@ -340,7 +340,7 @@ Notebook 与 repository module 的跨边界数据
 | model_revision | persisted_protocol | observed_metadata | none | true | false | false | 当前运行观察到或用于选择的生成模型 revision；不进入 KDF、方法/result 强身份或相等性门。 |
 | observed_repository_revision | persisted_protocol | observed_metadata | none | false | false | false | operational checkout 实际观察到的 40-hex HEAD；不作 exact revision authority 或方法身份。 |
 | runtime_schema_version | persisted_protocol | runtime_identity | none | false | false | false | runtime 配置 JSON 的严格 schema 版本。 |
-| runtime_config_digest | cross_boundary | runtime_identity | none | false | false | false | 冻结 runtime 配置按 canonical JSON 计算的 SHA-256 身份。 |
+| runtime_config_digest | cross_boundary | runtime_identity | none | false | false | false | 冻结 runtime behavior 配置按 canonical JSON 计算的 SHA-256 身份；排除 model locator、dependency version 与环境 metadata。 |
 | model_id | persisted_protocol | observed_metadata | none | true | false | false | runtime 选择或观察到的公开模型 locator；不进入 KDF、方法/result 强身份或相等性门。 |
 | pipeline_class | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际使用的完整 pipeline 类身份。 |
 | scheduler_class | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际使用的完整 scheduler 类身份。 |
@@ -464,25 +464,25 @@ Notebook 与 repository module 的跨边界数据
 | clean_image_sha256 | persisted_protocol | provenance | none | false | false | false | clean VAE decode 输出 tensor contiguous bytes 的摘要；不持久化 tensor。 |
 | watermarked_image_sha256 | persisted_protocol | provenance | none | false | false | false | watermarked VAE decode 输出 tensor contiguous bytes 的摘要；不持久化 tensor。 |
 | detection_latent_sha256 | persisted_protocol | provenance | none | false | false | false | detection-side posterior-mode latent contiguous bytes 的摘要；不持久化 tensor。 |
-| python | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 Python 版本。 |
-| torch | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 PyTorch 版本。 |
-| diffusers | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 diffusers 版本。 |
-| transformers | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 transformers 版本。 |
-| accelerate | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 accelerate distribution 版本。 |
-| numpy | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 NumPy distribution 版本。 |
-| pillow | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 Pillow distribution 版本。 |
-| safetensors | persisted_protocol | runtime_identity | none | false | false | false | qualification 环境实际 safetensors distribution 版本。 |
-| cuda_runtime | persisted_protocol | runtime_identity | none | false | false | false | PyTorch 报告的 CUDA runtime 版本。 |
+| python | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 Python 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| torch | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 PyTorch 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| diffusers | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 diffusers 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| transformers | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 transformers 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| accelerate | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 accelerate distribution 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| numpy | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 NumPy distribution 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| pillow | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 Pillow distribution 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| safetensors | persisted_protocol | observed_metadata | none | false | false | false | qualification 环境实际 safetensors distribution 版本；不进入 runtime config/session/result 强身份或相等性门。 |
+| cuda_runtime | persisted_protocol | observed_metadata | none | false | false | false | PyTorch 报告的 CUDA runtime 版本；不进入 runtime config/session/result 强身份或相等性门。 |
 | cuda_available | persisted_protocol | runtime_identity | none | false | false | false | runner 启动时 PyTorch 是否报告 CUDA 可用。 |
-| gpu_name | persisted_protocol | runtime_identity | none | false | false | false | qualification 实际 CUDA device 0 名称；不是 GPU 能力证明的替代物。 |
-| dependency_lock_evidence | persisted_protocol | runtime_identity | none | true | false | false | runner 对完整冻结 dependency lock 逐项核验后写入的期望/实际版本记录；PyTorch local build label 不得从实际版本中剥离。 |
-| expected_version | persisted_protocol | runtime_identity | none | false | false | false | 单项 dependency lock 登记的冻结版本或 Python 版本约束。 |
-| actual_version | persisted_protocol | runtime_identity | none | false | false | false | runner 通过 Python runtime 或 `importlib.metadata` 实际读取并原样保留的完整版本，包括获准的 PyTorch local build label。 |
-| huggingface_hub | persisted_protocol | runtime_identity | none | false | false | false | environment summary 中 `huggingface-hub` distribution 的实际版本。 |
+| gpu_name | persisted_protocol | observed_metadata | none | false | false | false | qualification 实际 CUDA device 名称；不是 GPU capability 证明或强身份。 |
+| dependency_lock_evidence | persisted_protocol | observed_metadata | none | true | false | false | runner 原样保留 dependency roster 的登记/实际版本 provenance；版本差异本身不进入 runtime config/session/result 强身份或相等性门。 |
+| expected_version | persisted_protocol | observed_metadata | none | false | false | false | dependency metadata 中登记的版本文本或 Python 版本约束；仅作观测 provenance。 |
+| actual_version | persisted_protocol | observed_metadata | none | false | false | false | runner 通过 Python runtime 或 `importlib.metadata` 实际读取并原样保留的完整版本；仅作观测 provenance。 |
+| huggingface_hub | persisted_protocol | observed_metadata | none | false | false | false | environment summary 中 `huggingface-hub` distribution 的实际版本；不进入强身份或相等性门。 |
 | materialization_attempt_count | persisted_protocol | runtime_state | none | true | false | false | 当前 qualification record 保存的 main-owned actual-dtype materialization 尝试次数。 |
-| dependency_lock | persisted_protocol | runtime_identity | none | false | false | false | runtime 候选冻结的 Python 与模型执行依赖版本映射。 |
-| package_name | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中按冻结顺序登记的包名。 |
-| version_specifier | persisted_protocol | runtime_identity | none | false | false | false | runtime dependency lock 中与包名绑定的精确版本或 Python 版本约束。 |
+| dependency_lock | persisted_protocol | observed_metadata | none | false | false | false | runtime 配置保留的固定 package roster 与非空 dependency version metadata；版本不进入 config/session/result 强身份或相等性门。 |
+| package_name | persisted_protocol | observed_metadata | none | false | false | false | runtime dependency metadata 中按固定 schema 顺序登记的 package locator。 |
+| version_specifier | persisted_protocol | observed_metadata | none | false | false | false | runtime dependency metadata 中与 package locator 绑定的非空 observed version 文本。 |
 | cpu_available | cross_boundary | runtime_identity | none | false | false | false | backend 在加载模型前报告 CPU 是否可供控制流使用。 |
 | cuda_device_count | cross_boundary | runtime_identity | none | false | false | false | backend 在加载模型前报告的非负 CUDA 设备数量。 |
 | runtime_backend_name | cross_boundary | runtime_identity | none | false | false | false | 实际准备 runtime session 的 backend 实现身份。 |
@@ -492,7 +492,7 @@ Notebook 与 repository module 的跨边界数据
 | qk_observation_callable_identity | cross_boundary | runtime_identity | none | false | false | false | runtime adapter 构造时惰性锚定的 qk_observation Q/K module 精确函数 qualified identity；公开值只含稳定字符串，不暴露 callable 对象。 |
 | backend_resources_owned | cross_boundary | runtime_state | none | false | false | false | runtime public identity 中与 lifecycle state 联合复验的资源所有权布尔值。 |
 | runtime_state | cross_boundary | runtime_state | none | false | false | false | runtime public execution identity 当前 `created`、`ready`、`failed` 或 `closed` 状态。 |
-| runtime_session_identity_digest | cross_boundary | provenance | none | false | false | false | READY session 全部公开配置/设备/backend identity 的 canonical SHA-256；不包含模型私有状态。 |
+| runtime_session_identity_digest | cross_boundary | provenance | none | false | false | false | READY session behavior/config/selected-device/backend identity 的 canonical SHA-256；排除 model locator、dependency version 与环境 metadata，不包含模型私有状态。 |
 | seed | persisted_protocol | protocol | none | true | false | false | 当前 record 实际使用的随机种子。 |
 | metric_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标名称。 |
 | metric_value | persisted_protocol | protocol | none | true | false | false | 实验记录中的指标数值。 |
@@ -765,8 +765,8 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | ledger_digest | persisted_protocol | provenance | none | true | false | false | 仅从已验证 COMMITTED units 重建的 ledger 摘要。 |
 | started_at_utc | persisted_protocol | provenance | none | true | false | false | worker session 开始时间。 |
 | ended_at_utc | persisted_protocol | provenance | none | true | false | false | worker session 结束时间。 |
-| gpu_model | persisted_protocol | runtime_identity | none | true | false | false | session 实际 GPU 型号；跨型号延迟/成本不可合并。 |
-| cuda_identity | persisted_protocol | runtime_identity | none | true | false | false | session CUDA 环境公开身份。 |
+| gpu_model | persisted_protocol | observed_metadata | none | true | false | false | session 实际 GPU 型号；仅作分组与成本 provenance，不进入方法/runtime/result 强身份。 |
+| cuda_identity | persisted_protocol | observed_metadata | none | true | false | false | session CUDA 环境公开观测 metadata；不进入方法/runtime/result 强身份或相等性门。 |
 | walltime_seconds | persisted_protocol | diagnostic | none | true | false | false | session 总 walltime，必须小于 24 小时。 |
 | peak_vram_bytes | persisted_protocol | diagnostic | none | true | false | false | session 峰值显存。 |
 | termination_reason | persisted_protocol | diagnostic | none | true | false | false | 正常、软停止或资源中断的终止原因。 |

@@ -83,19 +83,6 @@ _FROZEN_QK_LAYERS = (
     "transformer_blocks.0.attn",
     "transformer_blocks.23.attn",
 )
-_FROZEN_DEPENDENCIES = {
-    "python": ">=3.12",
-    "diffusers": "0.38.0",
-    "torch": "2.11.0",
-    "transformers": "5.12.1",
-    "accelerate": "1.14.0",
-    "numpy": "2.0.2",
-    "Pillow": "11.3.0",
-    "safetensors": "0.8.0",
-    "huggingface-hub": "1.20.1",
-}
-
-
 class RuntimeConfigurationError(ValueError):
     """The frozen runtime configuration is missing, malformed, or drifted."""
 
@@ -166,7 +153,7 @@ def _number(value: object, field: str) -> float:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeDependencyLock:
-    """Exact package identities registered for the runtime candidate."""
+    """Ordered dependency-version metadata observed for runtime selection."""
 
     python: str
     diffusers: str
@@ -258,7 +245,6 @@ class Sd35RuntimeConfiguration:
                 self.detection_conditioning_protocol
             ),
             "qk_layer_names": list(self.qk_layer_names),
-            "dependency_lock": self.dependency_lock.as_config_entries(),
         }
 
     def configuration_mapping(self) -> dict[str, object]:
@@ -268,11 +254,12 @@ class Sd35RuntimeConfiguration:
             **self.identity_mapping(),
             "model_id": self.model_id,
             "model_revision": self.model_revision,
+            "dependency_lock": self.dependency_lock.as_config_entries(),
         }
 
 
 def parse_runtime_configuration(value: object) -> Sd35RuntimeConfiguration:
-    """Parse and strictly match the one registered SD3.5 runtime identity."""
+    """Parse registered behavior identity and observed selection metadata."""
 
     root = _mapping(value, "runtime configuration")
     _exact_keys(root, _RUNTIME_KEYS, "runtime configuration")
@@ -339,10 +326,6 @@ def parse_runtime_configuration(value: object) -> Sd35RuntimeConfiguration:
             dependency["version_specifier"],
             f"dependency_lock[{index}].version_specifier",
         )
-    if dependencies != _FROZEN_DEPENDENCIES:
-        raise RuntimeConfigurationError(
-            "dependency_lock does not match the registered runtime candidate"
-        )
     dependency_lock = RuntimeDependencyLock(
         python=dependencies["python"],
         diffusers=dependencies["diffusers"],
@@ -358,7 +341,7 @@ def parse_runtime_configuration(value: object) -> Sd35RuntimeConfiguration:
     canonical_mapping = {
         key: value
         for key, value in root.items()
-        if key not in {"model_id", "model_revision"}
+        if key not in {"model_id", "model_revision", "dependency_lock"}
     }
     runtime_config_digest = sha256(
         _canonical_json_bytes(canonical_mapping)
