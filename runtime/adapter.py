@@ -144,7 +144,9 @@ def select_runtime_device(
             raise RuntimeAdapterError(
                 "CUDA was requested but the backend reported no CUDA device"
             )
-        return "cuda:0"
+        if capabilities.current_cuda_device_index is None:
+            return "cuda"
+        return f"cuda:{capabilities.current_cuda_device_index}"
     if requested_device == "cpu":
         if not capabilities.cpu_available:
             raise RuntimeAdapterError(
@@ -152,7 +154,9 @@ def select_runtime_device(
             )
         return "cpu"
     if capabilities.cuda_device_count > 0:
-        return "cuda:0"
+        if capabilities.current_cuda_device_index is None:
+            return "cuda"
+        return f"cuda:{capabilities.current_cuda_device_index}"
     if capabilities.cpu_available:
         return "cpu"
     raise RuntimeAdapterError("backend reported no selectable device")
@@ -215,7 +219,7 @@ class Sd35RuntimeAdapter:
             )
         try:
             rebuilt_configuration = parse_runtime_configuration(
-                self._configuration.identity_mapping()
+                self._configuration.configuration_mapping()
             )
         except Exception as exc:
             raise RuntimeAdapterError(
@@ -887,8 +891,6 @@ class Sd35RuntimeAdapter:
             if (
                 result.runtime_config_digest
                 != self._configuration.runtime_config_digest
-                or result.model_id != self._configuration.model_id
-                or result.model_revision != self._configuration.model_revision
                 or result.callback_indices
                 != tuple(range(self._configuration.inference_steps))
             ):
@@ -973,6 +975,8 @@ def _runtime_session_identity_mapping(
     session: RuntimeSession,
 ) -> dict[str, object]:
     identity = asdict(session)
+    del identity["model_id"]
+    del identity["model_revision"]
     identity["dependency_lock"] = (
         session.dependency_lock.as_config_entries()
     )

@@ -499,7 +499,8 @@ lineage 与注册 key family 形成的 source cluster，其所有攻击、回正
 
 - `key_schedule_sha256_counter` 固定 root key、serialization、KDF/PRG、职责域、
   wrong-key/public-noise 与 golden vector；
-- `runtime_sd35_flowmatch` 固定 backbone、model revision、scheduler、steps、dtype、VAE 和 runtime contract；
+- `runtime_sd35_flowmatch` 固定 pipeline/scheduler capability、steps、dtype、VAE、callback
+  与 Q/K runtime contract；model/repository/name/revision 只作非权威选择/观测元数据；
 - `hf_sparse_tail` 固定 CEG-WM 首个 HF 模板/方向顺序、embedder 使用和 runtime
   物化边界；其 sparse-tail 顺序具有 historical DirectHF 来源，但候选身份和证据
   不继承历史名称；

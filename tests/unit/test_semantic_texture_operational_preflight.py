@@ -18,7 +18,6 @@ CONFIG_PATH = (
     ROOT / "configs/experiments/semantic_texture_operational_preflight.json"
 )
 REVISION = "1" * 40
-PACKAGE_IDENTITY = "2" * 64
 
 
 class _PublicAdapter:
@@ -70,9 +69,8 @@ def _execute(adapter: _PublicAdapter):
     return preflight.execute_semantic_texture_operational_preflight(
         adapter,
         configuration,
-        source_revision=REVISION,
+        observed_repository_revision=REVISION,
         run_id="semantic-texture-phase-a",
-        package_identity=PACKAGE_IDENTITY,
         base_latent=_BASE_LATENT,
         detection_key="memory-only-detection-key",
         semantic_runtime=_SEMANTIC_RUNTIME,
@@ -190,14 +188,30 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
         match="fields drifted",
     ):
         preflight.load_semantic_texture_operational_configuration(path)
+    observed_checkpoint = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    observed_checkpoint["inspyrenet_checkpoint_filename"] = "observed-input.bin"
+    observed_path = tmp_path / "observed-configuration.json"
+    observed_path.write_text(
+        json.dumps(observed_checkpoint),
+        encoding="utf-8",
+    )
+    observed_configuration = (
+        preflight.load_semantic_texture_operational_configuration(observed_path)
+    )
+    assert observed_configuration.inspyrenet_checkpoint_filename == (
+        "observed-input.bin"
+    )
+    assert observed_configuration.configuration_digest == (
+        configuration.configuration_digest
+    )
+    assert observed_configuration == configuration
     adapter = _PublicAdapter()
     with pytest.raises(TypeError):
         preflight.execute_semantic_texture_operational_preflight(
             adapter,
             configuration,
-            source_revision=REVISION,
+            observed_repository_revision=REVISION,
             run_id="semantic-texture-phase-a",
-            package_identity=PACKAGE_IDENTITY,
             base_latent=_BASE_LATENT,
             detection_key="memory-only-detection-key",
             semantic_runtime=_SEMANTIC_RUNTIME,

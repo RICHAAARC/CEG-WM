@@ -336,7 +336,8 @@ Notebook 与 repository module 的跨边界数据
 | declared_deviation | persisted_protocol | protocol | none | false | false | false | baseline 相对上游实现的已声明语义偏差。 |
 | methods | persisted_protocol | protocol | none | false | false | false | Comparison protocol 中参与方法规格的有序集合。 |
 | method_code_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的方法代码 revision。 |
-| model_revision | persisted_protocol | protocol | none | true | false | false | 当前 record 实际执行的生成模型 revision。 |
+| model_revision | persisted_protocol | observed_metadata | none | true | false | false | 当前运行观察到或用于选择的生成模型 revision；不进入 KDF、方法/result 强身份或相等性门。 |
+| observed_repository_revision | persisted_protocol | observed_metadata | none | false | false | false | operational checkout 实际观察到的 40-hex HEAD；不作 exact revision authority 或方法身份。 |
 | runtime_schema_version | persisted_protocol | runtime_identity | none | false | false | false | runtime 配置 JSON 的严格 schema 版本。 |
 | runtime_config_digest | cross_boundary | runtime_identity | none | false | false | false | 冻结 runtime 配置按 canonical JSON 计算的 SHA-256 身份。 |
 | model_id | persisted_protocol | runtime_identity | none | true | false | false | runtime 实际加载的公开模型仓库身份。 |

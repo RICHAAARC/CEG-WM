@@ -549,14 +549,6 @@ def test_semantic_texture_detector_config_branch_key_model_and_whitening_mismatc
             hf_null=mismatched_branch_calibration,
             lf_null=lf_null,
         )
-    with pytest.raises(HfDetectorError, match="template reconstruction failed"):
-        semantic_texture_hf_detector(
-            hf_observation,
-            ROOT_KEY,
-            route,
-            model_revision="mismatched-semantic-texture-model-revision",
-        )
-
     alternate_asset_payload = {
         "artifact_role": "lf_semantic_texture_soft_clean_null_whitening_operator",
         "band_identity": "six_dyadic_chebyshev_frequency_rings_without_dc",
@@ -699,7 +691,7 @@ def test_lf_whitened_detector_reuses_one_asset_across_registered_wrong_and_null(
 
 
 @pytest.mark.unit
-def test_lf_whitened_prepared_features_preserve_legacy_binary64_results() -> None:
+def test_lf_whitened_prepared_features_semantic_domain_binary64_golden() -> None:
     weights = tuple(
         f"{0x3F000000 + channel * 6 + band:08x}"
         for channel in range(16)
@@ -758,19 +750,19 @@ def test_lf_whitened_prepared_features_preserve_legacy_binary64_results() -> Non
     )
     expected_score_bits = (
         "3ff0000000000000",
-        "3f820c26b18e0b5e",
-        "bf94abf44cc6955a",
-        "bf8d8f62b6f69a5e",
-        "bf8bf8832447c2f8",
-        "bf7f20b427919497",
+        "bf64defed55bde8b",
+        "3f9c4a2b8080e3ae",
+        "3f93ae326397e761",
+        "3f8fe6674c91e727",
+        "3f77947690515ad2",
     )
     expected_canonical_sha256 = (
-        "837dbd2535c224824d3858ae497691c2e5443e885fed52e9d80a35e2c11e72f4",
-        "52a7acf32fc9e19dbb036e96de9adecda9b7e99a13aa37eb4ce268960e7bf75d",
-        "e2d5a7c990d01d67fd8cbe1344179d24b91ad0b52527369ce95b150ce2122bba",
-        "fc737c1a5b3e985a6fd2933c97fe784cc1f4102fbfed102239c7b6c3eab6589a",
-        "9f76f94cd2ff33c80872b36fe9144ab67f0d31a357cd3830dbcabec0898f9269",
-        "cf82c1469ea4fbca8e6de32834bd9cbb7cb417a892aca6c3d524f31d627ac184",
+        "8e8e386bb9ff0077984b46543b565f96a739a1e433584df78c1da8f57ae71fab",
+        "1fa3099ff969913fca9bb53f9a366906a11d94ac57287c608b6ed6877f877e53",
+        "b1a3a351eaba6fb18017149de81585f9b622c21e4b4ca3177282593f450eeb7a",
+        "43617d0f42b9def70f1823d2ec2a0d617ff95876fe8cb8a55f76da7ebd8dd6bc",
+        "0ef2184f9fb3a5cc27e4d39db77a28062865ce7466785af1f3e58286533cf0ac",
+        "746f8c2ee71a484d18bc4cf291ee434535c900c3f97938a9dedf171584f86aca",
     )
 
     for index, (legacy_result, optimized_result) in enumerate(
@@ -839,23 +831,6 @@ def test_lf_whitened_prepared_features_fail_closed_on_identity_drift() -> None:
             wrong_key,
             asset,
             prepared_observation=prepared_observation,
-            prepared_template=prepared_template,
-        )
-    model_drifted_observation = prepare_lf_null_whitened_observation(
-        observation,
-        asset,
-    )
-    object.__setattr__(
-        model_drifted_observation,
-        "model_revision",
-        "different-model-revision",
-    )
-    with pytest.raises(LfDetectorError, match="observation model mismatch"):
-        lf_null_whitened_matched_detector(
-            observation,
-            ROOT_KEY,
-            asset,
-            prepared_observation=model_drifted_observation,
             prepared_template=prepared_template,
         )
     changed_asset = _asset(fit_manifest_sha256="b" * 64)
@@ -928,7 +903,6 @@ def test_lf_whitened_prepared_coefficients_reject_mutable_layout_and_data_drift(
             observation_shape=observation.shape,
             observation_protocol=observation.observation_protocol,
             whitening_asset_digest=asset.whitening_asset_digest,
-            model_revision=prepared.model_revision,
         )
 
 

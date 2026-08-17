@@ -111,11 +111,11 @@ root_key_public_digest =
 ### KDF, Counter Stream And Distributions
 
 候选的 PRG 算法身份字符串固定为
-`sha256_counter_normal_icdf_table20_float32`。对输出 shape、根材料和职责字段：
+`sha256_counter_semantic_domain_v2_normal_icdf_table20_float32`。对输出 shape、根材料和职责字段：
 
 ```text
 domain_digest = SHA256(stable_json_utf8({
-  "keyed_prg_version": "sha256_counter_normal_icdf_table20_float32",
+  "keyed_prg_version": "sha256_counter_semantic_domain_v2_normal_icdf_table20_float32",
   "key_material": key_material,
   "domain_fields": domain_fields,
   "shape": shape
@@ -146,12 +146,12 @@ reshape 为 float32 tensor，之后才允许搬到设备。
 秘密职责都使用原始 `root_key_text` 作为 `key_material`，并要求以下精确字段：
 
 - HF：`candidate_id=hf_sparse_tail`、`operator=carrier_template`、
-  `responsibility_domain=hf_carrier`、`model_revision`、`tensor_role=base_gaussian`；
+  `responsibility_domain=hf_carrier`、`tensor_role=base_gaussian`；
 - LF：`candidate_id=lf_low_pass`、`operator=carrier_template`、
-  `responsibility_domain=lf_carrier`、`model_revision`、`tensor_role=base_gaussian`；
+  `responsibility_domain=lf_carrier`、`tensor_role=base_gaussian`；
 - Q/K projection：`candidate_id=qk_relation_similarity`、
   `operator=attention_relation_signs`、`responsibility_domain=geometry_sync`、
-  `model_revision`、`layer_name`、`token_count`、`tensor_role=pair_uniform`。
+  `layer_name`、`token_count`、`tensor_role=pair_uniform`。
 
 错误 key roster 在访问图像或分数前由 manifest 冻结。第 `j` 个错误根材料为：
 
@@ -173,17 +173,15 @@ wrong_key_material_j =
 
 - image-only Q/K：`candidate_id=qk_relation_similarity`、
   `operator=public_image_only_qk_detection_noise`、
-  `responsibility_domain=public_noise`、`model_revision`、`schedule_index=7`、
+  `responsibility_domain=public_noise`、`schedule_index=7`、
   `conditioning_protocol=sd3_empty_text_triplet_without_cfg`、
   `tensor_role=scheduler_noise`；该 noise 只由公共身份与 tensor shape 决定，对所有
   图像相同，因此盲检不需要 sample manifest 或 embed record；
 - routing sensitivity probe：`candidate_id=routing_stqr`、
   `operator=local_sensitivity_public_probe`、
-  `responsibility_domain=public_noise`、`model_revision`、`sample_index`、
+  `responsibility_domain=public_noise`、`schedule_index=18`、
+  `conditioning_protocol=generation_callback18_vae_local_sensitivity`、
   `tensor_role=latent_probe`。
-
-routing 的 `sample_index` 来自预登记 generation manifest，不得以运行顺序、分数或
-重试次数替代；它不进入 image-only Q/K 检测 noise。
 
 ### Golden Vector, Failures And Gates
 
@@ -296,8 +294,8 @@ geometry delta 与已有 geometry/total budget 保持独立，不并入
 
 首个且唯一登记的 backbone/runtime 候选为：
 
-- model：`stabilityai/stable-diffusion-3.5-medium`；
-- model revision：`b940f670f0eda2d07fbb75229e779da1ad11eb80`；
+- model locator：配置中的 `model_id` 与 `model_revision` 只用于选择和观测，
+  不进入方法/KDF/runtime 强身份，也不作名称或 revision 相等性门；
 - pipeline：`StableDiffusion3Pipeline`；
 - scheduler：`FlowMatchEulerDiscreteScheduler`；
 - `512 x 512`、20 inference steps、guidance `4.5`；
@@ -307,7 +305,7 @@ geometry delta 与已有 geometry/total budget 保持独立，不并入
 - 检测编码使用 VAE posterior mode，不采样；
 - `content_embedder` 产生的内容 delta 由 runtime 在 callback index 18 物化，写入后
   保留一个 scheduler interval；HF-only 也走同一 embedder/runtime 边界；
-- Q/K observation 使用同一模型 revision：待检图像经 VAE posterior mode 编码，在重新建立的 20-step scheduler 上以 index 7 的 timestep 加入公开确定性噪声，再以三路空字符串条件、无 classifier-free guidance 做一次 Transformer 前向；不读取生成缓存。
+- Q/K observation 使用同一已准备 runtime：待检图像经 VAE posterior mode 编码，在重新建立的 20-step scheduler 上以 index 7 的 timestep 加入公开确定性噪声，再以三路空字符串条件、无 classifier-free guidance 做一次 Transformer 前向；不读取生成缓存。
 
 候选依赖锁来自 FlowHF：Python `>=3.12`、diffusers `0.38.0`、torch `2.11.0`、transformers `5.12.1`、accelerate `1.14.0`、numpy `2.0.2`、Pillow `11.3.0`、safetensors `0.8.0`、huggingface-hub `1.20.1`。若该组合不能在获授权环境解析，不允许实现者自行升级；应登记 runtime candidate failure 并先修订候选规格。
 
@@ -819,22 +817,19 @@ ties、低/高尾 clipping、排列不变性、严格单调区间、分支交换
 
 ### Frozen InSPyReNet Authority And Forward
 
-模型资产唯一绑定 Hugging Face repo `plemeri/InSPyReNet` exact revision
-`d94c2baaa4d023ab018c6f97be6ef37548e3bd1f` 的 `ckpt_base.pth`：LFS oid
-SHA-256 `0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd`，
-size `367520613` bytes，MIT。source 唯一绑定 `plemeri/transparent-background`
-exact revision `f0fa91701a98cfc8e955c554e84522f365ec6da3`，MIT，入口为
-`transparent_background/InSPyReNet.py`。Windows `Zone.Identifier`、下载 URL、
-本地路径和文件时间永久排除于 checkpoint、package、config 与 record identity。
+`plemeri/InSPyReNet`、`plemeri/transparent-background` 与 `ckpt_base.pth` 只作为
+runtime 选择 locator/观测元数据，不进入 KDF、方法配置、result identity 或相等性门。
+Notebook 的唯一 Drive 输入 basename 仍为 `ckpt_base.pth`；它必须是 regular
+non-symlink file。revision、SHA、size、下载 URL、本地路径和文件时间都不属于方法身份。
 
 checkpoint 必须 strict `state_dict` load。唯一前向为直接调用
 `InSPyReNet.forward_inspyre(x)`，确认返回 dict 且
 `out["saliency"]=[d3,d2,d1,d0]` 后取 `out["saliency"][-1]` 的 finest raw `d0`
 logit，再执行 `torch.sigmoid` 恰一次。
 禁止 `Remover.process`、`model.forward` 或 `forward_inference`；尤其禁止其 sigmoid
-后的 per-image min-max normalization。模型、revision、checkpoint、预处理、raw-output
-selector、sigmoid count、resize、threshold、erosion 与 coverage rule 全部进入 mask
-identity。
+后的 per-image min-max normalization。class/factory/API、strict-load、预处理、raw-output
+selector、sigmoid count、resize、threshold、erosion 与 coverage rule 进入行为身份；
+repository/model/name/revision/checkpoint blob 身份只作非权威观测元数据。
 
 ### Single Mask Construction Rule
 
@@ -1049,7 +1044,7 @@ relation 输出，把同一 relation scorer 用作 `rectification_similarity` �
 
 嵌入同步和盲检观察都使用 schedule index 7。盲检先以 VAE posterior mode 得到
 image latent；公开噪声使用 `key_schedule_sha256_counter` 中冻结的 image-only Q/K
-public-noise domain，绑定 shape、model revision、schedule index、conditioning 和
+public-noise domain，绑定 shape、schedule index、conditioning 和
 tensor role，由 scheduler `scale_noise` 在 index 7 加噪。条件协议固定为
 `sd3_empty_text_triplet_without_cfg`：`prompt`、`prompt_2`、`prompt_3` 全为空字符串且
 `do_classifier_free_guidance=false`。缺少 `scale_noise` 或任一身份不匹配即失败。

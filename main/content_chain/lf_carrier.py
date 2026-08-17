@@ -18,7 +18,6 @@ from main.shared.key_schedule import (
     stable_json_utf8,
 )
 
-from .hf_carrier import MODEL_REVISION
 from .routing import (
     ContentRouterError,
     ContentRoutingResult,
@@ -148,13 +147,11 @@ def _zero_padded_average_5x5(
 def _derive_lf_gaussian(
     detection_key: str | DerivedWrongKeyMaterial,
     shape: tuple[int, int, int, int],
-    model_revision: str,
 ):
     domain_fields = {
         "candidate_id": LF_CANDIDATE_ID,
         "operator": "carrier_template",
         "responsibility_domain": "lf_carrier",
-        "model_revision": model_revision,
         "tensor_role": "base_gaussian",
     }
     try:
@@ -204,7 +201,6 @@ def _carrier_config_identity(
         "dtype": "float32",
         "key_schedule_config_digest": DEFAULT_KEY_SCHEDULE_CONFIG.config_digest,
         "mask_digest": mask_digest,
-        "model_revision": MODEL_REVISION,
         "shape": list(normalized_shape),
     }
     if route_identity is not None:
@@ -219,13 +215,10 @@ def lf_carrier(
     *,
     mask_lf: Sequence[float] | None = None,
     routing_result: ContentRoutingResult | SemanticTextureRoutingResult | None = None,
-    model_revision: str = MODEL_REVISION,
 ) -> LfCarrierResult:
     """构造 center-per-sample 的 LF 单位模板与 mask 后单位方向。"""
 
     normalized_shape = _validate_shape(shape)
-    if model_revision != MODEL_REVISION:
-        raise LfCarrierError("LF model revision does not match the frozen candidate")
     element_count = prod(normalized_shape)
     route_identity: str | None = None
     route_config_digest: str | None = None
@@ -260,7 +253,6 @@ def lf_carrier(
     gaussian_stream, root_digest, key_role, wrong_key_index = _derive_lf_gaussian(
         detection_key,
         normalized_shape,
-        model_revision,
     )
     low_pass = _zero_padded_average_5x5(
         gaussian_stream.values,

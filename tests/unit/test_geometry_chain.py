@@ -421,13 +421,6 @@ def test_qk_relation_consumption():
             tuple(reversed(differentiable_observations)),
             _REGISTERED_KEY,
         )
-    with pytest.raises(QkGeometrySyncError, match="model_revision"):
-        differentiable_qk_relation_objective(
-            differentiable_observations,
-            _REGISTERED_KEY,
-            model_revision="unsupported-model-revision",
-        )
-
     large_observations, large_result = _actual_qk_observation(side=10, seed=902)
     layer = large_result.layers[0]
     indices = torch.tensor(layer.token_indices, dtype=torch.long)

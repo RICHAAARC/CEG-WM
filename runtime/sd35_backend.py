@@ -548,9 +548,15 @@ class Sd35PipelineBackend:
         self._requires_generation_prompt_selection = False
 
     def probe_devices(self) -> RuntimeDeviceCapabilities:
+        cuda_device_count = torch.cuda.device_count()
         return RuntimeDeviceCapabilities(
             cpu_available=True,
-            cuda_device_count=torch.cuda.device_count(),
+            cuda_device_count=cuda_device_count,
+            current_cuda_device_index=(
+                torch.cuda.current_device()
+                if cuda_device_count > 0
+                else None
+            ),
         )
 
     def prepare(
@@ -562,8 +568,8 @@ class Sd35PipelineBackend:
             raise Sd35BackendError("SD3.5 backend may only be prepared once")
         if type(configuration) is not Sd35RuntimeConfiguration:
             raise Sd35BackendError("configuration must be Sd35RuntimeConfiguration")
-        if selected_device != "cuda:0":
-            raise Sd35BackendError("real SD3.5 qualification requires cuda:0")
+        if selected_device != "cuda" and not selected_device.startswith("cuda:"):
+            raise Sd35BackendError("real SD3.5 qualification requires CUDA")
         try:
             diffusers = importlib.import_module("diffusers")
             pipeline_type = getattr(diffusers, "StableDiffusion3Pipeline")

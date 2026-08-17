@@ -38,13 +38,9 @@ RESULT_FIELDS = frozenset(
         "candidate_promoted",
         "configuration_digest",
         "formal_tau_created",
-        "inspyrenet_checkpoint_revision",
-        "inspyrenet_checkpoint_sha256",
-        "inspyrenet_checkpoint_size_bytes",
-        "inspyrenet_source_revision",
         "model_id",
         "model_revision",
-        "package_identity",
+        "observed_repository_revision",
         "profile_id",
         "result_identity",
         "run_id",
@@ -52,7 +48,6 @@ RESULT_FIELDS = frozenset(
         "science_started",
         "scientific_claims_supported",
         "scientific_unit_count",
-        "source_revision",
         "status",
         "unit_outcomes",
     }
@@ -130,28 +125,19 @@ def _validated_result(result: object) -> dict[str, object]:
         or value.get("scientific_claims_supported") is not False
         or type(value.get("blocked_class")) is not str
         or value.get("blocked_class") not in BLOCKED_CLASSES
-        or value.get("model_id")
-        != "stabilityai/stable-diffusion-3.5-medium"
-        or value.get("model_revision")
-        != "b940f670f0eda2d07fbb75229e779da1ad11eb80"
-        or value.get("inspyrenet_source_revision")
-        != "f0fa91701a98cfc8e955c554e84522f365ec6da3"
-        or value.get("inspyrenet_checkpoint_revision")
-        != "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
-        or value.get("inspyrenet_checkpoint_sha256")
-        != "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
-        or type(value.get("inspyrenet_checkpoint_size_bytes")) is not int
-        or value.get("inspyrenet_checkpoint_size_bytes") != 367520613
+        or any(
+            type(value.get(field)) is not str or not value[field]
+            for field in ("model_id", "model_revision")
+        )
         or type(value.get("run_id")) is not str
         or RUN_ID.fullmatch(value["run_id"]) is None
-        or type(value.get("source_revision")) is not str
-        or re.fullmatch(r"[0-9a-f]{40}", value["source_revision"]) is None
+        or type(value.get("observed_repository_revision")) is not str
+        or re.fullmatch(r"[0-9a-f]{40}", value["observed_repository_revision"]) is None
         or any(
             type(value.get(field)) is not str
             or DIGEST.fullmatch(value[field]) is None
             for field in (
                 "configuration_digest",
-                "package_identity",
                 "result_identity",
             )
         )
@@ -303,21 +289,11 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "candidate_promoted": False,
         "configuration_digest": result_value["configuration_digest"],
         "formal_tau_created": False,
-        "inspyrenet_checkpoint_revision": result_value[
-            "inspyrenet_checkpoint_revision"
-        ],
-        "inspyrenet_checkpoint_sha256": result_value[
-            "inspyrenet_checkpoint_sha256"
-        ],
-        "inspyrenet_checkpoint_size_bytes": result_value[
-            "inspyrenet_checkpoint_size_bytes"
-        ],
-        "inspyrenet_source_revision": result_value[
-            "inspyrenet_source_revision"
-        ],
         "model_id": result_value["model_id"],
         "model_revision": result_value["model_revision"],
-        "package_identity": result_value["package_identity"],
+        "observed_repository_revision": result_value[
+            "observed_repository_revision"
+        ],
         "profile_id": result_value["profile_id"],
         "result_filename": result_path.name,
         "result_identity": result_identity,
@@ -326,7 +302,6 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
-        "source_revision": result_value["source_revision"],
         "status": "blocked",
     }
     with receipt_path.open("xb") as handle:

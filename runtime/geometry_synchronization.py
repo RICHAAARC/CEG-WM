@@ -80,8 +80,6 @@ def _validate_boundary(
         )
     if (
         session.runtime_config_digest != configuration.runtime_config_digest
-        or session.model_id != configuration.model_id
-        or session.model_revision != configuration.model_revision
         or session.callback_index != configuration.callback_index
         or session.detection_schedule_index
         != configuration.detection_schedule_index

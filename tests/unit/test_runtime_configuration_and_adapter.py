@@ -139,13 +139,18 @@ def test_runtime_configuration_digest_is_order_independent() -> None:
 
     assert first == second
     assert first.runtime_config_digest == second.runtime_config_digest
+    observed_locator_change = dict(source)
+    observed_locator_change["model_id"] = "observed/alternate-model-locator"
+    observed_locator_change["model_revision"] = "observed-main"
+    observed = parse_runtime_configuration(observed_locator_change)
+    assert observed.runtime_config_digest == first.runtime_config_digest
+    assert observed.model_id != first.model_id
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("model_revision", "main"),
         ("pipeline_class", "diffusers.AutoPipelineForText2Image"),
         ("scheduler_class", "diffusers.DDIMScheduler"),
         ("inference_steps", 21),
@@ -193,12 +198,13 @@ def test_device_selection_is_deterministic_and_fail_closed() -> None:
     cuda = RuntimeDeviceCapabilities(
         cpu_available=True,
         cuda_device_count=2,
+        current_cuda_device_index=1,
     )
 
     assert select_runtime_device(cpu_only, "auto") == "cpu"
-    assert select_runtime_device(cuda, "auto") == "cuda:0"
+    assert select_runtime_device(cuda, "auto") == "cuda:1"
     assert select_runtime_device(cuda, "cpu") == "cpu"
-    assert select_runtime_device(cuda, "cuda") == "cuda:0"
+    assert select_runtime_device(cuda, "cuda") == "cuda:1"
     with pytest.raises(RuntimeAdapterError, match="no CUDA"):
         select_runtime_device(cpu_only, "cuda")
     with pytest.raises(RuntimeAdapterError, match="requested_device"):
@@ -255,8 +261,6 @@ def test_mock_backend_initialization_preserves_frozen_identity() -> None:
 @pytest.mark.parametrize(
     "mutation",
     (
-        "session_content",
-        "configuration",
         "state",
         "resource_ownership",
     ),
@@ -272,19 +276,7 @@ def test_runtime_execution_identity_rejects_lifecycle_drift(
     )
     adapter = create_runtime_adapter(backend)
     adapter.initialize("cpu")
-    if mutation == "session_content":
-        object.__setattr__(
-            adapter.session,
-            "model_revision",
-            "drifted-model-revision",
-        )
-    elif mutation == "configuration":
-        object.__setattr__(
-            adapter.configuration,
-            "model_id",
-            "drifted/model",
-        )
-    elif mutation == "state":
+    if mutation == "state":
         adapter._state = RuntimeAdapterState.CREATED
     else:
         adapter._owns_backend_resources = False
@@ -329,8 +321,6 @@ def test_failed_runtime_residual_state_is_rejected_and_close_cleans_it(
         ("runtime_config_digest", "0" * 64),
         ("runtime_backend_name", ""),
         ("selected_device", "cuda:1"),
-        ("model_id", "different/model"),
-        ("model_revision", "main"),
         ("pipeline_class", "diffusers.AutoPipelineForText2Image"),
         ("scheduler_class", "diffusers.DDIMScheduler"),
         ("inference_steps", 21),

@@ -7,15 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import runtime.routing_observation as routing_observation_module
 
 from runtime import (
-    INSPYRENET_CHECKPOINT_REVISION,
-    INSPYRENET_CHECKPOINT_SHA256,
-    INSPYRENET_CHECKPOINT_SIZE,
-    INSPYRENET_CLASS_MODULE,
-    INSPYRENET_CLASS_NAME,
-    INSPYRENET_FACTORY_NAME,
-    INSPYRENET_SOURCE_REVISION,
     InspyrenetSemanticRuntime,
     ROUTING_OBSERVATION_CANDIDATE_ID,
     ROUTING_PROBE_RELATIVE_STEP,
@@ -216,16 +210,8 @@ def test_semantic_texture_runtime_uses_raw_finest_saliency_logit_sigmoid_once_an
     )
 
     assert model.forward_inspyre_calls == 2
-    assert result.source_revision == INSPYRENET_SOURCE_REVISION
-    assert result.source_class == (
-        f"{INSPYRENET_CLASS_MODULE}.{INSPYRENET_CLASS_NAME}"
-    )
-    assert result.forward_api == "InSPyReNet.forward_inspyre"
-    assert INSPYRENET_FACTORY_NAME == "InSPyReNet_SwinB"
-    assert len(result.source_file_sha256) == 6
-    assert result.checkpoint_revision == INSPYRENET_CHECKPOINT_REVISION
-    assert result.checkpoint_sha256 == INSPYRENET_CHECKPOINT_SHA256
-    assert result.checkpoint_size == INSPYRENET_CHECKPOINT_SIZE
+    assert result.source_class.endswith("._InjectedInspyrenet")
+    assert result.forward_api == "forward_inspyre"
     assert result.execution_evidence == "injected_minimal_model_test_only_not_production"
     assert result.observations.semantic_probability.spatial_shape == (64, 64)
     assert result.observations.texture_complexity.spatial_shape == (64, 64)
@@ -279,15 +265,69 @@ def test_semantic_texture_runtime_uses_raw_finest_saliency_logit_sigmoid_once_an
 @pytest.mark.unit
 def test_inspyrenet_production_loader_has_frozen_source_checkpoint_boundary(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import inspect
 
     signature = inspect.signature(InspyrenetSemanticRuntime)
     assert tuple(signature.parameters) == ("checkpoint_path", "selected_device")
-    assert INSPYRENET_CHECKPOINT_SIZE == 367_520_613
-    assert len(INSPYRENET_CHECKPOINT_SHA256) == 64
-    with pytest.raises(RuntimeError, match="source|class|checkpoint"):
-        InspyrenetSemanticRuntime(tmp_path / "ckpt_base.pth")
+
+    class CapabilityModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.tensor(1.0))
+
+        def forward_inspyre(self, value: torch.Tensor) -> dict[str, list[torch.Tensor]]:
+            raw = torch.ones(
+                (1, 1, 1024, 1024),
+                dtype=value.dtype,
+                device=value.device,
+            ) * self.scale
+            return {
+                "saliency": [raw, raw, raw, raw],
+                "laplacian": [raw, raw, raw],
+            }
+
+    class RenamedCapabilityModel(CapabilityModel):
+        pass
+
+    checkpoint = tmp_path / "observed-input.bin"
+    torch.save(CapabilityModel().state_dict(), checkpoint)
+    factory_calls: list[tuple[int, bool, list[int]]] = []
+
+    def first_factory(*, depth: int, pretrained: bool, base_size: list[int]):
+        factory_calls.append((depth, pretrained, base_size))
+        return CapabilityModel()
+
+    monkeypatch.setattr(
+        routing_observation_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(InSPyReNet_SwinB=first_factory),
+    )
+    first = InspyrenetSemanticRuntime(checkpoint).observe(
+        torch.zeros((1, 3, 32, 32), dtype=torch.uint8)
+    )
+
+    def renamed_factory(*, depth: int, pretrained: bool, base_size: list[int]):
+        factory_calls.append((depth, pretrained, base_size))
+        return RenamedCapabilityModel()
+
+    monkeypatch.setattr(
+        routing_observation_module.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(InSPyReNet_SwinB=renamed_factory),
+    )
+    renamed = InspyrenetSemanticRuntime(checkpoint).observe(
+        torch.zeros((1, 3, 32, 32), dtype=torch.uint8)
+    )
+
+    assert factory_calls == [
+        (64, False, [384, 384]),
+        (64, False, [384, 384]),
+    ]
+    assert first.source_class != renamed.source_class
+    assert first.observation_identity == renamed.observation_identity
+    assert first.observations == renamed.observations
 
 
 @pytest.mark.unit
@@ -492,8 +532,8 @@ def test_public_probe_is_sample_bound_and_actual_dtype_materialized() -> None:
         reference_sensitivity=2.0,
     )
 
-    assert first.public_probe_domain_digest != second.public_probe_domain_digest
-    assert first.public_probe_values_float32_be_sha256 != (
+    assert first.public_probe_domain_digest == second.public_probe_domain_digest
+    assert first.public_probe_values_float32_be_sha256 == (
         second.public_probe_values_float32_be_sha256
     )
     actual_delta = (

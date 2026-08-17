@@ -13,7 +13,7 @@ from main.shared.key_schedule import (
     stable_json_utf8,
 )
 
-from .hf_carrier import MODEL_REVISION, HfCarrierError, hf_carrier
+from .hf_carrier import HfCarrierError, hf_carrier
 from .routing import (
     SEMANTIC_TEXTURE_CANDIDATE_STATUS,
     SemanticTextureRoutingResult,
@@ -164,8 +164,6 @@ def _normalize(values: Sequence[float], role: str) -> tuple[float, ...]:
 def hf_detector(
     observation: HfDetectionObservation,
     detection_key: str | DerivedWrongKeyMaterial,
-    *,
-    model_revision: str = MODEL_REVISION,
 ) -> HfDetectionResult:
     """从普通图像侧观测和 key 盲重构模板并计算 HF direct score。"""
 
@@ -182,7 +180,6 @@ def hf_detector(
             detection_key,
             observation.shape,
             mask_hf=None,
-            model_revision=model_revision,
         )
     except HfCarrierError as exc:
         raise HfDetectorError("HF detector template reconstruction failed") from exc
@@ -207,7 +204,6 @@ def hf_detector(
         "candidate_id": "hf_sparse_tail",
         "carrier_config_digest": carrier.carrier_config_digest,
         "dtype": "float32",
-        "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
         "score_operator": "centered_normalized_correlation",
         "template_time_centering": False,
@@ -239,8 +235,6 @@ def semantic_texture_hf_detector(
     observation: HfDetectionObservation,
     detection_key: str | DerivedWrongKeyMaterial,
     routing_result: SemanticTextureRoutingResult,
-    *,
-    model_revision: str = MODEL_REVISION,
 ) -> SemanticTextureHfDetectionResult:
     """Apply current-image ``m_hf`` to both observation and key-only template."""
 
@@ -262,7 +256,6 @@ def semantic_texture_hf_detector(
         carrier = hf_carrier(
             detection_key,
             observation.shape,
-            model_revision=model_revision,
         )
     except HfCarrierError as exc:
         raise HfDetectorError("semantic-texture HF template reconstruction failed") from exc
@@ -288,7 +281,6 @@ def semantic_texture_hf_detector(
         "candidate_id": candidate_id,
         "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
         "carrier_config_digest": carrier.carrier_config_digest,
-        "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
         "route_config_digest": route.route_config_digest,
         "score_operator": "centered_normalized_correlation_after_symmetric_m_hf",

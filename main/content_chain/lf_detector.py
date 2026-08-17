@@ -12,7 +12,6 @@ import numpy as np
 
 from main.shared.key_schedule import DerivedWrongKeyMaterial, stable_json_utf8
 
-from .hf_carrier import MODEL_REVISION
 from .lf_carrier import LfCarrierError, lf_carrier
 from .lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
@@ -200,8 +199,6 @@ def _normalize(values: Sequence[float], role: str) -> tuple[float, ...]:
 def lf_detector(
     observation: LfDetectionObservation,
     detection_key: str | DerivedWrongKeyMaterial,
-    *,
-    model_revision: str = MODEL_REVISION,
 ) -> LfDetectionResult:
     """从普通图像观测与 key 盲重构未 mask LF 模板并评分。"""
 
@@ -218,7 +215,6 @@ def lf_detector(
             detection_key,
             observation.shape,
             mask_lf=None,
-            model_revision=model_revision,
         )
     except LfCarrierError as exc:
         raise LfDetectorError("LF detector template reconstruction failed") from exc
@@ -247,7 +243,6 @@ def lf_detector(
         "candidate_ids": ["key_schedule_sha256_counter", "lf_low_pass"],
         "carrier_config_digest": carrier.carrier_config_digest,
         "dtype": "float32",
-        "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
         "score_operator": "centered_normalized_correlation",
         "template_mask": "unmasked",
@@ -437,7 +432,6 @@ class PreparedLfWhitenedObservation:
     observation_shape: tuple[int, int, int, int]
     observation_protocol: str
     whitening_asset_digest: str
-    model_revision: str
     detrend_identity: str = LF_NULL_WHITENING_DETREND_IDENTITY
     transform_identity: str = LF_NULL_WHITENING_TRANSFORM_IDENTITY
 
@@ -460,8 +454,6 @@ class PreparedLfWhitenedObservation:
             raise LfDetectorError("prepared LF observation transform mismatch")
         if not _is_sha256_digest(self.whitening_asset_digest):
             raise LfDetectorError("prepared LF observation asset mismatch")
-        if self.model_revision != MODEL_REVISION:
-            raise LfDetectorError("prepared LF observation model mismatch")
         if not _is_sha256_digest(self.observation_digest):
             raise LfDetectorError("prepared LF observation digest mismatch")
 
@@ -479,7 +471,6 @@ class PreparedLfWhitenedTemplate:
     wrong_key_index: int | None
     template_shape: tuple[int, int, int, int]
     whitening_asset_digest: str
-    model_revision: str
     detrend_identity: str = LF_NULL_WHITENING_DETREND_IDENTITY
     transform_identity: str = LF_NULL_WHITENING_TRANSFORM_IDENTITY
 
@@ -500,8 +491,6 @@ class PreparedLfWhitenedTemplate:
             raise LfDetectorError("prepared LF template transform mismatch")
         if not _is_sha256_digest(self.whitening_asset_digest):
             raise LfDetectorError("prepared LF template asset mismatch")
-        if self.model_revision != MODEL_REVISION:
-            raise LfDetectorError("prepared LF template model mismatch")
         if any(
             not _is_sha256_digest(value)
             for value in (
@@ -527,8 +516,6 @@ class PreparedLfWhitenedTemplate:
 def prepare_lf_null_whitened_observation(
     observation: LfDetectionObservation,
     whitening_asset: LfNullWhiteningAsset,
-    *,
-    model_revision: str = MODEL_REVISION,
 ) -> PreparedLfWhitenedObservation:
     """Prepare deterministic observation features without changing detector math."""
 
@@ -564,7 +551,6 @@ def prepare_lf_null_whitened_observation(
         observation_shape=observation.shape,
         observation_protocol=observation.observation_protocol,
         whitening_asset_digest=whitening_asset.whitening_asset_digest,
-        model_revision=model_revision,
     )
 
 
@@ -573,7 +559,6 @@ def prepare_lf_null_whitened_template(
     whitening_asset: LfNullWhiteningAsset,
     *,
     shape: tuple[int, int, int, int] = LF_NULL_WHITENING_LATENT_SHAPE,
-    model_revision: str = MODEL_REVISION,
 ) -> PreparedLfWhitenedTemplate:
     """Prepare deterministic key-template features without persisting them."""
 
@@ -592,7 +577,6 @@ def prepare_lf_null_whitened_template(
             detection_key,
             shape,
             mask_lf=None,
-            model_revision=model_revision,
         )
     except LfCarrierError as exc:
         raise LfDetectorError(
@@ -613,7 +597,6 @@ def prepare_lf_null_whitened_template(
         wrong_key_index=carrier.wrong_key_index,
         template_shape=shape,
         whitening_asset_digest=whitening_asset.whitening_asset_digest,
-        model_revision=model_revision,
     )
 
 
@@ -693,7 +676,6 @@ def lf_null_whitened_matched_detector(
     detection_key: str | DerivedWrongKeyMaterial,
     whitening_asset: LfNullWhiteningAsset | None = None,
     *,
-    model_revision: str = MODEL_REVISION,
     prepared_observation: PreparedLfWhitenedObservation | None = None,
     prepared_template: PreparedLfWhitenedTemplate | None = None,
 ) -> LfNullWhitenedDetectionResult:
@@ -724,7 +706,6 @@ def lf_null_whitened_matched_detector(
             detection_key,
             observation.shape,
             mask_lf=None,
-            model_revision=model_revision,
         )
     except LfCarrierError as exc:
         raise LfDetectorError(
@@ -748,7 +729,6 @@ def lf_null_whitened_matched_detector(
             != observation.observation_protocol
             or prepared_observation.whitening_asset_digest
             != whitening_asset.whitening_asset_digest
-            or prepared_observation.model_revision != model_revision
         ):
             raise LfDetectorError("prepared LF observation identity mismatch")
         observation_coefficients = prepared_observation.coefficients
@@ -772,7 +752,6 @@ def lf_null_whitened_matched_detector(
             or prepared_template.template_shape != observation.shape
             or prepared_template.whitening_asset_digest
             != whitening_asset.whitening_asset_digest
-            or prepared_template.model_revision != model_revision
         ):
             raise LfDetectorError("prepared LF template identity mismatch")
         template_coefficients = prepared_template.coefficients
@@ -793,7 +772,6 @@ def lf_null_whitened_matched_detector(
         "computation_dtype": "float64",
         "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
         "input_dtype": "float32",
-        "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
         "score_operator": LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
         "template_mask": "unmasked",
@@ -835,8 +813,6 @@ def semantic_texture_lf_detector(
     detection_key: str | DerivedWrongKeyMaterial,
     routing_result: SemanticTextureRoutingResult,
     whitening_asset: SemanticTextureLfWhiteningAsset | None,
-    *,
-    model_revision: str = MODEL_REVISION,
 ) -> SemanticTextureLfDetectionResult:
     """Score symmetric ``m_lf`` features using only the dedicated soft-route W."""
 
@@ -872,7 +848,6 @@ def semantic_texture_lf_detector(
         carrier = lf_carrier(
             detection_key,
             observation.shape,
-            model_revision=model_revision,
         )
     except LfCarrierError as exc:
         raise LfDetectorError("semantic-texture LF template reconstruction failed") from exc
@@ -909,7 +884,6 @@ def semantic_texture_lf_detector(
         "candidate_status": SEMANTIC_TEXTURE_CANDIDATE_STATUS,
         "carrier_config_digest": carrier.carrier_config_digest,
         "detrend_identity": LF_NULL_WHITENING_DETREND_IDENTITY,
-        "model_revision": model_revision,
         "observation_protocol": OBSERVATION_PROTOCOL,
         "route_config_digest": route.route_config_digest,
         "score_operator": SEMANTIC_TEXTURE_LF_WHITENED_CANDIDATE_ID,

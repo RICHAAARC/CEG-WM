@@ -1,4 +1,4 @@
-"""Git-less production entrypoint for semantic-texture operational preflight."""
+"""Repository-local production entrypoint for semantic-texture preflight."""
 
 from __future__ import annotations
 
@@ -92,9 +92,8 @@ def _pre_execution_blocked_class(error: BaseException) -> str:
 
 def execute_semantic_texture_operational_preflight_entrypoint(
     *,
-    source_revision: str,
+    observed_repository_revision: str,
     run_id: str,
-    package_identity: str,
     output_root: str | Path,
 ) -> tuple[int, dict[str, object]]:
     """Construct only registered public runtime objects and run both-unit roster."""
@@ -130,10 +129,10 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             backend,
             RUNTIME_CONFIGURATION_PATH,
         )
-        runtime_session = runtime_adapter.initialize("cuda:0")
+        runtime_session = runtime_adapter.initialize("cuda")
         semantic_runtime = InspyrenetSemanticRuntime(
             checkpoint_path,
-            selected_device="cuda:0",
+            selected_device=runtime_session.selected_device,
         )
         adapter_configuration = load_ceg_wm_experiment_adapter_configuration(
             ADAPTER_CONFIGURATION_PATH
@@ -156,15 +155,14 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             generator=latent_generator,
         )
         base_latent = base_latent_cpu.to(
-            device="cuda:0",
+            device=runtime_session.selected_device,
             dtype=torch.float16,
         )
         result = _RUNNER.execute_semantic_texture_operational_preflight(
             adapter,
             configuration,
-            source_revision=source_revision,
+            observed_repository_revision=observed_repository_revision,
             run_id=run_id,
-            package_identity=package_identity,
             base_latent=base_latent,
             detection_key=root_key,
             semantic_runtime=semantic_runtime,
@@ -172,9 +170,8 @@ def execute_semantic_texture_operational_preflight_entrypoint(
     except Exception as error:
         result = _RUNNER.create_semantic_texture_operational_pre_execution_failure(
             configuration,
-            source_revision=source_revision,
+            observed_repository_revision=observed_repository_revision,
             run_id=run_id,
-            package_identity=package_identity,
             blocked_class=_pre_execution_blocked_class(error),
         )
     return delivery_server.finalize_semantic_texture_operational_preflight_delivery(
@@ -204,9 +201,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--describe-boundary", action="store_true")
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--source-revision")
+    parser.add_argument("--observed-repository-revision")
     parser.add_argument("--run-id")
-    parser.add_argument("--package-identity")
     parser.add_argument("--output-root")
     arguments = parser.parse_args(argv)
     if arguments.describe_boundary:
@@ -215,17 +211,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not arguments.execute or any(
         value is None
         for value in (
-            arguments.source_revision,
+            arguments.observed_repository_revision,
             arguments.run_id,
-            arguments.package_identity,
             arguments.output_root,
         )
     ):
         parser.error("production execution arguments are incomplete")
     exit_code, receipt = execute_semantic_texture_operational_preflight_entrypoint(
-        source_revision=arguments.source_revision,
+        observed_repository_revision=arguments.observed_repository_revision,
         run_id=arguments.run_id,
-        package_identity=arguments.package_identity,
         output_root=arguments.output_root,
     )
     print(json.dumps(receipt, indent=2, sort_keys=True))

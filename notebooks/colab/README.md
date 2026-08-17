@@ -5,20 +5,21 @@ CEG-WM 的 Colab Notebook 放在此目录。文件名必须表达实际用途，
 ## Current authorized entrypoint
 
 `semantic_texture_operational_preflight.ipynb` 是当前唯一授权执行 **Run all** 的入口。
-它只从 Drive 固定输入目录
-`MyDrive/CEG-WM/semantic_texture_operational_preflight/inputs/9136303fcc8c72648e6c4fbc365776af4f8dd35c/`
-读取 `semantic-texture-phase-a.zip`、同名 `.manifest.json` 和外部
-`semantic_texture_operational_preflight_bootstrap.py`，逐一核对冻结 revision、大小、
-SHA-256 与 package identity。用户只需选择 GPU runtime、设置 `HF_TOKEN` 与
-`CEG_WM_ROOT_KEY` 两个 Colab Secrets、挂载 Drive 并 **Run all**；Secrets 只进入外部
-bootstrap 子进程环境。每次运行生成新的 run ID、新的 `/content` 根和新的 Drive export
-根，不恢复、迁移或覆盖既有 namespace。
+它固定从 `https://github.com/RICHAAARC/CEG-WM.git` 的 `main` 分支 clone fresh
+`/content` checkout；observed HEAD 只作信息记录，不作 exact revision 相等性门。Drive
+唯一输入是 regular non-symlink
+`MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth`，Notebook create-only 复制到 fresh
+`/content`；不读取 package/manifest/bootstrap 输入，也不校验 checkpoint SHA、size、
+revision 或名称身份。用户只需选择 GPU runtime、设置 `HF_TOKEN` 与
+`CEG_WM_ROOT_KEY` 两个 Colab Secrets、挂载 Drive 并 **Run all**；Secrets 只进入
+repo-local bootstrap 子进程环境。每次运行生成新的 run ID、新的 `/content` 根和新的
+Drive export 根，不恢复、迁移或覆盖既有 namespace。
 
-Notebook 仅以 `--execute` 调用已认证外部 bootstrap。package 产生的 operational 或
+Notebook 仅以 `--execute` 调用 checkout 内 bootstrap。repo runtime 产生的 operational 或
 transport quartet 必须恰有一种完整存在，且保持 `aggregate=null`、零 scientific units、
 无 formal tau、无 candidate promotion。Notebook 逐项复核 result-only ZIP、外部 receipt
-及 package 原始 `SHA256SUMS`，把 result、ZIP、receipt create-only 复制到
-`MyDrive/CEG-WM/semantic_texture_operational_preflight/exports/<revision>/<fresh-run-id>/`，
+及 repo runtime 原始 `SHA256SUMS`，把 result、ZIP、receipt create-only 复制到
+`MyDrive/CEG-WM/semantic_texture_operational_preflight/exports/<fresh-run-id>/`，
 最后才逐字节、原子落位同一 `SHA256SUMS`，随后复核完整 Drive quartet；bootstrap 非零
 也只在完整落盘后报告失败。Notebook 不实现或构造方法、runtime、runner、record、科学
 判定或 checksum，不持久化或输出 Secrets、prompt、seed、latent、M/T、mask、private state、

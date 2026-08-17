@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import importlib
+import inspect
 import json
 from math import isfinite
 import os
@@ -41,32 +42,10 @@ ROUTING_PROBE_RELATIVE_STEP = 1.0e-3
 _PREVIOUS_WRITE_CALLBACK_INDEX = 17
 _ROUTING_WRITE_CALLBACK_INDEX = 18
 SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID = "routing_semantic_texture_soft"
-INSPYRENET_SOURCE_REVISION = "f0fa91701a98cfc8e955c554e84522f365ec6da3"
-INSPYRENET_CHECKPOINT_REVISION = "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
-INSPYRENET_CHECKPOINT_SHA256 = (
-    "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
-)
-INSPYRENET_CHECKPOINT_SIZE = 367_520_613
 INSPYRENET_CHECKPOINT_BASENAME = "ckpt_base.pth"
 INSPYRENET_CLASS_MODULE = "transparent_background.InSPyReNet"
 INSPYRENET_CLASS_NAME = "InSPyReNet"
 INSPYRENET_FACTORY_NAME = "InSPyReNet_SwinB"
-_INSPYRENET_SOURCE_FILE_SHA256 = {
-    "InSPyReNet.py": "9bf8c73a361200888e48677c1df55b81bb1bdb669cfd91d73a01c01d24efbef4",
-    "modules/layers.py": "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
-    "modules/context_module.py": (
-        "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4"
-    ),
-    "modules/attention_module.py": (
-        "7f34d941393fb9dfc69f14ff02f731e5e1487f55cde9e79a7195d328922db2fb"
-    ),
-    "modules/decoder_module.py": (
-        "a6c99bfdfed9cefd4184662b4a093d179e6a0c805d92ad21122ebaf95e05ee20"
-    ),
-    "backbones/SwinTransformer.py": (
-        "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82"
-    ),
-}
 
 
 class RuntimeRoutingObservationError(RuntimeError):
@@ -80,13 +59,8 @@ class RuntimeSemanticTextureObservationResult:
     candidate_id: str
     input_image_digest: str
     observations: SemanticTextureRoutingObservations
-    source_revision: str
     source_class: str
-    source_file_sha256: tuple[tuple[str, str], ...]
     forward_api: str
-    checkpoint_revision: str
-    checkpoint_sha256: str
-    checkpoint_size: int
     execution_evidence: str
     observation_identity: str
 
@@ -102,83 +76,44 @@ class RuntimeSemanticTextureDetectionObservationResult:
     observation_identity: str
 
 
-def _sha256_regular_file(path: Path, role: str) -> str:
-    try:
-        path_stat = path.lstat()
-    except OSError:
-        raise RuntimeRoutingObservationError(f"{role} is unavailable") from None
-    if not stat.S_ISREG(path_stat.st_mode):
-        raise RuntimeRoutingObservationError(f"{role} must be a regular non-symlink file")
-    descriptor: int | None = None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or opened.st_dev != path_stat.st_dev
-            or opened.st_ino != path_stat.st_ino
-            or opened.st_size != path_stat.st_size
-        ):
-            raise RuntimeRoutingObservationError(f"{role} changed during verification")
-        digest = sha256()
-        while payload := os.read(descriptor, 1024 * 1024):
-            digest.update(payload)
-        return digest.hexdigest()
-    except OSError:
-        raise RuntimeRoutingObservationError(f"{role} verification failed") from None
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-
-
-def _load_registered_inspyrenet_class() -> tuple[type[torch.nn.Module], object]:
+def _load_registered_inspyrenet_factory() -> object:
     try:
         module = importlib.import_module(INSPYRENET_CLASS_MODULE)
     except Exception as exc:
         raise RuntimeRoutingObservationError(
             "registered transparent-background source dependency is unavailable"
         ) from exc
-    module_file = getattr(module, "__file__", None)
-    if type(module_file) is not str or Path(module_file).name != "InSPyReNet.py":
-        raise RuntimeRoutingObservationError("InSPyReNet source module has no regular file")
-    package_root = Path(module_file).parent
-    for relative_path, expected_digest in _INSPYRENET_SOURCE_FILE_SHA256.items():
-        actual_digest = _sha256_regular_file(
-            package_root / relative_path,
-            f"InSPyReNet source {relative_path}",
-        )
-        if actual_digest != expected_digest:
-            raise RuntimeRoutingObservationError(
-                "InSPyReNet source revision content drifted"
-            )
-    model_class = getattr(module, INSPYRENET_CLASS_NAME, None)
-    factory = getattr(module, INSPYRENET_FACTORY_NAME, None)
-    if (
-        not isinstance(model_class, type)
-        or model_class.__module__ != INSPYRENET_CLASS_MODULE
-        or model_class.__name__ != INSPYRENET_CLASS_NAME
-        or "forward_inspyre" not in model_class.__dict__
-        or not callable(model_class.__dict__["forward_inspyre"])
-        or not callable(factory)
-    ):
+    candidates: list[object] = []
+    for name, candidate in vars(module).items():
+        if name.startswith("_") or not callable(candidate):
+            continue
+        try:
+            parameters = inspect.signature(candidate).parameters
+        except (TypeError, ValueError):
+            continue
+        if all(
+            parameter_name in parameters
+            for parameter_name in ("depth", "pretrained", "base_size")
+        ):
+            candidates.append(candidate)
+    if len(candidates) != 1:
         raise RuntimeRoutingObservationError(
-            "registered InSPyReNet class/factory/forward_inspyre API drifted"
+            "exactly one callable InSPyReNet public factory API is required"
         )
-    return model_class, factory
+    return candidates[0]
 
 
 def _load_registered_checkpoint(path: Path) -> Mapping[str, torch.Tensor]:
-    if not isinstance(path, Path) or path.name != INSPYRENET_CHECKPOINT_BASENAME:
-        raise RuntimeRoutingObservationError("InSPyReNet checkpoint path identity drifted")
+    if not isinstance(path, Path):
+        raise RuntimeRoutingObservationError("InSPyReNet checkpoint path is invalid")
     try:
         checkpoint_stat = path.lstat()
     except OSError:
         raise RuntimeRoutingObservationError("InSPyReNet checkpoint is unavailable") from None
     if (
         not stat.S_ISREG(checkpoint_stat.st_mode)
-        or checkpoint_stat.st_size != INSPYRENET_CHECKPOINT_SIZE
     ):
-        raise RuntimeRoutingObservationError("InSPyReNet checkpoint size or SHA-256 drifted")
+        raise RuntimeRoutingObservationError("InSPyReNet checkpoint must be regular")
     descriptor: int | None = None
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -194,14 +129,6 @@ def _load_registered_checkpoint(path: Path) -> Mapping[str, torch.Tensor]:
             )
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = None
-            digest = sha256()
-            while payload := stream.read(1024 * 1024):
-                digest.update(payload)
-            if digest.hexdigest() != INSPYRENET_CHECKPOINT_SHA256:
-                raise RuntimeRoutingObservationError(
-                    "InSPyReNet checkpoint size or SHA-256 drifted"
-                )
-            stream.seek(0)
             state_dict = torch.load(stream, map_location="cpu", weights_only=True)
     except RuntimeRoutingObservationError:
         raise
@@ -263,12 +190,16 @@ class InspyrenetSemanticRuntime:
             device = torch.device(selected_device)
         except (RuntimeError, TypeError, ValueError):
             raise RuntimeRoutingObservationError("InSPyReNet device is invalid") from None
-        model_class, factory = _load_registered_inspyrenet_class()
+        factory = _load_registered_inspyrenet_factory()
         state_dict = _load_registered_checkpoint(checkpoint_path)
         try:
             model = factory(depth=64, pretrained=False, base_size=[384, 384])
-            if type(model) is not model_class:
-                raise RuntimeRoutingObservationError("InSPyReNet factory class drifted")
+            if not isinstance(model, torch.nn.Module) or not callable(
+                getattr(model, "forward_inspyre", None)
+            ):
+                raise RuntimeRoutingObservationError(
+                    "InSPyReNet factory must return a torch module with forward_inspyre"
+                )
             incompatible = model.load_state_dict(state_dict, strict=True)
             if incompatible.missing_keys or incompatible.unexpected_keys:
                 raise RuntimeRoutingObservationError(
@@ -379,14 +310,7 @@ class InspyrenetSemanticRuntime:
             texture = torch.zeros_like(downsampled)
         source_base = {
             "candidate_id": SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
-            "checkpoint_revision": INSPYRENET_CHECKPOINT_REVISION,
-            "checkpoint_sha256": INSPYRENET_CHECKPOINT_SHA256,
-            "checkpoint_size": INSPYRENET_CHECKPOINT_SIZE,
-            "class_module": INSPYRENET_CLASS_MODULE,
-            "class_name": INSPYRENET_CLASS_NAME,
-            "execution_evidence": self._execution_evidence,
-            "factory_name": INSPYRENET_FACTORY_NAME,
-            "forward_api": "InSPyReNet.forward_inspyre",
+            "forward_api": "forward_inspyre",
             "forward_output_selector": "out['saliency'][-1]_raw_finest_d0",
             "input_image_digest": input_digest,
             "model_preprocess": (
@@ -395,8 +319,6 @@ class InspyrenetSemanticRuntime:
             ),
             "probability_operator": "torch.sigmoid_exactly_once",
             "probability_resize": "bilinear_align_corners_false_to_64x64",
-            "source_file_sha256": dict(sorted(_INSPYRENET_SOURCE_FILE_SHA256.items())),
-            "source_revision": INSPYRENET_SOURCE_REVISION,
             "texture_operator": (
                 "rgb8_float32_grayscale_0.299_0.587_0.114_replicate_pad1_"
                 "sobel3x3_magnitude_area_64x64_positive_nearest_rank_p95_clamp"
@@ -427,13 +349,10 @@ class InspyrenetSemanticRuntime:
             candidate_id=SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID,
             input_image_digest=input_digest,
             observations=observations,
-            source_revision=INSPYRENET_SOURCE_REVISION,
-            source_class=f"{INSPYRENET_CLASS_MODULE}.{INSPYRENET_CLASS_NAME}",
-            source_file_sha256=tuple(sorted(_INSPYRENET_SOURCE_FILE_SHA256.items())),
-            forward_api="InSPyReNet.forward_inspyre",
-            checkpoint_revision=INSPYRENET_CHECKPOINT_REVISION,
-            checkpoint_sha256=INSPYRENET_CHECKPOINT_SHA256,
-            checkpoint_size=INSPYRENET_CHECKPOINT_SIZE,
+            source_class=(
+                f"{type(self._model).__module__}.{type(self._model).__qualname__}"
+            ),
+            forward_api="forward_inspyre",
             execution_evidence=self._execution_evidence,
             observation_identity=identity,
         )
@@ -662,8 +581,6 @@ def _validate_session(
     expected = {
         "candidate_id": configuration.candidate_id,
         "runtime_config_digest": configuration.runtime_config_digest,
-        "model_id": configuration.model_id,
-        "model_revision": configuration.model_revision,
         "inference_steps": configuration.inference_steps,
         "latent_dtype": configuration.latent_dtype,
         "callback_index": configuration.callback_index,
@@ -762,18 +679,15 @@ def _sensitivity_ratio(
     routing_latent: torch.Tensor,
     routing_rgb: torch.Tensor,
     factors: RuntimeVaeFactors,
-    *,
-    model_revision: str,
-    sample_index: int,
 ) -> tuple[torch.Tensor, str, str, float]:
     shape = tuple(int(size) for size in routing_latent.shape)
     stream = derive_public_noise_stream(
         {
             "candidate_id": ROUTING_OBSERVATION_CANDIDATE_ID,
+            "conditioning_protocol": "generation_callback18_vae_local_sensitivity",
             "operator": "local_sensitivity_public_probe",
             "responsibility_domain": "public_noise",
-            "model_revision": model_revision,
-            "sample_index": sample_index,
+            "schedule_index": _ROUTING_WRITE_CALLBACK_INDEX,
             "tensor_role": "latent_probe",
         },
         shape,
@@ -987,8 +901,6 @@ def measure_generation_routing_reference_inputs(
         routing_latent,
         routing_rgb,
         factors,
-        model_revision=configuration.model_revision,
-        sample_index=sample_index,
     )
     texture_values = _float32_values(texture_gradient, "texture_gradient")
     response_values = _float32_values(response_ratio, "response_ratio")
@@ -1057,8 +969,6 @@ def normalize_generation_routing_measurement(
     source_identity = {
         "candidate_id": measurement.candidate_id,
         "runtime_config_digest": measurement.runtime_config_digest,
-        "model_id": measurement.model_id,
-        "model_revision": measurement.model_revision,
         "sample_index": measurement.sample_index,
         "callback_indices": measurement.callback_indices,
         "public_probe_domain_digest": measurement.public_probe_domain_digest,

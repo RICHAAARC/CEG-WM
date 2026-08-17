@@ -62,15 +62,12 @@ route identity/digests 和不读取 observations 的 disabled uniform control。
 
 语义图 `M` 使用冻结 InSPyReNet public probability：
 
-- Hugging Face `plemeri/InSPyReNet` revision
-  `d94c2baaa4d023ab018c6f97be6ef37548e3bd1f` 的 `ckpt_base.pth`，LFS object
-  SHA-256 `0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd`、
-  size `367520613` bytes、MIT；
-- source `plemeri/transparent-background` revision
-  `f0fa91701a98cfc8e955c554e84522f365ec6da3`、MIT。
+- `plemeri/InSPyReNet`、`plemeri/transparent-background`、model/name/revision 与
+  `ckpt_base.pth` 只作为 runtime locator/观测元数据，不进入方法或结果强身份。
 
-Windows `Zone.Identifier`、下载路径和本地文件时间不属于 checkpoint 或方法身份，
-不得打包、哈希进候选或传播到 records。checkpoint 必须 strict `state_dict` load。
+Notebook 仅从 Drive 固定相对路径复制 regular non-symlink `ckpt_base.pth` 到 fresh
+`/content`；不校验 blob SHA、size 或 revision。checkpoint 必须 `weights_only` 且 strict
+`state_dict` load。
 唯一前向调用是 `InSPyReNet.forward_inspyre(x)`，取返回
 `out["saliency"][-1]` 的 raw finest `d0` logit，再调用 `torch.sigmoid` 恰一次；禁止
 `Remover.process`、`model.forward`、`forward_inference` 及其逐图 min-max。

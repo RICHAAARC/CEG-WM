@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import math
@@ -64,19 +64,14 @@ class SemanticTextureOperationalConfiguration:
     generation_prompt: str
     generation_negative_prompt: str
     generation_seed: int
-    model_id: str
-    model_revision: str
+    model_id: str = field(compare=False)
+    model_revision: str = field(compare=False)
     minimum_cuda_vram_bytes: int
     minimum_free_ephemeral_bytes: int
     requirements_lock_sha256: str
     seeded_latent_protocol: str
-    inspyrenet_source_repository: str
-    inspyrenet_source_revision: str
-    inspyrenet_checkpoint_repository: str
-    inspyrenet_checkpoint_filename: str
-    inspyrenet_checkpoint_revision: str
-    inspyrenet_checkpoint_sha256: str
-    inspyrenet_checkpoint_size_bytes: int
+    inspyrenet_source_repository: str = field(compare=False)
+    inspyrenet_checkpoint_filename: str = field(compare=False)
     configuration_digest: str
 
 
@@ -116,17 +111,12 @@ class SemanticTextureOperationalResult:
 
     schema_version: int
     profile_id: str
-    source_revision: str
+    observed_repository_revision: str
     run_id: str
     configuration_digest: str
-    package_identity: str
     asset_authority_status: str
     model_id: str
     model_revision: str
-    inspyrenet_source_revision: str
-    inspyrenet_checkpoint_revision: str
-    inspyrenet_checkpoint_sha256: str
-    inspyrenet_checkpoint_size_bytes: int
     unit_outcomes: tuple[OperationalUnitOutcome, OperationalUnitOutcome]
     aggregate: None
     blocked_class: str
@@ -146,13 +136,9 @@ class SemanticTextureOperationalResult:
             "candidate_promoted": self.candidate_promoted,
             "configuration_digest": self.configuration_digest,
             "formal_tau_created": self.formal_tau_created,
-            "inspyrenet_checkpoint_revision": self.inspyrenet_checkpoint_revision,
-            "inspyrenet_checkpoint_sha256": self.inspyrenet_checkpoint_sha256,
-            "inspyrenet_checkpoint_size_bytes": self.inspyrenet_checkpoint_size_bytes,
-            "inspyrenet_source_revision": self.inspyrenet_source_revision,
             "model_id": self.model_id,
             "model_revision": self.model_revision,
-            "package_identity": self.package_identity,
+            "observed_repository_revision": self.observed_repository_revision,
             "profile_id": self.profile_id,
             "result_identity": self.result_identity,
             "run_id": self.run_id,
@@ -160,7 +146,6 @@ class SemanticTextureOperationalResult:
             "science_started": self.science_started,
             "scientific_claims_supported": self.scientific_claims_supported,
             "scientific_unit_count": self.scientific_unit_count,
-            "source_revision": self.source_revision,
             "status": self.status,
             "unit_outcomes": [item.as_dict() for item in self.unit_outcomes],
         }
@@ -208,11 +193,6 @@ def load_semantic_texture_operational_configuration(
         "generation_prompt",
         "generation_seed",
         "inspyrenet_checkpoint_filename",
-        "inspyrenet_checkpoint_repository",
-        "inspyrenet_checkpoint_revision",
-        "inspyrenet_checkpoint_sha256",
-        "inspyrenet_checkpoint_size_bytes",
-        "inspyrenet_source_revision",
         "inspyrenet_source_repository",
         "minimum_cuda_vram_bytes",
         "minimum_free_ephemeral_bytes",
@@ -238,32 +218,21 @@ def load_semantic_texture_operational_configuration(
         or raw["generation_prompt"] != "a red cube"
         or raw["generation_negative_prompt"] != ""
         or raw["generation_seed"] != 2026081701
-        or raw["model_id"] != "stabilityai/stable-diffusion-3.5-medium"
-        or raw["model_revision"]
-        != "b940f670f0eda2d07fbb75229e779da1ad11eb80"
         or raw["minimum_cuda_vram_bytes"] != 23622320128
         or raw["minimum_free_ephemeral_bytes"] != 34359738368
         or raw["requirements_lock_sha256"]
         != "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
         or raw["seeded_latent_protocol"]
-        != "cpu_float32_generator_shape_1x16xheight_div8xwidth_div8_then_cuda0_float16_once"
-        or raw["inspyrenet_source_repository"]
-        != "plemeri/transparent-background"
-        or raw["inspyrenet_source_revision"]
-        != "f0fa91701a98cfc8e955c554e84522f365ec6da3"
-        or raw["inspyrenet_checkpoint_repository"] != "plemeri/InSPyReNet"
-        or raw["inspyrenet_checkpoint_filename"] != "ckpt_base.pth"
-        or raw["inspyrenet_checkpoint_revision"]
-        != "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
-        or raw["inspyrenet_checkpoint_sha256"]
-        != "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
-        or raw["inspyrenet_checkpoint_size_bytes"] != 367520613
-        or _REVISION.fullmatch(raw["model_revision"]) is None
-        or _REVISION.fullmatch(raw["inspyrenet_source_revision"]) is None
-        or _REVISION.fullmatch(raw["inspyrenet_checkpoint_revision"]) is None
-        or _DIGEST.fullmatch(raw["inspyrenet_checkpoint_sha256"]) is None
-        or type(raw["inspyrenet_checkpoint_size_bytes"]) is not int
-        or raw["inspyrenet_checkpoint_size_bytes"] <= 0
+        != "cpu_float32_generator_shape_1x16xheight_div8xwidth_div8_then_available_cuda_float16_once"
+        or any(
+            type(raw[field]) is not str or not raw[field]
+            for field in (
+                "model_id",
+                "model_revision",
+                "inspyrenet_source_repository",
+                "inspyrenet_checkpoint_filename",
+            )
+        )
         or zero_science
         != {
             "aggregate": None,
@@ -285,6 +254,10 @@ def load_semantic_texture_operational_configuration(
             "generation_negative_prompt",
             "generation_prompt",
             "generation_seed",
+            "inspyrenet_source_repository",
+            "inspyrenet_checkpoint_filename",
+            "model_id",
+            "model_revision",
         }
     }
     return SemanticTextureOperationalConfiguration(
@@ -302,16 +275,7 @@ def load_semantic_texture_operational_configuration(
         requirements_lock_sha256=raw["requirements_lock_sha256"],
         seeded_latent_protocol=raw["seeded_latent_protocol"],
         inspyrenet_source_repository=raw["inspyrenet_source_repository"],
-        inspyrenet_source_revision=raw["inspyrenet_source_revision"],
-        inspyrenet_checkpoint_repository=raw[
-            "inspyrenet_checkpoint_repository"
-        ],
         inspyrenet_checkpoint_filename=raw["inspyrenet_checkpoint_filename"],
-        inspyrenet_checkpoint_revision=raw["inspyrenet_checkpoint_revision"],
-        inspyrenet_checkpoint_sha256=raw["inspyrenet_checkpoint_sha256"],
-        inspyrenet_checkpoint_size_bytes=raw[
-            "inspyrenet_checkpoint_size_bytes"
-        ],
         configuration_digest=_digest(configuration_identity),
     )
 
@@ -387,13 +351,12 @@ def _unit_failure(
 def _operational_result(
     configuration: SemanticTextureOperationalConfiguration,
     *,
-    source_revision: str,
+    observed_repository_revision: str,
     run_id: str,
-    package_identity: str,
     write_outcome: OperationalUnitOutcome,
     detector_outcome: OperationalUnitOutcome,
 ) -> SemanticTextureOperationalResult:
-    if _REVISION.fullmatch(source_revision) is None:
+    if _REVISION.fullmatch(observed_repository_revision) is None:
         raise SemanticTextureOperationalPreflightError(
             "source revision must be exact"
         )
@@ -401,10 +364,6 @@ def _operational_result(
         r"[A-Za-z0-9][A-Za-z0-9._-]*", run_id
     ):
         raise SemanticTextureOperationalPreflightError("run identity is invalid")
-    if _DIGEST.fullmatch(package_identity) is None:
-        raise SemanticTextureOperationalPreflightError(
-            "package identity must be SHA-256"
-        )
     blocked_class = (
         write_outcome.blocked_class
         if write_outcome.status == "blocked"
@@ -421,26 +380,12 @@ def _operational_result(
         "candidate_promoted": False,
         "configuration_digest": configuration.configuration_digest,
         "formal_tau_created": False,
-        "inspyrenet_checkpoint_revision": (
-            configuration.inspyrenet_checkpoint_revision
-        ),
-        "inspyrenet_checkpoint_sha256": (
-            configuration.inspyrenet_checkpoint_sha256
-        ),
-        "inspyrenet_checkpoint_size_bytes": (
-            configuration.inspyrenet_checkpoint_size_bytes
-        ),
-        "inspyrenet_source_revision": configuration.inspyrenet_source_revision,
-        "model_id": configuration.model_id,
-        "model_revision": configuration.model_revision,
-        "package_identity": package_identity,
         "profile_id": configuration.profile_id,
         "run_id": run_id,
         "schema_version": configuration.schema_version,
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
-        "source_revision": source_revision,
         "status": "blocked",
         "unit_outcomes": [
             write_outcome.as_dict(),
@@ -450,23 +395,12 @@ def _operational_result(
     result = SemanticTextureOperationalResult(
         schema_version=configuration.schema_version,
         profile_id=configuration.profile_id,
-        source_revision=source_revision,
+        observed_repository_revision=observed_repository_revision,
         run_id=run_id,
         configuration_digest=configuration.configuration_digest,
-        package_identity=package_identity,
         asset_authority_status=configuration.asset_authority_status,
         model_id=configuration.model_id,
         model_revision=configuration.model_revision,
-        inspyrenet_source_revision=configuration.inspyrenet_source_revision,
-        inspyrenet_checkpoint_revision=(
-            configuration.inspyrenet_checkpoint_revision
-        ),
-        inspyrenet_checkpoint_sha256=(
-            configuration.inspyrenet_checkpoint_sha256
-        ),
-        inspyrenet_checkpoint_size_bytes=(
-            configuration.inspyrenet_checkpoint_size_bytes
-        ),
         unit_outcomes=(write_outcome, detector_outcome),
         aggregate=None,
         blocked_class=blocked_class,
@@ -488,9 +422,8 @@ def _operational_result(
 def create_semantic_texture_operational_pre_execution_failure(
     configuration: SemanticTextureOperationalConfiguration,
     *,
-    source_revision: str,
+    observed_repository_revision: str,
     run_id: str,
-    package_identity: str,
     blocked_class: str,
 ) -> SemanticTextureOperationalResult:
     """Create the fixed two-unstarted outcome before trusted execution begins."""
@@ -501,9 +434,8 @@ def create_semantic_texture_operational_pre_execution_failure(
     )
     return _operational_result(
         configuration,
-        source_revision=source_revision,
+        observed_repository_revision=observed_repository_revision,
         run_id=run_id,
-        package_identity=package_identity,
         write_outcome=_unit_failure(
             WRITE_UNIT_ID,
             started=False,
@@ -523,9 +455,8 @@ def execute_semantic_texture_operational_preflight(
     adapter: CegWmExperimentAdapter,
     configuration: SemanticTextureOperationalConfiguration,
     *,
-    source_revision: str,
+    observed_repository_revision: str,
     run_id: str,
-    package_identity: str,
     base_latent: object,
     detection_key: str,
     semantic_runtime: object,
@@ -533,7 +464,7 @@ def execute_semantic_texture_operational_preflight(
 ) -> SemanticTextureOperationalResult:
     """Run the live write unit and stop at the missing detector asset authority."""
 
-    if _REVISION.fullmatch(source_revision) is None:
+    if _REVISION.fullmatch(observed_repository_revision) is None:
         raise SemanticTextureOperationalPreflightError(
             "source revision must be exact"
         )
@@ -541,10 +472,6 @@ def execute_semantic_texture_operational_preflight(
         r"[A-Za-z0-9][A-Za-z0-9._-]*", run_id
     ):
         raise SemanticTextureOperationalPreflightError("run identity is invalid")
-    if _DIGEST.fullmatch(package_identity) is None:
-        raise SemanticTextureOperationalPreflightError(
-            "package identity must be SHA-256"
-        )
     if configuration.asset_authority_status != ASSET_AUTHORITY_STATUS:
         raise SemanticTextureOperationalPreflightError(
             "asset authority status drifted"
@@ -605,9 +532,8 @@ def execute_semantic_texture_operational_preflight(
 
     return _operational_result(
         configuration,
-        source_revision=source_revision,
+        observed_repository_revision=observed_repository_revision,
         run_id=run_id,
-        package_identity=package_identity,
         write_outcome=write_outcome,
         detector_outcome=detector_outcome,
     )

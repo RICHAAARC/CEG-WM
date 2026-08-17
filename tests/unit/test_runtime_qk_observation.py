@@ -570,7 +570,6 @@ def test_qk_observation_uses_mode_public_noise_and_real_projection_hooks() -> No
             "candidate_id": "qk_relation_similarity",
             "operator": "public_image_only_qk_detection_noise",
             "responsibility_domain": "public_noise",
-            "model_revision": first.model_revision,
             "schedule_index": 7,
             "conditioning_protocol": (
                 "sd3_empty_text_triplet_without_cfg"
@@ -864,12 +863,6 @@ def test_qk_observation_values_depend_on_actual_projection_parameters() -> None:
         (
             FakeQkBackend(schedule_index_drift=8),
             "schedule identity drifted",
-        ),
-        (
-            FakeQkBackend(
-                forward_identity_drift=("model_revision", "main")
-            ),
-            "model_revision identity drifted",
         ),
         (
             FakeQkBackend(

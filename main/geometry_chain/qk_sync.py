@@ -27,7 +27,6 @@ from main.shared.key_schedule import (
 
 QK_CANDIDATE_ID = "qk_relation_similarity"
 RUNTIME_CANDIDATE_ID = "runtime_sd35_flowmatch"
-MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 REGISTERED_LAYERS = (
     "transformer_blocks.0.attn",
     "transformer_blocks.23.attn",
@@ -232,13 +231,11 @@ def _geometry_projection(
     *,
     layer_name: str,
     token_count: int,
-    model_revision: str,
 ) -> tuple[torch.Tensor, str, str, str, int | None]:
     domain_fields = {
         "candidate_id": QK_CANDIDATE_ID,
         "operator": "attention_relation_signs",
         "responsibility_domain": "geometry_sync",
-        "model_revision": model_revision,
         "layer_name": layer_name,
         "token_count": token_count,
         "tensor_role": "pair_uniform",
@@ -374,16 +371,27 @@ def row_normalized_relation_score(
     return value
 
 
+def _ordered_float32_scalar_mean(values: Sequence[float]) -> float:
+    scalars = tuple(
+        torch.tensor(value, dtype=torch.float32, device="cpu")
+        for value in values
+    )
+    if not scalars:
+        raise QkGeometrySyncError("ordered float32 mean requires scalar values")
+    value = float(torch.stack(scalars).mean())
+    if not isfinite(value):
+        raise QkGeometrySyncError("ordered float32 mean must be finite")
+    return value
+
+
 def differentiable_qk_relation_objective(
     observations: Sequence[QkLayerObservation],
     detection_key: str | DerivedWrongKeyMaterial,
     *,
-    model_revision: str = MODEL_REVISION,
+    model_revision: str = "unobserved",
 ) -> torch.Tensor:
     """Return the frozen two-layer keyed relation score as a scalar tensor."""
 
-    if type(model_revision) is not str or model_revision != MODEL_REVISION:
-        raise QkGeometrySyncError("model_revision must match runtime_sd35_flowmatch")
     if isinstance(observations, (str, bytes)) or not isinstance(
         observations, Sequence
     ):
@@ -422,7 +430,6 @@ def differentiable_qk_relation_objective(
                 detection_key,
                 layer_name=observation.layer_name,
                 token_count=relation.shape[0],
-                model_revision=model_revision,
             )
         )
         if public_digest is None:
@@ -459,7 +466,6 @@ def _tensor_float32_digest(value: torch.Tensor) -> str:
 
 def _result_config_digest(
     layers: Sequence[QkLayerRelation],
-    model_revision: str,
 ) -> str:
     identity = {
         "candidate_ids": [
@@ -481,7 +487,6 @@ def _result_config_digest(
             for layer in layers
         ],
         "max_grid_side": MAX_GRID_SIDE,
-        "model_revision": model_revision,
         "rank_temperature_ratio": "1/4",
         "row_correlation_weights": "uniform_off_diagonal",
     }
@@ -515,12 +520,10 @@ def qk_geometry_sync(
     observations: Sequence[QkLayerObservation],
     detection_key: str | DerivedWrongKeyMaterial,
     *,
-    model_revision: str = MODEL_REVISION,
+    model_revision: str = "unobserved",
 ) -> QkGeometrySyncResult:
     """Build the frozen two-layer relation and keyed synchronization objective."""
 
-    if type(model_revision) is not str or model_revision != MODEL_REVISION:
-        raise QkGeometrySyncError("model_revision must match runtime_sd35_flowmatch")
     if isinstance(observations, (str, bytes)) or not isinstance(observations, Sequence):
         raise QkGeometrySyncError("observations must be the two registered Q/K layers")
     if len(observations) != len(REGISTERED_LAYERS):
@@ -547,7 +550,6 @@ def qk_geometry_sync(
                 detection_key,
                 layer_name=observation.layer_name,
                 token_count=token_count,
-                model_revision=model_revision,
             )
         )
         if public_digest is None:
@@ -588,13 +590,15 @@ def qk_geometry_sync(
         ),
         model_revision=model_revision,
         layers=layers,
-        relation_score=sum(layer.relation_score for layer in layers) / len(layers),
+        relation_score=_ordered_float32_scalar_mean(
+            tuple(layer.relation_score for layer in layers)
+        ),
         root_key_public_digest=public_digest or "",
         key_role=key_role or "",
         wrong_key_index=wrong_key_index,
         descriptor_digest=_aggregate_descriptor_digest(layers),
         projection_digest=_aggregate_projection_digest(layers),
-        geometry_config_digest=_result_config_digest(layers, model_revision),
+        geometry_config_digest=_result_config_digest(layers),
     )
     validate_qk_geometry_sync_result(result, detection_key)
     return result
@@ -614,8 +618,6 @@ def validate_qk_geometry_sync_result(
         QK_CANDIDATE_ID,
     ):
         raise QkGeometrySyncError("Q/K result candidate identity mismatch")
-    if result.model_revision != MODEL_REVISION:
-        raise QkGeometrySyncError("Q/K result model revision mismatch")
     if len(result.layers) != len(REGISTERED_LAYERS):
         raise QkGeometrySyncError("Q/K result must contain two registered layers")
 
@@ -673,7 +675,6 @@ def validate_qk_geometry_sync_result(
             detection_key,
             layer_name=layer.layer_name,
             token_count=layer.token_count,
-            model_revision=result.model_revision,
         )
         if (
             not torch.equal(projection, expected_projection)
@@ -709,9 +710,9 @@ def validate_qk_geometry_sync_result(
         or result.wrong_key_index != expected_wrong_key_index
     ):
         raise QkGeometrySyncError("Q/K result key identity mismatch")
-    expected_relation_score = sum(
-        layer.relation_score for layer in result.layers
-    ) / len(result.layers)
+    expected_relation_score = _ordered_float32_scalar_mean(
+        tuple(layer.relation_score for layer in result.layers)
+    )
     if not isclose(
         result.relation_score,
         expected_relation_score,
@@ -723,10 +724,7 @@ def validate_qk_geometry_sync_result(
         raise QkGeometrySyncError("Q/K aggregate descriptor digest mismatch")
     if result.projection_digest != _aggregate_projection_digest(result.layers):
         raise QkGeometrySyncError("Q/K aggregate projection digest mismatch")
-    if result.geometry_config_digest != _result_config_digest(
-        result.layers,
-        result.model_revision,
-    ):
+    if result.geometry_config_digest != _result_config_digest(result.layers):
         raise QkGeometrySyncError("Q/K geometry configuration digest mismatch")
 
 
@@ -744,7 +742,6 @@ def projection_for_detection_key(
             detection_key,
             layer_name=layer.layer_name,
             token_count=layer.token_count,
-            model_revision=observation.model_revision,
         )
         if public_digest != observation.root_key_public_digest:
             raise QkGeometrySyncError(

@@ -2,16 +2,14 @@
 
 ## Semantic-texture operational preflight Phase A
 
-`build_semantic_texture_operational_preflight_package.py` and the separately
-distributed `semantic_texture_operational_preflight_bootstrap.py` define the
-exact-revision, deterministic, Git-less delivery boundary for the current
-two-unit operational preflight. The archive includes the package-internal
-entrypoint, server, runner, fixed configuration, requirements, package README,
-and only their exact method/runtime dependencies. It excludes its builder and
-bootstrap, governance, Notebooks, outer documentation, tests outside necessary
-package support, outputs, caches, secrets, model bytes, and checkpoints.
+The current `semantic_texture_operational_preflight_bootstrap.py` runs from a
+fresh `main` checkout cloned under `/content`; the observed HEAD is informational.
+The previous deterministic Git-less package builder remains historical and is
+not a current Notebook input. The sole Drive input is regular non-symlink
+`MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth`, copied create-only into fresh
+`/content`; its blob SHA, size and revision are not method identity.
 
-Phase A runs no real model, network, GPU, Drive, Notebook, or science. The fixed
+Local tests run no real model, network, GPU, Drive, Notebook, or science. The fixed
 roster is `semantic_texture_write_operational` followed by
 `semantic_texture_blind_detection_operational`. A later separately authorized
 Colab run may exercise the first unit through only
@@ -27,7 +25,8 @@ Every Phase A result is package-local and non-scientific: `aggregate=null`,
 `formal_tau_created=false`, `candidate_promoted=false`, and
 `scientific_claims_supported=false`. The server persists result JSON, then a
 bounded deterministic ZIP that excludes the receipt, then computes the ZIP
-SHA-256, and finally creates one immutable external receipt. This does not
+SHA-256, then creates one immutable external receipt, and writes `SHA256SUMS`
+last as the sole completion marker. This does not
 change the current formal/default/joint HF-only detector or authorize Golden,
 Colab, asset hydration, or scientific execution.
 

@@ -48,6 +48,7 @@ class RuntimeDeviceCapabilities:
 
     cpu_available: bool
     cuda_device_count: int
+    current_cuda_device_index: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.cpu_available) is not bool:
@@ -58,6 +59,15 @@ class RuntimeDeviceCapabilities:
             )
         if not self.cpu_available and self.cuda_device_count == 0:
             raise RuntimeBackendError("backend reported no usable devices")
+        if self.current_cuda_device_index is not None:
+            if (
+                type(self.current_cuda_device_index) is not int
+                or self.current_cuda_device_index < 0
+                or self.current_cuda_device_index >= self.cuda_device_count
+            ):
+                raise RuntimeBackendError(
+                    "current_cuda_device_index must identify an available CUDA device"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,8 +344,6 @@ def validate_backend_identity(
         "candidate_id": configuration.candidate_id,
         "runtime_config_digest": configuration.runtime_config_digest,
         "selected_device": selected_device,
-        "model_id": configuration.model_id,
-        "model_revision": configuration.model_revision,
         "pipeline_class": configuration.pipeline_class,
         "scheduler_class": configuration.scheduler_class,
         "inference_steps": configuration.inference_steps,

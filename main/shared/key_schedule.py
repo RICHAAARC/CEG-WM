@@ -18,7 +18,7 @@ from struct import pack, unpack, unpack_from
 from typing import Literal, Sequence
 
 CANDIDATE_ID = "key_schedule_sha256_counter"
-KEYED_PRG_VERSION = "sha256_counter_normal_icdf_table20_float32"
+KEYED_PRG_VERSION = "sha256_counter_semantic_domain_v2_normal_icdf_table20_float32"
 NORMAL_QUANTILE_TABLE_SHA256 = (
     "70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a"
 )
@@ -247,11 +247,9 @@ def _validate_domain_fields(domain_fields: object) -> tuple[dict[str, object], b
                 "candidate_id",
                 "operator",
                 "responsibility_domain",
-                "model_revision",
                 "tensor_role",
             },
         )
-        _expect_non_empty_text(domain_fields, "model_revision")
         _expect_literal(domain_fields, "tensor_role", "base_gaussian")
         return dict(domain_fields), False
 
@@ -262,11 +260,9 @@ def _validate_domain_fields(domain_fields: object) -> tuple[dict[str, object], b
                 "candidate_id",
                 "operator",
                 "responsibility_domain",
-                "model_revision",
                 "tensor_role",
             },
         )
-        _expect_non_empty_text(domain_fields, "model_revision")
         _expect_literal(domain_fields, "tensor_role", "base_gaussian")
         return dict(domain_fields), False
 
@@ -281,13 +277,11 @@ def _validate_domain_fields(domain_fields: object) -> tuple[dict[str, object], b
                 "candidate_id",
                 "operator",
                 "responsibility_domain",
-                "model_revision",
                 "layer_name",
                 "token_count",
                 "tensor_role",
             },
         )
-        _expect_non_empty_text(domain_fields, "model_revision")
         _expect_non_empty_text(domain_fields, "layer_name")
         token_count = domain_fields["token_count"]
         if type(token_count) is not int or token_count <= 1:
@@ -306,13 +300,11 @@ def _validate_domain_fields(domain_fields: object) -> tuple[dict[str, object], b
                 "candidate_id",
                 "operator",
                 "responsibility_domain",
-                "model_revision",
                 "schedule_index",
                 "conditioning_protocol",
                 "tensor_role",
             },
         )
-        _expect_non_empty_text(domain_fields, "model_revision")
         _expect_literal(domain_fields, "schedule_index", 7)
         _expect_literal(
             domain_fields,
@@ -331,17 +323,19 @@ def _validate_domain_fields(domain_fields: object) -> tuple[dict[str, object], b
             domain_fields,
             {
                 "candidate_id",
+                "conditioning_protocol",
                 "operator",
                 "responsibility_domain",
-                "model_revision",
-                "sample_index",
+                "schedule_index",
                 "tensor_role",
             },
         )
-        _expect_non_empty_text(domain_fields, "model_revision")
-        sample_index = domain_fields["sample_index"]
-        if type(sample_index) is not int or sample_index < 0:
-            raise KeyScheduleError("domain field sample_index must be a non-negative integer")
+        _expect_literal(domain_fields, "schedule_index", 18)
+        _expect_literal(
+            domain_fields,
+            "conditioning_protocol",
+            "generation_callback18_vae_local_sensitivity",
+        )
         _expect_literal(domain_fields, "tensor_role", "latent_probe")
         return dict(domain_fields), True
 
@@ -424,14 +418,27 @@ def _domain_digest(
     key_material: str,
     domain_fields: dict[str, object],
     shape: tuple[int, ...],
+    distribution: Distribution,
+    *,
+    key_role: str,
+    root_key_public_digest: str,
+    wrong_key_index: int | None,
 ) -> bytes:
-    payload = {
-        "keyed_prg_version": KEYED_PRG_VERSION,
-        "key_material": key_material,
-        "domain_fields": domain_fields,
+    seed_envelope = {
+        "distribution": distribution,
+        "key_role": key_role,
+        "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
+        "root_key_public_digest": root_key_public_digest,
+        "semantic_domain": domain_fields,
         "shape": list(shape),
+        "version": KEYED_PRG_VERSION,
+        "wrong_key_index": wrong_key_index,
     }
-    return sha256(stable_json_utf8(payload)).digest()
+    return sha256(
+        key_material.encode("utf-8")
+        + b"\x00"
+        + stable_json_utf8(seed_envelope)
+    ).digest()
 
 
 def _counter_blocks(domain_digest: bytes, block_count: int):
@@ -569,6 +576,9 @@ def _derive_stream(
     domain_fields: dict[str, object],
     distribution: Distribution,
     expected_public_domain: bool,
+    key_role: str,
+    root_key_public_digest: str,
+    wrong_key_index: int | None,
     config: KeyScheduleConfig,
 ) -> KeyStreamResult:
     config = _validate_config(config)
@@ -579,7 +589,15 @@ def _derive_stream(
         raise KeyScheduleError("secret and public-noise responsibility domains cannot be mixed")
     element_count = prod(normalized_shape)
     block_count = _required_block_count(element_count, distribution)
-    digest = _domain_digest(key_material, validated_domain, normalized_shape)
+    digest = _domain_digest(
+        key_material,
+        validated_domain,
+        normalized_shape,
+        distribution,
+        key_role=key_role,
+        root_key_public_digest=root_key_public_digest,
+        wrong_key_index=wrong_key_index,
+    )
 
     if distribution == "uniform":
         values = _uniform_values(digest, element_count, block_count)
@@ -616,12 +634,16 @@ def key_schedule_sha256_counter(
     """为注册 root key 派生冻结职责域的 CPU float32 流。"""
 
     root_key_text = _validate_text(root_key_text, "root_key_text")
+    root_identity = identify_root_key(root_key_text, config=config)
     return _derive_stream(
         key_material=root_key_text,
         shape=shape,
         domain_fields=domain_fields,
         distribution=distribution,
         expected_public_domain=False,
+        key_role="registered",
+        root_key_public_digest=root_identity.root_key_public_digest,
+        wrong_key_index=None,
         config=config,
     )
 
@@ -648,6 +670,11 @@ def derive_wrong_key_stream(
         domain_fields=domain_fields,
         distribution=distribution,
         expected_public_domain=False,
+        key_role="wrong",
+        root_key_public_digest=(
+            wrong_key_material.registered_root_key_public_digest
+        ),
+        wrong_key_index=wrong_key_material.wrong_key_index,
         config=config,
     )
 
@@ -661,11 +688,18 @@ def derive_public_noise_stream(
 ) -> KeyStreamResult:
     """从固定公共材料派生与任何 secret root 无关的公开噪声。"""
 
+    public_identity = identify_root_key(
+        PUBLIC_NOISE_KEY_MATERIAL,
+        config=config,
+    )
     return _derive_stream(
         key_material=PUBLIC_NOISE_KEY_MATERIAL,
         shape=shape,
         domain_fields=domain_fields,
         distribution=distribution,
         expected_public_domain=True,
+        key_role="public",
+        root_key_public_digest=public_identity.root_key_public_digest,
+        wrong_key_index=None,
         config=config,
     )

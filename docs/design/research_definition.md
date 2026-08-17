@@ -12,9 +12,10 @@ CEG-WM 研究生成式图像中的密钥归属水印。目标是在常规内容�
 
 - 研究介质是生成式图像。
 - 生成与检测所用模型族必须能够提供 CEG-WM HF carrier/direct score 所需能力以及可复现的 Q/K 观测。
-- backbone/runtime 限定为 `candidate_specifications.md` 的
-  `runtime_sd35_flowmatch`，包含具体 model revision、调度器、精度、尺寸、steps、
-  VAE 与依赖锁。任何身份变化必须先修订规格，不能在实现中静默换模型。
+- runtime 使用 `candidate_specifications.md` 的 `runtime_sd35_flowmatch` 行为协议：
+  pipeline/scheduler capability、精度、尺寸、steps、callback、VAE、Q/K 与依赖/API
+  capability 是强约束；model/repository/name/revision 与环境版本/设备只作选择 locator
+  或观测元数据，不进入方法强身份。
 - 项目方法 API 不得依赖具体设备、远程服务或 Notebook 状态。
 
 ## Access Model

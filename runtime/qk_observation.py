@@ -79,8 +79,6 @@ def _validate_session(
     expected = {
         "candidate_id": configuration.candidate_id,
         "runtime_config_digest": configuration.runtime_config_digest,
-        "model_id": configuration.model_id,
-        "model_revision": configuration.model_revision,
         "scheduler_class": configuration.scheduler_class,
         "inference_steps": configuration.inference_steps,
         "latent_dtype": configuration.latent_dtype,
@@ -317,8 +315,6 @@ def _validate_forward_identity(
         )
     expected = {
         "runtime_config_digest": configuration.runtime_config_digest,
-        "model_id": configuration.model_id,
-        "model_revision": configuration.model_revision,
         "scheduler_class": configuration.scheduler_class,
         "inference_steps": configuration.inference_steps,
         "detection_schedule_index": configuration.detection_schedule_index,
@@ -432,7 +428,6 @@ def _observe_detection_qk_core(
             "candidate_id": "qk_relation_similarity",
             "operator": "public_image_only_qk_detection_noise",
             "responsibility_domain": "public_noise",
-            "model_revision": configuration.model_revision,
             "schedule_index": configuration.detection_schedule_index,
             "conditioning_protocol": configuration.detection_conditioning_protocol,
             "tensor_role": "scheduler_noise",

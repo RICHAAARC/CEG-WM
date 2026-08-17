@@ -60,8 +60,6 @@ _DEPENDENCY_KEYS = (
 _FROZEN_VALUES = {
     "runtime_schema_version": 1,
     "candidate_id": RUNTIME_CANDIDATE_ID,
-    "model_id": "stabilityai/stable-diffusion-3.5-medium",
-    "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
     "pipeline_class": "diffusers.StableDiffusion3Pipeline",
     "scheduler_class": "diffusers.FlowMatchEulerDiscreteScheduler",
     "inference_steps": 20,
@@ -205,7 +203,7 @@ class RuntimeDependencyLock:
 
 @dataclass(frozen=True, slots=True)
 class Sd35RuntimeConfiguration:
-    """Validated immutable identity for ``runtime_sd35_flowmatch``."""
+    """Validated behavior identity with observed model selection metadata."""
 
     runtime_schema_version: int
     candidate_id: str
@@ -237,8 +235,6 @@ class Sd35RuntimeConfiguration:
         return {
             "runtime_schema_version": self.runtime_schema_version,
             "candidate_id": self.candidate_id,
-            "model_id": self.model_id,
-            "model_revision": self.model_revision,
             "pipeline_class": self.pipeline_class,
             "scheduler_class": self.scheduler_class,
             "inference_steps": self.inference_steps,
@@ -265,6 +261,15 @@ class Sd35RuntimeConfiguration:
             "dependency_lock": self.dependency_lock.as_config_entries(),
         }
 
+    def configuration_mapping(self) -> dict[str, object]:
+        """Return the complete runtime selection and behavior configuration."""
+
+        return {
+            **self.identity_mapping(),
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+        }
+
 
 def parse_runtime_configuration(value: object) -> Sd35RuntimeConfiguration:
     """Parse and strictly match the one registered SD3.5 runtime identity."""
@@ -272,7 +277,10 @@ def parse_runtime_configuration(value: object) -> Sd35RuntimeConfiguration:
     root = _mapping(value, "runtime configuration")
     _exact_keys(root, _RUNTIME_KEYS, "runtime configuration")
 
-    parsed: dict[str, object] = {}
+    parsed: dict[str, object] = {
+        "model_id": _text(root["model_id"], "model_id"),
+        "model_revision": _text(root["model_revision"], "model_revision"),
+    }
     for field, frozen in _FROZEN_VALUES.items():
         raw = root[field]
         if type(frozen) is int:
@@ -347,7 +355,11 @@ def parse_runtime_configuration(value: object) -> Sd35RuntimeConfiguration:
         huggingface_hub=dependencies["huggingface-hub"],
     )
 
-    canonical_mapping = dict(root)
+    canonical_mapping = {
+        key: value
+        for key, value in root.items()
+        if key not in {"model_id", "model_revision"}
+    }
     runtime_config_digest = sha256(
         _canonical_json_bytes(canonical_mapping)
     ).hexdigest()

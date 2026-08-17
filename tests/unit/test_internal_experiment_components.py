@@ -1013,7 +1013,6 @@ def test_adapter_runs_actual_main_small_tensor_content_chain() -> None:
         "candidate_id": "hf_sparse_tail",
         "operator": "carrier_template",
         "responsibility_domain": "hf_carrier",
-        "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
         "tensor_role": "base_gaussian",
     }
     registered_stream_call = adapter.derive_registered_key_stream(
@@ -1032,8 +1031,10 @@ def test_adapter_runs_actual_main_small_tensor_content_chain() -> None:
             "candidate_id": "routing_stqr",
             "operator": "local_sensitivity_public_probe",
             "responsibility_domain": "public_noise",
-            "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
-            "sample_index": 0,
+            "schedule_index": 18,
+            "conditioning_protocol": (
+                "generation_callback18_vae_local_sensitivity"
+            ),
             "tensor_role": "latent_probe",
         },
         (2, 2),
@@ -1288,8 +1289,6 @@ def test_adapter_methods_delegate_all_thirteen_responsibilities(
         def operation(*args: object, **kwargs: object):
             calls.append(name)
             values = {identity_field: f"{name}_identity"}
-            if name == "qk_geometry_sync":
-                values["model_revision"] = "revision"
             return SimpleNamespace(**values)
 
         return operation

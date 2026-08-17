@@ -921,11 +921,8 @@ class CegWmExperimentAdapter:
         result = qk_geometry_sync(
             runtime_result.qk_layer_observations,
             detection_key,
+            model_revision=runtime_result.model_revision,
         )
-        if result.model_revision != runtime_result.model_revision:
-            raise CegWmExperimentAdapterError(
-                "runtime and method Q/K model revisions differ"
-            )
         return self._observe(
             "qk_geometry_sync",
             result,
@@ -1192,7 +1189,6 @@ def _runtime_observation_identity(result: RuntimeQkObservationResult) -> str:
     return _canonical_digest(
         {
             "candidate_id": result.candidate_id,
-            "model_revision": result.model_revision,
             "public_noise_domain_digest": result.public_noise_domain_digest,
             "public_noise_values_float32_be_sha256": (
                 result.public_noise_values_float32_be_sha256

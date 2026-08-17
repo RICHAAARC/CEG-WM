@@ -37,7 +37,6 @@ HF_DOMAIN = {
     "candidate_id": "hf_sparse_tail",
     "operator": "carrier_template",
     "responsibility_domain": "hf_carrier",
-    "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
     "tensor_role": "base_gaussian",
 }
 
@@ -45,7 +44,6 @@ LF_DOMAIN = {
     "candidate_id": "lf_low_pass",
     "operator": "carrier_template",
     "responsibility_domain": "lf_carrier",
-    "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
     "tensor_role": "base_gaussian",
 }
 
@@ -53,7 +51,6 @@ GEOMETRY_DOMAIN = {
     "candidate_id": "qk_relation_similarity",
     "operator": "attention_relation_signs",
     "responsibility_domain": "geometry_sync",
-    "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
     "layer_name": "transformer_blocks.0.attn",
     "token_count": 64,
     "tensor_role": "pair_uniform",
@@ -63,7 +60,6 @@ PUBLIC_QK_DOMAIN = {
     "candidate_id": "qk_relation_similarity",
     "operator": "public_image_only_qk_detection_noise",
     "responsibility_domain": "public_noise",
-    "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
     "schedule_index": 7,
     "conditioning_protocol": "sd3_empty_text_triplet_without_cfg",
     "tensor_role": "scheduler_noise",
@@ -129,6 +125,42 @@ def test_key_schedule_root_and_domain_separation() -> None:
     assert len({hf.domain_digest, lf.domain_digest, geometry.domain_digest}) == 3
     assert hf.values != lf.values
     assert hf.config_digest == lf.config_digest == geometry.config_digest
+    registered_identity = identify_root_key("registered-root")
+    expected_hf_envelope = {
+        "distribution": "gaussian",
+        "key_role": "registered",
+        "normal_quantile_table_sha256": NORMAL_QUANTILE_TABLE_SHA256,
+        "root_key_public_digest": registered_identity.root_key_public_digest,
+        "semantic_domain": HF_DOMAIN,
+        "shape": [2, 2],
+        "version": KEYED_PRG_VERSION,
+        "wrong_key_index": None,
+    }
+    assert set(expected_hf_envelope) == {
+        "distribution",
+        "key_role",
+        "normal_quantile_table_sha256",
+        "root_key_public_digest",
+        "semantic_domain",
+        "shape",
+        "version",
+        "wrong_key_index",
+    }
+    assert hf.domain_digest == sha256(
+        b"registered-root\x00" + stable_json_utf8(expected_hf_envelope)
+    ).hexdigest()
+    alternate_geometry_domain = {
+        **GEOMETRY_DOMAIN,
+        "layer_name": "transformer_blocks.23.attn",
+        "token_count": 65,
+    }
+    alternate_geometry = key_schedule_sha256_counter(
+        "registered-root",
+        alternate_geometry_domain,
+        [2, 2],
+        distribution="uniform",
+    )
+    assert alternate_geometry.domain_digest != geometry.domain_digest
 
 
 @pytest.mark.unit
@@ -146,34 +178,34 @@ def test_key_schedule_counter_quantile_golden() -> None:
     )
 
     assert gaussian.domain_digest == (
-        "e5b8e35d13815c1d23a09286da0bfe661e0330e38eda19e239f19224f7b1998f"
+        "8a70d7d728e57077123b2df8092dc4a7608030af3105d6bf6d0f4ff376a20ecc"
     )
     assert gaussian.quantile_indices_random == (
-        172059,
-        964892,
-        707530,
-        322430,
-        968250,
-        915318,
+        609925,
+        291593,
+        478679,
+        1031076,
+        435951,
+        227847,
     )
     assert [pack(">f", value).hex() for value in gaussian.values] == [
-        "bf7a508b",
-        "3fb40402",
-        "3ee7f9d3",
-        "bf00c274",
-        "3fb6d22b",
-        "3f91f4c9",
+        "3e531dca",
+        "bf16aa80",
+        "bddfbb80",
+        "40082924",
+        "be59dea7",
+        "bf4807e6",
     ]
     assert gaussian.values_float32_be_sha256 == (
-        "c82e2f254ab05f4502d397aa444d8facefaa64e0c4df4f1617e12948acecb8d0"
+        "216538d38ea0453bf8c20f77f08c7a08f76cc69c23339a149da1e69151ff073a"
     )
     assert [pack(">f", value).hex() for value in uniform.values] == [
-        "3e2806fb",
-        "3f6b7eec",
-        "3f1ca35d",
-        "3e6af2b7",
-        "3f213aef",
-        "3ef25444",
+        "3eaec2aa",
+        "3f5cbcf4",
+        "3f130075",
+        "3e70cd8e",
+        "3e0a0b24",
+        "3f6d4553",
     ]
     assert all(0.0 < value < 1.0 for value in uniform.values)
 
@@ -183,23 +215,23 @@ def test_key_schedule_counter_quantile_golden() -> None:
         [1, 14],
     )
     assert cross_block.domain_digest == (
-        "f70de8c70d23476c05d67457103c1aceecfd320ef512a7895479f5a113d7d170"
+        "5b6fb9e957687b4ead04c587b6bb300c11687ccd872b5e7f2a1b42a4ef9ac155"
     )
     assert cross_block.quantile_indices_random == (
-        666601,
-        190935,
-        927525,
-        564118,
-        976534,
-        107375,
-        656472,
-        326102,
-        1000891,
-        898163,
-        96925,
-        355206,
-        144019,
-        470889,
+        989210,
+        206028,
+        844962,
+        125147,
+        357930,
+        574565,
+        499012,
+        177947,
+        11892,
+        156803,
+        676679,
+        221429,
+        60515,
+        664296,
     )
 
 
@@ -341,6 +373,29 @@ def test_key_schedule_rejects_domain_shape_and_material_role_drift() -> None:
         )
     with pytest.raises(KeyScheduleError):
         derive_public_noise_stream(HF_DOMAIN, [2, 2])
+    missing_qk_field = dict(GEOMETRY_DOMAIN)
+    del missing_qk_field["layer_name"]
+    with pytest.raises(KeyScheduleError):
+        key_schedule_sha256_counter(
+            "registered-root",
+            missing_qk_field,
+            [2, 2],
+            distribution="uniform",
+        )
+    nonapplicable_qk_field = dict(HF_DOMAIN, layer_name="not-applicable")
+    with pytest.raises(KeyScheduleError):
+        key_schedule_sha256_counter(
+            "registered-root",
+            nonapplicable_qk_field,
+            [2, 2],
+        )
+    public_schedule_drift = dict(PUBLIC_QK_DOMAIN, schedule_index=8)
+    with pytest.raises(KeyScheduleError):
+        derive_public_noise_stream(
+            public_schedule_drift,
+            [2, 2],
+            distribution="uniform",
+        )
 
 
 @pytest.mark.unit

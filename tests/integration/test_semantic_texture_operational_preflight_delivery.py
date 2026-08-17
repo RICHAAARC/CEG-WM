@@ -56,10 +56,12 @@ def _committed_repository(tmp_path: Path) -> tuple[Path, str]:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     _git(repository, "init", "--quiet")
+    _git(repository, "branch", "-m", "main")
     _git(repository, "config", "user.name", "CEG-WM Phase A Test")
     _git(repository, "config", "user.email", "phase-a@example.invalid")
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "phase-a fixture")
+    _git(repository, "remote", "add", "origin", bootstrap.PROJECT_REPOSITORY_URL)
     revision = _git(repository, "rev-parse", "HEAD")
     assert len(revision) == 40
     assert _git(repository, "status", "--porcelain=v1") == ""
@@ -119,22 +121,6 @@ def test_semantic_texture_preflight_package_is_exact_gitless_and_excludes_outer_
     assert sha256(requirements_blob).hexdigest() == (
         "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
     )
-    extract_root = tmp_path / "gitless-package"
-    code, result = bootstrap.run_semantic_texture_operational_preflight_bootstrap(
-        archive=fixture["output"],
-        manifest=fixture["manifest"],
-        expected_sha256=fixture["build"]["archive_sha256"],
-        expected_size=fixture["build"]["archive_size_bytes"],
-        extract_root=extract_root,
-        entrypoint_args=("--help",),
-        environment={
-            **os.environ,
-            "PYTHONDONTWRITEBYTECODE": "1",
-        },
-    )
-    assert code == 0
-    assert result["status"] == "passed"
-    assert not (extract_root / ".git").exists()
 
 
 def test_semantic_texture_preflight_package_rebuild_is_deterministic(
@@ -163,51 +149,36 @@ def test_semantic_texture_preflight_bootstrap_persists_result_before_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     failure_stage: str,
 ) -> None:
-    fixture = _built_package(tmp_path)
-    extract_root = tmp_path / "blocked-gitless-package"
-    expected_sha256 = fixture["build"]["archive_sha256"]
+    repository, _revision = _committed_repository(tmp_path)
+    checkpoint = tmp_path / "ckpt_base.pth"
+    checkpoint.write_bytes(b"test-only-checkpoint")
+    execution_root = tmp_path / "execution"
+    run_id = "semantic-texture-bootstrap-test"
     entrypoint_arguments = (
-        "--execute",
-        "--source-revision",
-        fixture["revision"],
         "--run-id",
-        "dependency-blocked",
-        "--package-identity",
-        fixture["build"]["package_identity"],
-        "--output-root",
-        str(tmp_path / "operational-output"),
+        run_id,
+        "--describe-boundary",
     )
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("CEG_WM_ROOT_KEY", "test-root-key")
     if failure_stage == "pre_trust_integrity":
-        expected_sha256 = "0" * 64
-        entrypoint_arguments = ("--help",)
+        _git(repository, "remote", "set-url", "origin", "https://example.invalid/drift.git")
     else:
-        def fail_dependency_preparation(
-            package_destination: Path,
-            execution_environment: Mapping[str, str],
-        ) -> dict[str, str]:
-            assert package_destination.is_dir()
-            assert execution_environment["PYTHONDONTWRITEBYTECODE"] == "1"
-            raise bootstrap.SemanticTextureBootstrapError(
-                "dependency_identity",
-                "test-only dependency failure",
+        def fail_environment(*args: object, **kwargs: object) -> dict[str, str]:
+            raise bootstrap.SemanticTextureOperationalBootstrapError(
+                "environment_blocked"
             )
 
         monkeypatch.setattr(
             bootstrap,
-            "_prepare_production_environment",
-            fail_dependency_preparation,
+            "_execution_environment",
+            fail_environment,
         )
-    code, result = bootstrap.run_semantic_texture_operational_preflight_bootstrap(
-        archive=fixture["output"],
-        manifest=fixture["manifest"],
-        expected_sha256=expected_sha256,
-        expected_size=fixture["build"]["archive_size_bytes"],
-        extract_root=extract_root,
+    code, result = bootstrap.bootstrap_semantic_texture_operational_preflight(
+        repository_root=repository,
+        checkpoint=checkpoint,
+        execution_root=execution_root,
         entrypoint_args=entrypoint_arguments,
-        environment={
-            **os.environ,
-            "PYTHONDONTWRITEBYTECODE": "1",
-        },
     )
     assert code != 0
     assert result["status"] == "blocked"
@@ -216,23 +187,25 @@ def test_semantic_texture_preflight_bootstrap_persists_result_before_nonzero(
         if failure_stage == "pre_trust_integrity"
         else "environment_blocked"
     )
-    delivery_root = extract_root.with_name(extract_root.name + ".transport")
+    delivery_root = execution_root.with_name(execution_root.name + ".transport")
     assert {path.name for path in delivery_root.iterdir()} == {
-        bootstrap.DELIVERY_COMPLETION_CHECKSUMS_FILENAME,
-        bootstrap.TRANSPORT_ARCHIVE_FILENAME,
+        bootstrap.TRANSPORT_CHECKSUMS_FILENAME,
+        f"semantic_texture_transport_{run_id}.zip",
         bootstrap.TRANSPORT_RECEIPT_FILENAME,
         bootstrap.TRANSPORT_RESULT_FILENAME,
     }
-    with zipfile.ZipFile(delivery_root / bootstrap.TRANSPORT_ARCHIVE_FILENAME) as archive:
+    with zipfile.ZipFile(
+        delivery_root / f"semantic_texture_transport_{run_id}.zip"
+    ) as archive:
         assert archive.namelist() == [bootstrap.TRANSPORT_RESULT_FILENAME]
     sums = (
-        delivery_root / bootstrap.DELIVERY_COMPLETION_CHECKSUMS_FILENAME
+        delivery_root / bootstrap.TRANSPORT_CHECKSUMS_FILENAME
     ).read_text(
         encoding="ascii"
     ).splitlines()
     assert [line.split("  ", 1)[1] for line in sums] == [
         bootstrap.TRANSPORT_RESULT_FILENAME,
-        bootstrap.TRANSPORT_ARCHIVE_FILENAME,
+        f"semantic_texture_transport_{run_id}.zip",
         bootstrap.TRANSPORT_RECEIPT_FILENAME,
     ]
     for line in sums:
@@ -247,6 +220,7 @@ def test_semantic_texture_preflight_bootstrap_persists_result_before_nonzero(
     )
     assert "unit_outcomes" not in persisted
     assert "sanitized_error_message" not in persisted
+    assert result["run_id"] == run_id
 
 
 @dataclass(frozen=True)
@@ -272,19 +246,9 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
         "candidate_promoted": False,
         "configuration_digest": "1" * 64,
         "formal_tau_created": False,
-        "inspyrenet_checkpoint_revision": (
-            "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f"
-        ),
-        "inspyrenet_checkpoint_sha256": (
-            "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd"
-        ),
-        "inspyrenet_checkpoint_size_bytes": 367520613,
-        "inspyrenet_source_revision": (
-            "f0fa91701a98cfc8e955c554e84522f365ec6da3"
-        ),
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
         "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
-        "package_identity": "2" * 64,
+        "observed_repository_revision": "4" * 40,
         "profile_id": "semantic_texture_operational_preflight",
         "result_identity": "3" * 64,
         "run_id": run_id,
@@ -292,7 +256,6 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
-        "source_revision": "4" * 40,
         "status": "blocked",
         "unit_outcomes": [
             {
@@ -354,11 +317,8 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     persisted_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert persisted_receipt["archive_sha256"] == receipt["archive_sha256"]
     assert persisted_receipt["model_revision"] == value["model_revision"]
-    assert persisted_receipt["inspyrenet_source_revision"] == value[
-        "inspyrenet_source_revision"
-    ]
-    assert persisted_receipt["inspyrenet_checkpoint_sha256"] == value[
-        "inspyrenet_checkpoint_sha256"
+    assert persisted_receipt["observed_repository_revision"] == value[
+        "observed_repository_revision"
     ]
     assert not any(
         str(tmp_path) in json.dumps(document)
@@ -446,7 +406,11 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     class FakeRuntimeAdapter:
         def initialize(self, requested_device: str):
             constructor_calls.append(("runtime_device", requested_device))
-            return SimpleNamespace(image_height=512, image_width=512)
+            return SimpleNamespace(
+                image_height=512,
+                image_width=512,
+                selected_device="cuda",
+            )
 
     class FakeExperimentAdapter:
         def execute_semantic_texture_content_write_and_vae(
@@ -528,17 +492,16 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     output_root = tmp_path / "operational-delivery"
     exit_code, _receipt = (
         entrypoint.execute_semantic_texture_operational_preflight_entrypoint(
-            source_revision="4" * 40,
+            observed_repository_revision="4" * 40,
             run_id="semantic-texture-operational",
-            package_identity="5" * 64,
             output_root=output_root,
         )
     )
     assert exit_code == 2
-    assert ("runtime_device", "cuda:0") in constructor_calls
+    assert ("runtime_device", "cuda") in constructor_calls
     assert ("generation_seed", 2026081701) in constructor_calls
     assert ("latent_shape", (1, 16, 64, 64)) in constructor_calls
-    assert ("latent_to", ("cuda:0", "float16")) in constructor_calls
+    assert ("latent_to", ("cuda", "float16")) in constructor_calls
     assert ("public_write", "memory-only-root-key") in constructor_calls
     backend_call = next(
         value for label, value in constructor_calls if label == "backend"
@@ -575,9 +538,8 @@ def test_semantic_texture_operational_pre_execution_fault_classes_persist_zero_s
     )
     result = preflight.create_semantic_texture_operational_pre_execution_failure(
         configuration,
-        source_revision="4" * 40,
+        observed_repository_revision="4" * 40,
         run_id=f"pre-execution-{blocked_class}",
-        package_identity="5" * 64,
         blocked_class=blocked_class,
     )
     output_root = tmp_path / blocked_class
@@ -622,17 +584,9 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert len(code_cells) == 3
     assert all(cell["execution_count"] is None for cell in code_cells)
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
-    for exact_identity in (
-        "9136303fcc8c72648e6c4fbc365776af4f8dd35c",
-        "063a0b5eac30e94bfbe85222bc6c8da81064e51a801563d98bd0ff28144c525e",
-        "fb5e5678a4a695af281625baf4d408ea0d1742a2c78bf2ec5bf593dcd36f41b6",
-        "9efd4299598e7bcc1a2003720f4e93c7be82d762d98496041ed0c4dc37906061",
-        "82ba552bda3394dac0348e9d07c1bcb9a7c6e221451f9279673a91a3c43c85c4",
-        "6371404",
-        "665",
-        "37990",
-    ):
-        assert exact_identity in code_source
+    assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
+    assert 'PROJECT_BRANCH = "main"' in code_source
+    assert "MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth" in code_source
     notebook_syntax = ast.parse(code_source)
     drive_mount_calls = [
         node
@@ -653,23 +607,26 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert Path(drive_mount_argument.value).parts == ("/", "content", "drive")
     assert 'userdata.get("HF_TOKEN")' in code_source
     assert 'userdata.get("CEG_WM_ROOT_KEY")' in code_source
-    assert code_source.count("subprocess.run(") == 1
+    assert code_source.count("subprocess.run(") == 3
     assert '"--entrypoint-args"' in code_source
     assert '"--execute"' in code_source
     assert "--describe-boundary" not in code_source
-    assert "env=bootstrap_environment" in code_source
+    assert "env=environment" in code_source
     assert "capture_output=True" in code_source
     assert "secret_values" not in code_source
-    assert "operational_delivery_exists == transport_delivery_exists" in code_source
-    assert "archive.namelist() != [result_name]" in code_source
+    assert "operational_result.is_file() == transport_result.is_file()" in code_source
+    assert "archive.namelist() != [result_path.name]" in code_source
     assert "artifact_names[:3]" in code_source
-    assert "completion_checksums_blob = local_completion_checksums.read_bytes()" in code_source
-    assert "os.replace(pending_completion_checksums, drive_completion_checksums)" in code_source
-    assert "bootstrap_completed.returncode != 0" in code_source
+    assert "completion_blob = (artifact_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME).read_bytes()" in code_source
+    assert "os.replace(pending, drive_export_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME)" in code_source
+    assert "completed.returncode != 0" in code_source
     assert "sys.tracebacklimit = 0" in code_source
-    assert "fresh local and Drive roots are required" in code_source
+    assert "fresh roots are required" in code_source
+    assert "_persist_preclone_transport_failure(drive_export_root, run_id, blocked_class)" in code_source
+    assert '"--run-id", run_id' in code_source
+    assert "bootstrap-unbound" not in code_source
     assert "pip install" not in code_source
-    assert "git clone" not in code_source
+    assert '"git", "clone"' in code_source
     assert "hf_hub_download" not in code_source
     assert "from main" not in code_source
     assert "from runtime" not in code_source
@@ -680,5 +637,5 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert current_section.count(
         "`semantic_texture_operational_preflight.ipynb` 是当前唯一授权执行 **Run all** 的入口"
     ) == 1
-    assert "semantic_texture_operational_preflight/inputs/9136303" in current_section
-    assert "semantic_texture_operational_preflight/exports/<revision>/<fresh-run-id>/" in current_section
+    assert "MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth" in current_section
+    assert "semantic_texture_operational_preflight/exports/<fresh-run-id>/" in current_section

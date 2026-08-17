@@ -106,6 +106,10 @@ runtime 只提供执行能力，不决定 near-threshold、几何救援或最终
 - `infrastructure/` 保存环境、调度和远程执行入口。
 - `models/` 是本地、非权威、不审计的模型资产/缓存根；checkpoint 与下载附属
   元数据不得进入 Git，也不得作为方法、readiness 或科学结论的权威证据。
+- model/repository/name/revision、checkpoint blob SHA/size 与环境版本/设备是非权威
+  selection/observation metadata；方法强身份只绑定候选职责和行为协议。Notebook 唯一
+  Drive 模型输入为 regular non-symlink `MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth`，
+  复制到 fresh `/content` 后仍须 `weights_only`、strict state_dict 与 public API fail closed。
 - `.agents/`、`.codex/` 与 `governance/` 可整体删除；研究和交付代码不得导入它们。
 
 ## 协议与证据链

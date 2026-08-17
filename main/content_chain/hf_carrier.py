@@ -28,7 +28,6 @@ from .routing import (
 
 HF_CANDIDATE_ID = "hf_sparse_tail"
 RUNTIME_CANDIDATE_ID = "runtime_sd35_flowmatch"
-MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 TAIL_NUMERATOR = 1
 TAIL_DENOMINATOR = 5
 AVERAGE_KERNEL_SIZE = 5
@@ -164,13 +163,11 @@ def _sparse_tail(
 def _derive_hf_gaussian(
     detection_key: str | DerivedWrongKeyMaterial,
     shape: tuple[int, int, int, int],
-    model_revision: str,
 ):
     domain_fields = {
         "candidate_id": HF_CANDIDATE_ID,
         "operator": "carrier_template",
         "responsibility_domain": "hf_carrier",
-        "model_revision": model_revision,
         "tensor_role": "base_gaussian",
     }
     try:
@@ -217,7 +214,6 @@ def _carrier_config_identity(
         "dtype": "float32",
         "key_schedule_config_digest": DEFAULT_KEY_SCHEDULE_CONFIG.config_digest,
         "mask_digest": mask_digest,
-        "model_revision": MODEL_REVISION,
         "runtime_candidate_id": RUNTIME_CANDIDATE_ID,
         "shape": list(normalized_shape),
         "tail_denominator": TAIL_DENOMINATOR,
@@ -237,13 +233,10 @@ def hf_carrier(
     *,
     mask_hf: Sequence[float] | None = None,
     routing_result: ContentRoutingResult | SemanticTextureRoutingResult | None = None,
-    model_revision: str = MODEL_REVISION,
 ) -> HfCarrierResult:
     """构造未中心化 sparse-tail 模板及 mask 后单位 HF 写入方向。"""
 
     normalized_shape = _validate_shape(shape)
-    if model_revision != MODEL_REVISION:
-        raise HfCarrierError("HF model revision does not match the frozen candidate")
     element_count = prod(normalized_shape)
     route_identity: str | None = None
     route_config_digest: str | None = None
@@ -278,7 +271,6 @@ def hf_carrier(
     gaussian_stream, root_digest, key_role, wrong_key_index = _derive_hf_gaussian(
         detection_key,
         normalized_shape,
-        model_revision,
     )
     gaussian = gaussian_stream.values
     pooled = _zero_padded_average_5x5(gaussian, normalized_shape)

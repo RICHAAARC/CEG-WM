@@ -147,6 +147,10 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 10. `models/` 是本地、非权威、不审计的模型资产/缓存根；checkpoint 和
     Windows `Zone.Identifier` 等下载附属元数据必须保持 Git 忽略，不得支撑
     方法、readiness 或科学结论。
+11. model/repository/name/revision、checkpoint blob SHA/size 和环境版本/设备只能作为
+    runtime 选择 locator 或观测元数据；不得进入 KDF、方法配置/result 强身份或相等性门。
+    行为改变的 pipeline/scheduler、callback/VAE/QK、dtype/尺寸/steps、依赖/API/CUDA/
+    资源 capability 与 InSPyReNet public API/preprocess/output/strict state_dict 仍 fail closed。
 
 ## Stage Governance
 

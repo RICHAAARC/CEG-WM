@@ -4,11 +4,6 @@
   "generation_prompt": "a red cube",
   "generation_seed": 2026081701,
   "inspyrenet_checkpoint_filename": "ckpt_base.pth",
-  "inspyrenet_checkpoint_repository": "plemeri/InSPyReNet",
-  "inspyrenet_checkpoint_revision": "d94c2baaa4d023ab018c6f97be6ef37548e3bd1f",
-  "inspyrenet_checkpoint_sha256": "0a6fe2a73ab0532d6d0b8d82849a9760a226df719e3063d09b4149ece6f80fcd",
-  "inspyrenet_checkpoint_size_bytes": 367520613,
-  "inspyrenet_source_revision": "f0fa91701a98cfc8e955c554e84522f365ec6da3",
   "inspyrenet_source_repository": "plemeri/transparent-background",
   "minimum_cuda_vram_bytes": 23622320128,
   "minimum_free_ephemeral_bytes": 34359738368,
@@ -17,7 +12,7 @@
   "profile_id": "semantic_texture_operational_preflight",
   "requirements_lock_sha256": "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de",
   "schema_version": 1,
-  "seeded_latent_protocol": "cpu_float32_generator_shape_1x16xheight_div8xwidth_div8_then_cuda0_float16_once",
+  "seeded_latent_protocol": "cpu_float32_generator_shape_1x16xheight_div8xwidth_div8_then_available_cuda_float16_once",
   "unit_roster": [
     "semantic_texture_write_operational",
     "semantic_texture_blind_detection_operational"
