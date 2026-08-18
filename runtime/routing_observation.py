@@ -43,13 +43,40 @@ _PREVIOUS_WRITE_CALLBACK_INDEX = 17
 _ROUTING_WRITE_CALLBACK_INDEX = 18
 SEMANTIC_TEXTURE_ROUTING_CANDIDATE_ID = "routing_semantic_texture_soft"
 INSPYRENET_CHECKPOINT_BASENAME = "ckpt_base.pth"
-INSPYRENET_CLASS_MODULE = "transparent_background.InSPyReNet"
+INSPYRENET_CLASS_MODULE = "runtime._vendor.transparent_background.InSPyReNet"
 INSPYRENET_CLASS_NAME = "InSPyReNet"
 INSPYRENET_FACTORY_NAME = "InSPyReNet_SwinB"
+ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS = frozenset(
+    {
+        "device_resolution",
+        "factory_module_import",
+        "factory_resolution",
+        "checkpoint_file_validation",
+        "checkpoint_deserialization",
+        "checkpoint_state_validation",
+        "model_construction",
+        "model_interface_validation",
+        "checkpoint_state_binding",
+        "model_device_transfer",
+        "model_evaluation",
+    }
+)
 
 
 class RuntimeRoutingObservationError(RuntimeError):
     """A generation-time routing observation violated its frozen boundary."""
+
+
+class InspyrenetSemanticRuntimeInitializationError(RuntimeRoutingObservationError):
+    """A finite, sanitized production-loader initialization boundary."""
+
+    def __init__(self, step: str) -> None:
+        if step not in ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS:
+            raise RuntimeRoutingObservationError(
+                "InSPyReNet initialization boundary is invalid"
+            )
+        super().__init__("InSPyReNet semantic runtime initialization failed")
+        self.step = step
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,34 +103,35 @@ class RuntimeSemanticTextureDetectionObservationResult:
     observation_identity: str
 
 
-def _load_registered_inspyrenet_factory() -> object:
+def _load_registered_inspyrenet_module() -> object:
     try:
-        module = importlib.import_module(INSPYRENET_CLASS_MODULE)
-    except Exception as exc:
+        return importlib.import_module(INSPYRENET_CLASS_MODULE)
+    except Exception:
         raise RuntimeRoutingObservationError(
-            "registered transparent-background source dependency is unavailable"
-        ) from exc
-    candidates: list[object] = []
-    for name, candidate in vars(module).items():
-        if name.startswith("_") or not callable(candidate):
-            continue
-        try:
-            parameters = inspect.signature(candidate).parameters
-        except (TypeError, ValueError):
-            continue
-        if all(
-            parameter_name in parameters
-            for parameter_name in ("depth", "pretrained", "base_size")
-        ):
-            candidates.append(candidate)
-    if len(candidates) != 1:
+            "registered vendored InSPyReNet source dependency is unavailable"
+        ) from None
+
+
+def _resolve_registered_inspyrenet_factory(module: object) -> object:
+    factory = getattr(module, INSPYRENET_FACTORY_NAME, None)
+    if not callable(factory):
         raise RuntimeRoutingObservationError(
-            "exactly one callable InSPyReNet public factory API is required"
+            "registered InSPyReNet public factory API is unavailable"
         )
-    return candidates[0]
+    try:
+        parameters = inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        raise RuntimeRoutingObservationError(
+            "registered InSPyReNet public factory signature is unavailable"
+        ) from None
+    if tuple(parameters)[:3] != ("depth", "pretrained", "base_size"):
+        raise RuntimeRoutingObservationError(
+            "registered InSPyReNet public factory signature drifted"
+        )
+    return factory
 
 
-def _load_registered_checkpoint(path: Path) -> Mapping[str, torch.Tensor]:
+def _open_registered_checkpoint(path: Path):
     if not isinstance(path, Path):
         raise RuntimeRoutingObservationError("InSPyReNet checkpoint path is invalid")
     try:
@@ -127,16 +155,15 @@ def _load_registered_checkpoint(path: Path) -> Mapping[str, torch.Tensor]:
             raise RuntimeRoutingObservationError(
                 "InSPyReNet checkpoint changed during verification"
             )
-        with os.fdopen(descriptor, "rb") as stream:
-            descriptor = None
-            state_dict = torch.load(stream, map_location="cpu", weights_only=True)
-    except RuntimeRoutingObservationError:
-        raise
-    except Exception as exc:
-        raise RuntimeRoutingObservationError("InSPyReNet checkpoint load failed") from exc
+        stream = os.fdopen(descriptor, "rb")
+        descriptor = None
+        return stream
     finally:
         if descriptor is not None:
             os.close(descriptor)
+def _validate_registered_checkpoint_state(
+    state_dict: object,
+) -> Mapping[str, torch.Tensor]:
     if (
         not isinstance(state_dict, Mapping)
         or not state_dict
@@ -189,30 +216,78 @@ class InspyrenetSemanticRuntime:
         try:
             device = torch.device(selected_device)
         except (RuntimeError, TypeError, ValueError):
-            raise RuntimeRoutingObservationError("InSPyReNet device is invalid") from None
-        factory = _load_registered_inspyrenet_factory()
-        state_dict = _load_registered_checkpoint(checkpoint_path)
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "device_resolution"
+            ) from None
+        try:
+            module = _load_registered_inspyrenet_module()
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "factory_module_import"
+            ) from None
+        try:
+            factory = _resolve_registered_inspyrenet_factory(module)
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "factory_resolution"
+            ) from None
+        try:
+            stream = _open_registered_checkpoint(checkpoint_path)
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "checkpoint_file_validation"
+            ) from None
+        try:
+            with stream:
+                state_dict = torch.load(
+                    stream,
+                    map_location="cpu",
+                    weights_only=True,
+                )
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "checkpoint_deserialization"
+            ) from None
+        try:
+            state_dict = _validate_registered_checkpoint_state(state_dict)
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "checkpoint_state_validation"
+            ) from None
         try:
             model = factory(depth=64, pretrained=False, base_size=[384, 384])
-            if not isinstance(model, torch.nn.Module) or not callable(
-                getattr(model, "forward_inspyre", None)
-            ):
-                raise RuntimeRoutingObservationError(
-                    "InSPyReNet factory must return a torch module with forward_inspyre"
-                )
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "model_construction"
+            ) from None
+        if not isinstance(model, torch.nn.Module) or not callable(
+            getattr(model, "forward_inspyre", None)
+        ):
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "model_interface_validation"
+            )
+        try:
             incompatible = model.load_state_dict(state_dict, strict=True)
             if incompatible.missing_keys or incompatible.unexpected_keys:
                 raise RuntimeRoutingObservationError(
                     "strict state_dict returned incompatibilities"
                 )
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "checkpoint_state_binding"
+            ) from None
+        try:
             model.to(device)
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "model_device_transfer"
+            ) from None
+        try:
             model.eval()
-        except RuntimeRoutingObservationError:
-            raise
-        except Exception as exc:
-            raise RuntimeRoutingObservationError(
-                "strict InSPyReNet model initialization failed"
-            ) from exc
+        except Exception:
+            raise InspyrenetSemanticRuntimeInitializationError(
+                "model_evaluation"
+            ) from None
         self._device = device
         self._model = model
         self._execution_evidence = "registered_source_checkpoint_strict_production"

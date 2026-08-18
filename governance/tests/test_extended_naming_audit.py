@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import errno
+from hashlib import sha256
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -57,6 +61,55 @@ def _has_violation(
         violation["path"] == path and violation["reason"] == reason
         for violation in report["violations"]
     )
+
+
+@pytest.mark.unit
+def test_manifest_bound_external_vendor_naming_exemption_fails_closed(tmp_path: Path) -> None:
+    fifo_unsupported: list[bool] = []
+    def build(mutation: str | None = None) -> dict:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+        _write_minimal_audit_fixture(tmp_path, "runtime")
+        vendor = tmp_path / "runtime" / "_vendor" / "transparent_background"
+        vendor.mkdir(parents=True)
+        source = vendor / "InSPyReNet.py"
+        source.write_text("ExternalName = 1\n", encoding="utf-8")
+        license_path = vendor / "LICENSE"
+        license_path.write_text("MIT\n", encoding="utf-8")
+        record = {"upstream_path":"x","local_path":"InSPyReNet.py","upstream_sha256":"0"*64,"local_sha256":sha256(source.read_bytes()).hexdigest(),"transformations":[]}
+        manifest = {"source_repository":"x","upstream_commit":"1"*40,"upstream_tree":"2"*40,"source_license":"MIT","vendored_namespace":"runtime._vendor.transparent_background","files":[record,{"upstream_path":"x","local_path":"LICENSE","upstream_sha256":"0"*64,"local_sha256":sha256(license_path.read_bytes()).hexdigest(),"transformations":[]}]}
+        if mutation == "missing": return run_audit(tmp_path)
+        if mutation == "bad_sha": manifest["files"][0]["local_sha256"]="0"*64
+        if mutation == "top_type": manifest = []
+        if mutation == "top_keys": manifest.pop("source_license")
+        if mutation == "record_type": manifest["files"][0] = []
+        if mutation == "record_keys": manifest["files"][0].pop("transformations")
+        if mutation == "duplicate": manifest["files"].append(dict(manifest["files"][0]))
+        if mutation in {"absolute", "dot", "escape", "backslash"}:
+            manifest["files"][0]["local_path"] = {"absolute":"/x.py","dot":"./x.py","escape":"../x.py","backslash":"dir\\x.py"}[mutation]
+        if mutation == "extra": (vendor / "WeakName.py").write_text("x=1\n", encoding="utf-8")
+        if mutation == "empty_dir": (vendor / "WeakDirectory").mkdir()
+        if mutation == "symlink_file": (vendor / "WeakName.py").symlink_to(source)
+        if mutation == "symlink_parent":
+            source.unlink(); (vendor / "linked").symlink_to(vendor, target_is_directory=True)
+        fifo_not_supported = False
+        if mutation == "fifo" and hasattr(os, "mkfifo"):
+            try:
+                os.mkfifo(vendor / "fifo")
+            except OSError as error:
+                if error.errno not in (errno.EOPNOTSUPP, errno.ENOTSUP):
+                    raise
+                fifo_not_supported = True
+        if mutation == "fifo":
+            fifo_unsupported.append(fifo_not_supported)
+        (vendor / "SOURCE.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return run_audit(tmp_path)
+    assert not any(v["path"].startswith("runtime/_vendor") for v in build()["violations"])
+    for mutation in ("missing", "bad_sha", "top_type", "top_keys", "record_type", "record_keys", "duplicate", "absolute", "dot", "escape", "backslash", "extra", "empty_dir", "symlink_file", "symlink_parent", "fifo"):
+        report = build(mutation)
+        if mutation == "fifo" and fifo_unsupported[-1]:
+            assert not any(v["path"].startswith("runtime/_vendor") for v in report["violations"])
+            continue
+        assert any(v["path"].startswith("runtime/_vendor") for v in report["violations"])
 
 
 @pytest.mark.unit

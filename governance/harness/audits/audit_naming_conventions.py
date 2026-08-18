@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import ast
+from hashlib import sha256
 import io
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tokenize
 import tomllib
@@ -3451,6 +3454,55 @@ def _text_semantic_violations(path: Path, relative: Path) -> list[dict]:
     return violations
 
 
+def _authenticated_vendor_paths(root: Path) -> frozenset[Path]:
+    vendor_relative = Path("runtime/_vendor/transparent_background")
+    vendor = root / vendor_relative
+    manifest = vendor / "SOURCE.json"
+    license_path = vendor / "LICENSE"
+    required_top = {"source_repository", "upstream_commit", "upstream_tree", "source_license", "vendored_namespace", "files"}
+    required_record = {"upstream_path", "local_path", "upstream_sha256", "local_sha256", "transformations"}
+    def regular(path: Path) -> bool:
+        try: return stat.S_ISREG(path.lstat().st_mode)
+        except OSError: return False
+    if any(not stat.S_ISDIR((root / component).lstat().st_mode) for component in (Path("runtime"), Path("runtime/_vendor"), vendor_relative)) or not all(regular(item) for item in (manifest, license_path)):
+        return frozenset()
+    try:
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        if set(value) != required_top or not isinstance(value["files"], list) or not all(isinstance(value[key], str) and value[key] for key in required_top - {"files"}) or not re.fullmatch(r"[0-9a-f]{40}", value["upstream_commit"]) or not re.fullmatch(r"[0-9a-f]{40}", value["upstream_tree"]):
+            return frozenset()
+        listed = {"SOURCE.json"}
+        for record in value["files"]:
+            if not isinstance(record, dict) or set(record) != required_record: return frozenset()
+            local = record["local_path"]
+            if not isinstance(local, str) or not local or "\\" in local or any(part in {"", ".", ".."} for part in Path(local).parts) or not isinstance(record["local_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", record["local_sha256"]): return frozenset()
+            candidate = vendor / local
+            if Path(local).is_absolute() or local in listed or not regular(candidate):
+                return frozenset()
+            if sha256(candidate.read_bytes()).hexdigest() != record["local_sha256"]:
+                return frozenset()
+            listed.add(local)
+        actual_files=set(); actual_dirs={""}
+        for current, directories, files in os.walk(vendor, followlinks=False):
+            current_path=Path(current)
+            if current_path.is_symlink(): return frozenset()
+            for name in directories:
+                item=current_path/name
+                if item.is_symlink() or not stat.S_ISDIR(item.lstat().st_mode): return frozenset()
+                actual_dirs.add(str(item.relative_to(vendor)))
+            for name in files:
+                item=current_path/name
+                if not regular(item): return frozenset()
+                actual_files.add(str(item.relative_to(vendor)))
+        expected_dirs={""}
+        for name in listed:
+            expected_dirs.update(str(Path(name).parent) if str(Path(name).parent)!="." else "" for _ in (0,))
+        if actual_files != listed or actual_dirs != expected_dirs:
+            return frozenset()
+        return frozenset({Path("runtime/_vendor"), vendor_relative, *(vendor_relative / item for item in listed)})
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+        return frozenset()
+
+
 def run_audit(root: str | Path) -> dict:
     root_path = Path(root)
     registry_inspection = inspect_field_registry(root_path)
@@ -3462,10 +3514,14 @@ def run_audit(root: str | Path) -> dict:
         if row.category in {"method_identity", "runtime_identity"}
     )
     violations = list(registry_inspection.violations)
+    vendor_paths = _authenticated_vendor_paths(root_path)
     checked_paths = []
     for path in iter_governed_paths(root_path):
         relative = path.relative_to(root_path)
         checked_paths.append(str(relative))
+        vendor_root = Path("runtime/_vendor/transparent_background")
+        if vendor_paths and (relative in vendor_paths or vendor_root in relative.parents):
+            continue
         if path.is_dir():
             if not is_allowed_directory_name(path.name):
                 violations.append({"path": str(relative), "reason": "directory_name_not_snake_case"})

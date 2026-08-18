@@ -29,6 +29,7 @@ CONFIG_PATH = (
     "configs/experiments/semantic_texture_operational_preflight.json"
 )
 REQUIREMENTS_PATH = "requirements_semantic_texture_operational_preflight.txt"
+OVERLAY_REQUIREMENTS_PATH = "requirements_semantic_texture_operational_preflight_overlay.txt"
 RUNNER_PATH = "experiments/runners/semantic_texture_operational_preflight.py"
 SOURCE_TO_ARCHIVE_PATH = {
     "templates/release_readmes/semantic_texture_operational_preflight_package.md": (
@@ -66,6 +67,7 @@ EXACT_SOURCE_FILES = frozenset(
         "main/shared/normal_quantile_table20_float32_be.txt",
         "main/shared/rgb8.py",
         REQUIREMENTS_PATH,
+        OVERLAY_REQUIREMENTS_PATH,
         "runtime/__init__.py",
         "runtime/adapter.py",
         "runtime/backend.py",
@@ -74,6 +76,17 @@ EXACT_SOURCE_FILES = frozenset(
         "runtime/geometry_synchronization.py",
         "runtime/qk_observation.py",
         "runtime/routing_observation.py",
+        "runtime/_vendor/transparent_background/InSPyReNet.py",
+        "runtime/_vendor/transparent_background/LICENSE",
+        "runtime/_vendor/transparent_background/SOURCE.json",
+        "runtime/_vendor/transparent_background/__init__.py",
+        "runtime/_vendor/transparent_background/backbones/SwinTransformer.py",
+        "runtime/_vendor/transparent_background/backbones/__init__.py",
+        "runtime/_vendor/transparent_background/modules/__init__.py",
+        "runtime/_vendor/transparent_background/modules/attention_module.py",
+        "runtime/_vendor/transparent_background/modules/context_module.py",
+        "runtime/_vendor/transparent_background/modules/decoder_module.py",
+        "runtime/_vendor/transparent_background/modules/layers.py",
         "runtime/sd35_backend.py",
         "scripts/experiment_execution/__init__.py",
         ENTRYPOINT_PATH,

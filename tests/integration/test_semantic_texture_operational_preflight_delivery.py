@@ -117,10 +117,24 @@ def test_semantic_texture_preflight_package_is_exact_gitless_and_excludes_outer_
         requirements_blob = archive.read(
             "requirements_semantic_texture_operational_preflight.txt"
         )
-    assert len(requirements_blob.decode("utf-8").splitlines()) == 62
+        overlay_blob = archive.read(
+            "requirements_semantic_texture_operational_preflight_overlay.txt"
+        )
+        source_blob = archive.read(
+            "runtime/_vendor/transparent_background/SOURCE.json"
+        )
+    assert len(requirements_blob.decode("utf-8").splitlines()) == 67
     assert sha256(requirements_blob).hexdigest() == (
-        "07a4c1bbe6fc5e7e6b38334c5a9919a8565b810a9aae7820b61c24cee91270de"
+        "855f73f7cb79cc9b9ec5f4d5a62b17cafc336866836601360882bd1cbaa3568b"
     )
+    assert overlay_blob.decode("utf-8") == (
+        "kornia==0.8.3\n"
+        "kornia-rs==0.1.14\n"
+        "opencv-python-headless==4.12.0.88\n"
+        "timm==1.0.28\n"
+    )
+    assert sha256(overlay_blob).hexdigest() == "b85869b28fa0d4ce366cd9e8ced029c0c6cafaff0f000094cafb3d0af97b1474"
+    assert sha256(source_blob).hexdigest() == "731e40ae376f09fac29f5a0b5c5704d6c26d5c9b4560c54ff8f76463e38fe6b4"
 
 
 def test_semantic_texture_preflight_package_rebuild_is_deterministic(
@@ -243,11 +257,40 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
     )
     monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setenv("CEG_WM_ROOT_KEY", "test-root-key")
+    core_queries: list[str] = []
+    overlay_queries: list[str] = []
+    versions = {
+        **bootstrap._CORE_PACKAGE_VERSIONS,
+        **bootstrap._OVERLAY_PACKAGE_VERSIONS,
+    }
+
+    def version(name: str) -> str:
+        (overlay_queries if name in bootstrap._OVERLAY_PACKAGE_VERSIONS else core_queries).append(name)
+        return versions[name]
+
+    fake_torch = SimpleNamespace(
+        __version__="2.11.0+cu128",
+        version=SimpleNamespace(cuda="12.8"),
+        cuda=SimpleNamespace(is_available=lambda: True, device_count=lambda: 1),
+    )
+    fake_diffusers = SimpleNamespace(StableDiffusion3Pipeline=object)
+    monkeypatch.setattr(bootstrap.sys, "version_info", (3, 12, 0))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "diffusers", fake_diffusers)
+    monkeypatch.setattr(bootstrap.metadata, "version", version)
+    observed_imports: list[str] = []
+
+    def import_module(name: str) -> object:
+        observed_imports.append(name)
+        if name == "runtime._vendor.transparent_background.InSPyReNet":
+            return SimpleNamespace(InSPyReNet_SwinB=lambda: None)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", import_module)
     expected_environment = bootstrap._execution_environment(
         repository,
         execution_root,
         checkpoint,
-        execution_root / "source" / "transparent-background",
     )
     checked_calls: list[tuple[tuple[str, ...], Path, dict[str, str]]] = []
 
@@ -287,7 +330,7 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
     )
     assert code == 0
     assert result["observed_repository_revision"] == revision
-    assert len(checked_calls) == 2
+    assert len(checked_calls) == 1
     expected_pip = (
         sys.executable,
         "-m",
@@ -302,21 +345,21 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
         "--extra-index-url",
         bootstrap._NVIDIA_INDEX_URL,
         "--requirement",
-        str(repository / "requirements_semantic_texture_operational_preflight.txt"),
+        str(repository / "requirements_semantic_texture_operational_preflight_overlay.txt"),
+        "--no-deps",
         "--target",
         str(execution_root / "dependencies"),
     )
-    expected_clone = (
-        "git",
-        "clone",
-        "--depth",
-        "1",
-        "--branch",
-        bootstrap.PROJECT_BRANCH,
-        bootstrap.TRANSPARENT_BACKGROUND_REPOSITORY_URL,
-        str(execution_root / "source" / "transparent-background"),
-    )
-    assert [call[0] for call in checked_calls] == [expected_pip, expected_clone]
+    assert [call[0] for call in checked_calls] == [expected_pip]
+    assert core_queries == list(bootstrap._CORE_PACKAGE_VERSIONS)
+    assert overlay_queries == list(bootstrap._OVERLAY_PACKAGE_VERSIONS)
+    assert observed_imports == [
+        "cv2",
+        "kornia",
+        "timm.layers",
+        "runtime._vendor.transparent_background.InSPyReNet",
+    ]
+    assert "CEG_WM_INSPYRENET_SOURCE_ROOT" not in expected_environment
     assert all(call[1] == repository for call in checked_calls)
     assert all(call[2] == expected_environment for call in checked_calls)
     assert entrypoint_calls == [
@@ -361,10 +404,11 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
         "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
         "observed_repository_revision": "4" * 40,
         "pre_execution_stage": None,
+        "semantic_runtime_initialization_step": None,
         "profile_id": "semantic_texture_operational_preflight",
         "result_identity": "3" * 64,
         "run_id": run_id,
-        "schema_version": 2,
+        "schema_version": 3,
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
@@ -433,6 +477,7 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
         "observed_repository_revision"
     ]
     assert persisted_receipt["pre_execution_stage"] is None
+    assert persisted_receipt["semantic_runtime_initialization_step"] is None
     assert not any(
         str(tmp_path) in json.dumps(document)
         for document in (
@@ -491,6 +536,11 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     malformed_started_stage = json.loads(json.dumps(value))
     malformed_started_stage["pre_execution_stage"] = "latent_preparation"
     invalid_values.append(malformed_started_stage)
+    malformed_started_step = json.loads(json.dumps(value))
+    malformed_started_step["semantic_runtime_initialization_step"] = (
+        "factory_module_import"
+    )
+    invalid_values.append(malformed_started_step)
     for invalid_index, invalid_value in enumerate(invalid_values):
         invalid_output_root = tmp_path / f"invalid-delivery-{invalid_index}"
         with pytest.raises(server.SemanticTextureOperationalServerError):
@@ -581,7 +631,9 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
 
     def fake_semantic_runtime(checkpoint_path: Path, selected_device: str) -> object:
         if failing_stage[0] == "semantic_runtime_initialization":
-            raise RuntimeError("synthetic semantic runtime failure")
+            raise entrypoint.InspyrenetSemanticRuntimeInitializationError(
+                "factory_module_import"
+            )
         constructor_calls.append(("semantic_runtime", (checkpoint_path, selected_device)))
         return object()
 
@@ -642,7 +694,6 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     for name, value in {
         "HF_TOKEN": "memory-only-token",
         "CEG_WM_ROOT_KEY": "memory-only-root-key",
-        "CEG_WM_INSPYRENET_SOURCE_ROOT": str(tmp_path / "source"),
         "CEG_WM_INSPYRENET_CHECKPOINT_PATH": str(tmp_path / "ckpt_base.pth"),
         "CEG_WM_CACHE_ROOT": str(tmp_path / "cache"),
         "CEG_WM_PERSISTENT_ROOT": str(tmp_path / "persistent"),
@@ -677,6 +728,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
         (output_root / server.RESULT_FILENAME).read_text(encoding="utf-8")
     )
     assert persisted_result["pre_execution_stage"] is None
+    assert persisted_result["semantic_runtime_initialization_step"] is None
     persisted = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
         for path in output_root.iterdir()
@@ -715,8 +767,14 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             (failure_root / server.RESULT_FILENAME).read_text(encoding="utf-8")
         )
         assert exit_code == 2
-        assert persisted_failure["schema_version"] == 2
+        expected_step = (
+            "factory_module_import"
+            if stage == "semantic_runtime_initialization"
+            else None
+        )
+        assert persisted_failure["schema_version"] == 3
         assert persisted_failure["pre_execution_stage"] == stage
+        assert persisted_failure["semantic_runtime_initialization_step"] == expected_step
         assert persisted_failure["blocked_class"] == expected_blocked_classes[stage]
         assert all(
             outcome["started"] is False
@@ -740,51 +798,76 @@ def test_semantic_texture_operational_pre_execution_fault_classes_persist_zero_s
     )
     result_identities: set[str] = set()
     for stage in sorted(preflight.ALLOWED_PRE_EXECUTION_STAGES):
-        run_id = f"pre-execution-{blocked_class}"
-        result = preflight.create_semantic_texture_operational_pre_execution_failure(
-            configuration,
-            observed_repository_revision="4" * 40,
-            run_id=run_id,
-            blocked_class=blocked_class,
-            pre_execution_stage=stage,
+        steps = (
+            sorted(preflight.ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS)
+            if stage == "semantic_runtime_initialization"
+            else (None,)
         )
-        output_root = tmp_path / f"{blocked_class}-{stage}"
-        exit_code, receipt = server.finalize_semantic_texture_operational_preflight_delivery(
-            result,
-            output_root=output_root,
-        )
-        assert exit_code == 2
-        persisted = result.as_dict()
-        result_identities.add(persisted["result_identity"])
-        assert persisted["schema_version"] == 2
-        assert persisted["pre_execution_stage"] == stage
-        assert receipt["pre_execution_stage"] == stage
-        assert persisted["aggregate"] is None
-        assert persisted["science_started"] is False
-        assert persisted["scientific_unit_count"] == 0
-        assert all(
-            outcome["started"] is False
-            and outcome["blocked_class"] == blocked_class
-            and outcome["sanitized_error_category"] == blocked_class
-            and outcome["sanitized_error_message"] is None
-            and outcome["sanitized_trace_tail"] == []
-            for outcome in persisted["unit_outcomes"]
-        )
-        assert {path.name for path in output_root.iterdir()} == {
-            server.RESULT_FILENAME,
-            server.RECEIPT_FILENAME,
-            server.DELIVERY_COMPLETION_CHECKSUMS_FILENAME,
-            f"semantic_texture_operational_{run_id}.zip",
-        }
-        for invalid_stage in (None, "unknown_pre_execution_stage"):
-            invalid = dict(persisted)
-            invalid["pre_execution_stage"] = invalid_stage
-            with pytest.raises(server.SemanticTextureOperationalServerError):
-                server.finalize_semantic_texture_operational_preflight_delivery(
-                    _BlockedResult(invalid),
-                    output_root=tmp_path / f"invalid-{blocked_class}-{stage}-{invalid_stage}",
-                )
-    assert len(result_identities) == len(preflight.ALLOWED_PRE_EXECUTION_STAGES)
+        for semantic_runtime_initialization_step in steps:
+            run_id = (
+                f"pre-execution-{blocked_class}-"
+                f"{stage}-{semantic_runtime_initialization_step or 'none'}"
+            )
+            result = preflight.create_semantic_texture_operational_pre_execution_failure(
+                configuration,
+                observed_repository_revision="4" * 40,
+                run_id=run_id,
+                blocked_class=blocked_class,
+                pre_execution_stage=stage,
+                semantic_runtime_initialization_step=semantic_runtime_initialization_step,
+            )
+            output_root = tmp_path / run_id
+            exit_code, receipt = server.finalize_semantic_texture_operational_preflight_delivery(
+                result,
+                output_root=output_root,
+            )
+            assert exit_code == 2
+            persisted = result.as_dict()
+            result_identities.add(persisted["result_identity"])
+            assert persisted["schema_version"] == 3
+            assert persisted["pre_execution_stage"] == stage
+            assert persisted["semantic_runtime_initialization_step"] == semantic_runtime_initialization_step
+            assert receipt["pre_execution_stage"] == stage
+            assert receipt["semantic_runtime_initialization_step"] == semantic_runtime_initialization_step
+            assert persisted["aggregate"] is None
+            assert persisted["science_started"] is False
+            assert persisted["scientific_unit_count"] == 0
+            assert all(
+                outcome["started"] is False
+                and outcome["blocked_class"] == blocked_class
+                and outcome["sanitized_error_category"] == blocked_class
+                and outcome["sanitized_error_message"] is None
+                and outcome["sanitized_trace_tail"] == []
+                for outcome in persisted["unit_outcomes"]
+            )
+            assert {path.name for path in output_root.iterdir()} == {
+                server.RESULT_FILENAME,
+                server.RECEIPT_FILENAME,
+                server.DELIVERY_COMPLETION_CHECKSUMS_FILENAME,
+                f"semantic_texture_operational_{run_id}.zip",
+            }
+            for invalid_stage in (None, "unknown_pre_execution_stage"):
+                invalid = dict(persisted)
+                invalid["pre_execution_stage"] = invalid_stage
+                with pytest.raises(server.SemanticTextureOperationalServerError):
+                    server.finalize_semantic_texture_operational_preflight_delivery(
+                        _BlockedResult(invalid),
+                        output_root=tmp_path / f"invalid-{run_id}-{invalid_stage}",
+                    )
+            if stage == "semantic_runtime_initialization":
+                for invalid_step in (None, "unknown_semantic_runtime_initialization_step"):
+                    invalid = dict(persisted)
+                    invalid["semantic_runtime_initialization_step"] = invalid_step
+                    with pytest.raises(server.SemanticTextureOperationalServerError):
+                        server.finalize_semantic_texture_operational_preflight_delivery(
+                            _BlockedResult(invalid),
+                            output_root=tmp_path / f"invalid-step-{run_id}-{invalid_step}",
+                        )
+    assert len(result_identities) == (
+        len(preflight.ALLOWED_PRE_EXECUTION_STAGES)
+        - 1
+        + len(preflight.ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS)
+    )
 
 
 def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive_delivery_bound() -> None:

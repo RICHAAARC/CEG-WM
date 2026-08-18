@@ -12,9 +12,12 @@ from time import monotonic
 from typing import Callable
 
 from experiments.methods import CegWmExperimentAdapter
+from runtime.routing_observation import (
+    ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS,
+)
 
 
-PREFLIGHT_SCHEMA_VERSION = 2
+PREFLIGHT_SCHEMA_VERSION = 3
 PREFLIGHT_PROFILE_ID = "semantic_texture_operational_preflight"
 WRITE_UNIT_ID = "semantic_texture_write_operational"
 BLIND_DETECTION_UNIT_ID = "semantic_texture_blind_detection_operational"
@@ -130,6 +133,7 @@ class SemanticTextureOperationalResult:
     model_id: str
     model_revision: str
     pre_execution_stage: str | None
+    semantic_runtime_initialization_step: str | None
     unit_outcomes: tuple[OperationalUnitOutcome, OperationalUnitOutcome]
     aggregate: None
     blocked_class: str
@@ -153,6 +157,7 @@ class SemanticTextureOperationalResult:
             "model_revision": self.model_revision,
             "observed_repository_revision": self.observed_repository_revision,
             "pre_execution_stage": self.pre_execution_stage,
+            "semantic_runtime_initialization_step": self.semantic_runtime_initialization_step,
             "profile_id": self.profile_id,
             "result_identity": self.result_identity,
             "run_id": self.run_id,
@@ -369,6 +374,7 @@ def _operational_result(
     observed_repository_revision: str,
     run_id: str,
     pre_execution_stage: str | None,
+    semantic_runtime_initialization_step: str | None,
     write_outcome: OperationalUnitOutcome,
     detector_outcome: OperationalUnitOutcome,
 ) -> SemanticTextureOperationalResult:
@@ -397,7 +403,22 @@ def _operational_result(
             raise SemanticTextureOperationalPreflightError(
                 "pre-execution stage is not registered"
             )
-    elif pre_execution_stage is not None:
+        if pre_execution_stage == "semantic_runtime_initialization":
+            if (
+                semantic_runtime_initialization_step
+                not in ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS
+            ):
+                raise SemanticTextureOperationalPreflightError(
+                    "semantic runtime initialization step is not registered"
+                )
+        elif semantic_runtime_initialization_step is not None:
+            raise SemanticTextureOperationalPreflightError(
+                "unrelated pre-execution stage retains semantic runtime detail"
+            )
+    elif (
+        pre_execution_stage is not None
+        or semantic_runtime_initialization_step is not None
+    ):
         raise SemanticTextureOperationalPreflightError(
             "started operational result retains a pre-execution stage"
         )
@@ -409,6 +430,7 @@ def _operational_result(
         "configuration_digest": configuration.configuration_digest,
         "formal_tau_created": False,
         "pre_execution_stage": pre_execution_stage,
+        "semantic_runtime_initialization_step": semantic_runtime_initialization_step,
         "profile_id": configuration.profile_id,
         "run_id": run_id,
         "schema_version": configuration.schema_version,
@@ -431,6 +453,7 @@ def _operational_result(
         model_id=configuration.model_id,
         model_revision=configuration.model_revision,
         pre_execution_stage=pre_execution_stage,
+        semantic_runtime_initialization_step=semantic_runtime_initialization_step,
         unit_outcomes=(write_outcome, detector_outcome),
         aggregate=None,
         blocked_class=blocked_class,
@@ -456,6 +479,7 @@ def create_semantic_texture_operational_pre_execution_failure(
     run_id: str,
     blocked_class: str,
     pre_execution_stage: str,
+    semantic_runtime_initialization_step: str | None = None,
 ) -> SemanticTextureOperationalResult:
     """Create the fixed two-unstarted outcome before trusted execution begins."""
 
@@ -468,6 +492,7 @@ def create_semantic_texture_operational_pre_execution_failure(
         observed_repository_revision=observed_repository_revision,
         run_id=run_id,
         pre_execution_stage=pre_execution_stage,
+        semantic_runtime_initialization_step=semantic_runtime_initialization_step,
         write_outcome=_unit_failure(
             WRITE_UNIT_ID,
             started=False,
@@ -567,6 +592,7 @@ def execute_semantic_texture_operational_preflight(
         observed_repository_revision=observed_repository_revision,
         run_id=run_id,
         pre_execution_stage=None,
+        semantic_runtime_initialization_step=None,
         write_outcome=write_outcome,
         detector_outcome=detector_outcome,
     )

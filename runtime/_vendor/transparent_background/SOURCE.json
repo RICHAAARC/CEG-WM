@@ -1,0 +1,102 @@
+{
+  "source_repository": "https://github.com/plemeri/transparent-background",
+  "upstream_commit": "f0fa91701a98cfc8e955c554e84522f365ec6da3",
+  "upstream_tree": "19c4aae7fe5ca6d77ddbd8cc4a4e0be662bfcb5c",
+  "source_license": "MIT",
+  "vendored_namespace": "runtime._vendor.transparent_background",
+  "files": [
+    {
+      "upstream_path": "LICENSE",
+      "local_path": "LICENSE",
+      "upstream_sha256": "a08a7c43ff8fe90648f889d4f937b178c29ab9be1f92244f685bf7f97cb53f91",
+      "local_sha256": "a08a7c43ff8fe90648f889d4f937b178c29ab9be1f92244f685bf7f97cb53f91",
+      "transformations": []
+    },
+    {
+      "upstream_path": null,
+      "local_path": "__init__.py",
+      "upstream_sha256": null,
+      "local_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "transformations": [
+        "add_empty_namespace_initializer"
+      ]
+    },
+    {
+      "upstream_path": "transparent_background/InSPyReNet.py",
+      "local_path": "InSPyReNet.py",
+      "upstream_sha256": "9bf8c73a361200888e48677c1df55b81bb1bdb669cfd91d73a01c01d24efbef4",
+      "local_sha256": "e2f7d66c37b778ab1fce10553604075a54d93691b4612b952d7d44a8388cf42b",
+      "transformations": [
+        "remove_os_sys_imports_and_sys_path_mutation",
+        "rewrite_transparent_background_imports_to_vendored_relative_namespace",
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace"
+      ]
+    },
+    {
+      "upstream_path": null,
+      "local_path": "modules/__init__.py",
+      "upstream_sha256": null,
+      "local_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "transformations": [
+        "add_empty_namespace_initializer"
+      ]
+    },
+    {
+      "upstream_path": "transparent_background/modules/layers.py",
+      "local_path": "modules/layers.py",
+      "upstream_sha256": "e57eedd05bece9f14cf6b2798e0c2ed09382e60d200ed6352895a979f80ed5e8",
+      "local_sha256": "7f5c6ad133af2234b74ff6d067e95f09022f598abc0d987b8a2d99a1044d66d7",
+      "transformations": [
+        "strip_ascii_trailing_whitespace"
+      ]
+    },
+    {
+      "upstream_path": "transparent_background/modules/context_module.py",
+      "local_path": "modules/context_module.py",
+      "upstream_sha256": "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4",
+      "local_sha256": "b5b612e4d86848a3e69b66d89effcc8698e434d6f50270595605c1d42cb844d4",
+      "transformations": []
+    },
+    {
+      "upstream_path": "transparent_background/modules/attention_module.py",
+      "local_path": "modules/attention_module.py",
+      "upstream_sha256": "7f34d941393fb9dfc69f14ff02f731e5e1487f55cde9e79a7195d328922db2fb",
+      "local_sha256": "30e05975d0e8a9ff9f3dddaf0fa278556d16d9f40b4df8f76d193f4de8c8dcae",
+      "transformations": [
+        "rewrite_transparent_background_import_to_vendored_relative_namespace",
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace"
+      ]
+    },
+    {
+      "upstream_path": "transparent_background/modules/decoder_module.py",
+      "local_path": "modules/decoder_module.py",
+      "upstream_sha256": "a6c99bfdfed9cefd4184662b4a093d179e6a0c805d92ad21122ebaf95e05ee20",
+      "local_sha256": "1a0b8d23cace8f68ceee14f76802af8d8762ce4dff9327a97538d26b7e7f936d",
+      "transformations": [
+        "normalize_terminal_newline",
+        "strip_ascii_trailing_whitespace"
+      ]
+    },
+    {
+      "upstream_path": null,
+      "local_path": "backbones/__init__.py",
+      "upstream_sha256": null,
+      "local_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "transformations": [
+        "add_empty_namespace_initializer"
+      ]
+    },
+    {
+      "upstream_path": "transparent_background/backbones/SwinTransformer.py",
+      "local_path": "backbones/SwinTransformer.py",
+      "upstream_sha256": "78c53d0cbd05f9a0d3cbd1dfbf86f6b989f8708281b6915e5267b03850cd8d82",
+      "local_sha256": "6f76d560fec382c8526a7230f4bbd95d122b97bdea44de452586a79f8a5ac41d",
+      "transformations": [
+        "strip_ascii_trailing_whitespace",
+        "normalize_terminal_newline"
+      ]
+    }
+  ]
+}

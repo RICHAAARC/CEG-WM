@@ -26,6 +26,9 @@ from runtime import (
     Sd35PipelineBackend,
     create_runtime_adapter,
 )
+from runtime.routing_observation import (
+    InspyrenetSemanticRuntimeInitializationError,
+)
 from scripts.experiment_execution import (
     semantic_texture_operational_preflight_server as delivery_server,
 )
@@ -102,6 +105,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
         CONFIGURATION_PATH
     )
     pre_execution_stage = "required_environment"
+    semantic_runtime_initialization_step: str | None = None
     try:
         hf_token = os.environ.get("HF_TOKEN")
         root_key = os.environ.get("CEG_WM_ROOT_KEY")
@@ -109,16 +113,11 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             raise SemanticTextureOperationalEntrypointError(
                 "environment_blocked"
             )
-        source_root = _required_environment_path(
-            "CEG_WM_INSPYRENET_SOURCE_ROOT"
-        )
         checkpoint_path = _required_environment_path(
             "CEG_WM_INSPYRENET_CHECKPOINT_PATH"
         )
         cache_root = _required_environment_path("CEG_WM_CACHE_ROOT")
         persistent_root = _required_environment_path("CEG_WM_PERSISTENT_ROOT")
-        if str(source_root) not in sys.path:
-            sys.path.insert(0, str(source_root))
         pre_execution_stage = "runtime_backend_construction"
         backend = Sd35PipelineBackend(
             cache_root=cache_root,
@@ -176,12 +175,18 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             semantic_runtime=semantic_runtime,
         )
     except Exception as error:
+        if (
+            pre_execution_stage == "semantic_runtime_initialization"
+            and isinstance(error, InspyrenetSemanticRuntimeInitializationError)
+        ):
+            semantic_runtime_initialization_step = error.step
         result = _RUNNER.create_semantic_texture_operational_pre_execution_failure(
             configuration,
             observed_repository_revision=observed_repository_revision,
             run_id=run_id,
             blocked_class=_pre_execution_blocked_class(error),
             pre_execution_stage=pre_execution_stage,
+            semantic_runtime_initialization_step=semantic_runtime_initialization_step,
         )
     return delivery_server.finalize_semantic_texture_operational_preflight_delivery(
         result,

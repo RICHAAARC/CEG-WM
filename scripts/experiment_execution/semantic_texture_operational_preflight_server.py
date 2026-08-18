@@ -13,6 +13,7 @@ from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
 from experiments.runners.semantic_texture_operational_preflight import (
     ALLOWED_PRE_EXECUTION_STAGES,
+    ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS,
 )
 
 
@@ -46,6 +47,7 @@ RESULT_FIELDS = frozenset(
         "model_revision",
         "observed_repository_revision",
         "pre_execution_stage",
+        "semantic_runtime_initialization_step",
         "profile_id",
         "result_identity",
         "run_id",
@@ -118,7 +120,7 @@ def _validated_result(result: object) -> dict[str, object]:
         or set(value) != RESULT_FIELDS
         or value.get("profile_id") != "semantic_texture_operational_preflight"
         or type(value.get("schema_version")) is not int
-        or value.get("schema_version") != 2
+        or value.get("schema_version") != 3
         or value.get("status") != "blocked"
         or value.get("aggregate") is not None
         or value.get("asset_authority_status") != "identity_blocked"
@@ -201,7 +203,23 @@ def _validated_result(result: object) -> dict[str, object]:
             raise SemanticTextureOperationalServerError(
                 "pre-execution unit boundary drifted"
             )
-    elif value.get("pre_execution_stage") is not None:
+        if value["pre_execution_stage"] == "semantic_runtime_initialization":
+            if (
+                type(value.get("semantic_runtime_initialization_step")) is not str
+                or value["semantic_runtime_initialization_step"]
+                not in ALLOWED_SEMANTIC_RUNTIME_INITIALIZATION_STEPS
+            ):
+                raise SemanticTextureOperationalServerError(
+                    "semantic runtime initialization detail drifted"
+                )
+        elif value.get("semantic_runtime_initialization_step") is not None:
+            raise SemanticTextureOperationalServerError(
+                "unrelated pre-execution stage retains semantic runtime detail"
+            )
+    elif (
+        value.get("pre_execution_stage") is not None
+        or value.get("semantic_runtime_initialization_step") is not None
+    ):
         raise SemanticTextureOperationalServerError(
             "started unit result retains a pre-execution stage"
         )
@@ -306,6 +324,9 @@ def finalize_semantic_texture_operational_preflight_delivery(
             "observed_repository_revision"
         ],
         "pre_execution_stage": result_value["pre_execution_stage"],
+        "semantic_runtime_initialization_step": result_value[
+            "semantic_runtime_initialization_step"
+        ],
         "profile_id": result_value["profile_id"],
         "result_filename": result_path.name,
         "result_identity": result_identity,

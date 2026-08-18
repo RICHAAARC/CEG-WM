@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+import importlib
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -21,9 +23,24 @@ CHECKPOINT_BASENAME = "ckpt_base.pth"
 _PYPI_INDEX_URL = "https://pypi.org/simple"
 _PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 _NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
-TRANSPARENT_BACKGROUND_REPOSITORY_URL = (
-    "https://github.com/plemeri/transparent-background.git"
-)
+_CORE_PACKAGE_VERSIONS = {
+    "torch": "2.11.0+cu128",
+    "torchvision": "0.26.0+cu128",
+    "numpy": "2.0.2",
+    "diffusers": "0.38.0",
+    "transformers": "5.12.1",
+    "accelerate": "1.14.0",
+    "huggingface-hub": "1.20.1",
+    "safetensors": "0.8.0",
+    "tokenizers": "0.22.2",
+    "triton": "3.6.0",
+}
+_OVERLAY_PACKAGE_VERSIONS = {
+    "kornia": "0.8.3",
+    "kornia-rs": "0.1.14",
+    "opencv-python-headless": "4.12.0.88",
+    "timm": "1.0.28",
+}
 TRANSPORT_RESULT_FILENAME = "semantic_texture_operational_transport_result.json"
 TRANSPORT_RECEIPT_FILENAME = "semantic_texture_operational_transport_receipt.json"
 TRANSPORT_CHECKSUMS_FILENAME = "SHA256SUMS"
@@ -166,6 +183,47 @@ def _run_checked(command: Sequence[str], *, cwd: Path, environment: Mapping[str,
         raise SemanticTextureOperationalBootstrapError("implementation_blocked")
 
 
+def _require_ambient_colab_core() -> None:
+    if sys.version_info[:2] != (3, 12):
+        raise SemanticTextureOperationalBootstrapError("environment_blocked")
+    try:
+        import torch
+
+        if (
+            torch.__version__ != _CORE_PACKAGE_VERSIONS["torch"]
+            or torch.version.cuda != "12.8"
+            or not torch.cuda.is_available()
+            or torch.cuda.device_count() < 1
+        ):
+            raise ValueError
+        if any(metadata.version(name) != version for name, version in _CORE_PACKAGE_VERSIONS.items()):
+            raise ValueError
+        from diffusers import StableDiffusion3Pipeline
+
+        if StableDiffusion3Pipeline is None:
+            raise ValueError
+    except Exception:
+        raise SemanticTextureOperationalBootstrapError("environment_blocked") from None
+
+
+def _require_overlay_imports(dependency_root: Path) -> None:
+    try:
+        if str(dependency_root) not in sys.path:
+            sys.path.insert(0, str(dependency_root))
+        if any(metadata.version(name) != version for name, version in _OVERLAY_PACKAGE_VERSIONS.items()):
+            raise ValueError
+        importlib.import_module("cv2")
+        importlib.import_module("kornia")
+        importlib.import_module("timm.layers")
+        module = importlib.import_module(
+            "runtime._vendor.transparent_background.InSPyReNet"
+        )
+        if not callable(getattr(module, "InSPyReNet_SwinB", None)):
+            raise ValueError
+    except Exception:
+        raise SemanticTextureOperationalBootstrapError("environment_blocked") from None
+
+
 def _repository_revision(repository_root: Path) -> str:
     if not (repository_root / ".git").is_dir():
         raise SemanticTextureOperationalBootstrapError("integrity_blocked")
@@ -214,7 +272,6 @@ def _execution_environment(
     repository_root: Path,
     execution_root: Path,
     checkpoint_path: Path,
-    source_root: Path,
 ) -> dict[str, str]:
     environment = dict(os.environ)
     if not environment.get("HF_TOKEN") or not environment.get("CEG_WM_ROOT_KEY"):
@@ -226,15 +283,12 @@ def _execution_environment(
         {
             "CEG_WM_CACHE_ROOT": str(cache_root),
             "CEG_WM_INSPYRENET_CHECKPOINT_PATH": str(checkpoint_path),
-            "CEG_WM_INSPYRENET_SOURCE_ROOT": str(source_root),
             "CEG_WM_PERSISTENT_ROOT": str(execution_root / "persistent"),
             "DIFFUSERS_CACHE": str(cache_root / "diffusers"),
             "HF_HOME": str(cache_root / "huggingface"),
             "HF_HUB_CACHE": str(cache_root / "huggingface" / "hub"),
             "PIP_CACHE_DIR": str(cache_root / "pip"),
-            "PYTHONPATH": os.pathsep.join(
-                (str(dependency_root), str(repository_root), str(source_root))
-            ),
+            "PYTHONPATH": os.pathsep.join((str(dependency_root), str(repository_root))),
             "TMP": str(temp_root),
             "TEMP": str(temp_root),
             "TMPDIR": str(temp_root),
@@ -285,14 +339,13 @@ def bootstrap_semantic_texture_operational_preflight(
             (root / relative).mkdir()
         observed_revision = _repository_revision(repository)
         checkpoint_path = _regular_checkpoint(Path(checkpoint))
-        source_root = root / "source" / "transparent-background"
         environment = _execution_environment(
             repository,
             root,
             checkpoint_path,
-            source_root,
         )
         if "--execute" in bounded_args:
+            _require_ambient_colab_core()
             _run_checked(
                 [
                     sys.executable,
@@ -308,27 +361,18 @@ def bootstrap_semantic_texture_operational_preflight(
                     "--extra-index-url",
                     _NVIDIA_INDEX_URL,
                     "--requirement",
-                    str(repository / "requirements_semantic_texture_operational_preflight.txt"),
+                    str(
+                        repository
+                        / "requirements_semantic_texture_operational_preflight_overlay.txt"
+                    ),
+                    "--no-deps",
                     "--target",
                     str(root / "dependencies"),
                 ],
                 cwd=repository,
                 environment=environment,
             )
-            _run_checked(
-                [
-                    "git",
-                    "clone",
-                    "--depth",
-                    "1",
-                    "--branch",
-                    PROJECT_BRANCH,
-                    TRANSPARENT_BACKGROUND_REPOSITORY_URL,
-                    str(source_root),
-                ],
-                cwd=repository,
-                environment=environment,
-            )
+            _require_overlay_imports(root / "dependencies")
         command = [
             sys.executable,
             str(
