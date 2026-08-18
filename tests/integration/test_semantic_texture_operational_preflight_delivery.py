@@ -223,6 +223,117 @@ def test_semantic_texture_preflight_bootstrap_persists_result_before_nonzero(
     assert result["run_id"] == run_id
 
 
+def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, revision = _committed_repository(tmp_path)
+    checkpoint = tmp_path / "ckpt_base.pth"
+    checkpoint.write_bytes(b"test-only-checkpoint")
+    execution_root = tmp_path / "execution"
+    run_id = "semantic-texture-bootstrap-commands"
+    entrypoint_arguments = (
+        "--execute",
+        "--observed-repository-revision",
+        revision,
+        "--run-id",
+        run_id,
+        "--output-root",
+        str(tmp_path / "operational-delivery"),
+    )
+    monkeypatch.setenv("HF_TOKEN", "test-token")
+    monkeypatch.setenv("CEG_WM_ROOT_KEY", "test-root-key")
+    expected_environment = bootstrap._execution_environment(
+        repository,
+        execution_root,
+        checkpoint,
+        execution_root / "source" / "transparent-background",
+    )
+    checked_calls: list[tuple[tuple[str, ...], Path, dict[str, str]]] = []
+
+    def capture_checked(
+        command: tuple[str, ...] | list[str],
+        *,
+        cwd: Path,
+        environment: Mapping[str, str],
+    ) -> None:
+        checked_calls.append((tuple(command), cwd, dict(environment)))
+
+    monkeypatch.setattr(bootstrap, "_run_checked", capture_checked)
+    original_run = bootstrap.subprocess.run
+    entrypoint_calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def intercept_entrypoint(
+        command: list[str], *args: object, **kwargs: object
+    ) -> object:
+        if command == [
+            sys.executable,
+            str(
+                repository
+                / "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py"
+            ),
+            *entrypoint_arguments,
+        ]:
+            entrypoint_calls.append((tuple(command), dict(kwargs)))
+            return SimpleNamespace(returncode=0)
+        return original_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", intercept_entrypoint)
+    code, result = bootstrap.bootstrap_semantic_texture_operational_preflight(
+        repository_root=repository,
+        checkpoint=checkpoint,
+        execution_root=execution_root,
+        entrypoint_args=entrypoint_arguments,
+    )
+    assert code == 0
+    assert result["observed_repository_revision"] == revision
+    assert len(checked_calls) == 2
+    expected_pip = (
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--no-input",
+        "--index-url",
+        bootstrap._PYPI_INDEX_URL,
+        "--extra-index-url",
+        bootstrap._PYTORCH_CU128_INDEX_URL,
+        "--extra-index-url",
+        bootstrap._NVIDIA_INDEX_URL,
+        "--requirement",
+        str(repository / "requirements_semantic_texture_operational_preflight.txt"),
+        "--target",
+        str(execution_root / "dependencies"),
+    )
+    expected_clone = (
+        "git",
+        "clone",
+        "--depth",
+        "1",
+        "--branch",
+        bootstrap.PROJECT_BRANCH,
+        bootstrap.TRANSPARENT_BACKGROUND_REPOSITORY_URL,
+        str(execution_root / "source" / "transparent-background"),
+    )
+    assert [call[0] for call in checked_calls] == [expected_pip, expected_clone]
+    assert all(call[1] == repository for call in checked_calls)
+    assert all(call[2] == expected_environment for call in checked_calls)
+    assert entrypoint_calls == [
+        (
+            (
+                sys.executable,
+                str(
+                    repository
+                    / "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py"
+                ),
+                *entrypoint_arguments,
+            ),
+            {"cwd": repository, "env": expected_environment, "check": False},
+        )
+    ]
+
+
 @dataclass(frozen=True)
 class _BlockedResult:
     value: Mapping[str, object]
