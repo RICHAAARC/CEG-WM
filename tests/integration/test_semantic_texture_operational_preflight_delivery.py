@@ -371,6 +371,69 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
             {"cwd": repository, "env": expected_environment, "check": False},
         )
     ]
+    asset_execution_root = tmp_path / "asset-execution"
+    asset_arguments = (
+        "--execute",
+        "--observed-repository-revision",
+        revision,
+        "--run-id",
+        "semantic-texture-soft-detector-assets-test",
+        "--output-root",
+        str(tmp_path / "asset-delivery"),
+    )
+    asset_calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def intercept_asset_entrypoint(
+        command: list[str], *args: object, **kwargs: object
+    ) -> object:
+        if command == [
+            sys.executable,
+            str(
+                repository
+                / "scripts/experiment_execution/"
+                "semantic_texture_soft_detector_asset_preparation_entrypoint.py"
+            ),
+            *asset_arguments,
+        ]:
+            asset_calls.append((tuple(command), dict(kwargs)))
+            return SimpleNamespace(returncode=0)
+        return intercept_entrypoint(command, *args, **kwargs)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", intercept_asset_entrypoint)
+    asset_code, asset_result = bootstrap.bootstrap_semantic_texture_operational_preflight(
+        repository_root=repository,
+        checkpoint=checkpoint,
+        execution_root=asset_execution_root,
+        entrypoint_args=asset_arguments,
+        entrypoint_path=(
+            "scripts/experiment_execution/"
+            "semantic_texture_soft_detector_asset_preparation_entrypoint.py"
+        ),
+    )
+    assert asset_code == 0
+    assert asset_result["observed_repository_revision"] == revision
+    assert asset_calls == [
+        (
+            (
+                sys.executable,
+                str(
+                    repository
+                    / "scripts/experiment_execution/"
+                    "semantic_texture_soft_detector_asset_preparation_entrypoint.py"
+                ),
+                *asset_arguments,
+            ),
+            {
+                "cwd": repository,
+                "env": bootstrap._execution_environment(
+                    repository,
+                    asset_execution_root,
+                    checkpoint,
+                ),
+                "check": False,
+            },
+        )
+    ]
 
 
 @dataclass(frozen=True)
@@ -1082,7 +1145,12 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     readme = (ROOT / "notebooks/colab/README.md").read_text(encoding="utf-8")
     current_section = readme.split("## Current authorized entrypoint", 1)[1]
     assert current_section.count(
-        "`semantic_texture_operational_preflight.ipynb` 是当前唯一授权执行 **Run all** 的入口"
+        "`semantic_texture_soft_detector_asset_preparation.ipynb`"
     ) == 1
-    assert "MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth" in current_section
-    assert "semantic_texture_operational_preflight/exports/<fresh-run-id>/" in current_section
+    assert current_section.count(
+        "`semantic_texture_operational_preflight.ipynb`"
+    ) == 1
+    assert "exact bundle identity" in current_section
+    assert "retry" in current_section
+    assert "fallback" in current_section
+    assert "latest-bundle" in current_section

@@ -1,0 +1,302 @@
+{
+  "schema_version": "ceg_wm_semantic_texture_soft_detector_assets_manifest_v1",
+  "manifest_id": "semantic_texture_soft_branch_primary_null_v1",
+  "role_id": "semantic_texture_soft_branch_primary_null",
+  "seed_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "source_cluster_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "image_lineage_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "key_family_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "key_family_namespace_digest": "b03899dcaca917104a8cee24ad1dfbffc092c806d03f81eec0294a9e856a0d3b",
+  "source_roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
+  "source_roster_rows_digest": "9488cc26be1723bf40e1e7336c97a2b9c5307c1d4a8ac97f184855a832f12e69",
+  "entries": [
+    {
+      "source_row": 33,
+      "prompt_text": "0",
+      "prompt_digest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "generation_seed": 202608190100,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:01",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:01",
+      "image_lineage_digest": "71b336013d24d35ca7a48579f3eff4c5efb3b3cb0cab72f3bd308918952d04c2"
+    },
+    {
+      "source_row": 34,
+      "prompt_text": "infinity",
+      "prompt_digest": "d79987051a2552ac1895e06b97d12d8cfe5924872f61dba59c15552bcc832f9e",
+      "generation_seed": 202608190101,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:02",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:02",
+      "image_lineage_digest": "a24bb4419c03a4c2988107bd55e8750d196f7c4c49f555d3652e49313c95f8c8"
+    },
+    {
+      "source_row": 35,
+      "prompt_text": "imaginary numbers",
+      "prompt_digest": "45facee1e0d8e7132a74747e42576fecbaf541552e7d2e7e9f0c02bd01d908f7",
+      "generation_seed": 202608190102,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:03",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:03",
+      "image_lineage_digest": "046b74498f142c085b654bc689341f092715be8e39b4a42fc87ef46bd2f049bb"
+    },
+    {
+      "source_row": 36,
+      "prompt_text": "Fibonacci number",
+      "prompt_digest": "130794cdadd589547c16dfcad9045f8c1c159f22889039c9b168975e1c03de07",
+      "generation_seed": 202608190103,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:04",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:04",
+      "image_lineage_digest": "87f3f1df9f7ba9e38a422629dc12035a4334aed86fb7ba6c13a847621a6843d8"
+    },
+    {
+      "source_row": 37,
+      "prompt_text": "golden ratio",
+      "prompt_digest": "9468500ac0e116c3c6aea4b13cd96d9e23aa8da39ee2c9f3a752c374291f65f9",
+      "generation_seed": 202608190104,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:05",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:05",
+      "image_lineage_digest": "241ac7e1cdef905e35975e4c00d5bf7afb892e879ea2c27b22c21686d6c08c48"
+    },
+    {
+      "source_row": 38,
+      "prompt_text": "an F1",
+      "prompt_digest": "d15c8601f7e0e01c709a8cc1a31dcce1c83dd42873d243a265d7e901ce2c392d",
+      "generation_seed": 202608190105,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:06",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:06",
+      "image_lineage_digest": "4c19064eb8eb6d0f4f087a5c927dd968f1c213c6e77256d1ea5da914999cf694"
+    },
+    {
+      "source_row": 39,
+      "prompt_text": "parallel lines",
+      "prompt_digest": "53e71362f1afca3c8031e4749e426e5d21a9998cef7d86fd2971e7317c8141e6",
+      "generation_seed": 202608190106,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:07",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:07",
+      "image_lineage_digest": "afa57cbaa5a90c18a1322265b16ba313ffe0a74a150122ef4d576e68a6d18477"
+    },
+    {
+      "source_row": 40,
+      "prompt_text": "concentric circles",
+      "prompt_digest": "b058ba9871ac942e9d8315792511d1a1bf292afe3ff29847784ea1156491356e",
+      "generation_seed": 202608190107,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:08",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:08",
+      "image_lineage_digest": "577fb3544fba713aa40f047f26f33bb4a816885891568e996f980b5e353be532"
+    },
+    {
+      "source_row": 41,
+      "prompt_text": "concurrent lines",
+      "prompt_digest": "f316af80cfdefd20d1a35be2dd2add893e5d4c58c8112b6c802da6272648e36c",
+      "generation_seed": 202608190108,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:09",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:09",
+      "image_lineage_digest": "5923d556544c9aa689e3b9c86d93978111166b937929e60c78fc1f500fb36e0c"
+    },
+    {
+      "source_row": 42,
+      "prompt_text": "congruent triangles",
+      "prompt_digest": "088bfcbf235b2565c46d3074ea2cebf6a8fd4b1de88bef29b967b7f5094f9415",
+      "generation_seed": 202608190109,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:10",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:10",
+      "image_lineage_digest": "75c4573978a7d2de86b34bcf69b8440bd5551dc255a2f8b93d20295447dde9a1"
+    },
+    {
+      "source_row": 43,
+      "prompt_text": "a hot air balloon",
+      "prompt_digest": "846cc4423863159a6531365731494481ff5ced88d73b1b73103592f4d8f7c646",
+      "generation_seed": 202608190110,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:11",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:11",
+      "image_lineage_digest": "ba5709498c41b5095f6fd3faea36336f5577d0e34a7b910d8d095fc47bd62204"
+    },
+    {
+      "source_row": 44,
+      "prompt_text": "The Starry Night",
+      "prompt_digest": "f0551881ec85c71ce30a36cfc1da69697b9a3c70f528b3fdfcae2b209cbcd693",
+      "generation_seed": 202608190111,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:12",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:12",
+      "image_lineage_digest": "66b112e9276b2e6e2c52c26baca579e99c1e03ec25cadb7ad3329a1b7fb1753d"
+    },
+    {
+      "source_row": 45,
+      "prompt_text": "300",
+      "prompt_digest": "983bd614bb5afece5ab3b6023f71147cd7b6bc2314f9d27af7422541c6558389",
+      "generation_seed": 202608190112,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:13",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:13",
+      "image_lineage_digest": "be8771c219e06fe164c44615951abae71ca04044d129b32841f8f10bdcc324e5"
+    },
+    {
+      "source_row": 46,
+      "prompt_text": "101",
+      "prompt_digest": "16dc368a89b428b2485484313ba67a3912ca03f2b2b42429174a4f8b3dc84e44",
+      "generation_seed": 202608190113,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:14",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:14",
+      "image_lineage_digest": "b72f3f32ede791ab0ea8b628dc74285be47137a44bacd200ef114febdfefb772"
+    },
+    {
+      "source_row": 47,
+      "prompt_text": "U.S. 101",
+      "prompt_digest": "8bd4e44d0bc6c78635372b6af9685d7889ce9db45c25d840b327a0b5d3fa73ea",
+      "generation_seed": 202608190114,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:15",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:15",
+      "image_lineage_digest": "6b5bc2cd29df0847d6ddbf12ebf4cbcbadf5ba3f9ab231defc64c01575bbbcec"
+    },
+    {
+      "source_row": 48,
+      "prompt_text": "commonsense",
+      "prompt_digest": "223b65fc8f3d845f2b01f18cfbcce8d900ad31d399f165bc7ea16cdd1932e73d",
+      "generation_seed": 202608190115,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:16",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:16",
+      "image_lineage_digest": "1ee2141c5feeb6713fcd9b17b88c9025392b98b6d5185f0f1217734c10d2b53f"
+    },
+    {
+      "source_row": 49,
+      "prompt_text": "happiness",
+      "prompt_digest": "42f38c12577ba328f23ac4b46572a0ff91e24b00069f6da60ce80058e51a0117",
+      "generation_seed": 202608190116,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:17",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:17",
+      "image_lineage_digest": "de4da2a880dafdf5a973dda540d165eeca1cac17e91aee490906cc3a301cf313"
+    },
+    {
+      "source_row": 50,
+      "prompt_text": "hope",
+      "prompt_digest": "c29277f55fb31aeb8d4026132e53513a1fb755e5d9c13bf21405b72b9570373f",
+      "generation_seed": 202608190117,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:18",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:18",
+      "image_lineage_digest": "ef4e32966af8d3a1400fc4c198bd1d5e1e93f498ba596068be03c8d8a1973ab7"
+    },
+    {
+      "source_row": 51,
+      "prompt_text": "insight",
+      "prompt_digest": "e43ba08557cbb4f19ed7684fe3cdbf5426fa2c145b8baced5e4fcec410c4e46c",
+      "generation_seed": 202608190118,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:19",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:19",
+      "image_lineage_digest": "ee16bfd35cb2be5f4f7e8882ea5b84ee20cbb8410013708dd23ca7483a63f4d9"
+    },
+    {
+      "source_row": 52,
+      "prompt_text": "inspiration",
+      "prompt_digest": "be2c9ce17278c9311853dd3769e394cde004258b23e1ed82a9a18c0fe8302319",
+      "generation_seed": 202608190119,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:20",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:20",
+      "image_lineage_digest": "4cf965af8cc08f61cc654a4f27b8860d3d0d5ad68f33476d5c5832134ee8a2ed"
+    },
+    {
+      "source_row": 53,
+      "prompt_text": "derision",
+      "prompt_digest": "df1f442dff44a97b5091433d7b82f1d4ac617ff8887a6e737bd2c69265cbeab4",
+      "generation_seed": 202608190120,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:21",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:21",
+      "image_lineage_digest": "89ecf62f9a9ec9fe07e91f0e4a14d0e1568e67a26b1461fe73d30f7741151e09"
+    },
+    {
+      "source_row": 54,
+      "prompt_text": "Salvador Dalí",
+      "prompt_digest": "494af27044cdef98735f017d2641e5e30be5451781ca94d851b2d188dca111b8",
+      "generation_seed": 202608190121,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:22",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:22",
+      "image_lineage_digest": "d605efc8ccdea6178ffa010d707e039a17f51b91c88bc0886fb18c5d98e09516"
+    },
+    {
+      "source_row": 55,
+      "prompt_text": "a shiba inu",
+      "prompt_digest": "db0196b2d64e0879ed45cc7279fa75155a451b43fcbb29ec1c797b2f4a2ad0e9",
+      "generation_seed": 202608190122,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:23",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:23",
+      "image_lineage_digest": "04c4692519b973c5f04938b4422b764213c862de8f6abf7ebc9156d21f5cf0b0"
+    },
+    {
+      "source_row": 56,
+      "prompt_text": "a handpalm",
+      "prompt_digest": "abd6e4fe6582eeba601c9b4caf386d1912ed978249fdd9ec8bb5d635a37ad3c6",
+      "generation_seed": 202608190123,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:24",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:24",
+      "image_lineage_digest": "5b140497f881de13d686633331a98b8eeda464d3eaf5940843061328125e907a"
+    },
+    {
+      "source_row": 57,
+      "prompt_text": "an espresso machine",
+      "prompt_digest": "7bca5f539f0827eb600dbc33f3c7900dcb1646e3026926599985010dc230d85c",
+      "generation_seed": 202608190124,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:25",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:25",
+      "image_lineage_digest": "f8b289e841e3f8ce7ee5aa127e4a7989ac5d66ddd9059970d6fe422df8ac1e25"
+    },
+    {
+      "source_row": 58,
+      "prompt_text": "a propaganda poster",
+      "prompt_digest": "2112f186afda8d5355e082ea6378afd10c76b25e25affcb932b70edcc2995ee5",
+      "generation_seed": 202608190125,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:26",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:26",
+      "image_lineage_digest": "152b896f9e880f4fc56bb038844ca2307e2a959846290ff37a01abd8d17a28df"
+    },
+    {
+      "source_row": 59,
+      "prompt_text": "The Oriental Pearl",
+      "prompt_digest": "0cab90adefd8697a6f28b29890b15936001e7e2628707ec07ef6e212b4682523",
+      "generation_seed": 202608190126,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:27",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:27",
+      "image_lineage_digest": "e1f724c33b088827ace4ff241bbc577e0236e5d5f4bd9a96ec40fe5960edd421"
+    },
+    {
+      "source_row": 60,
+      "prompt_text": "Ha Long Bay",
+      "prompt_digest": "a5d336bffd43e92bdcffc2d690db8d3fe8b87b1c758d7b5867d0ec8a6d679ad4",
+      "generation_seed": 202608190127,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:28",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:28",
+      "image_lineage_digest": "979320aef89af79a580b67a2c42b9abc5ec26dfd4bf8f982299d3a8b3582033d"
+    },
+    {
+      "source_row": 61,
+      "prompt_text": "A Vietnam map",
+      "prompt_digest": "a5ac6cfaed61b0752956b6ca1e053ece5d0d5bf41e183d83e4268b72fa866d65",
+      "generation_seed": 202608190128,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:29",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:29",
+      "image_lineage_digest": "b886118cb836c6586da649e12cdef4583948111a9ee5cfde8f85905ac22d2c3f"
+    },
+    {
+      "source_row": 62,
+      "prompt_text": "A bowl of Pho",
+      "prompt_digest": "700f75c5efbe27ff0a27a81f0fd4b9c1dad9c0fafc13ed1a495e3c4b9ee00fa7",
+      "generation_seed": 202608190129,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:30",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:30",
+      "image_lineage_digest": "e60b7d8d3cfe135c3db33e122a42174e96210244b901eea76721eb59e0e1a2e7"
+    },
+    {
+      "source_row": 63,
+      "prompt_text": "a snail",
+      "prompt_digest": "81b45309e15a35d080e6a8c6b8a38073277be7b4fddd4142e8c5ca374a0150f2",
+      "generation_seed": 202608190130,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:31",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:31",
+      "image_lineage_digest": "bbde13bd0c7e50f683d661979d7d3a04334a16eba71e5eefcd1f5a13a179602c"
+    },
+    {
+      "source_row": 64,
+      "prompt_text": "brain coral",
+      "prompt_digest": "9e3db926ae1ee427150fa1a08e5e303f2c72348903dc4fa53282e6d973d46b4a",
+      "generation_seed": 202608190131,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:cluster:32",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_branch_primary_null:image:32",
+      "image_lineage_digest": "305d0b737a6a1e8ee7231ff097205776d958c050c8ebcce5f30607bfab2b5699"
+    }
+  ]
+}

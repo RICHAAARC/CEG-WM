@@ -544,7 +544,7 @@ def _decode_generation_latent(
     ).detach().clone()
 
 
-def _ordinary_rgb8_snapshot(
+def materialize_ordinary_rgb8_snapshot(
     decoded_image: torch.Tensor,
 ) -> torch.Tensor:
     image = _tensor(
@@ -596,7 +596,7 @@ def _semantic_texture_embedding_at_callback(
         factors,
         "semantic_texture_callback",
     )
-    callback_rgb8 = _ordinary_rgb8_snapshot(callback_image)
+    callback_rgb8 = materialize_ordinary_rgb8_snapshot(callback_image)
     try:
         semantic_texture = semantic_runtime.observe(callback_rgb8)
     except Exception as exc:

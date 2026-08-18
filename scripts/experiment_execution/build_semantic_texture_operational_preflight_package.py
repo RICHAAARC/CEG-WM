@@ -31,6 +31,17 @@ CONFIG_PATH = (
 REQUIREMENTS_PATH = "requirements_semantic_texture_operational_preflight.txt"
 OVERLAY_REQUIREMENTS_PATH = "requirements_semantic_texture_operational_preflight_overlay.txt"
 RUNNER_PATH = "experiments/runners/semantic_texture_operational_preflight.py"
+ASSET_PREPARATION_ENTRYPOINT_PATH = (
+    "scripts/experiment_execution/"
+    "semantic_texture_soft_detector_asset_preparation_entrypoint.py"
+)
+ASSET_PREPARATION_SERVER_PATH = (
+    "scripts/experiment_execution/"
+    "semantic_texture_soft_detector_asset_preparation_server.py"
+)
+ASSET_PREPARATION_RUNNER_PATH = (
+    "experiments/runners/semantic_texture_soft_detector_asset_preparation.py"
+)
 SOURCE_TO_ARCHIVE_PATH = {
     "templates/release_readmes/semantic_texture_operational_preflight_package.md": (
         "README.md"
@@ -39,12 +50,20 @@ SOURCE_TO_ARCHIVE_PATH = {
 EXACT_SOURCE_FILES = frozenset(
     {
         CONFIG_PATH,
+        "configs/experiments/semantic_texture_soft_detector_asset_preparation.json",
+        "configs/experiments/semantic_texture_soft_detector_branch_null_manifest.json",
+        "configs/experiments/semantic_texture_soft_detector_whitening_fit_manifest.json",
         "configs/experiments/internal_execution_components.json",
         "configs/runtime/runtime_sd35_flowmatch.json",
         "experiments/__init__.py",
         "experiments/methods/__init__.py",
         "experiments/methods/ceg_wm.py",
+        "experiments/metrics/__init__.py",
+        "experiments/metrics/lf_whitened_score_screening.py",
+        "experiments/protocol/__init__.py",
+        "experiments/protocol/semantic_texture_soft_detector_assets.py",
         RUNNER_PATH,
+        ASSET_PREPARATION_RUNNER_PATH,
         "main/__init__.py",
         "main/content_chain/__init__.py",
         "main/content_chain/detector.py",
@@ -91,6 +110,8 @@ EXACT_SOURCE_FILES = frozenset(
         "scripts/experiment_execution/__init__.py",
         ENTRYPOINT_PATH,
         SERVER_PATH,
+        ASSET_PREPARATION_ENTRYPOINT_PATH,
+        ASSET_PREPARATION_SERVER_PATH,
         *SOURCE_TO_ARCHIVE_PATH,
     }
 )

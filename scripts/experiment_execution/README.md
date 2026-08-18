@@ -1,6 +1,6 @@
 # Experiment Execution
 
-`semantic_texture_operational_preflight.ipynb` is 当前唯一授权 entrypoint. All retained diagnostic notebook and server families are paused / not authorized; their producer-bound records are not current science authority and 不读取、不迁移、不改写或混合 historic results.
+The current user-only sequence has exactly two entrypoints: run `semantic_texture_soft_detector_asset_preparation.ipynb` once to create one create-only diagnostic-only asset bundle; only after source read-only authentication and exact bundle-identity binding, run `semantic_texture_operational_preflight.ipynb` once for target write plus public blind detection. Neither step allows retry, fallback, or dynamic latest-bundle selection, and neither creates a threshold, FPR, tau, promotion, or scientific claim. All retained diagnostic notebook and server families are paused / not authorized; their producer-bound records are not current science authority and 不读取、不迁移、不改写或混合 historic results.
 
 - `hf_only_detector_directional_validation.ipynb`: `0d4253ab2614c642563c566e6268565c337b503f`; `ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority`; `ceg_wm_hf_only_detector_directional_validation_initial_gate` is immutable partial evidence.
 - `hf_transmission_diagnostic.ipynb`: `af1eea8f55086b583e3e5e4a02586959983db70b`; `ceg_wm_hf_transmission_diagnostic_server_execution`.

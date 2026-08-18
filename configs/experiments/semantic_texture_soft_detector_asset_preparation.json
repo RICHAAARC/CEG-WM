@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "profile_id": "semantic_texture_soft_detector_asset_preparation",
+  "asset_bundle_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "whitening_fit_manifest_path": "configs/experiments/semantic_texture_soft_detector_whitening_fit_manifest.json",
+  "branch_null_manifest_path": "configs/experiments/semantic_texture_soft_detector_branch_null_manifest.json",
+  "whitening_fit_source_cluster_count": 32,
+  "branch_null_source_cluster_count": 32,
+  "diagnostic_only": true,
+  "zero_science_boundary": {
+    "aggregate": null,
+    "candidate_promoted": false,
+    "formal_tau_created": false,
+    "science_started": false,
+    "scientific_claims_supported": false,
+    "scientific_unit_count": 0
+  }
+}

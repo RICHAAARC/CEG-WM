@@ -29,11 +29,35 @@ _OVERLAY_PACKAGE_VERSIONS = {
     "opencv-python-headless": "4.12.0.88",
     "timm": "1.0.28",
 }
-TRANSPORT_RESULT_FILENAME = "semantic_texture_operational_transport_result.json"
-TRANSPORT_RECEIPT_FILENAME = "semantic_texture_operational_transport_receipt.json"
 TRANSPORT_CHECKSUMS_FILENAME = "SHA256SUMS"
 REVISION = re.compile(r"^[0-9a-f]{40}$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_ENTRYPOINT_PATHS = frozenset(
+    {
+        "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py",
+        "scripts/experiment_execution/semantic_texture_soft_detector_asset_preparation_entrypoint.py",
+    }
+)
+_TRANSPORT_DELIVERY = {
+    "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py": {
+        "archive_prefix": "semantic_texture_transport",
+        "profile_id": "semantic_texture_operational_preflight_transport",
+        "receipt_filename": "semantic_texture_operational_transport_receipt.json",
+        "result_filename": "semantic_texture_operational_transport_result.json",
+    },
+    "scripts/experiment_execution/semantic_texture_soft_detector_asset_preparation_entrypoint.py": {
+        "archive_prefix": "semantic_texture_soft_detector_assets",
+        "profile_id": "semantic_texture_soft_detector_asset_preparation_transport",
+        "receipt_filename": "semantic_texture_soft_detector_asset_transport_receipt.json",
+        "result_filename": "semantic_texture_soft_detector_asset_transport_result.json",
+    },
+}
+TRANSPORT_RESULT_FILENAME = _TRANSPORT_DELIVERY[
+    "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py"
+]["result_filename"]
+TRANSPORT_RECEIPT_FILENAME = _TRANSPORT_DELIVERY[
+    "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py"
+]["receipt_filename"]
 
 
 class SemanticTextureOperationalBootstrapError(RuntimeError):
@@ -87,15 +111,20 @@ def _persist_transport_failure(
     run_id: str,
     blocked_class: str,
     observed_repository_revision: str | None,
+    entrypoint_path: str = (
+        "scripts/experiment_execution/"
+        "semantic_texture_operational_preflight_entrypoint.py"
+    ),
 ) -> dict[str, object]:
     """Persist a bounded transport-only quartet without method result authority."""
 
-    if delivery_root.exists():
+    delivery = _TRANSPORT_DELIVERY.get(entrypoint_path)
+    if delivery is None or delivery_root.exists():
         raise SemanticTextureOperationalBootstrapError("integrity_blocked")
     delivery_root.mkdir(parents=True)
-    result_path = delivery_root / TRANSPORT_RESULT_FILENAME
-    archive_path = delivery_root / f"semantic_texture_transport_{run_id}.zip"
-    receipt_path = delivery_root / TRANSPORT_RECEIPT_FILENAME
+    result_path = delivery_root / str(delivery["result_filename"])
+    archive_path = delivery_root / f"{delivery['archive_prefix']}_{run_id}.zip"
+    receipt_path = delivery_root / str(delivery["receipt_filename"])
     checksums_path = delivery_root / TRANSPORT_CHECKSUMS_FILENAME
     result = {
         "aggregate": None,
@@ -103,7 +132,7 @@ def _persist_transport_failure(
         "candidate_promoted": False,
         "formal_tau_created": False,
         "observed_repository_revision": observed_repository_revision,
-        "profile_id": "semantic_texture_operational_preflight_transport",
+        "profile_id": delivery["profile_id"],
         "run_id": run_id,
         "science_started": False,
         "scientific_claims_supported": False,
@@ -122,7 +151,7 @@ def _persist_transport_failure(
         "archive_size_bytes": archive_path.stat().st_size,
         "blocked_class": blocked_class,
         "observed_repository_revision": observed_repository_revision,
-        "profile_id": "semantic_texture_operational_preflight_transport",
+        "profile_id": delivery["profile_id"],
         "result_filename": result_path.name,
         "result_sha256": sha256(result_blob).hexdigest(),
         "run_id": run_id,
@@ -286,6 +315,10 @@ def bootstrap_semantic_texture_operational_preflight(
     checkpoint: str | Path,
     execution_root: str | Path,
     entrypoint_args: Sequence[str],
+    entrypoint_path: str = (
+        "scripts/experiment_execution/"
+        "semantic_texture_operational_preflight_entrypoint.py"
+    ),
 ) -> tuple[int, dict[str, object]]:
     """Validate a fresh checkout and invoke its public operational entrypoint."""
 
@@ -296,6 +329,8 @@ def bootstrap_semantic_texture_operational_preflight(
     try:
         bounded_args = tuple(entrypoint_args)
         if not bounded_args or len(bounded_args) > 16:
+            raise SemanticTextureOperationalBootstrapError("integrity_blocked")
+        if entrypoint_path not in _ENTRYPOINT_PATHS:
             raise SemanticTextureOperationalBootstrapError("integrity_blocked")
         run_id = _entrypoint_run_id(bounded_args)
         if root.exists():
@@ -342,7 +377,7 @@ def bootstrap_semantic_texture_operational_preflight(
             sys.executable,
             str(
                 repository
-                / "scripts/experiment_execution/semantic_texture_operational_preflight_entrypoint.py"
+                / entrypoint_path
             ),
             *bounded_args,
         ]
@@ -375,6 +410,7 @@ def bootstrap_semantic_texture_operational_preflight(
             run_id=run_id,
             blocked_class=blocked_class,
             observed_repository_revision=observed_revision,
+            entrypoint_path=entrypoint_path,
         )
         return 2, receipt
 
@@ -384,6 +420,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repository-root", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--execution-root", required=True)
+    parser.add_argument(
+        "--entrypoint-path",
+        choices=tuple(sorted(_ENTRYPOINT_PATHS)),
+        default=(
+            "scripts/experiment_execution/"
+            "semantic_texture_operational_preflight_entrypoint.py"
+        ),
+    )
     parser.add_argument("--entrypoint-args", nargs=argparse.REMAINDER, required=True)
     arguments = parser.parse_args(argv)
     exit_code, receipt = bootstrap_semantic_texture_operational_preflight(
@@ -391,6 +435,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         checkpoint=arguments.checkpoint,
         execution_root=arguments.execution_root,
         entrypoint_args=arguments.entrypoint_args,
+        entrypoint_path=arguments.entrypoint_path,
     )
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return exit_code

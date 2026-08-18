@@ -36,6 +36,7 @@ from main import (
     LfDetectionResult,
     LfNullWhitenedDetectionResult,
     LfNullWhiteningAsset,
+    NullScoreRecord,
     PreparedLfWhitenedObservation,
     PreparedLfWhitenedTemplate,
     QkGeometrySyncResult,
@@ -43,7 +44,9 @@ from main import (
     RoutingObservations,
     SemanticTextureBranchNullCalibration,
     SemanticTextureContentDetectionResult,
+    SemanticTextureHfDetectionResult,
     SemanticTextureLfWhiteningAsset,
+    SemanticTextureLfDetectionResult,
     SemanticTextureRoutingObservations,
     SemanticTextureRoutingResult,
     content_detector,
@@ -82,6 +85,14 @@ from runtime import (
     RuntimeSemanticTextureDetectionObservationResult,
     RuntimeSemanticTextureObservationResult,
     Sd35RuntimeAdapter,
+    materialize_ordinary_rgb8_snapshot,
+)
+from experiments.protocol.semantic_texture_soft_detector_assets import (
+    SemanticTextureBranchNullPayload,
+    SemanticTextureBranchNullRecordPayload,
+    SemanticTextureSoftDetectorAssetBundle,
+    SemanticTextureSoftDetectorAssetProtocolError,
+    create_asset_bundle,
 )
 
 
@@ -397,6 +408,127 @@ class QkSynchronizationWriteExecutionResult:
     @property
     def geometry_config_digest(self) -> str:
         return self.pre_write_observation.geometry_config_digest
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTextureCleanPrimaryNullObservation:
+    """One clean ordinary RGB8 observation for Phase-B asset fitting only."""
+
+    detection_image_rgb8: torch.Tensor
+    runtime_detection: RuntimeSemanticTextureDetectionObservationResult
+    routing_result: SemanticTextureRoutingResult
+    lf_carrier_config_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTexturePrimaryNullBranchObservation:
+    """Paired raw public branch observations before diagnostic CDF construction."""
+
+    hf_result: SemanticTextureHfDetectionResult
+    lf_result: SemanticTextureLfDetectionResult
+
+
+def serialize_semantic_texture_soft_detector_asset_bundle(
+    *,
+    whitening_manifest_digest: str,
+    branch_null_manifest_digest: str,
+    whitening_asset: SemanticTextureLfWhiteningAsset,
+    hf_null: SemanticTextureBranchNullCalibration,
+    lf_null: SemanticTextureBranchNullCalibration,
+) -> SemanticTextureSoftDetectorAssetBundle:
+    """Bind existing public detector assets to a pure Phase-B transport bundle."""
+
+    def calibration_payload(
+        calibration: SemanticTextureBranchNullCalibration,
+    ) -> SemanticTextureBranchNullPayload:
+        return SemanticTextureBranchNullPayload(
+            branch=calibration.branch,
+            detector_identity=calibration.detector_identity,
+            partition_identity=calibration.partition_identity,
+            records=tuple(
+                SemanticTextureBranchNullRecordPayload(
+                    score_float64_hex=record.score.hex(),
+                    source_cluster_id=record.source_cluster_id,
+                    sample_id=record.sample_id,
+                )
+                for record in calibration.records
+            ),
+        )
+
+    try:
+        whitening_asset.validate()
+        hf_null_payload = calibration_payload(hf_null)
+        lf_null_payload = calibration_payload(lf_null)
+        return create_asset_bundle(
+            whitening_manifest_digest=whitening_manifest_digest,
+            branch_null_manifest_digest=branch_null_manifest_digest,
+            lf_carrier_config_digest=whitening_asset.lf_carrier_config_digest,
+            whitening_asset_payload=whitening_asset.canonical_payload,
+            whitening_asset_digest=whitening_asset.whitening_asset_digest,
+            hf_null_payload=hf_null_payload,
+            lf_null_payload=lf_null_payload,
+        )
+    except (SemanticTextureSoftDetectorAssetProtocolError, ValueError) as exc:
+        raise CegWmExperimentAdapterError(
+            "semantic-texture detector asset serialization is invalid"
+        ) from exc
+
+
+def materialize_semantic_texture_soft_detector_asset_bundle(
+    bundle: SemanticTextureSoftDetectorAssetBundle,
+) -> tuple[
+    SemanticTextureLfWhiteningAsset,
+    SemanticTextureBranchNullCalibration,
+    SemanticTextureBranchNullCalibration,
+]:
+    """Materialize a pure validated bundle through the existing public main API."""
+
+    if type(bundle) is not SemanticTextureSoftDetectorAssetBundle:
+        raise CegWmExperimentAdapterError("semantic-texture asset bundle type is invalid")
+    try:
+        bundle.validate()
+        whitening = SemanticTextureLfWhiteningAsset.from_canonical_payload(
+            bundle.whitening_asset_payload,
+            whitening_asset_digest=bundle.whitening_asset_digest,
+        )
+        whitening.validate()
+
+        def calibration(
+            payload: SemanticTextureBranchNullPayload,
+        ) -> SemanticTextureBranchNullCalibration:
+            return SemanticTextureBranchNullCalibration(
+                branch=payload.branch,
+                detector_identity=payload.detector_identity,
+                partition_identity=payload.partition_identity,
+                records=tuple(
+                    NullScoreRecord(
+                        score=float.fromhex(record.score_float64_hex),
+                        source_cluster_id=record.source_cluster_id,
+                        sample_id=record.sample_id,
+                    )
+                    for record in payload.records
+                ),
+            )
+
+        hf_null, lf_null = calibration(bundle.hf_null_payload), calibration(
+            bundle.lf_null_payload
+        )
+    except (SemanticTextureSoftDetectorAssetProtocolError, TypeError, ValueError) as exc:
+        raise CegWmExperimentAdapterError(
+            "semantic-texture detector asset materialization is invalid"
+        ) from exc
+    if (
+        whitening.fit_manifest_sha256 != bundle.whitening_manifest_digest
+        or whitening.lf_carrier_config_digest != bundle.lf_carrier_config_digest
+        or hf_null.branch != "hf"
+        or lf_null.branch != "lf"
+        or hf_null.partition_identity != bundle.branch_null_manifest_digest
+        or lf_null.partition_identity != bundle.branch_null_manifest_digest
+        or len(hf_null.records) != 32
+        or len(lf_null.records) != 32
+    ):
+        raise CegWmExperimentAdapterError("semantic-texture detector asset binding drifted")
+    return whitening, hf_null, lf_null
 
 
 def load_ceg_wm_experiment_adapter_configuration(
@@ -824,6 +956,72 @@ class CegWmExperimentAdapter:
             weight=weight,
         )
         return self._observe("content_detector", result)
+
+    @_revalidate_configuration_before_call
+    def prepare_semantic_texture_clean_primary_null(
+        self,
+        base_latent: torch.Tensor,
+        detection_key: str,
+        semantic_runtime: InspyrenetSemanticRuntime,
+    ) -> SemanticTextureCleanPrimaryNullObservation:
+        """Materialize one clean RGB8 input for the declared Phase-B partitions."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture primary-null preparation requires a prepared runtime"
+            )
+        clean = self._runtime_adapter.execute_clean_image_and_vae_observation(
+            base_latent
+        )
+        image_rgb8 = materialize_ordinary_rgb8_snapshot(clean.clean_image)
+        runtime_detection = self._runtime_adapter.observe_semantic_texture_detection(
+            image_rgb8,
+            semantic_runtime,
+        )
+        route = semantic_texture_content_router(
+            runtime_detection.hf_observation.shape,
+            mode="routing_semantic_texture_soft",
+            observations=runtime_detection.semantic_texture.observations,
+        )
+        carrier = lf_carrier(
+            detection_key,
+            route.latent_shape,
+        )
+        return SemanticTextureCleanPrimaryNullObservation(
+            detection_image_rgb8=image_rgb8,
+            runtime_detection=runtime_detection,
+            routing_result=route,
+            lf_carrier_config_digest=carrier.carrier_config_digest,
+        )
+
+    @_revalidate_configuration_before_call
+    def observe_semantic_texture_primary_null_branches(
+        self,
+        prepared: SemanticTextureCleanPrimaryNullObservation,
+        detection_key: str,
+        whitening_asset: SemanticTextureLfWhiteningAsset,
+    ) -> SemanticTexturePrimaryNullBranchObservation:
+        """Read paired raw soft-route scores for the declared null partition."""
+
+        if type(prepared) is not SemanticTextureCleanPrimaryNullObservation:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture primary-null preparation identity is invalid"
+            )
+        hf_result = semantic_texture_hf_detector(
+            prepared.runtime_detection.hf_observation,
+            detection_key,
+            prepared.routing_result,
+        )
+        lf_result = semantic_texture_lf_detector(
+            prepared.runtime_detection.lf_observation,
+            detection_key,
+            prepared.routing_result,
+            whitening_asset,
+        )
+        return SemanticTexturePrimaryNullBranchObservation(
+            hf_result=hf_result,
+            lf_result=lf_result,
+        )
 
     @_revalidate_configuration_before_call
     def detect_semantic_texture_candidate(

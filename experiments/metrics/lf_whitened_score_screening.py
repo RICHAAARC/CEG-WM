@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from math import cos, isfinite, sqrt
-from struct import pack
+from struct import pack, unpack
 from typing import Sequence
 
 import numpy as np
@@ -130,6 +130,81 @@ class LfNullWhiteningFitResult:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class SemanticTextureLfWhiteningFitResult:
+    """Pure metric output for the diagnostic soft-route whitening asset."""
+
+    canonical_payload: dict[str, object]
+    whitening_asset_digest: str
+
+    def validate(self) -> None:
+        payload = self.canonical_payload
+        expected_keys = {
+            "artifact_role",
+            "band_identity",
+            "candidate_id",
+            "detrend_identity",
+            "fit_manifest_sha256",
+            "fit_source_cluster_count",
+            "latent_shape",
+            "lf_carrier_config_digest",
+            "observation_protocol",
+            "regularization_ratio",
+            "route_candidate_id",
+            "transform_identity",
+            "weights_binary32_be_hex",
+        }
+        if type(payload) is not dict or set(payload) != expected_keys:
+            raise LfWhitenedScoreMetricError(
+                "semantic-texture whitening fit payload fields drifted"
+            )
+        if (
+            payload["artifact_role"]
+            != "lf_semantic_texture_soft_clean_null_whitening_operator"
+            or payload["candidate_id"]
+            != "lf_semantic_texture_soft_whitened_matched_score"
+            or payload["route_candidate_id"] != "routing_semantic_texture_soft"
+            or payload["band_identity"] != _BAND_IDENTITY
+            or payload["detrend_identity"] != _DETREND_IDENTITY
+            or payload["fit_source_cluster_count"] != _FIT_SOURCE_CLUSTER_COUNT
+            or payload["latent_shape"] != list(_LATENT_SHAPE)
+            or payload["observation_protocol"] != _OBSERVATION_PROTOCOL
+            or payload["regularization_ratio"] != _REGULARIZATION_RATIO
+            or payload["transform_identity"] != _TRANSFORM_IDENTITY
+        ):
+            raise LfWhitenedScoreMetricError(
+                "semantic-texture whitening fit payload identity drifted"
+            )
+        for field in ("fit_manifest_sha256", "lf_carrier_config_digest"):
+            value = payload[field]
+            if (
+                type(value) is not str
+                or len(value) != 64
+                or any(character not in "0123456789abcdef" for character in value)
+            ):
+                raise LfWhitenedScoreMetricError(
+                    "semantic-texture whitening digest is invalid"
+                )
+        words = payload["weights_binary32_be_hex"]
+        if (
+            type(words) is not list
+            or len(words) != _WEIGHT_COUNT
+            or any(
+                type(word) is not str
+                or len(word) != 8
+                or any(character not in "0123456789abcdef" for character in word)
+                for word in words
+            )
+        ):
+            raise LfWhitenedScoreMetricError(
+                "semantic-texture whitening fit weights are invalid"
+            )
+        if self.whitening_asset_digest != _digest(payload):
+            raise LfWhitenedScoreMetricError(
+                "semantic-texture whitening fit payload digest drifted"
+            )
+
+
 def _detrended_dct(values: Sequence[float]) -> np.ndarray:
     if len(values) != 16 * 64 * 64:
         raise LfWhitenedScoreMetricError("clean observation shape drifted")
@@ -211,6 +286,42 @@ def clean_null_band_energy_sums(values: Sequence[float]) -> tuple[float, ...]:
     return tuple(energy)
 
 
+def semantic_texture_clean_null_band_energy_sums(
+    values: Sequence[float],
+    mask_lf: Sequence[float],
+) -> tuple[float, ...]:
+    """Fit one soft-route W row from the public routed LF observation."""
+
+    values_tuple = tuple(float(value) for value in values)
+    mask_tuple = tuple(float(value) for value in mask_lf)
+    if (
+        len(values_tuple) != 16 * 64 * 64
+        or len(mask_tuple) != len(values_tuple)
+        or any(not isfinite(value) for value in (*values_tuple, *mask_tuple))
+        or any(value < 0.0 or value > 1.0 for value in mask_tuple)
+    ):
+        raise LfWhitenedScoreMetricError("semantic-texture routed clean observation is invalid")
+    def binary32_product(value: float, mask: float) -> float:
+        try:
+            routed = unpack(">f", pack(">f", value * mask))[0]
+        except (OverflowError, ValueError) as exc:
+            raise LfWhitenedScoreMetricError(
+                "semantic-texture routed clean observation is outside binary32"
+            ) from exc
+        if not isfinite(routed):
+            raise LfWhitenedScoreMetricError(
+                "semantic-texture routed clean observation is non-finite"
+            )
+        return routed
+
+    return clean_null_band_energy_sums(
+        tuple(
+            binary32_product(value, mask)
+            for value, mask in zip(values_tuple, mask_tuple, strict=True)
+        )
+    )
+
+
 def fit_lf_null_whitening_asset(
     ordered_energy_sums: Sequence[Sequence[float]],
     *,
@@ -276,6 +387,39 @@ def fit_lf_null_whitening_asset(
         "weights_binary32_be_hex": words,
     }
     result = LfNullWhiteningFitResult(
+        canonical_payload=payload,
+        whitening_asset_digest=_digest(payload),
+    )
+    result.validate()
+    return result
+
+
+def fit_semantic_texture_lf_whitening_asset(
+    ordered_energy_sums: Sequence[Sequence[float]],
+    *,
+    fit_manifest_sha256: str,
+    lf_carrier_config_digest: str,
+) -> SemanticTextureLfWhiteningFitResult:
+    """Fit the distinct soft-route W payload without changing the formula."""
+
+    if (
+        type(lf_carrier_config_digest) is not str
+        or len(lf_carrier_config_digest) != 64
+        or any(character not in "0123456789abcdef" for character in lf_carrier_config_digest)
+    ):
+        raise LfWhitenedScoreMetricError("semantic-texture LF carrier configuration is invalid")
+    base = fit_lf_null_whitening_asset(
+        ordered_energy_sums,
+        fit_manifest_sha256=fit_manifest_sha256,
+    )
+    payload = {
+        **base.canonical_payload,
+        "artifact_role": "lf_semantic_texture_soft_clean_null_whitening_operator",
+        "candidate_id": "lf_semantic_texture_soft_whitened_matched_score",
+        "route_candidate_id": "routing_semantic_texture_soft",
+        "lf_carrier_config_digest": lf_carrier_config_digest,
+    }
+    result = SemanticTextureLfWhiteningFitResult(
         canonical_payload=payload,
         whitening_asset_digest=_digest(payload),
     )
@@ -475,4 +619,7 @@ __all__ = [
     "LfWhitenedScreeningDecision", "LfWhitenedScreeningObservation",
     "clean_null_band_energy_sums", "create_lf_whitened_screening_observation",
     "evaluate_lf_whitened_screening", "fit_lf_null_whitening_asset",
+    "fit_semantic_texture_lf_whitening_asset",
+    "semantic_texture_clean_null_band_energy_sums",
+    "SemanticTextureLfWhiteningFitResult",
 ]

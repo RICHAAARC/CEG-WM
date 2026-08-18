@@ -2,7 +2,7 @@
 
 ## Current authorized entrypoint
 
-`semantic_texture_operational_preflight.ipynb` 是当前唯一授权执行 **Run all** 的入口。唯一 Drive 输入是 regular non-symlink `MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth`；每次运行写入新的 `semantic_texture_operational_preflight/exports/<fresh-run-id>/` namespace。
+当前授权的用户流程固定为两步：先在 `semantic_texture_soft_detector_asset_preparation.ipynb` 仅执行一次 **Run all**，创建一个新的 create-only diagnostic-only asset bundle；只有 source 完成只读认证并以该 exact bundle identity 绑定后，才可在 `semantic_texture_operational_preflight.ipynb` 仅执行一次 **Run all** 进行 target write 与 public blind detection。两个入口都不允许 retry、fallback 或动态 latest-bundle 选择；它们不产生 threshold、FPR、tau、promotion 或 scientific claim。
 
 The following retained diagnostics are paused / not authorized and preserve producer-bound history: they 不读取、不迁移、不改写或混合 old records.
 

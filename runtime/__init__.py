@@ -54,6 +54,7 @@ from .content_write import (
     RuntimeContentExecutionError,
     execute_clean_image_and_vae_observation,
     execute_content_write_and_capture_geometry_suffix,
+    materialize_ordinary_rgb8_snapshot,
     measure_content_materialization,
 )
 from .geometry_synchronization import (
@@ -154,6 +155,7 @@ __all__ = [
     "execute_content_write_and_capture_geometry_suffix",
     "load_runtime_configuration",
     "measure_content_materialization",
+    "materialize_ordinary_rgb8_snapshot",
     "materialize_geometry_candidate",
     "measure_generation_routing_reference_inputs",
     "normalize_generation_routing_measurement",

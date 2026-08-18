@@ -1,0 +1,302 @@
+{
+  "schema_version": "ceg_wm_semantic_texture_soft_detector_assets_manifest_v1",
+  "manifest_id": "semantic_texture_soft_lf_whitening_fit_v1",
+  "role_id": "semantic_texture_soft_lf_whitening_fit",
+  "seed_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "source_cluster_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "image_lineage_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "key_family_namespace": "semantic_texture_soft_detector_assets_primary_null_v1",
+  "key_family_namespace_digest": "b03899dcaca917104a8cee24ad1dfbffc092c806d03f81eec0294a9e856a0d3b",
+  "source_roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
+  "source_roster_rows_digest": "9488cc26be1723bf40e1e7336c97a2b9c5307c1d4a8ac97f184855a832f12e69",
+  "entries": [
+    {
+      "source_row": 1,
+      "prompt_text": "bond",
+      "prompt_digest": "f21dea74d898cfeaf836ecc99ad0331bade09711ff927365e91ada2ff4cb5caf",
+      "generation_seed": 202608190000,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:01",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:01",
+      "image_lineage_digest": "45c27d334cc41a2c01c14480293feddba6b25f379f9716a7fc96e456c62a6e60"
+    },
+    {
+      "source_row": 2,
+      "prompt_text": "element",
+      "prompt_digest": "445929267209c034d1e324834c17e0c8305df3dcb21d1710a639ac6ca08c648b",
+      "generation_seed": 202608190001,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:02",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:02",
+      "image_lineage_digest": "1d74926346b06c51b9fd0538450142868e2457b8f241b9e1d02f1bde1528fcd6"
+    },
+    {
+      "source_row": 3,
+      "prompt_text": "molecule",
+      "prompt_digest": "cd282cd375dcc40a9fa0f06a7b72f24b7cacb587af40aea3f53227cbd6cb1124",
+      "generation_seed": 202608190002,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:03",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:03",
+      "image_lineage_digest": "b89f459a8c846f97e92b656ec64662fc1eaeb2d00874fff15d9a4d65d0bd621e"
+    },
+    {
+      "source_row": 4,
+      "prompt_text": "life",
+      "prompt_digest": "63bd7065ef1e165a04255d4048836ce126dfe2b6a0777722ad3a5c6013129d19",
+      "generation_seed": 202608190003,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:04",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:04",
+      "image_lineage_digest": "4cabbabfbc62a29c481c49c45a4d01a1e3ee0719a00caf30b6e4fa4249842c86"
+    },
+    {
+      "source_row": 5,
+      "prompt_text": "protein",
+      "prompt_digest": "ec871480d85b1756d8afd04cdc76ac6edf875f1d8a4192f74193a362dc7ec180",
+      "generation_seed": 202608190004,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:05",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:05",
+      "image_lineage_digest": "d448d3eed4f6ad3ff64b6422dfa9633323e6f66e3f426ff4ec6b662a6a8c6694"
+    },
+    {
+      "source_row": 6,
+      "prompt_text": "yin-yang",
+      "prompt_digest": "d837e4485a5a18e8d4a5aa42584ab97cd8bf42ef06ff14a4fa82a008f9c96638",
+      "generation_seed": 202608190005,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:06",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:06",
+      "image_lineage_digest": "583bacba3786f1e684d1f0bb201d63b4e874911a7063fe5e4537fd9384e81c4a"
+    },
+    {
+      "source_row": 7,
+      "prompt_text": "wood",
+      "prompt_digest": "99f7855eb789dfecf9ea66df3221a743f4ab8be59ae6b9c503499c1940a90fd5",
+      "generation_seed": 202608190006,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:07",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:07",
+      "image_lineage_digest": "f89dd9af82a49f58d90b39d7ef9c35e933c0f3434a7f5775377b8ea212bbb596"
+    },
+    {
+      "source_row": 8,
+      "prompt_text": "metal",
+      "prompt_digest": "03ecab669ba200ba17f994677e88894400fd627e6f70439247ce0cbda8ca9a20",
+      "generation_seed": 202608190007,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:08",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:08",
+      "image_lineage_digest": "ba5f442d7d92d8be0cd2d3a3dd8d7ed835141f878b7f7d34e09c071f8bdabc84"
+    },
+    {
+      "source_row": 9,
+      "prompt_text": "space",
+      "prompt_digest": "3f49dbbfe051cb20cc038923424fedf8d18307cc805e1520e4168e9360e2eb38",
+      "generation_seed": 202608190008,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:09",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:09",
+      "image_lineage_digest": "d4dc8ae6c94aba5b551bc0e2007cb2dde10ce058af3037b8fc562d2741f2ca23"
+    },
+    {
+      "source_row": 10,
+      "prompt_text": "air",
+      "prompt_digest": "9fe430e5274621be518924ed90d2355f39eeb1d4d98fb00ea0022f3a26ba5595",
+      "generation_seed": 202608190009,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:10",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:10",
+      "image_lineage_digest": "26140c030ad9df9494370b1ea205c8f5cf2fa4232c9276cffcd807ff79c3bb74"
+    },
+    {
+      "source_row": 11,
+      "prompt_text": "fire",
+      "prompt_digest": "dc9f28b12dd1818ee42ffc92ecb940386214598837348d30d3c6c0b7b57e34c9",
+      "generation_seed": 202608190010,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:11",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:11",
+      "image_lineage_digest": "6d7302e06efb5d16d4c51c15c3711d3f699f4347861062c5bf2a130728539aed"
+    },
+    {
+      "source_row": 12,
+      "prompt_text": "water",
+      "prompt_digest": "0f4168490e38b8447e11ba4bd656aa11b925bd22af30bac464bc153fdb608501",
+      "generation_seed": 202608190011,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:12",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:12",
+      "image_lineage_digest": "dea41c96397f1e2328271ba8ee1c97789fa65b26f7004e410b86bef5eef5de43"
+    },
+    {
+      "source_row": 13,
+      "prompt_text": "earth",
+      "prompt_digest": "7b74b418a352d67108173c20c1b16b4b726bad8606be65711ff924dbf9a40670",
+      "generation_seed": 202608190012,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:13",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:13",
+      "image_lineage_digest": "c24d124a86e916dd8b991f5c25e1318daeda96c160814851f5cbaa0ac25b04b7"
+    },
+    {
+      "source_row": 14,
+      "prompt_text": "force",
+      "prompt_digest": "32500d7500ce0755c1a0f96ef86b10c3100f70f9ca6d8f4d3673d2925afc2151",
+      "generation_seed": 202608190013,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:14",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:14",
+      "image_lineage_digest": "5939971a9fdb36ce85139d8851b088e9b6db68bacca6747eaad0013060a7a136"
+    },
+    {
+      "source_row": 15,
+      "prompt_text": "motion",
+      "prompt_digest": "305238273bb0fac2a73b43256e38d1515fdf61ec1d30ef161446c3588b93a97b",
+      "generation_seed": 202608190014,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:15",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:15",
+      "image_lineage_digest": "1e22c64a95d9040cc531ed6d10dcb211b6cba2c9569684f12a27ecf8af4ef01d"
+    },
+    {
+      "source_row": 16,
+      "prompt_text": "inertia",
+      "prompt_digest": "4a49c3b2035a18687310ef08f535a8bb337f5c9faf2ee52cb30f2c544be77f1a",
+      "generation_seed": 202608190015,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:16",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:16",
+      "image_lineage_digest": "2dd0df68264917a83a7207aaaf8d5c0d81c37294ae9b7dcf27a6d3844e9cdce9"
+    },
+    {
+      "source_row": 17,
+      "prompt_text": "energy",
+      "prompt_digest": "381cfb6e1e428419d5d6b5d113be06a9023d6407ebe388791ec3d59100d87ec5",
+      "generation_seed": 202608190016,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:17",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:17",
+      "image_lineage_digest": "047907311b5f4feb4a3cfc6e65828627220dd289225bbf604950fdc3de168037"
+    },
+    {
+      "source_row": 18,
+      "prompt_text": "black hole",
+      "prompt_digest": "94a28063dcd0030c9ce586896f0735bf3cbb9dfbaa4bc3a8efccd582ac157875",
+      "generation_seed": 202608190017,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:18",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:18",
+      "image_lineage_digest": "55fa7772d05f03893a836fc74bb24fe86b6db16d7d19a9f8788bf927095669a4"
+    },
+    {
+      "source_row": 19,
+      "prompt_text": "gravity",
+      "prompt_digest": "d4e3fc7b0477747da28f05c27af9f1ab8e70cd60f729a2813f410fd39eb466ac",
+      "generation_seed": 202608190018,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:19",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:19",
+      "image_lineage_digest": "089d3808e00d4b2dfc559baa9b8b13cea110b73f179d54e42051202c210b159c"
+    },
+    {
+      "source_row": 20,
+      "prompt_text": "peace",
+      "prompt_digest": "c2e10c20bf46daf0ba03f725218b012544a3d0d3b37334eeb1d4d81e5406e478",
+      "generation_seed": 202608190019,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:20",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:20",
+      "image_lineage_digest": "2d98f364df4dd02047a6d4340046ff0dcbeddf3285399695ece4f5f8453ad829"
+    },
+    {
+      "source_row": 21,
+      "prompt_text": "fairness",
+      "prompt_digest": "f12fd56ea99e797d42174fc09c8cd6f35a110949acbffab5ea102da3f3d73a57",
+      "generation_seed": 202608190020,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:21",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:21",
+      "image_lineage_digest": "8f0b84ae2781bade5e82e6b357f0164a5ca47e58d6c644709c55a639736f2039"
+    },
+    {
+      "source_row": 22,
+      "prompt_text": "gender",
+      "prompt_digest": "de9feaea8b66f7ba74845ee5fc156cdd22e8e4533de13ca76d71ac495da358ff",
+      "generation_seed": 202608190021,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:22",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:22",
+      "image_lineage_digest": "f3d4d760f35ad4ac657e064d02879cbd71156940d192a9c93c028b78d74b10fd"
+    },
+    {
+      "source_row": 23,
+      "prompt_text": "intelligence",
+      "prompt_digest": "9f80a5e14017ccc05ab0c904c792915a8e134a97ebc2f5a3c7bc9f7b0f215509",
+      "generation_seed": 202608190022,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:23",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:23",
+      "image_lineage_digest": "de2f2cf7a4cfd64f808170b321a0a5fab22c99fbb83b89311b2613d0c498fd91"
+    },
+    {
+      "source_row": 24,
+      "prompt_text": "bias",
+      "prompt_digest": "fa4824e83746480e1029c47ad659fdc3854195c0fa76c9209807cef32e29243e",
+      "generation_seed": 202608190023,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:24",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:24",
+      "image_lineage_digest": "0464f8501a237aecc01bfd526c0340e18ff6c2e254f8b489abf36de513e7fb72"
+    },
+    {
+      "source_row": 25,
+      "prompt_text": "hate",
+      "prompt_digest": "f2e9a23ac36c4b227b16387b4e0d37793e9459f3912942069981886d5bffe90e",
+      "generation_seed": 202608190024,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:25",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:25",
+      "image_lineage_digest": "5354e4ee35a3b3b3cdfe037c7ab9849765dacdf1fe541b94d7ad2457f9c196e6"
+    },
+    {
+      "source_row": 26,
+      "prompt_text": "anger",
+      "prompt_digest": "d4cc56aa47e0b5c789d492c0b1363ec44b73cd41adfdaa02860ed36d523ebf4c",
+      "generation_seed": 202608190025,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:26",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:26",
+      "image_lineage_digest": "e5bf066f60390cff5cd4b3efdf5d94f63d8cf5e4f52a9a37f4e8dc505b06b05f"
+    },
+    {
+      "source_row": 27,
+      "prompt_text": "emotion",
+      "prompt_digest": "3b9c4346fbead3ae18ec46b6e9a2094dc56a50a8396f02322897f224cf3078d6",
+      "generation_seed": 202608190026,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:27",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:27",
+      "image_lineage_digest": "803646b96b066fcecd81dcafe1eab3b1274665ec35444cd795604acd0c9b896c"
+    },
+    {
+      "source_row": 28,
+      "prompt_text": "feeling",
+      "prompt_digest": "1e8abffb973c275e041eddbe542c020d1e4f4098509018ed4e27f7879d97cbe0",
+      "generation_seed": 202608190027,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:28",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:28",
+      "image_lineage_digest": "ee89df5e0754c1503d6746bd7ccbba654e5ed3971ebe3373d3c41f9142013069"
+    },
+    {
+      "source_row": 29,
+      "prompt_text": "love",
+      "prompt_digest": "686f746a95b6f836d7d70567c302c3f9ebb5ee0def3d1220ee9d4e9f34f5e131",
+      "generation_seed": 202608190028,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:29",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:29",
+      "image_lineage_digest": "7d9507986f7ef711163c4d5355fbcd3e3a09178dc6a34d777a13279f4fd44ab9"
+    },
+    {
+      "source_row": 30,
+      "prompt_text": "artificial intelligence",
+      "prompt_digest": "803b3eb2b6af027151950019f2d5ede506a6636a9eafd262b27c23e3f834056f",
+      "generation_seed": 202608190029,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:30",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:30",
+      "image_lineage_digest": "27d9ef340a9bb578417d74956e25b323d3069a608ce86e34fac92cd842a163bb"
+    },
+    {
+      "source_row": 31,
+      "prompt_text": "meaning of life",
+      "prompt_digest": "50be6848cff0e0567cc56f6a1a153b6732eefb2e8ade0ca24b9bb1fb1f32e6b5",
+      "generation_seed": 202608190030,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:31",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:31",
+      "image_lineage_digest": "afc4b6210e01c054b5c83b6e5d649a88984cb3a10be979e377b58226c37f6b58"
+    },
+    {
+      "source_row": 32,
+      "prompt_text": "42",
+      "prompt_digest": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+      "generation_seed": 202608190031,
+      "source_cluster_id": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:cluster:32",
+      "image_lineage_identity": "semantic_texture_soft_detector_assets_primary_null_v1:semantic_texture_soft_lf_whitening_fit:image:32",
+      "image_lineage_digest": "45bcc53ca588428b09988715a68a40ec62710f87c45a6f6121a98c487bd50e4e"
+    }
+  ]
+}

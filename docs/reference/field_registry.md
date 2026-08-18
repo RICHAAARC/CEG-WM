@@ -78,6 +78,20 @@ Notebook 与 repository module 的跨边界数据
 | candidate_ids | cross_boundary | method_identity | none | false | false | false | 跨职责组件实际绑定的完整有序候选身份集合。 |
 | whitening_asset_digest | cross_boundary | provenance | none | false | false | false | LF clean-null whitening 公开资产 canonical payload 的 SHA-256。 |
 | fit_manifest_sha256 | cross_boundary | provenance | none | false | false | false | LF whitening 资产绑定的独立 32-clean fit manifest SHA-256。 |
+| asset_bundle_digest | persisted_protocol | provenance | none | true | false | false | Phase-B diagnostic-only bundle 的 canonical payload SHA-256；仅用于 exact bundle loader binding，不构成 threshold、FPR、tau、promotion 或科学 claim。 |
+| asset_bundle_namespace | persisted_protocol | protocol | none | true | false | false | Phase-B create-only diagnostic asset bundle 的固定命名空间；仅绑定资产协议，不构成方法或科学结果身份。 |
+| branch_null_manifest_digest | persisted_protocol | provenance | none | true | false | false | Phase-B 独立 32-clean paired HF/LF branch-null manifest 的 SHA-256；不得与 whitening-fit、target 或历史开发/评估资产重叠。 |
+| whitening_fit_manifest_path | persisted_protocol | runtime_locator | none | true | false | false | Run-A 读取固定 32-clean whitening-fit literal manifest 的仓库相对定位；不是动态样本选择器。 |
+| branch_null_manifest_path | persisted_protocol | runtime_locator | none | true | false | false | Run-A 读取固定 32-clean paired branch-null literal manifest 的仓库相对定位；不是动态样本选择器。 |
+| whitening_fit_source_cluster_count | persisted_protocol | protocol | none | true | false | false | Phase-B W fit 固定消费的 clean primary-null source-cluster 数量。 |
+| branch_null_source_cluster_count | persisted_protocol | protocol | none | true | false | false | Phase-B paired HF/LF branch-null CDF 固定消费的 clean primary-null source-cluster 数量。 |
+| key_family_namespace_digest | persisted_protocol | provenance | none | true | false | false | Phase-B literal manifest 所绑定 public key-family namespace 的不可逆摘要。 |
+| source_roster_path | persisted_protocol | runtime_locator | none | true | false | false | Literal Phase-B roster 来源的仓库相对路径；只作输入来源定位。 |
+| source_roster_rows_digest | persisted_protocol | provenance | none | true | false | false | Literal Phase-B roster 所绑定 source rows 的 canonical SHA-256。 |
+| whitening_manifest_digest | persisted_protocol | provenance | none | true | false | false | Bundle 所绑定 dedicated 32-clean semantic-texture whitening-fit manifest 的 SHA-256。 |
+| hf_null_payload | persisted_protocol | protocol | none | true | false | false | Phase-B HF branch 的有限 canonical primary-null record DTO；只支持诊断标准化，不含 threshold、FPR、tau 或 decision。 |
+| lf_null_payload | persisted_protocol | protocol | none | true | false | false | Phase-B LF branch 的有限 canonical primary-null record DTO；只支持诊断标准化，不含 threshold、FPR、tau 或 decision。 |
+| bundle_filename | persisted_protocol | runtime_locator | none | true | false | false | Create-only Phase-B bundle JSON 的固定文件名，用于 receipt 与 archive 完整性绑定。 |
 | fit_source_cluster_count | cross_boundary | protocol | none | false | false | false | LF whitening 资产固定消费的 clean source-cluster 数量。 |
 | weights_binary32_be_hex | cross_boundary | method_parameter | none | false | false | false | LF whitening 资产按 channel-major 序列化的 96 个 binary32 big-endian 权重。 |
 | artifact_role | cross_boundary | method_identity | none | false | false | false | LF whitening canonical payload 的公开资产职责身份。 |

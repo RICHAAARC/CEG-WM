@@ -1,5 +1,6 @@
 from dataclasses import dataclass, replace
 from hashlib import sha256
+import inspect
 from math import sqrt
 from struct import pack, unpack
 
@@ -7,6 +8,7 @@ import pytest
 import torch
 
 import runtime.content_write as runtime_content_write
+from experiments.methods.ceg_wm import CegWmExperimentAdapter
 from main import (
     ContentEmbeddingResult,
     content_actual_budget_accepts,
@@ -25,12 +27,45 @@ from runtime import (
     RuntimeVaeFactors,
     InspyrenetSemanticRuntime,
     create_runtime_adapter,
+    materialize_ordinary_rgb8_snapshot,
     measure_content_materialization,
 )
 
 
 TEST_ROOT_KEY = "ceg-wm-runtime-batch-two-root"
 TEST_SHAPE = (1, 1, 4, 4)
+
+
+@pytest.mark.unit
+def test_public_ordinary_rgb8_snapshot_matches_runtime_callback_contract() -> None:
+    image = torch.tensor(
+        [[[
+            [-0.1, 0.0, 0.0039, 0.5, 0.9999, 1.0, 1.1],
+        ]] * 3],
+        dtype=torch.float32,
+    )
+    expected = torch.tensor(
+        [[[
+            [0, 0, 0, 127, 254, 255, 255],
+        ]] * 3],
+        dtype=torch.uint8,
+    )
+    assert torch.equal(materialize_ordinary_rgb8_snapshot(image), expected)
+    assert torch.equal(
+        runtime_content_write.materialize_ordinary_rgb8_snapshot(image),
+        expected,
+    )
+    with pytest.raises(runtime_content_write.RuntimeContentExecutionError):
+        materialize_ordinary_rgb8_snapshot(torch.zeros((1, 1, 2, 2)))
+    with pytest.raises(runtime_content_write.RuntimeContentExecutionError):
+        materialize_ordinary_rgb8_snapshot("not-a-tensor")
+    source = inspect.getsource(
+        CegWmExperimentAdapter.prepare_semantic_texture_clean_primary_null
+    )
+    assert "materialize_ordinary_rgb8_snapshot(clean.clean_image)" in source
+    assert "carrier = lf_carrier(\n            detection_key,\n            route.latent_shape,\n        )" in source
+    for private_conversion_token in ("clamp(", ".floor(", "uint8"):
+        assert private_conversion_token not in source
 
 
 def _identity(configuration, selected_device: str) -> RuntimeBackendIdentity:

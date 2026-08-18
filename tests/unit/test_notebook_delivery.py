@@ -22,14 +22,16 @@ def test_colab_notebook_inventory_authority_and_outputs_are_exact() -> None:
         "lf_whitened_directional_validation.ipynb",
         "lf_whitened_score_screening.ipynb",
         "qk_synchronization_write_diagnostic.ipynb",
+        "semantic_texture_soft_detector_asset_preparation.ipynb",
         "semantic_texture_operational_preflight.ipynb",
     }
     assert {path.name for path in notebook_root.glob("*.ipynb")} == expected
-    paused_notebooks = expected - {"semantic_texture_operational_preflight.ipynb"}
-    banner = (
-        "**PAUSED / NOT AUTHORIZED:** Do not use **Run all**. The sole current "
-        "Run-all entrypoint is `semantic_texture_operational_preflight.ipynb`."
-    )
+    active_notebooks = {
+        "semantic_texture_operational_preflight.ipynb",
+        "semantic_texture_soft_detector_asset_preparation.ipynb",
+    }
+    paused_notebooks = expected - active_notebooks
+    banner = "**PAUSED / NOT AUTHORIZED:** Do not use **Run all**."
     current_run_all_phrase = "Run all once in a fresh GPU runtime"
     forbidden_authority_phrases = (
         "only currently authorized",
@@ -46,7 +48,7 @@ def test_colab_notebook_inventory_authority_and_outputs_are_exact() -> None:
         if path.name in paused_notebooks:
             assert notebook["cells"][0]["cell_type"] == "markdown"
             assert "".join(notebook["cells"][0]["source"]).startswith(
-                f"{banner}\n\n"
+                f"{banner}"
             )
         assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
         assert all(
@@ -56,7 +58,13 @@ def test_colab_notebook_inventory_authority_and_outputs_are_exact() -> None:
         )
     assert {
         name for name, source in sources.items() if current_run_all_phrase in source
-    } == {"semantic_texture_operational_preflight.ipynb"}
+    } == active_notebooks
+    asset_source = sources["semantic_texture_soft_detector_asset_preparation.ipynb"]
+    assert "semantic_texture_soft_detector_asset_preparation_entrypoint.py" in asset_source
+    assert "semantic_texture_soft_detector_assets" in asset_source
+    assert "--entrypoint-path" in asset_source
+    assert "latest-bundle" not in asset_source
+    assert "retry" not in asset_source
     for source in sources.values():
         for phrase in forbidden_authority_phrases:
             assert phrase not in source
