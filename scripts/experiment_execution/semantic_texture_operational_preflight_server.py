@@ -347,7 +347,15 @@ def finalize_semantic_texture_operational_preflight_delivery(
     ).encode("ascii")
     with delivery_completion_checksums_path.open("xb") as handle:
         handle.write(delivery_completion_checksums_blob)
-    return 2, {
+    write_outcome, detector_outcome = result_value["unit_outcomes"]
+    expected_operational_partial = (
+        write_outcome["started"] is True
+        and write_outcome["status"] == "passed"
+        and detector_outcome["started"] is True
+        and detector_outcome["status"] == "blocked"
+        and detector_outcome["blocked_class"] == "identity_blocked"
+    )
+    return (0 if expected_operational_partial else 2), {
         **receipt,
         "receipt_filename": receipt_path.name,
         "receipt_sha256": _sha256_file(receipt_path),

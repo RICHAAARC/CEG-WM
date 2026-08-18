@@ -446,7 +446,7 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
             _BlockedResult(value),
             output_root=output_root,
         )
-        assert exit_code != 0
+        assert exit_code == 0
         raise _DeliveredBlocked("raise only after complete delivery")
     result_path = output_root / server.RESULT_FILENAME
     archive_path = output_root / receipt["archive_filename"]
@@ -703,7 +703,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             output_root=output_root,
         )
     )
-    assert exit_code == 2
+    assert exit_code == 0
     assert ("runtime_device", "cuda") in constructor_calls
     assert ("generation_seed", 2026081701) in constructor_calls
     assert ("latent_shape", (1, 16, 64, 64)) in constructor_calls
