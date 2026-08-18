@@ -3462,9 +3462,21 @@ def _authenticated_vendor_paths(root: Path) -> frozenset[Path]:
     required_top = {"source_repository", "upstream_commit", "upstream_tree", "source_license", "vendored_namespace", "files"}
     required_record = {"upstream_path", "local_path", "upstream_sha256", "local_sha256", "transformations"}
     def regular(path: Path) -> bool:
-        try: return stat.S_ISREG(path.lstat().st_mode)
-        except OSError: return False
-    if any(not stat.S_ISDIR((root / component).lstat().st_mode) for component in (Path("runtime"), Path("runtime/_vendor"), vendor_relative)) or not all(regular(item) for item in (manifest, license_path)):
+        try:
+            return stat.S_ISREG(path.lstat().st_mode)
+        except OSError:
+            return False
+
+    def directory(path: Path) -> bool:
+        try:
+            return stat.S_ISDIR(path.lstat().st_mode)
+        except OSError:
+            return False
+
+    if not all(
+        directory(path)
+        for path in (root, root / "runtime", root / "runtime/_vendor", vendor)
+    ) or not all(regular(item) for item in (manifest, license_path)):
         return frozenset()
     try:
         value = json.loads(manifest.read_text(encoding="utf-8"))
@@ -3475,8 +3487,16 @@ def _authenticated_vendor_paths(root: Path) -> frozenset[Path]:
             if not isinstance(record, dict) or set(record) != required_record: return frozenset()
             local = record["local_path"]
             if not isinstance(local, str) or not local or "\\" in local or any(part in {"", ".", ".."} for part in Path(local).parts) or not isinstance(record["local_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", record["local_sha256"]): return frozenset()
-            candidate = vendor / local
-            if Path(local).is_absolute() or local in listed or not regular(candidate):
+            local_path = Path(local)
+            candidate_parent = vendor
+            if Path(local).is_absolute() or local in listed:
+                return frozenset()
+            for component in local_path.parts[:-1]:
+                candidate_parent = candidate_parent / component
+                if not directory(candidate_parent):
+                    return frozenset()
+            candidate = candidate_parent / local_path.name
+            if not regular(candidate):
                 return frozenset()
             if sha256(candidate.read_bytes()).hexdigest() != record["local_sha256"]:
                 return frozenset()
@@ -3495,7 +3515,10 @@ def _authenticated_vendor_paths(root: Path) -> frozenset[Path]:
                 actual_files.add(str(item.relative_to(vendor)))
         expected_dirs={""}
         for name in listed:
-            expected_dirs.update(str(Path(name).parent) if str(Path(name).parent)!="." else "" for _ in (0,))
+            parent = Path(name).parent
+            while str(parent) != ".":
+                expected_dirs.add(str(parent))
+                parent = parent.parent
         if actual_files != listed or actual_dirs != expected_dirs:
             return frozenset()
         return frozenset({Path("runtime/_vendor"), vendor_relative, *(vendor_relative / item for item in listed)})

@@ -64,8 +64,16 @@ def _has_violation(
 
 
 @pytest.mark.unit
-def test_manifest_bound_external_vendor_naming_exemption_fails_closed(tmp_path: Path) -> None:
+def test_manifest_bound_external_vendor_naming_exemption_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fifo_unsupported: list[bool] = []
+
+    _write_minimal_audit_fixture(tmp_path, "main")
+    no_runtime_report = run_audit(tmp_path)
+    assert no_runtime_report["decision"] in {"pass", "fail"}
+
     def build(mutation: str | None = None) -> dict:
         shutil.rmtree(tmp_path, ignore_errors=True)
         _write_minimal_audit_fixture(tmp_path, "runtime")
@@ -90,7 +98,21 @@ def test_manifest_bound_external_vendor_naming_exemption_fails_closed(tmp_path: 
         if mutation == "empty_dir": (vendor / "WeakDirectory").mkdir()
         if mutation == "symlink_file": (vendor / "WeakName.py").symlink_to(source)
         if mutation == "symlink_parent":
-            source.unlink(); (vendor / "linked").symlink_to(vendor, target_is_directory=True)
+            source.unlink()
+            source_root = vendor / "source_root"
+            source_root.mkdir()
+            linked_candidate = source_root / "InSPyReNet.py"
+            linked_candidate.write_text("ExternalName = 1\n", encoding="utf-8")
+            (vendor / "linked").symlink_to(source_root, target_is_directory=True)
+            manifest["files"][0]["local_path"] = "linked/InSPyReNet.py"
+            original_read_bytes = Path.read_bytes
+
+            def reject_linked_read(path: Path) -> bytes:
+                if path == vendor / "linked" / "InSPyReNet.py":
+                    raise AssertionError("linked vendor candidate must not be read")
+                return original_read_bytes(path)
+
+            monkeypatch.setattr(Path, "read_bytes", reject_linked_read)
         fifo_not_supported = False
         if mutation == "fifo" and hasattr(os, "mkfifo"):
             try:
