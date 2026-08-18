@@ -1010,6 +1010,8 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert "completion_blob = (artifact_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME).read_bytes()" in code_source
     assert "os.replace(pending, drive_export_root / DELIVERY_COMPLETION_CHECKSUMS_FILENAME)" in code_source
     assert "completed.returncode != 0" in code_source
+    assert "operational preflight blocked after complete Drive delivery" in code_source
+    assert "blocked roster unexpectedly returned success" not in code_source
     assert "sys.tracebacklimit = 0" in code_source
     mount_run_id_assignments = [
         node
