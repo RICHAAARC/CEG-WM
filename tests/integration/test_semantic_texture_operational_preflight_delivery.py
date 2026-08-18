@@ -360,10 +360,11 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
         "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
         "observed_repository_revision": "4" * 40,
+        "pre_execution_stage": None,
         "profile_id": "semantic_texture_operational_preflight",
         "result_identity": "3" * 64,
         "run_id": run_id,
-        "schema_version": 1,
+        "schema_version": 2,
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
@@ -431,6 +432,7 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     assert persisted_receipt["observed_repository_revision"] == value[
         "observed_repository_revision"
     ]
+    assert persisted_receipt["pre_execution_stage"] is None
     assert not any(
         str(tmp_path) in json.dumps(document)
         for document in (
@@ -486,6 +488,9 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     malformed_timing = json.loads(json.dumps(value))
     malformed_timing["unit_outcomes"][0]["elapsed_seconds"] = -0.1
     invalid_values.append(malformed_timing)
+    malformed_started_stage = json.loads(json.dumps(value))
+    malformed_started_stage["pre_execution_stage"] = "latent_preparation"
+    invalid_values.append(malformed_started_stage)
     for invalid_index, invalid_value in enumerate(invalid_values):
         invalid_output_root = tmp_path / f"invalid-delivery-{invalid_index}"
         with pytest.raises(server.SemanticTextureOperationalServerError):
@@ -501,6 +506,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     constructor_calls: list[tuple[str, object]] = []
+    failing_stage: list[str | None] = [None]
 
     class FakeTensor:
         def to(self, *, device: str, dtype: object):
@@ -509,6 +515,8 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
 
     class FakeGenerator:
         def __init__(self, *, device: str) -> None:
+            if failing_stage[0] == "latent_preparation":
+                raise RuntimeError("synthetic latent preparation failure")
             constructor_calls.append(("generator_device", device))
 
         def manual_seed(self, seed: int) -> None:
@@ -516,6 +524,8 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
 
     class FakeRuntimeAdapter:
         def initialize(self, requested_device: str):
+            if failing_stage[0] == "runtime_initialization":
+                raise RuntimeError("synthetic runtime initialization failure")
             constructor_calls.append(("runtime_device", requested_device))
             return SimpleNamespace(
                 image_height=512,
@@ -550,33 +560,71 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
         ) -> object:
             raise AssertionError("detector must remain identity-blocked")
 
-    monkeypatch.setattr(
-        entrypoint,
-        "Sd35PipelineBackend",
-        lambda **kwargs: constructor_calls.append(("backend", kwargs)) or object(),
-    )
+    def fake_backend(**kwargs: object) -> object:
+        if failing_stage[0] == "runtime_backend_construction":
+            raise RuntimeError("synthetic backend construction failure")
+        constructor_calls.append(("backend", kwargs))
+        return object()
+
+    monkeypatch.setattr(entrypoint, "Sd35PipelineBackend", fake_backend)
+
+    def fake_runtime_adapter(backend: object, config_path: Path) -> FakeRuntimeAdapter:
+        if failing_stage[0] == "runtime_configuration":
+            raise RuntimeError("synthetic runtime configuration failure")
+        return FakeRuntimeAdapter()
+
     monkeypatch.setattr(
         entrypoint,
         "create_runtime_adapter",
-        lambda backend, config_path: FakeRuntimeAdapter(),
+        fake_runtime_adapter,
     )
+
+    def fake_semantic_runtime(checkpoint_path: Path, selected_device: str) -> object:
+        if failing_stage[0] == "semantic_runtime_initialization":
+            raise RuntimeError("synthetic semantic runtime failure")
+        constructor_calls.append(("semantic_runtime", (checkpoint_path, selected_device)))
+        return object()
+
     monkeypatch.setattr(
         entrypoint,
         "InspyrenetSemanticRuntime",
-        lambda checkpoint_path, selected_device: constructor_calls.append(
-            ("semantic_runtime", (checkpoint_path, selected_device))
-        )
-        or object(),
+        fake_semantic_runtime,
     )
+
+    def fake_adapter_configuration(path: Path) -> object:
+        if failing_stage[0] == "experiment_adapter_initialization":
+            raise RuntimeError("synthetic adapter configuration failure")
+        return object()
+
     monkeypatch.setattr(
         entrypoint,
         "load_ceg_wm_experiment_adapter_configuration",
-        lambda path: object(),
+        fake_adapter_configuration,
     )
+
+    def fake_experiment_adapter(
+        configuration: object, runtime_adapter: FakeRuntimeAdapter
+    ) -> FakeExperimentAdapter:
+        if failing_stage[0] == "experiment_adapter_initialization":
+            raise RuntimeError("synthetic experiment adapter failure")
+        return FakeExperimentAdapter()
+
     monkeypatch.setattr(
         entrypoint,
         "CegWmExperimentAdapter",
-        lambda configuration, runtime_adapter: FakeExperimentAdapter(),
+        fake_experiment_adapter,
+    )
+
+    def fake_runner_admission(*args: object, **kwargs: object) -> object:
+        if failing_stage[0] == "runner_admission":
+            raise RuntimeError("synthetic runner admission failure")
+        return original_runner_admission(*args, **kwargs)
+
+    original_runner_admission = entrypoint._RUNNER.execute_semantic_texture_operational_preflight
+    monkeypatch.setattr(
+        entrypoint._RUNNER,
+        "execute_semantic_texture_operational_preflight",
+        fake_runner_admission,
     )
     monkeypatch.setattr(
         entrypoint,
@@ -625,6 +673,10 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
         "negative_prompt": "",
     }
     assert sum(label == "public_write" for label, _ in constructor_calls) == 1
+    persisted_result = json.loads(
+        (output_root / server.RESULT_FILENAME).read_text(encoding="utf-8")
+    )
+    assert persisted_result["pre_execution_stage"] is None
     persisted = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
         for path in output_root.iterdir()
@@ -637,6 +689,45 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     assert "2026081701" not in persisted
     assert "memory-only-token" not in persisted
     assert "memory-only-root-key" not in persisted
+    expected_blocked_classes = {
+        "required_environment": "environment_blocked",
+        **{
+            stage: "implementation_blocked"
+            for stage in preflight.ALLOWED_PRE_EXECUTION_STAGES
+            if stage != "required_environment"
+        },
+    }
+    for stage in sorted(preflight.ALLOWED_PRE_EXECUTION_STAGES):
+        failing_stage[0] = stage
+        if stage == "required_environment":
+            monkeypatch.delenv("HF_TOKEN")
+        failure_root = tmp_path / f"pre-execution-{stage}"
+        exit_code, _receipt = (
+            entrypoint.execute_semantic_texture_operational_preflight_entrypoint(
+                observed_repository_revision="4" * 40,
+                run_id=f"semantic-texture-{stage}",
+                output_root=failure_root,
+            )
+        )
+        if stage == "required_environment":
+            monkeypatch.setenv("HF_TOKEN", "memory-only-token")
+        persisted_failure = json.loads(
+            (failure_root / server.RESULT_FILENAME).read_text(encoding="utf-8")
+        )
+        assert exit_code == 2
+        assert persisted_failure["schema_version"] == 2
+        assert persisted_failure["pre_execution_stage"] == stage
+        assert persisted_failure["blocked_class"] == expected_blocked_classes[stage]
+        assert all(
+            outcome["started"] is False
+            and outcome["blocked_class"] == expected_blocked_classes[stage]
+            and outcome["sanitized_error_message"] is None
+            and outcome["sanitized_trace_tail"] == []
+            for outcome in persisted_failure["unit_outcomes"]
+        )
+        assert "memory-only-token" not in json.dumps(persisted_failure)
+        assert str(tmp_path) not in json.dumps(persisted_failure)
+    failing_stage[0] = None
 
 
 @pytest.mark.parametrize("blocked_class", sorted(preflight.ALLOWED_BLOCKED_CLASSES))
@@ -647,36 +738,53 @@ def test_semantic_texture_operational_pre_execution_fault_classes_persist_zero_s
     configuration = preflight.load_semantic_texture_operational_configuration(
         ROOT / "configs/experiments/semantic_texture_operational_preflight.json"
     )
-    result = preflight.create_semantic_texture_operational_pre_execution_failure(
-        configuration,
-        observed_repository_revision="4" * 40,
-        run_id=f"pre-execution-{blocked_class}",
-        blocked_class=blocked_class,
-    )
-    output_root = tmp_path / blocked_class
-    exit_code, _receipt = server.finalize_semantic_texture_operational_preflight_delivery(
-        result,
-        output_root=output_root,
-    )
-    assert exit_code == 2
-    persisted = result.as_dict()
-    assert persisted["aggregate"] is None
-    assert persisted["science_started"] is False
-    assert persisted["scientific_unit_count"] == 0
-    assert all(
-        outcome["started"] is False
-        and outcome["blocked_class"] == blocked_class
-        and outcome["sanitized_error_category"] == blocked_class
-        and outcome["sanitized_error_message"] is None
-        and outcome["sanitized_trace_tail"] == []
-        for outcome in persisted["unit_outcomes"]
-    )
-    assert {path.name for path in output_root.iterdir()} == {
-        server.RESULT_FILENAME,
-        server.RECEIPT_FILENAME,
-        server.DELIVERY_COMPLETION_CHECKSUMS_FILENAME,
-        f"semantic_texture_operational_pre-execution-{blocked_class}.zip",
-    }
+    result_identities: set[str] = set()
+    for stage in sorted(preflight.ALLOWED_PRE_EXECUTION_STAGES):
+        run_id = f"pre-execution-{blocked_class}"
+        result = preflight.create_semantic_texture_operational_pre_execution_failure(
+            configuration,
+            observed_repository_revision="4" * 40,
+            run_id=run_id,
+            blocked_class=blocked_class,
+            pre_execution_stage=stage,
+        )
+        output_root = tmp_path / f"{blocked_class}-{stage}"
+        exit_code, receipt = server.finalize_semantic_texture_operational_preflight_delivery(
+            result,
+            output_root=output_root,
+        )
+        assert exit_code == 2
+        persisted = result.as_dict()
+        result_identities.add(persisted["result_identity"])
+        assert persisted["schema_version"] == 2
+        assert persisted["pre_execution_stage"] == stage
+        assert receipt["pre_execution_stage"] == stage
+        assert persisted["aggregate"] is None
+        assert persisted["science_started"] is False
+        assert persisted["scientific_unit_count"] == 0
+        assert all(
+            outcome["started"] is False
+            and outcome["blocked_class"] == blocked_class
+            and outcome["sanitized_error_category"] == blocked_class
+            and outcome["sanitized_error_message"] is None
+            and outcome["sanitized_trace_tail"] == []
+            for outcome in persisted["unit_outcomes"]
+        )
+        assert {path.name for path in output_root.iterdir()} == {
+            server.RESULT_FILENAME,
+            server.RECEIPT_FILENAME,
+            server.DELIVERY_COMPLETION_CHECKSUMS_FILENAME,
+            f"semantic_texture_operational_{run_id}.zip",
+        }
+        for invalid_stage in (None, "unknown_pre_execution_stage"):
+            invalid = dict(persisted)
+            invalid["pre_execution_stage"] = invalid_stage
+            with pytest.raises(server.SemanticTextureOperationalServerError):
+                server.finalize_semantic_texture_operational_preflight_delivery(
+                    _BlockedResult(invalid),
+                    output_root=tmp_path / f"invalid-{blocked_class}-{stage}-{invalid_stage}",
+                )
+    assert len(result_identities) == len(preflight.ALLOWED_PRE_EXECUTION_STAGES)
 
 
 def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive_delivery_bound() -> None:

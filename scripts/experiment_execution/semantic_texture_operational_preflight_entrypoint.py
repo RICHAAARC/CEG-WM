@@ -101,6 +101,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
     configuration = _RUNNER.load_semantic_texture_operational_configuration(
         CONFIGURATION_PATH
     )
+    pre_execution_stage = "required_environment"
     try:
         hf_token = os.environ.get("HF_TOKEN")
         root_key = os.environ.get("CEG_WM_ROOT_KEY")
@@ -118,6 +119,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
         persistent_root = _required_environment_path("CEG_WM_PERSISTENT_ROOT")
         if str(source_root) not in sys.path:
             sys.path.insert(0, str(source_root))
+        pre_execution_stage = "runtime_backend_construction"
         backend = Sd35PipelineBackend(
             cache_root=cache_root,
             persistent_root=persistent_root,
@@ -125,15 +127,19 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             prompt=configuration.generation_prompt,
             negative_prompt=configuration.generation_negative_prompt,
         )
+        pre_execution_stage = "runtime_configuration"
         runtime_adapter = create_runtime_adapter(
             backend,
             RUNTIME_CONFIGURATION_PATH,
         )
+        pre_execution_stage = "runtime_initialization"
         runtime_session = runtime_adapter.initialize("cuda")
+        pre_execution_stage = "semantic_runtime_initialization"
         semantic_runtime = InspyrenetSemanticRuntime(
             checkpoint_path,
             selected_device=runtime_session.selected_device,
         )
+        pre_execution_stage = "experiment_adapter_initialization"
         adapter_configuration = load_ceg_wm_experiment_adapter_configuration(
             ADAPTER_CONFIGURATION_PATH
         )
@@ -141,6 +147,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             adapter_configuration,
             runtime_adapter,
         )
+        pre_execution_stage = "latent_preparation"
         latent_generator = torch.Generator(device="cpu")
         latent_generator.manual_seed(configuration.generation_seed)
         base_latent_cpu = torch.randn(
@@ -158,6 +165,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             device=runtime_session.selected_device,
             dtype=torch.float16,
         )
+        pre_execution_stage = "runner_admission"
         result = _RUNNER.execute_semantic_texture_operational_preflight(
             adapter,
             configuration,
@@ -173,6 +181,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             observed_repository_revision=observed_repository_revision,
             run_id=run_id,
             blocked_class=_pre_execution_blocked_class(error),
+            pre_execution_stage=pre_execution_stage,
         )
     return delivery_server.finalize_semantic_texture_operational_preflight_delivery(
         result,

@@ -11,6 +11,10 @@ import re
 from typing import Sequence
 from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
+from experiments.runners.semantic_texture_operational_preflight import (
+    ALLOWED_PRE_EXECUTION_STAGES,
+)
+
 
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -41,6 +45,7 @@ RESULT_FIELDS = frozenset(
         "model_id",
         "model_revision",
         "observed_repository_revision",
+        "pre_execution_stage",
         "profile_id",
         "result_identity",
         "run_id",
@@ -113,7 +118,7 @@ def _validated_result(result: object) -> dict[str, object]:
         or set(value) != RESULT_FIELDS
         or value.get("profile_id") != "semantic_texture_operational_preflight"
         or type(value.get("schema_version")) is not int
-        or value.get("schema_version") != 1
+        or value.get("schema_version") != 2
         or value.get("status") != "blocked"
         or value.get("aggregate") is not None
         or value.get("asset_authority_status") != "identity_blocked"
@@ -182,7 +187,9 @@ def _validated_result(result: object) -> dict[str, object]:
     )
     if pre_execution_failure:
         if (
-            write_outcome["status"] != "blocked"
+            value.get("pre_execution_stage") not in ALLOWED_PRE_EXECUTION_STAGES
+            or type(value["pre_execution_stage"]) is not str
+            or write_outcome["status"] != "blocked"
             or write_outcome["blocked_class"] not in BLOCKED_CLASSES
             or write_outcome["sanitized_error_category"]
             != write_outcome["blocked_class"]
@@ -194,6 +201,10 @@ def _validated_result(result: object) -> dict[str, object]:
             raise SemanticTextureOperationalServerError(
                 "pre-execution unit boundary drifted"
             )
+    elif value.get("pre_execution_stage") is not None:
+        raise SemanticTextureOperationalServerError(
+            "started unit result retains a pre-execution stage"
+        )
     elif write_outcome["started"] is not True:
         raise SemanticTextureOperationalServerError(
             "write unit start identity drifted"
@@ -294,6 +305,7 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "observed_repository_revision": result_value[
             "observed_repository_revision"
         ],
+        "pre_execution_stage": result_value["pre_execution_stage"],
         "profile_id": result_value["profile_id"],
         "result_filename": result_path.name,
         "result_identity": result_identity,

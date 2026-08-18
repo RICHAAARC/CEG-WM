@@ -14,7 +14,7 @@ from typing import Callable
 from experiments.methods import CegWmExperimentAdapter
 
 
-PREFLIGHT_SCHEMA_VERSION = 1
+PREFLIGHT_SCHEMA_VERSION = 2
 PREFLIGHT_PROFILE_ID = "semantic_texture_operational_preflight"
 WRITE_UNIT_ID = "semantic_texture_write_operational"
 BLIND_DETECTION_UNIT_ID = "semantic_texture_blind_detection_operational"
@@ -26,6 +26,18 @@ ALLOWED_BLOCKED_CLASSES = frozenset(
         "implementation_blocked",
         "identity_blocked",
         "integrity_blocked",
+    }
+)
+ALLOWED_PRE_EXECUTION_STAGES = frozenset(
+    {
+        "required_environment",
+        "runtime_backend_construction",
+        "runtime_configuration",
+        "runtime_initialization",
+        "semantic_runtime_initialization",
+        "experiment_adapter_initialization",
+        "latent_preparation",
+        "runner_admission",
     }
 )
 ASSET_AUTHORITY_STATUS = "identity_blocked"
@@ -117,6 +129,7 @@ class SemanticTextureOperationalResult:
     asset_authority_status: str
     model_id: str
     model_revision: str
+    pre_execution_stage: str | None
     unit_outcomes: tuple[OperationalUnitOutcome, OperationalUnitOutcome]
     aggregate: None
     blocked_class: str
@@ -139,6 +152,7 @@ class SemanticTextureOperationalResult:
             "model_id": self.model_id,
             "model_revision": self.model_revision,
             "observed_repository_revision": self.observed_repository_revision,
+            "pre_execution_stage": self.pre_execution_stage,
             "profile_id": self.profile_id,
             "result_identity": self.result_identity,
             "run_id": self.run_id,
@@ -354,6 +368,7 @@ def _operational_result(
     *,
     observed_repository_revision: str,
     run_id: str,
+    pre_execution_stage: str | None,
     write_outcome: OperationalUnitOutcome,
     detector_outcome: OperationalUnitOutcome,
 ) -> SemanticTextureOperationalResult:
@@ -374,6 +389,18 @@ def _operational_result(
         raise SemanticTextureOperationalPreflightError(
             "result blocked classification drifted"
         )
+    pre_execution_failure = (
+        write_outcome.started is False and detector_outcome.started is False
+    )
+    if pre_execution_failure:
+        if pre_execution_stage not in ALLOWED_PRE_EXECUTION_STAGES:
+            raise SemanticTextureOperationalPreflightError(
+                "pre-execution stage is not registered"
+            )
+    elif pre_execution_stage is not None:
+        raise SemanticTextureOperationalPreflightError(
+            "started operational result retains a pre-execution stage"
+        )
     unsigned = {
         "aggregate": None,
         "asset_authority_status": configuration.asset_authority_status,
@@ -381,6 +408,7 @@ def _operational_result(
         "candidate_promoted": False,
         "configuration_digest": configuration.configuration_digest,
         "formal_tau_created": False,
+        "pre_execution_stage": pre_execution_stage,
         "profile_id": configuration.profile_id,
         "run_id": run_id,
         "schema_version": configuration.schema_version,
@@ -402,6 +430,7 @@ def _operational_result(
         asset_authority_status=configuration.asset_authority_status,
         model_id=configuration.model_id,
         model_revision=configuration.model_revision,
+        pre_execution_stage=pre_execution_stage,
         unit_outcomes=(write_outcome, detector_outcome),
         aggregate=None,
         blocked_class=blocked_class,
@@ -426,6 +455,7 @@ def create_semantic_texture_operational_pre_execution_failure(
     observed_repository_revision: str,
     run_id: str,
     blocked_class: str,
+    pre_execution_stage: str,
 ) -> SemanticTextureOperationalResult:
     """Create the fixed two-unstarted outcome before trusted execution begins."""
 
@@ -437,6 +467,7 @@ def create_semantic_texture_operational_pre_execution_failure(
         configuration,
         observed_repository_revision=observed_repository_revision,
         run_id=run_id,
+        pre_execution_stage=pre_execution_stage,
         write_outcome=_unit_failure(
             WRITE_UNIT_ID,
             started=False,
@@ -535,6 +566,7 @@ def execute_semantic_texture_operational_preflight(
         configuration,
         observed_repository_revision=observed_repository_revision,
         run_id=run_id,
+        pre_execution_stage=None,
         write_outcome=write_outcome,
         detector_outcome=detector_outcome,
     )
@@ -542,6 +574,7 @@ def execute_semantic_texture_operational_preflight(
 
 __all__ = [
     "ALLOWED_BLOCKED_CLASSES",
+    "ALLOWED_PRE_EXECUTION_STAGES",
     "ASSET_AUTHORITY_STATUS",
     "BLIND_DETECTION_UNIT_ID",
     "OperationalUnitOutcome",

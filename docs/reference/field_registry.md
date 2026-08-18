@@ -50,6 +50,7 @@ Notebook 与 repository module 的跨边界数据
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | run_id | persisted_protocol | protocol | none | true | false | false | 一次运行的稳定标识。 |
 | drive_delivery_complete | persisted_protocol | provenance | none | true | false | false | Notebook transport quartet 是否已完整 create-only 落位到 Drive 的证据；仅描述交付完成，不表示 unit、science、promotion 或方法成功。 |
+| pre_execution_stage | persisted_protocol | runtime_state | none | false | false | false | 两个 operational unit 均未启动时的有限预执行阶段；不含错误文本、traceback、路径、token、cache/checkpoint/model 细节，且不构成因果科学 claim。 |
 | record_id | persisted_protocol | protocol | none | true | false | false | 单条记录的稳定标识。 |
 | split | persisted_protocol | protocol | none | true | false | false | 数据或事件划分。 |
 | method_name | persisted_protocol | protocol | none | true | false | false | 实验记录中的方法名称。 |
