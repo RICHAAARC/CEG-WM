@@ -275,6 +275,11 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
     )
     fake_diffusers = SimpleNamespace(StableDiffusion3Pipeline=object)
     monkeypatch.setattr(bootstrap.sys, "version_info", (3, 12, 0))
+    launch_path = [
+        str(repository / "scripts/experiment_execution"),
+        "/controlled-ambient-import-root",
+    ]
+    monkeypatch.setattr(bootstrap.sys, "path", launch_path)
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setitem(sys.modules, "diffusers", fake_diffusers)
     monkeypatch.setattr(bootstrap.metadata, "version", version)
@@ -359,6 +364,12 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
         "timm.layers",
         "runtime._vendor.transparent_background.InSPyReNet",
     ]
+    assert bootstrap.sys.path[:2] == [
+        str(execution_root / "dependencies"),
+        str(repository),
+    ]
+    assert bootstrap.sys.path.count(str(execution_root / "dependencies")) == 1
+    assert bootstrap.sys.path.count(str(repository)) == 1
     assert "CEG_WM_INSPYRENET_SOURCE_ROOT" not in expected_environment
     assert all(call[1] == repository for call in checked_calls)
     assert all(call[2] == expected_environment for call in checked_calls)

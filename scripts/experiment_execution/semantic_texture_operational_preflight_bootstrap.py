@@ -206,10 +206,11 @@ def _require_ambient_colab_core() -> None:
         raise SemanticTextureOperationalBootstrapError("environment_blocked") from None
 
 
-def _require_overlay_imports(dependency_root: Path) -> None:
+def _require_overlay_imports(repository_root: Path, dependency_root: Path) -> None:
     try:
-        if str(dependency_root) not in sys.path:
-            sys.path.insert(0, str(dependency_root))
+        import_roots = (str(dependency_root), str(repository_root))
+        sys.path[:] = [entry for entry in sys.path if entry not in import_roots]
+        sys.path[:0] = import_roots
         if any(metadata.version(name) != version for name, version in _OVERLAY_PACKAGE_VERSIONS.items()):
             raise ValueError
         importlib.import_module("cv2")
@@ -372,7 +373,7 @@ def bootstrap_semantic_texture_operational_preflight(
                 cwd=repository,
                 environment=environment,
             )
-            _require_overlay_imports(root / "dependencies")
+            _require_overlay_imports(repository, root / "dependencies")
         command = [
             sys.executable,
             str(
