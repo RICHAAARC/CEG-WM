@@ -589,10 +589,31 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert first_cell["metadata"] == {}
     assert first_cell["execution_count"] is None
     assert first_cell["outputs"] == []
-    assert first_cell["source"] == [
-        "from google.colab import drive\n",
-        'drive.mount("/content/drive")\n',
+    assert first_cell["source"][0] == "from google.colab import drive\n"
+    first_cell_syntax = ast.parse("".join(first_cell["source"]))
+    assert len(first_cell_syntax.body) == 2
+    mount_import, mount_expression = first_cell_syntax.body
+    assert isinstance(mount_import, ast.ImportFrom)
+    assert mount_import.module == "google.colab"
+    assert [(alias.name, alias.asname) for alias in mount_import.names] == [
+        ("drive", None)
     ]
+    assert isinstance(mount_expression, ast.Expr)
+    assert isinstance(mount_expression.value, ast.Call)
+    first_mount_call = mount_expression.value
+    assert isinstance(first_mount_call.func, ast.Attribute)
+    assert isinstance(first_mount_call.func.value, ast.Name)
+    assert first_mount_call.func.value.id == "drive"
+    assert first_mount_call.func.attr == "mount"
+    assert len(first_mount_call.args) == 1
+    assert first_mount_call.keywords == []
+    assert isinstance(first_mount_call.args[0], ast.Constant)
+    assert isinstance(first_mount_call.args[0].value, str)
+    assert Path(first_mount_call.args[0].value).parts == (
+        "/",
+        "content",
+        "drive",
+    )
     assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
     assert 'PROJECT_BRANCH = "main"' in code_source
     assert "PROJECT_REVISION" not in code_source
