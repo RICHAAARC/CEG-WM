@@ -6,8 +6,11 @@ import ast
 from dataclasses import replace
 import json
 from pathlib import Path
+import shutil
 from struct import pack, unpack
+import subprocess
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 
@@ -26,6 +29,7 @@ from experiments.protocol.semantic_texture_soft_detector_assets import (
     WHITENING_FIT_ROLE,
     SemanticTextureSoftDetectorAssetProtocolError,
     SemanticTextureSoftDetectorAssetBundle,
+    canonical_digest,
     load_manifest,
     validate_partition_disjointness,
 )
@@ -42,6 +46,9 @@ from main import (
 )
 from scripts.experiment_execution import (
     semantic_texture_soft_detector_asset_preparation_server as delivery_server,
+)
+from scripts.experiment_execution import (
+    build_semantic_texture_operational_preflight_package as package_builder,
 )
 
 
@@ -298,6 +305,51 @@ def test_semantic_texture_soft_detector_asset_manifests_and_bundle_fail_closed(
     assert receipt["diagnostic_only"] is True
     assert receipt["science_started"] is False
 
+    package_repository = tmp_path / "package-repository"
+    package_repository.mkdir()
+    source_root = Path(__file__).resolve().parents[2]
+    for relative in package_builder.EXACT_SOURCE_FILES:
+        source, target = source_root / relative, package_repository / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    for command in (
+        ("init", "--quiet"),
+        ("branch", "-m", "main"),
+        ("config", "user.name", "Phase-B Asset Test"),
+        ("config", "user.email", "phase-b@example.invalid"),
+        ("add", "."),
+        ("commit", "--quiet", "-m", "asset fixture"),
+    ):
+        subprocess.run(("git", *command), cwd=package_repository, check=True)
+    revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=package_repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    package = tmp_path / "asset-package.zip"
+    package_builder.build_semantic_texture_operational_preflight_package(
+        repository_root=package_repository,
+        source_revision=revision,
+        output=package,
+    )
+    extracted_package = tmp_path / "asset-package"
+    with ZipFile(package) as archive:
+        archive.extractall(extracted_package)
+    extracted_configs = extracted_package / "configs/experiments"
+    assert (extracted_configs / "hf_only_reference_prompt_roster.json").is_file()
+    load_manifest(
+        extracted_configs / "semantic_texture_soft_detector_whitening_fit_manifest.json",
+        expected_role=WHITENING_FIT_ROLE,
+        count=WHITENING_FIT_COUNT,
+    )
+    load_manifest(
+        extracted_configs / "semantic_texture_soft_detector_branch_null_manifest.json",
+        expected_role=BRANCH_NULL_ROLE,
+        count=BRANCH_NULL_COUNT,
+    )
+
     persisted = json.loads((root / delivery_server.BUNDLE_FILENAME).read_text("utf-8"))
     loaded_bundle = SemanticTextureSoftDetectorAssetBundle.from_mapping(persisted)
     loaded_asset, loaded_hf, loaded_lf = (
@@ -315,6 +367,22 @@ def test_semantic_texture_soft_detector_asset_manifests_and_bundle_fail_closed(
     tampered["unexpected"] = True
     with pytest.raises(SemanticTextureSoftDetectorAssetProtocolError):
         SemanticTextureSoftDetectorAssetBundle.from_mapping(tampered)
+    tampered = json.loads(json.dumps(persisted))
+    tampered["whitening_asset_payload"]["weights_binary32_be_hex"][0] = "3f800001"
+    tampered["bundle_digest"] = canonical_digest(
+        {key: value for key, value in tampered.items() if key != "bundle_digest"}
+    )
+    with pytest.raises(SemanticTextureSoftDetectorAssetProtocolError):
+        SemanticTextureSoftDetectorAssetBundle.from_mapping(tampered)
+
+    server_source = Path(delivery_server.__file__).read_text(encoding="utf-8")
+    assert ".write_bytes(" not in server_source
+    assert server_source.count("_write_exclusive(") == 8
+    collision = tmp_path / "exclusive-collision"
+    collision.write_text("existing", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        delivery_server._write_exclusive(collision, b"replacement")
+    assert collision.read_text(encoding="utf-8") == "existing"
 
     captured: dict[str, tuple[float, ...]] = {}
     monkeypatch.setattr(

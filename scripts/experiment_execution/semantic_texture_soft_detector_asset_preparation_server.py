@@ -38,6 +38,11 @@ def _zip_info(name: str) -> ZipInfo:
     return info
 
 
+def _write_exclusive(path: Path, content: bytes) -> None:
+    with path.open("xb") as handle:
+        handle.write(content)
+
+
 def finalize_semantic_texture_soft_detector_asset_delivery(
     bundle: SemanticTextureSoftDetectorAssetBundle,
     *,
@@ -75,8 +80,8 @@ def finalize_semantic_texture_soft_detector_asset_delivery(
     }
     result_blob = _canonical_bytes(result)
     bundle_path, result_path = root / BUNDLE_FILENAME, root / RESULT_FILENAME
-    bundle_path.write_bytes(bundle_blob)
-    result_path.write_bytes(result_blob)
+    _write_exclusive(bundle_path, bundle_blob)
+    _write_exclusive(result_path, result_blob)
     archive_path = root / f"semantic_texture_soft_detector_assets_{bundle.bundle_digest}.zip"
     with ZipFile(archive_path, "x", compression=ZIP_STORED) as archive:
         archive.writestr(_zip_info(RESULT_FILENAME), result_blob)
@@ -101,14 +106,14 @@ def finalize_semantic_texture_soft_detector_asset_delivery(
     }
     receipt_blob = _canonical_bytes(receipt)
     receipt_path = root / RECEIPT_FILENAME
-    receipt_path.write_bytes(receipt_blob)
+    _write_exclusive(receipt_path, receipt_blob)
     checksums_blob = (
         f"{digest(bundle_blob)}  {BUNDLE_FILENAME}\n"
         f"{digest(result_blob)}  {RESULT_FILENAME}\n"
         f"{receipt['zip_sha256']}  {archive_path.name}\n"
         f"{digest(receipt_blob)}  {RECEIPT_FILENAME}\n"
     ).encode("ascii")
-    (root / CHECKSUMS_FILENAME).write_bytes(checksums_blob)
+    _write_exclusive(root / CHECKSUMS_FILENAME, checksums_blob)
     return 0, {
         **receipt,
         "receipt_filename": RECEIPT_FILENAME,
@@ -145,16 +150,16 @@ def finalize_semantic_texture_soft_detector_asset_blocked_delivery(
     }
     result_blob = _canonical_bytes(result)
     result_path = root / RESULT_FILENAME
-    result_path.write_bytes(result_blob)
+    _write_exclusive(result_path, result_blob)
     archive_path = root / f"semantic_texture_soft_detector_assets_{run_id}.zip"
     with ZipFile(archive_path, "x", compression=ZIP_STORED) as archive:
         archive.writestr(_zip_info(RESULT_FILENAME), result_blob)
     receipt = {**result, "result_filename": RESULT_FILENAME, "result_sha256": sha256(result_blob).hexdigest(), "zip_filename": archive_path.name, "zip_sha256": sha256(archive_path.read_bytes()).hexdigest()}
     receipt_blob = _canonical_bytes(receipt)
     receipt_path = root / RECEIPT_FILENAME
-    receipt_path.write_bytes(receipt_blob)
+    _write_exclusive(receipt_path, receipt_blob)
     checksums_blob = (f"{sha256(result_blob).hexdigest()}  {RESULT_FILENAME}\n{receipt['zip_sha256']}  {archive_path.name}\n{sha256(receipt_blob).hexdigest()}  {RECEIPT_FILENAME}\n").encode("ascii")
-    (root / CHECKSUMS_FILENAME).write_bytes(checksums_blob)
+    _write_exclusive(root / CHECKSUMS_FILENAME, checksums_blob)
     return 2, {**receipt, "receipt_filename": RECEIPT_FILENAME, "receipt_sha256": sha256(receipt_blob).hexdigest(), "sha256sums_filename": CHECKSUMS_FILENAME, "sha256sums_sha256": sha256(checksums_blob).hexdigest()}
 
 

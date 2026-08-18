@@ -430,6 +430,10 @@ class SemanticTextureSoftDetectorAssetBundle:
             manifest_digest=self.whitening_manifest_digest,
             carrier_digest=self.lf_carrier_config_digest,
         )
+        if canonical_digest(self.whitening_asset_payload) != self.whitening_asset_digest:
+            raise SemanticTextureSoftDetectorAssetProtocolError(
+                "whitening asset digest drifted"
+            )
         if (
             type(self.hf_null_payload) is not SemanticTextureBranchNullPayload
             or type(self.lf_null_payload) is not SemanticTextureBranchNullPayload

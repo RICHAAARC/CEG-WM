@@ -50,6 +50,7 @@ SOURCE_TO_ARCHIVE_PATH = {
 EXACT_SOURCE_FILES = frozenset(
     {
         CONFIG_PATH,
+        "configs/experiments/hf_only_reference_prompt_roster.json",
         "configs/experiments/semantic_texture_soft_detector_asset_preparation.json",
         "configs/experiments/semantic_texture_soft_detector_branch_null_manifest.json",
         "configs/experiments/semantic_texture_soft_detector_whitening_fit_manifest.json",
