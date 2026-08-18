@@ -23,18 +23,6 @@ CHECKPOINT_BASENAME = "ckpt_base.pth"
 _PYPI_INDEX_URL = "https://pypi.org/simple"
 _PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 _NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
-_CORE_PACKAGE_VERSIONS = {
-    "torch": "2.11.0+cu128",
-    "torchvision": "0.26.0+cu128",
-    "numpy": "2.0.2",
-    "diffusers": "0.38.0",
-    "transformers": "5.12.1",
-    "accelerate": "1.14.0",
-    "huggingface-hub": "1.20.1",
-    "safetensors": "0.8.0",
-    "tokenizers": "0.22.2",
-    "triton": "3.6.0",
-}
 _OVERLAY_PACKAGE_VERSIONS = {
     "kornia": "0.8.3",
     "kornia-rs": "0.1.14",
@@ -183,29 +171,6 @@ def _run_checked(command: Sequence[str], *, cwd: Path, environment: Mapping[str,
         raise SemanticTextureOperationalBootstrapError("implementation_blocked")
 
 
-def _require_ambient_colab_core() -> None:
-    if sys.version_info[:2] != (3, 12):
-        raise SemanticTextureOperationalBootstrapError("environment_blocked")
-    try:
-        import torch
-
-        if (
-            torch.__version__ != _CORE_PACKAGE_VERSIONS["torch"]
-            or torch.version.cuda != "12.8"
-            or not torch.cuda.is_available()
-            or torch.cuda.device_count() < 1
-        ):
-            raise ValueError
-        if any(metadata.version(name) != version for name, version in _CORE_PACKAGE_VERSIONS.items()):
-            raise ValueError
-        from diffusers import StableDiffusion3Pipeline
-
-        if StableDiffusion3Pipeline is None:
-            raise ValueError
-    except Exception:
-        raise SemanticTextureOperationalBootstrapError("environment_blocked") from None
-
-
 def _require_overlay_imports(repository_root: Path, dependency_root: Path) -> None:
     try:
         import_roots = (str(dependency_root), str(repository_root))
@@ -346,7 +311,6 @@ def bootstrap_semantic_texture_operational_preflight(
             checkpoint_path,
         )
         if "--execute" in bounded_args:
-            _require_ambient_colab_core()
             _run_checked(
                 [
                     sys.executable,

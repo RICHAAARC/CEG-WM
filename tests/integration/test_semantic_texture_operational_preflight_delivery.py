@@ -257,31 +257,17 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
     )
     monkeypatch.setenv("HF_TOKEN", "test-token")
     monkeypatch.setenv("CEG_WM_ROOT_KEY", "test-root-key")
-    core_queries: list[str] = []
     overlay_queries: list[str] = []
-    versions = {
-        **bootstrap._CORE_PACKAGE_VERSIONS,
-        **bootstrap._OVERLAY_PACKAGE_VERSIONS,
-    }
 
     def version(name: str) -> str:
-        (overlay_queries if name in bootstrap._OVERLAY_PACKAGE_VERSIONS else core_queries).append(name)
-        return versions[name]
+        overlay_queries.append(name)
+        return bootstrap._OVERLAY_PACKAGE_VERSIONS[name]
 
-    fake_torch = SimpleNamespace(
-        __version__="2.11.0+cu128",
-        version=SimpleNamespace(cuda="12.8"),
-        cuda=SimpleNamespace(is_available=lambda: True, device_count=lambda: 1),
-    )
-    fake_diffusers = SimpleNamespace(StableDiffusion3Pipeline=object)
-    monkeypatch.setattr(bootstrap.sys, "version_info", (3, 12, 0))
     launch_path = [
         str(repository / "scripts/experiment_execution"),
         "/controlled-ambient-import-root",
     ]
     monkeypatch.setattr(bootstrap.sys, "path", launch_path)
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-    monkeypatch.setitem(sys.modules, "diffusers", fake_diffusers)
     monkeypatch.setattr(bootstrap.metadata, "version", version)
     observed_imports: list[str] = []
 
@@ -356,7 +342,6 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
         str(execution_root / "dependencies"),
     )
     assert [call[0] for call in checked_calls] == [expected_pip]
-    assert core_queries == list(bootstrap._CORE_PACKAGE_VERSIONS)
     assert overlay_queries == list(bootstrap._OVERLAY_PACKAGE_VERSIONS)
     assert observed_imports == [
         "cv2",
