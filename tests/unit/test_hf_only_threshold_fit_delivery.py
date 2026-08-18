@@ -748,7 +748,13 @@ def test_experiment_execution_readme_excludes_non_hf_only_threshold_fit_gpu_exec
         ROOT / "scripts/experiment_execution/README.md"
     ).read_text(encoding="utf-8")
     assert "semantic_texture_operational_preflight.ipynb" in readme
-    assert "当前唯一授权 entrypoint" in readme
+    assert "The current user-only sequence has exactly two entrypoints:" in readme
+    assert "semantic_texture_soft_detector_asset_preparation.ipynb" in readme
+    assert (
+        "only after source read-only authentication and exact bundle-identity binding"
+    ) in readme
+    assert "Neither step allows retry, fallback, or dynamic latest-bundle selection" in readme
+    assert "threshold, FPR, tau, promotion, or scientific claim" in readme
     assert "paused / not authorized" in readme
     assert "producer-bound records are not current science authority" in readme
     assert "remain only in Git ancestry" in readme

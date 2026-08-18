@@ -109,12 +109,15 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "LfDetectionResult",
         "LfNullWhitenedDetectionResult",
         "LfNullWhiteningAsset",
+        "NullScoreRecord",
         "PreparedLfWhitenedObservation",
         "PreparedLfWhitenedTemplate",
         "RoutingObservations",
         "SemanticTextureBranchNullCalibration",
         "SemanticTextureContentDetectionResult",
+        "SemanticTextureHfDetectionResult",
         "SemanticTextureLfWhiteningAsset",
+        "SemanticTextureLfDetectionResult",
         "SemanticTextureRoutingObservations",
         "SemanticTextureRoutingResult",
         "content_detector",
@@ -2612,10 +2615,18 @@ def test_experiment_method_adapter_imports_only_top_level_project_surfaces() -> 
                 "experiments",
             }:
                 project_modules.append(node.module)
-    assert set(project_modules) == {"main", "runtime"}
+    assert set(project_modules) == {
+        "main",
+        "runtime",
+        "experiments.protocol.semantic_texture_soft_detector_assets",
+    }
     assert all(
-        module in {"main", "runtime", "experiments.protocol"}
-        or module.startswith("experiments.protocol.")
+        module
+        in {
+            "main",
+            "runtime",
+            "experiments.protocol.semantic_texture_soft_detector_assets",
+        }
         for module in project_modules
     )
     assert "importlib" not in source

@@ -343,7 +343,17 @@ def test_lf_whitened_screening_readmes_expose_only_current_notebook() -> None:
         assert NOTEBOOK.name in source
         assert EXECUTION_REVISION in source
         assert RUN_ID in source
-        assert "当前唯一授权" in source
+        if path.parent.name == "colab":
+            assert "当前授权的用户流程固定为两步：先在" in source
+            assert "source 完成只读认证并以该 exact bundle identity 绑定后" in source
+            assert "不允许 retry、fallback 或动态 latest-bundle 选择" in source
+            assert "不产生 threshold、FPR、tau、promotion 或 scientific claim" in source
+        else:
+            assert "The current user-only sequence has exactly two entrypoints:" in source
+            assert "only after source read-only authentication and exact bundle-identity binding" in source
+            assert "Neither step allows retry, fallback, or dynamic latest-bundle selection" in source
+            assert "threshold, FPR, tau, promotion, or scientific claim" in source
+        assert "semantic_texture_soft_detector_asset_preparation.ipynb" in source
         assert "1 个 non-scientific operational" in normalized_source
         assert "32 个 clean null-fit" in normalized_source
         assert "8 个 paired raw-vs-whitened screening" in normalized_source
