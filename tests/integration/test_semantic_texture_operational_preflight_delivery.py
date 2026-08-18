@@ -581,14 +581,22 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     )
     assert notebook["nbformat"] == 4
     assert notebook["metadata"]["accelerator"] == "GPU"
-    assert len(code_cells) == 3
+    assert len(code_cells) == 4
     assert all(cell["execution_count"] is None for cell in code_cells)
     assert all(cell.get("outputs", []) == [] for cell in notebook["cells"])
+    first_cell = notebook["cells"][0]
+    assert first_cell["cell_type"] == "code"
+    assert first_cell["metadata"] == {}
+    assert first_cell["execution_count"] is None
+    assert first_cell["outputs"] == []
+    assert first_cell["source"] == [
+        "from google.colab import drive\n",
+        'drive.mount("/content/drive")\n',
+    ]
     assert "https://github.com/RICHAAARC/CEG-WM.git" in code_source
     assert 'PROJECT_BRANCH = "main"' in code_source
-    assert code_source.count(
-        'PROJECT_REVISION = "4c9194aec40133495a66a6e29538dcfe50ee53bc"'
-    ) == 1
+    assert "PROJECT_REVISION" not in code_source
+    assert '"git", "reset"' not in code_source
     assert "MyDrive/CEG-WM/models/inspyrenet/ckpt_base.pth" in code_source
     notebook_syntax = ast.parse(code_source)
     drive_mount_calls = [
@@ -610,7 +618,7 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert Path(drive_mount_argument.value).parts == ("/", "content", "drive")
     assert 'userdata.get("HF_TOKEN")' in code_source
     assert 'userdata.get("CEG_WM_ROOT_KEY")' in code_source
-    assert code_source.count("subprocess.run(") == 4
+    assert code_source.count("subprocess.run(") == 3
     subprocess_calls = [
         node
         for node in ast.walk(notebook_syntax)
@@ -631,23 +639,6 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
         and isinstance(node.args[0].elts[1], ast.Constant)
         and node.args[0].elts[1].value == "clone"
     )
-    reset_call = next(
-        node
-        for node in subprocess_calls
-        if len(node.args) == 1
-        and isinstance(node.args[0], ast.List)
-        and [
-            item.value if isinstance(item, ast.Constant) else item.id if isinstance(item, ast.Name) else None
-            for item in node.args[0].elts
-        ] == ["git", "reset", "--hard", "PROJECT_REVISION"]
-    )
-    reset_keywords = {keyword.arg: keyword.value for keyword in reset_call.keywords}
-    assert isinstance(reset_keywords["cwd"], ast.Name)
-    assert reset_keywords["cwd"].id == "checkout_root"
-    assert isinstance(reset_keywords["check"], ast.Constant)
-    assert reset_keywords["check"].value is True
-    assert isinstance(reset_keywords["capture_output"], ast.Constant)
-    assert reset_keywords["capture_output"].value is True
     observed_revision_assignment = next(
         node
         for node in ast.walk(notebook_syntax)
@@ -680,17 +671,10 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id == "bootstrap_command"
     )
-    assert clone_call.lineno < reset_call.lineno < observed_revision_assignment.lineno
+    assert clone_call.lineno < observed_revision_assignment.lineno
     assert observed_revision_assignment.lineno < checkpoint_copy_call.lineno
     assert observed_revision_assignment.lineno < min(node.lineno for node in secret_reads)
     assert observed_revision_assignment.lineno < bootstrap_assignment.lineno
-    assert "if observed_repository_revision != PROJECT_REVISION:" in code_source
-    assert (
-        '_persist_preclone_transport_failure(drive_export_root, run_id, "identity_blocked", '
-        "drive_delivery_complete=True, root_precreated=True)"
-        in code_source
-    )
-    assert 'raise RuntimeError("repository revision identity blocked") from None' in code_source
     assert '"git", "pull"' not in code_source
     assert '"git", "fetch"' not in code_source
     assert "retry" not in code_source
@@ -731,16 +715,8 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
         mount_run_id_assignments[0],
         mount_local_root_mkdir_calls[0],
     ):
-        assert (node.lineno, node.col_offset) < (
-            drive_mount_call.lineno,
-            drive_mount_call.col_offset,
-        )
+        assert drive_mount_call.lineno < node.lineno
     assert "fresh local root is required" in code_source
-    assert (
-        '_persist_preclone_transport_failure(mount_local_root / "transport-delivery", '
-        'mount_run_id, "environment_blocked", drive_delivery_complete=False)'
-        in code_source
-    )
     assert "for run_root_attempt in range(8):" in code_source
     assert 'run_id = "semantic-texture-operational-" + uuid4().hex' in code_source
     assert "exports_parent.mkdir(parents=True, exist_ok=True)" in code_source
