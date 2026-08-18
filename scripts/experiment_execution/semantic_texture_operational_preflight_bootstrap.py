@@ -19,7 +19,7 @@ PROJECT_REPOSITORY_URL = "https://github.com/RICHAAARC/CEG-WM.git"
 PROJECT_BRANCH = "main"
 CHECKPOINT_BASENAME = "ckpt_base.pth"
 _PYPI_INDEX_URL = "https://pypi.org/simple"
-_PYTORCH_CU128_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 _NVIDIA_INDEX_URL = "https://pypi.nvidia.com"
 TRANSPARENT_BACKGROUND_REPOSITORY_URL = (
     "https://github.com/plemeri/transparent-background.git"
@@ -304,7 +304,7 @@ def bootstrap_semantic_texture_operational_preflight(
                     "--index-url",
                     _PYPI_INDEX_URL,
                     "--extra-index-url",
-                    _PYTORCH_CU128_INDEX_URL,
+                    _PYTORCH_INDEX_URL,
                     "--extra-index-url",
                     _NVIDIA_INDEX_URL,
                     "--requirement",

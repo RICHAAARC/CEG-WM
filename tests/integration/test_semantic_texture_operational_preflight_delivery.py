@@ -298,7 +298,7 @@ def test_semantic_texture_preflight_bootstrap_uses_exact_dependency_and_source_c
         "--index-url",
         bootstrap._PYPI_INDEX_URL,
         "--extra-index-url",
-        bootstrap._PYTORCH_CU128_INDEX_URL,
+        bootstrap._PYTORCH_INDEX_URL,
         "--extra-index-url",
         bootstrap._NVIDIA_INDEX_URL,
         "--requirement",
