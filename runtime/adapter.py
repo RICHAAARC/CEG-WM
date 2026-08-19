@@ -404,7 +404,7 @@ class Sd35RuntimeAdapter:
                 "runtime backend raised an unexpected content_write_and_vae error"
             ) from exc
 
-    def _execute_semantic_texture_content_write_and_vae(
+    def execute_semantic_texture_content_write_and_vae(
         self,
         base_latent: torch.Tensor,
         semantic_runtime: InspyrenetSemanticRuntime,

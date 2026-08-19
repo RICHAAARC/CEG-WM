@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "protocol_id": "semantic_texture_soft_route_mechanism_validation",
+  "candidate_selection_manifest_path": "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json",
+  "candidate_selection_entries_digest": "5e270361246f7a591fa6423c5e3be360c17cf074a131ef6e1a61a684c74d8fb4",
+  "candidate_selection_manifest_digest": "55d0dff884155c087b6adb9895a621243669d8d89715f9dae7a54b0613576bec",
+  "untouched_confirmation_manifest_path": "configs/experiments/semantic_texture_soft_route_untouched_confirmation_manifest.json",
+  "untouched_confirmation_entries_digest": "0ebcec073a815d0f5f90cbb569d93b385ea85f5a641c7e335e27f10d1e694cad",
+  "untouched_confirmation_manifest_digest": "bd7f1f76a5eb39fc3b8fd225c806e4f189dda8d4adee4758ccb7ac6f3f7f16f1",
+  "asset_bundle_relative_path": "semantic_texture_soft_detector_assets/f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d/semantic_texture_soft_detector_asset_bundle.json",
+  "asset_bundle_digest": "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d",
+  "asset_bundle_sha256": "126f73150584d5c5a1e5b5e2dbffa9bb0379a9375c202ab49a87b56f99c41ea7",
+  "selection_artifact_relative_path": "semantic_texture_soft_route_mechanism_validation/candidate_selection/semantic_texture_soft_route_selection_artifact.json",
+  "alpha_selection_float64_hex": "0x1.999999999999ap-4",
+  "source_cluster_count": 32,
+  "maximum_record_attempts": 1,
+  "arms": [
+    "clean_unwatermarked",
+    "hf_only",
+    "lf_only",
+    "semantic_texture_soft_routed",
+    "semantic_texture_route_disabled"
+  ],
+  "attacks": [
+    {
+      "attack_id": "identity"
+    },
+    {
+      "attack_id": "crop",
+      "crop_fraction": 0.75
+    }
+  ],
+  "combined_relative_l2_numerator": 3,
+  "combined_relative_l2_denominator": 250,
+  "diagnostic_only": true,
+  "zero_science_boundary": {
+    "aggregate": null,
+    "candidate_promoted": false,
+    "formal_tau_created": false,
+    "formal_fpr_created": false,
+    "science_started": false,
+    "scientific_claims_supported": false,
+    "scientific_unit_count": 0
+  }
+}

@@ -1,0 +1,369 @@
+{
+  "entries": [
+    {
+      "generation_seed": 202608190200,
+      "image_lineage_digest": "a4e2f6ca132520565034d0f71c6f610f6efb7adb85151d596f57d9b4cee7e0b5",
+      "image_lineage_identity": "1b9feb3df294f4cad29a7baa81a7d9b44168db3e6168b34155720e1c4ec47793",
+      "manifest_cluster_label": "04bbd98676235b4ee1b4eae9e45bdad7e4f1a819f05e3d7c0d35bbb1cac84a74",
+      "prompt_digest": "36da4de0fc9727bbb34c38dedcfa0ee9c86941aae1b415e39867edc33d857d87",
+      "prompt_text": "a walnut",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "04bbd98676235b4ee1b4eae9e45bdad7e4f1a819f05e3d7c0d35bbb1cac84a74",
+      "source_row": 65
+    },
+    {
+      "generation_seed": 202608190201,
+      "image_lineage_digest": "c4b81c99e89fa48fbd04947e347b8cadf52c15746bbe46e7d45460a3f1bf41b4",
+      "image_lineage_identity": "e555166852ccf56084a86e1dc31629221f8f7aaaf0a7237c2a4f67cbf5b8693d",
+      "manifest_cluster_label": "8072ab283d48d3a7168f630fbdf3339e4bfd7c3b0f8fd284b24cbd68a106bb73",
+      "prompt_digest": "1d614c71f2913b195eab4f665573bdc67e8e180070485ae78b6dfe793a6c51b7",
+      "prompt_text": "a capybara",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "8072ab283d48d3a7168f630fbdf3339e4bfd7c3b0f8fd284b24cbd68a106bb73",
+      "source_row": 66
+    },
+    {
+      "generation_seed": 202608190202,
+      "image_lineage_digest": "7ff9d9206939b263bd6a63b229a312135ea7fc6f88b0de3965f8e07f57e89042",
+      "image_lineage_identity": "bff99d8fec247be2d343856d9ed59a42d500cb061abfc48dc3c84f1f1f8b1707",
+      "manifest_cluster_label": "16819c85eb722571363e84c1f0a81e4aadc2f50e3bc853fe591500daa85b54e9",
+      "prompt_digest": "5eab38126ecc1816f854cba08bbeb4ad01b39a896ad38f4a6e770074ee021b44",
+      "prompt_text": "a baby penguin",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "16819c85eb722571363e84c1f0a81e4aadc2f50e3bc853fe591500daa85b54e9",
+      "source_row": 67
+    },
+    {
+      "generation_seed": 202608190203,
+      "image_lineage_digest": "e0412734b30f8fb8ad5b80e3391d05dfd358409a0224cb7510c713ea24bd35fa",
+      "image_lineage_identity": "7b41c1ee79e6f8202f269689ef4a14ed20e4f649d8887ebbdef79a4387479568",
+      "manifest_cluster_label": "52a73586bc873f5556ca417f5a945309f6debd9d9a69660eac65f9c8dbd8eb87",
+      "prompt_digest": "333647b0ba64a61e1d029b21c7f92d9e59bc74952f8f54409cb7d3422042a5c8",
+      "prompt_text": "a cup of boba",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "52a73586bc873f5556ca417f5a945309f6debd9d9a69660eac65f9c8dbd8eb87",
+      "source_row": 68
+    },
+    {
+      "generation_seed": 202608190204,
+      "image_lineage_digest": "4c851723343d2171e02e2cc2a251065f16ce9326726dd0de6c11662e4bd7f542",
+      "image_lineage_identity": "c9e7104e4ea5bfff91ef2acd717eb6e51ed61372405cbddc4a3bffbd30eed142",
+      "manifest_cluster_label": "b966312baf25cbc820f8ff721d21021e2e3e622d44ea32acc48f9fb4365eb2d7",
+      "prompt_digest": "002c679fe2f308272aee2ab8fa74486a782f40808c925d972188a5cd58faf90c",
+      "prompt_text": "a photo of san francisco's golden gate bridge",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "b966312baf25cbc820f8ff721d21021e2e3e622d44ea32acc48f9fb4365eb2d7",
+      "source_row": 69
+    },
+    {
+      "generation_seed": 202608190205,
+      "image_lineage_digest": "eb7209336adfa7223f1b400a9f4684fd27b0aee48da32d2540c6e3e3d089581f",
+      "image_lineage_identity": "c2ca9f54716a976a413bfa92aafb38852152d9a5112041dbc2841951000c77a3",
+      "manifest_cluster_label": "2bbfcefba55f4bf7eebc82d0470e9bd0c90414a85c7061f19a183db3106e73df",
+      "prompt_digest": "b8037149ce3262bc58de2a0714597f82551f17ec2c67991d27aaad1beedc2435",
+      "prompt_text": "A picture of some food in the plate",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "2bbfcefba55f4bf7eebc82d0470e9bd0c90414a85c7061f19a183db3106e73df",
+      "source_row": 70
+    },
+    {
+      "generation_seed": 202608190206,
+      "image_lineage_digest": "5d936f0d4b2d7d77a5967534a3a9564fa04a919e9ce6576f3fe0a1d3faf3a9e7",
+      "image_lineage_identity": "f48d8258a045f380a0bf30897574949bffef7a8e22f1c52924aca10454eb6632",
+      "manifest_cluster_label": "db5751ab79a44c4e59dd2a1ddeb4483644ba40c11e26066ce36f41f1ba09f319",
+      "prompt_digest": "c47923ffc381bc1ea4182f11c3be01e6a7226f98a5c532f35f917ca290d29c35",
+      "prompt_text": "a chair",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "db5751ab79a44c4e59dd2a1ddeb4483644ba40c11e26066ce36f41f1ba09f319",
+      "source_row": 71
+    },
+    {
+      "generation_seed": 202608190207,
+      "image_lineage_digest": "43a294ad7c33ed1621d29fbcdfdc986fe25c30430bc61b02317d4967c8c04685",
+      "image_lineage_identity": "496b6979a08ef7435b6dc328da480754cebc143ec191689eb6715472c2d3a425",
+      "manifest_cluster_label": "6e2bf908a758f2871e99218d3011e7f5461ea2abd24cbd61305d6fb499a7a591",
+      "prompt_digest": "2a121d175fb89f0ecb1a29288aae78b813ee392e380c2bf785c742b729348dbd",
+      "prompt_text": "the Empire State Building",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "6e2bf908a758f2871e99218d3011e7f5461ea2abd24cbd61305d6fb499a7a591",
+      "source_row": 72
+    },
+    {
+      "generation_seed": 202608190208,
+      "image_lineage_digest": "d5aa0e5507392547916f0c28b96782a4aec8c1767d5d2e686a2988b768e65d75",
+      "image_lineage_identity": "51ac6624e3f4488aa3d110f592edd09d61a63ac297a4861f39e4efc53687dc07",
+      "manifest_cluster_label": "91fde8329bb64b6d9d0116d24a6df832365cea3bc817cbb13379761b890a4a9f",
+      "prompt_digest": "27dfc797efc48224191b918094bcf93c93d0c1ec4ec78bcf9c3b7ffa7e92afe6",
+      "prompt_text": "the Sydney Opera House",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "91fde8329bb64b6d9d0116d24a6df832365cea3bc817cbb13379761b890a4a9f",
+      "source_row": 73
+    },
+    {
+      "generation_seed": 202608190209,
+      "image_lineage_digest": "731485cc056f477c6acf0501179f96cefe480d615d68f55f2df2cd494c12c8c9",
+      "image_lineage_identity": "a140846750a48445250f64f8137c3184460c43f86a550ba17da429fcf6ff4248",
+      "manifest_cluster_label": "04bc83a22f8da631cce4c0868d510bf7e5451c6242d1cb235e2f6f187fa54ca1",
+      "prompt_digest": "86c789a519f4853ea247a16da94bbb7bf840b7d417dc616407566f96416937f3",
+      "prompt_text": "a hedgehog",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "04bc83a22f8da631cce4c0868d510bf7e5451c6242d1cb235e2f6f187fa54ca1",
+      "source_row": 74
+    },
+    {
+      "generation_seed": 202608190210,
+      "image_lineage_digest": "6873bb0869d66b4fe1ed0f2c3994ca4254fc7010e5e64122d4992a718fca8eab",
+      "image_lineage_identity": "d16fb69542bb26b957829f6dc16bb1e305ad73f4521d0776810188f2ed0ffac8",
+      "manifest_cluster_label": "abc6c39a5a795f3d2201084a58b6e391b4177a6b081d4024faa1e11aad684086",
+      "prompt_digest": "c766329dde04ee11cc9636051b3897ec7fbda380220f8e1ad46c3f0f46f23e7a",
+      "prompt_text": "a corgi",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "abc6c39a5a795f3d2201084a58b6e391b4177a6b081d4024faa1e11aad684086",
+      "source_row": 75
+    },
+    {
+      "generation_seed": 202608190211,
+      "image_lineage_digest": "4740bdc1602a160c6a9f7333bfd0b88886fc4c985cda16951fbda49388da097b",
+      "image_lineage_identity": "447e1f6181c7fef91f985f14f1be517be21661c1cb0eed64fc3763d89bbe5b6a",
+      "manifest_cluster_label": "85207bf2f4e8a0d43a0063313b444ae49cb959bd14c52f4bab8831e4d3513248",
+      "prompt_digest": "fac8ad7114bd5568be0cdf2df5961c06b70bc2064a8c2492d9218f61009d3ca4",
+      "prompt_text": "a robot",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "85207bf2f4e8a0d43a0063313b444ae49cb959bd14c52f4bab8831e4d3513248",
+      "source_row": 76
+    },
+    {
+      "generation_seed": 202608190212,
+      "image_lineage_digest": "f45991f0870426fb4140245476244d391bf9d27a26c6b68b3d613dad936062e2",
+      "image_lineage_identity": "77c64792966c9e59cd8ccaaa569c2c3321db8e79cd2e2f53bc1930c52b741441",
+      "manifest_cluster_label": "d3f87959e61fd67f3493caccfaff341d6cf5f35adaaa29909aa5acfc19aa2e41",
+      "prompt_digest": "23f49fcc0de8265d335010d6cb6f348fa9a4eb7add1163f1c9a67d28d1f8dbf1",
+      "prompt_text": "robots",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "d3f87959e61fd67f3493caccfaff341d6cf5f35adaaa29909aa5acfc19aa2e41",
+      "source_row": 77
+    },
+    {
+      "generation_seed": 202608190213,
+      "image_lineage_digest": "d7b93cd3d31b8cc9e07887482db54c00aac056ff3536e452fe5ad4d86531eaf3",
+      "image_lineage_identity": "b2bf19de7fc47b2ad0318c8775b8d7d519398fe5fd65f6108083e7a25a771e06",
+      "manifest_cluster_label": "5dd3ec1c89802cfaf3b77ec561d303cb5716f5a1d65aeb7b1575e6a553cdbea9",
+      "prompt_digest": "37264b9c11ab49e0796f02c928013de77b01e6b53453eeb8086136d8048aefc9",
+      "prompt_text": "a fall landscape",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "5dd3ec1c89802cfaf3b77ec561d303cb5716f5a1d65aeb7b1575e6a553cdbea9",
+      "source_row": 78
+    },
+    {
+      "generation_seed": 202608190214,
+      "image_lineage_digest": "4a5b7f4f2062fb4e4734b472cd797f221d5336d421ff629091e473b8f0a60f26",
+      "image_lineage_identity": "ac617a434703eb0a2ae628df3913ac84c3320d2f41d605f26547a11d4dff34c5",
+      "manifest_cluster_label": "d52280207eb26957e04818948d7afe018a9c3ea20d08929c7039bd67b98a532f",
+      "prompt_digest": "086c30b6f70a6e1c3d893782abb95e01bd034562c82a4485245928ab1cb9fa08",
+      "prompt_text": "a sunset",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "d52280207eb26957e04818948d7afe018a9c3ea20d08929c7039bd67b98a532f",
+      "source_row": 79
+    },
+    {
+      "generation_seed": 202608190215,
+      "image_lineage_digest": "207a76baadc9efbc73e7b2ddc5875fa9573e3763b26f8a9586d737d53e38ad31",
+      "image_lineage_identity": "db5b08369734504b051d664137f6c9bd9707cc8778d0a8e6fef6644231d85c10",
+      "manifest_cluster_label": "6b06d4b1691a3a00833e27594a269f7fb49cb8c37ced2f5ce377741666c16f6c",
+      "prompt_digest": "1cb78dba07d74a7bd0991ee37f386d08bf1b464436976c68ecc4367b8746ac90",
+      "prompt_text": "a boat",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "6b06d4b1691a3a00833e27594a269f7fb49cb8c37ced2f5ce377741666c16f6c",
+      "source_row": 80
+    },
+    {
+      "generation_seed": 202608190216,
+      "image_lineage_digest": "af4ae164e9b5930c2b6079bbff9ad558a6787f1e0ce4dd57f653603e2b046c7c",
+      "image_lineage_identity": "4443bfa9dd37335fe04ea0405afee5f0a7cd1b616490c03b50dd6b6934fc0cdb",
+      "manifest_cluster_label": "af6a85b96672596712ba963fb8c6b5307e2d46958264dcd43524d07462a3ff51",
+      "prompt_digest": "5ebbe2a2650a5e157c4f8e6720167485236ce883498722718171efe14efab41c",
+      "prompt_text": "a fox",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "af6a85b96672596712ba963fb8c6b5307e2d46958264dcd43524d07462a3ff51",
+      "source_row": 81
+    },
+    {
+      "generation_seed": 202608190217,
+      "image_lineage_digest": "4077311218cae6be1bd7ba6b82911ba89a4ddc3a26f7d3b7af84621c94c2813d",
+      "image_lineage_identity": "18578626dbab49d2989870c3d3e13ad2623c736ea9a8362c76e2ded25f12ded4",
+      "manifest_cluster_label": "2d18241a0ce48e01436883510deebbc2ae056137808dafa60edc3d9f3341c783",
+      "prompt_digest": "eb27712bbdf20a7b0641bdedcfe139c74b7e7bf363bbae7e280160a0c8024785",
+      "prompt_text": "a panda",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "2d18241a0ce48e01436883510deebbc2ae056137808dafa60edc3d9f3341c783",
+      "source_row": 83
+    },
+    {
+      "generation_seed": 202608190218,
+      "image_lineage_digest": "b03a887c01bcbed138faca7ced98d15aea33c6dde516ba31bd3c9da4bbbdd5c3",
+      "image_lineage_identity": "870558e15ae11488e123063c8820c07a5b41aec67c169230d451ea31f1911ed0",
+      "manifest_cluster_label": "ef57758dc0ed63b34666998dbe1a0823c004c8f7f5b5208164e3f6d3b5e18efa",
+      "prompt_digest": "8e377329ac544261032010ba766d972399e1ca95561e7e135cdc0e2e11b6e538",
+      "prompt_text": "a space elevator",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "ef57758dc0ed63b34666998dbe1a0823c004c8f7f5b5208164e3f6d3b5e18efa",
+      "source_row": 84
+    },
+    {
+      "generation_seed": 202608190219,
+      "image_lineage_digest": "63326f55d31020a3495f22929fce441e92e2b1f2aad1b448a5d4c8de0587d047",
+      "image_lineage_identity": "153c4a19bcc69f5cf8dddd83557aa1f596a89dca7bff91697f83c6a23787e7e8",
+      "manifest_cluster_label": "0175d8d3021ef92d19804297ee8fb1561ded3fedebfe887bfb81acf7096e3a86",
+      "prompt_digest": "a0d4a192d9a23ca05cbdf123572a298f1cd92cc35a23a1775528c39ba8dabb8e",
+      "prompt_text": "a city",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "0175d8d3021ef92d19804297ee8fb1561ded3fedebfe887bfb81acf7096e3a86",
+      "source_row": 85
+    },
+    {
+      "generation_seed": 202608190220,
+      "image_lineage_digest": "254530f8bd6a3dfe4ac1dacd26d559b7fbf8ad584921b5459dfdf36f9eb017e7",
+      "image_lineage_identity": "6209b79740cb006d8439dd3dde0b42fb02affaf63fd410aafa99f39d75bcf5e9",
+      "manifest_cluster_label": "3f942a83fcb578466e0df6f13cc1f26529de820ee3006efd631fdb1d39178c3d",
+      "prompt_digest": "db380259fc88b6b97fde4c2ea818c2f786d4b9d3bde82384a5cc33d481ffcbb7",
+      "prompt_text": "a fog",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "3f942a83fcb578466e0df6f13cc1f26529de820ee3006efd631fdb1d39178c3d",
+      "source_row": 86
+    },
+    {
+      "generation_seed": 202608190221,
+      "image_lineage_digest": "22df743f008f2eb53f3458f28a2777cdce8190f1fc91ef4697685a1074fdaa59",
+      "image_lineage_identity": "4dd448d0312531b34339991f3464d24fcb47592ad0c10582982a4e4565b988a2",
+      "manifest_cluster_label": "679b0ebf9b152a94c4d8a976dbcadfd549445b7be59862b8c824ea5a133abf71",
+      "prompt_digest": "f583a793a95fd25c63584df768a1b9e275f0d978293ffd93587c446b867ca31b",
+      "prompt_text": "a clock",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "679b0ebf9b152a94c4d8a976dbcadfd549445b7be59862b8c824ea5a133abf71",
+      "source_row": 87
+    },
+    {
+      "generation_seed": 202608190222,
+      "image_lineage_digest": "0eebe1daaaad451fbd38353f2c25b4c5af60869a7276a4cac1974876ecedbaf7",
+      "image_lineage_identity": "b4459caf7e1b79268002df2e87619e0c3a62806e5301d1625e9d78f4c9283a54",
+      "manifest_cluster_label": "3c7aa8beba7a0f4f8b495cca918834b4c076221b61288da285f982799732c83b",
+      "prompt_digest": "f103c10c546368c370763c528e33b8ab7ab7ee7c9f44cc3c921658b037a979da",
+      "prompt_text": "a phone",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "3c7aa8beba7a0f4f8b495cca918834b4c076221b61288da285f982799732c83b",
+      "source_row": 88
+    },
+    {
+      "generation_seed": 202608190223,
+      "image_lineage_digest": "e50f8a1c45a5c62e90c5d6001e3c3540efafac451a0b471244ce1f7905209d57",
+      "image_lineage_identity": "3b1385bbbf0b8a9671b05e5b12c8647dcb5119d30458bd76d6d0c43dae704b64",
+      "manifest_cluster_label": "856ae210465bdbfcb7d75381fb47a69812c0bd707317206d5d8b9076548ab8cd",
+      "prompt_digest": "c1f026582fe6e8cb620d0c85a72fe421ddded756662a8ec00ed4c297ad10676b",
+      "prompt_text": "food",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "856ae210465bdbfcb7d75381fb47a69812c0bd707317206d5d8b9076548ab8cd",
+      "source_row": 89
+    },
+    {
+      "generation_seed": 202608190224,
+      "image_lineage_digest": "26b23958537cf93fabfed16eb066d01593a01bf0f472cf52b3e7c7e5b224c441",
+      "image_lineage_identity": "e1786e77488bb527561caf6ba0289981305117bcd09b08106ae0a0c86796e283",
+      "manifest_cluster_label": "56c595fd88694060766af52c392753134a28b97358d3cf0cd6230dde74c48dc5",
+      "prompt_digest": "71d6584b509037e5fed60980cf8dfb614813bba5ebd0e8b46462afce25e166a8",
+      "prompt_text": "a store front",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "56c595fd88694060766af52c392753134a28b97358d3cf0cd6230dde74c48dc5",
+      "source_row": 90
+    },
+    {
+      "generation_seed": 202608190225,
+      "image_lineage_digest": "9e9ab82d15f492198945cd6e623f9183000b62589299c68a1285aa3f6d0d808c",
+      "image_lineage_identity": "2bf1efd0f04cbe76fa0bd1bc05513c4016876f9f4a8352efbe38e1422b3daab0",
+      "manifest_cluster_label": "2c695bd99d3482c8a8059ca51a796ed76426846c6df07abd55b4815b36255544",
+      "prompt_digest": "c2c7d53349a88cbcc888634523b8b504968039cbcaa626b63ee9bac27c4a06dc",
+      "prompt_text": "an armchair",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "2c695bd99d3482c8a8059ca51a796ed76426846c6df07abd55b4815b36255544",
+      "source_row": 91
+    },
+    {
+      "generation_seed": 202608190226,
+      "image_lineage_digest": "2d3fccce22392a4b83249e889702955164c1464b74131249106ddf31ba737d03",
+      "image_lineage_identity": "310a7428c5091940b9d63c92ec0381442594a9bca02ac5ac215a6ce6b2daf4f8",
+      "manifest_cluster_label": "93644b33b334470ec2fa53577f7cbb8b6b7015350f70db5415e69b568f521af8",
+      "prompt_digest": "cb01db3dc7964b4c9dd83c64d82f56fccd34291577bdc7d62f96d66aebf05a85",
+      "prompt_text": "a teapot",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "93644b33b334470ec2fa53577f7cbb8b6b7015350f70db5415e69b568f521af8",
+      "source_row": 92
+    },
+    {
+      "generation_seed": 202608190227,
+      "image_lineage_digest": "e2e597909a543ee5c90f3b4a9e973374a7b2df364f3b2149f7822bad0577dda4",
+      "image_lineage_identity": "b5c66e3b1d311adc7e21e559d78b702977975967ff2dc2e22e8da2439436fe7e",
+      "manifest_cluster_label": "9827943539d661652083b5123ba8247db371b548b18eb19e4a64d032fe1db892",
+      "prompt_digest": "57c3d4ad5dd13c75706685a57544fc357ac9b0c06827ac5ee16e7480bf99f97f",
+      "prompt_text": "an illustration of a teapot",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "9827943539d661652083b5123ba8247db371b548b18eb19e4a64d032fe1db892",
+      "source_row": 93
+    },
+    {
+      "generation_seed": 202608190228,
+      "image_lineage_digest": "e6259c8c28f8d473dbe9debaed6b5a547c934c88f8c285589fabe7a132f5793b",
+      "image_lineage_identity": "a643a56e05f4db0b86fb24ca569dd88a838ebcc70e47071b9a5ccac7ab104d52",
+      "manifest_cluster_label": "aab72d70317a555350c106c01f4771c57200bae4ec40b81e894949178f15679a",
+      "prompt_digest": "865ead78ca8ea7b909efe4844d742d3b01d4b56fe9a30302805802e0c0e16b22",
+      "prompt_text": "a tiger",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "aab72d70317a555350c106c01f4771c57200bae4ec40b81e894949178f15679a",
+      "source_row": 94
+    },
+    {
+      "generation_seed": 202608190229,
+      "image_lineage_digest": "d8d5ea52ec85bb8b198200a957f52d0fc789e1b69d5e861357f2275a66441a31",
+      "image_lineage_identity": "9f8cc29620af50a6acf4a3b7bfa210bce48c42aa326ba53b0ef16161c2451eb2",
+      "manifest_cluster_label": "8fb5a6b787b0f3a29503b4940ae6a0cda019c91a46ede68c412a922ff21cf53f",
+      "prompt_digest": "5662797c6d4c27f9f7702f6cbc53df7b8f2e0d71527865c0b03827c016ec0d96",
+      "prompt_text": "a bench",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "8fb5a6b787b0f3a29503b4940ae6a0cda019c91a46ede68c412a922ff21cf53f",
+      "source_row": 95
+    },
+    {
+      "generation_seed": 202608190230,
+      "image_lineage_digest": "43fd4ad3b4e1a485451e974c9a76d87ad3e8d8e590742e28d42551a6f5fee915",
+      "image_lineage_identity": "764e9c9b3d1ef36dfda4a8354c58bea368224cd3332fbe90716dd76ba31b0001",
+      "manifest_cluster_label": "519424b845d8320215ef4aa7c5cb486c0b92f86bcfbd64136acac5625d4db052",
+      "prompt_digest": "50982fe25d73be528fd0c26809e473d081279c96c7c2707ddc3412529ae9c84e",
+      "prompt_text": "an orange",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "519424b845d8320215ef4aa7c5cb486c0b92f86bcfbd64136acac5625d4db052",
+      "source_row": 96
+    },
+    {
+      "generation_seed": 202608190231,
+      "image_lineage_digest": "40d1c47e36677a7005078cb5d1e659dc25d9f4170eb2dbd3974459d133fd77a7",
+      "image_lineage_identity": "402879453c9d1e3b2936c6b6eebdc2bb5008e54d4009feb25c4f99458c755777",
+      "manifest_cluster_label": "bd111fc7d72c8d23d746338500f41540ef6bc6c240eddff5cf564d6466980450",
+      "prompt_digest": "24ff1173e361da5ac3cffe1bdc1543b6f3a4da9d96f85b63bffa86d88f493d85",
+      "prompt_text": "a laptop",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "bd111fc7d72c8d23d746338500f41540ef6bc6c240eddff5cf564d6466980450",
+      "source_row": 97
+    }
+  ],
+  "key_family_namespace_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+  "protocol_id": "semantic_texture_soft_route_mechanism_validation",
+  "role_id": "semantic_texture_soft_route_candidate_selection",
+  "schema_version": 1,
+  "skipped_raw_rows": [
+    {
+      "prompt_digest": "9f967626aad3681265acae6ac6a6a2d349237425eb02f3b3328e403006e1b905",
+      "raw_row": 82,
+      "reason": "run_b_target_prompt_text_and_digest_overlap"
+    }
+  ],
+  "source_roster_path": "configs/experiments/hf_only_reference_prompt_roster.json",
+  "source_roster_rows_digest": "9488cc26be1723bf40e1e7336c97a2b9c5307c1d4a8ac97f184855a832f12e69"
+}

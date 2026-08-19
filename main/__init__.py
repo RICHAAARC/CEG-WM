@@ -54,6 +54,7 @@ from .content_chain.embedder import (
     content_materialization_replay_identity,
     reconcile_content_materialization_budget,
     scale_content_delta_binary32,
+    semantic_texture_content_arm_embedder,
 )
 from .geometry_chain import (
     GeometricTransformEstimation,
@@ -167,6 +168,7 @@ __all__ = [
     "reconcile_content_materialization_budget",
     "rgb8_image_digest",
     "scale_content_delta_binary32",
+    "semantic_texture_content_arm_embedder",
     "validate_content_detection_result",
     "semantic_texture_content_detector",
     "semantic_texture_content_embedder",

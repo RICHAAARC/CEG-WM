@@ -1292,3 +1292,73 @@ def semantic_texture_content_embedder(
         embedding_result_identity=_embedding_result_identity(result),
     )
     return _validate_content_embedding_result(result)
+
+
+def semantic_texture_content_arm_embedder(
+    latent_values: Sequence[float],
+    hf_carrier_result: HfCarrierResult,
+    *,
+    lf_carrier_result: LfCarrierResult,
+    routing_result: SemanticTextureRoutingResult,
+    arm_id: Literal[
+        "hf_only",
+        "lf_only",
+        "semantic_texture_soft_routed",
+        "semantic_texture_route_disabled",
+    ],
+) -> ContentEmbeddingResult:
+    """Compose one frozen soft-route mechanism validation arm through the public semantic route.
+
+    The branch-only controls deliberately retain the ordinary single-branch
+    ``ContentEmbeddingResult`` shape.  Their semantic-route/control identity
+    is a governed experiment record responsibility rather than a second main
+    embedding identity.
+    """
+
+    hf_carrier_value, _ = _validated_hf_direction(hf_carrier_result)
+    lf_carrier_value, _ = _validated_lf_direction(lf_carrier_result)
+    try:
+        route = validate_semantic_texture_routing_result(routing_result)
+        validate_hf_carrier_semantic_texture_binding(hf_carrier_value, route)
+        validate_lf_carrier_semantic_texture_binding(lf_carrier_value, route)
+    except (ContentRouterError, HfCarrierError, LfCarrierError) as exc:
+        raise ContentEmbedderError(
+            "semantic-texture arm carrier route binding failed"
+        ) from exc
+    if (
+        hf_carrier_value.shape != lf_carrier_value.shape
+        or hf_carrier_value.shape != route.latent_shape
+        or hf_carrier_value.root_key_public_digest
+        != lf_carrier_value.root_key_public_digest
+        or hf_carrier_value.key_role != lf_carrier_value.key_role
+        or hf_carrier_value.wrong_key_index != lf_carrier_value.wrong_key_index
+    ):
+        raise ContentEmbedderError(
+            "semantic-texture arm carriers must share route and key semantics"
+        )
+    if arm_id == "semantic_texture_soft_routed":
+        if route.semantic_probability_digest is None:
+            raise ContentEmbedderError("soft-routed arm requires semantic observations")
+        return semantic_texture_content_embedder(
+            latent_values,
+            hf_carrier_result,
+            lf_carrier_result=lf_carrier_result,
+            routing_result=route,
+        )
+    if arm_id == "semantic_texture_route_disabled":
+        if route.semantic_probability_digest is not None:
+            raise ContentEmbedderError("route-disabled arm requires the disabled route")
+        return semantic_texture_content_embedder(
+            latent_values,
+            hf_carrier_result,
+            lf_carrier_result=lf_carrier_result,
+            routing_result=route,
+        )
+    if arm_id == "hf_only":
+        return content_embedder(latent_values, hf_carrier_result)
+    if arm_id == "lf_only":
+        return content_embedder(
+            latent_values,
+            lf_carrier_result=lf_carrier_result,
+        )
+    raise ContentEmbedderError("semantic-texture arm is not registered")

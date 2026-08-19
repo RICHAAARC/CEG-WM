@@ -14,6 +14,7 @@ import torch
 
 import main
 import main.content_chain as main_content_chain
+import main.content_chain.embedder as main_content_embedder
 import main.geometry_chain as main_geometry_chain
 import main.joint_decision as main_joint_decision
 import main.shared as main_shared
@@ -133,6 +134,9 @@ ADAPTER_MAIN_PUBLIC_OWNERS = {
         "semantic_texture_content_router",
         "semantic_texture_hf_detector",
         "semantic_texture_lf_detector",
+    ),
+    main_content_embedder: (
+        "semantic_texture_content_arm_embedder",
     ),
     main_geometry_chain: (
         "GeometricTransformEstimation",
@@ -560,6 +564,39 @@ def test_semantic_texture_embedding_traverses_live_callback_runtime_and_main(
         " -> main.semantic_texture_content_embedder"
         " -> runtime actual-dtype reconciliation"
     )
+
+
+@pytest.mark.unit
+def test_soft_route_mechanism_route_disabled_arm_never_reads_semantic_observations() -> None:
+    class PoisonSemanticModel(torch.nn.Module):
+        def forward_inspyre(self, value: torch.Tensor) -> object:
+            raise AssertionError("disabled arm read M/T")
+
+    backend = _SemanticTextureRuntimeBackend()
+    runtime_adapter = create_runtime_adapter(backend)
+    runtime_adapter.initialize("cpu")
+    adapter = CegWmExperimentAdapter(
+        load_ceg_wm_experiment_adapter_configuration(COMPONENT_CONFIG_PATH),
+        runtime_adapter,
+    )
+    result = adapter.execute_semantic_texture_content_arm_write_and_vae(
+        torch.linspace(-1.0, 1.0, steps=16 * 64 * 64, dtype=torch.float32)
+        .reshape(1, 16, 64, 64)
+        .to(torch.float16),
+        "soft_route_mechanism-disabled-no-read-key",
+        InspyrenetSemanticRuntime.from_injected_model_for_test(
+            PoisonSemanticModel()
+        ),
+        arm_id="semantic_texture_route_disabled",
+    )
+
+    embedding = (
+        result.result.content_write_result.content_materialization_result
+        .embedding_result
+    )
+    assert embedding.mode == "semantic_texture_soft_combined"
+    assert embedding.target_relative_l2 == pytest.approx(3.0 / 250.0)
+    assert len(backend.decode_inputs) == 2
 
 
 @pytest.mark.unit

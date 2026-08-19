@@ -53,6 +53,7 @@ from main import (
     content_embedder,
     content_router,
     semantic_texture_content_detector,
+    semantic_texture_content_arm_embedder,
     semantic_texture_content_embedder,
     semantic_texture_content_router,
     semantic_texture_hf_detector,
@@ -201,6 +202,15 @@ P = ParamSpec("P")
 
 class CegWmExperimentAdapterError(ValueError):
     """The experiment adapter configuration or delegation failed closed."""
+
+
+@dataclass(frozen=True, slots=True)
+class SoftRouteMechanismContentArmWriteResult:
+    """Uniform public wrapper for a soft-route mechanism validation arm materialization."""
+
+    arm_id: str
+    content_write_result: ContentWriteVaeResult
+    write_identity: str
 
 
 def _canonical_digest(value: object) -> str:
@@ -873,7 +883,7 @@ class CegWmExperimentAdapter:
             return route, embedding
 
         result = (
-            self._runtime_adapter._execute_semantic_texture_content_write_and_vae(
+            self._runtime_adapter.execute_semantic_texture_content_write_and_vae(
                 base_latent,
                 semantic_runtime,
                 compose_from_runtime_observation,
@@ -894,6 +904,293 @@ class CegWmExperimentAdapter:
         )
 
     @_revalidate_configuration_before_call
+    def execute_semantic_texture_content_arm_write_and_vae(
+        self,
+        base_latent: torch.Tensor,
+        detection_key: str,
+        semantic_runtime: InspyrenetSemanticRuntime,
+        *,
+        arm_id: str,
+    ) -> ComponentCallObservation[object]:
+        """Execute one registered soft-route mechanism validation write arm through public surfaces."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture arm embedding requires a prepared runtime adapter"
+            )
+        if arm_id not in {
+            "hf_only",
+            "lf_only",
+            "semantic_texture_soft_routed",
+            "semantic_texture_route_disabled",
+        }:
+            raise CegWmExperimentAdapterError("semantic-texture arm is not registered")
+
+        def compose_from_runtime_observation(
+            latent_values: tuple[float, ...],
+            latent_shape: tuple[int, ...],
+            runtime_observation: object,
+        ) -> tuple[SemanticTextureRoutingResult, ContentEmbeddingResult]:
+            if type(runtime_observation) is not RuntimeSemanticTextureObservationResult:
+                raise CegWmExperimentAdapterError(
+                    "semantic-texture arm composition requires the runtime observation"
+                )
+            route_mode = (
+                "routing_semantic_texture_soft"
+                if arm_id != "semantic_texture_route_disabled"
+                else "semantic_texture_route_disabled"
+            )
+            route = semantic_texture_content_router(
+                latent_shape,
+                mode=route_mode,
+                observations=(
+                    runtime_observation.observations
+                    if arm_id != "semantic_texture_route_disabled"
+                    else None
+                ),
+            )
+            hf_carrier_result = hf_carrier(
+                detection_key,
+                route.latent_shape,
+                routing_result=route,
+            )
+            lf_carrier_result = lf_carrier(
+                detection_key,
+                route.latent_shape,
+                routing_result=route,
+            )
+            return route, semantic_texture_content_arm_embedder(
+                latent_values,
+                hf_carrier_result,
+                lf_carrier_result=lf_carrier_result,
+                routing_result=route,
+                arm_id=arm_id,
+            )
+
+        if arm_id == "semantic_texture_soft_routed":
+            result = self._runtime_adapter.execute_semantic_texture_content_write_and_vae(
+                base_latent,
+                semantic_runtime,
+                compose_from_runtime_observation,
+            )
+            witness = getattr(result, "witness", None)
+            return self._observe(
+                "content_embedder",
+                result,
+                upstream_runtime_identity=getattr(
+                    witness,
+                    "semantic_observation_identity",
+                    None,
+                ),
+                result_identity_field="witness_identity",
+                public_callable=SEMANTIC_TEXTURE_EMBEDDING_PUBLIC_CALLABLE,
+            )
+
+        latent_shape = tuple(int(value) for value in base_latent.shape)
+
+        def compose_without_semantic_observation(
+            latent_values: tuple[float, ...],
+        ) -> ContentEmbeddingResult:
+            route = semantic_texture_content_router(
+                latent_shape,
+                mode="semantic_texture_route_disabled",
+                observations=None,
+            )
+            hf_carrier_result = hf_carrier(
+                detection_key,
+                route.latent_shape,
+                routing_result=route,
+            )
+            lf_carrier_result = lf_carrier(
+                detection_key,
+                route.latent_shape,
+                routing_result=route,
+            )
+            return semantic_texture_content_arm_embedder(
+                latent_values,
+                hf_carrier_result,
+                lf_carrier_result=lf_carrier_result,
+                routing_result=route,
+                arm_id=arm_id,
+            )
+
+        content_write = self._runtime_adapter.execute_content_write_and_vae(
+            base_latent,
+            compose_without_semantic_observation,
+        )
+        write_identity = (
+            content_write.content_materialization.materialization_replay_identity
+        )
+        result = SoftRouteMechanismContentArmWriteResult(
+            arm_id=arm_id,
+            content_write_result=content_write,
+            write_identity=write_identity,
+        )
+        return self._observe(
+            "content_embedder",
+            result,
+            result_identity_field="write_identity",
+            public_callable=(
+                "runtime.Sd35RuntimeAdapter.execute_content_write_and_vae"
+                " -> main.semantic_texture_content_arm_embedder"
+            ),
+        )
+
+    @_revalidate_configuration_before_call
+    def observe_semantic_texture_candidate_branches(
+        self,
+        detection_image_rgb8: torch.Tensor,
+        detection_key: str | DerivedWrongKeyMaterial,
+        semantic_runtime: InspyrenetSemanticRuntime,
+        whitening_asset: SemanticTextureLfWhiteningAsset,
+    ) -> SemanticTexturePrimaryNullBranchObservation:
+        """Read raw public soft-route branch scores without CDF/decision logic."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture branch observation requires a prepared runtime adapter"
+            )
+        runtime_result = self._runtime_adapter.observe_semantic_texture_detection(
+            detection_image_rgb8,
+            semantic_runtime,
+        )
+        if type(runtime_result) is not RuntimeSemanticTextureDetectionObservationResult:
+            raise CegWmExperimentAdapterError(
+                "runtime returned an invalid semantic-texture observation"
+            )
+        route = semantic_texture_content_router(
+            runtime_result.hf_observation.shape,
+            mode="routing_semantic_texture_soft",
+            observations=runtime_result.semantic_texture.observations,
+        )
+        return SemanticTexturePrimaryNullBranchObservation(
+            hf_result=semantic_texture_hf_detector(
+                runtime_result.hf_observation,
+                detection_key,
+                route,
+            ),
+            lf_result=semantic_texture_lf_detector(
+                runtime_result.lf_observation,
+                detection_key,
+                route,
+                whitening_asset,
+            ),
+        )
+
+    @_revalidate_configuration_before_call
+    def combine_semantic_texture_candidate_branches(
+        self,
+        branches: SemanticTexturePrimaryNullBranchObservation,
+        *,
+        hf_null: SemanticTextureBranchNullCalibration,
+        lf_null: SemanticTextureBranchNullCalibration,
+    ) -> ComponentCallObservation[SemanticTextureContentDetectionResult]:
+        """Apply existing public diagnostic CDFs to already observed branches."""
+
+        if type(branches) is not SemanticTexturePrimaryNullBranchObservation:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture branch observation identity is invalid"
+            )
+        result = semantic_texture_content_detector(
+            branches.hf_result,
+            branches.lf_result,
+            hf_null=hf_null,
+            lf_null=lf_null,
+        )
+        return self._observe(
+            "content_detector",
+            result,
+            public_callable="main.semantic_texture_content_detector",
+        )
+
+    @_revalidate_configuration_before_call
+    def build_semantic_texture_provisional_calibrations(
+        self,
+        observations: Sequence[
+            tuple[str, str, SemanticTexturePrimaryNullBranchObservation]
+        ],
+        *,
+        partition_identity: str,
+    ) -> tuple[SemanticTextureBranchNullCalibration, SemanticTextureBranchNullCalibration]:
+        """Convert declared clean branch observations into public CDF objects."""
+
+        if len(observations) != 32 or not partition_identity:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture provisional calibration inputs are invalid"
+            )
+        try:
+            first = observations[0][2]
+            hf_records = tuple(
+                NullScoreRecord(
+                    score=branches.hf_result.hf_score,
+                    source_cluster_id=cluster_id,
+                    sample_id=sample_id,
+                )
+                for cluster_id, sample_id, branches in observations
+            )
+            lf_records = tuple(
+                NullScoreRecord(
+                    score=branches.lf_result.lf_score,
+                    source_cluster_id=cluster_id,
+                    sample_id=sample_id,
+                )
+                for cluster_id, sample_id, branches in observations
+            )
+            return (
+                SemanticTextureBranchNullCalibration(
+                    branch="hf",
+                    detector_identity=first.hf_result.detector_identity,
+                    partition_identity=partition_identity,
+                    records=hf_records,
+                ),
+                SemanticTextureBranchNullCalibration(
+                    branch="lf",
+                    detector_identity=first.lf_result.detector_identity,
+                    partition_identity=partition_identity,
+                    records=lf_records,
+                ),
+            )
+        except (IndexError, TypeError, ValueError) as exc:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture provisional calibration is invalid"
+            ) from exc
+
+    @_revalidate_configuration_before_call
+    def materialize_semantic_texture_provisional_calibrations(
+        self,
+        *,
+        hf_detector_identity: str,
+        lf_detector_identity: str,
+        partition_identity: str,
+        hf_records: Sequence[tuple[str, str, float]],
+        lf_records: Sequence[tuple[str, str, float]],
+    ) -> tuple[SemanticTextureBranchNullCalibration, SemanticTextureBranchNullCalibration]:
+        """Materialize an authenticated soft-route mechanism validation provisional CDF without refitting."""
+
+        if (
+            len(hf_records) != 32
+            or len(lf_records) != 32
+            or not partition_identity
+        ):
+            raise CegWmExperimentAdapterError("provisional calibration authority is invalid")
+        try:
+            hf_null = SemanticTextureBranchNullCalibration(
+                branch="hf",
+                detector_identity=hf_detector_identity,
+                partition_identity=partition_identity,
+                records=tuple(NullScoreRecord(score=score, source_cluster_id=cluster, sample_id=sample) for cluster, sample, score in hf_records),
+            )
+            lf_null = SemanticTextureBranchNullCalibration(
+                branch="lf",
+                detector_identity=lf_detector_identity,
+                partition_identity=partition_identity,
+                records=tuple(NullScoreRecord(score=score, source_cluster_id=cluster, sample_id=sample) for cluster, sample, score in lf_records),
+            )
+            return hf_null, lf_null
+        except (TypeError, ValueError) as exc:
+            raise CegWmExperimentAdapterError("provisional calibration payload is invalid") from exc
+
+    @_revalidate_configuration_before_call
     def materialize_semantic_texture_written_rgb8(
         self,
         write_observation: ComponentCallObservation[object],
@@ -908,6 +1205,22 @@ class CegWmExperimentAdapter:
                 "semantic-texture write RGB8 observation is unavailable"
             )
         return materialize_ordinary_rgb8_snapshot(image)
+
+    @_revalidate_configuration_before_call
+    def derive_semantic_texture_wrong_key_material(
+        self,
+        registered_root_key_public_digest: str,
+        wrong_key_index: int,
+    ) -> DerivedWrongKeyMaterial:
+        """Expose exactly one public wrong-key control identity for soft-route mechanism validation."""
+
+        try:
+            return derive_wrong_key_material(
+                registered_root_key_public_digest,
+                wrong_key_index,
+            )
+        except (TypeError, ValueError) as exc:
+            raise CegWmExperimentAdapterError("wrong-key control identity is invalid") from exc
 
     @_revalidate_configuration_before_call
     def detect_lf(

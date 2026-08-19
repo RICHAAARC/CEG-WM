@@ -986,6 +986,24 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 
 ## 通用记录、产物与 baseline 字段（续）
 
+## Semantic-texture soft-route mechanism validation diagnostic protocol fields
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| soft_route_mechanism_protocol_id | persisted_protocol | protocol | none | true | false | false | soft-route mechanism validation fixed diagnostic mechanism protocol identity. |
+| soft_route_mechanism_split_role | persisted_protocol | protocol | none | true | false | false | Candidate-selection or untouched-confirmation literal split role. |
+| manifest_cluster_label | persisted_protocol | provenance | none | true | false | false | Human-readable literal manifest label; never a source-cluster authority. |
+| skipped_raw_rows | persisted_protocol | provenance | none | true | false | false | Literal eligibility-stream skip ledger; contains only bounded non-secret reasons. |
+| provisional_calibration_digest | persisted_protocol | protocol | none | true | false | false | Immutable selection-bound provisional CDF and operating-point artifact digest. |
+| provisional_authority_retired | persisted_protocol | protocol | none | true | false | false | Confirmation records that selection provisional calibration has no future formal authority. |
+| soft_route_mechanism_case_records | persisted_protocol | diagnostic | none | true | false | false | Complete fixed generation and detection matrix for one soft-route mechanism validation split. |
+| soft_route_mechanism_selection_artifact_locator | persisted_protocol | runtime_locator | none | true | false | false | Exact configured create-only selection artifact locator; never latest discovery. |
+| paired_rgb8_mse | persisted_protocol | diagnostic | none | true | false | false | Paired normalized RGB8 diagnostic quality measurement, not a scientific claim. |
+| wrong_key_index | persisted_protocol | protocol | none | true | false | false | Predeclared wrong-key control ordinal for one fixed cluster. |
+| hf_standardized_score | persisted_protocol | method_statistic | none | true | false | false | Diagnostic-only HF empirical-CDF standardized score. |
+| lf_standardized_score | persisted_protocol | method_statistic | none | true | false | false | Diagnostic-only LF empirical-CDF standardized score. |
+| max_standardized_score | persisted_protocol | method_statistic | none | true | false | false | Fixed diagnostic maximum of standardized branch scores; not a decision claim. |
+
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | failure_reason | persisted_protocol | protocol | none | true | false | false | 执行失败时必须保存的原因。 |

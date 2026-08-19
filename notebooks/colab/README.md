@@ -2,9 +2,13 @@
 
 ## Current authorized entrypoint
 
-当前授权的用户流程固定为两步：先在 `semantic_texture_soft_detector_asset_preparation.ipynb` 仅执行一次 **Run all**，创建一个新的 create-only diagnostic-only asset bundle；只有 source 完成只读认证并以该 exact bundle identity 绑定后，才可在 `semantic_texture_operational_preflight.ipynb` 仅执行一次 **Run all** 进行 target write 与 public blind detection。两个入口都不允许 retry、fallback 或动态 latest-bundle 选择；它们不产生 threshold、FPR、tau、promotion 或 scientific claim。
+下一次用户流程只有 `semantic_texture_soft_route_candidate_selection.ipynb`：在 fresh GPU runtime 中仅执行一次 **Run all**。它从用户提供的 exact revision 构建并解压 soft-route mechanism validation package，绑定已认证的 detector asset bundle，在新的 create-only run root 中保存 result、receipt、selection artifact、ZIP 与最后写入的 `SHA256SUMS`。该执行仅是 diagnostic candidate selection，不产生 formal threshold、FPR、promotion 或 scientific claim。
+
+`semantic_texture_soft_route_untouched_confirmation.ipynb` 已完成但保持 **PAUSED / NOT AUTHORIZED**；只有 returned selection artifact、receipt、ZIP 与 `SHA256SUMS` 通过只读认证，且控制会话另行授权后，才可绑定 exact artifact SHA 执行。它不扫描 latest，也不重拟合 W、CDF 或 provisional tau。
 
 The following retained diagnostics are paused / not authorized and preserve producer-bound history: they 不读取、不迁移、不改写或混合 old records.
+
+- `semantic_texture_soft_detector_asset_preparation.ipynb` and `semantic_texture_operational_preflight.ipynb`: completed producer-bound preparation/preflight entries; no longer the next authorized run.
 
 - `hf_only_detector_directional_validation.ipynb`: `0d4253ab2614c642563c566e6268565c337b503f`; `ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority`; superseded `ceg_wm_hf_only_detector_directional_validation_initial_gate` is immutable partial evidence.
 - `hf_transmission_diagnostic.ipynb`: `af1eea8f55086b583e3e5e4a02586959983db70b`; `ceg_wm_hf_transmission_diagnostic_server_execution`.
