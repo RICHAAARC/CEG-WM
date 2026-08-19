@@ -454,10 +454,12 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     run_id = "semantic-texture-phase-a"
     value = {
         "aggregate": None,
-        "asset_authority_status": "identity_blocked",
-        "blocked_class": "identity_blocked",
+        "asset_authority_status": "diagnostic_bundle_authenticated",
+        "asset_bundle_digest": "2" * 64,
+        "blocked_class": None,
         "candidate_promoted": False,
         "configuration_digest": "1" * 64,
+        "diagnostic_only": True,
         "formal_tau_created": False,
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
         "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
@@ -467,11 +469,11 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
         "profile_id": "semantic_texture_operational_preflight",
         "result_identity": "3" * 64,
         "run_id": run_id,
-        "schema_version": 3,
+        "schema_version": 4,
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
-        "status": "blocked",
+        "status": "passed",
         "unit_outcomes": [
             {
                 "blocked_class": None,
@@ -486,14 +488,14 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
                 "witness_identity": "6" * 64,
             },
             {
-                "blocked_class": "identity_blocked",
+                "blocked_class": None,
                 "elapsed_seconds": 0.25,
-                "public_result_identity": None,
-                "sanitized_error_category": "identity_blocked",
+                "public_result_identity": "9" * 64,
+                "sanitized_error_category": None,
                 "sanitized_error_message": None,
                 "sanitized_trace_tail": [],
                 "started": True,
-                "status": "blocked",
+                "status": "passed",
                 "unit_id": "semantic_texture_blind_detection_operational",
                 "witness_identity": None,
             },
@@ -537,6 +539,8 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     ]
     assert persisted_receipt["pre_execution_stage"] is None
     assert persisted_receipt["semantic_runtime_initialization_step"] is None
+    assert persisted_receipt["asset_bundle_digest"] == value["asset_bundle_digest"]
+    assert persisted_receipt["status"] == "passed"
     assert not any(
         str(tmp_path) in json.dumps(document)
         for document in (
@@ -584,7 +588,7 @@ def test_semantic_texture_preflight_server_finalizes_result_zip_receipt_before_r
     malformed_unit_identity["unit_outcomes"][0]["witness_identity"] = "6" * 63
     invalid_values.append(malformed_unit_identity)
     malformed_status = json.loads(json.dumps(value))
-    malformed_status["unit_outcomes"][1]["status"] = "passed"
+    malformed_status["unit_outcomes"][1]["status"] = "blocked"
     invalid_values.append(malformed_status)
     malformed_roster = json.loads(json.dumps(value))
     malformed_roster["unit_outcomes"].reverse()
@@ -649,6 +653,8 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             detection_key: str,
             semantic_runtime: object,
         ) -> object:
+            if failing_stage[0] == "write_unit":
+                raise RuntimeError("synthetic write failure")
             constructor_calls.append(("public_write", detection_key))
             return SimpleNamespace(
                 result_identity="7" * 64,
@@ -667,7 +673,16 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             hf_null: object,
             lf_null: object,
         ) -> object:
-            raise AssertionError("detector must remain identity-blocked")
+            if failing_stage[0] == "detector_unit":
+                raise RuntimeError("synthetic detector failure")
+            constructor_calls.append(("public_detector", detection_key))
+            return SimpleNamespace(result_identity="9" * 64)
+
+        def materialize_semantic_texture_written_rgb8(
+            self, write_observation: object
+        ) -> object:
+            constructor_calls.append(("public_rgb8", write_observation))
+            return object()
 
     def fake_backend(**kwargs: object) -> object:
         if failing_stage[0] == "runtime_backend_construction":
@@ -726,6 +741,16 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
         fake_experiment_adapter,
     )
 
+    def fake_assets(path: object, configuration: object) -> tuple[object, object, object]:
+        if failing_stage[0] == "detector_asset_loading":
+            raise entrypoint.SemanticTextureOperationalEntrypointError(
+                "integrity_blocked"
+            )
+        constructor_calls.append(("detector_assets", path))
+        return object(), object(), object()
+
+    monkeypatch.setattr(entrypoint, "_load_authenticated_detector_assets", fake_assets)
+
     def fake_runner_admission(*args: object, **kwargs: object) -> object:
         if failing_stage[0] == "runner_admission":
             raise RuntimeError("synthetic runner admission failure")
@@ -764,6 +789,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             observed_repository_revision="4" * 40,
             run_id="semantic-texture-operational",
             output_root=output_root,
+            detector_asset_bundle=tmp_path / "asset-bundle.json",
         )
     )
     assert exit_code == 0
@@ -772,6 +798,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     assert ("latent_shape", (1, 16, 64, 64)) in constructor_calls
     assert ("latent_to", ("cuda", "float16")) in constructor_calls
     assert ("public_write", "memory-only-root-key") in constructor_calls
+    assert ("public_detector", "memory-only-root-key") in constructor_calls
     backend_call = next(
         value for label, value in constructor_calls if label == "backend"
     )
@@ -788,6 +815,11 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
     )
     assert persisted_result["pre_execution_stage"] is None
     assert persisted_result["semantic_runtime_initialization_step"] is None
+    assert persisted_result["status"] == "passed"
+    assert persisted_result["blocked_class"] is None
+    assert persisted_result["asset_bundle_digest"] == (
+        "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d"
+    )
     persisted = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
         for path in output_root.iterdir()
@@ -807,6 +839,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             for stage in preflight.ALLOWED_PRE_EXECUTION_STAGES
             if stage != "required_environment"
         },
+        "detector_asset_loading": "integrity_blocked",
     }
     for stage in sorted(preflight.ALLOWED_PRE_EXECUTION_STAGES):
         failing_stage[0] = stage
@@ -818,6 +851,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
                 observed_repository_revision="4" * 40,
                 run_id=f"semantic-texture-{stage}",
                 output_root=failure_root,
+                detector_asset_bundle=tmp_path / "asset-bundle.json",
             )
         )
         if stage == "required_environment":
@@ -831,7 +865,7 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
             if stage == "semantic_runtime_initialization"
             else None
         )
-        assert persisted_failure["schema_version"] == 3
+        assert persisted_failure["schema_version"] == 4
         assert persisted_failure["pre_execution_stage"] == stage
         assert persisted_failure["semantic_runtime_initialization_step"] == expected_step
         assert persisted_failure["blocked_class"] == expected_blocked_classes[stage]
@@ -844,6 +878,26 @@ def test_semantic_texture_operational_entrypoint_constructs_registered_public_ru
         )
         assert "memory-only-token" not in json.dumps(persisted_failure)
         assert str(tmp_path) not in json.dumps(persisted_failure)
+    failing_stage[0] = None
+    for unit_failure, expected_started in (("write_unit", False), ("detector_unit", True)):
+        failing_stage[0] = unit_failure
+        failure_root = tmp_path / unit_failure
+        exit_code, _receipt = (
+            entrypoint.execute_semantic_texture_operational_preflight_entrypoint(
+                observed_repository_revision="4" * 40,
+                run_id=f"semantic-texture-{unit_failure}",
+                output_root=failure_root,
+                detector_asset_bundle=tmp_path / "asset-bundle.json",
+            )
+        )
+        persisted_failure = json.loads(
+            (failure_root / server.RESULT_FILENAME).read_text(encoding="utf-8")
+        )
+        assert exit_code == 2
+        assert persisted_failure["status"] == "blocked"
+        assert persisted_failure["pre_execution_stage"] is None
+        assert persisted_failure["unit_outcomes"][0]["status"] == "blocked" if unit_failure == "write_unit" else persisted_failure["unit_outcomes"][0]["status"] == "passed"
+        assert persisted_failure["unit_outcomes"][1]["started"] is expected_started
     failing_stage[0] = None
 
 
@@ -883,7 +937,7 @@ def test_semantic_texture_operational_pre_execution_fault_classes_persist_zero_s
             assert exit_code == 2
             persisted = result.as_dict()
             result_identities.add(persisted["result_identity"])
-            assert persisted["schema_version"] == 3
+            assert persisted["schema_version"] == 4
             assert persisted["pre_execution_stage"] == stage
             assert persisted["semantic_runtime_initialization_step"] == semantic_runtime_initialization_step
             assert receipt["pre_execution_stage"] == stage
@@ -1134,6 +1188,10 @@ def test_semantic_texture_operational_preflight_colab_notebook_is_thin_and_drive
     assert 'raise RuntimeError("operational bootstrap launch blocked") from None' in code_source
     assert '"drive_delivery_complete": drive_delivery_complete' in code_source
     assert '"--run-id", run_id' in code_source
+    assert "detector_asset_bundle_relative_path" in code_source
+    assert "detector_asset_bundle_path" in code_source
+    assert '"--detector-asset-bundle"' in code_source
+    assert ".glob(" not in code_source
     assert "bootstrap-unbound" not in code_source
     assert "pip install" not in code_source
     assert '"git", "clone"' in code_source

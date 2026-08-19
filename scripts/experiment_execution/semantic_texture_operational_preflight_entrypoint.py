@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 from typing import Sequence
 
@@ -20,6 +22,12 @@ if str(PACKAGE_ROOT) not in sys.path:
 from experiments.methods import (
     CegWmExperimentAdapter,
     load_ceg_wm_experiment_adapter_configuration,
+)
+from experiments.methods.ceg_wm import (
+    materialize_semantic_texture_soft_detector_asset_bundle,
+)
+from experiments.protocol.semantic_texture_soft_detector_assets import (
+    SemanticTextureSoftDetectorAssetBundle,
 )
 from runtime import (
     InspyrenetSemanticRuntime,
@@ -93,11 +101,49 @@ def _pre_execution_blocked_class(error: BaseException) -> str:
     return "implementation_blocked"
 
 
+def _load_authenticated_detector_assets(
+    path: str | Path,
+    configuration: object,
+) -> tuple[object, object, object]:
+    """Read one configured bundle without path following or replacement."""
+
+    bundle_path = Path(path)
+    try:
+        before = bundle_path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(bundle_path, flags)
+        try:
+            after = os.fstat(descriptor)
+            if (before.st_dev, before.st_ino, before.st_size) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+            ):
+                raise OSError
+            with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                blob = handle.read()
+        finally:
+            os.close(descriptor)
+        if sha256(blob).hexdigest() != configuration.detector_asset_bundle_sha256:
+            raise ValueError
+        bundle = SemanticTextureSoftDetectorAssetBundle.from_mapping(json.loads(blob))
+        if bundle.bundle_digest != configuration.detector_asset_bundle_digest:
+            raise ValueError
+        return materialize_semantic_texture_soft_detector_asset_bundle(bundle)
+    except MemoryError:
+        raise SemanticTextureOperationalEntrypointError("resource_blocked") from None
+    except Exception:
+        raise SemanticTextureOperationalEntrypointError("integrity_blocked") from None
+
+
 def execute_semantic_texture_operational_preflight_entrypoint(
     *,
     observed_repository_revision: str,
     run_id: str,
     output_root: str | Path,
+    detector_asset_bundle: str | Path,
 ) -> tuple[int, dict[str, object]]:
     """Construct only registered public runtime objects and run both-unit roster."""
 
@@ -118,6 +164,11 @@ def execute_semantic_texture_operational_preflight_entrypoint(
         )
         cache_root = _required_environment_path("CEG_WM_CACHE_ROOT")
         persistent_root = _required_environment_path("CEG_WM_PERSISTENT_ROOT")
+        pre_execution_stage = "detector_asset_loading"
+        whitening_asset, hf_null, lf_null = _load_authenticated_detector_assets(
+            detector_asset_bundle,
+            configuration,
+        )
         pre_execution_stage = "runtime_backend_construction"
         backend = Sd35PipelineBackend(
             cache_root=cache_root,
@@ -173,6 +224,9 @@ def execute_semantic_texture_operational_preflight_entrypoint(
             base_latent=base_latent,
             detection_key=root_key,
             semantic_runtime=semantic_runtime,
+            whitening_asset=whitening_asset,
+            hf_null=hf_null,
+            lf_null=lf_null,
         )
     except Exception as error:
         if (
@@ -197,7 +251,7 @@ def execute_semantic_texture_operational_preflight_entrypoint(
 def _boundary_description() -> dict[str, object]:
     return {
         "aggregate": None,
-        "asset_authority_status": "identity_blocked",
+        "asset_authority_status": "diagnostic_bundle_authenticated",
         "candidate_promoted": False,
         "formal_tau_created": False,
         "profile_id": "semantic_texture_operational_preflight",
@@ -218,6 +272,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--observed-repository-revision")
     parser.add_argument("--run-id")
     parser.add_argument("--output-root")
+    parser.add_argument("--detector-asset-bundle")
     arguments = parser.parse_args(argv)
     if arguments.describe_boundary:
         print(json.dumps(_boundary_description(), indent=2, sort_keys=True))
@@ -228,6 +283,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.observed_repository_revision,
             arguments.run_id,
             arguments.output_root,
+            arguments.detector_asset_bundle,
+            arguments.detector_asset_bundle,
         )
     ):
         parser.error("production execution arguments are incomplete")
@@ -235,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         observed_repository_revision=arguments.observed_repository_revision,
         run_id=arguments.run_id,
         output_root=arguments.output_root,
+        detector_asset_bundle=arguments.detector_asset_bundle,
     )
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return exit_code

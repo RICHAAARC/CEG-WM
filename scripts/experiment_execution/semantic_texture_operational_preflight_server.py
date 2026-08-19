@@ -39,9 +39,11 @@ RESULT_FIELDS = frozenset(
     {
         "aggregate",
         "asset_authority_status",
+        "asset_bundle_digest",
         "blocked_class",
         "candidate_promoted",
         "configuration_digest",
+        "diagnostic_only",
         "formal_tau_created",
         "model_id",
         "model_revision",
@@ -120,18 +122,23 @@ def _validated_result(result: object) -> dict[str, object]:
         or set(value) != RESULT_FIELDS
         or value.get("profile_id") != "semantic_texture_operational_preflight"
         or type(value.get("schema_version")) is not int
-        or value.get("schema_version") != 3
-        or value.get("status") != "blocked"
+        or value.get("schema_version") != 4
+        or value.get("status") not in {"blocked", "passed"}
         or value.get("aggregate") is not None
-        or value.get("asset_authority_status") != "identity_blocked"
+        or value.get("asset_authority_status") != "diagnostic_bundle_authenticated"
+        or type(value.get("asset_bundle_digest")) is not str
+        or DIGEST.fullmatch(value["asset_bundle_digest"]) is None
+        or value.get("diagnostic_only") is not True
         or type(value.get("scientific_unit_count")) is not int
         or value.get("scientific_unit_count") != 0
         or value.get("science_started") is not False
         or value.get("formal_tau_created") is not False
         or value.get("candidate_promoted") is not False
         or value.get("scientific_claims_supported") is not False
-        or type(value.get("blocked_class")) is not str
-        or value.get("blocked_class") not in BLOCKED_CLASSES
+        or (
+            value.get("blocked_class") is not None
+            and value.get("blocked_class") not in BLOCKED_CLASSES
+        )
         or any(
             type(value.get(field)) is not str or not value[field]
             for field in ("model_id", "model_revision")
@@ -173,16 +180,11 @@ def _validated_result(result: object) -> dict[str, object]:
     if (
         write_outcome["unit_id"] != WRITE_UNIT_ID
         or detector_outcome["unit_id"] != BLIND_DETECTION_UNIT_ID
-        or detector_outcome["status"] != "blocked"
-        or detector_outcome["blocked_class"] not in BLOCKED_CLASSES
-        or detector_outcome["sanitized_error_category"]
-        != detector_outcome["blocked_class"]
-        or detector_outcome["public_result_identity"] is not None
-        or detector_outcome["witness_identity"] is not None
     ):
         raise SemanticTextureOperationalServerError(
             "operational unit roster drifted"
         )
+    passed = value["status"] == "passed"
     pre_execution_failure = (
         write_outcome["started"] is False
         and detector_outcome["started"] is False
@@ -236,7 +238,6 @@ def _validated_result(result: object) -> dict[str, object]:
             or type(write_outcome["witness_identity"]) is not str
             or DIGEST.fullmatch(write_outcome["witness_identity"]) is None
             or detector_outcome["started"] is not True
-            or detector_outcome["blocked_class"] != "identity_blocked"
         ):
             raise SemanticTextureOperationalServerError(
                 "passed write unit boundary drifted"
@@ -259,6 +260,24 @@ def _validated_result(result: object) -> dict[str, object]:
         raise SemanticTextureOperationalServerError(
             "write unit status drifted"
         )
+    if passed:
+        if (
+            write_outcome["status"] != "passed"
+            or detector_outcome["status"] != "passed"
+            or write_outcome["blocked_class"] is not None
+            or detector_outcome["blocked_class"] is not None
+            or detector_outcome["sanitized_error_category"] is not None
+            or type(detector_outcome["public_result_identity"]) is not str
+            or DIGEST.fullmatch(detector_outcome["public_result_identity"]) is None
+            or detector_outcome["witness_identity"] is not None
+            or value["blocked_class"] is not None
+        ):
+            raise SemanticTextureOperationalServerError(
+                "passed detector result boundary drifted"
+            )
+        return value
+    if detector_outcome["status"] != "blocked" or detector_outcome["blocked_class"] not in BLOCKED_CLASSES or detector_outcome["sanitized_error_category"] != detector_outcome["blocked_class"] or detector_outcome["public_result_identity"] is not None or detector_outcome["witness_identity"] is not None:
+        raise SemanticTextureOperationalServerError("blocked detector result boundary drifted")
     expected_blocked_class = (
         write_outcome["blocked_class"]
         if write_outcome["status"] == "blocked"
@@ -314,9 +333,11 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "archive_sha256": archive_sha256,
         "archive_size_bytes": archive_path.stat().st_size,
         "asset_authority_status": result_value["asset_authority_status"],
+        "asset_bundle_digest": result_value["asset_bundle_digest"],
         "blocked_class": result_value["blocked_class"],
         "candidate_promoted": False,
         "configuration_digest": result_value["configuration_digest"],
+        "diagnostic_only": True,
         "formal_tau_created": False,
         "model_id": result_value["model_id"],
         "model_revision": result_value["model_revision"],
@@ -335,7 +356,7 @@ def finalize_semantic_texture_operational_preflight_delivery(
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
-        "status": "blocked",
+        "status": result_value["status"],
     }
     with receipt_path.open("xb") as handle:
         receipt_blob = _canonical_bytes(receipt)
@@ -348,14 +369,14 @@ def finalize_semantic_texture_operational_preflight_delivery(
     with delivery_completion_checksums_path.open("xb") as handle:
         handle.write(delivery_completion_checksums_blob)
     write_outcome, detector_outcome = result_value["unit_outcomes"]
-    expected_operational_partial = (
+    expected_operational_success = (
         write_outcome["started"] is True
         and write_outcome["status"] == "passed"
         and detector_outcome["started"] is True
-        and detector_outcome["status"] == "blocked"
-        and detector_outcome["blocked_class"] == "identity_blocked"
+        and detector_outcome["status"] == "passed"
+        and result_value["status"] == "passed"
     )
-    return (0 if expected_operational_partial else 2), {
+    return (0 if expected_operational_success else 2), {
         **receipt,
         "receipt_filename": receipt_path.name,
         "receipt_sha256": _sha256_file(receipt_path),

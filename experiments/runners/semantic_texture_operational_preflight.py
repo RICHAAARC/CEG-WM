@@ -17,7 +17,7 @@ from runtime.routing_observation import (
 )
 
 
-PREFLIGHT_SCHEMA_VERSION = 3
+PREFLIGHT_SCHEMA_VERSION = 4
 PREFLIGHT_PROFILE_ID = "semantic_texture_operational_preflight"
 WRITE_UNIT_ID = "semantic_texture_write_operational"
 BLIND_DETECTION_UNIT_ID = "semantic_texture_blind_detection_operational"
@@ -38,12 +38,13 @@ ALLOWED_PRE_EXECUTION_STAGES = frozenset(
         "runtime_configuration",
         "runtime_initialization",
         "semantic_runtime_initialization",
+        "detector_asset_loading",
         "experiment_adapter_initialization",
         "latent_preparation",
         "runner_admission",
     }
 )
-ASSET_AUTHORITY_STATUS = "identity_blocked"
+ASSET_AUTHORITY_STATUS = "diagnostic_bundle_authenticated"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 
@@ -76,6 +77,9 @@ class SemanticTextureOperationalConfiguration:
     profile_id: str
     unit_roster: tuple[str, str]
     asset_authority_status: str
+    detector_asset_bundle_digest: str
+    detector_asset_bundle_sha256: str
+    detector_asset_bundle_relative_path: str
     generation_prompt: str
     generation_negative_prompt: str
     generation_seed: int
@@ -130,13 +134,15 @@ class SemanticTextureOperationalResult:
     run_id: str
     configuration_digest: str
     asset_authority_status: str
+    asset_bundle_digest: str
+    diagnostic_only: bool
     model_id: str
     model_revision: str
     pre_execution_stage: str | None
     semantic_runtime_initialization_step: str | None
     unit_outcomes: tuple[OperationalUnitOutcome, OperationalUnitOutcome]
     aggregate: None
-    blocked_class: str
+    blocked_class: str | None
     status: str
     scientific_unit_count: int
     science_started: bool
@@ -149,9 +155,11 @@ class SemanticTextureOperationalResult:
         return {
             "aggregate": self.aggregate,
             "asset_authority_status": self.asset_authority_status,
+            "asset_bundle_digest": self.asset_bundle_digest,
             "blocked_class": self.blocked_class,
             "candidate_promoted": self.candidate_promoted,
             "configuration_digest": self.configuration_digest,
+            "diagnostic_only": self.diagnostic_only,
             "formal_tau_created": self.formal_tau_created,
             "model_id": self.model_id,
             "model_revision": self.model_revision,
@@ -208,6 +216,9 @@ def load_semantic_texture_operational_configuration(
         ) from exc
     required = {
         "asset_authority_status",
+        "detector_asset_bundle_digest",
+        "detector_asset_bundle_relative_path",
+        "detector_asset_bundle_sha256",
         "generation_negative_prompt",
         "generation_prompt",
         "generation_seed",
@@ -234,6 +245,19 @@ def load_semantic_texture_operational_configuration(
         or raw["profile_id"] != PREFLIGHT_PROFILE_ID
         or raw["unit_roster"] != list(UNIT_ROSTER)
         or raw["asset_authority_status"] != ASSET_AUTHORITY_STATUS
+        or any(
+            type(raw[field]) is not str or _DIGEST.fullmatch(raw[field]) is None
+            for field in (
+                "detector_asset_bundle_digest",
+                "detector_asset_bundle_sha256",
+            )
+        )
+        or raw["detector_asset_bundle_relative_path"]
+        != (
+            "semantic_texture_soft_detector_assets/"
+            "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d/"
+            "semantic_texture_soft_detector_asset_bundle.json"
+        )
         or raw["generation_prompt"] != "a red cube"
         or raw["generation_negative_prompt"] != ""
         or raw["generation_seed"] != 2026081701
@@ -285,6 +309,9 @@ def load_semantic_texture_operational_configuration(
         profile_id=raw["profile_id"],
         unit_roster=tuple(raw["unit_roster"]),
         asset_authority_status=raw["asset_authority_status"],
+        detector_asset_bundle_digest=raw["detector_asset_bundle_digest"],
+        detector_asset_bundle_sha256=raw["detector_asset_bundle_sha256"],
+        detector_asset_bundle_relative_path=raw["detector_asset_bundle_relative_path"],
         generation_prompt=raw["generation_prompt"],
         generation_negative_prompt=raw["generation_negative_prompt"],
         generation_seed=raw["generation_seed"],
@@ -322,6 +349,15 @@ def _public_identity(observation: object) -> tuple[str, str | None]:
             "semantic-texture write witness identity is unavailable",
         )
     return result_identity, witness_identity
+
+
+def _public_detector_identity(observation: object) -> str:
+    result_identity = getattr(observation, "result_identity", None)
+    if type(result_identity) is not str or _DIGEST.fullmatch(result_identity) is None:
+        raise SemanticTextureOperationalBlockedError(
+            "integrity_blocked", "public detector result identity is unavailable"
+        )
+    return result_identity
 
 
 def _live_blind_detection_via_public_adapter(
@@ -386,12 +422,16 @@ def _operational_result(
         r"[A-Za-z0-9][A-Za-z0-9._-]*", run_id
     ):
         raise SemanticTextureOperationalPreflightError("run identity is invalid")
-    blocked_class = (
+    passed = (
+        write_outcome.status == "passed"
+        and detector_outcome.status == "passed"
+    )
+    blocked_class = None if passed else (
         write_outcome.blocked_class
         if write_outcome.status == "blocked"
         else detector_outcome.blocked_class
     )
-    if blocked_class not in ALLOWED_BLOCKED_CLASSES:
+    if not passed and blocked_class not in ALLOWED_BLOCKED_CLASSES:
         raise SemanticTextureOperationalPreflightError(
             "result blocked classification drifted"
         )
@@ -425,9 +465,11 @@ def _operational_result(
     unsigned = {
         "aggregate": None,
         "asset_authority_status": configuration.asset_authority_status,
+        "asset_bundle_digest": configuration.detector_asset_bundle_digest,
         "blocked_class": blocked_class,
         "candidate_promoted": False,
         "configuration_digest": configuration.configuration_digest,
+        "diagnostic_only": True,
         "formal_tau_created": False,
         "pre_execution_stage": pre_execution_stage,
         "semantic_runtime_initialization_step": semantic_runtime_initialization_step,
@@ -437,7 +479,7 @@ def _operational_result(
         "science_started": False,
         "scientific_claims_supported": False,
         "scientific_unit_count": 0,
-        "status": "blocked",
+        "status": "passed" if passed else "blocked",
         "unit_outcomes": [
             write_outcome.as_dict(),
             detector_outcome.as_dict(),
@@ -450,6 +492,8 @@ def _operational_result(
         run_id=run_id,
         configuration_digest=configuration.configuration_digest,
         asset_authority_status=configuration.asset_authority_status,
+        asset_bundle_digest=configuration.detector_asset_bundle_digest,
+        diagnostic_only=True,
         model_id=configuration.model_id,
         model_revision=configuration.model_revision,
         pre_execution_stage=pre_execution_stage,
@@ -457,7 +501,7 @@ def _operational_result(
         unit_outcomes=(write_outcome, detector_outcome),
         aggregate=None,
         blocked_class=blocked_class,
-        status="blocked",
+        status="passed" if passed else "blocked",
         scientific_unit_count=0,
         science_started=False,
         formal_tau_created=False,
@@ -517,9 +561,12 @@ def execute_semantic_texture_operational_preflight(
     base_latent: object,
     detection_key: str,
     semantic_runtime: object,
+    whitening_asset: object,
+    hf_null: object,
+    lf_null: object,
     monotonic_clock: Callable[[], float] = monotonic,
 ) -> SemanticTextureOperationalResult:
-    """Run the live write unit and stop at the missing detector asset authority."""
+    """Run one public write followed by one public diagnostic blind detection."""
 
     if _REVISION.fullmatch(observed_repository_revision) is None:
         raise SemanticTextureOperationalPreflightError(
@@ -577,15 +624,38 @@ def execute_semantic_texture_operational_preflight(
         )
     else:
         detector_started = monotonic_clock()
-        detector_outcome = _unit_failure(
-            BLIND_DETECTION_UNIT_ID,
-            started=True,
-            elapsed_seconds=monotonic_clock() - detector_started,
-            error=SemanticTextureOperationalBlockedError(
-                "identity_blocked",
-                "dedicated semantic-texture detector assets are not authorized",
-            ),
-        )
+        try:
+            detection_image_rgb8 = (
+                adapter.materialize_semantic_texture_written_rgb8(write_observation)
+            )
+            detection_observation = _live_blind_detection_via_public_adapter(
+                adapter,
+                detection_image_rgb8=detection_image_rgb8,
+                detection_key=detection_key,
+                semantic_runtime=semantic_runtime,
+                whitening_asset=whitening_asset,
+                hf_null=hf_null,
+                lf_null=lf_null,
+            )
+            detector_outcome = OperationalUnitOutcome(
+                unit_id=BLIND_DETECTION_UNIT_ID,
+                started=True,
+                status="passed",
+                blocked_class=None,
+                sanitized_error_category=None,
+                sanitized_error_message=None,
+                sanitized_trace_tail=(),
+                elapsed_seconds=max(0.0, monotonic_clock() - detector_started),
+                public_result_identity=_public_detector_identity(detection_observation),
+                witness_identity=None,
+            )
+        except Exception as exc:
+            detector_outcome = _unit_failure(
+                BLIND_DETECTION_UNIT_ID,
+                started=True,
+                elapsed_seconds=monotonic_clock() - detector_started,
+                error=exc,
+            )
 
     return _operational_result(
         configuration,

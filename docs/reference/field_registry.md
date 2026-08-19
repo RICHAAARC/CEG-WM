@@ -79,6 +79,8 @@ Notebook 与 repository module 的跨边界数据
 | whitening_asset_digest | cross_boundary | provenance | none | false | false | false | LF clean-null whitening 公开资产 canonical payload 的 SHA-256。 |
 | fit_manifest_sha256 | cross_boundary | provenance | none | false | false | false | LF whitening 资产绑定的独立 32-clean fit manifest SHA-256。 |
 | asset_bundle_digest | persisted_protocol | provenance | none | true | false | false | Phase-B diagnostic-only bundle 的 canonical payload SHA-256；仅用于 exact bundle loader binding，不构成 threshold、FPR、tau、promotion 或科学 claim。 |
+| detector_asset_bundle_sha256 | persisted_protocol | runtime_locator | none | false | false | false | Run-B 读取前对 source-authenticated bundle JSON 执行的精确字节 SHA-256；不是环境或科学准入。 |
+| detector_asset_bundle_relative_path | persisted_protocol | runtime_locator | none | false | false | false | Run-B 从固定 Drive 项目根构造的唯一 bundle 相对定位；禁止 latest 扫描、动态选择或替代资产。 |
 | asset_bundle_namespace | persisted_protocol | protocol | none | true | false | false | Phase-B create-only diagnostic asset bundle 的固定命名空间；仅绑定资产协议，不构成方法或科学结果身份。 |
 | branch_null_manifest_digest | persisted_protocol | provenance | none | true | false | false | Phase-B 独立 32-clean paired HF/LF branch-null manifest 的 SHA-256；不得与 whitening-fit、target 或历史开发/评估资产重叠。 |
 | whitening_fit_manifest_path | persisted_protocol | runtime_locator | none | true | false | false | Run-A 读取固定 32-clean whitening-fit literal manifest 的仓库相对定位；不是动态样本选择器。 |

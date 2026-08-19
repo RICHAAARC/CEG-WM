@@ -894,6 +894,22 @@ class CegWmExperimentAdapter:
         )
 
     @_revalidate_configuration_before_call
+    def materialize_semantic_texture_written_rgb8(
+        self,
+        write_observation: ComponentCallObservation[object],
+    ) -> torch.Tensor:
+        """Expose the ordinary RGB8 form of the exact public write result."""
+
+        runtime_result = getattr(write_observation, "result", None)
+        content_write = getattr(runtime_result, "content_write_result", None)
+        image = getattr(content_write, "watermarked_image", None)
+        if image is None:
+            raise CegWmExperimentAdapterError(
+                "semantic-texture write RGB8 observation is unavailable"
+            )
+        return materialize_ordinary_rgb8_snapshot(image)
+
+    @_revalidate_configuration_before_call
     def detect_lf(
         self,
         observation: LfDetectionObservation,

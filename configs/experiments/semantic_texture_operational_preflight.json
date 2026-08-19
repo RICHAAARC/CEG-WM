@@ -1,5 +1,8 @@
 {
-  "asset_authority_status": "identity_blocked",
+  "asset_authority_status": "diagnostic_bundle_authenticated",
+  "detector_asset_bundle_digest": "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d",
+  "detector_asset_bundle_relative_path": "semantic_texture_soft_detector_assets/f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d/semantic_texture_soft_detector_asset_bundle.json",
+  "detector_asset_bundle_sha256": "126f73150584d5c5a1e5b5e2dbffa9bb0379a9375c202ab49a87b56f99c41ea7",
   "generation_negative_prompt": "",
   "generation_prompt": "a red cube",
   "generation_seed": 2026081701,
@@ -11,7 +14,7 @@
   "model_revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
   "profile_id": "semantic_texture_operational_preflight",
   "requirements_lock_sha256": "855f73f7cb79cc9b9ec5f4d5a62b17cafc336866836601360882bd1cbaa3568b",
-  "schema_version": 3,
+  "schema_version": 4,
   "seeded_latent_protocol": "cpu_float32_generator_shape_1x16xheight_div8xwidth_div8_then_available_cuda_float16_once",
   "unit_roster": [
     "semantic_texture_write_operational",
