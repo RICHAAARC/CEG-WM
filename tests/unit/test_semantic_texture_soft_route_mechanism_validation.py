@@ -165,6 +165,15 @@ def test_selection_artifact_requires_exact_sha_and_confirmation_does_not_refit(t
     loaded = load_selection_artifact(path, expected_sha256=sha256(blob).hexdigest())
     with pytest.raises(ValueError, match="authority drifted"):
         load_selection_artifact(path, expected_sha256="0" * 64)
+    drifted = {**artifact, "selection_manifest_digest": "f" * 64}
+    drifted_path = tmp_path / "selection-manifest-drift.json"
+    drifted_blob = (json.dumps(drifted, sort_keys=True) + "\n").encode()
+    drifted_path.write_bytes(drifted_blob)
+    with pytest.raises(ValueError, match="authority drifted"):
+        load_selection_artifact(
+            drifted_path,
+            expected_sha256=sha256(drifted_blob).hexdigest(),
+        )
     from scripts.experiment_execution.semantic_texture_soft_route_untouched_confirmation_entrypoint import _calibration_from_artifact
     confirmation_operations = SyntheticOperations()
     result = execute_soft_route_mechanism_split(

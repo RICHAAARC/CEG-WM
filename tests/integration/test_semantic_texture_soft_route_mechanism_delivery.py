@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from hashlib import sha256
 import json
 import os
@@ -13,7 +14,13 @@ import zipfile
 
 import pytest
 
-from experiments.protocol.semantic_texture_soft_route_mechanism_validation import SELECTION_ROLE, load_manifest
+from experiments.protocol.semantic_texture_soft_route_mechanism_validation import (
+    CONFIRMATION_MANIFEST_DIGEST,
+    CONFIRMATION_ROLE,
+    PROTOCOL_ID,
+    SELECTION_ROLE,
+    load_manifest,
+)
 from experiments.runners.semantic_texture_soft_route_mechanism_validation import (
     SoftRouteMechanismBranchScores,
     SoftRouteMechanismGeneration,
@@ -26,6 +33,13 @@ from scripts.experiment_execution.semantic_texture_soft_route_candidate_selectio
     SemanticTextureSoftRouteSoftRouteMechanismSelectionDeliveryError,
     finalize_soft_route_mechanism_candidate_selection_delivery,
     finalize_soft_route_mechanism_failure_delivery,
+)
+from scripts.experiment_execution.semantic_texture_soft_route_untouched_confirmation_server import (
+    CONFIRMATION_ARTIFACT_FILENAME,
+    RECEIPT_FILENAME as CONFIRMATION_RECEIPT_FILENAME,
+    RESULT_FILENAME as CONFIRMATION_RESULT_FILENAME,
+    SemanticTextureSoftRouteMechanismConfirmationDeliveryError,
+    finalize_soft_route_mechanism_untouched_confirmation_delivery,
 )
 
 
@@ -188,6 +202,79 @@ def test_gitless_bootstrap_rejects_arbitrary_extra_persistent_member(tmp_path: P
     assert not any(path.name == "__pycache__" for path in extracted.rglob("*"))
 
 
+def test_gitless_absolute_confirmation_bootstrap_propagates_bounded_failure(tmp_path: Path) -> None:
+    repository, revision = _repository(tmp_path)
+    archive_path = tmp_path / "confirmation.zip"
+    builder.build_semantic_texture_soft_route_mechanism_validation_package(
+        repository_root=repository,
+        source_revision=revision,
+        output=archive_path,
+        split="untouched_confirmation",
+    )
+    extracted, unrelated = tmp_path / "extracted", tmp_path / "unrelated"
+    unrelated.mkdir()
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(extracted)
+    environment = {
+        key: value for key, value in os.environ.items() if key != "PYTHONPATH"
+    }
+    environment["PATH"] = ""
+    output = tmp_path / "confirmation-output"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(
+                extracted
+                / "scripts/experiment_execution/semantic_texture_soft_route_untouched_confirmation_bootstrap.py"
+            ),
+            "--repository-root",
+            str(extracted),
+            "--checkpoint",
+            str(unrelated / "missing-checkpoint.pth"),
+            "--execution-root",
+            str(tmp_path / "confirmation-execution"),
+            "--entrypoint-args",
+            "--execute",
+            "--run-id",
+            "semantic-texture-soft-route-confirmation-replay",
+            "--output-root",
+            str(output),
+            "--selection-artifact-root",
+            str(unrelated),
+            "--selection-artifact-sha256",
+            "a" * 64,
+            "--detector-asset-bundle",
+            str(unrelated / "missing-asset.json"),
+        ],
+        cwd=unrelated,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 2
+    assert completed.stderr == ""
+    receipt = json.loads(completed.stdout)
+    assert receipt["blocked_class"] == "environment_blocked"
+    assert receipt["untouched_confirmation_passed"] is False
+    assert receipt["provisional_authority_retired"] is False
+    assert receipt["observed_repository_revision"] == revision
+    assert (output / CONFIRMATION_RESULT_FILENAME).exists()
+    assert (output / CONFIRMATION_RECEIPT_FILENAME).exists()
+    assert (output / "SHA256SUMS").exists()
+    persisted = "\n".join(
+        path.read_text("utf-8", errors="ignore")
+        for path in output.iterdir()
+        if path.suffix != ".zip"
+    )
+    assert "candidate_selection_passed" not in persisted
+    assert "selection_artifact_filename" not in persisted
+    assert not any(
+        path.name == "__pycache__" or path.suffix in {".pyc", ".pyo"}
+        for path in extracted.rglob("*")
+    )
+
+
 class _Operations:
     def __init__(self) -> None:
         self.count = 0
@@ -219,6 +306,18 @@ class _Operations:
         return None
 
 
+class _ConfirmationOperations(_Operations):
+    def __init__(self) -> None:
+        super().__init__()
+        self.installed = None
+
+    def build_calibration(self, primary, *, partition_identity):
+        raise AssertionError("confirmation must not refit")
+
+    def install_calibration(self, calibration):
+        self.installed = calibration
+
+
 def test_soft_route_mechanism_delivery_is_create_only_complete_and_sha_last(tmp_path: Path) -> None:
     manifest = load_manifest(ROOT / "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json", expected_role=SELECTION_ROLE)
     result = execute_soft_route_mechanism_split(manifest, _Operations())
@@ -248,3 +347,130 @@ def test_soft_route_mechanism_bounded_failure_is_exported_before_nonzero(tmp_pat
     assert str(tmp_path) not in persisted
     assert (output / "SHA256SUMS").exists()
     assert receipt["status"] == "blocked"
+
+
+def test_successful_confirmation_delivery_separates_and_retires_authority(tmp_path: Path) -> None:
+    selection_manifest = load_manifest(
+        ROOT / "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json",
+        expected_role=SELECTION_ROLE,
+    )
+    confirmation_manifest = load_manifest(
+        ROOT / "configs/experiments/semantic_texture_soft_route_untouched_confirmation_manifest.json",
+        expected_role=CONFIRMATION_ROLE,
+    )
+    selection_result = execute_soft_route_mechanism_split(
+        selection_manifest, _Operations()
+    )
+    operations = _ConfirmationOperations()
+    confirmation_result = execute_soft_route_mechanism_split(
+        confirmation_manifest,
+        operations,
+        provisional_calibration=selection_result.provisional_calibration,
+    )
+    assert all(
+        record.execution_status == "completed"
+        for record in (*confirmation_result.generations, *confirmation_result.records)
+    )
+    confirmation_result = replace(confirmation_result, passed=True)
+    source_artifact_sha256 = "c" * 64
+    output = tmp_path / "confirmation-delivery"
+    code, receipt = finalize_soft_route_mechanism_untouched_confirmation_delivery(
+        confirmation_result,
+        observed_repository_revision="3" * 40,
+        run_id="soft-route-mechanism-confirmation-delivery",
+        output_root=output,
+        source_selection_artifact_sha256=source_artifact_sha256,
+        source_selection_manifest_digest=selection_manifest.digest(),
+    )
+    assert code == 0
+    expected_authority = {
+        "protocol_id": PROTOCOL_ID,
+        "confirmation_manifest_digest": CONFIRMATION_MANIFEST_DIGEST,
+        "untouched_confirmation_passed": True,
+        "source_selection_manifest_digest": selection_manifest.digest(),
+        "source_selection_artifact_sha256": source_artifact_sha256,
+        "provisional_calibration_digest": selection_result.provisional_calibration.digest(),
+        "provisional_authority_retired": True,
+        "diagnostic_only": True,
+        "science_started": False,
+        "scientific_unit_count": 0,
+        "candidate_promoted": False,
+        "formal_tau_created": False,
+        "formal_fpr_created": False,
+    }
+    artifact = json.loads((output / CONFIRMATION_ARTIFACT_FILENAME).read_text("utf-8"))
+    assert artifact == expected_authority
+    result = json.loads((output / CONFIRMATION_RESULT_FILENAME).read_text("utf-8"))
+    assert {field: result[field] for field in expected_authority} == expected_authority
+    persisted_receipt = json.loads((output / CONFIRMATION_RECEIPT_FILENAME).read_text("utf-8"))
+    assert {field: persisted_receipt[field] for field in expected_authority} == expected_authority
+    assert receipt["confirmation_artifact_filename"] == CONFIRMATION_ARTIFACT_FILENAME
+    assert len(result["generations"]) == 160
+    assert len(result["records"]) == 384
+    assert "provisional_calibration" not in artifact
+    persisted = "\n".join(
+        path.read_text("utf-8", errors="ignore")
+        for path in output.iterdir()
+        if path.suffix != ".zip"
+    )
+    assert "candidate_selection_passed" not in persisted
+    assert "selection_artifact_filename" not in persisted
+    with zipfile.ZipFile(output / receipt["archive_filename"]) as archive:
+        assert archive.namelist() == [
+            CONFIRMATION_ARTIFACT_FILENAME,
+            CONFIRMATION_RESULT_FILENAME,
+        ]
+    assert (output / "SHA256SUMS").stat().st_mtime_ns >= max(
+        path.stat().st_mtime_ns
+        for path in output.iterdir()
+        if path.name != "SHA256SUMS"
+    )
+    with pytest.raises(SemanticTextureSoftRouteMechanismConfirmationDeliveryError):
+        finalize_soft_route_mechanism_untouched_confirmation_delivery(
+            confirmation_result,
+            observed_repository_revision="3" * 40,
+            run_id="soft-route-mechanism-confirmation-delivery",
+            output_root=output,
+            source_selection_artifact_sha256=source_artifact_sha256,
+            source_selection_manifest_digest=selection_manifest.digest(),
+        )
+
+
+def test_failed_confirmation_delivery_does_not_retire_authority(tmp_path: Path) -> None:
+    selection_manifest = load_manifest(
+        ROOT / "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json",
+        expected_role=SELECTION_ROLE,
+    )
+    confirmation_manifest = load_manifest(
+        ROOT / "configs/experiments/semantic_texture_soft_route_untouched_confirmation_manifest.json",
+        expected_role=CONFIRMATION_ROLE,
+    )
+    selection_result = execute_soft_route_mechanism_split(
+        selection_manifest, _Operations()
+    )
+    confirmation_result = execute_soft_route_mechanism_split(
+        confirmation_manifest,
+        _ConfirmationOperations(),
+        provisional_calibration=selection_result.provisional_calibration,
+    )
+    confirmation_result = replace(
+        confirmation_result,
+        passed=False,
+        blocked_class="implementation_blocked",
+    )
+    output = tmp_path / "failed-confirmation"
+    code, receipt = finalize_soft_route_mechanism_untouched_confirmation_delivery(
+        confirmation_result,
+        observed_repository_revision="4" * 40,
+        run_id="soft-route-mechanism-failed-confirmation",
+        output_root=output,
+        source_selection_artifact_sha256="d" * 64,
+        source_selection_manifest_digest=selection_manifest.digest(),
+    )
+    assert code == 2
+    assert receipt["status"] == "blocked"
+    assert receipt["untouched_confirmation_passed"] is False
+    assert receipt["provisional_authority_retired"] is False
+    artifact = json.loads((output / CONFIRMATION_ARTIFACT_FILENAME).read_text("utf-8"))
+    assert artifact["untouched_confirmation_passed"] is False
+    assert artifact["provisional_authority_retired"] is False

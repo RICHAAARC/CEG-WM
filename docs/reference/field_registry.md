@@ -996,6 +996,12 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | skipped_raw_rows | persisted_protocol | provenance | none | true | false | false | Literal eligibility-stream skip ledger; contains only bounded non-secret reasons. |
 | provisional_calibration_digest | persisted_protocol | protocol | none | true | false | false | Immutable selection-bound provisional CDF and operating-point artifact digest. |
 | provisional_authority_retired | persisted_protocol | protocol | none | true | false | false | Confirmation records that selection provisional calibration has no future formal authority. |
+| confirmation_manifest_digest | persisted_protocol | protocol | none | true | false | false | Exact untouched-confirmation manifest digest used by the completed diagnostic confirmation. |
+| untouched_confirmation_passed | persisted_protocol | diagnostic | none | true | false | false | Whether the fixed untouched-confirmation denominator completed and passed its frozen diagnostic conjunction. |
+| source_selection_manifest_digest | persisted_protocol | provenance | none | true | false | false | Frozen selection manifest digest authenticated as the source of confirmation calibration. |
+| source_selection_artifact_sha256 | persisted_protocol | provenance | none | true | false | false | Exact SHA-256 of the immutable source selection artifact consumed by confirmation; never a locator. |
+| confirmation_artifact_filename | persisted_protocol | runtime_locator | none | true | false | false | Create-only basename of the confirmation-only authority record, never a selection artifact identity. |
+| confirmation_artifact_sha256 | persisted_protocol | provenance | none | true | false | false | SHA-256 of the confirmation-only authority record bytes. |
 | soft_route_mechanism_case_records | persisted_protocol | diagnostic | none | true | false | false | Complete fixed generation and detection matrix for one soft-route mechanism validation split. |
 | soft_route_mechanism_selection_artifact_locator | persisted_protocol | runtime_locator | none | true | false | false | Exact configured create-only selection artifact locator; never latest discovery. |
 | paired_rgb8_mse | persisted_protocol | diagnostic | none | true | false | false | Paired normalized RGB8 diagnostic quality measurement, not a scientific claim. |

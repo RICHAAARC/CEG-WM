@@ -58,6 +58,9 @@ def execute_soft_route_mechanism_untouched_confirmation_entrypoint(
     """Consume one authenticated selection artifact and never refit it."""
 
     operations: SoftRouteMechanismOperations | None = None
+    calibration: SoftRouteMechanismProvisionalCalibration | None = None
+    authenticated_selection_artifact_sha256: str | None = None
+    authenticated_selection_manifest_digest: str | None = None
     try:
         configuration = load_soft_route_mechanism_configuration(CONFIG_PATH)
         selection_artifact_path = (
@@ -69,6 +72,10 @@ def execute_soft_route_mechanism_untouched_confirmation_entrypoint(
             selection_artifact_path,
             expected_sha256=selection_artifact_sha256,
         )
+        authenticated_selection_artifact_sha256 = selection_artifact_sha256
+        authenticated_selection_manifest_digest = artifact[
+            "selection_manifest_digest"
+        ]
         calibration = _calibration_from_artifact(artifact)
         operations = operations_factory()
         result: SoftRouteMechanismSplitResult = execute_soft_route_mechanism_split(
@@ -77,7 +84,16 @@ def execute_soft_route_mechanism_untouched_confirmation_entrypoint(
         operations.close()
         operations = None
         return finalize_soft_route_mechanism_untouched_confirmation_delivery(
-            result, observed_repository_revision=observed_repository_revision, run_id=run_id, output_root=output_root
+            result,
+            observed_repository_revision=observed_repository_revision,
+            run_id=run_id,
+            output_root=output_root,
+            source_selection_artifact_sha256=(
+                authenticated_selection_artifact_sha256
+            ),
+            source_selection_manifest_digest=(
+                authenticated_selection_manifest_digest
+            ),
         )
     except Exception as exc:
         failure_reason = type(exc).__name__
@@ -94,6 +110,15 @@ def execute_soft_route_mechanism_untouched_confirmation_entrypoint(
             output_root=output_root,
             stage="untouched_confirmation_entrypoint",
             failure_reason=failure_reason,
+            source_selection_artifact_sha256=(
+                authenticated_selection_artifact_sha256
+            ),
+            source_selection_manifest_digest=(
+                authenticated_selection_manifest_digest
+            ),
+            provisional_calibration_digest=(
+                None if calibration is None else calibration.digest()
+            ),
         )
 
 
