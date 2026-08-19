@@ -120,7 +120,14 @@ def _canonical(value: object) -> bytes:
 
 def _safe(path_text: str) -> None:
     path = PurePosixPath(path_text)
-    if not path_text or path.is_absolute() or ".." in path.parts or any(part in EXCLUDED_PARTS for part in path.parts):
+    if (
+        not path_text
+        or path.is_absolute()
+        or ".." in path.parts
+        or "__pycache__" in path.parts
+        or path.suffix in {".pyc", ".pyo"}
+        or any(part in EXCLUDED_PARTS for part in path.parts)
+    ):
         raise SemanticTextureSoftRouteSoftRouteMechanismPackageError("unsafe package path")
 
 

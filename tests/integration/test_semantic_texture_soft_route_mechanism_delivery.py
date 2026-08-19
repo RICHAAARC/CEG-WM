@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -43,6 +44,10 @@ def _repository(tmp_path: Path) -> tuple[Path, str]:
         target = repository / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / relative, target)
+    cache = repository / "scripts" / "experiment_execution" / "__pycache__"
+    cache.mkdir()
+    (cache / "excluded.pyc").write_bytes(b"interpreter cache")
+    (repository / "scripts" / "experiment_execution" / "excluded.pyo").write_bytes(b"optimized cache")
     _git(repository, "init", "--quiet")
     _git(repository, "config", "user.name", "SoftRouteMechanism Test")
     _git(repository, "config", "user.email", "soft_route_mechanism@example.invalid")
@@ -62,6 +67,7 @@ def test_soft_route_mechanism_package_is_deterministic_exact_and_gitless_replaya
     with zipfile.ZipFile(first) as archive:
         names = archive.namelist()
         assert names == sorted(builder.SOFT_ROUTE_MECHANISM_EXACT_SOURCE_FILES) + [builder.EMBEDDED_MANIFEST_PATH]
+        assert not any("__pycache__" in PurePosixPath(name).parts or PurePosixPath(name).suffix in {".pyc", ".pyo"} for name in names)
         archive.extractall(extracted)
     assert _package_revision(extracted) == revision
     assert not any(
@@ -77,6 +83,109 @@ def test_soft_route_mechanism_package_is_deterministic_exact_and_gitless_replaya
         text=True,
     )
     assert completed.stdout.strip() == "semantic_texture_soft_route_mechanism_validation"
+
+
+def _run_gitless_bootstrap(
+    *,
+    extracted: Path,
+    unrelated_cwd: Path,
+    execution_root: Path,
+    output_root: Path,
+) -> subprocess.CompletedProcess[str]:
+    environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    environment["PATH"] = ""
+    return subprocess.run(
+        [
+            sys.executable,
+            str(
+                extracted
+                / "scripts/experiment_execution/semantic_texture_soft_route_candidate_selection_bootstrap.py"
+            ),
+            "--repository-root",
+            str(extracted),
+            "--checkpoint",
+            str(unrelated_cwd / "missing-checkpoint.pth"),
+            "--execution-root",
+            str(execution_root),
+            "--entrypoint-args",
+            "--execute",
+            "--run-id",
+            "semantic-texture-soft-route-gitless-replay",
+            "--output-root",
+            str(output_root),
+            "--detector-asset-bundle",
+            str(unrelated_cwd / "missing-asset.json"),
+        ],
+        cwd=unrelated_cwd,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_gitless_absolute_bootstrap_authenticates_before_package_local_imports(tmp_path: Path) -> None:
+    repository, revision = _repository(tmp_path)
+    archive_path = tmp_path / "candidate.zip"
+    package = builder.build_semantic_texture_soft_route_mechanism_validation_package(
+        repository_root=repository,
+        source_revision=revision,
+        output=archive_path,
+        split="candidate_selection",
+    )
+    extracted, unrelated = tmp_path / "extracted", tmp_path / "unrelated"
+    unrelated.mkdir()
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(extracted)
+    embedded = (extracted / builder.EMBEDDED_MANIFEST_PATH).read_bytes()
+    assert sha256(embedded).hexdigest() == package["embedded_manifest_sha256"]
+
+    completed = _run_gitless_bootstrap(
+        extracted=extracted,
+        unrelated_cwd=unrelated,
+        execution_root=tmp_path / "execution",
+        output_root=tmp_path / "output",
+    )
+    assert completed.returncode == 2
+    receipt = json.loads(completed.stdout)
+    assert receipt["observed_repository_revision"] == revision
+    assert receipt["blocked_class"] == "environment_blocked"
+    assert receipt["status"] == "blocked"
+    assert not any(
+        path.name == "__pycache__" or path.suffix in {".pyc", ".pyo"}
+        for path in extracted.rglob("*")
+    )
+
+
+def test_gitless_bootstrap_rejects_arbitrary_extra_persistent_member(tmp_path: Path) -> None:
+    repository, revision = _repository(tmp_path)
+    archive_path = tmp_path / "candidate.zip"
+    builder.build_semantic_texture_soft_route_mechanism_validation_package(
+        repository_root=repository,
+        source_revision=revision,
+        output=archive_path,
+        split="candidate_selection",
+    )
+    extracted, unrelated = tmp_path / "extracted", tmp_path / "unrelated"
+    unrelated.mkdir()
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(extracted)
+    (extracted / "unexpected-persistent-member.txt").write_text("must fail closed", encoding="utf-8")
+
+    completed = _run_gitless_bootstrap(
+        extracted=extracted,
+        unrelated_cwd=unrelated,
+        execution_root=tmp_path / "execution",
+        output_root=tmp_path / "output",
+    )
+    assert completed.returncode == 2
+    assert json.loads(completed.stdout) == {
+        "blocked_class": "integrity_blocked",
+        "failure_delivery_status": "not_created",
+        "stage": "bootstrap",
+        "status": "blocked",
+    }
+    assert not any(path.name == "__pycache__" for path in extracted.rglob("*"))
 
 
 class _Operations:
