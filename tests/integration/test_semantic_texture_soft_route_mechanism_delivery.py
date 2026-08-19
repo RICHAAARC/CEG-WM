@@ -444,6 +444,7 @@ def test_runner_failure_delivery_preserves_fixed_denominator_without_selection_a
     (
         "generation_denominator",
         "detector_role",
+        "frozen_identity",
         "missing_failed_slot",
         "completed_without_calibration",
         "non_finite_value",
@@ -459,6 +460,29 @@ def test_runner_failure_delivery_rejects_malformed_or_forged_results(
         records = list(result.records)
         records[0] = replace(records[0], key_role="wrong", wrong_key_index=0)
         result = replace(result, records=tuple(records))
+    elif malformation == "frozen_identity":
+        original = result.generations[0].source_cluster_id
+        generations = tuple(
+            replace(
+                record,
+                source_cluster_id="e" * 64,
+                image_lineage_digest="f" * 64,
+            )
+            if record.source_cluster_id == original
+            else record
+            for record in result.generations
+        )
+        records = tuple(
+            replace(
+                record,
+                source_cluster_id="e" * 64,
+                image_lineage_digest="f" * 64,
+            )
+            if record.source_cluster_id == original
+            else record
+            for record in result.records
+        )
+        result = replace(result, generations=generations, records=records)
     elif malformation == "missing_failed_slot":
         generations = list(result.generations)
         generations[0] = replace(

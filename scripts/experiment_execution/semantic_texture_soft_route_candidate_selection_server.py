@@ -17,6 +17,7 @@ from experiments.protocol.semantic_texture_soft_route_mechanism_validation impor
     PROTOCOL_ID,
     SELECTION_MANIFEST_DIGEST,
     SELECTION_ROLE,
+    load_manifest,
 )
 from experiments.runners.semantic_texture_soft_route_mechanism_validation import SoftRouteMechanismSplitResult
 
@@ -101,6 +102,19 @@ def _fixed_failed_result_layout(
         and len({identity[0] for identity in identities}) == CLUSTER_COUNT
         and len({identity[1] for identity in identities}) == CLUSTER_COUNT,
         "selection generation identity is duplicated",
+    )
+    manifest = load_manifest(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json",
+        expected_role=SELECTION_ROLE,
+    )
+    _require(
+        tuple(identities)
+        == tuple(
+            (entry.source_cluster_id, entry.image_lineage_digest)
+            for entry in manifest.entries
+        ),
+        "selection generation identity is not frozen-manifest-bound",
     )
 
     primary_indexes: list[int] = []
