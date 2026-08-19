@@ -27,12 +27,18 @@ class _PublicAdapter:
         *,
         public_result_identity: str = "4" * 64,
         witness_identity: str = "3" * 64,
+        detector_error: BaseException | None = None,
+        detector_result_identity: str = "5" * 64,
     ) -> None:
         self.write_error = write_error
         self.public_result_identity = public_result_identity
         self.witness_identity = witness_identity
+        self.detector_error = detector_error
+        self.detector_result_identity = detector_result_identity
         self.write_calls = 0
+        self.rgb8_calls = 0
         self.detector_calls = 0
+        self.call_sequence: list[str] = []
 
     def execute_semantic_texture_content_write_and_vae(
         self,
@@ -41,24 +47,56 @@ class _PublicAdapter:
         semantic_runtime: object,
     ) -> object:
         self.write_calls += 1
+        self.call_sequence.append("write")
         assert base_latent is _BASE_LATENT
         assert detection_key == "memory-only-detection-key"
         assert semantic_runtime is _SEMANTIC_RUNTIME
         if self.write_error is not None:
             raise self.write_error
         witness = SimpleNamespace(witness_identity=self.witness_identity)
-        return SimpleNamespace(
+        self.write_observation = SimpleNamespace(
             result_identity=self.public_result_identity,
             result=SimpleNamespace(witness=witness),
         )
+        return self.write_observation
 
-    def detect_semantic_texture_candidate(self, *args, **kwargs):
+    def materialize_semantic_texture_written_rgb8(
+        self, write_observation: object
+    ) -> object:
+        self.rgb8_calls += 1
+        self.call_sequence.append("rgb8")
+        assert write_observation is self.write_observation
+        return _DETECTION_IMAGE_RGB8
+
+    def detect_semantic_texture_candidate(
+        self,
+        detection_image_rgb8: object,
+        detection_key: str,
+        semantic_runtime: object,
+        whitening_asset: object,
+        *,
+        hf_null: object,
+        lf_null: object,
+    ) -> object:
         self.detector_calls += 1
-        raise AssertionError("Phase A must block before public detector call")
+        self.call_sequence.append("detector")
+        assert detection_image_rgb8 is _DETECTION_IMAGE_RGB8
+        assert detection_key == "memory-only-detection-key"
+        assert semantic_runtime is _SEMANTIC_RUNTIME
+        assert whitening_asset is _WHITENING_ASSET
+        assert hf_null is _HF_NULL
+        assert lf_null is _LF_NULL
+        if self.detector_error is not None:
+            raise self.detector_error
+        return SimpleNamespace(result_identity=self.detector_result_identity)
 
 
 _BASE_LATENT = object()
 _SEMANTIC_RUNTIME = object()
+_DETECTION_IMAGE_RGB8 = object()
+_WHITENING_ASSET = object()
+_HF_NULL = object()
+_LF_NULL = object()
 
 
 def _execute(
@@ -78,27 +116,50 @@ def _execute(
         base_latent=_BASE_LATENT,
         detection_key="memory-only-detection-key",
         semantic_runtime=_SEMANTIC_RUNTIME,
+        whitening_asset=_WHITENING_ASSET,
+        hf_null=_HF_NULL,
+        lf_null=_LF_NULL,
         monotonic_clock=lambda: next(ticks),
     )
 
 
 def test_semantic_texture_operational_preflight_runs_exact_two_units_without_science() -> None:
     adapter = _PublicAdapter()
-    result = _execute(adapter)
+    configuration = preflight.load_semantic_texture_operational_configuration(
+        CONFIG_PATH
+    )
+    result = _execute(adapter, configuration)
     assert tuple(item.unit_id for item in result.unit_outcomes) == preflight.UNIT_ROSTER
-    assert result.unit_outcomes[0].status == "passed"
-    assert result.unit_outcomes[0].witness_identity == "3" * 64
-    assert result.unit_outcomes[1].started is True
-    assert result.unit_outcomes[1].blocked_class == "identity_blocked"
-    assert result.status == "blocked"
+    write, detector = result.unit_outcomes
+    assert write.started is True and write.status == "passed"
+    assert write.witness_identity == "3" * 64
+    assert detector.started is True and detector.status == "passed"
+    assert detector.public_result_identity == "5" * 64
+    assert detector.witness_identity is None
+    assert result.status == "passed"
+    assert result.blocked_class is None
+    assert result.diagnostic_only is True
+    assert result.asset_authority_status == "diagnostic_bundle_authenticated"
+    assert result.asset_bundle_digest == (
+        "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d"
+    )
+    assert configuration.schema_version == 4
+    assert configuration.detector_asset_bundle_sha256 == (
+        "126f73150584d5c5a1e5b5e2dbffa9bb0379a9375c202ab49a87b56f99c41ea7"
+    )
+    assert configuration.detector_asset_bundle_relative_path == (
+        "semantic_texture_soft_detector_assets/"
+        "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d/"
+        "semantic_texture_soft_detector_asset_bundle.json"
+    )
     assert result.aggregate is None
     assert result.scientific_unit_count == 0
     assert result.science_started is False
     assert result.formal_tau_created is False
     assert result.candidate_promoted is False
     assert result.scientific_claims_supported is False
-    assert adapter.write_calls == 1
-    assert adapter.detector_calls == 0
+    assert adapter.call_sequence == ["write", "rgb8", "detector"]
+    assert (adapter.write_calls, adapter.rgb8_calls, adapter.detector_calls) == (1, 1, 1)
 
 
 def test_semantic_texture_operational_preflight_uses_public_adapter_only() -> None:
@@ -114,14 +175,18 @@ def test_semantic_texture_operational_preflight_uses_public_adapter_only() -> No
     assert called_adapter_attributes == {
         "detect_semantic_texture_candidate",
         "execute_semantic_texture_content_write_and_vae",
+        "materialize_semantic_texture_written_rgb8",
     }
     source = Path(preflight.__file__).read_text(encoding="utf-8")
     assert "Sd35RuntimeAdapter" not in source
     assert "runtime.content_write" not in source
     assert "from main" not in source
+    assert "semantic_texture_lf_detector" not in source
+    assert "importlib" not in source
     adapter = _PublicAdapter()
     _execute(adapter)
-    assert (adapter.write_calls, adapter.detector_calls) == (1, 0)
+    assert adapter.call_sequence == ["write", "rgb8", "detector"]
+    assert (adapter.write_calls, adapter.rgb8_calls, adapter.detector_calls) == (1, 1, 1)
 
 
 @pytest.mark.parametrize(
@@ -161,7 +226,10 @@ def test_semantic_texture_operational_preflight_faults_are_blocked_and_aggregate
     assert result.aggregate is None
     assert result.science_started is False
     assert result.scientific_unit_count == 0
+    assert result.diagnostic_only is True
+    assert result.status == "blocked"
     assert adapter.detector_calls == 0
+    assert adapter.rgb8_calls == 0
     persisted_result = json.dumps(result.as_dict(), sort_keys=True)
     for private_fragment in (
         private_error_text,
@@ -182,7 +250,19 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
     configuration = preflight.load_semantic_texture_operational_configuration(
         CONFIG_PATH
     )
-    assert configuration.asset_authority_status == "identity_blocked"
+    assert configuration.schema_version == 4
+    assert configuration.asset_authority_status == "diagnostic_bundle_authenticated"
+    assert configuration.detector_asset_bundle_digest == (
+        "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d"
+    )
+    assert configuration.detector_asset_bundle_sha256 == (
+        "126f73150584d5c5a1e5b5e2dbffa9bb0379a9375c202ab49a87b56f99c41ea7"
+    )
+    assert configuration.detector_asset_bundle_relative_path == (
+        "semantic_texture_soft_detector_assets/"
+        "f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d/"
+        "semantic_texture_soft_detector_asset_bundle.json"
+    )
     raw = CONFIG_PATH.read_text(encoding="utf-8").rstrip()
     mutated = raw[:-1] + ',\n  "whitening_asset_override": "forbidden"\n}\n'
     path = tmp_path / "configuration.json"
@@ -242,6 +322,9 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
             base_latent=_BASE_LATENT,
             detection_key="memory-only-detection-key",
             semantic_runtime=_SEMANTIC_RUNTIME,
+            whitening_asset=_WHITENING_ASSET,
+            hf_null=_HF_NULL,
+            lf_null=_LF_NULL,
             whitening_asset_override=object(),
         )
     invalid_identity_adapters = (
@@ -258,5 +341,23 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
         assert invalid_detector.blocked_class == "integrity_blocked"
         assert invalid_identity_adapter.detector_calls == 0
     result = _execute(adapter)
-    assert result.unit_outcomes[1].blocked_class == "identity_blocked"
-    assert adapter.detector_calls == 0
+    write, detector = result.unit_outcomes
+    assert write.status == "passed"
+    assert detector.status == "passed"
+    assert result.status == "passed"
+    assert adapter.detector_calls == 1
+    private_error_text = "detector token=private-token /home/private/detector.bin"
+    blocked_result = _execute(
+        _PublicAdapter(
+            detector_error=preflight.SemanticTextureOperationalBlockedError(
+                "implementation_blocked", private_error_text
+            )
+        )
+    )
+    blocked_write, blocked_detector = blocked_result.unit_outcomes
+    assert blocked_write.status == "passed"
+    assert blocked_detector.started is True and blocked_detector.status == "blocked"
+    assert blocked_detector.blocked_class == "implementation_blocked"
+    assert blocked_result.status == "blocked"
+    assert blocked_result.blocked_class == "implementation_blocked"
+    assert private_error_text not in json.dumps(blocked_result.as_dict(), sort_keys=True)
