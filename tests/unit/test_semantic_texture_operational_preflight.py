@@ -358,6 +358,19 @@ def test_semantic_texture_preflight_rejects_asset_override_private_state_and_liv
     assert blocked_write.status == "passed"
     assert blocked_detector.started is True and blocked_detector.status == "blocked"
     assert blocked_detector.blocked_class == "implementation_blocked"
+    assert blocked_detector.sanitized_error_category == "implementation_blocked"
+    assert blocked_detector.sanitized_error_message is None
+    assert blocked_detector.sanitized_trace_tail == ()
     assert blocked_result.status == "blocked"
     assert blocked_result.blocked_class == "implementation_blocked"
-    assert private_error_text not in json.dumps(blocked_result.as_dict(), sort_keys=True)
+    persisted_blocked_result = json.dumps(
+        blocked_result.as_dict(), sort_keys=True
+    )
+    for private_fragment in (
+        private_error_text,
+        "private-token",
+        "/home/private/detector.bin",
+        "SemanticTextureOperationalBlockedError",
+        "detector token",
+    ):
+        assert private_fragment not in persisted_blocked_result
