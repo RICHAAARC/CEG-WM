@@ -318,12 +318,31 @@ class _ConfirmationOperations(_Operations):
         self.installed = calibration
 
 
+class _FirstGenerationFailureOperations(_Operations):
+    def clean(self, entry):
+        raise RuntimeError("private details must remain bounded")
+
+
+def _selection_manifest():
+    return load_manifest(
+        ROOT
+        / "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json",
+        expected_role=SELECTION_ROLE,
+    )
+
+
+def _first_generation_failure_result():
+    return execute_soft_route_mechanism_split(
+        _selection_manifest(), _FirstGenerationFailureOperations()
+    )
+
+
 def test_soft_route_mechanism_delivery_is_create_only_complete_and_sha_last(tmp_path: Path) -> None:
-    manifest = load_manifest(ROOT / "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json", expected_role=SELECTION_ROLE)
-    result = execute_soft_route_mechanism_split(manifest, _Operations())
+    result = execute_soft_route_mechanism_split(_selection_manifest(), _Operations())
+    result = replace(result, passed=True)
     output = tmp_path / "delivery"
     code, receipt = finalize_soft_route_mechanism_candidate_selection_delivery(result, observed_repository_revision="1" * 40, run_id="soft_route_mechanism-delivery", output_root=output)
-    assert code in {0, 2}
+    assert code == 0
     assert (output / "SHA256SUMS").stat().st_mtime_ns >= max(path.stat().st_mtime_ns for path in output.iterdir() if path.name != "SHA256SUMS")
     sums = (output / "SHA256SUMS").read_text("ascii").splitlines()
     for line in sums:
@@ -336,6 +355,139 @@ def test_soft_route_mechanism_delivery_is_create_only_complete_and_sha_last(tmp_
         ]
     with pytest.raises(SemanticTextureSoftRouteSoftRouteMechanismSelectionDeliveryError):
         finalize_soft_route_mechanism_candidate_selection_delivery(result, observed_repository_revision="1" * 40, run_id="soft_route_mechanism-delivery", output_root=output)
+
+
+def test_runner_failure_delivery_preserves_fixed_denominator_without_selection_authority(
+    tmp_path: Path,
+) -> None:
+    result = _first_generation_failure_result()
+    assert result.passed is False
+    assert result.provisional_calibration is None
+    assert len(result.generations) == 160
+    assert len(result.records) == 384
+    assert result.generations[0].execution_status == "failed"
+    assert all(
+        record.execution_status == "unstarted" for record in result.generations[1:]
+    )
+    assert all(record.execution_status == "unstarted" for record in result.records)
+
+    output = tmp_path / "runner-failure"
+    code, receipt = finalize_soft_route_mechanism_candidate_selection_delivery(
+        result,
+        observed_repository_revision="2" * 40,
+        run_id="soft-route-mechanism-runner-failure",
+        output_root=output,
+    )
+    assert code == 2
+    assert receipt["candidate_selection_passed"] is False
+    assert receipt["provisional_calibration_digest"] is None
+    assert receipt["selection_artifact_filename"] is None
+    assert receipt["selection_artifact_sha256"] is None
+    assert receipt["blocked_class"] == "implementation_blocked"
+    assert receipt["failure_reason"] == "RuntimeError"
+    assert not (output / "semantic_texture_soft_route_selection_artifact.json").exists()
+
+    persisted = json.loads(
+        (output / "semantic_texture_soft_route_candidate_selection_result.json").read_text(
+            "utf-8"
+        )
+    )
+    assert len(persisted["generations"]) == 160
+    assert len(persisted["records"]) == 384
+    assert persisted["generations"][0]["execution_status"] == "failed"
+    assert persisted["generations"][0]["failure_reason"] == "RuntimeError"
+    assert {
+        record["execution_status"] for record in persisted["generations"][1:]
+    } == {"unstarted"}
+    assert {record["execution_status"] for record in persisted["records"]} == {
+        "unstarted"
+    }
+    assert persisted["provisional_calibration"] is None
+    assert persisted["selection_artifact_filename"] is None
+    assert persisted["selection_artifact_sha256"] is None
+    serialized = json.dumps(persisted, sort_keys=True)
+    assert "private details must remain bounded" not in serialized
+    assert "Traceback" not in serialized
+    assert str(tmp_path) not in serialized
+
+    with zipfile.ZipFile(output / receipt["archive_filename"]) as archive:
+        assert archive.namelist() == [
+            "semantic_texture_soft_route_candidate_selection_result.json"
+        ]
+    sums = (output / "SHA256SUMS").read_text("ascii").splitlines()
+    assert len(sums) == 3
+    for line in sums:
+        digest, name = line.split("  ", 1)
+        assert sha256((output / name).read_bytes()).hexdigest() == digest
+    assert (output / "SHA256SUMS").stat().st_mtime_ns >= max(
+        path.stat().st_mtime_ns
+        for path in output.iterdir()
+        if path.name != "SHA256SUMS"
+    )
+    assert {path.name for path in output.iterdir()} == {
+        "semantic_texture_soft_route_candidate_selection_result.json",
+        "semantic_texture_soft_route_candidate_selection_receipt.json",
+        receipt["archive_filename"],
+        "SHA256SUMS",
+    }
+    with pytest.raises(SemanticTextureSoftRouteSoftRouteMechanismSelectionDeliveryError):
+        finalize_soft_route_mechanism_candidate_selection_delivery(
+            result,
+            observed_repository_revision="2" * 40,
+            run_id="soft-route-mechanism-runner-failure",
+            output_root=output,
+        )
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    (
+        "generation_denominator",
+        "detector_role",
+        "missing_failed_slot",
+        "completed_without_calibration",
+        "non_finite_value",
+    ),
+)
+def test_runner_failure_delivery_rejects_malformed_or_forged_results(
+    tmp_path: Path, malformation: str
+) -> None:
+    result = _first_generation_failure_result()
+    if malformation == "generation_denominator":
+        result = replace(result, generations=result.generations[:-1])
+    elif malformation == "detector_role":
+        records = list(result.records)
+        records[0] = replace(records[0], key_role="wrong", wrong_key_index=0)
+        result = replace(result, records=tuple(records))
+    elif malformation == "missing_failed_slot":
+        generations = list(result.generations)
+        generations[0] = replace(
+            generations[0], execution_status="unstarted", failure_reason=None
+        )
+        result = replace(result, generations=tuple(generations))
+    elif malformation == "completed_without_calibration":
+        completed = execute_soft_route_mechanism_split(
+            _selection_manifest(), _Operations()
+        )
+        result = replace(
+            completed,
+            passed=False,
+            blocked_class="implementation_blocked",
+            provisional_calibration=None,
+        )
+    elif malformation == "non_finite_value":
+        generations = list(result.generations)
+        generations[0] = replace(generations[0], paired_rgb8_mse=float("nan"))
+        result = replace(result, generations=tuple(generations))
+    output = tmp_path / malformation
+    with pytest.raises(SemanticTextureSoftRouteSoftRouteMechanismSelectionDeliveryError):
+        finalize_soft_route_mechanism_candidate_selection_delivery(
+            result,
+            observed_repository_revision="3" * 40,
+            run_id=f"soft-route-mechanism-{malformation}",
+            output_root=output,
+        )
+    assert not output.exists()
 
 
 def test_soft_route_mechanism_bounded_failure_is_exported_before_nonzero(tmp_path: Path) -> None:
