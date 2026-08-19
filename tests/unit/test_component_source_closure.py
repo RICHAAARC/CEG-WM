@@ -69,7 +69,7 @@ def test_lf_directional_component_closure_binds_only_reviewed_method_sources() -
         binding.implementation_path for binding in closure.source_bindings
     ) == LF_EXPECTED_PATHS
     assert closure.component_implementation_digest == (
-        "5c4e7b58a7f072c31eb9d1491afa83cde98fcf336defe7f19d726b2e6985ba93"
+        "5dae516ba8646a9a2e3740c8767df0eb401bb8f195746187bbf3b382cc7f7cb2"
     )
     assert not any(
         binding.implementation_path.endswith("/__init__.py")
@@ -143,7 +143,7 @@ def test_hf_reference_component_closure_binds_exact_scientific_sources() -> None
         for binding in closure.source_bindings
     )
     assert closure.component_implementation_digest == (
-        "a755ec6823551d7f21275bcdaba2adf8250e4da97978beacce47d834881a4ccd"
+        "27b2cfe9bae61b110bc747b58f70bfbbffbf40dd14f8b3bba341b347421bcd46"
     )
 
 

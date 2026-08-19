@@ -747,16 +747,21 @@ def test_experiment_execution_readme_excludes_non_hf_only_threshold_fit_gpu_exec
     readme = (
         ROOT / "scripts/experiment_execution/README.md"
     ).read_text(encoding="utf-8")
-    assert "semantic_texture_operational_preflight.ipynb" in readme
-    assert "The current user-only sequence has exactly two entrypoints:" in readme
-    assert "semantic_texture_soft_detector_asset_preparation.ipynb" in readme
-    assert (
-        "only after source read-only authentication and exact bundle-identity binding"
-    ) in readme
-    assert "Neither step allows retry, fallback, or dynamic latest-bundle selection" in readme
-    assert "threshold, FPR, tau, promotion, or scientific claim" in readme
-    assert "paused / not authorized" in readme
-    assert "producer-bound records are not current science authority" in readme
+    assert "next user-only entrypoint is soft-route mechanism validation candidate selection" in readme
+    assert "deterministic exact-revision package" in readme
+    assert "Git-less extraction" in readme
+    assert "authenticated semantic-texture asset bundle" in readme
+    assert "one create-only bounded delivery with `SHA256SUMS` last" in readme
+    assert "no retry, fallback, dynamic latest selection" in readme
+    assert "formal threshold/FPR, promotion, or scientific claim" in readme
+    assert "confirmation support is complete but paused" in readme
+    assert "read-only authenticated and separately authorized" in readme
+    assert "exact configured locator and SHA256" in readme
+    assert "never refits W, CDFs, or provisional tau" in readme
+    assert "paused producer-bound history" in readme
+    assert "hf_only_detector_directional_validation.ipynb" in readme
+    assert "0d4253ab2614c642563c566e6268565c337b503f" in readme
+    assert "ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority" in readme
     assert "remain only in Git ancestry" in readme
     for forbidden in (
         "HF-only threshold-fit GPU execution",

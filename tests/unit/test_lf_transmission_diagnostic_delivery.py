@@ -207,18 +207,32 @@ def test_lf_transmission_readmes_preserve_paused_historical_boundary() -> None:
         assert EXECUTION_REVISION in source
         assert RUN_ID in source
         if path.parent.name == "colab":
-            assert "当前授权的用户流程固定为两步：先在" in source
-            assert "source 完成只读认证并以该 exact bundle identity 绑定后" in source
-            assert "不允许 retry、fallback 或动态 latest-bundle 选择" in source
-            assert "不产生 threshold、FPR、tau、promotion 或 scientific claim" in source
+            assert "下一次用户流程只有 `semantic_texture_soft_route_candidate_selection.ipynb`" in source
+            assert "fresh GPU runtime 中仅执行一次 **Run all**" in source
+            assert "已认证的 detector asset bundle" in source
+            assert "新的 create-only run root" in source
+            assert "result、receipt、selection artifact、ZIP 与最后写入的 `SHA256SUMS`" in source
+            assert "PAUSED / NOT AUTHORIZED" in source
+            assert "returned selection artifact" in source
+            assert "通过只读认证，且控制会话另行授权后" in source
+            assert "exact artifact SHA" in source
+            assert "不扫描 latest，也不重拟合 W、CDF 或 provisional tau" in source
+            assert "不产生 formal threshold、FPR、promotion 或 scientific claim" in source
+            assert "semantic_texture_soft_detector_asset_preparation.ipynb" in source
         else:
-            assert "The current user-only sequence has exactly two entrypoints:" in source
-            assert "only after source read-only authentication and exact bundle-identity binding" in source
-            assert "Neither step allows retry, fallback, or dynamic latest-bundle selection" in source
-            assert "threshold, FPR, tau, promotion, or scientific claim" in source
-        assert "semantic_texture_soft_detector_asset_preparation.ipynb" in source
+            assert "next user-only entrypoint is soft-route mechanism validation candidate selection" in source
+            assert "deterministic exact-revision package" in source
+            assert "authenticated semantic-texture asset bundle" in source
+            assert "one create-only bounded delivery with `SHA256SUMS` last" in source
+            assert "no retry, fallback, dynamic latest selection" in source
+            assert "formal threshold/FPR, promotion, or scientific claim" in source
+            assert "confirmation support is complete but paused" in source
+            assert "read-only authenticated and separately authorized" in source
+            assert "exact configured locator and SHA256" in source
+            assert "never refits W, CDFs, or provisional tau" in source
+            assert "paused producer-bound history" in source
+            assert "All earlier diagnostic notebook/server families" in source
         assert "lf_whitened_score_screening.ipynb" in source
         assert "a78c47184cf83ad351bb4442ebd31c218726de25" in source
         assert "ceg_wm_lf_whitening_asset_fit_and_score_screening" in source
         assert "hf_only_detector_directional_validation.ipynb" in source
-        assert "paused / not authorized" in source
