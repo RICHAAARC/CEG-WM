@@ -368,7 +368,14 @@ class AdapterBackedSoftRouteMechanismOperations:
         return SoftRouteMechanismGeneration(image, ARMS[0], None, None, 0.0)
 
     def write(self, entry: SoftRouteMechanismManifestEntry, arm_id: str) -> SoftRouteMechanismGeneration:
-        from runtime import materialize_ordinary_rgb8_snapshot
+        from main import (
+            ContentMaterializationObservation,
+            ContentMaterializationResult,
+        )
+        from runtime import (
+            ContentMaterializationMeasurement,
+            materialize_ordinary_rgb8_snapshot,
+        )
 
         self._backend.set_development_generation_prompts(entry.prompt_text, "")
         observation = self._adapter.execute_semantic_texture_content_arm_write_and_vae(
@@ -378,13 +385,31 @@ class AdapterBackedSoftRouteMechanismOperations:
             arm_id=arm_id,
         )
         result = observation.result.content_write_result
+        measurement = getattr(result, "content_materialization", None)
+        budget_authority = getattr(
+            result,
+            "content_materialization_result",
+            None,
+        )
+        authority_observation = getattr(budget_authority, "observation", None)
+        if (
+            type(budget_authority) is not ContentMaterializationResult
+            or type(authority_observation) is not ContentMaterializationObservation
+            or type(measurement) is not ContentMaterializationMeasurement
+            or budget_authority.budget_status != "accepted"
+            or budget_authority.integrity_status != "passed"
+            or getattr(
+                authority_observation,
+                "materialization_replay_identity",
+                None,
+            )
+            != getattr(measurement, "materialization_replay_identity", None)
+        ):
+            raise SoftRouteMechanismRunnerError(
+                "content budget authority is invalid"
+            )
         clean = materialize_ordinary_rgb8_snapshot(result.clean_image)
         written = self._adapter.materialize_semantic_texture_written_rgb8(observation)
-        measurement = result.content_materialization
-        if measurement.realized_relative_l2 > 3.0 / 250.0:
-            raise SoftRouteMechanismRunnerError(
-                "actual-dtype budget exceeded"
-            )
         mse = float(
             torch.mean(
                 (
@@ -397,7 +422,7 @@ class AdapterBackedSoftRouteMechanismOperations:
         return SoftRouteMechanismGeneration(
             written,
             arm_id,
-            measurement.materialization_replay_identity,
+            authority_observation.materialization_replay_identity,
             "combined_relative_l2_3_250",
             mse,
         )

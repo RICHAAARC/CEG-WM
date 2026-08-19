@@ -5,10 +5,16 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
-from math import nextafter
+from math import isfinite, nextafter
 from pathlib import Path
+from struct import pack, unpack
+from types import SimpleNamespace
 
 import pytest
+import torch
+
+from main import ContentMaterializationObservation, ContentMaterializationResult
+from runtime import ContentMaterializationMeasurement
 
 from experiments.protocol.semantic_texture_soft_route_mechanism_validation import (
     CONFIRMATION_ROLE,
@@ -20,8 +26,10 @@ from experiments.protocol.semantic_texture_soft_route_mechanism_validation impor
     validate_split_disjointness,
 )
 from experiments.runners.semantic_texture_soft_route_mechanism_validation import (
+    AdapterBackedSoftRouteMechanismOperations,
     SoftRouteMechanismBranchScores,
     SoftRouteMechanismGeneration,
+    SoftRouteMechanismRunnerError,
     SoftRouteMechanismStandardizedScores,
     execute_soft_route_mechanism_split,
 )
@@ -87,6 +95,158 @@ class SyntheticOperations:
 
     def close(self):
         return None
+
+
+class _BudgetAuthorityAdapter:
+    def __init__(self, content_write, written_rgb8: torch.Tensor) -> None:
+        self.content_write = content_write
+        self.written_rgb8 = written_rgb8
+
+    def execute_semantic_texture_content_arm_write_and_vae(
+        self,
+        _latent,
+        _root_key,
+        _semantic_runtime,
+        *,
+        arm_id,
+    ):
+        assert arm_id == "semantic_texture_route_disabled"
+        return SimpleNamespace(
+            result=SimpleNamespace(content_write_result=self.content_write)
+        )
+
+    def materialize_semantic_texture_written_rgb8(self, _observation):
+        return self.written_rgb8
+
+
+def _budget_authority_write_operation(
+    budget_authority: object | None,
+    *,
+    measurement_identity: str = "m" * 64,
+) -> AdapterBackedSoftRouteMechanismOperations:
+    latent = torch.zeros((1, 16, 1, 1), dtype=torch.float16)
+    measurement = ContentMaterializationMeasurement(
+        attempt_index=1,
+        callback_index=18,
+        embedder_config_digest="e" * 64,
+        materialization_scale=1.0,
+        scaled_nominal_delta_digest="d" * 64,
+        baseline_latent_actual=latent,
+        written_latent_actual=latent.clone(),
+        delta_content_actual=torch.zeros_like(latent, dtype=torch.float32),
+        baseline_latent_digest="a" * 64,
+        written_latent_digest="b" * 64,
+        delta_content_actual_digest="c" * 64,
+        tensor_replay_identity="t" * 64,
+        materialization_replay_identity=measurement_identity,
+        realized_total_l2=1.0,
+        realized_relative_l2=unpack(">f", pack(">f", 3.0 / 250.0))[0],
+        integrity_status="passed",
+    )
+    content_write = SimpleNamespace(
+        clean_image=torch.zeros((1, 3, 2, 2), dtype=torch.float32),
+        content_materialization=measurement,
+        content_materialization_result=budget_authority,
+    )
+    backend = SimpleNamespace(
+        set_development_generation_prompts=lambda _prompt, _negative: None
+    )
+    adapter = _BudgetAuthorityAdapter(
+        content_write,
+        torch.ones((1, 3, 2, 2), dtype=torch.uint8),
+    )
+    return AdapterBackedSoftRouteMechanismOperations(
+        backend=backend,
+        runtime_adapter=SimpleNamespace(),
+        session=SimpleNamespace(
+            image_height=8,
+            image_width=8,
+            selected_device="cpu",
+        ),
+        semantic_runtime=object(),
+        adapter=adapter,
+        whitening_asset=object(),
+        root_key="synthetic-budget-authority-root",
+        attack_registry=object(),
+    )
+
+
+def _accepted_budget_authority(
+    *,
+    replay_identity: str = "m" * 64,
+) -> ContentMaterializationResult:
+    binary32_limit = unpack(">f", pack(">f", 3.0 / 250.0))[0]
+    observation = ContentMaterializationObservation(
+        materialization_scale=1.0,
+        baseline_norm=1.0,
+        scaled_nominal_delta_digest="d" * 64,
+        delta_content_actual=(binary32_limit,),
+        realized_total_l2=binary32_limit,
+        integrity_status="passed",
+        deterministic_binary16_replay_passed=True,
+        materialization_replay_identity=replay_identity,
+    )
+    return ContentMaterializationResult(
+        embedding_result=None,
+        observation=observation,
+        content_relative_l2_nominal=binary32_limit,
+        content_relative_l2_limit=binary32_limit,
+        realized_total_l2=binary32_limit,
+        realized_relative_l2=binary32_limit,
+        budget_utilization=1.0,
+        materialization_scale=1.0,
+        attempt_count=1,
+        integrity_status="passed",
+        budget_status="accepted",
+    )
+
+
+def test_production_write_honors_accepted_binary32_budget_authority() -> None:
+    binary32_limit = unpack(">f", pack(">f", 3.0 / 250.0))[0]
+    assert binary32_limit > 3.0 / 250.0
+    operation = _budget_authority_write_operation(_accepted_budget_authority())
+
+    generation = operation.write(
+        SimpleNamespace(prompt_text="a walnut", generation_seed=202608190200),
+        "semantic_texture_route_disabled",
+    )
+
+    assert generation.arm_id == "semantic_texture_route_disabled"
+    assert generation.materialization_replay_identity == "m" * 64
+    assert generation.budget_identity == "combined_relative_l2_3_250"
+    assert isfinite(generation.paired_rgb8_mse)
+
+
+@pytest.mark.parametrize(
+    "authority_case",
+    ["missing", "wrong_type", "not_accepted", "identity_drift"],
+)
+def test_production_write_rejects_invalid_budget_authority(
+    authority_case: str,
+) -> None:
+    authority = _accepted_budget_authority()
+    if authority_case == "missing":
+        authority = None
+    elif authority_case == "wrong_type":
+        authority = SimpleNamespace(
+            budget_status="accepted",
+            integrity_status="passed",
+            observation=authority.observation,
+        )
+    elif authority_case == "not_accepted":
+        authority = replace(authority, budget_status="rejected")
+    else:
+        authority = _accepted_budget_authority(replay_identity="x" * 64)
+    operation = _budget_authority_write_operation(authority)
+
+    with pytest.raises(
+        SoftRouteMechanismRunnerError,
+        match="content budget authority is invalid",
+    ):
+        operation.write(
+            SimpleNamespace(prompt_text="a walnut", generation_seed=202608190200),
+            "semantic_texture_route_disabled",
+        )
 
 
 def test_literal_manifests_roundtrip_tamper_skip_and_disjointness() -> None:
