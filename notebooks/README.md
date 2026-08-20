@@ -1,3 +1,11 @@
 # Notebook Entrypoints
 
-The retained eight Colab notebooks are thin orchestration entrypoints. `semantic_texture_operational_preflight.ipynb` is the current authorized entrypoint; every diagnostic and HF-only threshold-fit notebook is paused / not authorized. Retired development exploration, thirteen-module screening, and runtime qualification notebooks remain producer history in main ancestry only.
+`colab/contrastive_lf_branch_attribution_candidate_selection.ipynb` is the current thin
+Stage-A entrypoint. It mounts Drive first, authenticates the exact packaged revision, creates
+a fresh run ID, invokes one null-fit + candidate-selection bootstrap with `check=False`, then
+authenticates the bounded delivery. It contains no method formula, confirmation, Stage-B,
+Q/K, formal threshold, promotion, or scientific claim.
+
+Retained semantic-texture and earlier diagnostic notebooks are producer-bound history, not
+current authority. Retired development exploration, thirteen-module screening, and runtime
+qualification notebooks remain producer history in main ancestry only.

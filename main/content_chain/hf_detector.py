@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha256
-from math import isfinite, sqrt
+from math import isfinite, nextafter, sqrt
 from struct import pack, unpack
 from typing import Sequence
 
@@ -78,6 +78,55 @@ class HfDetectionResult:
     wrong_key_index: int | None
     observation_digest: str
     template_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class HfPopulationNullAsset:
+    population_count: int
+    raw_population: tuple[float, ...]
+    population_mean: float
+    population_variance: float
+    population_sigma: float
+    provisional_tau: float
+    null_manifest_digest: str
+    detector_config_digest: str
+    asset_digest: str
+
+    def validate(self) -> None:
+        if (
+            self.population_count != 32
+            or len(self.raw_population) != 32
+            or any(not isfinite(value) for value in self.raw_population)
+        ):
+            raise HfDetectorError("HF population null asset is invalid")
+        config = {
+            "candidate_id": "hf_sparse_tail",
+            "null_standardization": "binary64_population_divide_by_32",
+            "provisional_threshold": "nextafter_fourth_largest_z_toward_positive_infinity",
+        }
+        payload = {
+            **config,
+            "detector_config_digest": self.detector_config_digest,
+            "null_manifest_digest": self.null_manifest_digest,
+            "population_mean": float.hex(self.population_mean),
+            "population_scores": [float.hex(value) for value in self.raw_population],
+            "population_sigma": float.hex(self.population_sigma),
+            "population_variance": float.hex(self.population_variance),
+            "provisional_tau": float.hex(self.provisional_tau),
+        }
+        if (
+            self.detector_config_digest != sha256(stable_json_utf8(config)).hexdigest()
+            or self.asset_digest != sha256(stable_json_utf8(payload)).hexdigest()
+        ):
+            raise HfDetectorError("HF population null asset digest drifted")
+
+
+@dataclass(frozen=True, slots=True)
+class HfPopulationStandardizedResult:
+    raw_score: float
+    standardized_score: float
+    detector_identity: str
+    null_asset_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +277,82 @@ def hf_detector(
         wrong_key_index=carrier.wrong_key_index,
         observation_digest=observation.observation_digest,
         template_digest=carrier.template_digest,
+    )
+
+
+def fit_hf_population_null_asset(
+    raw_scores: Sequence[float], *, null_manifest_digest: str
+) -> HfPopulationNullAsset:
+    """Fit the Stage-A fresh 32-item binary64 population and provisional tau."""
+
+    if (
+        len(raw_scores) != 32
+        or any(not isfinite(value) for value in raw_scores)
+        or len(null_manifest_digest) != 64
+        or any(character not in "0123456789abcdef" for character in null_manifest_digest)
+    ):
+        raise HfDetectorError("HF null population authority is invalid")
+    values = tuple(float(value) for value in raw_scores)
+    mean = sum(values) / 32.0
+    variance = sum((value - mean) ** 2 for value in values) / 32.0
+    sigma = sqrt(variance)
+    if not isfinite(sigma) or sigma <= 0.0:
+        raise HfDetectorError("HF population sigma is invalid")
+    z_values = tuple((value - mean) / sigma for value in values)
+    tau = nextafter(sorted(z_values)[-4], float("inf"))
+    config = {
+        "candidate_id": "hf_sparse_tail",
+        "null_standardization": "binary64_population_divide_by_32",
+        "provisional_threshold": "nextafter_fourth_largest_z_toward_positive_infinity",
+    }
+    config_digest = sha256(stable_json_utf8(config)).hexdigest()
+    payload = {
+        **config,
+        "detector_config_digest": config_digest,
+        "null_manifest_digest": null_manifest_digest,
+        "population_mean": float.hex(mean),
+        "population_scores": [float.hex(value) for value in values],
+        "population_sigma": float.hex(sigma),
+        "population_variance": float.hex(variance),
+        "provisional_tau": float.hex(tau),
+    }
+    asset = HfPopulationNullAsset(
+        population_count=32,
+        raw_population=values,
+        population_mean=mean,
+        population_variance=variance,
+        population_sigma=sigma,
+        provisional_tau=tau,
+        null_manifest_digest=null_manifest_digest,
+        detector_config_digest=config_digest,
+        asset_digest=sha256(stable_json_utf8(payload)).hexdigest(),
+    )
+    asset.validate()
+    return asset
+
+
+def standardize_hf_population_score(
+    result: HfDetectionResult, asset: HfPopulationNullAsset
+) -> HfPopulationStandardizedResult:
+    if type(result) is not HfDetectionResult or type(asset) is not HfPopulationNullAsset:
+        raise HfDetectorError("HF population detector binding is invalid")
+    asset.validate()
+    z = (float(result.hf_score) - asset.population_mean) / asset.population_sigma
+    if not isfinite(z):
+        raise HfDetectorError("HF standardized score is non-finite")
+    identity = sha256(
+        stable_json_utf8(
+            {
+                "base_detector_identity": result.detector_identity,
+                "null_asset_digest": asset.asset_digest,
+            }
+        )
+    ).hexdigest()
+    return HfPopulationStandardizedResult(
+        raw_score=float(result.hf_score),
+        standardized_score=z,
+        detector_identity=identity,
+        null_asset_digest=asset.asset_digest,
     )
 
 

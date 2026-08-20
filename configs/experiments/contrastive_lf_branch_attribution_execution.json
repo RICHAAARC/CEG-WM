@@ -1,0 +1,40 @@
+{
+  "action_id": "contrastive_lf_null_fit_and_candidate_selection",
+  "allowed_result_classifications": [
+    "success",
+    "scientific_failure",
+    "insufficient_evidence",
+    "operational_failure"
+  ],
+  "candidate_selection_manifest_path": "configs/experiments/contrastive_lf_candidate_selection_manifest.json",
+  "codec_identity": "pillow_rgb8_jpeg_exact_capability",
+  "codec_pillow_version": "12.3.0",
+  "delivery": {
+    "create_only": true,
+    "execution_log_summary_bounded": true,
+    "formal_outputs_created": false,
+    "checksum_manifest_written_last": true
+  },
+  "implementation_revision_environment_name": "CEG_WM_CONTRASTIVE_LF_REVISION",
+  "null_fit_manifest_path": "configs/experiments/contrastive_lf_null_fit_manifest.json",
+  "production_factory": "experiments.runners.contrastive_lf_branch_attribution.create_adapter_backed_stage_a_operations",
+  "protocol_config_path": "configs/experiments/contrastive_lf_branch_attribution.json",
+  "protocol_id": "contrastive_lf_branch_attribution",
+  "required_secret_names": [
+    "HF_TOKEN",
+    "CEG_WM_ROOT_KEY"
+  ],
+  "runtime_storage_environment_names": [
+    "CEG_WM_CACHE_ROOT",
+    "CEG_WM_PERSISTENT_ROOT"
+  ],
+  "result_rc": {
+    "insufficient_evidence": 2,
+    "operational_failure": 2,
+    "scientific_failure": 2,
+    "success": 0
+  },
+  "role_id": "contrastive_lf_null_fit_and_candidate_selection",
+  "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
+  "schema_version": 1
+}

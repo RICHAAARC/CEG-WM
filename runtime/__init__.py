@@ -46,6 +46,7 @@ from .configuration import (
 )
 from .content_write import (
     CleanImageVaeObservationResult,
+    PublicOrdinaryImageVaeObservationResult,
     ContentEmbeddingOperation,
     ContentWriteGeometrySuffixResult,
     ContentMaterializationAttempt,
@@ -56,6 +57,7 @@ from .content_write import (
     execute_content_write_and_capture_geometry_suffix,
     materialize_ordinary_rgb8_snapshot,
     measure_content_materialization,
+    observe_public_rgb8_vae,
 )
 from .geometry_synchronization import (
     RuntimeActualQkSuffixResult,
@@ -97,6 +99,7 @@ from .sd35_backend import (
 __all__ = [
     "DEFAULT_RUNTIME_CONFIG_PATH",
     "CleanImageVaeObservationResult",
+    "PublicOrdinaryImageVaeObservationResult",
     "ContentEmbeddingOperation",
     "ContentWriteGeometrySuffixResult",
     "ContentMaterializationAttempt",
@@ -164,6 +167,7 @@ __all__ = [
     "observe_actual_qk_from_generation_suffix",
     "observe_differentiable_qk_from_generation_suffix",
     "observe_generation_routing",
+    "observe_public_rgb8_vae",
     "observe_semantic_texture_detection",
     "parse_runtime_configuration",
     "select_runtime_device",

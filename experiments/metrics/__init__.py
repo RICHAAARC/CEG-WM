@@ -43,6 +43,14 @@ from .binomial import (
     clopper_pearson_lower,
     clopper_pearson_upper,
 )
+from .contrastive_lf_branch_attribution import (
+    ContrastiveLfMetricError,
+    StageABranchCase,
+    StageACandidateGateResult,
+    StageAQualityCase,
+    evaluate_stage_a_candidate_gates,
+    evaluate_stage_a_hf_anchor,
+)
 from .hf_only_reference_metrics import (
     HfOnlyReferenceActualDtypeIntegrityCase,
     HfOnlyReferenceActualDtypeIntegrityResult,
@@ -156,4 +164,10 @@ __all__ = [
     "validate_hf_only_reference_paired_rgb8_quality_result",
     "validate_hf_only_reference_quality_case_result",
     "validate_hf_only_reference_threshold_result",
+    "ContrastiveLfMetricError",
+    "StageABranchCase",
+    "StageACandidateGateResult",
+    "StageAQualityCase",
+    "evaluate_stage_a_candidate_gates",
+    "evaluate_stage_a_hf_anchor",
 ]

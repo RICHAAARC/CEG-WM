@@ -86,4 +86,16 @@ __all__ = [
     "geometry_reliability_config_digest",
     "record_excluded_case",
     "replay_internal_record_collection",
+    "AdapterBackedStageAOperations",
+    "StageAExecutionResult",
+    "StageANullFitArtifact",
+    "create_adapter_backed_stage_a_operations",
+    "execute_stage_a_null_fit_and_selection",
 ]
+from .contrastive_lf_branch_attribution import (
+    AdapterBackedStageAOperations,
+    StageAExecutionResult,
+    StageANullFitArtifact,
+    create_adapter_backed_stage_a_operations,
+    execute_stage_a_null_fit_and_selection,
+)

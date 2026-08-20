@@ -109,6 +109,23 @@ class DerivedWrongKeyMaterial:
 
 
 @dataclass(frozen=True, slots=True)
+class DerivedInternalLfDecoyMaterial:
+    """In-memory-only candidate-specific LF internal-decoy material."""
+
+    lf_candidate_id: str
+    internal_decoy_index: int
+    registered_root_key_public_digest: str
+
+    @property
+    def material_text(self) -> str:
+        return _derive_internal_lf_decoy_material_text(
+            self.registered_root_key_public_digest,
+            self.lf_candidate_id,
+            self.internal_decoy_index,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class KeyStreamResult:
     """不可变的 row-major CPU float32 流及其可审计身份。"""
 
@@ -266,6 +283,54 @@ def _validate_domain_fields(domain_fields: object) -> tuple[dict[str, object], b
         _expect_literal(domain_fields, "tensor_role", "base_gaussian")
         return dict(domain_fields), False
 
+    contrastive_carrier_operators = {
+        "lf_multiscale_lowpass_contrastive": {
+            "carrier_template_lowpass_five_by_five",
+            "carrier_template_lowpass_nine_by_nine",
+        },
+        "lf_five_by_five_lowpass_contrastive": {
+            "carrier_template_lowpass_five_by_five",
+        },
+    }
+    if (
+        candidate_id in contrastive_carrier_operators
+        and operator in contrastive_carrier_operators[candidate_id]
+        and responsibility == "lf_carrier"
+    ):
+        _expect_exact_fields(
+            domain_fields,
+            {"candidate_id", "operator", "responsibility_domain", "tensor_role"},
+        )
+        _expect_literal(domain_fields, "tensor_role", "base_gaussian")
+        return dict(domain_fields), False
+
+    internal_operators = {
+        "internal_decoy_carrier_template_lowpass_five_by_five",
+        "internal_decoy_carrier_template_lowpass_nine_by_nine",
+    }
+    if (
+        candidate_id in contrastive_carrier_operators
+        and operator in internal_operators
+        and responsibility == "lf_detector_internal_decoy"
+    ):
+        allowed_scale = (
+            operator.endswith("five_by_five")
+            and "carrier_template_lowpass_five_by_five"
+            in contrastive_carrier_operators[candidate_id]
+        ) or (
+            operator.endswith("nine_by_nine")
+            and "carrier_template_lowpass_nine_by_nine"
+            in contrastive_carrier_operators[candidate_id]
+        )
+        if not allowed_scale:
+            raise KeyScheduleError("internal LF decoy scale is not registered")
+        _expect_exact_fields(
+            domain_fields,
+            {"candidate_id", "operator", "responsibility_domain", "tensor_role"},
+        )
+        _expect_literal(domain_fields, "tensor_role", "base_gaussian")
+        return dict(domain_fields), False
+
     if identity == (
         "qk_relation_similarity",
         "attention_relation_signs",
@@ -384,6 +449,49 @@ def derive_wrong_key_material(
         wrong_key_index=wrong_key_index,
         registered_root_key_public_digest=digest,
     )
+
+
+def derive_internal_lf_decoy_material(
+    registered_root_key_public_digest: str,
+    lf_candidate_id: str,
+    internal_decoy_index: int,
+) -> DerivedInternalLfDecoyMaterial:
+    """Create one authenticated in-memory LF internal-decoy capability."""
+
+    digest = _validate_public_digest(registered_root_key_public_digest)
+    if lf_candidate_id not in {
+        "lf_multiscale_lowpass_contrastive",
+        "lf_five_by_five_lowpass_contrastive",
+    }:
+        raise KeyScheduleError("LF internal decoy candidate is not registered")
+    if type(internal_decoy_index) is not int or internal_decoy_index not in range(8):
+        raise KeyScheduleError("internal_decoy_index must be in [0,7]")
+    return DerivedInternalLfDecoyMaterial(
+        lf_candidate_id=lf_candidate_id,
+        internal_decoy_index=internal_decoy_index,
+        registered_root_key_public_digest=digest,
+    )
+
+
+def _derive_internal_lf_decoy_material_text(
+    registered_root_key_public_digest: str,
+    lf_candidate_id: str,
+    internal_decoy_index: int,
+) -> str:
+    digest = _validate_public_digest(registered_root_key_public_digest)
+    if lf_candidate_id not in {
+        "lf_multiscale_lowpass_contrastive",
+        "lf_five_by_five_lowpass_contrastive",
+    } or type(internal_decoy_index) is not int or internal_decoy_index not in range(8):
+        raise KeyScheduleError("LF internal decoy identity is invalid")
+    payload = {
+        "candidate_id": CANDIDATE_ID,
+        "derivation_role": "candidate_internal_lf_decoy",
+        "lf_candidate_id": lf_candidate_id,
+        "registered_root_key_public_digest": digest,
+        "internal_decoy_index": internal_decoy_index,
+    }
+    return "ceg-wm-internal-lf-decoy:" + sha256(stable_json_utf8(payload)).hexdigest()
 
 
 def _derive_wrong_key_material_text(
@@ -675,6 +783,35 @@ def derive_wrong_key_stream(
             wrong_key_material.registered_root_key_public_digest
         ),
         wrong_key_index=wrong_key_material.wrong_key_index,
+        config=config,
+    )
+
+
+def derive_internal_lf_decoy_stream(
+    internal_decoy_material: DerivedInternalLfDecoyMaterial,
+    domain_fields: dict[str, object],
+    shape: Sequence[int],
+    *,
+    distribution: Distribution = "gaussian",
+    config: KeyScheduleConfig = DEFAULT_CONFIG,
+) -> KeyStreamResult:
+    """Derive an LF internal decoy in its separate material/domain authority."""
+
+    if type(internal_decoy_material) is not DerivedInternalLfDecoyMaterial:
+        raise KeyScheduleError(
+            "internal_decoy_material must come from derive_internal_lf_decoy_material"
+        )
+    if domain_fields.get("candidate_id") != internal_decoy_material.lf_candidate_id:
+        raise KeyScheduleError("LF internal decoy candidate/domain mismatch")
+    return _derive_stream(
+        key_material=internal_decoy_material.material_text,
+        shape=shape,
+        domain_fields=domain_fields,
+        distribution=distribution,
+        expected_public_domain=False,
+        key_role="internal_decoy",
+        root_key_public_digest=internal_decoy_material.registered_root_key_public_digest,
+        wrong_key_index=internal_decoy_material.internal_decoy_index,
         config=config,
     )
 

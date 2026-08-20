@@ -141,30 +141,6 @@ def test_hf_transmission_notebook_is_thin_historical_and_scientific_only() -> No
         assert "hf_transmission_diagnostic.ipynb" in readme
         assert EXECUTION_REVISION in readme
         assert RUN_ID in readme
-        if path.parent.name == "colab":
-            assert "下一次用户流程只有 `semantic_texture_soft_route_candidate_selection.ipynb`" in readme
-            assert "fresh GPU runtime 中仅执行一次 **Run all**" in readme
-            assert "已认证的 detector asset bundle" in readme
-            assert "新的 create-only run root" in readme
-            assert "result、receipt、selection artifact、ZIP 与最后写入的 `SHA256SUMS`" in readme
-            assert "PAUSED / NOT AUTHORIZED" in readme
-            assert "returned selection artifact" in readme
-            assert "通过只读认证，且控制会话另行授权后" in readme
-            assert "exact artifact SHA" in readme
-            assert "不扫描 latest，也不重拟合 W、CDF 或 provisional tau" in readme
-            assert "不产生 formal threshold、FPR、promotion 或 scientific claim" in readme
-        else:
-            assert "next user-only entrypoint is soft-route mechanism validation candidate selection" in readme
-            assert "deterministic exact-revision package" in readme
-            assert "authenticated semantic-texture asset bundle" in readme
-            assert "one create-only bounded delivery with `SHA256SUMS` last" in readme
-            assert "no retry, fallback, dynamic latest selection" in readme
-            assert "formal threshold/FPR, promotion, or scientific claim" in readme
-            assert "confirmation support is complete but paused" in readme
-            assert "read-only authenticated and separately authorized" in readme
-            assert "exact configured locator and SHA256" in readme
-            assert "never refits W, CDFs, or provisional tau" in readme
-            assert "paused producer-bound history" in readme
 
 
 @pytest.mark.quick

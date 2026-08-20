@@ -47,3 +47,9 @@ Notebook、GPU 调度、calibration、held-out evaluation 或 stage 推进。
 
 CPU/synthetic runner tests 只证明编排、身份绑定、原子写入、resume/replay 和失败
 语义，不构成候选晋升、runtime/GPU 或科学效果证据。
+
+`contrastive_lf_branch_attribution.py` 为 Stage-A 预分配 exact 128-item null-fit 与
+4960-item selection collections；每次最多一次 attempt，首个 failed slot 后完整保留
+unstarted tail。Production factory 明确装配 `Sd35PipelineBackend ->
+Sd35RuntimeAdapter -> CegWmExperimentAdapter -> Stage-A operations`；synthetic fake
+只存在于 tests，不是 package 默认路径。

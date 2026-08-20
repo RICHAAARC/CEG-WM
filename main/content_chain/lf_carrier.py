@@ -10,8 +10,10 @@ from typing import Sequence
 
 from main.shared.key_schedule import (
     DEFAULT_CONFIG as DEFAULT_KEY_SCHEDULE_CONFIG,
+    DerivedInternalLfDecoyMaterial,
     DerivedWrongKeyMaterial,
     KeyScheduleError,
+    derive_internal_lf_decoy_stream,
     derive_wrong_key_stream,
     identify_root_key,
     key_schedule_sha256_counter,
@@ -29,6 +31,12 @@ from .routing import (
 LF_CANDIDATE_ID = "lf_low_pass"
 KEY_SCHEDULE_CANDIDATE_ID = "key_schedule_sha256_counter"
 AVERAGE_KERNEL_SIZE = 5
+MULTISCALE_CONTRASTIVE_CANDIDATE_ID = "lf_multiscale_lowpass_contrastive"
+SINGLE_SCALE_CONTRASTIVE_CANDIDATE_ID = "lf_five_by_five_lowpass_contrastive"
+CONTRASTIVE_LF_CANDIDATE_IDS = (
+    MULTISCALE_CONTRASTIVE_CANDIDATE_ID,
+    SINGLE_SCALE_CONTRASTIVE_CANDIDATE_ID,
+)
 
 
 class LfCarrierError(ValueError):
@@ -54,6 +62,45 @@ class LfCarrierResult:
     wrong_key_index: int | None
     key_domain_digest: str
     carrier_config_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContrastiveLfCarrierResult:
+    """Registered Stage-A LF template(s) and exact embedding direction."""
+
+    candidate_id: str
+    shape: tuple[int, int, int, int]
+    scale_five_template: tuple[float, ...]
+    scale_nine_template: tuple[float, ...] | None
+    direction: tuple[float, ...]
+    scale_five_domain_digest: str
+    scale_nine_domain_digest: str | None
+    scale_five_template_digest: str
+    scale_nine_template_digest: str | None
+    direction_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    carrier_config_digest: str
+
+    def as_embedding_carrier(self) -> LfCarrierResult:
+        return LfCarrierResult(
+            candidate_id=self.candidate_id,
+            candidate_ids=(KEY_SCHEDULE_CANDIDATE_ID, self.candidate_id),
+            shape=self.shape,
+            template=self.direction,
+            direction=self.direction,
+            template_digest=self.direction_digest,
+            direction_digest=self.direction_digest,
+            mask_digest=_digest((1.0,) * prod(self.shape)),
+            route_identity=None,
+            route_config_digest=None,
+            root_key_public_digest=self.root_key_public_digest,
+            key_role=self.key_role,
+            wrong_key_index=self.wrong_key_index,
+            key_domain_digest=self.scale_five_domain_digest,
+            carrier_config_digest=self.carrier_config_digest,
+        )
 
 
 def _float32(value: float) -> float:
@@ -142,6 +189,164 @@ def _zero_padded_average_5x5(
                     window_sum / 25.0
                 )
     return tuple(pooled)
+
+
+def contrastive_lowpass(
+    values: Sequence[float],
+    shape: Sequence[int],
+    kernel_size: int,
+) -> tuple[float, ...]:
+    """Per-channel stride-one zero-padded binary32 average, padding included."""
+
+    normalized_shape = _validate_shape(shape)
+    normalized_values = _vector(values, prod(normalized_shape), "contrastive LF values")
+    if kernel_size not in {5, 9}:
+        raise LfCarrierError("contrastive LF kernel is not registered")
+    _, channels, height, width = normalized_shape
+    radius = kernel_size // 2
+    denominator = float(kernel_size * kernel_size)
+    pooled = [0.0] * len(normalized_values)
+    for channel in range(channels):
+        channel_offset = channel * height * width
+        for row in range(height):
+            for column in range(width):
+                total = _float32(0.0)
+                for row_offset in range(-radius, radius + 1):
+                    source_row = row + row_offset
+                    for column_offset in range(-radius, radius + 1):
+                        source_column = column + column_offset
+                        if 0 <= source_row < height and 0 <= source_column < width:
+                            total = _float32(
+                                total
+                                + normalized_values[
+                                    channel_offset + source_row * width + source_column
+                                ]
+                            )
+                pooled[channel_offset + row * width + column] = _float32(
+                    total / denominator
+                )
+    return tuple(pooled)
+
+
+def _contrastive_domain(
+    candidate_id: str,
+    kernel_size: int,
+    *,
+    internal_decoy: bool,
+) -> dict[str, object]:
+    scale = "five_by_five" if kernel_size == 5 else "nine_by_nine"
+    return {
+        "candidate_id": candidate_id,
+        "operator": (
+            f"internal_decoy_carrier_template_lowpass_{scale}"
+            if internal_decoy
+            else f"carrier_template_lowpass_{scale}"
+        ),
+        "responsibility_domain": (
+            "lf_detector_internal_decoy" if internal_decoy else "lf_carrier"
+        ),
+        "tensor_role": "base_gaussian",
+    }
+
+
+def contrastive_lf_carrier(
+    detection_key: str | DerivedWrongKeyMaterial | DerivedInternalLfDecoyMaterial,
+    shape: Sequence[int],
+    *,
+    candidate_id: str,
+) -> ContrastiveLfCarrierResult:
+    """Build the independent 5/9 Stage-A LF carrier family."""
+
+    if candidate_id not in CONTRASTIVE_LF_CANDIDATE_IDS:
+        raise LfCarrierError("contrastive LF candidate is not registered")
+    normalized_shape = _validate_shape(shape)
+    if normalized_shape[1] != 16:
+        raise LfCarrierError("contrastive LF observation must have 16 channels")
+    kernels = (
+        (5, 9)
+        if candidate_id == MULTISCALE_CONTRASTIVE_CANDIDATE_ID
+        else (5,)
+    )
+    internal = type(detection_key) is DerivedInternalLfDecoyMaterial
+    if internal and detection_key.lf_candidate_id != candidate_id:
+        raise LfCarrierError("internal LF decoy candidate mismatch")
+    streams = []
+    try:
+        for kernel in kernels:
+            domain = _contrastive_domain(candidate_id, kernel, internal_decoy=internal)
+            if type(detection_key) is str:
+                stream = key_schedule_sha256_counter(
+                    detection_key, domain, normalized_shape, distribution="gaussian"
+                )
+            elif type(detection_key) is DerivedWrongKeyMaterial:
+                stream = derive_wrong_key_stream(
+                    detection_key, domain, normalized_shape, distribution="gaussian"
+                )
+            elif type(detection_key) is DerivedInternalLfDecoyMaterial:
+                stream = derive_internal_lf_decoy_stream(
+                    detection_key, domain, normalized_shape, distribution="gaussian"
+                )
+            else:
+                raise LfCarrierError("contrastive LF key capability is invalid")
+            streams.append(stream)
+    except KeyScheduleError as exc:
+        raise LfCarrierError("contrastive LF key schedule failed") from exc
+    templates = tuple(
+        _normalize(
+            contrastive_lowpass(stream.values, normalized_shape, kernel),
+            f"contrastive LF scale {kernel} template",
+        )
+        for stream, kernel in zip(streams, kernels, strict=True)
+    )
+    direction = (
+        templates[0]
+        if len(templates) == 1
+        else _normalize(
+            tuple(
+                _float32(a + b)
+                for a, b in zip(templates[0], templates[1], strict=True)
+            ),
+            "contrastive LF multiscale carrier direction",
+        )
+    )
+    if type(detection_key) is str:
+        root_digest = identify_root_key(detection_key).root_key_public_digest
+        key_role, wrong_index = "registered", None
+    elif type(detection_key) is DerivedWrongKeyMaterial:
+        root_digest = detection_key.registered_root_key_public_digest
+        key_role, wrong_index = "wrong", detection_key.wrong_key_index
+    else:
+        root_digest = detection_key.registered_root_key_public_digest
+        key_role, wrong_index = "internal_decoy", detection_key.internal_decoy_index
+    identity = {
+        "candidate_id": candidate_id,
+        "carrier_direction": (
+            "normalize32(scale_five+scale_nine)"
+            if len(templates) == 2
+            else "scale_five"
+        ),
+        "dtype": "binary32",
+        "kernel_sizes": list(kernels),
+        "lowpass": "per_channel_stride_one_zero_padding_count_include_pad",
+        "scale_domain_digests": [stream.domain_digest for stream in streams],
+        "scale_template_digests": [_digest(value) for value in templates],
+    }
+    return ContrastiveLfCarrierResult(
+        candidate_id=candidate_id,
+        shape=normalized_shape,
+        scale_five_template=templates[0],
+        scale_nine_template=templates[1] if len(templates) == 2 else None,
+        direction=direction,
+        scale_five_domain_digest=streams[0].domain_digest,
+        scale_nine_domain_digest=(streams[1].domain_digest if len(streams) == 2 else None),
+        scale_five_template_digest=_digest(templates[0]),
+        scale_nine_template_digest=(_digest(templates[1]) if len(templates) == 2 else None),
+        direction_digest=_digest(direction),
+        root_key_public_digest=root_digest,
+        key_role=key_role,
+        wrong_key_index=wrong_index,
+        carrier_config_digest=sha256(stable_json_utf8(identity)).hexdigest(),
+    )
 
 
 def _derive_lf_gaussian(

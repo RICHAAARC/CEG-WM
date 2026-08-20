@@ -197,27 +197,3 @@ def test_hf_detector_directional_readmes_preserve_paused_evidence_boundary() -> 
         assert "immutable partial evidence" in source
         assert "hf_transmission_diagnostic.ipynb" in source
         assert "lf_transmission_diagnostic.ipynb" in source
-        if path.parent.name == "colab":
-            assert "下一次用户流程只有 `semantic_texture_soft_route_candidate_selection.ipynb`" in source
-            assert "fresh GPU runtime 中仅执行一次 **Run all**" in source
-            assert "已认证的 detector asset bundle" in source
-            assert "result、receipt、selection artifact、ZIP 与最后写入的 `SHA256SUMS`" in source
-            assert "PAUSED / NOT AUTHORIZED" in source
-            assert "通过只读认证，且控制会话另行授权后" in source
-            assert "exact artifact SHA" in source
-            assert "不扫描 latest，也不重拟合 W、CDF 或 provisional tau" in source
-            assert "不产生 formal threshold、FPR、promotion 或 scientific claim" in source
-            assert "paused / not authorized and preserve producer-bound history" in source
-            assert "不读取、不迁移、不改写或混合 old records" in source
-        else:
-            assert "next user-only entrypoint is soft-route mechanism validation candidate selection" in source
-            assert "deterministic exact-revision package" in source
-            assert "authenticated semantic-texture asset bundle" in source
-            assert "one create-only bounded delivery with `SHA256SUMS` last" in source
-            assert "no retry, fallback, dynamic latest selection" in source
-            assert "formal threshold/FPR, promotion, or scientific claim" in source
-            assert "confirmation support is complete but paused" in source
-            assert "read-only authenticated and separately authorized" in source
-            assert "exact configured locator and SHA256" in source
-            assert "never refits W, CDFs, or provisional tau" in source
-            assert "paused producer-bound history" in source

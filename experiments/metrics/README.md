@@ -53,3 +53,8 @@ case/threshold identity 纳入 `cross_input_digest`；hf_only_threshold_fit_gpu_
 `configs/experiments/hf_only_reference_metrics.json` 固定 hf_only_reference_validation spec、完整 hf_only_reference_protocol
 authority bundle、七项 split/formula、metric registry、实现 symbols 与源码
 SHA-256。该实现不写 records、不执行 promotion decision，也不产生科学结果。
+
+`contrastive_lf_branch_attribution.py` 只聚合预登记 Stage-A records：identity
+attribution 28/32、逐 condition null/wrong 3/32、blur complement 24/32 加共享 exact
+Clopper-Pearson lower、逐 attack quality 32/32。它不选择权重、不改变 detector，
+候选 hierarchy 仍由 runner 按注册顺序执行。

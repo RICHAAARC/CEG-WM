@@ -1,6 +1,16 @@
 # Experiment Execution
 
-The next user-only entrypoint is soft-route mechanism validation candidate selection. It builds a deterministic exact-revision package, replays from a Git-less extraction, binds the authenticated semantic-texture asset bundle, and writes one create-only bounded delivery with `SHA256SUMS` last. It allows no retry, fallback, dynamic latest selection, formal threshold/FPR, promotion, or scientific claim. soft-route mechanism validation untouched confirmation support is complete but paused until the returned selection artifact is read-only authenticated and separately authorized; confirmation requires its exact configured locator and SHA256 and never refits W, CDFs, or provisional tau. All earlier diagnostic notebook/server families are paused producer-bound history.
+The current Stage-A handoff is `contrastive_lf_branch_attribution_candidate_selection.ipynb`.
+Its exact-revision package performs only fresh null-fit plus candidate selection, authenticates
+before package-local imports, and writes a create-only bounded result, null artifact,
+selection artifact when passed, execution manifest, log summary, ZIP, receipt, and
+`SHA256SUMS` last. RC0 success and RC2 authenticated negative/blocked completion are delivered
+before exit. It permits no retry, resume, latest discovery, confirmation, Stage-B, formal
+threshold/FPR, promotion, or science claim.
+
+The former soft-route candidate-selection and untouched-confirmation surfaces are retained
+only as producer-bound negative/history. They are not the current entrypoint and are not
+reused by contrastive LF.
 
 - `hf_only_detector_directional_validation.ipynb`: `0d4253ab2614c642563c566e6268565c337b503f`; `ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority`; `ceg_wm_hf_only_detector_directional_validation_initial_gate` is immutable partial evidence.
 - `hf_transmission_diagnostic.ipynb`: `af1eea8f55086b583e3e5e4a02586959983db70b`; `ceg_wm_hf_transmission_diagnostic_server_execution`.

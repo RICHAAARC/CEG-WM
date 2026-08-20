@@ -133,6 +133,18 @@ class CleanImageVaeObservationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicOrdinaryImageVaeObservationResult:
+    """Public final-image RGB8 to deterministic VAE-posterior-mode observation."""
+
+    candidate_id: str
+    runtime_config_digest: str
+    selected_device: str
+    rgb8_digest: str
+    detection_latent: torch.Tensor
+    observation_identity: str
+
+
+@dataclass(frozen=True, slots=True)
 class ContentWriteGeometrySuffixResult:
     """Paired content result plus its execution-local geometry suffix capability."""
 
@@ -265,6 +277,23 @@ def _tensor_digest(value: torch.Tensor) -> str:
         bits.to_bytes(2, byteorder="big", signed=False)
         for bits in _actual_float16_bits(contiguous)
     )
+    identity = (
+        str(contiguous.dtype).encode("ascii")
+        + b"\x00"
+        + repr(tuple(contiguous.shape)).encode("ascii")
+        + b"\x00"
+        + raw
+    )
+    return sha256(identity).hexdigest()
+
+
+def _float32_tensor_digest(value: torch.Tensor) -> str:
+    contiguous = value.detach().contiguous().to(device="cpu")
+    if contiguous.dtype is not torch.float32:
+        raise RuntimeContentExecutionError(
+            "public observation digest requires registered binary32"
+        )
+    raw = b"".join(pack(">f", float(item)) for item in contiguous.reshape(-1))
     identity = (
         str(contiguous.dtype).encode("ascii")
         + b"\x00"
@@ -707,6 +736,57 @@ def _encode_detection_image(
         detection_latent,
         role=f"{role}_detection_latent",
     ).detach().clone()
+
+
+def observe_public_rgb8_vae(
+    backend: RuntimeContentBackend,
+    configuration: Sd35RuntimeConfiguration,
+    session: RuntimeSession,
+    image_rgb8: torch.Tensor,
+) -> PublicOrdinaryImageVaeObservationResult:
+    """Encode only one current ordinary RGB8 image through the public VAE mode."""
+
+    if not isinstance(backend, RuntimeContentBackend):
+        raise RuntimeContentExecutionError("runtime backend lacks public VAE observation")
+    if type(configuration) is not Sd35RuntimeConfiguration or type(session) is not RuntimeSession:
+        raise RuntimeContentExecutionError("public VAE observation identity is invalid")
+    if (
+        not isinstance(image_rgb8, torch.Tensor)
+        or image_rgb8.dtype is not torch.uint8
+        or image_rgb8.ndim != 4
+        or image_rgb8.shape[0] != 1
+        or image_rgb8.shape[1] != 3
+        or not image_rgb8.is_contiguous()
+    ):
+        raise RuntimeContentExecutionError("public VAE input must be contiguous [1,3,H,W] RGB8")
+    if (
+        session.runtime_config_digest != configuration.runtime_config_digest
+        or session.vae_encode_protocol != configuration.vae_encode_protocol
+    ):
+        raise RuntimeContentExecutionError("public VAE runtime identity drifted")
+    rgb8 = image_rgb8.detach().to(device="cpu").contiguous()
+    digest = rgb8_image_digest(rgb8)
+    image = rgb8.to(device=session.selected_device, dtype=torch.float32) / 255.0
+    factors = backend.vae_factors()
+    if type(factors) is not RuntimeVaeFactors:
+        raise RuntimeContentExecutionError("public VAE factors are invalid")
+    latent = _encode_detection_image(backend, image, factors, "public_rgb8")
+    if latent.dtype is not torch.float32 or latent.ndim != 4 or tuple(latent.shape[:2]) != (1, 16):
+        raise RuntimeContentExecutionError("public VAE observation must be binary32 [1,16,H,W]")
+    identity = sha256(
+        (
+            f"public-rgb8-vae-observation\0{configuration.runtime_config_digest}\0"
+            f"{digest}\0{_float32_tensor_digest(latent)}"
+        ).encode("ascii")
+    ).hexdigest()
+    return PublicOrdinaryImageVaeObservationResult(
+        candidate_id=session.candidate_id,
+        runtime_config_digest=session.runtime_config_digest,
+        selected_device=session.selected_device,
+        rgb8_digest=digest,
+        detection_latent=latent,
+        observation_identity=identity,
+    )
 
 
 def _validated_content_execution_latent(

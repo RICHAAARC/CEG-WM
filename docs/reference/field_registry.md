@@ -1062,6 +1062,7 @@ FPR、promotion 或 Stage-B 执行权威。
 | clean_base_observation_count | persisted_protocol | protocol | none | true | false | false | Null-fit 的 clean base observation 固定分母。 |
 | clopper_pearson_callable_identity | persisted_protocol | method_identity | none | false | false | false | Blur complement gate 复用的共享 exact Clopper-Pearson callable 身份。 |
 | codec_identity | persisted_protocol | runtime_identity | none | true | false | false | Record 实际绑定的冻结 RGB8 codec capability 身份。 |
+| codec_pillow_version | persisted_protocol | runtime_identity | none | false | false | false | Stage-A execution 绑定的 Pillow exact codec capability 版本。 |
 | combined_relative_l2_denominator | persisted_protocol | method_parameter | none | false | false | false | Combined actual-dtype hard budget 的冻结分母 250。 |
 | combined_relative_l2_numerator | persisted_protocol | method_parameter | none | false | false | false | Combined actual-dtype hard budget 的冻结分子 3。 |
 | complete_denominator_all_gates_pass | persisted_protocol | protocol | none | false | false | false | 完整分母且全部科学门通过时的 success 分类。 |
@@ -1124,6 +1125,9 @@ FPR、promotion 或 Stage-B 执行权威。
 | null_fit | persisted_protocol | protocol | none | false | false | false | Null-fit role 的固定分母配置。 |
 | pillow_version | persisted_protocol | runtime_identity | none | false | false | false | JPEG capability 绑定的 Pillow exact dependency version。 |
 | population_mean | persisted_protocol | method_statistic | none | true | false | false | 32项 clean-null binary64 population mean。 |
+| raw_feature_population | persisted_protocol | method_statistic | none | true | false | false | Candidate-specific 32项 manifest-order blind raw feature vectors，用于重放 mean/covariance/whitening。 |
+| raw_population | persisted_protocol | method_statistic | none | true | false | false | HF fresh clean-null 的32项 manifest-order raw score population。 |
+| contrastive_population | persisted_protocol | method_statistic | none | true | false | false | LF candidate 的32项 registered-minus-internal-decoy-median raw contrastive population。 |
 | population_sigma | persisted_protocol | method_statistic | none | true | false | false | 除数为32的 population variance binary64 square root。 |
 | population_variance | persisted_protocol | method_statistic | none | true | false | false | 32项 clean-null binary64 population variance，除数固定32。 |
 | private_latent_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 private latent；固定为 false。 |
@@ -1151,6 +1155,7 @@ FPR、promotion 或 Stage-B 执行权威。
 | rows_digest | persisted_protocol | provenance | none | false | false | false | Prompt roster 有序 rows 的 canonical SHA-256。 |
 | runner_up_recovery_allowed | persisted_protocol | protocol | none | false | false | false | Winner confirmation 失败后是否允许回捞 runner-up；固定为 false。 |
 | runtime_identity | persisted_protocol | runtime_identity | none | true | false | false | Record 观察到的 public runtime 配置与 backend 身份。 |
+| runtime_storage_environment_names | persisted_protocol | runtime_locator | none | false | false | false | Production backend 的 cache 与 persistent model storage 环境变量名；不保存其路径值。 |
 | selected_candidate_id | persisted_protocol | method_identity | none | true | false | false | Authenticated selection winner 的唯一 candidate ID。 |
 | selection_asset_refit_allowed | persisted_protocol | protocol | none | false | false | false | Confirmation 是否允许重拟合 selection null/threshold assets；固定为 false。 |
 | selection_rule | persisted_protocol | protocol | none | false | false | false | 从 snapshot 排除既有使用后选取96项的确定性规则。 |
@@ -1167,6 +1172,44 @@ FPR、promotion 或 Stage-B 执行权威。
 | untouched_confirmation | persisted_protocol | protocol | none | false | false | false | Untouched-confirmation role 的固定分母配置。 |
 | wrong_key_score | persisted_protocol | method_statistic | none | true | false | false | 单个 external wrong-key detector raw score。 |
 | zero_science_boundary | persisted_protocol | protocol | none | false | false | false | Diagnostic-only、无 formal tau/FPR/promotion/science 的冻结边界。 |
+| action_id | persisted_protocol | method_identity | none | false | false | false | Stage-A null-fit + candidate-selection 的单一执行动作身份。 |
+| adapter_chain | persisted_protocol | method_identity | none | false | false | false | Production public adapter、runtime、method、runner 的有序 callable chain。 |
+| allowed_result_classifications | persisted_protocol | protocol | none | false | false | false | Execution delivery 允许的四种完整结果分类。 |
+| archive_filename | persisted_protocol | provenance | none | true | false | false | 当前 bounded delivery ZIP 的 create-only 文件名。 |
+| artifact_filenames | persisted_protocol | provenance | none | true | false | false | 当前 delivery manifest 声明的有序 artifact 文件名。 |
+| attack_callable | persisted_protocol | method_identity | none | false | false | false | Stage-A 冻结攻击 public callable。 |
+| create_only | persisted_protocol | protocol | none | false | false | false | Delivery root 与成员是否只允许在目标缺失时创建。 |
+| delivery | persisted_protocol | protocol | none | false | false | false | Stage-A bounded delivery contract。 |
+| execution_log_summary_bounded | persisted_protocol | protocol | none | false | false | false | Execution log 是否只持久化有界摘要而无 traceback/private state。 |
+| first_failed_record_id | persisted_protocol | diagnostic | none | true | false | false | 完整 record collection 中首个且唯一 failed slot 的 public record ID。 |
+| formal_outputs_created | persisted_protocol | method_status | none | false | false | false | Stage-A execution 是否创建 formal outputs；固定为 false。 |
+| implementation_revision_environment_name | persisted_protocol | runtime_locator | none | false | false | false | Colab userdata 中承载 exact implementation revision 的变量名。 |
+| metric_callable | persisted_protocol | method_identity | none | false | false | false | Stage-A gate aggregation 的 public metric callable。 |
+| model_weights_in_package | persisted_protocol | protocol | none | false | false | false | Execution package 是否包含模型权重；固定为 false。 |
+| null_fit_artifact_digest | persisted_protocol | provenance | none | true | false | false | 完整可重放 fresh null-fit artifact canonical SHA-256。 |
+| null_fit_manifest_path | persisted_protocol | runtime_locator | none | false | false | false | Stage-A execution 使用的 literal null-fit manifest 路径。 |
+| null_fit_record_count | persisted_protocol | diagnostic | none | true | false | false | Delivery 中 null-fit records 实际固定槽位数。 |
+| null_fit_records | persisted_protocol | diagnostic | none | true | false | false | Exact 128-slot null-fit record collection，包括失败及 unstarted tail。 |
+| production_backend | persisted_protocol | runtime_identity | none | false | false | false | Production factory 绑定的真实 Sd35 backend class。 |
+| production_factory | persisted_protocol | method_identity | none | false | false | false | Stage-A production operations factory callable。 |
+| protocol_config_path | persisted_protocol | runtime_locator | none | false | false | false | Frozen contrastive LF protocol config 的 literal locator。 |
+| production_real_component_chain_required | persisted_protocol | method_status | none | false | false | false | Production factory 是否必须装配真实 public backend/runtime/method/runner chain；固定为 true。 |
+| receipt_filename | persisted_protocol | provenance | none | true | false | false | 当前 bounded delivery receipt 文件名。 |
+| required_secret_names | persisted_protocol | runtime_locator | none | false | false | false | 用户环境必须提供但不得持久化其值的 secret 名称。 |
+| result_filename | persisted_protocol | provenance | none | true | false | false | 当前 bounded result JSON 文件名。 |
+| result_rc | persisted_protocol | protocol | none | false | false | false | 四种 result classification 到 process RC 的冻结映射。 |
+| result_sha256 | persisted_protocol | provenance | none | true | false | false | 当前 bounded result JSON 的 SHA-256。 |
+| runtime_config_path | persisted_protocol | runtime_locator | none | false | false | false | Production Sd35 runtime config 的 literal locator。 |
+| selection_artifact_filename | persisted_protocol | provenance | none | true | false | false | Selection 通过时唯一 authority artifact 文件名；否则为 null。 |
+| selection_artifact_sha256 | persisted_protocol | provenance | none | true | false | false | Selection 通过时 authority artifact SHA-256；否则为 null。 |
+| selection_manifest_digest | persisted_protocol | provenance | none | true | false | false | Selection result 绑定的 frozen selection manifest digest。 |
+| selection_record_count | persisted_protocol | diagnostic | none | true | false | false | Delivery 中 selection records 实际固定槽位数。 |
+| selection_records | persisted_protocol | diagnostic | none | true | false | false | Exact 4960-slot selection record collection，包括失败及 unstarted tail。 |
+| selection_result | persisted_protocol | diagnostic | none | true | false | false | 绑定 validated record collection 的完整 provisional protocol result。 |
+| checksum_manifest_filename | persisted_protocol | provenance | none | true | false | false | 最后写入的 delivery checksum manifest 文件名。 |
+| checksum_manifest_sha256 | persisted_protocol | provenance | none | true | false | false | `SHA256SUMS` 自身 SHA-256。 |
+| checksum_manifest_written_last | persisted_protocol | protocol | none | false | false | false | Checksum manifest 是否在全部 payload、ZIP、receipt 后最后创建。 |
+| traceback_persisted | persisted_protocol | method_status | none | true | false | false | Delivery 是否持久化 traceback；固定为 false。 |
 
 ## Development exploration 精确记录与控制字段
 

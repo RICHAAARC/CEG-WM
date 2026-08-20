@@ -65,3 +65,8 @@ complement、quality 与 binary32 budget 规则均由配置和 protocol loader �
 该工作只建立 diagnostic/provisional 预登记：不创建 formal tau/FPR，不 promotion，
 不改变正式 HF-only detector，也不授权 Stage-B、模型运行、GPU 或 Colab。旧
 soft-route negative、W/CDF/tau/roster/result 均不得继承。
+
+`contrastive_lf_branch_attribution_execution.json` 与
+`contrastive_lf_branch_attribution_execution_components.json` 只绑定 Stage-A
+null-fit + candidate-selection 的真实 public adapter/runtime/method/runner 执行面。
+它们不授权 untouched confirmation、Stage-B、formal detector 或 promotion。

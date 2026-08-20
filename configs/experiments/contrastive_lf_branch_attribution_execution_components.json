@@ -1,0 +1,16 @@
+{
+  "adapter_chain": [
+    "experiments.methods.ceg_wm.CegWmExperimentAdapter",
+    "runtime.adapter.Sd35RuntimeAdapter",
+    "runtime.content_write.observe_public_rgb8_vae",
+    "main.content_chain.lf_carrier.contrastive_lf_carrier",
+    "main.content_chain.lf_detector.contrastive_lf_detector",
+    "experiments.runners.contrastive_lf_branch_attribution"
+  ],
+  "attack_callable": "experiments.attacks.contrastive_lf_branch_attribution.apply_contrastive_lf_attack",
+  "metric_callable": "experiments.metrics.contrastive_lf_branch_attribution.evaluate_stage_a_candidate_gates",
+  "model_weights_in_package": false,
+  "production_backend": "runtime.sd35_backend.Sd35PipelineBackend",
+  "production_real_component_chain_required": true,
+  "schema_version": 1
+}

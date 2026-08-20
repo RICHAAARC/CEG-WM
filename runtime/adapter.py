@@ -39,6 +39,7 @@ DeviceRequest = Literal["auto", "cpu", "cuda"]
 if TYPE_CHECKING:
     from .content_write import (
         CleanImageVaeObservationResult,
+        PublicOrdinaryImageVaeObservationResult,
         ContentWriteGeometrySuffixResult,
         ContentWriteVaeResult,
     )
@@ -491,6 +492,30 @@ class Sd35RuntimeAdapter:
             raise RuntimeAdapterError(
                 "runtime backend raised an unexpected clean observation error"
             ) from exc
+
+    def observe_public_rgb8_vae(
+        self, image_rgb8: torch.Tensor
+    ) -> PublicOrdinaryImageVaeObservationResult:
+        """Observe one current ordinary RGB8 image through public VAE posterior mode."""
+
+        if self._state is not RuntimeAdapterState.READY:
+            raise RuntimeAdapterError("runtime adapter must be ready before public VAE observation")
+        if not isinstance(self._backend, RuntimeContentBackend):
+            raise RuntimeAdapterError("runtime backend lacks public VAE observation")
+        from .content_write import RuntimeContentExecutionError, observe_public_rgb8_vae
+        try:
+            self.revalidate_execution_identity()
+            result = observe_public_rgb8_vae(
+                self._backend, self._configuration, self.session, image_rgb8
+            )
+            self.revalidate_execution_identity()
+            return result
+        except (RuntimeAdapterError, RuntimeContentExecutionError) as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError("runtime public RGB8 VAE observation failed closed") from exc
+        except Exception as exc:
+            self._transition_to_failed(exc)
+            raise RuntimeAdapterError("runtime raised an unexpected public VAE error") from exc
 
     def execute_content_write_and_capture_geometry_suffix(
         self,

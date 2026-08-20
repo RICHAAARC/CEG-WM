@@ -743,42 +743,6 @@ def test_dependency_target_requires_exact_distribution_set_and_versions(
 
 
 @pytest.mark.quick
-def test_experiment_execution_readme_excludes_non_hf_only_threshold_fit_gpu_execution_routes() -> None:
-    readme = (
-        ROOT / "scripts/experiment_execution/README.md"
-    ).read_text(encoding="utf-8")
-    assert "next user-only entrypoint is soft-route mechanism validation candidate selection" in readme
-    assert "deterministic exact-revision package" in readme
-    assert "Git-less extraction" in readme
-    assert "authenticated semantic-texture asset bundle" in readme
-    assert "one create-only bounded delivery with `SHA256SUMS` last" in readme
-    assert "no retry, fallback, dynamic latest selection" in readme
-    assert "formal threshold/FPR, promotion, or scientific claim" in readme
-    assert "confirmation support is complete but paused" in readme
-    assert "read-only authenticated and separately authorized" in readme
-    assert "exact configured locator and SHA256" in readme
-    assert "never refits W, CDFs, or provisional tau" in readme
-    assert "paused producer-bound history" in readme
-    assert "hf_only_detector_directional_validation.ipynb" in readme
-    assert "0d4253ab2614c642563c566e6268565c337b503f" in readme
-    assert "ceg_wm_hf_only_detector_directional_validation_binary32_budget_authority" in readme
-    assert "remain only in Git ancestry" in readme
-    for forbidden in (
-        "HF-only threshold-fit GPU execution",
-        "schema-v1",
-        "schema-v2",
-        "requirements_hf_only_threshold_fit_gpu_execution.txt",
-        "complete transitive",
-        "--no-deps",
-        "runtime_qualification_bootstrap.py",
-        "build_runtime_qualification_package.py",
-        "python -m pip",
-        "runtime_qualification_runner",
-    ):
-        assert forbidden not in readme
-
-
-@pytest.mark.quick
 def test_threshold_fit_notebook_is_thin_and_output_free() -> None:
     notebook = json.loads(
         (

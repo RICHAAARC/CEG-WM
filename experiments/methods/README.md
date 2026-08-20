@@ -21,3 +21,8 @@ geometry reliability、image rectifier 和 conditional recovery decision，并�
 
 该表面只提供内部实验组件调用能力，不是 runner、baseline、GPU qualification 或
 科学效果证据。
+
+Stage-A contrastive LF 路径通过同一薄适配器调用 public ordinary-RGB8 VAE
+posterior-mode observation、两个 candidate-specific LF carrier/detector 与 fresh HF
+anchor。Detector 入口不接收 prompt、reference、embed record、private latent、route
+或 Q/K cache；方法公式仍只属于 `main/`。

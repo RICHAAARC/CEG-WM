@@ -4,15 +4,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha256
-from math import cos, isfinite, sqrt
+from math import cos, isfinite, nextafter, sqrt
 from struct import pack, unpack
 from typing import Sequence
 
 import numpy as np
 
-from main.shared.key_schedule import DerivedWrongKeyMaterial, stable_json_utf8
+from main.shared.key_schedule import (
+    DerivedInternalLfDecoyMaterial,
+    DerivedWrongKeyMaterial,
+    derive_internal_lf_decoy_material,
+    stable_json_utf8,
+)
 
-from .lf_carrier import LfCarrierError, lf_carrier
+from .lf_carrier import (
+    CONTRASTIVE_LF_CANDIDATE_IDS,
+    MULTISCALE_CONTRASTIVE_CANDIDATE_ID,
+    ContrastiveLfCarrierResult,
+    LfCarrierError,
+    contrastive_lf_carrier,
+    contrastive_lowpass,
+    lf_carrier,
+)
 from .lf_whitening import (
     LF_NULL_WHITENED_MATCHED_SCORE_CANDIDATE_ID,
     LF_NULL_WHITENING_BAND_IDENTITY,
@@ -140,6 +153,92 @@ class LfDetectionResult:
     wrong_key_index: int | None
     observation_digest: str
     template_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContrastiveLfRawObservation:
+    """Blind registered/wrong raw vector plus separate internal-decoy vectors."""
+
+    candidate_id: str
+    raw_feature: tuple[float, ...]
+    internal_decoy_features: tuple[tuple[float, ...], ...]
+    observation_digest: str
+    carrier_config_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
+    raw_observation_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContrastiveLfNullAsset:
+    """Candidate-specific population asset; multiscale stores joint whitening."""
+
+    candidate_id: str
+    population_count: int
+    raw_feature_population: tuple[tuple[float, ...], ...]
+    population_mean: tuple[float, ...]
+    population_covariance: tuple[float, ...]
+    regularized_covariance: tuple[float, ...]
+    whitening_matrix: tuple[float, ...]
+    contrastive_population: tuple[float, ...]
+    contrastive_population_mean: float
+    contrastive_population_variance: float
+    contrastive_population_sigma: float
+    provisional_tau: float
+    null_manifest_digest: str
+    detector_config_digest: str
+    asset_digest: str
+
+    def validate(self) -> None:
+        """Recompute the complete candidate-specific replay authority."""
+
+        if (
+            self.candidate_id not in CONTRASTIVE_LF_CANDIDATE_IDS
+            or self.population_count != 32
+            or len(self.raw_feature_population) != 32
+            or len(self.contrastive_population) != 32
+            or any(not isfinite(value) for row in self.raw_feature_population for value in row)
+            or any(not isfinite(value) for value in self.contrastive_population)
+        ):
+            raise LfDetectorError("contrastive LF null asset population is invalid")
+        dimension = 2 if self.candidate_id == MULTISCALE_CONTRASTIVE_CANDIDATE_ID else 1
+        if any(len(row) != dimension for row in self.raw_feature_population):
+            raise LfDetectorError("contrastive LF null asset feature dimension drifted")
+        expected = _contrastive_lf_asset_payload(
+            candidate_id=self.candidate_id,
+            raw_feature_population=self.raw_feature_population,
+            population_mean=self.population_mean,
+            population_covariance=self.population_covariance,
+            regularized_covariance=self.regularized_covariance,
+            whitening_matrix=self.whitening_matrix,
+            contrastive_population=self.contrastive_population,
+            contrastive_population_mean=self.contrastive_population_mean,
+            contrastive_population_variance=self.contrastive_population_variance,
+            contrastive_population_sigma=self.contrastive_population_sigma,
+            provisional_tau=self.provisional_tau,
+            null_manifest_digest=self.null_manifest_digest,
+            detector_config_digest=self.detector_config_digest,
+        )
+        if self.asset_digest != sha256(stable_json_utf8(expected)).hexdigest():
+            raise LfDetectorError("contrastive LF null asset digest drifted")
+
+
+@dataclass(frozen=True, slots=True)
+class ContrastiveLfDetectionResult:
+    candidate_id: str
+    raw_feature: tuple[float, ...]
+    internal_decoy_features: tuple[tuple[float, ...], ...]
+    registered_score: float
+    internal_decoy_scores: tuple[float, ...]
+    contrastive_score: float
+    standardized_score: float
+    detector_identity: str
+    null_asset_digest: str
+    observation_digest: str
+    root_key_public_digest: str
+    key_role: str
+    wrong_key_index: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +372,326 @@ def lf_detector(
         wrong_key_index=carrier.wrong_key_index,
         observation_digest=observation.observation_digest,
         template_digest=carrier.template_digest,
+    )
+
+
+def _contrastive_correlation(
+    observed: Sequence[float], template: Sequence[float]
+) -> float:
+    if len(observed) != len(template) or not observed:
+        raise LfDetectorError("contrastive LF correlation shape mismatch")
+    observed_unit = _normalize(_center(observed), "contrastive LF observation")
+    template_unit = _normalize(_center(template), "contrastive LF template")
+    score = _float32(0.0)
+    for observed_value, template_value in zip(
+        observed_unit, template_unit, strict=True
+    ):
+        score = _float32(score + _float32(observed_value * template_value))
+    return score
+
+
+def _raw_feature(
+    observation: LfDetectionObservation,
+    carrier: ContrastiveLfCarrierResult,
+) -> tuple[float, ...]:
+    y_five = contrastive_lowpass(observation.values, observation.shape, 5)
+    values = [
+        _contrastive_correlation(y_five, carrier.scale_five_template)
+    ]
+    if carrier.candidate_id == MULTISCALE_CONTRASTIVE_CANDIDATE_ID:
+        if carrier.scale_nine_template is None:
+            raise LfDetectorError("multiscale LF carrier lost scale nine")
+        y_nine = contrastive_lowpass(observation.values, observation.shape, 9)
+        values.append(
+            _contrastive_correlation(y_nine, carrier.scale_nine_template)
+        )
+    return tuple(values)
+
+
+def contrastive_lf_raw_observation(
+    observation: LfDetectionObservation,
+    detection_key: str | DerivedWrongKeyMaterial,
+    *,
+    candidate_id: str,
+) -> ContrastiveLfRawObservation:
+    """Rebuild a blind Stage-A candidate and eight separate internal decoys."""
+
+    if type(observation) is not LfDetectionObservation:
+        raise LfDetectorError("contrastive LF detector requires public-image observation")
+    if candidate_id not in CONTRASTIVE_LF_CANDIDATE_IDS:
+        raise LfDetectorError("contrastive LF candidate is not registered")
+    try:
+        carrier = contrastive_lf_carrier(
+            detection_key, observation.shape, candidate_id=candidate_id
+        )
+        decoy_features = []
+        for index in range(8):
+            material: DerivedInternalLfDecoyMaterial = derive_internal_lf_decoy_material(
+                carrier.root_key_public_digest, candidate_id, index
+            )
+            decoy_carrier = contrastive_lf_carrier(
+                material, observation.shape, candidate_id=candidate_id
+            )
+            decoy_features.append(_raw_feature(observation, decoy_carrier))
+    except (LfCarrierError, ValueError) as exc:
+        raise LfDetectorError("contrastive LF carrier reconstruction failed") from exc
+    feature = _raw_feature(observation, carrier)
+    identity = {
+        "candidate_id": candidate_id,
+        "carrier_config_digest": carrier.carrier_config_digest,
+        "internal_decoy_feature_digests": [
+            sha256(stable_json_utf8([float.hex(value) for value in item])).hexdigest()
+            for item in decoy_features
+        ],
+        "observation_digest": observation.observation_digest,
+        "raw_feature": [float.hex(value) for value in feature],
+    }
+    return ContrastiveLfRawObservation(
+        candidate_id=candidate_id,
+        raw_feature=feature,
+        internal_decoy_features=tuple(decoy_features),
+        observation_digest=observation.observation_digest,
+        carrier_config_digest=carrier.carrier_config_digest,
+        root_key_public_digest=carrier.root_key_public_digest,
+        key_role=carrier.key_role,
+        wrong_key_index=carrier.wrong_key_index,
+        raw_observation_digest=sha256(stable_json_utf8(identity)).hexdigest(),
+    )
+
+
+def _score_feature(
+    candidate_id: str,
+    feature: Sequence[float],
+    mean: Sequence[float],
+    whitening: Sequence[float],
+) -> float:
+    if candidate_id != MULTISCALE_CONTRASTIVE_CANDIDATE_ID:
+        return float(feature[0])
+    centered = np.asarray(feature, dtype=np.float64) - np.asarray(mean, dtype=np.float64)
+    matrix = np.asarray(whitening, dtype=np.float64).reshape(2, 2)
+    whitened = matrix @ centered
+    score = float((whitened[0] + whitened[1]) / sqrt(2.0))
+    if not isfinite(score):
+        raise LfDetectorError("multiscale LF whitened score is non-finite")
+    return score
+
+
+def _even_median_eight(values: Sequence[float]) -> float:
+    if len(values) != 8 or any(not isfinite(value) for value in values):
+        raise LfDetectorError("contrastive LF internal decoy roster is invalid")
+    ordered = sorted(float(value) for value in values)
+    value = (ordered[3] + ordered[4]) / 2.0
+    if not isfinite(value):
+        raise LfDetectorError("contrastive LF decoy median is non-finite")
+    return value
+
+
+def _contrastive_lf_asset_payload(
+    *,
+    candidate_id: str,
+    raw_feature_population: Sequence[Sequence[float]],
+    population_mean: Sequence[float],
+    population_covariance: Sequence[float],
+    regularized_covariance: Sequence[float],
+    whitening_matrix: Sequence[float],
+    contrastive_population: Sequence[float],
+    contrastive_population_mean: float,
+    contrastive_population_variance: float,
+    contrastive_population_sigma: float,
+    provisional_tau: float,
+    null_manifest_digest: str,
+    detector_config_digest: str,
+) -> dict[str, object]:
+    dimension = 2 if candidate_id == MULTISCALE_CONTRASTIVE_CANDIDATE_ID else 1
+    return {
+        "candidate_id": candidate_id,
+        "contrastive": "registered_minus_binary64_even_median_internal_decoy_eight",
+        "null_standardization": "binary64_population_divide_by_32",
+        "raw_feature": (
+            "joint_whitened_equal_direction_scale_five_scale_nine"
+            if dimension == 2
+            else "scale_five_normalized_correlation"
+        ),
+        "contrastive_population": [float.hex(value) for value in contrastive_population],
+        "contrastive_population_mean": float.hex(contrastive_population_mean),
+        "contrastive_population_sigma": float.hex(contrastive_population_sigma),
+        "contrastive_population_variance": float.hex(contrastive_population_variance),
+        "detector_config_digest": detector_config_digest,
+        "null_manifest_digest": null_manifest_digest,
+        "population_covariance": [float.hex(value) for value in population_covariance],
+        "population_mean": [float.hex(value) for value in population_mean],
+        "provisional_tau": float.hex(provisional_tau),
+        "raw_feature_population": [
+            [float.hex(value) for value in row] for row in raw_feature_population
+        ],
+        "regularized_covariance": [float.hex(value) for value in regularized_covariance],
+        "whitening_matrix": [float.hex(value) for value in whitening_matrix],
+    }
+
+
+def fit_contrastive_lf_null_asset(
+    raw_observations: Sequence[ContrastiveLfRawObservation],
+    *,
+    candidate_id: str,
+    null_manifest_digest: str,
+) -> ContrastiveLfNullAsset:
+    """Fit the frozen 32-item population whitening/standardization asset."""
+
+    if (
+        candidate_id not in CONTRASTIVE_LF_CANDIDATE_IDS
+        or len(raw_observations) != 32
+        or len(null_manifest_digest) != 64
+        or any(character not in "0123456789abcdef" for character in null_manifest_digest)
+        or any(
+            type(item) is not ContrastiveLfRawObservation
+            or item.candidate_id != candidate_id
+            or item.key_role != "registered"
+            for item in raw_observations
+        )
+    ):
+        raise LfDetectorError("contrastive LF null population authority is invalid")
+    dimension = 2 if candidate_id == MULTISCALE_CONTRASTIVE_CANDIDATE_ID else 1
+    matrix = np.asarray([item.raw_feature for item in raw_observations], dtype=np.float64)
+    if matrix.shape != (32, dimension) or not np.isfinite(matrix).all():
+        raise LfDetectorError("contrastive LF null raw matrix is invalid")
+    mean = np.sum(matrix, axis=0, dtype=np.float64) / 32.0
+    centered = matrix - mean
+    covariance = (centered.T @ centered) / 32.0
+    if dimension == 2:
+        trace = float(np.trace(covariance))
+        if not isfinite(trace) or trace <= 0.0:
+            raise LfDetectorError("contrastive LF multiscale covariance trace is invalid")
+        ridge = (2.0 ** -10) * (trace / 2.0)
+        regularized = covariance + ridge * np.eye(2, dtype=np.float64)
+        eigenvalues, eigenvectors = np.linalg.eigh(regularized)
+        if np.any(eigenvalues <= 0.0) or not np.isfinite(eigenvalues).all():
+            raise LfDetectorError("contrastive LF covariance is not positive definite")
+        whitening_matrix = eigenvectors @ np.diag(1.0 / np.sqrt(eigenvalues)) @ eigenvectors.T
+    else:
+        trace = float(covariance[0, 0])
+        if not isfinite(trace) or trace <= 0.0:
+            raise LfDetectorError("single-scale LF raw population variance is invalid")
+        regularized = covariance.copy()
+        whitening_matrix = np.eye(1, dtype=np.float64)
+    scores = []
+    for item in raw_observations:
+        registered = _score_feature(candidate_id, item.raw_feature, mean, whitening_matrix.reshape(-1))
+        decoys = tuple(
+            _score_feature(candidate_id, feature, mean, whitening_matrix.reshape(-1))
+            for feature in item.internal_decoy_features
+        )
+        scores.append(registered - _even_median_eight(decoys))
+    contrastive_mean = sum(scores) / 32.0
+    contrastive_variance = sum((value - contrastive_mean) ** 2 for value in scores) / 32.0
+    contrastive_sigma = sqrt(contrastive_variance)
+    if not isfinite(contrastive_sigma) or contrastive_sigma <= 0.0:
+        raise LfDetectorError("contrastive LF population sigma is invalid")
+    z_values = [(value - contrastive_mean) / contrastive_sigma for value in scores]
+    tau = nextafter(sorted(z_values)[-4], float("inf"))
+    detector_config = {
+        "candidate_id": candidate_id,
+        "contrastive": "registered_minus_binary64_even_median_internal_decoy_eight",
+        "null_standardization": "binary64_population_divide_by_32",
+        "raw_feature": (
+            "joint_whitened_equal_direction_scale_five_scale_nine"
+            if dimension == 2
+            else "scale_five_normalized_correlation"
+        ),
+    }
+    detector_config_digest = sha256(stable_json_utf8(detector_config)).hexdigest()
+    raw_population = tuple(tuple(float(value) for value in row) for row in matrix)
+    payload = _contrastive_lf_asset_payload(
+        candidate_id=candidate_id,
+        raw_feature_population=raw_population,
+        population_mean=tuple(float(value) for value in mean),
+        population_covariance=tuple(float(value) for value in covariance.reshape(-1)),
+        regularized_covariance=tuple(float(value) for value in regularized.reshape(-1)),
+        whitening_matrix=tuple(float(value) for value in whitening_matrix.reshape(-1)),
+        contrastive_population=scores,
+        contrastive_population_mean=contrastive_mean,
+        contrastive_population_variance=contrastive_variance,
+        contrastive_population_sigma=contrastive_sigma,
+        provisional_tau=tau,
+        null_manifest_digest=null_manifest_digest,
+        detector_config_digest=detector_config_digest,
+    )
+    asset_digest = sha256(stable_json_utf8(payload)).hexdigest()
+    asset = ContrastiveLfNullAsset(
+        candidate_id=candidate_id,
+        population_count=32,
+        raw_feature_population=raw_population,
+        population_mean=tuple(float(value) for value in mean),
+        population_covariance=tuple(float(value) for value in covariance.reshape(-1)),
+        regularized_covariance=tuple(float(value) for value in regularized.reshape(-1)),
+        whitening_matrix=tuple(float(value) for value in whitening_matrix.reshape(-1)),
+        contrastive_population=tuple(scores),
+        contrastive_population_mean=contrastive_mean,
+        contrastive_population_variance=contrastive_variance,
+        contrastive_population_sigma=contrastive_sigma,
+        provisional_tau=tau,
+        null_manifest_digest=null_manifest_digest,
+        detector_config_digest=detector_config_digest,
+        asset_digest=asset_digest,
+    )
+    asset.validate()
+    return asset
+
+
+def contrastive_lf_detector(
+    raw_observation: ContrastiveLfRawObservation,
+    null_asset: ContrastiveLfNullAsset,
+) -> ContrastiveLfDetectionResult:
+    """Apply one candidate-specific frozen null asset to a blind raw observation."""
+
+    if (
+        type(raw_observation) is not ContrastiveLfRawObservation
+        or type(null_asset) is not ContrastiveLfNullAsset
+        or raw_observation.candidate_id != null_asset.candidate_id
+    ):
+        raise LfDetectorError("contrastive LF detector asset binding is invalid")
+    null_asset.validate()
+    registered = _score_feature(
+        null_asset.candidate_id,
+        raw_observation.raw_feature,
+        null_asset.population_mean,
+        null_asset.whitening_matrix,
+    )
+    decoys = tuple(
+        _score_feature(
+            null_asset.candidate_id,
+            feature,
+            null_asset.population_mean,
+            null_asset.whitening_matrix,
+        )
+        for feature in raw_observation.internal_decoy_features
+    )
+    contrastive = registered - _even_median_eight(decoys)
+    z = (contrastive - null_asset.contrastive_population_mean) / null_asset.contrastive_population_sigma
+    if not isfinite(z):
+        raise LfDetectorError("contrastive LF standardized score is non-finite")
+    identity = sha256(
+        stable_json_utf8(
+            {
+                "candidate_id": null_asset.candidate_id,
+                "detector_config_digest": null_asset.detector_config_digest,
+                "null_asset_digest": null_asset.asset_digest,
+            }
+        )
+    ).hexdigest()
+    return ContrastiveLfDetectionResult(
+        candidate_id=null_asset.candidate_id,
+        raw_feature=raw_observation.raw_feature,
+        internal_decoy_features=raw_observation.internal_decoy_features,
+        registered_score=registered,
+        internal_decoy_scores=decoys,
+        contrastive_score=contrastive,
+        standardized_score=z,
+        detector_identity=identity,
+        null_asset_digest=null_asset.asset_digest,
+        observation_digest=raw_observation.observation_digest,
+        root_key_public_digest=raw_observation.root_key_public_digest,
+        key_role=raw_observation.key_role,
+        wrong_key_index=raw_observation.wrong_key_index,
     )
 
 

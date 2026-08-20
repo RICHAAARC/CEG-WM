@@ -18,6 +18,9 @@ from main import (
     ContentDetectorBinding,
     ContentEmbeddingResult,
     ContentRoutingResult,
+    ContrastiveLfDetectionResult,
+    ContrastiveLfNullAsset,
+    ContrastiveLfRawObservation,
     DerivedWrongKeyMaterial,
     GeometricTransformEstimation,
     GeometryEstimationOperation,
@@ -27,6 +30,8 @@ from main import (
     HfCarrierResult,
     HfDetectionObservation,
     HfDetectionResult,
+    HfPopulationNullAsset,
+    HfPopulationStandardizedResult,
     ImageRectificationResult,
     JointDecisionThresholds,
     KeyScheduleConfig,
@@ -52,6 +57,9 @@ from main import (
     content_detector,
     content_embedder,
     content_router,
+    contrastive_lf_carrier,
+    contrastive_lf_detector,
+    contrastive_lf_raw_observation,
     semantic_texture_content_detector,
     semantic_texture_content_arm_embedder,
     semantic_texture_content_embedder,
@@ -75,6 +83,7 @@ from main import (
     lf_detector,
     lf_null_whitened_matched_detector,
     qk_geometry_sync,
+    standardize_hf_population_score,
 )
 from runtime import (
     ContentWriteGeometrySuffixResult,
@@ -209,6 +218,16 @@ class SoftRouteMechanismContentArmWriteResult:
     """Uniform public wrapper for a soft-route mechanism validation arm materialization."""
 
     arm_id: str
+    content_write_result: ContentWriteVaeResult
+    write_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContrastiveLfContentArmWriteResult:
+    """Public Stage-A write wrapper retaining the budgeted runtime result."""
+
+    arm_id: str
+    candidate_id: str
     content_write_result: ContentWriteVaeResult
     write_identity: str
 
@@ -1205,6 +1224,181 @@ class CegWmExperimentAdapter:
                 "semantic-texture write RGB8 observation is unavailable"
             )
         return materialize_ordinary_rgb8_snapshot(image)
+
+    @_revalidate_configuration_before_call
+    def execute_contrastive_lf_content_arm_write_and_vae(
+        self,
+        base_latent: torch.Tensor,
+        detection_key: str,
+        *,
+        arm_id: str,
+    ) -> ComponentCallObservation[ContrastiveLfContentArmWriteResult]:
+        """Execute HF or either real Stage-A LF-only carrier through the public runtime."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "contrastive LF embedding requires a prepared runtime adapter"
+            )
+        candidate_by_arm = {
+            "hf_only": "hf_sparse_tail",
+            "multiscale_low_frequency_only": "lf_multiscale_lowpass_contrastive",
+            "single_scale_low_frequency_only": "lf_five_by_five_lowpass_contrastive",
+        }
+        if arm_id not in candidate_by_arm:
+            raise CegWmExperimentAdapterError("contrastive LF write arm is not registered")
+
+        def embed(latent_values: tuple[float, ...]) -> ContentEmbeddingResult:
+            shape = tuple(int(size) for size in base_latent.shape)
+            if arm_id == "hf_only":
+                return content_embedder(
+                    latent_values,
+                    hf_carrier(detection_key, shape),
+                )
+            carrier = contrastive_lf_carrier(
+                detection_key,
+                shape,
+                candidate_id=candidate_by_arm[arm_id],
+            )
+            return content_embedder(
+                latent_values,
+                lf_carrier_result=carrier.as_embedding_carrier(),
+            )
+
+        runtime_result = self._runtime_adapter.execute_content_write_and_vae(
+            base_latent, embed
+        )
+        embedding = runtime_result.content_materialization_result.embedding_result
+        identity = _canonical_digest(
+            {
+                "arm_id": arm_id,
+                "candidate_id": candidate_by_arm[arm_id],
+                "embedding_result_identity": embedding.embedding_result_identity,
+                "materialization_replay_identity": runtime_result.content_materialization_result.observation.materialization_replay_identity,
+                "runtime_config_digest": runtime_result.runtime_config_digest,
+            }
+        )
+        wrapped = ContrastiveLfContentArmWriteResult(
+            arm_id=arm_id,
+            candidate_id=candidate_by_arm[arm_id],
+            content_write_result=runtime_result,
+            write_identity=identity,
+        )
+        return self._observe(
+            "content_embedder",
+            wrapped,
+            result_identity_field="write_identity",
+            public_callable=(
+                "runtime.Sd35RuntimeAdapter.execute_content_write_and_vae"
+                " -> main.contrastive_lf_carrier -> main.content_embedder"
+            ),
+        )
+
+    @_revalidate_configuration_before_call
+    def observe_contrastive_lf_candidate(
+        self,
+        detection_image_rgb8: torch.Tensor,
+        detection_key: str | DerivedWrongKeyMaterial,
+        null_asset: ContrastiveLfNullAsset,
+    ) -> ComponentCallObservation[ContrastiveLfDetectionResult]:
+        """Blindly rebuild one candidate from the current ordinary RGB8 image."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "contrastive LF detection requires a prepared runtime adapter"
+            )
+        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(
+            detection_image_rgb8
+        )
+        latent = runtime_observation.detection_latent.detach().to(
+            device="cpu", dtype=torch.float32
+        ).contiguous()
+        observation = LfDetectionObservation.from_public_image_encoding(
+            tuple(float(value) for value in latent.reshape(-1).tolist()),
+            tuple(int(size) for size in latent.shape),
+        )
+        raw: ContrastiveLfRawObservation = contrastive_lf_raw_observation(
+            observation, detection_key, candidate_id=null_asset.candidate_id
+        )
+        result = contrastive_lf_detector(raw, null_asset)
+        return self._observe(
+            "lf_detector",
+            result,
+            upstream_runtime_identity=runtime_observation.observation_identity,
+            public_callable=(
+                "runtime.Sd35RuntimeAdapter.observe_public_rgb8_vae"
+                " -> main.contrastive_lf_raw_observation"
+                " -> main.contrastive_lf_detector"
+            ),
+        )
+
+    @_revalidate_configuration_before_call
+    def observe_contrastive_lf_raw(
+        self,
+        detection_image_rgb8: torch.Tensor,
+        detection_key: str | DerivedWrongKeyMaterial,
+        *,
+        candidate_id: str,
+    ) -> ContrastiveLfRawObservation:
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError("contrastive LF raw observation requires runtime")
+        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(detection_image_rgb8)
+        latent = runtime_observation.detection_latent.detach().to(device="cpu", dtype=torch.float32).contiguous()
+        observation = LfDetectionObservation.from_public_image_encoding(
+            tuple(float(value) for value in latent.reshape(-1).tolist()),
+            tuple(int(size) for size in latent.shape),
+        )
+        return contrastive_lf_raw_observation(
+            observation, detection_key, candidate_id=candidate_id
+        )
+
+    @_revalidate_configuration_before_call
+    def observe_stage_a_hf_raw(
+        self,
+        detection_image_rgb8: torch.Tensor,
+        detection_key: str | DerivedWrongKeyMaterial,
+    ) -> HfDetectionResult:
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError("Stage-A HF raw observation requires runtime")
+        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(detection_image_rgb8)
+        latent = runtime_observation.detection_latent.detach().to(device="cpu", dtype=torch.float32).contiguous()
+        observation = HfDetectionObservation.from_public_image_encoding(
+            tuple(float(value) for value in latent.reshape(-1).tolist()),
+            tuple(int(size) for size in latent.shape),
+        )
+        return hf_detector(observation, detection_key)
+
+    @_revalidate_configuration_before_call
+    def observe_stage_a_hf(
+        self,
+        detection_image_rgb8: torch.Tensor,
+        detection_key: str | DerivedWrongKeyMaterial,
+        null_asset: HfPopulationNullAsset,
+    ) -> ComponentCallObservation[HfPopulationStandardizedResult]:
+        """Apply the fresh Stage-A HF population asset on public RGB8 VAE evidence."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError("Stage-A HF detection requires a prepared runtime")
+        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(
+            detection_image_rgb8
+        )
+        latent = runtime_observation.detection_latent.detach().to(
+            device="cpu", dtype=torch.float32
+        ).contiguous()
+        observation = HfDetectionObservation.from_public_image_encoding(
+            tuple(float(value) for value in latent.reshape(-1).tolist()),
+            tuple(int(size) for size in latent.shape),
+        )
+        raw = hf_detector(observation, detection_key)
+        result = standardize_hf_population_score(raw, null_asset)
+        return self._observe(
+            "hf_detector",
+            result,
+            upstream_runtime_identity=runtime_observation.observation_identity,
+            public_callable=(
+                "runtime.Sd35RuntimeAdapter.observe_public_rgb8_vae"
+                " -> main.hf_detector -> main.standardize_hf_population_score"
+            ),
+        )
 
     @_revalidate_configuration_before_call
     def derive_semantic_texture_wrong_key_material(

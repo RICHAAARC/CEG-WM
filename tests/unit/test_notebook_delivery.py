@@ -26,18 +26,20 @@ def test_colab_notebook_inventory_authority_and_outputs_are_exact() -> None:
         "semantic_texture_operational_preflight.ipynb",
         "semantic_texture_soft_route_candidate_selection.ipynb",
         "semantic_texture_soft_route_untouched_confirmation.ipynb",
+        "contrastive_lf_branch_attribution_candidate_selection.ipynb",
     }
     assert {path.name for path in notebook_root.glob("*.ipynb")} == expected
     active_notebooks = {
-        "semantic_texture_soft_route_candidate_selection.ipynb",
+        "contrastive_lf_branch_attribution_candidate_selection.ipynb",
     }
     retained_outside_current_delta = {
         "semantic_texture_operational_preflight.ipynb",
         "semantic_texture_soft_detector_asset_preparation.ipynb",
+        "semantic_texture_soft_route_candidate_selection.ipynb",
     }
     paused_notebooks = expected - active_notebooks - retained_outside_current_delta
     banner = "**PAUSED / NOT AUTHORIZED:** Do not use **Run all**."
-    current_run_all_phrase = "Run all once in a fresh GPU runtime"
+    current_run_all_phrase = "contrastive-lf-branch-attribution-"
     forbidden_authority_phrases = (
         "only currently authorized",
         "current authorized Colab entrypoint",
@@ -70,15 +72,13 @@ def test_colab_notebook_inventory_authority_and_outputs_are_exact() -> None:
     assert "--entrypoint-path" in asset_source
     assert "latest-bundle" not in asset_source
     assert "retry" not in asset_source
-    selection_source = sources[
-        "semantic_texture_soft_route_candidate_selection.ipynb"
-    ]
-    assert selection_source.index("drive.mount") < selection_source.index(
-        "'git', 'clone'"
-    )
-    assert "CEG_WM_SOFT_ROUTE_MECHANISM_VALIDATION_REVISION" in selection_source
-    assert "build_semantic_texture_soft_route_mechanism_validation_package.py" in selection_source
-    assert "--split', 'candidate_selection" in selection_source
+    selection_source = sources["contrastive_lf_branch_attribution_candidate_selection.ipynb"]
+    assert selection_source.index("drive.mount") < selection_source.index("userdata.get")
+    assert "CEG_WM_CONTRASTIVE_LF_REVISION" in selection_source
+    assert "contrastive_lf_branch_attribution_bootstrap.py" in selection_source
+    assert "check=False" in selection_source
+    assert "confirmation" not in selection_source.lower()
+    assert "stage_b" not in selection_source.lower()
     assert "latest" not in selection_source
     confirmation_source = sources[
         "semantic_texture_soft_route_untouched_confirmation.ipynb"
