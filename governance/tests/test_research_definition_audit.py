@@ -211,6 +211,74 @@ def test_live_contrastive_allocation_design_preserves_authority_boundary() -> No
     assert "formal/default/joint HF-only detector" in route_state
     assert "`full_ceg_wm_eligible=false`" in route_state
 
+    contrastive_text = candidate_text.split(
+        "## Content-Adaptive Contrastive Allocation Candidate Family", 1
+    )[1]
+    assert "scale_kernel_side" not in candidate_text
+    assert "control_role" not in candidate_text
+    for operator in (
+        "carrier_template_lowpass_five_by_five",
+        "carrier_template_lowpass_nine_by_nine",
+        "internal_decoy_carrier_template_lowpass_five_by_five",
+        "internal_decoy_carrier_template_lowpass_nine_by_nine",
+    ):
+        assert f"`operator={operator}`" in candidate_text
+    assert "三个完整\ndomain digest 必须两两不同" in candidate_text
+    assert '"ceg-wm-internal-lf-decoy:" + hex(SHA256(stable_json_utf8({' in (
+        candidate_text
+    )
+    assert '"derivation_role": "candidate_internal_lf_decoy"' in candidate_text
+    assert "`key_role=internal_decoy`" in candidate_text
+    assert "`key_role=wrong`" in candidate_text
+    assert "external roster 绝不参与 `c_lf`" in candidate_text
+
+    for replay_definition in (
+        "`Y_five=lowpass_five(Y)`",
+        "`Y_nine=lowpass_nine(Y)`",
+        "C-order flatten",
+        "population variance（不是 `n-1` sample SD）",
+        "mu_lf = sum_binary64(c_i)/32",
+        "var_lf = sum_binary64((c_i-mu_lf)^2)/32",
+        "nextafter(ordered_z_lf[-4],+inf)",
+        "`F_hf(x)=Y`",
+        "`[Y_five,Y_nine]` concatenate 为 32-channel tensor",
+    ):
+        assert replay_definition in contrastive_text
+
+    assert "Pillow `12.3.0`" in contrastive_text
+    for codec_argument in (
+        'format="JPEG"',
+        "quality=q",
+        "subsampling=0",
+        "optimize=False",
+        "progressive=False",
+    ):
+        assert codec_argument in contrastive_text
+    for golden_digest in (
+        "d0d6b5c216be3f18108fc5033550da26fa2737a53852e8e2bbc04f3795b76194",
+        "9a202effd37e2b693f70fad3e9e01bc41d68df1fab4138de349a39963b49c80b",
+        "e4c5fc8268dce4b00f6b36bdcf542968bdba495a153cc273e9ece7279dd7029b",
+        "e8c89254351499471fe086704f3ecc6e2fb76f7cccd33e5a8ecc2fc33fc54c36",
+        "0d0e02529511b7cae4de3479b9645569c3985750655217abfb6c7d6326b362c7",
+    ):
+        assert f"`{golden_digest}`" in contrastive_text
+
+    for cdf_definition in (
+        "less = count(x_i < s)",
+        "equal = count(x_i == s)",
+        "u_raw = binary64((less+0.5*equal)/32)",
+        "u = clip_binary64(u_raw,1/64,63/64)",
+        "index = min(1048575,floor(u*1048576))",
+        "branch CDF 包含该 cluster 自身",
+        "明确禁止 leave-one-out",
+        "C_raw_i = sqrt64(rho_hf_i)*z_hf_i + sqrt64(rho_lf_i)*z_lf_i",
+        "唯一 decision output 是 `z_combined`",
+        "nextafter(ordered_z_combined[-4],+inf)",
+        "branch CDF、combined\nCDF、`tau_combined`",
+        "不得另拟合 disabled threshold",
+    ):
+        assert cdf_definition in contrastive_text
+
 
 @pytest.mark.unit
 def test_registered_design_rejects_explicit_stale_current_status(tmp_path: Path) -> None:

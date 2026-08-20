@@ -173,9 +173,26 @@ reshape 为 float32 tensor，之后才允许搬到设备。
   `responsibility_domain=hf_carrier`、`tensor_role=base_gaussian`；
 - LF：`candidate_id=lf_low_pass`、`operator=carrier_template`、
   `responsibility_domain=lf_carrier`、`tensor_role=base_gaussian`；
+- contrastive multiscale five-by-five：
+  `candidate_id=lf_multiscale_lowpass_contrastive`、
+  `operator=carrier_template_lowpass_five_by_five`、
+  `responsibility_domain=lf_carrier`、`tensor_role=base_gaussian`；
+- contrastive multiscale nine-by-nine：
+  `candidate_id=lf_multiscale_lowpass_contrastive`、
+  `operator=carrier_template_lowpass_nine_by_nine`、
+  `responsibility_domain=lf_carrier`、`tensor_role=base_gaussian`；
+- contrastive single-scale five-by-five：
+  `candidate_id=lf_five_by_five_lowpass_contrastive`、
+  `operator=carrier_template_lowpass_five_by_five`、
+  `responsibility_domain=lf_carrier`、`tensor_role=base_gaussian`；
 - Q/K projection：`candidate_id=qk_relation_similarity`、
   `operator=attention_relation_signs`、`responsibility_domain=geometry_sync`、
   `layer_name`、`token_count`、`tensor_role=pair_uniform`。
+
+上述三个 contrastive carrier domain 的 `semantic_domain` 仍恰好只有
+`candidate_id`、`operator`、`responsibility_domain`、`tensor_role` 四个 common
+fields；不增加 scale、control 或其他 seed-envelope field。三个完整
+domain digest 必须两两不同。
 
 错误 key roster 在访问图像或分数前由 manifest 冻结。第 `j` 个错误根材料为：
 
@@ -191,6 +208,51 @@ wrong_key_material_j =
 
 `j` 必须是从 0 起、无重复的预登记非负整数；roster 大小由 attribution protocol
 预登记，不继承历史 32-key 数字。错误材料随后走与注册 key 相同的职责 domain。
+
+contrastive LF detector 的 internal decoy 不使用 external wrong-key material。
+对每个 LF candidate 和 `j=0..7`，内存中唯一派生：
+
+```text
+internal_decoy_material_j =
+  "ceg-wm-internal-lf-decoy:" + hex(SHA256(stable_json_utf8({
+    "candidate_id": "key_schedule_sha256_counter",
+    "derivation_role": "candidate_internal_lf_decoy",
+    "lf_candidate_id": <lf candidate id>,
+    "registered_root_key_public_digest": root_key_public_digest,
+    "internal_decoy_index": j
+  })))
+```
+
+`internal_decoy_index` 只存在上述预哈希派生 envelope，不加入
+`seed_envelope`。调用 key schedule 时固定
+`key_material=internal_decoy_material_j`、`key_role=internal_decoy`、
+`wrong_key_index=j`，而 `root_key_public_digest` 仍是 registered root 的公开摘要。
+internal-decoy `semantic_domain` 仍恰好只有四个 common fields：
+
+- multiscale five-by-five：
+  `candidate_id=lf_multiscale_lowpass_contrastive`、
+  `operator=internal_decoy_carrier_template_lowpass_five_by_five`、
+  `responsibility_domain=lf_detector_internal_decoy`、
+  `tensor_role=base_gaussian`；
+- multiscale nine-by-nine：
+  `candidate_id=lf_multiscale_lowpass_contrastive`、
+  `operator=internal_decoy_carrier_template_lowpass_nine_by_nine`、
+  `responsibility_domain=lf_detector_internal_decoy`、
+  `tensor_role=base_gaussian`；
+- single-scale five-by-five：
+  `candidate_id=lf_five_by_five_lowpass_contrastive`、
+  `operator=internal_decoy_carrier_template_lowpass_five_by_five`、
+  `responsibility_domain=lf_detector_internal_decoy`、
+  `tensor_role=base_gaussian`。
+
+每个 multiscale decoy 的两个 scale 共享该 candidate/index 唯一派生材料，
+但由两个不同 operator/domain digest 保持 scale separation。external wrong-key
+继续只用 `ceg-wm-wrong-key:` 派生、`key_role=wrong`、
+`wrong_key_index=j` 和对应的注册 carrier domain。internal/external 的 material
+prefix、derivation role、semantic domain、有序 roster digest 和用途必须不同；
+external roster 绝不参与 `c_lf` 计算。原始 root 和上述 derived secret
+material 都不持久化；record/artifact 只保存 registered public root digest、domain
+digest、roster/asset digest 与非密钥算法身份。
 
 公开噪声不消费 secret root。其 `key_material` 固定为 ASCII literal
 `ceg-wm-public-noise:key-schedule-sha256-counter`，并使用：
@@ -1130,32 +1192,36 @@ branch-attribution hierarchy 唯一为：selection 中两候选都通过时选�
 
 ### Multiscale Primary Candidate
 
-`lf_multiscale_lowpass_contrastive` 从两个独立 KDF scale domain 生成 binary32
-Gaussian 张量 `G_five` 与 `G_nine`。两个 domain 都复用
-`key_schedule_sha256_counter`，但 `candidate_id`、`tensor_role` 和
-`scale_kernel_side` 分别绑定本候选的 `five_by_five_lowpass` 与
-`nine_by_nine_lowpass`；domain digest 必须不同。令 `LP_k` 为 stride 1、
-zero padding `floor(k/2)`、`count_include_pad=true` 的 binary32 square average：
+`lf_multiscale_lowpass_contrastive` 从上述两个已登记、互异的 carrier domain 生成
+binary32 Gaussian 张量 `G_five` 与 `G_nine`。令 `lowpass_k` 对输入 tensor 的每个
+channel 独立执行 stride 1、zero padding `floor(k/2)`、
+`count_include_pad=true` 的 binary32 square average；禁止跨 channel 聚合。carrier
+方向固定为：
 
 ```text
-v_five = normalize32(lowpass_five(G_five))
-v_nine = normalize32(lowpass_nine(G_nine))
-T_lf_multiscale = normalize32(v_five + v_nine)
+T_five = normalize32(lowpass_five(G_five))
+T_nine = normalize32(lowpass_nine(G_nine))
+T_lf_multiscale = normalize32(T_five + T_nine)
 ```
 
 任一张量、方向或和为 zero/nonfinite 即 fail closed。不存在 scale weight、grid、
 结果后选择或跨 scale domain 复用。
 
-盲 detector 从普通 RGB8 经 public final-image VAE posterior mode 得到 binary32
-observation，按固定顺序产生两个 score：
+盲 detector 从当前普通 RGB8 经既有 public final-image VAE posterior mode 得到
+`Y`，固定为 binary32 `[1,16,H,W]`。它独立逐 channel 构造
+`Y_five=lowpass_five(Y)` 与 `Y_nine=lowpass_nine(Y)`，并按固定顺序产生两个 raw
+score：
 
 ```text
 r = [normalized_correlation(Y_five,T_five),
      normalized_correlation(Y_nine,T_nine)]
 ```
 
-correlation 的 centering、flatten 和 row-major accumulation 与现有 blind LF
-normalized-correlation primitive 相同。只从本候选专属的 32 个 clean source clusters
+每项都调用现有 blind LF `normalized_correlation`：`Y_k` 与 `T_k` 各自在自己的
+完整 tensor 上用 binary32 mean-centering，C-order flatten，再以 row-major binary32
+dot/norm 累积；zero/nonfinite input、centered norm 或 score fail closed。detector 不得
+以总 carrier `T_lf_multiscale` 代替 `[r_five,r_nine]` 两项 raw vector。只从本候选
+专属的 32 个 clean source clusters
 以 manifest 顺序、binary64 累加拟合 `mu` 和 population covariance `Sigma`：
 
 ```text
@@ -1176,19 +1242,24 @@ binary64 values。
 ### Single-Scale Fallback Candidate
 
 `lf_five_by_five_lowpass_contrastive` 使用独立 candidate/KDF domain 生成自己的
-`G_five`，构造 `T_lf_single=normalize32(lowpass_five(G_five))`，并在普通 RGB8 public VAE
-observation 上计算唯一 scalar blind normalized correlation `s_key`。它不得复用
-multiscale scale-5 tensor、domain、fit moment、artifact 或 score。zero/nonfinite
-template、observation 或 score 均 fail closed。
+`G_five`，构造 `T_five=normalize32(lowpass_five(G_five))`。它从当前普通 RGB8
+独立重建自己的 public final-image VAE posterior-mode `Y` 和
+`Y_five=lowpass_five(Y)`，按上述同一现有 primitive 计算唯一 scalar
+`s_key=normalized_correlation(Y_five,T_five)`。它不得复用 multiscale scale-five
+tensor、domain、asset、fit moment、artifact 或 score；即使 shape 相同也必须分别
+派生和重建。zero/nonfinite template、observation、centered norm 或 score 均 fail
+closed。
 
 ### Internal Decoy Contrast And Candidate-Specific Nulls
 
 每个 LF candidate 的 detector 内部都在访问图像或分数前冻结恰好八个 internal
-decoy indices。internal-decoy KDF domain 明确绑定 `control_role=internal_lf_decoy`；
-外部 attribution wrong-key roster 绑定独立
-`control_role=external_detection_wrong_key`，也恰好八个预登记 index。两者的 domain、
-material、roster digest 和用途必须不同；internal decoy 只构造 candidate statistic，
-external wrong-key 只做 attribution gate。
+decoy indices，并严格使用前述 `ceg-wm-internal-lf-decoy:` 材料派生、
+`key_role=internal_decoy` 与 candidate/scale 专属四字段 semantic domain。外部
+attribution wrong-key roster 也恰好八个预登记 index，但只使用现有
+`ceg-wm-wrong-key:` 派生、`key_role=wrong` 与注册 carrier domain。两者的 secret
+material prefix、derivation role、semantic domain、roster digest 和用途必须不同；
+internal decoy 只构造 candidate statistic，external wrong-key 只做 attribution gate，
+绝不得进入 `c_lf`。
 
 ```text
 ordered_decoys = stable_sort_binary64(s_decoy_0,...,s_decoy_7)
@@ -1197,9 +1268,61 @@ c_lf = binary64(s_registered-median_decoy)
 ```
 
 排序以 `(score,decoy_index)` 打破相等值顺序，但 median 保留相等值。每个 candidate
-从自己的 32-clean null-fit clusters 对 `c_lf` 拟合 binary64 mean/positive standard
-deviation，并形成专属 null-standardized LF margin。multiscale、single-scale、HF 和
-旧 soft-route 的 template/domain/null/standardization/CDF/threshold 资产不得互换。
+从自己的 32-clean null-fit clusters 以 manifest order 得到 binary64
+`c_0,...,c_31`，唯一标准化为 population variance（不是 `n-1` sample SD）：
+
+```text
+mu_lf = sum_binary64(c_i)/32
+var_lf = sum_binary64((c_i-mu_lf)^2)/32
+sigma_lf = sqrt_binary64(var_lf)
+z_lf = binary64((c_lf-mu_lf)/sigma_lf)
+```
+
+`sigma_lf<=0`、missing/nonfinite input、moment 或 standardized value fail closed。
+candidate 专属 provisional `tau_lf` 由这 32 个 clean-null `z_lf` 按
+`(value,source_cluster_id)` 稳定排序后取
+`nextafter(ordered_z_lf[-4],+inf)`，ties 保留。multiscale、single-scale、HF 和旧
+soft-route 的 template/domain/null/standardization/CDF/threshold 资产不得互换或继承。
+
+### Registered RGB8 JPEG Transform
+
+Stage-A attack quality 70 与 Stage-B public probe quality 90 共用唯一登记的 RGB8 JPEG
+变换。输入必须是 contiguous RGB `uint8` `H x W x 3`，且不携带 EXIF、ICC 或其他
+metadata；`q` 只允许预登记的 `70` 或 `90`。唯一 codec call 是 Pillow `12.3.0`：
+
+```text
+Image.save(BytesIO, format="JPEG", quality=q, subsampling=0,
+           optimize=False, progressive=False)
+decoded = contiguous_uint8(Image.open(BytesIO(the_same_encoded_bytes)).convert("RGB"))
+```
+
+编解码失败、输入或输出 mode/shape/dtype/contiguity 漂移、metadata 注入或
+non-regular output 一律 fail closed。`Pillow=12.3.0` 与上述 codec capability、参数、
+rounding 和 golden digests 共同构成 behavior-changing execution identity；版本字符串
+不能替代 capability/golden 验证。G0-2 config/package 必须固定该版本与能力，并在任何
+real-model preflight 前复验下述公开解析 fixture；不匹配是
+`operational_failure`，不是 `scientific_failure`。
+
+公开 fixture shape 为 `[5,7,3]`。对零起始 `h=0..4,w=0..6`，按 C-order 构造：
+
+```text
+R[h,w] = (37*h+19*w+11) mod 256
+G[h,w] = (13*h+53*w+29) mod 256
+B[h,w] = (71*h+7*w+47) mod 256
+```
+
+其 contiguous RGB8 bytes SHA-256 为
+`d0d6b5c216be3f18108fc5033550da26fa2737a53852e8e2bbc04f3795b76194`。登记能力向量：
+
+| quality | encoded bytes | encoded bytes SHA-256 | decoded contiguous RGB8 SHA-256 |
+| --- | ---: | --- | --- |
+| 70 | 678 | `9a202effd37e2b693f70fad3e9e01bc41d68df1fab4138de349a39963b49c80b` | `e4c5fc8268dce4b00f6b36bdcf542968bdba495a153cc273e9ece7279dd7029b` |
+| 90 | 722 | `e8c89254351499471fe086704f3ecc6e2fb76f7cccd33e5a8ecc2fc33fc54c36` | `0d0e02529511b7cae4de3479b9645569c3985750655217abfb6c7d6326b362c7` |
+
+该 fixture 只是 codec capability vector，不是科学数据或候选结果。Gaussian blur
+sigma `0.5` 继续使用已登记 radius 2、reflect padding、binary64 kernel 生成后一次
+cast binary32、RGB8 round-to-nearest-ties-to-even；JPEG 与 blur 都从同一个原始 `x`
+独立产生，禁止串联。
 
 ### Branch-Attribution Splits, Arms And Gates
 
@@ -1210,10 +1333,12 @@ arms 固定为 clean、HF-only、multiscale LF-only、single-scale LF-only；con
 只有 clean、HF-only 与唯一 selection winner。攻击顺序固定为 identity、RGB8 JPEG
 quality 70、Gaussian blur sigma 1.0、Gaussian noise sigma 0.01。
 
-每个 candidate 专属 provisional threshold 只从其全新 32 clean-null values 产生：
+每个 LF candidate 专属 provisional threshold 正是上一节从其全新 32 clean-null
+`z_lf` 产生的 `tau_lf`；不得另用 raw `c_lf` 或继承旧 values/artifact/identity。
 binary64 按 `(value,source_cluster_id)` 稳定排序，令
-`tau=nextafter(ordered[-4],+inf)`；ties 保留。它只给 candidate selection/
-confirmation gate 定义 operating point，不是 formal FPR 或 formal `tau`。
+`tau_lf=nextafter(ordered_z_lf[-4],+inf)`；ties 保留。它只给 candidate selection/
+confirmation gate 定义 operating point；provisional positive 当且仅当
+`z_lf>=tau_lf`。它不是 formal FPR 或 formal detector `tau`。
 
 selection 和 confirmation 分别执行以下固定门，不能 pool condition：
 
@@ -1258,15 +1383,17 @@ E = clip_binary32(g/P95(g),0,1)  if P95(g)>0
 E = all_zero                       otherwise
 ```
 
-对 branch `b`，`F_hf(x)` 是 Stage-B HF blind detector 的 public final-image VAE
-posterior-mode observation，在 centering/correlation/template multiplication 前的
-16-channel latent-grid tensor。`F_lf(x)` 是 Stage-A winner 的 public observation：
-multiscale winner 按 scale-5、scale-9 顺序 concatenate pre-correlation feature maps；
-single-scale winner 只有 scale-5。`F_b` 禁止消费 key、template 或 score。
+从 `x` 独立调用既有 public final-image VAE posterior mode 得 binary32
+`Y=[1,16,H,W]`。`F_hf(x)=Y`，即 Stage-B HF blind detector 在
+centering/correlation/template multiplication 前的 key-free observation。
+`F_lf(x)` 只继承 Stage-A winner algorithm：multiscale winner 逐 channel 重建
+`Y_five=lowpass_five(Y)` 与 `Y_nine=lowpass_nine(Y)`，按 channel 维固定
+`[Y_five,Y_nine]` concatenate 为 32-channel tensor；single-scale winner 只用独立
+重建的 `Y_five`。`F_b` 禁止消费 key、template、correlation 或 score。
 
 public probes 从同一 `x` 独立产生，禁止串联，顺序恰为：
 
-1. 复用登记 RGB8 JPEG codec/rounding 的 JPEG quality 90；
+1. 严格调用上一节唯一登记的 Pillow `12.3.0` RGB8 JPEG transform，quality 90；
 2. Gaussian blur sigma `0.5`，separable radius `ceil(3*sigma)=2`，reflect padding，
    binary64 kernel 生成后一次 cast binary32，输出 RGB8 使用 round-to-nearest-
    ties-to-even。
@@ -1318,19 +1445,47 @@ route-disabled 必须在 control-flow 入口直接构造 `q_lf=q_hf=all_one`、
 detector；它不得构造或读取 `M/E/S/F/probes`。
 
 检测端从自己的普通 RGB8 独立重建 maps 与 `rho`。Stage-A winner 的 algorithm
-identity 可以继承，但 Stage-B 的 `z_hf`、`z_lf` 与 combined score 都使用 Stage-B
-专属全新 32-clean-null assets：
+identity 可以继承，但 Stage-B fresh 32 clean-null records 分别保存 raw `s_hf` 与按
+winner algorithm 重新计算的 raw `c_lf`；不继承任何 Stage-A asset。两个 branch
+各自复用已登记 finite-sample midrank CDF primitive。CDF records 先按
+`(score,source_cluster_id,sample_id)` 稳定排序，后二者只确定 record 顺序，不改变
+binary64 精确相等的 tie count；对 query `s`：
 
 ```text
-C = binary64(sqrt_binary64(binary64(rho_hf_detect))*binary64(z_hf)
-             +sqrt_binary64(binary64(rho_lf_detect))*binary64(z_lf))
+less = count(x_i < s)
+equal = count(x_i == s)
+u_raw = binary64((less+0.5*equal)/32)
+u = clip_binary64(u_raw,1/64,63/64)
+index = min(1048575,floor(u*1048576))
+z = float64(frozen_normal_table_float32[index])
 ```
 
-在同一个 Stage-B fresh 32-clean-null split 上，branch `z_hf/z_lf` 各自拟合
-专属 null standardization，`C` 则从这 32 个 cluster 的 combined values 独立拟合
-自己的 CDF/provisional `tau`。这三个统计身份不互相代替，但不额外创建第二个
-null-fit split。Stage-A 或旧 soft-route 的 null、CDF、`tau`、W、roster 与 result
-均不得继承。
+冻结 table digest 仍为 key-schedule quantile table SHA-256
+`70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`；运行时不得
+替换 inverse-CDF。对每个 clean-null cluster `i`，branch CDF 包含该 cluster 自身，
+明确禁止 leave-one-out；用该 cluster 从自身普通 RGB8 重建的 `rho` 计算：
+
+```text
+C_raw_i = sqrt64(rho_hf_i)*z_hf_i + sqrt64(rho_lf_i)*z_lf_i
+```
+
+这 32 个 `C_raw_i` 形成独立 combined CDF，使用与 branch 完全相同的稳定排序、
+binary64 exact-tie、clip 和 frozen table lookup。任意 query 必须依次得到 branch
+`z_hf/z_lf`、`C_raw`，再由 combined CDF 得 `z_combined`；Stage-B provisional gate 的
+唯一 decision output 是 `z_combined`，不得以 `C_raw` 或任一 branch `z` 代替。
+
+provisional `tau_combined` 从 32 个 clean-null `z_combined` 按
+`(value,source_cluster_id)` 稳定排序，固定为
+`nextafter(ordered_z_combined[-4],+inf)`。missing/nonfinite value、null/identity/digest
+不匹配均 fail closed；provisional positive 当且仅当
+`z_combined>=tau_combined`。Stage-B detector identity 必须同时绑定 branch CDF、combined
+CDF、`tau_combined`、null manifest、winner algorithm identity、implementation
+revision、JPEG codec、route、carrier 与 detector config digests；raw/rectified 复用
+同一个 object、key、preprocess、route standardization 与 `tau_combined`。
+route-disabled 虽禁止读取 `M/E/S/F/probes`，其检测统计仍通过同一个 Stage-B detector
+object 和相同 CDF/`tau_combined`，不得另拟合 disabled threshold。Stage-A 或旧
+soft-route 的 null、CDF、`tau`、W、roster 与 result 均不得继承；confirmation 后
+provisional assets 不得转签 formal，32-sample gate 不得称为 FPR `0.001`。
 
 ### Adaptive Allocation Splits And Gates
 
@@ -1342,7 +1497,7 @@ noise sigma 0.01。external wrong-key roster 固定八个并在访问图像/scor
 
 selection 与 confirmation 都要求：HF anchor 通过；adaptive registered 对 paired null
 及 max external wrong 至少 `28/32`；每 condition null/wrong positives 分别 `<=3/32`；
-primary blur 下 adaptive `C` 严格大于 route-disabled 至少 `24/32` 且共享单侧 exact
+primary blur 下 adaptive `z_combined` 严格大于 route-disabled 至少 `24/32` 且共享单侧 exact
 Clopper-Pearson lower `>0.5`；adaptive 与 disabled actual delta 从同一 baseline latent、
 Prompt、seed、key 产生，分别 bitwise replay、nonzero、digest 不同；两臂分别满足上述
 per-attack quality gate与 combined budget。主 adaptive primary gate 失败关闭该
