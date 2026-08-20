@@ -144,6 +144,8 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
     )
     assert loaded.returncode == 0, loaded.stderr
     runs_root = tmp_path / "runs"
+    smoke_run_id = "contrastive-lf-branch-attribution-" + "a" * 32
+    smoke_session_id = "stage-a-session-" + "b" * 32
     launched = subprocess.run(
         (
             sys.executable,
@@ -160,9 +162,9 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
                 ).read_bytes()
             ).hexdigest(),
             "--new-run-id",
-            "contrastive-lf-branch-attribution-package-smoke",
+            smoke_run_id,
             "--session-id",
-            "stage-a-session-package-smoke",
+            smoke_session_id,
             "--runs-root",
             str(runs_root),
             "--package-sha256",
@@ -176,7 +178,7 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
     assert launched.returncode == 2, launched.stderr
     final_root = (
         runs_root
-        / "contrastive-lf-branch-attribution-package-smoke"
+        / smoke_run_id
         / "final"
     )
     receipt = json.loads(
@@ -188,7 +190,7 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
     assert result["scientific_unit_count"] == 0
     assert (
         runs_root
-        / "contrastive-lf-branch-attribution-package-smoke"
+        / smoke_run_id
         / "sessions"
-        / "stage-a-session-package-smoke.json"
+        / f"{smoke_session_id}.json"
     ).is_file()
