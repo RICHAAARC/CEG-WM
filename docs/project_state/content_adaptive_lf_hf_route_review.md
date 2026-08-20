@@ -2,10 +2,11 @@
 
 ## Status And Authority Boundary
 
-本文件记录 2026-08-20 的研究路线判断，不是 `docs/design` 方法权威，不创建候选、
-不修改既有 mechanism-validation 协议、不授权实现或 GPU 运行。若用户采纳下一候选，必须在实现前另行修订
-登记设计、候选规格和预登记协议，并绑定新的 revision、资产、split 和 detector
-identity。
+本文件记录 2026-08-20 的研究路线判断，不是 `docs/design` 方法权威，不修改
+既有 mechanism-validation 协议、不授权实现或 GPU 运行。该路线已被收敛为
+`docs/design/candidate_specifications.md` 中的有限登记设计；本文件只维持来源、负结果
+边界与实施授权隔离。后续仍必须另行授权，并在任何数据或调参前绑定新的
+revision、资产、split 和 detector identity。
 
 当前 exact semantic-texture soft-route mechanism-validation candidate selection 已形成
 `authenticated_development_negative`。权威 run、固定分母和证据边界见
@@ -63,10 +64,9 @@ identity。
   Image Generators,” arXiv:`2604.11843v1`。UniMark 是预印本，其实验结论不按同行评审
   论文处理。
 
-## Proposed Next Candidate Route
+## Adopted Unimplemented Candidate Route
 
-下一步不是直接加入 geometry，也不是回退为 HF-only。最小必要修改应分两级建立新的
-candidate identity：
+已登记路线不是直接加入 geometry，也不是回退为 HF-only。有限候选依赖分为：
 
 1. 先修复内容归因底座。冻结 HF 作为高特异性 attribution anchor；为 LF 建立新的
    carrier/detector 或 target-vs-impostor key-contrastive score。此级暂时禁用 adaptive
@@ -77,10 +77,12 @@ candidate identity：
    必须能从普通 RGB8 重建同一控制规则。route-disabled 使用相同 carrier、detector、
    总预算和样本形成因果对照。
 
-`S_lf/S_hf` 的候选来源可以是预登记的小扰动响应或生成路径保持度，但不得读取攻击
-标签、嵌入 record、参考图、私有 latent 或测试结果，也不得在检测时按攻击类型切换
-规则。具体公式、预算界和训练/冻结方式仍未确定，必须先做小规模可行性设计与独立审计，
-不能在本状态文件中发明。
+`S_lf/S_hf`、spatial `q`、nominal `rho`、orthogonal write、combined detector、
+fresh split 和唯一 conditional controller 均已在
+[candidate_specifications.md](../design/candidate_specifications.md) 冻结。本文件不复制
+公式，也不把这些 `adopted_design_unimplemented / not_yet_tested` 身份改写为
+implemented 或 approved-for-run。公式仍禁止读取 attack label、embed record、reference、
+private latent 或测试结果进行 runtime switching。
 
 ## Stage Order, Success And Stop Conditions
 
@@ -138,15 +140,14 @@ fixed-FPR evaluation。
 
 当前已完成的 mechanism-validation 不修改，也不豁免，其 raw-crop 失败仍属于当前 exact 候选负结果。
 
-若用户授权下一候选，建议在运行前建立新协议身份：把 identity 与非几何攻击下的
-key attribution、null/FPR 和 route-disabled 因果增益设为 Stage B 硬门；把 raw crop
-设为混合故障诊断，把 oracle-rectified crop 设为内容证据上界诊断；actual Q/K geometry
-在后续阶段承担端到端恢复硬门。新协议必须先于任何新数据、调参和结果观察冻结，使用
-新 split/manifest，并明确不继承当前 selection 资产。这样属于新的前置研究分解，而非
-对当前失败的事后改门。
+已登记设计把 identity/非几何 attribution、null/wrong、route-disabled 因果证据、
+raw/oracle crop 分解和 actual Q/K 的后续依赖隔离。实施协议仍必须在任何新数据、调参
+和结果观察前以独立授权冻结，使用与旧路线零交叉的 split/manifest，且不继承
+当前 selection 资产。这是前置设计闭合，不是对当前失败的事后改门。
 
 ## Immediate Decision
 
-下一项应先做“Stage A 新 LF key-attribution candidate 的设计与小规模可行性门”，而不是
-直接做 Q/K geometry、formal calibration、soft-max promotion 或重跑当前 mechanism-validation。
-在其设计身份、对照、样本和停止条件独立审核前，不授权实现或 GPU。
+本次只完成登记设计闭合。下一项只能是独立授权的实施准入，不得直接做
+Q/K geometry、formal calibration、soft-max promotion、GPU 运行或重跑当前
+mechanism-validation。本状态文件不授权 implementation、config、manifest、
+Notebook、package、GPU 或 Colab。

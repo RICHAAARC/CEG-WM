@@ -323,6 +323,36 @@ independent threshold/rescue/reliability fit and end-to-end check
 
 失败分支是有效、可报告的研究闭合，但不能与完整 CEG-WM 成功汇合。HF-only 加 geometry 若被继续研究，只能作为重新命名和重新授权的 reduced-scope method；它不得声明已经实现或验证“内容自适应路由 + LF + HF + Q/K + 回正 + 联合判定”的完整方法。
 
+### Registered Contrastive Allocation Mechanism
+
+新的 live design 把机制依赖固定为：branch attribution foundation → analytic orthogonal
+allocation → crop fault decomposition → actual geometry → joint/formal evidence。前一依赖未
+通过时，后一层不得执行或解释失败。
+
+branch foundation 只比较 multiscale contrastive LF 与 independent single-scale
+contrastive LF。selection winner 才进入 untouched confirmation；winner 失败不回捞
+runner-up。每个 candidate 的 KDF domains、internal decoys、external wrong keys、null
+assets 和 threshold identity 都独立。HF anchor、candidate attribution、blur complement、
+quality、actual budget 和 fixed-denominator failure gate 全部是合取。
+
+analytic main 由唯一 public-stability router、orthogonal embedder 与 combined detector
+组成。router 只从各侧当前 RGB8 构造 `M/E/S`、spatial `q` 和 nominal `rho`；embedder
+执行冻结 binary32 orthogonal residual、`sqrt(rho)` composition 与 combined `3/250`
+hard budget；detector 从 raw/rectified RGB8 独立重建并使用 fresh nulls 计算
+`C=sqrt(rho_hf)z_hf+sqrt(rho_lf)z_lf`。route-disabled 不读取 public observations，但走
+相同 carrier、orthogonalization、detector、budget 和 sample。
+
+analytic main 的完整 fixed-denominator scientific failure 才能授权唯一 monotone
+controller；operational failure 或 insufficient evidence 不能触发。该 controller 的
+`mean(M)` coefficient 固定为 zero，四参数 projected logistic fit 只消费独立
+controller-fit split；runtime inference 不读取 attack label。它不产生新 spatial route、
+detector 或 budget identity。
+
+这七个 design identity 当前均为 `adopted_design_unimplemented / not_yet_tested`，不进入
+readiness 或 formal decision。完整 formulas、split 与 first-failure order 只以
+[candidate_specifications.md](candidate_specifications.md) 为权威，避免 runner 或
+Notebook 补空。
+
 ## Geometry Mechanism And Crop Boundary
 
 crop 同时造成内容删除、坐标平移、有效尺度变化和插值重采样。几何链只能估计仍可观测的坐标关系，不能恢复已删除内容。
@@ -441,6 +471,12 @@ runtime 不负责：
 8. 回正能改善同一内容检测器；
 9. 条件恢复相对 raw-only 提供增益且不突破 FPR；
 10. 完整方法在冻结 calibration/evaluation 和攻击矩阵下形成 formal records。
+
+新 content-adaptive design 在上述既有 ladder 前增加独立 admission dependency：
+contrastive LF winner confirmation 与 analytic allocation confirmation 都必须先通过。
+crop oracle 若不能恢复同一 content detector 的 attribution，则禁止实际 Q/K geometry；
+geometry 必须在 wrong-key 下 fail closed 并接近 oracle upper bound；joint/formal evidence
+仍使用互斥 calibration/evaluation 与完整 raw+rescue FPR。这里仅冻结接口，不构建实现。
 
 前一项未通过时，不得用后一项的复杂度掩盖根因。
 

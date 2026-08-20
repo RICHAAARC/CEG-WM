@@ -125,6 +125,44 @@ D_soft_route = max(z_hf_soft, z_lf_soft)
 正式阈值必须直接在该 max statistic 上独立拟合。检测不得读取 reference、Prompt、
 embed record、private latent、Q/K 或 embed-side `M/T/route`。
 
+### Adopted Contrastive Attribution And Orthogonal Allocation Design
+
+下一 live design 不重用上述 negative identity。branch-attribution foundation 只有两个
+有限候选：独立 five-by-five/nine-by-nine KDF domains 的 multiscale LF，以及独立
+five-by-five domain 的 single-scale LF。multiscale detector 的两项 blind correlations
+必须 joint covariance-whiten 后沿 equal direction 得分；single-scale 只有 scalar blind
+correlation。两者都使用 candidate-specific 32-clean null 和八个 internal decoys，且
+external wrong-key 八项另用独立 domain/roster。selection hierarchy 与全部 exact 公式
+见 [candidate_specifications.md](candidate_specifications.md)；不得把任一 scale、weight、
+null 或 loser 变成结果后菜单。
+
+只有 Stage-A winner confirmation 通过后，`content_adaptive_orthogonal_allocation` 才有
+未来 implementation admission。router 对 embed/raw/rectified 各自当前 RGB8 生成
+InSPyReNet public `M`、Sobel/P95 edge map `E`，并用 JPEG/blur public feature probes
+形成 pointwise `S_lf/S_hf`。它输出 `q_lf/q_hf`、nominal `rho_lf/rho_hf` 与 digests，
+不输出 actual branch energy。
+
+embedder 先对 `q_lf*T_lf` 相对 `q_hf*T_hf` 做冻结 binary32 Gram-Schmidt residual，
+residual norm 不超过 `2^-10` 即 fail closed，再按 `sqrt(rho)` 合成并走现有 combined
+`3/250` hard budget。route-disabled 在入口直接构造 all-one `q`、`rho=0.5`，且不得
+读取 `M/E/S/F/probes`；同 carrier、detector、orthogonalization、budget 和 sample
+使其成为因果 control。
+
+检测端独立重建 route，并以 fresh branch null 和 combined null 计算：
+
+```text
+C = sqrt(rho_hf_detect)*z_hf + sqrt(rho_lf_detect)*z_lf
+```
+
+Stage-A identity 可继承算法，但其 assets/CDF/threshold 不得进入该 Stage-B detector。
+唯一 monotone fallback 只在 analytic main 的完整 scientific failure 后改变 scalar `rho`
+authority；`beta_M=0` 且 inference 不读 attack label。它不改变 spatial `q`、carrier、
+orthogonal write、blind detector 或 budget，也不授权第三路线。
+
+上述七个 identity 均为 `adopted_design_unimplemented / not_yet_tested`。当前 formal/
+default/joint detector 仍为 HF-only；本节没有 implementation、promotion 或 formal
+threshold authority。
+
 ## Combination Requirements
 
 以下 `a/u_content(a)` 与 calibrated-function 语义只服务 historical exact replay。

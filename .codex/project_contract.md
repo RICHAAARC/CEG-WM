@@ -36,7 +36,7 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 - root-key/KDF/PRG、Q/K relation/objective、LF/HF write/score、routing observations、
   backbone/runtime、搜索与回正已经在
   `docs/design/candidate_specifications.md` 中关闭为有限、可实施、可证伪的候选；
-  registry 现为 19 个具名候选加 1 个强制 routing 禁用对照，共 20 个 ID。
+  live registry 现为 26 个具名候选加 1 个强制 routing 禁用对照，共 27 个 ID。
   语义—纹理软路由五候选采用 InSPyReNet soft `M`、Sobel/P95 `T`、soft-routed
   LF/HF write、两条盲分支分数和固定 max statistic；当前 reviewed revision 为
   `3efc76c32790b28a9f2775238a0e7586ba249ac4`，状态为
@@ -57,6 +57,12 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
   control 与 registered identity 分离，不是 wrong-key FPR、attribution 效果或科学
   证据。readiness、runtime qualification 和阶段转换也不证明固定 FPR、鲁棒性、
   几何恢复效果或完整 CEG-WM 科学成功。
+- 新登记的两个 LF contrastive candidates、analytic orthogonal allocation family 的
+  三个职责 identity、family identity 与唯一 conditional monotone controller 均为
+  `adopted_design_unimplemented / not_yet_tested`。它们只扩展 live design authority，
+  不重签当前 readiness snapshot 的 12 个 implemented identities/17 个 behavior nodes/
+  13 项职责，不改变 `experiment_ready / implemented` stage/status、HF-only formal
+  detector 或 `full_ceg_wm_eligible=false`。
 
 ## Method Authority
 
@@ -159,7 +165,7 @@ CEG-WM 是双链生成式图像水印研究项目。内容链负责水印证据�
 2. `research_defined` 及以后阶段必须提供 `.codex/research_state/research_definition.yaml`，连接具体设计文档和冻结方法不变量。
 3. `method_construction_authorized` 是唯一允许开始实质 `main/` 实施的在建阶段。进入该阶段必须同时满足：候选规格已关闭并独立审计通过、用户明确授权、已有用户授权建立的可审计 repository revision、按模板登记 construction admission、阶段变更本身不包含 `main/` 实现；research-definition audit 必须从 admission 绑定的 base revision 验证该独立转换。
 4. `method_construction_authorized` 本身只表示允许实施，不自动表示组件完成；当前组件完成事实由后续独立 revisions、唯一 readiness 和独立语义复核另行记录。
-5. `method_implemented` 及以后阶段必须提供 `.codex/research_state/method_readiness.yaml`，逐项连接唯一的 13 个正式职责组件、固定架构路径、候选 ID、具体实现 symbol、责任和方法特异性行为测试。候选 registry 的 20 个 ID 与 13 项职责不得混淆；当前 readiness 的 12 个唯一候选身份和 17 个行为节点只绑定已审核实现，不得被解释为 runtime qualification、机制晋升、calibration、固定 FPR、GPU 或科学效果证据。
+5. `method_implemented` 及以后阶段必须提供 `.codex/research_state/method_readiness.yaml`，逐项连接唯一的 13 个正式职责组件、固定架构路径、候选 ID、具体实现 symbol、责任和方法特异性行为测试。live candidate registry 的 27 个 ID 与 13 项职责不得混淆；当前 readiness 的 12 个唯一候选身份和 17 个行为节点只绑定已审核实现，新登记 design identity 不得进入该 snapshot，也不得被解释为 runtime qualification、机制晋升、calibration、固定 FPR、GPU 或科学效果证据。
 6. 只有全部必需组件、候选特异性非同构行为测试以及绑定同一候选摘要和受保护 revision 的独立语义复核通过后，才允许从 `method_construction_authorized` 进入 `method_implemented`。
 7. readiness AST 审计只检查必要的结构和接线；空目录、placeholder、单一通用函数、集中式代理模块、重复同构测试、机械 audit pass 或 readiness 元数据不能替代项目实现与独立语义复核。
 8. `runtime_verified` 必须有真实 runtime 边界证据；`experiment_ready` 必须有冻结协议与可追溯执行入口；`formal_evidence_available` 必须有真实 records。

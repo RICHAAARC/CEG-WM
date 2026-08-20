@@ -158,6 +158,15 @@ BEHAVIOR_BINDINGS = {
         "conditional_recovery_decision",
     ],
 }
+CONTRASTIVE_ALLOCATION_PENDING_IDS = (
+    "lf_multiscale_lowpass_contrastive",
+    "lf_five_by_five_lowpass_contrastive",
+    "content_adaptive_orthogonal_allocation",
+    "content_adaptive_public_stability_router",
+    "content_adaptive_orthogonal_embedder",
+    "content_adaptive_combined_detector",
+    "content_adaptive_monotone_controller",
+)
 
 
 def _write(path: Path, content: str) -> None:
@@ -1183,7 +1192,7 @@ def test_schema_complete_candidate_fixture_passes_structural_gate(
 
 
 @pytest.mark.unit
-def test_live_candidate_design_can_extend_without_resigning_readiness_snapshot(
+def test_live_contrastive_design_can_extend_without_resigning_readiness_snapshot(
     tmp_path: Path,
 ) -> None:
     _write_authority(tmp_path, "method_implemented")
@@ -1192,7 +1201,10 @@ def test_live_candidate_design_can_extend_without_resigning_readiness_snapshot(
     _write(
         candidate_path,
         candidate_path.read_text(encoding="utf-8")
-        + "- `saliency_local_lf_design_candidate`\n",
+        + "".join(
+            f"- `{candidate_id}`\n"
+            for candidate_id in CONTRASTIVE_ALLOCATION_PENDING_IDS
+        ),
     )
 
     assert run_audit(tmp_path)["decision"] == "pass"
@@ -1313,11 +1325,14 @@ def test_pending_candidate_cannot_extend_readiness_component_binding(
     _write(
         candidate_path,
         candidate_path.read_text(encoding="utf-8")
-        + "- `saliency_local_lf_design_candidate`\n",
+        + "".join(
+            f"- `{candidate_id}`\n"
+            for candidate_id in CONTRASTIVE_ALLOCATION_PENDING_IDS
+        ),
     )
     manifest_path, manifest = _manifest(tmp_path)
     manifest["components"]["content_router"]["candidate_ids"].append(
-        "saliency_local_lf_design_candidate"
+        "content_adaptive_public_stability_router"
     )
     _write(manifest_path, json.dumps(manifest))
 

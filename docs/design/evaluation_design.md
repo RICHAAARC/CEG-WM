@@ -27,6 +27,20 @@ source cluster 由 Prompt、seed、生成图像 lineage 和注册 key family 共
 cluster 的全部攻击、回正和多 key 派生样本必须留在同一职责与 split。任何职责都
 不得反向选择路由公式、carrier、组合统计或攻击范围。
 
+### Contrastive Allocation Split Isolation
+
+contrastive branch foundation 使用 candidate-specific 32-clean null-fit、32 selection、
+32 untouched confirmation；两个 LF candidates 可以共享 selection source clusters 以
+形成预登记 hierarchy，但各自的 domains/assets/statistics 独立，只有 winner 进入
+confirmation。analytic allocation 另有 8-cluster operational feasibility、32 branch/
+combined null-fit、32 selection、32 confirmation。唯一 monotone controller 再使用
+32 controller-fit、32 null-fit、32 selection、32 confirmation。上述职责彼此及全部旧
+split/roster/source cluster 零交集。
+
+8-cluster feasibility 只检查 execution completeness，不能选择公式、参数、candidate、
+attack 或 threshold。controller-fit 可以用冻结攻击结果构造 training target，但
+selection/confirmation/evaluation 不得回流；inference 只读 clean-image public summaries。
+
 ## Analysis Unit And Failure Retention
 
 每个预登记单位必须保存：
@@ -63,6 +77,32 @@ cluster 的全部攻击、回正和多 key 派生样本必须留在同一职责�
   `D_soft_route=max(z_hf_soft,z_lf_soft)`；
 - registered/wrong-key/unwatermarked attribution；
 - 图像质量和攻击分层结果。
+
+### Contrastive Foundation Matrix
+
+selection arms 恰为 clean、HF-only、multiscale LF-only、single-scale LF-only；winner
+confirmation 只保留 clean、HF-only 与 winner LF-only。攻击按 identity、JPEG quality
+70、blur sigma 1.0、noise sigma 0.01 固定。每个 candidate 分别保存 registered、八个
+internal-decoy statistics、八个 external-wrong controls、primary null、candidate-specific
+null standardization、actual budget/replay 和 paired RGB8 MSE。
+
+identity paired separation 与 HF anchor 都要求至少 `28/32`；每 condition 的 primary-null
+和 external-wrong positives 分别 `<=3/32`，不 pool。primary blur complement 至少
+`24/32` 且共享 one-sided exact 95% Clopper-Pearson lower `>0.5`。每 attack 的 candidate
+mean binary64 paired MSE 不得超过 HF-only mean 加 `(1/255)^2`。
+
+### Orthogonal Allocation Matrix
+
+arms 恰为 clean、HF-only、winner LF-only、adaptive、route-disabled，攻击同上。adaptive
+与 disabled 必须从同一 baseline latent/Prompt/seed/key 生成；两条 actual delta 都需
+独立 bitwise replay、nonzero 且 digest 不同。记录 public `M/E/S/F` digests、spatial
+`q`、nominal `rho`、orthogonal residual、branch scores、fresh `z_hf/z_lf`、combined
+`C`、combined budget 和 paired quality。disabled 不得构造或读取 public observations。
+
+adaptive 对 paired null/max external wrong 至少 `28/32`；primary blur 下 adaptive 严格
+大于 disabled 至少 `24/32` 且 exact lower `>0.5`。HF anchor、per-condition null/wrong、
+quality、budget 和 fixed-denominator completeness 仍全部通过。first-failure order 只
+定位裁决，不能隐藏后续 gate report。
 
 ### Routing Causal Question
 
@@ -107,6 +147,11 @@ LF 与 HF 必须分别证明正确密钥相对 wrong-key 和 primary null 的可
 每类同时报告 rotation/scale/translation/crop 参数误差、coverage、uniqueness、gap、
 key margin、inlier、residual、boundary、可靠率、拒绝率、回正质量、内容分数变化和
 wrong-key 行为。oracle transform 只能作为诊断上界。
+
+新 design 的 crop fault decomposition 必须先用同一 content detector 报告 raw crop 与
+known-transform oracle rectification。oracle 不能恢复 attribution 时禁止 actual Q/K
+geometry。后续 geometry 必须相对预登记 oracle margin 足够接近，并在 external wrong-key
+下 fail closed；本 design revision 只登记该接口，不创建 protocol/config/manifest。
 
 ## Joint-Decision Validation
 
@@ -160,3 +205,5 @@ confidence 控制；实际样本量还要按聚类、目标效应、tail toleran
 
 本文件只规定实验设计。科学结论必须由 governed records 支撑；日志、Notebook
 输出、示例图或 harness 报告不能替代固定协议下的科学证据。
+新七个 identity 当前只有 `adopted_design_unimplemented / not_yet_tested` 设计权威；
+任何 32-unit candidate gate 都是 provisional mechanism evidence，不是 formal FPR。

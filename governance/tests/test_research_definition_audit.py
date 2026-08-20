@@ -27,6 +27,15 @@ REQUIRED_INVARIANTS = (
     "content_evidence_primary",
     "geometry_no_direct_positive",
 )
+CONTRASTIVE_ALLOCATION_DESIGN_IDS = (
+    "lf_multiscale_lowpass_contrastive",
+    "lf_five_by_five_lowpass_contrastive",
+    "content_adaptive_orthogonal_allocation",
+    "content_adaptive_public_stability_router",
+    "content_adaptive_orthogonal_embedder",
+    "content_adaptive_combined_detector",
+    "content_adaptive_monotone_controller",
+)
 
 
 def _write_authority(root: Path, stage: str) -> None:
@@ -173,6 +182,34 @@ def test_research_stage_accepts_substantive_design_and_invariants(tmp_path: Path
     _write_authority(tmp_path, "research_defined")
     _write_valid_definition(tmp_path)
     assert run_audit(tmp_path)["decision"] == "pass"
+
+
+@pytest.mark.unit
+def test_live_contrastive_allocation_design_preserves_authority_boundary() -> None:
+    root = Path(__file__).resolve().parents[2]
+    candidate_text = (
+        root / "docs/design/candidate_specifications.md"
+    ).read_text(encoding="utf-8")
+    route_state = (
+        root / "docs/project_state/method_route_registry.md"
+    ).read_text(encoding="utf-8")
+    contract_text = (root / ".codex/project_contract.md").read_text(
+        encoding="utf-8"
+    )
+    definition = json.loads(
+        (root / ".codex/research_state/research_definition.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    for candidate_id in CONTRASTIVE_ALLOCATION_DESIGN_IDS:
+        assert f"`{candidate_id}`" in candidate_text
+        assert f"`{candidate_id}`" in route_state
+    assert "`adopted_design_unimplemented / not_yet_tested`" in route_state
+    assert "- `project_stage`: `experiment_ready`" in contract_text
+    assert definition["implementation_status"] == "implemented"
+    assert "formal/default/joint HF-only detector" in route_state
+    assert "`full_ceg_wm_eligible=false`" in route_state
 
 
 @pytest.mark.unit

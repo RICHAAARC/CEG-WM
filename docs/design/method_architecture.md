@@ -142,8 +142,10 @@ budget status 与 realized combined total norm/relative L2，以及 active/combi
 零方向失败；
 `lf_detector` 独占盲 LF 分数和 soft-route 专属 32-clean null `W` 消费；
 `hf_detector` 独占盲 soft-routed HF 分数；`geometry_reliability` 独占 estimator
-原始指标上的合取门。候选 registry 是 20 个 ID（19 个具名候选加 1 个 routing
-强制对照），与这里的 13 项职责不是同一计数。
+原始指标上的合取门。live candidate registry 是 27 个 ID（26 个具名候选加 1 个
+routing 强制对照），与这里的 13 项职责不是同一计数。新增七个 identity 仅为
+`adopted_design_unimplemented / not_yet_tested`；当前 readiness 仍绑定原 12 个
+implemented identities、17 个 behavior nodes 和 13 项职责。
 
 records/controls 固定为 clean、HF-only、LF-only、soft-routed LF/HF、
 route-disabled 和显式失败。

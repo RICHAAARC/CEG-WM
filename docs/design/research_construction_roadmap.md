@@ -116,6 +116,54 @@ FPR 的科学有效性。
 - 任一必需机制失败：保存固定分母负结果，停止完整方法晋升；
 - 证据不足：增加样本只允许按预登记规则，不得调参后沿用原确认集。
 
+## Contrastive Allocation Admission Foundation
+
+旧 semantic-texture soft-route 已形成 producer-bound authenticated development negative；
+不得重跑、补样、豁免或复用其 `W`/CDF/`tau`/roster。新的七个 live-design identity
+状态为 `adopted_design_unimplemented / not_yet_tested`，其依赖顺序如下。
+
+### Stage A: Contrastive Branch Attribution
+
+- 先按固定 hierarchy 比较 multiscale 与 independent single-scale LF；winner 才进入
+  untouched confirmation，winner 失败不回捞 runner-up；
+- 32 null-fit、32 selection、32 confirmation 互斥并与旧路线零交集；
+- HF anchor、identity attribution、逐 condition null/wrong、primary blur complement、
+  one-sided exact lower、binary32 `3/250` budget、quality 与 fixed-denominator failure
+  retention 全部通过；
+- 失败关闭相应 LF identity，不进入 adaptive allocation 或 geometry。
+
+### Stage B: Analytic Orthogonal Allocation
+
+- 8 feasibility units 只检查 operational completeness；
+- public `M/E/S`、analytic `q/rho`、orthogonal LF residual、route-disabled no-read control、
+  fresh branch/combined null 与 `C` statistic 全部按 candidate specification 固定；
+- 32 null-fit、32 selection、32 confirmation 与 Stage A/旧路线互斥；
+- adaptive 相对 disabled 的 blur causal gain、HF anchor、wrong/null、quality、budget 与
+  distinct replayable actual deltas全部通过；
+- primary gate 的完整 scientific failure 才可进入唯一 monotone controller。该 fallback
+  有自己的 32 controller-fit、32 null-fit、32 selection、32 confirmation；operational
+  failure/insufficient evidence 不触发，固定权重或第三 controller 被禁止。
+
+### Stage C: Crop Fault Decomposition Interface
+
+同一 content detector 先比较 raw crop 与 known-transform oracle rectification。oracle
+不能恢复 attribution 时停止，禁止投入 actual geometry；oracle 只是 content evidence
+上界，不提供阳性或恢复被删除像素。
+
+### Stage D: Actual Geometry Interface
+
+只有 Stage C 存在预登记可达 margin 才能另行授权。actual Q/K geometry 必须接近 oracle
+upper bound、在 wrong-key 下 fail closed，且不改变 content detector/key/threshold。
+
+### Stage E: Joint And Formal Evidence Interface
+
+另行授权后才可互斥拟合 content threshold、rescue window 与 geometry reliability，并在
+独立 evaluation 报告完整 raw+rescue FPR。声称 `FPR<=0.001` 时经验值和单侧 95%
+Clopper-Pearson upper 都必须满足；零误报单条件最低 `n>=2995`。
+
+本路线图只冻结依赖与 authorization gates，不创建 implementation、config、manifest、
+Notebook、GPU execution、promotion 或 formal threshold。
+
 ## Gate 5: Q/K Geometry Mechanism
 
 ### Step 5.1: Synchronization Write

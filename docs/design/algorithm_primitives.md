@@ -368,6 +368,53 @@ LF/HF 组合只有同时满足以下条件才可以替换 HF-only content detect
 
 若晋升门不通过，LF/路由研究问题可以以 `research_question_closed_negative` 诚实闭合并作为失败或诊断消融报告，但这不构成完整 CEG-WM 方法成功。HF-only 加几何只能在重新命名、重新限定贡献范围并单独取得研究定义授权后成为 reduced-scope 候选；不得继续使用包含内容自适应路由、LF、HF、Q/K 与联合判定的完整 CEG-WM 身份或完成门。
 
+## Contrastive LF And Orthogonal Allocation Primitive
+
+新的 live design 先以有限 hierarchy 关闭 LF attribution，再允许唯一 analytic adaptive
+allocation。`lf_multiscale_lowpass_contrastive` 使用独立 five-by-five/nine-by-nine KDF
+domains、equal normalized-direction sum、二维 clean-null covariance ridge whitening 和
+固定 equal score direction；`lf_five_by_five_lowpass_contrastive` 使用完全独立的
+five-by-five domain 与 scalar blind correlation。两者都以 registered score 减八个
+internal decoy score 的 binary64 even median 为 `c_lf`，且 internal decoy 与八个
+external wrong-key 的 domain/roster 严格分离。两候选都过 selection 时只选 multiscale；
+winner confirmation 失败不得回捞另一候选。
+
+`content_adaptive_public_stability_router` 从各侧当前普通 RGB8 独立形成 public `M/E`
+和两条 stability maps。stability 只比较同一 public detector pre-correlation feature 在
+独立 JPEG quality 90 与 Gaussian blur sigma 0.5 probes 前后的 pointwise binary32
+relative norm；两 probe 取 even median 后唯一映射为 `S=1/(1+rbar)`，不跨空间聚合，
+不消费 key/template/score/attack label/private state。
+
+analytic allocation 的唯一 primitive 为：
+
+```text
+q_lf = 1/4+(3/4)*M*(1-E)*S_lf
+q_hf = 1/4+(3/4)*M*E*S_hf
+rho_lf = clip(mean32(q_lf)/(mean32(q_lf)+mean32(q_hf)),1/4,3/4)
+rho_hf = binary32(1-rho_lf)
+v_hf = normalize32(q_hf*T_hf)
+v_lf0 = normalize32(q_lf*T_lf)
+v_lf = normalize32(v_lf0-dot32(v_lf0,v_hf)*v_hf)
+u = normalize32(sqrt32(rho_hf)*v_hf+sqrt32(rho_lf)*v_lf)
+```
+
+orthogonal residual norm 必须严格大于 binary32 `2^-10`。随后仍只执行现有 binary32/
+actual-dtype combined `3/250` hard-budget protocol；`rho` 不声称 actual branch energy。
+route-disabled 在入口直接使用 all-one `q` 与 `rho=0.5`，不得构造 `M/E/S/F/probes`，
+但复用同 carrier、orthogonalization、detector、budget 和 samples。
+
+`content_adaptive_combined_detector` 在 raw/rectified 当前 RGB8 上分别重建 public route，
+用 fresh Stage-B branch null 得到 `z_hf/z_lf`，并唯一计算
+`C=sqrt(rho_hf_detect)z_hf+sqrt(rho_lf_detect)z_lf`。在同一个 Stage-B fresh
+32-clean-null split 上，branch standardization 和 `C` 的 CDF/provisional `tau` 保持独立
+统计身份，但不额外创建 null split；不得继承 Stage-A 或旧 soft-route 资产。
+
+唯一 `content_adaptive_monotone_controller` 只在 analytic main 的完整科学失败后可用。
+它以 fixed 4096-step projected binary64 logistic fit 产生 scalar `rho`；`beta_M=0`，
+其余三个符号和范围按 candidate specification 冻结。fit attack-derived target 只来自
+独立 controller-fit split；inference 只读 clean public summaries，不做 attack switch。
+任何 operational failure/insufficient evidence 不得触发该 fallback。
+
 ## Q/K Geometry Synchronization Primitive
 
 ### Public Observation
@@ -529,6 +576,6 @@ lineage 与注册 key family 形成的 source cluster，其所有攻击、回正
 - `rectification_similarity` 固定搜索域、目标、可靠性指标和回正规则；
 - `joint_conditional_recovery` 固定联合判定。
 
-registry 共 20 个 ID：19 个具名候选和 1 个强制同预算禁用对照
+live registry 共 27 个 ID：26 个具名候选和 1 个强制同预算禁用对照
 `routing_uniform_control`。该计数不等于固定的 13 项方法职责，也不把对照视为
-方法候选。
+方法候选。新增七个 identity 只属于 live design，不改变当前 readiness snapshot。

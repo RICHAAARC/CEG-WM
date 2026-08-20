@@ -80,6 +80,42 @@ qualification、机制成功、calibration、固定 FPR、GPU 或科学效果证
 它继续作为旧实现 exact-replay 的历史来源保留，但不再是当前 readiness 权威，也不向
 soft-route 五候选传递 CDF、threshold、calibration 或效果证据。
 
+### Adopted Unimplemented Contrastive Allocation Design
+
+下列七个 live-design identity 现状均为
+`adopted_design_unimplemented / not_yet_tested`：
+
+- `lf_multiscale_lowpass_contrastive`；
+- `lf_five_by_five_lowpass_contrastive`；
+- `content_adaptive_orthogonal_allocation`；
+- `content_adaptive_public_stability_router`；
+- `content_adaptive_orthogonal_embedder`；
+- `content_adaptive_combined_detector`；
+- `content_adaptive_monotone_controller`。
+
+其中 `lf_multiscale_lowpass_contrastive` 是 `multiscale_primary_candidate`，
+`lf_five_by_five_lowpass_contrastive` 是 `single_scale_fallback_candidate`。两者只构成
+一个有限 hierarchy，不是可调 candidate menu；selection 同时通过时只取
+multiscale primary，primary 未通过才可取 single-scale fallback，winner 的 untouched
+confirmation 失败不得回捞 runner-up。analytic allocation 只有一个 main；
+`content_adaptive_monotone_controller` 只能在 main 形成完整 fixed-denominator
+`scientific_failure` 后以新 identity/splits 启用，operational failure 或
+insufficient evidence 不得触发。
+
+公式、split、threshold、顺序与 gate 唯一权威是
+[candidate_specifications.md](../design/candidate_specifications.md)。live registry 现为 27 个
+ID（26 个具名候选加 1 个 mandatory routing control）；当前
+`method_readiness.yaml` 仍只绑定原 12 个 implemented identities、17 behavior nodes 和
+13 responsibilities。上述七个身份不进入该 snapshot，不转成 implemented、
+runtime-qualified、promoted 或 scientifically validated。当前 project stage、
+implementation status、formal/default/joint HF-only detector 和
+`full_ceg_wm_eligible=false` 全部不变。本次登记不授权 implementation、
+experiment、GPU、Colab、formal threshold 或 confirmation。
+
+旧 semantic-texture soft-route 五候选的
+`authenticated_development_negative` 保持 producer-bound；新设计不继承其
+W、CDF、provisional `tau`、roster、result 或 selection/confirmation split。
+
 ## Authenticated Development Negatives
 
 以下清单截至 2026-08-20 是当前仓库和已验真历史交付中可认证的 CEG-WM 开发负结果。

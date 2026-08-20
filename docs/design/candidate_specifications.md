@@ -10,7 +10,7 @@
 
 本文关闭“实现时自行发明算法”的空白，登记可实施、可证伪的候选规格。
 
-registry 固定为 **20 个候选 ID**：其中 19 个是具名的
+live registry 固定为 **27 个候选 ID**：其中 26 个是具名的
 method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得晋升为方法的
 同预算禁用对照。计数如下：
 
@@ -30,26 +30,33 @@ method/runtime/key 候选，`routing_uniform_control` 是强制保留、不得�
 - `lf_semantic_texture_soft_whitened_matched_score`；
 - `hf_semantic_texture_soft_direct_score`；
 - `content_combination_semantic_texture_max_standardized`；
+- `lf_multiscale_lowpass_contrastive`；
+- `lf_five_by_five_lowpass_contrastive`；
+- `content_adaptive_orthogonal_allocation`；
+- `content_adaptive_public_stability_router`；
+- `content_adaptive_orthogonal_embedder`；
+- `content_adaptive_combined_detector`；
+- `content_adaptive_monotone_controller`；
 - `qk_relation_similarity`；
 - `rectification_similarity`；
 - `joint_conditional_recovery`。
 
 实现者只能实现这些身份及其明确列出的有限候选值。增加 relation、objective、write、score、observation、backbone、runtime 或搜索策略，必须先修订本文并重新接受候选规格审计。
 
-候选 registry 与实现职责是两个不同计数：上面的 20 个 ID 描述算法/runtime/key
-候选身份；未来实现固定为 13 项职责组件。每项职责只消费下表列出的现有候选，
+候选 registry 与实现职责是两个不同计数：上面的 27 个 ID 描述算法/runtime/key
+候选身份；实现职责仍固定为 13 项组件。每项职责只消费下表列出的现有候选，
 不得据此新增候选、别名组件或把多个职责集中到一个代理模块：
 
 | component | responsibility | method path | candidate binding |
 | --- | --- | --- | --- |
 | `key_schedule` | `root_key_derivation_and_prg` | `main/shared/key_schedule.py` | `key_schedule_sha256_counter` |
-| `content_router` | `content_observation_and_adaptive_routing` | `main/content_chain/routing.py` | `key_schedule_sha256_counter`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `routing_semantic_texture_soft` |
-| `lf_carrier` | `low_frequency_carrier_template_and_write_direction` | `main/content_chain/lf_carrier.py` | `key_schedule_sha256_counter`, `lf_low_pass` |
+| `content_router` | `content_observation_and_adaptive_routing` | `main/content_chain/routing.py` | `key_schedule_sha256_counter`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `routing_semantic_texture_soft`, `content_adaptive_orthogonal_allocation`, `content_adaptive_public_stability_router`, `content_adaptive_monotone_controller` |
+| `lf_carrier` | `low_frequency_carrier_template_and_write_direction` | `main/content_chain/lf_carrier.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_multiscale_lowpass_contrastive`, `lf_five_by_five_lowpass_contrastive` |
 | `hf_carrier` | `high_frequency_carrier_template_and_write_direction` | `main/content_chain/hf_carrier.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `hf_sparse_tail` |
-| `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `content_embedding_global_hf_local_lf`, `routing_semantic_texture_soft`, `content_embedding_semantic_texture_soft_lf_hf` |
-| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score`, `routing_inspyrenet_salient_local_lf`, `lf_saliency_masked_null_whitened_matched_score`, `routing_semantic_texture_soft`, `lf_semantic_texture_soft_whitened_matched_score` |
+| `content_embedder` | `lf_hf_combined_embedding_and_total_budget` | `main/content_chain/embedder.py` | `runtime_sd35_flowmatch`, `hf_sparse_tail`, `lf_low_pass`, `routing_stqr`, `routing_uniform_control`, `routing_inspyrenet_salient_local_lf`, `content_embedding_global_hf_local_lf`, `routing_semantic_texture_soft`, `content_embedding_semantic_texture_soft_lf_hf`, `content_adaptive_orthogonal_allocation`, `content_adaptive_orthogonal_embedder` |
+| `lf_detector` | `low_frequency_blind_scoring` | `main/content_chain/lf_detector.py` | `key_schedule_sha256_counter`, `lf_low_pass`, `lf_null_whitened_matched_score`, `routing_inspyrenet_salient_local_lf`, `lf_saliency_masked_null_whitened_matched_score`, `routing_semantic_texture_soft`, `lf_semantic_texture_soft_whitened_matched_score`, `lf_multiscale_lowpass_contrastive`, `lf_five_by_five_lowpass_contrastive`, `content_adaptive_combined_detector` |
 | `hf_detector` | `high_frequency_direct_scoring` | `main/content_chain/hf_detector.py` | `key_schedule_sha256_counter`, `hf_sparse_tail`, `routing_semantic_texture_soft`, `hf_semantic_texture_soft_direct_score` |
-| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated`, `content_combination_saliency_max_standardized`, `content_combination_semantic_texture_max_standardized` |
+| `content_detector` | `lf_hf_score_standardization_and_content_detection` | `main/content_chain/detector.py` | `hf_sparse_tail`, `lf_low_pass`, `content_combination_calibrated`, `content_combination_saliency_max_standardized`, `content_combination_semantic_texture_max_standardized`, `content_adaptive_orthogonal_allocation`, `content_adaptive_combined_detector` |
 | `qk_geometry_sync` | `keyed_qk_geometry_synchronization_and_relation_observation` | `main/geometry_chain/qk_sync.py` | `key_schedule_sha256_counter`, `runtime_sd35_flowmatch`, `qk_relation_similarity` |
 | `geometric_transform_estimator` | `blind_bounded_geometric_transform_estimation` | `main/geometry_chain/transform_estimator.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
 | `geometry_reliability` | `independent_geometry_reliability_conjunction` | `main/geometry_chain/reliability.py` | `key_schedule_sha256_counter`, `qk_relation_similarity`, `rectification_similarity` |
@@ -1094,6 +1101,307 @@ detector、key、preprocessing、`W`、标准化身份和 `tau`。
 - 任一公式、观察量、纹理 normalization、InSPyReNet forward、总预算或 max statistic
   改变都产生新候选身份。
 
+## Content-Adaptive Contrastive Allocation Candidate Family
+
+### Authority, Status And Finite Hierarchy
+
+本节新增的七个 identity 是 live design authority，状态统一为
+`adopted_design_unimplemented / not_yet_tested`：
+
+- branch-attribution 候选 `lf_multiscale_lowpass_contrastive` 与
+  `lf_five_by_five_lowpass_contrastive`；
+- adaptive allocation family `content_adaptive_orthogonal_allocation`，由唯一
+  `content_adaptive_public_stability_router`、`content_adaptive_orthogonal_embedder`
+  与 `content_adaptive_combined_detector` 组成；
+- 只在主 adaptive allocation 完整科学失败后可启用的唯一
+  `content_adaptive_monotone_controller`。
+
+这些 identity 不修改已实现 readiness snapshot，不表示实现、runtime、机制通过、
+promotion 或 formal detector。旧 semantic-texture soft-route 五候选继续是
+`authenticated_development_negative`，其 `W`、CDF、provisional `tau`、roster、split、
+result 和效果观察均不得继承。当前 formal/default/joint detector 仍为 HF-only，
+`full_ceg_wm_eligible=false`。
+
+branch-attribution hierarchy 唯一为：selection 中两候选都通过时选择
+`multiscale_primary_candidate`；前者失败而
+`single_scale_fallback_candidate` 通过时选择后者；两者都失败则停止。只有 winner
+进入 untouched confirmation；winner confirmation 失败不得回捞 runner-up。该 hierarchy
+不是结果后菜单，不允许权重、kernel 或 detector 搜索。
+
+### Multiscale Primary Candidate
+
+`lf_multiscale_lowpass_contrastive` 从两个独立 KDF scale domain 生成 binary32
+Gaussian 张量 `G_five` 与 `G_nine`。两个 domain 都复用
+`key_schedule_sha256_counter`，但 `candidate_id`、`tensor_role` 和
+`scale_kernel_side` 分别绑定本候选的 `five_by_five_lowpass` 与
+`nine_by_nine_lowpass`；domain digest 必须不同。令 `LP_k` 为 stride 1、
+zero padding `floor(k/2)`、`count_include_pad=true` 的 binary32 square average：
+
+```text
+v_five = normalize32(lowpass_five(G_five))
+v_nine = normalize32(lowpass_nine(G_nine))
+T_lf_multiscale = normalize32(v_five + v_nine)
+```
+
+任一张量、方向或和为 zero/nonfinite 即 fail closed。不存在 scale weight、grid、
+结果后选择或跨 scale domain 复用。
+
+盲 detector 从普通 RGB8 经 public final-image VAE posterior mode 得到 binary32
+observation，按固定顺序产生两个 score：
+
+```text
+r = [normalized_correlation(Y_five,T_five),
+     normalized_correlation(Y_nine,T_nine)]
+```
+
+correlation 的 centering、flatten 和 row-major accumulation 与现有 blind LF
+normalized-correlation primitive 相同。只从本候选专属的 32 个 clean source clusters
+以 manifest 顺序、binary64 累加拟合 `mu` 和 population covariance `Sigma`：
+
+```text
+mu = mean_binary64(r_i)
+Sigma = mean_binary64((r_i-mu)(r_i-mu)^T)
+ridge = 2^-10 * (trace(Sigma)/2)
+Sigma_r = Sigma + ridge*I
+w = symmetric_inverse_sqrt_binary64(Sigma_r) * (r-mu)
+s_key = (w[0]+w[1]) / sqrt_binary64(2)
+```
+
+`trace(Sigma)<=0`、nonfinite input/moment、非正定 `Sigma_r` 或 inverse-square-root
+重放不一致均失败。`symmetric_inverse_sqrt_binary64` 是 SPD matrix 的唯一 principal
+inverse square root；不得换成 score norm、max、单轴选择或 learned weight。artifact
+绑定两个 scale domain、`mu`、`Sigma`、ridge、operator identity、manifest 和有序
+binary64 values。
+
+### Single-Scale Fallback Candidate
+
+`lf_five_by_five_lowpass_contrastive` 使用独立 candidate/KDF domain 生成自己的
+`G_five`，构造 `T_lf_single=normalize32(lowpass_five(G_five))`，并在普通 RGB8 public VAE
+observation 上计算唯一 scalar blind normalized correlation `s_key`。它不得复用
+multiscale scale-5 tensor、domain、fit moment、artifact 或 score。zero/nonfinite
+template、observation 或 score 均 fail closed。
+
+### Internal Decoy Contrast And Candidate-Specific Nulls
+
+每个 LF candidate 的 detector 内部都在访问图像或分数前冻结恰好八个 internal
+decoy indices。internal-decoy KDF domain 明确绑定 `control_role=internal_lf_decoy`；
+外部 attribution wrong-key roster 绑定独立
+`control_role=external_detection_wrong_key`，也恰好八个预登记 index。两者的 domain、
+material、roster digest 和用途必须不同；internal decoy 只构造 candidate statistic，
+external wrong-key 只做 attribution gate。
+
+```text
+ordered_decoys = stable_sort_binary64(s_decoy_0,...,s_decoy_7)
+median_decoy = binary64((ordered_decoys[3]+ordered_decoys[4])/2)
+c_lf = binary64(s_registered-median_decoy)
+```
+
+排序以 `(score,decoy_index)` 打破相等值顺序，但 median 保留相等值。每个 candidate
+从自己的 32-clean null-fit clusters 对 `c_lf` 拟合 binary64 mean/positive standard
+deviation，并形成专属 null-standardized LF margin。multiscale、single-scale、HF 和
+旧 soft-route 的 template/domain/null/standardization/CDF/threshold 资产不得互换。
+
+### Branch-Attribution Splits, Arms And Gates
+
+每个新 candidate family 使用全新的 32 null-fit、32 selection 与 32 untouched
+confirmation source clusters；三者彼此互斥，并与全部旧 fit/development/selection/
+confirmation/calibration/evaluation split、roster 和 source cluster 零交集。selection
+arms 固定为 clean、HF-only、multiscale LF-only、single-scale LF-only；confirmation
+只有 clean、HF-only 与唯一 selection winner。攻击顺序固定为 identity、RGB8 JPEG
+quality 70、Gaussian blur sigma 1.0、Gaussian noise sigma 0.01。
+
+每个 candidate 专属 provisional threshold 只从其全新 32 clean-null values 产生：
+binary64 按 `(value,source_cluster_id)` 稳定排序，令
+`tau=nextafter(ordered[-4],+inf)`；ties 保留。它只给 candidate selection/
+confirmation gate 定义 operating point，不是 formal FPR 或 formal `tau`。
+
+selection 和 confirmation 分别执行以下固定门，不能 pool condition：
+
+- identity 下 registered score 同时严格大于 paired primary-null 与八个 external
+  wrong-key score 的最大值，至少 `28/32`；HF-only anchor 自身也必须达到该门；
+- 每个预登记 condition 的 primary-null positives `<=3/32`，external-wrong positives
+  `<=3/32`；
+- primary complement attack 唯一为 blur sigma 1.0；LF null-standardized margin 严格
+  大于 HF margin 至少 `24/32`，且直接调用共享
+  `experiments.metrics.binomial.clopper_pearson_lower(successes,32,
+  confidence_level=0.95)` 的单侧 exact lower bound 必须严格大于 `0.5`，不得复制
+  正态近似或改变其 80-step identity；
+- 每个 attack、固定 32 slots，分别要求
+  `mean_binary64(paired_rgb8_mse_lf_candidate) <=
+  mean_binary64(paired_rgb8_mse_hf_only)+(1/255)^2`；missing/nonfinite 是该 slot 失败；
+- 所有写入复用 canonical actual-dtype combined budget：
+  `norm32(delta_actual)<=f32((3/250)*norm32(z0))`，并要求 finite、independent bitwise
+  replay、nonzero actual delta 与 accepted budget authority。不得使用 ratio tolerance、
+  branch actual decomposition、fallback 或重试替换失败单位。
+
+完整 record templates 必须在执行前建立，一次 attempt。若任一 generation/
+observation 操作失败，该 slot 保留 bounded reason，后续只记 unstarted tail，不能截断、
+补样、替换或 resume。若固定分母记录全部完成，所有 gate 均在 result 中完整
+报告，然后才按 identity/integrity 与固定分母完整性、budget/finite/replay、
+HF anchor、candidate attribution/null/wrong、blur complement、quality 的顺序定位首个
+未通过 gate。该“首个”只决定裁决定位，不删除后续 gate reports。
+
+### Adaptive Allocation Public Features
+
+`content_adaptive_orthogonal_allocation` 只有一个 analytic main。embed 输入 `x` 是
+callback-18 temporary VAE decode RGB8；raw/rectified detect 分别从各自当前普通 RGB8
+重新计算，禁止共享 map、Prompt、embed record、reference、private latent 或 Q/K cache。
+
+`M` 使用已登记 InSPyReNet strict-load、`forward_inspyre` finest raw `d0`、sigmoid
+exactly once 与 public preprocessing，再以 deterministic area resampling 到 latent
+grid，物化为 binary32 `[0,1]`。`E` 由同一 RGB8 按 `(0.299,0.587,0.114)` binary32
+灰度、replicate-pad、standard Sobel magnitude、area-to-grid 得到 `g`；对 strictly
+positive `g` 按 `(value,flat_index)` 求 exact nearest-rank P95：
+
+```text
+E = clip_binary32(g/P95(g),0,1)  if P95(g)>0
+E = all_zero                       otherwise
+```
+
+对 branch `b`，`F_hf(x)` 是 Stage-B HF blind detector 的 public final-image VAE
+posterior-mode observation，在 centering/correlation/template multiplication 前的
+16-channel latent-grid tensor。`F_lf(x)` 是 Stage-A winner 的 public observation：
+multiscale winner 按 scale-5、scale-9 顺序 concatenate pre-correlation feature maps；
+single-scale winner 只有 scale-5。`F_b` 禁止消费 key、template 或 score。
+
+public probes 从同一 `x` 独立产生，禁止串联，顺序恰为：
+
+1. 复用登记 RGB8 JPEG codec/rounding 的 JPEG quality 90；
+2. Gaussian blur sigma `0.5`，separable radius `ceil(3*sigma)=2`，reflect padding，
+   binary64 kernel 生成后一次 cast binary32，输出 RGB8 使用 round-to-nearest-
+   ties-to-even。
+
+`F_b(P(x))` 只按该 public observation 的既有 deterministic grid rule 对齐 `F_b(x)`，
+不得 learned resize。令 `eps_stability` 为 exact binary32 `2^-20`；channel-order、
+row-major binary32 accumulation 固定：
+
+```text
+r_b^P[h,w] = norm2_binary32(F_b(P(x))[:,h,w]-F_b(x)[:,h,w])
+             / (norm2_binary32(F_b(x)[:,h,w])+eps_stability)
+rbar_b[h,w] = binary32((binary64(r_b^jpeg[h,w])
+                        +binary64(r_b^blur[h,w]))/2)
+S_b[h,w] = binary32(1/(1+rbar_b[h,w]))
+```
+
+`S_b` 必须 finite 且逐点在 `(0,1]`；禁止跨空间 median。missing observation、
+nonfinite、codec/kernel/grid drift 均 fail closed。
+
+### Analytic Spatial Allocation And Orthogonal Write
+
+令 `epsilon` 为 exact binary32 `1/4`。所有 pointwise 运算、mean、dot、norm 和
+normalization 按固定 shape、channel-order 与 row-major binary32 执行：
+
+```text
+q_lf = epsilon+(1-epsilon)*M*(1-E)*S_lf
+q_hf = epsilon+(1-epsilon)*M*E*S_hf
+den = mean32(q_lf)+mean32(q_hf)
+rho_lf = clip_binary32(mean32(q_lf)/den,1/4,3/4)
+rho_hf = binary32(1-rho_lf)
+
+v_hf = normalize32(q_hf*T_hf)
+v_lf0 = normalize32(q_lf*T_lf)
+dot = dot32_row_major(v_lf0,v_hf)
+r_lf = binary32(v_lf0-dot*v_hf)
+residual_norm = norm32(r_lf)
+v_lf = normalize32(r_lf)
+u_pre = binary32(sqrt32(rho_hf)*v_hf + sqrt32(rho_lf)*v_lf)
+u = normalize32(u_pre)
+```
+
+`den` nonfinite/nonpositive，任一 active vector zero/nonfinite，或
+`residual_norm <= binary32(2^-10)` 均 fail closed。`u` 随后只走现有 actual-dtype
+materialization 与 combined `3/250` hard limit。`rho` 是 nominal allocation，不能
+声明 actual branch decomposition。
+
+route-disabled 必须在 control-flow 入口直接构造 `q_lf=q_hf=all_one`、
+`rho_lf=rho_hf=binary32(0.5)`，再走同 carrier、orthogonalization、budget、sample 和
+detector；它不得构造或读取 `M/E/S/F/probes`。
+
+检测端从自己的普通 RGB8 独立重建 maps 与 `rho`。Stage-A winner 的 algorithm
+identity 可以继承，但 Stage-B 的 `z_hf`、`z_lf` 与 combined score 都使用 Stage-B
+专属全新 32-clean-null assets：
+
+```text
+C = binary64(sqrt_binary64(binary64(rho_hf_detect))*binary64(z_hf)
+             +sqrt_binary64(binary64(rho_lf_detect))*binary64(z_lf))
+```
+
+在同一个 Stage-B fresh 32-clean-null split 上，branch `z_hf/z_lf` 各自拟合
+专属 null standardization，`C` 则从这 32 个 cluster 的 combined values 独立拟合
+自己的 CDF/provisional `tau`。这三个统计身份不互相代替，但不额外创建第二个
+null-fit split。Stage-A 或旧 soft-route 的 null、CDF、`tau`、W、roster 与 result
+均不得继承。
+
+### Adaptive Allocation Splits And Gates
+
+恰好 8 个全新 feasibility clusters 只检查 operational completeness，不选择公式、
+参数、candidate 或 threshold。scientific path 使用彼此及旧路线完全互斥的 32 branch/
+combined null-fit、32 selection、32 untouched confirmation。arms 固定为 clean、HF-only、
+LF-only、adaptive、route-disabled；攻击仍为 identity、JPEG quality 70、blur sigma 1.0、
+noise sigma 0.01。external wrong-key roster 固定八个并在访问图像/score 前冻结。
+
+selection 与 confirmation 都要求：HF anchor 通过；adaptive registered 对 paired null
+及 max external wrong 至少 `28/32`；每 condition null/wrong positives 分别 `<=3/32`；
+primary blur 下 adaptive `C` 严格大于 route-disabled 至少 `24/32` 且共享单侧 exact
+Clopper-Pearson lower `>0.5`；adaptive 与 disabled actual delta 从同一 baseline latent、
+Prompt、seed、key 产生，分别 bitwise replay、nonzero、digest 不同；两臂分别满足上述
+per-attack quality gate与 combined budget。主 adaptive primary gate 失败关闭该
+controller identity；固定权重不得沿用该身份。
+其中 quality 必须对 adaptive 和 route-disabled 各自、对每个 attack 的固定
+32 slots 分别检查：
+`mean_binary64(paired_rgb8_mse_arm) <=
+mean_binary64(paired_rgb8_mse_hf_only)+(1/255)^2`；missing/nonfinite 保留为该 slot
+失败，不从分母移除。
+
+### Unique Conditional Monotone Controller
+
+`content_adaptive_monotone_controller` 只在 analytic main 形成完整 fixed-denominator
+`scientific_failure` 后可启用；`operational_failure` 或 `insufficient_evidence` 不得触发。
+它使用新 identity/revision，以及与 main/旧路线和彼此零交集的 32 controller-fit、
+32 null-fit、32 selection、32 confirmation clusters；禁止第三路线、grid、hard mask、
+attack switch 或大网络。
+
+在 clean、un-attacked public RGB8 上形成
+`x=[mean(M),mean(E),mean(S_lf),mean(S_hf)]`。`beta_M=0` 固定且不拟合；因此 scalar
+controller 对 `mean(M)` 同时 nondecreasing/nonincreasing，而 `M` 仍真实进入 spatial
+`q`。controller-fit target 只由该 fresh split 产生：每 cluster 对四个预登记攻击分别
+计算 LF/HF `correct-key-max-external-wrong` null-standardized margin，按固定攻击顺序
+stable sort 后取 binary64 even median；`y=1` 当且仅当 LF median 严格大于 HF median，
+tie 记 0、不排除。
+
+```text
+eta = b0-a_E*mean(E)+a_lf*mean(S_lf)-a_hf*mean(S_hf)+0*mean(M)
+rho_lf = clip_binary64(sigmoid(eta),1/4,3/4)
+rho_hf = binary64(1-rho_lf)
+```
+
+free parameters 恰为 `b0,a_E,a_lf,a_hf`。使用 binary64 full-batch projected gradient
+descent：全零 init，4096 fixed iterations，step `2^-8`，loss 为 mean logistic
+cross-entropy 加 `2^-10*(a_E^2+a_lf^2+a_hf^2)`；每步后 `a_*` projection 到 `[0,8]`、
+`b0` clip 到 `[-8,8]`。禁止 early stop、restart、grid；任一 nonfinite fail closed。
+fit 可以消费冻结攻击结果形成 training target，但 inference 只读 clean-image public
+summaries，不读取 attack label，因此不构成 attack-conditioned switching。
+
+fallback 保持 analytic main 的 spatial `q`、carrier、detector、orthogonal write、blind
+boundary、combined budget、arms、attacks、external-wrong count、quality 与 gate；只有
+scalar `rho` authority 改为上述 fixed controller。它自己的 selection winner 不产生
+formal calibration、promotion 或 science claim。
+
+### Future Crop, Geometry And Joint Interfaces
+
+后续只登记依赖和授权门，不在本 candidate revision 建设实现/config/manifest：
+
+- crop fault decomposition 必须先用同一 content detector 比较 raw crop 与已知变换
+  oracle rectification；oracle 仍不能恢复 attribution 时禁止进入 actual geometry；
+- actual Q/K geometry 必须在 wrong-key 下 fail closed，并按预登记 margin 接近 oracle
+  content-recovery upper bound；geometry 仍无阳性权；
+- joint detector 与 formal evidence 必须互斥拟合 content `tau`、rescue window、geometry
+  reliability 和 evaluation；raw+rescue 共同计入完整 FPR。声明 `FPR<=0.001` 时经验值
+  与单侧 95% Clopper-Pearson upper 都必须满足，单条件零误报最低 `n>=2995`。
+
+上述每一步都需新的用户授权；本节不授权 implementation、runtime、experiment、GPU、
+Colab、formal threshold 或 promotion。
+
 ## Candidate `qk_relation_similarity`
 
 ### Cross-Component Ownership
@@ -1476,9 +1784,11 @@ CPU 检查三路门控、几何失败、可靠但内容仍负、同 detector/thr
 
 本文为候选集合关闭 key/KDF/PRG、relation/objective、LF/HF write/score、
 routing observations、backbone/runtime、搜索、可靠性指标、回正和联合判定的实现
-选择空白。registry 合计 20 个 ID：19 个具名候选，加上
+选择空白。live registry 合计 27 个 ID：26 个具名候选，加上
 `routing_uniform_control` 这一项强制同预算禁用对照。对照只用于因果验证，不参与
-方法身份，也不把 20 个候选 ID 误写为 13 项实现职责。
+方法身份，也不把 27 个候选 ID 误写为 13 项实现职责。新增七个 content-adaptive
+identity 仍为 `adopted_design_unimplemented / not_yet_tested`，不改写当前 readiness
+绑定的 12 个 implemented identities。
 
 ### Frozen Specification Values And Empirical Quantities
 
@@ -1497,7 +1807,9 @@ model/repository/name/revision/checkpoint/source 以及 Python/CUDA/GPU/dependen
 protocol、科学 W/CDF/`tau` 等资产摘要与实现 revision；旧身份的 threshold/records
 不得因 locator metadata 相同而继承。
 
-软路由 write 没有 `a/w` grid，检测统计固定为 max。只能由预登记实证决定的是：
+旧 soft-route write 没有 `a/w` grid，检测统计固定为 max；新的 analytic allocation
+与唯一 conditional monotone controller 也没有 candidate menu、weight grid 或 attack
+switch。只能由预登记实证决定的是：
 候选是否通过 mechanism validation 与独立 confirmation、
 `alpha_selection`、formal branch CDF、`tau`、`tau_rescue`、七个 geometry reliability
 `gamma` 与 `epsilon_inlier`、各职责样本量、候选是否晋升/淘汰、runtime 是否可复现，

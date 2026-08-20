@@ -16,8 +16,10 @@
 这些文档只定义项目要研究什么、方法公式、组件接口和实现不得偏离的不变量。
 
 方法采用唯一的 13 项职责组件口径；精确 responsibility、固定路径和候选绑定见
-[candidate_specifications.md](candidate_specifications.md)。候选 registry 固定为
-20 个 ID（19 个具名候选加 1 个 mandatory routing control），不得与 13 项职责混淆。
+[candidate_specifications.md](candidate_specifications.md)。live candidate registry 固定为
+27 个 ID（26 个具名候选加 1 个 mandatory routing control），不得与 13 项职责混淆；
+新增七个 identity 是 `adopted_design_unimplemented / not_yet_tested`，不重签当前
+12-identity/17-node readiness snapshot。
 
 内容链权威路线是 InSPyReNet soft semantic probability `M` + deterministic
 Sobel/P95 texture `T` 的逐图软路由、独立 keyed LF/HF carrier、共同 `3/250` 总预算

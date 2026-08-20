@@ -51,8 +51,9 @@ KDF/PRG、职责域、wrong-key/public-noise 和 golden-vector 责任。LF、HF 
 方法完成面固定为 13 项职责组件：共享 1 项、内容链 7 项、几何链 4 项、联合判定
 1 项。`content_embedder`、`lf_detector`、`geometry_reliability` 各有独立路径，
 不得折回 carrier、content detector 或 transform estimator。候选 registry 的
-20 个 ID（19 个具名候选加 1 个 mandatory control）与这 13 项职责是不同计数；
-新增候选不增加第 14 项职责，也不重签当前 readiness 或 stage。
+27 个 ID（26 个具名候选加 1 个 mandatory control）与这 13 项职责是不同计数；
+新增七个 `adopted_design_unimplemented / not_yet_tested` identity 不增加第 14 项职责，
+也不重签当前 12-identity/17-node readiness snapshot 或 stage。
 
 当前内容侧所有权固定为：`content_router` 只输出 `M/T`、`m_lf/m_hf` 与
 identity/digests；不输出攻击标签、`a/w` 或预算。

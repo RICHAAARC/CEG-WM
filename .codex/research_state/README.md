@@ -10,8 +10,10 @@
   阶段转换均不含方法实现混入；既有独立 experiment-stage revision 只同步阶段/status。
 - 唯一 `method_readiness.yaml` 已从模板实例化，逐项连接固定路径、候选 ID、
   责任、唯一实现 symbol、17 个非同构行为节点、候选摘要和 revision-bound
-  独立语义复核。当前 readiness 在13项职责上绑定12个唯一候选身份；设计 registry
-  则为20个 ID（19个具名候选加1个 mandatory control），二者不得混淆。语义—纹理
+  独立语义复核。当前 readiness 在13项职责上绑定12个唯一候选身份；live design registry
+  则为27个 ID（26个具名候选加1个 mandatory control），二者不得混淆。新增七个
+  identity 仅为 `adopted_design_unimplemented / not_yet_tested`，不进入现有17个
+  behavior nodes 或重签 readiness。语义—纹理
   软路由五候选的当前 reviewed revision 为
   `3efc76c32790b28a9f2775238a0e7586ba249ac4`，并经独立 exact audit 批准，但状态仅为
   `implemented_not_scientifically_validated`。当前 Q/K search identity 为 v2：joint-first
