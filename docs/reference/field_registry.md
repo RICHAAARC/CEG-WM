@@ -1030,6 +1030,143 @@ development runner 的逐 unit record、非科学 preflight/wiring receipt 与�
 | config_path | persisted_protocol | baseline | none | false | false | false | Baseline 固定配置路径。 |
 | deviations | persisted_protocol | baseline | none | false | false | false | 相对上游 baseline 的所有已声明语义偏差。 |
 
+## Contrastive LF branch-attribution preregistration fields
+
+以下字段只属于 `contrastive_lf_branch_attribution` 的冻结配置、roster、manifest、
+record template 与 diagnostic/provisional result。它们不建立正式 detector、tau、
+FPR、promotion 或 Stage-B 执行权威。
+
+| field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| actual_branch_decomposition_claimed | persisted_protocol | protocol | none | true | false | false | 是否声称 actual-dtype 总预算可拆成分支预算；本协议固定为 false。 |
+| actual_dtype_budget_identity | persisted_protocol | method_identity | none | true | false | false | 冻结 combined binary32 `3/250` hard-limit 算法身份。 |
+| arm_id | persisted_protocol | method_identity | none | true | false | false | 当前预分配 generation、observation 或 record 的冻结 arm 身份。 |
+| arms | persisted_protocol | protocol | none | false | false | false | 单一职责的完整有序 arm 集合。 |
+| arms_by_role | persisted_protocol | protocol | none | false | false | false | 三个冻结 role 到各自有序 arm 集合的精确映射。 |
+| attacked_observation_slot_count | persisted_protocol | protocol | none | true | false | false | 当前职责预分配的 attacked observation 固定分母。 |
+| attacks | persisted_protocol | protocol | none | false | false | false | identity、JPEG、blur 与 noise 的完整有序攻击集合。 |
+| authenticated_selection_artifact_required | persisted_protocol | protocol | none | false | false | false | Confirmation 是否必须先认证唯一 selection artifact。 |
+| base_generation_count | persisted_protocol | protocol | none | true | false | false | 当前职责预分配的 base-generation 固定分母。 |
+| blind_detection_boundary | persisted_protocol | protocol | none | false | false | false | Blind detector 允许与禁止输入的完整边界。 |
+| budget_record_count | persisted_protocol | protocol | none | true | false | false | 当前职责预分配的 actual-dtype budget record 固定分母。 |
+| candidate_family_id | persisted_protocol | method_identity | none | true | false | false | Manifest 绑定的唯一 contrastive LF candidate family。 |
+| candidate_promoted | persisted_protocol | method_status | none | true | false | false | Candidate 是否获得 promotion；本协议结果固定为 false。 |
+| candidate_role_label | persisted_protocol | method_identity | none | true | false | false | Candidate 的人类可读 primary 或 fallback 语义职责名。 |
+| candidate_selection | persisted_protocol | protocol | none | false | false | false | Candidate-selection role 的固定分母配置。 |
+| candidate_selection_passed | persisted_protocol | method_status | none | true | false | false | Selection 完整通过冻结门的独立状态。 |
+| candidate_selection_passed_required | persisted_protocol | protocol | none | false | false | false | Confirmation admission 是否要求 selection pass。 |
+| candidates | persisted_protocol | protocol | none | false | false | false | 本协议恰好两个候选及其语义职责的有序定义。 |
+| category | persisted_protocol | provenance | none | true | false | false | Prompt snapshot 的公开 category provenance。 |
+| challenge | persisted_protocol | provenance | none | true | false | false | Prompt snapshot 的公开 challenge provenance。 |
+| classification_policy | persisted_protocol | protocol | none | false | false | false | 四种 result classification 的互斥判定规则。 |
+| clean_base_observation_count | persisted_protocol | protocol | none | true | false | false | Null-fit 的 clean base observation 固定分母。 |
+| clopper_pearson_callable_identity | persisted_protocol | method_identity | none | false | false | false | Blur complement gate 复用的共享 exact Clopper-Pearson callable 身份。 |
+| codec_identity | persisted_protocol | runtime_identity | none | true | false | false | Record 实际绑定的冻结 RGB8 codec capability 身份。 |
+| combined_relative_l2_denominator | persisted_protocol | method_parameter | none | false | false | false | Combined actual-dtype hard budget 的冻结分母 250。 |
+| combined_relative_l2_numerator | persisted_protocol | method_parameter | none | false | false | false | Combined actual-dtype hard budget 的冻结分子 3。 |
+| complete_denominator_all_gates_pass | persisted_protocol | protocol | none | false | false | false | 完整分母且全部科学门通过时的 success 分类。 |
+| complete_denominator_scientific_gate_failure | persisted_protocol | protocol | none | false | false | false | 完整分母但冻结科学门失败时的 scientific_failure 分类。 |
+| completed_record_count | persisted_protocol | method_statistic | none | true | false | false | 某 record kind 在固定分母内 completed 的数量。 |
+| confirmation_admission | persisted_protocol | protocol | none | false | false | false | 只允许 authenticated selection winner 进入 confirmation 的规则。 |
+| confirmation_passed | persisted_protocol | method_status | none | true | false | false | Untouched confirmation 完整通过冻结门的独立状态。 |
+| content_only_positive_authority | persisted_protocol | protocol | none | false | false | false | Content evidence 是唯一 watermark positive authority。 |
+| current_rgb8_only | persisted_protocol | protocol | none | false | false | false | Detector 只可读取当前 ordinary RGB8。 |
+| denominator_reports | persisted_protocol | diagnostic | none | true | false | false | 各 record kind 的 expected/completed/failed/unstarted 完整报告。 |
+| detection_key_only | persisted_protocol | protocol | none | false | false | false | Detector key 输入仅限当前 detection key。 |
+| detector_record_count | persisted_protocol | protocol | none | true | false | false | 当前职责预分配的 detector record 固定分母。 |
+| downstream_protocol_requires_separate_authorization | persisted_protocol | protocol | none | false | false | false | Stage-B 或 fallback protocol 仍需单独授权。 |
+| embed_record_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 embed record；固定为 false。 |
+| embed_route_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 embed route；固定为 false。 |
+| entries_digest | persisted_protocol | provenance | none | true | false | false | Manifest 有序 entries 的 canonical SHA-256。 |
+| environment_dependency_runtime_codec_resource | persisted_protocol | protocol | none | false | false | false | 明确环境、依赖、runtime、codec 或资源失败的 operational 分类规则。 |
+| excluded_prompt_digest_count | persisted_protocol | provenance | none | false | false | false | Roster 构建时冻结排除的已使用 prompt digest 数量。 |
+| excluded_prompt_digests_digest | persisted_protocol | provenance | none | false | false | false | 已使用 prompt digest 有序集合的 canonical SHA-256。 |
+| exclusion_boundary_revision | persisted_protocol | provenance | none | false | false | false | Prompt 使用排除扫描所绑定的 40-char repository revision。 |
+| exclusion_rule | persisted_protocol | protocol | none | false | false | false | Prompt roster 对既有 checked-in 配置的冻结排除规则。 |
+| exclusion_source_bindings | persisted_protocol | provenance | none | false | false | false | 排除扫描消费的相对路径与文件 SHA-256 完整列表。 |
+| expected_record_count | persisted_protocol | protocol | none | true | false | false | 某 record kind 的预登记固定分母。 |
+| external_wrong_key_indexes | persisted_protocol | protocol | none | false | false | false | External wrong-key roster 的固定索引 0..7。 |
+| external_wrong_key_roster_digest | persisted_protocol | provenance | none | true | false | false | External wrong-key roster 的独立 canonical digest。 |
+| external_wrong_key_roster_identity | persisted_protocol | method_identity | none | true | false | false | External wrong-key attribution roster 身份。 |
+| failed_record_count | persisted_protocol | method_statistic | none | true | false | false | 某 record kind 在固定分母内 failed 的数量。 |
+| failed_slot_preserved | persisted_protocol | protocol | none | false | false | false | 首个执行失败 slot 必须原位保存 bounded evidence。 |
+| failure_policy | persisted_protocol | protocol | none | false | false | false | 单次 attempt、失败 tail 与禁止替代/补样的完整策略。 |
+| file_sha256 | persisted_protocol | provenance | none | false | false | false | Roster 排除源文件的精确字节 SHA-256。 |
+| first_failed_gate | persisted_protocol | diagnostic | none | true | false | false | 按冻结 gate order 定位的首个失败门；不隐藏后续 reports。 |
+| fixed_denominators | persisted_protocol | protocol | none | false | false | false | 三个 protocol role 的所有固定 record 分母。 |
+| formal_fpr_created | persisted_protocol | method_status | none | true | false | false | 是否创建正式 FPR authority；本协议固定为 false。 |
+| formal_tau_created | persisted_protocol | method_status | none | true | false | false | 是否创建正式 tau authority；本协议固定为 false。 |
+| gate_order | persisted_protocol | protocol | none | false | false | false | 身份到质量的冻结首次失败定位顺序。 |
+| gate_reports | persisted_protocol | diagnostic | none | true | false | false | 不因 first failure 截断的完整有序 gate report 集合。 |
+| geometry_positive_authority | persisted_protocol | protocol | none | false | false | false | Geometry 是否可直接产生 watermark positive；固定为 false。 |
+| image_lineage_identity | persisted_protocol | provenance | none | true | false | false | Prompt、seed、role 与 key-family 派生的语义 lineage 身份。 |
+| incomplete_or_nonfinite | persisted_protocol | protocol | none | false | false | false | 缺失、非有限或未满固定分母时的 insufficient_evidence 分类规则。 |
+| internal_decoy_indexes | persisted_protocol | protocol | none | false | false | false | 每个 LF candidate 的 internal decoy 固定索引 0..7。 |
+| internal_decoy_roster_digest | persisted_protocol | provenance | none | true | false | false | Internal LF decoy roster 的独立 canonical digest。 |
+| internal_decoy_roster_identity | persisted_protocol | method_identity | none | true | false | false | Internal LF score-centering decoy roster 身份。 |
+| internal_decoy_score_count | persisted_protocol | protocol | none | true | false | false | 当前 detector template 内嵌的 internal decoy score 数量。 |
+| internal_decoy_scores | persisted_protocol | method_statistic | none | true | false | false | LF `c_lf` record 内固定顺序的八项 internal decoy raw score。 |
+| jpeg_codec_identity | persisted_protocol | runtime_identity | none | false | false | false | Pillow RGB8 JPEG exact capability 的冻结身份。 |
+| jpeg_candidate_attack_decoded_sha256 | persisted_protocol | provenance | none | false | false | false | Q70 candidate-attack golden fixture decoded RGB8 bytes SHA-256。 |
+| jpeg_candidate_attack_encoded_sha256 | persisted_protocol | provenance | none | false | false | false | Q70 candidate-attack golden fixture encoded JPEG bytes SHA-256。 |
+| jpeg_stability_probe_decoded_sha256 | persisted_protocol | provenance | none | false | false | false | Q90 public-stability-probe golden fixture decoded RGB8 bytes SHA-256。 |
+| jpeg_stability_probe_encoded_sha256 | persisted_protocol | provenance | none | false | false | false | Q90 public-stability-probe golden fixture encoded JPEG bytes SHA-256。 |
+| manifest_bindings | persisted_protocol | provenance | none | false | false | false | Config 绑定三份 literal manifest 的 path、entries 与 manifest digest。 |
+| manifest_digest | persisted_protocol | provenance | none | true | false | false | Manifest 除自身 digest 外完整 payload 的 canonical SHA-256。 |
+| manifest_entries_digest | persisted_protocol | provenance | none | true | false | false | Result 或 record template 绑定的有序 manifest entries digest。 |
+| manifest_path | persisted_protocol | runtime_locator | none | false | false | false | Frozen role manifest 的 repository-relative literal locator。 |
+| maximum_condition_false_positive_count | persisted_protocol | method_parameter | none | false | false | false | 每个 null/wrong/attack-negative condition 允许的最大 positives 数 3/32。 |
+| minimum_blur_complement_success_count | persisted_protocol | method_parameter | none | false | false | false | Blur complement 固定最少 success 数 24/32。 |
+| minimum_identity_attribution_success_count | persisted_protocol | method_parameter | none | false | false | false | Identity paired attribution 固定最少 success 数 28/32。 |
+| model_identity | persisted_protocol | runtime_identity | none | true | false | false | Record 观察到的模型执行身份；locator 只作 observed metadata。 |
+| nonfinite_detected | persisted_protocol | diagnostic | none | true | false | false | 当前 record 是否观察到非有限数值；不得从分母移除。 |
+| null_asset_digest | persisted_protocol | provenance | none | true | false | false | Candidate-specific provisional 32-clean null asset digest。 |
+| null_fit | persisted_protocol | protocol | none | false | false | false | Null-fit role 的固定分母配置。 |
+| pillow_version | persisted_protocol | runtime_identity | none | false | false | false | JPEG capability 绑定的 Pillow exact dependency version。 |
+| population_mean | persisted_protocol | method_statistic | none | true | false | false | 32项 clean-null binary64 population mean。 |
+| population_sigma | persisted_protocol | method_statistic | none | true | false | false | 除数为32的 population variance binary64 square root。 |
+| population_variance | persisted_protocol | method_statistic | none | true | false | false | 32项 clean-null binary64 population variance，除数固定32。 |
+| private_latent_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 private latent；固定为 false。 |
+| prompt_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector invocation 是否允许接收 Prompt；固定为 false。 |
+| prompt_roster_path | persisted_protocol | runtime_locator | none | false | false | false | Protocol config 绑定的唯一 literal prompt roster path。 |
+| provisional_threshold_digest | persisted_protocol | provenance | none | true | false | false | Candidate-specific nextafter provisional threshold asset digest。 |
+| provisional_threshold_rule | persisted_protocol | protocol | none | false | false | false | Binary64 stable-sort fourth-largest z 向正无穷 nextafter 的阈值规则。 |
+| public_frozen_assets_only | persisted_protocol | protocol | none | false | false | false | Detector 除 key 与 current RGB8 外只允许 public frozen assets。 |
+| qk_cache_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 Q/K cache；固定为 false。 |
+| quality_epsilon_float64_hex | persisted_protocol | method_parameter | none | false | false | false | `(1/255)^2` 的冻结 binary64 hex identity。 |
+| quality_epsilon_formula | persisted_protocol | method_parameter | none | false | false | false | Paired RGB8 quality epsilon 的精确公式。 |
+| quality_record_count | persisted_protocol | protocol | none | true | false | false | 当前职责预分配的 paired RGB8 quality record 固定分母。 |
+| raw_null_statistic_count | persisted_protocol | protocol | none | true | false | false | Null-fit 保存的 HF/multiscale/single raw statistic 总数。 |
+| reference_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 reference image；固定为 false。 |
+| registered_key_family_namespace_digest | persisted_protocol | provenance | none | true | false | false | 本协议所有 split 绑定的 public registered key-family namespace digest。 |
+| registered_score | persisted_protocol | method_statistic | none | true | false | false | Registered-key detector raw score。 |
+| relative_path | persisted_protocol | runtime_locator | none | false | false | false | Roster 排除源绑定的 repository-relative literal path。 |
+| result_classification | persisted_protocol | method_status | none | true | false | false | success、scientific_failure、insufficient_evidence 或 operational_failure。 |
+| result_classifications | persisted_protocol | protocol | none | false | false | false | 本协议允许的四种互斥 result classification。 |
+| resume_allowed | persisted_protocol | protocol | none | false | false | false | 失败后是否允许 resume；固定为 false。 |
+| roles | persisted_protocol | protocol | none | false | false | false | Null-fit、selection 与 confirmation 的完整有序 role 集合。 |
+| roster_id | persisted_protocol | provenance | none | false | false | false | 96-row prompt roster 的语义身份。 |
+| rows | persisted_protocol | provenance | none | false | false | false | Frozen prompt roster 的96项有序 assignment。 |
+| rows_digest | persisted_protocol | provenance | none | false | false | false | Prompt roster 有序 rows 的 canonical SHA-256。 |
+| runner_up_recovery_allowed | persisted_protocol | protocol | none | false | false | false | Winner confirmation 失败后是否允许回捞 runner-up；固定为 false。 |
+| runtime_identity | persisted_protocol | runtime_identity | none | true | false | false | Record 观察到的 public runtime 配置与 backend 身份。 |
+| selected_candidate_id | persisted_protocol | method_identity | none | true | false | false | Authenticated selection winner 的唯一 candidate ID。 |
+| selection_asset_refit_allowed | persisted_protocol | protocol | none | false | false | false | Confirmation 是否允许重拟合 selection null/threshold assets；固定为 false。 |
+| selection_rule | persisted_protocol | protocol | none | false | false | false | 从 snapshot 排除既有使用后选取96项的确定性规则。 |
+| selection_winner_only | persisted_protocol | protocol | none | false | false | false | Confirmation 只运行 selection winner 的规则。 |
+| slot_ordinal | persisted_protocol | protocol | none | true | false | false | 完整 record template 顺序中的零基固定槽位序号。 |
+| source_snapshot_path | persisted_protocol | runtime_locator | none | false | false | false | Prompt source snapshot 的 repository-relative literal path。 |
+| source_snapshot_sha256 | persisted_protocol | provenance | none | false | false | false | Prompt source snapshot 的精确字节 SHA-256。 |
+| substitution_allowed | persisted_protocol | protocol | none | false | false | false | 失败 slot 是否允许替代样本；固定为 false。 |
+| templates_preallocated | persisted_protocol | protocol | none | false | false | false | 所有固定分母 slot 是否在执行前完整预分配。 |
+| threshold_positive_comparison | persisted_protocol | protocol | none | false | false | false | Detector positive 使用的冻结严格比较操作。 |
+| truncation_allowed | persisted_protocol | protocol | none | false | false | false | 失败后是否允许截断持久化 tail；固定为 false。 |
+| unstarted_record_count | persisted_protocol | method_statistic | none | true | false | false | 某 record kind 在首个失败后的预分配未启动数量。 |
+| unstarted_tail_required | persisted_protocol | protocol | none | false | false | false | 首个失败后全部后续 slot 必须标为 unstarted。 |
+| untouched_confirmation | persisted_protocol | protocol | none | false | false | false | Untouched-confirmation role 的固定分母配置。 |
+| wrong_key_score | persisted_protocol | method_statistic | none | true | false | false | 单个 external wrong-key detector raw score。 |
+| zero_science_boundary | persisted_protocol | protocol | none | false | false | false | Diagnostic-only、无 formal tau/FPR/promotion/science 的冻结边界。 |
+
 ## Development exploration 精确记录与控制字段
 
 | field_name | governance_level | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |

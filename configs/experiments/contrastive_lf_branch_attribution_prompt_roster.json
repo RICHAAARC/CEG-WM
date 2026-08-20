@@ -1,0 +1,1001 @@
+{
+  "excluded_prompt_digest_count": 324,
+  "excluded_prompt_digests_digest": "f30699bb8d6a029d04df7a647355872bd58ea6c4b427e5c21d088fb2c04f4147",
+  "exclusion_boundary_revision": "55eed59023ab0a06870c402047cc0eefd79a846f",
+  "exclusion_rule": "all_checked_in_experiment_json_at_boundary_revision_except_source_universe_rows",
+  "exclusion_source_bindings": [
+    {
+      "file_sha256": "a5b11f76270346351ad79bcba8ff4928f3fc11b843b0889108090045e71bc7bd",
+      "relative_path": "configs/experiments/development_exploration_prompt_roster.json"
+    },
+    {
+      "file_sha256": "554d1f488dadc433dba57a2b4e9435a8f55eeecef77929c76161076753b2886a",
+      "relative_path": "configs/experiments/hf_only_content_threshold_fit_manifest.json"
+    },
+    {
+      "file_sha256": "9c763262194c1585212674e399d45f5b4436db76656887d7faf61b43b9c33f2f",
+      "relative_path": "configs/experiments/hf_only_detector_directional_validation.json"
+    },
+    {
+      "file_sha256": "9cfbec095ddb896d526697e831072d6062c7755629ac3622688ee0a15f98441e",
+      "relative_path": "configs/experiments/hf_only_detector_directional_validation_manifest.json"
+    },
+    {
+      "file_sha256": "31d4f5a4f7273ecf5feb677c26d21168681afc64e8a7af5434f111d36d817567",
+      "relative_path": "configs/experiments/hf_only_reference_metrics.json"
+    },
+    {
+      "file_sha256": "4c936515064969efcb9a0185e58574e62923e9059222a8335702e19d0394826f",
+      "relative_path": "configs/experiments/hf_only_reference_prompt_roster.json"
+    },
+    {
+      "file_sha256": "11ff8936317307eda29f0bb286fdd1b239470d6c6f9e6be88e503fc1c92bb8b6",
+      "relative_path": "configs/experiments/hf_only_reference_validation.json"
+    },
+    {
+      "file_sha256": "a25dc474fa42c615a0680f32b7ecf08f00399cbc0ed541df84c3cc89bb30562a",
+      "relative_path": "configs/experiments/hf_only_threshold_fit_gpu_execution.json"
+    },
+    {
+      "file_sha256": "43d7d6d81f827348655f6bd0caa4b808f401cf20b1153923d14c5cc86270e6cd",
+      "relative_path": "configs/experiments/hf_only_untouched_confirmation_manifest.json"
+    },
+    {
+      "file_sha256": "d3ba5eef411374476d49b5982a611ae87c7ee07fb22b4a66603d9e30d1b94739",
+      "relative_path": "configs/experiments/hf_transmission_diagnostic.json"
+    },
+    {
+      "file_sha256": "8dc5708d50cc2093d4e481e35bdd39a6d6960c7939ab31cd278d0611b9ff7172",
+      "relative_path": "configs/experiments/hf_transmission_diagnostic_manifest.json"
+    },
+    {
+      "file_sha256": "6349fd5dd5ca44bc33fe79ce8949e3c5a3b8d6c1d343bfeff5be5b0c9b0e974a",
+      "relative_path": "configs/experiments/internal_execution_components.json"
+    },
+    {
+      "file_sha256": "084f06c5e80b19dbb93f298157c5350aa45f504b83e49c006f392fdfc2fd7793",
+      "relative_path": "configs/experiments/internal_scientific_validation_protocol.json"
+    },
+    {
+      "file_sha256": "039f600d56a9ad88407cf902db9f6a4da584af12604e4b777250532c9e5a7367",
+      "relative_path": "configs/experiments/lf_transmission_diagnostic.json"
+    },
+    {
+      "file_sha256": "158287d69632bb4952ddab93202aba7316b8fe22a7c4d6c160c1340d3fe2034d",
+      "relative_path": "configs/experiments/lf_transmission_diagnostic_manifest.json"
+    },
+    {
+      "file_sha256": "cae9453c86c8e851f7d4a93ca83f1fa13914e8aaadcf2ad32c95d92ab97c53f3",
+      "relative_path": "configs/experiments/lf_whitened_directional_validation.json"
+    },
+    {
+      "file_sha256": "fb47fa5dfa4e80bcd833d84892371b3e7a2d6793fa2d429c998d5965453f4468",
+      "relative_path": "configs/experiments/lf_whitened_directional_validation_manifest.json"
+    },
+    {
+      "file_sha256": "2683ea8bae1be8507b702b7320ab66f956835b7c5c151423598a1fbc34a4afe4",
+      "relative_path": "configs/experiments/lf_whitened_score_screening.json"
+    },
+    {
+      "file_sha256": "3e41f1740284dc7a139e33e49bcd6b5c863324548a2dfb776d088cfbc90b78fe",
+      "relative_path": "configs/experiments/lf_whitened_score_screening_manifest.json"
+    },
+    {
+      "file_sha256": "5d7388a92c98aa5fb1996369bae8de65360e2d25fa7569400135753257bb6e86",
+      "relative_path": "configs/experiments/lf_whitening_null_fit_manifest.json"
+    },
+    {
+      "file_sha256": "a4e101836af0702376074e32cdb6437dd2564a27ab9f019993a198f349778545",
+      "relative_path": "configs/experiments/qk_synchronization_write_diagnostic.json"
+    },
+    {
+      "file_sha256": "b6e5df39566e6ce25661a29b6189cbea2c79bcc9ec59f9eb624959bec1a496d0",
+      "relative_path": "configs/experiments/qk_synchronization_write_diagnostic_manifest.json"
+    },
+    {
+      "file_sha256": "5de43021a6710bad4b1aa309d81969a4d6d08e768ea232319c3664ab51d9af40",
+      "relative_path": "configs/experiments/semantic_texture_operational_preflight.json"
+    },
+    {
+      "file_sha256": "ced57a234d1db15a17105ab28671af495f1e21b3c3c0376572ab39299ba6f3a0",
+      "relative_path": "configs/experiments/semantic_texture_soft_detector_asset_preparation.json"
+    },
+    {
+      "file_sha256": "9f394ec84fffd9dd1bf2209d0ad6797add6a6f8c1d8408a93669c5f4c3b2d949",
+      "relative_path": "configs/experiments/semantic_texture_soft_detector_branch_null_manifest.json"
+    },
+    {
+      "file_sha256": "84212a6f9b495838fe0285f8dcfd42433394de4dd098242a78149319c641d5b1",
+      "relative_path": "configs/experiments/semantic_texture_soft_detector_whitening_fit_manifest.json"
+    },
+    {
+      "file_sha256": "213677b4aca92c81acaa99a1dd70e0a35f9c0534dcdadde7bed357624cf57ac3",
+      "relative_path": "configs/experiments/semantic_texture_soft_route_candidate_selection_manifest.json"
+    },
+    {
+      "file_sha256": "57e033241afe8010edfe5a6b38fa1dfb3b970b9c1482804a3703a36a95a8fbc3",
+      "relative_path": "configs/experiments/semantic_texture_soft_route_mechanism_validation.json"
+    },
+    {
+      "file_sha256": "71e9cfc077856e07005af6b2c9bd7005d202b19386d425a38e9e83a6ef73e679",
+      "relative_path": "configs/experiments/semantic_texture_soft_route_untouched_confirmation_manifest.json"
+    },
+    {
+      "file_sha256": "1245e497971a058a071f5e474b92b67fb548b440f88d50fb718abb3749a6965f",
+      "relative_path": "configs/experiments/thirteen_module_mechanism_screening_prompt_roster.json"
+    }
+  ],
+  "prompt_roster_digest": "92bdc0daa75425878345b4747f8d63233cd64ce49a7abcaa9db427cdc8de3548",
+  "roster_id": "contrastive_lf_branch_attribution_prompt_roster",
+  "rows": [
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210000,
+      "prompt_digest": "e6e11d07eee3d322878c11324bbacb77368ed8e11ba7e79f8a04a21ddcc7ec60",
+      "prompt_text": "a statue",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 132
+    },
+    {
+      "category": "Illustrations",
+      "challenge": "Basic",
+      "generation_seed": 202608210001,
+      "prompt_digest": "debe7e55e398958e5bb73e3534d991e842949fcb5630c1ade3735bbc700642f8",
+      "prompt_text": "a logo",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 133
+    },
+    {
+      "category": "Illustrations",
+      "challenge": "Basic",
+      "generation_seed": 202608210002,
+      "prompt_digest": "60847dc7588b787fec9810cddfd341b464199549c9673380f3f6fe9c92e5cdde",
+      "prompt_text": "a circular logo",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 134
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210003,
+      "prompt_digest": "f21416eee8f2e4fe8cc8e8d87a38a572f724e43a104c4333b9bcf345dfb49e2f",
+      "prompt_text": "a coffee mug",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 135
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210004,
+      "prompt_digest": "84e07bbf545c97a7d32cade5dbd7f152de9dbe1aef5ec8a0a390ff55c32a1b1c",
+      "prompt_text": "a pig",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 136
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210005,
+      "prompt_digest": "f8a2b11883e6163d295c4ab33c46ebe443efffad35fa5780408f2a26659ebd65",
+      "prompt_text": "a squirrel",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 137
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210006,
+      "prompt_digest": "9f7221793af7fe5d52710d99b01bd7d90cb57e68c090b3d6a7f61f9556fc75e5",
+      "prompt_text": "a hammer",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 138
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210007,
+      "prompt_digest": "b1978385d49c8f7e9a5f17754bbc73b23f59832472fe41ad24f2c9e0dd973c12",
+      "prompt_text": "a screwdriver",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 139
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210008,
+      "prompt_digest": "1dcba3bf113e0ffff86d9c1bdee92d972ec249beaf92cf7600998d8b0ea72e48",
+      "prompt_text": "a handsaw",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 140
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210009,
+      "prompt_digest": "bc9cee9bc7f26be3504bc1ff6d19e8c621e20d2dab65482a6a598f0616d08301",
+      "prompt_text": "a power drill",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 141
+    },
+    {
+      "category": "Food & Beverage",
+      "challenge": "Basic",
+      "generation_seed": 202608210010,
+      "prompt_digest": "d591fce4651787d49dbb4d8b7f962a962c366c948db431fdcd90d7561458e03d",
+      "prompt_text": "a cocktail",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 142
+    },
+    {
+      "category": "Food & Beverage",
+      "challenge": "Basic",
+      "generation_seed": 202608210011,
+      "prompt_digest": "b3fc43ccff458f2bd20c476b30ea0a8daa9b6fb9fda186b0046f1abc79dac6a6",
+      "prompt_text": "a margarita",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 143
+    },
+    {
+      "category": "Produce & Plants",
+      "challenge": "Basic",
+      "generation_seed": 202608210012,
+      "prompt_digest": "513e9e020d087af694d7914bb019356d05e89a9a976077a36b8d3201d260a9b6",
+      "prompt_text": "an avocado",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 144
+    },
+    {
+      "category": "Indoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210013,
+      "prompt_digest": "691ae274ea098833c47325a3597fd81236dc7f5adf7a2d6188ece9d85382fe4b",
+      "prompt_text": "a kitchen",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 145
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210014,
+      "prompt_digest": "3f6c06dfed35c1c7bcbd0d3aa3c9f37abe4e95831c4fac76e92b73b24ac98c8a",
+      "prompt_text": "an iPhone case",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 146
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210015,
+      "prompt_digest": "b6c0d10bac6a7ff4e7727d98fa934ae7295ad8ba9d46d0cb181d0bc30e6f0c57",
+      "prompt_text": "a coffee maker",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 147
+    },
+    {
+      "category": "Produce & Plants",
+      "challenge": "Basic",
+      "generation_seed": 202608210016,
+      "prompt_digest": "22c8586101346a587f22a4fa336f60d9d7ff3c342dbab48c125ce4852ba42410",
+      "prompt_text": "a banana",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 148
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210017,
+      "prompt_digest": "43a7a33e0db59f9242d450318fedbbc2130cdf280310639027f3cbd009a28d4d",
+      "prompt_text": "a violin",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 149
+    },
+    {
+      "category": "Indoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210018,
+      "prompt_digest": "fb878364d1f4937f7b5664a2cba181bc1bf0e14ca5a5d2504231a9ac0ecae82d",
+      "prompt_text": "a room",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 150
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210019,
+      "prompt_digest": "0005b2665003d5f21210572d61457df48690143b1f5055107e957e748090ee1a",
+      "prompt_text": "a mountain",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 151
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210020,
+      "prompt_digest": "9e5b3d53982c82e689e184e5b5774740a5b75cc8b66d3757b7de83c489ee2bb7",
+      "prompt_text": "a bird",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 152
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210021,
+      "prompt_digest": "ca53b9146fce3d3be030ab33ba6a61ecd01849ca3fe0ab8c05da3673dcbaeb4d",
+      "prompt_text": "a TV",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 153
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210022,
+      "prompt_digest": "cd79c85b54523beff822d456b4e2fe24098b2e8e397ab37053c0da3fcf71c423",
+      "prompt_text": "a Christmas tree",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 154
+    },
+    {
+      "category": "World Knowledge",
+      "challenge": "Basic",
+      "generation_seed": 202608210023,
+      "prompt_digest": "c8b79eb31a9ce028491b9df0f1995e28d75581c709ead48a8eeb592c91e08307",
+      "prompt_text": "The Statue of Liberty",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 155
+    },
+    {
+      "category": "World Knowledge",
+      "challenge": "Basic",
+      "generation_seed": 202608210024,
+      "prompt_digest": "16d37afecefedf6a885a32ff508258d04baf0f4390c18ee999ecff7a00857774",
+      "prompt_text": "the Eiffel Tower",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 156
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210025,
+      "prompt_digest": "1fe740b56828f4cc402f5a9085b7eda6373f79cdceb9589aaa5c4f6f72ad9074",
+      "prompt_text": "a zebra",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 157
+    },
+    {
+      "category": "World Knowledge",
+      "challenge": "Basic",
+      "generation_seed": 202608210026,
+      "prompt_digest": "250041fbb5d7e181f2133d304d8b48f176a4752171bc62a2fc37a71823a2df9a",
+      "prompt_text": "the city of London",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 158
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210027,
+      "prompt_digest": "9e478b236e09cd9decd93bd64bbdc073ddc74db1abad472a9bf742e3d5878c4c",
+      "prompt_text": "a koi fish",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 159
+    },
+    {
+      "category": "Produce & Plants",
+      "challenge": "Basic",
+      "generation_seed": 202608210028,
+      "prompt_digest": "0e04ed76cefebb5af6780dc9030588b5afc7c53b0a3d705df95b89863b278e2b",
+      "prompt_text": "a pineapple",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 160
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210029,
+      "prompt_digest": "be40b0e14499e49264dac28e86eb84e2ce9392a12a20986d5cde8c3e0c807b78",
+      "prompt_text": "a toaster",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 161
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210030,
+      "prompt_digest": "e926c6ef0019ed48dc60cc38eaec812778ba541959bfb4757897e1ce4b7db64b",
+      "prompt_text": "a sign",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 162
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210031,
+      "prompt_digest": "4d9960526fd027b3cfff0f37cac6bef32e6aaee0829d490d653f636be7cf0c29",
+      "prompt_text": "a red lego block",
+      "role_id": "contrastive_lf_null_fit",
+      "source_row": 163
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210100,
+      "prompt_digest": "417f1824ba04658978262aea110b75724ed39c984ccbed0b5c56a7ad801d0f1c",
+      "prompt_text": "teacup",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 164
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210101,
+      "prompt_digest": "3d7eb3d3dab17ee509a6911e0feb928eb46e956adcada792493614bfb97a7a9c",
+      "prompt_text": "chair",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 165
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210102,
+      "prompt_digest": "3cb562c897155ca6e376e1df492d7bd0c09a09a7fd20a632b6ea1092837d1952",
+      "prompt_text": "waterfall",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 166
+    },
+    {
+      "category": "Vehicles",
+      "challenge": "Basic",
+      "generation_seed": 202608210103,
+      "prompt_digest": "4ee17ae0157075fa13972a9103494f2037381e83a0be6a7c287f60d5ca1681c0",
+      "prompt_text": "a pirate ship",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 167
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210104,
+      "prompt_digest": "9460a478155389c64d2bf36c4aadd3572a7ac46894179c13b9f58a6e8c0cff61",
+      "prompt_text": "a dragon",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 168
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210105,
+      "prompt_digest": "887fc482435af529671ca5d7beb63f4a27cb82ec9a6ed2c6246e5be1756db8c3",
+      "prompt_text": "a present",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 169
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210106,
+      "prompt_digest": "d054e115f775781691e845b51d64d214060a5af029d9f4e299bdedce31f1ce20",
+      "prompt_text": "a bottle",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 170
+    },
+    {
+      "category": "Illustrations",
+      "challenge": "Basic",
+      "generation_seed": 202608210107,
+      "prompt_digest": "324488e0b83bc176fc53f68dc5df33828bdeb6b8a799ede8c5e9a49220a3b8de",
+      "prompt_text": "a book cover",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 171
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210108,
+      "prompt_digest": "a38a077d91dcfa22ad21b07aba85049816826f9d8f9dfe2e5c339d8dc90c2ecc",
+      "prompt_text": "a sweatshirt",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 172
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210109,
+      "prompt_digest": "5f68a8dd67616f2dc649fa6e02cfec51e229a6ab17e801ba45db331f26488374",
+      "prompt_text": "matching socks",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 173
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210110,
+      "prompt_digest": "ab0fcec08e18a7bccda1e81df4974e3434fcd36000518f7e776fb85495b5a494",
+      "prompt_text": "cash",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 174
+    },
+    {
+      "category": "Indoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210111,
+      "prompt_digest": "d2c34068340e983e7808bba3b691917587baba02995c3701caa79398a4be6540",
+      "prompt_text": "a wood cabin",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 175
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210112,
+      "prompt_digest": "4f6aa4a879b2822c728232be21802ddd52379697a5a0c86192e3ab7b32703af5",
+      "prompt_text": "a clock tower",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 176
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210113,
+      "prompt_digest": "3cdb6a82f854b92ca8b375506abaf31342c147cfc3c1d948b0d64fbc206b0d27",
+      "prompt_text": "a chimpanzee",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 177
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210114,
+      "prompt_digest": "f47ed6d83375a6e9519c9d2b3c55ebba5e58981719da4c4fa2c8fb49d8d0b43c",
+      "prompt_text": "a hat",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 178
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210115,
+      "prompt_digest": "c73c2439657961570873ea43f4eab3d7143bf0b5a693b2e7dc1f4440b35aa48a",
+      "prompt_text": "sneakers",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 179
+    },
+    {
+      "category": "Food & Beverage",
+      "challenge": "Basic",
+      "generation_seed": 202608210116,
+      "prompt_digest": "2886aff66ada8419f5fdc1350f59393c13aa8b6313ce64eae970be65448082f4",
+      "prompt_text": "a roast turkey",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 180
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210117,
+      "prompt_digest": "6d378d3d33e278c2a73b8403387c798b959c9f2d5975a0f1189cc2b9110dd220",
+      "prompt_text": "a turkey",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 181
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210118,
+      "prompt_digest": "674f849610a8e557f897ed7f871ea500e68d0a339a362ba525a62de3ebfbe22b",
+      "prompt_text": "a plate",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 182
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210119,
+      "prompt_digest": "4ce1f5d5cdced69d5142ff2a1024d56c393e54e8da25d0e89911810a91b6d1c4",
+      "prompt_text": "a ladder",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 183
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210120,
+      "prompt_digest": "1c24f353caa495d1256ce5f032205a752d2fbfbd1be730d3a15a39bd832e31de",
+      "prompt_text": "a Tyrannosaurus Rex",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 184
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210121,
+      "prompt_digest": "6c06d741a5acb4127baffc1ccc33ae9932dad61249ecdc4bd1235bdb563ec354",
+      "prompt_text": "a Stegasaurus",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 185
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210122,
+      "prompt_digest": "664717ad6f4355d7d0e86866f65f3b89599d4449ea02820936796048cd14ce70",
+      "prompt_text": "a Triceratops",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 186
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210123,
+      "prompt_digest": "ba0817f695310492a0d276e58735e6ce98667aa8e61795bba0cb732a132cb4d3",
+      "prompt_text": "a Styracosaurus",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 187
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210124,
+      "prompt_digest": "40e6a929129127704122fa9319c5af682a3ea35a1b83f77461200328b47f9e1f",
+      "prompt_text": "a Diplodocus",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 188
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210125,
+      "prompt_digest": "0d06e5fb9567239a96a70f82f9e3b4cdf512e08719bed615c39bce4d00f1c369",
+      "prompt_text": "a yellow sticky note",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 189
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210126,
+      "prompt_digest": "c83aca30646812661490de2bf5fcf42781dfb84e4f3edb3aa930431cce79ce7b",
+      "prompt_text": "a ball",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 190
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210127,
+      "prompt_digest": "8b1b56f86127978ffe8fb986a1e3acd455dd5cccf06d4c18f68e24497c416637",
+      "prompt_text": "red balls",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 191
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210128,
+      "prompt_digest": "fa745e757e18beeb4842d49209f226a491213cf8470a8b7f6a2966f9a55cc5ad",
+      "prompt_text": "an ostrich",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 192
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210129,
+      "prompt_digest": "372cee84734f501d5b7dd005eb8d11867c8bc4a7cea2cc36a505e92c786026d9",
+      "prompt_text": "a stone path",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 193
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210130,
+      "prompt_digest": "6dce6cbe70588dd674e901b382ea0b5dc2391ea3f2c6b64974b06427ecc31a4d",
+      "prompt_text": "a wooden deck",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 194
+    },
+    {
+      "category": "Vehicles",
+      "challenge": "Basic",
+      "generation_seed": 202608210131,
+      "prompt_digest": "3aa04aee9768f7ce8c0ec44ac42c0f24fa4477f61470da12aba0a289d8a39a7a",
+      "prompt_text": "an F1 race car",
+      "role_id": "contrastive_lf_candidate_selection",
+      "source_row": 195
+    },
+    {
+      "category": "Vehicles",
+      "challenge": "Basic",
+      "generation_seed": 202608210200,
+      "prompt_digest": "cc961a95829f3572bb32d42320c0dcdbe3d1349510c14b9bc42f18bb14348f78",
+      "prompt_text": "a taxi",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 196
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210201,
+      "prompt_digest": "9886b0cc856d559d94ef7e2b837df034a592a902a8849d8ee58cb197d19cb621",
+      "prompt_text": "a road",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 197
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210202,
+      "prompt_digest": "6872efd32f6f4ca2dd02412a9905be227228a29cbc1af9c00e80f7f333caa923",
+      "prompt_text": "a volcano",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 198
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210203,
+      "prompt_digest": "fa90d5ce02455f4e9290dca11f209a687e284ccaa9ac29d015e241cd839f2925",
+      "prompt_text": "a large open book",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 199
+    },
+    {
+      "category": "Indoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210204,
+      "prompt_digest": "9434ed1dd480f12df1784130362467fdbec669b8a4168a95a24ccabf3aa3253b",
+      "prompt_text": "a living room",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 200
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210205,
+      "prompt_digest": "8b94b960d779474f3f02154943f70a0147d5dfc69695ec37b652e366321ce13e",
+      "prompt_text": "an elephant",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 201
+    },
+    {
+      "category": "Produce & Plants",
+      "challenge": "Basic",
+      "generation_seed": 202608210206,
+      "prompt_digest": "3772490f916f9552aaf44abb1c0046039eaa558e619f9d8ad48ac9c9af5e49b8",
+      "prompt_text": "a tree",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 202
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210207,
+      "prompt_digest": "ada8fb9fc718f47c8a78b5ee0fe8dcf3af2b3d92da71c1211c382df12cf1580b",
+      "prompt_text": "a dolphin",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 203
+    },
+    {
+      "category": "Vehicles",
+      "challenge": "Basic",
+      "generation_seed": 202608210208,
+      "prompt_digest": "eca88a8f26dc58e1e4cf9bcfcdca3cfe55706a57c58dcc746fbfd0a6819c4163",
+      "prompt_text": "a rowboat",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 204
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210209,
+      "prompt_digest": "24d61c2ed784d0fb9cfed85f13ab07cf89a3c9d1de5b51e649f5557989e922a7",
+      "prompt_text": "a crown",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 205
+    },
+    {
+      "category": "Vehicles",
+      "challenge": "Basic",
+      "generation_seed": 202608210210,
+      "prompt_digest": "d92596df023bf5bb9027e587461a475825fcc98b546e7018f344c83e344f10b2",
+      "prompt_text": "a pick-up truck",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 206
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210211,
+      "prompt_digest": "8fa3aab2faa9b79e0a0398da5b5abd0780142442a5be80b9a64608d718cb1fcd",
+      "prompt_text": "a key",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 207
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210212,
+      "prompt_digest": "0b4c4d126e76c1ea8cf169478cb0186cbe173caf5ced1e34138bc354162b4d80",
+      "prompt_text": "a goat",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 208
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210213,
+      "prompt_digest": "6120cf2860609576ed117a0098f513597a4e3a1c00f455acd793db88d78c26ad",
+      "prompt_text": "a chest",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 209
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210214,
+      "prompt_digest": "fd071185221c9f8bf4ebf2dcf004063a1df063d68a09c7b5888730690357c91c",
+      "prompt_text": "a coffee table",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 210
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210215,
+      "prompt_digest": "1b67616c4bc3af5566cac22491d048fad2bdd4f6eca2742b4390f3d7a419cd0e",
+      "prompt_text": "toy cars",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 211
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210216,
+      "prompt_digest": "537462cf9d6aa6216ab3a72d2741451c97f02e2963f1d4eb841937e1c581e919",
+      "prompt_text": "a bookshelf",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 212
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210217,
+      "prompt_digest": "7bcd0f182d906d8e5c1dfbe656720d51d545da8f491f35da2c627badb29731cf",
+      "prompt_text": "the moon",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 213
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210218,
+      "prompt_digest": "130b52d6c53f14f4fc765aeb7609e2da439e90033eb1cd48349adfc23aec10cc",
+      "prompt_text": "the Earth",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 214
+    },
+    {
+      "category": "World Knowledge",
+      "challenge": "Basic",
+      "generation_seed": 202608210219,
+      "prompt_digest": "527af549e90ec708b7d202cf8adde80fa0fa57f2c3406c3f4e30bd98073207aa",
+      "prompt_text": "the International Space Station",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 215
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210220,
+      "prompt_digest": "95bfcceef9a8361a6063d65be77a8e16032d3dc24f0f02ecd1b7ed64299bcf6e",
+      "prompt_text": "the planet Jupiter",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 216
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210221,
+      "prompt_digest": "f7c3c02a258b9c63c686a01bfd3704e44f677fc5819f46a7939d5646470cd3fd",
+      "prompt_text": "a tornado",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 217
+    },
+    {
+      "category": "Outdoor Scenes",
+      "challenge": "Basic",
+      "generation_seed": 202608210222,
+      "prompt_digest": "6423b2a755a132c24830da299fe0ba65a732acf9041d9c3667b782ff921f897d",
+      "prompt_text": "a tidal wave",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 218
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210223,
+      "prompt_digest": "0a08755eb2abf5bdab0c18b54b1cc98126d6a2ce710cbbdb1656ba426f1d7330",
+      "prompt_text": "a laptop screen",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 219
+    },
+    {
+      "category": "Vehicles",
+      "challenge": "Basic",
+      "generation_seed": 202608210224,
+      "prompt_digest": "e4a02badaa19837d589eaae080714ef8fe778b43448ee1c9748b046f51d366c0",
+      "prompt_text": "an airplane",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 220
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210225,
+      "prompt_digest": "ac62ea368ae7ae5ac6972497ac1abc2f0c39902d7f5f278bfeac52302cda2961",
+      "prompt_text": "a butterfly",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 221
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210226,
+      "prompt_digest": "294e25a427837ab7d68b1e909f31f69d0a4dc025beb3fd989e8416c44fb4bb03",
+      "prompt_text": "a lizard",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 222
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210227,
+      "prompt_digest": "6307c35a8ffb412e18cd4ebf7de5d5047afe250a1579e69ba590fcc1df8b33bc",
+      "prompt_text": "a turtle",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 223
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210228,
+      "prompt_digest": "377e07edff0cafea2aa678b0c5090b12d0c829c43e226459fc0c5e4e7a9e946c",
+      "prompt_text": "an octopus",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 224
+    },
+    {
+      "category": "Artifacts",
+      "challenge": "Basic",
+      "generation_seed": 202608210229,
+      "prompt_digest": "ae35964219d1b24bba10a2fba9551a06219d701a8f3fff6e80750d09f4f3b495",
+      "prompt_text": "a book",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 225
+    },
+    {
+      "category": "Animals",
+      "challenge": "Basic",
+      "generation_seed": 202608210230,
+      "prompt_digest": "b37ab83ddcec6c8bada6da2b190d7d3444345c87809a9801e276adc35d3de8c2",
+      "prompt_text": "a moose",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 226
+    },
+    {
+      "category": "World Knowledge",
+      "challenge": "Basic",
+      "generation_seed": 202608210231,
+      "prompt_digest": "c6428fec8bade703ddd0aab2c35bdd1cfff5fe57b096697aede5555a87e6d4e3",
+      "prompt_text": "a kachina doll",
+      "role_id": "contrastive_lf_untouched_confirmation",
+      "source_row": 227
+    }
+  ],
+  "rows_digest": "7d55ce5897f0fe33c0ff3c815d2ea45618a60666ed086cd8a915ac037d371792",
+  "schema_version": 1,
+  "selection_rule": "ascending_source_row_first_ninety_six_nonempty_unique_prompt_digests_after_registered_usage_exclusion",
+  "source_snapshot_path": "configs/experiments/assets/parti_prompts_dataset_snapshot.txt",
+  "source_snapshot_sha256": "fab29e41bb512a169b56acab4cf2a41dcb675e285df2efcde6640c7dd3c440eb"
+}

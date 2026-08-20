@@ -1,0 +1,205 @@
+{
+  "actual_branch_decomposition_claimed": false,
+  "actual_dtype_budget_identity": "combined_actual_binary32_relative_l2_three_over_two_hundred_fifty",
+  "arms_by_role": [
+    {
+      "arms": [
+        "clean_unwatermarked"
+      ],
+      "role_id": "contrastive_lf_null_fit"
+    },
+    {
+      "arms": [
+        "clean_unwatermarked",
+        "hf_only",
+        "multiscale_low_frequency_only",
+        "single_scale_low_frequency_only"
+      ],
+      "role_id": "contrastive_lf_candidate_selection"
+    },
+    {
+      "arms": [
+        "clean_unwatermarked",
+        "hf_only",
+        "selected_low_frequency_only"
+      ],
+      "role_id": "contrastive_lf_untouched_confirmation"
+    }
+  ],
+  "attacks": [
+    {
+      "attack_id": "identity"
+    },
+    {
+      "attack_id": "jpeg_quality_70"
+    },
+    {
+      "attack_id": "gaussian_blur_sigma_1"
+    },
+    {
+      "attack_id": "gaussian_noise_sigma_0_01"
+    }
+  ],
+  "blind_detection_boundary": {
+    "content_only_positive_authority": true,
+    "current_rgb8_only": true,
+    "detection_key_only": true,
+    "embed_record_input_allowed": false,
+    "embed_route_input_allowed": false,
+    "geometry_positive_authority": false,
+    "private_latent_input_allowed": false,
+    "prompt_input_allowed": false,
+    "public_frozen_assets_only": true,
+    "qk_cache_input_allowed": false,
+    "reference_input_allowed": false
+  },
+  "candidate_family_id": "contrastive_lf_branch_attribution",
+  "candidates": [
+    {
+      "candidate_id": "lf_multiscale_lowpass_contrastive",
+      "candidate_role_label": "multiscale_primary_candidate"
+    },
+    {
+      "candidate_id": "lf_five_by_five_lowpass_contrastive",
+      "candidate_role_label": "single_scale_fallback_candidate"
+    }
+  ],
+  "classification_policy": {
+    "complete_denominator_all_gates_pass": "success",
+    "complete_denominator_scientific_gate_failure": "scientific_failure",
+    "environment_dependency_runtime_codec_resource": "operational_failure",
+    "incomplete_or_nonfinite": "insufficient_evidence"
+  },
+  "clopper_pearson_callable_identity": "experiments.metrics.binomial.clopper_pearson_lower",
+  "combined_relative_l2_denominator": 250,
+  "combined_relative_l2_numerator": 3,
+  "confidence_level": 0.95,
+  "config_digest": "389a7e24656c07b59b7a6f222c67f8058295efe976129b90e05f020625351ea4",
+  "confirmation_admission": {
+    "authenticated_selection_artifact_required": true,
+    "candidate_selection_passed_required": true,
+    "runner_up_recovery_allowed": false,
+    "selection_asset_refit_allowed": false,
+    "selection_winner_only": true
+  },
+  "external_wrong_key_indexes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "external_wrong_key_roster_digest": "d89725b2cec922e584d62247990b468d09354b58b64217db58c404adaaf3d23f",
+  "external_wrong_key_roster_identity": "contrastive_lf_external_wrong_key_roster",
+  "failure_policy": {
+    "failed_slot_preserved": true,
+    "maximum_record_attempts": 1,
+    "resume_allowed": false,
+    "substitution_allowed": false,
+    "templates_preallocated": true,
+    "truncation_allowed": false,
+    "unstarted_tail_required": true
+  },
+  "fixed_denominators": {
+    "candidate_selection": {
+      "attacked_observation_slot_count": 512,
+      "base_generation_count": 128,
+      "budget_record_count": 96,
+      "detector_record_count": 3840,
+      "quality_record_count": 384
+    },
+    "null_fit": {
+      "clean_base_observation_count": 32,
+      "raw_null_statistic_count": 96
+    },
+    "untouched_confirmation": {
+      "attacked_observation_slot_count": 384,
+      "base_generation_count": 96,
+      "budget_record_count": 64,
+      "detector_record_count": 2560,
+      "quality_record_count": 256
+    }
+  },
+  "gate_order": [
+    "identity_integrity_denominator",
+    "budget_finite_replay",
+    "hf_anchor",
+    "candidate_attribution_null_wrong",
+    "blur_complement",
+    "quality"
+  ],
+  "internal_decoy_indexes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "internal_decoy_roster_digest": "9b04ce25938fc49a820b8c631a7e8a5ae487a1e7f6738b49e5dc0ef8cb5be2c2",
+  "internal_decoy_roster_identity": "contrastive_lf_internal_decoy_roster",
+  "jpeg_codec_identity": "pillow_rgb8_jpeg_exact_capability",
+  "jpeg_candidate_attack_decoded_sha256": "e4c5fc8268dce4b00f6b36bdcf542968bdba495a153cc273e9ece7279dd7029b",
+  "jpeg_candidate_attack_encoded_sha256": "9a202effd37e2b693f70fad3e9e01bc41d68df1fab4138de349a39963b49c80b",
+  "jpeg_stability_probe_decoded_sha256": "0d0e02529511b7cae4de3479b9645569c3985750655217abfb6c7d6326b362c7",
+  "jpeg_stability_probe_encoded_sha256": "e8c89254351499471fe086704f3ecc6e2fb76f7cccd33e5a8ecc2fc33fc54c36",
+  "manifest_bindings": [
+    {
+      "entries_digest": "69993f38aa7bf2cdb945421f0e640bd4933d2035e5598f40b75b6a2911eb55d7",
+      "manifest_digest": "d77ca1688f8b231e7b1526fd6b7bcad1b49dbdc897c9d7335064bb68a7f3607c",
+      "manifest_path": "configs/experiments/contrastive_lf_null_fit_manifest.json",
+      "role_id": "contrastive_lf_null_fit"
+    },
+    {
+      "entries_digest": "199b17c5c76157178b602f0abfe0d356ca35f1ca624542b3f1978f4fb4e064a3",
+      "manifest_digest": "137e56f2df31766ca1038e1d53a6e1d2667adb4d3d8b92982e222f868dcbd50b",
+      "manifest_path": "configs/experiments/contrastive_lf_candidate_selection_manifest.json",
+      "role_id": "contrastive_lf_candidate_selection"
+    },
+    {
+      "entries_digest": "26334fd5cbd15172e5d07970723288a6cb2c72be24c23dd27c4b0903424cd1a9",
+      "manifest_digest": "13b9d9e7972483be363a3bdaa54597c1691191095c5022077e613d3c0e91a171",
+      "manifest_path": "configs/experiments/contrastive_lf_untouched_confirmation_manifest.json",
+      "role_id": "contrastive_lf_untouched_confirmation"
+    }
+  ],
+  "maximum_condition_false_positive_count": 3,
+  "maximum_record_attempts": 1,
+  "minimum_blur_complement_success_count": 24,
+  "minimum_identity_attribution_success_count": 28,
+  "pillow_version": "12.3.0",
+  "prompt_roster_digest": "92bdc0daa75425878345b4747f8d63233cd64ce49a7abcaa9db427cdc8de3548",
+  "prompt_roster_path": "configs/experiments/contrastive_lf_branch_attribution_prompt_roster.json",
+  "protocol_id": "contrastive_lf_branch_attribution",
+  "provisional_threshold_rule": "nextafter(fourth_largest_z,+inf)",
+  "quality_epsilon_float64_hex": "0x1.0203040506070p-16",
+  "quality_epsilon_formula": "(1/255)^2",
+  "result_classifications": [
+    "success",
+    "scientific_failure",
+    "insufficient_evidence",
+    "operational_failure"
+  ],
+  "roles": [
+    "contrastive_lf_null_fit",
+    "contrastive_lf_candidate_selection",
+    "contrastive_lf_untouched_confirmation"
+  ],
+  "schema_version": 1,
+  "source_cluster_count": 32,
+  "source_roster_rows_digest": "7d55ce5897f0fe33c0ff3c815d2ea45618a60666ed086cd8a915ac037d371792",
+  "threshold_positive_comparison": "z_greater_than_or_equal_to_tau",
+  "zero_science_boundary": {
+    "candidate_promoted": false,
+    "diagnostic_only": true,
+    "downstream_protocol_requires_separate_authorization": true,
+    "formal_fpr_created": false,
+    "formal_tau_created": false,
+    "full_ceg_wm_eligible": false
+  }
+}

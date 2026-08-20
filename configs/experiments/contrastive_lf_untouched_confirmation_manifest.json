@@ -1,0 +1,337 @@
+{
+  "candidate_family_id": "contrastive_lf_branch_attribution",
+  "candidate_ids": [
+    "lf_multiscale_lowpass_contrastive",
+    "lf_five_by_five_lowpass_contrastive"
+  ],
+  "entries": [
+    {
+      "generation_seed": 202608210200,
+      "image_lineage_digest": "8a22aa270f8d0582630665a17ab95356a47989681d5e93a3c15497fff031182b",
+      "image_lineage_identity": "b2613c76460934a3f7739b06f8eba1305cd61342156b6885f41ccbd6355efa19",
+      "prompt_digest": "cc961a95829f3572bb32d42320c0dcdbe3d1349510c14b9bc42f18bb14348f78",
+      "prompt_text": "a taxi",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "416479938ddf8a275ff2741ba0f6f039545c2b7922dd3236a12f751fc9fe26ce",
+      "source_row": 196
+    },
+    {
+      "generation_seed": 202608210201,
+      "image_lineage_digest": "a99d01005c325d29dd3b30ac99d592c5bb249a2ac07d8048584b5b584e0ff948",
+      "image_lineage_identity": "59b6b854574c10ebc690139ad7c0bfa52936f334e5935e7bf798de5e71ffa901",
+      "prompt_digest": "9886b0cc856d559d94ef7e2b837df034a592a902a8849d8ee58cb197d19cb621",
+      "prompt_text": "a road",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "61dd023402eeb64b7fc2fceb07902af97e6baf3b373a1d1a3e5e7ea1230de12c",
+      "source_row": 197
+    },
+    {
+      "generation_seed": 202608210202,
+      "image_lineage_digest": "dfc0d021af67d85b3d67b96812435bd642289a8d1e07b8704cd935fff2d13667",
+      "image_lineage_identity": "8d6c01bb89d763e5d28ae9ccaedb5eca5b1cec33f4e6efeab6719ea287598191",
+      "prompt_digest": "6872efd32f6f4ca2dd02412a9905be227228a29cbc1af9c00e80f7f333caa923",
+      "prompt_text": "a volcano",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "3192b71685d9ede1e3b3d5ce3aefec88585bc8a49213547588bbd5bbac9b6632",
+      "source_row": 198
+    },
+    {
+      "generation_seed": 202608210203,
+      "image_lineage_digest": "dbffe27acc264d47f4b2e100ea375b5396fed7594d9039754b7b3c0289149dfe",
+      "image_lineage_identity": "5c89d0e656f9c63112dba3d72ace8f1d7edff5212895dcb13906eca79c109043",
+      "prompt_digest": "fa90d5ce02455f4e9290dca11f209a687e284ccaa9ac29d015e241cd839f2925",
+      "prompt_text": "a large open book",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "6dd7c3902787f1c07975f671ee809fa20dff2e976a0629c847c262a5e13dbab7",
+      "source_row": 199
+    },
+    {
+      "generation_seed": 202608210204,
+      "image_lineage_digest": "2f2db4b28d364603203c687ce80d7de422bdc0a701f3be9c477b577a10eb6c96",
+      "image_lineage_identity": "32010e26d414f1a2ef2775d9facb9eaea80b487f4da0c41986644b536f478a3a",
+      "prompt_digest": "9434ed1dd480f12df1784130362467fdbec669b8a4168a95a24ccabf3aa3253b",
+      "prompt_text": "a living room",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "c9edb2439121a6c1d01e0d0a6ae1e0b6d10f1d97dc41f9c03343346561941105",
+      "source_row": 200
+    },
+    {
+      "generation_seed": 202608210205,
+      "image_lineage_digest": "f9015f10d3f8210b2cfa5684b803cdb067e2fbe4fc3df8fa91e4ae95caa7c609",
+      "image_lineage_identity": "cf8f810c4ad6360505f2d765448b64c7c2949dbd75a0f6d8d4505976f3f1e8d0",
+      "prompt_digest": "8b94b960d779474f3f02154943f70a0147d5dfc69695ec37b652e366321ce13e",
+      "prompt_text": "an elephant",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "cc346a93296b72ae915c951f14deb3b74015aba352c444ae1985c8c468712c5e",
+      "source_row": 201
+    },
+    {
+      "generation_seed": 202608210206,
+      "image_lineage_digest": "cd9477b8e52f7521b730ac67a563330fbd3dda28b00d649a9178e7e23276f573",
+      "image_lineage_identity": "efcc5f5a439d2823bb512095541b4e9168fe60749abb6d8afcc4263c36589972",
+      "prompt_digest": "3772490f916f9552aaf44abb1c0046039eaa558e619f9d8ad48ac9c9af5e49b8",
+      "prompt_text": "a tree",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "e0a6c320768be4450d1c9a0a4453a897c1bc183c43f0ea5114d3805d632b7cf1",
+      "source_row": 202
+    },
+    {
+      "generation_seed": 202608210207,
+      "image_lineage_digest": "5cdde0806240c12f96e4acfa8bcd44de49e42d2a6bf4ac9d154aefef0d9d5ff7",
+      "image_lineage_identity": "559f7a58b2781aada10fe8795ffa8c15056dda311a0d5cb4782cdc8e55a1b7c5",
+      "prompt_digest": "ada8fb9fc718f47c8a78b5ee0fe8dcf3af2b3d92da71c1211c382df12cf1580b",
+      "prompt_text": "a dolphin",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "021ff187517733e2b90be7c4f3f24de6796e8362352c269d8fd04a35ae000990",
+      "source_row": 203
+    },
+    {
+      "generation_seed": 202608210208,
+      "image_lineage_digest": "a09593f82f72d635fd2ddfa18fc967de0e35af8e367d5a4c1b19bcf1e0e03b6d",
+      "image_lineage_identity": "7ab998776a4cc486be963cdec08840c11f7280a82995026984b3869d4037bad7",
+      "prompt_digest": "eca88a8f26dc58e1e4cf9bcfcdca3cfe55706a57c58dcc746fbfd0a6819c4163",
+      "prompt_text": "a rowboat",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "203f9b35d5e57dba6989c5d0da3d673f2ea33a3585e7ce151961a11b20862ea3",
+      "source_row": 204
+    },
+    {
+      "generation_seed": 202608210209,
+      "image_lineage_digest": "3d3d8798e85cd7fd400e7c9d6fb7dfaf6ae5995b40cf0dfe0e1b54df48b0d1f3",
+      "image_lineage_identity": "da025951f3c60d7b29b18e8fc59078f9a4724dc4d56ebb2f7dc7c7a93368b378",
+      "prompt_digest": "24d61c2ed784d0fb9cfed85f13ab07cf89a3c9d1de5b51e649f5557989e922a7",
+      "prompt_text": "a crown",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "ddc590cbce3573ad1c4197d9ff0de874a62c2c04ebd93e0e0a27152e91b1dfc8",
+      "source_row": 205
+    },
+    {
+      "generation_seed": 202608210210,
+      "image_lineage_digest": "5b42ae5d0e2338c497e414eda4e8ff3a442aaf5276345c59d6cf6feaa2b41f68",
+      "image_lineage_identity": "26deba222eeb8b5d4265ae3ba43b7d5fbdc0a01944104821a6c2311e27aec13d",
+      "prompt_digest": "d92596df023bf5bb9027e587461a475825fcc98b546e7018f344c83e344f10b2",
+      "prompt_text": "a pick-up truck",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "eadde8ad62fe6be285d587950da4ee0eea069fc3c7c8286c63e3fecc35b05118",
+      "source_row": 206
+    },
+    {
+      "generation_seed": 202608210211,
+      "image_lineage_digest": "a6204be90eaf5b1bfb7c6301b668b9f2fb25410f1ff044a7fe5d7c9b9fa80a71",
+      "image_lineage_identity": "b514b5d6700dbf9d1c7a197705bd04214983bde0342316ac5da423edad4cd6a8",
+      "prompt_digest": "8fa3aab2faa9b79e0a0398da5b5abd0780142442a5be80b9a64608d718cb1fcd",
+      "prompt_text": "a key",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "66658c3b7534d35ff4fc28ddb5fee7f3454f00a80db4ec9e1246ec159113a410",
+      "source_row": 207
+    },
+    {
+      "generation_seed": 202608210212,
+      "image_lineage_digest": "62b3b18368e139ee5454ebffd51adc76eef9fa631a1b038abd805f11e9be28f1",
+      "image_lineage_identity": "7f28a01ec0c5f4ef20103f926b9afc5b83322ec4a8dd06537a03fd4d7080733a",
+      "prompt_digest": "0b4c4d126e76c1ea8cf169478cb0186cbe173caf5ced1e34138bc354162b4d80",
+      "prompt_text": "a goat",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "c6627ef4f5da5e8e3b42d3fe9816aa7e3167090c191c11737dac2636eede3766",
+      "source_row": 208
+    },
+    {
+      "generation_seed": 202608210213,
+      "image_lineage_digest": "bc5d15c9a8676d6143c882187947439997cd237ca5a2ffcb4114beab08a17fe6",
+      "image_lineage_identity": "6bb1297b49f8d7c13f52a9e6ceb5a2a46e5cb9e1379b63b6a477b8efa306b126",
+      "prompt_digest": "6120cf2860609576ed117a0098f513597a4e3a1c00f455acd793db88d78c26ad",
+      "prompt_text": "a chest",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "b3b53d926b18cae4aa19695a97d6fdd97def0518b1c71d13127257b3c354ff67",
+      "source_row": 209
+    },
+    {
+      "generation_seed": 202608210214,
+      "image_lineage_digest": "fa436c29002c4e6ec8e04f53c6268df5db0a7dd3a295c0a674489eac22f7476b",
+      "image_lineage_identity": "576fdc4f6997cf7d080d43afe9047a0d51bfe592c82358570bc84a870e55d1fa",
+      "prompt_digest": "fd071185221c9f8bf4ebf2dcf004063a1df063d68a09c7b5888730690357c91c",
+      "prompt_text": "a coffee table",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "86d12b9d17ea02ec57c23e6e73e049fa30ddd972d13fa83c3ee7da3af8b092ee",
+      "source_row": 210
+    },
+    {
+      "generation_seed": 202608210215,
+      "image_lineage_digest": "102f69abd3ef37ec8d408417d482e9ca51d4fbe83573f97ce93b413311f7438d",
+      "image_lineage_identity": "4ca6c2b06c1a55296dc28eb67b39046a311209da70a8496277b9be34fbdf7391",
+      "prompt_digest": "1b67616c4bc3af5566cac22491d048fad2bdd4f6eca2742b4390f3d7a419cd0e",
+      "prompt_text": "toy cars",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "006842b7e1bd3f3916bed4c85f8634659763dfb13ada3cdf056a06ab376cf172",
+      "source_row": 211
+    },
+    {
+      "generation_seed": 202608210216,
+      "image_lineage_digest": "3644908e85ccf48c19f0940fdfaf9934985751455dd40e0a58d20337928e1b70",
+      "image_lineage_identity": "a5347e1c5dbaa7815227a78067883d5ae839c6d394ab099ee9a1b55ccf99cbaa",
+      "prompt_digest": "537462cf9d6aa6216ab3a72d2741451c97f02e2963f1d4eb841937e1c581e919",
+      "prompt_text": "a bookshelf",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "cc0acef129ad82e271c50f38cac1b73f5322364dce20bdd4d8386c8c4e93c476",
+      "source_row": 212
+    },
+    {
+      "generation_seed": 202608210217,
+      "image_lineage_digest": "01c6a5eee62ff9cbf3cd2d2c965a8276a03c60d1c6ca7a838e02832662905593",
+      "image_lineage_identity": "b706a9974b8fc7f2b66274432bc3fda44f6978f758d0676c68019304aef63ba7",
+      "prompt_digest": "7bcd0f182d906d8e5c1dfbe656720d51d545da8f491f35da2c627badb29731cf",
+      "prompt_text": "the moon",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "517425af7f1f0a1990510bee308be5aa693f8dc5be2ff1181a1c8b0187629852",
+      "source_row": 213
+    },
+    {
+      "generation_seed": 202608210218,
+      "image_lineage_digest": "cf1942564dbb649a28a0da6e6b176b5ce21b71c9743a571a036247040b018910",
+      "image_lineage_identity": "14d11417cb06369e9f53d50f47e7a129fbf8a209aff80ea003ab1672229989ee",
+      "prompt_digest": "130b52d6c53f14f4fc765aeb7609e2da439e90033eb1cd48349adfc23aec10cc",
+      "prompt_text": "the Earth",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "cf644e101127eae1dce052bd1ab6b5bfbc972b9a5a04ae338943ef3498f9adf8",
+      "source_row": 214
+    },
+    {
+      "generation_seed": 202608210219,
+      "image_lineage_digest": "340cf122c3d32862e8bdcafdcf8a5ad2a491c5db540991c756221500e2a70232",
+      "image_lineage_identity": "32639ca20702910cfd578d813bc01644501f0b0b0ca6a4d3da6993c74d727ba7",
+      "prompt_digest": "527af549e90ec708b7d202cf8adde80fa0fa57f2c3406c3f4e30bd98073207aa",
+      "prompt_text": "the International Space Station",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "f02a8f20083411daa643a5700f42ad67950ad93b08034738a2ae46918790eb76",
+      "source_row": 215
+    },
+    {
+      "generation_seed": 202608210220,
+      "image_lineage_digest": "0718d4192644936350a069f2a958010623fb0bc2f385eee820c5d8b3cec8a787",
+      "image_lineage_identity": "074511a0b426054324a102f24512fc8343094c3e5d4fc0444fb78485163bcd66",
+      "prompt_digest": "95bfcceef9a8361a6063d65be77a8e16032d3dc24f0f02ecd1b7ed64299bcf6e",
+      "prompt_text": "the planet Jupiter",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "b7d765fe7d23de80d711291953384816b3c2e6292b23cd6738378bb231c4929d",
+      "source_row": 216
+    },
+    {
+      "generation_seed": 202608210221,
+      "image_lineage_digest": "1c5487b1f365fc3d049e77798bf8baa482585e4543c73b93ce24dab29e43e1c5",
+      "image_lineage_identity": "25dce4f3407e31581aee59391f80f32340035d067b6cfbf25fcc46d6393fc199",
+      "prompt_digest": "f7c3c02a258b9c63c686a01bfd3704e44f677fc5819f46a7939d5646470cd3fd",
+      "prompt_text": "a tornado",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "7b9d77a62a21fd023383e132149a345006096ed24a131356ccd1216fc8296cd7",
+      "source_row": 217
+    },
+    {
+      "generation_seed": 202608210222,
+      "image_lineage_digest": "5442b92d99c41cbe3c10a15ed14f9d15ad08ab16ac6263c4646a5eeebe519fac",
+      "image_lineage_identity": "04c55872137427b1d2826f6e7ebc6dfe92dbe3cfc87b6378c02577dfb827b6c0",
+      "prompt_digest": "6423b2a755a132c24830da299fe0ba65a732acf9041d9c3667b782ff921f897d",
+      "prompt_text": "a tidal wave",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "d03951907c6e94dae4f79a71b6251029e4584e90e4bf8405a7622a6a6c0cc990",
+      "source_row": 218
+    },
+    {
+      "generation_seed": 202608210223,
+      "image_lineage_digest": "3ac1ef9a575473fae8a670087da7eb44d4758a2bc6c7dc0638b6740f6b9d68f8",
+      "image_lineage_identity": "795577b80b7b448fd78c94565ac445a1db817a69a4efb964cbeaa70a39b7ca15",
+      "prompt_digest": "0a08755eb2abf5bdab0c18b54b1cc98126d6a2ce710cbbdb1656ba426f1d7330",
+      "prompt_text": "a laptop screen",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "2fa201906eb71afc330c73855dd39172fce0a330b74a1ec8ae18bdf9f636527f",
+      "source_row": 219
+    },
+    {
+      "generation_seed": 202608210224,
+      "image_lineage_digest": "59a1a5a63b6d6f9707d5969d1b83bd2e9f4f9bce63313256093961fa54b8e608",
+      "image_lineage_identity": "b65d9f6222d7be38c555a89939c4bc92c13dd738797cf55a6ea2514cf557e167",
+      "prompt_digest": "e4a02badaa19837d589eaae080714ef8fe778b43448ee1c9748b046f51d366c0",
+      "prompt_text": "an airplane",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "1ebbeb3e39eb5f902d52e54b9c253403179cb0b74591cd06236cd8c2379e9513",
+      "source_row": 220
+    },
+    {
+      "generation_seed": 202608210225,
+      "image_lineage_digest": "9b13aef8448702b4bdc9fd953a1e9d451a0338007b7832267ea8756885b5f85d",
+      "image_lineage_identity": "afe36e6427909bca96bd5d1df858702773fac628f10d8fc6527ef5bb260818c5",
+      "prompt_digest": "ac62ea368ae7ae5ac6972497ac1abc2f0c39902d7f5f278bfeac52302cda2961",
+      "prompt_text": "a butterfly",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "b664020add775f51a50308c0c188a384c039f9e88c9ad62764238a1d4beba491",
+      "source_row": 221
+    },
+    {
+      "generation_seed": 202608210226,
+      "image_lineage_digest": "a01e34fe53559c7b768817ddc8b88e801694a6d2bdc01e806b373ada353db118",
+      "image_lineage_identity": "d9ca88ffea743c9474050ecddb58626c95d429a494e52feacf56f684ce0bbc62",
+      "prompt_digest": "294e25a427837ab7d68b1e909f31f69d0a4dc025beb3fd989e8416c44fb4bb03",
+      "prompt_text": "a lizard",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "811f084195c5010c4d9abf96d6dfc4fcf6a39ba3c276c7884fecdfbbbbb21156",
+      "source_row": 222
+    },
+    {
+      "generation_seed": 202608210227,
+      "image_lineage_digest": "898a2f5d3c2d5944e798995ff233cc35e798e8224f65a7943976bb3665b6964a",
+      "image_lineage_identity": "ab7a99253c092ebd5f5796e92401733d01daf80947bfd3972ef89e0576d2a7ae",
+      "prompt_digest": "6307c35a8ffb412e18cd4ebf7de5d5047afe250a1579e69ba590fcc1df8b33bc",
+      "prompt_text": "a turtle",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "f545e7f1417b35343b80f344091c0e927aaf6f6484d44ff1657f31809da94223",
+      "source_row": 223
+    },
+    {
+      "generation_seed": 202608210228,
+      "image_lineage_digest": "e78d4967335f0d34e8c541bacd55d2cd5e3d51198f75ca9b5780436854628cf2",
+      "image_lineage_identity": "79852aa8a634e012ff0738565a9948d79ca865053b57a0356f30ff9d72134a6a",
+      "prompt_digest": "377e07edff0cafea2aa678b0c5090b12d0c829c43e226459fc0c5e4e7a9e946c",
+      "prompt_text": "an octopus",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "cdb00bb874a0696ff2e9c0b0e5f2fdd2a5a5a4b7e084559ffe830eaa146c22d9",
+      "source_row": 224
+    },
+    {
+      "generation_seed": 202608210229,
+      "image_lineage_digest": "1e5de1a25d53bc0a2b6affc302082fa90df9e88dbde529d6302c9da1fe342222",
+      "image_lineage_identity": "4b9aa171cf79857a027658e141567225a70613af3226bb95b3e083c7a75e9a9f",
+      "prompt_digest": "ae35964219d1b24bba10a2fba9551a06219d701a8f3fff6e80750d09f4f3b495",
+      "prompt_text": "a book",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "16558987e4554b57144438879e3feed67cf0de71dbb855bbaa8c62843912fe20",
+      "source_row": 225
+    },
+    {
+      "generation_seed": 202608210230,
+      "image_lineage_digest": "f371b72d604fe126e17d7f0b0ce735641abfb96d7c8762390af1286cbd0814cd",
+      "image_lineage_identity": "4ed01759b4b5c48b884c64861aa3712aa597bae97a8911a23a52d83820213a90",
+      "prompt_digest": "b37ab83ddcec6c8bada6da2b190d7d3444345c87809a9801e276adc35d3de8c2",
+      "prompt_text": "a moose",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "b74151fc55d26b1a3ea05e734bc5b989e36bc83617bdef7cd8dd8ab71d502ad2",
+      "source_row": 226
+    },
+    {
+      "generation_seed": 202608210231,
+      "image_lineage_digest": "09053019865f6bff3738878effadb337fcab0075d652b9dbe1b0f94ca5e3aee3",
+      "image_lineage_identity": "a7f742d3a0b73418a5e980ae1726d31134041969eecad65915f97d64a3117fc1",
+      "prompt_digest": "c6428fec8bade703ddd0aab2c35bdd1cfff5fe57b096697aede5555a87e6d4e3",
+      "prompt_text": "a kachina doll",
+      "registered_key_family_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+      "source_cluster_id": "d7f19bf85b467c9e9cc7f448c5102fcbd793e078b0f55719308d24800a3e86db",
+      "source_row": 227
+    }
+  ],
+  "entries_digest": "26334fd5cbd15172e5d07970723288a6cb2c72be24c23dd27c4b0903424cd1a9",
+  "manifest_digest": "13b9d9e7972483be363a3bdaa54597c1691191095c5022077e613d3c0e91a171",
+  "protocol_id": "contrastive_lf_branch_attribution",
+  "registered_key_family_namespace_digest": "c94f68e1aaf69b710630d3a3401262c3a7af7afdeeffe6d0f9ea3eb63e1777b1",
+  "role_id": "contrastive_lf_untouched_confirmation",
+  "schema_version": 1,
+  "source_roster_path": "configs/experiments/contrastive_lf_branch_attribution_prompt_roster.json",
+  "source_roster_rows_digest": "7d55ce5897f0fe33c0ff3c815d2ea45618a60666ed086cd8a915ac037d371792"
+}

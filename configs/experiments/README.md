@@ -42,3 +42,26 @@ source clusters，prompt 完全互斥、并集覆盖全部 roster，且每个
 三个 loader 都拒绝未登记配置键，并分别重算 adapter、attack 和 metric registry
 摘要。该配置不包含固定 LF/HF 权重，不授权 runner、Notebook、GPU、baseline 或
 held-out 执行。
+
+## Contrastive LF branch-attribution preregistration
+
+`contrastive_lf_branch_attribution.json` 与同名前缀 roster/manifest 冻结
+`contrastive_lf_branch_attribution` 的协议面，尚不提供方法、runner、GPU 或
+Stage-B 执行实现。它从登记的 PartiPrompts snapshot 中按 raw row 升序选取经既有
+配置使用排除后的首 96 个唯一 prompt（rows 132--227），固定分成 32 null-fit、
+32 candidate-selection 与 32 untouched-confirmation；三个 split 的 prompt、source
+row、seed、lineage 与 source-cluster identity 全部互斥。
+
+Null-fit 预分配 32 clean observations 与 96 个 HF/multiscale/single raw null
+statistics。Selection 预分配 128 base generations、512 attacked observations、
+3840 detector records、96 budget records 与 384 paired-quality records；只有经认证
+selection artifact 指定的 winner 可进入 confirmation，其分母分别为 96、384、
+2560、64 与 256。每个 slot 只允许一次 attempt；首个失败保留 bounded reason，
+其后只允许完整 unstarted tail，不得截断、补样、替换或 resume。
+
+两项 LF candidate 的 internal decoy 与 external wrong-key roster 身份分离；阈值、
+population standardization、identity attribution、逐 condition null/wrong、blur
+complement、quality 与 binary32 budget 规则均由配置和 protocol loader 精确认证。
+该工作只建立 diagnostic/provisional 预登记：不创建 formal tau/FPR，不 promotion，
+不改变正式 HF-only detector，也不授权 Stage-B、模型运行、GPU 或 Colab。旧
+soft-route negative、W/CDF/tau/roster/result 均不得继承。
