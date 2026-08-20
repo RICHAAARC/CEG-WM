@@ -26,9 +26,13 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
         capture_output=True,
         text=True,
     ).stdout, "exact package integration requires the final clean committed checkout"
-    archives = (tmp_path / "first.zip", tmp_path / "second.zip")
+    archives = (
+        tmp_path / "first" / "candidate.zip",
+        tmp_path / "second" / "candidate.zip",
+    )
     manifests = []
     for archive in archives:
+        archive.parent.mkdir()
         subprocess.run(
             (sys.executable, str(BUILDER), "--repository-root", str(ROOT), "--source-revision", revision, "--output", str(archive)),
             check=True,
