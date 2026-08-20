@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 import json
 from math import isfinite, nextafter, sqrt
@@ -137,6 +137,9 @@ RESULT_CLASSIFICATIONS = (
     "operational_failure",
 )
 EXECUTION_STATUSES = ("completed", "failed", "unstarted")
+OPERATIONAL_FAILURE_CLASSES = frozenset(
+    {"runtime_failure", "dependency_failure", "codec_failure", "resource_failure"}
+)
 RECORD_KINDS = (
     "clean_base_observation",
     "null_statistic",
@@ -1096,24 +1099,38 @@ class ContrastiveLfRecord:
                 )
         elif self.execution_status == "failed":
             validate_bounded_failure(self.failure_class, self.failure_reason)
-        elif any(
-            value is not None
-            for value in (
-                self.raw_score,
-                self.registered_score,
-                self.wrong_key_score,
-                self.primary_null_score,
-                self.z_score,
-                self.key_margin,
-                self.budget_status,
-                self.materialization_replay_identity,
-                self.replay_digest,
-                self.paired_rgb8_mse,
-                self.failure_class,
-                self.failure_reason,
-            )
-        ) or self.internal_decoy_scores:
+            if _record_science_evidence_present(self):
+                raise ContrastiveLfProtocolError("failed_record_has_evidence")
+        elif (
+            _record_science_evidence_present(self)
+            or self.failure_class is not None
+            or self.failure_reason is not None
+            or self.nonfinite_detected
+        ):
             raise ContrastiveLfProtocolError("unstarted_record_has_evidence")
+
+
+def _record_science_evidence_present(record: ContrastiveLfRecord) -> bool:
+    return bool(record.internal_decoy_scores) or any(
+        value is not None
+        for value in (
+            record.raw_score,
+            record.registered_score,
+            record.wrong_key_score,
+            record.primary_null_score,
+            record.population_mean,
+            record.population_variance,
+            record.population_sigma,
+            record.null_asset_digest,
+            record.provisional_threshold_digest,
+            record.z_score,
+            record.key_margin,
+            record.budget_status,
+            record.materialization_replay_identity,
+            record.replay_digest,
+            record.paired_rgb8_mse,
+        )
+    )
 
 
 def validate_bounded_failure(
@@ -1187,6 +1204,189 @@ class DenominatorReport:
             raise ContrastiveLfProtocolError("denominator_report_invalid")
 
 
+_VALIDATED_COLLECTION_CAPABILITY = object()
+
+
+def _derive_record_collection(
+    records: tuple[ContrastiveLfRecord, ...],
+    *,
+    role_id: str,
+    selected_candidate_id: str | None,
+) -> tuple[
+    tuple[DenominatorReport, ...], str, ContrastiveLfRecord | None
+]:
+    if role_id not in {SELECTION_ROLE, CONFIRMATION_ROLE}:
+        raise ContrastiveLfProtocolError("record_collection_role_invalid")
+    if (
+        role_id == SELECTION_ROLE
+        and selected_candidate_id is not None
+    ) or (
+        role_id == CONFIRMATION_ROLE
+        and selected_candidate_id not in CANDIDATE_IDS
+    ):
+        raise ContrastiveLfProtocolError(
+            "record_collection_selected_candidate_invalid"
+        )
+    repository_root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(
+        repository_root / MANIFEST_PATHS[role_id], expected_role=role_id
+    )
+    expected_templates = build_record_templates(
+        manifest, selected_candidate_id=selected_candidate_id
+    )
+    if len(records) != len(expected_templates):
+        raise ContrastiveLfProtocolError("record_collection_length_drifted")
+    for record, expected_template in zip(
+        records, expected_templates, strict=True
+    ):
+        if (
+            type(record) is not ContrastiveLfRecord
+            or record.template != expected_template
+        ):
+            raise ContrastiveLfProtocolError(
+                "record_collection_template_drifted"
+            )
+    validate_failure_tail(records)
+    expected = DENOMINATORS_BY_ROLE[role_id]
+    expected_by_kind = {
+        "base_generation": expected.base_generation_count,
+        "attacked_observation": expected.attacked_observation_slot_count,
+        "detector": expected.detector_record_count,
+        "budget": expected.budget_record_count,
+        "quality": expected.quality_record_count,
+    }
+    reports = tuple(
+        DenominatorReport(
+            record_kind=record_kind,
+            expected_record_count=expected_count,
+            completed_record_count=sum(
+                record.template.record_kind == record_kind
+                and record.execution_status == "completed"
+                for record in records
+            ),
+            failed_record_count=sum(
+                record.template.record_kind == record_kind
+                and record.execution_status == "failed"
+                for record in records
+            ),
+            unstarted_record_count=sum(
+                record.template.record_kind == record_kind
+                and record.execution_status == "unstarted"
+                for record in records
+            ),
+        )
+        for record_kind, expected_count in expected_by_kind.items()
+    )
+    for report in reports:
+        report.validate()
+    failed_records = tuple(
+        record for record in records if record.execution_status == "failed"
+    )
+    if len(failed_records) > 1 or sum(
+        report.failed_record_count for report in reports
+    ) > 1:
+        raise ContrastiveLfProtocolError("record_collection_failure_count_invalid")
+    return (
+        reports,
+        canonical_digest([record.canonical_payload() for record in records]),
+        failed_records[0] if failed_records else None,
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ValidatedContrastiveLfRecordCollection:
+    """Exact record collection authority produced only by validation."""
+
+    role_id: str
+    selected_candidate_id: str | None
+    records: tuple[ContrastiveLfRecord, ...]
+    denominator_reports: tuple[DenominatorReport, ...]
+    record_collection_digest: str
+    failed_record: ContrastiveLfRecord | None
+    _capability: object = field(repr=False, compare=False)
+
+    def __init__(
+        self,
+        *,
+        role_id: str,
+        selected_candidate_id: str | None,
+        records: tuple[ContrastiveLfRecord, ...],
+        denominator_reports: tuple[DenominatorReport, ...],
+        record_collection_digest: str,
+        failed_record: ContrastiveLfRecord | None,
+        _capability: object,
+    ) -> None:
+        if _capability is not _VALIDATED_COLLECTION_CAPABILITY:
+            raise ContrastiveLfProtocolError(
+                "record_collection_capability_invalid"
+            )
+        object.__setattr__(self, "role_id", role_id)
+        object.__setattr__(self, "selected_candidate_id", selected_candidate_id)
+        object.__setattr__(self, "records", records)
+        object.__setattr__(self, "denominator_reports", denominator_reports)
+        object.__setattr__(self, "record_collection_digest", record_collection_digest)
+        object.__setattr__(self, "failed_record", failed_record)
+        object.__setattr__(self, "_capability", _capability)
+
+    def validate(self) -> None:
+        if self._capability is not _VALIDATED_COLLECTION_CAPABILITY:
+            raise ContrastiveLfProtocolError(
+                "record_collection_capability_invalid"
+            )
+        reports, digest, failed_record = _derive_record_collection(
+            self.records,
+            role_id=self.role_id,
+            selected_candidate_id=self.selected_candidate_id,
+        )
+        if (
+            reports != self.denominator_reports
+            or digest != self.record_collection_digest
+            or failed_record != self.failed_record
+        ):
+            raise ContrastiveLfProtocolError(
+                "record_collection_capability_drifted"
+            )
+
+    @property
+    def denominator_complete(self) -> bool:
+        return all(
+            report.completed_record_count == report.expected_record_count
+            for report in self.denominator_reports
+        )
+
+    @property
+    def operational_failure_observed(self) -> bool:
+        return (
+            self.failed_record is not None
+            and self.failed_record.failure_class in OPERATIONAL_FAILURE_CLASSES
+        )
+
+
+def validate_record_collection(
+    records: Sequence[ContrastiveLfRecord],
+    *,
+    role_id: str,
+    selected_candidate_id: str | None = None,
+) -> ValidatedContrastiveLfRecordCollection:
+    """Validate exact templates, statuses, denominators, and collection digest."""
+
+    record_tuple = tuple(records)
+    reports, digest, failed_record = _derive_record_collection(
+        record_tuple,
+        role_id=role_id,
+        selected_candidate_id=selected_candidate_id,
+    )
+    return ValidatedContrastiveLfRecordCollection(
+        role_id=role_id,
+        selected_candidate_id=selected_candidate_id,
+        records=record_tuple,
+        denominator_reports=reports,
+        record_collection_digest=digest,
+        failed_record=failed_record,
+        _capability=_VALIDATED_COLLECTION_CAPABILITY,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class GateReport:
     gate_id: str
@@ -1208,6 +1408,7 @@ class ContrastiveLfProtocolResult:
     role_id: str
     sample_manifest_digest: str
     manifest_entries_digest: str
+    record_collection_digest: str
     denominator_reports: tuple[DenominatorReport, ...]
     gate_reports: tuple[GateReport, ...]
     first_failed_gate: str | None
@@ -1220,13 +1421,27 @@ class ContrastiveLfProtocolResult:
     formal_fpr_created: bool
     full_ceg_wm_eligible: bool
 
-    def validate(self) -> None:
+    def validate(
+        self,
+        validated_collection: ValidatedContrastiveLfRecordCollection,
+    ) -> None:
+        if type(validated_collection) is not ValidatedContrastiveLfRecordCollection:
+            raise ContrastiveLfProtocolError(
+                "protocol_result_record_collection_invalid"
+            )
+        validated_collection.validate()
         if (
             self.schema_version != SCHEMA_VERSION
             or self.protocol_id != PROTOCOL_ID
             or self.role_id not in {SELECTION_ROLE, CONFIRMATION_ROLE}
             or self.sample_manifest_digest != MANIFEST_DIGESTS[self.role_id]
             or self.manifest_entries_digest != ENTRIES_DIGESTS[self.role_id]
+            or _DIGEST.fullmatch(self.record_collection_digest) is None
+            or self.role_id != validated_collection.role_id
+            or self.record_collection_digest
+            != validated_collection.record_collection_digest
+            or self.denominator_reports
+            != validated_collection.denominator_reports
             or self.result_classification not in RESULT_CLASSIFICATIONS
             or type(self.candidate_selection_passed) is not bool
             or type(self.confirmation_passed) is not bool
@@ -1274,23 +1489,28 @@ class ContrastiveLfProtocolResult:
         gates_pass = all(
             report.gate_status == "passed" for report in self.gate_reports
         )
-        if self.result_classification == "success":
-            if not complete or not gates_pass:
-                raise ContrastiveLfProtocolError("success_result_invalid")
-        elif self.result_classification == "scientific_failure":
-            if not complete or expected_first is None:
-                raise ContrastiveLfProtocolError(
-                    "scientific_failure_result_invalid"
-                )
-        elif self.result_classification == "insufficient_evidence":
-            if complete:
-                raise ContrastiveLfProtocolError(
-                    "insufficient_evidence_result_invalid"
-                )
-        elif self.result_classification == "operational_failure" and complete:
+        if complete != validated_collection.denominator_complete:
+            raise ContrastiveLfProtocolError("denominator_completion_drifted")
+        expected_classification = classify_result(
+            validated_collection=validated_collection,
+            scientific_gates_passed=gates_pass,
+        )
+        if self.result_classification != expected_classification:
             raise ContrastiveLfProtocolError(
-                "operational_failure_result_invalid"
+                "result_classification_drifted"
             )
+        if not complete and (
+            expected_first is not None
+            or any(
+                report.gate_status != "not_evaluable"
+                for report in self.gate_reports
+            )
+        ):
+            raise ContrastiveLfProtocolError("incomplete_gate_report_invalid")
+        if complete and self.result_classification == "scientific_failure" and (
+            expected_first is None
+        ):
+            raise ContrastiveLfProtocolError("scientific_failure_result_invalid")
         if self.role_id == SELECTION_ROLE:
             expected_selection_pass = self.result_classification == "success"
             if (
@@ -1311,6 +1531,13 @@ class ContrastiveLfProtocolResult:
             is not (self.result_classification == "success")
         ):
             raise ContrastiveLfProtocolError("confirmation_result_invalid")
+        if self.role_id == CONFIRMATION_ROLE and (
+            self.selected_candidate_id
+            != validated_collection.selected_candidate_id
+        ):
+            raise ContrastiveLfProtocolError(
+                "confirmation_collection_candidate_drifted"
+            )
 
 
 def population_standardize(
@@ -1461,28 +1688,24 @@ def choose_selection_winner(
 
 def classify_result(
     *,
-    denominator_complete: bool,
-    operational_failure_observed: bool,
+    validated_collection: ValidatedContrastiveLfRecordCollection,
     scientific_gates_passed: bool,
 ) -> str:
     """Apply the exact operational/insufficient/scientific/success partition."""
 
-    if any(
-        type(value) is not bool
-        for value in (
-            denominator_complete,
-            operational_failure_observed,
-            scientific_gates_passed,
-        )
+    if (
+        type(validated_collection) is not ValidatedContrastiveLfRecordCollection
+        or type(scientific_gates_passed) is not bool
     ):
         raise ContrastiveLfProtocolError("classification_input_invalid")
-    if operational_failure_observed:
-        if denominator_complete:
+    validated_collection.validate()
+    if validated_collection.operational_failure_observed:
+        if validated_collection.denominator_complete:
             raise ContrastiveLfProtocolError(
                 "completed_denominator_operational_failure_invalid"
             )
         return "operational_failure"
-    if not denominator_complete:
+    if not validated_collection.denominator_complete:
         return "insufficient_evidence"
     if not scientific_gates_passed:
         return "scientific_failure"
@@ -1571,6 +1794,7 @@ __all__ = [
     "SOURCE_ROSTER_ROWS_DIGEST",
     "SOURCE_SNAPSHOT_SHA256",
     "SOURCE_SNAPSHOT_PATH",
+    "ValidatedContrastiveLfRecordCollection",
     "authenticate_selection_artifact",
     "blur_complement_passes",
     "branch_key_margin",
@@ -1588,5 +1812,6 @@ __all__ = [
     "provisional_tau",
     "quality_gate_passes",
     "validate_failure_tail",
+    "validate_record_collection",
     "validate_split_disjointness",
 ]

@@ -1137,6 +1137,7 @@ FPR、promotion 或 Stage-B 执行权威。
 | quality_epsilon_formula | persisted_protocol | method_parameter | none | false | false | false | Paired RGB8 quality epsilon 的精确公式。 |
 | quality_record_count | persisted_protocol | protocol | none | true | false | false | 当前职责预分配的 paired RGB8 quality record 固定分母。 |
 | raw_null_statistic_count | persisted_protocol | protocol | none | true | false | false | Null-fit 保存的 HF/multiscale/single raw statistic 总数。 |
+| record_collection_digest | persisted_protocol | provenance | none | true | false | false | 通过 exact template、逐记录 schema 与全局 failure-tail 验证后，对完整有序 record collection canonical payload 计算的 SHA-256；result 必须绑定同一 digest。 |
 | reference_input_allowed | persisted_protocol | protocol | none | false | false | false | Detector 是否允许读取 reference image；固定为 false。 |
 | registered_key_family_namespace_digest | persisted_protocol | provenance | none | true | false | false | 本协议所有 split 绑定的 public registered key-family namespace digest。 |
 | registered_score | persisted_protocol | method_statistic | none | true | false | false | Registered-key detector raw score。 |

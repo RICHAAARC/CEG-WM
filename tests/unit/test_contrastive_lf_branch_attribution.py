@@ -45,6 +45,7 @@ from experiments.protocol.contrastive_lf_branch_attribution import (
     SOURCE_ROSTER_ROWS_DIGEST,
     SOURCE_SNAPSHOT_SHA256,
     SOURCE_SNAPSHOT_PATH,
+    ValidatedContrastiveLfRecordCollection,
     authenticate_selection_artifact,
     blur_complement_passes,
     branch_key_margin,
@@ -62,6 +63,7 @@ from experiments.protocol.contrastive_lf_branch_attribution import (
     provisional_tau,
     quality_gate_passes,
     validate_failure_tail,
+    validate_record_collection,
     validate_split_disjointness,
 )
 
@@ -170,33 +172,104 @@ def _record(template, **overrides: object) -> ContrastiveLfRecord:
     return ContrastiveLfRecord(**payload)
 
 
-def _denominator_reports(role_id: str, *, complete: bool):
-    expected = DENOMINATORS_BY_ROLE[role_id]
-    counts = (
-        ("base_generation", expected.base_generation_count),
-        ("attacked_observation", expected.attacked_observation_slot_count),
-        ("detector", expected.detector_record_count),
-        ("budget", expected.budget_record_count),
-        ("quality", expected.quality_record_count),
-    )
-    reports = []
-    for ordinal, (record_kind, expected_count) in enumerate(counts):
-        if complete:
-            completed, failed, unstarted = expected_count, 0, 0
-        elif ordinal == 0:
-            completed, failed, unstarted = expected_count - 1, 1, 0
-        else:
-            completed, failed, unstarted = 0, 0, expected_count
-        reports.append(
-            DenominatorReport(
-                record_kind=record_kind,
-                expected_record_count=expected_count,
-                completed_record_count=completed,
-                failed_record_count=failed,
-                unstarted_record_count=unstarted,
-            )
+def _completed_record(template) -> ContrastiveLfRecord:
+    evidence: dict[str, object] = {}
+    if template.record_kind in {"null_statistic", "detector"}:
+        evidence["raw_score"] = 1.0
+        evidence["internal_decoy_scores"] = (0.0,) * (
+            template.internal_decoy_score_count
         )
-    return tuple(reports)
+        if template.control_identity == "registered_attribution":
+            evidence["registered_score"] = 1.0
+        elif template.control_identity == "external_wrong_key":
+            evidence["wrong_key_score"] = 1.0
+        elif template.control_identity == "paired_primary_null":
+            evidence["primary_null_score"] = 1.0
+    elif template.record_kind == "budget":
+        evidence.update(
+            budget_status="accepted",
+            materialization_replay_identity="ordinary_rgb8_materialization",
+            replay_digest="a" * 64,
+        )
+    elif template.record_kind == "quality":
+        evidence["paired_rgb8_mse"] = 0.0
+    return _record(template, **evidence)
+
+
+def _validated_collection(
+    role_id: str,
+    *,
+    selected_candidate_id: str | None = None,
+    failure_index: int | None = None,
+    failure_class: str = "operation_failure",
+) -> ValidatedContrastiveLfRecordCollection:
+    manifest = load_manifest(
+        ROOT / MANIFEST_PATHS[role_id], expected_role=role_id
+    )
+    templates = build_record_templates(
+        manifest, selected_candidate_id=selected_candidate_id
+    )
+    if failure_index is None:
+        records = tuple(_completed_record(template) for template in templates)
+    else:
+        records = tuple(
+            _completed_record(template)
+            if ordinal < failure_index
+            else _record(
+                template,
+                execution_status="failed",
+                failure_class=failure_class,
+                failure_reason="bounded_record_failure",
+            )
+            if ordinal == failure_index
+            else _record(template, execution_status="unstarted")
+            for ordinal, template in enumerate(templates)
+        )
+    return validate_record_collection(
+        records,
+        role_id=role_id,
+        selected_candidate_id=selected_candidate_id,
+    )
+
+
+def _result(
+    collection: ValidatedContrastiveLfRecordCollection,
+    *,
+    gate_reports: tuple[GateReport, ...],
+    result_classification: str,
+    selected_candidate_id: str | None,
+) -> ContrastiveLfProtocolResult:
+    role_id = collection.role_id
+    return ContrastiveLfProtocolResult(
+        schema_version=1,
+        protocol_id=PROTOCOL_ID,
+        role_id=role_id,
+        sample_manifest_digest=MANIFEST_DIGESTS[role_id],
+        manifest_entries_digest=ENTRIES_DIGESTS[role_id],
+        record_collection_digest=collection.record_collection_digest,
+        denominator_reports=collection.denominator_reports,
+        gate_reports=gate_reports,
+        first_failed_gate=next(
+            (
+                report.gate_id
+                for report in gate_reports
+                if report.gate_status == "failed"
+            ),
+            None,
+        ),
+        result_classification=result_classification,
+        candidate_selection_passed=(
+            role_id == CONFIRMATION_ROLE or result_classification == "success"
+        ),
+        confirmation_passed=(
+            role_id == CONFIRMATION_ROLE and result_classification == "success"
+        ),
+        selected_candidate_id=selected_candidate_id,
+        candidate_promoted=False,
+        formal_tau_created=False,
+        formal_fpr_created=False,
+        full_ceg_wm_eligible=False,
+    )
 
 
 @pytest.mark.unit
@@ -225,6 +298,27 @@ def test_config_roster_and_manifests_replay_exact_frozen_digests() -> None:
         assert manifest.entries_digest == ENTRIES_DIGESTS[manifest.role_id]
         assert manifest.manifest_digest == MANIFEST_DIGESTS[manifest.role_id]
         assert len(manifest.entries) == CLUSTER_COUNT
+    frozen_file_sha256 = {
+        CONFIG_PATH: (
+            "75f58f28a5991de906611573d2d6d9133ff47e806357e630ca47dc7de7464a8c"
+        ),
+        PROMPT_ROSTER_PATH: (
+            "352e2762c4828af3c536ff3a6e0dd5a78a00cdd13a839656d59d311e7418bdc5"
+        ),
+        MANIFEST_PATHS[NULL_FIT_ROLE]: (
+            "e598c3c7aa952dc87317f4f4f5a14cbff56645d5d991dded419d2d16830e7710"
+        ),
+        MANIFEST_PATHS[SELECTION_ROLE]: (
+            "73099470250254bd8930e8873a48752a6290de4bfa0523cf0776dea56d4d0562"
+        ),
+        MANIFEST_PATHS[CONFIRMATION_ROLE]: (
+            "f44f87d3aa8c888154927c384cbc6814cfdf3b75c4fcbfd685ff7812e66ab15b"
+        ),
+    }
+    assert {
+        path: sha256((ROOT / path).read_bytes()).hexdigest()
+        for path in frozen_file_sha256
+    } == frozen_file_sha256
 
 
 @pytest.mark.unit
@@ -482,24 +576,27 @@ def test_hierarchy_classification_and_confirmation_admission_are_frozen() -> Non
         multiscale_passed=False, single_scale_passed=False
     ) is None
 
+    complete_collection = _validated_collection(SELECTION_ROLE)
+    operational_collection = _validated_collection(
+        SELECTION_ROLE, failure_index=0, failure_class="runtime_failure"
+    )
+    incomplete_collection = _validated_collection(
+        SELECTION_ROLE, failure_index=0, failure_class="operation_failure"
+    )
     assert classify_result(
-        denominator_complete=False,
-        operational_failure_observed=True,
+        validated_collection=operational_collection,
         scientific_gates_passed=False,
     ) == "operational_failure"
     assert classify_result(
-        denominator_complete=False,
-        operational_failure_observed=False,
+        validated_collection=incomplete_collection,
         scientific_gates_passed=False,
     ) == "insufficient_evidence"
     assert classify_result(
-        denominator_complete=True,
-        operational_failure_observed=False,
+        validated_collection=complete_collection,
         scientific_gates_passed=False,
     ) == "scientific_failure"
     assert classify_result(
-        denominator_complete=True,
-        operational_failure_observed=False,
+        validated_collection=complete_collection,
         scientific_gates_passed=True,
     ) == "success"
 
@@ -575,6 +672,56 @@ def test_failure_tail_and_bounded_record_schema_fail_closed() -> None:
     with pytest.raises(TypeError):
         ContrastiveLfRecord(**{**asdict(records[0]), "unexpected_field": 1})
 
+    forbidden_evidence = {
+        "raw_score": 1.0,
+        "internal_decoy_scores": (0.0,),
+        "registered_score": 1.0,
+        "wrong_key_score": 1.0,
+        "primary_null_score": 1.0,
+        "population_mean": 0.0,
+        "population_variance": 1.0,
+        "population_sigma": 1.0,
+        "null_asset_digest": "a" * 64,
+        "provisional_threshold_digest": "b" * 64,
+        "z_score": 0.0,
+        "key_margin": 0.0,
+        "budget_status": "accepted",
+        "materialization_replay_identity": "ordinary_rgb8_materialization",
+        "replay_digest": "c" * 64,
+        "paired_rgb8_mse": 0.0,
+    }
+    for field_name, field_value in forbidden_evidence.items():
+        with pytest.raises(ContrastiveLfProtocolError, match="has_evidence"):
+            _record(
+                templates[2],
+                execution_status="unstarted",
+                **{field_name: field_value},
+            ).validate()
+        with pytest.raises(ContrastiveLfProtocolError, match="has_evidence"):
+            _record(
+                templates[1],
+                execution_status="failed",
+                failure_class="operation_failure",
+                failure_reason="bounded_generation_failure",
+                **{field_name: field_value},
+            ).validate()
+    with pytest.raises(ContrastiveLfProtocolError, match="has_evidence"):
+        _record(
+            templates[2],
+            execution_status="unstarted",
+            nonfinite_detected=True,
+        ).validate()
+    for field_name, field_value in (
+        ("failure_class", "operation_failure"),
+        ("failure_reason", "bounded_generation_failure"),
+    ):
+        with pytest.raises(ContrastiveLfProtocolError, match="has_evidence"):
+            _record(
+                templates[2],
+                execution_status="unstarted",
+                **{field_name: field_value},
+            ).validate()
+
     lf_detector_template = next(
         template
         for template in build_record_templates(_manifests()[1])
@@ -598,25 +745,14 @@ def test_failure_tail_and_bounded_record_schema_fail_closed() -> None:
 @pytest.mark.unit
 def test_protocol_result_keeps_all_gate_reports_and_independent_statuses() -> None:
     passing_gates = tuple(GateReport(gate_id, "passed") for gate_id in GATE_ORDER)
-    selection_success = ContrastiveLfProtocolResult(
-        schema_version=1,
-        protocol_id=PROTOCOL_ID,
-        role_id=SELECTION_ROLE,
-        sample_manifest_digest=MANIFEST_DIGESTS[SELECTION_ROLE],
-        manifest_entries_digest=ENTRIES_DIGESTS[SELECTION_ROLE],
-        denominator_reports=_denominator_reports(SELECTION_ROLE, complete=True),
+    selection_collection = _validated_collection(SELECTION_ROLE)
+    selection_success = _result(
+        selection_collection,
         gate_reports=passing_gates,
-        first_failed_gate=None,
         result_classification="success",
-        candidate_selection_passed=True,
-        confirmation_passed=False,
         selected_candidate_id=MULTISCALE_CANDIDATE_ID,
-        candidate_promoted=False,
-        formal_tau_created=False,
-        formal_fpr_created=False,
-        full_ceg_wm_eligible=False,
     )
-    selection_success.validate()
+    selection_success.validate(selection_collection)
 
     failed_gates = tuple(
         GateReport(
@@ -633,42 +769,33 @@ def test_protocol_result_keeps_all_gate_reports_and_independent_statuses() -> No
         candidate_selection_passed=False,
         selected_candidate_id=None,
     )
-    scientific_failure.validate()
+    scientific_failure.validate(selection_collection)
     assert len(scientific_failure.gate_reports) == len(GATE_ORDER)
 
-    insufficient = replace(
-        selection_success,
-        denominator_reports=_denominator_reports(SELECTION_ROLE, complete=False),
+    operational_collection = _validated_collection(
+        SELECTION_ROLE, failure_index=4, failure_class="runtime_failure"
+    )
+    operational = _result(
+        operational_collection,
         gate_reports=tuple(
             GateReport(gate_id, "not_evaluable") for gate_id in GATE_ORDER
         ),
-        result_classification="insufficient_evidence",
-        candidate_selection_passed=False,
+        result_classification="operational_failure",
         selected_candidate_id=None,
     )
-    insufficient.validate()
+    operational.validate(operational_collection)
 
-    confirmation_success = ContrastiveLfProtocolResult(
-        schema_version=1,
-        protocol_id=PROTOCOL_ID,
-        role_id=CONFIRMATION_ROLE,
-        sample_manifest_digest=MANIFEST_DIGESTS[CONFIRMATION_ROLE],
-        manifest_entries_digest=ENTRIES_DIGESTS[CONFIRMATION_ROLE],
-        denominator_reports=_denominator_reports(
-            CONFIRMATION_ROLE, complete=True
-        ),
-        gate_reports=passing_gates,
-        first_failed_gate=None,
-        result_classification="success",
-        candidate_selection_passed=True,
-        confirmation_passed=True,
+    confirmation_collection = _validated_collection(
+        CONFIRMATION_ROLE,
         selected_candidate_id=MULTISCALE_CANDIDATE_ID,
-        candidate_promoted=False,
-        formal_tau_created=False,
-        formal_fpr_created=False,
-        full_ceg_wm_eligible=False,
     )
-    confirmation_success.validate()
+    confirmation_success = _result(
+        confirmation_collection,
+        gate_reports=passing_gates,
+        result_classification="success",
+        selected_candidate_id=MULTISCALE_CANDIDATE_ID,
+    )
+    confirmation_success.validate(confirmation_collection)
     confirmation_failure = replace(
         confirmation_success,
         gate_reports=failed_gates,
@@ -676,8 +803,111 @@ def test_protocol_result_keeps_all_gate_reports_and_independent_statuses() -> No
         result_classification="scientific_failure",
         confirmation_passed=False,
     )
-    confirmation_failure.validate()
+    confirmation_failure.validate(confirmation_collection)
     assert confirmation_failure.selected_candidate_id == MULTISCALE_CANDIDATE_ID
+
+    with pytest.raises(ContrastiveLfProtocolError):
+        replace(
+            selection_success, record_collection_digest="f" * 64
+        ).validate(selection_collection)
+    denominator_drift = replace(
+        selection_collection.denominator_reports[0],
+        completed_record_count=(
+            selection_collection.denominator_reports[0].completed_record_count - 1
+        ),
+        unstarted_record_count=1,
+    )
+    with pytest.raises(ContrastiveLfProtocolError):
+        replace(
+            selection_success,
+            denominator_reports=(
+                denominator_drift,
+                *selection_collection.denominator_reports[1:],
+            ),
+        ).validate(selection_collection)
+    with pytest.raises(ContrastiveLfProtocolError):
+        selection_success.validate(
+            {"record_collection_validated": True}  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.unit
+def test_record_collection_rejects_order_identity_and_global_failure_tamper() -> None:
+    collection = _validated_collection(SELECTION_ROLE)
+    records = collection.records
+    with pytest.raises(ContrastiveLfProtocolError):
+        validate_record_collection(
+            (records[1], records[0], *records[2:]), role_id=SELECTION_ROLE
+        )
+    with pytest.raises(ContrastiveLfProtocolError):
+        validate_record_collection(records[:-1], role_id=SELECTION_ROLE)
+    with pytest.raises(ContrastiveLfProtocolError):
+        validate_record_collection((*records, records[-1]), role_id=SELECTION_ROLE)
+    with pytest.raises(ContrastiveLfProtocolError):
+        validate_record_collection(records, role_id=CONFIRMATION_ROLE)
+    with pytest.raises(ContrastiveLfProtocolError):
+        validate_record_collection(
+            (
+                replace(
+                    records[0],
+                    template=replace(records[0].template, record_id="f" * 64),
+                ),
+                *records[1:],
+            ),
+            role_id=SELECTION_ROLE,
+        )
+
+    failed_indexes = tuple(
+        next(
+            ordinal
+            for ordinal, record in enumerate(records)
+            if record.template.record_kind == record_kind
+        )
+        for record_kind in (
+            "base_generation",
+            "attacked_observation",
+            "detector",
+            "budget",
+            "quality",
+        )
+    )
+    five_failures = tuple(
+        _record(
+            record.template,
+            execution_status="failed",
+            failure_class="operation_failure",
+            failure_reason="bounded_record_failure",
+        )
+        if ordinal in failed_indexes
+        else record
+        for ordinal, record in enumerate(records)
+    )
+    with pytest.raises(ContrastiveLfProtocolError):
+        validate_record_collection(five_failures, role_id=SELECTION_ROLE)
+
+    forged_reports = tuple(
+        DenominatorReport(
+            record_kind=report.record_kind,
+            expected_record_count=report.expected_record_count,
+            completed_record_count=report.expected_record_count - 1,
+            failed_record_count=1,
+            unstarted_record_count=0,
+        )
+        for report in collection.denominator_reports
+    )
+    with pytest.raises(ContrastiveLfProtocolError):
+        replace(
+            _result(
+                collection,
+                gate_reports=tuple(
+                    GateReport(gate_id, "not_evaluable")
+                    for gate_id in GATE_ORDER
+                ),
+                result_classification="insufficient_evidence",
+                selected_candidate_id=None,
+            ),
+            denominator_reports=forged_reports,
+        ).validate(collection)
 
 
 @pytest.mark.unit
@@ -757,6 +987,7 @@ def test_field_registry_covers_contrastive_lf_persisted_protocol_surface() -> No
         "population_sigma",
         "null_asset_digest",
         "provisional_threshold_digest",
+        "record_collection_digest",
         "nonfinite_detected",
         "expected_record_count",
         "completed_record_count",
