@@ -9,6 +9,11 @@ from zipfile import ZipFile
 
 import pytest
 
+from scripts.experiment_execution.build_contrastive_lf_branch_attribution_package import (
+    ContrastiveLfPackageError,
+    _parse_roster_exclusion_bindings,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILDER = ROOT / "scripts/experiment_execution/build_contrastive_lf_branch_attribution_package.py"
@@ -46,6 +51,34 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
         source.extractall(tmp_path / "extracted")
     embedded = json.loads((tmp_path / "extracted/contrastive_lf_branch_attribution_package_manifest.json").read_text())
     assert embedded["package_ready"] is True
+    roster_path = tmp_path / (
+        "extracted/configs/experiments/"
+        "contrastive_lf_branch_attribution_prompt_roster.json"
+    )
+    roster = json.loads(roster_path.read_text(encoding="utf-8"))
+    binding_paths = [
+        binding["relative_path"]
+        for binding in roster["exclusion_source_bindings"]
+    ]
+    assert len(binding_paths) == len(set(binding_paths)) == 30
+    copied_paths = {entry["path"] for entry in embedded["copied_files"]}
+    assert set(binding_paths) <= copied_paths
+    assert set(binding_paths) <= set(names)
+
+    invalid_roster = dict(roster)
+    invalid_roster["exclusion_source_bindings"] = list(
+        roster["exclusion_source_bindings"]
+    )
+    invalid_roster["exclusion_source_bindings"][1] = dict(
+        invalid_roster["exclusion_source_bindings"][0]
+    )
+    with pytest.raises(
+        ContrastiveLfPackageError,
+        match="prompt roster exclusion path is duplicated",
+    ):
+        _parse_roster_exclusion_bindings(
+            json.dumps(invalid_roster).encode("utf-8")
+        )
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
     bootstrap = tmp_path / "extracted/scripts/experiment_execution/contrastive_lf_branch_attribution_bootstrap.py"
@@ -80,3 +113,33 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
         text=True,
     )
     assert imported.returncode == 0, imported.stderr
+    loaded = subprocess.run(
+        (
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                "from experiments.protocol.contrastive_lf_branch_attribution "
+                "import load_manifest; "
+                "root=Path(sys.argv[1]); "
+                "null_fit=load_manifest(root/'configs/experiments/"
+                "contrastive_lf_null_fit_manifest.json', "
+                "expected_role='contrastive_lf_null_fit'); "
+                "selection=load_manifest(root/'configs/experiments/"
+                "contrastive_lf_candidate_selection_manifest.json', "
+                "expected_role='contrastive_lf_candidate_selection'); "
+                "assert null_fit.role_id == 'contrastive_lf_null_fit'; "
+                "assert selection.role_id == 'contrastive_lf_candidate_selection'"
+            ),
+            str(tmp_path / "extracted"),
+        ),
+        cwd=unrelated,
+        env={
+            "PATH": "/nonexistent",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPATH": str(tmp_path / "extracted"),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert loaded.returncode == 0, loaded.stderr

@@ -17,7 +17,11 @@ from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
 PROFILE = "contrastive_lf_branch_attribution_stage_a"
 EMBEDDED_MANIFEST = "contrastive_lf_branch_attribution_package_manifest.json"
+PROMPT_ROSTER_PATH = (
+    "configs/experiments/contrastive_lf_branch_attribution_prompt_roster.json"
+)
 REVISION = re.compile(r"^[0-9a-f]{40}$")
+SHA256_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 LOCAL_PATH = re.compile(rb"(?<![A-Za-z0-9_])(?:/(?:home|Users|mnt|tmp|var|opt|root)/|[A-Za-z]:[\\/])")
 SEED_FILES = frozenset(
     {
@@ -33,7 +37,7 @@ SEED_FILES = frozenset(
 DATA_FILES = frozenset(
     {
         "configs/experiments/contrastive_lf_branch_attribution.json",
-        "configs/experiments/contrastive_lf_branch_attribution_prompt_roster.json",
+        PROMPT_ROSTER_PATH,
         "configs/experiments/contrastive_lf_null_fit_manifest.json",
         "configs/experiments/contrastive_lf_candidate_selection_manifest.json",
         "configs/experiments/contrastive_lf_branch_attribution_execution.json",
@@ -77,6 +81,58 @@ def _available_paths(root: Path, revision: str) -> set[str]:
     raw = _git(root, "ls-tree", "-r", "--name-only", revision)
     assert isinstance(raw, str)
     return set(raw.splitlines())
+
+
+def _parse_roster_exclusion_bindings(blob: bytes) -> tuple[tuple[str, str], ...]:
+    try:
+        roster = json.loads(blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ContrastiveLfPackageError("prompt roster data is not valid JSON") from exc
+    if type(roster) is not dict:
+        raise ContrastiveLfPackageError("prompt roster data is not a mapping")
+    bindings = roster.get("exclusion_source_bindings")
+    if type(bindings) is not list or len(bindings) != 30:
+        raise ContrastiveLfPackageError("prompt roster exclusion bindings drifted")
+    parsed: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for binding in bindings:
+        if type(binding) is not dict or set(binding) != {
+            "file_sha256",
+            "relative_path",
+        }:
+            raise ContrastiveLfPackageError("prompt roster exclusion binding is invalid")
+        relative_path = binding["relative_path"]
+        expected_sha256 = binding["file_sha256"]
+        if type(relative_path) is not str or type(expected_sha256) is not str:
+            raise ContrastiveLfPackageError("prompt roster exclusion binding is invalid")
+        member_path = PurePosixPath(relative_path)
+        if relative_path != member_path.as_posix():
+            raise ContrastiveLfPackageError("prompt roster exclusion path is not canonical")
+        _safe(relative_path, b"")
+        if SHA256_DIGEST.fullmatch(expected_sha256) is None:
+            raise ContrastiveLfPackageError("prompt roster exclusion digest is invalid")
+        if relative_path in seen:
+            raise ContrastiveLfPackageError("prompt roster exclusion path is duplicated")
+        seen.add(relative_path)
+        parsed.append((relative_path, expected_sha256))
+    return tuple(parsed)
+
+
+def _roster_exclusion_paths(
+    root: Path, revision: str, available: set[str]
+) -> tuple[str, ...]:
+    bindings = _parse_roster_exclusion_bindings(
+        _blob(root, revision, PROMPT_ROSTER_PATH)
+    )
+    paths: list[str] = []
+    for relative_path, expected_sha256 in bindings:
+        if relative_path not in available:
+            raise ContrastiveLfPackageError("prompt roster exclusion source is missing")
+        blob = _blob(root, revision, relative_path)
+        if sha256(blob).hexdigest() != expected_sha256:
+            raise ContrastiveLfPackageError("prompt roster exclusion source drifted")
+        paths.append(relative_path)
+    return tuple(paths)
 
 
 def _resolve_imports(path: str, blob: bytes, available: set[str]) -> set[str]:
@@ -138,6 +194,7 @@ def _source_closure(root: Path, revision: str) -> tuple[str, ...]:
                 if dependency not in closure:
                     pending.append(dependency)
     closure.update(DATA_FILES)
+    closure.update(_roster_exclusion_paths(root, revision, available))
     if not closure <= available:
         raise ContrastiveLfPackageError("required package data is missing")
     return tuple(sorted(closure))
