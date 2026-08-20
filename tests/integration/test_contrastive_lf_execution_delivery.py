@@ -118,7 +118,7 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
             sys.executable,
             "-c",
             (
-                "from pathlib import Path; "
+                "import sys; from pathlib import Path; "
                 "from experiments.protocol.contrastive_lf_branch_attribution "
                 "import load_manifest; "
                 "root=Path(sys.argv[1]); "
