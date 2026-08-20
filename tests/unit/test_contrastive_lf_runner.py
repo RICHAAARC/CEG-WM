@@ -307,3 +307,24 @@ def test_resumable_runner_commits_one_cluster_then_continues_same_behavior_ident
     assert second.completed_null_fit_units == 2
     assert second.completed_selection_units == 0
     assert second.producer_revisions == ("1" * 40, "2" * 40)
+
+
+def test_resumable_runner_reports_the_resolved_run_before_claiming_a_unit(
+    tmp_path: Path,
+) -> None:
+    resolved: list[StageACommittedUnitStore] = []
+    operations = FakeOperations()
+    outcome = execute_stage_a_resumable(
+        *_manifests(),
+        operations,
+        runs_root=tmp_path,
+        new_run_id="contrastive-lf-branch-attribution-" + "6" * 32,
+        session_id="stage-a-session-" + "6" * 32,
+        package_sha256="6" * 64,
+        stop_requested=lambda: True,
+        resolved_run_callback=resolved.append,
+    )
+    assert len(resolved) == 1
+    assert resolved[0].run_root.name == outcome.run_id
+    assert outcome.completed_null_fit_units == 0
+    assert outcome.session_status == "interrupted_resumable"

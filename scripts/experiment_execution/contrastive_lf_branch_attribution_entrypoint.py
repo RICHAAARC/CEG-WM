@@ -22,6 +22,7 @@ from experiments.runners.contrastive_lf_branch_attribution import (
     execute_stage_a_resumable,
     execute_stage_a_null_fit_and_selection,
 )
+from experiments.runners.development_persistence import StageACommittedUnitStore
 from scripts.experiment_execution.contrastive_lf_branch_attribution_server import (
     finalize_contrastive_lf_delivery,
     finalize_contrastive_lf_preexecution_failure,
@@ -93,7 +94,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not arguments.execute:
         parser.error("--execute is required")
     operations = None
+    resolved_store: StageACommittedUnitStore | None = None
     stop_requested = False
+
+    def bind_resolved_store(store: StageACommittedUnitStore) -> None:
+        nonlocal resolved_store
+        if resolved_store is not None and resolved_store.run_root != store.run_root:
+            raise RuntimeError("Stage-A resolved run identity changed")
+        resolved_store = store
 
     def request_stop(_signum: int, _frame: object) -> None:
         nonlocal stop_requested
@@ -124,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             session_id=arguments.session_id,
             package_sha256=arguments.package_sha256,
             stop_requested=lambda: stop_requested,
+            resolved_run_callback=bind_resolved_store,
         )
         if outcome.execution_result is None:
             receipt = {
@@ -152,8 +161,76 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(receipt, sort_keys=True))
         return code
-    except Exception as exc:
-        run_parent = Path(arguments.runs_root) / arguments.new_run_id
+    except (Exception, KeyboardInterrupt) as exc:
+        run_parent = (
+            resolved_store.run_root
+            if resolved_store is not None
+            else Path(arguments.runs_root) / arguments.new_run_id
+        )
+        if resolved_store is not None:
+            units = resolved_store.committed_units()
+            revisions = tuple(
+                sorted({str(unit["producer_revision"]) for unit in units})
+            )
+            snapshot_index = len(
+                tuple((resolved_store.run_root / "snapshots").glob("*.zip"))
+            )
+            cache_diagnostics = (
+                operations.cache_diagnostics()
+                if operations is not None
+                else {
+                    "cache_entry_count": 0,
+                    "cache_hit_count": 0,
+                    "cache_miss_count": 0,
+                    "vae_encode_count": 0,
+                }
+            )
+            snapshot = resolved_store.write_snapshot(
+                session_id=arguments.session_id,
+                snapshot_index=snapshot_index,
+                payload={
+                    "behavior_identity_digest": resolved_store.behavior_identity_digest,
+                    "cache_diagnostics": cache_diagnostics,
+                    "committed_unit_count": len(units),
+                    "failure_reason": type(exc).__name__[:120],
+                    "producer_revisions": list(revisions),
+                    "reason": "resolved_run_operational_failure",
+                    "run_id": resolved_store.run_root.name,
+                    "session_id": arguments.session_id,
+                },
+            )
+            session_status = (
+                "interrupted_resumable" if units else "operational_failure"
+            )
+            session_payload = {
+                "behavior_identity_digest": resolved_store.behavior_identity_digest,
+                "cache_diagnostics": cache_diagnostics,
+                "committed_unit_count": len(units),
+                "ended_at_utc": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "failure_reason": type(exc).__name__[:120],
+                "heterogeneous_revisions": len(revisions) > 1,
+                "most_recent_snapshot_path": snapshot["archive_path"],
+                "producer_revision": arguments.observed_repository_revision,
+                "producer_revisions": list(revisions),
+                "result_classification": "operational_failure",
+                "run_id": resolved_store.run_root.name,
+                "session_id": arguments.session_id,
+                "session_status": session_status,
+            }
+            resolved_store.write_session_receipt(arguments.session_id, session_payload)
+            if units:
+                print(json.dumps(session_payload, sort_keys=True))
+                return 3
+            code, receipt = finalize_contrastive_lf_preexecution_failure(
+                observed_repository_revision=arguments.observed_repository_revision,
+                run_id=resolved_store.run_root.name,
+                output_root=resolved_store.run_root / "final",
+                failure_reason=type(exc).__name__[:120],
+            )
+            print(json.dumps(receipt, sort_keys=True))
+            return code
         run_root = run_parent / "final"
         if not run_root.exists():
             code, receipt = finalize_contrastive_lf_preexecution_failure(

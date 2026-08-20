@@ -987,6 +987,7 @@ def execute_stage_a_resumable(
     package_sha256: str,
     stop_requested: Callable[[], bool] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    resolved_run_callback: Callable[[StageACommittedUnitStore], None] | None = None,
 ) -> StageAResumableOutcome:
     """Execute Stage A as 64 authenticated cluster units with safe resume."""
 
@@ -1023,6 +1024,8 @@ def execute_stage_a_resumable(
         created_at_utc=utc_now(),
         initial_producer_revision=operations.implementation_revision,
     )
+    if resolved_run_callback is not None:
+        resolved_run_callback(store)
     started = monotonic()
     last_snapshot = started
     snapshot_index = len(tuple((store.run_root / "snapshots").glob("*.zip")))

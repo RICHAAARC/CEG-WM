@@ -9,6 +9,8 @@ from zipfile import ZipFile
 
 import pytest
 
+import scripts.experiment_execution.contrastive_lf_branch_attribution_entrypoint as entrypoint_module
+from experiments.runners.development_persistence import StageACommittedUnitStore
 from scripts.experiment_execution.build_contrastive_lf_branch_attribution_package import (
     ContrastiveLfPackageError,
     _parse_roster_exclusion_bindings,
@@ -194,3 +196,111 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
         / "sessions"
         / f"{smoke_session_id}.json"
     ).is_file()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("failure_type", (RuntimeError, KeyboardInterrupt))
+@pytest.mark.parametrize(
+    ("committed", "expected_code", "expected_status"),
+    ((False, 2, "operational_failure"), (True, 3, "interrupted_resumable")),
+)
+def test_resolved_run_failure_never_falls_back_to_fresh_run_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_type: type[BaseException],
+    committed: bool,
+    expected_code: int,
+    expected_status: str,
+) -> None:
+    runs_root = tmp_path / "runs"
+    old_run_id = "contrastive-lf-branch-attribution-" + "c" * 32
+    fresh_run_id = "contrastive-lf-branch-attribution-" + "d" * 32
+    session_id = "stage-a-session-" + "e" * 32
+    behavior_identity = {"protocol_id": "resolved-run-regression"}
+    store = StageACommittedUnitStore.discover_or_create(
+        runs_root,
+        behavior_identity=behavior_identity,
+        new_run_id=old_run_id,
+        created_at_utc="2026-08-21T00:00:00Z",
+        initial_producer_revision="1" * 40,
+    )
+    if committed:
+        store.commit_unit(
+            phase="null_fit",
+            cluster_ordinal=0,
+            source_cluster_id="a" * 64,
+            producer_revision="1" * 40,
+            session_id="stage-a-session-" + "f" * 32,
+            committed_at_utc="2026-08-21T00:01:00Z",
+            records=({"execution_status": "completed", "record_id": "b" * 64},),
+            evidence={},
+            status="completed",
+            cache_diagnostics={"vae_encode_count": 1},
+            package_sha256="2" * 64,
+        )
+
+    class Operations:
+        implementation_revision = "2" * 40
+
+        def cache_diagnostics(self) -> dict[str, int]:
+            return {
+                "cache_entry_count": 0,
+                "cache_hit_count": 0,
+                "cache_miss_count": 0,
+                "vae_encode_count": 0,
+            }
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(entrypoint_module, "load_manifest", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        entrypoint_module,
+        "create_adapter_backed_stage_a_operations",
+        lambda **_kwargs: Operations(),
+    )
+
+    def fail_after_resolution(*_args, resolved_run_callback, **_kwargs):
+        resolved_run_callback(store)
+        raise failure_type("bounded_post_resolution_failure")
+
+    monkeypatch.setattr(
+        entrypoint_module, "execute_stage_a_resumable", fail_after_resolution
+    )
+    code = entrypoint_module.main(
+        (
+            "--execute",
+            "--observed-repository-revision",
+            "2" * 40,
+            "--new-run-id",
+            fresh_run_id,
+            "--session-id",
+            session_id,
+            "--runs-root",
+            str(runs_root),
+            "--package-sha256",
+            "3" * 64,
+        )
+    )
+
+    assert code == expected_code
+    assert not (runs_root / fresh_run_id).exists()
+    session = json.loads(
+        (store.run_root / "sessions" / f"{session_id}.json").read_text()
+    )
+    assert session["run_id"] == old_run_id
+    assert session["session_status"] == expected_status
+    assert session["committed_unit_count"] == int(committed)
+    assert Path(session["most_recent_snapshot_path"]).is_file()
+    if committed:
+        assert not (store.run_root / "final").exists()
+    else:
+        final_root = store.run_root / "final"
+        delivery_receipt = json.loads(
+            (final_root / "contrastive_lf_execution_receipt.json").read_text()
+        )
+        result = json.loads(
+            (final_root / delivery_receipt["result_filename"]).read_text()
+        )
+        assert result["result_classification"] == "operational_failure"
+        assert result["scientific_unit_count"] == 0
