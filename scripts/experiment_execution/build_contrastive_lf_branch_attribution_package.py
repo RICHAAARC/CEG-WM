@@ -142,10 +142,11 @@ def _source_closure(root: Path, revision: str) -> tuple[str, ...]:
 
 def _safe(path_text: str, blob: bytes) -> None:
     path = PurePosixPath(path_text)
+    declared_root_data_file = len(path.parts) == 1 and path_text in DATA_FILES
     if (
         path.is_absolute()
         or not path.parts
-        or path.parts[0] not in ALLOWED_ROOTS
+        or (path.parts[0] not in ALLOWED_ROOTS and not declared_root_data_file)
         or any(part in FORBIDDEN_PARTS for part in path.parts)
         or ".." in path.parts
         or path.suffix in {".pyc", ".pyo"}
