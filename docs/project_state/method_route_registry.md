@@ -22,7 +22,9 @@
 
 ## Adopted Method Route
 
-状态：`implemented_not_scientifically_validated`。
+实现状态：`implemented_not_scientifically_validated`；当前 exact mechanism-validation
+candidate-selection 结果：`authenticated_development_negative`。前者只描述代码/API
+完成面，不能覆盖后者的机制裁决。
 
 当前五候选实现身份为：
 
@@ -40,7 +42,7 @@
 `02fe5dcc2b74482c9eb1e0b192b4a2ce79e0d9eb` 只保留为 semantic-domain 变更前的历史
 exact provenance，不是当前 readiness 或方法身份权威。本次 authority rebinding 的
 completion profile 状态为 `profile_pending`。
-该状态只表示实现/API/CPU-synthetic 语义已审核；soft max 仍是 diagnostic、未晋升，
+实现状态只表示实现/API/CPU-synthetic 语义已审核；soft max 仍是 diagnostic、未晋升，
 正式 detector 仍为 HF-only，`full_ceg_wm_eligible=false`。它不提供 runtime
 qualification、机制成功、calibration、固定 FPR、GPU 或科学效果证据。
 
@@ -70,7 +72,8 @@ qualification、机制成功、calibration、固定 FPR、GPU 或科学效果证
 设计采用 InSPyReNet soft probability 作为 `M`，采用确定性灰度 Sobel/P95 映射作为
 `T`，不要求逐图 Jacobian、SVD、显式零空间或 Self-Attention 几何锚点。准确公式和
 身份见 `docs/design`。这一路线是对开题“内容自适应潜空间水印 + 几何条件恢复”的
-最小忠实实现。当前已实现但未实验晋升，也未形成效果证据。
+最小忠实实现。当前 exact 候选已完成 mechanism-validation candidate selection 并形成下述开发负
+结果；它没有晋升，也没有形成 formal calibration、固定 FPR 或论文效果证据。
 
 历史 readiness 快照在 revision
 `0258ccb2100bfe8b58d1a12079876841192528b3` 绑定 11 个唯一候选身份和 28 个行为节点；
@@ -79,7 +82,37 @@ soft-route 五候选传递 CDF、threshold、calibration 或效果证据。
 
 ## Authenticated Development Negatives
 
-以下清单截至 2026-08-16 是当前仓库和已验真历史交付中可认证的 CEG-WM 开发负结果。
+以下清单截至 2026-08-20 是当前仓库和已验真历史交付中可认证的 CEG-WM 开发负结果。
+
+### Semantic-texture soft-route mechanism-validation candidate selection
+
+- exact candidate family：`routing_semantic_texture_soft`、
+  `content_embedding_semantic_texture_soft_lf_hf`、
+  `lf_semantic_texture_soft_whitened_matched_score`、
+  `hf_semantic_texture_soft_direct_score`、
+  `content_combination_semantic_texture_max_standardized`；
+- producer revision：`c46ef185c04ea76e48b8630cf5c0a70011cb9df5`；
+- detector asset bundle identity：
+  `f9dd6df410cb4f7895376c65c5f6d3e764f6cfddabd0d64d525fdaaefd93de3d`；
+- run：`semantic-texture-soft-route-candidate-selection-ab0dbf93033e4eada8b4a47920913f78`；
+- 固定分母：`160/160` generations、`384/384` detector records，全部完成；
+- 首个失败门：identity 条件下 soft-routed wrong-key max positives 为 `5`，超过冻结
+  上限 `3`；crop 条件另有多个后续冻结门未通过；
+- aggregate：`candidate_selection_passed=false`，confirmation 不获授权；未产生 formal
+  threshold、formal FPR、promotion 或论文效果结论；
+- evidence boundary：result、receipt 与 `SHA256SUMS` 已完成只读解析和固定分母复算；
+  Drive ZIP 当时为流式 placeholder，本次没有把 ZIP 声明哈希误写为现场重算；
+- 结论：该 exact mechanism-validation candidate-selection 身份为
+  `authenticated_development_negative`。Notebook 抛出的 RC2 是冻结候选未通过的返回，
+  不是执行、资源或 binary32 预算故障。
+
+禁止回流：不得重跑、续跑、补样、放宽 wrong-key/crop 门，或复用该 selection 的
+`W`、CDF、provisional `tau` 与 roster 调参后重新命名，也不得把失败事后归因于尚未
+加入几何链。该负结果只关闭上述 exact
+五候选的当前公式、资产和统计身份；它不否定内容自适应 LF/HF 研究问题、M/T 作为
+先验、不同 LF carrier/detector、受约束分支分配或后续独立几何链。继续研究必须建立
+新的 candidate identity 和前置登记协议。路线判断见
+[content_adaptive_lf_hf_route_review.md](content_adaptive_lf_hf_route_review.md)。
 
 ### `routing_stqr` fixed-half directional diagnosis
 
@@ -137,7 +170,9 @@ mask、erosion、coverage 门静默带入新软路由。
 状态：`not_yet_tested` 或 `implemented_not_scientifically_validated`，具体取决于所指
 实现身份。
 
-- LF 的独立盲 key attribution、primary-null FPR 和攻击互补性尚无完整方法晋升证据；
+- 当前 semantic-texture soft-route 五候选 exact family 已有上述 mechanism-validation 负结果；不同 LF
+  carrier/detector 的独立盲 key attribution、primary-null FPR 和攻击互补性仍是新的
+  开放研究问题，不得继承旧资产或旧 roster；
 - Q/K 的真实 observation/runtime 可用性不能替代 synchronization write、变换估计、
   reliability 和 rectification 的科学验证；
 - 联合判定的 CPU/synthetic 控制流不能替代完整 raw+rescue 固定 FPR；

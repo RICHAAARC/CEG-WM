@@ -67,9 +67,10 @@ CEG-WM 是一个双链生成式图像水印研究项目。项目以内容证据�
   方法架构与证据边界、内容/几何/联合判定设计、算法与候选冻结、真实方法实现、
   runtime qualification，以及实验协议与可追溯交付入口。该闭环已完成；这只表示实验执行准备就绪，
   不授权 calibration、hf_only_reference_validation 晋升、GPU 高成本运行或正式实验。
-- 正式 detector 仍为 HF-only；语义—纹理 soft-route 五候选为
-  `implemented_not_scientifically_validated`，soft max 仅作 diagnostic 且尚未实验
-  晋升，没有 calibration、固定 FPR、GPU 或科学效果证据。hard salient-object
+- 正式 detector 仍为 HF-only；语义—纹理 soft-route 五候选的实现状态仍为
+  `implemented_not_scientifically_validated`，但当前 exact mechanism-validation candidate selection
+  已形成 `authenticated_development_negative`。soft max 仍仅作 diagnostic、未晋升，
+  没有 formal calibration、固定 FPR 或论文效果证据。hard salient-object
   local-LF 四候选只作为 `superseded_without_scientific_adjudication` 历史候选保留；
   `full_ceg_wm_eligible=false`。
 - 既有 SD3.5 runtime qualification 只保留为原 producer/revision 上的历史窄证据，
