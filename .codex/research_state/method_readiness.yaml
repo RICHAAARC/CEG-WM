@@ -2,7 +2,7 @@
   "method_name": "ceg_wm_dual_chain",
   "design_path": "docs/design/method_architecture.md",
   "candidate_specification_path": "docs/design/candidate_specifications.md",
-  "candidate_specification_sha256": "d8846a731e7a32280d58cf801f4215a0f3f474ae4aa97bafd6162e9c1d998526",
+  "candidate_specification_sha256": "30a42a816b8db9189751c547cc245e1084f52c1eab999e08e8021fca859af2b8",
   "components": {
     "key_schedule": {
       "responsibility": "root_key_derivation_and_prg",
@@ -207,8 +207,8 @@
   },
   "independent_semantic_review": {
     "decision": "approve",
-    "review_reference": "A2-D1541C9527C7387D-SEMANTIC-20260819-01",
-    "reviewed_repository_revision": "d1541c9527c7387dc837c64c4e84cd3d4b1d010b",
-    "candidate_specification_sha256": "d8846a731e7a32280d58cf801f4215a0f3f474ae4aa97bafd6162e9c1d998526"
+    "review_reference": "agent2-fcba991-stagea-semantic-8e31c4",
+    "reviewed_repository_revision": "fcba9911b346fd5d4df74a5807cc806ffc12ed57",
+    "candidate_specification_sha256": "30a42a816b8db9189751c547cc245e1084f52c1eab999e08e8021fca859af2b8"
   }
 }
