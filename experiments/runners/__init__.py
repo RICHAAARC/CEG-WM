@@ -89,13 +89,17 @@ __all__ = [
     "AdapterBackedStageAOperations",
     "StageAExecutionResult",
     "StageANullFitArtifact",
+    "StageAResumableOutcome",
     "create_adapter_backed_stage_a_operations",
     "execute_stage_a_null_fit_and_selection",
+    "execute_stage_a_resumable",
 ]
 from .contrastive_lf_branch_attribution import (
     AdapterBackedStageAOperations,
     StageAExecutionResult,
     StageANullFitArtifact,
+    StageAResumableOutcome,
     create_adapter_backed_stage_a_operations,
     execute_stage_a_null_fit_and_selection,
+    execute_stage_a_resumable,
 )

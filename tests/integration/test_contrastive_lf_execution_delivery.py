@@ -143,3 +143,52 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
         text=True,
     )
     assert loaded.returncode == 0, loaded.stderr
+    runs_root = tmp_path / "runs"
+    launched = subprocess.run(
+        (
+            sys.executable,
+            str(bootstrap),
+            "--expected-revision",
+            revision,
+            "--expected-package-identity",
+            embedded["package_identity"],
+            "--expected-embedded-manifest-sha256",
+            sha256(
+                (
+                    tmp_path
+                    / "extracted/contrastive_lf_branch_attribution_package_manifest.json"
+                ).read_bytes()
+            ).hexdigest(),
+            "--new-run-id",
+            "contrastive-lf-branch-attribution-package-smoke",
+            "--session-id",
+            "stage-a-session-package-smoke",
+            "--runs-root",
+            str(runs_root),
+            "--package-sha256",
+            sha256(archives[0].read_bytes()).hexdigest(),
+        ),
+        cwd=unrelated,
+        env={"PATH": "/nonexistent", "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True,
+        text=True,
+    )
+    assert launched.returncode == 2, launched.stderr
+    final_root = (
+        runs_root
+        / "contrastive-lf-branch-attribution-package-smoke"
+        / "final"
+    )
+    receipt = json.loads(
+        (final_root / "contrastive_lf_execution_receipt.json").read_text()
+    )
+    result = json.loads((final_root / receipt["result_filename"]).read_text())
+    assert result["result_classification"] == "operational_failure"
+    assert result["science_started"] is False
+    assert result["scientific_unit_count"] == 0
+    assert (
+        runs_root
+        / "contrastive-lf-branch-attribution-package-smoke"
+        / "sessions"
+        / "stage-a-session-package-smoke.json"
+    ).is_file()

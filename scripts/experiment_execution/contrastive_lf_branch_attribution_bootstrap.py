@@ -63,8 +63,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--expected-package-identity", required=True)
     parser.add_argument("--expected-embedded-manifest-sha256", required=True)
     parser.add_argument("--authenticate-only", action="store_true")
-    parser.add_argument("--run-id")
-    parser.add_argument("--output-root")
+    parser.add_argument("--new-run-id")
+    parser.add_argument("--session-id")
+    parser.add_argument("--runs-root")
+    parser.add_argument("--package-sha256")
     arguments = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[2]
     try:
@@ -80,8 +82,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.authenticate_only:
         print(json.dumps({"package_identity": manifest["package_identity"], "science_started": False, "scientific_unit_count": 0, "status": "authenticated"}, sort_keys=True))
         return 0
-    if not arguments.run_id or not arguments.output_root:
-        parser.error("--run-id and --output-root are required for execution")
+    if not all(
+        (
+            arguments.new_run_id,
+            arguments.session_id,
+            arguments.runs_root,
+            arguments.package_sha256,
+        )
+    ):
+        parser.error(
+            "--new-run-id, --session-id, --runs-root and --package-sha256 are required"
+        )
     sys.dont_write_bytecode = True
     root_text = str(root)
     if not sys.path or sys.path[0] != root_text:
@@ -92,10 +103,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--execute",
             "--observed-repository-revision",
             arguments.expected_revision,
-            "--run-id",
-            arguments.run_id,
-            "--output-root",
-            arguments.output_root,
+            "--new-run-id",
+            arguments.new_run_id,
+            "--session-id",
+            arguments.session_id,
+            "--runs-root",
+            arguments.runs_root,
+            "--package-sha256",
+            arguments.package_sha256,
         )
     )
 

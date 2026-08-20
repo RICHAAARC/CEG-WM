@@ -110,9 +110,10 @@ def test_production_factory_constructs_public_backend_runtime_method_chain_witho
                 runtime_config_digest="1" * 64,
                 runtime_backend_name="diffusers_sd35_pipeline",
                 selected_device="cuda:0",
-                image_height=1024,
-                image_width=1024,
-            )
+                    image_height=1024,
+                    image_width=1024,
+                    vae_encode_protocol="posterior_mode_public_rgb8_binary32",
+                )
 
     class MethodAdapter:
         def __init__(self, configuration, runtime_adapter) -> None:

@@ -232,6 +232,27 @@ class ContrastiveLfContentArmWriteResult:
     write_identity: str
 
 
+@dataclass(frozen=True, slots=True)
+class ContrastiveLfPublicImageVaeObservation:
+    """Key-free public VAE observation reused by Stage-A detector scoring."""
+
+    lf_observation: LfDetectionObservation
+    hf_observation: HfDetectionObservation
+    input_rgb8_digest: str
+    runtime_observation_identity: str
+    preprocess_behavior_identity: str
+
+    @property
+    def cache_identity(self) -> str:
+        return _canonical_digest(
+            {
+                "input_rgb8_digest": self.input_rgb8_digest,
+                "preprocess_behavior_identity": self.preprocess_behavior_identity,
+                "runtime_observation_identity": self.runtime_observation_identity,
+            }
+        )
+
+
 def _canonical_digest(value: object) -> str:
     canonical = json.dumps(
         value,
@@ -1294,6 +1315,83 @@ class CegWmExperimentAdapter:
         )
 
     @_revalidate_configuration_before_call
+    def prepare_stage_a_public_rgb8_observation(
+        self,
+        detection_image_rgb8: torch.Tensor,
+    ) -> ContrastiveLfPublicImageVaeObservation:
+        """Encode one current public RGB8 image without consuming any key."""
+
+        if self._runtime_adapter is None:
+            raise CegWmExperimentAdapterError(
+                "Stage-A public observation requires a prepared runtime"
+            )
+        image = materialize_ordinary_rgb8_snapshot(detection_image_rgb8)
+        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(image)
+        latent = runtime_observation.detection_latent.detach().to(
+            device="cpu", dtype=torch.float32
+        ).contiguous()
+        values = tuple(float(value) for value in latent.reshape(-1).tolist())
+        shape = tuple(int(size) for size in latent.shape)
+        input_digest = sha256(
+            str(image.dtype).encode("ascii")
+            + repr(tuple(int(size) for size in image.shape)).encode("ascii")
+            + image.cpu().numpy().tobytes(order="C")
+        ).hexdigest()
+        behavior_identity = _canonical_digest(
+            {
+                "public_image_boundary": "ordinary_contiguous_rgb8_nchw",
+                "runtime_observation_identity": runtime_observation.observation_identity,
+                "vae_observation": "posterior_mode_binary32_16_channel",
+            }
+        )
+        return ContrastiveLfPublicImageVaeObservation(
+            lf_observation=LfDetectionObservation.from_public_image_encoding(
+                values, shape
+            ),
+            hf_observation=HfDetectionObservation.from_public_image_encoding(
+                values, shape
+            ),
+            input_rgb8_digest=input_digest,
+            runtime_observation_identity=runtime_observation.observation_identity,
+            preprocess_behavior_identity=behavior_identity,
+        )
+
+    @_revalidate_configuration_before_call
+    def score_contrastive_lf_prepared_observation(
+        self,
+        observation: ContrastiveLfPublicImageVaeObservation,
+        detection_key: str | DerivedWrongKeyMaterial,
+        *,
+        candidate_id: str,
+        null_asset: ContrastiveLfNullAsset | None = None,
+    ) -> ContrastiveLfRawObservation | ContrastiveLfDetectionResult:
+        if type(observation) is not ContrastiveLfPublicImageVaeObservation:
+            raise CegWmExperimentAdapterError("Stage-A LF public observation is invalid")
+        raw = contrastive_lf_raw_observation(
+            observation.lf_observation,
+            detection_key,
+            candidate_id=candidate_id,
+        )
+        if null_asset is None:
+            return raw
+        if null_asset.candidate_id != candidate_id:
+            raise CegWmExperimentAdapterError("Stage-A LF null asset identity drifted")
+        return contrastive_lf_detector(raw, null_asset)
+
+    @_revalidate_configuration_before_call
+    def score_stage_a_hf_prepared_observation(
+        self,
+        observation: ContrastiveLfPublicImageVaeObservation,
+        detection_key: str | DerivedWrongKeyMaterial,
+        *,
+        null_asset: HfPopulationNullAsset | None = None,
+    ) -> HfDetectionResult | HfPopulationStandardizedResult:
+        if type(observation) is not ContrastiveLfPublicImageVaeObservation:
+            raise CegWmExperimentAdapterError("Stage-A HF public observation is invalid")
+        raw = hf_detector(observation.hf_observation, detection_key)
+        return raw if null_asset is None else standardize_hf_population_score(raw, null_asset)
+
+    @_revalidate_configuration_before_call
     def observe_contrastive_lf_candidate(
         self,
         detection_image_rgb8: torch.Tensor,
@@ -1302,28 +1400,18 @@ class CegWmExperimentAdapter:
     ) -> ComponentCallObservation[ContrastiveLfDetectionResult]:
         """Blindly rebuild one candidate from the current ordinary RGB8 image."""
 
-        if self._runtime_adapter is None:
-            raise CegWmExperimentAdapterError(
-                "contrastive LF detection requires a prepared runtime adapter"
-            )
-        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(
-            detection_image_rgb8
+        observation = self.prepare_stage_a_public_rgb8_observation(detection_image_rgb8)
+        result = self.score_contrastive_lf_prepared_observation(
+            observation,
+            detection_key,
+            candidate_id=null_asset.candidate_id,
+            null_asset=null_asset,
         )
-        latent = runtime_observation.detection_latent.detach().to(
-            device="cpu", dtype=torch.float32
-        ).contiguous()
-        observation = LfDetectionObservation.from_public_image_encoding(
-            tuple(float(value) for value in latent.reshape(-1).tolist()),
-            tuple(int(size) for size in latent.shape),
-        )
-        raw: ContrastiveLfRawObservation = contrastive_lf_raw_observation(
-            observation, detection_key, candidate_id=null_asset.candidate_id
-        )
-        result = contrastive_lf_detector(raw, null_asset)
+        assert type(result) is ContrastiveLfDetectionResult
         return self._observe(
             "lf_detector",
             result,
-            upstream_runtime_identity=runtime_observation.observation_identity,
+            upstream_runtime_identity=observation.runtime_observation_identity,
             public_callable=(
                 "runtime.Sd35RuntimeAdapter.observe_public_rgb8_vae"
                 " -> main.contrastive_lf_raw_observation"
@@ -1339,17 +1427,12 @@ class CegWmExperimentAdapter:
         *,
         candidate_id: str,
     ) -> ContrastiveLfRawObservation:
-        if self._runtime_adapter is None:
-            raise CegWmExperimentAdapterError("contrastive LF raw observation requires runtime")
-        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(detection_image_rgb8)
-        latent = runtime_observation.detection_latent.detach().to(device="cpu", dtype=torch.float32).contiguous()
-        observation = LfDetectionObservation.from_public_image_encoding(
-            tuple(float(value) for value in latent.reshape(-1).tolist()),
-            tuple(int(size) for size in latent.shape),
-        )
-        return contrastive_lf_raw_observation(
+        observation = self.prepare_stage_a_public_rgb8_observation(detection_image_rgb8)
+        result = self.score_contrastive_lf_prepared_observation(
             observation, detection_key, candidate_id=candidate_id
         )
+        assert type(result) is ContrastiveLfRawObservation
+        return result
 
     @_revalidate_configuration_before_call
     def observe_stage_a_hf_raw(
@@ -1357,15 +1440,10 @@ class CegWmExperimentAdapter:
         detection_image_rgb8: torch.Tensor,
         detection_key: str | DerivedWrongKeyMaterial,
     ) -> HfDetectionResult:
-        if self._runtime_adapter is None:
-            raise CegWmExperimentAdapterError("Stage-A HF raw observation requires runtime")
-        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(detection_image_rgb8)
-        latent = runtime_observation.detection_latent.detach().to(device="cpu", dtype=torch.float32).contiguous()
-        observation = HfDetectionObservation.from_public_image_encoding(
-            tuple(float(value) for value in latent.reshape(-1).tolist()),
-            tuple(int(size) for size in latent.shape),
-        )
-        return hf_detector(observation, detection_key)
+        observation = self.prepare_stage_a_public_rgb8_observation(detection_image_rgb8)
+        result = self.score_stage_a_hf_prepared_observation(observation, detection_key)
+        assert type(result) is HfDetectionResult
+        return result
 
     @_revalidate_configuration_before_call
     def observe_stage_a_hf(
@@ -1376,24 +1454,15 @@ class CegWmExperimentAdapter:
     ) -> ComponentCallObservation[HfPopulationStandardizedResult]:
         """Apply the fresh Stage-A HF population asset on public RGB8 VAE evidence."""
 
-        if self._runtime_adapter is None:
-            raise CegWmExperimentAdapterError("Stage-A HF detection requires a prepared runtime")
-        runtime_observation = self._runtime_adapter.observe_public_rgb8_vae(
-            detection_image_rgb8
+        observation = self.prepare_stage_a_public_rgb8_observation(detection_image_rgb8)
+        result = self.score_stage_a_hf_prepared_observation(
+            observation, detection_key, null_asset=null_asset
         )
-        latent = runtime_observation.detection_latent.detach().to(
-            device="cpu", dtype=torch.float32
-        ).contiguous()
-        observation = HfDetectionObservation.from_public_image_encoding(
-            tuple(float(value) for value in latent.reshape(-1).tolist()),
-            tuple(int(size) for size in latent.shape),
-        )
-        raw = hf_detector(observation, detection_key)
-        result = standardize_hf_population_score(raw, null_asset)
+        assert type(result) is HfPopulationStandardizedResult
         return self._observe(
             "hf_detector",
             result,
-            upstream_runtime_identity=runtime_observation.observation_identity,
+            upstream_runtime_identity=observation.runtime_observation_identity,
             public_callable=(
                 "runtime.Sd35RuntimeAdapter.observe_public_rgb8_vae"
                 " -> main.hf_detector -> main.standardize_hf_population_score"

@@ -74,12 +74,20 @@ def test_colab_notebook_inventory_authority_and_outputs_are_exact() -> None:
     assert "retry" not in asset_source
     selection_source = sources["contrastive_lf_branch_attribution_candidate_selection.ipynb"]
     assert selection_source.index("drive.mount") < selection_source.index("userdata.get")
-    assert "CEG_WM_CONTRASTIVE_LF_REVISION" in selection_source
+    assert "CEG_WM_CONTRASTIVE_LF_REVISION" not in selection_source
+    assert "https://github.com/RICHAAARC/CEG-WM.git" in selection_source
+    assert "'--branch', 'main'" in selection_source
+    assert "build_contrastive_lf_branch_attribution_package.py" in selection_source
+    assert "colab_handoffs" not in selection_source
+    assert "capture_output=True" not in selection_source.split("command =", 1)[1]
+    assert "--runs-root" in selection_source
+    assert "--session-id" in selection_source
     assert "contrastive_lf_branch_attribution_bootstrap.py" in selection_source
     assert "check=False" in selection_source
     assert "confirmation" not in selection_source.lower()
     assert "stage_b" not in selection_source.lower()
-    assert "latest" not in selection_source
+    assert "latest-bundle" not in selection_source
+    assert "latest_run" not in selection_source
     confirmation_source = sources[
         "semantic_texture_soft_route_untouched_confirmation.ipynb"
     ]

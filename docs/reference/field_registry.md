@@ -1256,3 +1256,22 @@ FPR、promotion 或 Stage-B 执行权威。
 | wrong_key_geometry_reliability_status | persisted_protocol | method_status | none | true | false | false | wrong-key reliability 的 fail-closed 状态。 |
 | wrong_key_geometry_reliability_failure_reasons | persisted_protocol | method_status | none | true | false | false | wrong-key reliability 的完整拒绝原因。 |
 | ambiguous_control_realized | persisted_protocol | method_status | none | true | false | false | ambiguous control 是否满足冻结 top-two gap 结构判据。 |
+| implementation_revision_role | persisted_protocol | provenance | none | false | false | false | Stage-A execution 将代码 revision 仅作为逐 session/unit producer provenance 记录的角色。 |
+| committed_unit_roles | persisted_protocol | protocol | none | false | false | false | Stage-A 原子提交单位固定为 null-fit cluster 与完整 selection cluster bundle。 |
+| committed_unit_resume_allowed | persisted_protocol | protocol | none | false | false | false | 仅允许从同一 behavior identity 的已认证 create-only COMMITTED units 续跑。 |
+| revision_mismatch_blocks_resume | persisted_protocol | protocol | none | false | false | false | Stage-A 固定为 false；revision 仅记录，behavior identity 漂移仍 fail closed。 |
+| snapshot_interval_seconds | persisted_protocol | resource_budget | none | false | false | false | Stage-A 在原子 unit 后首个安全点生成 progress snapshot 的最长目标间隔。 |
+| behavior_identity_digest | persisted_protocol | provenance | none | true | false | false | 绑定 candidate/config/protocol/model/preprocess/runtime/codec/public-key identity 的续跑摘要，不含代码 revision。 |
+| producer_revision | persisted_protocol | provenance | none | true | false | false | 单个 Stage-A committed unit 或 session 的 40 字符 producer revision。 |
+| producer_revisions | persisted_protocol | provenance | none | true | false | false | 最终结果实际消费的 committed units producer revision 去重有序集合。 |
+| heterogeneous_revisions | persisted_protocol | provenance | none | true | false | false | 最终结果是否由多个 producer revision 的同 behavior identity units 组成。 |
+| cache_diagnostics | persisted_protocol | diagnostic | none | true | false | false | key-free public RGB8 VAE observation cache 的 hit/miss/encode/entry 诊断映射，不参与科学门。 |
+| cache_hit_count | persisted_protocol | diagnostic | none | true | false | false | 当前 session key-free public observation cache 命中次数。 |
+| cache_miss_count | persisted_protocol | diagnostic | none | true | false | false | 当前 session key-free public observation cache 未命中次数。 |
+| cache_entry_count | persisted_protocol | diagnostic | none | true | false | false | 当前 session key-free public observation cache 条目数。 |
+| vae_encode_count | persisted_protocol | diagnostic | none | true | false | false | 当前 session 实际 public RGB8 VAE encode 次数。 |
+| most_recent_snapshot_path | persisted_protocol | runtime_locator | none | true | false | false | 当前 run 内最近 progress snapshot 的 Drive-local locator；不作为科学 authority。 |
+| completed_unit_count | persisted_protocol | diagnostic | none | true | false | false | 已认证 COMMITTED Stage-A 原子单位总数。 |
+| session_status | persisted_protocol | method_status | none | true | false | false | Stage-A session 的 completed 或 interrupted_resumable 状态，独立于科学四分类。 |
+| unit_relative_path | persisted_protocol | runtime_locator | none | true | false | false | COMMITTED marker 相对 run root 绑定的 create-only unit payload 路径。 |
+| unit_payload_digest | persisted_protocol | provenance | none | true | false | false | Stage-A committed unit canonical payload SHA-256。 |

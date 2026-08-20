@@ -15,7 +15,7 @@
     "formal_outputs_created": false,
     "checksum_manifest_written_last": true
   },
-  "implementation_revision_environment_name": "CEG_WM_CONTRASTIVE_LF_REVISION",
+  "implementation_revision_role": "observed_producer_provenance_only",
   "null_fit_manifest_path": "configs/experiments/contrastive_lf_null_fit_manifest.json",
   "production_factory": "experiments.runners.contrastive_lf_branch_attribution.create_adapter_backed_stage_a_operations",
   "protocol_config_path": "configs/experiments/contrastive_lf_branch_attribution.json",
@@ -35,6 +35,17 @@
     "success": 0
   },
   "role_id": "contrastive_lf_null_fit_and_candidate_selection",
+  "session_persistence": {
+    "committed_unit_roles": [
+      "null_fit_cluster",
+      "candidate_selection_cluster_bundle"
+    ],
+    "hard_session_cap_seconds": 86400,
+    "committed_unit_resume_allowed": true,
+    "revision_mismatch_blocks_resume": false,
+    "snapshot_interval_seconds": 1800,
+    "soft_stop_seconds": 75600
+  },
   "runtime_config_path": "configs/runtime/runtime_sd35_flowmatch.json",
   "schema_version": 1
 }

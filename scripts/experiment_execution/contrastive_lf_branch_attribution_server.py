@@ -51,6 +51,7 @@ def finalize_contrastive_lf_delivery(
     observed_repository_revision: str,
     run_id: str,
     output_root: str | Path,
+    session_provenance: dict[str, object] | None = None,
 ) -> tuple[int, dict[str, object]]:
     if type(result) is not StageAExecutionResult or REVISION.fullmatch(observed_repository_revision) is None or RUN_ID.fullmatch(run_id) is None:
         raise ContrastiveLfDeliveryError("Stage-A delivery identity is invalid")
@@ -66,6 +67,14 @@ def finalize_contrastive_lf_delivery(
     root.mkdir(parents=True)
     selection = result.selection_result
     selection_passed = bool(selection and selection.candidate_selection_passed)
+    provenance = {} if session_provenance is None else dict(session_provenance)
+    if set(provenance) - {
+        "cache_diagnostics",
+        "heterogeneous_revisions",
+        "producer_revisions",
+        "session_id",
+    }:
+        raise ContrastiveLfDeliveryError("Stage-A session provenance is invalid")
     result_value = {
         "candidate_promoted": False,
         "candidate_selection_passed": selection_passed,
@@ -81,6 +90,7 @@ def finalize_contrastive_lf_delivery(
         "protocol_id": PROTOCOL_ID,
         "result_classification": result.result_classification,
         "run_id": run_id,
+        **provenance,
         "science_started": False,
         "scientific_unit_count": 0,
         "selected_candidate_id": None if selection is None else selection.selected_candidate_id,
@@ -123,6 +133,7 @@ def finalize_contrastive_lf_delivery(
         "result_filename": RESULT_FILENAME,
         "run_id": run_id,
         "schema_version": 1,
+        **provenance,
     }
     log_summary = {
         "failure_reason": result.failure_reason,
@@ -149,9 +160,11 @@ def finalize_contrastive_lf_delivery(
         "result_filename": RESULT_FILENAME,
         "result_sha256": sha256(payloads[RESULT_FILENAME]).hexdigest(),
         "run_id": run_id,
+        **provenance,
         "selection_artifact_filename": SELECTION_ARTIFACT_FILENAME if selection_passed else None,
         "selection_artifact_sha256": sha256(payloads[SELECTION_ARTIFACT_FILENAME]).hexdigest() if selection_passed else None,
         "status": result_value["status"],
+        **provenance,
     }
     receipt_blob = _blob(receipt)
     _write(root / RECEIPT_FILENAME, receipt_blob)

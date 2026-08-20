@@ -2446,3 +2446,257 @@ class DevelopmentPersistentStore:
 
     def _committed_marker_paths(self, unit_id: str) -> tuple[Path, ...]:
         return tuple((self.run_root / "markers").glob(f"{unit_id}__attempt_*.COMMITTED.json"))
+
+
+STAGE_A_PERSISTENCE_SCHEMA = "contrastive_lf_stage_a_committed_units"
+STAGE_A_SNAPSHOT_INTERVAL_SECONDS = 30 * 60
+_STAGE_A_RUN_ID = re.compile(r"^contrastive-lf-branch-attribution-[0-9a-f]{32}$")
+_STAGE_A_SESSION_ID = re.compile(r"^stage-a-session-[0-9a-f]{32}$")
+
+
+class StageACommittedUnitStore:
+    """Stage-A-specific create-only units built on the existing COMMITTED model.
+
+    Repository revisions are producer provenance.  Resume authority is the
+    immutable behavior identity plus authenticated unit markers.
+    """
+
+    def __init__(self, run_root: str | Path, behavior_identity: Mapping[str, object]):
+        self.run_root = Path(run_root).resolve()
+        if self.run_root.is_symlink() or not self.run_root.is_dir():
+            raise DevelopmentPersistenceError("Stage-A run root is not a regular directory")
+        self.behavior_identity = dict(behavior_identity)
+        self.behavior_identity_digest = canonical_digest(self.behavior_identity)
+        identity = _read_canonical_json(self.run_root / "run_identity.json", "Stage-A run identity")
+        if (
+            identity.get("schema_version") != STAGE_A_PERSISTENCE_SCHEMA
+            or identity.get("run_id") != self.run_root.name
+            or identity.get("behavior_identity") != self.behavior_identity
+            or identity.get("behavior_identity_digest") != self.behavior_identity_digest
+        ):
+            raise DevelopmentPersistenceError("Stage-A run behavior identity drifted")
+        for relative in ("pending", "committed", "sessions", "snapshots"):
+            path = self.run_root / relative
+            if path.is_symlink() or not path.is_dir():
+                raise DevelopmentPersistenceError("Stage-A persistence directory drifted")
+
+    @classmethod
+    def discover_or_create(
+        cls,
+        runs_root: str | Path,
+        *,
+        behavior_identity: Mapping[str, object],
+        new_run_id: str,
+        created_at_utc: str,
+        initial_producer_revision: str,
+    ) -> "StageACommittedUnitStore":
+        root = Path(runs_root).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        if root.is_symlink() or not root.is_dir():
+            raise DevelopmentPersistenceError("Stage-A runs root is invalid")
+        digest = canonical_digest(dict(behavior_identity))
+        compatible: list[Path] = []
+        for candidate in sorted(root.iterdir()):
+            if candidate.is_symlink() or not candidate.is_dir():
+                continue
+            identity_path = candidate / "run_identity.json"
+            if not identity_path.is_file() or identity_path.is_symlink():
+                continue
+            identity = _read_canonical_json(identity_path, "Stage-A discovery identity")
+            if identity.get("behavior_identity_digest") != digest:
+                continue
+            store = cls(candidate, behavior_identity)
+            if not store.is_terminal():
+                compatible.append(candidate)
+        if len(compatible) > 1:
+            raise DevelopmentPersistenceError("multiple compatible unfinished Stage-A runs exist")
+        if compatible:
+            return cls(compatible[0], behavior_identity)
+        if _STAGE_A_RUN_ID.fullmatch(new_run_id) is None:
+            raise DevelopmentPersistenceError("Stage-A run_id is invalid")
+        if _REVISION.fullmatch(initial_producer_revision) is None:
+            raise DevelopmentPersistenceError("Stage-A initial revision is invalid")
+        target = root / new_run_id
+        target.mkdir()
+        for relative in ("pending", "committed", "sessions", "snapshots"):
+            (target / relative).mkdir()
+        payload = {
+            "behavior_identity": dict(behavior_identity),
+            "behavior_identity_digest": digest,
+            "created_at_utc": created_at_utc,
+            "initial_producer_revision": initial_producer_revision,
+            "run_id": new_run_id,
+            "schema_version": STAGE_A_PERSISTENCE_SCHEMA,
+        }
+        _create_only(target / "run_identity.json", canonical_json_bytes(payload))
+        return cls(target, behavior_identity)
+
+    def _marker_path(self, phase: str, cluster_ordinal: int) -> Path:
+        return self.run_root / "committed" / f"{phase}_{cluster_ordinal:02d}.COMMITTED.json"
+
+    def committed_units(self) -> tuple[dict[str, object], ...]:
+        units: list[dict[str, object]] = []
+        seen: set[tuple[str, int]] = set()
+        for marker_path in sorted((self.run_root / "committed").glob("*.COMMITTED.json")):
+            marker = _read_canonical_json(marker_path, "Stage-A COMMITTED marker")
+            if (
+                marker.get("schema_version") != STAGE_A_PERSISTENCE_SCHEMA
+                or marker.get("behavior_identity_digest") != self.behavior_identity_digest
+                or type(marker.get("cluster_ordinal")) is not int
+                or type(marker.get("phase")) is not str
+                or type(marker.get("unit_relative_path")) is not str
+            ):
+                raise DevelopmentPersistenceError("Stage-A COMMITTED marker drifted")
+            key = (marker["phase"], marker["cluster_ordinal"])
+            if key in seen or marker_path != self._marker_path(*key):
+                raise DevelopmentPersistenceError("Stage-A COMMITTED unit identity collided")
+            seen.add(key)
+            unit_path = self.run_root / _safe_member_path(marker["unit_relative_path"])
+            if unit_path.is_symlink() or not unit_path.is_file():
+                raise DevelopmentPersistenceError("Stage-A committed unit payload is missing")
+            blob = unit_path.read_bytes()
+            if sha256(blob).hexdigest() != marker.get("unit_sha256"):
+                raise DevelopmentPersistenceError("Stage-A committed unit digest drifted")
+            unit = json.loads(blob)
+            if (
+                type(unit) is not dict
+                or unit.get("behavior_identity_digest") != self.behavior_identity_digest
+                or unit.get("phase") != key[0]
+                or unit.get("cluster_ordinal") != key[1]
+                or canonical_digest(unit) != marker.get("unit_payload_digest")
+            ):
+                raise DevelopmentPersistenceError("Stage-A committed unit payload drifted")
+            units.append(unit)
+        for phase in ("null_fit", "candidate_selection"):
+            ordinals = sorted(
+                unit["cluster_ordinal"] for unit in units if unit["phase"] == phase
+            )
+            if ordinals != list(range(len(ordinals))):
+                raise DevelopmentPersistenceError("Stage-A committed units are not a prefix")
+        return tuple(sorted(units, key=lambda value: (value["phase"], value["cluster_ordinal"])))
+
+    def commit_unit(
+        self,
+        *,
+        phase: str,
+        cluster_ordinal: int,
+        source_cluster_id: str,
+        producer_revision: str,
+        session_id: str,
+        committed_at_utc: str,
+        records: Sequence[Mapping[str, object]],
+        evidence: Mapping[str, object],
+        status: str,
+        cache_diagnostics: Mapping[str, int],
+        package_sha256: str,
+    ) -> dict[str, object]:
+        if phase not in {"null_fit", "candidate_selection"} or not 0 <= cluster_ordinal < 32:
+            raise DevelopmentPersistenceError("Stage-A committed unit phase is invalid")
+        if self._marker_path(phase, cluster_ordinal).exists():
+            raise DevelopmentPersistenceError("Stage-A unit is already committed")
+        if _REVISION.fullmatch(producer_revision) is None:
+            raise DevelopmentPersistenceError("Stage-A unit producer revision is invalid")
+        if _STAGE_A_SESSION_ID.fullmatch(session_id) is None:
+            raise DevelopmentPersistenceError("Stage-A session_id is invalid")
+        _digest(source_cluster_id, "Stage-A source cluster")
+        _digest(package_sha256, "Stage-A package")
+        payload = {
+            "behavior_identity_digest": self.behavior_identity_digest,
+            "cache_diagnostics": dict(cache_diagnostics),
+            "cluster_ordinal": cluster_ordinal,
+            "committed_at_utc": committed_at_utc,
+            "evidence": dict(evidence),
+            "package_sha256": package_sha256,
+            "phase": phase,
+            "producer_revision": producer_revision,
+            "records": [dict(record) for record in records],
+            "schema_version": STAGE_A_PERSISTENCE_SCHEMA,
+            "session_id": session_id,
+            "source_cluster_id": source_cluster_id,
+            "status": status,
+        }
+        blob = canonical_json_bytes(payload)
+        pending_dir = self.run_root / "pending" / session_id
+        pending_dir.mkdir(exist_ok=True)
+        unit_path = pending_dir / f"{phase}_{cluster_ordinal:02d}.json"
+        _create_only(unit_path, blob)
+        relative = unit_path.relative_to(self.run_root).as_posix()
+        marker = {
+            "behavior_identity_digest": self.behavior_identity_digest,
+            "cluster_ordinal": cluster_ordinal,
+            "committed_at_utc": committed_at_utc,
+            "phase": phase,
+            "producer_revision": producer_revision,
+            "schema_version": STAGE_A_PERSISTENCE_SCHEMA,
+            "source_cluster_id": source_cluster_id,
+            "unit_payload_digest": canonical_digest(payload),
+            "unit_relative_path": relative,
+            "unit_sha256": sha256(blob).hexdigest(),
+        }
+        _create_only(self._marker_path(phase, cluster_ordinal), canonical_json_bytes(marker))
+        self.committed_units()
+        return marker
+
+    def append_heartbeat(self, event: Mapping[str, object]) -> Path:
+        payload = canonical_json_bytes(dict(event))
+        path = self.run_root / "progress.jsonl"
+        with path.open("ab") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return path
+
+    def write_session_receipt(self, session_id: str, payload: Mapping[str, object]) -> Path:
+        if _STAGE_A_SESSION_ID.fullmatch(session_id) is None:
+            raise DevelopmentPersistenceError("Stage-A session_id is invalid")
+        path = self.run_root / "sessions" / f"{session_id}.json"
+        _create_only(path, canonical_json_bytes(dict(payload)))
+        return path
+
+    def write_snapshot(self, *, session_id: str, snapshot_index: int, payload: Mapping[str, object]) -> dict[str, str]:
+        if _STAGE_A_SESSION_ID.fullmatch(session_id) is None:
+            raise DevelopmentPersistenceError("Stage-A session_id is invalid")
+        if type(snapshot_index) is not int or snapshot_index < 0:
+            raise DevelopmentPersistenceError("Stage-A snapshot index is invalid")
+        prefix = f"{session_id}_{snapshot_index:04d}"
+        archive_path = self.run_root / "snapshots" / f"{prefix}.zip"
+        receipt_path = self.run_root / "snapshots" / f"{prefix}.receipt.json"
+        sums_path = self.run_root / "snapshots" / f"{prefix}.SHA256SUMS"
+        members = {
+            "progress_snapshot.json": canonical_json_bytes(dict(payload)),
+            "run_identity.json": (self.run_root / "run_identity.json").read_bytes(),
+        }
+        buffer = BytesIO()
+        with ZipFile(buffer, "w", compression=ZIP_DEFLATED, compresslevel=6) as archive:
+            for name, blob in sorted(members.items()):
+                info = ZipInfo(name, (1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.external_attr = stat.S_IFREG << 16 | 0o600 << 16
+                archive.writestr(info, blob, compress_type=ZIP_DEFLATED, compresslevel=6)
+        archive_blob = buffer.getvalue()
+        _create_only(archive_path, archive_blob)
+        receipt = canonical_json_bytes(
+            {
+                "archive_filename": archive_path.name,
+                "archive_sha256": sha256(archive_blob).hexdigest(),
+                "behavior_identity_digest": self.behavior_identity_digest,
+                "session_id": session_id,
+                "snapshot_index": snapshot_index,
+            }
+        )
+        _create_only(receipt_path, receipt)
+        sums = (
+            f"{sha256(archive_blob).hexdigest()}  {archive_path.name}\n"
+            f"{sha256(receipt).hexdigest()}  {receipt_path.name}\n"
+        ).encode("ascii")
+        _create_only(sums_path, sums)
+        return {
+            "archive_path": str(archive_path),
+            "archive_sha256": sha256(archive_blob).hexdigest(),
+            "receipt_sha256": sha256(receipt).hexdigest(),
+            "sha256sums_sha256": sha256(sums).hexdigest(),
+        }
+
+    def is_terminal(self) -> bool:
+        final = self.run_root / "final" / "contrastive_lf_execution_receipt.json"
+        return final.is_file() and not final.is_symlink()
