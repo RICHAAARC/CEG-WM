@@ -84,9 +84,12 @@ def _resolve_imports(path: str, blob: bytes, available: set[str]) -> set[str]:
         tree = ast.parse(blob, filename=path)
     except (SyntaxError, UnicodeDecodeError) as exc:
         raise ContrastiveLfPackageError("package Python source is not parseable") from exc
-    module = path[:-3].replace("/", ".")
     is_package = path.endswith("/__init__.py")
-    package_parts = module.split(".") if is_package else module.split(".")[:-1]
+    if is_package:
+        package_parts = path[: -len("/__init__.py")].split("/")
+    else:
+        module = path[:-3].replace("/", ".")
+        package_parts = module.split(".")[:-1]
     discovered: set[str] = set()
     for node in ast.walk(tree):
         candidates: list[str] = []

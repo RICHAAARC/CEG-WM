@@ -64,3 +64,19 @@ def test_exact_package_is_deterministic_and_gitless_authenticatable(tmp_path: Pa
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
+    imported = subprocess.run(
+        (
+            sys.executable,
+            "-c",
+            (
+                "from scripts.experiment_execution."
+                "contrastive_lf_branch_attribution_entrypoint import main; "
+                "assert callable(main)"
+            ),
+        ),
+        cwd=unrelated,
+        env={"PATH": "/nonexistent", "PYTHONPATH": str(tmp_path / "extracted")},
+        capture_output=True,
+        text=True,
+    )
+    assert imported.returncode == 0, imported.stderr
