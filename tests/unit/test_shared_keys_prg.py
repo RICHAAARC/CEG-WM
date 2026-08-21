@@ -70,3 +70,16 @@ def test_array_prg_binds_kind_shape_and_explicit_domain() -> None:
 
     assert not np.array_equal(one, two)
     assert not np.array_equal(one, reshaped.ravel())
+
+
+@pytest.mark.unit
+def test_prg_binds_detection_key_for_bytes_and_carrier_arrays() -> None:
+    first_key = b"0123456789abcdef0123456789abcdef"
+    second_key = b"abcdef0123456789abcdef0123456789"
+    domain = "lf/carrier/selection-0001"
+
+    assert prg_bytes(first_key, domain, 64) != prg_bytes(second_key, domain, 64)
+    assert not np.array_equal(
+        prg_rademacher(first_key, domain, (8, 8)),
+        prg_rademacher(second_key, domain, (8, 8)),
+    )
