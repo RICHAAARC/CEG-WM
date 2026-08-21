@@ -1,0 +1,7 @@
+{
+  "policy_version": 1,
+  "allowed_root": "notebooks",
+  "committed_outputs": "fail",
+  "committed_execution_counts": "fail",
+  "max_notebook_bytes": 5000000
+}

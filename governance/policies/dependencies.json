@@ -1,0 +1,33 @@
+{
+  "policy_version": 1,
+  "forbidden_dependency": "governance",
+  "layers": {
+    "cegwm.shared": {
+      "path": "src/cegwm/shared",
+      "allowed_project_dependencies": []
+    },
+    "cegwm.method": {
+      "path": "src/cegwm/method",
+      "allowed_project_dependencies": ["cegwm.shared"]
+    },
+    "cegwm.runtime": {
+      "path": "src/cegwm/runtime",
+      "allowed_project_dependencies": ["cegwm.shared", "cegwm.method"]
+    },
+    "cegwm.protocol": {
+      "path": "src/cegwm/protocol",
+      "allowed_project_dependencies": []
+    },
+    "experiments.stage_a": {
+      "path": "experiments/stage_a",
+      "allowed_project_dependencies": [
+        "cegwm.shared",
+        "cegwm.method",
+        "cegwm.runtime",
+        "cegwm.protocol"
+      ]
+    }
+  },
+  "delivery_code_roots": ["notebooks"],
+  "record_writer_layers": ["experiments.stage_a"]
+}
