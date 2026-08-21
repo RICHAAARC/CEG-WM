@@ -27,7 +27,7 @@ class _VAE(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)
-        self.config = SimpleNamespace(scaling_factor=1.0)
+        self.config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
 
     def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
         class Distribution:

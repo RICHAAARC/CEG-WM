@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from numbers import Real
 from typing import Any
 
 import numpy as np
@@ -33,6 +35,16 @@ def _vae_device_dtype(vae: Any) -> tuple[torch.device, torch.dtype]:
     return parameter.device, parameter.dtype
 
 
+def _vae_config_number(config: Any, name: str, *, positive: bool) -> float:
+    value = getattr(config, name, None)
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+        raise ValueError(f"frozen VAE config must provide a finite {name}")
+    numeric = float(value)
+    if positive and numeric <= 0.0:
+        raise ValueError(f"frozen VAE config {name} must be positive")
+    return numeric
+
+
 def encode_final_rgb_image(image: Any, image_processor: Any, vae: Any) -> torch.Tensor:
     """Re-encode a final RGB image without accepting any embedding-side latent."""
 
@@ -62,15 +74,9 @@ def encode_final_rgb_image(image: Any, image_processor: Any, vae: Any) -> torch.
     if not isinstance(observation, torch.Tensor) or observation.ndim != 4:
         raise TypeError("frozen VAE mode must return an NCHW torch Tensor")
     config = getattr(vae, "config", None)
-    scaling_factor = getattr(config, "scaling_factor", None)
-    if not isinstance(scaling_factor, (int, float)) or not math_is_finite_positive(scaling_factor):
-        raise ValueError("frozen VAE config must provide a finite positive scaling_factor")
-    observation = observation * float(scaling_factor)
+    scaling_factor = _vae_config_number(config, "scaling_factor", positive=True)
+    shift_factor = _vae_config_number(config, "shift_factor", positive=False)
+    observation = (observation - shift_factor) * scaling_factor
     if not bool(torch.isfinite(observation).all()):
         raise ValueError("final-image VAE observation must be finite")
     return observation.detach()
-
-
-def math_is_finite_positive(value: int | float) -> bool:
-    numeric = float(value)
-    return bool(np.isfinite(numeric) and numeric > 0.0)

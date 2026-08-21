@@ -32,7 +32,7 @@ class _TrackingVAE(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)
-        self.config = SimpleNamespace(scaling_factor=0.5)
+        self.config = SimpleNamespace(scaling_factor=0.5, shift_factor=0.25)
         self.inputs: list[torch.Tensor] = []
 
     def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
@@ -69,9 +69,8 @@ def test_final_image_is_processed_and_vae_reencoded_with_input_dependence() -> N
     assert len(vae.inputs) == 2
     assert dark_observation.shape == (1, 4, 8, 8)
     assert not torch.equal(dark_observation, bright_observation)
-    assert torch.equal(bright_observation, torch.cat(
-        [vae.inputs[1], vae.inputs[1].mean(dim=1, keepdim=True)], dim=1
-    ) * 0.5)
+    mode = torch.cat([vae.inputs[1], vae.inputs[1].mean(dim=1, keepdim=True)], dim=1)
+    assert torch.equal(bright_observation, (mode - 0.25) * 0.5)
 
 
 @pytest.mark.unit
@@ -87,3 +86,33 @@ def test_incompatible_vae_result_fails_without_observation_fallback() -> None:
             _TrackingProcessor(),
             IncompatibleVAE(),
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing_name", ["scaling_factor", "shift_factor"])
+def test_missing_vae_scale_or_shift_fails_closed(missing_name: str) -> None:
+    vae = _TrackingVAE()
+    delattr(vae.config, missing_name)
+
+    with pytest.raises(ValueError, match=missing_name):
+        encode_final_rgb_image(Image.new("RGB", (8, 8)), _TrackingProcessor(), vae)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("shift_factor", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_vae_shift_fails_closed(shift_factor: float) -> None:
+    vae = _TrackingVAE()
+    vae.config.shift_factor = shift_factor
+
+    with pytest.raises(ValueError, match="finite shift_factor"):
+        encode_final_rgb_image(Image.new("RGB", (8, 8)), _TrackingProcessor(), vae)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("scaling_factor", [0.0, -1.0, float("nan"), float("inf")])
+def test_nonpositive_or_nonfinite_vae_scale_fails_closed(scaling_factor: float) -> None:
+    vae = _TrackingVAE()
+    vae.config.scaling_factor = scaling_factor
+
+    with pytest.raises(ValueError, match="scaling_factor"):
+        encode_final_rgb_image(Image.new("RGB", (8, 8)), _TrackingProcessor(), vae)
