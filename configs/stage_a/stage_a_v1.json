@@ -37,8 +37,8 @@
     "inference_steps": 20,
     "image_dtype": "float32_rgb_0_1",
     "latent_dtype": "runtime_actual_dtype",
-    "public_asset_rule": "resolve_and_record_immutable_revision_and_weight_digests_before_first_unit",
-    "asset_reuse_rule": "reuse_the_same_frozen_asset_receipt_across_all_units_and_both_splits"
+    "public_asset_rule": "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest",
+    "asset_reuse_rule": "reuse_the_same_loaded_model_instance_across_all_units_and_both_splits"
   },
   "keying": {
     "task": "zero_bit_keyed_attribution",

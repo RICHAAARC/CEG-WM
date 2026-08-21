@@ -53,23 +53,13 @@ def _args(
     repo: Path,
     exact: str,
     output_root: Path,
-    run_id: str,
-    checkpoint_sink: Path,
-    *,
-    interval: float = 2.0,
-    resume_zip: Path | None = None,
-    resume_checksum: Path | None = None,
+    run_store_root: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         repo_root=str(repo),
         output_root=str(output_root),
         expected_exact=exact,
-        model_revision="c" * 40,
-        run_id=run_id,
-        checkpoint_sink=str(checkpoint_sink),
-        checkpoint_interval_hours=interval,
-        resume_zip=str(resume_zip) if resume_zip else None,
-        resume_checksum=str(resume_checksum) if resume_checksum else None,
+        run_store_root=str(run_store_root),
     )
 
 
@@ -79,9 +69,15 @@ def _install_fakes(
     fail_hf_calls: frozenset[int] = frozenset(),
     interrupt_hf_call: int | None = None,
 ) -> dict[str, int]:
-    calls = {"hf": 0, "plain": 0, "score": 0}
-    assets = SimpleNamespace(vae_weight_digest="d" * 64)
-    monkeypatch.setattr(runner, "_load_pipeline_and_assets", lambda model_id, revision: (object(), assets))
+    calls = {"load": 0, "hf": 0, "plain": 0, "score": 0}
+    assets = SimpleNamespace()
+
+    def fake_load(model_id: str) -> tuple[object, object]:
+        assert model_id == "stabilityai/stable-diffusion-3.5-medium"
+        calls["load"] += 1
+        return object(), assets
+
+    monkeypatch.setattr(runner, "_load_pipeline_and_assets", fake_load)
     monkeypatch.setattr(runner.torch, "Generator", _Generator)
 
     def fake_hf(pipeline: object, prompt: str, key: bytes, public_assets: object, **kwargs: object) -> SimpleNamespace:
@@ -122,25 +118,31 @@ def _payloads(output_root: Path, run_id: str) -> tuple[dict[str, object], dict[s
     return receipt, result, local_run_dir / f"{run_id}.zip"
 
 
+def _only_run_id(root: Path) -> str:
+    directories = [path.name for path in root.iterdir() if path.is_dir()]
+    assert len(directories) == 1
+    return directories[0]
+
+
 @pytest.mark.integration
 def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, exact = _repo(tmp_path)
     output_root = tmp_path / "output"
-    checkpoint_sink = tmp_path / "checkpoint-sink"
-    checkpoint_sink.mkdir()
+    run_store_root = tmp_path / "run-store"
     calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
 
-    rc = runner.execute(_args(repo, exact, output_root, "a2-run-success", checkpoint_sink))
-    receipt, result, zip_path = _payloads(output_root, "a2-run-success")
+    rc = runner.execute(_args(repo, exact, output_root, run_store_root))
+    run_id = _only_run_id(output_root)
+    receipt, result, zip_path = _payloads(output_root, run_id)
 
     assert rc == receipt["rc"] == result["rc"] == 0
     assert receipt["resolved_exact"] == result["resolved_exact"] == exact
     assert receipt["scientific_status"] == result["scientific_status"] == "not_evaluated"
     assert result["completeness"] == "incomplete_for_hf_anchor"
     assert len(result["records"]) == 16
-    assert calls == {"hf": 8, "plain": 8, "score": 8 * 2 * 17}
+    assert calls == {"load": 1, "hf": 8, "plain": 8, "score": 8 * 2 * 17}
     assert {record["arm"] for record in result["records"]} == {"hf_anchor", "primary_null"}
     assert Counter(record["unit_id"] for record in result["records"]) == {
         f"selection-{index:04d}": 2 for index in range(1, 9)
@@ -148,9 +150,14 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
     assert all(len(record["scores"]) == 17 for record in result["records"])
     assert result["records"][0]["scores"] != result["records"][1]["scores"]
     assert runner.KEY_ENV not in os.environ
-    assert receipt["checkpoint_interval_hours"] == 2.0
-    assert not list(checkpoint_sink.iterdir())
+    assert receipt["checkpoint_interval_hours"] == runner.CHECKPOINT_INTERVAL_HOURS == 2.0
+    assert receipt["model_id"] == "stabilityai/stable-diffusion-3.5-medium"
+    assert not ({"model_revision", "vae_weight_digest", "full_weight_digest"} & set(receipt))
     assert zip_path.is_file()
+    stored = run_store_root / run_id
+    assert (stored / f"{run_id}.zip").is_file()
+    assert (stored / f"{run_id}.zip.sha256").is_file()
+    assert not list(stored.glob("checkpoint-*.zip"))
     with zipfile.ZipFile(zip_path) as archive:
         assert set(archive.namelist()) == {"receipt.json", "result.json"}
         archived = b"".join(archive.read(name) for name in archive.namelist())
@@ -167,54 +174,38 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, exact = _repo(tmp_path)
-    checkpoint_sink = tmp_path / "checkpoint-sink"
-    checkpoint_sink.mkdir()
+    run_store_root = tmp_path / "run-store"
     first_calls = _install_fakes(
         monkeypatch,
         fail_hf_calls=frozenset({1}),
-        interrupt_hf_call=3,
+        interrupt_hf_call=5,
     )
-    clock = iter([0.0, 100.0, 3601.0])
+    clock = iter([0.0, 100.0, 7201.0, 7300.0, 14402.0])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
 
     with pytest.raises(KeyboardInterrupt):
-        runner.execute(_args(
-            repo,
-            exact,
-            tmp_path / "first-output",
-            "a2-run-resume",
-            checkpoint_sink,
-            interval=1.0,
-        ))
+        runner.execute(_args(repo, exact, tmp_path / "first-output", run_store_root))
 
-    checkpoint_files = sorted(checkpoint_sink.iterdir())
-    assert {path.suffix for path in checkpoint_files} == {".sha256", ".zip"}
-    checkpoint_zip = next(path for path in checkpoint_files if path.suffix == ".zip")
-    checkpoint_checksum = next(path for path in checkpoint_files if path.suffix == ".sha256")
+    run_id = _only_run_id(tmp_path / "first-output")
+    stored = run_store_root / run_id
+    checkpoint_files = sorted(stored.iterdir())
+    assert len(checkpoint_files) == 4
+    checkpoint_zip = sorted(stored.glob("checkpoint-*.zip"))[-1]
     with zipfile.ZipFile(checkpoint_zip) as archive:
         checkpoint_bytes = archive.read("state.json")
     assert _RAW_KEY.encode() not in checkpoint_bytes
     assert b"A red ceramic teapot" not in checkpoint_bytes
     assert b"private detail" not in checkpoint_bytes
-    assert first_calls["hf"] == 3
-    assert first_calls["plain"] == 1
+    assert first_calls["hf"] == 5
+    assert first_calls["plain"] == 3
 
     resumed_calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     resumed_output = tmp_path / "resumed-output"
-    rc = runner.execute(_args(
-        repo,
-        exact,
-        resumed_output,
-        "a2-run-resume",
-        checkpoint_sink,
-        interval=1.0,
-        resume_zip=checkpoint_zip,
-        resume_checksum=checkpoint_checksum,
-    ))
-    receipt, result, zip_path = _payloads(resumed_output, "a2-run-resume")
+    rc = runner.execute(_args(repo, exact, resumed_output, run_store_root))
+    receipt, result, zip_path = _payloads(resumed_output, run_id)
     failed = [record for record in result["records"] if record["status"] != "success"]
 
     assert rc == receipt["rc"] == result["rc"] == 1
@@ -222,98 +213,117 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
     assert len(failed) == 2
     assert {record["unit_id"] for record in failed} == {"selection-0001"}
     assert all(record["failure_reason"] == "unit_execution_failure" for record in failed)
-    assert resumed_calls["hf"] == 6
-    assert resumed_calls["plain"] == 6
+    assert resumed_calls == {"load": 1, "hf": 4, "plain": 4, "score": 4 * 2 * 17}
     assert zip_path.is_file()
-    assert sorted(checkpoint_sink.iterdir()) == checkpoint_files
+    assert len(list(stored.glob("checkpoint-*.zip"))) == 2
     with zipfile.ZipFile(zip_path) as archive:
         assert b"private detail" not in b"".join(archive.read(name) for name in archive.namelist())
 
-    monkeypatch.setenv(runner.KEY_ENV, "different-stage-a-detection-key-0002")
-    with pytest.raises(ValueError, match="identity mismatch"):
-        runner.execute(_args(
-            repo,
-            exact,
-            tmp_path / "mismatch-output",
-            "a2-run-resume",
-            checkpoint_sink,
-            interval=1.0,
-            resume_zip=checkpoint_zip,
-            resume_checksum=checkpoint_checksum,
-        ))
+    verified_calls = _install_fakes(monkeypatch)
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 1
+    assert verified_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
+
+    highest_zip = stored / "checkpoint-0002-units-0004.zip"
+    with zipfile.ZipFile(highest_zip) as archive:
+        ambiguous_state = json.loads(archive.read("state.json"))
+    ambiguous_state["checkpoint_sequence"] = 1
+    ambiguous_zip = stored / "checkpoint-0001-units-0004.zip"
+    with zipfile.ZipFile(ambiguous_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("state.json", json.dumps(ambiguous_state))
+    ambiguous_checksum = stored / f"{ambiguous_zip.name}.sha256"
+    ambiguous_checksum.write_text(
+        f"{hashlib.sha256(ambiguous_zip.read_bytes()).hexdigest()}  {ambiguous_zip.name}\n",
+        encoding="utf-8",
+    )
+    protocol = runner._load_protocol(repo)
+    expected = runner._new_state(
+        run_id=run_id,
+        resolved_exact=exact,
+        protocol=protocol,
+        model_id=protocol.config["generation_runtime"]["model_id"],
+        key_digest=runner.public_key_digest(_RAW_KEY),
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        runner._discover_checkpoint(stored, expected)
 
 
 @pytest.mark.integration
-def test_due_checkpoint_after_final_safe_boundary_resumes_without_empty_checkpoint(
+def test_due_checkpoint_at_final_boundary_and_verified_final_do_not_create_empty_checkpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, exact = _repo(tmp_path)
-    checkpoint_sink = tmp_path / "checkpoint-sink"
-    checkpoint_sink.mkdir()
+    run_store_root = tmp_path / "run-store"
     calls = _install_fakes(monkeypatch)
-    clock = iter([0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 3601.0])
+    clock = iter([0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 7201.0])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
 
-    assert runner.execute(_args(
-        repo,
-        exact,
-        tmp_path / "first-output",
-        "a2-run-complete-checkpoint",
-        checkpoint_sink,
-        interval=1.0,
-    )) == 0
+    assert runner.execute(_args(repo, exact, tmp_path / "first-output", run_store_root)) == 0
     assert calls["hf"] == 8
-    checkpoint_files = sorted(checkpoint_sink.iterdir())
+    run_id = _only_run_id(tmp_path / "first-output")
+    stored = run_store_root / run_id
+    checkpoint_files = sorted(stored.glob("checkpoint-*.zip*"))
     assert len(checkpoint_files) == 2
-    checkpoint_zip = next(path for path in checkpoint_files if path.suffix == ".zip")
-    checkpoint_checksum = next(path for path in checkpoint_files if path.suffix == ".sha256")
 
     resumed_calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 999999.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    resumed_output = tmp_path / "resumed-output"
-    assert runner.execute(_args(
-        repo,
-        exact,
-        resumed_output,
-        "a2-run-complete-checkpoint",
-        checkpoint_sink,
-        interval=1.0,
-        resume_zip=checkpoint_zip,
-        resume_checksum=checkpoint_checksum,
-    )) == 0
-    _, result, _ = _payloads(resumed_output, "a2-run-complete-checkpoint")
-    assert len(result["records"]) == 16
-    assert resumed_calls == {"hf": 0, "plain": 0, "score": 0}
-    assert sorted(checkpoint_sink.iterdir()) == checkpoint_files
+    assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 0
+    assert resumed_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
+    assert sorted(stored.glob("checkpoint-*.zip*")) == checkpoint_files
+
+    final_checksum = stored / f"{run_id}.zip.sha256"
+    final_checksum.write_text(f"{'0' * 64}  {run_id}.zip\n", encoding="utf-8")
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        runner.execute(_args(repo, exact, tmp_path / "bad-final-output", run_store_root))
 
 
 @pytest.mark.integration
-def test_checkpoint_interval_range_is_fail_closed(tmp_path: Path) -> None:
+def test_run_identity_is_deterministic_and_cli_keeps_fixed_interval_internal(tmp_path: Path) -> None:
     repo, exact = _repo(tmp_path)
-    checkpoint_sink = tmp_path / "checkpoint-sink"
-    checkpoint_sink.mkdir()
+    protocol = runner._load_protocol(repo)
+    model_id = protocol.config["generation_runtime"]["model_id"]
+    key_digest = runner.public_key_digest(_RAW_KEY)
+    first = runner._deterministic_run_id(exact, protocol, model_id, key_digest)
+
+    assert first == runner._deterministic_run_id(exact, protocol, model_id, key_digest)
+    assert first != runner._deterministic_run_id("f" * 40, protocol, model_id, key_digest)
+    assert first != runner._deterministic_run_id(
+        exact,
+        protocol,
+        model_id,
+        runner.public_key_digest("different-stage-a-root-key-0002"),
+    )
     parsed = runner._parser().parse_args([
         "--repo-root", str(repo),
         "--output-root", str(tmp_path / "parsed-output"),
         "--expected-exact", exact,
-        "--model-revision", "c" * 40,
-        "--run-id", "a2-run-default-interval",
-        "--checkpoint-sink", str(checkpoint_sink),
+        "--run-store-root", str(tmp_path / "run-store"),
     ])
-    assert parsed.checkpoint_interval_hours == 2.0
+    assert set(vars(parsed)) == {"repo_root", "output_root", "expected_exact", "run_store_root"}
+    assert runner.CHECKPOINT_INTERVAL_HOURS == 2.0
 
-    with pytest.raises(ValueError, match=r"\[1.0, 2.0\]"):
-        runner.execute(_args(
-            repo,
-            exact,
-            tmp_path / "output",
-            "a2-run-bad-interval",
-            checkpoint_sink,
-            interval=0.5,
-        ))
+    empty_state = runner._new_state(
+        run_id=first,
+        resolved_exact=exact,
+        protocol=protocol,
+        model_id=model_id,
+        key_digest=key_digest,
+    )
+    empty_state["checkpoint_sequence"] = 1
+    empty_zip = tmp_path / "checkpoint-0001-units-0000.zip"
+    with zipfile.ZipFile(empty_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("state.json", json.dumps(empty_state))
+    empty_checksum = tmp_path / f"{empty_zip.name}.sha256"
+    empty_checksum.write_text(
+        f"{hashlib.sha256(empty_zip.read_bytes()).hexdigest()}  {empty_zip.name}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="cannot be empty"):
+        runner._resume_state(empty_zip, empty_checksum, empty_state | {"checkpoint_sequence": 0})
 
 
 @pytest.mark.integration
@@ -324,10 +334,19 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
 ) -> None:
     repo, exact = _repo(tmp_path)
     output_root = tmp_path / "output"
-    checkpoint_sink = tmp_path / "checkpoint-sink"
-    checkpoint_sink.mkdir()
-    resume_zip = tmp_path / "resume.zip"
-    resume_checksum = tmp_path / "resume.zip.sha256"
+    run_store_root = tmp_path / "run-store"
+    protocol = runner._load_protocol(repo)
+    model_id = protocol.config["generation_runtime"]["model_id"]
+    run_id = runner._deterministic_run_id(
+        exact,
+        protocol,
+        model_id,
+        runner.public_key_digest(_RAW_KEY),
+    )
+    stored = run_store_root / run_id
+    stored.mkdir(parents=True)
+    resume_zip = stored / "checkpoint-0001-units-0002.zip"
+    resume_checksum = stored / "checkpoint-0001-units-0002.zip.sha256"
     private_detail = "private checkpoint detail that must not be exported"
     with zipfile.ZipFile(resume_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("state.json", json.dumps({"private": private_detail}))
@@ -342,11 +361,7 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
         "--repo-root", str(repo),
         "--output-root", str(output_root),
         "--expected-exact", exact,
-        "--model-revision", "c" * 40,
-        "--run-id", "a2-run-fatal-package",
-        "--checkpoint-sink", str(checkpoint_sink),
-        "--resume-zip", str(resume_zip),
-        "--resume-checksum", str(resume_checksum),
+        "--run-store-root", str(run_store_root),
     ])
 
     with pytest.raises(SystemExit) as exit_info:
@@ -356,7 +371,7 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
     stdout = capsys.readouterr().out
     assert "resume_validation_failure" in stdout
     assert _RAW_KEY not in stdout and private_detail not in stdout
-    receipt, result, zip_path = _payloads(output_root, "a2-run-fatal-package")
+    receipt, result, zip_path = _payloads(output_root, run_id)
     assert receipt["rc"] == result["rc"] == 2
     assert receipt["error_class"] == result["error_class"] == "resume_validation_failure"
     assert receipt["result_kind"] == result["result_kind"] == "operational_failure_not_scientific"
@@ -364,7 +379,7 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
     assert receipt["approved_execution_exact"] == result["approved_execution_exact"] == exact
     assert receipt["resolved_exact"] == result["resolved_exact"] == exact
     assert receipt["protocol_digest"] == result["protocol_digest"]
-    assert receipt["model_revision"] == result["model_revision"] == "c" * 40
+    assert receipt["model_id"] == result["model_id"] == model_id
     assert len(receipt["ordered_roster_unit_ids"]) == len(result["ordered_roster_unit_ids"]) == 8
     assert receipt["committed_unit_count"] == result["committed_unit_count"] == 0
     assert receipt["committed_unit_ids"] == result["committed_unit_ids"] == []

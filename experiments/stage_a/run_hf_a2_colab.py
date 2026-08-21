@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib
 import json
 import math
 import os
@@ -22,11 +21,12 @@ import torch
 from cegwm.method.hf import HF_CANDIDATE_ID, FrozenHFPublicAssets, score_hf_image
 from cegwm.protocol.records import StageARecord
 from cegwm.protocol.stage_a import StageAProtocol, load_stage_a_protocol
-from cegwm.runtime.diffusers_sd35 import run_sd35_hf, run_sd35_plain
+from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_hf, run_sd35_plain
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from cegwm.shared.prg import prg_bytes
 
-KEY_ENV = "CEGWM_STAGE_A_DETECTION_KEY"
+KEY_ENV = "CEG_WM_ROOT_KEY"
+CHECKPOINT_INTERVAL_HOURS = 2.0
 COMPLETENESS = "incomplete_for_hf_anchor"
 SCIENTIFIC_STATUS = "not_evaluated"
 LIMITATIONS = (
@@ -34,6 +34,7 @@ LIMITATIONS = (
     "gaussian_blur_sigma_1_not_evaluated",
     "gaussian_noise_std_0_01_not_evaluated",
     "lpips_quality_gate_not_evaluated",
+    "model_revision_and_weight_digest_not_recorded",
 )
 _FATAL_ERROR_BY_PHASE = {
     "initialization": "initialization_failure",
@@ -87,40 +88,16 @@ def _load_protocol(repo_root: Path) -> StageAProtocol:
     )
 
 
-def _module_digest(module: torch.nn.Module) -> str:
-    digest = hashlib.sha256()
-    for name, tensor in sorted(module.state_dict().items()):
-        value = tensor.detach().cpu().contiguous()
-        digest.update(name.encode("utf-8") + b"\x00")
-        digest.update(str(value.dtype).encode("ascii") + b"\x00")
-        digest.update(str(tuple(value.shape)).encode("ascii") + b"\x00")
-        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
-    return digest.hexdigest()
-
-
-def _load_pipeline_and_assets(model_id: str, model_revision: str) -> tuple[Any, FrozenHFPublicAssets]:
+def _load_pipeline_and_assets(model_id: str) -> tuple[Any, FrozenHFPublicAssets]:
     if not torch.cuda.is_available():
         raise RuntimeError("cuda_required_for_colab_execution")
-    try:
-        diffusers = importlib.import_module("diffusers")
-    except (ImportError, ModuleNotFoundError) as error:
-        raise RuntimeError("diffusers_required_for_colab_execution") from error
-    pipeline_class = getattr(diffusers, "StableDiffusion3Pipeline", None)
-    if pipeline_class is None:
-        raise RuntimeError("stable_diffusion_3_pipeline_unavailable")
-    pipeline = pipeline_class.from_pretrained(
-        model_id,
-        revision=model_revision,
-        torch_dtype=torch.float16,
-    )
+    pipeline = load_sd35_pipeline(model_id, torch_dtype=torch.float16)
     vae = getattr(pipeline, "vae", None)
     image_processor = getattr(pipeline, "image_processor", None)
     assets = FrozenHFPublicAssets(
         vae=vae,
         image_processor=image_processor,
-        model_revision=model_revision,
-        vae_weight_digest=_module_digest(vae),
-        image_processor_id=f"{model_id}@{model_revision}:image_processor",
+        image_processor_id=f"{model_id}:image_processor",
     )
     pipeline.to("cuda")
     return pipeline, assets
@@ -186,9 +163,8 @@ def _new_state(
     run_id: str,
     resolved_exact: str,
     protocol: StageAProtocol,
-    model_revision: str,
+    model_id: str,
     key_digest: str,
-    checkpoint_interval_hours: float,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -196,14 +172,13 @@ def _new_state(
         "protocol_digest": protocol.protocol_digest,
         "hf_candidate_id": HF_CANDIDATE_ID,
         "ordered_roster_unit_ids": [unit.unit_id for unit in protocol.candidate_selection],
-        "model_revision": model_revision,
+        "model_id": model_id,
         "key_public_digest": key_digest,
-        "checkpoint_interval_hours": checkpoint_interval_hours,
+        "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
         "checkpoint_sequence": 0,
         "committed_unit_count": 0,
         "committed_unit_ids": [],
         "records": [],
-        "vae_weight_digest": None,
     }
 
 
@@ -227,7 +202,7 @@ def _resume_state(
         "protocol_digest",
         "hf_candidate_id",
         "ordered_roster_unit_ids",
-        "model_revision",
+        "model_id",
         "key_public_digest",
         "checkpoint_interval_hours",
     )
@@ -238,6 +213,8 @@ def _resume_state(
     records = state.get("records")
     if not isinstance(committed, list) or committed != roster[: len(committed)]:
         raise ValueError("resume committed units must be an ordered roster prefix")
+    if not committed:
+        raise ValueError("resume checkpoint cannot be empty")
     if not isinstance(records, list) or len(records) != len(committed) * 2:
         raise ValueError("resume checkpoint record count mismatch")
     if state.get("committed_unit_count") != len(committed):
@@ -262,6 +239,145 @@ def _resume_state(
     if not isinstance(sequence, int) or sequence < 1:
         raise ValueError("resume checkpoint sequence is invalid")
     return state
+
+
+def _deterministic_run_id(
+    resolved_exact: str,
+    protocol: StageAProtocol,
+    model_id: str,
+    key_digest: str,
+) -> str:
+    identity = {
+        "resolved_exact": resolved_exact,
+        "protocol_digest": protocol.protocol_digest,
+        "hf_candidate_id": HF_CANDIDATE_ID,
+        "model_id": model_id,
+        "key_public_digest": key_digest,
+        "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
+    }
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(b"CEG-WM/stage-a2/run-id/v1\x00" + canonical.encode("utf-8"))
+    return f"a2hf-{digest.hexdigest()[:24]}"
+
+
+def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
+    parts = checksum_path.read_text(encoding="utf-8").strip().split()
+    if len(parts) != 2 or parts[1] != zip_path.name:
+        raise ValueError("artifact checksum file is malformed")
+    digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    if parts[0] != digest:
+        raise ValueError("artifact checksum mismatch")
+    return digest
+
+
+def _validate_final(
+    zip_path: Path,
+    checksum_path: Path,
+    expected: dict[str, Any],
+) -> tuple[int, str]:
+    _verify_checksum(zip_path, checksum_path)
+    with zipfile.ZipFile(zip_path) as archive:
+        if set(archive.namelist()) != {"receipt.json", "result.json"}:
+            raise ValueError("final package members mismatch")
+        receipt = json.loads(archive.read("receipt.json"))
+        result = json.loads(archive.read("result.json"))
+    identity_fields = (
+        "run_id",
+        "resolved_exact",
+        "protocol_digest",
+        "hf_candidate_id",
+        "ordered_roster_unit_ids",
+        "model_id",
+        "key_public_digest",
+        "checkpoint_interval_hours",
+    )
+    if any(
+        receipt.get(field) != expected.get(field) or result.get(field) != expected.get(field)
+        for field in identity_fields
+    ):
+        raise ValueError("final package identity mismatch")
+    if receipt.get("rc") not in {0, 1} or result.get("rc") != receipt.get("rc"):
+        raise ValueError("final package RC mismatch")
+    if (
+        receipt.get("completeness") != COMPLETENESS
+        or result.get("completeness") != COMPLETENESS
+        or receipt.get("scientific_status") != SCIENTIFIC_STATUS
+        or result.get("scientific_status") != SCIENTIFIC_STATUS
+        or receipt.get("limitations") != list(LIMITATIONS)
+        or result.get("limitations") != list(LIMITATIONS)
+    ):
+        raise ValueError("final package scientific scope mismatch")
+    if result.get("fixed_unit_count") != 8 or result.get("fixed_record_count") != 16:
+        raise ValueError("final package fixed denominator mismatch")
+    roster = expected["ordered_roster_unit_ids"]
+    committed = result.get("committed_unit_ids")
+    record_payloads = result.get("records")
+    if committed != roster or result.get("committed_unit_count") != 8:
+        raise ValueError("final package committed roster mismatch")
+    if not isinstance(record_payloads, list) or len(record_payloads) != 16:
+        raise ValueError("final package record count mismatch")
+    records = [StageARecord(**record) for record in record_payloads]
+    for index, unit_id in enumerate(roster):
+        pair = records[index * 2 : index * 2 + 2]
+        if [record.unit_id for record in pair] != [unit_id, unit_id]:
+            raise ValueError("final package record roster mismatch")
+        if [record.arm for record in pair] != ["hf_anchor", "primary_null"]:
+            raise ValueError("final package paired arms mismatch")
+        for record in pair:
+            if (
+                record.run_id != expected["run_id"]
+                or record.code_revision != expected["resolved_exact"]
+                or record.config_digest != expected["protocol_digest"]
+                or record.key_public_digest != expected["key_public_digest"]
+                or record.condition != "identity"
+            ):
+                raise ValueError("final package record identity mismatch")
+    status = receipt.get("status")
+    expected_status = (
+        "complete_incomplete_scope" if receipt["rc"] == 0 else "complete_with_failures"
+    )
+    if status != expected_status or result.get("status") != expected_status:
+        raise ValueError("final package status mismatch")
+    has_failure = any(record.status != "success" for record in records)
+    if has_failure != (receipt["rc"] == 1):
+        raise ValueError("final package failure/RC mismatch")
+    return int(receipt["rc"]), status
+
+
+def _discover_checkpoint(run_store: Path, expected: dict[str, Any]) -> dict[str, Any] | None:
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    checkpoint_names: set[str] = set()
+    pattern = re.compile(r"checkpoint-(\d{4})-units-(\d{4})\.zip")
+    for zip_path in sorted(run_store.glob("checkpoint-*.zip")):
+        match = pattern.fullmatch(zip_path.name)
+        if match is None:
+            raise ValueError("checkpoint filename is malformed")
+        checksum_path = run_store / f"{zip_path.name}.sha256"
+        if not checksum_path.is_file():
+            raise ValueError("checkpoint checksum is missing")
+        state = _resume_state(zip_path, checksum_path, expected)
+        sequence = int(match.group(1))
+        committed_count = int(match.group(2))
+        if state["checkpoint_sequence"] != sequence:
+            raise ValueError("checkpoint sequence filename mismatch")
+        if state["committed_unit_count"] != committed_count:
+            raise ValueError("checkpoint count filename mismatch")
+        candidates.append((sequence, committed_count, state))
+        checkpoint_names.update({zip_path.name, checksum_path.name})
+    orphan_checksums = {
+        path.name for path in run_store.glob("checkpoint-*.zip.sha256")
+    } - checkpoint_names
+    if orphan_checksums:
+        raise ValueError("checkpoint checksum has no matching ZIP")
+    ranks = [(sequence, count) for sequence, count, _ in candidates]
+    if len({sequence for sequence, _ in ranks}) != len(ranks):
+        raise ValueError("checkpoint sequence is ambiguous")
+    ordered = sorted(ranks)
+    if any(later[1] <= earlier[1] for earlier, later in zip(ordered, ordered[1:])):
+        raise ValueError("checkpoint committed counts are ambiguous")
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]
 
 
 def _checkpoint(state: dict[str, Any], output_dir: Path, checkpoint_sink: Path) -> None:
@@ -297,28 +413,28 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "run_id": receipt["run_id"],
         "resolved_exact": receipt["resolved_exact"],
         "rc": receipt["rc"],
+        "status": receipt["status"],
         "completeness": COMPLETENESS,
         "scientific_status": SCIENTIFIC_STATUS,
         "limitations": list(LIMITATIONS),
+        "protocol_digest": receipt["protocol_digest"],
+        "hf_candidate_id": receipt["hf_candidate_id"],
+        "ordered_roster_unit_ids": receipt["ordered_roster_unit_ids"],
+        "model_id": receipt["model_id"],
+        "key_public_digest": receipt["key_public_digest"],
         "checkpoint_interval_hours": receipt["checkpoint_interval_hours"],
         "checkpoint_sequence": receipt["checkpoint_sequence"],
         "committed_unit_count": receipt["committed_unit_count"],
+        "committed_unit_ids": receipt["committed_unit_ids"],
         "fixed_unit_count": 8,
         "fixed_record_count": 16,
         "records": [record.to_dict() for record in records],
     }
     if "error_class" in receipt:
         result.update({
-            "status": receipt["status"],
             "result_kind": receipt["result_kind"],
             "error_class": receipt["error_class"],
             "approved_execution_exact": receipt["approved_execution_exact"],
-            "protocol_digest": receipt["protocol_digest"],
-            "hf_candidate_id": receipt["hf_candidate_id"],
-            "ordered_roster_unit_ids": receipt["ordered_roster_unit_ids"],
-            "model_revision": receipt["model_revision"],
-            "key_public_digest": receipt["key_public_digest"],
-            "committed_unit_ids": receipt["committed_unit_ids"],
             "resume_status": receipt["resume_status"],
         })
     _json_write(output_dir / "receipt.json", receipt)
@@ -331,14 +447,28 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
     return zip_path, zip_digest
 
 
+def _publish_final(zip_path: Path, zip_digest: str, run_store: Path) -> None:
+    checksum_path = zip_path.with_suffix(".zip.sha256")
+    checksum_path.write_text(f"{zip_digest}  {zip_path.name}\n", encoding="utf-8")
+    _verify_checksum(zip_path, checksum_path)
+    for source in (zip_path, checksum_path):
+        destination = run_store / source.name
+        if destination.exists():
+            raise RuntimeError("final run store refuses overwrite")
+        shutil.copy2(source, destination)
+        if source.read_bytes() != destination.read_bytes():
+            raise RuntimeError("final run store copy verification failed")
+
+
 def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class: str) -> tuple[Path, str]:
     if error_class not in _FATAL_ERROR_BY_PHASE.values():
         raise ValueError("fatal error class is not predeclared")
-    if re.fullmatch(r"[a-z0-9][a-z0-9-]{7,63}", args.run_id) is None:
+    run_id = context.get("run_id")
+    if not isinstance(run_id, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]{7,63}", run_id) is None:
         raise ValueError("unsafe run id cannot name a fatal package")
     output_dir = context.get("output_dir")
     if output_dir is None:
-        output_dir = Path(args.output_root).resolve() / args.run_id
+        output_dir = Path(args.output_root).resolve() / run_id
         output_dir.mkdir(parents=True, exist_ok=False)
         context["output_dir"] = output_dir
         context["output_dir_owned"] = True
@@ -357,7 +487,7 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
     )
     interval = context.get("checkpoint_interval_hours")
     receipt: dict[str, Any] = {
-        "run_id": args.run_id,
+        "run_id": run_id,
         "approved_execution_exact": approved_exact,
         "resolved_exact": context.get("resolved_exact"),
         "rc": 2,
@@ -369,7 +499,7 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
         "protocol_digest": context.get("protocol_digest"),
         "hf_candidate_id": HF_CANDIDATE_ID,
         "ordered_roster_unit_ids": list(context.get("ordered_roster_unit_ids", [])),
-        "model_revision": context.get("model_revision"),
+        "model_id": context.get("model_id"),
         "key_public_digest": context.get("key_public_digest"),
         "checkpoint_interval_hours": interval,
         "checkpoint_sequence": int(state.get("checkpoint_sequence", 0)),
@@ -396,73 +526,111 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     budget_config = protocol.config["budget"]
     if runtime_config["model_id"] != "stabilityai/stable-diffusion-3.5-medium":
         raise RuntimeError("protocol_model_identity_mismatch")
+    if runtime_config["public_asset_rule"] != (
+        "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest"
+    ):
+        raise RuntimeError("protocol_public_asset_rule_mismatch")
     if runtime_config["inference_steps"] != 20 or budget_config["total_relative_l2"] != 0.012:
         raise RuntimeError("protocol_runtime_identity_mismatch")
     if len(protocol.candidate_selection) != 8:
         raise RuntimeError("candidate_selection_roster_mismatch")
-    if re.fullmatch(r"[0-9a-f]{40}", args.model_revision) is None:
-        raise ValueError("model revision must be a lowercase 40-character revision")
-    context["model_revision"] = args.model_revision
-    if re.fullmatch(r"[a-z0-9][a-z0-9-]{7,63}", args.run_id) is None:
-        raise ValueError("run id must be 8-64 lowercase letters, digits, or hyphens")
-    checkpoint_interval_hours = float(args.checkpoint_interval_hours)
-    if not 1.0 <= checkpoint_interval_hours <= 2.0:
-        raise ValueError("checkpoint interval hours must be in [1.0, 2.0]")
-    context["checkpoint_interval_hours"] = checkpoint_interval_hours
-    checkpoint_sink = Path(args.checkpoint_sink).resolve()
-    if not checkpoint_sink.is_dir():
-        raise ValueError("checkpoint sink must be an existing directory")
-    if any(path.suffix not in {".zip", ".sha256"} for path in checkpoint_sink.iterdir()):
-        raise ValueError("checkpoint sink may contain only zip and sha256 files")
-    if bool(args.resume_zip) != bool(args.resume_checksum):
-        raise ValueError("resume requires both checkpoint zip and checksum")
+    model_id = runtime_config["model_id"]
+    context["model_id"] = model_id
+    context["checkpoint_interval_hours"] = CHECKPOINT_INTERVAL_HOURS
+    run_store_root = Path(args.run_store_root).resolve()
+    run_store_root.mkdir(parents=True, exist_ok=True)
+    if not run_store_root.is_dir():
+        raise ValueError("run store root must be a directory")
 
     raw_key = os.environ.pop(KEY_ENV, None)
     if raw_key is None:
-        raise RuntimeError("detection_key_environment_input_required")
+        raise RuntimeError("root_key_environment_input_required")
     detection_key = normalize_detection_key(raw_key)
     del raw_key
     key_digest = public_key_digest(detection_key)
     context["key_public_digest"] = key_digest
     wrong_keys = _wrong_keys(detection_key)
-    output_dir = Path(args.output_root).resolve() / args.run_id
+    run_id = _deterministic_run_id(resolved_exact, protocol, model_id, key_digest)
+    context["run_id"] = run_id
+    expected_state = _new_state(
+        run_id=run_id,
+        resolved_exact=resolved_exact,
+        protocol=protocol,
+        model_id=model_id,
+        key_digest=key_digest,
+    )
+    context["state"] = expected_state
+    run_store = run_store_root / run_id
+    if run_store.exists():
+        if not run_store.is_dir():
+            raise ValueError("deterministic run store path must be a directory")
+    else:
+        run_store.mkdir(parents=False, exist_ok=False)
+    final_zip = run_store / f"{run_id}.zip"
+    final_checksum = run_store / f"{run_id}.zip.sha256"
+    final_names = {final_zip.name, final_checksum.name}
+    checkpoint_name = re.compile(r"checkpoint-\d{4}-units-\d{4}\.zip(?:\.sha256)?")
+    for path in run_store.iterdir():
+        if not path.is_file() or (
+            path.name not in final_names and checkpoint_name.fullmatch(path.name) is None
+        ):
+            raise ValueError("run store contains an unexpected artifact")
+    context["phase"] = "resume_validation"
+    context["resume_status"] = "rejected"
+    state = _discover_checkpoint(run_store, expected_state)
+    context["state"] = state or expected_state
+    if final_zip.exists() or final_checksum.exists():
+        if not (final_zip.is_file() and final_checksum.is_file()):
+            raise ValueError("final package pair is incomplete")
+        final_rc, final_status = _validate_final(final_zip, final_checksum, expected_state)
+        context["resume_status"] = "verified_final"
+        del detection_key, wrong_keys
+        print(
+            "CEGWM_PROGRESS " + json.dumps({
+                "run_id": run_id,
+                "committed": 8,
+                "fixed_total": 8,
+                "phase": "verified_final",
+            }),
+            flush=True,
+        )
+        print(
+            "CEGWM_SUMMARY " + json.dumps({
+                "run_id": run_id,
+                "resolved_exact": resolved_exact,
+                "rc": final_rc,
+                "status": final_status,
+                "zip_path": str(final_zip),
+                "zip_sha256": _verify_checksum(final_zip, final_checksum),
+            }),
+            flush=True,
+        )
+        return final_rc
+    if state is None:
+        state = expected_state
+        context["resume_status"] = "fresh"
+    else:
+        context["resume_status"] = "accepted_checkpoint"
+    context["state"] = state
+    context["phase"] = "runtime_execution"
+    output_dir = Path(args.output_root).resolve() / run_id
     output_dir.mkdir(parents=True, exist_ok=False)
     context["output_dir"] = output_dir
     context["output_dir_owned"] = True
-    expected_state = _new_state(
-        run_id=args.run_id,
-        resolved_exact=resolved_exact,
-        protocol=protocol,
-        model_revision=args.model_revision,
-        key_digest=key_digest,
-        checkpoint_interval_hours=checkpoint_interval_hours,
-    )
-    context["state"] = expected_state
-    if args.resume_zip:
-        context["phase"] = "resume_validation"
-        context["resume_status"] = "rejected"
-        state = _resume_state(Path(args.resume_zip), Path(args.resume_checksum), expected_state)
-        context["resume_status"] = "accepted"
-    else:
-        state = expected_state
-        context["resume_status"] = "not_requested"
-    context["state"] = state
-    context["phase"] = "runtime_execution"
     _atomic_json_write(output_dir / "state.json", state)
     receipt: dict[str, Any] = {
-        "run_id": args.run_id,
+        "run_id": run_id,
         "resolved_exact": resolved_exact,
         "rc": None,
         "status": "running",
         "completeness": COMPLETENESS,
         "scientific_status": SCIENTIFIC_STATUS,
         "protocol_digest": protocol.protocol_digest,
-        "model_id": runtime_config["model_id"],
-        "model_revision": args.model_revision,
+        "hf_candidate_id": HF_CANDIDATE_ID,
+        "ordered_roster_unit_ids": expected_state["ordered_roster_unit_ids"],
+        "model_id": model_id,
         "key_public_digest": key_digest,
-        "checkpoint_interval_hours": checkpoint_interval_hours,
-        "full_weight_digest": None,
-        "full_weight_digest_status": "not_computed_nonblocking",
+        "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
         "limitations": list(LIMITATIONS),
     }
     _json_write(output_dir / "receipt.json", receipt)
@@ -476,8 +644,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     last_checkpoint_time = time.monotonic()
     if pending_units:
         try:
-            pipeline, assets = _load_pipeline_and_assets(runtime_config["model_id"], args.model_revision)
-            state["vae_weight_digest"] = assets.vae_weight_digest
+            pipeline, assets = _load_pipeline_and_assets(model_id)
         except Exception:
             model_load_failed = True
             any_failure = True
@@ -488,7 +655,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             pair = _failure_pair(
                 unit,
                 protocol,
-                args.run_id,
+                run_id,
                 resolved_exact,
                 key_digest,
                 "model_load_failure",
@@ -520,7 +687,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
                 hf_scores = _scores(hf_output.image, detection_key, wrong_keys, assets)
                 null_scores = _scores(null_image, detection_key, wrong_keys, assets)
                 common = dict(
-                    run_id=args.run_id,
+                    run_id=run_id,
                     unit_id=unit.unit_id,
                     source_cluster_id=unit.source_id,
                     condition="identity",
@@ -551,7 +718,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
                 pair = _failure_pair(
                     unit,
                     protocol,
-                    args.run_id,
+                    run_id,
                     resolved_exact,
                     key_digest,
                     "unit_execution_failure",
@@ -571,11 +738,11 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         now = time.monotonic()
         if (
             new_units_since_checkpoint > 0
-            and now - last_checkpoint_time >= checkpoint_interval_hours * 3600.0
+            and now - last_checkpoint_time >= CHECKPOINT_INTERVAL_HOURS * 3600.0
         ):
             try:
                 context["phase"] = "checkpoint"
-                _checkpoint(state, output_dir, checkpoint_sink)
+                _checkpoint(state, output_dir, run_store)
                 last_checkpoint_time = now
                 new_units_since_checkpoint = 0
             except Exception:
@@ -585,6 +752,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
                 context["phase"] = "runtime_execution"
         print(
             "CEGWM_PROGRESS " + json.dumps({
+                "run_id": run_id,
                 "committed": len(state["committed_unit_ids"]),
                 "fixed_total": 8,
             }),
@@ -596,23 +764,24 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     receipt["rc"] = 1 if any_failure else 0
     receipt["checkpoint_sequence"] = state["checkpoint_sequence"]
     receipt["committed_unit_count"] = state["committed_unit_count"]
+    receipt["committed_unit_ids"] = list(state["committed_unit_ids"])
     if checkpoint_failure:
         receipt["checkpoint_status"] = "failure"
     else:
         receipt["checkpoint_status"] = "complete"
     receipt["status"] = "complete_with_failures" if any_failure else "complete_incomplete_scope"
-    receipt["vae_weight_digest"] = (
-        assets.vae_weight_digest if assets is not None else state.get("vae_weight_digest")
-    )
     context["phase"] = "final_export"
     zip_path, zip_digest = _export(output_dir, receipt, records)
+    _discover_checkpoint(run_store, expected_state)
+    _publish_final(zip_path, zip_digest, run_store)
+    _validate_final(final_zip, final_checksum, expected_state)
     del detection_key, wrong_keys
     print(
         "CEGWM_SUMMARY " + json.dumps({
-            "run_id": args.run_id,
+            "run_id": run_id,
             "resolved_exact": resolved_exact,
             "rc": receipt["rc"],
-            "zip_path": str(zip_path),
+            "zip_path": str(final_zip),
             "zip_sha256": zip_digest,
         }),
         flush=True,
@@ -625,12 +794,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--expected-exact", required=True)
-    parser.add_argument("--model-revision", required=True)
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--checkpoint-sink", required=True)
-    parser.add_argument("--checkpoint-interval-hours", type=float, default=2.0)
-    parser.add_argument("--resume-zip")
-    parser.add_argument("--resume-checksum")
+    parser.add_argument("--run-store-root", required=True)
     return parser
 
 

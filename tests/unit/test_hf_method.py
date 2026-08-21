@@ -46,8 +46,6 @@ def _assets(vae: _VAE | None = None) -> FrozenHFPublicAssets:
     return FrozenHFPublicAssets(
         vae=vae or _VAE(),
         image_processor=_Processor(),
-        model_revision="a" * 40,
-        vae_weight_digest="b" * 64,
         image_processor_id="sd35-vae-image-processor-v1",
     )
 

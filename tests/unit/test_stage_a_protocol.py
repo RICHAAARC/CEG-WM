@@ -29,6 +29,9 @@ def test_frozen_stage_a_protocol_is_finite_disjoint_and_digestible() -> None:
     assert isinstance(protocol.config["detection_access"], MappingProxyType)
     assert protocol.config["execution_flow"]["failure_units_remain_in_denominator"] is True
     assert protocol.config["execution_flow"]["replacement_units_allowed"] is False
+    assert protocol.config["generation_runtime"]["public_asset_rule"] == (
+        "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest"
+    )
 
 
 @pytest.mark.unit

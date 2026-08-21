@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,12 +25,10 @@ _CARRIER_VERSION = "spatial-irfft2-real-rademacher-v1"
 
 @dataclass(frozen=True, slots=True)
 class FrozenHFPublicAssets:
-    """Public inference assets whose identity is fixed before the first unit."""
+    """One immutable in-memory view of the protocol-named public assets."""
 
     vae: Any
     image_processor: Any
-    model_revision: str
-    vae_weight_digest: str
     image_processor_id: str
     model_id: str = _MODEL_ID
     candidate_id: str = HF_CANDIDATE_ID
@@ -53,10 +50,6 @@ class FrozenHFPublicAssets:
             raise ValueError("HF minimum radius differs from the frozen Stage-A anchor")
         if not math.isclose(self.hf_max_radius, HF_MAX_RADIUS, abs_tol=0.0):
             raise ValueError("HF maximum radius differs from the frozen Stage-A anchor")
-        if re.fullmatch(r"[0-9a-f]{40}", self.model_revision) is None:
-            raise ValueError("model_revision must be a lowercase 40-character immutable revision")
-        if re.fullmatch(r"[0-9a-f]{64}", self.vae_weight_digest) is None:
-            raise ValueError("vae_weight_digest must be a lowercase SHA-256 digest")
         if not isinstance(self.image_processor_id, str) or not self.image_processor_id.strip():
             raise ValueError("image_processor_id must be non-empty")
         if not callable(getattr(self.vae, "encode", None)):

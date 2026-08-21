@@ -78,12 +78,15 @@ def _validate_pipeline_callback_api(pipeline: Any) -> None:
         raise TypeError("pipeline lacks the required diffusers callback-on-step-end API")
 
 
-def load_local_sd35_pipeline(
-    frozen_public_assets: FrozenHFPublicAssets,
+def load_sd35_pipeline(
+    model_id: str,
     *,
     torch_dtype: torch.dtype,
 ) -> Any:
-    """Load only an already-cached frozen SD3.5 revision; never fetch implicitly."""
+    """Load the protocol-named SD3.5 model using the Hub default resolution."""
+
+    if not isinstance(model_id, str) or not model_id.strip():
+        raise ValueError("SD3.5 model_id must be non-empty text")
 
     try:
         diffusers = importlib.import_module("diffusers")
@@ -93,10 +96,8 @@ def load_local_sd35_pipeline(
     if pipeline_class is None or not callable(getattr(pipeline_class, "from_pretrained", None)):
         raise RuntimeError("installed diffusers lacks StableDiffusion3Pipeline")
     pipeline = pipeline_class.from_pretrained(
-        frozen_public_assets.model_id,
-        revision=frozen_public_assets.model_revision,
+        model_id,
         torch_dtype=torch_dtype,
-        local_files_only=True,
     )
     _validate_pipeline_callback_api(pipeline)
     return pipeline

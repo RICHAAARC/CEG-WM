@@ -12,7 +12,7 @@ from PIL import Image
 from cegwm.method.hf import FrozenHFPublicAssets
 from cegwm.runtime.diffusers_sd35 import (
     HFInjectionCallback,
-    load_local_sd35_pipeline,
+    load_sd35_pipeline,
     run_sd35_hf,
 )
 
@@ -41,8 +41,6 @@ def _assets() -> FrozenHFPublicAssets:
     return FrozenHFPublicAssets(
         vae=_VAE(),
         image_processor=_Processor(),
-        model_revision="a" * 40,
-        vae_weight_digest="b" * 64,
         image_processor_id="sd35-vae-image-processor-v1",
     )
 
@@ -137,10 +135,45 @@ def test_runtime_path_uses_evolving_latent_and_returns_key_dependent_rgb() -> No
 
 
 @pytest.mark.integration
+def test_model_loader_uses_protocol_name_without_revision_or_local_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class CompatiblePipeline:
+        def __call__(self, **kwargs: object) -> SimpleNamespace:
+            del kwargs
+            return SimpleNamespace(images=[])
+
+    class Factory:
+        @staticmethod
+        def from_pretrained(model_id: str, **kwargs: object) -> CompatiblePipeline:
+            calls.append((model_id, kwargs))
+            return CompatiblePipeline()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "diffusers",
+        SimpleNamespace(StableDiffusion3Pipeline=Factory),
+    )
+
+    pipeline = load_sd35_pipeline(
+        "stabilityai/stable-diffusion-3.5-medium",
+        torch_dtype=torch.float16,
+    )
+
+    assert isinstance(pipeline, CompatiblePipeline)
+    assert calls == [(
+        "stabilityai/stable-diffusion-3.5-medium",
+        {"torch_dtype": torch.float16},
+    )]
+
+
+@pytest.mark.integration
 def test_missing_or_incompatible_diffusers_capability_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "diffusers", None)
     with pytest.raises(RuntimeError, match="diffusers is required"):
-        load_local_sd35_pipeline(_assets(), torch_dtype=torch.float16)
+        load_sd35_pipeline("stabilityai/stable-diffusion-3.5-medium", torch_dtype=torch.float16)
 
     class IncompatiblePipeline:
         def __call__(self, prompt: str) -> SimpleNamespace:
