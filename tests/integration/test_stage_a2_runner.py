@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 import zipfile
 
@@ -312,3 +314,67 @@ def test_checkpoint_interval_range_is_fail_closed(tmp_path: Path) -> None:
             checkpoint_sink,
             interval=0.5,
         ))
+
+
+@pytest.mark.integration
+def test_top_level_resume_failure_exports_only_sanitized_partial_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, exact = _repo(tmp_path)
+    output_root = tmp_path / "output"
+    checkpoint_sink = tmp_path / "checkpoint-sink"
+    checkpoint_sink.mkdir()
+    resume_zip = tmp_path / "resume.zip"
+    resume_checksum = tmp_path / "resume.zip.sha256"
+    private_detail = "private checkpoint detail that must not be exported"
+    with zipfile.ZipFile(resume_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("state.json", json.dumps({"private": private_detail}))
+    resume_checksum.write_text(
+        f"{hashlib.sha256(resume_zip.read_bytes()).hexdigest()}  {resume_zip.name}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv("CEGWM_PRIVATE_DETAIL", private_detail)
+    monkeypatch.setattr(sys, "argv", [
+        "run_hf_a2_colab",
+        "--repo-root", str(repo),
+        "--output-root", str(output_root),
+        "--expected-exact", exact,
+        "--model-revision", "c" * 40,
+        "--run-id", "a2-run-fatal-package",
+        "--checkpoint-sink", str(checkpoint_sink),
+        "--resume-zip", str(resume_zip),
+        "--resume-checksum", str(resume_checksum),
+    ])
+
+    with pytest.raises(SystemExit) as exit_info:
+        runner.main()
+
+    assert exit_info.value.code == 2
+    stdout = capsys.readouterr().out
+    assert "resume_validation_failure" in stdout
+    assert _RAW_KEY not in stdout and private_detail not in stdout
+    receipt, result, zip_path = _payloads(output_root, "a2-run-fatal-package")
+    assert receipt["rc"] == result["rc"] == 2
+    assert receipt["error_class"] == result["error_class"] == "resume_validation_failure"
+    assert receipt["result_kind"] == result["result_kind"] == "operational_failure_not_scientific"
+    assert receipt["resume_status"] == result["resume_status"] == "rejected"
+    assert receipt["approved_execution_exact"] == result["approved_execution_exact"] == exact
+    assert receipt["resolved_exact"] == result["resolved_exact"] == exact
+    assert receipt["protocol_digest"] == result["protocol_digest"]
+    assert receipt["model_revision"] == result["model_revision"] == "c" * 40
+    assert len(receipt["ordered_roster_unit_ids"]) == len(result["ordered_roster_unit_ids"]) == 8
+    assert receipt["committed_unit_count"] == result["committed_unit_count"] == 0
+    assert receipt["committed_unit_ids"] == result["committed_unit_ids"] == []
+    assert result["records"] == []
+    assert result["fixed_unit_count"] == 8 and result["fixed_record_count"] == 16
+    with zipfile.ZipFile(zip_path) as archive:
+        exported = b"".join(archive.read(name) for name in archive.namelist())
+    exported += b"".join(
+        path.read_bytes() for path in (zip_path.parent / "receipt.json", zip_path.parent / "result.json")
+    )
+    assert _RAW_KEY.encode() not in exported
+    assert private_detail.encode() not in exported
+    assert b"traceback" not in exported

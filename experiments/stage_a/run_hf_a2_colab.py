@@ -35,6 +35,13 @@ LIMITATIONS = (
     "gaussian_noise_std_0_01_not_evaluated",
     "lpips_quality_gate_not_evaluated",
 )
+_FATAL_ERROR_BY_PHASE = {
+    "initialization": "initialization_failure",
+    "resume_validation": "resume_validation_failure",
+    "runtime_execution": "runtime_execution_failure",
+    "checkpoint": "checkpoint_failure",
+    "final_export": "final_export_failure",
+}
 
 
 def _json_write(path: Path, payload: dict[str, Any]) -> None:
@@ -300,6 +307,20 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "fixed_record_count": 16,
         "records": [record.to_dict() for record in records],
     }
+    if "error_class" in receipt:
+        result.update({
+            "status": receipt["status"],
+            "result_kind": receipt["result_kind"],
+            "error_class": receipt["error_class"],
+            "approved_execution_exact": receipt["approved_execution_exact"],
+            "protocol_digest": receipt["protocol_digest"],
+            "hf_candidate_id": receipt["hf_candidate_id"],
+            "ordered_roster_unit_ids": receipt["ordered_roster_unit_ids"],
+            "model_revision": receipt["model_revision"],
+            "key_public_digest": receipt["key_public_digest"],
+            "committed_unit_ids": receipt["committed_unit_ids"],
+            "resume_status": receipt["resume_status"],
+        })
     _json_write(output_dir / "receipt.json", receipt)
     _json_write(output_dir / "result.json", result)
     zip_path = output_dir / f"{receipt['run_id']}.zip"
@@ -310,10 +331,67 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
     return zip_path, zip_digest
 
 
-def execute(args: argparse.Namespace) -> int:
+def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class: str) -> tuple[Path, str]:
+    if error_class not in _FATAL_ERROR_BY_PHASE.values():
+        raise ValueError("fatal error class is not predeclared")
+    if re.fullmatch(r"[a-z0-9][a-z0-9-]{7,63}", args.run_id) is None:
+        raise ValueError("unsafe run id cannot name a fatal package")
+    output_dir = context.get("output_dir")
+    if output_dir is None:
+        output_dir = Path(args.output_root).resolve() / args.run_id
+        output_dir.mkdir(parents=True, exist_ok=False)
+        context["output_dir"] = output_dir
+        context["output_dir_owned"] = True
+    elif not context.get("output_dir_owned"):
+        raise RuntimeError("fatal package refuses an unowned output directory")
+    state = context.get("state") or {}
+    record_payloads = state.get("records", [])
+    records = [StageARecord(**record) for record in record_payloads]
+    committed_ids = list(state.get("committed_unit_ids", []))
+    if len(records) != len(committed_ids) * 2:
+        raise ValueError("fatal package refuses inconsistent committed records")
+    approved_exact = (
+        args.expected_exact
+        if re.fullmatch(r"[0-9a-f]{40}", args.expected_exact) is not None
+        else None
+    )
+    interval = context.get("checkpoint_interval_hours")
+    receipt: dict[str, Any] = {
+        "run_id": args.run_id,
+        "approved_execution_exact": approved_exact,
+        "resolved_exact": context.get("resolved_exact"),
+        "rc": 2,
+        "status": "operational_failure",
+        "result_kind": "operational_failure_not_scientific",
+        "error_class": error_class,
+        "completeness": COMPLETENESS,
+        "scientific_status": SCIENTIFIC_STATUS,
+        "protocol_digest": context.get("protocol_digest"),
+        "hf_candidate_id": HF_CANDIDATE_ID,
+        "ordered_roster_unit_ids": list(context.get("ordered_roster_unit_ids", [])),
+        "model_revision": context.get("model_revision"),
+        "key_public_digest": context.get("key_public_digest"),
+        "checkpoint_interval_hours": interval,
+        "checkpoint_sequence": int(state.get("checkpoint_sequence", 0)),
+        "committed_unit_count": len(committed_ids),
+        "committed_unit_ids": committed_ids,
+        "resume_status": context.get("resume_status", "not_requested"),
+        "limitations": list(LIMITATIONS),
+    }
+    return _export(output_dir, receipt, records)
+
+
+def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = None) -> int:
+    context = fatal_context if fatal_context is not None else {}
+    context["phase"] = "initialization"
     repo_root = Path(args.repo_root).resolve()
     resolved_exact = _git_exact(repo_root, args.expected_exact)
+    context["resolved_exact"] = resolved_exact
     protocol = _load_protocol(repo_root)
+    context["protocol_digest"] = protocol.protocol_digest
+    context["ordered_roster_unit_ids"] = [
+        unit.unit_id for unit in protocol.candidate_selection
+    ]
     runtime_config = protocol.config["generation_runtime"]
     budget_config = protocol.config["budget"]
     if runtime_config["model_id"] != "stabilityai/stable-diffusion-3.5-medium":
@@ -324,11 +402,13 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError("candidate_selection_roster_mismatch")
     if re.fullmatch(r"[0-9a-f]{40}", args.model_revision) is None:
         raise ValueError("model revision must be a lowercase 40-character revision")
+    context["model_revision"] = args.model_revision
     if re.fullmatch(r"[a-z0-9][a-z0-9-]{7,63}", args.run_id) is None:
         raise ValueError("run id must be 8-64 lowercase letters, digits, or hyphens")
     checkpoint_interval_hours = float(args.checkpoint_interval_hours)
     if not 1.0 <= checkpoint_interval_hours <= 2.0:
         raise ValueError("checkpoint interval hours must be in [1.0, 2.0]")
+    context["checkpoint_interval_hours"] = checkpoint_interval_hours
     checkpoint_sink = Path(args.checkpoint_sink).resolve()
     if not checkpoint_sink.is_dir():
         raise ValueError("checkpoint sink must be an existing directory")
@@ -343,9 +423,12 @@ def execute(args: argparse.Namespace) -> int:
     detection_key = normalize_detection_key(raw_key)
     del raw_key
     key_digest = public_key_digest(detection_key)
+    context["key_public_digest"] = key_digest
     wrong_keys = _wrong_keys(detection_key)
     output_dir = Path(args.output_root).resolve() / args.run_id
     output_dir.mkdir(parents=True, exist_ok=False)
+    context["output_dir"] = output_dir
+    context["output_dir_owned"] = True
     expected_state = _new_state(
         run_id=args.run_id,
         resolved_exact=resolved_exact,
@@ -354,10 +437,17 @@ def execute(args: argparse.Namespace) -> int:
         key_digest=key_digest,
         checkpoint_interval_hours=checkpoint_interval_hours,
     )
+    context["state"] = expected_state
     if args.resume_zip:
+        context["phase"] = "resume_validation"
+        context["resume_status"] = "rejected"
         state = _resume_state(Path(args.resume_zip), Path(args.resume_checksum), expected_state)
+        context["resume_status"] = "accepted"
     else:
         state = expected_state
+        context["resume_status"] = "not_requested"
+    context["state"] = state
+    context["phase"] = "runtime_execution"
     _atomic_json_write(output_dir / "state.json", state)
     receipt: dict[str, Any] = {
         "run_id": args.run_id,
@@ -466,11 +556,17 @@ def execute(args: argparse.Namespace) -> int:
                     key_digest,
                     "unit_execution_failure",
                 )
+        next_state = dict(state)
+        next_state["committed_unit_ids"] = [*state["committed_unit_ids"], unit.unit_id]
+        next_state["committed_unit_count"] = len(next_state["committed_unit_ids"])
+        next_state["records"] = [
+            *state["records"],
+            *(record.to_dict() for record in pair),
+        ]
+        _atomic_json_write(output_dir / "state.json", next_state)
+        state.clear()
+        state.update(next_state)
         records.extend(pair)
-        state["committed_unit_ids"].append(unit.unit_id)
-        state["committed_unit_count"] = len(state["committed_unit_ids"])
-        state["records"].extend(record.to_dict() for record in pair)
-        _atomic_json_write(output_dir / "state.json", state)
         new_units_since_checkpoint += 1
         now = time.monotonic()
         if (
@@ -478,12 +574,15 @@ def execute(args: argparse.Namespace) -> int:
             and now - last_checkpoint_time >= checkpoint_interval_hours * 3600.0
         ):
             try:
+                context["phase"] = "checkpoint"
                 _checkpoint(state, output_dir, checkpoint_sink)
                 last_checkpoint_time = now
                 new_units_since_checkpoint = 0
             except Exception:
                 checkpoint_failure = True
                 any_failure = True
+            finally:
+                context["phase"] = "runtime_execution"
         print(
             "CEGWM_PROGRESS " + json.dumps({
                 "committed": len(state["committed_unit_ids"]),
@@ -505,6 +604,7 @@ def execute(args: argparse.Namespace) -> int:
     receipt["vae_weight_digest"] = (
         assets.vae_weight_digest if assets is not None else state.get("vae_weight_digest")
     )
+    context["phase"] = "final_export"
     zip_path, zip_digest = _export(output_dir, receipt, records)
     del detection_key, wrong_keys
     print(
@@ -535,10 +635,26 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    args = _parser().parse_args()
+    fatal_context: dict[str, Any] = {}
     try:
-        return_code = execute(_parser().parse_args())
-    except Exception:
-        print("CEGWM_FATAL " + json.dumps({"code": "initialization_or_export_failure"}), flush=True)
+        return_code = execute(args, fatal_context=fatal_context)
+    except (Exception, KeyboardInterrupt):
+        phase = fatal_context.get("phase", "initialization")
+        error_class = _FATAL_ERROR_BY_PHASE.get(phase, "initialization_failure")
+        package_created = False
+        try:
+            _export_fatal(args, fatal_context, error_class)
+            package_created = True
+        except Exception:
+            pass
+        print(
+            "CEGWM_FATAL " + json.dumps({
+                "code": error_class,
+                "package_created": package_created,
+            }),
+            flush=True,
+        )
         return_code = 2
     raise SystemExit(return_code)
 
