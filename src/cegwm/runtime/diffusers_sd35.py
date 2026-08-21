@@ -137,3 +137,33 @@ def run_sd35_hf(
     if callback.measurement is None:
         raise RuntimeError("SD3.5 pipeline completed without the frozen HF injection")
     return HFRunOutput(image=image, injection_budget=callback.measurement)
+
+
+def run_sd35_plain(
+    pipeline: Any,
+    prompt: str,
+    *,
+    height: int,
+    width: int,
+    generator: torch.Generator | None = None,
+) -> Image.Image:
+    """Generate the paired primary-null image without installing a callback."""
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("generation prompt must be non-empty text")
+    if not isinstance(height, int) or not isinstance(width, int) or height < 256 or width < 256:
+        raise ValueError("Stage-A image dimensions must be integer values of at least 256")
+    if not callable(pipeline):
+        raise TypeError("SD3.5 pipeline must be callable")
+    result = pipeline(
+        prompt=prompt,
+        num_inference_steps=20,
+        height=height,
+        width=width,
+        generator=generator,
+        output_type="pil",
+    )
+    images = getattr(result, "images", None)
+    if not isinstance(images, (list, tuple)) or len(images) != 1:
+        raise RuntimeError("SD3.5 pipeline must return exactly one primary-null image")
+    return require_ordinary_rgb_image(images[0])
