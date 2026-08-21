@@ -160,12 +160,13 @@ def test_model_loader_uses_protocol_name_without_revision_or_local_only(
     pipeline = load_sd35_pipeline(
         "stabilityai/stable-diffusion-3.5-medium",
         torch_dtype=torch.float16,
+        token="hf_test_token",
     )
 
     assert isinstance(pipeline, CompatiblePipeline)
     assert calls == [(
         "stabilityai/stable-diffusion-3.5-medium",
-        {"torch_dtype": torch.float16},
+        {"torch_dtype": torch.float16, "token": "hf_test_token"},
     )]
 
 
@@ -173,7 +174,18 @@ def test_model_loader_uses_protocol_name_without_revision_or_local_only(
 def test_missing_or_incompatible_diffusers_capability_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "diffusers", None)
     with pytest.raises(RuntimeError, match="diffusers is required"):
-        load_sd35_pipeline("stabilityai/stable-diffusion-3.5-medium", torch_dtype=torch.float16)
+        load_sd35_pipeline(
+            "stabilityai/stable-diffusion-3.5-medium",
+            torch_dtype=torch.float16,
+            token="hf_test_token",
+        )
+
+    with pytest.raises(ValueError, match="token"):
+        load_sd35_pipeline(
+            "stabilityai/stable-diffusion-3.5-medium",
+            torch_dtype=torch.float16,
+            token="",
+        )
 
     class IncompatiblePipeline:
         def __call__(self, prompt: str) -> SimpleNamespace:

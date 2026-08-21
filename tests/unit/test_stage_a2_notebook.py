@@ -30,6 +30,11 @@ def test_stage_a2_notebook_is_output_free_exact_bound_and_thin() -> None:
     assert "--model-revision" not in source and "--checkpoint-interval-hours" not in source
     runner_cell = "".join(code_cells[-2]["source"])
     assert "if line.startswith('CEGWM_PROGRESS ')" in runner_cell
-    assert "CEGWM_SUMMARY " not in runner_cell and "CEGWM_FATAL " not in runner_cell
+    assert "elif line.startswith('CEGWM_FATAL ')" in runner_cell
+    assert "{'run_id', 'error_class', 'export_status'}" in runner_cell
+    assert "CEGWM_SUMMARY " not in runner_cell
     assert "zipfile.ZipFile" in last and "hashlib.sha256" in last
+    assert "failure-{error_class}.zip" in last
+    assert "RC2 committed prefix mismatch" in last
     assert last.index("final fixed denominator mismatch") < last.index("summary =")
+    assert last.index("zip_sha256 =") < last.index("summary =") < last.index("if runner_rc != 0")

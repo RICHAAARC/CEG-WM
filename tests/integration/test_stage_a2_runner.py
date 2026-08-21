@@ -20,6 +20,7 @@ from experiments.stage_a import run_hf_a2_colab as runner
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RAW_KEY = "stage-a-colab-detection-key-0001"
+_HF_TOKEN = "hf_stage_a_test_token"
 
 
 def _repo(tmp_path: Path) -> tuple[Path, str]:
@@ -72,8 +73,9 @@ def _install_fakes(
     calls = {"load": 0, "hf": 0, "plain": 0, "score": 0}
     assets = SimpleNamespace()
 
-    def fake_load(model_id: str) -> tuple[object, object]:
+    def fake_load(model_id: str, hf_token: str) -> tuple[object, object]:
         assert model_id == "stabilityai/stable-diffusion-3.5-medium"
+        assert hf_token == _HF_TOKEN
         calls["load"] += 1
         return object(), assets
 
@@ -132,6 +134,7 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
     calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
 
     rc = runner.execute(_args(repo, exact, output_root, run_store_root))
     run_id = _only_run_id(output_root)
@@ -150,6 +153,7 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
     assert all(len(record["scores"]) == 17 for record in result["records"])
     assert result["records"][0]["scores"] != result["records"][1]["scores"]
     assert runner.KEY_ENV not in os.environ
+    assert runner.TOKEN_ENV not in os.environ
     assert receipt["checkpoint_interval_hours"] == runner.CHECKPOINT_INTERVAL_HOURS == 2.0
     assert receipt["model_id"] == "stabilityai/stable-diffusion-3.5-medium"
     assert not ({"model_revision", "vae_weight_digest", "full_weight_digest"} & set(receipt))
@@ -163,6 +167,7 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
         archived = b"".join(archive.read(name) for name in archive.namelist())
     exported = b"".join(path.read_bytes() for path in (zip_path.parent / "receipt.json", zip_path.parent / "result.json")) + archived
     assert _RAW_KEY.encode() not in exported
+    assert _HF_TOKEN.encode() not in exported
     assert b"A red ceramic teapot" not in exported
     for forbidden in (b"private_latent", b"carrier", b"cached_qk", b"traceback"):
         assert forbidden not in exported
@@ -183,6 +188,7 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
     clock = iter([0.0, 100.0, 7201.0, 7300.0, 14402.0])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
 
     with pytest.raises(KeyboardInterrupt):
         runner.execute(_args(repo, exact, tmp_path / "first-output", run_store_root))
@@ -203,6 +209,7 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
     resumed_calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     resumed_output = tmp_path / "resumed-output"
     rc = runner.execute(_args(repo, exact, resumed_output, run_store_root))
     receipt, result, zip_path = _payloads(resumed_output, run_id)
@@ -221,6 +228,7 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
 
     verified_calls = _install_fakes(monkeypatch)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 1
     assert verified_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
 
@@ -259,6 +267,7 @@ def test_due_checkpoint_at_final_boundary_and_verified_final_do_not_create_empty
     clock = iter([0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 7201.0])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
 
     assert runner.execute(_args(repo, exact, tmp_path / "first-output", run_store_root)) == 0
     assert calls["hf"] == 8
@@ -270,6 +279,7 @@ def test_due_checkpoint_at_final_boundary_and_verified_final_do_not_create_empty
     resumed_calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 999999.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 0
     assert resumed_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
     assert sorted(stored.glob("checkpoint-*.zip*")) == checkpoint_files
@@ -277,6 +287,7 @@ def test_due_checkpoint_at_final_boundary_and_verified_final_do_not_create_empty
     final_checksum = stored / f"{run_id}.zip.sha256"
     final_checksum.write_text(f"{'0' * 64}  {run_id}.zip\n", encoding="utf-8")
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     with pytest.raises(ValueError, match="checksum mismatch"):
         runner.execute(_args(repo, exact, tmp_path / "bad-final-output", run_store_root))
 
@@ -327,6 +338,25 @@ def test_run_identity_is_deterministic_and_cli_keeps_fixed_interval_internal(tmp
 
 
 @pytest.mark.integration
+def test_runner_requires_nonempty_root_key_and_explicit_hf_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, "   ")
+    with pytest.raises(RuntimeError, match="hugging_face_token"):
+        runner.execute(_args(repo, exact, tmp_path / "token-output", tmp_path / "token-store"))
+    assert runner.KEY_ENV not in os.environ and runner.TOKEN_ENV not in os.environ
+
+    monkeypatch.setenv(runner.KEY_ENV, "")
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
+    with pytest.raises(RuntimeError, match="root_key"):
+        runner.execute(_args(repo, exact, tmp_path / "key-output", tmp_path / "key-store"))
+    assert runner.KEY_ENV not in os.environ and runner.TOKEN_ENV not in os.environ
+
+
+@pytest.mark.integration
 def test_top_level_resume_failure_exports_only_sanitized_partial_package(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -355,6 +385,7 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
         encoding="utf-8",
     )
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     monkeypatch.setenv("CEGWM_PRIVATE_DETAIL", private_detail)
     monkeypatch.setattr(sys, "argv", [
         "run_hf_a2_colab",
@@ -369,9 +400,21 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
 
     assert exit_info.value.code == 2
     stdout = capsys.readouterr().out
-    assert "resume_validation_failure" in stdout
+    fatal_lines = [line for line in stdout.splitlines() if line.startswith("CEGWM_FATAL ")]
+    assert len(fatal_lines) == 1
+    fatal_event = json.loads(fatal_lines[0].removeprefix("CEGWM_FATAL "))
+    assert fatal_event == {
+        "run_id": run_id,
+        "error_class": "resume_validation_failure",
+        "export_status": "published",
+    }
     assert _RAW_KEY not in stdout and private_detail not in stdout
-    receipt, result, zip_path = _payloads(output_root, run_id)
+    assert _HF_TOKEN not in stdout
+    local_run_dir = output_root / run_id
+    receipt = json.loads((local_run_dir / "receipt.json").read_text(encoding="utf-8"))
+    result = json.loads((local_run_dir / "result.json").read_text(encoding="utf-8"))
+    zip_path = local_run_dir / "failure-resume_validation_failure.zip"
+    checksum_path = local_run_dir / f"{zip_path.name}.sha256"
     assert receipt["rc"] == result["rc"] == 2
     assert receipt["error_class"] == result["error_class"] == "resume_validation_failure"
     assert receipt["result_kind"] == result["result_kind"] == "operational_failure_not_scientific"
@@ -388,8 +431,106 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
     with zipfile.ZipFile(zip_path) as archive:
         exported = b"".join(archive.read(name) for name in archive.namelist())
     exported += b"".join(
-        path.read_bytes() for path in (zip_path.parent / "receipt.json", zip_path.parent / "result.json")
+        path.read_bytes()
+        for path in (zip_path.parent / "receipt.json", zip_path.parent / "result.json", checksum_path)
     )
     assert _RAW_KEY.encode() not in exported
+    assert _HF_TOKEN.encode() not in exported
     assert private_detail.encode() not in exported
     assert b"traceback" not in exported
+    stored_zip = stored / zip_path.name
+    stored_checksum = stored / checksum_path.name
+    assert stored_zip.read_bytes() == zip_path.read_bytes()
+    assert stored_checksum.read_bytes() == checksum_path.read_bytes()
+    assert not (stored / f"{run_id}.zip").exists()
+
+    second_output = tmp_path / "second-output"
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
+    monkeypatch.setattr(sys, "argv", [
+        "run_hf_a2_colab",
+        "--repo-root", str(repo),
+        "--output-root", str(second_output),
+        "--expected-exact", exact,
+        "--run-store-root", str(run_store_root),
+    ])
+    with pytest.raises(SystemExit) as second_exit:
+        runner.main()
+    assert second_exit.value.code == 2
+    second_event = json.loads(
+        capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL ")
+    )
+    assert second_event["export_status"] == "published"
+    assert (second_output / run_id / zip_path.name).read_bytes() == stored_zip.read_bytes()
+
+    stored_zip.write_bytes(b"corrupt")
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
+    monkeypatch.setattr(sys, "argv", [
+        "run_hf_a2_colab",
+        "--repo-root", str(repo),
+        "--output-root", str(tmp_path / "third-output"),
+        "--expected-exact", exact,
+        "--run-store-root", str(run_store_root),
+    ])
+    with pytest.raises(SystemExit) as third_exit:
+        runner.main()
+    assert third_exit.value.code == 2
+    third_event = json.loads(capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL "))
+    assert third_event["export_status"] == "unavailable"
+
+
+@pytest.mark.integration
+def test_runtime_fatal_preserves_only_the_real_committed_pair_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, exact = _repo(tmp_path)
+    output_root = tmp_path / "output"
+    run_store_root = tmp_path / "run-store"
+    _install_fakes(monkeypatch, interrupt_hf_call=2)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
+    monkeypatch.setattr(sys, "argv", [
+        "run_hf_a2_colab",
+        "--repo-root", str(repo),
+        "--output-root", str(output_root),
+        "--expected-exact", exact,
+        "--run-store-root", str(run_store_root),
+    ])
+
+    with pytest.raises(SystemExit) as exit_info:
+        runner.main()
+
+    assert exit_info.value.code == 2
+    lines = capsys.readouterr().out.splitlines()
+    fatal_event = json.loads(
+        next(line for line in lines if line.startswith("CEGWM_FATAL ")).removeprefix("CEGWM_FATAL ")
+    )
+    assert fatal_event["error_class"] == "runtime_execution_failure"
+    assert fatal_event["export_status"] == "published"
+    run_id = fatal_event["run_id"]
+    local_run_dir = output_root / run_id
+    result = json.loads((local_run_dir / "result.json").read_text(encoding="utf-8"))
+    assert result["rc"] == 2
+    assert result["committed_unit_count"] == 1
+    assert result["committed_unit_ids"] == ["selection-0001"]
+    assert len(result["records"]) == 2
+    assert [record["unit_id"] for record in result["records"]] == ["selection-0001"] * 2
+    assert [record["arm"] for record in result["records"]] == ["hf_anchor", "primary_null"]
+    stored = run_store_root / run_id
+    assert (stored / "failure-runtime_execution_failure.zip").is_file()
+    protocol = runner._load_protocol(repo)
+    expected = runner._new_state(
+        run_id=run_id,
+        resolved_exact=exact,
+        protocol=protocol,
+        model_id=protocol.config["generation_runtime"]["model_id"],
+        key_digest=runner.public_key_digest(_RAW_KEY),
+    )
+    assert runner._discover_checkpoint(stored, expected) is None
+    assert not (stored / f"{run_id}.zip").exists()
+    exported = b"".join(path.read_bytes() for path in local_run_dir.iterdir() if path.is_file())
+    assert _RAW_KEY.encode() not in exported and _HF_TOKEN.encode() not in exported

@@ -82,11 +82,14 @@ def load_sd35_pipeline(
     model_id: str,
     *,
     torch_dtype: torch.dtype,
+    token: str,
 ) -> Any:
     """Load the protocol-named SD3.5 model using the Hub default resolution."""
 
     if not isinstance(model_id, str) or not model_id.strip():
         raise ValueError("SD3.5 model_id must be non-empty text")
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("Hugging Face token must be non-empty text")
 
     try:
         diffusers = importlib.import_module("diffusers")
@@ -98,6 +101,7 @@ def load_sd35_pipeline(
     pipeline = pipeline_class.from_pretrained(
         model_id,
         torch_dtype=torch_dtype,
+        token=token,
     )
     _validate_pipeline_callback_api(pipeline)
     return pipeline

@@ -26,6 +26,7 @@ from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from cegwm.shared.prg import prg_bytes
 
 KEY_ENV = "CEG_WM_ROOT_KEY"
+TOKEN_ENV = "HF_TOKEN"
 CHECKPOINT_INTERVAL_HOURS = 2.0
 COMPLETENESS = "incomplete_for_hf_anchor"
 SCIENTIFIC_STATUS = "not_evaluated"
@@ -88,10 +89,10 @@ def _load_protocol(repo_root: Path) -> StageAProtocol:
     )
 
 
-def _load_pipeline_and_assets(model_id: str) -> tuple[Any, FrozenHFPublicAssets]:
+def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, FrozenHFPublicAssets]:
     if not torch.cuda.is_available():
         raise RuntimeError("cuda_required_for_colab_execution")
-    pipeline = load_sd35_pipeline(model_id, torch_dtype=torch.float16)
+    pipeline = load_sd35_pipeline(model_id, torch_dtype=torch.float16, token=hf_token)
     vae = getattr(pipeline, "vae", None)
     image_processor = getattr(pipeline, "image_processor", None)
     assets = FrozenHFPublicAssets(
@@ -344,6 +345,91 @@ def _validate_final(
     return int(receipt["rc"]), status
 
 
+def _validate_fatal(
+    zip_path: Path,
+    checksum_path: Path,
+    expected: dict[str, Any],
+    error_class: str,
+) -> str:
+    if error_class not in _FATAL_ERROR_BY_PHASE.values():
+        raise ValueError("fatal error class is not predeclared")
+    digest = _verify_checksum(zip_path, checksum_path)
+    with zipfile.ZipFile(zip_path) as archive:
+        if set(archive.namelist()) != {"receipt.json", "result.json"}:
+            raise ValueError("fatal package members mismatch")
+        receipt = json.loads(archive.read("receipt.json"))
+        result = json.loads(archive.read("result.json"))
+    identity_fields = (
+        "run_id",
+        "resolved_exact",
+        "protocol_digest",
+        "hf_candidate_id",
+        "ordered_roster_unit_ids",
+        "model_id",
+        "key_public_digest",
+        "checkpoint_interval_hours",
+    )
+    if any(
+        receipt.get(field) != expected.get(field) or result.get(field) != expected.get(field)
+        for field in identity_fields
+    ):
+        raise ValueError("fatal package identity mismatch")
+    if (
+        receipt.get("approved_execution_exact") != expected["resolved_exact"]
+        or result.get("approved_execution_exact") != expected["resolved_exact"]
+        or receipt.get("rc") != 2
+        or result.get("rc") != 2
+        or receipt.get("status") != "operational_failure"
+        or result.get("status") != "operational_failure"
+        or receipt.get("result_kind") != "operational_failure_not_scientific"
+        or result.get("result_kind") != "operational_failure_not_scientific"
+        or receipt.get("error_class") != error_class
+        or result.get("error_class") != error_class
+    ):
+        raise ValueError("fatal package operational status mismatch")
+    if (
+        receipt.get("completeness") != COMPLETENESS
+        or result.get("completeness") != COMPLETENESS
+        or receipt.get("scientific_status") != SCIENTIFIC_STATUS
+        or result.get("scientific_status") != SCIENTIFIC_STATUS
+        or receipt.get("limitations") != list(LIMITATIONS)
+        or result.get("limitations") != list(LIMITATIONS)
+    ):
+        raise ValueError("fatal package scientific scope mismatch")
+    roster = expected["ordered_roster_unit_ids"]
+    committed = result.get("committed_unit_ids")
+    record_payloads = result.get("records")
+    if (
+        not isinstance(committed, list)
+        or committed != roster[: len(committed)]
+        or receipt.get("committed_unit_ids") != committed
+        or receipt.get("committed_unit_count") != len(committed)
+        or result.get("committed_unit_count") != len(committed)
+        or not isinstance(record_payloads, list)
+        or len(record_payloads) != len(committed) * 2
+        or result.get("fixed_unit_count") != 8
+        or result.get("fixed_record_count") != 16
+    ):
+        raise ValueError("fatal package committed prefix mismatch")
+    records = [StageARecord(**record) for record in record_payloads]
+    for index, unit_id in enumerate(committed):
+        pair = records[index * 2 : index * 2 + 2]
+        if [record.unit_id for record in pair] != [unit_id, unit_id]:
+            raise ValueError("fatal package record roster mismatch")
+        if [record.arm for record in pair] != ["hf_anchor", "primary_null"]:
+            raise ValueError("fatal package paired arms mismatch")
+        for record in pair:
+            if (
+                record.run_id != expected["run_id"]
+                or record.code_revision != expected["resolved_exact"]
+                or record.config_digest != expected["protocol_digest"]
+                or record.key_public_digest != expected["key_public_digest"]
+                or record.condition != "identity"
+            ):
+                raise ValueError("fatal package record identity mismatch")
+    return digest
+
+
 def _discover_checkpoint(run_store: Path, expected: dict[str, Any]) -> dict[str, Any] | None:
     candidates: list[tuple[int, int, dict[str, Any]]] = []
     checkpoint_names: set[str] = set()
@@ -441,8 +527,11 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
     _json_write(output_dir / "result.json", result)
     zip_path = output_dir / f"{receipt['run_id']}.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(output_dir / "receipt.json", arcname="receipt.json")
-        archive.write(output_dir / "result.json", arcname="result.json")
+        for name in ("receipt.json", "result.json"):
+            member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            member.compress_type = zipfile.ZIP_DEFLATED
+            member.external_attr = 0o600 << 16
+            archive.writestr(member, (output_dir / name).read_bytes())
     zip_digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     return zip_path, zip_digest
 
@@ -458,6 +547,35 @@ def _publish_final(zip_path: Path, zip_digest: str, run_store: Path) -> None:
         shutil.copy2(source, destination)
         if source.read_bytes() != destination.read_bytes():
             raise RuntimeError("final run store copy verification failed")
+
+
+def _publish_failure(
+    zip_path: Path,
+    checksum_path: Path,
+    run_store: Path,
+    expected: dict[str, Any],
+    error_class: str,
+) -> None:
+    destination_zip = run_store / zip_path.name
+    destination_checksum = run_store / checksum_path.name
+    existing = (destination_zip.exists(), destination_checksum.exists())
+    if any(existing):
+        if not all(existing) or not destination_zip.is_file() or not destination_checksum.is_file():
+            raise RuntimeError("failure run store pair is incomplete")
+        _validate_fatal(destination_zip, destination_checksum, expected, error_class)
+        if (
+            zip_path.read_bytes() != destination_zip.read_bytes()
+            or checksum_path.read_bytes() != destination_checksum.read_bytes()
+        ):
+            raise RuntimeError("failure run store refuses non-identical overwrite")
+        return
+    for source, destination in (
+        (zip_path, destination_zip),
+        (checksum_path, destination_checksum),
+    ):
+        with destination.open("xb") as target:
+            target.write(source.read_bytes())
+    _validate_fatal(destination_zip, destination_checksum, expected, error_class)
 
 
 def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class: str) -> tuple[Path, str]:
@@ -508,7 +626,18 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
         "resume_status": context.get("resume_status", "not_requested"),
         "limitations": list(LIMITATIONS),
     }
-    return _export(output_dir, receipt, records)
+    expected = context.get("expected_state")
+    run_store = context.get("run_store")
+    if not isinstance(expected, dict) or not isinstance(run_store, Path):
+        raise RuntimeError("fatal package requires resolved run identity and sink")
+    base_zip, zip_digest = _export(output_dir, receipt, records)
+    fatal_zip = output_dir / f"failure-{error_class}.zip"
+    os.replace(base_zip, fatal_zip)
+    fatal_checksum = output_dir / f"{fatal_zip.name}.sha256"
+    fatal_checksum.write_text(f"{zip_digest}  {fatal_zip.name}\n", encoding="utf-8")
+    _validate_fatal(fatal_zip, fatal_checksum, expected, error_class)
+    _publish_failure(fatal_zip, fatal_checksum, run_store, expected, error_class)
+    return fatal_zip, zip_digest
 
 
 def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = None) -> int:
@@ -543,13 +672,15 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         raise ValueError("run store root must be a directory")
 
     raw_key = os.environ.pop(KEY_ENV, None)
-    if raw_key is None:
+    hf_token = os.environ.pop(TOKEN_ENV, None)
+    if not isinstance(raw_key, str) or not raw_key.strip():
+        hf_token = ""
+        del hf_token
         raise RuntimeError("root_key_environment_input_required")
     detection_key = normalize_detection_key(raw_key)
     del raw_key
     key_digest = public_key_digest(detection_key)
     context["key_public_digest"] = key_digest
-    wrong_keys = _wrong_keys(detection_key)
     run_id = _deterministic_run_id(resolved_exact, protocol, model_id, key_digest)
     context["run_id"] = run_id
     expected_state = _new_state(
@@ -559,6 +690,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         model_id=model_id,
         key_digest=key_digest,
     )
+    context["expected_state"] = expected_state
     context["state"] = expected_state
     run_store = run_store_root / run_id
     if run_store.exists():
@@ -566,16 +698,33 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             raise ValueError("deterministic run store path must be a directory")
     else:
         run_store.mkdir(parents=False, exist_ok=False)
+    context["run_store"] = run_store
+    if not isinstance(hf_token, str) or not hf_token.strip():
+        hf_token = ""
+        del hf_token, detection_key
+        raise RuntimeError("hugging_face_token_environment_input_required")
+    wrong_keys = _wrong_keys(detection_key)
     final_zip = run_store / f"{run_id}.zip"
     final_checksum = run_store / f"{run_id}.zip.sha256"
     final_names = {final_zip.name, final_checksum.name}
     checkpoint_name = re.compile(r"checkpoint-\d{4}-units-\d{4}\.zip(?:\.sha256)?")
+    fatal_classes = "|".join(re.escape(value) for value in _FATAL_ERROR_BY_PHASE.values())
+    failure_name = re.compile(rf"failure-(?:{fatal_classes})\.zip(?:\.sha256)?")
+    context["phase"] = "resume_validation"
     for path in run_store.iterdir():
         if not path.is_file() or (
-            path.name not in final_names and checkpoint_name.fullmatch(path.name) is None
+            path.name not in final_names
+            and checkpoint_name.fullmatch(path.name) is None
+            and failure_name.fullmatch(path.name) is None
         ):
             raise ValueError("run store contains an unexpected artifact")
-    context["phase"] = "resume_validation"
+    for error_class in _FATAL_ERROR_BY_PHASE.values():
+        failure_zip = run_store / f"failure-{error_class}.zip"
+        failure_checksum = run_store / f"{failure_zip.name}.sha256"
+        if failure_zip.exists() or failure_checksum.exists():
+            if not (failure_zip.is_file() and failure_checksum.is_file()):
+                raise ValueError("failure package pair is incomplete")
+            _validate_fatal(failure_zip, failure_checksum, expected_state, error_class)
     context["resume_status"] = "rejected"
     state = _discover_checkpoint(run_store, expected_state)
     context["state"] = state or expected_state
@@ -584,7 +733,8 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             raise ValueError("final package pair is incomplete")
         final_rc, final_status = _validate_final(final_zip, final_checksum, expected_state)
         context["resume_status"] = "verified_final"
-        del detection_key, wrong_keys
+        hf_token = ""
+        del detection_key, wrong_keys, hf_token
         print(
             "CEGWM_PROGRESS " + json.dumps({
                 "run_id": run_id,
@@ -644,10 +794,16 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     last_checkpoint_time = time.monotonic()
     if pending_units:
         try:
-            pipeline, assets = _load_pipeline_and_assets(model_id)
+            pipeline, assets = _load_pipeline_and_assets(model_id, hf_token)
         except Exception:
             model_load_failed = True
             any_failure = True
+        finally:
+            hf_token = ""
+            del hf_token
+    else:
+        hf_token = ""
+        del hf_token
     checkpoint_failure = False
     new_units_since_checkpoint = 0
     for unit in pending_units:
@@ -806,16 +962,17 @@ def main() -> None:
     except (Exception, KeyboardInterrupt):
         phase = fatal_context.get("phase", "initialization")
         error_class = _FATAL_ERROR_BY_PHASE.get(phase, "initialization_failure")
-        package_created = False
+        export_status = "unavailable"
         try:
             _export_fatal(args, fatal_context, error_class)
-            package_created = True
+            export_status = "published"
         except Exception:
             pass
         print(
             "CEGWM_FATAL " + json.dumps({
-                "code": error_class,
-                "package_created": package_created,
+                "run_id": fatal_context.get("run_id"),
+                "error_class": error_class,
+                "export_status": export_status,
             }),
             flush=True,
         )
