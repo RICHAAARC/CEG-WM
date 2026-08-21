@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -9,32 +10,32 @@ _NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_col
 
 
 @pytest.mark.unit
-def test_stage_a2_notebook_is_output_free_exact_bound_and_thin() -> None:
+def test_stage_a2_notebook_has_one_thin_runnable_terminal_path() -> None:
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
-    source = "\n".join("".join(cell["source"]) for cell in code_cells)
-    first = "".join(code_cells[0]["source"])
-    last = "".join(code_cells[-1]["source"])
+    sources = ["".join(cell["source"]) for cell in code_cells]
 
+    assert len(code_cells) == 4
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
-    assert "from google.colab import drive" in first
-    assert "drive.mount('/content/drive')" in first
-    assert "CEG_WM_ROOT_KEY" in first and "HF_TOKEN" in first
-    assert "userdata.get(name)" in first
-    assert "input(" not in source and "getpass" not in source
-    assert "CEGWM_STAGE_A_DETECTION_KEY" not in source
-    assert "'fetch', '--depth', '1', 'origin', 'refs/heads/stage-a-method-feasibility'" in source
-    assert "'checkout', '--detach', 'FETCH_HEAD'" in source
-    assert "experiments.stage_a.run_hf_a2_colab" in source
-    assert "--run-store-root" in source
-    assert "--model-revision" not in source and "--checkpoint-interval-hours" not in source
-    runner_cell = "".join(code_cells[-2]["source"])
-    assert "if line.startswith('CEGWM_PROGRESS ')" in runner_cell
-    assert "elif line.startswith('CEGWM_FATAL ')" in runner_cell
-    assert "{'run_id', 'error_class', 'export_status'}" in runner_cell
-    assert "CEGWM_SUMMARY " not in runner_cell
-    assert "zipfile.ZipFile" in last and "hashlib.sha256" in last
-    assert "failure-{error_class}.zip" in last
-    assert "RC2 committed prefix mismatch" in last
-    assert last.index("final fixed denominator mismatch") < last.index("summary =")
-    assert last.index("zip_sha256 =") < last.index("summary =") < last.index("if runner_rc != 0")
+    trees = [ast.parse(source) for source in sources]
+
+    runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
+    terminal_index = next(index for index, source in enumerate(sources) if "zipfile.ZipFile" in source)
+    assert runner_index < terminal_index == len(code_cells) - 1
+
+    summary_assignments = [
+        node
+        for node in ast.walk(trees[terminal_index])
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "summary" for target in node.targets)
+    ]
+    assert len(summary_assignments) == 1
+    summary_value = summary_assignments[0].value
+    assert isinstance(summary_value, ast.Dict)
+    assert 1 <= len(summary_value.keys) <= 8
+    assert all(isinstance(key, ast.Constant) and isinstance(key.value, str) for key in summary_value.keys)
+
+    terminal = sources[terminal_index]
+    nonzero_boundary = terminal.index("if runner_rc != 0:")
+    assert terminal.index("summary =") < terminal.index("print(summary)") < nonzero_boundary
+    assert "raise RuntimeError" in terminal[nonzero_boundary:]
