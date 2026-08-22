@@ -10,7 +10,7 @@ _NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_col
 
 
 @pytest.mark.unit
-def test_stage_a_lf_balanced_notebook_has_one_thin_selection_handoff_path() -> None:
+def test_stage_a_lf_balanced_notebook_has_one_thin_confirmation_handoff_path() -> None:
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
     sources = ["".join(cell["source"]) for cell in code_cells]
@@ -19,9 +19,9 @@ def test_stage_a_lf_balanced_notebook_has_one_thin_selection_handoff_path() -> N
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
     trees = [ast.parse(source) for source in sources]
     combined = "\n".join(sources)
-    assert "refs/heads/stage-a-lf-balanced-blocks-v2" in combined
-    assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_balanced_blocks_selection" in combined
-    assert combined.count("lfbbsel-[0-9a-f]{24}") == 2
+    assert "refs/heads/stage-a-lf-balanced-blocks-confirmation" in combined
+    assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_balanced_blocks_confirmation" in combined
+    assert combined.count("lfbbconf-[0-9a-f]{24}") == 2
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
     terminal_index = len(code_cells) - 1
