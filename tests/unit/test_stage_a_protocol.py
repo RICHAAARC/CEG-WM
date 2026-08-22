@@ -9,6 +9,7 @@ import pytest
 
 from cegwm.protocol.stage_a import (
     load_hf_v2_confirmation_protocol,
+    load_hf_lf_attack_complementarity_protocol,
     load_lf_a3_selection_protocol,
     load_lf_balanced_blocks_confirmation_protocol,
     load_lf_balanced_blocks_selection_protocol,
@@ -39,6 +40,12 @@ _LF_BALANCED_CONFIRMATION = (
 _LF_BALANCED_CONFIRMATION_CONFIG = (
     _ROOT / "configs" / "stage_a" / "stage_a_lf_balanced_blocks_confirmation_v1.json"
 )
+_ATTACK_CONFIG = (
+    _ROOT / "configs" / "stage_a" / "stage_a_hf_lf_attack_complementarity_v1.json"
+)
+_ATTACK_ROSTER = (
+    _ROOT / "configs" / "stage_a" / "hf_lf_attack_complementarity.jsonl"
+)
 
 
 @pytest.mark.unit
@@ -59,6 +66,88 @@ def test_frozen_stage_a_protocol_is_finite_disjoint_and_digestible() -> None:
     assert protocol.config["generation_runtime"]["public_asset_rule"] == (
         "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest"
     )
+
+
+@pytest.mark.unit
+def test_attack_complementarity_protocol_freezes_reference_attacks_and_128_records() -> None:
+    protocol = load_hf_lf_attack_complementarity_protocol(
+        _ATTACK_CONFIG, _ATTACK_ROSTER
+    )
+    assert protocol.protocol_id == "cegwm-stage-a-hf-lf-attack-complementarity-v1"
+    assert protocol.untouched_confirmation == ()
+    assert [unit.unit_id for unit in protocol.candidate_selection] == [
+        f"attack-comp-{index:04d}" for index in range(1, 9)
+    ]
+    assert protocol.config["condition_order"] == (
+        "identity_reference",
+        "jpeg_q75",
+        "gaussian_blur_sigma_1",
+        "gaussian_noise_std_0_01",
+    )
+    assert protocol.config["attack_ids"] == protocol.config["condition_order"][1:]
+    assert protocol.config["methods"]["hf"]["detector_statistic_id"] == (
+        "vae_reencode_hf_masked_normalized_correlation"
+    )
+    assert protocol.config["execution_flow"]["unit_transaction_record_count"] == 16
+    assert protocol.config["execution_flow"]["fixed_records"] == 128
+    assert protocol.config["decision_rule"]["paired_clean_failure_outcome"] == (
+        "SCIENTIFIC_NEGATIVE_FOR_PAIRED_CLEAN_PREREQUISITE_"
+        "ATTACK_COMPLEMENTARITY_NOT_EVALUABLE_AND_STOP"
+    )
+    assert len(protocol.protocol_digest) == 64
+
+
+@pytest.mark.unit
+def test_attack_roster_is_globally_disjoint_from_prior_stage_a_manifests() -> None:
+    attack = load_hf_lf_attack_complementarity_protocol(
+        _ATTACK_CONFIG, _ATTACK_ROSTER
+    ).candidate_selection
+    prior_units: set[str] = set()
+    prior_sources: set[str] = set()
+    prior_prompts: set[str] = set()
+    prior_seeds: set[int] = set()
+    for manifest in (_ROOT / "configs" / "stage_a").glob("*.jsonl"):
+        if manifest == _ATTACK_ROSTER:
+            continue
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            payload = json.loads(line)
+            prior_units.add(payload["unit_id"])
+            prior_sources.add(payload["source_id"])
+            prior_prompts.add(payload["prompt"])
+            prior_seeds.add(payload["seed"])
+    assert {unit.unit_id for unit in attack}.isdisjoint(prior_units)
+    assert {unit.source_id for unit in attack}.isdisjoint(prior_sources)
+    assert {unit.prompt for unit in attack}.isdisjoint(prior_prompts)
+    assert {unit.seed for unit in attack}.isdisjoint(prior_seeds)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("condition_order",), ["identity_reference"], "condition order"),
+        (("attack_ids",), ["identity_reference"], "separate"),
+        (("decision_rule", "gate_a_registered_top_rank_among_17_min_units"), 6, "decision rule"),
+        (("execution_flow", "fixed_records"), 96, "128-record"),
+        (("budget", "total_relative_l2_per_method"), 0.011, "0.012"),
+        (("methods", "hf", "carrier_method_id"), "changed", "method"),
+    ],
+)
+def test_attack_protocol_rejects_identity_gate_denominator_or_method_drift(
+    tmp_path: Path,
+    path: tuple[str, ...],
+    value: object,
+    message: str,
+) -> None:
+    payload = json.loads(_ATTACK_CONFIG.read_text(encoding="utf-8"))
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    modified = tmp_path / "invalid-attack.json"
+    modified.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_hf_lf_attack_complementarity_protocol(modified, _ATTACK_ROSTER)
 
 
 @pytest.mark.unit

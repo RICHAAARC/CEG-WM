@@ -1132,3 +1132,195 @@ def load_lf_balanced_blocks_confirmation_protocol(
         untouched_confirmation=confirmation,
         protocol_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
+
+
+def _validate_attack_complementarity_choices(config: Mapping[str, Any]) -> None:
+    """Validate only the frozen paired clean/attack comparison choices."""
+
+    _validate_detection_access(config)
+    if _require_mapping(config, "clean_provenance") != {
+        "hf_clean_exact": "985a2306ec1509c0a632b8c52c0957fb25e86071",
+        "lf_clean_exact": "19ed1a351dc860ea4446309a475eaa74fc976df5",
+        "role": "prerequisite_identity_only_not_attack_evidence",
+    }:
+        raise ValueError("attack comparison clean evidence must remain provenance-only")
+    if config.get("execution_scope_id") != (
+        "hf_lf_paired_clean_reference_and_non_geometric_attack_complementarity_v1"
+    ):
+        raise ValueError("unexpected attack-complementarity execution scope")
+    runtime = _require_mapping(config, "generation_runtime")
+    if runtime != {
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "inference_steps": 20,
+        "injection_step_index_zero_based": 18,
+        "public_asset_rule": "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest",
+        "generation_rule": "independent_same_seed_generators_for_hf_lf_and_plain",
+        "primary_null_rule": "one_same_prompt_seed_no_callback_image_per_unit_reused_only_as_current_ordinary_image",
+    }:
+        raise ValueError("attack comparison must preserve the frozen generation runtime")
+    keying = _require_mapping(config, "keying")
+    if (
+        keying.get("task") != "zero_bit_keyed_attribution"
+        or keying.get("normalization") != "NFC_UTF8_for_text_exact_bytes_for_binary"
+        or keying.get("prg") != "HMAC_SHA256_counter_v1"
+        or keying.get("wrong_key_count") != 16
+        or keying.get("wrong_key_derivation_domain")
+        != "stage-a/external-wrong-key/v1"
+        or keying.get("primary_null") is not True
+        or keying.get("payload_bits") != 0
+    ):
+        raise ValueError("attack comparison key and control identity differs")
+    methods = _require_mapping(config, "methods")
+    if methods.get("hf") != {
+        "carrier_method_id": "hf_tail_rademacher_v1",
+        "evaluated_candidate_id": "hf_tail_rademacher_v1_rankgate_v2",
+        "detector_statistic_id": "vae_reencode_hf_masked_normalized_correlation",
+        "blind_score_function": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
+    } or methods.get("lf") != {
+        "carrier_method_id": "lf_shell_balanced_blocks_v2",
+        "evaluated_candidate_id": "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
+        "detector_statistic_id": "lf_block_centered_normalized_median_corr_v2",
+        "blind_score_function": "frozen_lf_final_rgb_public_vae_block_centered_normalized_median_correlation",
+    }:
+        raise ValueError("attack comparison method or blind-detector identity differs")
+    budget = _require_mapping(config, "budget")
+    if (
+        budget.get("total_relative_l2_per_method") != 0.012
+        or budget.get("measurement")
+        != "actual_dtype_final_minus_actual_dtype_base"
+        or budget.get("methods_generated_independently_never_coinjected") is not True
+        or budget.get("quality_evidence")
+        != {
+            "actual_dtype_relative_l2": "enforced_separately_for_hf_and_lf",
+            "paired_rgb_psnr": "reported_pre_attack_method_image_vs_same_unit_pre_attack_primary_null",
+            "attacked_vs_pre_attack_psnr": "reported_only_for_three_attack_ids_identity_reference_null",
+            "lpips_alex": "not_evaluated",
+        }
+    ):
+        raise ValueError("attack comparison must preserve independent 0.012 budgets")
+    condition_order = (
+        "identity_reference",
+        "jpeg_q75",
+        "gaussian_blur_sigma_1",
+        "gaussian_noise_std_0_01",
+    )
+    attack_ids = condition_order[1:]
+    if tuple(config.get("condition_order", ())) != condition_order:
+        raise ValueError("attack comparison condition order differs")
+    if tuple(config.get("attack_ids", ())) != attack_ids:
+        raise ValueError("identity_reference must remain separate from the three attacks")
+    attacks = _require_mapping(config, "attacks")
+    if set(attacks) != set(attack_ids):
+        raise ValueError("attack set must contain exactly three frozen attacks")
+    if attacks["jpeg_q75"] != {
+        "input": "ordinary_RGB8_sRGB",
+        "codec": "Pillow_in_memory_JPEG",
+        "quality": 75,
+        "subsampling": 2,
+        "optimize": False,
+        "progressive": False,
+        "metadata": "no_EXIF_or_ICC",
+        "output": "decoded_same_shape_RGB8",
+    }:
+        raise ValueError("JPEG Q75 attack identity differs")
+    if attacks["gaussian_blur_sigma_1"] != {
+        "input": "ordinary_RGB8_to_float64_RGB_0_1",
+        "implementation": "explicit_separable_Gaussian",
+        "sigma_pixels": 1.0,
+        "radius_pixels": 3,
+        "axis_order": "horizontal_then_vertical",
+        "boundary": "numpy_reflect",
+        "output": "clip_round_nearest_uint8_RGB",
+    }:
+        raise ValueError("Gaussian blur attack identity differs")
+    if attacks["gaussian_noise_std_0_01"] != {
+        "input": "ordinary_RGB8_to_float64_RGB_0_1",
+        "distribution": "deterministic_prg_normal",
+        "std": 0.01,
+        "public_seed_domain": "SHA256_protocol_attack_unit_source_generation_seed_height_width",
+        "independence": "no_detection_key_method_image_content_or_outcome_input",
+        "shared_noise_field_rule": "same_unit_noise_field_for_hf_lf_and_primary_null",
+        "output": "clip_round_nearest_uint8_RGB",
+    }:
+        raise ValueError("Gaussian noise attack identity differs")
+    arms = (
+        "hf_tail_rademacher_v1_rankgate_v2",
+        "primary_null__hf_tail_rademacher_v1_rankgate_v2",
+        "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
+        "primary_null__lf_shell_balanced_blocks_v2_blocknorm_median_v1",
+    )
+    if tuple(config.get("record_arms_in_exact_condition_order", ())) != arms:
+        raise ValueError("attack comparison record arm order differs")
+    rule = _require_mapping(config, "decision_rule")
+    if rule != {
+        "fixed_units": 8,
+        "gate_a_registered_top_rank_among_17_min_units": 7,
+        "gate_b_method_registered_gt_same_condition_primary_null_min_units": 7,
+        "strict_comparison_ties_fail": True,
+        "paired_clean_prerequisite": "identity_reference_hf_and_lf_each_pass_gate_a_and_gate_b",
+        "paired_clean_failure_outcome": "SCIENTIFIC_NEGATIVE_FOR_PAIRED_CLEAN_PREREQUISITE_ATTACK_COMPLEMENTARITY_NOT_EVALUABLE_AND_STOP",
+        "complementarity_pass_rule": "at_least_one_attack_lf_survives_and_hf_does_not",
+        "pass_outcome": "attack_complementarity_pass_candidate_for_agent5_adjudication",
+        "failure_outcome": "SCIENTIFIC_NEGATIVE_FOR_COMPLEMENTARITY_AND_STOP",
+        "margins_and_paired_lifts": "reported_effect_sizes_only",
+        "formal_fpr_claim": False,
+    }:
+        raise ValueError("attack-complementarity decision rule differs")
+    flow = _require_mapping(config, "execution_flow")
+    if flow != {
+        "roster_manifest": "hf_lf_attack_complementarity.jsonl",
+        "split": "hf_lf_attack_complementarity_v1",
+        "fixed_units": 8,
+        "conditions_per_unit": 4,
+        "arms_per_condition": 4,
+        "unit_transaction_record_count": 16,
+        "fixed_records": 128,
+        "failure_units_remain_in_denominator": True,
+        "replacement_units_allowed": False,
+        "outcome_requires_complete_rc0": True,
+        "checkpoint_committed_units_immutable": True,
+        "interrupted_uncommitted_unit_reruns_whole_transaction": True,
+    }:
+        raise ValueError("attack comparison must preserve the 8-unit/128-record denominator")
+
+
+def load_hf_lf_attack_complementarity_protocol(
+    config_path: str | Path,
+    roster_path: str | Path,
+) -> StageAProtocol:
+    """Load only the fresh paired clean/attack-complementarity roster."""
+
+    with Path(config_path).open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    if not isinstance(config, dict) or config.get("protocol_version") != 1:
+        raise ValueError("unsupported attack-complementarity protocol version")
+    protocol_id = _require_nonempty_text(config, "protocol_id")
+    if protocol_id != "cegwm-stage-a-hf-lf-attack-complementarity-v1":
+        raise ValueError("unexpected attack-complementarity protocol identity")
+    _validate_attack_complementarity_choices(config)
+    roster = _load_units(Path(roster_path), "hf_lf_attack_complementarity_v1")
+    expected_ids = [f"attack-comp-{index:04d}" for index in range(1, 9)]
+    expected_sources = [f"attack-prompt-{index:04d}" for index in range(6001, 6009)]
+    if (
+        len(roster) != 8
+        or [unit.unit_id for unit in roster] != expected_ids
+        or [unit.source_id for unit in roster] != expected_sources
+    ):
+        raise ValueError("attack-complementarity manifest differs from the frozen roster")
+    digest_payload = {
+        "config": config,
+        "attack_complementarity_roster": [asdict(unit) for unit in roster],
+    }
+    canonical = json.dumps(
+        digest_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return StageAProtocol(
+        protocol_id=protocol_id,
+        config=_freeze(config),
+        candidate_selection=roster,
+        untouched_confirmation=(),
+        protocol_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    )
