@@ -10,7 +10,7 @@ _NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_col
 
 
 @pytest.mark.unit
-def test_stage_a_lf_v2_notebook_has_one_thin_selection_handoff_path() -> None:
+def test_stage_a_lf_balanced_notebook_has_one_thin_selection_handoff_path() -> None:
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
     sources = ["".join(cell["source"]) for cell in code_cells]
@@ -24,14 +24,14 @@ def test_stage_a_lf_v2_notebook_has_one_thin_selection_handoff_path() -> None:
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
     trees = [ast.parse(source) for source in sources]
     combined = "\n".join(sources)
-    assert "refs/heads/stage-a-lf-v2-blocknorm" in combined
-    assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_v2_blocknorm_selection" in combined
-    assert combined.count("lfv2sel-[0-9a-f]{24}") == 2
-    assert "8-unit/16-paired-record roster with 16 external wrong keys" in markdown
-    assert "untouched confirmation or attacks" in markdown
-    assert "evaluate LPIPS" in markdown
-    assert "claim fixed FPR" in markdown
-    assert "fuse LF with HF" in markdown
+    assert "refs/heads/stage-a-lf-balanced-blocks-v2" in combined
+    assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_balanced_blocks_selection" in combined
+    assert combined.count("lfbbsel-[0-9a-f]{24}") == 2
+    assert "8 units / 16 paired records with exactly 16 external wrong keys" in markdown
+    assert "untouched confirmation, attacks, LPIPS" in markdown
+    assert "calibrated threshold/FPR" in markdown
+    assert "fusion, routing, geometry" in markdown
+    assert "Stage-A promotion" in markdown
     assert "external supervisor validation and Agent5 adjudication" in markdown
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
