@@ -142,14 +142,29 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
 
     assert rc == receipt["rc"] == result["rc"] == 0
     assert receipt["resolved_exact"] == result["resolved_exact"] == exact
-    assert receipt["scientific_status"] == result["scientific_status"] == "not_evaluated"
-    assert result["completeness"] == "incomplete_for_hf_anchor"
+    assert receipt["scientific_status"] == result["scientific_status"] == "not_adjudicated"
+    assert result["completeness"] == "complete_for_hf_v2_clean_confirmation_execution"
+    assert receipt["evaluated_candidate_id"] == result["evaluated_candidate_id"] == (
+        "hf_tail_rademacher_v1_rankgate_v2"
+    )
+    assert receipt["carrier_method_id"] == result["carrier_method_id"] == (
+        "hf_tail_rademacher_v1"
+    )
     assert len(result["records"]) == 16
     assert calls == {"load": 1, "hf": 8, "plain": 8, "score": 8 * 2 * 17}
     assert {record["arm"] for record in result["records"]} == {"hf_anchor", "primary_null"}
     assert Counter(record["unit_id"] for record in result["records"]) == {
-        f"selection-{index:04d}": 2 for index in range(1, 9)
+        f"confirmation-{index:04d}": 2 for index in range(1, 9)
     }
+    evidence = result["clean_confirmation_evidence"]
+    assert evidence["evaluation_status"] == "candidate_outcome"
+    assert evidence["candidate_outcome"] in {"pass", "fail"}
+    assert evidence["gate_a_required_units"] == evidence["gate_b_required_units"] == 7
+    assert evidence["median_margin_is_gate"] is False
+    assert evidence["mean_margin_is_gate"] is False
+    assert evidence["min_margin_is_gate"] is False
+    assert evidence["primary_null_cutoff_is_gate"] is False
+    assert evidence["formal_fpr_claim"] is False
     assert all(len(record["scores"]) == 17 for record in result["records"])
     assert result["records"][0]["scores"] != result["records"][1]["scores"]
     assert runner.KEY_ENV not in os.environ
@@ -169,7 +184,13 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
     assert _RAW_KEY.encode() not in exported
     assert _HF_TOKEN.encode() not in exported
     assert b"A red ceramic teapot" not in exported
-    for forbidden in (b"private_latent", b"carrier", b"cached_qk", b"traceback"):
+    for forbidden in (
+        b"private_latent",
+        b'"carrier":',
+        b'"mask":',
+        b"cached_qk",
+        b"traceback",
+    ):
         assert forbidden not in exported
 
 
@@ -218,7 +239,14 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
     assert rc == receipt["rc"] == result["rc"] == 1
     assert len(result["records"]) == 16
     assert len(failed) == 2
-    assert {record["unit_id"] for record in failed} == {"selection-0001"}
+    assert {record["unit_id"] for record in failed} == {"confirmation-0001"}
+    assert result["clean_confirmation_evidence"]["evaluation_status"] == (
+        "not_evaluable_operational"
+    )
+    assert result["clean_confirmation_evidence"]["candidate_outcome"] is None
+    assert receipt["completeness"] == result["completeness"] == (
+        "incomplete_operational_execution"
+    )
     assert all(record["failure_reason"] == "unit_execution_failure" for record in failed)
     assert resumed_calls == {"load": 1, "hf": 4, "plain": 4, "score": 4 * 2 * 17}
     assert zip_path.is_file()
@@ -338,6 +366,86 @@ def test_run_identity_is_deterministic_and_cli_keeps_fixed_interval_internal(tmp
 
 
 @pytest.mark.integration
+def test_rank_gate_uses_all_units_strict_ties_and_no_absolute_margin() -> None:
+    protocol = runner._load_protocol(_ROOT)
+    exact = "e" * 40
+    key_digest = runner.public_key_digest(_RAW_KEY)
+    run_id = runner._deterministic_run_id(
+        exact,
+        protocol,
+        protocol.config["generation_runtime"]["model_id"],
+        key_digest,
+    )
+    expected = runner._new_state(
+        run_id=run_id,
+        resolved_exact=exact,
+        protocol=protocol,
+        model_id=protocol.config["generation_runtime"]["model_id"],
+        key_digest=key_digest,
+    )
+    def evidence_for(gate_a_units: int, gate_b_units: int) -> dict[str, object]:
+        wrong_scores = {f"wrong_{index:02d}": 0.0 for index in range(16)}
+        records = []
+        for index, unit in enumerate(protocol.untouched_confirmation):
+            registered = 1.0e-9 if index < gate_a_units else 0.0
+            primary_null_registered = (
+                registered - 1.0 if index < gate_b_units else registered + 1.0
+            )
+            common = dict(
+                run_id=run_id,
+                unit_id=unit.unit_id,
+                source_cluster_id=unit.source_id,
+                condition="identity",
+                code_revision=exact,
+                config_digest=protocol.protocol_digest,
+                key_public_digest=key_digest,
+                status="success",
+            )
+            records.extend([
+                runner.StageARecord(
+                    arm="hf_anchor",
+                    scores={"registered": registered, **wrong_scores},
+                    **common,
+                ),
+                runner.StageARecord(
+                    arm="primary_null",
+                    scores={"registered": primary_null_registered, **wrong_scores},
+                    **common,
+                ),
+            ])
+        return runner._clean_confirmation_evidence(records, expected)
+
+    evidence = evidence_for(7, 7)
+
+    assert evidence["evaluation_status"] == "candidate_outcome"
+    assert evidence["gate_a_registered_top_rank_units"] == 7
+    assert evidence["gate_b_paired_hf_gt_primary_null_units"] == 7
+    assert evidence["gate_a_pass"] is evidence["gate_b_pass"] is True
+    assert evidence["candidate_outcome"] == "pass"
+    assert evidence["median_correct_minus_wrong_key_max_effect_size"] == pytest.approx(1.0e-9)
+    assert evidence["mean_correct_minus_wrong_key_max_effect_size"] == pytest.approx(
+        0.875e-9
+    )
+    assert evidence["min_correct_minus_wrong_key_max_effect_size"] == 0.0
+    assert evidence["median_margin_is_gate"] is False
+    assert evidence["mean_margin_is_gate"] is False
+    assert evidence["min_margin_is_gate"] is False
+    assert evidence["unit_evidence"][-1]["registered_top_rank"] is False
+
+    gate_a_fail = evidence_for(6, 7)
+    assert gate_a_fail["successful_pair_count"] == 8
+    assert gate_a_fail["gate_a_pass"] is False
+    assert gate_a_fail["gate_b_pass"] is True
+    assert gate_a_fail["candidate_outcome"] == "fail"
+
+    gate_b_fail = evidence_for(7, 6)
+    assert gate_b_fail["successful_pair_count"] == 8
+    assert gate_b_fail["gate_a_pass"] is True
+    assert gate_b_fail["gate_b_pass"] is False
+    assert gate_b_fail["candidate_outcome"] == "fail"
+
+
+@pytest.mark.integration
 def test_runner_requires_nonempty_root_key_and_explicit_hf_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -416,6 +524,9 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
     zip_path = local_run_dir / "failure-resume_validation_failure.zip"
     checksum_path = local_run_dir / f"{zip_path.name}.sha256"
     assert receipt["rc"] == result["rc"] == 2
+    assert receipt["completeness"] == result["completeness"] == (
+        "incomplete_operational_execution"
+    )
     assert receipt["error_class"] == result["error_class"] == "resume_validation_failure"
     assert receipt["result_kind"] == result["result_kind"] == "operational_failure_not_scientific"
     assert receipt["resume_status"] == result["resume_status"] == "rejected"
@@ -516,9 +627,14 @@ def test_runtime_fatal_preserves_only_the_real_committed_pair_prefix(
     result = json.loads((local_run_dir / "result.json").read_text(encoding="utf-8"))
     assert result["rc"] == 2
     assert result["committed_unit_count"] == 1
-    assert result["committed_unit_ids"] == ["selection-0001"]
+    assert result["committed_unit_ids"] == ["confirmation-0001"]
     assert len(result["records"]) == 2
-    assert [record["unit_id"] for record in result["records"]] == ["selection-0001"] * 2
+    assert [record["unit_id"] for record in result["records"]] == [
+        "confirmation-0001"
+    ] * 2
+    assert result["clean_confirmation_evidence"]["evaluation_status"] == (
+        "not_evaluable_operational"
+    )
     assert [record["arm"] for record in result["records"]] == ["hf_anchor", "primary_null"]
     stored = run_store_root / run_id
     assert (stored / "failure-runtime_execution_failure.zip").is_file()

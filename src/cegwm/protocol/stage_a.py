@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -254,6 +255,196 @@ def load_stage_a_protocol(
         protocol_id=protocol_id,
         config=_freeze(config),
         candidate_selection=selection,
+        untouched_confirmation=confirmation,
+        protocol_digest=digest,
+    )
+
+
+def _validate_hf_v2_confirmation_choices(config: Mapping[str, Any]) -> None:
+    """Validate only the frozen HF-v2 untouched-confirmation choices."""
+
+    _validate_detection_access(config)
+
+    development = _require_mapping(config, "development_evidence")
+    if (
+        development.get("candidate_selection_role")
+        != "protocol_v1_pilot_only_not_v2_confirmation_evidence"
+        or development.get("protocol_v1_outcome") != "preserved_scientific_negative"
+    ):
+        raise ValueError("HF-v2 must keep protocol-v1 observations as pilot-only provenance")
+
+    runtime = _require_mapping(config, "generation_runtime")
+    if runtime.get("model_id") != "stabilityai/stable-diffusion-3.5-medium":
+        raise ValueError("HF-v2 must preserve the frozen SD3.5 model name")
+    if runtime.get("inference_steps") != 20:
+        raise ValueError("HF-v2 must preserve the 20-step runtime")
+    if runtime.get("public_asset_rule") != (
+        "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest"
+    ):
+        raise ValueError("HF-v2 public asset identity differs from the frozen runtime")
+
+    keying = _require_mapping(config, "keying")
+    if (
+        keying.get("task") != "zero_bit_keyed_attribution"
+        or keying.get("normalization") != "NFC_UTF8_for_text_exact_bytes_for_binary"
+        or keying.get("prg") != "HMAC_SHA256_counter_v1"
+        or keying.get("wrong_key_count") != 16
+        or keying.get("wrong_key_derivation_domain")
+        != "stage-a/external-wrong-key/v1"
+        or keying.get("primary_null") is not True
+        or keying.get("payload_bits") != 0
+    ):
+        raise ValueError("HF-v2 must preserve the frozen key and control semantics")
+
+    bands = _require_mapping(config, "bands")
+    if bands.get("lf_radius") != [0.04, 0.24] or bands.get("hf_radius") != [0.58, 1.0]:
+        raise ValueError("HF-v2 must preserve the frozen frequency bands")
+
+    budget = _require_mapping(config, "budget")
+    if (
+        budget.get("total_relative_l2") != 0.012
+        or budget.get("measurement") != "actual_dtype_final_minus_actual_dtype_base"
+        or budget.get("shared_across_active_carriers") is not True
+    ):
+        raise ValueError("HF-v2 must preserve the actual-dtype 0.012 budget")
+    quality = _require_mapping(budget, "quality_evidence")
+    if quality != {
+        "actual_dtype_relative_l2": "enforced",
+        "rgb_psnr": "reported",
+        "lpips_alex": "not_evaluated",
+    }:
+        raise ValueError("HF-v2 quality evidence status differs from the frozen plan")
+
+    candidate = _require_mapping(config, "hf_confirmation_candidate")
+    if (
+        candidate.get("evaluated_candidate_id") != "hf_tail_rademacher_v1_rankgate_v2"
+        or candidate.get("carrier_method_id") != "hf_tail_rademacher_v1"
+        or candidate.get("injection_step_index_zero_based") != 18
+        or candidate.get("carrier") != "keyed_rademacher_on_hf_rfft_band"
+        or candidate.get("blind_score")
+        != "vae_reencode_hf_masked_normalized_correlation"
+        or candidate.get("uses_lf") is not False
+    ):
+        raise ValueError("HF-v2 candidate must change only its evaluated decision identity")
+
+    controls = _require_mapping(config, "controls")
+    if (
+        controls.get("correct_key") != "registered_detection_key"
+        or controls.get("wrong_key") != "16_external_domain_separated_keys"
+        or controls.get("primary_null") != "same_generation_unit_without_embedding"
+        or controls.get("report_wrong_key_and_primary_null_separately") is not True
+    ):
+        raise ValueError("HF-v2 controls must remain paired and separately reported")
+
+    rule = _require_mapping(config, "confirmation_rule")
+    expected_rule_fields = {
+        "condition",
+        "fixed_units",
+        "registered_top_rank_among_17_min_units",
+        "exchangeable_key_null_tail_expression",
+        "exchangeable_key_null_tail_probability",
+        "exchangeable_key_null_interpretation",
+        "paired_hf_registered_gt_primary_null_registered_min_units",
+        "paired_sign_test_null_tail_expression",
+        "paired_sign_test_null_tail_probability",
+        "paired_sign_test_interpretation",
+        "median_correct_minus_wrong_key_max_role",
+        "primary_null_role",
+        "wrong_key_role",
+        "formal_threshold_status",
+        "failure_outcome",
+    }
+    if set(rule) != expected_rule_fields:
+        raise ValueError("HF-v2 confirmation rule contains an unregistered gate field")
+    if (
+        rule.get("condition") != "identity"
+        or rule.get("fixed_units") != 8
+        or rule.get("registered_top_rank_among_17_min_units") != 7
+        or rule.get("exchangeable_key_null_tail_expression") != "129/17^8"
+        or not math.isclose(
+            rule.get("exchangeable_key_null_tail_probability", math.nan),
+            1.849261547452937e-08,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        )
+        or rule.get("exchangeable_key_null_interpretation")
+        != "rationale_only_not_formal_fpr_claim"
+        or rule.get("paired_hf_registered_gt_primary_null_registered_min_units") != 7
+        or rule.get("paired_sign_test_null_tail_expression") != "9/256"
+        or not math.isclose(
+            rule.get("paired_sign_test_null_tail_probability", math.nan),
+            0.03515625,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        )
+        or rule.get("paired_sign_test_interpretation")
+        != "supportive_paired_evidence_not_independent_multiplied_p_value"
+        or rule.get("median_correct_minus_wrong_key_max_role")
+        != "reported_effect_size_only_no_pass_threshold"
+        or rule.get("primary_null_role") != "reported_separately_no_pass_cutoff"
+        or rule.get("wrong_key_role") != "reported_separately"
+        or rule.get("formal_threshold_status") != "not_introduced_at_stage_a"
+        or rule.get("failure_outcome")
+        != "SCIENTIFIC_NEGATIVE_AND_STOP_IF_EITHER_GATE_FAILS"
+    ):
+        raise ValueError("HF-v2 rank-gate semantics differ from the preregistration")
+
+    flow = _require_mapping(config, "execution_flow")
+    if (
+        flow.get("untouched_confirmation_manifest") != "untouched_confirmation.jsonl"
+        or flow.get("untouched_confirmation_units") != 8
+        or flow.get("identity_only") is not True
+        or flow.get("attacks_authorized") is not False
+        or flow.get("failure_units_remain_in_denominator") is not True
+        or flow.get("replacement_units_allowed") is not False
+        or flow.get("operational_failure_counts_as_scientific_failure") is not False
+        or flow.get("candidate_outcome_requires_complete_rc0") is not True
+        or flow.get("stop_if_confirmation_fails") is not True
+    ):
+        raise ValueError("HF-v2 execution flow must preserve the fixed confirmation denominator")
+
+
+def load_hf_v2_confirmation_protocol(
+    config_path: str | Path,
+    untouched_confirmation_path: str | Path,
+) -> StageAProtocol:
+    """Load the rank-gate protocol and its previously untouched fixed roster."""
+
+    config_file = Path(config_path)
+    with config_file.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    if not isinstance(config, dict):
+        raise ValueError("HF-v2 config must be an object")
+    if config.get("protocol_version") != 2:
+        raise ValueError("unsupported HF-v2 protocol_version")
+    protocol_id = _require_nonempty_text(config, "protocol_id")
+    if protocol_id != "cegwm-stage-a-hf-v2-rankgate":
+        raise ValueError("unexpected HF-v2 protocol identity")
+    _validate_hf_v2_confirmation_choices(config)
+
+    confirmation = _load_units(
+        Path(untouched_confirmation_path),
+        "untouched_confirmation",
+    )
+    execution = _require_mapping(config, "execution_flow")
+    if execution.get("untouched_confirmation_units") != len(confirmation):
+        raise ValueError("HF-v2 confirmation manifest differs from the fixed denominator")
+
+    digest_payload = {
+        "config": config,
+        "untouched_confirmation": [asdict(unit) for unit in confirmation],
+    }
+    canonical = json.dumps(
+        digest_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return StageAProtocol(
+        protocol_id=protocol_id,
+        config=_freeze(config),
+        candidate_selection=(),
         untouched_confirmation=confirmation,
         protocol_digest=digest,
     )

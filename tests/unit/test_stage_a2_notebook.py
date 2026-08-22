@@ -10,7 +10,7 @@ _NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_col
 
 
 @pytest.mark.unit
-def test_stage_a2_notebook_has_one_thin_runnable_terminal_path() -> None:
+def test_stage_a_hf_v2_notebook_has_one_thin_runnable_terminal_path() -> None:
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
     sources = ["".join(cell["source"]) for cell in code_cells]
@@ -18,6 +18,9 @@ def test_stage_a2_notebook_has_one_thin_runnable_terminal_path() -> None:
     assert len(code_cells) == 4
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
     trees = [ast.parse(source) for source in sources]
+    combined = "\n".join(sources)
+    assert "refs/heads/stage-a-hf-v2-rankgate" in combined
+    assert "CEG-WM/stage_a_hf_v2_rankgate" in combined
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
     terminal_index = next(index for index, source in enumerate(sources) if "zipfile.ZipFile" in source)

@@ -1,4 +1,4 @@
-"""Thin Colab runner for incomplete Stage-A HF-anchor evidence collection."""
+"""Thin Colab runner for Stage-A HF-v2 untouched rank-gate confirmation."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import torch
 
 from cegwm.method.hf import HF_CANDIDATE_ID, FrozenHFPublicAssets, score_hf_image
 from cegwm.protocol.records import StageARecord
-from cegwm.protocol.stage_a import StageAProtocol, load_stage_a_protocol
+from cegwm.protocol.stage_a import StageAProtocol, load_hf_v2_confirmation_protocol
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_hf, run_sd35_plain
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from cegwm.shared.prg import prg_bytes
@@ -28,13 +28,13 @@ from cegwm.shared.prg import prg_bytes
 KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
 CHECKPOINT_INTERVAL_HOURS = 2.0
-COMPLETENESS = "incomplete_for_hf_anchor"
-SCIENTIFIC_STATUS = "not_evaluated"
+COMPLETE_EXECUTION = "complete_for_hf_v2_clean_confirmation_execution"
+INCOMPLETE_EXECUTION = "incomplete_operational_execution"
+SCIENTIFIC_STATUS = "not_adjudicated"
 LIMITATIONS = (
-    "jpeg_q75_not_evaluated",
-    "gaussian_blur_sigma_1_not_evaluated",
-    "gaussian_noise_std_0_01_not_evaluated",
-    "lpips_quality_gate_not_evaluated",
+    "identity_only_no_attack_evaluation",
+    "lpips_not_evaluated",
+    "no_calibrated_threshold_or_fixed_fpr_claim",
     "model_revision_and_weight_digest_not_recorded",
 )
 _FATAL_ERROR_BY_PHASE = {
@@ -44,6 +44,10 @@ _FATAL_ERROR_BY_PHASE = {
     "checkpoint": "checkpoint_failure",
     "final_export": "final_export_failure",
 }
+
+
+def _completeness_for_rc(rc: int) -> str:
+    return COMPLETE_EXECUTION if rc == 0 else INCOMPLETE_EXECUTION
 
 
 def _json_write(path: Path, payload: dict[str, Any]) -> None:
@@ -82,11 +86,15 @@ def _git_exact(repo_root: Path, expected_exact: str) -> str:
 
 def _load_protocol(repo_root: Path) -> StageAProtocol:
     config_root = repo_root / "configs" / "stage_a"
-    return load_stage_a_protocol(
-        config_root / "stage_a_v1.json",
-        config_root / "candidate_selection.jsonl",
+    return load_hf_v2_confirmation_protocol(
+        config_root / "stage_a_hf_v2_rankgate.json",
         config_root / "untouched_confirmation.jsonl",
     )
+
+
+def _candidate_identity(protocol: StageAProtocol) -> tuple[str, str]:
+    candidate = protocol.config["hf_confirmation_candidate"]
+    return candidate["evaluated_candidate_id"], candidate["carrier_method_id"]
 
 
 def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, FrozenHFPublicAssets]:
@@ -104,10 +112,13 @@ def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, Frozen
     return pipeline, assets
 
 
-def _wrong_keys(detection_key: bytes) -> tuple[bytes, ...]:
+def _wrong_keys(detection_key: bytes, protocol: StageAProtocol) -> tuple[bytes, ...]:
+    keying = protocol.config["keying"]
+    domain = keying["wrong_key_derivation_domain"]
+    count = keying["wrong_key_count"]
     return tuple(
-        prg_bytes(detection_key, f"stage-a/external-wrong-key/v1/index={index}", 32)
-        for index in range(16)
+        prg_bytes(detection_key, f"{domain}/index={index}", 32)
+        for index in range(count)
     )
 
 
@@ -167,14 +178,23 @@ def _new_state(
     model_id: str,
     key_digest: str,
 ) -> dict[str, Any]:
+    evaluated_candidate_id, carrier_method_id = _candidate_identity(protocol)
+    rule = protocol.config["confirmation_rule"]
     return {
         "run_id": run_id,
         "resolved_exact": resolved_exact,
         "protocol_digest": protocol.protocol_digest,
-        "hf_candidate_id": HF_CANDIDATE_ID,
-        "ordered_roster_unit_ids": [unit.unit_id for unit in protocol.candidate_selection],
+        "evaluated_candidate_id": evaluated_candidate_id,
+        "carrier_method_id": carrier_method_id,
+        "ordered_roster_unit_ids": [
+            unit.unit_id for unit in protocol.untouched_confirmation
+        ],
         "model_id": model_id,
         "key_public_digest": key_digest,
+        "rank_gate_a_min_units": rule["registered_top_rank_among_17_min_units"],
+        "rank_gate_b_min_units": rule[
+            "paired_hf_registered_gt_primary_null_registered_min_units"
+        ],
         "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
         "checkpoint_sequence": 0,
         "committed_unit_count": 0,
@@ -201,10 +221,13 @@ def _resume_state(
         "run_id",
         "resolved_exact",
         "protocol_digest",
-        "hf_candidate_id",
+        "evaluated_candidate_id",
+        "carrier_method_id",
         "ordered_roster_unit_ids",
         "model_id",
         "key_public_digest",
+        "rank_gate_a_min_units",
+        "rank_gate_b_min_units",
         "checkpoint_interval_hours",
     )
     if any(state.get(field) != expected.get(field) for field in identity_fields):
@@ -248,17 +271,21 @@ def _deterministic_run_id(
     model_id: str,
     key_digest: str,
 ) -> str:
+    evaluated_candidate_id, carrier_method_id = _candidate_identity(protocol)
     identity = {
         "resolved_exact": resolved_exact,
         "protocol_digest": protocol.protocol_digest,
-        "hf_candidate_id": HF_CANDIDATE_ID,
+        "evaluated_candidate_id": evaluated_candidate_id,
+        "carrier_method_id": carrier_method_id,
         "model_id": model_id,
         "key_public_digest": key_digest,
         "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
     }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(b"CEG-WM/stage-a2/run-id/v1\x00" + canonical.encode("utf-8"))
-    return f"a2hf-{digest.hexdigest()[:24]}"
+    digest = hashlib.sha256(
+        b"CEG-WM/stage-a-hf-v2-rankgate/run-id/v1\x00" + canonical.encode("utf-8")
+    )
+    return f"a2hfv2-{digest.hexdigest()[:24]}"
 
 
 def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
@@ -269,6 +296,129 @@ def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
     if parts[0] != digest:
         raise ValueError("artifact checksum mismatch")
     return digest
+
+
+def _clean_confirmation_evidence(
+    records: list[StageARecord],
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    """Summarize the frozen rank gates without issuing a scientific verdict."""
+
+    roster = expected["ordered_roster_unit_ids"]
+    by_unit: dict[str, list[StageARecord]] = {unit_id: [] for unit_id in roster}
+    for record in records:
+        if record.unit_id not in by_unit:
+            raise ValueError("confirmation evidence contains a unit outside the fixed roster")
+        by_unit[record.unit_id].append(record)
+
+    gate_a_count = 0
+    gate_b_count = 0
+    successful_pair_count = 0
+    margins: list[float] = []
+    paired_differences: list[float] = []
+    unit_evidence: list[dict[str, Any]] = []
+    wrong_fields = tuple(f"wrong_{index:02d}" for index in range(16))
+    expected_score_fields = {"registered", *wrong_fields}
+    for unit_id in roster:
+        pair = by_unit[unit_id]
+        if not pair:
+            unit_evidence.append({
+                "unit_id": unit_id,
+                "status": "uncommitted",
+                "registered_top_rank": None,
+                "paired_hf_registered_gt_primary_null_registered": None,
+                "correct_minus_wrong_key_max": None,
+                "hf_registered_minus_primary_null_registered": None,
+                "hf_wrong_key_max": None,
+                "primary_null_registered": None,
+            })
+            continue
+        if len(pair) != 2 or [record.arm for record in pair] != [
+            "hf_anchor",
+            "primary_null",
+        ]:
+            raise ValueError("confirmation evidence requires one ordered paired record per unit")
+        if any(record.status != "success" for record in pair):
+            unit_evidence.append({
+                "unit_id": unit_id,
+                "status": "operational_failure",
+                "registered_top_rank": None,
+                "paired_hf_registered_gt_primary_null_registered": None,
+                "correct_minus_wrong_key_max": None,
+                "hf_registered_minus_primary_null_registered": None,
+                "hf_wrong_key_max": None,
+                "primary_null_registered": None,
+            })
+            continue
+        if any(set(record.scores) != expected_score_fields for record in pair):
+            raise ValueError("confirmation evidence score roster mismatch")
+        values = [
+            float(value)
+            for record in pair
+            for value in record.scores.values()
+        ]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("confirmation evidence contains a nonfinite score")
+
+        hf_record, null_record = pair
+        registered = float(hf_record.scores["registered"])
+        wrong_max = max(float(hf_record.scores[field]) for field in wrong_fields)
+        primary_null_registered = float(null_record.scores["registered"])
+        margin = registered - wrong_max
+        paired_difference = registered - primary_null_registered
+        registered_top_rank = registered > wrong_max
+        paired_hf_greater = registered > primary_null_registered
+        gate_a_count += int(registered_top_rank)
+        gate_b_count += int(paired_hf_greater)
+        successful_pair_count += 1
+        margins.append(margin)
+        paired_differences.append(paired_difference)
+        unit_evidence.append({
+            "unit_id": unit_id,
+            "status": "success",
+            "registered_top_rank": registered_top_rank,
+            "paired_hf_registered_gt_primary_null_registered": paired_hf_greater,
+            "correct_minus_wrong_key_max": margin,
+            "hf_registered_minus_primary_null_registered": paired_difference,
+            "hf_wrong_key_max": wrong_max,
+            "primary_null_registered": primary_null_registered,
+        })
+
+    complete = successful_pair_count == len(roster) == 8
+    gate_a_pass = gate_a_count >= expected["rank_gate_a_min_units"]
+    gate_b_pass = gate_b_count >= expected["rank_gate_b_min_units"]
+    return {
+        "evaluation_status": "candidate_outcome" if complete else "not_evaluable_operational",
+        "candidate_outcome": (
+            "pass" if gate_a_pass and gate_b_pass else "fail"
+        ) if complete else None,
+        "fixed_unit_count": len(roster),
+        "successful_pair_count": successful_pair_count,
+        "gate_a_registered_top_rank_units": gate_a_count,
+        "gate_a_required_units": expected["rank_gate_a_min_units"],
+        "gate_a_pass": gate_a_pass if complete else None,
+        "gate_b_paired_hf_gt_primary_null_units": gate_b_count,
+        "gate_b_required_units": expected["rank_gate_b_min_units"],
+        "gate_b_pass": gate_b_pass if complete else None,
+        "median_correct_minus_wrong_key_max_effect_size": (
+            float(np.median(margins)) if margins else None
+        ),
+        "mean_correct_minus_wrong_key_max_effect_size": (
+            float(np.mean(margins)) if margins else None
+        ),
+        "min_correct_minus_wrong_key_max_effect_size": (
+            float(min(margins)) if margins else None
+        ),
+        "median_hf_registered_minus_primary_null_registered_effect_size": (
+            float(np.median(paired_differences)) if paired_differences else None
+        ),
+        "median_margin_is_gate": False,
+        "mean_margin_is_gate": False,
+        "min_margin_is_gate": False,
+        "primary_null_cutoff_is_gate": False,
+        "formal_fpr_claim": False,
+        "unit_evidence": unit_evidence,
+    }
 
 
 def _validate_final(
@@ -286,10 +436,13 @@ def _validate_final(
         "run_id",
         "resolved_exact",
         "protocol_digest",
-        "hf_candidate_id",
+        "evaluated_candidate_id",
+        "carrier_method_id",
         "ordered_roster_unit_ids",
         "model_id",
         "key_public_digest",
+        "rank_gate_a_min_units",
+        "rank_gate_b_min_units",
         "checkpoint_interval_hours",
     )
     if any(
@@ -300,8 +453,8 @@ def _validate_final(
     if receipt.get("rc") not in {0, 1} or result.get("rc") != receipt.get("rc"):
         raise ValueError("final package RC mismatch")
     if (
-        receipt.get("completeness") != COMPLETENESS
-        or result.get("completeness") != COMPLETENESS
+        receipt.get("completeness") != _completeness_for_rc(int(receipt["rc"]))
+        or result.get("completeness") != _completeness_for_rc(int(receipt["rc"]))
         or receipt.get("scientific_status") != SCIENTIFIC_STATUS
         or result.get("scientific_status") != SCIENTIFIC_STATUS
         or receipt.get("limitations") != list(LIMITATIONS)
@@ -335,13 +488,22 @@ def _validate_final(
                 raise ValueError("final package record identity mismatch")
     status = receipt.get("status")
     expected_status = (
-        "complete_incomplete_scope" if receipt["rc"] == 0 else "complete_with_failures"
+        "complete_for_adjudication"
+        if receipt["rc"] == 0
+        else "complete_with_operational_failures"
     )
     if status != expected_status or result.get("status") != expected_status:
         raise ValueError("final package status mismatch")
     has_failure = any(record.status != "success" for record in records)
     if has_failure != (receipt["rc"] == 1):
         raise ValueError("final package failure/RC mismatch")
+    evidence = _clean_confirmation_evidence(records, expected)
+    if result.get("clean_confirmation_evidence") != evidence:
+        raise ValueError("final package rank-gate evidence mismatch")
+    if receipt["rc"] == 0 and evidence["evaluation_status"] != "candidate_outcome":
+        raise ValueError("RC0 final package must contain a complete candidate outcome")
+    if receipt["rc"] == 1 and evidence["evaluation_status"] != "not_evaluable_operational":
+        raise ValueError("RC1 final package cannot contain a candidate outcome")
     return int(receipt["rc"]), status
 
 
@@ -363,10 +525,13 @@ def _validate_fatal(
         "run_id",
         "resolved_exact",
         "protocol_digest",
-        "hf_candidate_id",
+        "evaluated_candidate_id",
+        "carrier_method_id",
         "ordered_roster_unit_ids",
         "model_id",
         "key_public_digest",
+        "rank_gate_a_min_units",
+        "rank_gate_b_min_units",
         "checkpoint_interval_hours",
     )
     if any(
@@ -388,8 +553,8 @@ def _validate_fatal(
     ):
         raise ValueError("fatal package operational status mismatch")
     if (
-        receipt.get("completeness") != COMPLETENESS
-        or result.get("completeness") != COMPLETENESS
+        receipt.get("completeness") != INCOMPLETE_EXECUTION
+        or result.get("completeness") != INCOMPLETE_EXECUTION
         or receipt.get("scientific_status") != SCIENTIFIC_STATUS
         or result.get("scientific_status") != SCIENTIFIC_STATUS
         or receipt.get("limitations") != list(LIMITATIONS)
@@ -427,6 +592,13 @@ def _validate_fatal(
                 or record.condition != "identity"
             ):
                 raise ValueError("fatal package record identity mismatch")
+    evidence = _clean_confirmation_evidence(records, expected)
+    if (
+        result.get("clean_confirmation_evidence") != evidence
+        or evidence["evaluation_status"] != "not_evaluable_operational"
+        or evidence["candidate_outcome"] is not None
+    ):
+        raise ValueError("fatal package must remain scientifically non-evaluable")
     return digest
 
 
@@ -500,14 +672,17 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "resolved_exact": receipt["resolved_exact"],
         "rc": receipt["rc"],
         "status": receipt["status"],
-        "completeness": COMPLETENESS,
+        "completeness": receipt["completeness"],
         "scientific_status": SCIENTIFIC_STATUS,
         "limitations": list(LIMITATIONS),
         "protocol_digest": receipt["protocol_digest"],
-        "hf_candidate_id": receipt["hf_candidate_id"],
+        "evaluated_candidate_id": receipt["evaluated_candidate_id"],
+        "carrier_method_id": receipt["carrier_method_id"],
         "ordered_roster_unit_ids": receipt["ordered_roster_unit_ids"],
         "model_id": receipt["model_id"],
         "key_public_digest": receipt["key_public_digest"],
+        "rank_gate_a_min_units": receipt["rank_gate_a_min_units"],
+        "rank_gate_b_min_units": receipt["rank_gate_b_min_units"],
         "checkpoint_interval_hours": receipt["checkpoint_interval_hours"],
         "checkpoint_sequence": receipt["checkpoint_sequence"],
         "committed_unit_count": receipt["committed_unit_count"],
@@ -516,6 +691,8 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "fixed_record_count": 16,
         "records": [record.to_dict() for record in records],
     }
+    if "clean_confirmation_evidence" in receipt:
+        result["clean_confirmation_evidence"] = receipt["clean_confirmation_evidence"]
     if "error_class" in receipt:
         result.update({
             "result_kind": receipt["result_kind"],
@@ -612,13 +789,16 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
         "status": "operational_failure",
         "result_kind": "operational_failure_not_scientific",
         "error_class": error_class,
-        "completeness": COMPLETENESS,
+        "completeness": INCOMPLETE_EXECUTION,
         "scientific_status": SCIENTIFIC_STATUS,
         "protocol_digest": context.get("protocol_digest"),
-        "hf_candidate_id": HF_CANDIDATE_ID,
+        "evaluated_candidate_id": context.get("evaluated_candidate_id"),
+        "carrier_method_id": context.get("carrier_method_id"),
         "ordered_roster_unit_ids": list(context.get("ordered_roster_unit_ids", [])),
         "model_id": context.get("model_id"),
         "key_public_digest": context.get("key_public_digest"),
+        "rank_gate_a_min_units": context.get("rank_gate_a_min_units"),
+        "rank_gate_b_min_units": context.get("rank_gate_b_min_units"),
         "checkpoint_interval_hours": interval,
         "checkpoint_sequence": int(state.get("checkpoint_sequence", 0)),
         "committed_unit_count": len(committed_ids),
@@ -630,6 +810,10 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
     run_store = context.get("run_store")
     if not isinstance(expected, dict) or not isinstance(run_store, Path):
         raise RuntimeError("fatal package requires resolved run identity and sink")
+    receipt["clean_confirmation_evidence"] = _clean_confirmation_evidence(
+        records,
+        expected,
+    )
     base_zip, zip_digest = _export(output_dir, receipt, records)
     fatal_zip = output_dir / f"failure-{error_class}.zip"
     os.replace(base_zip, fatal_zip)
@@ -648,21 +832,37 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     context["resolved_exact"] = resolved_exact
     protocol = _load_protocol(repo_root)
     context["protocol_digest"] = protocol.protocol_digest
+    evaluated_candidate_id, carrier_method_id = _candidate_identity(protocol)
+    context["evaluated_candidate_id"] = evaluated_candidate_id
+    context["carrier_method_id"] = carrier_method_id
     context["ordered_roster_unit_ids"] = [
-        unit.unit_id for unit in protocol.candidate_selection
+        unit.unit_id for unit in protocol.untouched_confirmation
+    ]
+    confirmation_rule = protocol.config["confirmation_rule"]
+    context["rank_gate_a_min_units"] = confirmation_rule[
+        "registered_top_rank_among_17_min_units"
+    ]
+    context["rank_gate_b_min_units"] = confirmation_rule[
+        "paired_hf_registered_gt_primary_null_registered_min_units"
     ]
     runtime_config = protocol.config["generation_runtime"]
     budget_config = protocol.config["budget"]
+    candidate_config = protocol.config["hf_confirmation_candidate"]
     if runtime_config["model_id"] != "stabilityai/stable-diffusion-3.5-medium":
         raise RuntimeError("protocol_model_identity_mismatch")
     if runtime_config["public_asset_rule"] != (
         "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest"
     ):
         raise RuntimeError("protocol_public_asset_rule_mismatch")
-    if runtime_config["inference_steps"] != 20 or budget_config["total_relative_l2"] != 0.012:
+    if (
+        runtime_config["inference_steps"] != 20
+        or budget_config["total_relative_l2"] != 0.012
+        or candidate_config["carrier_method_id"] != HF_CANDIDATE_ID
+        or candidate_config["injection_step_index_zero_based"] != 18
+    ):
         raise RuntimeError("protocol_runtime_identity_mismatch")
-    if len(protocol.candidate_selection) != 8:
-        raise RuntimeError("candidate_selection_roster_mismatch")
+    if protocol.candidate_selection or len(protocol.untouched_confirmation) != 8:
+        raise RuntimeError("untouched_confirmation_roster_mismatch")
     model_id = runtime_config["model_id"]
     context["model_id"] = model_id
     context["checkpoint_interval_hours"] = CHECKPOINT_INTERVAL_HOURS
@@ -703,7 +903,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         hf_token = ""
         del hf_token, detection_key
         raise RuntimeError("hugging_face_token_environment_input_required")
-    wrong_keys = _wrong_keys(detection_key)
+    wrong_keys = _wrong_keys(detection_key, protocol)
     final_zip = run_store / f"{run_id}.zip"
     final_checksum = run_store / f"{run_id}.zip.sha256"
     final_names = {final_zip.name, final_checksum.name}
@@ -739,7 +939,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             "CEGWM_PROGRESS " + json.dumps({
                 "run_id": run_id,
                 "committed": 8,
-                "fixed_total": 8,
+                "fixed_total": len(expected_state["ordered_roster_unit_ids"]),
                 "phase": "verified_final",
             }),
             flush=True,
@@ -773,20 +973,27 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         "resolved_exact": resolved_exact,
         "rc": None,
         "status": "running",
-        "completeness": COMPLETENESS,
+        "completeness": INCOMPLETE_EXECUTION,
         "scientific_status": SCIENTIFIC_STATUS,
         "protocol_digest": protocol.protocol_digest,
-        "hf_candidate_id": HF_CANDIDATE_ID,
+        "evaluated_candidate_id": evaluated_candidate_id,
+        "carrier_method_id": carrier_method_id,
         "ordered_roster_unit_ids": expected_state["ordered_roster_unit_ids"],
         "model_id": model_id,
         "key_public_digest": key_digest,
+        "rank_gate_a_min_units": expected_state["rank_gate_a_min_units"],
+        "rank_gate_b_min_units": expected_state["rank_gate_b_min_units"],
         "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
         "limitations": list(LIMITATIONS),
     }
     _json_write(output_dir / "receipt.json", receipt)
     records = [StageARecord(**record) for record in state["records"]]
     committed = set(state["committed_unit_ids"])
-    pending_units = [unit for unit in protocol.candidate_selection if unit.unit_id not in committed]
+    pending_units = [
+        unit
+        for unit in protocol.untouched_confirmation
+        if unit.unit_id not in committed
+    ]
     any_failure = any(record.status != "success" for record in records)
     pipeline = None
     assets = None
@@ -910,7 +1117,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             "CEGWM_PROGRESS " + json.dumps({
                 "run_id": run_id,
                 "committed": len(state["committed_unit_ids"]),
-                "fixed_total": 8,
+                "fixed_total": len(expected_state["ordered_roster_unit_ids"]),
             }),
             flush=True,
         )
@@ -918,6 +1125,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     if len(records) != 16:
         raise RuntimeError("fixed_record_roster_not_preserved")
     receipt["rc"] = 1 if any_failure else 0
+    receipt["completeness"] = _completeness_for_rc(receipt["rc"])
     receipt["checkpoint_sequence"] = state["checkpoint_sequence"]
     receipt["committed_unit_count"] = state["committed_unit_count"]
     receipt["committed_unit_ids"] = list(state["committed_unit_ids"])
@@ -925,7 +1133,15 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         receipt["checkpoint_status"] = "failure"
     else:
         receipt["checkpoint_status"] = "complete"
-    receipt["status"] = "complete_with_failures" if any_failure else "complete_incomplete_scope"
+    receipt["clean_confirmation_evidence"] = _clean_confirmation_evidence(
+        records,
+        expected_state,
+    )
+    receipt["status"] = (
+        "complete_with_operational_failures"
+        if any_failure
+        else "complete_for_adjudication"
+    )
     context["phase"] = "final_export"
     zip_path, zip_digest = _export(output_dir, receipt, records)
     _discover_checkpoint(run_store, expected_state)
