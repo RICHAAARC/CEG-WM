@@ -10,6 +10,17 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 _UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
+_EXPECTED_PROTOCOL_DIGEST = "9da57877b67fd04036ca5d8dfc5dd745e6e39c5e4380bd22fe174a897b3a3343"
+_EXPECTED_ROSTER = (
+    ("content-adaptive-v2-0001", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8101", "A violin maker carving a maple bridge beside a sunlit window", 1213061, 512, 512),
+    ("content-adaptive-v2-0002", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8102", "A night market noodle stall reflected in rain-polished pavement", 1238321, 512, 512),
+    ("content-adaptive-v2-0003", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8103", "Scientific illustration of desert succulents and layered roots", 1263581, 512, 512),
+    ("content-adaptive-v2-0004", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8104", "A potter arranging glazed bowls on rough cedar shelves", 1288843, 512, 512),
+    ("content-adaptive-v2-0005", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8105", "A satellite technician inspecting an antenna above a coastal plain", 1314103, 512, 512),
+    ("content-adaptive-v2-0006", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8106", "A mountain hare crossing dark heather after a light snowfall", 1339367, 512, 512),
+    ("content-adaptive-v2-0007", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8107", "Architectural photograph of a brick museum with long arcades", 1364627, 512, 512),
+    ("content-adaptive-v2-0008", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8108", "An ecologist labeling moss samples in a compact field station", 1389887, 512, 512),
+)
 _ALLOWED_DETECTION_INPUTS = ("image", "detection_key", "frozen_public_assets")
 _COUNTERFACTUAL_EFFECT_FIELDS = [
     "semantic_importance_counterfactual_effect",
@@ -44,8 +55,10 @@ _CONTENT_ANALYSIS = {
         "hf_transfer_stability", "lf_local_perturbation_sensitivity",
         "hf_local_perturbation_sensitivity",
     ],
-    "allocation_directions": "semantic_uses_only_magnitude_away_from_0.5_texture_monotonic_opposite_branches_stability_helps_only_own_branch_sensitivity_cannot_help",
-    "flat_texture_rule": "neutral_0.5",
+    "texture_complexity_rule": "RGB8_per_tile_mean_channel_gradient_magnitude_raw_x_finite_closed_0_to_255_sqrt2_then_t_equals_0.5_plus_0.5_times_x_over_255_sqrt2_no_minmax_rank_kappa_or_fallback",
+    "allocation_directions": "semantic_uses_only_magnitude_away_from_0.5_raw_texture_coordinate_increase_weakly_decreases_LF_raw_allocation_and_public_share_and_increases_HF_raw_allocation_and_public_share_stability_helps_only_own_branch_sensitivity_cannot_help",
+    "counterfactual_neutral_rule": "semantic_0.5_texture_raw_x_0_stability_and_sensitivity_0.5_unchanged",
+    "flat_texture_rule": "raw_x_0_maps_to_neutral_t_0.5",
     "export": "irreversible_aggregate_scalars_only",
 }
 _DETECTION_ACCESS = {
@@ -141,36 +154,16 @@ def _load_roster(path: Path) -> tuple[ContentChainUnit, ...]:
             if payload["seed"] < 0 or payload["height"] < 256 or payload["width"] < 256:
                 raise ValueError(f"{path.name}:{line_number} has invalid runtime values")
             units.append(ContentChainUnit(**payload))
-    expected_ids = [f"content-adaptive-v2-{index:04d}" for index in range(1, 9)]
-    expected_sources = [f"content-v2-prompt-{index}" for index in range(8101, 8109)]
-    if len(units) != 8 or [unit.unit_id for unit in units] != expected_ids or [unit.source_id for unit in units] != expected_sources:
+    received = tuple(
+        (
+            unit.unit_id, unit.split, unit.source_id, unit.prompt,
+            unit.seed, unit.height, unit.width,
+        )
+        for unit in units
+    )
+    if received != _EXPECTED_ROSTER:
         raise ValueError("content-adaptive roster differs from the frozen eight units")
-    if len({unit.seed for unit in units}) != 8:
-        raise ValueError("content-adaptive roster seeds must be unique")
     return tuple(units)
-
-
-def _validate_global_disjoint(roster_path: Path, roster: tuple[ContentChainUnit, ...]) -> None:
-    """Reject unit/source collisions with every other current configuration manifest."""
-
-    unit_ids = {unit.unit_id for unit in roster}
-    source_ids = {unit.source_id for unit in roster}
-    config_root = roster_path.resolve().parents[1]
-    for candidate in config_root.rglob("*.jsonl"):
-        if candidate.resolve() == roster_path.resolve():
-            continue
-        with candidate.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                if not line.strip():
-                    continue
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(payload, dict) and (
-                    payload.get("unit_id") in unit_ids or payload.get("source_id") in source_ids
-                ):
-                    raise ValueError("content-adaptive roster is not globally disjoint")
 
 
 def _validate_config(config: Mapping[str, Any]) -> None:
@@ -239,7 +232,13 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         "fixed_records": 16,
         "record_score_prefixes_in_order": ["lf", "hf", "joint"],
         "score_labels_per_prefix": "registered_then_wrong_00_through_wrong_15",
-        "flat_score_field_rule": "prefix_double_underscore_label_within_StageARecord_v1",
+        "flat_score_field_rule": "prefix_double_underscore_label_within_content_adaptive_dual_branch_v2_record_v1",
+        "record_contract_id": "content_adaptive_dual_branch_v2_record_v1",
+        "record_fields_in_order": [
+            "run_id", "unit_id", "source_cluster_id", "arm", "condition",
+            "code_revision", "config_digest", "key_public_digest", "status",
+            "failure_reason", "scores", "metrics", "record_contract_id",
+        ],
         "failure_units_remain_in_denominator": True,
         "replacement_units_allowed": False,
         "outcome_requires_complete_rc0": True,
@@ -289,16 +288,18 @@ def load_content_adaptive_dual_branch_v2_clean_protocol(
         raise ValueError("content-adaptive config must be an object")
     _validate_config(config)
     roster = _load_roster(roster_path)
-    _validate_global_disjoint(roster_path, roster)
     canonical = json.dumps(
         {"config": config, "roster": [asdict(unit) for unit in roster]},
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
     )
+    protocol_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if protocol_digest != _EXPECTED_PROTOCOL_DIGEST:
+        raise ValueError("content-adaptive config and ordered roster digest differs")
     return ContentChainProtocol(
         protocol_id=config["protocol_id"],
         config=_freeze(config),
         roster=roster,
-        protocol_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        protocol_digest=protocol_digest,
     )

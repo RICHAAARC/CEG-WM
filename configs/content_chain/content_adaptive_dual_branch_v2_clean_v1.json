@@ -28,8 +28,10 @@
     "stability_rule": "two_scale_alignment_times_gain_consistency_equal_mean_RGB_and_VAE",
     "sensitivity_rule": "RGB_and_VAE_each_divide_by_rho_then_unit_positive_median_kappa_then_x_over_x_plus_kappa_all_zero_modality_stays_zero_no_fallback_p_bi_equal_mean_two_scales_by_two_modalities",
     "signals": ["semantic_importance", "texture_complexity", "lf_transfer_stability", "hf_transfer_stability", "lf_local_perturbation_sensitivity", "hf_local_perturbation_sensitivity"],
-    "allocation_directions": "semantic_uses_only_magnitude_away_from_0.5_texture_monotonic_opposite_branches_stability_helps_only_own_branch_sensitivity_cannot_help",
-    "flat_texture_rule": "neutral_0.5",
+    "texture_complexity_rule": "RGB8_per_tile_mean_channel_gradient_magnitude_raw_x_finite_closed_0_to_255_sqrt2_then_t_equals_0.5_plus_0.5_times_x_over_255_sqrt2_no_minmax_rank_kappa_or_fallback",
+    "allocation_directions": "semantic_uses_only_magnitude_away_from_0.5_raw_texture_coordinate_increase_weakly_decreases_LF_raw_allocation_and_public_share_and_increases_HF_raw_allocation_and_public_share_stability_helps_only_own_branch_sensitivity_cannot_help",
+    "counterfactual_neutral_rule": "semantic_0.5_texture_raw_x_0_stability_and_sensitivity_0.5_unchanged",
+    "flat_texture_rule": "raw_x_0_maps_to_neutral_t_0.5",
     "export": "irreversible_aggregate_scalars_only"
   },
   "method_identities": {
@@ -94,7 +96,9 @@
     "fixed_records": 16,
     "record_score_prefixes_in_order": ["lf", "hf", "joint"],
     "score_labels_per_prefix": "registered_then_wrong_00_through_wrong_15",
-    "flat_score_field_rule": "prefix_double_underscore_label_within_StageARecord_v1",
+    "flat_score_field_rule": "prefix_double_underscore_label_within_content_adaptive_dual_branch_v2_record_v1",
+    "record_contract_id": "content_adaptive_dual_branch_v2_record_v1",
+    "record_fields_in_order": ["run_id", "unit_id", "source_cluster_id", "arm", "condition", "code_revision", "config_digest", "key_public_digest", "status", "failure_reason", "scores", "metrics", "record_contract_id"],
     "failure_units_remain_in_denominator": true,
     "replacement_units_allowed": false,
     "outcome_requires_complete_rc0": true

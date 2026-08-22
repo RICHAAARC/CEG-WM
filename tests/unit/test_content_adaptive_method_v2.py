@@ -12,6 +12,7 @@ from cegwm.method.content_adaptive_v2 import (
     COMBINED_RELATIVE_L2,
     COUNTERFACTUAL_EFFECT_FIELDS,
     PROBE_RELATIVE_L2_SCALES,
+    RGB8_TEXTURE_COMPLEXITY_MAX,
     ContentAdaptiveMeasurement,
     ContentAllocation,
     ContentSignals,
@@ -69,34 +70,70 @@ def _signals(**updates: tuple[float, ...]) -> ContentSignals:
 
 
 @pytest.mark.unit
-def test_v2_allocation_directions_semantic_magnitude_and_flat_texture_neutral() -> None:
+def test_v2_allocation_directions_semantic_magnitude_and_rgb8_texture_coordinate() -> None:
     flat = rgb_texture_tiles(Image.new("RGB", (16, 16), color=(90, 90, 90)))
     assert flat == (0.0,) * 16
+    alternating = np.zeros((16, 16, 3), dtype=np.uint8)
+    alternating[::2, ::2] = (255, 0, 0)
+    alternating[1::2, 1::2] = (255, 0, 0)
+    alternating[::2, 1::2] = (0, 255, 0)
+    alternating[1::2, ::2] = (0, 255, 0)
+    raw_texture = rgb_texture_tiles(Image.fromarray(alternating, mode="RGB"))
+    assert all(0.0 < value <= RGB8_TEXTURE_COMPLEXITY_MAX for value in raw_texture)
 
     anchors = (0.0, 1.0) + (0.5,) * 14
     neutral = allocate_content(_signals(
         semantic_importance=anchors,
-        texture_complexity=(0.5,) * 16,
+        texture_complexity=(0.0,) * 16,
     ))
     low = allocate_content(_signals(
         semantic_importance=(0.0, 1.0, 0.2) + (0.5,) * 13,
-        texture_complexity=(0.5,) * 16,
+        texture_complexity=(0.0,) * 16,
     ))
     high = allocate_content(_signals(
         semantic_importance=(0.0, 1.0, 0.8) + (0.5,) * 13,
-        texture_complexity=(0.5,) * 16,
+        texture_complexity=(0.0,) * 16,
     ))
     assert low.lf_tile_weights == pytest.approx(high.lf_tile_weights)
     assert low.hf_tile_weights == pytest.approx(high.hf_tile_weights)
     assert low.lf_tile_weights[2] > neutral.lf_tile_weights[2]
     assert low.hf_tile_weights[2] > neutral.hf_tile_weights[2]
 
-    texture_low = allocate_content(_signals(texture_complexity=(0.2,) * 16))
-    texture_high = allocate_content(_signals(texture_complexity=(0.8,) * 16))
-    # A spatial directional check avoids normalization cancelling a flat map.
-    texture_step = allocate_content(_signals(texture_complexity=(0.8,) + (0.2,) * 15))
-    assert texture_step.lf_tile_weights[0] > texture_low.lf_tile_weights[0]
-    assert texture_step.hf_tile_weights[0] < texture_high.hf_tile_weights[0]
+    texture_min = allocate_content(_signals(texture_complexity=(0.0,) * 16))
+    texture_max = allocate_content(
+        _signals(texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) * 16)
+    )
+    texture_step = allocate_content(_signals(
+        texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) + (0.0,) * 15,
+    ))
+    assert texture_step.lf_tile_weights[0] < texture_min.lf_tile_weights[0]
+    assert texture_step.hf_tile_weights[0] > texture_min.hf_tile_weights[0]
+    assert texture_step.lf_branch_share < texture_min.lf_branch_share
+    assert texture_step.hf_branch_share > texture_min.hf_branch_share
+    assert texture_max.lf_branch_share < texture_min.lf_branch_share
+    assert texture_max.hf_branch_share > texture_min.hf_branch_share
+    assert texture_min.lf_branch_share == pytest.approx(0.5)
+    assert texture_min.hf_branch_share == pytest.approx(0.5)
+
+    for invalid in (-1.0, RGB8_TEXTURE_COMPLEXITY_MAX + 1.0, float("nan")):
+        with pytest.raises(ValueError, match="texture_complexity"):
+            allocate_content(_signals(texture_complexity=(invalid,) + (0.0,) * 15))
+
+
+@pytest.mark.unit
+def test_v2_counterfactual_neutrals_are_semantic_half_texture_raw_zero_and_other_half() -> None:
+    neutral = ContentSignals(
+        semantic_importance=(0.5,) * 16,
+        texture_complexity=(0.0,) * 16,
+        lf_transfer_stability=(0.5,) * 16,
+        hf_transfer_stability=(0.5,) * 16,
+        lf_local_perturbation_sensitivity=(0.5,) * 16,
+        hf_local_perturbation_sensitivity=(0.5,) * 16,
+    )
+    allocation = allocate_content(neutral)
+    assert allocation.lf_branch_share == pytest.approx(0.5)
+    assert allocation.hf_branch_share == pytest.approx(0.5)
+    assert allocation.counterfactual_effects == pytest.approx((0.0,) * 6)
 
 
 @pytest.mark.unit

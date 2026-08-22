@@ -127,7 +127,8 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     assert len(result["records"]) == 16
     assert [record["arm"] for record in result["records"][:2]] == list(runner.ARMS)
     assert all(len(record["scores"]) == 51 for record in result["records"])
-    assert all(record["schema_version"] == 1 for record in result["records"])
+    assert all(tuple(record) == runner.RECORD_FIELDS for record in result["records"])
+    assert all(record["record_contract_id"] == runner.RECORD_CONTRACT_ID for record in result["records"])
     assert all(value["gate_a_pass_units"] == 8 for value in result["gate_evidence"]["branches"].values())
     assert all(value["gate_b_pass_units"] == 8 for value in result["gate_evidence"]["branches"].values())
     assert result["gate_evidence"]["combined_budget_pass_units"] == 8
@@ -194,6 +195,21 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     assert "runner-key-value-01" not in serialized
     assert "hf_test" not in serialized
 
+    valid_record = result["records"][0]
+    missing = dict(valid_record)
+    missing.pop("scores")
+    extra = dict(valid_record)
+    extra["private_route"] = "forbidden"
+    drift = dict(valid_record)
+    drift["record_contract_id"] = "content_adaptive_dual_branch_v2_record_v2"
+    for invalid, message in (
+        (missing, "fields or order"),
+        (extra, "fields or order"),
+        (drift, "contract identity"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            runner._validate_content_v2_record(invalid)
+
     adaptive_calls = 0
     score_calls = 0
     monkeypatch.setattr(
@@ -238,6 +254,8 @@ def test_runner_keeps_failed_unit_in_fixed_denominator_and_never_claims_completi
     assert len(result["failed_units"]) == 8
     assert len(result["records"]) == 16
     assert all(record["status"] == "operational_failure" for record in result["records"])
+    assert all(record["failure_reason"] == "RuntimeError" for record in result["records"])
+    assert all(record["scores"] == {} and record["metrics"] == {} for record in result["records"])
     assert all("private" not in failure for failure in result["failed_units"])
     assert result["lf_branch_share_population_std"] is None
     assert result["hf_branch_share_population_std"] is None

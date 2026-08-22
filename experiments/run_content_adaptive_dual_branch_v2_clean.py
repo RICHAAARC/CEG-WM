@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 import torch
@@ -30,7 +30,6 @@ from cegwm.protocol.content_chain_v2 import (
     ContentChainProtocol,
     load_content_adaptive_dual_branch_v2_clean_protocol,
 )
-from cegwm.protocol.records import StageARecord
 from cegwm.runtime.content_adaptive_sd35_v2 import (
     ContentEmbedAssets,
     load_dino_content_assets,
@@ -48,6 +47,148 @@ COMPLETE_EXECUTION = "complete_for_content_adaptive_dual_branch_v2_clean_evaluat
 INCOMPLETE_EXECUTION = "incomplete_operational_execution"
 ARMS = (JOINT_EVALUATED_CANDIDATE_ID, f"primary_null__{JOINT_EVALUATED_CANDIDATE_ID}")
 BRANCHES = ("lf", "hf", "joint")
+RECORD_CONTRACT_ID = "content_adaptive_dual_branch_v2_record_v1"
+RECORD_FIELDS = (
+    "run_id", "unit_id", "source_cluster_id", "arm", "condition",
+    "code_revision", "config_digest", "key_public_digest", "status",
+    "failure_reason", "scores", "metrics", "record_contract_id",
+)
+_SCORE_FIELDS = tuple(
+    f"{branch}__{label}"
+    for branch in BRANCHES
+    for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))
+)
+_CANDIDATE_METRIC_FIELDS = (
+    "combined_relative_l2", "lf_effective_relative_l2", "hf_effective_relative_l2",
+    "lf_branch_share", "hf_branch_share", *COUNTERFACTUAL_EFFECT_FIELDS,
+    "minimum_counterfactual_effect", "probe_evaluation_count", "paired_rgb_psnr_db",
+)
+_NULL_METRIC_FIELDS = ("paired_rgb_psnr_db",)
+_PUBLIC_OPERATIONAL_ERROR_CLASSES = (
+    "FileNotFoundError", "ImportError", "MemoryError", "OSError",
+    "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError",
+    "OtherOperationalError",
+)
+
+
+def _finite_real(value: Any, name: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError(f"{name} must be a real scalar")
+    scalar = float(value)
+    if not math.isfinite(scalar):
+        raise ValueError(f"{name} must be finite")
+    return scalar
+
+
+def _validate_content_v2_record(record: Mapping[str, Any]) -> None:
+    """Validate the narrow public JSON contract owned only by this v2 runner."""
+
+    if tuple(record) != RECORD_FIELDS:
+        raise ValueError("content v2 record fields or order differ from the frozen contract")
+    if record["record_contract_id"] != RECORD_CONTRACT_ID:
+        raise ValueError("content v2 record contract identity differs")
+    for name in (
+        "run_id", "unit_id", "source_cluster_id", "arm", "condition",
+        "code_revision", "config_digest", "key_public_digest", "status",
+    ):
+        if not isinstance(record[name], str) or not record[name].strip():
+            raise ValueError(f"content v2 record {name} must be nonempty text")
+    if record["arm"] not in ARMS or record["condition"] != "clean":
+        raise ValueError("content v2 record arm or condition differs")
+    if re.fullmatch(r"[0-9a-f]{40}", record["code_revision"]) is None:
+        raise ValueError("content v2 record revision must be an exact lowercase commit")
+    if any(
+        re.fullmatch(r"[0-9a-f]{64}", record[name]) is None
+        for name in ("config_digest", "key_public_digest")
+    ):
+        raise ValueError("content v2 record digest identity differs")
+    status = record["status"]
+    failure_reason = record["failure_reason"]
+    scores = record["scores"]
+    metrics = record["metrics"]
+    if not isinstance(scores, dict) or not isinstance(metrics, dict):
+        raise TypeError("content v2 record scores and metrics must be plain JSON objects")
+    if status == "operational_failure":
+        if failure_reason not in _PUBLIC_OPERATIONAL_ERROR_CLASSES:
+            raise ValueError("operational failure requires one finite public error class")
+        if scores or metrics:
+            raise ValueError("operational failure scores and metrics must be empty")
+        return
+    if status != "success" or failure_reason is not None:
+        raise ValueError("successful records require null failure_reason")
+    if tuple(scores) != _SCORE_FIELDS:
+        raise ValueError("successful record scores differ from the exact 3-by-17 fields")
+    if any(not -1.0 <= _finite_real(value, name) <= 1.0 for name, value in scores.items()):
+        raise ValueError("successful record scores must lie in [-1, 1]")
+    expected_metrics = (
+        _CANDIDATE_METRIC_FIELDS if record["arm"] == ARMS[0] else _NULL_METRIC_FIELDS
+    )
+    if set(metrics) != set(expected_metrics):
+        raise ValueError("successful record metrics differ from the exact arm contract")
+    finite_metrics = {name: _finite_real(metrics[name], name) for name in expected_metrics}
+    if finite_metrics["paired_rgb_psnr_db"] < 0.0:
+        raise ValueError("paired_rgb_psnr_db must be nonnegative")
+    if record["arm"] == ARMS[1]:
+        return
+    if not 0.0 <= finite_metrics["combined_relative_l2"] <= 0.012:
+        raise ValueError("combined_relative_l2 escaped the frozen budget")
+    for name in ("lf_effective_relative_l2", "hf_effective_relative_l2"):
+        if not 0.0 < finite_metrics[name] <= 0.012:
+            raise ValueError(f"{name} must be positive within the frozen budget")
+    lf_share = finite_metrics["lf_branch_share"]
+    hf_share = finite_metrics["hf_branch_share"]
+    if not (
+        0.0 < lf_share < 1.0
+        and 0.0 < hf_share < 1.0
+        and math.isclose(lf_share + hf_share, 1.0, rel_tol=0.0, abs_tol=1e-12)
+    ):
+        raise ValueError("recorded public branch shares are invalid")
+    effects = [finite_metrics[name] for name in COUNTERFACTUAL_EFFECT_FIELDS]
+    if any(value < 0.0 for value in effects):
+        raise ValueError("recorded counterfactual effects must be nonnegative")
+    if finite_metrics["minimum_counterfactual_effect"] != min(effects):
+        raise ValueError("recorded minimum counterfactual effect differs")
+    if finite_metrics["probe_evaluation_count"] != 64.0:
+        raise ValueError("recorded probe evaluation count must be exactly 64")
+
+
+def _content_v2_record(
+    *,
+    run_id: str,
+    unit_id: str,
+    source_cluster_id: str,
+    arm: str,
+    condition: str,
+    code_revision: str,
+    config_digest: str,
+    key_public_digest: str,
+    status: str,
+    failure_reason: str | None = None,
+    scores: Mapping[str, float] | None = None,
+    metrics: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    record = {
+        "run_id": run_id,
+        "unit_id": unit_id,
+        "source_cluster_id": source_cluster_id,
+        "arm": arm,
+        "condition": condition,
+        "code_revision": code_revision,
+        "config_digest": config_digest,
+        "key_public_digest": key_public_digest,
+        "status": status,
+        "failure_reason": failure_reason,
+        "scores": dict(scores or {}),
+        "metrics": dict(metrics or {}),
+        "record_contract_id": RECORD_CONTRACT_ID,
+    }
+    _validate_content_v2_record(record)
+    return record
+
+
+def _public_operational_error_class(error: Exception) -> str:
+    name = type(error).__name__
+    return name if name in _PUBLIC_OPERATIONAL_ERROR_CLASSES else "OtherOperationalError"
 
 
 def _git_exact(repo_root: Path, expected_exact: str) -> str:
@@ -361,7 +502,7 @@ def _gate_evidence(records: list[dict[str, Any]], unit_metrics: list[dict[str, A
 def _write_result(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -415,33 +556,33 @@ def execute(args: argparse.Namespace) -> int:
                 ],
             )
             transaction = [
-                StageARecord(
+                _content_v2_record(
                     run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
                     arm=ARMS[0], condition="clean", code_revision=exact,
                     config_digest=protocol.protocol_digest, key_public_digest=key_digest,
                     status="success", scores=_flat_scores(joint_scores),
                     metrics={key: float(value) for key, value in metrics.items() if key != "unit_id"},
-                ).to_dict(),
-                StageARecord(
+                ),
+                _content_v2_record(
                     run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
                     arm=ARMS[1], condition="clean", code_revision=exact,
                     config_digest=protocol.protocol_digest, key_public_digest=key_digest,
                     status="success", scores=_flat_scores(null_scores),
                     metrics={"paired_rgb_psnr_db": metrics["paired_rgb_psnr_db"]},
-                ).to_dict(),
+                ),
             ]
             unit_metrics.append(metrics)
             records.extend(transaction)
         except Exception as error:  # noqa: BLE001 - fixed-denominator unit failure is evidence
-            error_type = type(error).__name__
+            error_type = _public_operational_error_class(error)
             failures.append({"unit_id": unit.unit_id, "status": "failed", "error_type": error_type})
             for arm in ARMS:
-                records.append(StageARecord(
+                records.append(_content_v2_record(
                     run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
                     arm=arm, condition="clean", code_revision=exact,
                     config_digest=protocol.protocol_digest, key_public_digest=key_digest,
                     status="operational_failure", failure_reason=error_type,
-                ).to_dict())
+                ))
     rc = 0 if not failures and len(records) == 16 and len(unit_metrics) == 8 else 2
     lf_share_std, hf_share_std, supports_nonidentical, population_summary_valid = (
         _branch_share_population_summary(

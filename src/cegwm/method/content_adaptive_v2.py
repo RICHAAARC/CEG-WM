@@ -39,6 +39,7 @@ LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = (
 COMBINED_BUDGET_PROJECTOR_ID = "dual_branch_actual_dtype_relative_l2_v1"
 JOINT_EVALUATED_CANDIDATE_ID = "content_adaptive_dual_branch_v2_clean_v1"
 BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE = 1e-12
+RGB8_TEXTURE_COMPLEXITY_MAX = 255.0 * math.sqrt(2.0)
 COUNTERFACTUAL_EFFECT_FIELDS = (
     "semantic_importance_counterfactual_effect",
     "texture_complexity_counterfactual_effect",
@@ -195,6 +196,16 @@ def _bounded_vector(values: Any, name: str) -> torch.Tensor:
     return tensor
 
 
+def _rgb8_texture_vector(values: Any) -> torch.Tensor:
+    tensor = _finite_vector(values, "texture_complexity")
+    if not bool(((0.0 <= tensor) & (tensor <= RGB8_TEXTURE_COMPLEXITY_MAX)).all()):
+        raise ValueError(
+            "texture_complexity must lie in the frozen RGB8 range "
+            "[0, 255*sqrt(2)]"
+        )
+    return tensor
+
+
 def _unit_interval(values: torch.Tensor) -> torch.Tensor:
     minimum = values.min()
     span = values.max() - minimum
@@ -253,23 +264,34 @@ def dino_last_layer_cls_patch_tiles(
 
 
 def rgb_texture_tiles(image: Any) -> tuple[float, ...]:
-    """Compute local RGB texture complexity; a flat image is neutral, not a fallback."""
+    """Compute bounded raw RGB8 gradient complexity; flat RGB maps to raw zero."""
 
     pixels = np.asarray(image).copy()
-    if pixels.ndim != 3 or pixels.shape[2] != 3 or pixels.shape[0] < 4 or pixels.shape[1] < 4:
-        raise ValueError("texture input must be an RGB image of at least 4x4")
+    if (
+        pixels.ndim != 3
+        or pixels.shape[2] != 3
+        or pixels.shape[0] < 4
+        or pixels.shape[1] < 4
+        or pixels.dtype != np.uint8
+    ):
+        raise ValueError("texture input must be an RGB8 image of at least 4x4")
     values = torch.as_tensor(pixels, dtype=torch.float64)
     if not bool(torch.isfinite(values).all()):
         raise ValueError("texture image must be finite")
-    gray = values.mean(dim=2)
-    dy = torch.zeros_like(gray)
-    dx = torch.zeros_like(gray)
-    dy[1:] = gray[1:] - gray[:-1]
-    dx[:, 1:] = gray[:, 1:] - gray[:, :-1]
-    magnitude = torch.sqrt(dx.square() + dy.square()).reshape(1, 1, *gray.shape)
+    dy = torch.zeros_like(values)
+    dx = torch.zeros_like(values)
+    dy[1:] = values[1:] - values[:-1]
+    dx[:, 1:] = values[:, 1:] - values[:, :-1]
+    magnitude = torch.sqrt(dx.square() + dy.square()).mean(dim=2)
+    magnitude = magnitude.reshape(1, 1, *magnitude.shape)
     pooled = functional.adaptive_avg_pool2d(
         magnitude, (TILE_GRID_SIDE, TILE_GRID_SIDE)
     ).reshape(-1)
+    if not bool(
+        torch.isfinite(pooled).all()
+        and ((0.0 <= pooled) & (pooled <= RGB8_TEXTURE_COMPLEXITY_MAX)).all()
+    ):
+        raise RuntimeError("RGB8 texture complexity escaped its frozen finite range")
     return tuple(float(value) for value in pooled.tolist())
 
 
@@ -485,7 +507,8 @@ def evaluate_public_probes(
 
 def _allocation_vectors(signals: ContentSignals) -> tuple[torch.Tensor, torch.Tensor, float, float]:
     semantic = _unit_interval(_finite_vector(signals.semantic_importance, "semantic_importance"))
-    texture = _unit_interval(_finite_vector(signals.texture_complexity, "texture_complexity"))
+    texture_raw = _rgb8_texture_vector(signals.texture_complexity)
+    texture = 0.5 + 0.5 * texture_raw / RGB8_TEXTURE_COMPLEXITY_MAX
     lf_stability = _bounded_vector(signals.lf_transfer_stability, "lf_transfer_stability")
     hf_stability = _bounded_vector(signals.hf_transfer_stability, "hf_transfer_stability")
     lf_sensitivity = _bounded_vector(
@@ -495,14 +518,14 @@ def _allocation_vectors(signals: ContentSignals) -> tuple[torch.Tensor, torch.Te
         signals.hf_local_perturbation_sensitivity, "hf_local_perturbation_sensitivity"
     )
     semantic_magnitude = 2.0 * torch.abs(semantic - 0.5)
-    # Frozen monotonic directions: texture favours LF and disfavors HF; each
+    # Frozen monotonic directions: raw RGB8 texture disfavors LF and favours HF; each
     # stability helps only its own branch; sensitivity is always a penalty.
     lf_raw = (
-        0.25 + 0.20 * semantic_magnitude + 0.30 * texture
+        0.25 + 0.20 * semantic_magnitude + 0.30 * (1.0 - texture)
         + 0.30 * lf_stability + 0.20 * (1.0 - lf_sensitivity)
     )
     hf_raw = (
-        0.25 + 0.20 * semantic_magnitude + 0.30 * (1.0 - texture)
+        0.25 + 0.20 * semantic_magnitude + 0.30 * texture
         + 0.30 * hf_stability + 0.20 * (1.0 - hf_sensitivity)
     )
     lf_strength = float(lf_raw.mean().item())
@@ -521,10 +544,10 @@ def allocate_content(signals: ContentSignals) -> ContentAllocation:
     lf, hf, lf_share, hf_share = _allocation_vectors(signals)
     original = torch.cat((lf, hf, torch.tensor([lf_share, hf_share], dtype=torch.float64)))
     effects: list[float] = []
-    neutral = (0.5,) * TILE_COUNT
     for field in _SIGNAL_FIELDS:
         values = {name: getattr(signals, name) for name in _SIGNAL_FIELDS}
-        values[field] = neutral
+        neutral_value = 0.0 if field == "texture_complexity" else 0.5
+        values[field] = (neutral_value,) * TILE_COUNT
         alternate_signals = ContentSignals(**values)
         cf_lf, cf_hf, cf_lf_share, cf_hf_share = _allocation_vectors(alternate_signals)
         alternate = torch.cat((cf_lf, cf_hf, torch.tensor([cf_lf_share, cf_hf_share])))
