@@ -62,6 +62,45 @@ _RECORD_FIELDS = {
     "schema_version",
 }
 _SCORE_FIELDS = {"registered", *(f"wrong_{index:02d}" for index in range(16))}
+_PROGRESS_PHASES = {
+    "identity_ready", "resume_ready", "unit_committed", "checkpoint_published",
+}
+
+
+def _emit_progress(*, run_id: str, committed: int, phase: str) -> None:
+    if re.fullmatch(r"slhfr-[0-9a-f]{24}", run_id) is None:
+        raise RuntimeError("public event run identity differs")
+    if type(committed) is not int or not 0 <= committed <= FIXED_UNIT_COUNT:
+        raise RuntimeError("public event committed count differs")
+    if phase not in _PROGRESS_PHASES:
+        raise RuntimeError("public event progress phase differs")
+    print(
+        "CEGWM_PROGRESS " + json.dumps(
+            {"run_id": run_id, "committed": committed, "fixed_total": FIXED_UNIT_COUNT, "phase": phase},
+            sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ),
+        flush=True,
+    )
+
+
+def _emit_summary(*, run_id: str, rc: int) -> None:
+    if re.fullmatch(r"slhfr-[0-9a-f]{24}", run_id) is None:
+        raise RuntimeError("public event run identity differs")
+    if type(rc) is not int:
+        raise RuntimeError("public event return code differs")
+    print(
+        "CEGWM_SUMMARY " + json.dumps(
+            {
+                "run_id": run_id,
+                "committed": FIXED_UNIT_COUNT,
+                "fixed_total": FIXED_UNIT_COUNT,
+                "phase": "terminal",
+                "rc": rc,
+            },
+            sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ),
+        flush=True,
+    )
 
 
 def _git_exact(repo_root: Path, expected_exact: str) -> str:
@@ -506,6 +545,7 @@ def execute(args: argparse.Namespace) -> int:
     key_digest = public_key_digest(detection_key)
     identity = _run_identity(revision, plan, key_digest)
     run_id = str(identity["run_id"])
+    _emit_progress(run_id=run_id, committed=0, phase="identity_ready")
     local_work_root = Path(args.local_work_root).resolve()
     artifact_sink = Path(args.artifact_sink).resolve()
     run_dir = local_work_root / run_id
@@ -518,6 +558,8 @@ def execute(args: argparse.Namespace) -> int:
     terminal_rc = _minimal_valid_final(run_sink, identity=identity)
     if terminal_rc is not None:
         del detection_key, hf_token
+        _emit_progress(run_id=run_id, committed=FIXED_UNIT_COUNT, phase="resume_ready")
+        _emit_summary(run_id=run_id, rc=terminal_rc)
         return terminal_rc
     sink_records: list[StageARecord] = []
     sink_sequence = 0
@@ -555,6 +597,8 @@ def execute(args: argparse.Namespace) -> int:
             _state_payload(identity, records, checkpoint_sequence=checkpoint_sequence, checkpoint_anchor_unix_seconds=checkpoint_anchor),
         )
 
+    _emit_progress(run_id=run_id, committed=len(records) // RECORDS_PER_UNIT, phase="resume_ready")
+
     if len(records) < FIXED_RECORD_COUNT:
         try:
             pipeline, hf_assets, lf_assets = _load_pipeline_and_assets(plan.model_id, hf_token)
@@ -581,6 +625,7 @@ def execute(args: argparse.Namespace) -> int:
             state_path,
             _state_payload(identity, records, checkpoint_sequence=checkpoint_sequence, checkpoint_anchor_unix_seconds=checkpoint_anchor),
         )
+        _emit_progress(run_id=run_id, committed=len(records) // RECORDS_PER_UNIT, phase="unit_committed")
         if now - checkpoint_anchor >= _CHECKPOINT_INTERVAL_SECONDS and len(records) < FIXED_RECORD_COUNT:
             next_sequence = checkpoint_sequence + 1
             _publish_checkpoint(
@@ -592,10 +637,13 @@ def execute(args: argparse.Namespace) -> int:
                 state_path,
                 _state_payload(identity, records, checkpoint_sequence=checkpoint_sequence, checkpoint_anchor_unix_seconds=checkpoint_anchor),
             )
+            _emit_progress(run_id=run_id, committed=len(records) // RECORDS_PER_UNIT, phase="checkpoint_published")
     del detection_key, wrong_keys
     if len(records) != FIXED_RECORD_COUNT:
         raise RuntimeError("fixed 320-record export cannot be formed")
-    return _publish_final(run_sink=run_sink, identity=identity, records=records)
+    rc = _publish_final(run_sink=run_sink, identity=identity, records=records)
+    _emit_summary(run_id=run_id, rc=rc)
+    return rc
 
 
 def _parser() -> argparse.ArgumentParser:
