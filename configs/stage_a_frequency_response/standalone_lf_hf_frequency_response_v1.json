@@ -121,7 +121,21 @@
     "fixed_records": 320,
     "failures_remain_in_denominator": true,
     "replacement_units_allowed": false,
-    "complete_rc": 0
+    "complete_rc": 0,
+    "automatic_fresh_or_resume": true,
+    "checkpoint_interval_hours": 2.0,
+    "checkpoint_only_after_new_complete_unit": true,
+    "short_run_final_only": true,
+    "checkpoint_schema": "standalone-lf-hf-frequency-response-checkpoint-v1",
+    "committed_unit_transactions_immutable": true,
+    "active_state_location": "local_only",
+    "artifact_sink_pairs": [
+      "complete_checkpoint_zip_and_sha256",
+      "complete_final_zip_and_sha256",
+      "complete_failure_zip_and_sha256"
+    ],
+    "artifact_publication": "create_only",
+    "terminal_pair_prevents_rerun": true
   },
   "limitations": [
     "descriptive_per_method_response_only",

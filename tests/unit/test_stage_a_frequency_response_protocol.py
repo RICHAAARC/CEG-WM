@@ -37,7 +37,10 @@ def test_frequency_response_plan_is_finite_disjoint_and_320_records() -> None:
     )
     assert RECORD_ARMS[0].startswith("hf_") and RECORD_ARMS[2].startswith("lf_")
     assert len({unit.unit_id for unit in plan.units}) == len({unit.source_id for unit in plan.units}) == 8
-    assert len(plan.config_digest) == 64
+    assert len(plan.protocol_digest) == len(plan.roster_digest) == 64
+    assert plan.config_digest == plan.protocol_digest
+    assert plan.protocol_digest != plan.roster_digest
+    assert set(plan.method_identities) == {"hf", "lf"}
 
 
 @pytest.mark.unit
@@ -125,6 +128,45 @@ def test_plan_rejects_execution_failure_contract_drift(tmp_path: Path) -> None:
     payload = _payload()
     payload["execution"]["fixed_records"] = 319
     _assert_rejected(tmp_path, payload, "denominator")
+
+
+@pytest.mark.unit
+def test_execution_contract_fixes_atomic_resume_and_artifact_rules() -> None:
+    execution = _payload()["execution"]
+    assert execution == {
+        "fixed_units": 8,
+        "records_per_unit": 40,
+        "fixed_records": 320,
+        "failures_remain_in_denominator": True,
+        "replacement_units_allowed": False,
+        "complete_rc": 0,
+        "automatic_fresh_or_resume": True,
+        "checkpoint_interval_hours": 2.0,
+        "checkpoint_only_after_new_complete_unit": True,
+        "short_run_final_only": True,
+        "checkpoint_schema": "standalone-lf-hf-frequency-response-checkpoint-v1",
+        "committed_unit_transactions_immutable": True,
+        "active_state_location": "local_only",
+        "artifact_sink_pairs": [
+            "complete_checkpoint_zip_and_sha256",
+            "complete_final_zip_and_sha256",
+            "complete_failure_zip_and_sha256",
+        ],
+        "artifact_publication": "create_only",
+        "terminal_pair_prevents_rerun": True,
+    }
+
+
+@pytest.mark.unit
+def test_protocol_and_roster_digests_are_independent(tmp_path: Path) -> None:
+    original = load_plan(_CONFIG, _ROSTER)
+    entries = [json.loads(line) for line in _ROSTER.read_text(encoding="utf-8").splitlines()]
+    entries[0]["prompt"] += " at dawn"
+    changed = tmp_path / "changed.jsonl"
+    changed.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
+    revised = load_plan(_CONFIG, changed)
+    assert revised.protocol_digest == original.protocol_digest
+    assert revised.roster_digest != original.roster_digest
 
 
 @pytest.mark.unit

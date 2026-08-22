@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
+import zipfile
 
 import numpy as np
 from PIL import Image
 import pytest
 
-from cegwm.shared.keys import normalize_detection_key
+from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from experiments.stage_a_frequency_response import run_colab as runner
+from experiments.stage_a_frequency_response.protocol import load_plan
 
 _ROOT = Path(__file__).resolve().parents[2]
 _KEY = "frequency-response-integration-detection-key"
@@ -37,26 +40,40 @@ def _repo(tmp_path: Path) -> tuple[Path, str]:
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "Frequency Response Test"], check=True)
     subprocess.run(["git", "-C", str(repo), "add", "configs"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "fixture"], check=True)
-    return repo, subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    exact = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    return repo, exact
 
 
 def _pattern(seed: int, offset: int) -> Image.Image:
     yy, xx = np.mgrid[:24, :24]
-    pixels = np.stack(((xx * 3 + yy * 5 + seed) % 100 + 20 + offset, (xx * 7 + yy * 2 + seed) % 100 + 20 + offset, (xx + yy * 11 + seed) % 100 + 20 + offset), axis=-1).astype(np.uint8)
+    pixels = np.stack((
+        (xx * 3 + yy * 5 + seed) % 100 + 20 + offset,
+        (xx * 7 + yy * 2 + seed) % 100 + 20 + offset,
+        (xx + yy * 11 + seed) % 100 + 20 + offset,
+    ), axis=-1).astype(np.uint8)
     return Image.fromarray(pixels, mode="RGB")
 
 
-def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, fail_hf_call: int | None = None) -> dict[str, object]:
-    calls: dict[str, object] = {"hf": 0, "lf": 0, "plain": 0, "seeds": [], "scores": 0}
+def _install_fakes(
+    monkeypatch: pytest.MonkeyPatch, *, fail_hf_call: int | None = None,
+    interrupt_hf_call: int | None = None,
+) -> dict[str, object]:
+    calls: dict[str, object] = {"load": 0, "hf": 0, "lf": 0, "plain": 0, "seeds": [], "scores": 0}
     registered = normalize_detection_key(_KEY)
     hf_assets, lf_assets = SimpleNamespace(method="hf"), SimpleNamespace(method="lf")
 
     def load(model_id: str, token: str) -> tuple[object, object, object]:
+        calls["load"] = int(calls["load"]) + 1
         assert model_id == "stabilityai/stable-diffusion-3.5-medium" and token == _TOKEN
         return object(), hf_assets, lf_assets
 
     def hf(_: object, __: str, ___: bytes, assets: object, **kwargs: object) -> SimpleNamespace:
         calls["hf"] = int(calls["hf"]) + 1
+        if calls["hf"] == interrupt_hf_call:
+            raise KeyboardInterrupt
         if calls["hf"] == fail_hf_call:
             raise RuntimeError("sensitive runtime detail")
         assert assets is hf_assets
@@ -80,7 +97,10 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, fail_hf_call: int | None 
     def scores(image: Image.Image, key: bytes, wrong_keys: tuple[bytes, ...], assets: object) -> dict[str, float]:
         calls["scores"] = int(calls["scores"]) + 1
         mean = float(np.asarray(image, dtype=np.float64).mean() / 255.0)
-        return {"registered": mean + (0.5 if key == registered else 0.0), **{f"wrong_{index:02d}": mean + wrong[0] / 8192.0 for index, wrong in enumerate(wrong_keys)}}
+        return {
+            "registered": mean + (0.5 if key == registered else 0.0),
+            **{f"wrong_{index:02d}": mean + wrong[0] / 8192.0 for index, wrong in enumerate(wrong_keys)},
+        }
 
     monkeypatch.setattr(runner, "_load_pipeline_and_assets", load)
     monkeypatch.setattr(runner.torch, "Generator", _Generator)
@@ -91,41 +111,228 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, fail_hf_call: int | None 
     return calls
 
 
-def _args(repo: Path, exact: str, output_dir: Path) -> argparse.Namespace:
-    return argparse.Namespace(repo_root=str(repo), expected_exact=exact, output_dir=str(output_dir))
+def _args(repo: Path, exact: str, output_root: Path, store: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        repo_root=str(repo), expected_exact=exact,
+        output_root=str(output_root), run_store_root=str(store),
+    )
+
+
+def _run_id(root: Path) -> str:
+    children = [path.name for path in root.iterdir() if path.is_dir()]
+    assert len(children) == 1
+    return children[0]
+
+
+def _terminal_payload(store: Path, run_id: str) -> tuple[dict[str, object], bytes]:
+    zip_path = store / run_id / f"{run_id}.zip"
+    with zipfile.ZipFile(zip_path) as archive:
+        raw = b"".join(archive.read(name) for name in archive.namelist())
+        return json.loads(archive.read("result.json")), raw
+
+
+def _env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _TOKEN)
+
+
+def _expected(repo: Path, exact: str) -> dict[str, object]:
+    plan = load_plan(
+        repo / "configs/stage_a_frequency_response/standalone_lf_hf_frequency_response_v1.json",
+        repo / "configs/stage_a_frequency_response/standalone_lf_hf_frequency_response_v1.jsonl",
+    )
+    return runner._new_state(exact, plan, public_key_digest(normalize_detection_key(_KEY)))
 
 
 @pytest.mark.integration
-def test_runner_exports_only_complete_fixed_320_descriptive_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fresh_success_exports_complete_fixed_320_descriptive_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    calls = _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    run_id = _run_id(output)
+    result, _ = _terminal_payload(store, run_id)
+    assert result["evidence_contract"] == "STANDALONE_LF_HF_FREQUENCY_RESPONSE_EVIDENCE"
+    assert result["complete"] is True and result["rc"] == 0
+    assert result["committed_unit_count"] == 8 and len(result["records"]) == 320
+    assert [tuple((record["condition"], record["arm"])) for record in result["records"][:40]] == list(runner.expected_pairs())
+    assert calls["hf"] == calls["lf"] == calls["plain"] == 8 and calls["scores"] == 320
+    assert not list((store / run_id).glob("checkpoint-*.zip"))
+
+
+@pytest.mark.integration
+def test_operational_failure_is_a_durable_complete_40_record_unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch, fail_hf_call=3)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 2
+    result, _ = _terminal_payload(store, _run_id(output))
+    failed = [record for record in result["records"] if record["status"] == "operational_failure"]
+    assert result["complete"] is False and len(result["records"]) == 320
+    assert len(failed) == 40 and {record["unit_id"] for record in failed} == {"frequency-response-0003"}
+    assert {record["failure_reason"] for record in failed} == {"unit_execution_failure"}
+    assert result["scientific_evaluation_allowed"] is False
+
+
+@pytest.mark.integration
+def test_keyboard_interrupt_does_not_commit_partial_unit_and_local_resume_reruns_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    first = _install_fakes(monkeypatch, interrupt_hf_call=2)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, output, store))
+    run_id = _run_id(output)
+    state = json.loads((output / run_id / "state.json").read_text(encoding="utf-8"))
+    assert state["committed_unit_ids"] == ["frequency-response-0001"]
+    assert len(state["records"]) == 40 and first["hf"] == 2
+    resumed = _install_fakes(monkeypatch)
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    assert resumed["hf"] == resumed["lf"] == resumed["plain"] == 7
+
+
+@pytest.mark.integration
+def test_two_hour_checkpoint_enables_sink_resume_without_recomputing_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch, interrupt_hf_call=2)
+    clock = iter([0.0, 7201.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    _env(monkeypatch)
+    first_output, store = tmp_path / "first", tmp_path / "store"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, first_output, store))
+    run_id = _run_id(first_output)
+    checkpoint = next((store / run_id).glob("checkpoint-*.zip"))
+    assert checkpoint.name == "checkpoint-0001-units-0001.zip"
+    resumed = _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, tmp_path / "second", store)) == 0
+    assert resumed["hf"] == resumed["lf"] == resumed["plain"] == 7
+
+
+@pytest.mark.integration
+def test_resume_rejects_identity_drift_and_39_or_41_record_transactions(tmp_path: Path) -> None:
+    repo, exact = _repo(tmp_path)
+    expected = _expected(repo, exact)
+    drifted = dict(expected)
+    drifted["roster_digest"] = "0" * 64
+    with pytest.raises(ValueError, match="identity"):
+        runner._validate_state(drifted, expected)
+    for count in (39, 41):
+        state = dict(expected)
+        state["committed_unit_ids"] = [expected["ordered_unit_ids"][0]]
+        state["committed_unit_count"] = 1
+        state["records"] = [{} for _ in range(count)]
+        with pytest.raises(ValueError, match="40-record"):
+            runner._validate_state(state, expected)
+
+
+@pytest.mark.integration
+def test_sink_orphan_bad_sha_and_divergence_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    expected = _expected(repo, exact)
+    run_store = tmp_path / "sink" / expected["run_id"]
+    run_store.mkdir(parents=True)
+    orphan = run_store / "checkpoint-0001-units-0001.zip.sha256"
+    orphan.write_text("0" * 64 + "  checkpoint-0001-units-0001.zip\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="orphan"):
+        runner._discover_sink(run_store, expected)
+    orphan.unlink()
+    bad_zip = run_store / "checkpoint-0001-units-0001.zip"
+    bad_zip.write_bytes(b"bad")
+    (run_store / f"{bad_zip.name}.sha256").write_text(f"{'0' * 64}  {bad_zip.name}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="checksum"):
+        runner._discover_sink(run_store, expected)
+
+    local = dict(expected)
+    sink = dict(expected)
+    local["committed_unit_count"] = sink["committed_unit_count"] = 1
+    local["committed_unit_ids"] = sink["committed_unit_ids"] = [expected["ordered_unit_ids"][0]]
+    local["records"] = [{"value": "left"}] * 40
+    sink["records"] = [{"value": "right"}] * 40
+    with pytest.raises(ValueError, match="diverge"):
+        runner._select_resume_state(local, sink)
+    local = dict(expected)
+    local["checkpoint_sequence"] = 1
+    with pytest.raises(ValueError, match="no sink history"):
+        runner._select_resume_state(local, None)
+
+
+@pytest.mark.integration
+def test_create_only_publication_and_valid_terminal_pair_prevent_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source, sink = tmp_path / "source", tmp_path / "sink"
+    source.mkdir()
+    sink.mkdir()
+    zip_path, sha_path = runner._write_zip_pair(source, "sample", {"state.json": {"safe": True}})
+    (sink / zip_path.name).write_bytes(b"occupied")
+    with pytest.raises(RuntimeError, match="overwrite"):
+        runner._publish_pair_create_only(zip_path, sha_path, sink)
+
+    repo, exact = _repo(tmp_path)
+    initial = _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    assert initial["load"] == 1
+    no_rerun = _install_fakes(monkeypatch)
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, tmp_path / "other-output", store)) == 0
+    assert no_rerun["load"] == no_rerun["scores"] == 0
+
+
+@pytest.mark.integration
+def test_missing_token_publishes_sanitized_failure_pair_and_prevents_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, exact = _repo(tmp_path)
     calls = _install_fakes(monkeypatch)
     monkeypatch.setenv(runner.KEY_ENV, _KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _TOKEN)
-    output = tmp_path / "output"
-    assert runner.execute(_args(repo, exact, output)) == 0
-    result = json.loads((output / "frequency_response_evidence.json").read_text(encoding="utf-8"))
-    assert result["evidence_contract"] == "STANDALONE_LF_HF_FREQUENCY_RESPONSE_EVIDENCE"
-    assert result["complete"] is True and result["rc"] == 0 and len(result["records"]) == 320
-    assert [tuple((record["condition"], record["arm"])) for record in result["records"][:40]] == list(runner.expected_pairs())
-    assert calls["hf"] == calls["lf"] == calls["plain"] == 8 and calls["scores"] == 320
-    seeds = calls["seeds"]
-    for index in range(8):
-        triple = seeds[index * 3:index * 3 + 3]
-        assert [name for name, _ in triple] == ["hf", "lf", "plain"] and len({seed for _, seed in triple}) == 1
-    assert set(result["descriptive_per_method_response"]) == {"hf", "lf"}
-    assert not any(term in result for term in ("winner", "complementarity", "joint", "robustness"))
+    monkeypatch.delenv(runner.TOKEN_ENV, raising=False)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 2
+    run_id = _run_id(output)
+    failure_zip = next((store / run_id).glob("failure-*.zip"))
+    with zipfile.ZipFile(failure_zip) as archive:
+        raw = b"".join(archive.read(name) for name in archive.namelist())
+        result = json.loads(archive.read("result.json"))
+    assert result["result_kind"] == "operational_failure_not_scientific"
+    assert result["committed_unit_count"] == 0 and result["records"] == []
+    assert _KEY.encode() not in raw and _TOKEN.encode() not in raw
+    assert calls["load"] == calls["scores"] == 0
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, tmp_path / "other-output", store)) == 2
+    assert calls["load"] == calls["scores"] == 0
 
 
 @pytest.mark.integration
-def test_runner_retains_failed_unit_and_withholds_complete_rc0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_artifacts_exclude_secrets_private_inputs_and_preserve_claim_ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, exact = _repo(tmp_path)
-    _install_fakes(monkeypatch, fail_hf_call=3)
-    monkeypatch.setenv(runner.KEY_ENV, _KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _TOKEN)
-    output = tmp_path / "output"
-    assert runner.execute(_args(repo, exact, output)) == 2
-    result = json.loads((output / "frequency_response_evidence.json").read_text(encoding="utf-8"))
-    failed = [record for record in result["records"] if record["status"] == "operational_failure"]
-    assert result["complete"] is False and result["rc"] == 2 and len(result["records"]) == 320
-    assert len(failed) == 40 and {record["unit_id"] for record in failed} == {"frequency-response-0003"}
-    assert {record["failure_reason"] for record in failed} == {"unit_execution_failure"}
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    result, raw = _terminal_payload(store, _run_id(output))
+    assert _KEY.encode() not in raw and _TOKEN.encode() not in raw
+    roster_path = repo / "configs/stage_a_frequency_response/standalone_lf_hf_frequency_response_v1.jsonl"
+    for line in roster_path.read_text(encoding="utf-8").splitlines():
+        assert json.loads(line)["prompt"].encode() not in raw
+    serialized = json.dumps(result, sort_keys=True)
+    assert not any(name in serialized for name in ("private_latent", "embedding_latent", "embed_side_route", "cached_qk"))
+    assert result["claim_ceiling"] == "descriptive_per_method_response_only"
+    assert set(result["descriptive_per_method_response"]) == {"hf", "lf"}
+    assert not any(key in result for key in ("winner", "complementarity", "joint", "fpr", "threshold"))
+
+
+@pytest.mark.integration
+def test_cli_is_automatic_with_fixed_interval() -> None:
+    options = {option for action in runner._parser()._actions for option in action.option_strings}
+    assert "--run-mode" not in options and "--checkpoint-interval" not in options
+    assert {"--output-root", "--run-store-root"}.issubset(options)
+    assert runner.CHECKPOINT_INTERVAL_HOURS == 2.0

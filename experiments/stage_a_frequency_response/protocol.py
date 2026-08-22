@@ -116,6 +116,20 @@ _EXECUTION = {
     "failures_remain_in_denominator": True,
     "replacement_units_allowed": False,
     "complete_rc": 0,
+    "automatic_fresh_or_resume": True,
+    "checkpoint_interval_hours": 2.0,
+    "checkpoint_only_after_new_complete_unit": True,
+    "short_run_final_only": True,
+    "checkpoint_schema": "standalone-lf-hf-frequency-response-checkpoint-v1",
+    "committed_unit_transactions_immutable": True,
+    "active_state_location": "local_only",
+    "artifact_sink_pairs": [
+        "complete_checkpoint_zip_and_sha256",
+        "complete_final_zip_and_sha256",
+        "complete_failure_zip_and_sha256",
+    ],
+    "artifact_publication": "create_only",
+    "terminal_pair_prevents_rerun": True,
 }
 _LIMITATIONS = [
     "descriptive_per_method_response_only",
@@ -143,13 +157,21 @@ class FrequencyResponseUnit:
 @dataclass(frozen=True, slots=True)
 class FrequencyResponsePlan:
     protocol_id: str
-    config_digest: str
+    protocol_digest: str
+    roster_digest: str
     model_id: str
+    method_identities: dict[str, dict[str, str]]
     units: tuple[FrequencyResponseUnit, ...]
 
+    @property
+    def config_digest(self) -> str:
+        """Compatibility name used by StageARecord for the full protocol digest."""
 
-def _canonical_digest(config: dict[str, Any], roster: list[dict[str, Any]]) -> str:
-    payload = json.dumps({"config": config, "roster": roster}, sort_keys=True, separators=(",", ":"))
+        return self.protocol_digest
+
+
+def _canonical_digest(payload: Any) -> str:
+    payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -202,8 +224,12 @@ def load_plan(config_path: Path, roster_path: Path) -> FrequencyResponsePlan:
     if any(not unit.prompt.strip() or unit.height < 256 or unit.width < 256 or unit.seed < 0 for unit in units):
         raise ValueError("frequency-response roster has invalid generation identity")
     return FrequencyResponsePlan(
-        protocol_id=config["protocol_id"], config_digest=_canonical_digest(config, roster),
-        model_id=config["generation_runtime"]["model_id"], units=units,
+        protocol_id=config["protocol_id"],
+        protocol_digest=_canonical_digest(config),
+        roster_digest=_canonical_digest(roster),
+        model_id=config["generation_runtime"]["model_id"],
+        method_identities=config["methods"],
+        units=units,
     )
 
 
