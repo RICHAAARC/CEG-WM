@@ -9,7 +9,6 @@ import math
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import time
 from typing import Any
@@ -301,6 +300,8 @@ def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
 def _clean_confirmation_evidence(
     records: list[StageARecord],
     expected: dict[str, Any],
+    *,
+    candidate_outcome_allowed: bool,
 ) -> dict[str, Any]:
     """Summarize the frozen rank gates without issuing a scientific verdict."""
 
@@ -309,6 +310,14 @@ def _clean_confirmation_evidence(
     for record in records:
         if record.unit_id not in by_unit:
             raise ValueError("confirmation evidence contains a unit outside the fixed roster")
+        if (
+            record.run_id != expected["run_id"]
+            or record.code_revision != expected["resolved_exact"]
+            or record.config_digest != expected["protocol_digest"]
+            or record.key_public_digest != expected["key_public_digest"]
+            or record.condition != "identity"
+        ):
+            raise ValueError("confirmation evidence record identity mismatch")
         by_unit[record.unit_id].append(record)
 
     gate_a_count = 0
@@ -385,21 +394,25 @@ def _clean_confirmation_evidence(
         })
 
     complete = successful_pair_count == len(roster) == 8
+    outcome_permitted = candidate_outcome_allowed and complete
     gate_a_pass = gate_a_count >= expected["rank_gate_a_min_units"]
     gate_b_pass = gate_b_count >= expected["rank_gate_b_min_units"]
     return {
-        "evaluation_status": "candidate_outcome" if complete else "not_evaluable_operational",
+        "candidate_outcome_allowed": outcome_permitted,
+        "evaluation_status": (
+            "candidate_outcome" if outcome_permitted else "not_evaluable_operational"
+        ),
         "candidate_outcome": (
             "pass" if gate_a_pass and gate_b_pass else "fail"
-        ) if complete else None,
+        ) if outcome_permitted else None,
         "fixed_unit_count": len(roster),
         "successful_pair_count": successful_pair_count,
         "gate_a_registered_top_rank_units": gate_a_count,
         "gate_a_required_units": expected["rank_gate_a_min_units"],
-        "gate_a_pass": gate_a_pass if complete else None,
+        "gate_a_pass": gate_a_pass if outcome_permitted else None,
         "gate_b_paired_hf_gt_primary_null_units": gate_b_count,
         "gate_b_required_units": expected["rank_gate_b_min_units"],
-        "gate_b_pass": gate_b_pass if complete else None,
+        "gate_b_pass": gate_b_pass if outcome_permitted else None,
         "median_correct_minus_wrong_key_max_effect_size": (
             float(np.median(margins)) if margins else None
         ),
@@ -495,10 +508,23 @@ def _validate_final(
     if status != expected_status or result.get("status") != expected_status:
         raise ValueError("final package status mismatch")
     has_failure = any(record.status != "success" for record in records)
-    if has_failure != (receipt["rc"] == 1):
+    checkpoint_status = receipt.get("checkpoint_status")
+    if checkpoint_status not in {"complete", "failure"}:
+        raise ValueError("final package checkpoint status is invalid")
+    if result.get("checkpoint_status") != checkpoint_status:
+        raise ValueError("final package checkpoint status mismatch")
+    has_operational_failure = has_failure or checkpoint_status == "failure"
+    if has_operational_failure != (receipt["rc"] == 1):
         raise ValueError("final package failure/RC mismatch")
-    evidence = _clean_confirmation_evidence(records, expected)
-    if result.get("clean_confirmation_evidence") != evidence:
+    evidence = _clean_confirmation_evidence(
+        records,
+        expected,
+        candidate_outcome_allowed=receipt["rc"] == 0,
+    )
+    if (
+        receipt.get("clean_confirmation_evidence") != evidence
+        or result.get("clean_confirmation_evidence") != evidence
+    ):
         raise ValueError("final package rank-gate evidence mismatch")
     if receipt["rc"] == 0 and evidence["evaluation_status"] != "candidate_outcome":
         raise ValueError("RC0 final package must contain a complete candidate outcome")
@@ -592,9 +618,15 @@ def _validate_fatal(
                 or record.condition != "identity"
             ):
                 raise ValueError("fatal package record identity mismatch")
-    evidence = _clean_confirmation_evidence(records, expected)
+    evidence = _clean_confirmation_evidence(
+        records,
+        expected,
+        candidate_outcome_allowed=False,
+    )
     if (
-        result.get("clean_confirmation_evidence") != evidence
+        receipt.get("clean_confirmation_evidence") != evidence
+        or result.get("clean_confirmation_evidence") != evidence
+        or evidence["candidate_outcome_allowed"] is not False
         or evidence["evaluation_status"] != "not_evaluable_operational"
         or evidence["candidate_outcome"] is not None
     ):
@@ -655,13 +687,12 @@ def _checkpoint(state: dict[str, Any], output_dir: Path, checkpoint_sink: Path) 
     with zipfile.ZipFile(zip_path) as archive:
         if json.loads(archive.read("state.json")) != checkpoint_state:
             raise RuntimeError("local checkpoint verification failed")
-    for source in (zip_path, checksum_path):
-        destination = checkpoint_sink / source.name
-        if destination.exists():
-            raise RuntimeError("checkpoint sink refuses overwrite")
-        shutil.copy2(source, destination)
-        if source.read_bytes() != destination.read_bytes():
-            raise RuntimeError("checkpoint sink copy verification failed")
+    _publish_pair_create_only(
+        zip_path,
+        checksum_path,
+        checkpoint_sink,
+        artifact_kind="checkpoint",
+    )
     state.clear()
     state.update(checkpoint_state)
 
@@ -693,6 +724,8 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
     }
     if "clean_confirmation_evidence" in receipt:
         result["clean_confirmation_evidence"] = receipt["clean_confirmation_evidence"]
+    if "checkpoint_status" in receipt:
+        result["checkpoint_status"] = receipt["checkpoint_status"]
     if "error_class" in receipt:
         result.update({
             "result_kind": receipt["result_kind"],
@@ -713,17 +746,55 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
     return zip_path, zip_digest
 
 
-def _publish_final(zip_path: Path, zip_digest: str, run_store: Path) -> None:
+def _write_local_checksum(zip_path: Path, zip_digest: str) -> Path:
     checksum_path = zip_path.with_suffix(".zip.sha256")
     checksum_path.write_text(f"{zip_digest}  {zip_path.name}\n", encoding="utf-8")
     _verify_checksum(zip_path, checksum_path)
-    for source in (zip_path, checksum_path):
-        destination = run_store / source.name
-        if destination.exists():
-            raise RuntimeError("final run store refuses overwrite")
-        shutil.copy2(source, destination)
-        if source.read_bytes() != destination.read_bytes():
-            raise RuntimeError("final run store copy verification failed")
+    return checksum_path
+
+
+def _publish_pair_create_only(
+    zip_path: Path,
+    checksum_path: Path,
+    sink: Path,
+    *,
+    artifact_kind: str,
+) -> None:
+    """Publish one prevalidated ZIP/checksum pair without overwrite or orphans."""
+
+    _verify_checksum(zip_path, checksum_path)
+    destinations = (sink / zip_path.name, sink / checksum_path.name)
+    if any(destination.exists() for destination in destinations):
+        raise RuntimeError(f"{artifact_kind} sink refuses overwrite")
+    created: list[Path] = []
+    try:
+        for source, destination in zip((zip_path, checksum_path), destinations):
+            with destination.open("xb") as target:
+                target.write(source.read_bytes())
+            created.append(destination)
+            if source.read_bytes() != destination.read_bytes():
+                raise RuntimeError(f"{artifact_kind} sink copy verification failed")
+    except Exception as error:
+        cleanup_failed = False
+        for destination in reversed(created):
+            try:
+                destination.unlink()
+            except OSError:
+                cleanup_failed = True
+        if cleanup_failed:
+            raise RuntimeError(f"{artifact_kind} sink pair cleanup failed") from error
+        raise
+    if not all(destination.is_file() for destination in destinations):
+        raise RuntimeError(f"{artifact_kind} sink pair publication incomplete")
+
+
+def _publish_final(zip_path: Path, checksum_path: Path, run_store: Path) -> None:
+    _publish_pair_create_only(
+        zip_path,
+        checksum_path,
+        run_store,
+        artifact_kind="final",
+    )
 
 
 def _publish_failure(
@@ -746,16 +817,20 @@ def _publish_failure(
         ):
             raise RuntimeError("failure run store refuses non-identical overwrite")
         return
-    for source, destination in (
-        (zip_path, destination_zip),
-        (checksum_path, destination_checksum),
-    ):
-        with destination.open("xb") as target:
-            target.write(source.read_bytes())
+    _publish_pair_create_only(
+        zip_path,
+        checksum_path,
+        run_store,
+        artifact_kind="failure",
+    )
     _validate_fatal(destination_zip, destination_checksum, expected, error_class)
 
 
-def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class: str) -> tuple[Path, str]:
+def _export_fatal(
+    args: argparse.Namespace,
+    context: dict[str, Any],
+    error_class: str,
+) -> tuple[Path, str, bool]:
     if error_class not in _FATAL_ERROR_BY_PHASE.values():
         raise ValueError("fatal error class is not predeclared")
     run_id = context.get("run_id")
@@ -813,6 +888,7 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
     receipt["clean_confirmation_evidence"] = _clean_confirmation_evidence(
         records,
         expected,
+        candidate_outcome_allowed=False,
     )
     base_zip, zip_digest = _export(output_dir, receipt, records)
     fatal_zip = output_dir / f"failure-{error_class}.zip"
@@ -820,8 +896,14 @@ def _export_fatal(args: argparse.Namespace, context: dict[str, Any], error_class
     fatal_checksum = output_dir / f"{fatal_zip.name}.sha256"
     fatal_checksum.write_text(f"{zip_digest}  {fatal_zip.name}\n", encoding="utf-8")
     _validate_fatal(fatal_zip, fatal_checksum, expected, error_class)
-    _publish_failure(fatal_zip, fatal_checksum, run_store, expected, error_class)
-    return fatal_zip, zip_digest
+    published = False
+    if not context.get("durable_publication_failed", False):
+        try:
+            _publish_failure(fatal_zip, fatal_checksum, run_store, expected, error_class)
+            published = True
+        except Exception:
+            published = False
+    return fatal_zip, zip_digest, published
 
 
 def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = None) -> int:
@@ -1136,6 +1218,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     receipt["clean_confirmation_evidence"] = _clean_confirmation_evidence(
         records,
         expected_state,
+        candidate_outcome_allowed=receipt["rc"] == 0,
     )
     receipt["status"] = (
         "complete_with_operational_failures"
@@ -1144,8 +1227,14 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     )
     context["phase"] = "final_export"
     zip_path, zip_digest = _export(output_dir, receipt, records)
+    local_checksum = _write_local_checksum(zip_path, zip_digest)
+    _validate_final(zip_path, local_checksum, expected_state)
     _discover_checkpoint(run_store, expected_state)
-    _publish_final(zip_path, zip_digest, run_store)
+    try:
+        _publish_final(zip_path, local_checksum, run_store)
+    except Exception:
+        context["durable_publication_failed"] = True
+        raise
     _validate_final(final_zip, final_checksum, expected_state)
     del detection_key, wrong_keys
     print(
@@ -1180,8 +1269,8 @@ def main() -> None:
         error_class = _FATAL_ERROR_BY_PHASE.get(phase, "initialization_failure")
         export_status = "unavailable"
         try:
-            _export_fatal(args, fatal_context, error_class)
-            export_status = "published"
+            _, _, published = _export_fatal(args, fatal_context, error_class)
+            export_status = "published" if published else "local_only"
         except Exception:
             pass
         print(
