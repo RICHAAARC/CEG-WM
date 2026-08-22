@@ -179,7 +179,7 @@ def test_runner_executes_fixed_lf_confirmation_transaction_and_exports_public_da
     assert evidence["confirmation_outcome"] == (
         "confirmation_pass_candidate_for_agent5_adjudication"
     )
-    assert evidence["selected_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+    assert evidence["confirmation_pass_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     assert evidence["fixed_unit_count"] == 8
     assert evidence["fixed_record_count"] == 16
     assert evidence["median_margin_is_gate"] is False
@@ -249,7 +249,7 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
     assert result["records"][:2] == state["records"][:2]
     evidence = result["clean_confirmation_evidence"]
     assert evidence["evaluation_status"] == "not_evaluable_operational"
-    assert evidence["selected_candidate_id"] is None
+    assert evidence["confirmation_pass_candidate_id"] is None
     assert evidence["confirmation_outcome"] is None
     assert all(
         facts["gate_a_pass"] is None and facts["gate_b_pass"] is None and facts["eligible"] is None
@@ -330,14 +330,14 @@ def test_scale_free_gates_use_strict_ties_and_complete_denominator() -> None:
         confirmation_outcome_allowed=True,
     )
     assert failure["confirmation_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
-    assert failure["selected_candidate_id"] is None
+    assert failure["confirmation_pass_candidate_id"] is None
 
     passed = runner._clean_confirmation_evidence(
         _confirmation_records(expected, gate_a=7, gate_b=7),
         expected,
         confirmation_outcome_allowed=True,
     )
-    assert passed["selected_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+    assert passed["confirmation_pass_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     facts = passed["candidate_evidence"][runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID]
     assert facts["gate_a_pass"] is True and facts["gate_b_pass"] is True
     assert "winner_ranking_order" not in passed
@@ -355,7 +355,7 @@ def test_scale_free_gates_use_strict_ties_and_complete_denominator() -> None:
     )
     assert partial["evaluation_status"] == "not_evaluable_operational"
     assert partial["confirmation_outcome"] is None
-    assert partial["selected_candidate_id"] is None
+    assert partial["confirmation_pass_candidate_id"] is None
 
 
 @pytest.mark.integration
@@ -426,7 +426,7 @@ def test_nonfinite_scores_become_retained_operational_failures_without_outcome(
     evidence = result["clean_confirmation_evidence"]
     assert evidence["evaluation_status"] == "not_evaluable_operational"
     assert evidence["confirmation_outcome"] is None
-    assert evidence["selected_candidate_id"] is None
+    assert evidence["confirmation_pass_candidate_id"] is None
     facts = evidence["candidate_evidence"][runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID]
     assert facts["gate_a_pass"] is None
     assert facts["gate_b_pass"] is None
@@ -504,7 +504,7 @@ def test_missing_secrets_fail_closed_without_leaking_values(
     evidence = result["clean_confirmation_evidence"]
     assert evidence["confirmation_outcome_allowed"] is False
     assert evidence["confirmation_outcome"] is None
-    assert evidence["selected_candidate_id"] is None
+    assert evidence["confirmation_pass_candidate_id"] is None
     assert result["records"] == []
 
 

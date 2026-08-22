@@ -429,11 +429,11 @@ def _clean_confirmation_evidence(
     gate_b_pass = gate_b_count >= expected["rank_gate_b_min_units"]
     candidate_pass = gate_a_pass and gate_b_pass
     confirmation_outcome = None
-    selected_candidate_id = None
+    confirmation_pass_candidate_id = None
     if outcome_permitted:
         if candidate_pass:
             confirmation_outcome = "confirmation_pass_candidate_for_agent5_adjudication"
-            selected_candidate_id = evaluated_candidate_id
+            confirmation_pass_candidate_id = evaluated_candidate_id
         else:
             confirmation_outcome = "SCIENTIFIC_NEGATIVE_AND_STOP"
     summary = {
@@ -456,7 +456,7 @@ def _clean_confirmation_evidence(
             "confirmation_outcome" if outcome_permitted else "not_evaluable_operational"
         ),
         "confirmation_outcome": confirmation_outcome,
-        "selected_candidate_id": selected_candidate_id,
+        "confirmation_pass_candidate_id": confirmation_pass_candidate_id,
         "fixed_unit_count": len(roster),
         "fixed_record_count": 16,
         "successful_unit_count": successful_unit_count,
