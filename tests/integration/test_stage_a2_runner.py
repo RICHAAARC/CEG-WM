@@ -69,8 +69,8 @@ def _install_fakes(
     calls = {"load": 0, "lf": 0, "plain": 0, "score": 0}
     registered_key = normalize_detection_key(_RAW_KEY)
     assets = SimpleNamespace(
-        candidate_id=runner.LF_SHELL_CANDIDATE_ID,
-        evaluated_candidate_id=runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+        candidate_id=runner.LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        evaluated_candidate_id=runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
         detector_statistic_id=runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
     )
 
@@ -97,7 +97,7 @@ def _install_fakes(
         if calls["lf"] in fail_lf_calls:
             raise RuntimeError("private detail that must not be exported")
         seed = kwargs["generator"].seed
-        assert public_assets.candidate_id == runner.LF_SHELL_CANDIDATE_ID
+        assert public_assets.candidate_id == runner.LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
         pixels = np.full((8, 8, 3), (seed % 20) + 130, dtype=np.uint8)
         return SimpleNamespace(
             image=Image.fromarray(pixels),
@@ -153,15 +153,15 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
     receipt, result, local_zip = _payloads(output_root, run_id)
 
     assert rc == receipt["rc"] == result["rc"] == 0
-    assert result["completeness"] == "complete_for_lf_v2_blocknorm_selection_execution"
-    assert result["carrier_method_id"] == runner.LF_SHELL_CANDIDATE_ID
-    assert result["evaluated_candidate_id"] == runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+    assert result["completeness"] == "complete_for_lf_balanced_blocks_selection_execution"
+    assert result["carrier_method_id"] == runner.LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
+    assert result["evaluated_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     assert result["detector_statistic_id"] == runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID
     assert result["record_arms_in_exact_unit_order"] == list(runner.RECORD_ARMS)
     assert len(result["records"]) == 16
     assert calls == {"load": 1, "lf": 8, "plain": 8, "score": 8 * 2 * 17}
     assert Counter(record["unit_id"] for record in result["records"]) == {
-        f"lfv2-selection-{index:04d}": 2 for index in range(1, 9)
+        f"lfbb-selection-{index:04d}": 2 for index in range(1, 9)
     }
     for index in range(8):
         assert [record["arm"] for record in result["records"][index * 2 : index * 2 + 2]] == list(
@@ -173,7 +173,7 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
     assert evidence["candidate_selection_outcome"] == (
         "candidate_frozen_for_separate_confirmation_authorization"
     )
-    assert evidence["selected_candidate_id"] == runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+    assert evidence["selected_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     assert evidence["fixed_unit_count"] == 8
     assert evidence["fixed_record_count"] == 16
     assert evidence["median_margin_is_gate"] is False
@@ -191,7 +191,7 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
         exported = b"".join(archive.read(name) for name in archive.namelist()) + stored_sha.read_bytes()
     assert _RAW_KEY.encode() not in exported
     assert _HF_TOKEN.encode() not in exported
-    assert b"A copper watering can" not in exported
+    assert b"A brass telescope" not in exported
     for forbidden in (b"private_latent", b'"carrier":', b'"mask":', b"traceback"):
         assert forbidden not in exported
 
@@ -219,7 +219,7 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
     checkpoint_zip = next((store_root / run_id).glob("checkpoint-*.zip"))
     with zipfile.ZipFile(checkpoint_zip) as archive:
         state = json.loads(archive.read("state.json"))
-    assert state["committed_unit_ids"] == ["lfv2-selection-0001", "lfv2-selection-0002"]
+    assert state["committed_unit_ids"] == ["lfbb-selection-0001", "lfbb-selection-0002"]
     assert len(state["records"]) == 4
     assert [record["status"] for record in state["records"][:2]] == ["operational_failure"] * 2
     assert first_calls["plain"] == 3
@@ -276,13 +276,13 @@ def _record(
 
 def _expected() -> dict[str, object]:
     return {
-        "run_id": "lfv2sel-test",
+        "run_id": "lfbbsel-test",
         "resolved_exact": "1" * 40,
         "protocol_digest": "2" * 64,
         "key_public_digest": "3" * 64,
-        "ordered_roster_unit_ids": [f"lfv2-selection-{index:04d}" for index in range(1, 9)],
-        "carrier_method_id": runner.LF_SHELL_CANDIDATE_ID,
-        "evaluated_candidate_id": runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+        "ordered_roster_unit_ids": [f"lfbb-selection-{index:04d}" for index in range(1, 9)],
+        "carrier_method_id": runner.LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        "evaluated_candidate_id": runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
         "detector_statistic_id": runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
         "rank_gate_a_min_units": 7,
         "rank_gate_b_min_units": 7,
@@ -324,8 +324,8 @@ def test_scale_free_gates_use_strict_ties_and_complete_denominator() -> None:
         expected,
         candidate_outcome_allowed=True,
     )
-    assert passed["selected_candidate_id"] == runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
-    facts = passed["candidate_evidence"][runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID]
+    assert passed["selected_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+    facts = passed["candidate_evidence"][runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID]
     assert facts["gate_a_pass"] is True and facts["gate_b_pass"] is True
     assert "winner_ranking_order" not in passed
 
@@ -355,7 +355,7 @@ def test_resume_rejects_four_arm_order_or_identity_drift(tmp_path: Path) -> None
         **expected,
         "checkpoint_sequence": 1,
         "committed_unit_count": 1,
-        "committed_unit_ids": ["lfv2-selection-0001"],
+        "committed_unit_ids": ["lfbb-selection-0001"],
         "records": transaction,
     }
     zip_path = tmp_path / "checkpoint-0001-units-0001.zip"
@@ -450,7 +450,7 @@ def test_run_identity_is_deterministic_and_cli_has_no_mode_or_interval() -> None
     protocol = runner._load_protocol(_ROOT)
     first = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
     second = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
-    assert first == second and first.startswith("lfv2sel-")
+    assert first == second and first.startswith("lfbbsel-")
     actions = runner._parser()._actions
     option_strings = {option for action in actions for option in action.option_strings}
     assert "--run-mode" not in option_strings

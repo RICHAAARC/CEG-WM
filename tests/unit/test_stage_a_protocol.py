@@ -9,6 +9,7 @@ import pytest
 from cegwm.protocol.stage_a import (
     load_hf_v2_confirmation_protocol,
     load_lf_a3_selection_protocol,
+    load_lf_balanced_blocks_selection_protocol,
     load_lf_v2_blocknorm_selection_protocol,
     load_stage_a_protocol,
 )
@@ -23,6 +24,15 @@ _LF_V2_CONFIG = _ROOT / "configs" / "stage_a" / "stage_a_lf_v2_blocknorm_selecti
 _LF_V2_SELECTION = _ROOT / "configs" / "stage_a" / "lf_v2_blocknorm_selection.jsonl"
 _LF_V2_CONFIRMATION = (
     _ROOT / "configs" / "stage_a" / "lf_v2_blocknorm_untouched_confirmation.jsonl"
+)
+_LF_BALANCED_CONFIG = (
+    _ROOT / "configs" / "stage_a" / "stage_a_lf_balanced_blocks_selection_v1.json"
+)
+_LF_BALANCED_SELECTION = (
+    _ROOT / "configs" / "stage_a" / "lf_balanced_blocks_selection.jsonl"
+)
+_LF_BALANCED_CONFIRMATION = (
+    _ROOT / "configs" / "stage_a" / "lf_balanced_blocks_untouched_confirmation.jsonl"
 )
 
 
@@ -279,3 +289,90 @@ def test_lf_v2_protocol_rejects_method_gate_or_denominator_drift(
     modified.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match=message):
         load_lf_v2_blocknorm_selection_protocol(modified, _LF_V2_SELECTION)
+
+
+@pytest.mark.unit
+def test_lf_balanced_blocks_protocol_freezes_carrier_gate_and_globally_fresh_rosters() -> None:
+    protocol = load_lf_balanced_blocks_selection_protocol(
+        _LF_BALANCED_CONFIG,
+        _LF_BALANCED_SELECTION,
+    )
+    assert protocol.protocol_id == "cegwm-stage-a-lf-balanced-blocks-selection-v1"
+    assert [unit.unit_id for unit in protocol.candidate_selection] == [
+        f"lfbb-selection-{index:04d}" for index in range(1, 9)
+    ]
+    assert protocol.untouched_confirmation == ()
+    candidate = protocol.config["candidate"]
+    assert candidate["carrier_method_id"] == "lf_shell_balanced_blocks_v2"
+    assert candidate["evaluated_candidate_id"] == (
+        "lf_shell_balanced_blocks_v2_blocknorm_median_v1"
+    )
+    assert candidate["detector_statistic_id"] == (
+        "lf_block_centered_normalized_median_corr_v2"
+    )
+    assert [block["canonical_bound_token"] for block in candidate["radial_blocks"]] == [
+        "0.14<=r<0.165",
+        "0.165<=r<0.19",
+        "0.19<=r<0.215",
+        "0.215<=r<=0.24",
+    ]
+    assert [block["block_index"] for block in candidate["radial_blocks"]] == [0, 1, 2, 3]
+    assert protocol.config["selection_rule"]["registered_top_rank_among_17_min_units"] == 7
+    assert protocol.config["selection_rule"][
+        "paired_lf_registered_gt_primary_null_registered_min_units"
+    ] == 7
+    assert protocol.config["execution_flow"]["fixed_records"] == 16
+
+    current_paths = {_LF_BALANCED_SELECTION, _LF_BALANCED_CONFIRMATION}
+    old_units = [
+        json.loads(line)
+        for path in (_ROOT / "configs" / "stage_a").glob("*.jsonl")
+        if path not in current_paths
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    selection = [
+        json.loads(line)
+        for line in _LF_BALANCED_SELECTION.read_text(encoding="utf-8").splitlines()
+    ]
+    confirmation = [
+        json.loads(line)
+        for line in _LF_BALANCED_CONFIRMATION.read_text(encoding="utf-8").splitlines()
+    ]
+    for field in ("unit_id", "source_id", "prompt", "seed"):
+        old_values = {unit[field] for unit in old_units}
+        selection_values = {unit[field] for unit in selection}
+        confirmation_values = {unit[field] for unit in confirmation}
+        assert old_values.isdisjoint(selection_values | confirmation_values)
+        assert selection_values.isdisjoint(confirmation_values)
+        assert len(selection_values) == len(confirmation_values) == 8
+    assert {unit["split"] for unit in selection} == {"lf_balanced_blocks_selection"}
+    assert {unit["split"] for unit in confirmation} == {
+        "lf_balanced_blocks_untouched_confirmation"
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("candidate", "carrier_method_id"), "changed", "carrier or detector"),
+        (("candidate", "detector_statistic_id"), "changed", "carrier or detector"),
+        (("candidate", "construction_dtype"), "float32", "carrier or detector"),
+        (("selection_rule", "registered_top_rank_among_17_min_units"), 6, "scale-free"),
+        (("selection_rule", "absolute_margin_min"), 0.03, "scale-free"),
+        (("execution_flow", "fixed_records"), 8, "8-unit/16-record"),
+        (("budget", "total_relative_l2"), 0.013, "0.012 budget"),
+    ],
+)
+def test_lf_balanced_blocks_protocol_rejects_formula_gate_or_denominator_drift(
+    tmp_path: Path,
+    path: tuple[str, str],
+    value: object,
+    message: str,
+) -> None:
+    payload = json.loads(_LF_BALANCED_CONFIG.read_text(encoding="utf-8"))
+    payload[path[0]][path[1]] = value
+    modified = tmp_path / "invalid-lf-balanced.json"
+    modified.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_lf_balanced_blocks_selection_protocol(modified, _LF_BALANCED_SELECTION)

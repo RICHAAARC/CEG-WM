@@ -1,4 +1,4 @@
-"""Thin Colab runner for Stage-A LF-v2 block-normalized clean selection."""
+"""Thin Colab runner for Stage-A balanced-block LF clean selection."""
 
 from __future__ import annotations
 
@@ -19,17 +19,17 @@ import numpy as np
 import torch
 
 from cegwm.method.lf import (
+    LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
     LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
-    LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
     LF_INJECTION_STEP_INDEX,
-    LF_SHELL_CANDIDATE_ID,
     FrozenLFPublicAssets,
     score_lf_image,
 )
 from cegwm.protocol.records import StageARecord
 from cegwm.protocol.stage_a import (
     StageAProtocol,
-    load_lf_v2_blocknorm_selection_protocol,
+    load_lf_balanced_blocks_selection_protocol,
 )
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_lf, run_sd35_plain
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
@@ -38,19 +38,19 @@ from cegwm.shared.prg import prg_bytes
 KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
 CHECKPOINT_INTERVAL_HOURS = 2.0
-COMPLETE_EXECUTION = "complete_for_lf_v2_blocknorm_selection_execution"
+COMPLETE_EXECUTION = "complete_for_lf_balanced_blocks_selection_execution"
 INCOMPLETE_EXECUTION = "incomplete_operational_execution"
 SCIENTIFIC_STATUS = "not_adjudicated"
 LIMITATIONS = (
-    "lf_v2_blocknorm_selection_only_no_confirmation_or_attack_evaluation",
-    "block_centered_block_normalized_equal_weight_median_correlation_not_calibrated",
+    "lf_balanced_blocks_selection_only_no_confirmation_or_attack_evaluation",
+    "balanced_carrier_with_block_centered_normalized_median_correlation_not_calibrated",
     "lpips_not_evaluated",
     "no_calibrated_threshold_or_fixed_fpr_claim",
     "model_revision_and_weight_digest_not_recorded",
 )
 RECORD_ARMS = (
-    LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
-    f"primary_null__{LF_BLOCKNORM_EVALUATED_CANDIDATE_ID}",
+    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    f"primary_null__{LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID}",
 )
 _FATAL_ERROR_BY_PHASE = {
     "initialization": "initialization_failure",
@@ -101,9 +101,9 @@ def _git_exact(repo_root: Path, expected_exact: str) -> str:
 
 def _load_protocol(repo_root: Path) -> StageAProtocol:
     config_root = repo_root / "configs" / "stage_a"
-    return load_lf_v2_blocknorm_selection_protocol(
-        config_root / "stage_a_lf_v2_blocknorm_selection_v1.json",
-        config_root / "lf_v2_blocknorm_selection.jsonl",
+    return load_lf_balanced_blocks_selection_protocol(
+        config_root / "stage_a_lf_balanced_blocks_selection_v1.json",
+        config_root / "lf_balanced_blocks_selection.jsonl",
     )
 
 
@@ -126,9 +126,9 @@ def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, Frozen
         vae=vae,
         image_processor=image_processor,
         image_processor_id=f"{model_id}:image_processor",
-        candidate_id=LF_SHELL_CANDIDATE_ID,
+        candidate_id=LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
         detector_statistic_id=LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
-        evaluated_candidate_id=LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+        evaluated_candidate_id=LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
     )
     pipeline.to("cuda")
     return pipeline, assets
@@ -310,9 +310,9 @@ def _deterministic_run_id(
     }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(
-        b"CEG-WM/stage-a-lf-v2-blocknorm-selection/run-id/v1\x00" + canonical.encode("utf-8")
+        b"CEG-WM/stage-a-lf-balanced-blocks-selection/run-id/v1\x00" + canonical.encode("utf-8")
     )
-    return f"lfv2sel-{digest.hexdigest()[:24]}"
+    return f"lfbbsel-{digest.hexdigest()[:24]}"
 
 
 def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
@@ -331,7 +331,7 @@ def _clean_selection_evidence(
     *,
     candidate_outcome_allowed: bool,
 ) -> dict[str, Any]:
-    """Apply both scale-free gates to the one frozen LF-v2 candidate."""
+    """Apply both scale-free gates to the one frozen balanced-block candidate."""
 
     roster = expected["ordered_roster_unit_ids"]
     by_unit: dict[str, list[StageARecord]] = {unit_id: [] for unit_id in roster}
@@ -772,8 +772,8 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         runtime_config["inference_steps"] != 20
         or budget_config["total_relative_l2"] != 0.012
         or runtime_config["injection_step_index_zero_based"] != LF_INJECTION_STEP_INDEX
-        or carrier_method_id != LF_SHELL_CANDIDATE_ID
-        or evaluated_candidate_id != LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+        or carrier_method_id != LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
+        or evaluated_candidate_id != LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
         or detector_statistic_id != LF_BLOCKNORM_DETECTOR_STATISTIC_ID
     ):
         raise RuntimeError("protocol_runtime_identity_mismatch")

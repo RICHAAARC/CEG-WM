@@ -9,9 +9,13 @@ from typing import Any
 import torch
 
 from cegwm.method.frequency import (
+    BalancedRadialBlock,
     FrequencyCarrierSpec,
+    inject_balanced_frequency_carrier,
     inject_frequency_carrier,
+    reconstruct_balanced_frequency_carrier,
     reconstruct_frequency_carrier,
+    score_balanced_frequency_image_block_centered_normalized_median,
     score_frequency_image,
     score_frequency_image_block_centered_normalized_median,
 )
@@ -29,17 +33,29 @@ LF_BLOCKNORM_DETECTOR_STATISTIC_ID = (
 LF_BLOCKNORM_EVALUATED_CANDIDATE_ID = (
     "lf_shell_rademacher_v1_blocknorm_median_v2"
 )
+LF_BALANCED_BLOCKS_CARRIER_METHOD_ID = "lf_shell_balanced_blocks_v2"
+LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID = (
+    "lf_shell_balanced_blocks_v2_blocknorm_median_v1"
+)
 LF_BLOCKNORM_RADIAL_BLOCKS = (
     (0.14, 0.165, False),
     (0.165, 0.19, False),
     (0.19, 0.215, False),
     (0.215, 0.24, True),
 )
+LF_BALANCED_BLOCKS_RADIAL_BLOCKS: tuple[BalancedRadialBlock, ...] = (
+    (0.14, 0.165, False, "0.14<=r<0.165"),
+    (0.165, 0.19, False, "0.165<=r<0.19"),
+    (0.19, 0.215, False, "0.19<=r<0.215"),
+    (0.215, 0.24, True, "0.215<=r<=0.24"),
+)
 _MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 _BANDS = {
     LF_CORE_CANDIDATE_ID: (0.04, 0.14, False),
     LF_SHELL_CANDIDATE_ID: (0.14, 0.24, True),
+    LF_BALANCED_BLOCKS_CARRIER_METHOD_ID: (0.14, 0.24, True),
 }
+LF_CANDIDATE_IDS = (*LF_CANDIDATE_IDS, LF_BALANCED_BLOCKS_CARRIER_METHOD_ID)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,17 +76,23 @@ class FrozenLFPublicAssets:
         if self.model_id != _MODEL_ID:
             raise ValueError("LF public assets must use the frozen SD3.5 model identity")
         if self.candidate_id not in LF_CANDIDATE_IDS:
-            raise ValueError("LF candidate identity is not one of the two frozen candidates")
+            raise ValueError("LF candidate identity is not one of the frozen finite carriers")
         if self.detector_statistic_id == LF_GLOBAL_NORMALIZED_CORRELATION_ID:
+            if self.candidate_id == LF_BALANCED_BLOCKS_CARRIER_METHOD_ID:
+                raise ValueError("balanced LF carrier requires the frozen block-normalized detector")
             if self.evaluated_candidate_id not in {None, self.candidate_id}:
                 raise ValueError("legacy LF evaluated identity must match its carrier identity")
         elif self.detector_statistic_id == LF_BLOCKNORM_DETECTOR_STATISTIC_ID:
-            if (
-                self.candidate_id != LF_SHELL_CANDIDATE_ID
-                or self.evaluated_candidate_id != LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
-            ):
+            identities = {
+                LF_SHELL_CANDIDATE_ID: LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+                LF_BALANCED_BLOCKS_CARRIER_METHOD_ID: (
+                    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+                ),
+            }
+            if identities.get(self.candidate_id) != self.evaluated_candidate_id:
                 raise ValueError(
-                    "LF-v2 block-normalized detector requires the frozen shell carrier and evaluated identity"
+                    "LF block-normalized detector requires the frozen shell carrier "
+                    "or balanced carrier with its evaluated identity"
                 )
         else:
             raise ValueError("LF detector statistic identity is not frozen")
@@ -108,6 +130,15 @@ def reconstruct_lf_carrier(
 ) -> torch.Tensor:
     """Rebuild one LF carrier from key, candidate identity, and public shape."""
 
+    if frozen_public_assets.candidate_id == LF_BALANCED_BLOCKS_CARRIER_METHOD_ID:
+        return reconstruct_balanced_frequency_carrier(
+            detection_key,
+            shape,
+            _spec(frozen_public_assets),
+            LF_BALANCED_BLOCKS_RADIAL_BLOCKS,
+            dtype=dtype,
+            device=device,
+        )
     return reconstruct_frequency_carrier(
         detection_key,
         shape,
@@ -124,6 +155,13 @@ def inject_lf_carrier(
 ) -> tuple[torch.Tensor, BudgetMeasurement]:
     """Inject exactly one LF candidate under the full single-carrier budget."""
 
+    if frozen_public_assets.candidate_id == LF_BALANCED_BLOCKS_CARRIER_METHOD_ID:
+        return inject_balanced_frequency_carrier(
+            latents,
+            detection_key,
+            _spec(frozen_public_assets),
+            LF_BALANCED_BLOCKS_RADIAL_BLOCKS,
+        )
     return inject_frequency_carrier(latents, detection_key, _spec(frozen_public_assets))
 
 
@@ -136,6 +174,14 @@ def score_lf_image(
 
     spec = _spec(frozen_public_assets)
     if frozen_public_assets.detector_statistic_id == LF_BLOCKNORM_DETECTOR_STATISTIC_ID:
+        if frozen_public_assets.candidate_id == LF_BALANCED_BLOCKS_CARRIER_METHOD_ID:
+            return score_balanced_frequency_image_block_centered_normalized_median(
+                image,
+                detection_key,
+                frozen_public_assets,
+                spec,
+                LF_BALANCED_BLOCKS_RADIAL_BLOCKS,
+            )
         return score_frequency_image_block_centered_normalized_median(
             image,
             detection_key,
