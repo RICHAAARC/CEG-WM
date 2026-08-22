@@ -65,9 +65,16 @@ def _install_fakes(
     registered = normalize_detection_key(_KEY)
     hf_assets, lf_assets = SimpleNamespace(method="hf"), SimpleNamespace(method="lf")
 
-    def load(model_id: str, token: str) -> tuple[object, object, object]:
+    def load(
+        model_id: str, token: str, lf_method_identity: dict[str, str],
+    ) -> tuple[object, object, object]:
         calls["load"] = int(calls["load"]) + 1
         assert model_id == "stabilityai/stable-diffusion-3.5-medium" and token == _TOKEN
+        assert lf_method_identity == {
+            "carrier_method_id": "lf_shell_balanced_blocks_v2",
+            "detector_statistic_id": "lf_block_centered_normalized_median_corr_v2",
+            "evaluated_candidate_id": "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
+        }
         return object(), hf_assets, lf_assets
 
     def hf(_: object, __: str, ___: bytes, assets: object, **kwargs: object) -> SimpleNamespace:
@@ -142,6 +149,56 @@ def _expected(repo: Path, exact: str) -> dict[str, object]:
         repo / "configs/stage_a_frequency_response/standalone_lf_hf_frequency_response_v1.jsonl",
     )
     return runner._new_state(exact, plan, public_key_digest(normalize_detection_key(_KEY)))
+
+
+@pytest.mark.integration
+def test_real_lf_assets_constructor_receives_exact_protocol_identity_and_rejects_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = load_plan(
+        _ROOT / "configs/stage_a_frequency_response/standalone_lf_hf_frequency_response_v1.json",
+        _ROOT / "configs/stage_a_frequency_response/standalone_lf_hf_frequency_response_v1.jsonl",
+    )
+
+    class VAE:
+        def encode(self, _: object) -> None:
+            return None
+
+    class Processor:
+        def preprocess(self, _: object) -> None:
+            return None
+
+    moved: list[str] = []
+    pipeline = SimpleNamespace(
+        vae=VAE(), image_processor=Processor(), to=lambda device: moved.append(device),
+    )
+    loads: list[tuple[str, object, str]] = []
+
+    def load(model_id: str, *, torch_dtype: object, token: str) -> object:
+        loads.append((model_id, torch_dtype, token))
+        return pipeline
+
+    monkeypatch.setattr(runner.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(runner, "load_sd35_pipeline", load)
+    loaded, _, lf_assets = runner._load_pipeline_and_assets(
+        plan.model_id, _TOKEN, plan.method_identities["lf"],
+    )
+    assert loaded is pipeline and moved == ["cuda"]
+    assert loads == [(plan.model_id, runner.torch.float16, _TOKEN)]
+    assert {
+        "carrier_method_id": lf_assets.candidate_id,
+        "detector_statistic_id": lf_assets.detector_statistic_id,
+        "evaluated_candidate_id": lf_assets.evaluated_candidate_id,
+    } == plan.method_identities["lf"]
+
+    missing = dict(plan.method_identities["lf"])
+    missing.pop("evaluated_candidate_id")
+    with pytest.raises(ValueError, match="identity fields"):
+        runner._load_pipeline_and_assets(plan.model_id, _TOKEN, missing)
+    mismatched = dict(plan.method_identities["lf"])
+    mismatched["evaluated_candidate_id"] = "lf_shell_rademacher_v1_blocknorm_median_v2"
+    with pytest.raises(ValueError, match="evaluated identity"):
+        runner._load_pipeline_and_assets(plan.model_id, _TOKEN, mismatched)
 
 
 @pytest.mark.integration
@@ -274,6 +331,7 @@ def test_create_only_publication_and_valid_terminal_pair_prevent_rerun(tmp_path:
     (sink / zip_path.name).write_bytes(b"occupied")
     with pytest.raises(RuntimeError, match="overwrite"):
         runner._publish_pair_create_only(zip_path, sha_path, sink)
+    assert (sink / zip_path.name).read_bytes() == b"occupied"
 
     repo, exact = _repo(tmp_path)
     initial = _install_fakes(monkeypatch)
@@ -286,6 +344,79 @@ def test_create_only_publication_and_valid_terminal_pair_prevent_rerun(tmp_path:
     _env(monkeypatch)
     assert runner.execute(_args(repo, exact, tmp_path / "other-output", store)) == 0
     assert no_rerun["load"] == no_rerun["scores"] == 0
+
+
+@pytest.mark.integration
+def test_create_only_partial_keyboard_interrupt_leaves_no_orphan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, sink = tmp_path / "source", tmp_path / "sink"
+    source.mkdir()
+    sink.mkdir()
+    zip_path, sha_path = runner._write_zip_pair(
+        source, "sample", {"state.json": {"safe": True}},
+    )
+
+    def partial_interrupt(source_stream: object, target: object) -> None:
+        del source_stream
+        target.write(b"partial")
+        target.flush()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner.shutil, "copyfileobj", partial_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        runner._publish_pair_create_only(zip_path, sha_path, sink)
+    assert list(sink.iterdir()) == []
+
+
+@pytest.mark.integration
+def test_terminal_fast_path_rejects_nonexact_or_rewritten_public_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    expected = _expected(repo, exact)
+    run_id = expected["run_id"]
+    final_zip = store / run_id / f"{run_id}.zip"
+    with zipfile.ZipFile(final_zip) as archive:
+        baseline = {
+            "receipt.json": json.loads(archive.read("receipt.json")),
+            "result.json": json.loads(archive.read("result.json")),
+        }
+
+    mutations = [
+        ("missing_limitations", None),
+        ("altered_aggregate", None),
+        ("receipt_disagreement", None),
+        *((f"extra_{name}", name) for name in (
+            "winner", "complementarity", "joint", "fpr", "threshold",
+            "prompt", "secret", "private_latent",
+        )),
+    ]
+    for index, (label, extra_name) in enumerate(mutations):
+        payloads = json.loads(json.dumps(baseline))
+        result = payloads["result.json"]
+        if label == "missing_limitations":
+            result.pop("limitations")
+        elif label == "altered_aggregate":
+            result["descriptive_per_method_response"]["hf"]["identity"][
+                "successful_candidate_records"
+            ] = 9
+        elif label == "receipt_disagreement":
+            payloads["receipt.json"]["status"] = "rewritten"
+        else:
+            result[extra_name] = "forbidden"
+        directory = tmp_path / f"tampered-{index:02d}"
+        directory.mkdir()
+        zip_path, checksum_path = runner._write_zip_pair(directory, run_id, payloads)
+        with pytest.raises(ValueError, match="terminal"):
+            runner._validate_terminal_pair(
+                ("final", zip_path, checksum_path), expected, None,
+            )
 
 
 @pytest.mark.integration
@@ -308,6 +439,23 @@ def test_missing_token_publishes_sanitized_failure_pair_and_prevents_rerun(tmp_p
     _env(monkeypatch)
     assert runner.execute(_args(repo, exact, tmp_path / "other-output", store)) == 2
     assert calls["load"] == calls["scores"] == 0
+
+    expected = _expected(repo, exact)
+    with zipfile.ZipFile(failure_zip) as archive:
+        payloads = {
+            "receipt.json": json.loads(archive.read("receipt.json")),
+            "result.json": json.loads(archive.read("result.json")),
+        }
+    payloads["result.json"]["descriptive_per_method_response"] = {}
+    tampered = tmp_path / "tampered-failure"
+    tampered.mkdir()
+    zip_path, checksum_path = runner._write_zip_pair(
+        tampered, "failure-hugging_face_token_missing", payloads,
+    )
+    with pytest.raises(ValueError, match="failure terminal result schema"):
+        runner._validate_terminal_pair(
+            ("failure", zip_path, checksum_path), expected, None,
+        )
 
 
 @pytest.mark.integration

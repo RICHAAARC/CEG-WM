@@ -49,6 +49,48 @@ _STATE_KEYS = {
     *_IDENTITY_FIELDS, "checkpoint_sequence", "committed_unit_count",
     "committed_unit_ids", "records",
 }
+_LF_IDENTITY_KEYS = {
+    "carrier_method_id", "detector_statistic_id", "evaluated_candidate_id",
+}
+_SCORE_KEYS = {"registered", *(f"wrong_{index:02d}" for index in range(16))}
+_CANDIDATE_METRIC_KEYS = {
+    "actual_callback_dtype_relative_l2", "candidate_vs_plain_psnr",
+}
+_UNIT_FAILURE_REASONS = {
+    "runtime_initialization_failure", "unit_execution_failure",
+}
+_FAILURE_CLASSES = {"hugging_face_token_missing"}
+_LIMITATIONS = [
+    "descriptive_per_method_response_only",
+    "no_calibrated_threshold_or_fixed_fpr_claim",
+    "no_winner_complementarity_joint_content_gate_or_robustness_promotion",
+    "ordinary_rgb_attacks_only",
+]
+_FINAL_RESULT_KEYS = _STATE_KEYS | {
+    "evidence_contract", "result_kind", "rc", "complete", "status",
+    "scientific_evaluation_allowed", "claim_ceiling", "limitations",
+    "descriptive_per_method_response",
+}
+_FAILURE_RESULT_KEYS = _STATE_KEYS | {
+    "evidence_contract", "result_kind", "error_class", "rc", "complete",
+    "status", "scientific_evaluation_allowed", "claim_ceiling", "limitations",
+}
+_FINAL_RECEIPT_FIELDS = (
+    "run_id", "resolved_exact", "protocol_digest", "roster_digest",
+    "key_public_digest", "rc", "status", "result_kind",
+    "committed_unit_count", "fixed_record_count", "claim_ceiling",
+)
+_FAILURE_RECEIPT_FIELDS = (
+    "run_id", "resolved_exact", "protocol_digest", "roster_digest",
+    "key_public_digest", "rc", "status", "result_kind", "error_class",
+    "committed_unit_count", "fixed_record_count", "claim_ceiling",
+)
+
+
+def _exact_json(actual: Any, expected: Any) -> bool:
+    return json.dumps(actual, sort_keys=True, separators=(",", ":")) == json.dumps(
+        expected, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _git_exact(repo_root: Path, expected_exact: str) -> str:
@@ -68,7 +110,11 @@ def _git_exact(repo_root: Path, expected_exact: str) -> str:
     return actual
 
 
-def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, FrozenHFPublicAssets, FrozenLFPublicAssets]:
+def _load_pipeline_and_assets(
+    model_id: str, hf_token: str, lf_method_identity: dict[str, str],
+) -> tuple[Any, FrozenHFPublicAssets, FrozenLFPublicAssets]:
+    if not isinstance(lf_method_identity, dict) or set(lf_method_identity) != _LF_IDENTITY_KEYS:
+        raise ValueError("LF protocol-bound method identity fields differ")
     if not torch.cuda.is_available():
         raise RuntimeError("cuda_required_for_frequency_response_execution")
     pipeline = load_sd35_pipeline(model_id, torch_dtype=torch.float16, token=hf_token)
@@ -81,6 +127,9 @@ def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, Frozen
     lf_assets = FrozenLFPublicAssets(
         vae=vae, image_processor=processor,
         image_processor_id=f"{model_id}:image_processor",
+        candidate_id=lf_method_identity["carrier_method_id"],
+        detector_statistic_id=lf_method_identity["detector_statistic_id"],
+        evaluated_candidate_id=lf_method_identity["evaluated_candidate_id"],
     )
     pipeline.to("cuda")
     return pipeline, hf_assets, lf_assets
@@ -263,21 +312,58 @@ def _validate_transaction(payloads: list[dict[str, Any]], expected: dict[str, An
             or record.key_public_digest != expected["key_public_digest"]
         ):
             raise ValueError("committed transaction identity differs")
+    if records[0].status == "operational_failure":
+        reasons = {record.failure_reason for record in records}
+        if len(reasons) != 1 or not reasons.issubset(_UNIT_FAILURE_REASONS):
+            raise ValueError("committed failure transaction reason differs")
+        if any(record.scores or record.metrics for record in records):
+            raise ValueError("committed failure transaction must not contain observations")
+        return
+    for record in records:
+        if set(record.scores) != _SCORE_KEYS:
+            raise ValueError("committed public score schema differs")
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in record.scores.values()
+        ):
+            raise ValueError("committed public scores must be finite numbers")
+        if record.arm in (HF_ARM, LF_ARM):
+            metric_keys = set(record.metrics)
+            if (
+                not {"actual_callback_dtype_relative_l2"}.issubset(metric_keys)
+                or not metric_keys.issubset(_CANDIDATE_METRIC_KEYS)
+            ):
+                raise ValueError("committed candidate metric schema differs")
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                for value in record.metrics.values()
+            ):
+                raise ValueError("committed candidate metrics must be finite numbers")
+            budget = float(record.metrics["actual_callback_dtype_relative_l2"])
+            if not 0.0 < budget <= _BUDGET_MAX:
+                raise ValueError("committed candidate budget differs")
+        elif record.metrics:
+            raise ValueError("committed primary-null record must not contain metrics")
 
 
 def _validate_state(state: Any, expected: dict[str, Any], *, checkpoint: bool = False) -> dict[str, Any]:
     if not isinstance(state, dict) or set(state) != _STATE_KEYS:
         raise ValueError("checkpoint state schema differs")
-    if any(state[field] != expected[field] for field in _IDENTITY_FIELDS):
+    if any(not _exact_json(state[field], expected[field]) for field in _IDENTITY_FIELDS):
         raise ValueError("resume identity differs")
     committed = state["committed_unit_ids"]
     records = state["records"]
     sequence = state["checkpoint_sequence"]
-    if not isinstance(sequence, int) or sequence < 0 or (checkpoint and sequence < 1):
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0 or (checkpoint and sequence < 1):
         raise ValueError("checkpoint sequence is invalid")
     if not isinstance(committed, list) or committed != expected["ordered_unit_ids"][:len(committed)]:
         raise ValueError("committed units must be an ordered roster prefix")
-    if state["committed_unit_count"] != len(committed):
+    committed_count = state["committed_unit_count"]
+    if isinstance(committed_count, bool) or not isinstance(committed_count, int) or committed_count != len(committed):
         raise ValueError("committed unit count differs")
     if checkpoint and not committed:
         raise ValueError("complete checkpoint cannot be empty")
@@ -327,7 +413,7 @@ def _write_zip_pair(directory: Path, stem: str, payloads: dict[str, dict[str, An
         if not (zip_path.is_file() and checksum_path.is_file()):
             raise ValueError("local artifact pair is incomplete")
         _verify_checksum(zip_path, checksum_path)
-        if _zip_payload(zip_path, tuple(payloads)) != payloads:
+        if not _exact_json(_zip_payload(zip_path, tuple(payloads)), payloads):
             raise ValueError("local create-only artifact content differs")
         return zip_path, checksum_path
     with zip_path.open("xb") as stream:
@@ -352,11 +438,11 @@ def _publish_pair_create_only(zip_path: Path, checksum_path: Path, sink: Path) -
     try:
         for source, destination in zip((zip_path, checksum_path), destinations, strict=True):
             with source.open("rb") as source_stream, destination.open("xb") as target:
+                created.append(destination)
                 shutil.copyfileobj(source_stream, target)
-            created.append(destination)
             if source.read_bytes() != destination.read_bytes():
                 raise RuntimeError("artifact sink copy verification failed")
-    except Exception:
+    except BaseException:
         for destination in reversed(created):
             destination.unlink(missing_ok=True)
         raise
@@ -424,45 +510,45 @@ def _discover_sink(run_store: Path, expected: dict[str, Any]) -> tuple[dict[str,
 
 def _validate_terminal_pair(terminal: tuple[str, Path, Path], expected: dict[str, Any], checkpoint: dict[str, Any] | None) -> int:
     kind, zip_path, checksum_path = terminal
+    if kind not in {"final", "failure"}:
+        raise ValueError("terminal artifact kind differs")
     _verify_checksum(zip_path, checksum_path)
     payloads = _zip_payload(zip_path, ("receipt.json", "result.json"))
     receipt, result = payloads["receipt.json"], payloads["result.json"]
-    if any(result.get(field) != expected[field] for field in _IDENTITY_FIELDS):
-        raise ValueError("terminal artifact identity differs")
-    if result.get("run_id") != expected["run_id"] or receipt.get("run_id") != expected["run_id"]:
-        raise ValueError("terminal artifact run identity differs")
-    rc = result.get("rc")
-    if not isinstance(rc, int) or receipt.get("rc") != rc:
-        raise ValueError("terminal artifact return code differs")
     if kind == "final":
-        if result.get("result_kind") != "complete_fixed_denominator":
-            raise ValueError("final artifact kind differs")
+        if not isinstance(result, dict) or set(result) != _FINAL_RESULT_KEYS:
+            raise ValueError("final terminal result schema differs")
         state = {key: result[key] for key in _STATE_KEYS}
         _validate_state(state, expected)
         if state["committed_unit_count"] != expected["fixed_unit_count"]:
             raise ValueError("final artifact is not a complete unit roster")
-        has_failure = any(record.get("status") != "success" for record in state["records"])
-        if (
-            rc != (2 if has_failure else 0)
-            or result.get("complete") is not (rc == 0)
-            or result.get("scientific_evaluation_allowed") is not (rc == 0)
-        ):
-            raise ValueError("final artifact outcome differs from committed records")
+        records = [StageARecord(**payload) for payload in state["records"]]
+        rc = 2 if any(record.status != "success" for record in records) else 0
+        expected_result = _result_payload(state, records, rc)
+        if not _exact_json(result, expected_result):
+            raise ValueError("final terminal result differs from committed public records")
+        if not _exact_json(receipt, _receipt_payload(expected_result, failure=False)):
+            raise ValueError("final terminal receipt differs from result")
         if checkpoint and not _state_extends(state, checkpoint):
             raise ValueError("terminal artifact diverges from checkpoints")
     else:
-        if (
-            result.get("result_kind") != "operational_failure_not_scientific"
-            or rc != 2
-            or result.get("scientific_evaluation_allowed") is not False
-        ):
-            raise ValueError("failure artifact kind differs")
-        if zip_path.name != f"failure-{result.get('error_class')}.zip":
+        if not isinstance(result, dict) or set(result) != _FAILURE_RESULT_KEYS:
+            raise ValueError("failure terminal result schema differs")
+        error_class = result["error_class"]
+        if error_class not in _FAILURE_CLASSES:
+            raise ValueError("failure terminal class differs")
+        if zip_path.name != f"failure-{error_class}.zip":
             raise ValueError("failure filename and error class differ")
         state = {key: result[key] for key in _STATE_KEYS}
         _validate_state(state, expected)
+        expected_result = _failure_result_payload(state, error_class)
+        if not _exact_json(result, expected_result):
+            raise ValueError("failure terminal result differs from frozen contract")
+        if not _exact_json(receipt, _receipt_payload(expected_result, failure=True)):
+            raise ValueError("failure terminal receipt differs from result")
         if checkpoint and not _state_extends(state, checkpoint):
             raise ValueError("failure artifact diverges from checkpoints")
+        rc = 2
     return rc
 
 
@@ -506,23 +592,36 @@ def _result_payload(state: dict[str, Any], records: list[StageARecord], rc: int)
         "status": "complete_with_operational_failures" if any_failure else "complete_for_descriptive_adjudication",
         "scientific_evaluation_allowed": rc == 0,
         "claim_ceiling": "descriptive_per_method_response_only",
-        "limitations": [
-            "descriptive_per_method_response_only",
-            "no_calibrated_threshold_or_fixed_fpr_claim",
-            "no_winner_complementarity_joint_content_gate_or_robustness_promotion",
-            "ordinary_rgb_attacks_only",
-        ],
+        "limitations": list(_LIMITATIONS),
         "descriptive_per_method_response": _descriptive_response(records),
     }
 
 
+def _failure_result_payload(state: dict[str, Any], error_class: str) -> dict[str, Any]:
+    if error_class not in _FAILURE_CLASSES:
+        raise ValueError("failure class is not frozen")
+    return {
+        **state,
+        "evidence_contract": EVIDENCE_CONTRACT,
+        "result_kind": "operational_failure_not_scientific",
+        "error_class": error_class,
+        "rc": 2,
+        "complete": False,
+        "status": "operational_failure",
+        "scientific_evaluation_allowed": False,
+        "claim_ceiling": "descriptive_per_method_response_only",
+        "limitations": list(_LIMITATIONS),
+    }
+
+
+def _receipt_payload(result: dict[str, Any], *, failure: bool) -> dict[str, Any]:
+    fields = _FAILURE_RECEIPT_FIELDS if failure else _FINAL_RECEIPT_FIELDS
+    return {key: result[key] for key in fields}
+
+
 def _publish_final(state: dict[str, Any], records: list[StageARecord], rc: int, local_run: Path, run_store: Path) -> tuple[Path, str]:
     result = _result_payload(state, records, rc)
-    receipt = {key: result[key] for key in (
-        "run_id", "resolved_exact", "protocol_digest", "roster_digest",
-        "key_public_digest", "rc", "status", "result_kind",
-        "committed_unit_count", "fixed_record_count", "claim_ceiling",
-    )}
+    receipt = _receipt_payload(result, failure=False)
     zip_path, checksum_path = _write_zip_pair(
         local_run, state["run_id"], {"receipt.json": receipt, "result.json": result},
     )
@@ -534,24 +633,8 @@ def _publish_final(state: dict[str, Any], records: list[StageARecord], rc: int, 
 def _publish_failure(
     state: dict[str, Any], error_class: str, local_run: Path, run_store: Path,
 ) -> tuple[Path, str]:
-    if re.fullmatch(r"[a-z][a-z0-9_]*", error_class) is None:
-        raise ValueError("failure class is unsafe")
-    result = {
-        **state,
-        "evidence_contract": EVIDENCE_CONTRACT,
-        "result_kind": "operational_failure_not_scientific",
-        "error_class": error_class,
-        "rc": 2,
-        "complete": False,
-        "status": "operational_failure",
-        "scientific_evaluation_allowed": False,
-        "claim_ceiling": "descriptive_per_method_response_only",
-    }
-    receipt = {key: result[key] for key in (
-        "run_id", "resolved_exact", "protocol_digest", "roster_digest",
-        "key_public_digest", "rc", "status", "result_kind", "error_class",
-        "committed_unit_count", "fixed_record_count", "claim_ceiling",
-    )}
+    result = _failure_result_payload(state, error_class)
+    receipt = _receipt_payload(result, failure=True)
     zip_path, checksum_path = _write_zip_pair(
         local_run, f"failure-{error_class}",
         {"receipt.json": receipt, "result.json": result},
@@ -628,7 +711,9 @@ def execute(args: argparse.Namespace) -> int:
     model_load_failed = False
     if pending:
         try:
-            pipeline, hf_assets, lf_assets = _load_pipeline_and_assets(plan.model_id, hf_token)
+            pipeline, hf_assets, lf_assets = _load_pipeline_and_assets(
+                plan.model_id, hf_token, plan.method_identities["lf"],
+            )
         except Exception:
             model_load_failed = True
     hf_token = ""
