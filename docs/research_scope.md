@@ -2,9 +2,13 @@
 
 ## Research question
 
-Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image, while an LF branch adds attack complementarity without becoming a generic image-content signal?
+Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image through the frozen content-adaptive simultaneous LF+HF embedding and its clean joint statistic?
 
-The user's latest authorization makes the content-adaptive dual-branch clean route authoritative for this route and supersedes LF-over-HF attack complementarity as its content-chain implementation gate. The earlier complementarity result remains admitted only as historical `SCIENTIFIC_NEGATIVE` evidence; semantic/texture allocation is active within this branch rather than deferred. Original Stage A and the complete content chain remain unfinished, while LF/HF fusion, routing, geometry, fixed-FPR calibration, and paper promotion are not authorized. Local CPU, fake, and runtime checks are engineering evidence only; scientific status requires externally returned real-GPU artifacts, external audit of those artifacts, and a later Agent5 decision.
+The content-adaptive simultaneous LF+HF embedding and its clean joint statistic are authorized for this narrow route. The earlier attack-complementarity result remains historical `SCIENTIFIC_NEGATIVE` evidence against its preregistered incremental-complementarity claim; it does not negate this clean simultaneous-embedding question. Only broader downstream or promotion-level LF/HF fusion and routing remain unauthorized.
+
+The four positive neutral-counterfactual effects establish only that each frozen allocation input changed the allocation. The two public branch-share population standard deviations can support only that allocation was not identical across the fixed eight-image roster, and only when both independently computed RC0 values are finite and strictly positive. They do not expose or recover masks, tile weights, attention, latents, deltas, or probe state.
+
+Local CPU, fake, and runtime checks are engineering evidence only; they do not scientifically validate this route, finish original Stage A, or complete the content chain. Geometry, fixed-FPR calibration, and paper promotion are outside this route.
 
 ## Stage-A decision
 

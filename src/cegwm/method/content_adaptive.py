@@ -32,6 +32,13 @@ HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = "hf_content_tiles_attention_probe_v1"
 LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = "lf_content_tiles_texture_probe_v1"
 COMBINED_BUDGET_PROJECTOR_ID = "dual_branch_actual_dtype_relative_l2_v1"
 JOINT_EVALUATED_CANDIDATE_ID = "content_adaptive_dual_branch_clean_v1"
+BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE = 1e-12
+COUNTERFACTUAL_EFFECT_FIELDS = (
+    "semantic_attention_counterfactual_effect",
+    "texture_energy_counterfactual_effect",
+    "lf_probe_response_counterfactual_effect",
+    "hf_probe_response_counterfactual_effect",
+)
 _PUBLIC_PROBE_MASTER = b"CEG-WM/public-content-probe-master/v1"
 
 
@@ -55,6 +62,16 @@ class ContentAllocation:
     hf_branch_share: float
     counterfactual_effects: tuple[float, float, float, float]
 
+    def __post_init__(self) -> None:
+        _validate_public_branch_shares(self.lf_branch_share, self.hf_branch_share)
+        if len(self.counterfactual_effects) != len(COUNTERFACTUAL_EFFECT_FIELDS):
+            raise ValueError("content allocation must carry exactly four counterfactual effects")
+        semantic, texture, lf_probe, hf_probe = self.counterfactual_effects
+        _positive_finite_scalar(semantic, "semantic_attention_counterfactual_effect")
+        _positive_finite_scalar(texture, "texture_energy_counterfactual_effect")
+        _positive_finite_scalar(lf_probe, "lf_probe_response_counterfactual_effect")
+        _positive_finite_scalar(hf_probe, "hf_probe_response_counterfactual_effect")
+
 
 @dataclass(frozen=True, slots=True)
 class ContentAdaptiveMeasurement:
@@ -65,8 +82,41 @@ class ContentAdaptiveMeasurement:
     hf_effective_relative_l2: float
     lf_branch_share: float
     hf_branch_share: float
-    minimum_counterfactual_effect: float
+    semantic_attention_counterfactual_effect: float
+    texture_energy_counterfactual_effect: float
+    lf_probe_response_counterfactual_effect: float
+    hf_probe_response_counterfactual_effect: float
     probe_evaluation_count: int
+
+    def __post_init__(self) -> None:
+        _validate_public_branch_shares(self.lf_branch_share, self.hf_branch_share)
+        _positive_finite_scalar(
+            self.semantic_attention_counterfactual_effect,
+            "semantic_attention_counterfactual_effect",
+        )
+        _positive_finite_scalar(
+            self.texture_energy_counterfactual_effect,
+            "texture_energy_counterfactual_effect",
+        )
+        _positive_finite_scalar(
+            self.lf_probe_response_counterfactual_effect,
+            "lf_probe_response_counterfactual_effect",
+        )
+        _positive_finite_scalar(
+            self.hf_probe_response_counterfactual_effect,
+            "hf_probe_response_counterfactual_effect",
+        )
+
+    @property
+    def minimum_counterfactual_effect(self) -> float:
+        """Minimum of the four exported effects; never independent constructor state."""
+
+        return min(
+            self.semantic_attention_counterfactual_effect,
+            self.texture_energy_counterfactual_effect,
+            self.lf_probe_response_counterfactual_effect,
+            self.hf_probe_response_counterfactual_effect,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +126,33 @@ class ContentBlindScores:
     lf: float
     hf: float
     content: float
+
+
+def _positive_finite_scalar(value: Any, name: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError(f"{name} must be a real scalar")
+    scalar = float(value)
+    if not math.isfinite(scalar) or scalar <= 0.0:
+        raise ValueError(f"{name} must be finite and strictly positive")
+    return scalar
+
+
+def _validate_public_branch_shares(lf_share: Any, hf_share: Any) -> None:
+    values: list[float] = []
+    for name, value in (("lf_branch_share", lf_share), ("hf_branch_share", hf_share)):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError(f"{name} must be a real scalar")
+        scalar = float(value)
+        if not math.isfinite(scalar) or not 0.0 < scalar < 1.0:
+            raise ValueError(f"{name} must be finite and strictly between zero and one")
+        values.append(scalar)
+    if not math.isclose(
+        values[0] + values[1],
+        1.0,
+        rel_tol=0.0,
+        abs_tol=BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE,
+    ):
+        raise ValueError("public branch shares must sum to one within the frozen tolerance")
 
 
 def _finite_vector(values: Any, name: str) -> torch.Tensor:
@@ -416,7 +493,7 @@ def embed_content_adaptive(
         hf_actual.relative_l2,
         allocation.lf_branch_share,
         allocation.hf_branch_share,
-        min(allocation.counterfactual_effects),
+        *allocation.counterfactual_effects,
         32,
     )
 

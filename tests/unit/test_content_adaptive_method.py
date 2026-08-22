@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import fields
+import inspect
 from types import SimpleNamespace
 
 import numpy as np
@@ -8,7 +10,10 @@ import pytest
 import torch
 
 from cegwm.method.content_adaptive import (
+    COUNTERFACTUAL_EFFECT_FIELDS,
     COMBINED_RELATIVE_L2,
+    ContentAdaptiveMeasurement,
+    ContentAllocation,
     ContentSignals,
     allocate_content,
     dino_last_layer_cls_patch_tiles,
@@ -132,8 +137,49 @@ def test_adaptive_allocation_uses_four_nonzero_counterfactual_effects_and_one_bu
     assert 0.0 < measurement.combined_budget.relative_l2 <= COMBINED_RELATIVE_L2
     assert measurement.lf_effective_relative_l2 > 0.0
     assert measurement.hf_effective_relative_l2 > 0.0
+    assert tuple(getattr(measurement, name) for name in COUNTERFACTUAL_EFFECT_FIELDS) == (
+        allocation.counterfactual_effects
+    )
+    assert measurement.minimum_counterfactual_effect == min(allocation.counterfactual_effects)
+    measurement_field_names = tuple(field.name for field in fields(ContentAdaptiveMeasurement))
+    effect_start = measurement_field_names.index(COUNTERFACTUAL_EFFECT_FIELDS[0])
+    assert measurement_field_names[effect_start:effect_start + 4] == COUNTERFACTUAL_EFFECT_FIELDS
+    assert "minimum_counterfactual_effect" not in inspect.signature(ContentAdaptiveMeasurement).parameters
     assert measurement.probe_evaluation_count == 32
     assert not hasattr(measurement, "mask") and not hasattr(measurement, "latents")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_effect", [0.0, -0.1, float("nan"), float("inf")])
+def test_allocation_rejects_each_nonpositive_or_nonfinite_counterfactual_effect(
+    bad_effect: float,
+) -> None:
+    weights = (1.0,) * 16
+    for index in range(4):
+        effects = [0.1, 0.2, 0.3, 0.4]
+        effects[index] = bad_effect
+        with pytest.raises(ValueError, match="finite and strictly positive"):
+            ContentAllocation(weights, weights, 0.4, 0.6, tuple(effects))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("lf_share", "hf_share"),
+    [
+        (0.0, 1.0),
+        (1.0, 0.0),
+        (-0.1, 1.1),
+        (float("nan"), 0.5),
+        (0.4, float("inf")),
+        (0.4, 0.59),
+    ],
+)
+def test_allocation_rejects_invalid_public_branch_shares(
+    lf_share: float,
+    hf_share: float,
+) -> None:
+    with pytest.raises((TypeError, ValueError), match="branch_share|branch shares"):
+        ContentAllocation((1.0,) * 16, (1.0,) * 16, lf_share, hf_share, (0.1, 0.2, 0.3, 0.4))
 
 
 @pytest.mark.unit

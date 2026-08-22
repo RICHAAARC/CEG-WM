@@ -154,6 +154,154 @@ def _psnr(first: Any, second: Any) -> float:
     return value
 
 
+def _candidate_aggregate_metrics(
+    unit_id: str,
+    measurement: Any,
+    paired_rgb_psnr_db: float,
+    *,
+    share_sum_absolute_tolerance: float,
+) -> dict[str, Any]:
+    """Pass through the fixed public aggregates and reject invalid identities."""
+
+    lf_share = measurement.lf_branch_share
+    hf_share = measurement.hf_branch_share
+    if not all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+        for value in (lf_share, hf_share)
+    ):
+        raise ValueError("public branch shares must be finite real scalars")
+    if not 0.0 < float(lf_share) < 1.0 or not 0.0 < float(hf_share) < 1.0:
+        raise ValueError("public branch shares must be strictly between zero and one")
+    if not math.isclose(
+        float(lf_share) + float(hf_share),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=share_sum_absolute_tolerance,
+    ):
+        raise ValueError("public branch shares do not sum to one within the frozen tolerance")
+    for name, value in (
+        (
+            "semantic_attention_counterfactual_effect",
+            measurement.semantic_attention_counterfactual_effect,
+        ),
+        (
+            "texture_energy_counterfactual_effect",
+            measurement.texture_energy_counterfactual_effect,
+        ),
+        (
+            "lf_probe_response_counterfactual_effect",
+            measurement.lf_probe_response_counterfactual_effect,
+        ),
+        (
+            "hf_probe_response_counterfactual_effect",
+            measurement.hf_probe_response_counterfactual_effect,
+        ),
+    ):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+        ):
+            raise ValueError(f"{name} must be finite and strictly positive")
+    return {
+        "unit_id": unit_id,
+        "combined_relative_l2": measurement.combined_budget.relative_l2,
+        "lf_effective_relative_l2": measurement.lf_effective_relative_l2,
+        "hf_effective_relative_l2": measurement.hf_effective_relative_l2,
+        "lf_branch_share": lf_share,
+        "hf_branch_share": hf_share,
+        "semantic_attention_counterfactual_effect": (
+            measurement.semantic_attention_counterfactual_effect
+        ),
+        "texture_energy_counterfactual_effect": measurement.texture_energy_counterfactual_effect,
+        "lf_probe_response_counterfactual_effect": (
+            measurement.lf_probe_response_counterfactual_effect
+        ),
+        "hf_probe_response_counterfactual_effect": (
+            measurement.hf_probe_response_counterfactual_effect
+        ),
+        "minimum_counterfactual_effect": measurement.minimum_counterfactual_effect,
+        "probe_evaluation_count": measurement.probe_evaluation_count,
+        "paired_rgb_psnr_db": paired_rgb_psnr_db,
+    }
+
+
+def _branch_share_population_summary(
+    unit_metrics: list[dict[str, Any]],
+    expected_unit_ids: tuple[str, ...],
+    *,
+    rc: int,
+    share_sum_absolute_tolerance: float,
+    population_std_absolute_tolerance: float,
+) -> tuple[float | None, float | None, bool, bool]:
+    """Compute two independent fixed-roster ddof=0 summaries only for valid RC0."""
+
+    unavailable = (None, None, False, False)
+    if rc != 0 or len(unit_metrics) != 8 or len(expected_unit_ids) != 8:
+        return unavailable
+    try:
+        received_unit_ids = tuple(metric["unit_id"] for metric in unit_metrics)
+    except KeyError:
+        return unavailable
+    if received_unit_ids != expected_unit_ids:
+        return unavailable
+    try:
+        lf_values = np.asarray([metric["lf_branch_share"] for metric in unit_metrics], dtype=np.float64)
+        hf_values = np.asarray([metric["hf_branch_share"] for metric in unit_metrics], dtype=np.float64)
+    except (KeyError, TypeError, ValueError):
+        return unavailable
+    if (
+        lf_values.shape != (8,)
+        or hf_values.shape != (8,)
+        or not np.all(np.isfinite(lf_values))
+        or not np.all(np.isfinite(hf_values))
+    ):
+        return unavailable
+    if (
+        not np.all((0.0 < lf_values) & (lf_values < 1.0))
+        or not np.all((0.0 < hf_values) & (hf_values < 1.0))
+        or not np.allclose(
+            lf_values + hf_values,
+            np.ones(8, dtype=np.float64),
+            rtol=0.0,
+            atol=share_sum_absolute_tolerance,
+        )
+    ):
+        return unavailable
+    lf_mean = float(np.sum(lf_values) / 8.0)
+    lf_population_std = math.sqrt(float(np.sum(np.square(lf_values - lf_mean)) / 8.0))
+    hf_mean = float(np.sum(hf_values) / 8.0)
+    hf_population_std = math.sqrt(float(np.sum(np.square(hf_values - hf_mean)) / 8.0))
+    lf_reference = float(np.std(lf_values, ddof=0))
+    hf_reference = float(np.std(hf_values, ddof=0))
+    if not all(math.isfinite(value) for value in (lf_population_std, hf_population_std)):
+        return unavailable
+    if not (
+        math.isclose(
+            lf_population_std,
+            lf_reference,
+            rel_tol=0.0,
+            abs_tol=population_std_absolute_tolerance,
+        )
+        and math.isclose(
+            hf_population_std,
+            hf_reference,
+            rel_tol=0.0,
+            abs_tol=population_std_absolute_tolerance,
+        )
+        and math.isclose(
+            lf_population_std,
+            hf_population_std,
+            rel_tol=0.0,
+            abs_tol=population_std_absolute_tolerance,
+        )
+    ):
+        return unavailable
+    supports_nonidentical = lf_population_std > 0.0 and hf_population_std > 0.0
+    return lf_population_std, hf_population_std, supports_nonidentical, True
+
+
 def _gate_evidence(records: list[dict[str, Any]], unit_metrics: list[dict[str, Any]]) -> dict[str, Any]:
     by_unit: dict[str, dict[str, dict[str, Any]]] = {}
     for record in records:
@@ -214,6 +362,7 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError("CEG_WM_ROOT_KEY_and_HF_TOKEN_are_required")
     exact = _git_exact(repo_root, args.expected_exact)
     protocol = _load_protocol(repo_root)
+    aggregate_contract = protocol.config["aggregate_measurement"]
     key = normalize_detection_key(key_text)
     key_digest = public_key_digest(key)
     run_id = f"content-adaptive-{protocol.protocol_digest[:12]}-{key_digest[:12]}"
@@ -245,17 +394,14 @@ def execute(args: argparse.Namespace) -> int:
                 assets.hf_public_assets, assets.lf_public_assets,
             )
             measurement = output.measurement
-            metrics = {
-                "unit_id": unit.unit_id,
-                "combined_relative_l2": measurement.combined_budget.relative_l2,
-                "lf_effective_relative_l2": measurement.lf_effective_relative_l2,
-                "hf_effective_relative_l2": measurement.hf_effective_relative_l2,
-                "lf_branch_share": measurement.lf_branch_share,
-                "hf_branch_share": measurement.hf_branch_share,
-                "minimum_counterfactual_effect": measurement.minimum_counterfactual_effect,
-                "probe_evaluation_count": measurement.probe_evaluation_count,
-                "paired_rgb_psnr_db": _psnr(output.image, primary_null),
-            }
+            metrics = _candidate_aggregate_metrics(
+                unit.unit_id,
+                measurement,
+                _psnr(output.image, primary_null),
+                share_sum_absolute_tolerance=aggregate_contract[
+                    "branch_share_sum_absolute_tolerance"
+                ],
+            )
             transaction = [
                 StageARecord(
                     run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
@@ -285,6 +431,23 @@ def execute(args: argparse.Namespace) -> int:
                     status="operational_failure", failure_reason=error_type,
                 ).to_dict())
     rc = 0 if not failures and len(records) == 16 and len(unit_metrics) == 8 else 2
+    lf_share_std, hf_share_std, supports_nonidentical, population_summary_valid = (
+        _branch_share_population_summary(
+            unit_metrics,
+            tuple(unit.unit_id for unit in protocol.roster),
+            rc=rc,
+            share_sum_absolute_tolerance=aggregate_contract[
+                "branch_share_sum_absolute_tolerance"
+            ],
+            population_std_absolute_tolerance=aggregate_contract[
+                "population_std_absolute_tolerance"
+            ],
+        )
+    )
+    if rc == 0 and not population_summary_valid:
+        rc = 1
+        lf_share_std = hf_share_std = None
+        supports_nonidentical = False
     gates = _gate_evidence(records, unit_metrics) if rc == 0 else None
     payload = {
         "rc": rc,
@@ -298,6 +461,9 @@ def execute(args: argparse.Namespace) -> int:
         "public_key_digest": key_digest,
         "fixed_denominator_units": 8,
         "fixed_records": 16,
+        "lf_branch_share_population_std": lf_share_std,
+        "hf_branch_share_population_std": hf_share_std,
+        "fixed_roster_allocation_not_all_identical_supported": supports_nonidentical,
         "records": records,
         "unit_aggregate_metrics": unit_metrics,
         "failed_units": failures,

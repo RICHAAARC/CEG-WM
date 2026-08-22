@@ -8,6 +8,7 @@ import pytest
 import torch
 import torch.nn.functional as functional
 
+from cegwm.method.content_adaptive import ContentAdaptiveMeasurement, ContentAllocation
 from cegwm.method.hf import FrozenHFPublicAssets
 from cegwm.method.lf import (
     LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
@@ -16,6 +17,7 @@ from cegwm.method.lf import (
     FrozenLFPublicAssets,
 )
 from cegwm.runtime import content_adaptive_sd35 as runtime
+from cegwm.shared.numerics import BudgetMeasurement
 
 
 class _Distribution:
@@ -152,6 +154,72 @@ def test_real_callback_boundary_executes_32_temporary_probes_and_one_combined_em
     assert 0.0 < output.measurement.combined_budget.relative_l2 <= 0.012
     assert output.measurement.lf_effective_relative_l2 > 0.0
     assert output.measurement.hf_effective_relative_l2 > 0.0
+
+
+@pytest.mark.integration
+def test_runtime_passes_allocation_effects_and_measurement_through_without_recomputation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assets = _assets()
+    allocation = ContentAllocation(
+        (1.0,) * 16,
+        (1.0,) * 16,
+        0.37,
+        0.63,
+        (0.11, 0.22, 0.33, 0.44),
+    )
+    measurement = ContentAdaptiveMeasurement(
+        BudgetMeasurement("torch.float32", 10.0, 0.1, 0.01),
+        0.004,
+        0.006,
+        allocation.lf_branch_share,
+        allocation.hf_branch_share,
+        *allocation.counterfactual_effects,
+        32,
+    )
+    monkeypatch.setattr(runtime, "dino_last_layer_cls_patch_tiles", lambda *args: (1.0,) * 16)
+    monkeypatch.setattr(runtime, "rgb_texture_tiles", lambda *args: (2.0,) * 16)
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_public_probes",
+        lambda *args: ((3.0,) * 16, (4.0,) * 16),
+    )
+
+    def allocate(signals: object) -> ContentAllocation:
+        del signals
+        return allocation
+
+    def embed(
+        latents: torch.Tensor,
+        detection_key: object,
+        hf_assets: object,
+        lf_assets: object,
+        received: ContentAllocation,
+    ) -> tuple[torch.Tensor, ContentAdaptiveMeasurement]:
+        del detection_key, hf_assets, lf_assets
+        assert received is allocation
+        return latents + 0.01, measurement
+
+    monkeypatch.setattr(runtime, "allocate_content", allocate)
+    monkeypatch.setattr(runtime, "embed_content_adaptive", embed)
+    output = runtime.run_sd35_content_adaptive(
+        _Pipeline(assets),
+        "runtime pass-through fixture",
+        b"registered-key-01",
+        assets,
+        height=512,
+        width=512,
+    )
+    assert output.measurement is measurement
+    assert tuple(
+        getattr(output.measurement, name)
+        for name in (
+            "semantic_attention_counterfactual_effect",
+            "texture_energy_counterfactual_effect",
+            "lf_probe_response_counterfactual_effect",
+            "hf_probe_response_counterfactual_effect",
+        )
+    ) == allocation.counterfactual_effects
 
 
 @pytest.mark.integration

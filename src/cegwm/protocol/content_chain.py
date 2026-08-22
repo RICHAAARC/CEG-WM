@@ -11,6 +11,12 @@ from typing import Any, Mapping
 
 _UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
 _ALLOWED_DETECTION_INPUTS = ("image", "detection_key", "frozen_public_assets")
+_COUNTERFACTUAL_EFFECT_FIELDS = [
+    "semantic_attention_counterfactual_effect",
+    "texture_energy_counterfactual_effect",
+    "lf_probe_response_counterfactual_effect",
+    "hf_probe_response_counterfactual_effect",
+]
 _CONTENT_ANALYSIS = {
     "asset_id": "facebook/dinov2-small",
     "attention_implementation": "eager",
@@ -36,11 +42,36 @@ _DETECTION_ACCESS = {
     "forbidden_inputs": [
         "original_image", "prompt", "embed_record", "private_latent", "embedding_latent",
         "embed_side_route", "route", "mask", "cached_qk", "qk",
+        "lf_branch_share", "hf_branch_share", *_COUNTERFACTUAL_EFFECT_FIELDS,
+        "minimum_counterfactual_effect",
     ],
     "threshold_status": "deferred_calibration_not_stage_a",
     "hf_detector": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
     "lf_detector": "frozen_lf_final_rgb_public_vae_block_centered_normalized_median_correlation",
     "joint_score": "min(s_LF,s_HF)",
+}
+_AGGREGATE_MEASUREMENT = {
+    "counterfactual_effect_fields_in_order": _COUNTERFACTUAL_EFFECT_FIELDS,
+    "counterfactual_effect_source": "single_ContentAllocation_counterfactual_effects_pass_through_without_recompute_copy_swap_default_alias_or_fallback",
+    "counterfactual_effect_validation": "each_finite_and_strictly_positive",
+    "minimum_counterfactual_effect": "min_of_the_four_counterfactual_effect_fields",
+    "public_branch_share_fields_in_order": ["lf_branch_share", "hf_branch_share"],
+    "public_branch_share_source": "same_ContentAllocation_values_pass_through",
+    "public_branch_share_validation": "each_finite_strictly_between_0_and_1_and_sum_to_1_with_absolute_tolerance",
+    "branch_share_sum_absolute_tolerance": 1e-12,
+    "population_std_fields_in_order": [
+        "lf_branch_share_population_std", "hf_branch_share_population_std",
+    ],
+    "population_std_formula": "sqrt(sum((x_i-mean(x))^2)/8)_ddof_0_each_field_independently",
+    "population_std_fixed_roster_units": 8,
+    "population_std_absolute_tolerance": 1e-12,
+    "population_std_validation": "both_finite_and_theoretically_equal_with_absolute_tolerance",
+    "population_std_availability": "complete_finite_identity_valid_RC0_only_else_both_null_and_no_scientific_outcome",
+    "allocation_not_all_identical_support": "both_population_std_fields_strictly_positive",
+    "blind_score_consumes_aggregate_measurement": False,
+    "forbidden_private_exports": [
+        "mask", "tile_weights", "attention_map", "latent", "delta", "probe_state",
+    ],
 }
 
 
@@ -170,6 +201,9 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         "both_effective_branches_nonzero": True,
     }:
         raise ValueError("content-adaptive combined budget differs")
+    aggregate = _mapping(config, "aggregate_measurement")
+    if aggregate != _AGGREGATE_MEASUREMENT:
+        raise ValueError("content-adaptive aggregate measurement contract differs")
     access = _mapping(config, "detection_access")
     if access != _DETECTION_ACCESS:
         raise ValueError("blind detection access differs")
