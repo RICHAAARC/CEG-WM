@@ -23,7 +23,7 @@ def test_stage_a_hf_v2_notebook_has_one_thin_runnable_terminal_path() -> None:
     assert "CEG-WM/stage_a_hf_v2_rankgate" in combined
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
-    terminal_index = next(index for index, source in enumerate(sources) if "zipfile.ZipFile" in source)
+    terminal_index = len(code_cells) - 1
     assert runner_index < terminal_index == len(code_cells) - 1
     popen_calls = [
         node
@@ -57,6 +57,14 @@ def test_stage_a_hf_v2_notebook_has_one_thin_runnable_terminal_path() -> None:
     assert all(isinstance(key, ast.Constant) and isinstance(key.value, str) for key in summary_value.keys)
 
     terminal = sources[terminal_index]
+    terminal_names = {
+        node.id for node in ast.walk(trees[terminal_index]) if isinstance(node, ast.Name)
+    }
+    terminal_attributes = {
+        node.attr for node in ast.walk(trees[terminal_index]) if isinstance(node, ast.Attribute)
+    }
+    assert not ({"hashlib", "zipfile", "receipt", "result"} & terminal_names)
+    assert not ({"read_bytes", "read_text"} & terminal_attributes)
     nonzero_boundary = terminal.index("if runner_rc != 0:")
     assert terminal.index("summary =") < terminal.index("print(summary)") < nonzero_boundary
     assert "raise RuntimeError" in terminal[nonzero_boundary:]

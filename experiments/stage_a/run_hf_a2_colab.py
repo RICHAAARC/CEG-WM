@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 from typing import Any
@@ -434,206 +435,6 @@ def _clean_confirmation_evidence(
     }
 
 
-def _validate_final(
-    zip_path: Path,
-    checksum_path: Path,
-    expected: dict[str, Any],
-) -> tuple[int, str]:
-    _verify_checksum(zip_path, checksum_path)
-    with zipfile.ZipFile(zip_path) as archive:
-        if set(archive.namelist()) != {"receipt.json", "result.json"}:
-            raise ValueError("final package members mismatch")
-        receipt = json.loads(archive.read("receipt.json"))
-        result = json.loads(archive.read("result.json"))
-    identity_fields = (
-        "run_id",
-        "resolved_exact",
-        "protocol_digest",
-        "evaluated_candidate_id",
-        "carrier_method_id",
-        "ordered_roster_unit_ids",
-        "model_id",
-        "key_public_digest",
-        "rank_gate_a_min_units",
-        "rank_gate_b_min_units",
-        "checkpoint_interval_hours",
-    )
-    if any(
-        receipt.get(field) != expected.get(field) or result.get(field) != expected.get(field)
-        for field in identity_fields
-    ):
-        raise ValueError("final package identity mismatch")
-    if receipt.get("rc") not in {0, 1} or result.get("rc") != receipt.get("rc"):
-        raise ValueError("final package RC mismatch")
-    if (
-        receipt.get("completeness") != _completeness_for_rc(int(receipt["rc"]))
-        or result.get("completeness") != _completeness_for_rc(int(receipt["rc"]))
-        or receipt.get("scientific_status") != SCIENTIFIC_STATUS
-        or result.get("scientific_status") != SCIENTIFIC_STATUS
-        or receipt.get("limitations") != list(LIMITATIONS)
-        or result.get("limitations") != list(LIMITATIONS)
-    ):
-        raise ValueError("final package scientific scope mismatch")
-    if result.get("fixed_unit_count") != 8 or result.get("fixed_record_count") != 16:
-        raise ValueError("final package fixed denominator mismatch")
-    roster = expected["ordered_roster_unit_ids"]
-    committed = result.get("committed_unit_ids")
-    record_payloads = result.get("records")
-    if committed != roster or result.get("committed_unit_count") != 8:
-        raise ValueError("final package committed roster mismatch")
-    if not isinstance(record_payloads, list) or len(record_payloads) != 16:
-        raise ValueError("final package record count mismatch")
-    records = [StageARecord(**record) for record in record_payloads]
-    for index, unit_id in enumerate(roster):
-        pair = records[index * 2 : index * 2 + 2]
-        if [record.unit_id for record in pair] != [unit_id, unit_id]:
-            raise ValueError("final package record roster mismatch")
-        if [record.arm for record in pair] != ["hf_anchor", "primary_null"]:
-            raise ValueError("final package paired arms mismatch")
-        for record in pair:
-            if (
-                record.run_id != expected["run_id"]
-                or record.code_revision != expected["resolved_exact"]
-                or record.config_digest != expected["protocol_digest"]
-                or record.key_public_digest != expected["key_public_digest"]
-                or record.condition != "identity"
-            ):
-                raise ValueError("final package record identity mismatch")
-    status = receipt.get("status")
-    expected_status = (
-        "complete_for_adjudication"
-        if receipt["rc"] == 0
-        else "complete_with_operational_failures"
-    )
-    if status != expected_status or result.get("status") != expected_status:
-        raise ValueError("final package status mismatch")
-    has_failure = any(record.status != "success" for record in records)
-    checkpoint_status = receipt.get("checkpoint_status")
-    if checkpoint_status not in {"complete", "failure"}:
-        raise ValueError("final package checkpoint status is invalid")
-    if result.get("checkpoint_status") != checkpoint_status:
-        raise ValueError("final package checkpoint status mismatch")
-    has_operational_failure = has_failure or checkpoint_status == "failure"
-    if has_operational_failure != (receipt["rc"] == 1):
-        raise ValueError("final package failure/RC mismatch")
-    evidence = _clean_confirmation_evidence(
-        records,
-        expected,
-        candidate_outcome_allowed=receipt["rc"] == 0,
-    )
-    if (
-        receipt.get("clean_confirmation_evidence") != evidence
-        or result.get("clean_confirmation_evidence") != evidence
-    ):
-        raise ValueError("final package rank-gate evidence mismatch")
-    if receipt["rc"] == 0 and evidence["evaluation_status"] != "candidate_outcome":
-        raise ValueError("RC0 final package must contain a complete candidate outcome")
-    if receipt["rc"] == 1 and evidence["evaluation_status"] != "not_evaluable_operational":
-        raise ValueError("RC1 final package cannot contain a candidate outcome")
-    return int(receipt["rc"]), status
-
-
-def _validate_fatal(
-    zip_path: Path,
-    checksum_path: Path,
-    expected: dict[str, Any],
-    error_class: str,
-) -> str:
-    if error_class not in _FATAL_ERROR_BY_PHASE.values():
-        raise ValueError("fatal error class is not predeclared")
-    digest = _verify_checksum(zip_path, checksum_path)
-    with zipfile.ZipFile(zip_path) as archive:
-        if set(archive.namelist()) != {"receipt.json", "result.json"}:
-            raise ValueError("fatal package members mismatch")
-        receipt = json.loads(archive.read("receipt.json"))
-        result = json.loads(archive.read("result.json"))
-    identity_fields = (
-        "run_id",
-        "resolved_exact",
-        "protocol_digest",
-        "evaluated_candidate_id",
-        "carrier_method_id",
-        "ordered_roster_unit_ids",
-        "model_id",
-        "key_public_digest",
-        "rank_gate_a_min_units",
-        "rank_gate_b_min_units",
-        "checkpoint_interval_hours",
-    )
-    if any(
-        receipt.get(field) != expected.get(field) or result.get(field) != expected.get(field)
-        for field in identity_fields
-    ):
-        raise ValueError("fatal package identity mismatch")
-    if (
-        receipt.get("approved_execution_exact") != expected["resolved_exact"]
-        or result.get("approved_execution_exact") != expected["resolved_exact"]
-        or receipt.get("rc") != 2
-        or result.get("rc") != 2
-        or receipt.get("status") != "operational_failure"
-        or result.get("status") != "operational_failure"
-        or receipt.get("result_kind") != "operational_failure_not_scientific"
-        or result.get("result_kind") != "operational_failure_not_scientific"
-        or receipt.get("error_class") != error_class
-        or result.get("error_class") != error_class
-    ):
-        raise ValueError("fatal package operational status mismatch")
-    if (
-        receipt.get("completeness") != INCOMPLETE_EXECUTION
-        or result.get("completeness") != INCOMPLETE_EXECUTION
-        or receipt.get("scientific_status") != SCIENTIFIC_STATUS
-        or result.get("scientific_status") != SCIENTIFIC_STATUS
-        or receipt.get("limitations") != list(LIMITATIONS)
-        or result.get("limitations") != list(LIMITATIONS)
-    ):
-        raise ValueError("fatal package scientific scope mismatch")
-    roster = expected["ordered_roster_unit_ids"]
-    committed = result.get("committed_unit_ids")
-    record_payloads = result.get("records")
-    if (
-        not isinstance(committed, list)
-        or committed != roster[: len(committed)]
-        or receipt.get("committed_unit_ids") != committed
-        or receipt.get("committed_unit_count") != len(committed)
-        or result.get("committed_unit_count") != len(committed)
-        or not isinstance(record_payloads, list)
-        or len(record_payloads) != len(committed) * 2
-        or result.get("fixed_unit_count") != 8
-        or result.get("fixed_record_count") != 16
-    ):
-        raise ValueError("fatal package committed prefix mismatch")
-    records = [StageARecord(**record) for record in record_payloads]
-    for index, unit_id in enumerate(committed):
-        pair = records[index * 2 : index * 2 + 2]
-        if [record.unit_id for record in pair] != [unit_id, unit_id]:
-            raise ValueError("fatal package record roster mismatch")
-        if [record.arm for record in pair] != ["hf_anchor", "primary_null"]:
-            raise ValueError("fatal package paired arms mismatch")
-        for record in pair:
-            if (
-                record.run_id != expected["run_id"]
-                or record.code_revision != expected["resolved_exact"]
-                or record.config_digest != expected["protocol_digest"]
-                or record.key_public_digest != expected["key_public_digest"]
-                or record.condition != "identity"
-            ):
-                raise ValueError("fatal package record identity mismatch")
-    evidence = _clean_confirmation_evidence(
-        records,
-        expected,
-        candidate_outcome_allowed=False,
-    )
-    if (
-        receipt.get("clean_confirmation_evidence") != evidence
-        or result.get("clean_confirmation_evidence") != evidence
-        or evidence["candidate_outcome_allowed"] is not False
-        or evidence["evaluation_status"] != "not_evaluable_operational"
-        or evidence["candidate_outcome"] is not None
-    ):
-        raise ValueError("fatal package must remain scientifically non-evaluable")
-    return digest
-
-
 def _discover_checkpoint(run_store: Path, expected: dict[str, Any]) -> dict[str, Any] | None:
     candidates: list[tuple[int, int, dict[str, Any]]] = []
     checkpoint_names: set[str] = set()
@@ -749,7 +550,6 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
 def _write_local_checksum(zip_path: Path, zip_digest: str) -> Path:
     checksum_path = zip_path.with_suffix(".zip.sha256")
     checksum_path.write_text(f"{zip_digest}  {zip_path.name}\n", encoding="utf-8")
-    _verify_checksum(zip_path, checksum_path)
     return checksum_path
 
 
@@ -789,7 +589,7 @@ def _publish_pair_create_only(
 
 
 def _publish_final(zip_path: Path, checksum_path: Path, run_store: Path) -> None:
-    _publish_pair_create_only(
+    _publish_terminal_pair_create_only(
         zip_path,
         checksum_path,
         run_store,
@@ -797,33 +597,34 @@ def _publish_final(zip_path: Path, checksum_path: Path, run_store: Path) -> None
     )
 
 
+def _publish_terminal_pair_create_only(
+    zip_path: Path,
+    checksum_path: Path,
+    sink: Path,
+    *,
+    artifact_kind: str,
+) -> None:
+    """Copy a completed terminal pair once; external adjudication validates it."""
+
+    destinations = (sink / zip_path.name, sink / checksum_path.name)
+    if any(destination.exists() for destination in destinations):
+        raise RuntimeError(f"{artifact_kind} sink refuses overwrite")
+    for source, destination in zip((zip_path, checksum_path), destinations):
+        with source.open("rb") as source_stream, destination.open("xb") as target:
+            shutil.copyfileobj(source_stream, target)
+
+
 def _publish_failure(
     zip_path: Path,
     checksum_path: Path,
     run_store: Path,
-    expected: dict[str, Any],
-    error_class: str,
 ) -> None:
-    destination_zip = run_store / zip_path.name
-    destination_checksum = run_store / checksum_path.name
-    existing = (destination_zip.exists(), destination_checksum.exists())
-    if any(existing):
-        if not all(existing) or not destination_zip.is_file() or not destination_checksum.is_file():
-            raise RuntimeError("failure run store pair is incomplete")
-        _validate_fatal(destination_zip, destination_checksum, expected, error_class)
-        if (
-            zip_path.read_bytes() != destination_zip.read_bytes()
-            or checksum_path.read_bytes() != destination_checksum.read_bytes()
-        ):
-            raise RuntimeError("failure run store refuses non-identical overwrite")
-        return
-    _publish_pair_create_only(
+    _publish_terminal_pair_create_only(
         zip_path,
         checksum_path,
         run_store,
         artifact_kind="failure",
     )
-    _validate_fatal(destination_zip, destination_checksum, expected, error_class)
 
 
 def _export_fatal(
@@ -895,14 +696,12 @@ def _export_fatal(
     os.replace(base_zip, fatal_zip)
     fatal_checksum = output_dir / f"{fatal_zip.name}.sha256"
     fatal_checksum.write_text(f"{zip_digest}  {fatal_zip.name}\n", encoding="utf-8")
-    _validate_fatal(fatal_zip, fatal_checksum, expected, error_class)
     published = False
-    if not context.get("durable_publication_failed", False):
-        try:
-            _publish_failure(fatal_zip, fatal_checksum, run_store, expected, error_class)
-            published = True
-        except Exception:
-            published = False
+    try:
+        _publish_failure(fatal_zip, fatal_checksum, run_store)
+        published = True
+    except Exception:
+        published = False
     return fatal_zip, zip_digest, published
 
 
@@ -1000,21 +799,36 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             and failure_name.fullmatch(path.name) is None
         ):
             raise ValueError("run store contains an unexpected artifact")
+    existing_failure_classes: list[str] = []
     for error_class in _FATAL_ERROR_BY_PHASE.values():
         failure_zip = run_store / f"failure-{error_class}.zip"
         failure_checksum = run_store / f"{failure_zip.name}.sha256"
         if failure_zip.exists() or failure_checksum.exists():
             if not (failure_zip.is_file() and failure_checksum.is_file()):
                 raise ValueError("failure package pair is incomplete")
-            _validate_fatal(failure_zip, failure_checksum, expected_state, error_class)
+            existing_failure_classes.append(error_class)
+    if existing_failure_classes:
+        if len(existing_failure_classes) != 1:
+            raise ValueError("multiple terminal failure package pairs exist")
+        context["resume_status"] = "terminal_failure_pair_present"
+        hf_token = ""
+        del detection_key, wrong_keys, hf_token
+        print(
+            "CEGWM_FATAL " + json.dumps({
+                "run_id": run_id,
+                "error_class": existing_failure_classes[0],
+                "export_status": "present_for_external_validation",
+            }),
+            flush=True,
+        )
+        return 2
     context["resume_status"] = "rejected"
     state = _discover_checkpoint(run_store, expected_state)
     context["state"] = state or expected_state
     if final_zip.exists() or final_checksum.exists():
         if not (final_zip.is_file() and final_checksum.is_file()):
             raise ValueError("final package pair is incomplete")
-        final_rc, final_status = _validate_final(final_zip, final_checksum, expected_state)
-        context["resume_status"] = "verified_final"
+        context["resume_status"] = "terminal_final_pair_present"
         hf_token = ""
         del detection_key, wrong_keys, hf_token
         print(
@@ -1022,7 +836,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
                 "run_id": run_id,
                 "committed": 8,
                 "fixed_total": len(expected_state["ordered_roster_unit_ids"]),
-                "phase": "verified_final",
+                "phase": "terminal_pair_present",
             }),
             flush=True,
         )
@@ -1030,14 +844,13 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             "CEGWM_SUMMARY " + json.dumps({
                 "run_id": run_id,
                 "resolved_exact": resolved_exact,
-                "rc": final_rc,
-                "status": final_status,
+                "rc": 0,
+                "status": "terminal_pair_present_for_external_validation",
                 "zip_path": str(final_zip),
-                "zip_sha256": _verify_checksum(final_zip, final_checksum),
             }),
             flush=True,
         )
-        return final_rc
+        return 0
     if state is None:
         state = expected_state
         context["resume_status"] = "fresh"
@@ -1228,14 +1041,8 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     context["phase"] = "final_export"
     zip_path, zip_digest = _export(output_dir, receipt, records)
     local_checksum = _write_local_checksum(zip_path, zip_digest)
-    _validate_final(zip_path, local_checksum, expected_state)
-    _discover_checkpoint(run_store, expected_state)
-    try:
-        _publish_final(zip_path, local_checksum, run_store)
-    except Exception:
-        context["durable_publication_failed"] = True
-        raise
-    _validate_final(final_zip, final_checksum, expected_state)
+    context["terminal_package_constructed"] = True
+    _publish_final(zip_path, local_checksum, run_store)
     del detection_key, wrong_keys
     print(
         "CEGWM_SUMMARY " + json.dumps({
@@ -1268,11 +1075,14 @@ def main() -> None:
         phase = fatal_context.get("phase", "initialization")
         error_class = _FATAL_ERROR_BY_PHASE.get(phase, "initialization_failure")
         export_status = "unavailable"
-        try:
-            _, _, published = _export_fatal(args, fatal_context, error_class)
-            export_status = "published" if published else "local_only"
-        except Exception:
-            pass
+        if fatal_context.get("terminal_package_constructed"):
+            export_status = "local_only"
+        else:
+            try:
+                _, _, published = _export_fatal(args, fatal_context, error_class)
+                export_status = "published" if published else "local_only"
+            except Exception:
+                pass
         print(
             "CEGWM_FATAL " + json.dumps({
                 "run_id": fatal_context.get("run_id"),

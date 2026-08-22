@@ -175,13 +175,16 @@ def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_pat
     assert not ({"model_revision", "vae_weight_digest", "full_weight_digest"} & set(receipt))
     assert zip_path.is_file()
     stored = run_store_root / run_id
-    assert (stored / f"{run_id}.zip").is_file()
-    assert (stored / f"{run_id}.zip.sha256").is_file()
+    stored_zip = stored / f"{run_id}.zip"
+    stored_checksum = stored / f"{run_id}.zip.sha256"
+    assert stored_zip.is_file() and stored_checksum.is_file()
     assert not list(stored.glob("checkpoint-*.zip"))
-    with zipfile.ZipFile(zip_path) as archive:
+    checksum_parts = stored_checksum.read_text(encoding="utf-8").strip().split()
+    assert checksum_parts == [hashlib.sha256(stored_zip.read_bytes()).hexdigest(), stored_zip.name]
+    with zipfile.ZipFile(stored_zip) as archive:
         assert set(archive.namelist()) == {"receipt.json", "result.json"}
         archived = b"".join(archive.read(name) for name in archive.namelist())
-    exported = b"".join(path.read_bytes() for path in (zip_path.parent / "receipt.json", zip_path.parent / "result.json")) + archived
+    exported = archived + stored_checksum.read_bytes()
     assert _RAW_KEY.encode() not in exported
     assert _HF_TOKEN.encode() not in exported
     assert b"A red ceramic teapot" not in exported
@@ -259,7 +262,7 @@ def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted
     verified_calls = _install_fakes(monkeypatch)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 1
+    assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 0
     assert verified_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
 
     highest_zip = stored / "checkpoint-0002-units-0004.zip"
@@ -318,8 +321,9 @@ def test_due_checkpoint_at_final_boundary_and_verified_final_do_not_create_empty
     final_checksum.write_text(f"{'0' * 64}  {run_id}.zip\n", encoding="utf-8")
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    with pytest.raises(ValueError, match="checksum mismatch"):
-        runner.execute(_args(repo, exact, tmp_path / "bad-final-output", run_store_root))
+    assert runner.execute(
+        _args(repo, exact, tmp_path / "bad-final-output", run_store_root)
+    ) == 0
 
 
 @pytest.mark.integration
@@ -373,7 +377,7 @@ def test_all_success_checkpoint_publication_failure_is_rc1_without_candidate_out
 
 
 @pytest.mark.integration
-def test_all_success_final_publication_failure_yields_local_rc2_without_candidate_outcome(
+def test_all_success_final_publication_failure_preserves_local_rc0_outcome_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -383,7 +387,7 @@ def test_all_success_final_publication_failure_yields_local_rc2_without_candidat
     run_store_root = tmp_path / "run-store"
     _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
-    original_publish_pair = runner._publish_pair_create_only
+    original_publish_pair = runner._publish_terminal_pair_create_only
 
     def fail_final_publication(
         zip_path: Path,
@@ -401,7 +405,7 @@ def test_all_success_final_publication_failure_yields_local_rc2_without_candidat
             artifact_kind=artifact_kind,
         )
 
-    monkeypatch.setattr(runner, "_publish_pair_create_only", fail_final_publication)
+    monkeypatch.setattr(runner, "_publish_terminal_pair_create_only", fail_final_publication)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     monkeypatch.setattr(sys, "argv", [
@@ -428,31 +432,20 @@ def test_all_success_final_publication_failure_yields_local_rc2_without_candidat
     run_id = fatal_event["run_id"]
     receipt, result, _ = _payloads(output_root, run_id)
     evidence = result["clean_confirmation_evidence"]
-    assert receipt["rc"] == result["rc"] == 2
+    assert receipt["rc"] == result["rc"] == 0
     assert all(record["status"] == "success" for record in result["records"])
     assert evidence["successful_pair_count"] == 8
-    assert evidence["candidate_outcome_allowed"] is False
-    assert evidence["candidate_outcome"] is None
-    assert evidence["gate_a_pass"] is evidence["gate_b_pass"] is None
-    local_failure = output_root / run_id / "failure-final_export_failure.zip"
-    local_checksum = output_root / run_id / "failure-final_export_failure.zip.sha256"
-    assert runner._validate_fatal(
-        local_failure,
-        local_checksum,
-        runner._new_state(
-            run_id=run_id,
-            resolved_exact=exact,
-            protocol=runner._load_protocol(repo),
-            model_id="stabilityai/stable-diffusion-3.5-medium",
-            key_digest=runner.public_key_digest(_RAW_KEY),
-        ),
-        "final_export_failure",
-    )
+    assert evidence["candidate_outcome_allowed"] is True
+    assert evidence["candidate_outcome"] in {"pass", "fail"}
+    local_final = output_root / run_id / f"{run_id}.zip"
+    local_checksum = output_root / run_id / f"{run_id}.zip.sha256"
+    assert local_final.is_file() and local_checksum.is_file()
+    assert not (output_root / run_id / "failure-final_export_failure.zip").exists()
     assert not list((run_store_root / run_id).glob("*.zip*"))
 
 
 @pytest.mark.integration
-def test_terminal_package_is_semantically_validated_before_publication(
+def test_terminal_package_is_copied_without_production_validation_or_readback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -462,33 +455,81 @@ def test_terminal_package_is_semantically_validated_before_publication(
     _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     events: list[str] = []
-    original_validate = runner._validate_final
     original_publish = runner._publish_final
 
-    def record_validation(
-        zip_path: Path,
-        checksum_path: Path,
-        expected: dict[str, object],
-    ) -> tuple[int, str]:
-        events.append("validate")
-        return original_validate(zip_path, checksum_path, expected)
-
-    def require_prior_validation(
+    def record_publish(
         zip_path: Path,
         checksum_path: Path,
         run_store: Path,
     ) -> None:
-        assert events == ["validate"]
         events.append("publish")
         original_publish(zip_path, checksum_path, run_store)
 
-    monkeypatch.setattr(runner, "_validate_final", record_validation)
-    monkeypatch.setattr(runner, "_publish_final", require_prior_validation)
+    def reject_checksum_validation(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise AssertionError("terminal publication must not verify its completed pair")
+
+    original_read_bytes = Path.read_bytes
+
+    def reject_drive_readback(path: Path) -> bytes:
+        if run_store_root in path.parents:
+            raise AssertionError("terminal publication must not read back Drive bytes")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(runner, "_verify_checksum", reject_checksum_validation)
+    monkeypatch.setattr(Path, "read_bytes", reject_drive_readback)
+    monkeypatch.setattr(runner, "_publish_final", record_publish)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
 
     assert runner.execute(_args(repo, exact, output_root, run_store_root)) == 0
-    assert events == ["validate", "publish", "validate"]
+    assert events == ["publish"]
+    run_id = _only_run_id(output_root)
+    stored = run_store_root / run_id
+    assert (stored / f"{run_id}.zip").is_file()
+    assert (stored / f"{run_id}.zip.sha256").is_file()
+
+
+@pytest.mark.integration
+def test_partial_terminal_copy_is_never_deleted_or_overwritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_zip = tmp_path / "run.zip"
+    local_checksum = tmp_path / "run.zip.sha256"
+    sink = tmp_path / "drive"
+    sink.mkdir()
+    local_zip.write_bytes(b"complete-local-zip")
+    local_checksum.write_text("digest  run.zip\n", encoding="utf-8")
+    original_copy = runner.shutil.copyfileobj
+    copy_count = 0
+
+    def fail_second_copy(source: object, target: object) -> None:
+        nonlocal copy_count
+        copy_count += 1
+        if copy_count == 2:
+            target.write(b"partial")
+            raise OSError("simulated Drive interruption")
+        original_copy(source, target)
+
+    monkeypatch.setattr(runner.shutil, "copyfileobj", fail_second_copy)
+    with pytest.raises(OSError, match="Drive interruption"):
+        runner._publish_terminal_pair_create_only(
+            local_zip,
+            local_checksum,
+            sink,
+            artifact_kind="final",
+        )
+
+    assert (sink / local_zip.name).read_bytes() == local_zip.read_bytes()
+    assert (sink / local_checksum.name).read_bytes() == b"partial"
+    with pytest.raises(RuntimeError, match="refuses overwrite"):
+        runner._publish_terminal_pair_create_only(
+            local_zip,
+            local_checksum,
+            sink,
+            artifact_kind="final",
+        )
 
 
 @pytest.mark.integration
@@ -745,11 +786,13 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
     with pytest.raises(SystemExit) as second_exit:
         runner.main()
     assert second_exit.value.code == 2
-    second_event = json.loads(
-        capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL ")
-    )
-    assert second_event["export_status"] == "published"
-    assert (second_output / run_id / zip_path.name).read_bytes() == stored_zip.read_bytes()
+    second_event = json.loads(capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL "))
+    assert second_event == {
+        "run_id": run_id,
+        "error_class": "resume_validation_failure",
+        "export_status": "present_for_external_validation",
+    }
+    assert not second_output.exists()
 
     stored_zip.write_bytes(b"corrupt")
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
@@ -765,7 +808,7 @@ def test_top_level_resume_failure_exports_only_sanitized_partial_package(
         runner.main()
     assert third_exit.value.code == 2
     third_event = json.loads(capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL "))
-    assert third_event["export_status"] == "local_only"
+    assert third_event["export_status"] == "present_for_external_validation"
 
 
 @pytest.mark.integration
@@ -779,6 +822,13 @@ def test_runtime_fatal_preserves_only_the_real_committed_pair_prefix(
     run_store_root = tmp_path / "run-store"
     _install_fakes(monkeypatch, interrupt_hf_call=2)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(
+        runner,
+        "_verify_checksum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("terminal failure publication must not verify its pair")
+        ),
+    )
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
     monkeypatch.setattr(sys, "argv", [
