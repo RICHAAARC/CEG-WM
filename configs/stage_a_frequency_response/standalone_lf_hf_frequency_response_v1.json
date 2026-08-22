@@ -1,0 +1,66 @@
+{
+  "protocol_id": "standalone-lf-hf-frequency-response-v1",
+  "evidence_contract": "STANDALONE_LF_HF_FREQUENCY_RESPONSE_EVIDENCE",
+  "detection_access": {
+    "allowed_inputs": ["image", "detection_key", "frozen_public_assets"],
+    "forbidden_inputs": ["original_image", "prompt", "embed_record", "private_latent", "embedding_latent", "embed_side_route", "route", "mask", "cached_qk", "qk"]
+  },
+  "generation_runtime": {
+    "model_id": "stabilityai/stable-diffusion-3.5-medium",
+    "inference_steps": 20,
+    "same_seed_independent_generators": ["hf", "lf", "plain"]
+  },
+  "methods": {
+    "hf": {
+      "carrier_method_id": "hf_tail_rademacher_v1",
+      "evaluated_candidate_id": "hf_tail_rademacher_v1_rankgate_v2",
+      "detector_statistic_id": "vae_reencode_hf_masked_normalized_correlation"
+    },
+    "lf": {
+      "carrier_method_id": "lf_shell_balanced_blocks_v2",
+      "evaluated_candidate_id": "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
+      "detector_statistic_id": "lf_block_centered_normalized_median_corr_v2"
+    }
+  },
+  "budget": {
+    "actual_callback_dtype_relative_l2_per_method_max": 0.012,
+    "independent_full_budget": true,
+    "never_coinject_or_fuse": true
+  },
+  "keying": {
+    "wrong_key_count": 16,
+    "wrong_key_derivation_domain": "stage-a/frequency-response/wrong-key/v1"
+  },
+  "conditions": [
+    "identity",
+    "jpeg_q90",
+    "jpeg_q75",
+    "jpeg_q50",
+    "gaussian_blur_sigma_0_5",
+    "gaussian_blur_sigma_1",
+    "gaussian_blur_sigma_2",
+    "gaussian_noise_std_0_005",
+    "gaussian_noise_std_0_01",
+    "gaussian_noise_std_0_02"
+  ],
+  "record_arms_in_exact_condition_order": [
+    "hf_tail_rademacher_v1_rankgate_v2",
+    "primary_null__hf_tail_rademacher_v1_rankgate_v2",
+    "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
+    "primary_null__lf_shell_balanced_blocks_v2_blocknorm_median_v1"
+  ],
+  "execution": {
+    "fixed_units": 8,
+    "records_per_unit": 40,
+    "fixed_records": 320,
+    "failures_remain_in_denominator": true,
+    "replacement_units_allowed": false,
+    "complete_rc": 0
+  },
+  "limitations": [
+    "descriptive_per_method_response_only",
+    "no_calibrated_threshold_or_fixed_fpr_claim",
+    "no_winner_complementarity_joint_content_gate_or_robustness_promotion",
+    "ordinary_rgb_attacks_only"
+  ]
+}
