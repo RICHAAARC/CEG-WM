@@ -60,8 +60,8 @@ def _signals(**updates: tuple[float, ...]) -> ContentSignals:
     base = {
         "semantic_importance": tuple(float(index) for index in range(16)),
         "texture_complexity": tuple(float(index) for index in range(16)),
-        "lf_transfer_stability": (0.5,) * 16,
-        "hf_transfer_stability": (0.5,) * 16,
+        "lf_two_scale_response_consistency": (0.5,) * 16,
+        "hf_two_scale_response_consistency": (0.5,) * 16,
         "lf_local_perturbation_sensitivity": (0.5,) * 16,
         "hf_local_perturbation_sensitivity": (0.5,) * 16,
     }
@@ -70,7 +70,7 @@ def _signals(**updates: tuple[float, ...]) -> ContentSignals:
 
 
 @pytest.mark.unit
-def test_v2_allocation_directions_semantic_magnitude_and_rgb8_texture_coordinate() -> None:
+def test_v2_direct_semantic_gate_and_rgb8_texture_coordinate() -> None:
     flat = rgb_texture_tiles(Image.new("RGB", (16, 16), color=(90, 90, 90)))
     assert flat == (0.0,) * 16
     alternating = np.zeros((16, 16, 3), dtype=np.uint8)
@@ -81,29 +81,35 @@ def test_v2_allocation_directions_semantic_magnitude_and_rgb8_texture_coordinate
     raw_texture = rgb_texture_tiles(Image.fromarray(alternating, mode="RGB"))
     assert all(0.0 < value <= RGB8_TEXTURE_COMPLEXITY_MAX for value in raw_texture)
 
-    anchors = (0.0, 1.0) + (0.5,) * 14
-    neutral = allocate_content(_signals(
-        semantic_importance=anchors,
-        texture_complexity=(0.0,) * 16,
-    ))
-    low = allocate_content(_signals(
-        semantic_importance=(0.0, 1.0, 0.2) + (0.5,) * 13,
-        texture_complexity=(0.0,) * 16,
-    ))
-    high = allocate_content(_signals(
-        semantic_importance=(0.0, 1.0, 0.8) + (0.5,) * 13,
-        texture_complexity=(0.0,) * 16,
-    ))
-    assert low.lf_tile_weights == pytest.approx(high.lf_tile_weights)
-    assert low.hf_tile_weights == pytest.approx(high.hf_tile_weights)
-    assert low.lf_tile_weights[2] > neutral.lf_tile_weights[2]
-    assert low.hf_tile_weights[2] > neutral.hf_tile_weights[2]
+    semantic_zero = allocate_content(_signals(semantic_importance=(0.0,) * 16))
+    assert semantic_zero.lf_branch_share == 0.5
+    assert semantic_zero.hf_branch_share == 0.5
+    assert semantic_zero.lf_tile_weights == pytest.approx((1.0,) * 16)
+    assert semantic_zero.hf_tile_weights == pytest.approx((1.0,) * 16)
 
-    texture_min = allocate_content(_signals(texture_complexity=(0.0,) * 16))
+    # Equal LF/HF suitability remains exact balance for every frozen gate value.
+    for gate in (0.0, 0.25, 0.5, 1.0):
+        balanced = allocate_content(_signals(
+            semantic_importance=(gate, 1.0) + (0.0,) * 14,
+            texture_complexity=(0.0,) * 16,
+            lf_two_scale_response_consistency=(0.5,) * 16,
+            hf_two_scale_response_consistency=(0.5,) * 16,
+        ))
+        assert balanced.lf_branch_share == pytest.approx(0.5)
+        assert balanced.hf_branch_share == pytest.approx(0.5)
+
+    texture_min = allocate_content(_signals(
+        semantic_importance=(1.0,) * 16,
+        texture_complexity=(0.0,) * 16,
+    ))
     texture_max = allocate_content(
-        _signals(texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) * 16)
+        _signals(
+            semantic_importance=(1.0,) * 16,
+            texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) * 16,
+        )
     )
     texture_step = allocate_content(_signals(
+        semantic_importance=(1.0,) * 16,
         texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) + (0.0,) * 15,
     ))
     assert texture_step.lf_tile_weights[0] < texture_min.lf_tile_weights[0]
@@ -121,12 +127,12 @@ def test_v2_allocation_directions_semantic_magnitude_and_rgb8_texture_coordinate
 
 
 @pytest.mark.unit
-def test_v2_counterfactual_neutrals_are_semantic_half_texture_raw_zero_and_other_half() -> None:
+def test_v2_counterfactual_neutrals_are_semantic_zero_texture_raw_zero_and_other_half() -> None:
     neutral = ContentSignals(
-        semantic_importance=(0.5,) * 16,
+        semantic_importance=(0.0,) * 16,
         texture_complexity=(0.0,) * 16,
-        lf_transfer_stability=(0.5,) * 16,
-        hf_transfer_stability=(0.5,) * 16,
+        lf_two_scale_response_consistency=(0.5,) * 16,
+        hf_two_scale_response_consistency=(0.5,) * 16,
         lf_local_perturbation_sensitivity=(0.5,) * 16,
         hf_local_perturbation_sensitivity=(0.5,) * 16,
     )
@@ -137,22 +143,128 @@ def test_v2_counterfactual_neutrals_are_semantic_half_texture_raw_zero_and_other
 
 
 @pytest.mark.unit
-def test_v2_stability_only_helps_own_branch_and_sensitivity_cannot_help() -> None:
+def test_v2_response_consistency_only_helps_own_branch_and_sensitivity_cannot_help() -> None:
     baseline = allocate_content(_signals())
-    lf_stable = allocate_content(_signals(lf_transfer_stability=(0.8,) + (0.5,) * 15))
-    hf_stable = allocate_content(_signals(hf_transfer_stability=(0.8,) + (0.5,) * 15))
+    lf_stable = allocate_content(_signals(
+        lf_two_scale_response_consistency=(0.5,) * 15 + (0.8,)
+    ))
+    hf_stable = allocate_content(_signals(
+        hf_two_scale_response_consistency=(0.5,) * 15 + (0.8,)
+    ))
     lf_sensitive = allocate_content(_signals(
-        lf_local_perturbation_sensitivity=(0.8,) + (0.5,) * 15
+        lf_local_perturbation_sensitivity=(0.5,) * 15 + (0.8,)
     ))
     hf_sensitive = allocate_content(_signals(
-        hf_local_perturbation_sensitivity=(0.8,) + (0.5,) * 15
+        hf_local_perturbation_sensitivity=(0.5,) * 15 + (0.8,)
     ))
-    assert lf_stable.lf_tile_weights[0] > baseline.lf_tile_weights[0]
-    assert lf_stable.hf_tile_weights == pytest.approx(baseline.hf_tile_weights)
-    assert hf_stable.hf_tile_weights[0] > baseline.hf_tile_weights[0]
-    assert hf_stable.lf_tile_weights == pytest.approx(baseline.lf_tile_weights)
-    assert lf_sensitive.lf_tile_weights[0] < baseline.lf_tile_weights[0]
-    assert hf_sensitive.hf_tile_weights[0] < baseline.hf_tile_weights[0]
+    assert lf_stable.lf_tile_weights[-1] > baseline.lf_tile_weights[-1]
+    assert lf_stable.lf_branch_share > baseline.lf_branch_share
+    assert lf_stable.hf_branch_share < baseline.hf_branch_share
+    assert hf_stable.hf_tile_weights[-1] > baseline.hf_tile_weights[-1]
+    assert hf_stable.hf_branch_share > baseline.hf_branch_share
+    assert hf_stable.lf_branch_share < baseline.lf_branch_share
+    assert lf_sensitive.lf_tile_weights[-1] < baseline.lf_tile_weights[-1]
+    assert lf_sensitive.lf_branch_share < baseline.lf_branch_share
+    assert hf_sensitive.hf_tile_weights[-1] < baseline.hf_tile_weights[-1]
+    assert hf_sensitive.hf_branch_share < baseline.hf_branch_share
+
+
+@pytest.mark.unit
+def test_v2_direct_gate_prevents_old_global_ratio_reversal() -> None:
+    # In the former mean-normalized rule, a locally HF-favouring tile can reduce
+    # global HF share when its Q_H/Q_L ratio is below the existing global ratio.
+    old_q_h = torch.tensor([0.61] + [1.0] * 15, dtype=torch.float64)
+    old_q_l = torch.tensor([0.60] + [0.20] * 15, dtype=torch.float64)
+    old_g_low = torch.tensor([0.25] + [1.0] * 15, dtype=torch.float64)
+    old_g_high = torch.tensor([0.75] + [1.0] * 15, dtype=torch.float64)
+
+    def old_share(gate: torch.Tensor) -> float:
+        mean_h = float((0.25 + gate * old_q_h).mean())
+        mean_l = float((0.25 + gate * old_q_l).mean())
+        return mean_h / (mean_h + mean_l)
+
+    assert old_q_h[0] > old_q_l[0]
+    assert old_share(old_g_high) < old_share(old_g_low)
+
+    # The direct gate has d=0.30 at tile 0 and an unchanged max-attention anchor
+    # at tile 1, so normalization leaves Delta(g_0)=0.50 exactly.
+    common = {
+        "texture_complexity": (RGB8_TEXTURE_COMPLEXITY_MAX,) + (0.0,) * 15,
+        "lf_two_scale_response_consistency": (0.5,) * 16,
+        "hf_two_scale_response_consistency": (0.5,) * 16,
+        "lf_local_perturbation_sensitivity": (0.5,) * 16,
+        "hf_local_perturbation_sensitivity": (0.5,) * 16,
+    }
+    low = allocate_content(ContentSignals(
+        semantic_importance=(0.25, 1.0) + (0.0,) * 14,
+        **common,
+    ))
+    high = allocate_content(ContentSignals(
+        semantic_importance=(0.75, 1.0) + (0.0,) * 14,
+        **common,
+    ))
+    expected = 0.25 * (0.75 - 0.25) * 0.30 / 16.0
+    assert high.hf_branch_share - low.hf_branch_share == pytest.approx(expected, abs=1e-15)
+    assert high.hf_branch_share > low.hf_branch_share
+    assert high.lf_branch_share < low.lf_branch_share
+
+
+@pytest.mark.unit
+def test_v2_direct_gate_bounds_and_lf_hf_semantic_dominance() -> None:
+    gate_low = (0.25, 1.0) + (0.0,) * 14
+    gate_high = (0.75, 1.0) + (0.0,) * 14
+    hf_low = allocate_content(_signals(
+        semantic_importance=gate_low,
+        texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) + (0.0,) * 15,
+    ))
+    hf_high = allocate_content(_signals(
+        semantic_importance=gate_high,
+        texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) + (0.0,) * 15,
+    ))
+    assert hf_high.hf_branch_share > hf_low.hf_branch_share
+
+    lf_low = allocate_content(_signals(
+        semantic_importance=gate_low,
+        lf_two_scale_response_consistency=(1.0,) + (0.5,) * 15,
+        hf_two_scale_response_consistency=(0.0,) + (0.5,) * 15,
+    ))
+    lf_high = allocate_content(_signals(
+        semantic_importance=gate_high,
+        lf_two_scale_response_consistency=(1.0,) + (0.5,) * 15,
+        hf_two_scale_response_consistency=(0.0,) + (0.5,) * 15,
+    ))
+    assert lf_high.lf_branch_share > lf_low.lf_branch_share
+    for allocation in (hf_low, hf_high, lf_low, lf_high):
+        assert 0.0 < allocation.lf_branch_share < 1.0
+        assert 0.0 < allocation.hf_branch_share < 1.0
+        assert np.mean(allocation.lf_tile_weights) == pytest.approx(1.0, abs=1e-12)
+        assert np.mean(allocation.hf_tile_weights) == pytest.approx(1.0, abs=1e-12)
+
+    maximum_hf = allocate_content(ContentSignals(
+        semantic_importance=(1.0,) * 16,
+        texture_complexity=(RGB8_TEXTURE_COMPLEXITY_MAX,) * 16,
+        lf_two_scale_response_consistency=(0.0,) * 16,
+        hf_two_scale_response_consistency=(1.0,) * 16,
+        lf_local_perturbation_sensitivity=(1.0,) * 16,
+        hf_local_perturbation_sensitivity=(0.0,) * 16,
+    ))
+    maximum_lf = allocate_content(ContentSignals(
+        semantic_importance=(1.0,) * 16,
+        texture_complexity=(0.0,) * 16,
+        lf_two_scale_response_consistency=(1.0,) * 16,
+        hf_two_scale_response_consistency=(0.0,) * 16,
+        lf_local_perturbation_sensitivity=(0.0,) * 16,
+        hf_local_perturbation_sensitivity=(1.0,) * 16,
+    ))
+    assert maximum_hf.hf_branch_share == pytest.approx(0.70)
+    assert maximum_hf.lf_branch_share == pytest.approx(0.30)
+    assert maximum_lf.hf_branch_share == pytest.approx(0.375)
+    assert maximum_lf.lf_branch_share == pytest.approx(0.625)
+    for invalid in (-1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="semantic_importance"):
+            allocate_content(_signals(semantic_importance=(invalid,) + (1.0,) * 15))
+    with pytest.raises(ValueError, match="unit mean"):
+        ContentAllocation((2.0,) * 16, (1.0,) * 16, 0.5, 0.5, (0.0,) * 6)
 
 
 @pytest.mark.unit
@@ -195,8 +307,12 @@ def test_v2_64_actual_dtype_probes_are_noncumulative_baseline_differenced_and_in
         return ProbeObservation(value.rgb + offset, value.vae - offset)
 
     shifted = evaluate_public_probes(base, shifted_baseline, shifted_evaluator)
-    assert shifted.lf_transfer_stability == pytest.approx(first.lf_transfer_stability, abs=1e-10)
-    assert shifted.hf_transfer_stability == pytest.approx(first.hf_transfer_stability, abs=1e-10)
+    assert shifted.lf_two_scale_response_consistency == pytest.approx(
+        first.lf_two_scale_response_consistency, abs=1e-10
+    )
+    assert shifted.hf_two_scale_response_consistency == pytest.approx(
+        first.hf_two_scale_response_consistency, abs=1e-10
+    )
     assert shifted.lf_local_perturbation_sensitivity == pytest.approx(
         first.lf_local_perturbation_sensitivity, abs=1e-10
     )

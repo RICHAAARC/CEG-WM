@@ -31,28 +31,29 @@ PROBE_EVALUATION_COUNT = 64
 PROBE_MEASUREMENT_ID = "baseline_differenced_branch_tile_two_scale_v1"
 COMBINED_RELATIVE_L2 = 0.012
 HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = (
-    "hf_content_tiles_semantic_stability_sensitivity_probe_v2"
+    "hf_content_tiles_semantic_gate_texture_two_scale_response_consistency_sensitivity_v1"
 )
 LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = (
-    "lf_content_tiles_texture_stability_sensitivity_probe_v2"
+    "lf_content_tiles_semantic_gate_texture_two_scale_response_consistency_sensitivity_v1"
 )
 COMBINED_BUDGET_PROJECTOR_ID = "dual_branch_actual_dtype_relative_l2_v1"
-JOINT_EVALUATED_CANDIDATE_ID = "content_adaptive_dual_branch_v2_clean_v1"
+JOINT_EVALUATED_CANDIDATE_ID = "content_adaptive_dual_branch_v2_semantic_gate_v1"
 BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE = 1e-12
 RGB8_TEXTURE_COMPLEXITY_MAX = 255.0 * math.sqrt(2.0)
+SEMANTIC_GATE_GAMMA = 0.25
 COUNTERFACTUAL_EFFECT_FIELDS = (
-    "semantic_importance_counterfactual_effect",
-    "texture_complexity_counterfactual_effect",
-    "lf_transfer_stability_counterfactual_effect",
-    "hf_transfer_stability_counterfactual_effect",
+    "semantic_routing_strength_counterfactual_effect",
+    "texture_hf_suitability_counterfactual_effect",
+    "lf_two_scale_response_consistency_counterfactual_effect",
+    "hf_two_scale_response_consistency_counterfactual_effect",
     "lf_local_perturbation_sensitivity_counterfactual_effect",
     "hf_local_perturbation_sensitivity_counterfactual_effect",
 )
 _SIGNAL_FIELDS = (
     "semantic_importance",
     "texture_complexity",
-    "lf_transfer_stability",
-    "hf_transfer_stability",
+    "lf_two_scale_response_consistency",
+    "hf_two_scale_response_consistency",
     "lf_local_perturbation_sensitivity",
     "hf_local_perturbation_sensitivity",
 )
@@ -65,8 +66,8 @@ class ContentSignals:
 
     semantic_importance: tuple[float, ...]
     texture_complexity: tuple[float, ...]
-    lf_transfer_stability: tuple[float, ...]
-    hf_transfer_stability: tuple[float, ...]
+    lf_two_scale_response_consistency: tuple[float, ...]
+    hf_two_scale_response_consistency: tuple[float, ...]
     lf_local_perturbation_sensitivity: tuple[float, ...]
     hf_local_perturbation_sensitivity: tuple[float, ...]
 
@@ -83,8 +84,8 @@ class ProbeObservation:
 class PublicProbeMaps:
     """Four private maps derived only from baseline-differenced responses."""
 
-    lf_transfer_stability: tuple[float, ...]
-    hf_transfer_stability: tuple[float, ...]
+    lf_two_scale_response_consistency: tuple[float, ...]
+    hf_two_scale_response_consistency: tuple[float, ...]
     lf_local_perturbation_sensitivity: tuple[float, ...]
     hf_local_perturbation_sensitivity: tuple[float, ...]
     evaluation_count: int = PROBE_EVALUATION_COUNT
@@ -101,8 +102,15 @@ class ContentAllocation:
     counterfactual_effects: tuple[float, float, float, float, float, float]
 
     def __post_init__(self) -> None:
-        _positive_vector(self.lf_tile_weights, "lf_tile_weights")
-        _positive_vector(self.hf_tile_weights, "hf_tile_weights")
+        for values, name in (
+            (self.lf_tile_weights, "lf_tile_weights"),
+            (self.hf_tile_weights, "hf_tile_weights"),
+        ):
+            vector = _positive_vector(values, name)
+            if not math.isclose(
+                float(vector.mean().item()), 1.0, rel_tol=0.0, abs_tol=1e-12
+            ):
+                raise ValueError(f"{name} must have frozen unit mean")
         _validate_public_branch_shares(self.lf_branch_share, self.hf_branch_share)
         if len(self.counterfactual_effects) != len(COUNTERFACTUAL_EFFECT_FIELDS):
             raise ValueError("content allocation must carry exactly six counterfactual effects")
@@ -119,10 +127,10 @@ class ContentAdaptiveMeasurement:
     hf_effective_relative_l2: float
     lf_branch_share: float
     hf_branch_share: float
-    semantic_importance_counterfactual_effect: float
-    texture_complexity_counterfactual_effect: float
-    lf_transfer_stability_counterfactual_effect: float
-    hf_transfer_stability_counterfactual_effect: float
+    semantic_routing_strength_counterfactual_effect: float
+    texture_hf_suitability_counterfactual_effect: float
+    lf_two_scale_response_consistency_counterfactual_effect: float
+    hf_two_scale_response_consistency_counterfactual_effect: float
     lf_local_perturbation_sensitivity_counterfactual_effect: float
     hf_local_perturbation_sensitivity_counterfactual_effect: float
     probe_evaluation_count: int
@@ -206,12 +214,18 @@ def _rgb8_texture_vector(values: Any) -> torch.Tensor:
     return tensor
 
 
-def _unit_interval(values: torch.Tensor) -> torch.Tensor:
-    minimum = values.min()
-    span = values.max() - minimum
-    if float(span.item()) == 0.0:
-        return torch.full_like(values, 0.5)
-    return (values - minimum) / span
+def _semantic_gate(values: Any) -> torch.Tensor:
+    attention = _finite_vector(values, "semantic_importance")
+    if not bool((attention >= 0.0).all()):
+        raise ValueError("semantic_importance must be nonnegative")
+    maximum = float(attention.max().item())
+    if maximum == 0.0:
+        # The all-zero vector is reserved for the internal semantic counterfactual.
+        return torch.zeros_like(attention)
+    gate = attention / maximum
+    if not bool(((0.0 <= gate) & (gate <= 1.0)).all()):
+        raise RuntimeError("semantic gate escaped the closed unit interval")
+    return gate
 
 
 def dino_last_layer_cls_patch_tiles(
@@ -258,7 +272,9 @@ def dino_last_layer_cls_patch_tiles(
     ).reshape(-1).to(torch.float64)
     if vector.numel() != TILE_COUNT or not bool(torch.isfinite(vector).all()):
         raise RuntimeError("DINO semantic importance is invalid")
-    if float(torch.linalg.vector_norm(vector).item()) == 0.0:
+    if not bool((vector >= 0.0).all()):
+        raise RuntimeError("DINO semantic importance is negative")
+    if float(vector.max().item()) == 0.0:
         raise RuntimeError("DINO semantic importance is identically zero")
     return tuple(float(value) for value in vector.tolist())
 
@@ -425,7 +441,7 @@ def _alignment_and_gain_consistency(
     consistency = min(small_gain, large_gain) / max(small_gain, large_gain)
     value = alignment * consistency
     if not math.isfinite(value):
-        raise RuntimeError("probe transfer stability is nonfinite")
+        raise RuntimeError("two-scale response consistency is nonfinite")
     return value
 
 
@@ -444,7 +460,7 @@ def evaluate_public_probes(
     baseline: ProbeObservation,
     evaluator: Callable[[str, torch.Tensor], ProbeObservation],
 ) -> PublicProbeMaps:
-    """Run 64 probes and derive response-only two-scale stability/sensitivity."""
+    """Run 64 probes and derive response-only consistency and sensitivity."""
 
     if not callable(evaluator):
         raise TypeError("probe evaluator must be callable")
@@ -477,12 +493,12 @@ def evaluate_public_probes(
         for modality in ("rgb", "vae")
         for index, (branch, tile, scale_index) in enumerate(order)
     }
-    stability: dict[str, list[float]] = {"lf": [], "hf": []}
+    response_consistency: dict[str, list[float]] = {"lf": [], "hf": []}
     sensitivity: dict[str, list[float]] = {"lf": [], "hf": []}
     small_scale, large_scale = PROBE_RELATIVE_L2_SCALES
     for branch in ("lf", "hf"):
         for tile_index in range(TILE_COUNT):
-            modality_stability = [
+            modality_consistency = [
                 _alignment_and_gain_consistency(
                     differences[(branch, tile_index, 0, modality)],
                     differences[(branch, tile_index, 1, modality)],
@@ -491,51 +507,72 @@ def evaluate_public_probes(
                 )
                 for modality in ("rgb", "vae")
             ]
-            stability[branch].append(sum(modality_stability) / 2.0)
+            response_consistency[branch].append(sum(modality_consistency) / 2.0)
             sensitivity[branch].append(sum(
                 normalized_by_key[(branch, tile_index, scale_index, modality)]
                 for scale_index in range(2)
                 for modality in ("rgb", "vae")
             ) / 4.0)
     return PublicProbeMaps(
-        tuple(stability["lf"]),
-        tuple(stability["hf"]),
+        tuple(response_consistency["lf"]),
+        tuple(response_consistency["hf"]),
         tuple(sensitivity["lf"]),
         tuple(sensitivity["hf"]),
     )
 
 
 def _allocation_vectors(signals: ContentSignals) -> tuple[torch.Tensor, torch.Tensor, float, float]:
-    semantic = _unit_interval(_finite_vector(signals.semantic_importance, "semantic_importance"))
+    semantic_gate = _semantic_gate(signals.semantic_importance)
     texture_raw = _rgb8_texture_vector(signals.texture_complexity)
     texture = 0.5 + 0.5 * texture_raw / RGB8_TEXTURE_COMPLEXITY_MAX
-    lf_stability = _bounded_vector(signals.lf_transfer_stability, "lf_transfer_stability")
-    hf_stability = _bounded_vector(signals.hf_transfer_stability, "hf_transfer_stability")
+    lf_consistency = _bounded_vector(
+        signals.lf_two_scale_response_consistency,
+        "lf_two_scale_response_consistency",
+    )
+    hf_consistency = _bounded_vector(
+        signals.hf_two_scale_response_consistency,
+        "hf_two_scale_response_consistency",
+    )
     lf_sensitivity = _bounded_vector(
         signals.lf_local_perturbation_sensitivity, "lf_local_perturbation_sensitivity"
     )
     hf_sensitivity = _bounded_vector(
         signals.hf_local_perturbation_sensitivity, "hf_local_perturbation_sensitivity"
     )
-    semantic_magnitude = 2.0 * torch.abs(semantic - 0.5)
-    # Frozen monotonic directions: raw RGB8 texture disfavors LF and favours HF; each
-    # stability helps only its own branch; sensitivity is always a penalty.
-    lf_raw = (
-        0.25 + 0.20 * semantic_magnitude + 0.30 * (1.0 - texture)
-        + 0.30 * lf_stability + 0.20 * (1.0 - lf_sensitivity)
+    lf_suitability = (
+        0.20 + 0.30 * (1.0 - texture) + 0.30 * lf_consistency
+        + 0.20 * (1.0 - lf_sensitivity)
     )
-    hf_raw = (
-        0.25 + 0.20 * semantic_magnitude + 0.30 * texture
-        + 0.30 * hf_stability + 0.20 * (1.0 - hf_sensitivity)
+    hf_suitability = (
+        0.20 + 0.30 * texture + 0.30 * hf_consistency
+        + 0.20 * (1.0 - hf_sensitivity)
     )
-    lf_strength = float(lf_raw.mean().item())
-    hf_strength = float(hf_raw.mean().item())
-    total = lf_strength + hf_strength
-    if not math.isfinite(total) or total <= 0.0:
-        raise RuntimeError("content signals cannot allocate the two branches")
-    lf_weights = lf_raw / lf_raw.mean()
-    hf_weights = hf_raw / hf_raw.mean()
-    return lf_weights, hf_weights, lf_strength / total, hf_strength / total
+    direction = hf_suitability - lf_suitability
+    hf_allocation = 0.5 + SEMANTIC_GATE_GAMMA * semantic_gate * direction
+    lf_allocation = 1.0 - hf_allocation
+    bounds = (
+        (lf_suitability, 0.20, 0.85, "LF suitability"),
+        (hf_suitability, 0.35, 1.00, "HF suitability"),
+        (direction, -0.50, 0.80, "suitability direction"),
+        (hf_allocation, 0.375, 0.70, "HF allocation"),
+        (lf_allocation, 0.30, 0.625, "LF allocation"),
+    )
+    for values, lower, upper, name in bounds:
+        if not bool(torch.isfinite(values).all()) or not bool(
+            ((lower <= values) & (values <= upper)).all()
+        ):
+            raise RuntimeError(f"{name} escaped its frozen finite bounds")
+    hf_share = float(hf_allocation.mean().item())
+    lf_share = 1.0 - hf_share
+    _validate_public_branch_shares(lf_share, hf_share)
+    lf_weights = lf_allocation / lf_share
+    hf_weights = hf_allocation / hf_share
+    for weights, name in ((lf_weights, "LF tile weights"), (hf_weights, "HF tile weights")):
+        if not bool(torch.isfinite(weights).all()) or not bool((weights > 0.0).all()):
+            raise RuntimeError(f"{name} are invalid")
+        if not math.isclose(float(weights.mean().item()), 1.0, rel_tol=0.0, abs_tol=1e-12):
+            raise RuntimeError(f"{name} do not have frozen unit mean")
+    return lf_weights, hf_weights, lf_share, hf_share
 
 
 def allocate_content(signals: ContentSignals) -> ContentAllocation:
@@ -546,7 +583,7 @@ def allocate_content(signals: ContentSignals) -> ContentAllocation:
     effects: list[float] = []
     for field in _SIGNAL_FIELDS:
         values = {name: getattr(signals, name) for name in _SIGNAL_FIELDS}
-        neutral_value = 0.0 if field == "texture_complexity" else 0.5
+        neutral_value = 0.0 if field in {"semantic_importance", "texture_complexity"} else 0.5
         values[field] = (neutral_value,) * TILE_COUNT
         alternate_signals = ContentSignals(**values)
         cf_lf, cf_hf, cf_lf_share, cf_hf_share = _allocation_vectors(alternate_signals)

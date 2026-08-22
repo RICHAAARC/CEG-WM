@@ -42,12 +42,12 @@ from cegwm.shared.prg import prg_bytes
 
 KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
-EXECUTION_SCOPE_ID = "content_adaptive_dual_branch_v2_clean_engineering_and_stage_a_evaluation_v1"
-COMPLETE_EXECUTION = "complete_for_content_adaptive_dual_branch_v2_clean_evaluation"
+EXECUTION_SCOPE_ID = "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1"
+COMPLETE_EXECUTION = "complete_for_content_adaptive_dual_branch_v2_semantic_gate_evaluation"
 INCOMPLETE_EXECUTION = "incomplete_operational_execution"
 ARMS = (JOINT_EVALUATED_CANDIDATE_ID, f"primary_null__{JOINT_EVALUATED_CANDIDATE_ID}")
 BRANCHES = ("lf", "hf", "joint")
-RECORD_CONTRACT_ID = "content_adaptive_dual_branch_v2_record_v1"
+RECORD_CONTRACT_ID = "content_adaptive_dual_branch_v2_semantic_gate_record_v1"
 RECORD_FIELDS = (
     "run_id", "unit_id", "source_cluster_id", "arm", "condition",
     "code_revision", "config_digest", "key_public_digest", "status",

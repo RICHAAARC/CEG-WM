@@ -124,6 +124,12 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     assert runner.execute(args) == 0
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["rc"] == 0 and result["scientific_outcome_allowed"] is True
+    assert result["execution_scope_id"] == (
+        "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1"
+    )
+    assert result["protocol_id"] == (
+        "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1"
+    )
     assert len(result["records"]) == 16
     assert [record["arm"] for record in result["records"][:2]] == list(runner.ARMS)
     assert all(len(record["scores"]) == 51 for record in result["records"])
@@ -173,6 +179,7 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     assert first["minimum_counterfactual_effect"] == 0.01
     assert all(metric["probe_evaluation_count"] == 64 for metric in result["unit_aggregate_metrics"])
     serialized = output.read_text(encoding="utf-8")
+    assert "transfer_stability" not in serialized
     assert all(
         word not in serialized
         for word in ("attention_map", "tile_weights", "latents", "deltas", "probe_state")
@@ -201,7 +208,7 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     extra = dict(valid_record)
     extra["private_route"] = "forbidden"
     drift = dict(valid_record)
-    drift["record_contract_id"] = "content_adaptive_dual_branch_v2_record_v2"
+    drift["record_contract_id"] = "content_adaptive_dual_branch_v2_semantic_gate_record_v2"
     for invalid, message in (
         (missing, "fields or order"),
         (extra, "fields or order"),

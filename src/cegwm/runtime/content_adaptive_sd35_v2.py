@@ -14,6 +14,9 @@ from PIL import Image
 
 from cegwm.method.content_adaptive_v2 import (
     DINO_ASSET_ID,
+    HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID,
+    JOINT_EVALUATED_CANDIDATE_ID,
+    LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID,
     ContentAdaptiveMeasurement,
     ContentSignals,
     ProbeObservation,
@@ -71,6 +74,13 @@ class ContentEmbedAssets:
     dino_asset_id: str = DINO_ASSET_ID
     hf_detector_statistic_id: str = field(default=_HF_DETECTOR_STATISTIC_ID, init=False)
     hf_evaluated_candidate_id: str = field(default=_HF_EVALUATED_CANDIDATE_ID, init=False)
+    hf_adaptive_embedding_transform_id: str = field(
+        default=HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID, init=False
+    )
+    lf_adaptive_embedding_transform_id: str = field(
+        default=LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID, init=False
+    )
+    evaluated_candidate_id: str = field(default=JOINT_EVALUATED_CANDIDATE_ID, init=False)
 
     def __post_init__(self) -> None:
         if self.dino_asset_id != DINO_ASSET_ID:
@@ -88,6 +98,8 @@ class ContentEmbedAssets:
             or hf.candidate_id != HF_CANDIDATE_ID
             or self.hf_detector_statistic_id != _HF_DETECTOR_STATISTIC_ID
             or self.hf_evaluated_candidate_id != _HF_EVALUATED_CANDIDATE_ID
+            or self.hf_adaptive_embedding_transform_id
+            != HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID
         ):
             raise ValueError("content HF frozen carrier, detector, or evaluated identity differs")
         if (
@@ -96,6 +108,9 @@ class ContentEmbedAssets:
             or lf.candidate_id != LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
             or lf.detector_statistic_id != LF_BLOCKNORM_DETECTOR_STATISTIC_ID
             or lf.evaluated_candidate_id != LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+            or self.lf_adaptive_embedding_transform_id
+            != LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID
+            or self.evaluated_candidate_id != JOINT_EVALUATED_CANDIDATE_ID
         ):
             raise ValueError("content LF frozen carrier, detector, or evaluated identity differs")
         if hf.vae is not lf.vae or hf.image_processor is not lf.image_processor:
@@ -249,8 +264,8 @@ class ContentAdaptiveInjectionCallback:
         allocation = allocate_content(ContentSignals(
             semantic,
             texture,
-            probes.lf_transfer_stability,
-            probes.hf_transfer_stability,
+            probes.lf_two_scale_response_consistency,
+            probes.hf_two_scale_response_consistency,
             probes.lf_local_perturbation_sensitivity,
             probes.hf_local_perturbation_sensitivity,
         ))

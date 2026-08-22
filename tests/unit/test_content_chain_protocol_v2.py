@@ -25,8 +25,8 @@ _PRE_V2_MANIFESTS = (
 @pytest.mark.unit
 def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_identity() -> None:
     protocol = load_content_adaptive_dual_branch_v2_clean_protocol(_CONFIG, _ROSTER)
-    assert protocol.protocol_id == "cegwm-stage-a-content-adaptive-dual-branch-v2-clean-v1"
-    assert protocol.protocol_digest == "9da57877b67fd04036ca5d8dfc5dd745e6e39c5e4380bd22fe174a897b3a3343"
+    assert protocol.protocol_id == "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1"
+    assert protocol.protocol_digest == "bfd9b7464195107f7dc57a43ab3042501500f5e2c07a322269859bb908a3dbb8"
     assert len(protocol.roster) == 8
     assert len({unit.unit_id for unit in protocol.roster}) == 8
     assert len({unit.source_id for unit in protocol.roster}) == 8
@@ -39,15 +39,19 @@ def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_ide
     assert analysis["baseline_observations"] == ("I0_equals_D_of_z", "Y0_equals_E_of_I0")
     assert len(analysis["signals"]) == 6
     assert analysis["texture_complexity_rule"].endswith("no_minmax_rank_kappa_or_fallback")
-    assert "decreases_LF" in analysis["allocation_directions"]
-    assert "increases_HF" in analysis["allocation_directions"]
+    assert analysis["derived_ranges"] == {
+        "Q_L": (0.2, 0.85), "Q_H": (0.35, 1.0), "d": (-0.5, 0.8),
+        "a_H": (0.375, 0.7), "a_L": (0.3, 0.625),
+    }
+    assert "gamma_0.25" in analysis["direct_per_tile_gate_rule"]
+    assert "increasing_g" in analysis["allocation_directions"]
     assert analysis["counterfactual_neutral_rule"] == (
-        "semantic_0.5_texture_raw_x_0_stability_and_sensitivity_0.5_unchanged"
+        "semantic_gate_0_texture_raw_x_0_response_consistency_and_sensitivity_0.5_unchanged"
     )
     identities = protocol.config["method_identities"]
-    assert identities["evaluated_candidate_id"] == "content_adaptive_dual_branch_v2_clean_v1"
-    assert identities["hf_adaptive_embedding_transform_id"].endswith("v2")
-    assert identities["lf_adaptive_embedding_transform_id"].endswith("v2")
+    assert identities["evaluated_candidate_id"] == "content_adaptive_dual_branch_v2_semantic_gate_v1"
+    assert "semantic_gate" in identities["hf_adaptive_embedding_transform_id"]
+    assert "semantic_gate" in identities["lf_adaptive_embedding_transform_id"]
     aggregate = protocol.config["aggregate_measurement"]
     assert len(aggregate["counterfactual_effect_fields_in_order"]) == 6
     assert aggregate["counterfactual_effect_validation"].endswith("zero_allowed")
@@ -56,7 +60,7 @@ def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_ide
     assert aggregate["blind_score_consumes_aggregate_measurement"] is False
     assert protocol.config["execution_flow"]["fixed_records"] == 16
     assert protocol.config["execution_flow"]["record_contract_id"] == (
-        "content_adaptive_dual_branch_v2_record_v1"
+        "content_adaptive_dual_branch_v2_semantic_gate_record_v1"
     )
     assert protocol.config["keying"]["wrong_key_count"] == 16
     assert protocol.config["decision_rule"]["lf_gate_a_registered_top_rank_among_17_min_units"] == 7
@@ -67,6 +71,8 @@ def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_ide
 def test_v2_protocol_rejects_formula_identity_detector_or_private_export_drift(tmp_path: Path) -> None:
     mutations = (
         ("content_analysis", "probe_measurement", "candidate_observation_magnitude", "content analysis"),
+        ("content_analysis", "direct_per_tile_gate_rule", "gamma_0.20", "content analysis"),
+        ("content_analysis", "derived_ranges", {"d": [-1.0, 1.0]}, "content analysis"),
         ("method_identities", "evaluated_candidate_id", "v1", "method identities"),
         ("aggregate_measurement", "counterfactual_effect_validation", "strictly_positive", "aggregate measurement"),
         ("aggregate_measurement", "blind_score_consumes_aggregate_measurement", True, "aggregate measurement"),
@@ -92,6 +98,9 @@ def test_v2_protocol_detection_is_blind_and_private_maps_are_never_exported() ->
     }
     forbidden = set(access["forbidden_inputs"])
     assert {"prompt", "embed_record", "private_latent", "lf_branch_share", "hf_branch_share"} <= forbidden
+    serialized = _CONFIG.read_text(encoding="utf-8")
+    assert "transfer_stability" not in serialized
+    assert "two_scale_response_consistency" in serialized
 
 
 @pytest.mark.unit

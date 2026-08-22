@@ -61,18 +61,28 @@ class _ImageProcessor:
 
 
 class _Dino(torch.nn.Module):
-    def __init__(self, *, attentions: bool = True, model_id: str = runtime.DINO_ASSET_ID) -> None:
+    def __init__(
+        self,
+        *,
+        attentions: bool = True,
+        zero_attention: bool = False,
+        model_id: str = runtime.DINO_ASSET_ID,
+    ) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)
         self.config = SimpleNamespace(_attn_implementation="eager", _name_or_path=model_id)
         self.attentions = attentions
+        self.zero_attention = zero_attention
 
     def forward(self, **kwargs: object) -> SimpleNamespace:
         del kwargs
         if not self.attentions:
             return SimpleNamespace(attentions=None)
         attention = torch.ones((1, 3, 17, 17), device=self.anchor.device)
-        attention[:, :, 0, 1:] *= torch.arange(1, 17, device=self.anchor.device)
+        if self.zero_attention:
+            attention[:, :, 0, 1:] = 0.0
+        else:
+            attention[:, :, 0, 1:] *= torch.arange(1, 17, device=self.anchor.device)
         return SimpleNamespace(attentions=(attention, attention * 1.25))
 
 
@@ -151,7 +161,10 @@ def test_v2_runtime_passes_six_private_maps_to_allocation_and_only_aggregates_ou
     monkeypatch.setattr(runtime, "evaluate_public_probes", lambda *args: maps)
 
     def allocate(signals: object) -> ContentAllocation:
-        assert signals.lf_transfer_stability == maps.lf_transfer_stability
+        assert (
+            signals.lf_two_scale_response_consistency
+            == maps.lf_two_scale_response_consistency
+        )
         assert signals.hf_local_perturbation_sensitivity == maps.hf_local_perturbation_sensitivity
         return allocation
 
@@ -166,7 +179,7 @@ def test_v2_runtime_passes_six_private_maps_to_allocation_and_only_aggregates_ou
         height=512, width=512,
     )
     assert output.measurement is measurement
-    assert not hasattr(output.measurement, "lf_transfer_stability")
+    assert not hasattr(output.measurement, "lf_two_scale_response_consistency")
     assert not hasattr(output.measurement, "tile_weights")
 
 
@@ -176,6 +189,12 @@ def test_v2_callback_and_assets_fail_closed_on_attention_or_identity_drift() -> 
     with pytest.raises(RuntimeError, match="attention"):
         runtime.run_sd35_content_adaptive(
             _Pipeline(assets), "runtime fixture", b"registered-key-01", assets,
+            height=512, width=512,
+        )
+    zero_assets = _assets(_Dino(zero_attention=True))
+    with pytest.raises(RuntimeError, match="identically zero"):
+        runtime.run_sd35_content_adaptive(
+            _Pipeline(zero_assets), "runtime fixture", b"registered-key-01", zero_assets,
             height=512, width=512,
         )
     vae, processor = _VAE(), _ImageProcessor()

@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 _UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
-_EXPECTED_PROTOCOL_DIGEST = "9da57877b67fd04036ca5d8dfc5dd745e6e39c5e4380bd22fe174a897b3a3343"
+_EXPECTED_PROTOCOL_DIGEST = "bfd9b7464195107f7dc57a43ab3042501500f5e2c07a322269859bb908a3dbb8"
 _EXPECTED_ROSTER = (
     ("content-adaptive-v2-0001", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8101", "A violin maker carving a maple bridge beside a sunlit window", 1213061, 512, 512),
     ("content-adaptive-v2-0002", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8102", "A night market noodle stall reflected in rain-polished pavement", 1238321, 512, 512),
@@ -23,10 +23,10 @@ _EXPECTED_ROSTER = (
 )
 _ALLOWED_DETECTION_INPUTS = ("image", "detection_key", "frozen_public_assets")
 _COUNTERFACTUAL_EFFECT_FIELDS = [
-    "semantic_importance_counterfactual_effect",
-    "texture_complexity_counterfactual_effect",
-    "lf_transfer_stability_counterfactual_effect",
-    "hf_transfer_stability_counterfactual_effect",
+    "semantic_routing_strength_counterfactual_effect",
+    "texture_hf_suitability_counterfactual_effect",
+    "lf_two_scale_response_consistency_counterfactual_effect",
+    "hf_two_scale_response_consistency_counterfactual_effect",
     "lf_local_perturbation_sensitivity_counterfactual_effect",
     "hf_local_perturbation_sensitivity_counterfactual_effect",
 ]
@@ -48,16 +48,23 @@ _CONTENT_ANALYSIS = {
     ],
     "baseline_observations": ["I0_equals_D_of_z", "Y0_equals_E_of_I0"],
     "response_rule": "all_probe_responses_use_only_DeltaI_and_DeltaY_never_absolute_observation_magnitude",
-    "stability_rule": "two_scale_alignment_times_gain_consistency_equal_mean_RGB_and_VAE",
+    "response_consistency_rule": "two_scale_alignment_times_gain_consistency_equal_mean_RGB_and_VAE_no_carrier_transfer_claim",
     "sensitivity_rule": "RGB_and_VAE_each_divide_by_rho_then_unit_positive_median_kappa_then_x_over_x_plus_kappa_all_zero_modality_stays_zero_no_fallback_p_bi_equal_mean_two_scales_by_two_modalities",
     "signals": [
-        "semantic_importance", "texture_complexity", "lf_transfer_stability",
-        "hf_transfer_stability", "lf_local_perturbation_sensitivity",
+        "semantic_importance", "texture_complexity", "lf_two_scale_response_consistency",
+        "hf_two_scale_response_consistency", "lf_local_perturbation_sensitivity",
         "hf_local_perturbation_sensitivity",
     ],
     "texture_complexity_rule": "RGB8_per_tile_mean_channel_gradient_magnitude_raw_x_finite_closed_0_to_255_sqrt2_then_t_equals_0.5_plus_0.5_times_x_over_255_sqrt2_no_minmax_rank_kappa_or_fallback",
-    "allocation_directions": "semantic_uses_only_magnitude_away_from_0.5_raw_texture_coordinate_increase_weakly_decreases_LF_raw_allocation_and_public_share_and_increases_HF_raw_allocation_and_public_share_stability_helps_only_own_branch_sensitivity_cannot_help",
-    "counterfactual_neutral_rule": "semantic_0.5_texture_raw_x_0_stability_and_sensitivity_0.5_unchanged",
+    "semantic_gate_rule": "g_i_equals_A_i_over_max_A_finite_nonnegative_production_max_strictly_positive_all_zero_only_internal_counterfactual",
+    "suitability_rule": "Q_L_equals_0.20_plus_0.30_times_1_minus_t_plus_0.30_c_L_plus_0.20_times_1_minus_p_L__Q_H_equals_0.20_plus_0.30_t_plus_0.30_c_H_plus_0.20_times_1_minus_p_H",
+    "direct_per_tile_gate_rule": "d_equals_Q_H_minus_Q_L_gamma_0.25_a_H_equals_0.5_plus_gamma_g_d_a_L_equals_1_minus_a_H_pi_branch_equals_mean_a_branch_w_branch_equals_a_branch_over_pi_branch",
+    "derived_ranges": {
+        "Q_L": [0.20, 0.85], "Q_H": [0.35, 1.00], "d": [-0.50, 0.80],
+        "a_H": [0.375, 0.70], "a_L": [0.30, 0.625],
+    },
+    "allocation_directions": "g_zero_exact_per_tile_balance_equal_suitability_exact_balance_increasing_g_moves_only_toward_local_suitability_texture_increase_with_positive_g_moves_toward_HF_own_response_consistency_helps_only_own_branch_own_sensitivity_cannot_help",
+    "counterfactual_neutral_rule": "semantic_gate_0_texture_raw_x_0_response_consistency_and_sensitivity_0.5_unchanged",
     "flat_texture_rule": "raw_x_0_maps_to_neutral_t_0.5",
     "export": "irreversible_aggregate_scalars_only",
 }
@@ -167,9 +174,9 @@ def _load_roster(path: Path) -> tuple[ContentChainUnit, ...]:
 
 
 def _validate_config(config: Mapping[str, Any]) -> None:
-    if config.get("protocol_version") != 1 or config.get("protocol_id") != "cegwm-stage-a-content-adaptive-dual-branch-v2-clean-v1":
+    if config.get("protocol_version") != 1 or config.get("protocol_id") != "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1":
         raise ValueError("unexpected content-adaptive protocol identity")
-    if config.get("execution_scope_id") != "content_adaptive_dual_branch_v2_clean_engineering_and_stage_a_evaluation_v1":
+    if config.get("execution_scope_id") != "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1":
         raise ValueError("unexpected content-adaptive execution scope")
     if config.get("scientific_status") != "not_evaluated_until_complete_real_gpu_rc0":
         raise ValueError("content-adaptive protocol cannot preclaim scientific evidence")
@@ -190,10 +197,10 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         "hf_base_evaluated_candidate_id": "hf_tail_rademacher_v1_rankgate_v2",
         "lf_base_carrier_method_id": "lf_shell_balanced_blocks_v2",
         "lf_base_evaluated_candidate_id": "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
-        "hf_adaptive_embedding_transform_id": "hf_content_tiles_semantic_stability_sensitivity_probe_v2",
-        "lf_adaptive_embedding_transform_id": "lf_content_tiles_texture_stability_sensitivity_probe_v2",
+        "hf_adaptive_embedding_transform_id": "hf_content_tiles_semantic_gate_texture_two_scale_response_consistency_sensitivity_v1",
+        "lf_adaptive_embedding_transform_id": "lf_content_tiles_semantic_gate_texture_two_scale_response_consistency_sensitivity_v1",
         "combined_budget_projector_id": "dual_branch_actual_dtype_relative_l2_v1",
-        "evaluated_candidate_id": "content_adaptive_dual_branch_v2_clean_v1",
+        "evaluated_candidate_id": "content_adaptive_dual_branch_v2_semantic_gate_v1",
         "base_prg_domain_rule": "base_carrier_ids_only_adaptive_and_joint_ids_never_enter_base_hf_or_lf_prg_domain",
     }:
         raise ValueError("content-adaptive method identities differ")
@@ -227,13 +234,13 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         "roster_manifest": "content_adaptive_dual_branch_v2_clean.jsonl",
         "split": "content_adaptive_dual_branch_v2_clean_v1",
         "fixed_units": 8,
-        "record_arms_in_order": ["content_adaptive_dual_branch_v2_clean_v1", "primary_null__content_adaptive_dual_branch_v2_clean_v1"],
+        "record_arms_in_order": ["content_adaptive_dual_branch_v2_semantic_gate_v1", "primary_null__content_adaptive_dual_branch_v2_semantic_gate_v1"],
         "unit_transaction_record_count": 2,
         "fixed_records": 16,
         "record_score_prefixes_in_order": ["lf", "hf", "joint"],
         "score_labels_per_prefix": "registered_then_wrong_00_through_wrong_15",
-        "flat_score_field_rule": "prefix_double_underscore_label_within_content_adaptive_dual_branch_v2_record_v1",
-        "record_contract_id": "content_adaptive_dual_branch_v2_record_v1",
+        "flat_score_field_rule": "prefix_double_underscore_label_within_content_adaptive_dual_branch_v2_semantic_gate_record_v1",
+        "record_contract_id": "content_adaptive_dual_branch_v2_semantic_gate_record_v1",
         "record_fields_in_order": [
             "run_id", "unit_id", "source_cluster_id", "arm", "condition",
             "code_revision", "config_digest", "key_public_digest", "status",
