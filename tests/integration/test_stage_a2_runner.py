@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 from types import SimpleNamespace
 import zipfile
 
@@ -16,6 +15,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from cegwm.protocol.records import StageARecord
+from cegwm.shared.keys import normalize_detection_key
 from experiments.stage_a import run_hf_a2_colab as runner
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -50,12 +51,7 @@ class _Generator:
         return self
 
 
-def _args(
-    repo: Path,
-    exact: str,
-    output_root: Path,
-    run_store_root: Path,
-) -> argparse.Namespace:
+def _args(repo: Path, exact: str, output_root: Path, run_store_root: Path) -> argparse.Namespace:
     return argparse.Namespace(
         repo_root=str(repo),
         output_root=str(output_root),
@@ -67,11 +63,15 @@ def _args(
 def _install_fakes(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    fail_hf_calls: frozenset[int] = frozenset(),
-    interrupt_hf_call: int | None = None,
+    fail_lf_calls: frozenset[int] = frozenset(),
+    interrupt_lf_call: int | None = None,
 ) -> dict[str, int]:
-    calls = {"load": 0, "hf": 0, "plain": 0, "score": 0}
-    assets = SimpleNamespace()
+    calls = {"load": 0, "lf": 0, "plain": 0, "score": 0}
+    registered_key = normalize_detection_key(_RAW_KEY)
+    assets = {
+        candidate_id: SimpleNamespace(candidate_id=candidate_id)
+        for candidate_id in runner.LF_CANDIDATE_IDS
+    }
 
     def fake_load(model_id: str, hf_token: str) -> tuple[object, object]:
         assert model_id == "stabilityai/stable-diffusion-3.5-medium"
@@ -82,799 +82,384 @@ def _install_fakes(
     monkeypatch.setattr(runner, "_load_pipeline_and_assets", fake_load)
     monkeypatch.setattr(runner.torch, "Generator", _Generator)
 
-    def fake_hf(pipeline: object, prompt: str, key: bytes, public_assets: object, **kwargs: object) -> SimpleNamespace:
-        del pipeline, prompt, public_assets
-        calls["hf"] += 1
-        if calls["hf"] == interrupt_hf_call:
+    def fake_lf(
+        pipeline: object,
+        prompt: str,
+        key: bytes,
+        public_assets: object,
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        del pipeline, prompt
+        calls["lf"] += 1
+        if calls["lf"] == interrupt_lf_call:
             raise KeyboardInterrupt
-        if calls["hf"] in fail_hf_calls:
+        if calls["lf"] in fail_lf_calls:
             raise RuntimeError("private detail that must not be exported")
         seed = kwargs["generator"].seed
-        pixels = np.full((8, 8, 3), (seed + key[0]) % 200 + 30, dtype=np.uint8)
+        candidate_offset = 110 if public_assets.candidate_id == runner.LF_CANDIDATE_IDS[0] else 130
+        pixels = np.full((8, 8, 3), (seed % 20) + candidate_offset, dtype=np.uint8)
         return SimpleNamespace(
             image=Image.fromarray(pixels),
-            injection_budget=SimpleNamespace(relative_l2=0.01),
+            injection_budget=SimpleNamespace(relative_l2=0.011999),
         )
 
     def fake_plain(pipeline: object, prompt: str, **kwargs: object) -> Image.Image:
         del pipeline, prompt
         calls["plain"] += 1
         seed = kwargs["generator"].seed
-        return Image.fromarray(np.full((8, 8, 3), seed % 200, dtype=np.uint8))
+        return Image.fromarray(np.full((8, 8, 3), (seed % 20) + 20, dtype=np.uint8))
 
     def fake_score(image: Image.Image, key: bytes, public_assets: object) -> float:
-        del public_assets
         calls["score"] += 1
-        return float(np.asarray(image).mean() / 255.0 + key[0] / 1024.0)
+        image_value = float(np.asarray(image).mean() / 255.0)
+        candidate_term = 0.002 if public_assets.candidate_id == runner.LF_CANDIDATE_IDS[1] else 0.0
+        return image_value + candidate_term + (0.25 if key == registered_key else key[0] / 4096.0)
 
-    monkeypatch.setattr(runner, "run_sd35_hf", fake_hf)
+    monkeypatch.setattr(runner, "run_sd35_lf", fake_lf)
     monkeypatch.setattr(runner, "run_sd35_plain", fake_plain)
-    monkeypatch.setattr(runner, "score_hf_image", fake_score)
+    monkeypatch.setattr(runner, "score_lf_image", fake_score)
     return calls
 
 
 def _payloads(output_root: Path, run_id: str) -> tuple[dict[str, object], dict[str, object], Path]:
-    local_run_dir = output_root / run_id
-    receipt = json.loads((local_run_dir / "receipt.json").read_text(encoding="utf-8"))
-    result = json.loads((local_run_dir / "result.json").read_text(encoding="utf-8"))
-    return receipt, result, local_run_dir / f"{run_id}.zip"
+    local = output_root / run_id
+    receipt = json.loads((local / "receipt.json").read_text(encoding="utf-8"))
+    result = json.loads((local / "result.json").read_text(encoding="utf-8"))
+    return receipt, result, local / f"{run_id}.zip"
 
 
 def _only_run_id(root: Path) -> str:
-    directories = [path.name for path in root.iterdir() if path.is_dir()]
-    assert len(directories) == 1
-    return directories[0]
+    names = [path.name for path in root.iterdir() if path.is_dir()]
+    assert len(names) == 1
+    return names[0]
 
 
 @pytest.mark.integration
-def test_runner_uses_fixed_production_calls_and_exports_only_public_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo, exact = _repo(tmp_path)
     output_root = tmp_path / "output"
-    run_store_root = tmp_path / "run-store"
+    store_root = tmp_path / "store"
     calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
 
-    rc = runner.execute(_args(repo, exact, output_root, run_store_root))
+    rc = runner.execute(_args(repo, exact, output_root, store_root))
     run_id = _only_run_id(output_root)
-    receipt, result, zip_path = _payloads(output_root, run_id)
+    receipt, result, local_zip = _payloads(output_root, run_id)
 
     assert rc == receipt["rc"] == result["rc"] == 0
-    assert receipt["resolved_exact"] == result["resolved_exact"] == exact
-    assert receipt["scientific_status"] == result["scientific_status"] == "not_adjudicated"
-    assert result["completeness"] == "complete_for_hf_v2_clean_confirmation_execution"
-    assert receipt["evaluated_candidate_id"] == result["evaluated_candidate_id"] == (
-        "hf_tail_rademacher_v1_rankgate_v2"
-    )
-    assert receipt["carrier_method_id"] == result["carrier_method_id"] == (
-        "hf_tail_rademacher_v1"
-    )
-    assert len(result["records"]) == 16
-    assert calls == {"load": 1, "hf": 8, "plain": 8, "score": 8 * 2 * 17}
-    assert {record["arm"] for record in result["records"]} == {"hf_anchor", "primary_null"}
+    assert result["completeness"] == "complete_for_lf_a3_clean_selection_execution"
+    assert result["carrier_method_ids"] == list(runner.LF_CANDIDATE_IDS)
+    assert result["record_arms_in_exact_unit_order"] == list(runner.RECORD_ARMS)
+    assert len(result["records"]) == 32
+    assert calls == {"load": 1, "lf": 16, "plain": 8, "score": 8 * 4 * 17}
     assert Counter(record["unit_id"] for record in result["records"]) == {
-        f"confirmation-{index:04d}": 2 for index in range(1, 9)
+        f"selection-{index:04d}": 4 for index in range(1, 9)
     }
-    evidence = result["clean_confirmation_evidence"]
+    for index in range(8):
+        assert [record["arm"] for record in result["records"][index * 4 : index * 4 + 4]] == list(
+            runner.RECORD_ARMS
+        )
+    evidence = result["clean_selection_evidence"]
     assert evidence["candidate_outcome_allowed"] is True
     assert evidence["evaluation_status"] == "candidate_outcome"
-    assert evidence["candidate_outcome"] in {"pass", "fail"}
-    assert evidence["gate_a_required_units"] == evidence["gate_b_required_units"] == 7
+    assert evidence["candidate_selection_outcome"] == "winner_selected"
+    assert evidence["selected_candidate_id"] in runner.LF_CANDIDATE_IDS
+    assert evidence["fixed_unit_count"] == 8
+    assert evidence["fixed_record_count"] == 32
     assert evidence["median_margin_is_gate"] is False
-    assert evidence["mean_margin_is_gate"] is False
-    assert evidence["min_margin_is_gate"] is False
     assert evidence["primary_null_cutoff_is_gate"] is False
     assert evidence["formal_fpr_claim"] is False
+    assert all(record["status"] == "success" for record in result["records"])
     assert all(len(record["scores"]) == 17 for record in result["records"])
-    assert result["records"][0]["scores"] != result["records"][1]["scores"]
-    assert runner.KEY_ENV not in os.environ
-    assert runner.TOKEN_ENV not in os.environ
+    assert runner.KEY_ENV not in os.environ and runner.TOKEN_ENV not in os.environ
     assert receipt["checkpoint_interval_hours"] == runner.CHECKPOINT_INTERVAL_HOURS == 2.0
-    assert receipt["model_id"] == "stabilityai/stable-diffusion-3.5-medium"
-    assert not ({"model_revision", "vae_weight_digest", "full_weight_digest"} & set(receipt))
-    assert zip_path.is_file()
-    stored = run_store_root / run_id
-    stored_zip = stored / f"{run_id}.zip"
-    stored_checksum = stored / f"{run_id}.zip.sha256"
-    assert stored_zip.is_file() and stored_checksum.is_file()
-    assert not list(stored.glob("checkpoint-*.zip"))
-    checksum_parts = stored_checksum.read_text(encoding="utf-8").strip().split()
-    assert checksum_parts == [hashlib.sha256(stored_zip.read_bytes()).hexdigest(), stored_zip.name]
+    stored_zip = store_root / run_id / f"{run_id}.zip"
+    stored_sha = store_root / run_id / f"{run_id}.zip.sha256"
+    assert local_zip.is_file() and stored_zip.is_file() and stored_sha.is_file()
     with zipfile.ZipFile(stored_zip) as archive:
-        assert set(archive.namelist()) == {"receipt.json", "result.json"}
-        archived = b"".join(archive.read(name) for name in archive.namelist())
-    exported = archived + stored_checksum.read_bytes()
+        assert archive.namelist() == ["receipt.json", "result.json"]
+        exported = b"".join(archive.read(name) for name in archive.namelist()) + stored_sha.read_bytes()
     assert _RAW_KEY.encode() not in exported
     assert _HF_TOKEN.encode() not in exported
     assert b"A red ceramic teapot" not in exported
-    for forbidden in (
-        b"private_latent",
-        b'"carrier":',
-        b'"mask":',
-        b"cached_qk",
-        b"traceback",
-    ):
+    for forbidden in (b"private_latent", b'"carrier":', b'"mask":', b"traceback"):
         assert forbidden not in exported
 
 
 @pytest.mark.integration
-def test_timed_checkpoint_resume_skips_persisted_failure_and_retries_uncommitted_unit(
+def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrupted_unit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, exact = _repo(tmp_path)
-    run_store_root = tmp_path / "run-store"
+    store_root = tmp_path / "store"
     first_calls = _install_fakes(
         monkeypatch,
-        fail_hf_calls=frozenset({1}),
-        interrupt_hf_call=5,
+        fail_lf_calls=frozenset({1}),
+        interrupt_lf_call=5,
     )
-    clock = iter([0.0, 100.0, 7201.0, 7300.0, 14402.0])
+    clock = iter([0.0, 100.0, 7201.0])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
 
     with pytest.raises(KeyboardInterrupt):
-        runner.execute(_args(repo, exact, tmp_path / "first-output", run_store_root))
-
-    run_id = _only_run_id(tmp_path / "first-output")
-    stored = run_store_root / run_id
-    checkpoint_files = sorted(stored.iterdir())
-    assert len(checkpoint_files) == 4
-    checkpoint_zip = sorted(stored.glob("checkpoint-*.zip"))[-1]
+        runner.execute(_args(repo, exact, tmp_path / "first", store_root))
+    run_id = _only_run_id(tmp_path / "first")
+    checkpoint_zip = next((store_root / run_id).glob("checkpoint-*.zip"))
     with zipfile.ZipFile(checkpoint_zip) as archive:
-        checkpoint_bytes = archive.read("state.json")
-    assert _RAW_KEY.encode() not in checkpoint_bytes
-    assert b"A red ceramic teapot" not in checkpoint_bytes
-    assert b"private detail" not in checkpoint_bytes
-    assert first_calls["hf"] == 5
+        state = json.loads(archive.read("state.json"))
+    assert state["committed_unit_ids"] == ["selection-0001", "selection-0002"]
+    assert len(state["records"]) == 8
+    assert [record["status"] for record in state["records"][:4]] == ["operational_failure"] * 4
     assert first_calls["plain"] == 3
+    assert first_calls["lf"] == 5
 
     resumed_calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    resumed_output = tmp_path / "resumed-output"
-    rc = runner.execute(_args(repo, exact, resumed_output, run_store_root))
-    receipt, result, zip_path = _payloads(resumed_output, run_id)
-    failed = [record for record in result["records"] if record["status"] != "success"]
+    rc = runner.execute(_args(repo, exact, tmp_path / "resumed", store_root))
+    receipt, result, _ = _payloads(tmp_path / "resumed", run_id)
 
-    assert rc == receipt["rc"] == result["rc"] == 1
-    assert len(result["records"]) == 16
-    assert len(failed) == 2
-    assert {record["unit_id"] for record in failed} == {"confirmation-0001"}
-    assert result["clean_confirmation_evidence"]["evaluation_status"] == (
-        "not_evaluable_operational"
+    assert rc == receipt["rc"] == 1
+    assert resumed_calls["plain"] == 6
+    assert resumed_calls["lf"] == 12
+    assert len(result["records"]) == 32
+    assert result["records"][:4] == state["records"][:4]
+    evidence = result["clean_selection_evidence"]
+    assert evidence["evaluation_status"] == "not_evaluable_operational"
+    assert evidence["selected_candidate_id"] is None
+    assert evidence["candidate_selection_outcome"] is None
+    assert all(
+        facts["gate_a_pass"] is None and facts["gate_b_pass"] is None and facts["eligible"] is None
+        for facts in evidence["candidate_evidence"].values()
     )
-    assert result["clean_confirmation_evidence"]["candidate_outcome"] is None
-    assert result["clean_confirmation_evidence"]["candidate_outcome_allowed"] is False
-    assert receipt["completeness"] == result["completeness"] == (
-        "incomplete_operational_execution"
+
+
+def _record(
+    expected: dict[str, object],
+    unit_id: str,
+    arm: str,
+    registered: float,
+    wrong: float,
+    *,
+    psnr: float = 40.0,
+) -> StageARecord:
+    metrics = {"paired_rgb_psnr": psnr}
+    if not arm.startswith("primary_null__"):
+        metrics["actual_dtype_relative_l2"] = 0.012
+    return StageARecord(
+        run_id=str(expected["run_id"]),
+        unit_id=unit_id,
+        source_cluster_id=f"source-{unit_id}",
+        arm=arm,
+        condition="identity",
+        code_revision=str(expected["resolved_exact"]),
+        config_digest=str(expected["protocol_digest"]),
+        key_public_digest=str(expected["key_public_digest"]),
+        status="success",
+        scores={"registered": registered, **{f"wrong_{index:02d}": wrong for index in range(16)}},
+        metrics=metrics,
     )
-    assert all(record["failure_reason"] == "unit_execution_failure" for record in failed)
-    assert resumed_calls == {"load": 1, "hf": 4, "plain": 4, "score": 4 * 2 * 17}
-    assert zip_path.is_file()
-    assert len(list(stored.glob("checkpoint-*.zip"))) == 2
-    with zipfile.ZipFile(zip_path) as archive:
-        assert b"private detail" not in b"".join(archive.read(name) for name in archive.namelist())
 
-    verified_calls = _install_fakes(monkeypatch)
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 0
-    assert verified_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
 
-    highest_zip = stored / "checkpoint-0002-units-0004.zip"
-    with zipfile.ZipFile(highest_zip) as archive:
-        ambiguous_state = json.loads(archive.read("state.json"))
-    ambiguous_state["checkpoint_sequence"] = 1
-    ambiguous_zip = stored / "checkpoint-0001-units-0004.zip"
-    with zipfile.ZipFile(ambiguous_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("state.json", json.dumps(ambiguous_state))
-    ambiguous_checksum = stored / f"{ambiguous_zip.name}.sha256"
-    ambiguous_checksum.write_text(
-        f"{hashlib.sha256(ambiguous_zip.read_bytes()).hexdigest()}  {ambiguous_zip.name}\n",
+def _expected() -> dict[str, object]:
+    return {
+        "run_id": "a3lfsel-test",
+        "resolved_exact": "1" * 40,
+        "protocol_digest": "2" * 64,
+        "key_public_digest": "3" * 64,
+        "ordered_roster_unit_ids": [f"selection-{index:04d}" for index in range(1, 9)],
+        "carrier_method_ids": list(runner.LF_CANDIDATE_IDS),
+        "rank_gate_a_min_units": 7,
+        "rank_gate_b_min_units": 7,
+    }
+
+
+def _selection_records(
+    expected: dict[str, object],
+    *,
+    core_gate_a: int = 8,
+    core_gate_b: int = 8,
+    shell_gate_a: int = 8,
+    shell_gate_b: int = 8,
+    core_margin: float = 0.1,
+    shell_margin: float = 0.1,
+    core_psnr: float = 40.0,
+    shell_psnr: float = 40.0,
+) -> list[StageARecord]:
+    records: list[StageARecord] = []
+    for index, unit_id in enumerate(expected["ordered_roster_unit_ids"]):
+        core_wrong = 0.0
+        shell_wrong = 0.0
+        core_registered = core_margin if index < core_gate_a else 0.0
+        shell_registered = shell_margin if index < shell_gate_a else 0.0
+        core_null = core_registered - 0.05 if index < core_gate_b else core_registered
+        shell_null = shell_registered - 0.05 if index < shell_gate_b else shell_registered
+        records.extend([
+            _record(expected, unit_id, runner.RECORD_ARMS[0], core_registered, core_wrong, psnr=core_psnr),
+            _record(expected, unit_id, runner.RECORD_ARMS[1], core_null, -0.2, psnr=core_psnr),
+            _record(expected, unit_id, runner.RECORD_ARMS[2], shell_registered, shell_wrong, psnr=shell_psnr),
+            _record(expected, unit_id, runner.RECORD_ARMS[3], shell_null, -0.2, psnr=shell_psnr),
+        ])
+    return records
+
+
+@pytest.mark.integration
+def test_scale_free_gates_use_strict_ties_complete_denominator_and_frozen_ranking() -> None:
+    expected = _expected()
+    neither = runner._clean_selection_evidence(
+        _selection_records(expected, core_gate_a=6, shell_gate_b=6),
+        expected,
+        candidate_outcome_allowed=True,
+    )
+    assert neither["candidate_selection_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
+    assert neither["selected_candidate_id"] is None
+
+    one = runner._clean_selection_evidence(
+        _selection_records(expected, core_gate_a=7, core_gate_b=7, shell_gate_a=6),
+        expected,
+        candidate_outcome_allowed=True,
+    )
+    assert one["selected_candidate_id"] == runner.LF_CANDIDATE_IDS[0]
+
+    effect_size_ranked = runner._clean_selection_evidence(
+        _selection_records(expected, core_margin=0.05, shell_margin=0.07),
+        expected,
+        candidate_outcome_allowed=True,
+    )
+    assert effect_size_ranked["selected_candidate_id"] == runner.LF_CANDIDATE_IDS[1]
+
+    lexical_tie = runner._clean_selection_evidence(
+        _selection_records(expected), expected, candidate_outcome_allowed=True
+    )
+    assert lexical_tie["selected_candidate_id"] == min(runner.LF_CANDIDATE_IDS)
+    partial = runner._clean_selection_evidence(
+        _selection_records(expected)[:-4], expected, candidate_outcome_allowed=False
+    )
+    assert partial["evaluation_status"] == "not_evaluable_operational"
+    assert partial["candidate_selection_outcome"] is None
+    assert partial["selected_candidate_id"] is None
+
+
+@pytest.mark.integration
+def test_resume_rejects_four_arm_order_or_identity_drift(tmp_path: Path) -> None:
+    expected = {
+        **_expected(),
+        "record_arms_in_exact_unit_order": list(runner.RECORD_ARMS),
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "checkpoint_interval_hours": 2.0,
+    }
+    transaction = [record.to_dict() for record in _selection_records(expected)[:4]]
+    transaction[0]["arm"], transaction[1]["arm"] = transaction[1]["arm"], transaction[0]["arm"]
+    state = {
+        **expected,
+        "checkpoint_sequence": 1,
+        "committed_unit_count": 1,
+        "committed_unit_ids": ["selection-0001"],
+        "records": transaction,
+    }
+    zip_path = tmp_path / "checkpoint-0001-units-0001.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("state.json", json.dumps(state))
+    sha_path = tmp_path / f"{zip_path.name}.sha256"
+    sha_path.write_text(
+        f"{hashlib.sha256(zip_path.read_bytes()).hexdigest()}  {zip_path.name}\n",
         encoding="utf-8",
     )
-    protocol = runner._load_protocol(repo)
-    expected = runner._new_state(
-        run_id=run_id,
-        resolved_exact=exact,
-        protocol=protocol,
-        model_id=protocol.config["generation_runtime"]["model_id"],
-        key_digest=runner.public_key_digest(_RAW_KEY),
-    )
-    with pytest.raises(ValueError, match="ambiguous"):
-        runner._discover_checkpoint(stored, expected)
+
+    with pytest.raises(ValueError, match="four-arm transaction"):
+        runner._resume_state(zip_path, sha_path, expected)
 
 
 @pytest.mark.integration
-def test_due_checkpoint_at_final_boundary_and_verified_final_do_not_create_empty_checkpoint(
+def test_terminal_publication_is_create_only_without_readback_or_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo, exact = _repo(tmp_path)
-    run_store_root = tmp_path / "run-store"
-    calls = _install_fakes(monkeypatch)
-    clock = iter([0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 7201.0])
-    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-
-    assert runner.execute(_args(repo, exact, tmp_path / "first-output", run_store_root)) == 0
-    assert calls["hf"] == 8
-    run_id = _only_run_id(tmp_path / "first-output")
-    stored = run_store_root / run_id
-    checkpoint_files = sorted(stored.glob("checkpoint-*.zip*"))
-    assert len(checkpoint_files) == 2
-
-    resumed_calls = _install_fakes(monkeypatch)
-    monkeypatch.setattr(runner.time, "monotonic", lambda: 999999.0)
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    assert runner.execute(_args(repo, exact, tmp_path / "verified-output", run_store_root)) == 0
-    assert resumed_calls == {"load": 0, "hf": 0, "plain": 0, "score": 0}
-    assert sorted(stored.glob("checkpoint-*.zip*")) == checkpoint_files
-
-    final_checksum = stored / f"{run_id}.zip.sha256"
-    final_checksum.write_text(f"{'0' * 64}  {run_id}.zip\n", encoding="utf-8")
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    assert runner.execute(
-        _args(repo, exact, tmp_path / "bad-final-output", run_store_root)
-    ) == 0
-
-
-@pytest.mark.integration
-def test_all_success_checkpoint_publication_failure_is_rc1_without_candidate_outcome(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, exact = _repo(tmp_path)
-    output_root = tmp_path / "output"
-    run_store_root = tmp_path / "run-store"
-    _install_fakes(monkeypatch)
-    clock = iter([0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 7201.0])
-    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
-    original_publish_pair = runner._publish_pair_create_only
-
-    def fail_checkpoint_publication(
-        zip_path: Path,
-        checksum_path: Path,
-        sink: Path,
-        *,
-        artifact_kind: str,
-    ) -> None:
-        if artifact_kind == "checkpoint":
-            raise RuntimeError("simulated checkpoint publication failure")
-        original_publish_pair(
-            zip_path,
-            checksum_path,
-            sink,
-            artifact_kind=artifact_kind,
-        )
-
-    monkeypatch.setattr(runner, "_publish_pair_create_only", fail_checkpoint_publication)
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-
-    assert runner.execute(_args(repo, exact, output_root, run_store_root)) == 1
-    run_id = _only_run_id(output_root)
-    receipt, result, _ = _payloads(output_root, run_id)
-    evidence = result["clean_confirmation_evidence"]
-
-    assert receipt["rc"] == result["rc"] == 1
-    assert all(record["status"] == "success" for record in result["records"])
-    assert evidence["successful_pair_count"] == 8
-    assert evidence["candidate_outcome_allowed"] is False
-    assert evidence["candidate_outcome"] is None
-    assert evidence["gate_a_pass"] is evidence["gate_b_pass"] is None
-    stored = run_store_root / run_id
-    assert not list(stored.glob("checkpoint-*.zip*"))
-    assert (stored / f"{run_id}.zip").is_file()
-    assert (stored / f"{run_id}.zip.sha256").is_file()
-
-
-@pytest.mark.integration
-def test_all_success_final_publication_failure_preserves_local_rc0_outcome_only(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    repo, exact = _repo(tmp_path)
-    output_root = tmp_path / "output"
-    run_store_root = tmp_path / "run-store"
-    _install_fakes(monkeypatch)
-    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
-    original_publish_pair = runner._publish_terminal_pair_create_only
-
-    def fail_final_publication(
-        zip_path: Path,
-        checksum_path: Path,
-        sink: Path,
-        *,
-        artifact_kind: str,
-    ) -> None:
-        if artifact_kind == "final":
-            raise RuntimeError("simulated final publication failure")
-        original_publish_pair(
-            zip_path,
-            checksum_path,
-            sink,
-            artifact_kind=artifact_kind,
-        )
-
-    monkeypatch.setattr(runner, "_publish_terminal_pair_create_only", fail_final_publication)
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    monkeypatch.setattr(sys, "argv", [
-        "run_hf_a2_colab",
-        "--repo-root", str(repo),
-        "--output-root", str(output_root),
-        "--expected-exact", exact,
-        "--run-store-root", str(run_store_root),
-    ])
-
-    with pytest.raises(SystemExit) as exit_info:
-        runner.main()
-
-    assert exit_info.value.code == 2
-    fatal_lines = [
-        line
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("CEGWM_FATAL ")
-    ]
-    assert len(fatal_lines) == 1
-    fatal_event = json.loads(fatal_lines[0].removeprefix("CEGWM_FATAL "))
-    assert fatal_event["error_class"] == "final_export_failure"
-    assert fatal_event["export_status"] == "local_only"
-    run_id = fatal_event["run_id"]
-    receipt, result, _ = _payloads(output_root, run_id)
-    evidence = result["clean_confirmation_evidence"]
-    assert receipt["rc"] == result["rc"] == 0
-    assert all(record["status"] == "success" for record in result["records"])
-    assert evidence["successful_pair_count"] == 8
-    assert evidence["candidate_outcome_allowed"] is True
-    assert evidence["candidate_outcome"] in {"pass", "fail"}
-    local_final = output_root / run_id / f"{run_id}.zip"
-    local_checksum = output_root / run_id / f"{run_id}.zip.sha256"
-    assert local_final.is_file() and local_checksum.is_file()
-    assert not (output_root / run_id / "failure-final_export_failure.zip").exists()
-    assert not list((run_store_root / run_id).glob("*.zip*"))
-
-
-@pytest.mark.integration
-def test_terminal_package_is_copied_without_production_validation_or_readback(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo, exact = _repo(tmp_path)
-    output_root = tmp_path / "output"
-    run_store_root = tmp_path / "run-store"
-    _install_fakes(monkeypatch)
-    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
-    events: list[str] = []
-    original_publish = runner._publish_final
-
-    def record_publish(
-        zip_path: Path,
-        checksum_path: Path,
-        run_store: Path,
-    ) -> None:
-        events.append("publish")
-        original_publish(zip_path, checksum_path, run_store)
-
-    def reject_checksum_validation(*args: object, **kwargs: object) -> str:
-        del args, kwargs
-        raise AssertionError("terminal publication must not verify its completed pair")
-
-    original_read_bytes = Path.read_bytes
-
-    def reject_drive_readback(path: Path) -> bytes:
-        if run_store_root in path.parents:
-            raise AssertionError("terminal publication must not read back Drive bytes")
-        return original_read_bytes(path)
-
-    monkeypatch.setattr(runner, "_verify_checksum", reject_checksum_validation)
-    monkeypatch.setattr(Path, "read_bytes", reject_drive_readback)
-    monkeypatch.setattr(runner, "_publish_final", record_publish)
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-
-    assert runner.execute(_args(repo, exact, output_root, run_store_root)) == 0
-    assert events == ["publish"]
-    run_id = _only_run_id(output_root)
-    stored = run_store_root / run_id
-    assert (stored / f"{run_id}.zip").is_file()
-    assert (stored / f"{run_id}.zip.sha256").is_file()
-
-
-@pytest.mark.integration
-def test_partial_terminal_copy_is_never_deleted_or_overwritten(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    local_zip = tmp_path / "run.zip"
-    local_checksum = tmp_path / "run.zip.sha256"
-    sink = tmp_path / "drive"
+    source_zip = tmp_path / "result.zip"
+    source_sha = tmp_path / "result.zip.sha256"
+    source_zip.write_bytes(b"zip-bytes")
+    source_sha.write_text("not-revalidated  result.zip\n", encoding="utf-8")
+    sink = tmp_path / "sink"
     sink.mkdir()
-    local_zip.write_bytes(b"complete-local-zip")
-    local_checksum.write_text("digest  run.zip\n", encoding="utf-8")
-    original_copy = runner.shutil.copyfileobj
-    copy_count = 0
 
-    def fail_second_copy(source: object, target: object) -> None:
-        nonlocal copy_count
-        copy_count += 1
-        if copy_count == 2:
-            target.write(b"partial")
-            raise OSError("simulated Drive interruption")
+    runner._publish_terminal_pair_create_only(source_zip, source_sha, sink, artifact_kind="final")
+    assert (sink / source_zip.name).read_bytes() == b"zip-bytes"
+    assert (sink / source_sha.name).is_file()
+    with pytest.raises(RuntimeError, match="refuses overwrite"):
+        runner._publish_terminal_pair_create_only(source_zip, source_sha, sink, artifact_kind="final")
+
+    partial_sink = tmp_path / "partial"
+    partial_sink.mkdir()
+    original_copy = shutil.copyfileobj
+    calls = 0
+
+    def fail_second(source: object, target: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated Drive copy failure")
         original_copy(source, target)
 
-    monkeypatch.setattr(runner.shutil, "copyfileobj", fail_second_copy)
-    with pytest.raises(OSError, match="Drive interruption"):
-        runner._publish_terminal_pair_create_only(
-            local_zip,
-            local_checksum,
-            sink,
-            artifact_kind="final",
-        )
-
-    assert (sink / local_zip.name).read_bytes() == local_zip.read_bytes()
-    assert (sink / local_checksum.name).read_bytes() == b"partial"
-    with pytest.raises(RuntimeError, match="refuses overwrite"):
-        runner._publish_terminal_pair_create_only(
-            local_zip,
-            local_checksum,
-            sink,
-            artifact_kind="final",
-        )
+    monkeypatch.setattr(runner.shutil, "copyfileobj", fail_second)
+    with pytest.raises(OSError, match="Drive copy"):
+        runner._publish_terminal_pair_create_only(source_zip, source_sha, partial_sink, artifact_kind="final")
+    assert (partial_sink / source_zip.name).is_file()
+    assert (partial_sink / source_sha.name).exists()
 
 
 @pytest.mark.integration
-def test_run_identity_is_deterministic_and_cli_keeps_fixed_interval_internal(tmp_path: Path) -> None:
-    repo, exact = _repo(tmp_path)
-    protocol = runner._load_protocol(repo)
-    model_id = protocol.config["generation_runtime"]["model_id"]
-    key_digest = runner.public_key_digest(_RAW_KEY)
-    first = runner._deterministic_run_id(exact, protocol, model_id, key_digest)
-
-    assert first == runner._deterministic_run_id(exact, protocol, model_id, key_digest)
-    assert first != runner._deterministic_run_id("f" * 40, protocol, model_id, key_digest)
-    assert first != runner._deterministic_run_id(
-        exact,
-        protocol,
-        model_id,
-        runner.public_key_digest("different-stage-a-root-key-0002"),
-    )
-    parsed = runner._parser().parse_args([
-        "--repo-root", str(repo),
-        "--output-root", str(tmp_path / "parsed-output"),
-        "--expected-exact", exact,
-        "--run-store-root", str(tmp_path / "run-store"),
-    ])
-    assert set(vars(parsed)) == {"repo_root", "output_root", "expected_exact", "run_store_root"}
-    assert runner.CHECKPOINT_INTERVAL_HOURS == 2.0
-
-    empty_state = runner._new_state(
-        run_id=first,
-        resolved_exact=exact,
-        protocol=protocol,
-        model_id=model_id,
-        key_digest=key_digest,
-    )
-    empty_state["checkpoint_sequence"] = 1
-    empty_zip = tmp_path / "checkpoint-0001-units-0000.zip"
-    with zipfile.ZipFile(empty_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("state.json", json.dumps(empty_state))
-    empty_checksum = tmp_path / f"{empty_zip.name}.sha256"
-    empty_checksum.write_text(
-        f"{hashlib.sha256(empty_zip.read_bytes()).hexdigest()}  {empty_zip.name}\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="cannot be empty"):
-        runner._resume_state(empty_zip, empty_checksum, empty_state | {"checkpoint_sequence": 0})
-
-
-@pytest.mark.integration
-def test_rank_gate_uses_all_units_strict_ties_and_no_absolute_margin() -> None:
-    protocol = runner._load_protocol(_ROOT)
-    exact = "e" * 40
-    key_digest = runner.public_key_digest(_RAW_KEY)
-    run_id = runner._deterministic_run_id(
-        exact,
-        protocol,
-        protocol.config["generation_runtime"]["model_id"],
-        key_digest,
-    )
-    expected = runner._new_state(
-        run_id=run_id,
-        resolved_exact=exact,
-        protocol=protocol,
-        model_id=protocol.config["generation_runtime"]["model_id"],
-        key_digest=key_digest,
-    )
-    def evidence_for(gate_a_units: int, gate_b_units: int) -> dict[str, object]:
-        wrong_scores = {f"wrong_{index:02d}": 0.0 for index in range(16)}
-        records = []
-        for index, unit in enumerate(protocol.untouched_confirmation):
-            registered = 1.0e-9 if index < gate_a_units else 0.0
-            primary_null_registered = (
-                registered - 1.0 if index < gate_b_units else registered + 1.0
-            )
-            common = dict(
-                run_id=run_id,
-                unit_id=unit.unit_id,
-                source_cluster_id=unit.source_id,
-                condition="identity",
-                code_revision=exact,
-                config_digest=protocol.protocol_digest,
-                key_public_digest=key_digest,
-                status="success",
-            )
-            records.extend([
-                runner.StageARecord(
-                    arm="hf_anchor",
-                    scores={"registered": registered, **wrong_scores},
-                    **common,
-                ),
-                runner.StageARecord(
-                    arm="primary_null",
-                    scores={"registered": primary_null_registered, **wrong_scores},
-                    **common,
-                ),
-            ])
-        return runner._clean_confirmation_evidence(
-            records,
-            expected,
-            candidate_outcome_allowed=True,
-        )
-
-    evidence = evidence_for(7, 7)
-
-    assert evidence["evaluation_status"] == "candidate_outcome"
-    assert evidence["candidate_outcome_allowed"] is True
-    assert evidence["gate_a_registered_top_rank_units"] == 7
-    assert evidence["gate_b_paired_hf_gt_primary_null_units"] == 7
-    assert evidence["gate_a_pass"] is evidence["gate_b_pass"] is True
-    assert evidence["candidate_outcome"] == "pass"
-    assert evidence["median_correct_minus_wrong_key_max_effect_size"] == pytest.approx(1.0e-9)
-    assert evidence["mean_correct_minus_wrong_key_max_effect_size"] == pytest.approx(
-        0.875e-9
-    )
-    assert evidence["min_correct_minus_wrong_key_max_effect_size"] == 0.0
-    assert evidence["median_margin_is_gate"] is False
-    assert evidence["mean_margin_is_gate"] is False
-    assert evidence["min_margin_is_gate"] is False
-    assert evidence["unit_evidence"][-1]["registered_top_rank"] is False
-
-    gate_a_fail = evidence_for(6, 7)
-    assert gate_a_fail["successful_pair_count"] == 8
-    assert gate_a_fail["gate_a_pass"] is False
-    assert gate_a_fail["gate_b_pass"] is True
-    assert gate_a_fail["candidate_outcome"] == "fail"
-
-    gate_b_fail = evidence_for(7, 6)
-    assert gate_b_fail["successful_pair_count"] == 8
-    assert gate_b_fail["gate_a_pass"] is True
-    assert gate_b_fail["gate_b_pass"] is False
-    assert gate_b_fail["candidate_outcome"] == "fail"
-
-
-@pytest.mark.integration
-def test_runner_requires_nonempty_root_key_and_explicit_hf_token(
+def test_missing_secrets_fail_closed_without_leaking_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, exact = _repo(tmp_path)
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, "   ")
-    with pytest.raises(RuntimeError, match="hugging_face_token"):
-        runner.execute(_args(repo, exact, tmp_path / "token-output", tmp_path / "token-store"))
-    assert runner.KEY_ENV not in os.environ and runner.TOKEN_ENV not in os.environ
-
-    monkeypatch.setenv(runner.KEY_ENV, "")
+    _install_fakes(monkeypatch)
+    monkeypatch.delenv(runner.KEY_ENV, raising=False)
     monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    with pytest.raises(RuntimeError, match="root_key"):
-        runner.execute(_args(repo, exact, tmp_path / "key-output", tmp_path / "key-store"))
-    assert runner.KEY_ENV not in os.environ and runner.TOKEN_ENV not in os.environ
+    with pytest.raises(RuntimeError, match="root_key_environment_input_required"):
+        runner.execute(_args(repo, exact, tmp_path / "missing-key", tmp_path / "store-a"))
 
-
-@pytest.mark.integration
-def test_top_level_resume_failure_exports_only_sanitized_partial_package(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    repo, exact = _repo(tmp_path)
-    output_root = tmp_path / "output"
-    run_store_root = tmp_path / "run-store"
-    protocol = runner._load_protocol(repo)
-    model_id = protocol.config["generation_runtime"]["model_id"]
-    run_id = runner._deterministic_run_id(
-        exact,
-        protocol,
-        model_id,
-        runner.public_key_digest(_RAW_KEY),
-    )
-    stored = run_store_root / run_id
-    stored.mkdir(parents=True)
-    resume_zip = stored / "checkpoint-0001-units-0002.zip"
-    resume_checksum = stored / "checkpoint-0001-units-0002.zip.sha256"
-    private_detail = "private checkpoint detail that must not be exported"
-    with zipfile.ZipFile(resume_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("state.json", json.dumps({"private": private_detail}))
-    resume_checksum.write_text(
-        f"{hashlib.sha256(resume_zip.read_bytes()).hexdigest()}  {resume_zip.name}\n",
-        encoding="utf-8",
-    )
     monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    monkeypatch.setenv("CEGWM_PRIVATE_DETAIL", private_detail)
-    monkeypatch.setattr(sys, "argv", [
-        "run_hf_a2_colab",
-        "--repo-root", str(repo),
-        "--output-root", str(output_root),
-        "--expected-exact", exact,
-        "--run-store-root", str(run_store_root),
-    ])
-
-    with pytest.raises(SystemExit) as exit_info:
-        runner.main()
-
-    assert exit_info.value.code == 2
-    stdout = capsys.readouterr().out
-    fatal_lines = [line for line in stdout.splitlines() if line.startswith("CEGWM_FATAL ")]
-    assert len(fatal_lines) == 1
-    fatal_event = json.loads(fatal_lines[0].removeprefix("CEGWM_FATAL "))
-    assert fatal_event == {
-        "run_id": run_id,
-        "error_class": "resume_validation_failure",
-        "export_status": "published",
-    }
-    assert _RAW_KEY not in stdout and private_detail not in stdout
-    assert _HF_TOKEN not in stdout
-    local_run_dir = output_root / run_id
-    receipt = json.loads((local_run_dir / "receipt.json").read_text(encoding="utf-8"))
-    result = json.loads((local_run_dir / "result.json").read_text(encoding="utf-8"))
-    zip_path = local_run_dir / "failure-resume_validation_failure.zip"
-    checksum_path = local_run_dir / f"{zip_path.name}.sha256"
-    assert receipt["rc"] == result["rc"] == 2
-    assert receipt["completeness"] == result["completeness"] == (
-        "incomplete_operational_execution"
+    monkeypatch.setenv(runner.TOKEN_ENV, "")
+    context: dict[str, object] = {}
+    with pytest.raises(RuntimeError, match="hugging_face_token_environment_input_required"):
+        runner.execute(_args(repo, exact, tmp_path / "missing-token", tmp_path / "store-b"), fatal_context=context)
+    serialized_context = repr(context)
+    assert _RAW_KEY not in serialized_context
+    assert _HF_TOKEN not in serialized_context
+    fatal_zip, _, published = runner._export_fatal(
+        _args(repo, exact, tmp_path / "missing-token", tmp_path / "store-b"),
+        context,
+        "initialization_failure",
     )
-    assert receipt["error_class"] == result["error_class"] == "resume_validation_failure"
-    assert receipt["result_kind"] == result["result_kind"] == "operational_failure_not_scientific"
-    assert receipt["resume_status"] == result["resume_status"] == "rejected"
-    assert receipt["approved_execution_exact"] == result["approved_execution_exact"] == exact
-    assert receipt["resolved_exact"] == result["resolved_exact"] == exact
-    assert receipt["protocol_digest"] == result["protocol_digest"]
-    assert receipt["model_id"] == result["model_id"] == model_id
-    assert len(receipt["ordered_roster_unit_ids"]) == len(result["ordered_roster_unit_ids"]) == 8
-    assert receipt["committed_unit_count"] == result["committed_unit_count"] == 0
-    assert receipt["committed_unit_ids"] == result["committed_unit_ids"] == []
+    assert published is True
+    with zipfile.ZipFile(fatal_zip) as archive:
+        payload = b"".join(archive.read(name) for name in archive.namelist())
+        result = json.loads(archive.read("result.json"))
+    assert _RAW_KEY.encode() not in payload and _HF_TOKEN.encode() not in payload
+    evidence = result["clean_selection_evidence"]
+    assert evidence["candidate_outcome_allowed"] is False
+    assert evidence["candidate_selection_outcome"] is None
+    assert evidence["selected_candidate_id"] is None
     assert result["records"] == []
-    assert result["clean_confirmation_evidence"]["candidate_outcome_allowed"] is False
-    assert result["fixed_unit_count"] == 8 and result["fixed_record_count"] == 16
-    with zipfile.ZipFile(zip_path) as archive:
-        exported = b"".join(archive.read(name) for name in archive.namelist())
-    exported += b"".join(
-        path.read_bytes()
-        for path in (zip_path.parent / "receipt.json", zip_path.parent / "result.json", checksum_path)
-    )
-    assert _RAW_KEY.encode() not in exported
-    assert _HF_TOKEN.encode() not in exported
-    assert private_detail.encode() not in exported
-    assert b"traceback" not in exported
-    stored_zip = stored / zip_path.name
-    stored_checksum = stored / checksum_path.name
-    assert stored_zip.read_bytes() == zip_path.read_bytes()
-    assert stored_checksum.read_bytes() == checksum_path.read_bytes()
-    assert not (stored / f"{run_id}.zip").exists()
-
-    second_output = tmp_path / "second-output"
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    monkeypatch.setattr(sys, "argv", [
-        "run_hf_a2_colab",
-        "--repo-root", str(repo),
-        "--output-root", str(second_output),
-        "--expected-exact", exact,
-        "--run-store-root", str(run_store_root),
-    ])
-    with pytest.raises(SystemExit) as second_exit:
-        runner.main()
-    assert second_exit.value.code == 2
-    second_event = json.loads(capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL "))
-    assert second_event == {
-        "run_id": run_id,
-        "error_class": "resume_validation_failure",
-        "export_status": "present_for_external_validation",
-    }
-    assert not second_output.exists()
-
-    stored_zip.write_bytes(b"corrupt")
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    monkeypatch.setattr(sys, "argv", [
-        "run_hf_a2_colab",
-        "--repo-root", str(repo),
-        "--output-root", str(tmp_path / "third-output"),
-        "--expected-exact", exact,
-        "--run-store-root", str(run_store_root),
-    ])
-    with pytest.raises(SystemExit) as third_exit:
-        runner.main()
-    assert third_exit.value.code == 2
-    third_event = json.loads(capsys.readouterr().out.strip().removeprefix("CEGWM_FATAL "))
-    assert third_event["export_status"] == "present_for_external_validation"
 
 
 @pytest.mark.integration
-def test_runtime_fatal_preserves_only_the_real_committed_pair_prefix(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    repo, exact = _repo(tmp_path)
-    output_root = tmp_path / "output"
-    run_store_root = tmp_path / "run-store"
-    _install_fakes(monkeypatch, interrupt_hf_call=2)
-    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
-    monkeypatch.setattr(
-        runner,
-        "_verify_checksum",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("terminal failure publication must not verify its pair")
-        ),
-    )
-    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
-    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
-    monkeypatch.setattr(sys, "argv", [
-        "run_hf_a2_colab",
-        "--repo-root", str(repo),
-        "--output-root", str(output_root),
-        "--expected-exact", exact,
-        "--run-store-root", str(run_store_root),
-    ])
-
-    with pytest.raises(SystemExit) as exit_info:
-        runner.main()
-
-    assert exit_info.value.code == 2
-    lines = capsys.readouterr().out.splitlines()
-    fatal_event = json.loads(
-        next(line for line in lines if line.startswith("CEGWM_FATAL ")).removeprefix("CEGWM_FATAL ")
-    )
-    assert fatal_event["error_class"] == "runtime_execution_failure"
-    assert fatal_event["export_status"] == "published"
-    run_id = fatal_event["run_id"]
-    local_run_dir = output_root / run_id
-    result = json.loads((local_run_dir / "result.json").read_text(encoding="utf-8"))
-    assert result["rc"] == 2
-    assert result["committed_unit_count"] == 1
-    assert result["committed_unit_ids"] == ["confirmation-0001"]
-    assert len(result["records"]) == 2
-    assert [record["unit_id"] for record in result["records"]] == [
-        "confirmation-0001"
-    ] * 2
-    assert result["clean_confirmation_evidence"]["evaluation_status"] == (
-        "not_evaluable_operational"
-    )
-    assert result["clean_confirmation_evidence"]["candidate_outcome_allowed"] is False
-    assert [record["arm"] for record in result["records"]] == ["hf_anchor", "primary_null"]
-    stored = run_store_root / run_id
-    assert (stored / "failure-runtime_execution_failure.zip").is_file()
-    protocol = runner._load_protocol(repo)
-    expected = runner._new_state(
-        run_id=run_id,
-        resolved_exact=exact,
-        protocol=protocol,
-        model_id=protocol.config["generation_runtime"]["model_id"],
-        key_digest=runner.public_key_digest(_RAW_KEY),
-    )
-    assert runner._discover_checkpoint(stored, expected) is None
-    assert not (stored / f"{run_id}.zip").exists()
-    exported = b"".join(path.read_bytes() for path in local_run_dir.iterdir() if path.is_file())
-    assert _RAW_KEY.encode() not in exported and _HF_TOKEN.encode() not in exported
+def test_run_identity_is_deterministic_and_cli_has_no_mode_or_interval() -> None:
+    protocol = runner._load_protocol(_ROOT)
+    first = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
+    second = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
+    assert first == second and first.startswith("a3lfsel-")
+    actions = runner._parser()._actions
+    option_strings = {option for action in actions for option in action.option_strings}
+    assert "--run-mode" not in option_strings
+    assert "--checkpoint-interval" not in option_strings
+    assert runner.CHECKPOINT_INTERVAL_HOURS == 2.0

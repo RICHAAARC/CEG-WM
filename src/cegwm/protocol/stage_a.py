@@ -448,3 +448,165 @@ def load_hf_v2_confirmation_protocol(
         untouched_confirmation=confirmation,
         protocol_digest=digest,
     )
+
+
+def _validate_lf_a3_selection_choices(config: Mapping[str, Any]) -> None:
+    """Validate the finite LF selection protocol without adding a schema layer."""
+
+    _validate_detection_access(config)
+    runtime = _require_mapping(config, "generation_runtime")
+    if runtime != {
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "inference_steps": 20,
+        "injection_step_index_zero_based": 18,
+        "public_asset_rule": "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest",
+        "candidate_generator_rule": "separately_initialized_same_seed_generators_no_latent_or_callback_state_reuse",
+        "primary_null_rule": "one_new_same_prompt_seed_no_callback_image_shared_only_as_image_observation",
+    }:
+        raise ValueError("LF-A3 runtime identity differs from the frozen production path")
+
+    keying = _require_mapping(config, "keying")
+    if keying != {
+        "task": "zero_bit_keyed_attribution",
+        "normalization": "NFC_UTF8_for_text_exact_bytes_for_binary",
+        "prg": "HMAC_SHA256_counter_v1",
+        "wrong_key_count": 16,
+        "wrong_key_derivation_domain": "stage-a/external-wrong-key/v1",
+        "carrier_domain_public_inputs": "carrier_method_id_shape_channel_only",
+        "primary_null": True,
+        "payload_bits": 0,
+    }:
+        raise ValueError("LF-A3 key or control identity differs from the frozen plan")
+
+    bands = _require_mapping(config, "bands")
+    if bands != {
+        "radius_definition": "rfft2_radial_frequency_divided_by_2d_nyquist_corner",
+        "lf_radius": [0.04, 0.24],
+        "core_radius": [0.04, 0.14],
+        "core_upper_bound": "exclusive",
+        "shell_radius": [0.14, 0.24],
+        "shell_upper_bound": "inclusive",
+        "partition_rule": "r_equals_0.14_belongs_only_to_shell_disjoint_union_equals_lf_band",
+    }:
+        raise ValueError("LF-A3 core and shell must be an exact disjoint LF partition")
+
+    budget = _require_mapping(config, "budget")
+    if (
+        budget.get("total_relative_l2") != 0.012
+        or budget.get("measurement") != "actual_dtype_final_minus_actual_dtype_base"
+        or budget.get("allocation")
+        != "full_single_carrier_budget_per_independent_candidate_never_coinjected"
+        or budget.get("quality_evidence") != {
+            "actual_dtype_relative_l2": "enforced",
+            "rgb_psnr": "reported_candidate_image_vs_shared_primary_null",
+            "lpips_alex": "not_evaluated",
+        }
+    ):
+        raise ValueError("LF-A3 must preserve the single-carrier actual-dtype 0.012 budget")
+
+    candidates = config.get("lf_candidates")
+    if candidates != [
+        {
+            "carrier_method_id": "lf_core_rademacher_v1",
+            "radial_subband": [0.04, 0.14],
+            "upper_bound": "exclusive",
+        },
+        {
+            "carrier_method_id": "lf_shell_rademacher_v1",
+            "radial_subband": [0.14, 0.24],
+            "upper_bound": "inclusive",
+        },
+    ]:
+        raise ValueError("LF-A3 requires exactly the frozen core and shell candidates")
+    arms = config.get("record_arms_in_exact_unit_order")
+    if arms != [
+        "lf_core_rademacher_v1",
+        "primary_null__lf_core_rademacher_v1",
+        "lf_shell_rademacher_v1",
+        "primary_null__lf_shell_rademacher_v1",
+    ]:
+        raise ValueError("LF-A3 record arms must preserve the exact four-record unit order")
+
+    controls = _require_mapping(config, "controls")
+    if controls != {
+        "correct_key": "registered_detection_key",
+        "wrong_key": "16_external_domain_separated_keys",
+        "primary_null": "one_shared_same_generation_unit_image_scored_independently_by_each_candidate_detector",
+        "report_wrong_key_and_primary_null_separately": True,
+    }:
+        raise ValueError("LF-A3 controls must keep one shared image and candidate-specific scores")
+
+    rule = _require_mapping(config, "selection_rule")
+    if rule != {
+        "fixed_units_per_candidate": 8,
+        "registered_top_rank_among_17_min_units": 7,
+        "paired_lf_registered_gt_candidate_scored_primary_null_registered_min_units": 7,
+        "strict_comparison_ties_fail": True,
+        "candidate_eligibility": "both_rank_and_paired_gates_required",
+        "neither_eligible_outcome": "SCIENTIFIC_NEGATIVE_AND_STOP",
+        "one_eligible_outcome": "freeze_the_single_eligible_candidate",
+        "both_eligible_ranking": [
+            "gate_a_count_desc",
+            "gate_b_count_desc",
+            "median_correct_minus_wrong_key_max_desc",
+            "median_lf_minus_primary_null_registered_desc",
+            "median_paired_rgb_psnr_desc",
+            "candidate_id_asc",
+        ],
+        "absolute_margin_role": "report_and_ranking_only_no_pass_threshold",
+        "primary_null_role": "reported_separately_no_pass_cutoff",
+        "formal_threshold_status": "not_introduced_at_stage_a",
+        "formal_fpr_claim": False,
+    }:
+        raise ValueError("LF-A3 selection rule differs from the frozen scale-free gates")
+
+    flow = _require_mapping(config, "execution_flow")
+    if flow != {
+        "candidate_selection_manifest": "candidate_selection.jsonl",
+        "candidate_selection_units": 8,
+        "fixed_records": 32,
+        "unit_transaction_record_count": 4,
+        "untouched_confirmation_manifest_reserved": "untouched_confirmation.jsonl",
+        "failure_units_remain_in_denominator": True,
+        "replacement_units_allowed": False,
+        "outcome_requires_complete_rc0": True,
+        "operational_failure_counts_as_scientific_failure": False,
+        "checkpoint_committed_units_immutable": True,
+        "interrupted_uncommitted_unit_reruns_whole_transaction": True,
+    }:
+        raise ValueError("LF-A3 execution flow must preserve the 8-unit/32-record denominator")
+
+
+def load_lf_a3_selection_protocol(
+    config_path: str | Path,
+    candidate_selection_path: str | Path,
+) -> StageAProtocol:
+    """Load only the LF candidate-selection roster; confirmation stays untouched."""
+
+    config_file = Path(config_path)
+    with config_file.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    if not isinstance(config, dict) or config.get("protocol_version") != 1:
+        raise ValueError("unsupported LF-A3 protocol version")
+    protocol_id = _require_nonempty_text(config, "protocol_id")
+    if protocol_id != "cegwm-stage-a-lf-a3-clean-selection-v1":
+        raise ValueError("unexpected LF-A3 protocol identity")
+    _validate_lf_a3_selection_choices(config)
+    selection = _load_units(Path(candidate_selection_path), "candidate_selection")
+    if len(selection) != 8 or [unit.unit_id for unit in selection] != [
+        f"selection-{index:04d}" for index in range(1, 9)
+    ]:
+        raise ValueError("LF-A3 selection manifest differs from the fixed roster")
+    digest_payload = {
+        "config": config,
+        "candidate_selection": [asdict(unit) for unit in selection],
+    }
+    canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return StageAProtocol(
+        protocol_id=protocol_id,
+        config=_freeze(config),
+        candidate_selection=selection,
+        untouched_confirmation=(),
+        protocol_digest=digest,
+    )

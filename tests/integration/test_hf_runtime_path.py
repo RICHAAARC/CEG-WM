@@ -10,10 +10,17 @@ import torch.nn.functional as functional
 from PIL import Image
 
 from cegwm.method.hf import FrozenHFPublicAssets
+from cegwm.method.lf import (
+    LF_CORE_CANDIDATE_ID,
+    LF_SHELL_CANDIDATE_ID,
+    FrozenLFPublicAssets,
+)
 from cegwm.runtime.diffusers_sd35 import (
     HFInjectionCallback,
+    LFInjectionCallback,
     load_sd35_pipeline,
     run_sd35_hf,
+    run_sd35_lf,
 )
 
 
@@ -42,6 +49,15 @@ def _assets() -> FrozenHFPublicAssets:
         vae=_VAE(),
         image_processor=_Processor(),
         image_processor_id="sd35-vae-image-processor-v1",
+    )
+
+
+def _lf_assets(candidate_id: str) -> FrozenLFPublicAssets:
+    return FrozenLFPublicAssets(
+        vae=_VAE(),
+        image_processor=_Processor(),
+        image_processor_id="sd35-vae-image-processor-v1",
+        candidate_id=candidate_id,
     )
 
 
@@ -132,6 +148,43 @@ def test_runtime_path_uses_evolving_latent_and_returns_key_dependent_rgb() -> No
     assert not torch.equal(first_pipeline.target_before, first_pipeline.target_after)
     assert not np.array_equal(np.asarray(first.image), np.asarray(second.image))
     assert first.injection_budget.relative_l2 <= 0.012
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("candidate_id", [LF_CORE_CANDIDATE_ID, LF_SHELL_CANDIDATE_ID])
+def test_lf_runtime_uses_same_real_callback_and_returns_final_rgb(candidate_id: str) -> None:
+    pipeline = _FakeSD35Pipeline()
+    result = run_sd35_lf(
+        pipeline,
+        "a public test prompt",
+        b"0123456789abcdef0123456789abcdef",
+        _lf_assets(candidate_id),
+        height=256,
+        width=256,
+        generator=torch.Generator().manual_seed(5),
+    )
+
+    assert result.image.mode == "RGB"
+    assert pipeline.target_before is not None
+    assert pipeline.target_after is not None
+    assert not torch.equal(pipeline.target_before, pipeline.target_after)
+    assert 0.0 < result.injection_budget.relative_l2 <= 0.012
+
+
+@pytest.mark.integration
+def test_lf_callback_is_single_candidate_and_fail_closed() -> None:
+    callback = LFInjectionCallback(
+        b"0123456789abcdef0123456789abcdef",
+        _lf_assets(LF_CORE_CANDIDATE_ID),
+    )
+    latents = torch.linspace(-1.0, 1.0, 4 * 16 * 16).reshape(1, 4, 16, 16)
+    early = {"latents": latents}
+
+    assert callback(None, 17, None, early) is early
+    updated = callback(None, 18, None, early)
+    assert not torch.equal(updated["latents"], latents)
+    with pytest.raises(RuntimeError, match="more than once"):
+        callback(None, 18, None, early)
 
 
 @pytest.mark.integration

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 from types import SimpleNamespace
 
@@ -82,6 +83,9 @@ def test_production_carrier_is_repeatable_and_key_dependent() -> None:
     assert not torch.equal(first, wrong)
     assert first.shape == (1, 4, 16, 16)
     assert torch.linalg.vector_norm(first.float()).item() == pytest.approx(1.0)
+    assert hashlib.sha256(first.numpy().tobytes()).hexdigest() == (
+        "5d35e543e3890fc5dedae6e31bd8ac4efd049430abbe3ed065a7534b5d34759b"
+    )
 
 
 @pytest.mark.unit

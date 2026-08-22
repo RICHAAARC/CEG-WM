@@ -1,4 +1,4 @@
-"""Thin SD3.5 diffusers adapter for the real Stage-A HF callback path."""
+"""Thin SD3.5 adapter for the real Stage-A frequency-carrier callback path."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import torch
 from PIL import Image
 
 from cegwm.method.hf import FrozenHFPublicAssets, inject_hf_carrier
+from cegwm.method.lf import FrozenLFPublicAssets, inject_lf_carrier
 from cegwm.runtime.observation import require_ordinary_rgb_image
 from cegwm.shared.numerics import BudgetMeasurement
 
@@ -18,6 +19,14 @@ from cegwm.shared.numerics import BudgetMeasurement
 @dataclass(frozen=True, slots=True)
 class HFRunOutput:
     """Runtime output only; it contains no detection decision or positive claim."""
+
+    image: Image.Image
+    injection_budget: BudgetMeasurement
+
+
+@dataclass(frozen=True, slots=True)
+class LFRunOutput:
+    """Runtime LF output only; it contains no detection decision."""
 
     image: Image.Image
     injection_budget: BudgetMeasurement
@@ -67,6 +76,50 @@ class HFInjectionCallback:
         return updated
 
 
+class LFInjectionCallback:
+    """Inject exactly one LF candidate at the frozen zero-based step."""
+
+    tensor_inputs = ("latents",)
+
+    def __init__(
+        self,
+        detection_key: str | bytes | bytearray | memoryview,
+        frozen_public_assets: FrozenLFPublicAssets,
+    ) -> None:
+        self._detection_key = detection_key
+        self._assets = frozen_public_assets
+        self._measurement: BudgetMeasurement | None = None
+
+    @property
+    def measurement(self) -> BudgetMeasurement | None:
+        return self._measurement
+
+    def __call__(
+        self,
+        pipeline: Any,
+        step_index: int,
+        timestep: Any,
+        callback_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        del pipeline, timestep
+        if not isinstance(step_index, int):
+            raise TypeError("diffusers callback step_index must be an integer")
+        if not isinstance(callback_kwargs, dict):
+            raise TypeError("diffusers callback state must be a dict")
+        if step_index != self._assets.injection_step_index:
+            return callback_kwargs
+        if self._measurement is not None:
+            raise RuntimeError("LF callback attempted the frozen injection step more than once")
+        latents = callback_kwargs.get("latents")
+        if not isinstance(latents, torch.Tensor):
+            raise TypeError("diffusers callback state must contain torch latents")
+        injected, measurement = inject_lf_carrier(latents, self._detection_key, self._assets)
+        updated = dict(callback_kwargs)
+        updated["latents"] = injected
+        self._measurement = measurement
+        return updated
+
+
 def _validate_pipeline_callback_api(pipeline: Any) -> None:
     call = getattr(pipeline, "__call__", None)
     if not callable(call):
@@ -107,6 +160,40 @@ def load_sd35_pipeline(
     return pipeline
 
 
+def _run_sd35_frequency(
+    pipeline: Any,
+    prompt: str,
+    callback: HFInjectionCallback | LFInjectionCallback,
+    *,
+    height: int,
+    width: int,
+    generator: torch.Generator | None = None,
+) -> tuple[Image.Image, BudgetMeasurement]:
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("embedding prompt must be non-empty text")
+    if not isinstance(height, int) or not isinstance(width, int) or height < 256 or width < 256:
+        raise ValueError("Stage-A image dimensions must be integer values of at least 256")
+    _validate_pipeline_callback_api(pipeline)
+    result = pipeline(
+        prompt=prompt,
+        num_inference_steps=20,
+        height=height,
+        width=width,
+        generator=generator,
+        output_type="pil",
+        callback_on_step_end=callback,
+        callback_on_step_end_tensor_inputs=list(callback.tensor_inputs),
+    )
+    images = getattr(result, "images", None)
+    if not isinstance(images, (list, tuple)) or len(images) != 1:
+        raise RuntimeError("SD3.5 pipeline must return exactly one final image")
+    image = require_ordinary_rgb_image(images[0])
+    if callback.measurement is None:
+        raise RuntimeError("SD3.5 pipeline completed without the frozen carrier injection")
+    return image, callback.measurement
+
+
 def run_sd35_hf(
     pipeline: Any,
     prompt: str,
@@ -117,31 +204,40 @@ def run_sd35_hf(
     width: int,
     generator: torch.Generator | None = None,
 ) -> HFRunOutput:
-    """Execute the fixed callback path and return the ordinary final RGB image."""
+    """Execute the fixed HF callback path and return the ordinary final RGB image."""
 
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("embedding prompt must be non-empty text")
-    if not isinstance(height, int) or not isinstance(width, int) or height < 256 or width < 256:
-        raise ValueError("Stage-A image dimensions must be integer values of at least 256")
-    _validate_pipeline_callback_api(pipeline)
-    callback = HFInjectionCallback(detection_key, frozen_public_assets)
-    result = pipeline(
-        prompt=prompt,
-        num_inference_steps=20,
+    image, budget = _run_sd35_frequency(
+        pipeline,
+        prompt,
+        HFInjectionCallback(detection_key, frozen_public_assets),
         height=height,
         width=width,
         generator=generator,
-        output_type="pil",
-        callback_on_step_end=callback,
-        callback_on_step_end_tensor_inputs=list(HFInjectionCallback.tensor_inputs),
     )
-    images = getattr(result, "images", None)
-    if not isinstance(images, (list, tuple)) or len(images) != 1:
-        raise RuntimeError("SD3.5 pipeline must return exactly one final image")
-    image = require_ordinary_rgb_image(images[0])
-    if callback.measurement is None:
-        raise RuntimeError("SD3.5 pipeline completed without the frozen HF injection")
-    return HFRunOutput(image=image, injection_budget=callback.measurement)
+    return HFRunOutput(image=image, injection_budget=budget)
+
+
+def run_sd35_lf(
+    pipeline: Any,
+    prompt: str,
+    detection_key: str | bytes | bytearray | memoryview,
+    frozen_public_assets: FrozenLFPublicAssets,
+    *,
+    height: int,
+    width: int,
+    generator: torch.Generator | None = None,
+) -> LFRunOutput:
+    """Execute one frozen LF callback and return the ordinary final RGB image."""
+
+    image, budget = _run_sd35_frequency(
+        pipeline,
+        prompt,
+        LFInjectionCallback(detection_key, frozen_public_assets),
+        height=height,
+        width=width,
+        generator=generator,
+    )
+    return LFRunOutput(image=image, injection_budget=budget)
 
 
 def run_sd35_plain(
