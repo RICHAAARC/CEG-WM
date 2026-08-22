@@ -420,6 +420,88 @@ def test_terminal_fast_path_rejects_nonexact_or_rewritten_public_payload(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (("lower", "latest verified checkpoint"),
+     ("higher", "latest verified checkpoint"),
+     ("rewritten", "diverges")),
+)
+def test_terminal_rejects_lower_higher_or_rewritten_checkpoint_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str, message: str,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch, interrupt_hf_call=2)
+    clock = iter([0.0, 7201.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    _env(monkeypatch)
+    output, store = tmp_path / "first", tmp_path / "store"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, output, store))
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, tmp_path / "second", store)) == 0
+
+    expected = _expected(repo, exact)
+    checkpoint, terminal = runner._discover_sink(store / expected["run_id"], expected)
+    assert checkpoint is not None and terminal is not None
+    with zipfile.ZipFile(terminal[1]) as archive:
+        result = json.loads(archive.read("result.json"))
+    state = {key: result[key] for key in runner._STATE_KEYS}
+    if mutation == "lower":
+        state["checkpoint_sequence"] = checkpoint["checkpoint_sequence"] - 1
+    elif mutation == "higher":
+        state["checkpoint_sequence"] = checkpoint["checkpoint_sequence"] + 1
+    else:
+        state["records"][0]["scores"]["registered"] += 0.125
+    records = [runner.StageARecord(**payload) for payload in state["records"]]
+    forged_result = runner._result_payload(state, records, 0)
+    payloads = {
+        "receipt.json": runner._receipt_payload(forged_result, failure=False),
+        "result.json": forged_result,
+    }
+    forged = tmp_path / "forged"
+    forged.mkdir()
+    zip_path, checksum_path = runner._write_zip_pair(
+        forged, str(expected["run_id"]), payloads,
+    )
+    with pytest.raises(ValueError, match=message):
+        runner._validate_terminal_pair(
+            ("final", zip_path, checksum_path), expected, checkpoint,
+        )
+
+
+@pytest.mark.integration
+def test_terminal_without_checkpoint_rejects_nonzero_checkpoint_sequence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    expected = _expected(repo, exact)
+    result, _ = _terminal_payload(store, str(expected["run_id"]))
+    state = {key: result[key] for key in runner._STATE_KEYS}
+    state["checkpoint_sequence"] = 1
+    records = [runner.StageARecord(**payload) for payload in state["records"]]
+    forged_result = runner._result_payload(state, records, 0)
+    forged = tmp_path / "forged"
+    forged.mkdir()
+    zip_path, checksum_path = runner._write_zip_pair(
+        forged, str(expected["run_id"]), {
+            "receipt.json": runner._receipt_payload(forged_result, failure=False),
+            "result.json": forged_result,
+        },
+    )
+    with pytest.raises(ValueError, match="latest verified checkpoint"):
+        runner._validate_terminal_pair(
+            ("final", zip_path, checksum_path), expected, None,
+        )
+
+
+@pytest.mark.integration
 def test_missing_token_publishes_sanitized_failure_pair_and_prevents_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, exact = _repo(tmp_path)
     calls = _install_fakes(monkeypatch)
@@ -453,6 +535,81 @@ def test_missing_token_publishes_sanitized_failure_pair_and_prevents_rerun(tmp_p
         tampered, "failure-hugging_face_token_missing", payloads,
     )
     with pytest.raises(ValueError, match="failure terminal result schema"):
+        runner._validate_terminal_pair(
+            ("failure", zip_path, checksum_path), expected, None,
+        )
+
+
+@pytest.mark.integration
+def test_checkpointed_token_missing_failure_is_valid_and_prevents_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch, interrupt_hf_call=2)
+    clock = iter([0.0, 7201.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    _env(monkeypatch)
+    store = tmp_path / "store"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, tmp_path / "first", store))
+
+    calls = _install_fakes(monkeypatch)
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.delenv(runner.TOKEN_ENV, raising=False)
+    assert runner.execute(_args(repo, exact, tmp_path / "second", store)) == 2
+    run_id = _run_id(store)
+    failure_zip = next((store / run_id).glob("failure-*.zip"))
+    with zipfile.ZipFile(failure_zip) as archive:
+        result = json.loads(archive.read("result.json"))
+    assert result["checkpoint_sequence"] == 1
+    assert result["committed_unit_count"] == 1 and len(result["records"]) == 40
+    assert calls["load"] == calls["scores"] == 0
+
+    no_rerun = _install_fakes(monkeypatch)
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, tmp_path / "third", store)) == 2
+    assert no_rerun["load"] == no_rerun["scores"] == 0
+
+
+@pytest.mark.integration
+def test_token_missing_failure_rejects_complete_fixed_roster_forgery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    _env(monkeypatch)
+    output, store = tmp_path / "output", tmp_path / "store"
+    assert runner.execute(_args(repo, exact, output, store)) == 0
+    expected = _expected(repo, exact)
+    result, _ = _terminal_payload(store, str(expected["run_id"]))
+    complete_state = {key: result[key] for key in runner._STATE_KEYS}
+    with pytest.raises(ValueError, match="pending frozen roster"):
+        runner._failure_result_payload(
+            complete_state, "hugging_face_token_missing",
+        )
+
+    forged_result = {
+        **complete_state,
+        "evidence_contract": runner.EVIDENCE_CONTRACT,
+        "result_kind": "operational_failure_not_scientific",
+        "error_class": "hugging_face_token_missing",
+        "rc": 2,
+        "complete": False,
+        "status": "operational_failure",
+        "scientific_evaluation_allowed": False,
+        "claim_ceiling": "descriptive_per_method_response_only",
+        "limitations": list(runner._LIMITATIONS),
+    }
+    forged = tmp_path / "forged"
+    forged.mkdir()
+    zip_path, checksum_path = runner._write_zip_pair(
+        forged, "failure-hugging_face_token_missing", {
+            "receipt.json": runner._receipt_payload(forged_result, failure=True),
+            "result.json": forged_result,
+        },
+    )
+    with pytest.raises(ValueError, match="pending frozen roster"):
         runner._validate_terminal_pair(
             ("failure", zip_path, checksum_path), expected, None,
         )

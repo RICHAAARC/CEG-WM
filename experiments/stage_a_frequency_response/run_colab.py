@@ -463,6 +463,16 @@ def _state_extends(later: dict[str, Any], earlier: dict[str, Any]) -> bool:
     )
 
 
+def _validate_terminal_progress(
+    state: dict[str, Any], checkpoint: dict[str, Any] | None,
+) -> None:
+    checkpoint_sequence = 0 if checkpoint is None else checkpoint["checkpoint_sequence"]
+    if state["checkpoint_sequence"] != checkpoint_sequence:
+        raise ValueError("terminal checkpoint sequence differs from latest verified checkpoint")
+    if checkpoint is not None and not _state_extends(state, checkpoint):
+        raise ValueError("terminal artifact diverges from checkpoints")
+
+
 def _discover_sink(run_store: Path, expected: dict[str, Any]) -> tuple[dict[str, Any] | None, tuple[str, Path, Path] | None]:
     checkpoint_pattern = re.compile(r"checkpoint-(\d{4})-units-(\d{4})\.zip")
     failure_pattern = re.compile(r"failure-[a-z][a-z0-9_]*\.zip")
@@ -529,8 +539,7 @@ def _validate_terminal_pair(terminal: tuple[str, Path, Path], expected: dict[str
             raise ValueError("final terminal result differs from committed public records")
         if not _exact_json(receipt, _receipt_payload(expected_result, failure=False)):
             raise ValueError("final terminal receipt differs from result")
-        if checkpoint and not _state_extends(state, checkpoint):
-            raise ValueError("terminal artifact diverges from checkpoints")
+        _validate_terminal_progress(state, checkpoint)
     else:
         if not isinstance(result, dict) or set(result) != _FAILURE_RESULT_KEYS:
             raise ValueError("failure terminal result schema differs")
@@ -546,8 +555,7 @@ def _validate_terminal_pair(terminal: tuple[str, Path, Path], expected: dict[str
             raise ValueError("failure terminal result differs from frozen contract")
         if not _exact_json(receipt, _receipt_payload(expected_result, failure=True)):
             raise ValueError("failure terminal receipt differs from result")
-        if checkpoint and not _state_extends(state, checkpoint):
-            raise ValueError("failure artifact diverges from checkpoints")
+        _validate_terminal_progress(state, checkpoint)
         rc = 2
     return rc
 
@@ -600,6 +608,21 @@ def _result_payload(state: dict[str, Any], records: list[StageARecord], rc: int)
 def _failure_result_payload(state: dict[str, Any], error_class: str) -> dict[str, Any]:
     if error_class not in _FAILURE_CLASSES:
         raise ValueError("failure class is not frozen")
+    if error_class == "hugging_face_token_missing":
+        committed_count = state.get("committed_unit_count")
+        fixed_count = state.get("fixed_unit_count")
+        frozen_roster = state.get("ordered_unit_ids")
+        if (
+            isinstance(committed_count, bool)
+            or not isinstance(committed_count, int)
+            or isinstance(fixed_count, bool)
+            or not isinstance(fixed_count, int)
+            or not isinstance(frozen_roster, list)
+            or committed_count < 0
+            or committed_count >= fixed_count
+            or not frozen_roster[committed_count:fixed_count]
+        ):
+            raise ValueError("hugging face token missing failure requires pending frozen roster")
     return {
         **state,
         "evidence_contract": EVIDENCE_CONTRACT,
