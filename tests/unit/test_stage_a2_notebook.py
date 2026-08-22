@@ -10,17 +10,28 @@ _NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_col
 
 
 @pytest.mark.unit
-def test_stage_a_hf_v2_notebook_has_one_thin_runnable_terminal_path() -> None:
+def test_stage_a_lf_a3_notebook_has_one_thin_selection_handoff_path() -> None:
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
     sources = ["".join(cell["source"]) for cell in code_cells]
+    markdown = "\n".join(
+        "".join(cell["source"])
+        for cell in document["cells"]
+        if cell["cell_type"] == "markdown"
+    )
 
     assert len(code_cells) == 4
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
     trees = [ast.parse(source) for source in sources]
     combined = "\n".join(sources)
-    assert "refs/heads/stage-a-hf-v2-rankgate" in combined
-    assert "CEG-WM/stage_a_hf_v2_rankgate" in combined
+    assert "refs/heads/stage-a-lf-a3-clean" in combined
+    assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_a3_clean_selection" in combined
+    assert combined.count("a3lfsel-[0-9a-f]{24}") == 2
+    assert "stage-a-hf-v2-rankgate" not in combined
+    assert "stage_a_hf_v2_rankgate" not in combined
+    assert "a2hfv2-" not in combined
+    assert "8-unit/32-record candidate-selection roster" in markdown
+    assert "external supervisor validation and Agent5 adjudication" in markdown
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
     terminal_index = len(code_cells) - 1
