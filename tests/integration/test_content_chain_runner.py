@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,15 @@ from types import SimpleNamespace
 import numpy as np
 from PIL import Image
 import pytest
+import torch
 
+from cegwm.method.hf import FrozenHFPublicAssets
+from cegwm.method.lf import (
+    LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    FrozenLFPublicAssets,
+)
 from cegwm.protocol.content_chain import load_content_adaptive_dual_branch_clean_protocol
 from experiments import run_content_adaptive_dual_branch_clean as runner
 
@@ -72,9 +81,17 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
 
     score_calls = 0
 
-    def scores(image: Image.Image, key: bytes, wrong: tuple[bytes, ...], received: object):
+    def scores(
+        image: Image.Image,
+        key: bytes,
+        wrong: tuple[bytes, ...],
+        hf_assets: object,
+        lf_assets: object,
+    ):
         nonlocal score_calls
-        del image, key, received
+        del image, key
+        assert hf_assets is assets.hf_public_assets
+        assert lf_assets is assets.lf_public_assets
         is_joint = score_calls % 2 == 0
         score_calls += 1
         registered = 0.9 if is_joint else 0.2
@@ -84,7 +101,6 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     monkeypatch.setattr(runner, "run_sd35_content_adaptive", adaptive)
     monkeypatch.setattr(runner, "run_sd35_plain", plain)
     monkeypatch.setattr(runner, "_blind_scores", scores)
-    monkeypatch.setattr(runner, "score_content_image", lambda *args: None)
     monkeypatch.setenv(runner.KEY_ENV, "runner-key-value-01")
     monkeypatch.setenv(runner.TOKEN_ENV, "hf_test")
     output = tmp_path / "result.json"
@@ -103,6 +119,8 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     assert all(metric["probe_evaluation_count"] == 32 for metric in result["unit_aggregate_metrics"])
     serialized = output.read_text(encoding="utf-8")
     assert all(word not in serialized for word in ("attention_map", "tile_weights", "latents", "deltas", "probe_state"))
+    assert "runner-key-value-01" not in serialized
+    assert "hf_test" not in serialized
 
 
 @pytest.mark.integration
@@ -129,3 +147,52 @@ def test_runner_keeps_failed_unit_in_fixed_denominator_and_never_claims_completi
     assert len(result["records"]) == 16
     assert all(record["status"] == "operational_failure" for record in result["records"])
     assert all("private" not in failure for failure in result["failed_units"])
+
+
+class _BlindVAE(torch.nn.Module):
+    def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
+        return SimpleNamespace(latent_dist=SimpleNamespace(mode=lambda: pixels))
+
+
+class _BlindProcessor:
+    def preprocess(self, image: Image.Image) -> torch.Tensor:
+        del image
+        return torch.zeros((1, 3, 2, 2))
+
+
+@pytest.mark.integration
+def test_recorded_score_helper_accepts_only_ordinary_image_keys_and_frozen_public_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parameters = tuple(inspect.signature(runner._blind_scores).parameters)
+    assert parameters == (
+        "image", "key", "wrong_keys", "hf_public_assets", "lf_public_assets",
+    )
+    vae, processor = _BlindVAE(), _BlindProcessor()
+    image_processor_id = "stabilityai/stable-diffusion-3.5-medium:image_processor"
+    hf_assets = FrozenHFPublicAssets(vae, processor, image_processor_id)
+    lf_assets = FrozenLFPublicAssets(
+        vae, processor, image_processor_id, LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        LF_BLOCKNORM_DETECTOR_STATISTIC_ID, LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    )
+    wrong_keys = tuple(f"wrong-{index:02d}".encode() for index in range(16))
+    monkeypatch.setattr(runner, "score_lf_image", lambda image, key, assets: float(len(key)))
+    monkeypatch.setattr(runner, "score_hf_image", lambda image, key, assets: float(len(key) + 2))
+    values = runner._blind_scores(
+        Image.new("RGB", (4, 4)), b"registered", wrong_keys, hf_assets, lf_assets,
+    )
+    assert values["joint"]["registered"] == min(
+        values["lf"]["registered"], values["hf"]["registered"]
+    )
+    assert all(
+        values["joint"][label] == min(values["lf"][label], values["hf"][label])
+        for label in values["joint"]
+    )
+    with pytest.raises(ValueError, match="RGB"):
+        runner._blind_scores(
+            Image.new("L", (4, 4)), b"registered", wrong_keys, hf_assets, lf_assets,
+        )
+    with pytest.raises(TypeError, match="FrozenHFPublicAssets"):
+        runner._blind_scores(
+            Image.new("RGB", (4, 4)), b"registered", wrong_keys, object(), lf_assets,
+        )

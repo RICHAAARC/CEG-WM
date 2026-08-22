@@ -11,9 +11,36 @@ from typing import Any, Mapping
 
 _UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
 _ALLOWED_DETECTION_INPUTS = ("image", "detection_key", "frozen_public_assets")
-_FORBIDDEN_DETECTION_INPUTS = {
-    "original_image", "prompt", "embed_record", "private_latent", "embedding_latent",
-    "embed_side_route", "route", "mask", "cached_qk", "qk",
+_CONTENT_ANALYSIS = {
+    "asset_id": "facebook/dinov2-small",
+    "attention_implementation": "eager",
+    "attention_layer": "last",
+    "attention_statistic": "mean_head_cls_to_patch",
+    "tile_grid": [4, 4],
+    "tile_count": 16,
+    "probe_evaluations_per_tile": {"lf": 1, "hf": 1},
+    "probe_evaluations_per_unit": 32,
+    "probe_relative_l2": 0.001,
+    "probe_measurement": "actual_callback_dtype_candidate_minus_complete_current_callback_latent",
+    "probe_independence": "each_probe_relative_to_complete_current_callback_latent_non_cumulative_never_evolving",
+    "probe_domain": "public_key_independent_branch_tile_public_shape_v1",
+    "probe_domain_forbidden_inputs": [
+        "detection_key", "unit", "prompt", "seed", "content", "source", "candidate_outcome", "results",
+    ],
+    "signals": ["semantic_attention", "texture_energy", "lf_probe_response", "hf_probe_response"],
+    "signal_requirement": "each_has_nonzero_neutral_counterfactual_allocation_effect",
+    "export": "irreversible_aggregate_scalars_only",
+}
+_DETECTION_ACCESS = {
+    "allowed_inputs": list(_ALLOWED_DETECTION_INPUTS),
+    "forbidden_inputs": [
+        "original_image", "prompt", "embed_record", "private_latent", "embedding_latent",
+        "embed_side_route", "route", "mask", "cached_qk", "qk",
+    ],
+    "threshold_status": "deferred_calibration_not_stage_a",
+    "hf_detector": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
+    "lf_detector": "frozen_lf_final_rgb_public_vae_block_centered_normalized_median_correlation",
+    "joint_score": "min(s_LF,s_HF)",
 }
 
 
@@ -120,24 +147,7 @@ def _validate_config(config: Mapping[str, Any]) -> None:
     }:
         raise ValueError("content-adaptive generation runtime differs")
     analysis = _mapping(config, "content_analysis")
-    if (
-        analysis.get("asset_id") != "facebook/dinov2-small"
-        or analysis.get("attention_implementation") != "eager"
-        or analysis.get("attention_layer") != "last"
-        or analysis.get("attention_statistic") != "mean_head_cls_to_patch"
-        or analysis.get("tile_grid") != [4, 4]
-        or analysis.get("tile_count") != 16
-        or analysis.get("probe_evaluations_per_tile") != {"lf": 1, "hf": 1}
-        or analysis.get("probe_evaluations_per_unit") != 32
-        or analysis.get("probe_relative_l2") != 0.001
-        or analysis.get("probe_measurement") != "actual_callback_dtype_candidate_minus_complete_current_callback_latent"
-        or analysis.get("probe_independence") != "each_probe_relative_to_complete_current_callback_latent_non_cumulative_never_evolving"
-        or analysis.get("probe_domain") != "public_key_independent_branch_tile_public_shape_v1"
-        or set(analysis.get("probe_domain_forbidden_inputs", ())) != {"detection_key", "unit", "prompt", "seed", "content", "source", "candidate_outcome", "results"}
-        or analysis.get("signals") != ["semantic_attention", "texture_energy", "lf_probe_response", "hf_probe_response"]
-        or analysis.get("signal_requirement") != "each_has_nonzero_neutral_counterfactual_allocation_effect"
-        or analysis.get("export") != "irreversible_aggregate_scalars_only"
-    ):
+    if analysis != _CONTENT_ANALYSIS:
         raise ValueError("content analysis identity or fail-closed rules differ")
     identities = _mapping(config, "method_identities")
     if identities != {
@@ -161,13 +171,7 @@ def _validate_config(config: Mapping[str, Any]) -> None:
     }:
         raise ValueError("content-adaptive combined budget differs")
     access = _mapping(config, "detection_access")
-    if (
-        tuple(access.get("allowed_inputs", ())) != _ALLOWED_DETECTION_INPUTS
-        or set(access.get("forbidden_inputs", ())) != _FORBIDDEN_DETECTION_INPUTS
-        or access.get("threshold_status") != "deferred_calibration_not_stage_a"
-        or access.get("joint_score") != "min(s_LF,s_HF)"
-        or set(access) != {"allowed_inputs", "forbidden_inputs", "threshold_status", "hf_detector", "lf_detector", "joint_score"}
-    ):
+    if access != _DETECTION_ACCESS:
         raise ValueError("blind detection access differs")
     keying = _mapping(config, "keying")
     if keying != {

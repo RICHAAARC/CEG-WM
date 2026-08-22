@@ -56,10 +56,18 @@ class _ImageProcessor:
 
 
 class _Dino(torch.nn.Module):
-    def __init__(self, *, attentions: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        attentions: bool = True,
+        model_id: str = runtime.DINO_ASSET_ID,
+    ) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)
-        self.config = SimpleNamespace(_attn_implementation="eager")
+        self.config = SimpleNamespace(
+            _attn_implementation="eager",
+            _name_or_path=model_id,
+        )
         self.attentions = attentions
 
     def forward(self, **kwargs: object) -> SimpleNamespace:
@@ -71,9 +79,13 @@ class _Dino(torch.nn.Module):
         return SimpleNamespace(attentions=(attention, attention * 1.25))
 
 
-def _dino_processor(**kwargs: object) -> dict[str, torch.Tensor]:
-    del kwargs
-    return {"pixel_values": torch.ones((1, 3, 16, 16))}
+class _DinoProcessor:
+    def __init__(self, model_id: str = runtime.DINO_ASSET_ID) -> None:
+        self.name_or_path = model_id
+
+    def __call__(self, **kwargs: object) -> dict[str, torch.Tensor]:
+        del kwargs
+        return {"pixel_values": torch.ones((1, 3, 16, 16))}
 
 
 class _Pipeline:
@@ -105,12 +117,13 @@ class _Pipeline:
 
 def _assets(dino: _Dino | None = None) -> runtime.ContentEmbedAssets:
     vae, processor = _VAE(), _ImageProcessor()
-    hf = FrozenHFPublicAssets(vae, processor, "fixture")
+    image_processor_id = "stabilityai/stable-diffusion-3.5-medium:image_processor"
+    hf = FrozenHFPublicAssets(vae, processor, image_processor_id)
     lf = FrozenLFPublicAssets(
-        vae, processor, "fixture", LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        vae, processor, image_processor_id, LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
         LF_BLOCKNORM_DETECTOR_STATISTIC_ID, LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
     )
-    return runtime.ContentEmbedAssets(dino or _Dino(), _dino_processor, hf, lf)
+    return runtime.ContentEmbedAssets(dino or _Dino(), _DinoProcessor(), hf, lf)
 
 
 @pytest.mark.integration
@@ -150,3 +163,22 @@ def test_callback_fails_closed_without_real_dino_attention(monkeypatch: pytest.M
             _Pipeline(assets), "runtime fixture", b"registered-key-01", assets,
             height=512, width=512,
         )
+
+
+@pytest.mark.integration
+def test_content_assets_fail_closed_on_dino_or_frozen_detector_identity_drift() -> None:
+    vae, processor = _VAE(), _ImageProcessor()
+    image_processor_id = "stabilityai/stable-diffusion-3.5-medium:image_processor"
+    hf = FrozenHFPublicAssets(vae, processor, image_processor_id)
+    lf = FrozenLFPublicAssets(
+        vae, processor, image_processor_id, LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        LF_BLOCKNORM_DETECTOR_STATISTIC_ID, LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    )
+    with pytest.raises(RuntimeError, match="model identity"):
+        runtime.ContentEmbedAssets(_Dino(model_id="drifted"), _DinoProcessor(), hf, lf)
+    with pytest.raises(RuntimeError, match="processor identity"):
+        runtime.ContentEmbedAssets(_Dino(), _DinoProcessor("drifted"), hf, lf)
+
+    drifted_hf = FrozenHFPublicAssets(vae, processor, "unfrozen:image_processor")
+    with pytest.raises(ValueError, match="HF frozen carrier"):
+        runtime.ContentEmbedAssets(_Dino(), _DinoProcessor(), drifted_hf, lf)

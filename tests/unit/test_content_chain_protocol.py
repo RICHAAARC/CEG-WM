@@ -18,6 +18,12 @@ def test_protocol_freezes_real_analysis_joint_identity_and_16_record_denominator
     assert len(protocol.roster) == 8
     assert len(protocol.protocol_digest) == 64
     analysis = protocol.config["content_analysis"]
+    assert set(analysis) == {
+        "asset_id", "attention_implementation", "attention_layer", "attention_statistic",
+        "tile_grid", "tile_count", "probe_evaluations_per_tile", "probe_evaluations_per_unit",
+        "probe_relative_l2", "probe_measurement", "probe_independence", "probe_domain",
+        "probe_domain_forbidden_inputs", "signals", "signal_requirement", "export",
+    }
     assert analysis["asset_id"] == "facebook/dinov2-small"
     assert analysis["attention_implementation"] == "eager"
     assert analysis["tile_grid"] == (4, 4)
@@ -30,6 +36,12 @@ def test_protocol_freezes_real_analysis_joint_identity_and_16_record_denominator
     assert protocol.config["execution_flow"]["fixed_records"] == 16
     assert protocol.config["execution_flow"]["flat_score_field_rule"].endswith("StageARecord_v1")
     assert protocol.config["detection_access"]["joint_score"] == "min(s_LF,s_HF)"
+    assert protocol.config["detection_access"]["hf_detector"] == (
+        "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
+    )
+    assert protocol.config["detection_access"]["lf_detector"] == (
+        "frozen_lf_final_rgb_public_vae_block_centered_normalized_median_correlation"
+    )
 
 
 @pytest.mark.unit
@@ -44,4 +56,29 @@ def test_protocol_rejects_per_branch_budget_or_private_detector_input(tmp_path: 
     config["detection_access"]["allowed_inputs"].append("prompt")
     modified.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="detection access"):
+        load_content_adaptive_dual_branch_clean_protocol(modified, _ROSTER)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("section", "field", "value", "message"),
+    [
+        ("content_analysis", "unexpected", "not_allowed", "content analysis"),
+        ("detection_access", "hf_detector", "drifted", "detection access"),
+        ("detection_access", "lf_detector", "drifted", "detection access"),
+        ("detection_access", "unexpected", "not_allowed", "detection access"),
+    ],
+)
+def test_protocol_rejects_extra_analysis_fields_and_detector_identity_drift(
+    tmp_path: Path,
+    section: str,
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    config = json.loads(_CONFIG.read_text(encoding="utf-8"))
+    config[section][field] = value
+    modified = tmp_path / "config.json"
+    modified.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
         load_content_adaptive_dual_branch_clean_protocol(modified, _ROSTER)

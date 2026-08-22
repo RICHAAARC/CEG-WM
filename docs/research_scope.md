@@ -4,9 +4,11 @@
 
 Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image, while an LF branch adds attack complementarity without becoming a generic image-content signal?
 
+The user's latest authorization makes the content-adaptive dual-branch clean route authoritative for this route and supersedes LF-over-HF attack complementarity as its content-chain implementation gate. The earlier complementarity result remains admitted only as historical `SCIENTIFIC_NEGATIVE` evidence; semantic/texture allocation is active within this branch rather than deferred. Original Stage A and the complete content chain remain unfinished, while LF/HF fusion, routing, geometry, fixed-FPR calibration, and paper promotion are not authorized. Local CPU, fake, and runtime checks are engineering evidence only; scientific status requires externally returned real-GPU artifacts, external audit of those artifacts, and a later Agent5 decision.
+
 ## Stage-A decision
 
-Stage A evaluates attribution foundations before content adaptation or geometry:
+The original Stage A evaluates attribution foundations and remains unfinished:
 
 1. reproduce one HF keyed-attribution anchor;
 2. evaluate finite LF candidates independently;
@@ -19,7 +21,6 @@ Stage A may produce a scientific negative. Passing Stage A only authorizes desig
 
 ## Deferred work
 
-- semantic/texture/stability-based spatial allocation;
 - LF/HF combined detector calibration;
 - crop oracle fault decomposition;
 - Q/K synchronization and geometric estimation;

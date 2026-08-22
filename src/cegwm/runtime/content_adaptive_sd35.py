@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -22,9 +22,41 @@ from cegwm.method.content_adaptive import (
     evaluate_public_probes,
     rgb_texture_tiles,
 )
-from cegwm.method.hf import FrozenHFPublicAssets
-from cegwm.method.lf import FrozenLFPublicAssets
+from cegwm.method.hf import HF_CANDIDATE_ID, FrozenHFPublicAssets
+from cegwm.method.lf import (
+    LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    FrozenLFPublicAssets,
+)
 from cegwm.runtime.observation import encode_final_rgb_image, require_ordinary_rgb_image
+
+_SD35_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+_SD35_IMAGE_PROCESSOR_ID = f"{_SD35_MODEL_ID}:image_processor"
+_HF_DETECTOR_STATISTIC_ID = "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
+_HF_EVALUATED_CANDIDATE_ID = "hf_tail_rademacher_v1_rankgate_v2"
+
+
+def _dino_source_identity(asset: Any) -> str | None:
+    for owner in (asset, getattr(asset, "config", None), getattr(asset, "init_kwargs", None)):
+        if isinstance(owner, dict):
+            value = owner.get("_name_or_path") or owner.get("name_or_path")
+        else:
+            value = getattr(owner, "_name_or_path", None) or getattr(owner, "name_or_path", None)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _validate_dino_assets(model: Any, processor: Any) -> None:
+    if _dino_source_identity(model) != DINO_ASSET_ID:
+        raise RuntimeError("content DINO model identity is missing or differs")
+    if _dino_source_identity(processor) != DINO_ASSET_ID:
+        raise RuntimeError("content DINO processor identity is missing or differs")
+    if getattr(getattr(model, "config", None), "_attn_implementation", None) != "eager":
+        raise RuntimeError("content DINO asset must expose eager attention")
+    if not callable(processor):
+        raise TypeError("content DINO processor must be callable")
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,12 +68,37 @@ class ContentEmbedAssets:
     hf_public_assets: FrozenHFPublicAssets
     lf_public_assets: FrozenLFPublicAssets
     dino_asset_id: str = DINO_ASSET_ID
+    hf_detector_statistic_id: str = field(default=_HF_DETECTOR_STATISTIC_ID, init=False)
+    hf_evaluated_candidate_id: str = field(default=_HF_EVALUATED_CANDIDATE_ID, init=False)
 
     def __post_init__(self) -> None:
         if self.dino_asset_id != DINO_ASSET_ID:
             raise ValueError("content embed asset must be facebook/dinov2-small")
-        if getattr(getattr(self.dino_model, "config", None), "_attn_implementation", None) != "eager":
-            raise RuntimeError("content DINO asset must expose eager attention")
+        _validate_dino_assets(self.dino_model, self.dino_processor)
+        if not isinstance(self.hf_public_assets, FrozenHFPublicAssets):
+            raise TypeError("content HF assets must be FrozenHFPublicAssets")
+        if not isinstance(self.lf_public_assets, FrozenLFPublicAssets):
+            raise TypeError("content LF assets must be FrozenLFPublicAssets")
+        hf = self.hf_public_assets
+        lf = self.lf_public_assets
+        if (
+            hf.model_id != _SD35_MODEL_ID
+            or hf.image_processor_id != _SD35_IMAGE_PROCESSOR_ID
+            or hf.candidate_id != HF_CANDIDATE_ID
+            or self.hf_detector_statistic_id != _HF_DETECTOR_STATISTIC_ID
+            or self.hf_evaluated_candidate_id != _HF_EVALUATED_CANDIDATE_ID
+        ):
+            raise ValueError("content HF frozen carrier, detector, or evaluated identity differs")
+        if (
+            lf.model_id != _SD35_MODEL_ID
+            or lf.image_processor_id != _SD35_IMAGE_PROCESSOR_ID
+            or lf.candidate_id != LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
+            or lf.detector_statistic_id != LF_BLOCKNORM_DETECTOR_STATISTIC_ID
+            or lf.evaluated_candidate_id != LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+        ):
+            raise ValueError("content LF frozen carrier, detector, or evaluated identity differs")
+        if hf.vae is not lf.vae or hf.image_processor is not lf.image_processor:
+            raise ValueError("content HF and LF detectors must share the same frozen public observation assets")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +127,7 @@ def load_dino_content_assets(*, token: str | None = None) -> tuple[Any, Any]:
         attn_implementation="eager",
         **kwargs,
     )
-    if getattr(getattr(model, "config", None), "_attn_implementation", None) != "eager":
-        raise RuntimeError("loaded DINO model did not retain eager attention")
+    _validate_dino_assets(model, processor)
     return model, processor
 
 

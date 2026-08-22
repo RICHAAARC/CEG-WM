@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from cegwm.method.content_adaptive import JOINT_EVALUATED_CANDIDATE_ID, score_content_image
+from cegwm.method.content_adaptive import JOINT_EVALUATED_CANDIDATE_ID
 from cegwm.method.hf import FrozenHFPublicAssets, score_hf_image
 from cegwm.method.lf import (
     LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
@@ -31,6 +31,7 @@ from cegwm.runtime.content_adaptive_sd35 import (
     run_sd35_content_adaptive,
 )
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_plain
+from cegwm.runtime.observation import require_ordinary_rgb_image
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from cegwm.shared.prg import prg_bytes
 
@@ -105,14 +106,22 @@ def _blind_scores(
     image: Any,
     key: bytes,
     wrong_keys: tuple[bytes, ...],
-    assets: ContentEmbedAssets,
+    hf_public_assets: FrozenHFPublicAssets,
+    lf_public_assets: FrozenLFPublicAssets,
 ) -> dict[str, dict[str, float]]:
-    lf = {"registered": float(score_lf_image(image, key, assets.lf_public_assets))}
-    hf = {"registered": float(score_hf_image(image, key, assets.hf_public_assets))}
+    ordinary_image = require_ordinary_rgb_image(image)
+    if not isinstance(hf_public_assets, FrozenHFPublicAssets):
+        raise TypeError("blind HF score requires FrozenHFPublicAssets")
+    if not isinstance(lf_public_assets, FrozenLFPublicAssets):
+        raise TypeError("blind LF score requires FrozenLFPublicAssets")
+    if len(wrong_keys) != 16 or any(not isinstance(item, bytes) for item in wrong_keys):
+        raise ValueError("blind score requires exactly 16 normalized external wrong keys")
+    lf = {"registered": float(score_lf_image(ordinary_image, key, lf_public_assets))}
+    hf = {"registered": float(score_hf_image(ordinary_image, key, hf_public_assets))}
     for index, wrong_key in enumerate(wrong_keys):
         label = f"wrong_{index:02d}"
-        lf[label] = float(score_lf_image(image, wrong_key, assets.lf_public_assets))
-        hf[label] = float(score_hf_image(image, wrong_key, assets.hf_public_assets))
+        lf[label] = float(score_lf_image(ordinary_image, wrong_key, lf_public_assets))
+        hf[label] = float(score_hf_image(ordinary_image, wrong_key, hf_public_assets))
     joint = {label: min(lf[label], hf[label]) for label in lf}
     values = {"lf": lf, "hf": hf, "joint": joint}
     if not all(math.isfinite(value) for branch in values.values() for value in branch.values()):
@@ -227,12 +236,14 @@ def execute(args: argparse.Namespace) -> int:
                 pipeline, unit.prompt,
                 height=unit.height, width=unit.width, generator=null_generator,
             )
-            # This call documents and enforces the joint blind score boundary itself.
-            score_content_image(
-                output.image, key, assets.hf_public_assets, assets.lf_public_assets
+            joint_scores = _blind_scores(
+                output.image, key, wrong_keys,
+                assets.hf_public_assets, assets.lf_public_assets,
             )
-            joint_scores = _blind_scores(output.image, key, wrong_keys, assets)
-            null_scores = _blind_scores(primary_null, key, wrong_keys, assets)
+            null_scores = _blind_scores(
+                primary_null, key, wrong_keys,
+                assets.hf_public_assets, assets.lf_public_assets,
+            )
             measurement = output.measurement
             metrics = {
                 "unit_id": unit.unit_id,
