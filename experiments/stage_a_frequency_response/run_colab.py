@@ -414,7 +414,10 @@ def _sink_checkpoints(run_sink: Path, run_id: str, *, identity: dict[str, object
         if stored_sequence != sequence or sequence <= 0:
             raise RuntimeError("checkpoint sequence differs from package name")
         serialized = [record.to_dict() for record in records]
-        if len(serialized) <= len(previous_records) or serialized[:len(previous_records)] != previous_records:
+        if (
+            len(serialized) <= len(previous_records)
+            or _canonical_json_bytes(serialized[:len(previous_records)]) != _canonical_json_bytes(previous_records)
+        ):
             raise RuntimeError("artifact sink checkpoint history diverges")
         previous_records = serialized
         checkpoints.append((state, records, sequence, anchor))
@@ -464,27 +467,30 @@ def _final_payload(identity: dict[str, object], records: list[StageARecord]) -> 
 
 
 def _publish_checkpoint(
-    *, run_dir: Path, run_sink: Path, identity: dict[str, object], records: list[StageARecord],
+    *, run_sink: Path, identity: dict[str, object], records: list[StageARecord],
     sequence: int, anchor: float,
 ) -> None:
     state = _state_payload(identity, records, checkpoint_sequence=sequence, checkpoint_anchor_unix_seconds=anchor)
-    package_dir = run_dir / "packages"
-    local_zip = package_dir / f"checkpoint-{sequence:04d}.zip"
-    local_checksum = package_dir / f"checkpoint-{sequence:04d}.zip.sha256"
     sink_zip, sink_checksum = _checkpoint_paths(run_sink, str(identity["run_id"]), sequence)
-    _write_zip(local_zip, {"state.json": state})
-    _write_checksum(local_checksum, local_zip, published_name=sink_zip.name)
-    _publish_pair(local_zip, local_checksum, sink_zip, sink_checksum)
+    with tempfile.TemporaryDirectory(prefix=f".{identity['run_id']}-checkpoint-") as staging_name:
+        staging = Path(staging_name)
+        local_zip = staging / "checkpoint.zip"
+        local_checksum = staging / "checkpoint.zip.sha256"
+        _write_zip(local_zip, {"state.json": state})
+        _write_checksum(local_checksum, local_zip, published_name=sink_zip.name)
+        _publish_pair(local_zip, local_checksum, sink_zip, sink_checksum)
 
 
-def _publish_final(*, run_dir: Path, run_sink: Path, identity: dict[str, object], records: list[StageARecord]) -> int:
+def _publish_final(*, run_sink: Path, identity: dict[str, object], records: list[StageARecord]) -> int:
     receipt, result = _final_payload(identity, records)
-    local_zip = run_dir / "packages" / "final.zip"
-    local_checksum = run_dir / "packages" / "final.zip.sha256"
     sink_zip, sink_checksum = _final_paths(run_sink, str(identity["run_id"]))
-    _write_zip(local_zip, {"receipt.json": receipt, "result.json": result})
-    _write_checksum(local_checksum, local_zip, published_name=sink_zip.name)
-    _publish_pair(local_zip, local_checksum, sink_zip, sink_checksum)
+    with tempfile.TemporaryDirectory(prefix=f".{identity['run_id']}-final-") as staging_name:
+        staging = Path(staging_name)
+        local_zip = staging / "final.zip"
+        local_checksum = staging / "final.zip.sha256"
+        _write_zip(local_zip, {"receipt.json": receipt, "result.json": result})
+        _write_checksum(local_checksum, local_zip, published_name=sink_zip.name)
+        _publish_pair(local_zip, local_checksum, sink_zip, sink_checksum)
     return int(result["rc"])
 
 
@@ -523,9 +529,25 @@ def execute(args: argparse.Namespace) -> int:
         local_records, local_sequence, local_anchor = _validate_state(_read_json(state_path), identity=identity, plan=plan)
         serialized_local = [record.to_dict() for record in local_records]
         serialized_sink = [record.to_dict() for record in sink_records]
-        if local_sequence != sink_sequence or len(local_records) < len(sink_records) or serialized_local[:len(sink_records)] != serialized_sink:
-            raise RuntimeError("local and artifact-sink histories diverge or roll back")
-        records, checkpoint_sequence, checkpoint_anchor = local_records, local_sequence, local_anchor
+        if not checkpoints:
+            if local_sequence != 0:
+                raise RuntimeError("local checkpoint sequence has no verified sink checkpoint")
+            records, checkpoint_sequence, checkpoint_anchor = local_records, local_sequence, local_anchor
+        else:
+            same_records = _canonical_json_bytes(serialized_local) == _canonical_json_bytes(serialized_sink)
+            if same_records and sink_sequence > local_sequence:
+                records, checkpoint_sequence, checkpoint_anchor = local_records, sink_sequence, sink_anchor
+                _atomic_json_write(
+                    state_path,
+                    _state_payload(
+                        identity, records, checkpoint_sequence=checkpoint_sequence,
+                        checkpoint_anchor_unix_seconds=checkpoint_anchor,
+                    ),
+                )
+            elif same_records and local_sequence == sink_sequence and local_anchor == sink_anchor:
+                records, checkpoint_sequence, checkpoint_anchor = local_records, local_sequence, local_anchor
+            else:
+                raise RuntimeError("local and artifact-sink histories diverge or roll back")
     else:
         records, checkpoint_sequence, checkpoint_anchor = sink_records, sink_sequence, sink_anchor
         _atomic_json_write(
@@ -562,7 +584,7 @@ def execute(args: argparse.Namespace) -> int:
         if now - checkpoint_anchor >= _CHECKPOINT_INTERVAL_SECONDS and len(records) < FIXED_RECORD_COUNT:
             next_sequence = checkpoint_sequence + 1
             _publish_checkpoint(
-                run_dir=run_dir, run_sink=run_sink, identity=identity, records=records,
+                run_sink=run_sink, identity=identity, records=records,
                 sequence=next_sequence, anchor=now,
             )
             checkpoint_sequence, checkpoint_anchor = next_sequence, now
@@ -573,7 +595,7 @@ def execute(args: argparse.Namespace) -> int:
     del detection_key, wrong_keys
     if len(records) != FIXED_RECORD_COUNT:
         raise RuntimeError("fixed 320-record export cannot be formed")
-    return _publish_final(run_dir=run_dir, run_sink=run_sink, identity=identity, records=records)
+    return _publish_final(run_sink=run_sink, identity=identity, records=records)
 
 
 def _parser() -> argparse.ArgumentParser:

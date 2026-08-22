@@ -138,6 +138,19 @@ def _state(local: Path, run_id: str) -> dict[str, object]:
     return json.loads((local / run_id / "state.json").read_text(encoding="utf-8"))
 
 
+def _checkpoint_state(sink: Path, run_id: str) -> tuple[Path, Path, dict[str, object]]:
+    zip_path = next((sink / run_id).glob("*checkpoint*.zip"))
+    checksum_path = zip_path.with_suffix(".zip.sha256")
+    with zipfile.ZipFile(zip_path) as archive:
+        state = json.loads(archive.read("state.json"))
+    return zip_path, checksum_path, state
+
+
+def _rewrite_checkpoint(zip_path: Path, checksum_path: Path, state: dict[str, object]) -> None:
+    runner._write_zip(zip_path, {"state.json": state})
+    runner._write_checksum(checksum_path, zip_path, published_name=zip_path.name)
+
+
 @pytest.mark.integration
 def test_fresh_run_exports_fixed_320_descriptive_only_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, exact = _repo(tmp_path)
@@ -158,6 +171,7 @@ def test_fresh_run_exports_fixed_320_descriptive_only_pair(tmp_path: Path, monke
     assert first_prompt.encode() not in raw
     assert not any(name in raw for name in (b'"private_latent"', b'"carrier"', b'"mask"', b'"route"'))
     assert not list((sink / run_id).glob("*.json")) and not list((sink / run_id).glob("state*"))
+    assert not list((local / run_id).rglob("*.zip")) and not list((local / run_id).rglob("*.sha256"))
 
 
 @pytest.mark.integration
@@ -226,6 +240,64 @@ def test_two_hour_checkpoint_restores_new_runtime_and_short_run_is_final_only(tm
     assert runner.execute(_args(short_repo, short_exact, short_local, short_sink)) == 0
     short_id = _run_id(short_local)
     assert not list((short_sink / short_id).glob("*checkpoint*"))
+
+
+@pytest.mark.integration
+def test_resume_repairs_only_same_records_checkpoint_metadata_lag_without_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch)
+    clock_values = iter([0.0, 7300.0])
+    monkeypatch.setattr(runner.time, "time", lambda: next(clock_values))
+    original_write = runner._atomic_json_write
+
+    def interrupt_after_checkpoint(path: Path, payload: dict[str, object]) -> None:
+        if payload["checkpoint_sequence"] == 1:
+            raise KeyboardInterrupt
+        original_write(path, payload)
+
+    monkeypatch.setattr(runner, "_atomic_json_write", interrupt_after_checkpoint)
+    _env(monkeypatch)
+    local, sink = tmp_path / "local", tmp_path / "sink"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, local, sink))
+    run_id = _run_id(local)
+    before = _state(local, run_id)
+    _, _, durable = _checkpoint_state(sink, run_id)
+    assert before["committed_unit_count"] == durable["committed_unit_count"] == 1
+    assert before["records"] == durable["records"]
+    assert before["checkpoint_sequence"] == 0 and durable["checkpoint_sequence"] == 1
+    assert not list((local / run_id).rglob("*.zip")) and not list((local / run_id).rglob("*.sha256"))
+
+    monkeypatch.setattr(runner, "_atomic_json_write", original_write)
+    resumed = _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "time", lambda: 7400.0)
+    _env(monkeypatch)
+    assert runner.execute(_args(repo, exact, local, sink)) == 0
+    assert resumed["hf"] == resumed["lf"] == resumed["plain"] == 7
+    after = _state(local, run_id)
+    assert after["records"][:40] == before["records"]
+    assert after["checkpoint_sequence"] == 1
+    assert after["checkpoint_anchor_unix_seconds"] == durable["checkpoint_anchor_unix_seconds"]
+
+
+@pytest.mark.integration
+def test_sink_with_fewer_records_than_local_state_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch, interrupt_hf_call=3)
+    clock_values = iter([0.0, 7300.0, 7400.0])
+    monkeypatch.setattr(runner.time, "time", lambda: next(clock_values))
+    _env(monkeypatch)
+    local, sink = tmp_path / "local", tmp_path / "sink"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, local, sink))
+    run_id = _run_id(local)
+    assert _state(local, run_id)["committed_unit_count"] == 2
+    assert _checkpoint_state(sink, run_id)[2]["committed_unit_count"] == 1
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "time", lambda: 7500.0)
+    _env(monkeypatch)
+    with pytest.raises(RuntimeError, match="diverge|roll back"):
+        runner.execute(_args(repo, exact, local, sink))
 
 
 def _interrupted_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, units: int = 1) -> tuple[Path, str, Path, Path, str]:
@@ -329,6 +401,63 @@ def test_local_history_may_extend_but_may_not_diverge_from_sink(tmp_path: Path, 
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("case", ["sink_more_records", "sink_sequence_rollback", "same_sequence_metadata_drift"])
+def test_checkpoint_reconcile_rejects_non_metadata_lag_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    repo, exact = _repo(tmp_path)
+    interrupt_call = 3 if case in {"sink_more_records", "sink_sequence_rollback"} else 2
+    _install_fakes(monkeypatch, interrupt_hf_call=interrupt_call)
+    if case == "sink_more_records":
+        clock_values = iter([0.0, 100.0, 7300.0])
+    elif case == "sink_sequence_rollback":
+        clock_values = iter([0.0, 7300.0, 7400.0])
+    else:
+        clock_values = iter([0.0, 7300.0])
+    monkeypatch.setattr(runner.time, "time", lambda: next(clock_values))
+    _env(monkeypatch)
+    local, sink = tmp_path / "local", tmp_path / "sink"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, local, sink))
+    run_id = _run_id(local)
+    state_path = local / run_id / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    if case == "sink_more_records":
+        state["committed_unit_count"] = 1
+        state["ordered_committed_unit_ids"] = state["ordered_committed_unit_ids"][:1]
+        state["records"] = state["records"][:40]
+    elif case == "sink_sequence_rollback":
+        state["checkpoint_sequence"] = 2
+    else:
+        state["checkpoint_anchor_unix_seconds"] += 1.0
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "time", lambda: 7500.0)
+    _env(monkeypatch)
+    with pytest.raises(RuntimeError, match="diverge|roll back"):
+        runner.execute(_args(repo, exact, local, sink))
+
+
+@pytest.mark.integration
+def test_verified_sink_identity_drift_fails_before_local_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch, interrupt_hf_call=2)
+    clock_values = iter([0.0, 7300.0])
+    monkeypatch.setattr(runner.time, "time", lambda: next(clock_values))
+    _env(monkeypatch)
+    local, sink = tmp_path / "local", tmp_path / "sink"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, local, sink))
+    run_id = _run_id(local)
+    zip_path, checksum_path, state = _checkpoint_state(sink, run_id)
+    state["protocol_digest"] = "0" * 64
+    _rewrite_checkpoint(zip_path, checksum_path, state)
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner.time, "time", lambda: 7400.0)
+    _env(monkeypatch)
+    with pytest.raises(ValueError, match="protocol_digest"):
+        runner.execute(_args(repo, exact, local, sink))
+
+
+@pytest.mark.integration
 def test_checkpoint_orphan_fails_closed_before_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, exact = _repo(tmp_path)
     _install_fakes(monkeypatch, interrupt_hf_call=2)
@@ -346,6 +475,42 @@ def test_checkpoint_orphan_fails_closed_before_resume(tmp_path: Path, monkeypatc
     _env(monkeypatch)
     with pytest.raises(RuntimeError, match="orphan"):
         runner.execute(_args(repo, exact, local, sink))
+
+
+@pytest.mark.integration
+def test_checkpoint_staging_is_removed_after_interrupted_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch)
+    clock_values = iter([0.0, 7300.0])
+    monkeypatch.setattr(runner.time, "time", lambda: next(clock_values))
+    original_publish = runner._publish_pair
+    staging_dirs: list[Path] = []
+
+    def observe_staging(local_zip: Path, local_checksum: Path, sink_zip: Path, sink_checksum: Path) -> None:
+        staging_dirs.append(local_zip.parent)
+        original_publish(local_zip, local_checksum, sink_zip, sink_checksum)
+
+    original_copy = shutil.copyfileobj
+    copy_calls = 0
+
+    def interrupt_second_copy(reader: object, writer: object) -> None:
+        nonlocal copy_calls
+        copy_calls += 1
+        if copy_calls == 2:
+            writer.write(b"partial")
+            raise KeyboardInterrupt
+        original_copy(reader, writer)
+
+    monkeypatch.setattr(runner, "_publish_pair", observe_staging)
+    monkeypatch.setattr(runner.shutil, "copyfileobj", interrupt_second_copy)
+    _env(monkeypatch)
+    local, sink = tmp_path / "local", tmp_path / "sink"
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(repo, exact, local, sink))
+    run_id = _run_id(local)
+    assert len(staging_dirs) == 1 and not staging_dirs[0].exists()
+    assert not list((local / run_id).rglob("*.zip")) and not list((local / run_id).rglob("*.sha256"))
+    assert not list((sink / run_id).glob("*checkpoint*"))
 
 
 @pytest.mark.integration
