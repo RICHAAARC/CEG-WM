@@ -610,3 +610,155 @@ def load_lf_a3_selection_protocol(
         untouched_confirmation=(),
         protocol_digest=digest,
     )
+
+
+def _validate_lf_v2_blocknorm_selection_choices(config: Mapping[str, Any]) -> None:
+    """Validate the single LF-v2 block-normalized selection experiment."""
+
+    _validate_detection_access(config)
+    provenance = _require_mapping(config, "negative_provenance")
+    if provenance != {
+        "lf_a3_exact": "09d84108d5b1ed22dd08a9793b4470268dcf76e9",
+        "lf_a3_outcome": "SCIENTIFIC_NEGATIVE_core_A2_B8_shell_A6_B8_no_winner",
+        "role": "pilot_negative_provenance_only_not_lf_v2_evidence",
+    }:
+        raise ValueError("LF-v2 must preserve the frozen LF-A3 negative provenance")
+
+    runtime = _require_mapping(config, "generation_runtime")
+    if runtime != {
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "inference_steps": 20,
+        "injection_step_index_zero_based": 18,
+        "public_asset_rule": "protocol_model_id_default_hub_resolution_without_revision_or_weight_digest",
+        "primary_null_rule": "one_new_same_prompt_seed_no_callback_image_used_only_as_ordinary_image_observation",
+    }:
+        raise ValueError("LF-v2 runtime identity differs from the frozen production path")
+
+    keying = _require_mapping(config, "keying")
+    if keying != {
+        "task": "zero_bit_keyed_attribution",
+        "normalization": "NFC_UTF8_for_text_exact_bytes_for_binary",
+        "prg": "HMAC_SHA256_counter_v1",
+        "wrong_key_count": 16,
+        "wrong_key_derivation_domain": "stage-a/external-wrong-key/v1",
+        "carrier_domain_public_inputs": "carrier_method_id_shape_channel_only",
+        "primary_null": True,
+        "payload_bits": 0,
+    }:
+        raise ValueError("LF-v2 key and wrong-key semantics differ from the frozen plan")
+
+    candidate = _require_mapping(config, "candidate")
+    if candidate != {
+        "carrier_method_id": "lf_shell_rademacher_v1",
+        "evaluated_candidate_id": "lf_shell_rademacher_v1_blocknorm_median_v2",
+        "detector_statistic_id": "lf_block_centered_normalized_median_corr_v2",
+        "carrier_radial_band": [0.14, 0.24],
+        "carrier_upper_bound": "inclusive",
+        "detector_radial_blocks": [
+            {"radius": [0.14, 0.165], "upper_bound": "exclusive"},
+            {"radius": [0.165, 0.19], "upper_bound": "exclusive"},
+            {"radius": [0.19, 0.215], "upper_bound": "exclusive"},
+            {"radius": [0.215, 0.24], "upper_bound": "inclusive"},
+        ],
+        "detector_statistic": "per_channel_block_independent_centered_cosine_then_equal_weight_deterministic_median",
+        "invalid_block_rule": "empty_zero_variance_invalid_denominator_or_nonfinite_fails_closed",
+    }:
+        raise ValueError("LF-v2 candidate or block-normalized statistic identity differs")
+
+    budget = _require_mapping(config, "budget")
+    if budget != {
+        "total_relative_l2": 0.012,
+        "measurement": "actual_dtype_final_minus_actual_dtype_base",
+        "carrier_change_from_lf_shell_rademacher_v1": "none",
+        "quality_evidence": {
+            "actual_dtype_relative_l2": "enforced",
+            "rgb_psnr": "reported_candidate_image_vs_primary_null",
+            "lpips_alex": "not_evaluated",
+        },
+    }:
+        raise ValueError("LF-v2 must preserve the shell carrier actual-dtype 0.012 budget")
+
+    if config.get("record_arms_in_exact_unit_order") != [
+        "lf_shell_rademacher_v1_blocknorm_median_v2",
+        "primary_null__lf_shell_rademacher_v1_blocknorm_median_v2",
+    ]:
+        raise ValueError("LF-v2 requires the exact paired record-arm order")
+    controls = _require_mapping(config, "controls")
+    if controls != {
+        "correct_key": "registered_detection_key",
+        "wrong_key": "16_external_domain_separated_keys",
+        "primary_null": "same_generation_unit_without_callback_embedding_scored_by_same_detector",
+        "identical_preprocessing_for_registered_and_wrong_keys": True,
+        "report_wrong_key_and_primary_null_separately": True,
+    }:
+        raise ValueError("LF-v2 correct, wrong-key, and primary-null controls differ")
+
+    rule = _require_mapping(config, "selection_rule")
+    if rule != {
+        "fixed_units": 8,
+        "registered_top_rank_among_17_min_units": 7,
+        "paired_lf_registered_gt_primary_null_registered_min_units": 7,
+        "strict_comparison_ties_fail": True,
+        "pass_outcome": "freeze_candidate_for_separately_authorized_untouched_confirmation",
+        "failure_outcome": "SCIENTIFIC_NEGATIVE_AND_STOP",
+        "absolute_margin_role": "reported_effect_size_only_no_pass_threshold",
+        "primary_null_role": "reported_separately_no_pass_cutoff",
+        "formal_threshold_status": "not_introduced_at_stage_a",
+        "formal_fpr_claim": False,
+    }:
+        raise ValueError("LF-v2 scale-free selection gates differ from the preregistration")
+
+    flow = _require_mapping(config, "execution_flow")
+    if flow != {
+        "selection_manifest": "lf_v2_blocknorm_selection.jsonl",
+        "selection_units": 8,
+        "fixed_records": 16,
+        "unit_transaction_record_count": 2,
+        "untouched_confirmation_manifest_reserved": "lf_v2_blocknorm_untouched_confirmation.jsonl",
+        "untouched_confirmation_units_reserved": 8,
+        "failure_units_remain_in_denominator": True,
+        "replacement_units_allowed": False,
+        "outcome_requires_complete_rc0": True,
+        "operational_failure_counts_as_scientific_failure": False,
+        "checkpoint_committed_units_immutable": True,
+        "interrupted_uncommitted_unit_reruns_whole_transaction": True,
+    }:
+        raise ValueError("LF-v2 execution flow must preserve the 8-unit/16-record denominator")
+
+
+def load_lf_v2_blocknorm_selection_protocol(
+    config_path: str | Path,
+    selection_path: str | Path,
+) -> StageAProtocol:
+    """Load only the fresh LF-v2 selection roster; confirmation remains unexecuted."""
+
+    config_file = Path(config_path)
+    with config_file.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    if not isinstance(config, dict) or config.get("protocol_version") != 2:
+        raise ValueError("unsupported LF-v2 block-normalized protocol version")
+    protocol_id = _require_nonempty_text(config, "protocol_id")
+    if protocol_id != "cegwm-stage-a-lf-v2-blocknorm-selection-v1":
+        raise ValueError("unexpected LF-v2 block-normalized protocol identity")
+    _validate_lf_v2_blocknorm_selection_choices(config)
+    selection = _load_units(Path(selection_path), "lf_v2_blocknorm_selection")
+    expected_ids = [f"lfv2-selection-{index:04d}" for index in range(1, 9)]
+    if len(selection) != 8 or [unit.unit_id for unit in selection] != expected_ids:
+        raise ValueError("LF-v2 selection manifest differs from the fresh fixed roster")
+    digest_payload = {
+        "config": config,
+        "candidate_selection": [asdict(unit) for unit in selection],
+    }
+    canonical = json.dumps(
+        digest_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return StageAProtocol(
+        protocol_id=protocol_id,
+        config=_freeze(config),
+        candidate_selection=selection,
+        untouched_confirmation=(),
+        protocol_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    )

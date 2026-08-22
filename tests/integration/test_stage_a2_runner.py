@@ -68,10 +68,11 @@ def _install_fakes(
 ) -> dict[str, int]:
     calls = {"load": 0, "lf": 0, "plain": 0, "score": 0}
     registered_key = normalize_detection_key(_RAW_KEY)
-    assets = {
-        candidate_id: SimpleNamespace(candidate_id=candidate_id)
-        for candidate_id in runner.LF_CANDIDATE_IDS
-    }
+    assets = SimpleNamespace(
+        candidate_id=runner.LF_SHELL_CANDIDATE_ID,
+        evaluated_candidate_id=runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+        detector_statistic_id=runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    )
 
     def fake_load(model_id: str, hf_token: str) -> tuple[object, object]:
         assert model_id == "stabilityai/stable-diffusion-3.5-medium"
@@ -96,8 +97,8 @@ def _install_fakes(
         if calls["lf"] in fail_lf_calls:
             raise RuntimeError("private detail that must not be exported")
         seed = kwargs["generator"].seed
-        candidate_offset = 110 if public_assets.candidate_id == runner.LF_CANDIDATE_IDS[0] else 130
-        pixels = np.full((8, 8, 3), (seed % 20) + candidate_offset, dtype=np.uint8)
+        assert public_assets.candidate_id == runner.LF_SHELL_CANDIDATE_ID
+        pixels = np.full((8, 8, 3), (seed % 20) + 130, dtype=np.uint8)
         return SimpleNamespace(
             image=Image.fromarray(pixels),
             injection_budget=SimpleNamespace(relative_l2=0.011999),
@@ -112,8 +113,8 @@ def _install_fakes(
     def fake_score(image: Image.Image, key: bytes, public_assets: object) -> float:
         calls["score"] += 1
         image_value = float(np.asarray(image).mean() / 255.0)
-        candidate_term = 0.002 if public_assets.candidate_id == runner.LF_CANDIDATE_IDS[1] else 0.0
-        return image_value + candidate_term + (0.25 if key == registered_key else key[0] / 4096.0)
+        assert public_assets.detector_statistic_id == runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID
+        return image_value + (0.25 if key == registered_key else key[0] / 4096.0)
 
     monkeypatch.setattr(runner, "run_sd35_lf", fake_lf)
     monkeypatch.setattr(runner, "run_sd35_plain", fake_plain)
@@ -152,25 +153,29 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
     receipt, result, local_zip = _payloads(output_root, run_id)
 
     assert rc == receipt["rc"] == result["rc"] == 0
-    assert result["completeness"] == "complete_for_lf_a3_clean_selection_execution"
-    assert result["carrier_method_ids"] == list(runner.LF_CANDIDATE_IDS)
+    assert result["completeness"] == "complete_for_lf_v2_blocknorm_selection_execution"
+    assert result["carrier_method_id"] == runner.LF_SHELL_CANDIDATE_ID
+    assert result["evaluated_candidate_id"] == runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+    assert result["detector_statistic_id"] == runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID
     assert result["record_arms_in_exact_unit_order"] == list(runner.RECORD_ARMS)
-    assert len(result["records"]) == 32
-    assert calls == {"load": 1, "lf": 16, "plain": 8, "score": 8 * 4 * 17}
+    assert len(result["records"]) == 16
+    assert calls == {"load": 1, "lf": 8, "plain": 8, "score": 8 * 2 * 17}
     assert Counter(record["unit_id"] for record in result["records"]) == {
-        f"selection-{index:04d}": 4 for index in range(1, 9)
+        f"lfv2-selection-{index:04d}": 2 for index in range(1, 9)
     }
     for index in range(8):
-        assert [record["arm"] for record in result["records"][index * 4 : index * 4 + 4]] == list(
+        assert [record["arm"] for record in result["records"][index * 2 : index * 2 + 2]] == list(
             runner.RECORD_ARMS
         )
     evidence = result["clean_selection_evidence"]
     assert evidence["candidate_outcome_allowed"] is True
     assert evidence["evaluation_status"] == "candidate_outcome"
-    assert evidence["candidate_selection_outcome"] == "winner_selected"
-    assert evidence["selected_candidate_id"] in runner.LF_CANDIDATE_IDS
+    assert evidence["candidate_selection_outcome"] == (
+        "candidate_frozen_for_separate_confirmation_authorization"
+    )
+    assert evidence["selected_candidate_id"] == runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
     assert evidence["fixed_unit_count"] == 8
-    assert evidence["fixed_record_count"] == 32
+    assert evidence["fixed_record_count"] == 16
     assert evidence["median_margin_is_gate"] is False
     assert evidence["primary_null_cutoff_is_gate"] is False
     assert evidence["formal_fpr_claim"] is False
@@ -186,7 +191,7 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
         exported = b"".join(archive.read(name) for name in archive.namelist()) + stored_sha.read_bytes()
     assert _RAW_KEY.encode() not in exported
     assert _HF_TOKEN.encode() not in exported
-    assert b"A red ceramic teapot" not in exported
+    assert b"A copper watering can" not in exported
     for forbidden in (b"private_latent", b'"carrier":', b'"mask":', b"traceback"):
         assert forbidden not in exported
 
@@ -201,7 +206,7 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
     first_calls = _install_fakes(
         monkeypatch,
         fail_lf_calls=frozenset({1}),
-        interrupt_lf_call=5,
+        interrupt_lf_call=3,
     )
     clock = iter([0.0, 100.0, 7201.0])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
@@ -214,11 +219,11 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
     checkpoint_zip = next((store_root / run_id).glob("checkpoint-*.zip"))
     with zipfile.ZipFile(checkpoint_zip) as archive:
         state = json.loads(archive.read("state.json"))
-    assert state["committed_unit_ids"] == ["selection-0001", "selection-0002"]
-    assert len(state["records"]) == 8
-    assert [record["status"] for record in state["records"][:4]] == ["operational_failure"] * 4
+    assert state["committed_unit_ids"] == ["lfv2-selection-0001", "lfv2-selection-0002"]
+    assert len(state["records"]) == 4
+    assert [record["status"] for record in state["records"][:2]] == ["operational_failure"] * 2
     assert first_calls["plain"] == 3
-    assert first_calls["lf"] == 5
+    assert first_calls["lf"] == 3
 
     resumed_calls = _install_fakes(monkeypatch)
     monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
@@ -229,9 +234,9 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
 
     assert rc == receipt["rc"] == 1
     assert resumed_calls["plain"] == 6
-    assert resumed_calls["lf"] == 12
-    assert len(result["records"]) == 32
-    assert result["records"][:4] == state["records"][:4]
+    assert resumed_calls["lf"] == 6
+    assert len(result["records"]) == 16
+    assert result["records"][:2] == state["records"][:2]
     evidence = result["clean_selection_evidence"]
     assert evidence["evaluation_status"] == "not_evaluable_operational"
     assert evidence["selected_candidate_id"] is None
@@ -271,12 +276,14 @@ def _record(
 
 def _expected() -> dict[str, object]:
     return {
-        "run_id": "a3lfsel-test",
+        "run_id": "lfv2sel-test",
         "resolved_exact": "1" * 40,
         "protocol_digest": "2" * 64,
         "key_public_digest": "3" * 64,
-        "ordered_roster_unit_ids": [f"selection-{index:04d}" for index in range(1, 9)],
-        "carrier_method_ids": list(runner.LF_CANDIDATE_IDS),
+        "ordered_roster_unit_ids": [f"lfv2-selection-{index:04d}" for index in range(1, 9)],
+        "carrier_method_id": runner.LF_SHELL_CANDIDATE_ID,
+        "evaluated_candidate_id": runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+        "detector_statistic_id": runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
         "rank_gate_a_min_units": 7,
         "rank_gate_b_min_units": 7,
     }
@@ -285,63 +292,49 @@ def _expected() -> dict[str, object]:
 def _selection_records(
     expected: dict[str, object],
     *,
-    core_gate_a: int = 8,
-    core_gate_b: int = 8,
-    shell_gate_a: int = 8,
-    shell_gate_b: int = 8,
-    core_margin: float = 0.1,
-    shell_margin: float = 0.1,
-    core_psnr: float = 40.0,
-    shell_psnr: float = 40.0,
+    gate_a: int = 8,
+    gate_b: int = 8,
+    margin: float = 0.1,
+    psnr: float = 40.0,
 ) -> list[StageARecord]:
     records: list[StageARecord] = []
     for index, unit_id in enumerate(expected["ordered_roster_unit_ids"]):
-        core_wrong = 0.0
-        shell_wrong = 0.0
-        core_registered = core_margin if index < core_gate_a else 0.0
-        shell_registered = shell_margin if index < shell_gate_a else 0.0
-        core_null = core_registered - 0.05 if index < core_gate_b else core_registered
-        shell_null = shell_registered - 0.05 if index < shell_gate_b else shell_registered
+        registered = margin if index < gate_a else 0.0
+        null = registered - 0.05 if index < gate_b else registered
         records.extend([
-            _record(expected, unit_id, runner.RECORD_ARMS[0], core_registered, core_wrong, psnr=core_psnr),
-            _record(expected, unit_id, runner.RECORD_ARMS[1], core_null, -0.2, psnr=core_psnr),
-            _record(expected, unit_id, runner.RECORD_ARMS[2], shell_registered, shell_wrong, psnr=shell_psnr),
-            _record(expected, unit_id, runner.RECORD_ARMS[3], shell_null, -0.2, psnr=shell_psnr),
+            _record(expected, unit_id, runner.RECORD_ARMS[0], registered, 0.0, psnr=psnr),
+            _record(expected, unit_id, runner.RECORD_ARMS[1], null, -0.2, psnr=psnr),
         ])
     return records
 
 
 @pytest.mark.integration
-def test_scale_free_gates_use_strict_ties_complete_denominator_and_frozen_ranking() -> None:
+def test_scale_free_gates_use_strict_ties_and_complete_denominator() -> None:
     expected = _expected()
-    neither = runner._clean_selection_evidence(
-        _selection_records(expected, core_gate_a=6, shell_gate_b=6),
+    failure = runner._clean_selection_evidence(
+        _selection_records(expected, gate_a=6),
         expected,
         candidate_outcome_allowed=True,
     )
-    assert neither["candidate_selection_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
-    assert neither["selected_candidate_id"] is None
+    assert failure["candidate_selection_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
+    assert failure["selected_candidate_id"] is None
 
-    one = runner._clean_selection_evidence(
-        _selection_records(expected, core_gate_a=7, core_gate_b=7, shell_gate_a=6),
+    passed = runner._clean_selection_evidence(
+        _selection_records(expected, gate_a=7, gate_b=7),
         expected,
         candidate_outcome_allowed=True,
     )
-    assert one["selected_candidate_id"] == runner.LF_CANDIDATE_IDS[0]
+    assert passed["selected_candidate_id"] == runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+    facts = passed["candidate_evidence"][runner.LF_BLOCKNORM_EVALUATED_CANDIDATE_ID]
+    assert facts["gate_a_pass"] is True and facts["gate_b_pass"] is True
+    assert "winner_ranking_order" not in passed
 
-    effect_size_ranked = runner._clean_selection_evidence(
-        _selection_records(expected, core_margin=0.05, shell_margin=0.07),
-        expected,
-        candidate_outcome_allowed=True,
+    tie_failure = runner._clean_selection_evidence(
+        _selection_records(expected, gate_a=6, gate_b=6), expected, candidate_outcome_allowed=True
     )
-    assert effect_size_ranked["selected_candidate_id"] == runner.LF_CANDIDATE_IDS[1]
-
-    lexical_tie = runner._clean_selection_evidence(
-        _selection_records(expected), expected, candidate_outcome_allowed=True
-    )
-    assert lexical_tie["selected_candidate_id"] == min(runner.LF_CANDIDATE_IDS)
+    assert tie_failure["candidate_selection_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
     partial = runner._clean_selection_evidence(
-        _selection_records(expected)[:-4], expected, candidate_outcome_allowed=False
+        _selection_records(expected)[:-2], expected, candidate_outcome_allowed=False
     )
     assert partial["evaluation_status"] == "not_evaluable_operational"
     assert partial["candidate_selection_outcome"] is None
@@ -356,13 +349,13 @@ def test_resume_rejects_four_arm_order_or_identity_drift(tmp_path: Path) -> None
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
         "checkpoint_interval_hours": 2.0,
     }
-    transaction = [record.to_dict() for record in _selection_records(expected)[:4]]
+    transaction = [record.to_dict() for record in _selection_records(expected)[:2]]
     transaction[0]["arm"], transaction[1]["arm"] = transaction[1]["arm"], transaction[0]["arm"]
     state = {
         **expected,
         "checkpoint_sequence": 1,
         "committed_unit_count": 1,
-        "committed_unit_ids": ["selection-0001"],
+        "committed_unit_ids": ["lfv2-selection-0001"],
         "records": transaction,
     }
     zip_path = tmp_path / "checkpoint-0001-units-0001.zip"
@@ -374,7 +367,7 @@ def test_resume_rejects_four_arm_order_or_identity_drift(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="four-arm transaction"):
+    with pytest.raises(ValueError, match="paired transaction"):
         runner._resume_state(zip_path, sha_path, expected)
 
 
@@ -457,7 +450,7 @@ def test_run_identity_is_deterministic_and_cli_has_no_mode_or_interval() -> None
     protocol = runner._load_protocol(_ROOT)
     first = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
     second = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
-    assert first == second and first.startswith("a3lfsel-")
+    assert first == second and first.startswith("lfv2sel-")
     actions = runner._parser()._actions
     option_strings = {option for action in actions for option in action.option_strings}
     assert "--run-mode" not in option_strings

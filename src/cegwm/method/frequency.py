@@ -217,3 +217,85 @@ def score_frequency_image(
     if not math.isfinite(score):
         raise RuntimeError("blind frequency score is not finite")
     return score
+
+
+def score_frequency_image_block_centered_normalized_median(
+    image: Any,
+    detection_key: str | bytes | bytearray | memoryview,
+    frozen_public_assets: Any,
+    spec: FrequencyCarrierSpec,
+    radial_blocks: tuple[tuple[float, float, bool], ...],
+) -> float:
+    """Blind equal-weight median of independently centered channel-block correlations."""
+
+    if not radial_blocks:
+        raise ValueError("block-normalized frequency score requires fixed radial blocks")
+    observation = encode_final_rgb_image(
+        image,
+        frozen_public_assets.image_processor,
+        frozen_public_assets.vae,
+    )
+    if observation.shape[0] != 1:
+        raise ValueError("block-normalized frequency score requires one ordinary image")
+    carrier = reconstruct_frequency_carrier(
+        detection_key,
+        tuple(observation.shape),
+        spec,
+        dtype=torch.float32,
+        device=observation.device,
+    )
+    observation_spectrum = torch.fft.rfft2(observation.to(torch.float32), norm="ortho").real
+    carrier_spectrum = torch.fft.rfft2(carrier, norm="ortho").real
+    if not bool(torch.isfinite(observation_spectrum).all()) or not bool(
+        torch.isfinite(carrier_spectrum).all()
+    ):
+        raise ValueError("block-normalized frequency score requires finite spectra")
+
+    _, channels, height, width = observation.shape
+    block_scores: list[float] = []
+    union = torch.zeros(
+        (height, width // 2 + 1),
+        dtype=torch.bool,
+        device=observation.device,
+    )
+    for minimum, maximum, maximum_inclusive in radial_blocks:
+        block_spec = FrequencyCarrierSpec(
+            domain_prefix=spec.domain_prefix,
+            carrier_method_id=spec.carrier_method_id,
+            min_radius=minimum,
+            max_radius=maximum,
+            max_inclusive=maximum_inclusive,
+            total_relative_l2=spec.total_relative_l2,
+        )
+        mask = torch.from_numpy(radial_frequency_mask(height, width, block_spec)).to(
+            device=observation.device
+        )
+        if bool(torch.any(union & mask)):
+            raise ValueError("block-normalized frequency blocks must be disjoint")
+        union |= mask
+        for channel in range(channels):
+            observed = observation_spectrum[0, channel][mask].reshape(-1).to(torch.float64)
+            expected = carrier_spectrum[0, channel][mask].reshape(-1).to(torch.float64)
+            if observed.numel() == 0 or expected.numel() == 0:
+                raise ValueError("block-normalized frequency score contains an empty block")
+            observed = observed - observed.mean()
+            expected = expected - expected.mean()
+            denominator = torch.linalg.vector_norm(observed) * torch.linalg.vector_norm(expected)
+            if not bool(torch.isfinite(denominator)) or float(denominator.item()) == 0.0:
+                raise ValueError(
+                    "block-normalized frequency score requires finite nonzero block variance"
+                )
+            block_score = float(torch.dot(observed, expected).item() / denominator.item())
+            if not math.isfinite(block_score):
+                raise ValueError("block-normalized frequency correlation is not finite")
+            block_scores.append(block_score)
+
+    shell_mask = torch.from_numpy(radial_frequency_mask(height, width, spec)).to(
+        device=observation.device
+    )
+    if not torch.equal(union, shell_mask):
+        raise ValueError("block-normalized frequency blocks must exactly partition the carrier band")
+    score = float(np.median(np.asarray(block_scores, dtype=np.float64)))
+    if not math.isfinite(score):
+        raise RuntimeError("block-normalized median frequency score is not finite")
+    return score

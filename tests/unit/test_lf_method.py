@@ -11,6 +11,9 @@ from PIL import Image
 from cegwm.method import frequency
 from cegwm.method.frequency import radial_frequency_mask
 from cegwm.method.lf import (
+    LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+    LF_BLOCKNORM_RADIAL_BLOCKS,
     LF_CORE_CANDIDATE_ID,
     LF_SHELL_CANDIDATE_ID,
     FrozenLFPublicAssets,
@@ -55,6 +58,17 @@ def _assets(candidate_id: str, vae: _VAE | None = None) -> FrozenLFPublicAssets:
         image_processor=_Processor(),
         image_processor_id="sd35-vae-image-processor-v1",
         candidate_id=candidate_id,
+    )
+
+
+def _blocknorm_assets(vae: _VAE | None = None) -> FrozenLFPublicAssets:
+    return FrozenLFPublicAssets(
+        vae=vae or _VAE(),
+        image_processor=_Processor(),
+        image_processor_id="sd35-vae-image-processor-v1",
+        candidate_id=LF_SHELL_CANDIDATE_ID,
+        detector_statistic_id=LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+        evaluated_candidate_id=LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
     )
 
 
@@ -136,6 +150,21 @@ def test_lf_prg_domain_contains_only_method_and_public_shape(
     ]
     assert not any(token in "/".join(domains) for token in ("unit", "prompt", "seed", "winner", "record"))
 
+    domains.clear()
+    reconstruct_lf_carrier(
+        b"0123456789abcdef0123456789abcdef",
+        (1, 2, 32, 32),
+        _blocknorm_assets(),
+        dtype=torch.float32,
+        device="cpu",
+    )
+    assert domains == [
+        "lf/lf_shell_rademacher_v1/spatial-irfft2-real-rademacher-v1/channels=2/height=32/width=32/channel=0",
+        "lf/lf_shell_rademacher_v1/spatial-irfft2-real-rademacher-v1/channels=2/height=32/width=32/channel=1",
+    ]
+    assert LF_BLOCKNORM_EVALUATED_CANDIDATE_ID not in "/".join(domains)
+    assert LF_BLOCKNORM_DETECTOR_STATISTIC_ID not in "/".join(domains)
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize("candidate_id", [LF_CORE_CANDIDATE_ID, LF_SHELL_CANDIDATE_ID])
@@ -184,3 +213,106 @@ def test_lf_blind_signature_and_final_image_reencode_are_keyed() -> None:
     assert vae.encode_calls == 3
     with pytest.raises(TypeError, match="unexpected keyword"):
         score_lf_image(image, correct_key, assets, prompt="private")
+
+
+@pytest.mark.unit
+def test_blocknorm_radial_blocks_are_disjoint_and_exactly_partition_shell() -> None:
+    assets = _blocknorm_assets()
+    shell = radial_frequency_mask(128, 128, _spec(assets))
+    union = np.zeros_like(shell)
+    for minimum, maximum, inclusive in LF_BLOCKNORM_RADIAL_BLOCKS:
+        block = radial_frequency_mask(
+            128,
+            128,
+            frequency.FrequencyCarrierSpec(
+                domain_prefix="lf",
+                carrier_method_id=LF_SHELL_CANDIDATE_ID,
+                min_radius=minimum,
+                max_radius=maximum,
+                max_inclusive=inclusive,
+                total_relative_l2=0.012,
+            ),
+        )
+        assert not np.any(union & block)
+        union |= block
+    assert np.array_equal(union, shell)
+
+
+@pytest.mark.unit
+def test_blocknorm_blind_score_centers_each_channel_block_and_is_keyed() -> None:
+    correct_key = b"0123456789abcdef0123456789abcdef"
+    wrong_key = b"abcdef0123456789abcdef0123456789"
+    vae = _VAE()
+    assets = _blocknorm_assets(vae)
+    carrier = reconstruct_lf_carrier(
+        correct_key,
+        (1, 4, 64, 64),
+        assets,
+        dtype=torch.float32,
+        device="cpu",
+    )
+    channel_offsets = torch.arange(4, dtype=torch.float32).reshape(1, 4, 1, 1) * 17.0
+    vae.observation = carrier * 3.5 + channel_offsets
+    image = Image.new("RGB", (32, 32), color=(10, 20, 30))
+
+    correct = score_lf_image(image, correct_key, assets)
+    wrong = score_lf_image(image, wrong_key, assets)
+
+    assert correct == pytest.approx(1.0, abs=1e-6)
+    assert correct > wrong
+    assert vae.encode_calls == 2
+
+
+@pytest.mark.unit
+def test_blocknorm_score_fails_closed_on_zero_variance_or_identity_drift() -> None:
+    image = Image.new("RGB", (32, 32), color=(10, 20, 30))
+    assets = _blocknorm_assets()
+    with pytest.raises(ValueError, match="nonzero block variance"):
+        score_lf_image(image, b"0123456789abcdef0123456789abcdef", assets)
+    with pytest.raises(ValueError, match="frozen shell carrier"):
+        FrozenLFPublicAssets(
+            vae=_VAE(),
+            image_processor=_Processor(),
+            image_processor_id="sd35-vae-image-processor-v1",
+            candidate_id=LF_CORE_CANDIDATE_ID,
+            detector_statistic_id=LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+            evaluated_candidate_id=LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+        )
+
+
+@pytest.mark.unit
+def test_blocknorm_equal_weight_median_is_not_dominated_by_one_high_energy_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = b"0123456789abcdef0123456789abcdef"
+    assets = _blocknorm_assets()
+    carrier = reconstruct_lf_carrier(
+        key,
+        (1, 4, 64, 64),
+        assets,
+        dtype=torch.float32,
+        device="cpu",
+    )
+    spectrum = torch.fft.rfft2(carrier, norm="ortho")
+    first = LF_BLOCKNORM_RADIAL_BLOCKS[0]
+    nuisance_mask = torch.from_numpy(
+        radial_frequency_mask(
+            64,
+            64,
+            frequency.FrequencyCarrierSpec(
+                domain_prefix="lf",
+                carrier_method_id=LF_SHELL_CANDIDATE_ID,
+                min_radius=first[0],
+                max_radius=first[1],
+                max_inclusive=first[2],
+                total_relative_l2=0.012,
+            ),
+        )
+    )
+    spectrum[0, 0][nuisance_mask] *= -1000.0
+    observation = torch.fft.irfft2(spectrum, s=(64, 64), norm="ortho")
+    monkeypatch.setattr(frequency, "encode_final_rgb_image", lambda *args: observation)
+
+    score = score_lf_image(Image.new("RGB", (32, 32)), key, assets)
+
+    assert score == pytest.approx(1.0, abs=1e-5)

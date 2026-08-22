@@ -1,4 +1,4 @@
-"""Thin Colab runner for Stage-A A3.1 LF clean candidate selection."""
+"""Thin Colab runner for Stage-A LF-v2 block-normalized clean selection."""
 
 from __future__ import annotations
 
@@ -19,13 +19,18 @@ import numpy as np
 import torch
 
 from cegwm.method.lf import (
-    LF_CANDIDATE_IDS,
+    LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
     LF_INJECTION_STEP_INDEX,
+    LF_SHELL_CANDIDATE_ID,
     FrozenLFPublicAssets,
     score_lf_image,
 )
 from cegwm.protocol.records import StageARecord
-from cegwm.protocol.stage_a import StageAProtocol, load_lf_a3_selection_protocol
+from cegwm.protocol.stage_a import (
+    StageAProtocol,
+    load_lf_v2_blocknorm_selection_protocol,
+)
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_lf, run_sd35_plain
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from cegwm.shared.prg import prg_bytes
@@ -33,20 +38,19 @@ from cegwm.shared.prg import prg_bytes
 KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
 CHECKPOINT_INTERVAL_HOURS = 2.0
-COMPLETE_EXECUTION = "complete_for_lf_a3_clean_selection_execution"
+COMPLETE_EXECUTION = "complete_for_lf_v2_blocknorm_selection_execution"
 INCOMPLETE_EXECUTION = "incomplete_operational_execution"
 SCIENTIFIC_STATUS = "not_adjudicated"
 LIMITATIONS = (
-    "clean_lf_candidate_selection_only_no_confirmation_or_attack_evaluation",
+    "lf_v2_blocknorm_selection_only_no_confirmation_or_attack_evaluation",
+    "block_centered_block_normalized_equal_weight_median_correlation_not_calibrated",
     "lpips_not_evaluated",
     "no_calibrated_threshold_or_fixed_fpr_claim",
     "model_revision_and_weight_digest_not_recorded",
 )
 RECORD_ARMS = (
-    "lf_core_rademacher_v1",
-    "primary_null__lf_core_rademacher_v1",
-    "lf_shell_rademacher_v1",
-    "primary_null__lf_shell_rademacher_v1",
+    LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+    f"primary_null__{LF_BLOCKNORM_EVALUATED_CANDIDATE_ID}",
 )
 _FATAL_ERROR_BY_PHASE = {
     "initialization": "initialization_failure",
@@ -97,34 +101,35 @@ def _git_exact(repo_root: Path, expected_exact: str) -> str:
 
 def _load_protocol(repo_root: Path) -> StageAProtocol:
     config_root = repo_root / "configs" / "stage_a"
-    return load_lf_a3_selection_protocol(
-        config_root / "stage_a_lf_a3_clean_selection_v1.json",
-        config_root / "candidate_selection.jsonl",
+    return load_lf_v2_blocknorm_selection_protocol(
+        config_root / "stage_a_lf_v2_blocknorm_selection_v1.json",
+        config_root / "lf_v2_blocknorm_selection.jsonl",
     )
 
 
-def _candidate_identities(protocol: StageAProtocol) -> tuple[str, str]:
-    return tuple(
-        candidate["carrier_method_id"]
-        for candidate in protocol.config["lf_candidates"]
+def _candidate_identity(protocol: StageAProtocol) -> tuple[str, str, str]:
+    candidate = protocol.config["candidate"]
+    return (
+        candidate["carrier_method_id"],
+        candidate["evaluated_candidate_id"],
+        candidate["detector_statistic_id"],
     )
 
 
-def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, dict[str, FrozenLFPublicAssets]]:
+def _load_pipeline_and_assets(model_id: str, hf_token: str) -> tuple[Any, FrozenLFPublicAssets]:
     if not torch.cuda.is_available():
         raise RuntimeError("cuda_required_for_colab_execution")
     pipeline = load_sd35_pipeline(model_id, torch_dtype=torch.float16, token=hf_token)
     vae = getattr(pipeline, "vae", None)
     image_processor = getattr(pipeline, "image_processor", None)
-    assets = {
-        candidate_id: FrozenLFPublicAssets(
-            vae=vae,
-            image_processor=image_processor,
-            image_processor_id=f"{model_id}:image_processor",
-            candidate_id=candidate_id,
-        )
-        for candidate_id in LF_CANDIDATE_IDS
-    }
+    assets = FrozenLFPublicAssets(
+        vae=vae,
+        image_processor=image_processor,
+        image_processor_id=f"{model_id}:image_processor",
+        candidate_id=LF_SHELL_CANDIDATE_ID,
+        detector_statistic_id=LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+        evaluated_candidate_id=LF_BLOCKNORM_EVALUATED_CANDIDATE_ID,
+    )
     pipeline.to("cuda")
     return pipeline, assets
 
@@ -195,13 +200,15 @@ def _new_state(
     model_id: str,
     key_digest: str,
 ) -> dict[str, Any]:
-    carrier_method_ids = _candidate_identities(protocol)
+    carrier_method_id, evaluated_candidate_id, detector_statistic_id = _candidate_identity(protocol)
     rule = protocol.config["selection_rule"]
     return {
         "run_id": run_id,
         "resolved_exact": resolved_exact,
         "protocol_digest": protocol.protocol_digest,
-        "carrier_method_ids": list(carrier_method_ids),
+        "carrier_method_id": carrier_method_id,
+        "evaluated_candidate_id": evaluated_candidate_id,
+        "detector_statistic_id": detector_statistic_id,
         "record_arms_in_exact_unit_order": list(RECORD_ARMS),
         "ordered_roster_unit_ids": [
             unit.unit_id for unit in protocol.candidate_selection
@@ -210,7 +217,7 @@ def _new_state(
         "key_public_digest": key_digest,
         "rank_gate_a_min_units": rule["registered_top_rank_among_17_min_units"],
         "rank_gate_b_min_units": rule[
-            "paired_lf_registered_gt_candidate_scored_primary_null_registered_min_units"
+            "paired_lf_registered_gt_primary_null_registered_min_units"
         ],
         "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
         "checkpoint_sequence": 0,
@@ -238,7 +245,9 @@ def _resume_state(
         "run_id",
         "resolved_exact",
         "protocol_digest",
-        "carrier_method_ids",
+        "carrier_method_id",
+        "evaluated_candidate_id",
+        "detector_statistic_id",
         "record_arms_in_exact_unit_order",
         "ordered_roster_unit_ids",
         "model_id",
@@ -256,17 +265,17 @@ def _resume_state(
         raise ValueError("resume committed units must be an ordered roster prefix")
     if not committed:
         raise ValueError("resume checkpoint cannot be empty")
-    if not isinstance(records, list) or len(records) != len(committed) * 4:
+    if not isinstance(records, list) or len(records) != len(committed) * 2:
         raise ValueError("resume checkpoint record count mismatch")
     if state.get("committed_unit_count") != len(committed):
         raise ValueError("resume checkpoint committed count mismatch")
     for index, unit_id in enumerate(committed):
-        transaction = records[index * 4 : index * 4 + 4]
-        if [record.get("unit_id") for record in transaction] != [unit_id] * 4:
+        transaction = records[index * 2 : index * 2 + 2]
+        if [record.get("unit_id") for record in transaction] != [unit_id] * 2:
             raise ValueError("resume checkpoint record roster mismatch")
         validated = [StageARecord(**record) for record in transaction]
         if [record.arm for record in validated] != list(RECORD_ARMS):
-            raise ValueError("resume checkpoint four-arm transaction mismatch")
+            raise ValueError("resume checkpoint paired transaction mismatch")
         for record in validated:
             if (
                 record.run_id != expected["run_id"]
@@ -288,20 +297,22 @@ def _deterministic_run_id(
     model_id: str,
     key_digest: str,
 ) -> str:
-    carrier_method_ids = _candidate_identities(protocol)
+    carrier_method_id, evaluated_candidate_id, detector_statistic_id = _candidate_identity(protocol)
     identity = {
         "resolved_exact": resolved_exact,
         "protocol_digest": protocol.protocol_digest,
-        "carrier_method_ids": carrier_method_ids,
+        "carrier_method_id": carrier_method_id,
+        "evaluated_candidate_id": evaluated_candidate_id,
+        "detector_statistic_id": detector_statistic_id,
         "model_id": model_id,
         "key_public_digest": key_digest,
         "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
     }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(
-        b"CEG-WM/stage-a-lf-a3-clean-selection/run-id/v1\x00" + canonical.encode("utf-8")
+        b"CEG-WM/stage-a-lf-v2-blocknorm-selection/run-id/v1\x00" + canonical.encode("utf-8")
     )
-    return f"a3lfsel-{digest.hexdigest()[:24]}"
+    return f"lfv2sel-{digest.hexdigest()[:24]}"
 
 
 def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
@@ -320,7 +331,7 @@ def _clean_selection_evidence(
     *,
     candidate_outcome_allowed: bool,
 ) -> dict[str, Any]:
-    """Apply both independent scale-free gates and the frozen winner ranking."""
+    """Apply both scale-free gates to the one frozen LF-v2 candidate."""
 
     roster = expected["ordered_roster_unit_ids"]
     by_unit: dict[str, list[StageARecord]] = {unit_id: [] for unit_id in roster}
@@ -337,17 +348,12 @@ def _clean_selection_evidence(
             raise ValueError("selection evidence record identity mismatch")
         by_unit[record.unit_id].append(record)
 
-    candidates = tuple(expected["carrier_method_ids"])
-    per_candidate: dict[str, dict[str, Any]] = {
-        candidate_id: {
-            "gate_a_count": 0,
-            "gate_b_count": 0,
-            "margins": [],
-            "paired_differences": [],
-            "psnr": [],
-        }
-        for candidate_id in candidates
-    }
+    evaluated_candidate_id = expected["evaluated_candidate_id"]
+    gate_a_count = 0
+    gate_b_count = 0
+    margins: list[float] = []
+    paired_differences: list[float] = []
+    psnr_values: list[float] = []
     successful_unit_count = 0
     unit_evidence: list[dict[str, Any]] = []
     wrong_fields = tuple(f"wrong_{index:02d}" for index in range(16))
@@ -361,8 +367,8 @@ def _clean_selection_evidence(
                 "candidates": {},
             })
             continue
-        if len(transaction) != 4 or [record.arm for record in transaction] != list(RECORD_ARMS):
-            raise ValueError("selection evidence requires the exact four-arm unit transaction")
+        if len(transaction) != 2 or [record.arm for record in transaction] != list(RECORD_ARMS):
+            raise ValueError("selection evidence requires the exact paired unit transaction")
         if any(record.status != "success" for record in transaction):
             unit_evidence.append({
                 "unit_id": unit_id,
@@ -379,28 +385,25 @@ def _clean_selection_evidence(
         ]
         if not all(math.isfinite(value) for value in values):
             raise ValueError("selection evidence contains a nonfinite score")
-        candidate_evidence: dict[str, Any] = {}
-        for candidate_index, candidate_id in enumerate(candidates):
-            candidate_record = transaction[candidate_index * 2]
-            null_record = transaction[candidate_index * 2 + 1]
-            registered = float(candidate_record.scores["registered"])
-            wrong_max = max(float(candidate_record.scores[field]) for field in wrong_fields)
-            null_registered = float(null_record.scores["registered"])
-            margin = registered - wrong_max
-            paired_difference = registered - null_registered
-            gate_a = registered > wrong_max
-            gate_b = registered > null_registered
-            psnr = float(candidate_record.metrics.get("paired_rgb_psnr", float("nan")))
-            budget = float(candidate_record.metrics.get("actual_dtype_relative_l2", float("nan")))
-            if not (math.isfinite(psnr) and math.isfinite(budget) and 0.0 < budget <= 0.012):
-                raise ValueError("selection evidence contains invalid quality or budget evidence")
-            facts = per_candidate[candidate_id]
-            facts["gate_a_count"] += int(gate_a)
-            facts["gate_b_count"] += int(gate_b)
-            facts["margins"].append(margin)
-            facts["paired_differences"].append(paired_difference)
-            facts["psnr"].append(psnr)
-            candidate_evidence[candidate_id] = {
+        candidate_record, null_record = transaction
+        registered = float(candidate_record.scores["registered"])
+        wrong_max = max(float(candidate_record.scores[field]) for field in wrong_fields)
+        null_registered = float(null_record.scores["registered"])
+        margin = registered - wrong_max
+        paired_difference = registered - null_registered
+        gate_a = registered > wrong_max
+        gate_b = registered > null_registered
+        psnr = float(candidate_record.metrics.get("paired_rgb_psnr", float("nan")))
+        budget = float(candidate_record.metrics.get("actual_dtype_relative_l2", float("nan")))
+        if not (math.isfinite(psnr) and math.isfinite(budget) and 0.0 < budget <= 0.012):
+            raise ValueError("selection evidence contains invalid quality or budget evidence")
+        gate_a_count += int(gate_a)
+        gate_b_count += int(gate_b)
+        margins.append(margin)
+        paired_differences.append(paired_difference)
+        psnr_values.append(psnr)
+        candidate_evidence = {
+            evaluated_candidate_id: {
                 "registered_top_rank": gate_a,
                 "paired_lf_registered_gt_primary_null_registered": gate_b,
                 "correct_minus_wrong_key_max": margin,
@@ -410,75 +413,48 @@ def _clean_selection_evidence(
                 "paired_rgb_psnr": psnr,
                 "actual_dtype_relative_l2": budget,
             }
+        }
         successful_unit_count += 1
         unit_evidence.append({"unit_id": unit_id, "status": "success", "candidates": candidate_evidence})
 
-    complete = successful_unit_count == len(roster) == 8 and len(records) == 32
+    complete = successful_unit_count == len(roster) == 8 and len(records) == 16
     outcome_permitted = candidate_outcome_allowed and complete
-    summaries: dict[str, dict[str, Any]] = {}
-    eligible: list[str] = []
-    for candidate_id in candidates:
-        facts = per_candidate[candidate_id]
-        gate_a_pass = facts["gate_a_count"] >= expected["rank_gate_a_min_units"]
-        gate_b_pass = facts["gate_b_count"] >= expected["rank_gate_b_min_units"]
-        is_eligible = gate_a_pass and gate_b_pass
-        if outcome_permitted and is_eligible:
-            eligible.append(candidate_id)
-        summaries[candidate_id] = {
-            "gate_a_registered_top_rank_units": facts["gate_a_count"],
-            "gate_a_required_units": expected["rank_gate_a_min_units"],
-            "gate_a_pass": gate_a_pass if outcome_permitted else None,
-            "gate_b_lf_gt_primary_null_units": facts["gate_b_count"],
-            "gate_b_required_units": expected["rank_gate_b_min_units"],
-            "gate_b_pass": gate_b_pass if outcome_permitted else None,
-            "eligible": is_eligible if outcome_permitted else None,
-            "median_correct_minus_wrong_key_max_effect_size": float(np.median(facts["margins"])) if complete else None,
-            "mean_correct_minus_wrong_key_max_effect_size": float(np.mean(facts["margins"])) if complete else None,
-            "min_correct_minus_wrong_key_max_effect_size": float(min(facts["margins"])) if complete else None,
-            "median_lf_registered_minus_primary_null_registered_effect_size": float(np.median(facts["paired_differences"])) if complete else None,
-            "median_paired_rgb_psnr": float(np.median(facts["psnr"])) if complete else None,
-        }
-
-    winner: str | None = None
-    selection_outcome: str | None = None
+    gate_a_pass = gate_a_count >= expected["rank_gate_a_min_units"]
+    gate_b_pass = gate_b_count >= expected["rank_gate_b_min_units"]
+    candidate_pass = gate_a_pass and gate_b_pass
+    selection_outcome = None
+    selected_candidate_id = None
     if outcome_permitted:
-        if not eligible:
-            selection_outcome = "SCIENTIFIC_NEGATIVE_AND_STOP"
-        elif len(eligible) == 1:
-            winner = eligible[0]
-            selection_outcome = "winner_selected"
+        if candidate_pass:
+            selection_outcome = "candidate_frozen_for_separate_confirmation_authorization"
+            selected_candidate_id = evaluated_candidate_id
         else:
-            winner = sorted(
-                eligible,
-                key=lambda candidate_id: (
-                    -summaries[candidate_id]["gate_a_registered_top_rank_units"],
-                    -summaries[candidate_id]["gate_b_lf_gt_primary_null_units"],
-                    -summaries[candidate_id]["median_correct_minus_wrong_key_max_effect_size"],
-                    -summaries[candidate_id]["median_lf_registered_minus_primary_null_registered_effect_size"],
-                    -summaries[candidate_id]["median_paired_rgb_psnr"],
-                    candidate_id,
-                ),
-            )[0]
-            selection_outcome = "winner_selected"
+            selection_outcome = "SCIENTIFIC_NEGATIVE_AND_STOP"
+    summary = {
+        "gate_a_registered_top_rank_units": gate_a_count,
+        "gate_a_required_units": expected["rank_gate_a_min_units"],
+        "gate_a_pass": gate_a_pass if outcome_permitted else None,
+        "gate_b_lf_gt_primary_null_units": gate_b_count,
+        "gate_b_required_units": expected["rank_gate_b_min_units"],
+        "gate_b_pass": gate_b_pass if outcome_permitted else None,
+        "eligible": candidate_pass if outcome_permitted else None,
+        "median_correct_minus_wrong_key_max_effect_size": float(np.median(margins)) if complete else None,
+        "mean_correct_minus_wrong_key_max_effect_size": float(np.mean(margins)) if complete else None,
+        "min_correct_minus_wrong_key_max_effect_size": float(min(margins)) if complete else None,
+        "median_lf_registered_minus_primary_null_registered_effect_size": float(np.median(paired_differences)) if complete else None,
+        "median_paired_rgb_psnr": float(np.median(psnr_values)) if complete else None,
+    }
     return {
         "candidate_outcome_allowed": outcome_permitted,
         "evaluation_status": (
             "candidate_outcome" if outcome_permitted else "not_evaluable_operational"
         ),
         "candidate_selection_outcome": selection_outcome,
-        "selected_candidate_id": winner,
+        "selected_candidate_id": selected_candidate_id,
         "fixed_unit_count": len(roster),
-        "fixed_record_count": 32,
+        "fixed_record_count": 16,
         "successful_unit_count": successful_unit_count,
-        "candidate_evidence": summaries,
-        "winner_ranking_order": [
-            "gate_a_count_desc",
-            "gate_b_count_desc",
-            "median_correct_minus_wrong_key_max_desc",
-            "median_lf_minus_primary_null_registered_desc",
-            "median_paired_rgb_psnr_desc",
-            "candidate_id_asc",
-        ],
+        "candidate_evidence": {evaluated_candidate_id: summary},
         "median_margin_is_gate": False,
         "mean_margin_is_gate": False,
         "min_margin_is_gate": False,
@@ -561,7 +537,9 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "scientific_status": SCIENTIFIC_STATUS,
         "limitations": list(LIMITATIONS),
         "protocol_digest": receipt["protocol_digest"],
-        "carrier_method_ids": receipt["carrier_method_ids"],
+        "carrier_method_id": receipt["carrier_method_id"],
+        "evaluated_candidate_id": receipt["evaluated_candidate_id"],
+        "detector_statistic_id": receipt["detector_statistic_id"],
         "record_arms_in_exact_unit_order": receipt["record_arms_in_exact_unit_order"],
         "ordered_roster_unit_ids": receipt["ordered_roster_unit_ids"],
         "model_id": receipt["model_id"],
@@ -573,7 +551,7 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "committed_unit_count": receipt["committed_unit_count"],
         "committed_unit_ids": receipt["committed_unit_ids"],
         "fixed_unit_count": 8,
-        "fixed_record_count": 32,
+        "fixed_record_count": 16,
         "records": [record.to_dict() for record in records],
     }
     if "clean_selection_evidence" in receipt:
@@ -702,7 +680,7 @@ def _export_fatal(
     record_payloads = state.get("records", [])
     records = [StageARecord(**record) for record in record_payloads]
     committed_ids = list(state.get("committed_unit_ids", []))
-    if len(records) != len(committed_ids) * 4:
+    if len(records) != len(committed_ids) * 2:
         raise ValueError("fatal package refuses inconsistent committed records")
     approved_exact = (
         args.expected_exact
@@ -721,7 +699,9 @@ def _export_fatal(
         "completeness": INCOMPLETE_EXECUTION,
         "scientific_status": SCIENTIFIC_STATUS,
         "protocol_digest": context.get("protocol_digest"),
-        "carrier_method_ids": list(context.get("carrier_method_ids", [])),
+        "carrier_method_id": context.get("carrier_method_id"),
+        "evaluated_candidate_id": context.get("evaluated_candidate_id"),
+        "detector_statistic_id": context.get("detector_statistic_id"),
         "record_arms_in_exact_unit_order": list(RECORD_ARMS),
         "ordered_roster_unit_ids": list(context.get("ordered_roster_unit_ids", [])),
         "model_id": context.get("model_id"),
@@ -766,8 +746,10 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     context["resolved_exact"] = resolved_exact
     protocol = _load_protocol(repo_root)
     context["protocol_digest"] = protocol.protocol_digest
-    carrier_method_ids = _candidate_identities(protocol)
-    context["carrier_method_ids"] = list(carrier_method_ids)
+    carrier_method_id, evaluated_candidate_id, detector_statistic_id = _candidate_identity(protocol)
+    context["carrier_method_id"] = carrier_method_id
+    context["evaluated_candidate_id"] = evaluated_candidate_id
+    context["detector_statistic_id"] = detector_statistic_id
     context["ordered_roster_unit_ids"] = [
         unit.unit_id for unit in protocol.candidate_selection
     ]
@@ -776,7 +758,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         "registered_top_rank_among_17_min_units"
     ]
     context["rank_gate_b_min_units"] = selection_rule[
-        "paired_lf_registered_gt_candidate_scored_primary_null_registered_min_units"
+        "paired_lf_registered_gt_primary_null_registered_min_units"
     ]
     runtime_config = protocol.config["generation_runtime"]
     budget_config = protocol.config["budget"]
@@ -790,7 +772,9 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         runtime_config["inference_steps"] != 20
         or budget_config["total_relative_l2"] != 0.012
         or runtime_config["injection_step_index_zero_based"] != LF_INJECTION_STEP_INDEX
-        or carrier_method_ids != LF_CANDIDATE_IDS
+        or carrier_method_id != LF_SHELL_CANDIDATE_ID
+        or evaluated_candidate_id != LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+        or detector_statistic_id != LF_BLOCKNORM_DETECTOR_STATISTIC_ID
     ):
         raise RuntimeError("protocol_runtime_identity_mismatch")
     if len(protocol.candidate_selection) != 8 or protocol.untouched_confirmation:
@@ -922,7 +906,9 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         "completeness": INCOMPLETE_EXECUTION,
         "scientific_status": SCIENTIFIC_STATUS,
         "protocol_digest": protocol.protocol_digest,
-        "carrier_method_ids": list(carrier_method_ids),
+        "carrier_method_id": carrier_method_id,
+        "evaluated_candidate_id": evaluated_candidate_id,
+        "detector_statistic_id": detector_statistic_id,
         "record_arms_in_exact_unit_order": list(RECORD_ARMS),
         "ordered_roster_unit_ids": expected_state["ordered_roster_unit_ids"],
         "model_id": model_id,
@@ -989,46 +975,39 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
                     key_public_digest=key_digest,
                     status="success",
                 )
-                transaction = []
-                for candidate_id in carrier_method_ids:
-                    candidate_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
-                    candidate_assets = assets[candidate_id]
-                    lf_output = run_sd35_lf(
-                        pipeline,
-                        unit.prompt,
-                        detection_key,
-                        candidate_assets,
-                        height=unit.height,
-                        width=unit.width,
-                        generator=candidate_generator,
-                    )
-                    budget_value = float(lf_output.injection_budget.relative_l2)
-                    if not math.isfinite(budget_value) or not 0.0 < budget_value <= 0.012:
-                        raise ValueError("actual_dtype_budget_invalid")
-                    psnr = _psnr(lf_output.image, null_image)
-                    candidate_scores = _scores(
-                        lf_output.image, detection_key, wrong_keys, candidate_assets
-                    )
-                    null_scores = _scores(
-                        null_image, detection_key, wrong_keys, candidate_assets
-                    )
-                    transaction.extend([
-                        StageARecord(
-                            arm=candidate_id,
-                            scores=candidate_scores,
-                            metrics={
-                                "actual_dtype_relative_l2": budget_value,
-                                "paired_rgb_psnr": psnr,
-                            },
-                            **common,
-                        ),
-                        StageARecord(
-                            arm=f"primary_null__{candidate_id}",
-                            scores=null_scores,
-                            metrics={"paired_rgb_psnr": psnr},
-                            **common,
-                        ),
-                    ])
+                candidate_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
+                lf_output = run_sd35_lf(
+                    pipeline,
+                    unit.prompt,
+                    detection_key,
+                    assets,
+                    height=unit.height,
+                    width=unit.width,
+                    generator=candidate_generator,
+                )
+                budget_value = float(lf_output.injection_budget.relative_l2)
+                if not math.isfinite(budget_value) or not 0.0 < budget_value <= 0.012:
+                    raise ValueError("actual_dtype_budget_invalid")
+                psnr = _psnr(lf_output.image, null_image)
+                candidate_scores = _scores(lf_output.image, detection_key, wrong_keys, assets)
+                null_scores = _scores(null_image, detection_key, wrong_keys, assets)
+                transaction = [
+                    StageARecord(
+                        arm=evaluated_candidate_id,
+                        scores=candidate_scores,
+                        metrics={
+                            "actual_dtype_relative_l2": budget_value,
+                            "paired_rgb_psnr": psnr,
+                        },
+                        **common,
+                    ),
+                    StageARecord(
+                        arm=f"primary_null__{evaluated_candidate_id}",
+                        scores=null_scores,
+                        metrics={"paired_rgb_psnr": psnr},
+                        **common,
+                    ),
+                ]
                 if [record.arm for record in transaction] != list(RECORD_ARMS):
                     raise RuntimeError("unit_transaction_arm_order_mismatch")
             except Exception:
@@ -1077,7 +1056,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
             flush=True,
         )
 
-    if len(records) != 32:
+    if len(records) != 16:
         raise RuntimeError("fixed_record_roster_not_preserved")
     receipt["rc"] = 1 if any_failure else 0
     receipt["completeness"] = _completeness_for_rc(receipt["rc"])

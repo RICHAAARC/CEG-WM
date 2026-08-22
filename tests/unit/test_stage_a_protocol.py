@@ -9,6 +9,7 @@ import pytest
 from cegwm.protocol.stage_a import (
     load_hf_v2_confirmation_protocol,
     load_lf_a3_selection_protocol,
+    load_lf_v2_blocknorm_selection_protocol,
     load_stage_a_protocol,
 )
 
@@ -18,6 +19,11 @@ _SELECTION = _ROOT / "configs" / "stage_a" / "candidate_selection.jsonl"
 _CONFIRMATION = _ROOT / "configs" / "stage_a" / "untouched_confirmation.jsonl"
 _V2_CONFIG = _ROOT / "configs" / "stage_a" / "stage_a_hf_v2_rankgate.json"
 _LF_A3_CONFIG = _ROOT / "configs" / "stage_a" / "stage_a_lf_a3_clean_selection_v1.json"
+_LF_V2_CONFIG = _ROOT / "configs" / "stage_a" / "stage_a_lf_v2_blocknorm_selection_v1.json"
+_LF_V2_SELECTION = _ROOT / "configs" / "stage_a" / "lf_v2_blocknorm_selection.jsonl"
+_LF_V2_CONFIRMATION = (
+    _ROOT / "configs" / "stage_a" / "lf_v2_blocknorm_untouched_confirmation.jsonl"
+)
 
 
 @pytest.mark.unit
@@ -192,3 +198,84 @@ def test_lf_a3_protocol_rejects_band_gate_candidate_or_denominator_drift(
 
     with pytest.raises(ValueError, match=message):
         load_lf_a3_selection_protocol(modified, _SELECTION)
+
+
+@pytest.mark.unit
+def test_lf_v2_protocol_freezes_blocknorm_identity_fresh_rosters_and_scale_free_gates() -> None:
+    protocol = load_lf_v2_blocknorm_selection_protocol(_LF_V2_CONFIG, _LF_V2_SELECTION)
+    assert protocol.protocol_id == "cegwm-stage-a-lf-v2-blocknorm-selection-v1"
+    assert [unit.unit_id for unit in protocol.candidate_selection] == [
+        f"lfv2-selection-{index:04d}" for index in range(1, 9)
+    ]
+    assert protocol.untouched_confirmation == ()
+    candidate = protocol.config["candidate"]
+    assert candidate["carrier_method_id"] == "lf_shell_rademacher_v1"
+    assert candidate["evaluated_candidate_id"] == (
+        "lf_shell_rademacher_v1_blocknorm_median_v2"
+    )
+    assert candidate["detector_statistic_id"] == (
+        "lf_block_centered_normalized_median_corr_v2"
+    )
+    assert candidate["detector_radial_blocks"] == (
+        MappingProxyType({"radius": (0.14, 0.165), "upper_bound": "exclusive"}),
+        MappingProxyType({"radius": (0.165, 0.19), "upper_bound": "exclusive"}),
+        MappingProxyType({"radius": (0.19, 0.215), "upper_bound": "exclusive"}),
+        MappingProxyType({"radius": (0.215, 0.24), "upper_bound": "inclusive"}),
+    )
+    assert protocol.config["execution_flow"]["fixed_records"] == 16
+    assert protocol.config["selection_rule"]["registered_top_rank_among_17_min_units"] == 7
+    assert protocol.config["selection_rule"][
+        "paired_lf_registered_gt_primary_null_registered_min_units"
+    ] == 7
+    assert protocol.config["selection_rule"]["absolute_margin_role"] == (
+        "reported_effect_size_only_no_pass_threshold"
+    )
+
+    old_units = [
+        json.loads(line)
+        for path in (_SELECTION, _CONFIRMATION)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    new_selection = [
+        json.loads(line) for line in _LF_V2_SELECTION.read_text(encoding="utf-8").splitlines()
+    ]
+    new_confirmation = [
+        json.loads(line)
+        for line in _LF_V2_CONFIRMATION.read_text(encoding="utf-8").splitlines()
+    ]
+    for field in ("unit_id", "source_id", "prompt", "seed"):
+        old_values = {unit[field] for unit in old_units}
+        selection_values = {unit[field] for unit in new_selection}
+        confirmation_values = {unit[field] for unit in new_confirmation}
+        assert old_values.isdisjoint(selection_values | confirmation_values)
+        assert selection_values.isdisjoint(confirmation_values)
+        assert len(selection_values) == len(confirmation_values) == 8
+    assert [unit["split"] for unit in new_confirmation] == [
+        "lf_v2_blocknorm_untouched_confirmation"
+    ] * 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("candidate", "carrier_method_id"), "changed", "candidate or block-normalized"),
+        (("candidate", "detector_statistic_id"), "changed", "candidate or block-normalized"),
+        (("selection_rule", "registered_top_rank_among_17_min_units"), 6, "scale-free"),
+        (("selection_rule", "absolute_margin_min"), 0.08, "scale-free"),
+        (("execution_flow", "fixed_records"), 32, "8-unit/16-record"),
+        (("budget", "total_relative_l2"), 0.013, "0.012 budget"),
+    ],
+)
+def test_lf_v2_protocol_rejects_method_gate_or_denominator_drift(
+    tmp_path: Path,
+    path: tuple[str, str],
+    value: object,
+    message: str,
+) -> None:
+    payload = json.loads(_LF_V2_CONFIG.read_text(encoding="utf-8"))
+    payload[path[0]][path[1]] = value
+    modified = tmp_path / "invalid-lf-v2.json"
+    modified.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_lf_v2_blocknorm_selection_protocol(modified, _LF_V2_SELECTION)

@@ -13,6 +13,7 @@ from cegwm.method.frequency import (
     inject_frequency_carrier,
     reconstruct_frequency_carrier,
     score_frequency_image,
+    score_frequency_image_block_centered_normalized_median,
 )
 from cegwm.shared.numerics import BudgetMeasurement
 
@@ -21,6 +22,19 @@ LF_SHELL_CANDIDATE_ID = "lf_shell_rademacher_v1"
 LF_CANDIDATE_IDS = (LF_CORE_CANDIDATE_ID, LF_SHELL_CANDIDATE_ID)
 LF_INJECTION_STEP_INDEX = 18
 LF_TOTAL_RELATIVE_L2 = 0.012
+LF_GLOBAL_NORMALIZED_CORRELATION_ID = "lf_global_centered_normalized_corr_v1"
+LF_BLOCKNORM_DETECTOR_STATISTIC_ID = (
+    "lf_block_centered_normalized_median_corr_v2"
+)
+LF_BLOCKNORM_EVALUATED_CANDIDATE_ID = (
+    "lf_shell_rademacher_v1_blocknorm_median_v2"
+)
+LF_BLOCKNORM_RADIAL_BLOCKS = (
+    (0.14, 0.165, False),
+    (0.165, 0.19, False),
+    (0.19, 0.215, False),
+    (0.215, 0.24, True),
+)
 _MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 _BANDS = {
     LF_CORE_CANDIDATE_ID: (0.04, 0.14, False),
@@ -36,6 +50,8 @@ class FrozenLFPublicAssets:
     image_processor: Any
     image_processor_id: str
     candidate_id: str
+    detector_statistic_id: str = LF_GLOBAL_NORMALIZED_CORRELATION_ID
+    evaluated_candidate_id: str | None = None
     model_id: str = _MODEL_ID
     injection_step_index: int = LF_INJECTION_STEP_INDEX
     total_relative_l2: float = LF_TOTAL_RELATIVE_L2
@@ -45,6 +61,19 @@ class FrozenLFPublicAssets:
             raise ValueError("LF public assets must use the frozen SD3.5 model identity")
         if self.candidate_id not in LF_CANDIDATE_IDS:
             raise ValueError("LF candidate identity is not one of the two frozen candidates")
+        if self.detector_statistic_id == LF_GLOBAL_NORMALIZED_CORRELATION_ID:
+            if self.evaluated_candidate_id not in {None, self.candidate_id}:
+                raise ValueError("legacy LF evaluated identity must match its carrier identity")
+        elif self.detector_statistic_id == LF_BLOCKNORM_DETECTOR_STATISTIC_ID:
+            if (
+                self.candidate_id != LF_SHELL_CANDIDATE_ID
+                or self.evaluated_candidate_id != LF_BLOCKNORM_EVALUATED_CANDIDATE_ID
+            ):
+                raise ValueError(
+                    "LF-v2 block-normalized detector requires the frozen shell carrier and evaluated identity"
+                )
+        else:
+            raise ValueError("LF detector statistic identity is not frozen")
         if self.injection_step_index != LF_INJECTION_STEP_INDEX:
             raise ValueError("LF injection step differs from the frozen Stage-A plan")
         if not math.isclose(self.total_relative_l2, LF_TOTAL_RELATIVE_L2, abs_tol=0.0):
@@ -105,9 +134,13 @@ def score_lf_image(
 ) -> float:
     """Blind LF score from only ordinary image, key, and frozen public assets."""
 
-    return score_frequency_image(
-        image,
-        detection_key,
-        frozen_public_assets,
-        _spec(frozen_public_assets),
-    )
+    spec = _spec(frozen_public_assets)
+    if frozen_public_assets.detector_statistic_id == LF_BLOCKNORM_DETECTOR_STATISTIC_ID:
+        return score_frequency_image_block_centered_normalized_median(
+            image,
+            detection_key,
+            frozen_public_assets,
+            spec,
+            LF_BLOCKNORM_RADIAL_BLOCKS,
+        )
+    return score_frequency_image(image, detection_key, frozen_public_assets, spec)
