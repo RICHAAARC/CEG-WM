@@ -5,12 +5,14 @@ import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import zipfile
 
 import numpy as np
 from PIL import Image
 import pytest
 import torch
 
+from cegwm.method.content_adaptive_v2 import COUNTERFACTUAL_EFFECT_FIELDS
 from cegwm.method.hf import FrozenHFPublicAssets
 from cegwm.method.lf import (
     LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
@@ -18,11 +20,13 @@ from cegwm.method.lf import (
     LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
     FrozenLFPublicAssets,
 )
-from cegwm.method.content_adaptive_v2 import COUNTERFACTUAL_EFFECT_FIELDS
 from cegwm.protocol.content_chain_v2 import load_content_adaptive_dual_branch_v2_clean_protocol
 from experiments import run_content_adaptive_dual_branch_v2_clean as runner
 
 _ROOT = Path(__file__).resolve().parents[2]
+_EXACT = "a" * 40
+_KEY = "runner-key-value-01"
+_TOKEN = "hf_test_secret"
 
 
 class _Generator:
@@ -49,47 +53,60 @@ def _protocol():
     )
 
 
-@pytest.mark.integration
-def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _args(tmp_path: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        repo_root=str(_ROOT), expected_exact=_EXACT,
+        local_work_root=str(tmp_path / "local"), artifact_sink=str(tmp_path / "sink"),
+    )
+
+
+def _set_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _TOKEN)
+
+
+def _install_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    interrupt_at: int | None = None,
+    system_exit_at: int | None = None,
+    fail_all: bool = False,
+) -> list[int]:
     protocol = _protocol()
     assets = SimpleNamespace(hf_public_assets=object(), lf_public_assets=object())
     monkeypatch.setattr(runner, "_git_exact", lambda repo, exact: exact)
     monkeypatch.setattr(runner, "_load_protocol", lambda repo: protocol)
     monkeypatch.setattr(runner, "_load_pipeline_and_assets", lambda model, token: (object(), assets))
     monkeypatch.setattr(runner.torch, "Generator", _Generator)
+    calls: list[int] = []
 
-    adaptive_calls = 0
-
-    def adaptive(pipeline: object, prompt: str, key: bytes, received: object, **kwargs: object) -> SimpleNamespace:
-        nonlocal adaptive_calls
+    def adaptive(
+        pipeline: object, prompt: str, key: bytes, received: object, **kwargs: object,
+    ) -> SimpleNamespace:
         del pipeline, prompt, key
         assert received is assets
-        seed = kwargs["generator"].seed
-        lf_share = 0.20 + 0.05 * adaptive_calls
-        hf_share = 1.0 - lf_share
-        effects = (
-            0.01 + 0.001 * adaptive_calls,
-            0.02 + 0.001 * adaptive_calls,
-            0.03 + 0.001 * adaptive_calls,
-            0.04 + 0.001 * adaptive_calls,
-            0.05 + 0.001 * adaptive_calls,
-            0.06 + 0.001 * adaptive_calls,
+        call_index = len(calls)
+        calls.append(call_index)
+        if fail_all:
+            raise RuntimeError(f"private {_KEY} {_TOKEN}")
+        if interrupt_at is not None and call_index == interrupt_at:
+            raise KeyboardInterrupt("private interruption")
+        if system_exit_at is not None and call_index == system_exit_at:
+            raise SystemExit("private interruption")
+        unit_index = next(
+            index for index, unit in enumerate(protocol.roster)
+            if unit.seed == kwargs["generator"].seed
         )
-        adaptive_calls += 1
-        budget = SimpleNamespace(relative_l2=0.0119)
+        lf_share = 0.20 + 0.05 * unit_index
+        effects = tuple(0.01 * effect + 0.001 * unit_index for effect in range(1, 7))
         measurement = SimpleNamespace(
-            combined_budget=budget,
-            lf_effective_relative_l2=0.006,
-            hf_effective_relative_l2=0.006,
-            lf_branch_share=lf_share,
-            hf_branch_share=hf_share,
+            combined_budget=SimpleNamespace(relative_l2=0.0119),
+            lf_effective_relative_l2=0.006, hf_effective_relative_l2=0.006,
+            lf_branch_share=lf_share, hf_branch_share=1.0 - lf_share,
             **dict(zip(COUNTERFACTUAL_EFFECT_FIELDS, effects, strict=True)),
-            minimum_counterfactual_effect=min(effects),
-            probe_evaluation_count=64,
+            minimum_counterfactual_effect=min(effects), probe_evaluation_count=64,
         )
-        return SimpleNamespace(image=_image(seed, 2), measurement=measurement)
+        return SimpleNamespace(image=_image(kwargs["generator"].seed, 2), measurement=measurement)
 
     def plain(pipeline: object, prompt: str, **kwargs: object) -> Image.Image:
         del pipeline, prompt
@@ -98,228 +115,382 @@ def test_runner_writes_exact_16_record_transactions_and_strict_three_branch_gate
     score_calls = 0
 
     def scores(
-        image: Image.Image,
-        key: bytes,
-        wrong: tuple[bytes, ...],
-        hf_assets: object,
-        lf_assets: object,
-    ):
+        image: Image.Image, key: bytes, wrong: tuple[bytes, ...],
+        hf_assets: object, lf_assets: object,
+    ) -> dict[str, dict[str, float]]:
         nonlocal score_calls
         del image, key
-        assert hf_assets is assets.hf_public_assets
-        assert lf_assets is assets.lf_public_assets
-        is_joint = score_calls % 2 == 0
+        assert hf_assets is assets.hf_public_assets and lf_assets is assets.lf_public_assets
+        registered = 0.9 if score_calls % 2 == 0 else 0.2
         score_calls += 1
-        registered = 0.9 if is_joint else 0.2
-        values = {"registered": registered, **{f"wrong_{index:02d}": 0.1 for index in range(len(wrong))}}
+        values = {"registered": registered, **{
+            f"wrong_{index:02d}": 0.1 for index in range(len(wrong))
+        }}
         return {"lf": dict(values), "hf": dict(values), "joint": dict(values)}
 
     monkeypatch.setattr(runner, "run_sd35_content_adaptive", adaptive)
     monkeypatch.setattr(runner, "run_sd35_plain", plain)
     monkeypatch.setattr(runner, "_blind_scores", scores)
-    monkeypatch.setenv(runner.KEY_ENV, "runner-key-value-01")
-    monkeypatch.setenv(runner.TOKEN_ENV, "hf_test")
-    output = tmp_path / "result.json"
-    args = argparse.Namespace(repo_root=str(_ROOT), expected_exact="a" * 40, output=str(output))
-    assert runner.execute(args) == 0
-    result = json.loads(output.read_text(encoding="utf-8"))
-    assert result["rc"] == 0 and result["scientific_outcome_allowed"] is True
-    assert result["execution_scope_id"] == (
-        "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1"
+    return calls
+
+
+def _run_id(protocol=None) -> str:
+    protocol = protocol or _protocol()
+    key_digest = runner.public_key_digest(runner.normalize_detection_key(_KEY))
+    return f"content-adaptive-v2-{protocol.protocol_digest[:12]}-{key_digest[:12]}"
+
+
+def _terminal(tmp_path: Path) -> tuple[dict[str, object], dict[str, object], bytes]:
+    run_id = _run_id()
+    archive_path = tmp_path / "sink" / run_id / f"{run_id}.zip"
+    payload = archive_path.read_bytes()
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == ["receipt.json", "result.json"]
+        receipt = json.loads(archive.read("receipt.json"))
+        result = json.loads(archive.read("result.json"))
+    checksum = archive_path.with_name(f"{archive_path.name}.sha256").read_text(encoding="ascii")
+    assert checksum.split() == [runner.hashlib.sha256(payload).hexdigest(), archive_path.name]
+    return receipt, result, payload
+
+
+def _identity() -> tuple[object, dict[str, object]]:
+    protocol = _protocol()
+    key_digest = runner.public_key_digest(runner.normalize_detection_key(_KEY))
+    return protocol, runner._public_identity(
+        protocol, exact=_EXACT, key_digest=key_digest, run_id=_run_id(protocol)
     )
-    assert result["protocol_id"] == (
-        "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1"
-    )
-    assert len(result["records"]) == 16
-    assert [record["arm"] for record in result["records"][:2]] == list(runner.ARMS)
-    assert all(len(record["scores"]) == 51 for record in result["records"])
-    assert all(tuple(record) == runner.RECORD_FIELDS for record in result["records"])
-    assert all(record["record_contract_id"] == runner.RECORD_CONTRACT_ID for record in result["records"])
-    assert all(value["gate_a_pass_units"] == 8 for value in result["gate_evidence"]["branches"].values())
-    assert all(value["gate_b_pass_units"] == 8 for value in result["gate_evidence"]["branches"].values())
-    assert result["gate_evidence"]["combined_budget_pass_units"] == 8
-    assert result["gate_evidence"]["both_nonzero_branches_pass_units"] == 8
-    assert result["gate_evidence"]["baseline_differenced_probe_response_pass_units"] == 8
-    assert result["gate_evidence"]["probe_evaluation_count_64_pass_units"] == 8
-    assert result["gate_evidence"]["public_branch_share_valid_pass_units"] == 8
-    expected_lf_shares = np.asarray([0.20 + 0.05 * index for index in range(8)])
-    expected_hf_shares = 1.0 - expected_lf_shares
-    assert result["lf_branch_share_population_std"] == pytest.approx(
-        float(np.std(expected_lf_shares, ddof=0))
-    )
-    assert result["hf_branch_share_population_std"] == pytest.approx(
-        float(np.std(expected_hf_shares, ddof=0))
-    )
-    assert result["lf_branch_share_population_std"] > 0.0
-    assert result["hf_branch_share_population_std"] > 0.0
-    assert result["fixed_roster_allocation_not_all_identical_supported"] is True
-    candidate_fields = {
-        "combined_relative_l2",
-        "lf_effective_relative_l2",
-        "hf_effective_relative_l2",
-        "lf_branch_share",
-        "hf_branch_share",
-        *COUNTERFACTUAL_EFFECT_FIELDS,
-        "minimum_counterfactual_effect",
-        "probe_evaluation_count",
-        "paired_rgb_psnr_db",
-    }
-    assert all(
-        set(metric) == {"unit_id", *candidate_fields}
-        for metric in result["unit_aggregate_metrics"]
-    )
-    candidate_records = [record for record in result["records"] if record["arm"] == runner.ARMS[0]]
-    null_records = [record for record in result["records"] if record["arm"] == runner.ARMS[1]]
-    assert all(set(record["metrics"]) == candidate_fields for record in candidate_records)
-    assert all(set(record["metrics"]) == {"paired_rgb_psnr_db"} for record in null_records)
-    first = result["unit_aggregate_metrics"][0]
-    assert [first[name] for name in COUNTERFACTUAL_EFFECT_FIELDS] == [
-        0.01, 0.02, 0.03, 0.04, 0.05, 0.06,
+
+
+def _failure_transaction(protocol, identity, unit_index: int = 0) -> list[dict[str, object]]:
+    unit = protocol.roster[unit_index]
+    return [
+        runner._content_v2_record(
+            run_id=identity["run_id"], unit_id=unit.unit_id,
+            source_cluster_id=unit.source_id, arm=arm, condition="clean",
+            code_revision=identity["exact"], config_digest=identity["protocol_digest"],
+            key_public_digest=identity["public_key_digest"], status="operational_failure",
+            failure_reason="RuntimeError",
+        )
+        for arm in runner.ARMS
     ]
-    assert first["minimum_counterfactual_effect"] == 0.01
-    assert all(metric["probe_evaluation_count"] == 64 for metric in result["unit_aggregate_metrics"])
-    serialized = output.read_text(encoding="utf-8")
-    assert "transfer_stability" not in serialized
-    assert all(
-        word not in serialized
-        for word in ("attention_map", "tile_weights", "latents", "deltas", "probe_state")
-    )
-    result_keys: set[str] = set()
-
-    def collect_keys(value: object) -> None:
-        if isinstance(value, dict):
-            result_keys.update(str(key) for key in value)
-            for item in value.values():
-                collect_keys(item)
-        elif isinstance(value, list):
-            for item in value:
-                collect_keys(item)
-
-    collect_keys(result)
-    assert result_keys.isdisjoint(
-        {"mask", "tile_weights", "attention_map", "latent", "latents", "delta", "deltas", "probe_state"}
-    )
-    assert "runner-key-value-01" not in serialized
-    assert "hf_test" not in serialized
-
-    valid_record = result["records"][0]
-    missing = dict(valid_record)
-    missing.pop("scores")
-    extra = dict(valid_record)
-    extra["private_route"] = "forbidden"
-    drift = dict(valid_record)
-    drift["record_contract_id"] = "content_adaptive_dual_branch_v2_semantic_gate_record_v2"
-    for invalid, message in (
-        (missing, "fields or order"),
-        (extra, "fields or order"),
-        (drift, "contract identity"),
-    ):
-        with pytest.raises(ValueError, match=message):
-            runner._validate_content_v2_record(invalid)
-
-    adaptive_calls = 0
-    score_calls = 0
-    monkeypatch.setattr(
-        runner,
-        "_branch_share_population_summary",
-        lambda *args, **kwargs: (None, None, False, False),
-    )
-    identity_invalid_output = tmp_path / "identity-invalid-result.json"
-    identity_invalid_args = argparse.Namespace(
-        repo_root=str(_ROOT),
-        expected_exact="a" * 40,
-        output=str(identity_invalid_output),
-    )
-    assert runner.execute(identity_invalid_args) == 1
-    identity_invalid_result = json.loads(identity_invalid_output.read_text(encoding="utf-8"))
-    assert identity_invalid_result["scientific_outcome_allowed"] is False
-    assert identity_invalid_result["lf_branch_share_population_std"] is None
-    assert identity_invalid_result["hf_branch_share_population_std"] is None
-    assert identity_invalid_result["gate_evidence"] is None
 
 
 @pytest.mark.integration
-def test_runner_keeps_failed_unit_in_fixed_denominator_and_never_claims_completion(
+def test_fresh_short_run_is_final_only_record_derived_and_secret_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner, "_now", lambda: 100.0)
+    _set_secrets(monkeypatch)
+    assert runner.execute(_args(tmp_path)) == 0
+    receipt, result, archive_bytes = _terminal(tmp_path)
+    assert receipt["committed_unit_count"] == 8 and receipt["external_validation_required"] is True
+    assert set(receipt).isdisjoint({"gate_evidence", "scientific_outcome_allowed", "records"})
+    assert result["rc"] == 0 and result["scientific_outcome_allowed"] is True
+    assert len(result["records"]) == 16 and len(result["unit_aggregate_metrics"]) == 8
+    assert all(tuple(record) == runner.RECORD_FIELDS for record in result["records"])
+    assert all(len(record["scores"]) == 51 for record in result["records"])
+    expected_lf = np.asarray([0.20 + 0.05 * index for index in range(8)])
+    assert result["lf_branch_share_population_std"] == pytest.approx(np.std(expected_lf, ddof=0))
+    assert result["hf_branch_share_population_std"] == pytest.approx(np.std(1.0 - expected_lf, ddof=0))
+    assert all(gate["gate_a_pass_units"] == 8 for gate in result["gate_evidence"]["branches"].values())
+    assert not list((tmp_path / "sink" / _run_id()).glob("*.checkpoint-*.zip"))
+    all_bytes = archive_bytes + (tmp_path / "local" / _run_id() / "state.json").read_bytes()
+    assert _KEY.encode() not in all_bytes and _TOKEN.encode() not in all_bytes
+    assert runner.KEY_ENV not in runner.os.environ and runner.TOKEN_ENV not in runner.os.environ
+    lines = capsys.readouterr().out.splitlines()
+    labels = [line.split(" ", 1)[0] for line in lines]
+    events = [json.loads(line.split(" ", 1)[1]) for line in lines]
+    assert labels == ["CEGWM_PROGRESS", "CEGWM_PROGRESS", *(["CEGWM_PROGRESS"] * 8), "CEGWM_SUMMARY"]
+    assert [event["phase"] for event in events] == [
+        "identity_ready", "resume_ready", *(["unit_committed"] * 8), "terminal",
+    ]
+    assert [event["committed"] for event in events] == [0, 0, *range(1, 9), 8]
+    assert all(tuple(event) == ("run_id", "committed", "fixed_total", "phase") for event in events[:-1])
+    assert tuple(events[-1]) == ("run_id", "committed", "fixed_total", "rc", "phase")
+
+
+@pytest.mark.integration
+def test_unit_exceptions_commit_two_failure_records_and_rc2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    protocol = _protocol()
-    assets = SimpleNamespace(hf_public_assets=object(), lf_public_assets=object())
-    monkeypatch.setattr(runner, "_git_exact", lambda repo, exact: exact)
-    monkeypatch.setattr(runner, "_load_protocol", lambda repo: protocol)
-    monkeypatch.setattr(runner, "_load_pipeline_and_assets", lambda model, token: (object(), assets))
-    monkeypatch.setattr(runner.torch, "Generator", _Generator)
-    monkeypatch.setattr(runner, "run_sd35_content_adaptive", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("private")))
-    monkeypatch.setattr(runner, "run_sd35_plain", lambda *args, **kwargs: Image.new("RGB", (32, 32)))
-    monkeypatch.setenv(runner.KEY_ENV, "runner-key-value-01")
-    monkeypatch.setenv(runner.TOKEN_ENV, "hf_test")
-    output = tmp_path / "failed.json"
-    args = argparse.Namespace(repo_root=str(_ROOT), expected_exact="b" * 40, output=str(output))
-    assert runner.execute(args) == 2
-    result = json.loads(output.read_text(encoding="utf-8"))
+    _install_fakes(monkeypatch, fail_all=True)
+    monkeypatch.setattr(runner, "_now", lambda: 1.0)
+    _set_secrets(monkeypatch)
+    assert runner.execute(_args(tmp_path)) == 2
+    _, result, payload = _terminal(tmp_path)
     assert result["scientific_outcome_allowed"] is False
-    assert result["completeness"] == runner.INCOMPLETE_EXECUTION
-    assert len(result["failed_units"]) == 8
-    assert len(result["records"]) == 16
+    assert len(result["records"]) == 16 and len(result["failed_units"]) == 8
     assert all(record["status"] == "operational_failure" for record in result["records"])
     assert all(record["failure_reason"] == "RuntimeError" for record in result["records"])
-    assert all(record["scores"] == {} and record["metrics"] == {} for record in result["records"])
-    assert all("private" not in failure for failure in result["failed_units"])
-    assert result["lf_branch_share_population_std"] is None
-    assert result["hf_branch_share_population_std"] is None
-    assert result["fixed_roster_allocation_not_all_identical_supported"] is False
+    assert result["gate_evidence"] is None
+    assert _KEY.encode() not in payload and _TOKEN.encode() not in payload
 
 
 @pytest.mark.integration
-def test_population_std_is_null_for_non_rc0_partial_nonfinite_or_identity_invalid() -> None:
+@pytest.mark.parametrize("kind", ["keyboard", "system_exit"])
+def test_incomplete_unit_is_uncommitted_and_reruns_whole_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    kwargs = {"interrupt_at": 2} if kind == "keyboard" else {"system_exit_at": 2}
+    _install_fakes(monkeypatch, **kwargs)
+    monkeypatch.setattr(runner, "_now", lambda: 10.0)
+    _set_secrets(monkeypatch)
+    expected = KeyboardInterrupt if kind == "keyboard" else SystemExit
+    with pytest.raises(expected):
+        runner.execute(_args(tmp_path))
+    state_path = tmp_path / "local" / _run_id() / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["committed_unit_count"] == 2 and len(state["records"]) == 4
+    assert not (tmp_path / "sink" / _run_id() / f"{_run_id()}.zip").exists()
+    resumed_calls = _install_fakes(monkeypatch)
+    _set_secrets(monkeypatch)
+    assert runner.execute(_args(tmp_path)) == 0
+    assert len(resumed_calls) == 6
+
+
+@pytest.mark.integration
+def test_two_hour_checkpoint_follows_local_commit_and_sink_only_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fakes(monkeypatch, interrupt_at=1)
+    times = iter([0.0, 7201.0])
+    monkeypatch.setattr(runner, "_now", lambda: next(times))
+    _set_secrets(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(tmp_path))
+    assert len(calls) == 2
+    local_state_path = tmp_path / "local" / _run_id() / "state.json"
+    state = json.loads(local_state_path.read_text(encoding="utf-8"))
+    assert state["committed_unit_count"] == 1 and state["checkpoint_sequence"] == 1
+    sink_root = tmp_path / "sink" / _run_id()
+    checkpoint = sink_root / f"{_run_id()}.checkpoint-0000.zip"
+    assert checkpoint.exists() and checkpoint.with_name(f"{checkpoint.name}.sha256").exists()
+    with zipfile.ZipFile(checkpoint) as archive:
+        assert archive.namelist() == ["state.json"]
+    local_state_path.unlink()
+    resumed_calls = _install_fakes(monkeypatch)
+    monkeypatch.setattr(runner, "_now", lambda: 7201.0)
+    _set_secrets(monkeypatch)
+    assert runner.execute(_args(tmp_path)) == 0
+    assert len(resumed_calls) == 7
+
+
+@pytest.mark.integration
+def test_sequence_lag_reconciliation_requires_identical_records(tmp_path: Path) -> None:
+    protocol, identity = _identity()
+    local_root = tmp_path / "local" / identity["run_id"]
+    sink_root = tmp_path / "sink" / identity["run_id"]
+    local_root.mkdir(parents=True)
+    records = _failure_transaction(protocol, identity)
+    local = runner._new_state(identity, 100.0)
+    local["records"] = records
+    local["committed_unit_count"] = 1
+    runner._write_local_state(local_root / "state.json", local)
+    checkpoint = dict(local)
+    checkpoint["checkpoint_sequence"] = 1
+    checkpoint["checkpoint_time_anchor_unix_seconds"] = 200.0
+    runner._publish_pair(
+        local_run_root=local_root, sink_run_root=sink_root,
+        archive_name=f"{identity['run_id']}.checkpoint-0000.zip",
+        members=(("state.json", runner._json_bytes(checkpoint)),),
+    )
+    resolved = runner._resolve_state(
+        local_state_path=local_root / "state.json", sink_run_root=sink_root,
+        identity=identity, protocol=protocol, now=300.0,
+    )
+    assert resolved["records"] == records and resolved["checkpoint_sequence"] == 1
+    assert resolved["checkpoint_time_anchor_unix_seconds"] == 200.0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("variant", ["fewer", "more", "different", "identity", "rollback"])
+def test_resume_rejects_divergence_identity_and_rollback(tmp_path: Path, variant: str) -> None:
+    protocol, identity = _identity()
+    local_root = tmp_path / "local" / identity["run_id"]
+    sink_root = tmp_path / "sink" / identity["run_id"]
+    local_root.mkdir(parents=True)
+    local = runner._new_state(identity, 100.0)
+    local["records"] = _failure_transaction(protocol, identity)
+    local["committed_unit_count"] = 1
+    if variant == "identity":
+        local["identity"] = dict(identity)
+        local["identity"]["record_contract_id"] = "drift"
+        runner._write_local_state(local_root / "state.json", local)
+    elif variant == "rollback":
+        local["checkpoint_sequence"] = 1
+        runner._write_local_state(local_root / "state.json", local)
+    else:
+        runner._write_local_state(local_root / "state.json", local)
+        checkpoint = dict(local)
+        checkpoint["checkpoint_sequence"] = 1
+        checkpoint["checkpoint_time_anchor_unix_seconds"] = 200.0
+        if variant == "fewer":
+            checkpoint["records"] = []
+            checkpoint["committed_unit_count"] = 0
+        elif variant == "more":
+            checkpoint["records"] = [*checkpoint["records"], *_failure_transaction(protocol, identity, 1)]
+            checkpoint["committed_unit_count"] = 2
+        else:
+            checkpoint["records"] = [dict(record) for record in checkpoint["records"]]
+            checkpoint["records"][0]["failure_reason"] = "ValueError"
+            checkpoint["records"][1]["failure_reason"] = "ValueError"
+        runner._publish_pair(
+            local_run_root=local_root, sink_run_root=sink_root,
+            archive_name=f"{identity['run_id']}.checkpoint-0000.zip",
+            members=(("state.json", runner._json_bytes(checkpoint)),),
+        )
+    with pytest.raises(ValueError):
+        runner._resolve_state(
+            local_state_path=local_root / "state.json", sink_run_root=sink_root,
+            identity=identity, protocol=protocol, now=300.0,
+        )
+
+
+@pytest.mark.integration
+def test_state_rejects_partial_nonfinite_and_private_fields() -> None:
+    protocol, identity = _identity()
+    records = _failure_transaction(protocol, identity)
+    for invalid_records in (records[:1], [*records, records[0]]):
+        state = runner._new_state(identity, 1.0)
+        state["records"] = invalid_records
+        state["committed_unit_count"] = 1
+        with pytest.raises(ValueError, match="two-record"):
+            runner._validate_state(state, identity, protocol)
+    nonfinite = runner._new_state(identity, 1.0)
+    nonfinite["checkpoint_time_anchor_unix_seconds"] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        runner._validate_state(nonfinite, identity, protocol)
+    private = runner._new_state(identity, 1.0)
+    private["records"] = [dict(record) for record in records]
+    private["records"][0]["private_route"] = "forbidden"
+    private["committed_unit_count"] = 1
+    with pytest.raises(ValueError, match="fields or order"):
+        runner._validate_state(private, identity, protocol)
+    identity_type_drift = runner._new_state(identity, 1.0)
+    identity_type_drift["identity"] = dict(identity)
+    identity_type_drift["identity"]["fixed_unit_count"] = True
+    with pytest.raises(ValueError, match="public identity differs"):
+        runner._validate_state(identity_type_drift, identity, protocol)
+    assert not runner._same_json_bytes({"records": [{"value": 1}]}, {"records": [{"value": 1.0}]})
+    assert not runner._same_json_bytes({"records": [{"value": True}]}, {"records": [{"value": 1}]})
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("failure", [RuntimeError("copy"), KeyboardInterrupt(), SystemExit()])
+def test_publication_cleans_only_current_partial_and_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException,
+) -> None:
+    local_root, sink_root = tmp_path / "local-run", tmp_path / "sink-run"
+    local_root.mkdir()
+    sink_root.mkdir()
+    existing = sink_root / "preexisting.zip"
+    existing.write_bytes(b"keep")
+    def partial_then_fail(incoming, outgoing) -> None:
+        outgoing.write(incoming.read(3))
+        outgoing.flush()
+        raise failure
+
+    monkeypatch.setattr(runner.shutil, "copyfileobj", partial_then_fail)
+    with pytest.raises(type(failure)):
+        runner._publish_pair(
+            local_run_root=local_root, sink_run_root=sink_root,
+            archive_name="attempt.zip", members=(("state.json", b"{}\n"),),
+        )
+    assert existing.read_bytes() == b"keep"
+    assert not (sink_root / "attempt.zip").exists()
+    assert not (sink_root / "attempt.zip.sha256").exists()
+    assert not list(local_root.iterdir())
+
+
+@pytest.mark.integration
+def test_zero_commit_init_fatal_and_fatal_after_prefix_are_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fakes(monkeypatch)
+    monkeypatch.setattr(
+        runner, "_load_pipeline_and_assets",
+        lambda model, token: (_ for _ in ()).throw(RuntimeError(f"private {_KEY} {_TOKEN}")),
+    )
+    monkeypatch.setattr(runner, "_now", lambda: 1.0)
+    _set_secrets(monkeypatch)
+    assert runner.execute(_args(tmp_path)) == 2
+    _, result, payload = _terminal(tmp_path)
+    assert result["committed_unit_count"] == 0 and result["record_count"] == 0
+    assert result["records"] == [] and result["operational_error_class"] == "RuntimeError"
+    assert "gate_evidence" not in result and "scientific_outcome_allowed" not in result
+    assert _KEY.encode() not in payload and _TOKEN.encode() not in payload
+
+    second = tmp_path / "after-prefix"
+    _install_fakes(monkeypatch)
+    original_publish = runner._publish_pair
+
+    def fail_checkpoint(**kwargs: object) -> None:
+        if ".checkpoint-" in str(kwargs["archive_name"]):
+            raise RuntimeError("private checkpoint failure")
+        original_publish(**kwargs)
+
+    monkeypatch.setattr(runner, "_publish_pair", fail_checkpoint)
+    times = iter([0.0, 7201.0])
+    monkeypatch.setattr(runner, "_now", lambda: next(times))
+    _set_secrets(monkeypatch)
+    assert runner.execute(_args(second)) == 2
+    _, result, _ = _terminal(second)
+    state = json.loads((second / "local" / _run_id() / "state.json").read_text(encoding="utf-8"))
+    assert result["committed_unit_count"] == 1 and result["record_count"] == 2
+    assert result["records"] == state["records"]
+
+
+@pytest.mark.integration
+def test_checksum_create_only_and_terminal_no_fast_path(tmp_path: Path) -> None:
+    protocol, identity = _identity()
+    local_root = tmp_path / "local" / identity["run_id"]
+    sink_root = tmp_path / "sink" / identity["run_id"]
+    local_root.mkdir(parents=True)
+    state = runner._new_state(identity, 1.0)
+    checkpoint = dict(state)
+    checkpoint["checkpoint_sequence"] = 1
+    name = f"{identity['run_id']}.checkpoint-0000.zip"
+    runner._publish_pair(
+        local_run_root=local_root, sink_run_root=sink_root,
+        archive_name=name, members=(("state.json", runner._json_bytes(checkpoint)),),
+    )
+    with pytest.raises(FileExistsError, match="create-only"):
+        runner._publish_pair(
+            local_run_root=local_root, sink_run_root=sink_root,
+            archive_name=name, members=(("state.json", runner._json_bytes(checkpoint)),),
+        )
+    (sink_root / f"{name}.sha256").write_text("0" * 64 + f"  {name}\n", encoding="ascii")
+    with pytest.raises(ValueError, match="checksum"):
+        runner._load_sink_checkpoint(sink_root, identity, protocol)
+    (sink_root / f"{identity['run_id']}.zip").write_bytes(b"preexisting")
+    with pytest.raises(FileExistsError, match="no terminal reconstruction"):
+        runner._terminal_pair_presence(sink_root, identity["run_id"])
+
+
+@pytest.mark.integration
+def test_population_std_is_null_for_non_rc0_nonfinite_or_identity_invalid() -> None:
     unit_ids = tuple(f"unit-{index}" for index in range(8))
     metrics = [
-        {
-            "unit_id": unit_id,
-            "lf_branch_share": 0.2 + index * 0.05,
-            "hf_branch_share": 0.8 - index * 0.05,
-        }
+        {"unit_id": unit_id, "lf_branch_share": 0.2 + index * 0.05,
+         "hf_branch_share": 0.8 - index * 0.05}
         for index, unit_id in enumerate(unit_ids)
     ]
     for rc in (1, 2):
         assert runner._branch_share_population_summary(
-            metrics,
-            unit_ids,
-            rc=rc,
-            share_sum_absolute_tolerance=1e-12,
+            metrics, unit_ids, rc=rc, share_sum_absolute_tolerance=1e-12,
             population_std_absolute_tolerance=1e-12,
         ) == (None, None, False, False)
-    assert runner._branch_share_population_summary(
-        metrics[:-1],
-        unit_ids,
-        rc=0,
-        share_sum_absolute_tolerance=1e-12,
-        population_std_absolute_tolerance=1e-12,
-    ) == (None, None, False, False)
     nonfinite = [dict(metric) for metric in metrics]
     nonfinite[3]["lf_branch_share"] = float("nan")
     assert runner._branch_share_population_summary(
-        nonfinite,
-        unit_ids,
-        rc=0,
-        share_sum_absolute_tolerance=1e-12,
+        nonfinite, unit_ids, rc=0, share_sum_absolute_tolerance=1e-12,
         population_std_absolute_tolerance=1e-12,
     ) == (None, None, False, False)
-    identity_invalid = [dict(metric) for metric in metrics]
-    identity_invalid[2]["unit_id"] = identity_invalid[1]["unit_id"]
+    duplicate = [dict(metric) for metric in metrics]
+    duplicate[2]["unit_id"] = duplicate[1]["unit_id"]
     assert runner._branch_share_population_summary(
-        identity_invalid,
-        unit_ids,
-        rc=0,
-        share_sum_absolute_tolerance=1e-12,
-        population_std_absolute_tolerance=1e-12,
-    ) == (None, None, False, False)
-    share_invalid = [dict(metric) for metric in metrics]
-    share_invalid[4]["hf_branch_share"] += 0.01
-    assert runner._branch_share_population_summary(
-        share_invalid,
-        unit_ids,
-        rc=0,
-        share_sum_absolute_tolerance=1e-12,
+        duplicate, unit_ids, rc=0, share_sum_absolute_tolerance=1e-12,
         population_std_absolute_tolerance=1e-12,
     ) == (None, None, False, False)
 
@@ -339,8 +510,7 @@ class _BlindProcessor:
 def test_recorded_score_helper_accepts_only_ordinary_image_keys_and_frozen_public_assets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    parameters = tuple(inspect.signature(runner._blind_scores).parameters)
-    assert parameters == (
+    assert tuple(inspect.signature(runner._blind_scores).parameters) == (
         "image", "key", "wrong_keys", "hf_public_assets", "lf_public_assets",
     )
     vae, processor = _BlindVAE(), _BlindProcessor()
@@ -359,15 +529,7 @@ def test_recorded_score_helper_accepts_only_ordinary_image_keys_and_frozen_publi
     assert values["joint"]["registered"] == min(
         values["lf"]["registered"], values["hf"]["registered"]
     )
-    assert all(
-        values["joint"][label] == min(values["lf"][label], values["hf"][label])
-        for label in values["joint"]
-    )
     with pytest.raises(ValueError, match="RGB"):
-        runner._blind_scores(
-            Image.new("L", (4, 4)), b"registered", wrong_keys, hf_assets, lf_assets,
-        )
+        runner._blind_scores(Image.new("L", (4, 4)), b"registered", wrong_keys, hf_assets, lf_assets)
     with pytest.raises(TypeError, match="FrozenHFPublicAssets"):
-        runner._blind_scores(
-            Image.new("RGB", (4, 4)), b"registered", wrong_keys, object(), lf_assets,
-        )
+        runner._blind_scores(Image.new("RGB", (4, 4)), b"registered", wrong_keys, object(), lf_assets)

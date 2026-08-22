@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import tempfile
+import time
 from typing import Any, Mapping
+import zipfile
 
 import numpy as np
 import torch
@@ -68,6 +73,21 @@ _PUBLIC_OPERATIONAL_ERROR_CLASSES = (
     "FileNotFoundError", "ImportError", "MemoryError", "OSError",
     "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError",
     "OtherOperationalError",
+)
+STATE_SCHEMA_ID = "content_adaptive_dual_branch_v2_resumable_state_v1"
+CHECKPOINT_INTERVAL_HOURS = 2.0
+FIXED_UNIT_COUNT = 8
+RECORDS_PER_UNIT = 2
+FIXED_RECORD_COUNT = 16
+_STATE_FIELDS = (
+    "state_schema_id", "identity", "checkpoint_sequence",
+    "checkpoint_time_anchor_unix_seconds", "committed_unit_count", "records",
+)
+_IDENTITY_FIELDS = (
+    "run_id", "exact", "execution_scope_id", "protocol_id", "protocol_digest",
+    "public_key_digest", "model_id", "ordered_roster", "ordered_arms",
+    "record_contract_id", "fixed_unit_count", "records_per_unit",
+    "fixed_record_count", "checkpoint_interval_hours",
 )
 
 
@@ -499,92 +519,355 @@ def _gate_evidence(records: list[dict[str, Any]], unit_metrics: list[dict[str, A
     }
 
 
-def _write_result(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+def _now() -> float:
+    return time.time()
 
 
-def execute(args: argparse.Namespace) -> int:
-    repo_root = Path(args.repo_root).resolve()
-    output_path = Path(args.output).resolve()
-    key_text = os.environ.get(KEY_ENV, "")
-    token = os.environ.get(TOKEN_ENV, "")
-    if not key_text.strip() or not token.strip():
-        raise RuntimeError("CEG_WM_ROOT_KEY_and_HF_TOKEN_are_required")
-    exact = _git_exact(repo_root, args.expected_exact)
-    protocol = _load_protocol(repo_root)
-    aggregate_contract = protocol.config["aggregate_measurement"]
-    key = normalize_detection_key(key_text)
-    key_digest = public_key_digest(key)
-    run_id = f"content-adaptive-v2-{protocol.protocol_digest[:12]}-{key_digest[:12]}"
-    wrong_keys = _wrong_keys(key, protocol)
-    pipeline, assets = _load_pipeline_and_assets(
-        protocol.config["generation_runtime"]["model_id"], token
+def _json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return (json.dumps(payload, indent=2, allow_nan=False) + "\n").encode("utf-8")
+
+
+def _same_json_bytes(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:
+    """Compare only frozen public identity/history with JSON type and order fidelity."""
+
+    return _json_bytes(first) == _json_bytes(second)
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"nonfinite JSON constant is forbidden: {value}")
+
+
+def _read_json_bytes(payload: bytes) -> Any:
+    return json.loads(payload.decode("utf-8"), parse_constant=_reject_json_constant)
+
+
+def _public_identity(
+    protocol: ContentChainProtocol,
+    *,
+    exact: str,
+    key_digest: str,
+    run_id: str,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "exact": exact,
+        "execution_scope_id": EXECUTION_SCOPE_ID,
+        "protocol_id": protocol.protocol_id,
+        "protocol_digest": protocol.protocol_digest,
+        "public_key_digest": key_digest,
+        "model_id": protocol.config["generation_runtime"]["model_id"],
+        "ordered_roster": [
+            [unit.unit_id, unit.source_id]
+            for unit in protocol.roster
+        ],
+        "ordered_arms": list(ARMS),
+        "record_contract_id": RECORD_CONTRACT_ID,
+        "fixed_unit_count": FIXED_UNIT_COUNT,
+        "records_per_unit": RECORDS_PER_UNIT,
+        "fixed_record_count": FIXED_RECORD_COUNT,
+        "checkpoint_interval_hours": CHECKPOINT_INTERVAL_HOURS,
+    }
+
+
+def _new_state(identity: dict[str, Any], now: float) -> dict[str, Any]:
+    return {
+        "state_schema_id": STATE_SCHEMA_ID,
+        "identity": identity,
+        "checkpoint_sequence": 0,
+        "checkpoint_time_anchor_unix_seconds": _finite_real(now, "checkpoint time anchor"),
+        "committed_unit_count": 0,
+        "records": [],
+    }
+
+
+def _validate_state(
+    state: Any,
+    identity: dict[str, Any],
+    protocol: ContentChainProtocol,
+) -> dict[str, Any]:
+    if not isinstance(state, dict) or tuple(state) != _STATE_FIELDS:
+        raise ValueError("resumable state fields or order differ")
+    if state["state_schema_id"] != STATE_SCHEMA_ID:
+        raise ValueError("resumable state schema identity differs")
+    received_identity = state["identity"]
+    if not isinstance(received_identity, dict) or tuple(received_identity) != _IDENTITY_FIELDS:
+        raise ValueError("resumable public identity fields or order differ")
+    if not _same_json_bytes(received_identity, identity):
+        raise ValueError("resumable public identity differs")
+    sequence = state["checkpoint_sequence"]
+    committed = state["committed_unit_count"]
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise ValueError("checkpoint sequence must be a nonnegative integer")
+    if not isinstance(committed, int) or isinstance(committed, bool) or not 0 <= committed <= 8:
+        raise ValueError("committed unit count differs from the fixed roster")
+    anchor = _finite_real(
+        state["checkpoint_time_anchor_unix_seconds"], "checkpoint time anchor"
     )
-    records: list[dict[str, Any]] = []
+    if anchor < 0.0:
+        raise ValueError("checkpoint time anchor must be nonnegative")
+    records = state["records"]
+    if not isinstance(records, list) or len(records) != committed * RECORDS_PER_UNIT:
+        raise ValueError("committed records are not an exact two-record unit prefix")
+    for unit_index in range(committed):
+        unit = protocol.roster[unit_index]
+        transaction = records[unit_index * 2 : unit_index * 2 + 2]
+        for arm_index, record in enumerate(transaction):
+            if not isinstance(record, dict):
+                raise TypeError("committed record must be a plain JSON object")
+            _validate_content_v2_record(record)
+            if (
+                record["run_id"] != identity["run_id"]
+                or record["unit_id"] != unit.unit_id
+                or record["source_cluster_id"] != unit.source_id
+                or record["arm"] != ARMS[arm_index]
+                or record["code_revision"] != identity["exact"]
+                or record["config_digest"] != identity["protocol_digest"]
+                or record["key_public_digest"] != identity["public_key_digest"]
+            ):
+                raise ValueError("committed record prefix identity or order differs")
+        statuses = tuple(record["status"] for record in transaction)
+        if statuses not in (("success", "success"), ("operational_failure", "operational_failure")):
+            raise ValueError("committed unit transaction status is incomplete")
+        if statuses[0] == "operational_failure" and (
+            transaction[0]["failure_reason"] != transaction[1]["failure_reason"]
+        ):
+            raise ValueError("committed unit failure classes differ")
+    return state
+
+
+def _write_local_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".state-stage-", dir=path.parent) as staging:
+        staged = Path(staging) / "state.json"
+        staged.write_bytes(_json_bytes(state))
+        os.replace(staged, path)
+
+
+def _zip_bytes(members: tuple[tuple[str, bytes], ...], path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, payload in members:
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o600 << 16
+            archive.writestr(info, payload)
+
+
+def _copy_create_only(source: Path, destination: Path) -> None:
+    opened = False
+    try:
+        with source.open("rb") as incoming, destination.open("xb") as outgoing:
+            opened = True
+            shutil.copyfileobj(incoming, outgoing)
+    except BaseException:
+        if opened:
+            destination.unlink(missing_ok=True)
+        raise
+
+
+def _publish_pair(
+    *,
+    local_run_root: Path,
+    sink_run_root: Path,
+    archive_name: str,
+    members: tuple[tuple[str, bytes], ...],
+) -> None:
+    sink_run_root.mkdir(parents=True, exist_ok=True)
+    archive_destination = sink_run_root / archive_name
+    checksum_destination = sink_run_root / f"{archive_name}.sha256"
+    if archive_destination.exists() or checksum_destination.exists():
+        raise FileExistsError("create-only artifact destination already exists")
+    created: list[Path] = []
+    with tempfile.TemporaryDirectory(prefix=".artifact-stage-", dir=local_run_root) as staging:
+        staging_root = Path(staging)
+        staged_archive = staging_root / archive_name
+        staged_checksum = staging_root / f"{archive_name}.sha256"
+        _zip_bytes(members, staged_archive)
+        digest = hashlib.sha256(staged_archive.read_bytes()).hexdigest()
+        staged_checksum.write_text(
+            f"{digest}  {archive_name}\n", encoding="ascii"
+        )
+        try:
+            _copy_create_only(staged_archive, archive_destination)
+            created.append(archive_destination)
+            _copy_create_only(staged_checksum, checksum_destination)
+            created.append(checksum_destination)
+        except BaseException:
+            for path in reversed(created):
+                path.unlink(missing_ok=True)
+            raise
+
+
+def _read_checkpoint_pair(archive_path: Path, checksum_path: Path) -> dict[str, Any]:
+    checksum_fields = checksum_path.read_text(encoding="ascii").strip().split()
+    if (
+        len(checksum_fields) != 2
+        or re.fullmatch(r"[0-9a-f]{64}", checksum_fields[0]) is None
+        or checksum_fields[1] != archive_path.name
+    ):
+        raise ValueError("checkpoint checksum sidecar differs")
+    payload = archive_path.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != checksum_fields[0]:
+        raise ValueError("checkpoint checksum validation failed")
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        if archive.namelist() != ["state.json"]:
+            raise ValueError("checkpoint ZIP must contain exactly state.json")
+        return _read_json_bytes(archive.read("state.json"))
+
+
+def _load_sink_checkpoint(
+    sink_run_root: Path,
+    identity: dict[str, Any],
+    protocol: ContentChainProtocol,
+) -> dict[str, Any] | None:
+    if not sink_run_root.exists():
+        return None
+    run_id = identity["run_id"]
+    pattern = re.compile(re.escape(run_id) + r"\.checkpoint-([0-9]{4})\.zip")
+    archives: dict[int, Path] = {}
+    sidecars: dict[int, Path] = {}
+    for path in sink_run_root.iterdir():
+        match = pattern.fullmatch(path.name)
+        if match:
+            archives[int(match.group(1))] = path
+            continue
+        checksum_match = pattern.fullmatch(path.name.removesuffix(".sha256"))
+        if path.name.endswith(".zip.sha256") and checksum_match:
+            sidecars[int(checksum_match.group(1))] = path
+    if set(archives) != set(sidecars):
+        raise ValueError("sink checkpoint ZIP and SHA pairs are incomplete")
+    if not archives:
+        return None
+    sequences = sorted(archives)
+    if sequences != list(range(sequences[-1] + 1)):
+        raise ValueError("sink checkpoint sequence is not contiguous from zero")
+    previous: dict[str, Any] | None = None
+    for sequence in sequences:
+        state = _validate_state(
+            _read_checkpoint_pair(archives[sequence], sidecars[sequence]), identity, protocol
+        )
+        if state["checkpoint_sequence"] != sequence + 1:
+            raise ValueError("sink checkpoint metadata sequence differs from its name")
+        if previous is not None:
+            previous_records = previous["records"]
+            records = state["records"]
+            if (
+                len(records) <= len(previous_records)
+                or not _same_json_bytes(
+                    {"records": records[: len(previous_records)]},
+                    {"records": previous_records},
+                )
+            ):
+                raise ValueError("sink checkpoint history diverges or rolls back")
+        previous = state
+    return previous
+
+
+def _terminal_pair_presence(sink_run_root: Path, run_id: str) -> None:
+    archive = sink_run_root / f"{run_id}.zip"
+    checksum = sink_run_root / f"{run_id}.zip.sha256"
+    if archive.exists() or checksum.exists():
+        raise FileExistsError("terminal artifact pair already exists; no terminal reconstruction")
+
+
+def _resolve_state(
+    *,
+    local_state_path: Path,
+    sink_run_root: Path,
+    identity: dict[str, Any],
+    protocol: ContentChainProtocol,
+    now: float,
+) -> dict[str, Any]:
+    _terminal_pair_presence(sink_run_root, identity["run_id"])
+    local = None
+    if local_state_path.exists():
+        local = _validate_state(
+            _read_json_bytes(local_state_path.read_bytes()), identity, protocol
+        )
+    sink = _load_sink_checkpoint(sink_run_root, identity, protocol)
+    if local is None and sink is None:
+        state = _new_state(identity, now)
+        _write_local_state(local_state_path, state)
+        return state
+    if local is None:
+        assert sink is not None
+        _write_local_state(local_state_path, sink)
+        return sink
+    if sink is None:
+        if local["checkpoint_sequence"] != 0:
+            raise ValueError("local checkpoint metadata would roll back missing sink history")
+        return local
+    local_sequence = local["checkpoint_sequence"]
+    sink_sequence = sink["checkpoint_sequence"]
+    if sink_sequence > local_sequence:
+        if not _same_json_bytes({"records": sink["records"]}, {"records": local["records"]}):
+            raise ValueError("checkpoint crash reconciliation requires identical records")
+        _write_local_state(local_state_path, sink)
+        return sink
+    if sink_sequence < local_sequence:
+        raise ValueError("sink checkpoint metadata rolls back local publication history")
+    if len(sink["records"]) > len(local["records"]):
+        raise ValueError("sink checkpoint has an uncommitted longer history")
+    if not _same_json_bytes(
+        {"records": local["records"][: len(sink["records"])]},
+        {"records": sink["records"]},
+    ):
+        raise ValueError("local and sink checkpoint histories diverge")
+    if not _same_json_bytes(
+        {
+            "checkpoint_time_anchor_unix_seconds": local[
+                "checkpoint_time_anchor_unix_seconds"
+            ]
+        },
+        {
+            "checkpoint_time_anchor_unix_seconds": sink[
+                "checkpoint_time_anchor_unix_seconds"
+            ]
+        },
+    ):
+        raise ValueError("local and sink checkpoint time metadata differs")
+    return local
+
+
+def _progress(identity: dict[str, Any], committed: int, phase: str) -> None:
+    print("CEGWM_PROGRESS " + json.dumps({
+        "run_id": identity["run_id"],
+        "committed": committed,
+        "fixed_total": FIXED_UNIT_COUNT,
+        "phase": phase,
+    }, separators=(",", ":")), flush=True)
+
+
+def _summary(identity: dict[str, Any], committed: int, rc: int) -> None:
+    print("CEGWM_SUMMARY " + json.dumps({
+        "run_id": identity["run_id"],
+        "committed": committed,
+        "fixed_total": FIXED_UNIT_COUNT,
+        "rc": rc,
+        "phase": "terminal",
+    }, separators=(",", ":")), flush=True)
+
+
+def _derive_result(
+    records: list[dict[str, Any]],
+    protocol: ContentChainProtocol,
+    identity: dict[str, Any],
+) -> dict[str, Any]:
     unit_metrics: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
-    for unit in protocol.roster:
-        try:
-            joint_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
-            null_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
-            output = run_sd35_content_adaptive(
-                pipeline, unit.prompt, key, assets,
-                height=unit.height, width=unit.width, generator=joint_generator,
-            )
-            primary_null = run_sd35_plain(
-                pipeline, unit.prompt,
-                height=unit.height, width=unit.width, generator=null_generator,
-            )
-            joint_scores = _blind_scores(
-                output.image, key, wrong_keys,
-                assets.hf_public_assets, assets.lf_public_assets,
-            )
-            null_scores = _blind_scores(
-                primary_null, key, wrong_keys,
-                assets.hf_public_assets, assets.lf_public_assets,
-            )
-            measurement = output.measurement
-            metrics = _candidate_aggregate_metrics(
-                unit.unit_id,
-                measurement,
-                _psnr(output.image, primary_null),
-                share_sum_absolute_tolerance=aggregate_contract[
-                    "branch_share_sum_absolute_tolerance"
-                ],
-            )
-            transaction = [
-                _content_v2_record(
-                    run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
-                    arm=ARMS[0], condition="clean", code_revision=exact,
-                    config_digest=protocol.protocol_digest, key_public_digest=key_digest,
-                    status="success", scores=_flat_scores(joint_scores),
-                    metrics={key: float(value) for key, value in metrics.items() if key != "unit_id"},
-                ),
-                _content_v2_record(
-                    run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
-                    arm=ARMS[1], condition="clean", code_revision=exact,
-                    config_digest=protocol.protocol_digest, key_public_digest=key_digest,
-                    status="success", scores=_flat_scores(null_scores),
-                    metrics={"paired_rgb_psnr_db": metrics["paired_rgb_psnr_db"]},
-                ),
-            ]
-            unit_metrics.append(metrics)
-            records.extend(transaction)
-        except Exception as error:  # noqa: BLE001 - fixed-denominator unit failure is evidence
-            error_type = _public_operational_error_class(error)
-            failures.append({"unit_id": unit.unit_id, "status": "failed", "error_type": error_type})
-            for arm in ARMS:
-                records.append(_content_v2_record(
-                    run_id=run_id, unit_id=unit.unit_id, source_cluster_id=unit.source_id,
-                    arm=arm, condition="clean", code_revision=exact,
-                    config_digest=protocol.protocol_digest, key_public_digest=key_digest,
-                    status="operational_failure", failure_reason=error_type,
-                ))
+    for index, unit in enumerate(protocol.roster):
+        transaction = records[index * 2 : index * 2 + 2]
+        if transaction[0]["status"] == "operational_failure":
+            failures.append({
+                "unit_id": unit.unit_id,
+                "status": "failed",
+                "error_type": transaction[0]["failure_reason"],
+            })
+        else:
+            unit_metrics.append({"unit_id": unit.unit_id, **transaction[0]["metrics"]})
     rc = 0 if not failures and len(records) == 16 and len(unit_metrics) == 8 else 2
-    lf_share_std, hf_share_std, supports_nonidentical, population_summary_valid = (
+    aggregate_contract = protocol.config["aggregate_measurement"]
+    lf_share_std, hf_share_std, supports_nonidentical, summary_valid = (
         _branch_share_population_summary(
             unit_metrics,
             tuple(unit.unit_id for unit in protocol.roster),
@@ -597,23 +880,23 @@ def execute(args: argparse.Namespace) -> int:
             ],
         )
     )
-    if rc == 0 and not population_summary_valid:
+    if rc == 0 and not summary_valid:
         rc = 1
         lf_share_std = hf_share_std = None
         supports_nonidentical = False
     gates = _gate_evidence(records, unit_metrics) if rc == 0 else None
-    payload = {
+    return {
         "rc": rc,
         "completeness": COMPLETE_EXECUTION if rc == 0 else INCOMPLETE_EXECUTION,
         "scientific_outcome_allowed": rc == 0,
         "scientific_status": "not_adjudicated" if rc == 0 else "not_evaluable",
         "execution_scope_id": EXECUTION_SCOPE_ID,
-        "exact": exact,
+        "exact": identity["exact"],
         "protocol_id": protocol.protocol_id,
         "protocol_digest": protocol.protocol_digest,
-        "public_key_digest": key_digest,
-        "fixed_denominator_units": 8,
-        "fixed_records": 16,
+        "public_key_digest": identity["public_key_digest"],
+        "fixed_denominator_units": FIXED_UNIT_COUNT,
+        "fixed_records": FIXED_RECORD_COUNT,
         "lf_branch_share_population_std": lf_share_std,
         "hf_branch_share_population_std": hf_share_std,
         "fixed_roster_allocation_not_all_identical_supported": supports_nonidentical,
@@ -623,7 +906,207 @@ def execute(args: argparse.Namespace) -> int:
         "gate_evidence": gates,
         "limitations": list(protocol.config["limitations"]),
     }
-    _write_result(output_path, payload)
+
+
+def _fatal_result(
+    records: list[dict[str, Any]],
+    identity: dict[str, Any],
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "rc": 2,
+        "completeness": INCOMPLETE_EXECUTION,
+        "run_id": identity["run_id"],
+        "execution_scope_id": identity["execution_scope_id"],
+        "exact": identity["exact"],
+        "protocol_id": identity["protocol_id"],
+        "protocol_digest": identity["protocol_digest"],
+        "public_key_digest": identity["public_key_digest"],
+        "fixed_unit_count": FIXED_UNIT_COUNT,
+        "fixed_record_count": FIXED_RECORD_COUNT,
+        "committed_unit_count": len(records) // 2,
+        "record_count": len(records),
+        "operational_error_class": _public_operational_error_class(error),
+        "records": records,
+    }
+
+
+def _receipt(identity: dict[str, Any], committed: int) -> dict[str, Any]:
+    return {
+        "artifact_kind": "terminal",
+        "run_id": identity["run_id"],
+        "exact": identity["exact"],
+        "execution_scope_id": identity["execution_scope_id"],
+        "protocol_id": identity["protocol_id"],
+        "protocol_digest": identity["protocol_digest"],
+        "public_key_digest": identity["public_key_digest"],
+        "fixed_unit_count": FIXED_UNIT_COUNT,
+        "fixed_record_count": FIXED_RECORD_COUNT,
+        "committed_unit_count": committed,
+        "result_member": "result.json",
+        "external_validation_required": True,
+    }
+
+
+def _publish_terminal(
+    local_run_root: Path,
+    sink_run_root: Path,
+    identity: dict[str, Any],
+    result: dict[str, Any],
+    committed: int,
+) -> None:
+    _publish_pair(
+        local_run_root=local_run_root,
+        sink_run_root=sink_run_root,
+        archive_name=f"{identity['run_id']}.zip",
+        members=(
+            ("receipt.json", _json_bytes(_receipt(identity, committed))),
+            ("result.json", _json_bytes(result)),
+        ),
+    )
+
+
+def _unit_transaction(
+    *,
+    unit: Any,
+    pipeline: Any,
+    assets: ContentEmbedAssets,
+    key: bytes,
+    wrong_keys: tuple[bytes, ...],
+    identity: dict[str, Any],
+    protocol: ContentChainProtocol,
+) -> list[dict[str, Any]]:
+    joint_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
+    null_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
+    output = run_sd35_content_adaptive(
+        pipeline, unit.prompt, key, assets,
+        height=unit.height, width=unit.width, generator=joint_generator,
+    )
+    primary_null = run_sd35_plain(
+        pipeline, unit.prompt,
+        height=unit.height, width=unit.width, generator=null_generator,
+    )
+    joint_scores = _blind_scores(
+        output.image, key, wrong_keys,
+        assets.hf_public_assets, assets.lf_public_assets,
+    )
+    null_scores = _blind_scores(
+        primary_null, key, wrong_keys,
+        assets.hf_public_assets, assets.lf_public_assets,
+    )
+    metrics = _candidate_aggregate_metrics(
+        unit.unit_id,
+        output.measurement,
+        _psnr(output.image, primary_null),
+        share_sum_absolute_tolerance=protocol.config["aggregate_measurement"][
+            "branch_share_sum_absolute_tolerance"
+        ],
+    )
+    return [
+        _content_v2_record(
+            run_id=identity["run_id"], unit_id=unit.unit_id,
+            source_cluster_id=unit.source_id, arm=ARMS[0], condition="clean",
+            code_revision=identity["exact"], config_digest=identity["protocol_digest"],
+            key_public_digest=identity["public_key_digest"], status="success",
+            scores=_flat_scores(joint_scores),
+            metrics={name: float(value) for name, value in metrics.items() if name != "unit_id"},
+        ),
+        _content_v2_record(
+            run_id=identity["run_id"], unit_id=unit.unit_id,
+            source_cluster_id=unit.source_id, arm=ARMS[1], condition="clean",
+            code_revision=identity["exact"], config_digest=identity["protocol_digest"],
+            key_public_digest=identity["public_key_digest"], status="success",
+            scores=_flat_scores(null_scores),
+            metrics={"paired_rgb_psnr_db": metrics["paired_rgb_psnr_db"]},
+        ),
+    ]
+
+
+def execute(args: argparse.Namespace) -> int:
+    repo_root = Path(args.repo_root).resolve()
+    local_work_root = Path(args.local_work_root).resolve()
+    artifact_sink = Path(args.artifact_sink).resolve()
+    key_text = os.environ.pop(KEY_ENV, "")
+    token = os.environ.pop(TOKEN_ENV, "")
+    if not key_text.strip() or not token.strip():
+        raise RuntimeError("CEG_WM_ROOT_KEY_and_HF_TOKEN_are_required")
+    key = normalize_detection_key(key_text)
+    key_text = ""
+    exact = _git_exact(repo_root, args.expected_exact)
+    protocol = _load_protocol(repo_root)
+    key_digest = public_key_digest(key)
+    run_id = f"content-adaptive-v2-{protocol.protocol_digest[:12]}-{key_digest[:12]}"
+    identity = _public_identity(protocol, exact=exact, key_digest=key_digest, run_id=run_id)
+    local_run_root = local_work_root / run_id
+    local_run_root.mkdir(parents=True, exist_ok=True)
+    local_state_path = local_run_root / "state.json"
+    sink_run_root = artifact_sink / run_id
+    state = _resolve_state(
+        local_state_path=local_state_path,
+        sink_run_root=sink_run_root,
+        identity=identity,
+        protocol=protocol,
+        now=_now(),
+    )
+    _progress(identity, state["committed_unit_count"], "identity_ready")
+    _progress(identity, state["committed_unit_count"], "resume_ready")
+    wrong_keys = _wrong_keys(key, protocol)
+    result: dict[str, Any]
+    try:
+        try:
+            pipeline, assets = _load_pipeline_and_assets(identity["model_id"], token)
+        finally:
+            token = ""
+        for unit_index in range(state["committed_unit_count"], FIXED_UNIT_COUNT):
+            unit = protocol.roster[unit_index]
+            try:
+                transaction = _unit_transaction(
+                    unit=unit, pipeline=pipeline, assets=assets, key=key,
+                    wrong_keys=wrong_keys, identity=identity, protocol=protocol,
+                )
+            except Exception as error:  # noqa: BLE001 - fixed denominator records the attempt
+                error_class = _public_operational_error_class(error)
+                transaction = [
+                    _content_v2_record(
+                        run_id=run_id, unit_id=unit.unit_id,
+                        source_cluster_id=unit.source_id, arm=arm, condition="clean",
+                        code_revision=exact, config_digest=protocol.protocol_digest,
+                        key_public_digest=key_digest, status="operational_failure",
+                        failure_reason=error_class,
+                    )
+                    for arm in ARMS
+                ]
+            prospective = dict(state)
+            prospective["records"] = [*state["records"], *transaction]
+            prospective["committed_unit_count"] = unit_index + 1
+            _validate_state(prospective, identity, protocol)
+            _write_local_state(local_state_path, prospective)
+            state = prospective
+            _progress(identity, state["committed_unit_count"], "unit_committed")
+            now = _now()
+            elapsed = now - state["checkpoint_time_anchor_unix_seconds"]
+            if elapsed >= CHECKPOINT_INTERVAL_HOURS * 3600.0:
+                checkpoint_sequence = state["checkpoint_sequence"]
+                checkpoint_state = dict(state)
+                checkpoint_state["checkpoint_sequence"] = checkpoint_sequence + 1
+                checkpoint_state["checkpoint_time_anchor_unix_seconds"] = now
+                archive_name = f"{run_id}.checkpoint-{checkpoint_sequence:04d}.zip"
+                _publish_pair(
+                    local_run_root=local_run_root,
+                    sink_run_root=sink_run_root,
+                    archive_name=archive_name,
+                    members=(("state.json", _json_bytes(checkpoint_state)),),
+                )
+                _write_local_state(local_state_path, checkpoint_state)
+                state = checkpoint_state
+                _progress(identity, state["committed_unit_count"], "checkpoint_published")
+        result = _derive_result(state["records"], protocol, identity)
+    except Exception as error:  # noqa: BLE001 - sanitized operational terminal only
+        result = _fatal_result(state["records"], identity, error)
+    committed = state["committed_unit_count"]
+    rc = int(result["rc"])
+    _publish_terminal(local_run_root, sink_run_root, identity, result, committed)
+    _summary(identity, committed, rc)
     return rc
 
 
@@ -631,7 +1114,8 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--expected-exact", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--local-work-root", required=True)
+    parser.add_argument("--artifact-sink", required=True)
     return parser.parse_args()
 
 
