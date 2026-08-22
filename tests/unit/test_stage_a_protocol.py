@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import MappingProxyType
@@ -9,6 +10,7 @@ import pytest
 from cegwm.protocol.stage_a import (
     load_hf_v2_confirmation_protocol,
     load_lf_a3_selection_protocol,
+    load_lf_balanced_blocks_confirmation_protocol,
     load_lf_balanced_blocks_selection_protocol,
     load_lf_v2_blocknorm_selection_protocol,
     load_stage_a_protocol,
@@ -33,6 +35,9 @@ _LF_BALANCED_SELECTION = (
 )
 _LF_BALANCED_CONFIRMATION = (
     _ROOT / "configs" / "stage_a" / "lf_balanced_blocks_untouched_confirmation.jsonl"
+)
+_LF_BALANCED_CONFIRMATION_CONFIG = (
+    _ROOT / "configs" / "stage_a" / "stage_a_lf_balanced_blocks_confirmation_v1.json"
 )
 
 
@@ -376,3 +381,94 @@ def test_lf_balanced_blocks_protocol_rejects_formula_gate_or_denominator_drift(
     modified.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match=message):
         load_lf_balanced_blocks_selection_protocol(modified, _LF_BALANCED_SELECTION)
+
+
+@pytest.mark.unit
+def test_lf_balanced_blocks_confirmation_loader_freezes_scope_roster_digest_and_method() -> None:
+    confirmation = load_lf_balanced_blocks_confirmation_protocol(
+        _LF_BALANCED_CONFIRMATION_CONFIG,
+        _LF_BALANCED_CONFIRMATION,
+    )
+    selection = load_lf_balanced_blocks_selection_protocol(
+        _LF_BALANCED_CONFIG,
+        _LF_BALANCED_SELECTION,
+    )
+    assert confirmation.protocol_id == "cegwm-stage-a-lf-balanced-blocks-confirmation-v1"
+    assert confirmation.config["execution_scope_id"] == (
+        "lf_balanced_blocks_untouched_confirmation_v1"
+    )
+    assert confirmation.candidate_selection == ()
+    assert [unit.unit_id for unit in confirmation.untouched_confirmation] == [
+        f"lfbb-confirmation-{index:04d}" for index in range(1, 9)
+    ]
+    for field in (
+        "generation_runtime",
+        "keying",
+        "candidate",
+        "budget",
+        "record_arms_in_exact_unit_order",
+        "controls",
+    ):
+        assert confirmation.config[field] == selection.config[field]
+    assert confirmation.config["selection_provenance"] == MappingProxyType({
+        "selection_exact": "12833721415683bdc6028013080ec28bf8e529e3",
+        "selection_run_id": "lfbbsel-45fcf9fdd8480f450aeaf9d6",
+        "selection_artifact_sha256": "6be7f792695fc7ac3c194a1fddb9d81e7d04c2dc7032e17c72c61f52041ec8e2",
+        "selection_protocol_digest": "f023b307a7822f8584bd641ab7b3accff762d86831d9b386e7ee40a66c01cf85",
+        "selection_agent5_verdict": "FINAL_APPROVE_selection_only",
+    })
+    config = json.loads(_LF_BALANCED_CONFIRMATION_CONFIG.read_text(encoding="utf-8"))
+    units = [
+        json.loads(line)
+        for line in _LF_BALANCED_CONFIRMATION.read_text(encoding="utf-8").splitlines()
+    ]
+    canonical = json.dumps(
+        {"config": config, "untouched_confirmation": units},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    assert confirmation.protocol_digest == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert hashlib.sha256(_LF_BALANCED_CONFIRMATION.read_bytes()).hexdigest() == (
+        "129f4a0633eddbc2ae16bd9a400d6bc6e0e940b42f862b7473cfe231e4d21713"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("execution_scope_id", ""), "changed", "execution scope"),
+        (("scope_exclusions", ""), [], "scope exclusions"),
+        (("selection_provenance", "selection_run_id"), "changed", "selection provenance"),
+        (("candidate", "carrier_method_id"), "changed", "carrier or detector"),
+        (("confirmation_rule", "registered_top_rank_among_17_min_units"), 6, "scale-free"),
+        (("confirmation_rule", "absolute_margin_min"), 0.03, "scale-free"),
+        (("execution_flow", "fixed_records"), 8, "8-unit/16-record"),
+        (("budget", "total_relative_l2"), 0.013, "0.012 budget"),
+    ],
+)
+def test_lf_balanced_blocks_confirmation_rejects_identity_gate_or_denominator_drift(
+    tmp_path: Path,
+    path: tuple[str, str],
+    value: object,
+    message: str,
+) -> None:
+    payload = json.loads(_LF_BALANCED_CONFIRMATION_CONFIG.read_text(encoding="utf-8"))
+    if path[1]:
+        payload[path[0]][path[1]] = value
+    else:
+        payload[path[0]] = value
+    modified = tmp_path / "invalid-lf-balanced-confirmation.json"
+    modified.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_lf_balanced_blocks_confirmation_protocol(modified, _LF_BALANCED_CONFIRMATION)
+
+
+@pytest.mark.unit
+def test_lf_balanced_blocks_confirmation_loader_refuses_selection_roster() -> None:
+    with pytest.raises(ValueError, match="wrong split"):
+        load_lf_balanced_blocks_confirmation_protocol(
+            _LF_BALANCED_CONFIRMATION_CONFIG,
+            _LF_BALANCED_SELECTION,
+        )

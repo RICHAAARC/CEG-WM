@@ -65,6 +65,7 @@ def _install_fakes(
     *,
     fail_lf_calls: frozenset[int] = frozenset(),
     interrupt_lf_call: int | None = None,
+    nonfinite_scores: bool = False,
 ) -> dict[str, int]:
     calls = {"load": 0, "lf": 0, "plain": 0, "score": 0}
     registered_key = normalize_detection_key(_RAW_KEY)
@@ -112,6 +113,8 @@ def _install_fakes(
 
     def fake_score(image: Image.Image, key: bytes, public_assets: object) -> float:
         calls["score"] += 1
+        if nonfinite_scores:
+            return float("nan")
         image_value = float(np.asarray(image).mean() / 255.0)
         assert public_assets.detector_statistic_id == runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID
         return image_value + (0.25 if key == registered_key else key[0] / 4096.0)
@@ -136,7 +139,7 @@ def _only_run_id(root: Path) -> str:
 
 
 @pytest.mark.integration
-def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
+def test_runner_executes_fixed_lf_confirmation_transaction_and_exports_public_data(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -153,7 +156,10 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
     receipt, result, local_zip = _payloads(output_root, run_id)
 
     assert rc == receipt["rc"] == result["rc"] == 0
-    assert result["completeness"] == "complete_for_lf_balanced_blocks_selection_execution"
+    assert result["execution_scope_id"] == runner.EXECUTION_SCOPE_ID
+    assert result["completeness"] == (
+        "complete_for_lf_balanced_blocks_untouched_confirmation_execution"
+    )
     assert result["carrier_method_id"] == runner.LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
     assert result["evaluated_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     assert result["detector_statistic_id"] == runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID
@@ -161,17 +167,17 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
     assert len(result["records"]) == 16
     assert calls == {"load": 1, "lf": 8, "plain": 8, "score": 8 * 2 * 17}
     assert Counter(record["unit_id"] for record in result["records"]) == {
-        f"lfbb-selection-{index:04d}": 2 for index in range(1, 9)
+        f"lfbb-confirmation-{index:04d}": 2 for index in range(1, 9)
     }
     for index in range(8):
         assert [record["arm"] for record in result["records"][index * 2 : index * 2 + 2]] == list(
             runner.RECORD_ARMS
         )
-    evidence = result["clean_selection_evidence"]
-    assert evidence["candidate_outcome_allowed"] is True
-    assert evidence["evaluation_status"] == "candidate_outcome"
-    assert evidence["candidate_selection_outcome"] == (
-        "candidate_frozen_for_separate_confirmation_authorization"
+    evidence = result["clean_confirmation_evidence"]
+    assert evidence["confirmation_outcome_allowed"] is True
+    assert evidence["evaluation_status"] == "confirmation_outcome"
+    assert evidence["confirmation_outcome"] == (
+        "confirmation_pass_candidate_for_agent5_adjudication"
     )
     assert evidence["selected_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     assert evidence["fixed_unit_count"] == 8
@@ -191,7 +197,7 @@ def test_runner_executes_fixed_lf_selection_transaction_and_exports_public_data(
         exported = b"".join(archive.read(name) for name in archive.namelist()) + stored_sha.read_bytes()
     assert _RAW_KEY.encode() not in exported
     assert _HF_TOKEN.encode() not in exported
-    assert b"A brass telescope" not in exported
+    assert b"A glassblower" not in exported
     for forbidden in (b"private_latent", b'"carrier":', b'"mask":', b"traceback"):
         assert forbidden not in exported
 
@@ -219,7 +225,11 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
     checkpoint_zip = next((store_root / run_id).glob("checkpoint-*.zip"))
     with zipfile.ZipFile(checkpoint_zip) as archive:
         state = json.loads(archive.read("state.json"))
-    assert state["committed_unit_ids"] == ["lfbb-selection-0001", "lfbb-selection-0002"]
+    assert state["execution_scope_id"] == runner.EXECUTION_SCOPE_ID
+    assert state["committed_unit_ids"] == [
+        "lfbb-confirmation-0001",
+        "lfbb-confirmation-0002",
+    ]
     assert len(state["records"]) == 4
     assert [record["status"] for record in state["records"][:2]] == ["operational_failure"] * 2
     assert first_calls["plain"] == 3
@@ -237,10 +247,10 @@ def test_checkpoint_resume_skips_full_committed_transactions_and_reruns_interrup
     assert resumed_calls["lf"] == 6
     assert len(result["records"]) == 16
     assert result["records"][:2] == state["records"][:2]
-    evidence = result["clean_selection_evidence"]
+    evidence = result["clean_confirmation_evidence"]
     assert evidence["evaluation_status"] == "not_evaluable_operational"
     assert evidence["selected_candidate_id"] is None
-    assert evidence["candidate_selection_outcome"] is None
+    assert evidence["confirmation_outcome"] is None
     assert all(
         facts["gate_a_pass"] is None and facts["gate_b_pass"] is None and facts["eligible"] is None
         for facts in evidence["candidate_evidence"].values()
@@ -276,11 +286,14 @@ def _record(
 
 def _expected() -> dict[str, object]:
     return {
-        "run_id": "lfbbsel-test",
+        "run_id": "lfbbconf-test",
+        "execution_scope_id": runner.EXECUTION_SCOPE_ID,
         "resolved_exact": "1" * 40,
         "protocol_digest": "2" * 64,
         "key_public_digest": "3" * 64,
-        "ordered_roster_unit_ids": [f"lfbb-selection-{index:04d}" for index in range(1, 9)],
+        "ordered_roster_unit_ids": [
+            f"lfbb-confirmation-{index:04d}" for index in range(1, 9)
+        ],
         "carrier_method_id": runner.LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
         "evaluated_candidate_id": runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
         "detector_statistic_id": runner.LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
@@ -289,7 +302,7 @@ def _expected() -> dict[str, object]:
     }
 
 
-def _selection_records(
+def _confirmation_records(
     expected: dict[str, object],
     *,
     gate_a: int = 8,
@@ -311,33 +324,37 @@ def _selection_records(
 @pytest.mark.integration
 def test_scale_free_gates_use_strict_ties_and_complete_denominator() -> None:
     expected = _expected()
-    failure = runner._clean_selection_evidence(
-        _selection_records(expected, gate_a=6),
+    failure = runner._clean_confirmation_evidence(
+        _confirmation_records(expected, gate_a=6),
         expected,
-        candidate_outcome_allowed=True,
+        confirmation_outcome_allowed=True,
     )
-    assert failure["candidate_selection_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
+    assert failure["confirmation_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
     assert failure["selected_candidate_id"] is None
 
-    passed = runner._clean_selection_evidence(
-        _selection_records(expected, gate_a=7, gate_b=7),
+    passed = runner._clean_confirmation_evidence(
+        _confirmation_records(expected, gate_a=7, gate_b=7),
         expected,
-        candidate_outcome_allowed=True,
+        confirmation_outcome_allowed=True,
     )
     assert passed["selected_candidate_id"] == runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
     facts = passed["candidate_evidence"][runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID]
     assert facts["gate_a_pass"] is True and facts["gate_b_pass"] is True
     assert "winner_ranking_order" not in passed
 
-    tie_failure = runner._clean_selection_evidence(
-        _selection_records(expected, gate_a=6, gate_b=6), expected, candidate_outcome_allowed=True
+    tie_failure = runner._clean_confirmation_evidence(
+        _confirmation_records(expected, gate_a=6, gate_b=6),
+        expected,
+        confirmation_outcome_allowed=True,
     )
-    assert tie_failure["candidate_selection_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
-    partial = runner._clean_selection_evidence(
-        _selection_records(expected)[:-2], expected, candidate_outcome_allowed=False
+    assert tie_failure["confirmation_outcome"] == "SCIENTIFIC_NEGATIVE_AND_STOP"
+    partial = runner._clean_confirmation_evidence(
+        _confirmation_records(expected)[:-2],
+        expected,
+        confirmation_outcome_allowed=False,
     )
     assert partial["evaluation_status"] == "not_evaluable_operational"
-    assert partial["candidate_selection_outcome"] is None
+    assert partial["confirmation_outcome"] is None
     assert partial["selected_candidate_id"] is None
 
 
@@ -349,13 +366,13 @@ def test_resume_rejects_four_arm_order_or_identity_drift(tmp_path: Path) -> None
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
         "checkpoint_interval_hours": 2.0,
     }
-    transaction = [record.to_dict() for record in _selection_records(expected)[:2]]
+    transaction = [record.to_dict() for record in _confirmation_records(expected)[:2]]
     transaction[0]["arm"], transaction[1]["arm"] = transaction[1]["arm"], transaction[0]["arm"]
     state = {
         **expected,
         "checkpoint_sequence": 1,
         "committed_unit_count": 1,
-        "committed_unit_ids": ["lfbb-selection-0001"],
+        "committed_unit_ids": ["lfbb-confirmation-0001"],
         "records": transaction,
     }
     zip_path = tmp_path / "checkpoint-0001-units-0001.zip"
@@ -369,6 +386,51 @@ def test_resume_rejects_four_arm_order_or_identity_drift(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="paired transaction"):
         runner._resume_state(zip_path, sha_path, expected)
+
+    correct_transaction = [
+        record.to_dict() for record in _confirmation_records(expected)[:2]
+    ]
+    wrong_scope_state = {
+        **state,
+        "execution_scope_id": "lf_balanced_blocks_selection_v1",
+        "records": correct_transaction,
+    }
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("state.json", json.dumps(wrong_scope_state))
+    sha_path.write_text(
+        f"{hashlib.sha256(zip_path.read_bytes()).hexdigest()}  {zip_path.name}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="identity mismatch"):
+        runner._resume_state(zip_path, sha_path, expected)
+
+
+@pytest.mark.integration
+def test_nonfinite_scores_become_retained_operational_failures_without_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, exact = _repo(tmp_path)
+    output_root = tmp_path / "output"
+    _install_fakes(monkeypatch, nonfinite_scores=True)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 0.0)
+    monkeypatch.setenv(runner.KEY_ENV, _RAW_KEY)
+    monkeypatch.setenv(runner.TOKEN_ENV, _HF_TOKEN)
+
+    rc = runner.execute(_args(repo, exact, output_root, tmp_path / "store"))
+    receipt, result, _ = _payloads(output_root, _only_run_id(output_root))
+
+    assert rc == receipt["rc"] == result["rc"] == 1
+    assert len(result["records"]) == 16
+    assert all(record["status"] == "operational_failure" for record in result["records"])
+    evidence = result["clean_confirmation_evidence"]
+    assert evidence["evaluation_status"] == "not_evaluable_operational"
+    assert evidence["confirmation_outcome"] is None
+    assert evidence["selected_candidate_id"] is None
+    facts = evidence["candidate_evidence"][runner.LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID]
+    assert facts["gate_a_pass"] is None
+    assert facts["gate_b_pass"] is None
+    assert facts["eligible"] is None
 
 
 @pytest.mark.integration
@@ -438,9 +500,10 @@ def test_missing_secrets_fail_closed_without_leaking_values(
         payload = b"".join(archive.read(name) for name in archive.namelist())
         result = json.loads(archive.read("result.json"))
     assert _RAW_KEY.encode() not in payload and _HF_TOKEN.encode() not in payload
-    evidence = result["clean_selection_evidence"]
-    assert evidence["candidate_outcome_allowed"] is False
-    assert evidence["candidate_selection_outcome"] is None
+    assert result["execution_scope_id"] == runner.EXECUTION_SCOPE_ID
+    evidence = result["clean_confirmation_evidence"]
+    assert evidence["confirmation_outcome_allowed"] is False
+    assert evidence["confirmation_outcome"] is None
     assert evidence["selected_candidate_id"] is None
     assert result["records"] == []
 
@@ -450,7 +513,7 @@ def test_run_identity_is_deterministic_and_cli_has_no_mode_or_interval() -> None
     protocol = runner._load_protocol(_ROOT)
     first = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
     second = runner._deterministic_run_id("a" * 40, protocol, "stabilityai/stable-diffusion-3.5-medium", "b" * 64)
-    assert first == second and first.startswith("lfbbsel-")
+    assert first == second and first.startswith("lfbbconf-")
     actions = runner._parser()._actions
     option_strings = {option for action in actions for option in action.option_strings}
     assert "--run-mode" not in option_strings

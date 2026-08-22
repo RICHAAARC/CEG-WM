@@ -1,4 +1,4 @@
-"""Thin Colab runner for Stage-A balanced-block LF clean selection."""
+"""Thin Colab runner for balanced-block LF untouched confirmation."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from cegwm.method.lf import (
 from cegwm.protocol.records import StageARecord
 from cegwm.protocol.stage_a import (
     StageAProtocol,
-    load_lf_balanced_blocks_selection_protocol,
+    load_lf_balanced_blocks_confirmation_protocol,
 )
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_lf, run_sd35_plain
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
@@ -38,14 +38,16 @@ from cegwm.shared.prg import prg_bytes
 KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
 CHECKPOINT_INTERVAL_HOURS = 2.0
-COMPLETE_EXECUTION = "complete_for_lf_balanced_blocks_selection_execution"
+EXECUTION_SCOPE_ID = "lf_balanced_blocks_untouched_confirmation_v1"
+COMPLETE_EXECUTION = "complete_for_lf_balanced_blocks_untouched_confirmation_execution"
 INCOMPLETE_EXECUTION = "incomplete_operational_execution"
 SCIENTIFIC_STATUS = "not_adjudicated"
 LIMITATIONS = (
-    "lf_balanced_blocks_selection_only_no_confirmation_or_attack_evaluation",
+    "lf_balanced_blocks_untouched_confirmation_only_no_attack_evaluation",
     "balanced_carrier_with_block_centered_normalized_median_correlation_not_calibrated",
     "lpips_not_evaluated",
     "no_calibrated_threshold_or_fixed_fpr_claim",
+    "no_hf_lf_fusion_routing_or_geometry_evaluation",
     "model_revision_and_weight_digest_not_recorded",
 )
 RECORD_ARMS = (
@@ -101,9 +103,9 @@ def _git_exact(repo_root: Path, expected_exact: str) -> str:
 
 def _load_protocol(repo_root: Path) -> StageAProtocol:
     config_root = repo_root / "configs" / "stage_a"
-    return load_lf_balanced_blocks_selection_protocol(
-        config_root / "stage_a_lf_balanced_blocks_selection_v1.json",
-        config_root / "lf_balanced_blocks_selection.jsonl",
+    return load_lf_balanced_blocks_confirmation_protocol(
+        config_root / "stage_a_lf_balanced_blocks_confirmation_v1.json",
+        config_root / "lf_balanced_blocks_untouched_confirmation.jsonl",
     )
 
 
@@ -201,9 +203,10 @@ def _new_state(
     key_digest: str,
 ) -> dict[str, Any]:
     carrier_method_id, evaluated_candidate_id, detector_statistic_id = _candidate_identity(protocol)
-    rule = protocol.config["selection_rule"]
+    rule = protocol.config["confirmation_rule"]
     return {
         "run_id": run_id,
+        "execution_scope_id": EXECUTION_SCOPE_ID,
         "resolved_exact": resolved_exact,
         "protocol_digest": protocol.protocol_digest,
         "carrier_method_id": carrier_method_id,
@@ -211,7 +214,7 @@ def _new_state(
         "detector_statistic_id": detector_statistic_id,
         "record_arms_in_exact_unit_order": list(RECORD_ARMS),
         "ordered_roster_unit_ids": [
-            unit.unit_id for unit in protocol.candidate_selection
+            unit.unit_id for unit in protocol.untouched_confirmation
         ],
         "model_id": model_id,
         "key_public_digest": key_digest,
@@ -243,6 +246,7 @@ def _resume_state(
         state = json.loads(archive.read("state.json"))
     identity_fields = (
         "run_id",
+        "execution_scope_id",
         "resolved_exact",
         "protocol_digest",
         "carrier_method_id",
@@ -300,6 +304,7 @@ def _deterministic_run_id(
     carrier_method_id, evaluated_candidate_id, detector_statistic_id = _candidate_identity(protocol)
     identity = {
         "resolved_exact": resolved_exact,
+        "execution_scope_id": EXECUTION_SCOPE_ID,
         "protocol_digest": protocol.protocol_digest,
         "carrier_method_id": carrier_method_id,
         "evaluated_candidate_id": evaluated_candidate_id,
@@ -310,9 +315,10 @@ def _deterministic_run_id(
     }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(
-        b"CEG-WM/stage-a-lf-balanced-blocks-selection/run-id/v1\x00" + canonical.encode("utf-8")
+        b"CEG-WM/stage-a-lf-balanced-blocks-confirmation/run-id/v1\x00"
+        + canonical.encode("utf-8")
     )
-    return f"lfbbsel-{digest.hexdigest()[:24]}"
+    return f"lfbbconf-{digest.hexdigest()[:24]}"
 
 
 def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
@@ -325,19 +331,19 @@ def _verify_checksum(zip_path: Path, checksum_path: Path) -> str:
     return digest
 
 
-def _clean_selection_evidence(
+def _clean_confirmation_evidence(
     records: list[StageARecord],
     expected: dict[str, Any],
     *,
-    candidate_outcome_allowed: bool,
+    confirmation_outcome_allowed: bool,
 ) -> dict[str, Any]:
-    """Apply both scale-free gates to the one frozen balanced-block candidate."""
+    """Apply both scale-free gates to the frozen untouched confirmation."""
 
     roster = expected["ordered_roster_unit_ids"]
     by_unit: dict[str, list[StageARecord]] = {unit_id: [] for unit_id in roster}
     for record in records:
         if record.unit_id not in by_unit:
-            raise ValueError("selection evidence contains a unit outside the fixed roster")
+            raise ValueError("confirmation evidence contains a unit outside the fixed roster")
         if (
             record.run_id != expected["run_id"]
             or record.code_revision != expected["resolved_exact"]
@@ -345,7 +351,7 @@ def _clean_selection_evidence(
             or record.key_public_digest != expected["key_public_digest"]
             or record.condition != "identity"
         ):
-            raise ValueError("selection evidence record identity mismatch")
+            raise ValueError("confirmation evidence record identity mismatch")
         by_unit[record.unit_id].append(record)
 
     evaluated_candidate_id = expected["evaluated_candidate_id"]
@@ -368,7 +374,7 @@ def _clean_selection_evidence(
             })
             continue
         if len(transaction) != 2 or [record.arm for record in transaction] != list(RECORD_ARMS):
-            raise ValueError("selection evidence requires the exact paired unit transaction")
+            raise ValueError("confirmation evidence requires the exact paired unit transaction")
         if any(record.status != "success" for record in transaction):
             unit_evidence.append({
                 "unit_id": unit_id,
@@ -377,14 +383,14 @@ def _clean_selection_evidence(
             })
             continue
         if any(set(record.scores) != expected_score_fields for record in transaction):
-            raise ValueError("selection evidence score roster mismatch")
+            raise ValueError("confirmation evidence score roster mismatch")
         values = [
             float(value)
             for record in transaction
             for value in record.scores.values()
         ]
         if not all(math.isfinite(value) for value in values):
-            raise ValueError("selection evidence contains a nonfinite score")
+            raise ValueError("confirmation evidence contains a nonfinite score")
         candidate_record, null_record = transaction
         registered = float(candidate_record.scores["registered"])
         wrong_max = max(float(candidate_record.scores[field]) for field in wrong_fields)
@@ -396,7 +402,7 @@ def _clean_selection_evidence(
         psnr = float(candidate_record.metrics.get("paired_rgb_psnr", float("nan")))
         budget = float(candidate_record.metrics.get("actual_dtype_relative_l2", float("nan")))
         if not (math.isfinite(psnr) and math.isfinite(budget) and 0.0 < budget <= 0.012):
-            raise ValueError("selection evidence contains invalid quality or budget evidence")
+            raise ValueError("confirmation evidence contains invalid quality or budget evidence")
         gate_a_count += int(gate_a)
         gate_b_count += int(gate_b)
         margins.append(margin)
@@ -418,18 +424,18 @@ def _clean_selection_evidence(
         unit_evidence.append({"unit_id": unit_id, "status": "success", "candidates": candidate_evidence})
 
     complete = successful_unit_count == len(roster) == 8 and len(records) == 16
-    outcome_permitted = candidate_outcome_allowed and complete
+    outcome_permitted = confirmation_outcome_allowed and complete
     gate_a_pass = gate_a_count >= expected["rank_gate_a_min_units"]
     gate_b_pass = gate_b_count >= expected["rank_gate_b_min_units"]
     candidate_pass = gate_a_pass and gate_b_pass
-    selection_outcome = None
+    confirmation_outcome = None
     selected_candidate_id = None
     if outcome_permitted:
         if candidate_pass:
-            selection_outcome = "candidate_frozen_for_separate_confirmation_authorization"
+            confirmation_outcome = "confirmation_pass_candidate_for_agent5_adjudication"
             selected_candidate_id = evaluated_candidate_id
         else:
-            selection_outcome = "SCIENTIFIC_NEGATIVE_AND_STOP"
+            confirmation_outcome = "SCIENTIFIC_NEGATIVE_AND_STOP"
     summary = {
         "gate_a_registered_top_rank_units": gate_a_count,
         "gate_a_required_units": expected["rank_gate_a_min_units"],
@@ -445,11 +451,11 @@ def _clean_selection_evidence(
         "median_paired_rgb_psnr": float(np.median(psnr_values)) if complete else None,
     }
     return {
-        "candidate_outcome_allowed": outcome_permitted,
+        "confirmation_outcome_allowed": outcome_permitted,
         "evaluation_status": (
-            "candidate_outcome" if outcome_permitted else "not_evaluable_operational"
+            "confirmation_outcome" if outcome_permitted else "not_evaluable_operational"
         ),
-        "candidate_selection_outcome": selection_outcome,
+        "confirmation_outcome": confirmation_outcome,
         "selected_candidate_id": selected_candidate_id,
         "fixed_unit_count": len(roster),
         "fixed_record_count": 16,
@@ -530,6 +536,7 @@ def _checkpoint(state: dict[str, Any], output_dir: Path, checkpoint_sink: Path) 
 def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecord]) -> tuple[Path, str]:
     result = {
         "run_id": receipt["run_id"],
+        "execution_scope_id": receipt["execution_scope_id"],
         "resolved_exact": receipt["resolved_exact"],
         "rc": receipt["rc"],
         "status": receipt["status"],
@@ -554,8 +561,8 @@ def _export(output_dir: Path, receipt: dict[str, Any], records: list[StageARecor
         "fixed_record_count": 16,
         "records": [record.to_dict() for record in records],
     }
-    if "clean_selection_evidence" in receipt:
-        result["clean_selection_evidence"] = receipt["clean_selection_evidence"]
+    if "clean_confirmation_evidence" in receipt:
+        result["clean_confirmation_evidence"] = receipt["clean_confirmation_evidence"]
     if "checkpoint_status" in receipt:
         result["checkpoint_status"] = receipt["checkpoint_status"]
     if "error_class" in receipt:
@@ -690,6 +697,7 @@ def _export_fatal(
     interval = context.get("checkpoint_interval_hours")
     receipt: dict[str, Any] = {
         "run_id": run_id,
+        "execution_scope_id": context.get("execution_scope_id"),
         "approved_execution_exact": approved_exact,
         "resolved_exact": context.get("resolved_exact"),
         "rc": 2,
@@ -719,10 +727,10 @@ def _export_fatal(
     run_store = context.get("run_store")
     if not isinstance(expected, dict) or not isinstance(run_store, Path):
         raise RuntimeError("fatal package requires resolved run identity and sink")
-    receipt["clean_selection_evidence"] = _clean_selection_evidence(
+    receipt["clean_confirmation_evidence"] = _clean_confirmation_evidence(
         records,
         expected,
-        candidate_outcome_allowed=False,
+        confirmation_outcome_allowed=False,
     )
     base_zip, zip_digest = _export(output_dir, receipt, records)
     fatal_zip = output_dir / f"failure-{error_class}.zip"
@@ -746,18 +754,22 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     context["resolved_exact"] = resolved_exact
     protocol = _load_protocol(repo_root)
     context["protocol_digest"] = protocol.protocol_digest
+    execution_scope_id = protocol.config["execution_scope_id"]
+    if execution_scope_id != EXECUTION_SCOPE_ID:
+        raise RuntimeError("protocol_execution_scope_identity_mismatch")
+    context["execution_scope_id"] = execution_scope_id
     carrier_method_id, evaluated_candidate_id, detector_statistic_id = _candidate_identity(protocol)
     context["carrier_method_id"] = carrier_method_id
     context["evaluated_candidate_id"] = evaluated_candidate_id
     context["detector_statistic_id"] = detector_statistic_id
     context["ordered_roster_unit_ids"] = [
-        unit.unit_id for unit in protocol.candidate_selection
+        unit.unit_id for unit in protocol.untouched_confirmation
     ]
-    selection_rule = protocol.config["selection_rule"]
-    context["rank_gate_a_min_units"] = selection_rule[
+    confirmation_rule = protocol.config["confirmation_rule"]
+    context["rank_gate_a_min_units"] = confirmation_rule[
         "registered_top_rank_among_17_min_units"
     ]
-    context["rank_gate_b_min_units"] = selection_rule[
+    context["rank_gate_b_min_units"] = confirmation_rule[
         "paired_lf_registered_gt_primary_null_registered_min_units"
     ]
     runtime_config = protocol.config["generation_runtime"]
@@ -777,8 +789,8 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         or detector_statistic_id != LF_BLOCKNORM_DETECTOR_STATISTIC_ID
     ):
         raise RuntimeError("protocol_runtime_identity_mismatch")
-    if len(protocol.candidate_selection) != 8 or protocol.untouched_confirmation:
-        raise RuntimeError("candidate_selection_roster_mismatch")
+    if protocol.candidate_selection or len(protocol.untouched_confirmation) != 8:
+        raise RuntimeError("untouched_confirmation_roster_mismatch")
     model_id = runtime_config["model_id"]
     context["model_id"] = model_id
     context["checkpoint_interval_hours"] = CHECKPOINT_INTERVAL_HOURS
@@ -900,6 +912,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     _atomic_json_write(output_dir / "state.json", state)
     receipt: dict[str, Any] = {
         "run_id": run_id,
+        "execution_scope_id": execution_scope_id,
         "resolved_exact": resolved_exact,
         "rc": None,
         "status": "running",
@@ -923,7 +936,7 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
     committed = set(state["committed_unit_ids"])
     pending_units = [
         unit
-        for unit in protocol.candidate_selection
+        for unit in protocol.untouched_confirmation
         if unit.unit_id not in committed
     ]
     any_failure = any(record.status != "success" for record in records)
@@ -1067,10 +1080,10 @@ def execute(args: argparse.Namespace, *, fatal_context: dict[str, Any] | None = 
         receipt["checkpoint_status"] = "failure"
     else:
         receipt["checkpoint_status"] = "complete"
-    receipt["clean_selection_evidence"] = _clean_selection_evidence(
+    receipt["clean_confirmation_evidence"] = _clean_confirmation_evidence(
         records,
         expected_state,
-        candidate_outcome_allowed=receipt["rc"] == 0,
+        confirmation_outcome_allowed=receipt["rc"] == 0,
     )
     receipt["status"] = (
         "complete_with_operational_failures"
