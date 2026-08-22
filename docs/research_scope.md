@@ -2,9 +2,11 @@
 
 ## Research question
 
-Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image, while an LF branch adds attack complementarity without becoming a generic image-content signal?
+Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image through the frozen content-adaptive simultaneous LF+HF embedding and its clean joint statistic?
 
-The user's latest authorization makes the content-adaptive dual-branch clean route authoritative for this route and supersedes LF-over-HF attack complementarity as its content-chain implementation gate. The earlier complementarity result remains admitted only as historical `SCIENTIFIC_NEGATIVE` evidence; semantic/texture allocation is active within this branch rather than deferred. Original Stage A and the complete content chain remain unfinished, while LF/HF fusion, routing, geometry, fixed-FPR calibration, and paper promotion are not authorized. Local CPU, fake, and runtime checks are engineering evidence only; scientific status requires externally returned real-GPU artifacts, external audit of those artifacts, and a later Agent5 decision.
+The frozen content-adaptive simultaneous LF+HF embedding and its clean joint statistic are the authorized mechanism for this route. The earlier attack-complementarity result remains admitted as historical `SCIENTIFIC_NEGATIVE` evidence only against its originally preregistered incremental-complementarity claim; it does not override or negate this branch. Broader downstream or promotion-level LF/HF fusion and routing remain unauthorized, without withdrawing the simultaneous allocation, embedding, or clean joint statistic frozen here.
+
+Local CPU, fake, and runtime checks are engineering evidence only; they do not scientifically validate this route or complete original Stage A or the complete content chain. The persisted minimum neutral-counterfactual effect can establish only that all four internal effects passed the positive fail-closed boundary, not their individual magnitudes. Cross-roster allocation dispersion is omitted and supports no claim that different images allocate different regions. Geometry, fixed-FPR calibration, and paper promotion are outside this route.
 
 ## Stage-A decision
 

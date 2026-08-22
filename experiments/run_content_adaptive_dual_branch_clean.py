@@ -250,8 +250,6 @@ def execute(args: argparse.Namespace) -> int:
                 "combined_relative_l2": measurement.combined_budget.relative_l2,
                 "lf_effective_relative_l2": measurement.lf_effective_relative_l2,
                 "hf_effective_relative_l2": measurement.hf_effective_relative_l2,
-                "lf_branch_share": measurement.lf_branch_share,
-                "hf_branch_share": measurement.hf_branch_share,
                 "minimum_counterfactual_effect": measurement.minimum_counterfactual_effect,
                 "probe_evaluation_count": measurement.probe_evaluation_count,
                 "paired_rgb_psnr_db": _psnr(output.image, primary_null),
