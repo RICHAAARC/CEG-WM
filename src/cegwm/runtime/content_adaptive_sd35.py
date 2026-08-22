@@ -1,0 +1,265 @@
+"""Real SD3.5 step-18 adapter for content-adaptive dual-branch embedding."""
+
+from __future__ import annotations
+
+import importlib
+import inspect
+import math
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import torch
+from PIL import Image
+
+from cegwm.method.content_adaptive import (
+    DINO_ASSET_ID,
+    ContentAdaptiveMeasurement,
+    ContentSignals,
+    allocate_content,
+    dino_last_layer_cls_patch_tiles,
+    embed_content_adaptive,
+    evaluate_public_probes,
+    rgb_texture_tiles,
+)
+from cegwm.method.hf import FrozenHFPublicAssets
+from cegwm.method.lf import FrozenLFPublicAssets
+from cegwm.runtime.observation import encode_final_rgb_image, require_ordinary_rgb_image
+
+
+@dataclass(frozen=True, slots=True)
+class ContentEmbedAssets:
+    """Embed-only DINO assets plus frozen blind-detector assets."""
+
+    dino_model: Any
+    dino_processor: Any
+    hf_public_assets: FrozenHFPublicAssets
+    lf_public_assets: FrozenLFPublicAssets
+    dino_asset_id: str = DINO_ASSET_ID
+
+    def __post_init__(self) -> None:
+        if self.dino_asset_id != DINO_ASSET_ID:
+            raise ValueError("content embed asset must be facebook/dinov2-small")
+        if getattr(getattr(self.dino_model, "config", None), "_attn_implementation", None) != "eager":
+            raise RuntimeError("content DINO asset must expose eager attention")
+
+
+@dataclass(frozen=True, slots=True)
+class ContentAdaptiveRunOutput:
+    """Final RGB plus irreversible aggregate embedding measurements only."""
+
+    image: Image.Image
+    measurement: ContentAdaptiveMeasurement
+
+
+def load_dino_content_assets(*, token: str | None = None) -> tuple[Any, Any]:
+    """Load the named public embed-only asset with eager attention enabled."""
+
+    try:
+        transformers = importlib.import_module("transformers")
+    except (ImportError, ModuleNotFoundError) as error:
+        raise RuntimeError("transformers is required for DINO content analysis") from error
+    model_class = getattr(transformers, "AutoModel", None)
+    processor_class = getattr(transformers, "AutoImageProcessor", None)
+    if model_class is None or processor_class is None:
+        raise RuntimeError("installed transformers lacks DINO auto classes")
+    kwargs = {"token": token} if token else {}
+    processor = processor_class.from_pretrained(DINO_ASSET_ID, **kwargs)
+    model = model_class.from_pretrained(
+        DINO_ASSET_ID,
+        attn_implementation="eager",
+        **kwargs,
+    )
+    if getattr(getattr(model, "config", None), "_attn_implementation", None) != "eager":
+        raise RuntimeError("loaded DINO model did not retain eager attention")
+    return model, processor
+
+
+def _config_scalar(config: Any, name: str, *, positive: bool) -> float:
+    value = config.get(name) if isinstance(config, dict) else getattr(config, name, None)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise RuntimeError(f"SD3 VAE {name} is missing or invalid")
+    scalar = float(value)
+    if not math.isfinite(scalar) or (positive and scalar <= 0.0):
+        raise RuntimeError(f"SD3 VAE {name} is missing or invalid")
+    return scalar
+
+
+def _decode_callback_latents(pipeline: Any, latents: torch.Tensor) -> Image.Image:
+    """Decode the complete current callback latent using SD3 VAE coordinates."""
+
+    vae = getattr(pipeline, "vae", None)
+    processor = getattr(pipeline, "image_processor", None)
+    if not callable(getattr(vae, "decode", None)):
+        raise RuntimeError("SD3 pipeline VAE cannot decode callback latents")
+    if not callable(getattr(processor, "postprocess", None)):
+        raise RuntimeError("SD3 pipeline image processor cannot postprocess decoded latents")
+    config = getattr(vae, "config", None)
+    scaling = _config_scalar(config, "scaling_factor", positive=True)
+    shift = _config_scalar(config, "shift_factor", positive=False)
+    try:
+        parameter = next(vae.parameters())
+    except (AttributeError, StopIteration, TypeError) as error:
+        raise RuntimeError("SD3 pipeline VAE device and dtype cannot be resolved") from error
+    if not parameter.dtype.is_floating_point:
+        raise RuntimeError("SD3 pipeline VAE must use a floating dtype")
+    coordinate = (latents.to(torch.float32) / scaling + shift).to(
+        device=parameter.device,
+        dtype=parameter.dtype,
+    )
+    with torch.no_grad():
+        decoded = vae.decode(coordinate, return_dict=True)
+    sample = getattr(decoded, "sample", None)
+    if not isinstance(sample, torch.Tensor) or sample.ndim != 4 or sample.shape[0] != 1:
+        raise RuntimeError("SD3 VAE probe decode returned an invalid sample")
+    if not bool(torch.isfinite(sample).all()):
+        raise RuntimeError("SD3 VAE probe decode returned nonfinite pixels")
+    images = processor.postprocess(sample, output_type="pil")
+    if not isinstance(images, (list, tuple)) or len(images) != 1:
+        raise RuntimeError("SD3 VAE probe decode must return exactly one image")
+    return require_ordinary_rgb_image(images[0])
+
+
+def _public_band_energy(
+    image: Image.Image,
+    branch: str,
+    assets: ContentEmbedAssets,
+) -> float:
+    """Key-independent public probe statistic derived through final-RGB VAE observation."""
+
+    public = assets.lf_public_assets if branch == "lf" else assets.hf_public_assets
+    observation = encode_final_rgb_image(image, public.image_processor, public.vae)
+    spectrum = torch.fft.rfft2(observation.to(torch.float32), norm="ortho")
+    height, width = observation.shape[-2:]
+    vertical = np.fft.fftfreq(height)[:, None]
+    horizontal = np.fft.rfftfreq(width)[None, :]
+    radius = np.hypot(vertical, horizontal) / np.hypot(0.5, 0.5)
+    mask_array = (
+        (radius >= 0.14) & (radius <= 0.24)
+        if branch == "lf"
+        else (radius >= 0.58) & (radius <= 1.0)
+    )
+    mask = torch.from_numpy(mask_array).to(observation.device)
+    selected = spectrum[..., mask].abs().to(torch.float64)
+    if selected.numel() == 0 or not bool(torch.isfinite(selected).all()):
+        raise RuntimeError("public probe band observation is empty or nonfinite")
+    energy = float(torch.sqrt(torch.mean(selected.square())).item())
+    if not math.isfinite(energy):
+        raise RuntimeError("public probe band energy is nonfinite")
+    return energy
+
+
+class ContentAdaptiveInjectionCallback:
+    """Analyze and co-embed both branches once at the same frozen step 18."""
+
+    tensor_inputs = ("latents",)
+
+    def __init__(
+        self,
+        detection_key: str | bytes | bytearray | memoryview,
+        assets: ContentEmbedAssets,
+    ) -> None:
+        self._detection_key = detection_key
+        self._assets = assets
+        self._measurement: ContentAdaptiveMeasurement | None = None
+
+    @property
+    def measurement(self) -> ContentAdaptiveMeasurement | None:
+        return self._measurement
+
+    def __call__(
+        self,
+        pipeline: Any,
+        step_index: int,
+        timestep: Any,
+        callback_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        del timestep
+        if not isinstance(step_index, int):
+            raise TypeError("diffusers callback step_index must be an integer")
+        if not isinstance(callback_kwargs, dict):
+            raise TypeError("diffusers callback state must be a dict")
+        if step_index != 18:
+            return callback_kwargs
+        if self._measurement is not None:
+            raise RuntimeError("content-adaptive callback attempted step 18 more than once")
+        latents = callback_kwargs.get("latents")
+        if not isinstance(latents, torch.Tensor):
+            raise TypeError("diffusers callback state must contain torch latents")
+        if pipeline is None:
+            raise RuntimeError("content analysis requires the real callback pipeline")
+        base_image = _decode_callback_latents(pipeline, latents)
+        attention = dino_last_layer_cls_patch_tiles(
+            base_image,
+            self._assets.dino_processor,
+            self._assets.dino_model,
+        )
+        texture = rgb_texture_tiles(base_image)
+
+        def probe_evaluator(branch: str, candidate: torch.Tensor) -> float:
+            return _public_band_energy(
+                _decode_callback_latents(pipeline, candidate),
+                branch,
+                self._assets,
+            )
+
+        lf_probe, hf_probe = evaluate_public_probes(latents, probe_evaluator)
+        allocation = allocate_content(ContentSignals(attention, texture, lf_probe, hf_probe))
+        embedded, measurement = embed_content_adaptive(
+            latents,
+            self._detection_key,
+            self._assets.hf_public_assets,
+            self._assets.lf_public_assets,
+            allocation,
+        )
+        updated = dict(callback_kwargs)
+        updated["latents"] = embedded
+        self._measurement = measurement
+        return updated
+
+
+def _validate_pipeline(pipeline: Any) -> None:
+    call = getattr(pipeline, "__call__", None)
+    if not callable(call):
+        raise TypeError("SD3.5 pipeline must be callable")
+    parameters = inspect.signature(call).parameters
+    has_kwargs = any(value.kind is inspect.Parameter.VAR_KEYWORD for value in parameters.values())
+    required = {"callback_on_step_end", "callback_on_step_end_tensor_inputs"}
+    if not has_kwargs and not required.issubset(parameters):
+        raise TypeError("pipeline lacks the required diffusers callback-on-step-end API")
+
+
+def run_sd35_content_adaptive(
+    pipeline: Any,
+    prompt: str,
+    detection_key: str | bytes | bytearray | memoryview,
+    assets: ContentEmbedAssets,
+    *,
+    height: int,
+    width: int,
+    generator: torch.Generator | None = None,
+) -> ContentAdaptiveRunOutput:
+    """Run one real joint embedding and return only final RGB plus aggregates."""
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("embedding prompt must be non-empty text")
+    if not isinstance(height, int) or not isinstance(width, int) or height < 256 or width < 256:
+        raise ValueError("image dimensions must be integers of at least 256")
+    _validate_pipeline(pipeline)
+    callback = ContentAdaptiveInjectionCallback(detection_key, assets)
+    result = pipeline(
+        prompt=prompt,
+        num_inference_steps=20,
+        height=height,
+        width=width,
+        generator=generator,
+        output_type="pil",
+        callback_on_step_end=callback,
+        callback_on_step_end_tensor_inputs=["latents"],
+    )
+    images = getattr(result, "images", None)
+    if not isinstance(images, (list, tuple)) or len(images) != 1:
+        raise RuntimeError("SD3.5 pipeline must return exactly one final image")
+    if callback.measurement is None:
+        raise RuntimeError("pipeline completed without the frozen step-18 joint embedding")
+    return ContentAdaptiveRunOutput(require_ordinary_rgb_image(images[0]), callback.measurement)
