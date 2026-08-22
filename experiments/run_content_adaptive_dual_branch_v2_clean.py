@@ -1028,8 +1028,9 @@ def execute(args: argparse.Namespace) -> int:
     artifact_sink = Path(args.artifact_sink).resolve()
     key_text = os.environ.pop(KEY_ENV, "")
     token = os.environ.pop(TOKEN_ENV, "")
-    if not key_text.strip() or not token.strip():
-        raise RuntimeError("CEG_WM_ROOT_KEY_and_HF_TOKEN_are_required")
+    if not key_text.strip():
+        token = ""
+        raise RuntimeError("CEG_WM_ROOT_KEY_is_required")
     key = normalize_detection_key(key_text)
     key_text = ""
     exact = _git_exact(repo_root, args.expected_exact)
@@ -1050,6 +1051,19 @@ def execute(args: argparse.Namespace) -> int:
     )
     _progress(identity, state["committed_unit_count"], "identity_ready")
     _progress(identity, state["committed_unit_count"], "resume_ready")
+    if state["committed_unit_count"] == FIXED_UNIT_COUNT:
+        key = b""
+        token = ""
+        result = _derive_result(state["records"], protocol, identity)
+        rc = int(result["rc"])
+        _publish_terminal(
+            local_run_root, sink_run_root, identity, result, FIXED_UNIT_COUNT
+        )
+        _summary(identity, FIXED_UNIT_COUNT, rc)
+        return rc
+    if not token.strip():
+        token = ""
+        raise RuntimeError("HF_TOKEN_is_required_for_incomplete_execution")
     wrong_keys = _wrong_keys(key, protocol)
     result: dict[str, Any]
     try:

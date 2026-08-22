@@ -175,6 +175,50 @@ def _failure_transaction(protocol, identity, unit_index: int = 0) -> list[dict[s
     ]
 
 
+def _prepare_complete_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_all: bool = False,
+    checkpoint_at_end: bool = False,
+) -> dict[str, object]:
+    _install_fakes(monkeypatch, fail_all=fail_all)
+    original_terminal = runner._publish_terminal
+    original_now = runner._now
+    monkeypatch.setattr(
+        runner,
+        "_publish_terminal",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    if checkpoint_at_end:
+        times = iter([*([0.0] * 8), 7201.0])
+        monkeypatch.setattr(runner, "_now", lambda: next(times))
+    else:
+        monkeypatch.setattr(runner, "_now", lambda: 1.0)
+    _set_secrets(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(tmp_path))
+    monkeypatch.setattr(runner, "_publish_terminal", original_terminal)
+    monkeypatch.setattr(runner, "_now", original_now)
+    state_path = tmp_path / "local" / _run_id() / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["committed_unit_count"] == 8 and len(state["records"]) == 16
+    return state
+
+
+def _forbid_completion_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("complete prefix must not call runtime or scoring helpers")
+
+    for name in (
+        "_wrong_keys", "_load_pipeline_and_assets", "load_dino_content_assets",
+        "load_sd35_pipeline", "run_sd35_content_adaptive", "run_sd35_plain",
+        "_blind_scores", "score_lf_image", "score_hf_image", "_unit_transaction",
+    ):
+        monkeypatch.setattr(runner, name, forbidden)
+
+
 @pytest.mark.integration
 def test_fresh_short_run_is_final_only_record_derived_and_secret_free(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
@@ -208,6 +252,101 @@ def test_fresh_short_run_is_final_only_record_derived_and_secret_free(
     assert [event["committed"] for event in events] == [0, 0, *range(1, 9), 8]
     assert all(tuple(event) == ("run_id", "committed", "fixed_total", "phase") for event in events[:-1])
     assert tuple(events[-1]) == ("run_id", "committed", "fixed_total", "rc", "phase")
+
+
+@pytest.mark.integration
+def test_complete_local_prefix_terminalizes_without_token_or_runtime_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _prepare_complete_prefix(tmp_path, monkeypatch)
+    protocol, identity = _identity()
+    expected = runner._derive_result(state["records"], protocol, identity)
+    _forbid_completion_helpers(monkeypatch)
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.delenv(runner.TOKEN_ENV, raising=False)
+    assert runner.execute(_args(tmp_path)) == 0
+    _, result, payload = _terminal(tmp_path)
+    assert result == expected
+    assert result["records"] == state["records"]
+    assert result["gate_evidence"]["all_predeclared_gates_pass"] is True
+    assert result["lf_branch_share_population_std"] is not None
+    assert _KEY.encode() not in payload
+
+
+@pytest.mark.integration
+def test_complete_sink_prefix_restores_and_terminalizes_without_token_or_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _prepare_complete_prefix(
+        tmp_path, monkeypatch, checkpoint_at_end=True
+    )
+    local_state = tmp_path / "local" / _run_id() / "state.json"
+    local_state.unlink()
+    _forbid_completion_helpers(monkeypatch)
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.delenv(runner.TOKEN_ENV, raising=False)
+    assert runner.execute(_args(tmp_path)) == 0
+    restored = json.loads(local_state.read_text(encoding="utf-8"))
+    assert restored["records"] == state["records"]
+    _, result, _ = _terminal(tmp_path)
+    assert result["rc"] == 0 and result["records"] == state["records"]
+
+
+@pytest.mark.integration
+def test_complete_failure_prefix_terminalizes_exact_rc2_without_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _prepare_complete_prefix(tmp_path, monkeypatch, fail_all=True)
+    _forbid_completion_helpers(monkeypatch)
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.delenv(runner.TOKEN_ENV, raising=False)
+    assert runner.execute(_args(tmp_path)) == 2
+    _, result, _ = _terminal(tmp_path)
+    assert result["rc"] == 2
+    assert result["records"] == state["records"]
+    assert len(result["failed_units"]) == 8
+    assert result["gate_evidence"] is None
+    assert result["scientific_outcome_allowed"] is False
+    assert result["scientific_status"] == "not_evaluable"
+
+
+@pytest.mark.integration
+def test_incomplete_prefix_requires_token_and_model_starts_only_pending_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fakes(monkeypatch, interrupt_at=2)
+    monkeypatch.setattr(runner, "_now", lambda: 1.0)
+    _set_secrets(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(tmp_path))
+    state_path = tmp_path / "local" / _run_id() / "state.json"
+    before = state_path.read_bytes()
+    model_calls: list[tuple[str, str]] = []
+
+    def model(model_id: str, token: str):
+        model_calls.append((model_id, token))
+        return object(), object()
+
+    monkeypatch.setattr(runner, "_load_pipeline_and_assets", model)
+    monkeypatch.setenv(runner.KEY_ENV, _KEY)
+    monkeypatch.delenv(runner.TOKEN_ENV, raising=False)
+    with pytest.raises(RuntimeError, match="HF_TOKEN_is_required_for_incomplete_execution"):
+        runner.execute(_args(tmp_path))
+    assert model_calls == [] and state_path.read_bytes() == before
+
+    pending: list[str] = []
+
+    def stop_pending(**kwargs: object) -> list[dict[str, object]]:
+        pending.append(kwargs["unit"].unit_id)
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(runner, "_unit_transaction", stop_pending)
+    _set_secrets(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        runner.execute(_args(tmp_path))
+    assert model_calls == [(_protocol().config["generation_runtime"]["model_id"], _TOKEN)]
+    assert pending == [_protocol().roster[2].unit_id]
+    assert state_path.read_bytes() == before
 
 
 @pytest.mark.integration
