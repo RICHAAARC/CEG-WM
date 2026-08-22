@@ -40,6 +40,9 @@ def test_stage_a_frequency_response_notebook_has_one_thin_handoff_path() -> None
         and node.func.attr == "Popen"
     ]
     assert len(popen_calls) == 1
+    assert len(popen_calls[0].args) >= 1
+    assert isinstance(popen_calls[0].args[0], ast.Name)
+    assert popen_calls[0].args[0].id == "command"
     cwd_keywords = [keyword.value for keyword in popen_calls[0].keywords if keyword.arg == "cwd"]
     assert len(cwd_keywords) == 1
     cwd_value = cwd_keywords[0]
@@ -47,6 +50,32 @@ def test_stage_a_frequency_response_notebook_has_one_thin_handoff_path() -> None
     assert isinstance(cwd_value.func, ast.Name) and cwd_value.func.id == "str"
     assert len(cwd_value.args) == 1 and isinstance(cwd_value.args[0], ast.Name)
     assert cwd_value.args[0].id == "repo" and not cwd_value.keywords
+
+    command_assignments = [
+        node
+        for tree in trees
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "command"
+    ]
+    assert len(command_assignments) == 1
+    command_value = command_assignments[0].value
+    assert isinstance(command_value, ast.List)
+    command_elements = command_value.elts
+    assert len(command_elements) == 11
+    assert isinstance(command_elements[0], ast.Attribute)
+    assert isinstance(command_elements[0].value, ast.Name)
+    assert command_elements[0].value.id == "sys" and command_elements[0].attr == "executable"
+    assert [element.value for element in command_elements[1:3] if isinstance(element, ast.Constant)] == ["-m", "experiments.stage_a_frequency_response.run_colab"]
+    assert [element.value for element in command_elements[3::2] if isinstance(element, ast.Constant)] == ["--repo-root", "--expected-exact", "--local-work-root", "--artifact-sink"]
+    assert all(isinstance(element, ast.Call) for element in (command_elements[4], command_elements[8], command_elements[10]))
+    assert all(isinstance(element.func, ast.Name) and element.func.id == "str" and len(element.args) == 1 and isinstance(element.args[0], ast.Name) and not element.keywords for element in (command_elements[4], command_elements[8], command_elements[10]))
+    assert command_elements[4].args[0].id == "repo"
+    assert isinstance(command_elements[6], ast.Name) and command_elements[6].id == "resolved_exact"
+    assert command_elements[8].args[0].id == "local_work_root"
+    assert command_elements[10].args[0].id == "run_store_root"
 
     runner = sources[runner_index]
     assert runner.index("CEGWM_PROGRESS ") < runner.index("CEGWM_SUMMARY ")
