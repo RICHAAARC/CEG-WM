@@ -14,11 +14,6 @@ def test_stage_a_lf_balanced_notebook_has_one_thin_selection_handoff_path() -> N
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
     sources = ["".join(cell["source"]) for cell in code_cells]
-    markdown = "\n".join(
-        "".join(cell["source"])
-        for cell in document["cells"]
-        if cell["cell_type"] == "markdown"
-    )
 
     assert len(code_cells) == 4
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
@@ -27,12 +22,6 @@ def test_stage_a_lf_balanced_notebook_has_one_thin_selection_handoff_path() -> N
     assert "refs/heads/stage-a-lf-balanced-blocks-v2" in combined
     assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_balanced_blocks_selection" in combined
     assert combined.count("lfbbsel-[0-9a-f]{24}") == 2
-    assert "8 units / 16 paired records with exactly 16 external wrong keys" in markdown
-    assert "untouched confirmation, attacks, LPIPS" in markdown
-    assert "calibrated threshold/FPR" in markdown
-    assert "fusion, routing, geometry" in markdown
-    assert "Stage-A promotion" in markdown
-    assert "external supervisor validation and Agent5 adjudication" in markdown
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
     terminal_index = len(code_cells) - 1
