@@ -11,6 +11,7 @@ _BRANCH = "stage-a-content-adaptive-dual-branch-v2"
 _RUNNER = "experiments.run_content_adaptive_dual_branch_v2_clean"
 _LOCAL_ROOT = "/content/cegwm-stage-a-content-adaptive-dual-branch-v2-local"
 _ARTIFACT_SINK = "/content/drive/MyDrive/CEG-WM/stage_a_content_adaptive_dual_branch_v2_clean"
+_SCOPE_PARAGRAPH = "Content V2 clean mechanism only, with a fixed 8 units/16 records: no attacks, complementarity, superiority, geometry, fixed-FPR calibration, Stage-A/content-chain completion, scientific self-promotion, or paper promotion; local/Colab results are engineering evidence only, and any returned ZIP+SHA requires external supervisor validation."
 
 
 def _popen_calls(trees: list[ast.AST]) -> list[ast.Call]:
@@ -36,6 +37,7 @@ def test_stage_a_content_v2_notebook_has_one_thin_handoff_path() -> None:
 
     assert len(code_cells) == 4
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
+    assert document["cells"][0]["source"][-1] == _SCOPE_PARAGRAPH
     assert f"refs/heads/{_BRANCH}" in combined
     assert _RUNNER in combined
     assert _LOCAL_ROOT in combined
