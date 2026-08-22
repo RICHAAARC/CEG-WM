@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -172,6 +173,39 @@ def test_fresh_run_exports_fixed_320_descriptive_only_pair(tmp_path: Path, monke
     assert not any(name in raw for name in (b'"private_latent"', b'"carrier"', b'"mask"', b'"route"'))
     assert not list((sink / run_id).glob("*.json")) and not list((sink / run_id).glob("state*"))
     assert not list((local / run_id).rglob("*.zip")) and not list((local / run_id).rglob("*.sha256"))
+
+
+@pytest.mark.integration
+def test_public_progress_and_summary_events_are_bounded_and_follow_final_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, exact = _repo(tmp_path)
+    _install_fakes(monkeypatch)
+    _env(monkeypatch)
+    local, sink = tmp_path / "local", tmp_path / "sink"
+    original_summary = runner._emit_summary
+
+    def summary_after_pair(*, run_id: str, rc: int) -> None:
+        assert (sink / run_id / f"{run_id}.zip").is_file()
+        assert (sink / run_id / f"{run_id}.zip.sha256").is_file()
+        original_summary(run_id=run_id, rc=rc)
+
+    monkeypatch.setattr(runner, "_emit_summary", summary_after_pair)
+    assert runner.execute(_args(repo, exact, local, sink)) == 0
+    events = [line.split(" ", 1) for line in capsys.readouterr().out.splitlines() if line.startswith("CEGWM_")]
+    assert events and events[-1][0] == "CEGWM_SUMMARY"
+    progress = [json.loads(payload) for name, payload in events if name == "CEGWM_PROGRESS"]
+    summary = json.loads(events[-1][1])
+    assert all(set(event) == {"run_id", "committed", "fixed_total", "phase"} for event in progress)
+    assert [event["phase"] for event in progress[:2]] == ["identity_ready", "resume_ready"]
+    assert all(re.fullmatch(r"slhfr-[0-9a-f]{24}", str(event["run_id"])) for event in progress)
+    assert len({event["run_id"] for event in progress}) == 1
+    assert [event["committed"] for event in progress] == sorted(event["committed"] for event in progress)
+    assert all(type(event["committed"]) is int and 0 <= event["committed"] <= 8 and event["fixed_total"] == 8 for event in progress)
+    assert set(summary) == {"run_id", "committed", "fixed_total", "phase", "rc"}
+    assert summary == {"run_id": progress[0]["run_id"], "committed": 8, "fixed_total": 8, "phase": "terminal", "rc": 0}
+    public_text = "\n".join(payload for _, payload in events).lower()
+    assert not any(term in public_text for term in ("root_key", "token", "prompt", "records", "scores", "metrics", "image", "path", "exception", "winner", "complementarity", "joint", "fpr"))
 
 
 @pytest.mark.integration

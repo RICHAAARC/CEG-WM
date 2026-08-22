@@ -10,7 +10,7 @@ _NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_col
 
 
 @pytest.mark.unit
-def test_stage_a_lf_balanced_notebook_has_one_thin_confirmation_handoff_path() -> None:
+def test_stage_a_frequency_response_notebook_has_one_thin_handoff_path() -> None:
     document = json.loads(_NOTEBOOK.read_text(encoding="utf-8"))
     code_cells = [cell for cell in document["cells"] if cell["cell_type"] == "code"]
     sources = ["".join(cell["source"]) for cell in code_cells]
@@ -19,9 +19,12 @@ def test_stage_a_lf_balanced_notebook_has_one_thin_confirmation_handoff_path() -
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
     trees = [ast.parse(source) for source in sources]
     combined = "\n".join(sources)
-    assert "refs/heads/stage-a-lf-balanced-blocks-confirmation" in combined
-    assert "/content/drive/MyDrive/CEG-WM/stage_a_lf_balanced_blocks_confirmation" in combined
-    assert combined.count("lfbbconf-[0-9a-f]{24}") == 2
+    assert "refs/heads/stage-a-standalone-lf-hf-frequency-response-resumable-v2" in combined
+    assert "/content/drive/MyDrive/CEG-WM/stage_a_standalone_lf_hf_frequency_response" in combined
+    assert "slhfr-[0-9a-f]{24}" in combined
+    assert "experiments.stage_a_frequency_response.run_colab" in combined
+    for flag in ("--repo-root", "--expected-exact", "--local-work-root", "--artifact-sink"):
+        assert flag in combined
 
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
     terminal_index = len(code_cells) - 1
@@ -44,6 +47,11 @@ def test_stage_a_lf_balanced_notebook_has_one_thin_confirmation_handoff_path() -
     assert isinstance(cwd_value.func, ast.Name) and cwd_value.func.id == "str"
     assert len(cwd_value.args) == 1 and isinstance(cwd_value.args[0], ast.Name)
     assert cwd_value.args[0].id == "repo" and not cwd_value.keywords
+
+    runner = sources[runner_index]
+    assert runner.index("CEGWM_PROGRESS ") < runner.index("CEGWM_SUMMARY ")
+    assert "if terminal_event is not None:" in runner
+    assert "terminal_event['rc'] != runner_rc" in runner
 
     summary_assignments = [
         node
