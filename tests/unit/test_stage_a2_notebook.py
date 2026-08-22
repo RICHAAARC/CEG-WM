@@ -22,6 +22,24 @@ def test_stage_a2_notebook_has_one_thin_runnable_terminal_path() -> None:
     runner_index = next(index for index, source in enumerate(sources) if "subprocess.Popen" in source)
     terminal_index = next(index for index, source in enumerate(sources) if "zipfile.ZipFile" in source)
     assert runner_index < terminal_index == len(code_cells) - 1
+    popen_calls = [
+        node
+        for tree in trees
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "Popen"
+    ]
+    assert len(popen_calls) == 1
+    cwd_keywords = [keyword.value for keyword in popen_calls[0].keywords if keyword.arg == "cwd"]
+    assert len(cwd_keywords) == 1
+    cwd_value = cwd_keywords[0]
+    assert isinstance(cwd_value, ast.Call)
+    assert isinstance(cwd_value.func, ast.Name) and cwd_value.func.id == "str"
+    assert len(cwd_value.args) == 1 and isinstance(cwd_value.args[0], ast.Name)
+    assert cwd_value.args[0].id == "repo" and not cwd_value.keywords
 
     summary_assignments = [
         node
