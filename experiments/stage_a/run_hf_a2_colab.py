@@ -60,7 +60,10 @@ CHECKPOINT_INTERVAL_HOURS = 2.0
 EXECUTION_SCOPE_ID = (
     "hf_lf_paired_clean_reference_and_non_geometric_attack_complementarity_v1"
 )
-COMPLETE_EXECUTION = "complete_for_hf_lf_attack_complementarity_execution"
+COMPLETE_EXECUTION = (
+    "complete_for_hf_lf_paired_clean_reference_and_"
+    "attack_complementarity_execution"
+)
 INCOMPLETE_EXECUTION = "incomplete_operational_execution"
 SCIENTIFIC_STATUS = "not_adjudicated"
 LIMITATIONS = (
@@ -553,13 +556,13 @@ def _attack_complementarity_evidence(
 
     complete = successful_unit_count == len(roster) == 8 and len(records) == 128
     outcome_permitted = scientific_outcome_allowed and complete
-    condition_evidence: dict[str, Any] = {}
+    summaries_by_condition: dict[str, Any] = {}
     for condition in CONDITION_ORDER:
-        condition_evidence[condition] = {}
+        summaries_by_condition[condition] = {}
         for method in ("hf", "lf"):
             accumulator = accumulators[condition][method]
             available = len(accumulator["margins"]) == 8
-            condition_evidence[condition][method] = {
+            summaries_by_condition[condition][method] = {
                 "evaluated_candidate_id": method_ids[method],
                 "gate_a_registered_top_rank_units": accumulator["gate_a_count"],
                 "gate_a_required_units": expected["rank_gate_a_min_units"],
@@ -567,7 +570,6 @@ def _attack_complementarity_evidence(
                 "gate_b_registered_gt_primary_null_units": accumulator["gate_b_count"],
                 "gate_b_required_units": expected["rank_gate_b_min_units"],
                 "gate_b_pass": None,
-                "method_survives_attack": None,
                 "median_correct_minus_wrong_key_max_effect_size": (
                     float(np.median(accumulator["margins"])) if available else None
                 ),
@@ -590,14 +592,14 @@ def _attack_complementarity_evidence(
                 ),
             }
 
-    paired_clean_prerequisite_pass: bool | None = None
+    clean_both_methods_pass: bool | None = None
     attack_complementarity_pass: bool | None = None
     complementary_attack_ids: list[str] | None = None
-    scientific_outcome: str | None = None
+    attack_complementarity_outcome: str | None = None
     evaluation_status = "not_evaluable_operational"
     if outcome_permitted:
         for method in ("hf", "lf"):
-            facts = condition_evidence[IDENTITY_REFERENCE][method]
+            facts = summaries_by_condition[IDENTITY_REFERENCE][method]
             facts["gate_a_pass"] = (
                 facts["gate_a_registered_top_rank_units"]
                 >= expected["rank_gate_a_min_units"]
@@ -606,14 +608,14 @@ def _attack_complementarity_evidence(
                 facts["gate_b_registered_gt_primary_null_units"]
                 >= expected["rank_gate_b_min_units"]
             )
-        paired_clean_prerequisite_pass = all(
-            condition_evidence[IDENTITY_REFERENCE][method]["gate_a_pass"]
-            and condition_evidence[IDENTITY_REFERENCE][method]["gate_b_pass"]
+        clean_both_methods_pass = all(
+            summaries_by_condition[IDENTITY_REFERENCE][method]["gate_a_pass"]
+            and summaries_by_condition[IDENTITY_REFERENCE][method]["gate_b_pass"]
             for method in ("hf", "lf")
         )
-        if not paired_clean_prerequisite_pass:
+        if not clean_both_methods_pass:
             evaluation_status = "paired_clean_prerequisite_failed"
-            scientific_outcome = (
+            attack_complementarity_outcome = (
                 "SCIENTIFIC_NEGATIVE_FOR_PAIRED_CLEAN_PREREQUISITE_"
                 "ATTACK_COMPLEMENTARITY_NOT_EVALUABLE_AND_STOP"
             )
@@ -622,7 +624,7 @@ def _attack_complementarity_evidence(
             complementary_attack_ids = []
             for attack_id in ATTACK_IDS:
                 for method in ("hf", "lf"):
-                    facts = condition_evidence[attack_id][method]
+                    facts = summaries_by_condition[attack_id][method]
                     facts["gate_a_pass"] = (
                         facts["gate_a_registered_top_rank_units"]
                         >= expected["rank_gate_a_min_units"]
@@ -635,36 +637,85 @@ def _attack_complementarity_evidence(
                         facts["gate_a_pass"] and facts["gate_b_pass"]
                     )
                 if (
-                    condition_evidence[attack_id]["lf"]["method_survives_attack"]
-                    and not condition_evidence[attack_id]["hf"]["method_survives_attack"]
+                    summaries_by_condition[attack_id]["lf"]["method_survives_attack"]
+                    and not summaries_by_condition[attack_id]["hf"]["method_survives_attack"]
                 ):
                     complementary_attack_ids.append(attack_id)
             attack_complementarity_pass = bool(complementary_attack_ids)
-            scientific_outcome = (
+            attack_complementarity_outcome = (
                 "attack_complementarity_pass_candidate_for_agent5_adjudication"
                 if attack_complementarity_pass
                 else "SCIENTIFIC_NEGATIVE_FOR_COMPLEMENTARITY_AND_STOP"
             )
+
+    clean_unit_evidence: list[dict[str, Any]] = []
+    attack_unit_evidence: dict[str, list[dict[str, Any]]] = {
+        attack_id: [] for attack_id in ATTACK_IDS
+    }
+    for unit in unit_evidence:
+        clean_entry = {"unit_id": unit["unit_id"], "status": unit["status"]}
+        if unit["status"] == "success":
+            clean_entry["methods"] = unit["conditions"][IDENTITY_REFERENCE]
+        else:
+            clean_entry["methods"] = {}
+        clean_unit_evidence.append(clean_entry)
+        for attack_id in ATTACK_IDS:
+            attack_entry = {"unit_id": unit["unit_id"], "status": unit["status"]}
+            if unit["status"] == "success":
+                attack_entry["methods"] = unit["conditions"][attack_id]
+            else:
+                attack_entry["methods"] = {}
+            attack_unit_evidence[attack_id].append(attack_entry)
+
+    paired_clean_prerequisite = {
+        "condition_id": IDENTITY_REFERENCE,
+        "identity_reference_is_attack": False,
+        "hf": summaries_by_condition[IDENTITY_REFERENCE]["hf"],
+        "lf": summaries_by_condition[IDENTITY_REFERENCE]["lf"],
+        "both_methods_pass": clean_both_methods_pass,
+        "unit_evidence": clean_unit_evidence,
+    }
+    attack_conditions: dict[str, Any] = {}
+    for attack_id in ATTACK_IDS:
+        for method in ("hf", "lf"):
+            summaries_by_condition[attack_id][method].setdefault(
+                "method_survives_attack", None
+            )
+        hf_survives = summaries_by_condition[attack_id]["hf"].get(
+            "method_survives_attack"
+        )
+        lf_survives = summaries_by_condition[attack_id]["lf"].get(
+            "method_survives_attack"
+        )
+        complementarity_condition = (
+            bool(lf_survives and not hf_survives)
+            if clean_both_methods_pass is True
+            else None
+        )
+        attack_conditions[attack_id] = {
+            "hf": summaries_by_condition[attack_id]["hf"],
+            "lf": summaries_by_condition[attack_id]["lf"],
+            "complementarity_condition": complementarity_condition,
+            "unit_evidence": attack_unit_evidence[attack_id],
+        }
     return {
         "scientific_outcome_allowed": outcome_permitted,
         "evaluation_status": evaluation_status,
-        "scientific_outcome": scientific_outcome,
-        "paired_clean_prerequisite_pass": paired_clean_prerequisite_pass,
-        "attack_complementarity_pass": attack_complementarity_pass,
-        "complementary_attack_ids": complementary_attack_ids,
         "fixed_unit_count": len(roster),
         "fixed_condition_count": 4,
+        "fixed_attack_count": 3,
         "fixed_record_count": 128,
-        "successful_unit_count": successful_unit_count,
-        "condition_order": list(CONDITION_ORDER),
-        "attack_ids": list(ATTACK_IDS),
-        "condition_evidence": condition_evidence,
+        "unit_transaction_record_count": 16,
+        "paired_clean_prerequisite": paired_clean_prerequisite,
+        "attack_conditions": attack_conditions,
+        "attack_complementarity_pass": attack_complementarity_pass,
+        "complementary_attack_ids": complementary_attack_ids,
+        "attack_complementarity_outcome": attack_complementarity_outcome,
         "median_margin_is_gate": False,
         "primary_null_cutoff_is_gate": False,
         "score_retention_ratio_is_gate": False,
         "cross_detector_raw_score_comparison": False,
         "formal_fpr_claim": False,
-        "unit_evidence": unit_evidence,
     }
 
 

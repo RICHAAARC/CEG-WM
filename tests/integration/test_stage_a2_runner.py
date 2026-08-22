@@ -188,6 +188,10 @@ def test_runner_executes_three_real_paths_fixed_128_records_and_safe_export(
     assert rc == receipt["rc"] == result["rc"] == 0
     assert result["execution_scope_id"] == runner.EXECUTION_SCOPE_ID
     assert result["completeness"] == runner.COMPLETE_EXECUTION
+    assert runner.COMPLETE_EXECUTION == (
+        "complete_for_hf_lf_paired_clean_reference_and_"
+        "attack_complementarity_execution"
+    )
     assert result["condition_order"] == list(runner.CONDITION_ORDER)
     assert result["attack_ids"] == list(runner.ATTACK_IDS)
     assert len(result["records"]) == 128
@@ -215,12 +219,48 @@ def test_runner_executes_three_real_paths_fixed_128_records_and_safe_export(
         assert group[0][0] == "hf" and group[1][0] == "lf"
         assert group[0][1] == group[1][1]
     evidence = result["attack_complementarity_evidence"]
+    assert set(evidence) == {
+        "scientific_outcome_allowed",
+        "evaluation_status",
+        "fixed_unit_count",
+        "fixed_condition_count",
+        "fixed_attack_count",
+        "fixed_record_count",
+        "unit_transaction_record_count",
+        "paired_clean_prerequisite",
+        "attack_conditions",
+        "attack_complementarity_pass",
+        "complementary_attack_ids",
+        "attack_complementarity_outcome",
+        "median_margin_is_gate",
+        "primary_null_cutoff_is_gate",
+        "score_retention_ratio_is_gate",
+        "cross_detector_raw_score_comparison",
+        "formal_fpr_claim",
+    }
     assert evidence["scientific_outcome_allowed"] is True
-    assert evidence["paired_clean_prerequisite_pass"] is True
+    assert evidence["paired_clean_prerequisite"]["both_methods_pass"] is True
     assert evidence["fixed_record_count"] == 128
-    assert evidence["condition_evidence"]["identity_reference"]["hf"][
+    assert evidence["paired_clean_prerequisite"]["hf"][
         "median_attacked_vs_pre_attack_psnr"
     ] is None
+    assert set(evidence["attack_conditions"]) == set(runner.ATTACK_IDS)
+    assert "identity_reference" not in evidence["attack_conditions"]
+    assert set(evidence["paired_clean_prerequisite"]) == {
+        "condition_id",
+        "identity_reference_is_attack",
+        "hf",
+        "lf",
+        "both_methods_pass",
+        "unit_evidence",
+    }
+    assert evidence["paired_clean_prerequisite"]["condition_id"] == "identity_reference"
+    assert evidence["paired_clean_prerequisite"]["identity_reference_is_attack"] is False
+    assert all(
+        set(evidence["attack_conditions"][attack_id])
+        == {"hf", "lf", "complementarity_condition", "unit_evidence"}
+        for attack_id in runner.ATTACK_IDS
+    )
     assert all(len(record["scores"]) == 17 for record in result["records"])
     assert runner.KEY_ENV not in os.environ and runner.TOKEN_ENV not in os.environ
     stored_zip = store_root / run_id / f"{run_id}.zip"
@@ -302,19 +342,20 @@ def test_clean_prerequisite_failure_nulls_all_attack_decisions() -> None:
         scientific_outcome_allowed=True,
     )
     assert evidence["evaluation_status"] == "paired_clean_prerequisite_failed"
-    assert evidence["scientific_outcome"] == (
+    assert evidence["attack_complementarity_outcome"] == (
         "SCIENTIFIC_NEGATIVE_FOR_PAIRED_CLEAN_PREREQUISITE_"
         "ATTACK_COMPLEMENTARITY_NOT_EVALUABLE_AND_STOP"
     )
-    assert evidence["paired_clean_prerequisite_pass"] is False
+    assert evidence["paired_clean_prerequisite"]["both_methods_pass"] is False
     assert evidence["attack_complementarity_pass"] is None
     assert evidence["complementary_attack_ids"] is None
     for attack_id in runner.ATTACK_IDS:
         for method in ("hf", "lf"):
-            facts = evidence["condition_evidence"][attack_id][method]
+            facts = evidence["attack_conditions"][attack_id][method]
             assert facts["gate_a_pass"] is None
             assert facts["gate_b_pass"] is None
             assert facts["method_survives_attack"] is None
+        assert evidence["attack_conditions"][attack_id]["complementarity_condition"] is None
 
 
 @pytest.mark.integration
@@ -327,20 +368,29 @@ def test_complementarity_pass_no_complement_and_strict_tie_cases() -> None:
     )
     assert complement["attack_complementarity_pass"] is True
     assert complement["complementary_attack_ids"] == ["jpeg_q75"]
-    assert complement["scientific_outcome"] == "attack_complementarity_pass_candidate_for_agent5_adjudication"
+    assert complement["attack_complementarity_outcome"] == "attack_complementarity_pass_candidate_for_agent5_adjudication"
     assert "identity_reference" not in complement["complementary_attack_ids"]
+    assert complement["attack_conditions"]["jpeg_q75"]["hf"][
+        "method_survives_attack"
+    ] is False
+    assert complement["attack_conditions"]["jpeg_q75"]["lf"][
+        "method_survives_attack"
+    ] is True
+    assert complement["attack_conditions"]["jpeg_q75"][
+        "complementarity_condition"
+    ] is True
     negative = runner._attack_complementarity_evidence(
         _records(expected, {}), expected, scientific_outcome_allowed=True
     )
     assert negative["attack_complementarity_pass"] is False
     assert negative["complementary_attack_ids"] == []
-    assert negative["scientific_outcome"] == "SCIENTIFIC_NEGATIVE_FOR_COMPLEMENTARITY_AND_STOP"
+    assert negative["attack_complementarity_outcome"] == "SCIENTIFIC_NEGATIVE_FOR_COMPLEMENTARITY_AND_STOP"
     tie = runner._attack_complementarity_evidence(
         _records(expected, {("identity_reference", "lf"): (6, 6)}),
         expected,
         scientific_outcome_allowed=True,
     )
-    assert tie["paired_clean_prerequisite_pass"] is False
+    assert tie["paired_clean_prerequisite"]["both_methods_pass"] is False
 
 
 @pytest.mark.integration
@@ -352,10 +402,21 @@ def test_non_rc0_or_partial_records_have_no_scientific_booleans() -> None:
             records, expected, scientific_outcome_allowed=False
         )
         assert evidence["evaluation_status"] == "not_evaluable_operational"
-        assert evidence["scientific_outcome"] is None
-        assert evidence["paired_clean_prerequisite_pass"] is None
+        assert evidence["attack_complementarity_outcome"] is None
+        assert evidence["paired_clean_prerequisite"]["both_methods_pass"] is None
         assert evidence["attack_complementarity_pass"] is None
         assert evidence["complementary_attack_ids"] is None
+        for method in ("hf", "lf"):
+            clean = evidence["paired_clean_prerequisite"][method]
+            assert clean["gate_a_pass"] is None and clean["gate_b_pass"] is None
+        for attack_id in runner.ATTACK_IDS:
+            attack = evidence["attack_conditions"][attack_id]
+            assert attack["complementarity_condition"] is None
+            for method in ("hf", "lf"):
+                facts = attack[method]
+                assert facts["gate_a_pass"] is None
+                assert facts["gate_b_pass"] is None
+                assert facts["method_survives_attack"] is None
 
 
 @pytest.mark.integration
@@ -433,7 +494,7 @@ def test_operational_failure_retains_full_unit_and_nulls_outcome(
     assert all(record["status"] == "operational_failure" for record in result["records"][:16])
     evidence = result["attack_complementarity_evidence"]
     assert evidence["evaluation_status"] == "not_evaluable_operational"
-    assert evidence["scientific_outcome"] is None
+    assert evidence["attack_complementarity_outcome"] is None
 
 
 @pytest.mark.integration
@@ -458,8 +519,8 @@ def test_checkpoint_publication_failure_makes_complete_records_rc1_not_evaluable
     assert all(record["status"] == "success" for record in result["records"])
     evidence = result["attack_complementarity_evidence"]
     assert evidence["evaluation_status"] == "not_evaluable_operational"
-    assert evidence["scientific_outcome"] is None
-    assert evidence["paired_clean_prerequisite_pass"] is None
+    assert evidence["attack_complementarity_outcome"] is None
+    assert evidence["paired_clean_prerequisite"]["both_methods_pass"] is None
     assert evidence["attack_complementarity_pass"] is None
 
 
@@ -483,7 +544,7 @@ def test_missing_token_fatal_package_has_no_secret_or_scientific_outcome(
     assert _RAW_KEY.encode() not in payload and _HF_TOKEN.encode() not in payload
     evidence = result["attack_complementarity_evidence"]
     assert evidence["scientific_outcome_allowed"] is False
-    assert evidence["scientific_outcome"] is None
+    assert evidence["attack_complementarity_outcome"] is None
 
 
 @pytest.mark.integration
