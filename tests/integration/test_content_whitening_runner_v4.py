@@ -95,14 +95,6 @@ def _args(sink: Path) -> argparse.Namespace:
     )
 
 
-def _all_keys(value: object) -> set[str]:
-    if isinstance(value, dict):
-        return set(value).union(*(map(_all_keys, value.values())))
-    if isinstance(value, list):
-        return set().union(*(map(_all_keys, value))) if value else set()
-    return set()
-
-
 @pytest.mark.integration
 def test_controlled_runner_exactly_32_clean_calls_and_public_create_only_asset(
     tmp_path: Path,
@@ -144,46 +136,39 @@ def test_controlled_runner_exactly_32_clean_calls_and_public_create_only_asset(
         for call in pipeline.calls
     )
 
-    binding = v4.bind_fit_protocol(manifest, _EXACT)
-    asset_path, checksum_path = runner._destinations(sink.resolve(), binding.run_id, _EXACT)
+    asset_path, checksum_path = runner._destinations(sink.resolve(), _EXACT)
     assert sorted(path.name for path in asset_path.parent.iterdir()) == [
         runner.ASSET_FILENAME,
         f"{runner.ASSET_FILENAME}.sha256",
     ]
     raw = asset_path.read_bytes()
-    payload = json.loads(raw)
     digest = hashlib.sha256(raw).hexdigest()
     assert checksum_path.read_text(encoding="ascii") == f"{digest}  {runner.ASSET_FILENAME}\n"
-    assert payload["fit_protocol_digest"] == binding.digest
-    assert payload["run_id"] == binding.run_id
+    loaded_asset = v4.load_whitening_asset(asset_path)
+    payload = loaded_asset.payload
+    assert set(payload) == {
+        "schema_version",
+        "observation_contract_id",
+        "whitening_shape",
+        "whitening_order",
+        "whitening_words_be_hex",
+        "fit_sample_count",
+        "producer_exact",
+    }
     assert payload["producer_exact"] == _EXACT
-    assert len(payload["whitening_words_be_hex_channel_major_band_minor"]) == 96
-    assert "\"prompt\":" not in raw.decode("utf-8")
-    assert _all_keys(payload).isdisjoint(
-        {
-            "original_image",
-            "image",
-            "observation",
-            "observations",
-            "latent",
-            "latents",
-            "energies",
-            "energy_global",
-            "model_object",
-            "token",
-            "stdout",
-            "stderr",
-            "trace",
-            "private_state",
-            "scores",
-            "gates",
-            "threshold",
-        }
-    )
-    receipt = capsys.readouterr().out
-    assert receipt.count("CEGWM_CONTENT_V4_WHITENING_RECEIPT ") == 1
-    assert "fixture-secret-token" not in receipt
-    assert manifest.entries[0].prompt not in receipt
+    assert len(payload["whitening_words_be_hex"]) == 96
+
+    receipt_output = capsys.readouterr().out
+    assert receipt_output.count("CEGWM_CONTENT_V4_WHITENING_RECEIPT ") == 1
+    assert len(receipt_output.encode("utf-8")) < 512
+    assert "fixture-secret-token" not in receipt_output
+    assert manifest.entries[0].prompt not in receipt_output
+    receipt = json.loads(receipt_output.split(" ", 1)[1])
+    assert receipt == {
+        "asset_sha256": digest,
+        "producer_exact": _EXACT,
+        "unit_count": 32,
+    }
 
     before = len(pipeline.calls)
     monkeypatch.setenv(runner.TOKEN_ENV, "unused-secret-token")
@@ -222,23 +207,13 @@ def test_publication_rejects_existing_sidecar_without_partial_asset(tmp_path: Pa
     sidecar = tmp_path / f"{runner.ASSET_FILENAME}.sha256"
     sidecar.write_text("occupied", encoding="ascii")
     raw = b"{}"
-    digest = hashlib.sha256(raw).hexdigest()
     with pytest.raises(FileExistsError, match="create-only"):
-        runner._publish_create_only(asset, sidecar, raw, digest)
+        runner._publish_create_only(asset, sidecar, raw)
     assert not asset.exists()
     assert sidecar.read_text(encoding="ascii") == "occupied"
 
 
 @pytest.mark.integration
-def test_expected_exact_and_publish_payload_drift_fail_closed(tmp_path: Path) -> None:
+def test_expected_exact_fails_closed() -> None:
     with pytest.raises(ValueError, match="lowercase 40-character"):
         runner._git_exact(_REPO_ROOT, "not-an-exact")
-    raw = b"{}"
-    with pytest.raises(ValueError, match="payload digest differs"):
-        runner._publish_create_only(
-            tmp_path / runner.ASSET_FILENAME,
-            tmp_path / f"{runner.ASSET_FILENAME}.sha256",
-            raw,
-            "0" * 64,
-        )
-    assert list(tmp_path.iterdir()) == []
