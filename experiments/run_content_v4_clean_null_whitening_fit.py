@@ -1,4 +1,4 @@
-"""User-run current-stack producer for the Content V4 clean-null W asset."""
+"""User-run producer for the Content V4 clean-null W asset."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from cegwm.method.content_whitening_v4 import (
     FIT_MANIFEST_REPO_PATH,
     FIT_UNIT_COUNT,
     MODEL_ID,
-    bind_fit_protocol,
     build_whitening_asset,
     fit_whitening_operator,
     load_fit_manifest,
@@ -66,12 +65,8 @@ def _generator(seed: int) -> torch.Generator:
     return torch.Generator(device="cuda").manual_seed(seed)
 
 
-def _destinations(
-    artifact_sink: Path,
-    run_id: str,
-    producer_exact: str,
-) -> tuple[Path, Path]:
-    execution_root = artifact_sink / run_id / producer_exact
+def _destinations(artifact_sink: Path, producer_exact: str) -> tuple[Path, Path]:
+    execution_root = artifact_sink / producer_exact
     asset = execution_root / ASSET_FILENAME
     return asset, execution_root / f"{ASSET_FILENAME}.sha256"
 
@@ -85,10 +80,8 @@ def _publish_create_only(
     asset_path: Path,
     checksum_path: Path,
     payload: bytes,
-    digest: str,
-) -> None:
-    if hashlib.sha256(payload).hexdigest() != digest:
-        raise ValueError("whitening asset payload digest differs before publication")
+) -> str:
+    digest = hashlib.sha256(payload).hexdigest()
     _require_create_only(asset_path, checksum_path)
     asset_path.parent.mkdir(parents=True, exist_ok=True)
     created_asset = False
@@ -102,21 +95,13 @@ def _publish_create_only(
         if created_asset:
             asset_path.unlink(missing_ok=True)
         raise
+    return digest
 
 
-def _receipt(
-    *,
-    run_id: str,
-    producer_exact: str,
-    fit_protocol_digest: str,
-    asset_digest: str,
-) -> None:
+def _receipt(*, producer_exact: str, asset_sha256: str) -> None:
     payload = {
-        "asset_digest": asset_digest,
-        "asset_role_id": ASSET_ROLE_ID,
-        "fit_protocol_digest": fit_protocol_digest,
+        "asset_sha256": asset_sha256,
         "producer_exact": producer_exact,
-        "run_id": run_id,
         "unit_count": FIT_UNIT_COUNT,
     }
     print(
@@ -131,10 +116,7 @@ def execute(args: argparse.Namespace) -> int:
     artifact_sink = Path(args.artifact_sink).resolve()
     exact = _git_exact(repo_root, args.expected_exact)
     manifest = load_fit_manifest(repo_root / FIT_MANIFEST_REPO_PATH)
-    binding = bind_fit_protocol(manifest, exact)
-    asset_path, checksum_path = _destinations(
-        artifact_sink, binding.run_id, exact
-    )
+    asset_path, checksum_path = _destinations(artifact_sink, exact)
     _require_create_only(asset_path, checksum_path)
 
     token = os.environ.pop(TOKEN_ENV, "")
@@ -159,14 +141,9 @@ def execute(args: argparse.Namespace) -> int:
         raise RuntimeError("Content V4 whitening runner did not produce exactly 32 observations")
     fit = fit_whitening_operator(observations)
     observations.clear()
-    asset = build_whitening_asset(binding, fit.words_be_hex)
-    _publish_create_only(asset_path, checksum_path, asset.json_bytes, asset.digest)
-    _receipt(
-        run_id=binding.run_id,
-        producer_exact=exact,
-        fit_protocol_digest=binding.digest,
-        asset_digest=asset.digest,
-    )
+    asset = build_whitening_asset(exact, fit.words_be_hex)
+    asset_sha256 = _publish_create_only(asset_path, checksum_path, asset.json_bytes)
+    _receipt(producer_exact=exact, asset_sha256=asset_sha256)
     return 0
 
 
