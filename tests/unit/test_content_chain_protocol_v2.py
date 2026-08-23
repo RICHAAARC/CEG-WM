@@ -28,13 +28,13 @@ def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_ide
     protocol = load_content_adaptive_dual_branch_v2_clean_protocol(_CONFIG, _ROSTER)
     assert protocol.protocol_id == (
         "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-"
-        "runtime-asset-contract-v2"
+        "runtime-asset-contract-v3"
     )
-    assert protocol.config["protocol_version"] == 2
+    assert protocol.config["protocol_version"] == 3
     assert protocol.protocol_digest == (
-        "af4434590c12c882808279f331e1e987e2031719b9076c8d6ca2bd2d5f66d51f"
+        "e3fe3fd32ca2df7a1b1d2afe0318ff6c81cd67765b1f1be79a3ed89db7e87345"
     )
-    assert protocol.protocol_digest[:12] != "bfd9b7464195"
+    assert protocol.protocol_digest[:12] not in {"bfd9b7464195", "af4434590c12"}
     assert hashlib.sha256(_ROSTER.read_bytes()).hexdigest() == (
         "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
     )
@@ -44,7 +44,7 @@ def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_ide
     assert all("v2" in unit.unit_id and "v2" in unit.source_id for unit in protocol.roster)
     analysis = protocol.config["content_analysis"]
     assert analysis["runtime_asset_validation_contract_id"] == (
-        "dinov2_small_eager_bit_image_processor_semantics_v2"
+        "dinov2_small_eager_bit_image_processor_public_size_semantics_v3"
     )
     assert analysis["probe_evaluations_per_unit"] == 64
     assert analysis["probe_relative_l2_scales_in_order"] == (0.0005, 0.001)

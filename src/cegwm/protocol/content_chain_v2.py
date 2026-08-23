@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 _UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
-_EXPECTED_PROTOCOL_DIGEST = "af4434590c12c882808279f331e1e987e2031719b9076c8d6ca2bd2d5f66d51f"
+_EXPECTED_PROTOCOL_DIGEST = "e3fe3fd32ca2df7a1b1d2afe0318ff6c81cd67765b1f1be79a3ed89db7e87345"
 _EXPECTED_ROSTER = (
     ("content-adaptive-v2-0001", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8101", "A violin maker carving a maple bridge beside a sunlit window", 1213061, 512, 512),
     ("content-adaptive-v2-0002", "content_adaptive_dual_branch_v2_clean_v1", "content-v2-prompt-8102", "A night market noodle stall reflected in rain-polished pavement", 1238321, 512, 512),
@@ -33,7 +33,7 @@ _COUNTERFACTUAL_EFFECT_FIELDS = [
 _CONTENT_ANALYSIS = {
     "asset_id": "facebook/dinov2-small",
     "attention_implementation": "eager",
-    "runtime_asset_validation_contract_id": "dinov2_small_eager_bit_image_processor_semantics_v2",
+    "runtime_asset_validation_contract_id": "dinov2_small_eager_bit_image_processor_public_size_semantics_v3",
     "attention_layer": "last",
     "attention_statistic": "mean_head_cls_to_patch",
     "tile_grid": [4, 4],
@@ -176,9 +176,9 @@ def _load_roster(path: Path) -> tuple[ContentChainUnit, ...]:
 
 def _validate_config(config: Mapping[str, Any]) -> None:
     if (
-        config.get("protocol_version") != 2
+        config.get("protocol_version") != 3
         or config.get("protocol_id")
-        != "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v2"
+        != "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v3"
     ):
         raise ValueError("unexpected content-adaptive protocol identity")
     if config.get("execution_scope_id") != "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1":

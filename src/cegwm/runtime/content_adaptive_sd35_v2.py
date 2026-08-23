@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,6 +40,7 @@ _SD35_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 _SD35_IMAGE_PROCESSOR_ID = f"{_SD35_MODEL_ID}:image_processor"
 _HF_DETECTOR_STATISTIC_ID = "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
 _HF_EVALUATED_CANDIDATE_ID = "hf_tail_rademacher_v1_rankgate_v2"
+_MISSING_PROCESSOR_FIELD = object()
 
 
 def _dino_source_identity(asset: Any) -> str | None:
@@ -53,20 +54,33 @@ def _dino_source_identity(asset: Any) -> str | None:
     return None
 
 
-def _processor_mapping_integer(
+def _processor_public_size_integer(
     processor: Any,
     container_name: str,
     field_name: str,
     expected: int,
 ) -> None:
     container = getattr(processor, container_name, None)
-    if not isinstance(container, Mapping):
+    if type(container) is not dict:
+        try:
+            image_utils = importlib.import_module("transformers.image_utils")
+        except (ImportError, ModuleNotFoundError) as error:
+            raise RuntimeError(
+                "transformers.image_utils.SizeDict is required for DINO processor size validation"
+            ) from error
+        size_dict_type = getattr(image_utils, "SizeDict", None)
+        if not isinstance(size_dict_type, type) or type(container) is not size_dict_type:
+            raise RuntimeError(
+                f"content DINO processor {container_name} is missing or invalid"
+            )
+    value = container.get(field_name, _MISSING_PROCESSOR_FIELD)
+    if (
+        value is _MISSING_PROCESSOR_FIELD
+        or not isinstance(value, int)
+        or isinstance(value, bool)
+        or value != expected
+    ):
         raise RuntimeError(f"content DINO processor {container_name} is missing or invalid")
-    value = container.get(field_name)
-    if not isinstance(value, int) or isinstance(value, bool) or value != expected:
-        raise RuntimeError(
-            f"content DINO processor {container_name}.{field_name} differs"
-        )
 
 
 def _processor_finite_sequence(
@@ -103,9 +117,9 @@ def _validate_dino_processor(processor: Any) -> None:
     ):
         if getattr(processor, name, None) is not True:
             raise RuntimeError(f"content DINO processor {name} must be exactly true")
-    _processor_mapping_integer(processor, "size", "shortest_edge", 256)
-    _processor_mapping_integer(processor, "crop_size", "height", 224)
-    _processor_mapping_integer(processor, "crop_size", "width", 224)
+    _processor_public_size_integer(processor, "size", "shortest_edge", 256)
+    _processor_public_size_integer(processor, "crop_size", "height", 224)
+    _processor_public_size_integer(processor, "crop_size", "width", 224)
     rescale_factor = getattr(processor, "rescale_factor", None)
     if (
         not isinstance(rescale_factor, (int, float))

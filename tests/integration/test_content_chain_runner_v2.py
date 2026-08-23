@@ -28,8 +28,10 @@ _EXACT = "a" * 40
 _KEY = "runner-key-value-01"
 _TOKEN = "hf_test_secret"
 _OLD_PROTOCOL_DIGEST = "bfd9b7464195107f7dc57a43ab3042501500f5e2c07a322269859bb908a3dbb8"
+_V2_PROTOCOL_DIGEST = "af4434590c12c882808279f331e1e987e2031719b9076c8d6ca2bd2d5f66d51f"
 _FIXED_PUBLIC_KEY_DIGEST = "805bc21e173a" + "0" * 52
 _OLD_RUN_ID = "content-adaptive-v2-bfd9b7464195-805bc21e173a"
+_V2_RUN_ID = "content-adaptive-v2-af4434590c12-805bc21e173a"
 
 
 class _Generator:
@@ -184,9 +186,9 @@ def test_runtime_asset_contract_changes_run_identity_and_rejects_old_resume(
 ) -> None:
     protocol = _protocol()
     assert protocol.protocol_digest == (
-        "af4434590c12c882808279f331e1e987e2031719b9076c8d6ca2bd2d5f66d51f"
+        "e3fe3fd32ca2df7a1b1d2afe0318ff6c81cd67765b1f1be79a3ed89db7e87345"
     )
-    new_run_id = "content-adaptive-v2-af4434590c12-805bc21e173a"
+    new_run_id = "content-adaptive-v2-e3fe3fd32ca2-805bc21e173a"
     identity = runner._public_identity(
         protocol,
         exact=_EXACT,
@@ -196,21 +198,54 @@ def test_runtime_asset_contract_changes_run_identity_and_rejects_old_resume(
     assert identity["public_key_digest"][:12] == "805bc21e173a"
     assert identity["run_id"] == new_run_id
     assert identity["run_id"] != _OLD_RUN_ID
-    old_identity = dict(identity)
-    old_identity["run_id"] = _OLD_RUN_ID
-    old_identity["protocol_id"] = "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1"
-    old_identity["protocol_digest"] = _OLD_PROTOCOL_DIGEST
-    local_root = tmp_path / "local" / identity["run_id"]
-    local_root.mkdir(parents=True)
-    runner._write_local_state(local_root / "state.json", runner._new_state(old_identity, 1.0))
-    with pytest.raises(ValueError, match="public identity differs"):
-        runner._resolve_state(
-            local_state_path=local_root / "state.json",
-            sink_run_root=tmp_path / "sink" / identity["run_id"],
-            identity=identity,
-            protocol=protocol,
-            now=2.0,
+    assert identity["run_id"] != _V2_RUN_ID
+    for index, (old_run_id, old_protocol_id, old_digest) in enumerate((
+        (
+            _OLD_RUN_ID,
+            "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1",
+            _OLD_PROTOCOL_DIGEST,
+        ),
+        (
+            _V2_RUN_ID,
+            "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v2",
+            _V2_PROTOCOL_DIGEST,
+        ),
+    )):
+        old_identity = dict(identity)
+        old_identity.update(
+            run_id=old_run_id,
+            protocol_id=old_protocol_id,
+            protocol_digest=old_digest,
         )
+        mismatch_root = tmp_path / f"mismatch-{index}" / identity["run_id"]
+        runner._write_local_state(
+            mismatch_root / "state.json", runner._new_state(old_identity, 1.0)
+        )
+        with pytest.raises(ValueError, match="public identity differs"):
+            runner._resolve_state(
+                local_state_path=mismatch_root / "state.json",
+                sink_run_root=tmp_path / f"mismatch-sink-{index}" / identity["run_id"],
+                identity=identity,
+                protocol=protocol,
+                now=2.0,
+            )
+        isolated_old_root = tmp_path / "isolated-old" / old_run_id
+        isolated_old_root.mkdir(parents=True)
+        runner._write_local_state(
+            isolated_old_root / "state.json",
+            runner._new_state(old_identity, 1.0),
+        )
+    fresh_local_root = tmp_path / "isolated-old" / identity["run_id"]
+    state = runner._resolve_state(
+        local_state_path=fresh_local_root / "state.json",
+        sink_run_root=tmp_path / "isolated-sink" / identity["run_id"],
+        identity=identity,
+        protocol=protocol,
+        now=3.0,
+    )
+    assert state["checkpoint_sequence"] == 0
+    assert state["identity"] == identity
+    assert state["records"] == []
 
 
 def _prepare_complete_prefix(

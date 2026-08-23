@@ -7,6 +7,7 @@ from PIL import Image
 import pytest
 import torch
 import torch.nn.functional as functional
+from transformers.image_utils import SizeDict
 
 from cegwm.method.content_adaptive_v2 import (
     ContentAdaptiveMeasurement,
@@ -257,6 +258,60 @@ def test_v2_runtime_asset_loader_uses_exact_model_processor_calls(
             "backend": "torchvision", "token": "hf-secret",
         }),
     ]
+
+
+@pytest.mark.integration
+def test_v3_runtime_accepts_builtin_dict_and_official_size_dict_public_fields() -> None:
+    builtin_processor = BitImageProcessor()
+    runtime._validate_dino_assets(_Dino(), builtin_processor)
+
+    official_processor = BitImageProcessor()
+    official_processor.size = SizeDict(shortest_edge=256)
+    official_processor.crop_size = SizeDict(height=224, width=224)
+    runtime._validate_dino_assets(_Dino(), official_processor)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("container_name", "container"),
+    (
+        ("size", SizeDict()),
+        ("size", SizeDict(shortest_edge=True)),
+        ("size", SizeDict(shortest_edge=256.0)),
+        ("size", SizeDict(shortest_edge=255)),
+        ("crop_size", SizeDict(width=224)),
+        ("crop_size", SizeDict(height=True, width=224)),
+        ("crop_size", SizeDict(height=223, width=224)),
+        ("crop_size", SizeDict(height=224)),
+        ("crop_size", SizeDict(height=224, width=True)),
+        ("crop_size", SizeDict(height=224, width=225)),
+    ),
+)
+def test_v3_runtime_rejects_official_size_dict_missing_type_or_value(
+    container_name: str,
+    container: SizeDict,
+) -> None:
+    processor = BitImageProcessor()
+    setattr(processor, container_name, container)
+    with pytest.raises(RuntimeError, match=container_name):
+        runtime._validate_dino_assets(_Dino(), processor)
+
+
+@pytest.mark.integration
+def test_v3_runtime_rejects_arbitrary_fake_get_container() -> None:
+    class FakeGetContainer:
+        calls = 0
+
+        def get(self, name: str, default: object) -> object:
+            self.calls += 1
+            return {"shortest_edge": 256}.get(name, default)
+
+    processor = BitImageProcessor()
+    fake = FakeGetContainer()
+    processor.size = fake
+    with pytest.raises(RuntimeError, match="size"):
+        runtime._validate_dino_assets(_Dino(), processor)
+    assert fake.calls == 0
 
 
 @pytest.mark.integration
