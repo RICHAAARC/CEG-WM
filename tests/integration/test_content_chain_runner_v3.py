@@ -108,7 +108,7 @@ def _success_records() -> tuple[object, dict[str, object], list[dict[str, object
 def test_content_v3_runner_binds_distinct_deterministic_run_record_and_state_identity() -> None:
     protocol, identity = _identity()
     assert protocol.protocol_digest == CONTENT_V3_PROTOCOL_DIGEST
-    assert identity["run_id"] == "content-v3-0ba7e5555689-8fac30fb16d4"
+    assert identity["run_id"] == "content-v3-6b812bbef380-8fac30fb16d4"
     assert identity["public_key_digest"][:12] == "8fac30fb16d4"
     assert identity["ordered_arms"] == list(runner.CONTENT_V3_RUNNER_VARIANT.arms)
     assert identity["record_contract_id"] == (

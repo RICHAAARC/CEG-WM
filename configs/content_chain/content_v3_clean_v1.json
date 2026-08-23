@@ -1,6 +1,6 @@
 {
-  "protocol_version": 1,
-  "protocol_id": "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v1",
+  "protocol_version": 2,
+  "protocol_id": "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v2",
   "execution_scope_id": "content_v3_unweighted_lf_adaptive_hf_engineering_and_stage_a_evaluation_v1",
   "scientific_status": "not_evaluated_until_complete_real_gpu_rc0",
   "generation_runtime": {
@@ -62,7 +62,8 @@
   },
   "aggregate_measurement": {
     "counterfactual_effect_fields_in_order": ["semantic_routing_strength_counterfactual_effect", "texture_hf_suitability_counterfactual_effect", "lf_two_scale_response_consistency_counterfactual_effect", "hf_two_scale_response_consistency_counterfactual_effect", "lf_local_perturbation_sensitivity_counterfactual_effect", "hf_local_perturbation_sensitivity_counterfactual_effect"],
-    "counterfactual_effect_source": "single_ContentAllocation_counterfactual_effects_pass_through_without_recompute_copy_swap_default_alias_or_fallback",
+    "counterfactual_effect_source": "six_Content_V3_neutral_reallocations_each_compare_only_hf_tile_weights_lf_branch_share_hf_branch_share",
+    "counterfactual_effect_formula": "l2_of_observed_minus_neutral_counterfactual_vector_in_order_hf_tile_weights_then_lf_branch_share_then_hf_branch_share",
     "counterfactual_effect_validation": "each_finite_and_nonnegative_zero_allowed",
     "minimum_counterfactual_effect": "min_of_the_six_counterfactual_effect_fields",
     "public_branch_share_fields_in_order": ["lf_branch_share", "hf_branch_share"],

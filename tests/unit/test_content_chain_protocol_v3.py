@@ -35,7 +35,7 @@ def test_content_v3_protocol_has_distinct_method_protocol_digest_record_and_run_
     assert protocol.protocol_id == CONTENT_V3_PROTOCOL_ID
     assert protocol.protocol_digest == CONTENT_V3_PROTOCOL_DIGEST
     assert protocol.protocol_digest != v2.protocol_digest
-    assert protocol.config["protocol_version"] == 1
+    assert protocol.config["protocol_version"] == 2
     identities = protocol.config["method_identities"]
     assert identities["content_method_id"] == "content_v3_unweighted_lf_adaptive_hf_v1"
     assert identities["evaluated_candidate_id"] == (
@@ -90,7 +90,7 @@ def test_content_v3_keeps_runtime_asset_contract_separate_from_method_version() 
     assert analysis["runtime_asset_validation_contract_id"] == (
         RUNTIME_ASSET_VALIDATION_CONTRACT_ID
     )
-    assert protocol.config["protocol_version"] == 1
+    assert protocol.config["protocol_version"] == 2
     assert analysis["probe_evaluations_per_unit"] == 64
     assert analysis["probe_measurement"] == (
         "baseline_differenced_branch_tile_two_scale_v1"

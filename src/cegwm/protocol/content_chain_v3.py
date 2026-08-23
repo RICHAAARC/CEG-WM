@@ -19,7 +19,7 @@ from cegwm.protocol.content_chain_v2 import (
     ContentChainUnit,
 )
 
-CONTENT_V3_PROTOCOL_ID = "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v1"
+CONTENT_V3_PROTOCOL_ID = "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v2"
 CONTENT_V3_EXECUTION_SCOPE_ID = (
     "content_v3_unweighted_lf_adaptive_hf_engineering_and_stage_a_evaluation_v1"
 )
@@ -39,7 +39,7 @@ CONTENT_V3_ROSTER_SHA256 = (
     "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
 )
 CONTENT_V3_PROTOCOL_DIGEST = (
-    "0ba7e55556892b49a873429a1d76a021a119069e03abf512b2dfd4adb50d1c56"
+    "6b812bbef380085b67c33ea380444c379278faad1822762d4028465ecfd6058c"
 )
 RUNTIME_ASSET_VALIDATION_CONTRACT_ID = (
     "dinov2_small_eager_bit_image_processor_public_size_semantics_v3"
@@ -62,6 +62,8 @@ _METHOD_IDENTITIES = {
 }
 _AGGREGATE_MEASUREMENT = {
     **_V2_AGGREGATE_MEASUREMENT,
+    "counterfactual_effect_source": "six_Content_V3_neutral_reallocations_each_compare_only_hf_tile_weights_lf_branch_share_hf_branch_share",
+    "counterfactual_effect_formula": "l2_of_observed_minus_neutral_counterfactual_vector_in_order_hf_tile_weights_then_lf_branch_share_then_hf_branch_share",
     "public_branch_share_source": "same_ContentAllocation_values_pass_through_and_control_Content_V3_branch_amplitudes",
 }
 _EXECUTION_FLOW = {
@@ -118,7 +120,7 @@ def _mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:
 
 
 def _validate_config(config: Mapping[str, Any]) -> None:
-    if config.get("protocol_version") != 1 or config.get("protocol_id") != CONTENT_V3_PROTOCOL_ID:
+    if config.get("protocol_version") != 2 or config.get("protocol_id") != CONTENT_V3_PROTOCOL_ID:
         raise ValueError("unexpected Content V3 protocol identity")
     if config.get("execution_scope_id") != CONTENT_V3_EXECUTION_SCOPE_ID:
         raise ValueError("unexpected Content V3 execution scope")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import fields, replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -171,6 +172,67 @@ def test_content_v3_real_signals_change_allocation_shares_and_branch_amplitudes(
     )
     assert torch.linalg.vector_norm(high_hf_delta) > torch.linalg.vector_norm(low_hf_delta)
     assert torch.linalg.vector_norm(high_lf_delta) < torch.linalg.vector_norm(low_lf_delta)
+
+
+@pytest.mark.unit
+def test_content_v3_six_neutral_effects_use_real_allocation_and_only_production_controls() -> None:
+    signals = _signals(
+        semantic_importance=tuple(float((index * 5) % 17 + 1) for index in range(16)),
+        texture_complexity=tuple(float(index * 13 + 7) for index in range(16)),
+        lf_two_scale_response_consistency=tuple(0.1 + index * 0.03 for index in range(16)),
+        hf_two_scale_response_consistency=tuple(0.8 - index * 0.025 for index in range(16)),
+        lf_local_perturbation_sensitivity=tuple(0.2 + index * 0.02 for index in range(16)),
+        hf_local_perturbation_sensitivity=tuple(0.7 - index * 0.02 for index in range(16)),
+    )
+    allocation = v3.allocate_content(signals)
+    v2_allocation = v2.allocate_content(signals)
+    assert allocation.lf_tile_weights == v2_allocation.lf_tile_weights
+    assert allocation.hf_tile_weights == v2_allocation.hf_tile_weights
+    assert allocation.lf_branch_share == v2_allocation.lf_branch_share
+    assert allocation.hf_branch_share == v2_allocation.hf_branch_share
+
+    observed_v3 = torch.tensor(
+        (*allocation.hf_tile_weights, allocation.lf_branch_share, allocation.hf_branch_share),
+        dtype=torch.float64,
+    )
+    expected_v3: list[float] = []
+    for signal_field in fields(v3.ContentSignals):
+        neutral = (
+            0.0
+            if signal_field.name in {"semantic_importance", "texture_complexity"}
+            else 0.5
+        )
+        counterfactual = v2.allocate_content(
+            replace(signals, **{signal_field.name: (neutral,) * v3.TILE_COUNT})
+        )
+        counterfactual_v3 = torch.tensor(
+            (
+                *counterfactual.hf_tile_weights,
+                counterfactual.lf_branch_share,
+                counterfactual.hf_branch_share,
+            ),
+            dtype=torch.float64,
+        )
+        expected_v3.append(float(torch.linalg.vector_norm(observed_v3 - counterfactual_v3)))
+
+    assert allocation.counterfactual_effects == pytest.approx(expected_v3, abs=1e-15)
+    assert any(
+        v3_effect != pytest.approx(v2_effect, abs=1e-15)
+        for v3_effect, v2_effect in zip(
+            allocation.counterfactual_effects,
+            v2_allocation.counterfactual_effects,
+            strict=True,
+        )
+    )
+    neutral = v3.ContentSignals(
+        (0.0,) * v3.TILE_COUNT,
+        (0.0,) * v3.TILE_COUNT,
+        (0.5,) * v3.TILE_COUNT,
+        (0.5,) * v3.TILE_COUNT,
+        (0.5,) * v3.TILE_COUNT,
+        (0.5,) * v3.TILE_COUNT,
+    )
+    assert v3.allocate_content(neutral).counterfactual_effects == (0.0,) * 6
 
 
 @pytest.mark.unit

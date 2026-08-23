@@ -9,9 +9,9 @@ import torch
 import torch.nn.functional as functional
 from transformers.image_utils import SizeDict
 
+from cegwm.method import content_adaptive_v3 as method_v3
 from cegwm.method.content_adaptive_v3 import (
     ContentAdaptiveMeasurement,
-    ContentAllocation,
     PublicProbeMaps,
 )
 from cegwm.method.hf import FrozenHFPublicAssets
@@ -175,32 +175,41 @@ def test_content_v3_runtime_passes_real_signal_allocation_to_v3_embed_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assets = _assets()
-    effects = (0.11, 0.22, 0.33, 0.44, 0.55, 0.66)
-    allocation = ContentAllocation((1.0,) * 16, (1.0,) * 16, 0.4, 0.6, effects)
-    measurement = ContentAdaptiveMeasurement(
-        BudgetMeasurement("torch.float32", 10.0, 0.1, 0.01),
-        0.004,
-        0.006,
-        0.4,
-        0.6,
-        *effects,
-        64,
+    semantic = tuple(float((index * 3) % 11 + 1) for index in range(16))
+    texture = tuple(float(index * 9 + 2) for index in range(16))
+    maps = PublicProbeMaps(
+        tuple(0.1 + index * 0.02 for index in range(16)),
+        tuple(0.8 - index * 0.02 for index in range(16)),
+        tuple(0.2 + index * 0.015 for index in range(16)),
+        tuple(0.7 - index * 0.015 for index in range(16)),
     )
-    maps = PublicProbeMaps((0.1,) * 16, (0.2,) * 16, (0.3,) * 16, (0.4,) * 16)
-    monkeypatch.setattr(runtime, "dino_last_layer_cls_patch_tiles", lambda *args: (1.0,) * 16)
-    monkeypatch.setattr(runtime, "rgb_texture_tiles", lambda *args: (2.0,) * 16)
+    expected = method_v3.allocate_content(method_v3.ContentSignals(
+        semantic,
+        texture,
+        maps.lf_two_scale_response_consistency,
+        maps.hf_two_scale_response_consistency,
+        maps.lf_local_perturbation_sensitivity,
+        maps.hf_local_perturbation_sensitivity,
+    ))
+    monkeypatch.setattr(runtime, "dino_last_layer_cls_patch_tiles", lambda *args: semantic)
+    monkeypatch.setattr(runtime, "rgb_texture_tiles", lambda *args: texture)
     monkeypatch.setattr(runtime, "evaluate_public_probes", lambda *args: maps)
 
-    def allocate(signals: object) -> ContentAllocation:
-        assert signals.lf_two_scale_response_consistency == maps.lf_two_scale_response_consistency
-        assert signals.hf_local_perturbation_sensitivity == maps.hf_local_perturbation_sensitivity
-        return allocation
-
     def embed(latents: torch.Tensor, *args: object) -> tuple[torch.Tensor, ContentAdaptiveMeasurement]:
-        assert args[-1] is allocation
+        allocation = args[-1]
+        assert isinstance(allocation, method_v3.ContentAllocation)
+        assert allocation == expected
+        measurement = ContentAdaptiveMeasurement(
+            BudgetMeasurement("torch.float32", 10.0, 0.1, 0.01),
+            0.004,
+            0.006,
+            allocation.lf_branch_share,
+            allocation.hf_branch_share,
+            *allocation.counterfactual_effects,
+            64,
+        )
         return latents + 0.01, measurement
 
-    monkeypatch.setattr(runtime, "allocate_content", allocate)
     monkeypatch.setattr(runtime, "embed_content_v3", embed)
     output = runtime.run_sd35_content_v3(
         _Pipeline(assets),
@@ -210,7 +219,12 @@ def test_content_v3_runtime_passes_real_signal_allocation_to_v3_embed_only(
         height=512,
         width=512,
     )
-    assert output.measurement is measurement
+    assert tuple(
+        getattr(output.measurement, name)
+        for name in method_v3.COUNTERFACTUAL_EFFECT_FIELDS
+    ) == pytest.approx(
+        expected.counterfactual_effects
+    )
     assert not hasattr(output.measurement, "tile_weights")
     assert not hasattr(output.measurement, "latent")
 

@@ -9,10 +9,12 @@ allocation remains real because its branch share controls the LF amplitude.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import torch
 import torch.nn.functional as functional
 
+from cegwm.method import content_adaptive_v2 as _content_v2
 from cegwm.method.content_adaptive_v2 import (
     BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE,
     COMBINED_BUDGET_PROJECTOR_ID,
@@ -36,7 +38,6 @@ from cegwm.method.content_adaptive_v2 import (
     ContentSignals,
     ProbeObservation,
     PublicProbeMaps,
-    allocate_content,
     dino_last_layer_cls_patch_tiles,
     evaluate_public_probes,
     rgb_texture_tiles,
@@ -53,6 +54,58 @@ CONTENT_V3_METHOD_ID = "content_v3_unweighted_lf_adaptive_hf_v1"
 CONTENT_V3_EVALUATED_CANDIDATE_ID = (
     "content_v3_unweighted_lf_adaptive_hf_semantic_gate_v1"
 )
+_CONTENT_V3_COUNTERFACTUAL_SIGNAL_FIELDS = (
+    "semantic_importance",
+    "texture_complexity",
+    "lf_two_scale_response_consistency",
+    "hf_two_scale_response_consistency",
+    "lf_local_perturbation_sensitivity",
+    "hf_local_perturbation_sensitivity",
+)
+
+
+def _content_v3_production_control_vector(
+    allocation: ContentAllocation,
+) -> torch.Tensor:
+    """Return only allocation controls consumed by Content V3 production."""
+
+    return torch.tensor(
+        (
+            *allocation.hf_tile_weights,
+            allocation.lf_branch_share,
+            allocation.hf_branch_share,
+        ),
+        dtype=torch.float64,
+    )
+
+
+def allocate_content(signals: ContentSignals) -> ContentAllocation:
+    """Allocate with V2 formulas but measure only controls consumed by V3."""
+
+    allocation = _content_v2.allocate_content(signals)
+    observed = _content_v3_production_control_vector(allocation)
+    effects: list[float] = []
+    for field in _CONTENT_V3_COUNTERFACTUAL_SIGNAL_FIELDS:
+        neutral_value = 0.0 if field in {
+            "semantic_importance",
+            "texture_complexity",
+        } else 0.5
+        counterfactual = _content_v2.allocate_content(
+            replace(signals, **{field: (neutral_value,) * TILE_COUNT})
+        )
+        effect = float(torch.linalg.vector_norm(
+            observed - _content_v3_production_control_vector(counterfactual)
+        ).item())
+        if not math.isfinite(effect) or effect < 0.0:
+            raise RuntimeError(f"{field} Content V3 counterfactual effect is invalid")
+        effects.append(effect)
+    return ContentAllocation(
+        allocation.lf_tile_weights,
+        allocation.hf_tile_weights,
+        allocation.lf_branch_share,
+        allocation.hf_branch_share,
+        tuple(effects),
+    )
 
 
 def _relative_l2(base: torch.Tensor, candidate: torch.Tensor) -> BudgetMeasurement:
