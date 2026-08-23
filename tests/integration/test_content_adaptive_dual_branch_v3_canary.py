@@ -117,8 +117,12 @@ def _install_controlled_runtime(
     def validate(root: Path, expected: str, exact: str) -> None:
         calls.append(("identity", root, expected, exact))
 
-    def non_roster(root: Path) -> None:
+    def non_roster(root: Path) -> SimpleNamespace:
         calls.append(("non_roster", root))
+        return SimpleNamespace(
+            protocol_id=runner.CONTENT_V3_PROTOCOL_ID,
+            protocol_digest=runner.CONTENT_V3_PROTOCOL_DIGEST,
+        )
 
     monkeypatch.setattr(runner, "_validate_execution_identity", validate)
     monkeypatch.setattr(runner, "_assert_non_roster_identity", non_roster)
@@ -150,30 +154,32 @@ def _install_controlled_runtime(
         hf_assets: FrozenHFPublicAssets,
         lf_assets: FrozenLFPublicAssets,
     ) -> SimpleNamespace:
-        calls.append(("ContentEmbedAssets", received_dino, received_processor))
+        calls.append(("ContentV3EmbedAssets", received_dino, received_processor))
         assert received_dino is dino and received_processor is processor
         assert isinstance(hf_assets, FrozenHFPublicAssets)
         assert isinstance(lf_assets, FrozenLFPublicAssets)
         return SimpleNamespace(
             hf_public_assets=hf_assets,
             lf_public_assets=lf_assets,
+            content_method_id=runner.CONTENT_V3_METHOD_ID,
+            evaluated_candidate_id=runner.CONTENT_V3_EVALUATED_CANDIDATE_ID,
         )
 
-    monkeypatch.setattr(runner, "ContentEmbedAssets", content_assets)
+    monkeypatch.setattr(runner, "ContentV3EmbedAssets", content_assets)
     monkeypatch.setattr(runner.torch, "Generator", _Generator)
 
     joint_image = _image(11)
     null_image = joint_image.copy() if same_images else _image(10)
     measurement = _measurement(**(measurement_updates or {}))
 
-    def adaptive(
+    def content_v3(
         received_pipeline: _Pipeline,
         prompt: str,
         key: bytes,
         assets: object,
         **kwargs: Any,
     ) -> SimpleNamespace:
-        calls.append(("run_sd35_content_adaptive", prompt, key, assets, kwargs))
+        calls.append(("run_sd35_content_v3", prompt, key, assets, kwargs))
         assert received_pipeline is pipeline
         if failure_at == "joint":
             raise RuntimeError(f"private joint {_KEY} {_TOKEN}")
@@ -186,7 +192,7 @@ def _install_controlled_runtime(
             raise RuntimeError(f"private null {_KEY} {_TOKEN}")
         return null_image
 
-    monkeypatch.setattr(runner, "run_sd35_content_adaptive", adaptive)
+    monkeypatch.setattr(runner, "run_sd35_content_v3", content_v3)
     monkeypatch.setattr(runner, "run_sd35_plain", plain)
 
     def lf_score(image: Image.Image, key: bytes, assets: FrozenLFPublicAssets) -> float:
@@ -216,7 +222,9 @@ def _payload(capsys: pytest.CaptureFixture[str]) -> tuple[dict[str, Any], str]:
 
 @pytest.mark.integration
 def test_fixed_identity_is_absent_from_the_frozen_roster() -> None:
-    runner._assert_non_roster_identity(_ROOT)
+    protocol = runner._assert_non_roster_identity(_ROOT)
+    assert protocol.protocol_id == runner.CONTENT_V3_PROTOCOL_ID
+    assert protocol.protocol_digest == runner.CONTENT_V3_PROTOCOL_DIGEST
     assert (
         runner.CANARY_ID,
         runner.UNIT_ID,
@@ -226,9 +234,9 @@ def test_fixed_identity_is_absent_from_the_frozen_roster() -> None:
         runner.HEIGHT,
         runner.WIDTH,
     ) == (
-        "content-v3-full-runtime-non-roster-canary-v1",
-        "content-v3-canary-0001",
-        "content-v3-canary-prompt-9001",
+        "content-v3-unweighted-lf-full-runtime-non-roster-canary-v1",
+        "content-v3-unweighted-lf-canary-0001",
+        "content-v3-unweighted-lf-canary-prompt-9001",
         "A book conservator examining an illuminated manuscript under neutral studio light",
         1415149,
         512,
@@ -254,8 +262,8 @@ def test_one_joint_one_null_and_blind_final_image_scoring_only(
         "load_dino_content_assets",
         "dino.to",
         "dino.eval",
-        "ContentEmbedAssets",
-        "run_sd35_content_adaptive",
+        "ContentV3EmbedAssets",
+        "run_sd35_content_v3",
         "run_sd35_plain",
     ]
     assert calls[2][1:] == (runner.MODEL_ID, torch.float16, _TOKEN)
@@ -278,6 +286,15 @@ def test_one_joint_one_null_and_blind_final_image_scoring_only(
     assert tuple(payload) == tuple(sorted(runner._SUCCESS_FIELDS))
     assert payload["status"] == "operational_canary_pass"
     assert payload["claim_ceiling"] == "full_non_roster_runtime_canary_only"
+    assert payload["protocol_id"] == runner.CONTENT_V3_PROTOCOL_ID
+    assert payload["protocol_digest"] == runner.CONTENT_V3_PROTOCOL_DIGEST
+    assert payload["content_method_id"] == runner.CONTENT_V3_METHOD_ID
+    assert payload["evaluated_candidate_id"] == runner.CONTENT_V3_EVALUATED_CANDIDATE_ID
+    key_digest = runner.public_key_digest(runner.normalize_detection_key(_KEY))
+    assert payload["run_id"] == (
+        f"{runner.CONTENT_V3_RUN_PREFIX}-{runner.CONTENT_V3_PROTOCOL_DIGEST[:12]}-"
+        f"{key_digest[:12]}"
+    )
     assert payload["formal_roster_member"] is False
     assert payload["scientific_denominator_units"] == 0
     assert payload["probe_evaluation_count"] == 64

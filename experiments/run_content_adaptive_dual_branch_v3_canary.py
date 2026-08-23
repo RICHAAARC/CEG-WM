@@ -1,4 +1,4 @@
-"""One-unit, non-roster operational canary for the real content-v2 runtime."""
+"""One-unit, non-roster operational canary for the real Content V3 runtime."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import torch
 
-from cegwm.method.content_adaptive_v2 import (
+from cegwm.method.content_adaptive_v3 import (
     BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE,
+    CONTENT_V3_EVALUATED_CANDIDATE_ID,
+    CONTENT_V3_METHOD_ID,
     DINO_ASSET_ID,
 )
 from cegwm.method.hf import FrozenHFPublicAssets, score_hf_image
@@ -26,21 +28,25 @@ from cegwm.method.lf import (
     FrozenLFPublicAssets,
     score_lf_image,
 )
-from cegwm.protocol.content_chain_v2 import (
-    load_content_adaptive_dual_branch_v2_clean_protocol,
+from cegwm.protocol.content_chain_v3 import (
+    CONTENT_V3_PROTOCOL_DIGEST,
+    CONTENT_V3_PROTOCOL_ID,
+    CONTENT_V3_RUN_PREFIX,
+    ContentChainProtocol,
+    load_content_v3_clean_protocol,
 )
-from cegwm.runtime.content_adaptive_sd35_v2 import (
-    ContentEmbedAssets,
+from cegwm.runtime.content_adaptive_sd35_v3 import (
+    ContentV3EmbedAssets,
     load_dino_content_assets,
-    run_sd35_content_adaptive,
+    run_sd35_content_v3,
 )
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline, run_sd35_plain
 from cegwm.runtime.observation import require_ordinary_rgb_image
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
 
-CANARY_ID = "content-v3-full-runtime-non-roster-canary-v1"
-UNIT_ID = "content-v3-canary-0001"
-SOURCE_ID = "content-v3-canary-prompt-9001"
+CANARY_ID = "content-v3-unweighted-lf-full-runtime-non-roster-canary-v1"
+UNIT_ID = "content-v3-unweighted-lf-canary-0001"
+SOURCE_ID = "content-v3-unweighted-lf-canary-prompt-9001"
 PROMPT = "A book conservator examining an illuminated manuscript under neutral studio light"
 SEED = 1415149
 HEIGHT = 512
@@ -81,6 +87,11 @@ _SUCCESS_FIELDS = (
     "source_id",
     "exact",
     "public_key_digest",
+    "run_id",
+    "protocol_id",
+    "protocol_digest",
+    "content_method_id",
+    "evaluated_candidate_id",
     "model_id",
     "dino_asset_id",
     "seed",
@@ -152,12 +163,17 @@ def _validate_execution_identity(
         raise RuntimeError("cuda is required for the operational canary")
 
 
-def _assert_non_roster_identity(repo_root: Path) -> None:
+def _assert_non_roster_identity(repo_root: Path) -> ContentChainProtocol:
     config_root = repo_root / "configs" / "content_chain"
-    protocol = load_content_adaptive_dual_branch_v2_clean_protocol(
-        config_root / "content_adaptive_dual_branch_v2_clean_v1.json",
+    protocol = load_content_v3_clean_protocol(
+        config_root / "content_v3_clean_v1.json",
         config_root / "content_adaptive_dual_branch_v2_clean.jsonl",
     )
+    if (
+        protocol.protocol_id != CONTENT_V3_PROTOCOL_ID
+        or protocol.protocol_digest != CONTENT_V3_PROTOCOL_DIGEST
+    ):
+        raise RuntimeError("canary protocol identity differs from corrected Content V3")
     for unit in protocol.roster:
         if (
             unit.unit_id == UNIT_ID
@@ -166,6 +182,7 @@ def _assert_non_roster_identity(repo_root: Path) -> None:
             or unit.seed == SEED
         ):
             raise RuntimeError("canary identity overlaps the frozen scientific roster")
+    return protocol
 
 
 def _load_pipeline(token: str) -> tuple[Any, FrozenHFPublicAssets, FrozenLFPublicAssets]:
@@ -194,11 +211,11 @@ def _load_content_assets(
     token: str,
     hf_assets: FrozenHFPublicAssets,
     lf_assets: FrozenLFPublicAssets,
-) -> ContentEmbedAssets:
+) -> ContentV3EmbedAssets:
     dino_model, dino_processor = load_dino_content_assets(token=token)
     dino_model.to("cuda")
     dino_model.eval()
-    return ContentEmbedAssets(dino_model, dino_processor, hf_assets, lf_assets)
+    return ContentV3EmbedAssets(dino_model, dino_processor, hf_assets, lf_assets)
 
 
 def _registered_scores(
@@ -309,19 +326,28 @@ def execute(args: argparse.Namespace) -> int:
         repo_root = Path(args.repo_root).resolve()
         exact = _resolve_exact(repo_root)
         _validate_execution_identity(repo_root, args.expected_exact, exact)
-        _assert_non_roster_identity(repo_root)
+        protocol = _assert_non_roster_identity(repo_root)
         key_digest = public_key_digest(detection_key)
+        run_id = (
+            f"{CONTENT_V3_RUN_PREFIX}-{protocol.protocol_digest[:12]}-"
+            f"{key_digest[:12]}"
+        )
 
         stage = "sd35_pipeline_load"
         pipeline, hf_assets, lf_assets = _load_pipeline(token)
 
         stage = "dino_asset_validation"
         assets = _load_content_assets(token, hf_assets, lf_assets)
+        if (
+            assets.content_method_id != CONTENT_V3_METHOD_ID
+            or assets.evaluated_candidate_id != CONTENT_V3_EVALUATED_CANDIDATE_ID
+        ):
+            raise RuntimeError("canary assets differ from the corrected Content V3 method")
         token = ""
 
         stage = "joint_generation"
         joint_generator = torch.Generator(device="cuda").manual_seed(SEED)
-        joint = run_sd35_content_adaptive(
+        joint = run_sd35_content_v3(
             pipeline,
             PROMPT,
             detection_key,
@@ -361,6 +387,11 @@ def execute(args: argparse.Namespace) -> int:
             "source_id": SOURCE_ID,
             "exact": exact,
             "public_key_digest": key_digest,
+            "run_id": run_id,
+            "protocol_id": protocol.protocol_id,
+            "protocol_digest": protocol.protocol_digest,
+            "content_method_id": CONTENT_V3_METHOD_ID,
+            "evaluated_candidate_id": CONTENT_V3_EVALUATED_CANDIDATE_ID,
             "model_id": MODEL_ID,
             "dino_asset_id": DINO_ID,
             "seed": SEED,
