@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,15 +53,82 @@ def _dino_source_identity(asset: Any) -> str | None:
     return None
 
 
+def _processor_mapping_integer(
+    processor: Any,
+    container_name: str,
+    field_name: str,
+    expected: int,
+) -> None:
+    container = getattr(processor, container_name, None)
+    if not isinstance(container, Mapping):
+        raise RuntimeError(f"content DINO processor {container_name} is missing or invalid")
+    value = container.get(field_name)
+    if not isinstance(value, int) or isinstance(value, bool) or value != expected:
+        raise RuntimeError(
+            f"content DINO processor {container_name}.{field_name} differs"
+        )
+
+
+def _processor_finite_sequence(
+    processor: Any,
+    name: str,
+    expected: tuple[float, ...],
+) -> None:
+    value = getattr(processor, name, None)
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes, bytearray))
+        or len(value) != len(expected)
+    ):
+        raise RuntimeError(f"content DINO processor {name} is missing or invalid")
+    received: list[float] = []
+    for item in value:
+        if not isinstance(item, (int, float)) or isinstance(item, bool):
+            raise RuntimeError(f"content DINO processor {name} is missing or invalid")
+        scalar = float(item)
+        if not math.isfinite(scalar):
+            raise RuntimeError(f"content DINO processor {name} is missing or invalid")
+        received.append(scalar)
+    if tuple(received) != expected:
+        raise RuntimeError(f"content DINO processor {name} differs")
+
+
+def _validate_dino_processor(processor: Any) -> None:
+    if not callable(processor):
+        raise TypeError("content DINO processor must be callable")
+    if processor.__class__.__name__ != "BitImageProcessor":
+        raise RuntimeError("content DINO processor class must be exactly BitImageProcessor")
+    for name in (
+        "do_resize", "do_center_crop", "do_convert_rgb", "do_rescale", "do_normalize",
+    ):
+        if getattr(processor, name, None) is not True:
+            raise RuntimeError(f"content DINO processor {name} must be exactly true")
+    _processor_mapping_integer(processor, "size", "shortest_edge", 256)
+    _processor_mapping_integer(processor, "crop_size", "height", 224)
+    _processor_mapping_integer(processor, "crop_size", "width", 224)
+    rescale_factor = getattr(processor, "rescale_factor", None)
+    if (
+        not isinstance(rescale_factor, (int, float))
+        or isinstance(rescale_factor, bool)
+        or not math.isfinite(float(rescale_factor))
+        or float(rescale_factor) != 1.0 / 255.0
+    ):
+        raise RuntimeError("content DINO processor rescale_factor differs")
+    _processor_finite_sequence(processor, "image_mean", (0.485, 0.456, 0.406))
+    _processor_finite_sequence(processor, "image_std", (0.229, 0.224, 0.225))
+    resample = getattr(processor, "resample", None)
+    if not isinstance(resample, int) or isinstance(resample, bool) or int(resample) != 3:
+        raise RuntimeError("content DINO processor resample must be bicubic public value 3")
+
+
 def _validate_dino_assets(model: Any, processor: Any) -> None:
     if _dino_source_identity(model) != DINO_ASSET_ID:
         raise RuntimeError("content DINO model identity is missing or differs")
-    if _dino_source_identity(processor) != DINO_ASSET_ID:
-        raise RuntimeError("content DINO processor identity is missing or differs")
     if getattr(getattr(model, "config", None), "_attn_implementation", None) != "eager":
         raise RuntimeError("content DINO asset must expose eager attention")
-    if not callable(processor):
-        raise TypeError("content DINO processor must be callable")
+    if not callable(model):
+        raise TypeError("content DINO model must be callable")
+    _validate_dino_processor(processor)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,12 +204,15 @@ def load_dino_content_assets(*, token: str | None = None) -> tuple[Any, Any]:
     processor_class = getattr(transformers, "AutoImageProcessor", None)
     if model_class is None or processor_class is None:
         raise RuntimeError("installed transformers lacks DINO auto classes")
-    kwargs = {"token": token} if token else {}
-    processor = processor_class.from_pretrained(DINO_ASSET_ID, **kwargs)
     model = model_class.from_pretrained(
         DINO_ASSET_ID,
         attn_implementation="eager",
-        **kwargs,
+        token=token,
+    )
+    processor = processor_class.from_pretrained(
+        DINO_ASSET_ID,
+        backend="torchvision",
+        token=token,
     )
     _validate_dino_assets(model, processor)
     return model, processor

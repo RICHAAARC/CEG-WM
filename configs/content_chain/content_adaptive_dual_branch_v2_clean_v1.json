@@ -1,6 +1,6 @@
 {
-  "protocol_version": 1,
-  "protocol_id": "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1",
+  "protocol_version": 2,
+  "protocol_id": "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v2",
   "execution_scope_id": "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1",
   "scientific_status": "not_evaluated_until_complete_real_gpu_rc0",
   "generation_runtime": {
@@ -12,6 +12,7 @@
   "content_analysis": {
     "asset_id": "facebook/dinov2-small",
     "attention_implementation": "eager",
+    "runtime_asset_validation_contract_id": "dinov2_small_eager_bit_image_processor_semantics_v2",
     "attention_layer": "last",
     "attention_statistic": "mean_head_cls_to_patch",
     "tile_grid": [4, 4],

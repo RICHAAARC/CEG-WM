@@ -67,10 +67,14 @@ class _Dino(torch.nn.Module):
         attentions: bool = True,
         zero_attention: bool = False,
         model_id: str = runtime.DINO_ASSET_ID,
+        attention_implementation: str = "eager",
     ) -> None:
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)
-        self.config = SimpleNamespace(_attn_implementation="eager", _name_or_path=model_id)
+        self.config = SimpleNamespace(
+            _attn_implementation=attention_implementation,
+            _name_or_path=model_id,
+        )
         self.attentions = attentions
         self.zero_attention = zero_attention
 
@@ -86,9 +90,19 @@ class _Dino(torch.nn.Module):
         return SimpleNamespace(attentions=(attention, attention * 1.25))
 
 
-class _DinoProcessor:
-    def __init__(self, model_id: str = runtime.DINO_ASSET_ID) -> None:
-        self.name_or_path = model_id
+class BitImageProcessor:
+    def __init__(self) -> None:
+        self.do_resize = True
+        self.size = {"shortest_edge": 256}
+        self.resample = 3
+        self.do_center_crop = True
+        self.crop_size = {"height": 224, "width": 224}
+        self.do_convert_rgb = True
+        self.do_rescale = True
+        self.rescale_factor = 1.0 / 255.0
+        self.do_normalize = True
+        self.image_mean = [0.485, 0.456, 0.406]
+        self.image_std = [0.229, 0.224, 0.225]
 
     def __call__(self, **kwargs: object) -> dict[str, torch.Tensor]:
         del kwargs
@@ -124,7 +138,7 @@ def _assets(dino: _Dino | None = None) -> runtime.ContentEmbedAssets:
         vae, processor, image_processor_id, LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
         LF_BLOCKNORM_DETECTOR_STATISTIC_ID, LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
     )
-    return runtime.ContentEmbedAssets(dino or _Dino(), _DinoProcessor(), hf, lf)
+    return runtime.ContentEmbedAssets(dino or _Dino(), BitImageProcessor(), hf, lf)
 
 
 @pytest.mark.integration
@@ -205,4 +219,138 @@ def test_v2_callback_and_assets_fail_closed_on_attention_or_identity_drift() -> 
         LF_BLOCKNORM_DETECTOR_STATISTIC_ID, LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
     )
     with pytest.raises(RuntimeError, match="model identity"):
-        runtime.ContentEmbedAssets(_Dino(model_id="drifted"), _DinoProcessor(), hf, lf)
+        runtime.ContentEmbedAssets(_Dino(model_id="drifted"), BitImageProcessor(), hf, lf)
+
+
+@pytest.mark.integration
+def test_v2_runtime_asset_loader_uses_exact_model_processor_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _Dino()
+    processor = BitImageProcessor()
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    class AutoModel:
+        @staticmethod
+        def from_pretrained(asset_id: str, **kwargs: object) -> _Dino:
+            calls.append(("model", asset_id, kwargs))
+            return model
+
+    class AutoImageProcessor:
+        @staticmethod
+        def from_pretrained(asset_id: str, **kwargs: object) -> BitImageProcessor:
+            calls.append(("processor", asset_id, kwargs))
+            return processor
+
+    fake_transformers = SimpleNamespace(
+        AutoModel=AutoModel,
+        AutoImageProcessor=AutoImageProcessor,
+    )
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda name: fake_transformers)
+    received_model, received_processor = runtime.load_dino_content_assets(token="hf-secret")
+    assert received_model is model and received_processor is processor
+    assert calls == [
+        ("model", "facebook/dinov2-small", {
+            "attn_implementation": "eager", "token": "hf-secret",
+        }),
+        ("processor", "facebook/dinov2-small", {
+            "backend": "torchvision", "token": "hf-secret",
+        }),
+    ]
+
+
+@pytest.mark.integration
+def test_v2_runtime_accepts_processor_without_name_attributes_and_never_adds_them() -> None:
+    processor = BitImageProcessor()
+    before = dict(processor.__dict__)
+    assert not hasattr(processor, "name_or_path")
+    assert not hasattr(processor, "_name_or_path")
+    vae, image_processor = _VAE(), _ImageProcessor()
+    image_processor_id = "stabilityai/stable-diffusion-3.5-medium:image_processor"
+    hf = FrozenHFPublicAssets(vae, image_processor, image_processor_id)
+    lf = FrozenLFPublicAssets(
+        vae, image_processor, image_processor_id, LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        LF_BLOCKNORM_DETECTOR_STATISTIC_ID, LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    )
+    runtime.ContentEmbedAssets(_Dino(), processor, hf, lf)
+    assert processor.__dict__ == before
+    assert not hasattr(processor, "name_or_path")
+    assert not hasattr(processor, "_name_or_path")
+
+
+def _processor_with_drift(name: str) -> object:
+    processor = BitImageProcessor()
+    if name == "missing":
+        del processor.do_resize
+    elif name == "size_type":
+        processor.size = {"shortest_edge": True}
+    elif name == "size_value":
+        processor.size = {"shortest_edge": 255}
+    elif name == "center_crop":
+        processor.do_center_crop = False
+    elif name == "crop_height":
+        processor.crop_size["height"] = 223
+    elif name == "crop_width":
+        processor.crop_size["width"] = 225
+    elif name == "convert_rgb":
+        processor.do_convert_rgb = 1
+    elif name == "rescale":
+        processor.do_rescale = False
+    elif name == "rescale_factor":
+        processor.rescale_factor = 1.0 / 256.0
+    elif name == "rescale_nonfinite":
+        processor.rescale_factor = float("nan")
+    elif name == "normalize":
+        processor.do_normalize = False
+    elif name == "mean":
+        processor.image_mean = [0.485, 0.456, 0.405]
+    elif name == "mean_nonfinite":
+        processor.image_mean = [0.485, float("inf"), 0.406]
+    elif name == "std":
+        processor.image_std = [0.229, 0.224, True]
+    elif name == "resample":
+        processor.resample = 2
+    else:
+        raise AssertionError(name)
+    return processor
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "missing", "size_type", "size_value", "center_crop", "crop_height",
+        "crop_width", "convert_rgb", "rescale", "rescale_factor",
+        "rescale_nonfinite", "normalize", "mean", "mean_nonfinite", "std",
+        "resample",
+    ),
+)
+def test_v2_runtime_rejects_every_processor_semantic_drift(drift: str) -> None:
+    with pytest.raises((RuntimeError, TypeError), match="processor"):
+        runtime._validate_dino_assets(_Dino(), _processor_with_drift(drift))
+
+
+@pytest.mark.integration
+def test_v2_runtime_rejects_processor_class_and_model_identity_or_eager_drift() -> None:
+    class DriftedBitImageProcessor(BitImageProcessor):
+        pass
+
+    with pytest.raises(RuntimeError, match="class"):
+        runtime._validate_dino_assets(_Dino(), DriftedBitImageProcessor())
+    with pytest.raises(RuntimeError, match="model identity"):
+        runtime._validate_dino_assets(_Dino(model_id="drift"), BitImageProcessor())
+    with pytest.raises(RuntimeError, match="eager attention"):
+        runtime._validate_dino_assets(
+            _Dino(attention_implementation="sdpa"), BitImageProcessor()
+        )
+    noncallable_processor = type("BitImageProcessor", (), {})()
+    with pytest.raises(TypeError, match="processor must be callable"):
+        runtime._validate_dino_assets(_Dino(), noncallable_processor)
+    noncallable_model = SimpleNamespace(
+        config=SimpleNamespace(
+            _attn_implementation="eager",
+            _name_or_path=runtime.DINO_ASSET_ID,
+        )
+    )
+    with pytest.raises(TypeError, match="model must be callable"):
+        runtime._validate_dino_assets(noncallable_model, BitImageProcessor())

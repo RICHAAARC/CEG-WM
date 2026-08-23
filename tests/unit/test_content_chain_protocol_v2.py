@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -25,13 +26,26 @@ _PRE_V2_MANIFESTS = (
 @pytest.mark.unit
 def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_identity() -> None:
     protocol = load_content_adaptive_dual_branch_v2_clean_protocol(_CONFIG, _ROSTER)
-    assert protocol.protocol_id == "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-v1"
-    assert protocol.protocol_digest == "bfd9b7464195107f7dc57a43ab3042501500f5e2c07a322269859bb908a3dbb8"
+    assert protocol.protocol_id == (
+        "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-"
+        "runtime-asset-contract-v2"
+    )
+    assert protocol.config["protocol_version"] == 2
+    assert protocol.protocol_digest == (
+        "af4434590c12c882808279f331e1e987e2031719b9076c8d6ca2bd2d5f66d51f"
+    )
+    assert protocol.protocol_digest[:12] != "bfd9b7464195"
+    assert hashlib.sha256(_ROSTER.read_bytes()).hexdigest() == (
+        "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
+    )
     assert len(protocol.roster) == 8
     assert len({unit.unit_id for unit in protocol.roster}) == 8
     assert len({unit.source_id for unit in protocol.roster}) == 8
     assert all("v2" in unit.unit_id and "v2" in unit.source_id for unit in protocol.roster)
     analysis = protocol.config["content_analysis"]
+    assert analysis["runtime_asset_validation_contract_id"] == (
+        "dinov2_small_eager_bit_image_processor_semantics_v2"
+    )
     assert analysis["probe_evaluations_per_unit"] == 64
     assert analysis["probe_relative_l2_scales_in_order"] == (0.0005, 0.001)
     assert analysis["probe_measurement"] == "baseline_differenced_branch_tile_two_scale_v1"
@@ -70,6 +84,7 @@ def test_v2_protocol_freezes_64_probe_six_effect_and_fresh_fixed_denominator_ide
 @pytest.mark.unit
 def test_v2_protocol_rejects_formula_identity_detector_or_private_export_drift(tmp_path: Path) -> None:
     mutations = (
+        ("content_analysis", "runtime_asset_validation_contract_id", "drift", "content analysis"),
         ("content_analysis", "probe_measurement", "candidate_observation_magnitude", "content analysis"),
         ("content_analysis", "direct_per_tile_gate_rule", "gamma_0.20", "content analysis"),
         ("content_analysis", "derived_ranges", {"d": [-1.0, 1.0]}, "content analysis"),
