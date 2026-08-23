@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from importlib import metadata
 import json
 import math
 import os
@@ -87,11 +86,6 @@ _SUCCESS_FIELDS = (
     "seed",
     "height",
     "width",
-    "observed_torch_version",
-    "observed_torchvision_version",
-    "observed_transformers_version",
-    "observed_cuda_version",
-    "observed_gpu_name",
     "combined_actual_dtype_relative_l2",
     "lf_effective_relative_l2",
     "hf_effective_relative_l2",
@@ -289,23 +283,6 @@ def _validated_metrics(measurement: Any, psnr: float) -> dict[str, float | int]:
     }
 
 
-def _bounded_observation(value: Any) -> str:
-    text = str(value).strip()
-    if not text or any(character in text for character in "\r\n"):
-        raise ValueError("runtime observation must be bounded one-line text")
-    return text[:160]
-
-
-def _runtime_versions() -> dict[str, str]:
-    return {
-        "observed_torch_version": _bounded_observation(torch.__version__),
-        "observed_torchvision_version": _bounded_observation(metadata.version("torchvision")),
-        "observed_transformers_version": _bounded_observation(metadata.version("transformers")),
-        "observed_cuda_version": _bounded_observation(torch.version.cuda),
-        "observed_gpu_name": _bounded_observation(torch.cuda.get_device_name(0)),
-    }
-
-
 def _public_error_class(error: Exception) -> str:
     name = type(error).__name__
     return name if name in _ERROR_CLASSES else "OtherOperationalError"
@@ -376,7 +353,6 @@ def execute(args: argparse.Namespace) -> int:
         metrics = _validated_metrics(
             joint.measurement, _paired_psnr(joint.image, primary_null)
         )
-        versions = _runtime_versions()
         result = {
             "status": "operational_canary_pass",
             "claim_ceiling": CLAIM_CEILING,
@@ -390,7 +366,6 @@ def execute(args: argparse.Namespace) -> int:
             "seed": SEED,
             "height": HEIGHT,
             "width": WIDTH,
-            **versions,
             **metrics,
             "joint_registered_lf_score": joint_scores["lf"],
             "joint_registered_hf_score": joint_scores["hf"],

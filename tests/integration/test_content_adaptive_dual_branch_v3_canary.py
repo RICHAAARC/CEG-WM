@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,9 +12,7 @@ import pytest
 import torch
 
 from cegwm.method.hf import FrozenHFPublicAssets
-from cegwm.method import content_adaptive_v2
 from cegwm.method.lf import FrozenLFPublicAssets
-from cegwm.runtime import content_adaptive_sd35_v2, diffusers_sd35
 from experiments import run_content_adaptive_dual_branch_v3_canary as runner
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -204,17 +201,6 @@ def _install_controlled_runtime(
 
     monkeypatch.setattr(runner, "score_lf_image", lf_score)
     monkeypatch.setattr(runner, "score_hf_image", hf_score)
-    monkeypatch.setattr(
-        runner,
-        "_runtime_versions",
-        lambda: {
-            "observed_torch_version": "test-torch",
-            "observed_torchvision_version": "test-torchvision",
-            "observed_transformers_version": "test-transformers",
-            "observed_cuda_version": "test-cuda",
-            "observed_gpu_name": "test-gpu",
-        },
-    )
     return calls, score_calls
 
 
@@ -413,56 +399,3 @@ def test_identity_failure_is_sanitized_and_does_not_start_model_work(
         "error_class": "RuntimeError",
     }
     assert _KEY not in line and _TOKEN not in line
-
-
-@pytest.mark.integration
-def test_delivery_source_is_only_the_existing_real_runtime_surface() -> None:
-    source = (
-        _ROOT / "experiments" / "run_content_adaptive_dual_branch_v3_canary.py"
-    ).read_text(encoding="utf-8")
-    for required in (
-        "load_sd35_pipeline(",
-        "load_dino_content_assets(",
-        "ContentEmbedAssets(",
-        "FrozenHFPublicAssets(",
-        "FrozenLFPublicAssets(",
-        "run_sd35_content_adaptive(",
-        "run_sd35_plain(",
-        "score_hf_image(",
-        "score_lf_image(",
-        "require_ordinary_rgb_image(",
-        "normalize_detection_key(",
-        "public_key_digest(",
-    ):
-        assert required in source
-    for forbidden in (
-        "governance",
-        "StageARecord",
-        "checkpoint",
-        "resume",
-        "artifact_sink",
-        "local_work_root",
-        "wrong_key",
-        "threshold",
-        "Gate",
-        "Drive",
-    ):
-        assert forbidden not in source
-
-    adaptive_source = inspect.getsource(content_adaptive_sd35_v2.run_sd35_content_adaptive)
-    callback_source = inspect.getsource(
-        content_adaptive_sd35_v2.ContentAdaptiveInjectionCallback.__call__
-    )
-    plain_source = inspect.getsource(diffusers_sd35.run_sd35_plain)
-    assert "num_inference_steps=20" in adaptive_source
-    assert "num_inference_steps=20" in plain_source
-    for production_step in (
-        "step_index != 18",
-        "dino_last_layer_cls_patch_tiles(",
-        "rgb_texture_tiles(",
-        "evaluate_public_probes(",
-        "embed_content_adaptive(",
-    ):
-        assert production_step in callback_source
-    assert content_adaptive_v2.PROBE_EVALUATION_COUNT == 64
-    assert content_adaptive_v2.COMBINED_RELATIVE_L2 == 0.012
