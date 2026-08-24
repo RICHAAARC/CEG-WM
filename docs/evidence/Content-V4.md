@@ -38,12 +38,22 @@ requirements passed 8/8. The independently recomputed preregistered gates were:
 - Joint Gate A: 5/8, fail
 - Joint Gate B: 8/8, pass
 
-Therefore `all_predeclared_gates_pass=false`; `formal_fpr_claim=false`. The
-artifact itself remains `scientific_status=not_adjudicated`. This branch
-records the complete, evaluable mechanical gate outcome and preserves its
-implementation and handoff provenance. It does not independently adjudicate a
-`SCIENTIFIC_NEGATIVE`, authorize a retry or parameter change, or support a
-broader LF, HF, Content, attack, robustness, Stage, main, or publication claim.
+Therefore `all_predeclared_gates_pass=false`; `formal_fpr_claim=false`.
+
+## Adjudication boundary
+
+The user personally adjudicated this exact bound result as a narrow
+`SCIENTIFIC_NEGATIVE`. The adjudication applies only to the source exact, run,
+protocol, roster, public-key identity, formal archive, and preregistered
+conjunction listed above: LF Gate A passed only `4/8` and Joint Gate A only
+`5/8`, both below the required `7/8`, so the all-gates conjunction failed.
+
+The immutable artifact itself continues to record its original
+`scientific_status=not_adjudicated`; it is not rewritten or reinterpreted.
+This evidence-branch adjudication establishes no general LF, HF, Content, or
+CEG-WM invalidity; authorizes no retry, resume, tuning, replacement, or new
+formal execution; and supports no attack, complementarity, fixed-FPR,
+robustness, geometry, Stage, main, or publication claim.
 
 ## Branch role
 
