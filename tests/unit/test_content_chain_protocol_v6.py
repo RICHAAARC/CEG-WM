@@ -7,13 +7,18 @@ from pathlib import Path
 import pytest
 
 from cegwm.protocol.content_chain_v6 import (
+    CONTENT_V6_ARMS,
+    CONTENT_V6_PROTOCOL_DIGEST,
+    CONTENT_V6_PROTOCOL_ID,
     V6_DEVELOPMENT_MANIFEST_SHA256,
     V6_DEVELOPMENT_PROMPT_LIST_SHA256,
     V6_EVALUATION_MANIFEST_SHA256,
     V6_EVALUATION_PROMPT_LIST_SHA256,
     V6_PERSONAL_SPEC_SHA256,
+    load_content_v6_clean_protocol,
     load_content_v6_data_contract,
 )
+from cegwm.protocol.content_chain_v4 import _DECISION_RULE as V4_DECISION_RULE
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,3 +64,34 @@ def test_v6_manifest_loader_fails_closed_on_data_or_serialization_drift(tmp_path
     (target / "content_v6_iss_clean.jsonl").write_text("\n".join(rows) + "\n")
     with pytest.raises(ValueError, match="manifest bytes differ"):
         load_content_v6_data_contract(tmp_path)
+
+
+@pytest.mark.unit
+def test_final_v6_protocol_binds_asset_pair_and_preserves_v4_public_decisions() -> None:
+    protocol = load_content_v6_clean_protocol(_ROOT)
+    assert protocol.protocol_id == CONTENT_V6_PROTOCOL_ID
+    assert protocol.protocol_digest == CONTENT_V6_PROTOCOL_DIGEST
+    assert len(protocol.roster) == 8
+    assert tuple(unit.unit_id for unit in protocol.roster) == tuple(
+        f"content-v6-iss-eval-{index:04d}" for index in range(1, 9)
+    )
+    config = protocol.config
+    assert tuple(config["execution_flow"]["record_arms_in_order"]) == CONTENT_V6_ARMS
+    assert config["execution_flow"]["fixed_units"] == 8
+    assert config["execution_flow"]["fixed_records"] == 16
+    assert config["execution_flow"]["failure_units_remain_in_denominator"] is True
+    assert dict(config["decision_rule"]) == V4_DECISION_RULE
+    assert config["budget"]["combined_total_relative_l2"] == 0.012
+    assert config["detection_access"]["joint_score"] == "min(s_LF,s_HF)"
+    assert tuple(config["detection_access"]["allowed_inputs"]) == (
+        "image", "detection_key", "frozen_public_assets",
+    )
+    assert config["keying"]["prg"] == "HMAC_SHA256_counter_v1"
+    assert config["keying"]["wrong_key_derivation_domain"] == (
+        "stage-a/content-adaptive-v2-external-wrong-key/v1"
+    )
+    controller = config["iss_controller"]
+    assert controller["application"] == "LF_preprojection_delta_only"
+    assert controller["hf_preprojection_delta"] == "unchanged_from_V4"
+    assert controller["pass1_reuse"] == "sole_primary_null_record_no_third_generation"
+    assert controller["blind_detector_consumes_host_observation_or_beta"] is False

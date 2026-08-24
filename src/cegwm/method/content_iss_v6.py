@@ -13,6 +13,14 @@ from typing import Any, Iterable, Mapping
 
 import torch
 
+from cegwm.method.content_adaptive_v3 import (
+    COMBINED_RELATIVE_L2,
+    PROBE_EVALUATION_COUNT,
+    ContentAdaptiveMeasurement,
+    ContentAllocation,
+    _content_v3_branch_deltas,
+    _relative_l2,
+)
 from cegwm.method.content_whitening_v4 import (
     ASSET_SHA256 as V4_WHITENING_ASSET_SHA256,
     CONTENT_V4_LF_SCORER_ID,
@@ -41,6 +49,13 @@ ISS_ASSET_SCHEMA_ID = "cegwm_content_v6_iss_gain_target_asset_v1"
 ISS_ASSET_ROLE_ID = "content_v6_iss_gain_target_v1"
 ISS_ASSET_REPO_PATH = "configs/content_chain/assets/content_v6_iss_gain_target_v1.json"
 ISS_ASSET_SIDECAR_REPO_PATH = f"{ISS_ASSET_REPO_PATH}.sha256"
+ISS_ASSET_SHA256 = "d66ff88640a3d1a020646cfde3face7502282bf835c9d3fb746b518dfb02c231"
+ISS_ASSET_SIDECAR_SHA256 = (
+    "27094d56994bc6f5d93564bad79ddd9ce8218d2d193786f4816535ee1e7f6538"
+)
+ISS_LF_PREPROJECTION_CONTROLLER_ID = (
+    "content_v6_detector_domain_iss_lf_preprojection_multiplier_v1"
+)
 ISS_DEVELOPMENT_KEY_DOMAIN = "stage-a/content-v6-iss-development-key/v1"
 ISS_WRONG_KEY_DOMAIN = "stage-a/content-adaptive-v2-external-wrong-key/v1"
 ISS_DEVELOPMENT_COUNT = 32
@@ -238,6 +253,75 @@ def iss_beta(host_score: Any, asset: ISSAsset) -> float:
     return min(ISS_BETA_MAX, max(ISS_BETA_MIN, raw))
 
 
+def embed_content_v6(
+    latents: torch.Tensor,
+    detection_key: str | bytes | bytearray | memoryview,
+    hf_assets: Any,
+    lf_assets: Any,
+    allocation: ContentAllocation,
+    beta: Any,
+) -> tuple[torch.Tensor, ContentAdaptiveMeasurement]:
+    """Apply beta to only the V4 LF preprojection delta, then project jointly."""
+
+    if (
+        not isinstance(latents, torch.Tensor)
+        or latents.ndim != 4
+        or not latents.dtype.is_floating_point
+    ):
+        raise TypeError("Content V6 embedding requires floating NCHW callback latents")
+    if not bool(torch.isfinite(latents).all()):
+        raise ValueError("Content V6 callback latents must be finite")
+    if not isinstance(allocation, ContentAllocation):
+        raise TypeError("Content V6 embedding requires a real ContentAllocation")
+    if not isinstance(beta, (int, float)) or isinstance(beta, bool):
+        raise TypeError("beta must be a real scalar")
+    multiplier = float(beta)
+    if not math.isfinite(multiplier) or not ISS_BETA_MIN <= multiplier <= ISS_BETA_MAX:
+        raise ValueError("Content V6 beta must be finite in [1, 2]")
+
+    base64 = latents.to(torch.float64)
+    lf_v4, hf_v4 = _content_v3_branch_deltas(
+        latents, detection_key, hf_assets, lf_assets, allocation
+    )
+    lf_delta = lf_v4 * multiplier
+    hf_delta = hf_v4
+    if any(
+        float(torch.linalg.vector_norm(delta).item()) == 0.0
+        for delta in (lf_delta, hf_delta)
+    ):
+        raise RuntimeError("both Content V6 branches must be nonzero")
+
+    def candidate_at(scale: float) -> torch.Tensor:
+        return (base64 + scale * (lf_delta + hf_delta)).to(latents.dtype)
+
+    low, high = 0.0, 2.0
+    best = latents.detach().clone()
+    measurement = _relative_l2(latents, best)
+    for _ in range(96):
+        middle = (low + high) / 2.0
+        trial = candidate_at(middle)
+        trial_measurement = _relative_l2(latents, trial)
+        if trial_measurement.relative_l2 <= COMBINED_RELATIVE_L2:
+            low, best, measurement = middle, trial, trial_measurement
+        else:
+            high = middle
+    lf_actual = _relative_l2(latents, (base64 + low * lf_delta).to(latents.dtype))
+    hf_actual = _relative_l2(latents, (base64 + low * hf_delta).to(latents.dtype))
+    if measurement.perturbation_l2 == 0.0 or measurement.relative_l2 > COMBINED_RELATIVE_L2:
+        raise RuntimeError("Content V6 actual-dtype embedding is zero or over budget")
+    if lf_actual.perturbation_l2 == 0.0 or hf_actual.perturbation_l2 == 0.0:
+        raise RuntimeError("both actual-dtype Content V6 branches must remain nonzero")
+    return best, ContentAdaptiveMeasurement(
+        measurement,
+        lf_actual.relative_l2,
+        hf_actual.relative_l2,
+        allocation.lf_branch_share,
+        allocation.hf_branch_share,
+        *allocation.counterfactual_effects,
+        PROBE_EVALUATION_COUNT,
+    )
+
+
 def _encode_f64(value: Any, name: str, *, positive: bool = False) -> str:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise TypeError(f"{name} must be a real scalar")
@@ -349,7 +433,13 @@ def load_iss_asset(path: str | Path, sidecar_path: str | Path) -> ISSAsset:
 
 def load_frozen_content_v6_iss_asset(repo_root: str | Path) -> ISSAsset:
     root = Path(repo_root)
-    return load_iss_asset(root / ISS_ASSET_REPO_PATH, root / ISS_ASSET_SIDECAR_REPO_PATH)
+    asset_path = root / ISS_ASSET_REPO_PATH
+    sidecar_path = root / ISS_ASSET_SIDECAR_REPO_PATH
+    if hashlib.sha256(asset_path.read_bytes()).hexdigest() != ISS_ASSET_SHA256:
+        raise ValueError("frozen Content V6 ISS asset SHA differs")
+    if hashlib.sha256(sidecar_path.read_bytes()).hexdigest() != ISS_ASSET_SIDECAR_SHA256:
+        raise ValueError("frozen Content V6 ISS sidecar file SHA differs")
+    return load_iss_asset(asset_path, sidecar_path)
 
 
 __all__ = [
@@ -358,9 +448,12 @@ __all__ = [
     "ISS_ASSET_REPO_PATH",
     "ISS_ASSET_ROLE_ID",
     "ISS_ASSET_SCHEMA_ID",
+    "ISS_ASSET_SHA256",
     "ISS_ASSET_SIDECAR_REPO_PATH",
+    "ISS_ASSET_SIDECAR_SHA256",
     "ISS_BETA_MAX",
     "ISS_BETA_MIN",
+    "ISS_LF_PREPROJECTION_CONTROLLER_ID",
     "ISSDevelopmentMeasurement",
     "ISSFit",
     "ISSAsset",
@@ -370,6 +463,7 @@ __all__ = [
     "content_v6_u",
     "derive_development_key",
     "derive_development_wrong_keys",
+    "embed_content_v6",
     "fit_iss_gain_target",
     "iss_beta",
     "load_frozen_content_v6_iss_asset",

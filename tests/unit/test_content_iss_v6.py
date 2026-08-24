@@ -12,6 +12,7 @@ import pytest
 import torch
 from PIL import Image
 
+from cegwm.method import content_adaptive_v3 as v3
 from cegwm.method import content_iss_v6 as v6
 from cegwm.method.content_whitening_v4 import FrozenContentV4LFPublicAssets, load_frozen_content_v4_whitening_asset
 from cegwm.method.lf import (
@@ -132,8 +133,64 @@ def test_asset_binary64_sidecar_and_beta_boundaries_fail_closed(tmp_path: Path) 
 
 
 @pytest.mark.unit
-def test_no_frozen_v6_gain_target_asset_exists_before_user_fit() -> None:
-    assert not (_ROOT / v6.ISS_ASSET_REPO_PATH).exists()
-    assert not (_ROOT / v6.ISS_ASSET_SIDECAR_REPO_PATH).exists()
-    with pytest.raises(FileNotFoundError):
-        v6.load_frozen_content_v6_iss_asset(_ROOT)
+def test_frozen_v6_gain_target_asset_is_the_accepted_exact_pair() -> None:
+    asset_path = _ROOT / v6.ISS_ASSET_REPO_PATH
+    sidecar_path = _ROOT / v6.ISS_ASSET_SIDECAR_REPO_PATH
+    raw = asset_path.read_bytes()
+    sidecar = sidecar_path.read_bytes()
+    assert len(raw) == 1152
+    assert len(sidecar) == 101
+    assert hashlib.sha256(raw).hexdigest() == v6.ISS_ASSET_SHA256
+    assert hashlib.sha256(sidecar).hexdigest() == v6.ISS_ASSET_SIDECAR_SHA256
+    assert sidecar == f"{v6.ISS_ASSET_SHA256}  {asset_path.name}\n".encode("ascii")
+    asset = v6.load_frozen_content_v6_iss_asset(_ROOT)
+    assert asset.payload["producer_exact"] == "70d4147ceb9832acf7511b2e68edf0c47e453229"
+    assert asset.gain_g == pytest.approx(0.01216927948727384, abs=0.0)
+    assert asset.target_m == pytest.approx(0.013417310725870352, abs=0.0)
+
+
+@pytest.mark.unit
+def test_v6_beta_scales_only_lf_before_the_unchanged_common_projector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = torch.linspace(-1.0, 1.0, 64, dtype=torch.float64).reshape(1, 1, 8, 8)
+    lf_delta = torch.ones_like(base)
+    hf_delta = torch.where(
+        torch.arange(base.numel()).reshape(base.shape) % 2 == 0,
+        torch.tensor(1.0, dtype=torch.float64),
+        torch.tensor(-1.0, dtype=torch.float64),
+    )
+    calls: list[tuple[object, ...]] = []
+
+    def branch_deltas(*args: object) -> tuple[torch.Tensor, torch.Tensor]:
+        calls.append(args)
+        return lf_delta, hf_delta
+
+    monkeypatch.setattr(v6, "_content_v3_branch_deltas", branch_deltas)
+    allocation = v3.ContentAllocation(
+        (1.0,) * 16, (1.0,) * 16, 0.4, 0.6, (0.1,) * 6
+    )
+    one, one_measurement = v6.embed_content_v6(
+        base, b"key", object(), object(), allocation, 1.0
+    )
+    two, two_measurement = v6.embed_content_v6(
+        base, b"key", object(), object(), allocation, 2.0
+    )
+    assert len(calls) == 2
+    assert one_measurement.combined_budget.relative_l2 <= 0.012
+    assert two_measurement.combined_budget.relative_l2 <= 0.012
+    assert one_measurement.lf_branch_share == two_measurement.lf_branch_share == 0.4
+    assert one_measurement.hf_branch_share == two_measurement.hf_branch_share == 0.6
+    assert (
+        two_measurement.lf_effective_relative_l2
+        / two_measurement.hf_effective_relative_l2
+    ) == pytest.approx(
+        2.0
+        * one_measurement.lf_effective_relative_l2
+        / one_measurement.hf_effective_relative_l2,
+        rel=1e-12,
+    )
+    assert not torch.equal(one, two)
+    for invalid in (0.999, 2.001, math.nan, True):
+        with pytest.raises((TypeError, ValueError)):
+            v6.embed_content_v6(base, b"key", object(), object(), allocation, invalid)

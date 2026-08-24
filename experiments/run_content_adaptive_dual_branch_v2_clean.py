@@ -108,6 +108,7 @@ class ContentRunnerVariant:
     load_pipeline_and_assets: Callable[[str, str], tuple[Any, Any]]
     run_joint: Callable[..., Any]
     lf_scorer: Callable[[Any, bytes, Any], float] | None = None
+    run_pair: Callable[..., Any] | None = None
 
 
 def _runner_variant(variant: ContentRunnerVariant | None) -> ContentRunnerVariant:
@@ -1106,17 +1107,31 @@ def _unit_transaction(
     variant: ContentRunnerVariant | None = None,
 ) -> list[dict[str, Any]]:
     selected = _runner_variant(variant)
-    joint_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
-    null_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
-    joint_runner = run_sd35_content_adaptive if variant is None else selected.run_joint
-    output = joint_runner(
-        pipeline, unit.prompt, key, assets,
-        height=unit.height, width=unit.width, generator=joint_generator,
-    )
-    primary_null = run_sd35_plain(
-        pipeline, unit.prompt,
-        height=unit.height, width=unit.width, generator=null_generator,
-    )
+    if selected.run_pair is None:
+        joint_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
+        null_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
+        joint_runner = run_sd35_content_adaptive if variant is None else selected.run_joint
+        output = joint_runner(
+            pipeline, unit.prompt, key, assets,
+            height=unit.height, width=unit.width, generator=joint_generator,
+        )
+        primary_null = run_sd35_plain(
+            pipeline, unit.prompt,
+            height=unit.height, width=unit.width, generator=null_generator,
+        )
+    else:
+        output = selected.run_pair(
+            pipeline,
+            unit.prompt,
+            key,
+            assets,
+            height=unit.height,
+            width=unit.width,
+            seed=unit.seed,
+        )
+        primary_null = getattr(output, "primary_null", None)
+        if primary_null is None:
+            raise RuntimeError("paired content runner did not return its primary null")
     if selected.lf_scorer is None:
         joint_scores = _blind_scores(
             output.image, key, wrong_keys,
