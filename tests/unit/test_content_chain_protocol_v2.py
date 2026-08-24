@@ -14,7 +14,6 @@ _ROSTER = _ROOT / "configs" / "content_chain" / "content_adaptive_dual_branch_v2
 _PRE_V2_MANIFESTS = (
     _ROOT / "configs" / "content_chain" / "content_adaptive_dual_branch_clean.jsonl",
     _ROOT / "configs" / "stage_a" / "candidate_selection.jsonl",
-    _ROOT / "configs" / "stage_a" / "hf_lf_attack_complementarity.jsonl",
     _ROOT / "configs" / "stage_a" / "lf_balanced_blocks_selection.jsonl",
     _ROOT / "configs" / "stage_a" / "lf_balanced_blocks_untouched_confirmation.jsonl",
     _ROOT / "configs" / "stage_a" / "lf_v2_blocknorm_selection.jsonl",
