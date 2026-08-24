@@ -34,8 +34,18 @@ The run completed RC0 with all 8 fixed units, 16 ordered records, and no failed 
 
 LF Gate-A failures were units `0001`, `0003`, and `0004`. The exact clean-only candidate therefore failed its preregistered all-gates conjunction.
 
-## Evidence boundary
+## Adjudication boundary
 
-The artifact itself records `scientific_status=not_adjudicated`. This branch preserves the authenticated complete/evaluable mechanical failure result; it does not independently promote that result to a broader scientific conclusion. It supports no retry, resampling, tuning, threshold change, attack, complementarity, fixed-FPR, robustness, geometry, Stage, main, or paper claim.
+The user personally adjudicated this exact bound result as a narrow
+`SCIENTIFIC_NEGATIVE`. The adjudication applies only to the source exact, run,
+protocol, roster, public-key identity, artifact, and preregistered conjunction
+listed above: LF Gate A passed only `5/8`, below the required `7/8`, so the
+all-gates conjunction failed.
+
+The immutable artifact itself continues to record its original
+`scientific_status=not_adjudicated`; it is not rewritten or reinterpreted.
+This evidence-branch adjudication establishes no general LF/HF invalidity and
+supports no retry, resampling, tuning, threshold change, attack,
+complementarity, fixed-FPR, robustness, geometry, Stage, main, or paper claim.
 
 The original canary/formal revisions are merge parents of this branch, and their runners and notebooks are retained here. The canonical `Content-V3` branch is a clean method-first reconstruction; the historical artifact remains bound only to its original source exact.
