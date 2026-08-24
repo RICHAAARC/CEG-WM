@@ -1,17 +1,19 @@
-"""Method-only definition for Content V5 branchwise-OR decisions.
-
-No roster, manifest digest, canonical protocol digest, or deterministic run identity is
-defined here. Formal execution remains unavailable until the user freezes a new,
-disjoint manifest binding.
-"""
+"""Frozen paired-cohort protocol for Content V5 branchwise-OR decisions."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from cegwm.protocol.content_chain_v2 import _CONTENT_ANALYSIS, _freeze
+from cegwm.protocol.content_chain_v2 import (
+    _CONTENT_ANALYSIS,
+    _freeze,
+    ContentChainProtocol,
+    ContentChainUnit,
+)
 from cegwm.protocol.content_chain_v3 import (
     _AGGREGATE_MEASUREMENT as _V3_AGGREGATE_MEASUREMENT,
 )
@@ -39,7 +41,21 @@ CONTENT_V5_RECORD_CONTRACT_ID = (
 )
 CONTENT_V5_STATE_SCHEMA_ID = "content_v5_resumable_state_v1"
 CONTENT_V5_RUN_PREFIX = "content-v5"
-CONTENT_V5_EXECUTION_SCOPE_ID = "content_v5_method_only_no_formal_manifest_binding_v1"
+CONTENT_V5_EXECUTION_SCOPE_ID = (
+    "content_v5_paired_primary_and_reference_cohort_evaluation_v1"
+)
+CONTENT_V5_PRIMARY_EXECUTION_SCOPE_ID = (
+    "content_v5_primary_1_whitened_lf_adaptive_hf_branchwise_or_evaluation_v1"
+)
+CONTENT_V5_CONTROL_EXECUTION_SCOPE_ID = (
+    "content_v5_control_1_whitened_lf_adaptive_hf_branchwise_or_"
+    "reference_evaluation_v1"
+)
+CONTENT_V5_PRIMARY_RUN_PREFIX = "content-v5-primary-1"
+CONTENT_V5_CONTROL_RUN_PREFIX = "content-v5-control-1"
+CONTENT_V5_PROTOCOL_DIGEST = (
+    "7d8f1ebef662a45dfd760261efbc81b733eed97bfea7bfd9fde72fa15f025314"
+)
 CONTENT_V5_ARMS = (
     CONTENT_V5_EVALUATED_CANDIDATE_ID,
     f"primary_null__{CONTENT_V5_EVALUATED_CANDIDATE_ID}",
@@ -50,14 +66,52 @@ _METHOD_IDENTITIES = {
     "content_method_id": CONTENT_V5_METHOD_ID,
     "evaluated_candidate_id": CONTENT_V5_EVALUATED_CANDIDATE_ID,
 }
+_UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
+_COHORTS_IN_ORDER = [
+    {
+        "cohort_id": "primary_1",
+        "cohort_role": "primary_evaluation",
+        "manifest_path": "configs/content_chain/content_v5_primary_evaluation_v1.jsonl",
+        "manifest_sha256": (
+            "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c"
+        ),
+        "manifest_git_blob": "1b134b998820427b53be0d82ba61cab1b4a8ad79",
+        "split": "content_v5_primary_evaluation_v1",
+        "run_prefix": CONTENT_V5_PRIMARY_RUN_PREFIX,
+        "execution_scope_id": CONTENT_V5_PRIMARY_EXECUTION_SCOPE_ID,
+    },
+    {
+        "cohort_id": "control_1",
+        "cohort_role": "reference_cohort",
+        "manifest_path": (
+            "configs/content_chain/content_adaptive_dual_branch_v2_clean.jsonl"
+        ),
+        "manifest_sha256": (
+            "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
+        ),
+        "manifest_git_blob": "7e0415ca14a3c37475ec796d4985698afbde4f89",
+        "split": "content_adaptive_dual_branch_v2_clean_v1",
+        "run_prefix": CONTENT_V5_CONTROL_RUN_PREFIX,
+        "execution_scope_id": CONTENT_V5_CONTROL_EXECUTION_SCOPE_ID,
+    },
+]
 _EXECUTION_FLOW = {
-    "formal_execution_status": "blocked_pending_user_frozen_disjoint_manifest_binding",
-    "approved_disjoint_manifest_binding_required": True,
-    "approved_disjoint_manifest_binding_present": False,
-    "fixed_units": 8,
+    "cohorts_in_order": _COHORTS_IN_ORDER,
+    "cohort_selection_required": True,
+    "fixed_units_per_cohort": 8,
     "record_arms_in_order": list(CONTENT_V5_ARMS),
     "unit_transaction_record_count": 2,
-    "fixed_records": 16,
+    "fixed_records_per_cohort": 16,
+    "cohort_denominators_independent": True,
+    "pooling_to_16_units_forbidden": True,
+    "pass_transfer_forbidden": True,
+    "conditional_omission_forbidden": True,
+    "cross_cohort_conjunction": False,
+    "both_cohort_results_always_reported": True,
+    "fresh_execution_required_on_final_v5_exact": True,
+    "reuse_from_prior_content_versions_forbidden": [
+        "images", "scores", "records", "results", "checkpoints", "artifacts",
+    ],
     "record_score_prefixes_in_order": ["lf", "hf", "joint"],
     "joint_score_prefix_status": "diagnostic_only_never_consumed_by_v5_decision",
     "score_labels_per_prefix": "registered_then_wrong_00_through_wrong_15",
@@ -104,10 +158,6 @@ _DECISION_RULE = {
 }
 
 
-class ContentV5ManifestBindingRequired(RuntimeError):
-    """Raised because no user-approved disjoint V5 evidence manifest is frozen."""
-
-
 def _mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     value = parent.get(key)
     if not isinstance(value, dict):
@@ -120,7 +170,9 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         raise ValueError("unexpected Content V5 protocol identity")
     if config.get("execution_scope_id") != CONTENT_V5_EXECUTION_SCOPE_ID:
         raise ValueError("unexpected Content V5 execution scope")
-    if config.get("scientific_status") != "method_defined_formal_execution_blocked":
+    if config.get("scientific_status") != (
+        "not_evaluated_until_each_cohort_complete_real_gpu_rc0"
+    ):
         raise ValueError("Content V5 cannot preclaim execution or scientific evidence")
     expected_sections = {
         "generation_runtime": _V4_GENERATION_RUNTIME,
@@ -156,22 +208,107 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         raise ValueError("Content V5 config fields differ")
 
 
-def load_content_v5_method_definition(config_path: str | Path) -> Mapping[str, Any]:
-    """Load the method definition without fabricating an executable protocol."""
+def _git_blob_sha1(payload: bytes) -> str:
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(header + payload).hexdigest()
 
-    with Path(config_path).open("r", encoding="utf-8") as handle:
+
+def _load_bound_roster(path: Path, cohort: Mapping[str, Any]) -> tuple[ContentChainUnit, ...]:
+    payload = path.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != cohort["manifest_sha256"]:
+        raise ValueError(f"Content V5 {cohort['cohort_id']} manifest SHA differs")
+    if _git_blob_sha1(payload) != cohort["manifest_git_blob"]:
+        raise ValueError(f"Content V5 {cohort['cohort_id']} manifest Git blob differs")
+    units: list[ContentChainUnit] = []
+    for line_number, line in enumerate(payload.decode("utf-8").splitlines(), 1):
+        if not line:
+            raise ValueError(f"{path.name}:{line_number} cannot be blank")
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{path.name}:{line_number} is invalid JSON") from error
+        if not isinstance(item, dict) or set(item) != _UNIT_FIELDS:
+            raise ValueError(f"{path.name}:{line_number} has unexpected fields")
+        if any(
+            not isinstance(item[name], str) or not item[name].strip()
+            for name in ("unit_id", "split", "source_id", "prompt")
+        ):
+            raise ValueError(f"{path.name}:{line_number} has empty identity text")
+        if item["split"] != cohort["split"]:
+            raise ValueError(f"{path.name}:{line_number} has the wrong split")
+        if any(
+            not isinstance(item[name], int) or isinstance(item[name], bool)
+            for name in ("seed", "height", "width")
+        ):
+            raise ValueError(f"{path.name}:{line_number} has non-integer runtime values")
+        if item["seed"] < 0 or item["height"] < 256 or item["width"] < 256:
+            raise ValueError(f"{path.name}:{line_number} has invalid runtime values")
+        units.append(ContentChainUnit(**item))
+    if len(units) != 8:
+        raise ValueError(f"Content V5 {cohort['cohort_id']} must contain exactly 8 units")
+    if len({unit.unit_id for unit in units}) != 8:
+        raise ValueError(f"Content V5 {cohort['cohort_id']} unit identities collide")
+    if len({unit.source_id for unit in units}) != 8:
+        raise ValueError(f"Content V5 {cohort['cohort_id']} source identities collide")
+    return tuple(units)
+
+
+def load_content_v5_clean_protocol(
+    config_path: str | Path,
+    primary_roster_path: str | Path,
+    control_roster_path: str | Path,
+    *,
+    cohort_id: str,
+) -> ContentChainProtocol:
+    """Bind both exact rosters and select one independent eight-unit denominator."""
+
+    config_path = Path(config_path).resolve()
+    with config_path.open("r", encoding="utf-8") as handle:
         config = json.load(handle)
     if not isinstance(config, dict):
         raise ValueError("Content V5 config must be an object")
     _validate_config(config)
-    return _freeze(config)
-
-
-def require_content_v5_manifest_binding() -> None:
-    """Fail closed until a separate user-approved manifest binding exists."""
-
-    raise ContentV5ManifestBindingRequired(
-        "Content_V5_requires_a_user_frozen_new_disjoint_manifest_binding"
+    repo_root = config_path.parents[2]
+    received_paths = {
+        "primary_1": Path(primary_roster_path).resolve(),
+        "control_1": Path(control_roster_path).resolve(),
+    }
+    cohorts: dict[str, tuple[ContentChainUnit, ...]] = {}
+    ordered_cohorts: list[dict[str, Any]] = []
+    for cohort in _COHORTS_IN_ORDER:
+        selected_id = cohort["cohort_id"]
+        expected_path = (repo_root / cohort["manifest_path"]).resolve()
+        if received_paths[selected_id] != expected_path:
+            raise ValueError(f"Content V5 {selected_id} manifest path differs")
+        roster = _load_bound_roster(expected_path, cohort)
+        cohorts[selected_id] = roster
+        ordered_cohorts.append({
+            "cohort_id": selected_id,
+            "cohort_role": cohort["cohort_role"],
+            "roster": [asdict(unit) for unit in roster],
+        })
+    primary = cohorts["primary_1"]
+    control = cohorts["control_1"]
+    if {unit.unit_id for unit in primary} & {unit.unit_id for unit in control}:
+        raise ValueError("Content V5 cohort unit identities collide")
+    if {unit.source_id for unit in primary} & {unit.source_id for unit in control}:
+        raise ValueError("Content V5 cohort source identities collide")
+    if cohort_id not in cohorts:
+        raise ValueError("Content V5 cohort selection differs")
+    canonical = json.dumps(
+        {"config": config, "ordered_cohorts": ordered_cohorts},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    protocol_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if protocol_digest != CONTENT_V5_PROTOCOL_DIGEST:
+        raise ValueError("Content V5 paired canonical protocol digest differs")
+    return ContentChainProtocol(
+        protocol_id=config["protocol_id"],
+        config=_freeze(config),
+        roster=cohorts[cohort_id],
+        protocol_digest=protocol_digest,
     )
 
 
@@ -239,14 +376,19 @@ __all__ = [
     "CONTENT_V5_ARMS",
     "CONTENT_V5_DECISION_RULE_ID",
     "CONTENT_V5_EVALUATED_CANDIDATE_ID",
+    "CONTENT_V5_CONTROL_EXECUTION_SCOPE_ID",
+    "CONTENT_V5_CONTROL_RUN_PREFIX",
     "CONTENT_V5_EXECUTION_SCOPE_ID",
     "CONTENT_V5_METHOD_ID",
+    "CONTENT_V5_PRIMARY_EXECUTION_SCOPE_ID",
+    "CONTENT_V5_PRIMARY_RUN_PREFIX",
+    "CONTENT_V5_PROTOCOL_DIGEST",
     "CONTENT_V5_PROTOCOL_ID",
     "CONTENT_V5_RECORD_CONTRACT_ID",
     "CONTENT_V5_RUN_PREFIX",
     "CONTENT_V5_STATE_SCHEMA_ID",
-    "ContentV5ManifestBindingRequired",
+    "ContentChainProtocol",
+    "ContentChainUnit",
     "evaluate_content_v5_decision",
-    "load_content_v5_method_definition",
-    "require_content_v5_manifest_binding",
+    "load_content_v5_clean_protocol",
 ]

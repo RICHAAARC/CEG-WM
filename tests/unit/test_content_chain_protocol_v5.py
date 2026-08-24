@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,15 +11,24 @@ from cegwm.protocol.content_chain_v5 import (
     CONTENT_V5_DECISION_RULE_ID,
     CONTENT_V5_EVALUATED_CANDIDATE_ID,
     CONTENT_V5_METHOD_ID,
+    CONTENT_V5_PROTOCOL_DIGEST,
     CONTENT_V5_PROTOCOL_ID,
     evaluate_content_v5_decision,
-    load_content_v5_method_definition,
+    load_content_v5_clean_protocol,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG_ROOT = _ROOT / "configs" / "content_chain"
 _CONFIG = _CONFIG_ROOT / "content_v5_lf_or_hf_clean_v1.json"
+_PRIMARY = _CONFIG_ROOT / "content_v5_primary_evaluation_v1.jsonl"
+_CONTROL = _CONFIG_ROOT / "content_adaptive_dual_branch_v2_clean.jsonl"
 _V4_CONFIG = _CONFIG_ROOT / "content_v4_clean_v1.json"
+
+
+def _protocol(cohort_id: str):
+    return load_content_v5_clean_protocol(
+        _CONFIG, _PRIMARY, _CONTROL, cohort_id=cohort_id
+    )
 
 
 def _scores(registered: float, wrong: float, joint: float) -> dict[str, float]:
@@ -54,22 +64,92 @@ def _transaction(
 
 
 @pytest.mark.unit
-def test_content_v5_definition_freezes_identities_without_manifest_or_digest() -> None:
-    config = load_content_v5_method_definition(_CONFIG)
+def test_content_v5_protocol_freezes_paired_manifest_and_method_identities() -> None:
+    primary = _protocol("primary_1")
+    control = _protocol("control_1")
+    config = primary.config
     assert config["protocol_id"] == CONTENT_V5_PROTOCOL_ID
+    assert primary.protocol_digest == control.protocol_digest == CONTENT_V5_PROTOCOL_DIGEST
     assert config["method_identities"]["content_method_id"] == CONTENT_V5_METHOD_ID
     assert (
         config["method_identities"]["evaluated_candidate_id"]
         == CONTENT_V5_EVALUATED_CANDIDATE_ID
     )
     assert config["decision_rule"]["decision_rule_id"] == CONTENT_V5_DECISION_RULE_ID
-    assert config["execution_flow"]["approved_disjoint_manifest_binding_present"] is False
+    flow = config["execution_flow"]
+    assert tuple(item["cohort_id"] for item in flow["cohorts_in_order"]) == (
+        "primary_1", "control_1"
+    )
+    assert tuple(item["cohort_role"] for item in flow["cohorts_in_order"]) == (
+        "primary_evaluation", "reference_cohort"
+    )
+    assert flow["fixed_units_per_cohort"] == 8
+    assert flow["fixed_records_per_cohort"] == 16
+    assert flow["cohort_denominators_independent"] is True
+    assert flow["pooling_to_16_units_forbidden"] is True
+    assert flow["pass_transfer_forbidden"] is True
+    assert flow["conditional_omission_forbidden"] is True
+    assert flow["cross_cohort_conjunction"] is False
+    assert flow["both_cohort_results_always_reported"] is True
+    assert flow["fresh_execution_required_on_final_v5_exact"] is True
+    assert tuple(flow["reuse_from_prior_content_versions_forbidden"]) == (
+        "images", "scores", "records", "results", "checkpoints", "artifacts"
+    )
     assert config["decision_rule"]["formal_fpr_claim"] is False
     serialized = _CONFIG.read_text(encoding="utf-8")
     assert "protocol_digest" not in serialized
     assert "formal_roster_sha256" not in serialized
-    assert "roster_manifest" not in serialized
-    assert "content_adaptive_dual_branch_v2_clean.jsonl" not in serialized
+
+
+@pytest.mark.unit
+def test_content_v5_primary_manifest_exact_bytes_sha_blob_and_order() -> None:
+    payload = _PRIMARY.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == (
+        "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c"
+    )
+    header = f"blob {len(payload)}\0".encode("ascii")
+    assert hashlib.sha1(header + payload).hexdigest() == (
+        "1b134b998820427b53be0d82ba61cab1b4a8ad79"
+    )
+    assert payload.endswith(b"\n") and b"\r" not in payload
+    lines = payload.decode("utf-8").splitlines()
+    entries = [json.loads(line) for line in lines]
+    assert len(entries) == 8
+    assert [entry["unit_id"] for entry in entries] == [
+        f"content-v5-primary-{index:04d}" for index in range(1, 9)
+    ]
+    assert [entry["source_id"] for entry in entries] == [
+        f"content-v5-primary-prompt-{index}" for index in range(9201, 9209)
+    ]
+    assert [entry["seed"] for entry in entries] == [
+        2026082401, 2026083410, 2026084419, 2026085428,
+        2026086437, 2026087446, 2026088455, 2026089464,
+    ]
+    assert lines == [
+        json.dumps(entry, separators=(",", ":"), ensure_ascii=False)
+        for entry in entries
+    ]
+
+
+@pytest.mark.unit
+def test_content_v5_reference_manifest_exact_identity_and_cohorts_are_disjoint() -> None:
+    payload = _CONTROL.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == (
+        "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
+    )
+    header = f"blob {len(payload)}\0".encode("ascii")
+    assert hashlib.sha1(header + payload).hexdigest() == (
+        "7e0415ca14a3c37475ec796d4985698afbde4f89"
+    )
+    primary = _protocol("primary_1")
+    control = _protocol("control_1")
+    assert len(primary.roster) == len(control.roster) == 8
+    assert {unit.unit_id for unit in primary.roster}.isdisjoint(
+        unit.unit_id for unit in control.roster
+    )
+    assert {unit.source_id for unit in primary.roster}.isdisjoint(
+        unit.source_id for unit in control.roster
+    )
 
 
 @pytest.mark.unit
@@ -158,4 +238,6 @@ def test_content_v5_definition_rejects_identity_drift(tmp_path: Path) -> None:
     modified = tmp_path / "modified.json"
     modified.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="decision rule"):
-        load_content_v5_method_definition(modified)
+        load_content_v5_clean_protocol(
+            modified, _PRIMARY, _CONTROL, cohort_id="primary_1"
+        )
