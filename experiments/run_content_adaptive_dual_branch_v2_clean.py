@@ -351,8 +351,6 @@ def _blind_scores_with_lf_scorer(
         raise TypeError("blind HF score requires FrozenHFPublicAssets")
     if not callable(lf_scorer):
         raise TypeError("blind LF scorer hook must be callable")
-    if len(wrong_keys) != 16 or any(not isinstance(item, bytes) for item in wrong_keys):
-        raise ValueError("blind score requires exactly 16 normalized external wrong keys")
     return _blind_scores_from_ordinary(
         ordinary_image,
         key,
@@ -371,6 +369,8 @@ def _blind_scores_from_ordinary(
     lf_public_assets: Any,
     lf_scorer: Callable[[Any, bytes, Any], float],
 ) -> dict[str, dict[str, float]]:
+    if len(wrong_keys) != 16 or any(not isinstance(item, bytes) for item in wrong_keys):
+        raise ValueError("blind score requires exactly 16 normalized external wrong keys")
     lf = {"registered": float(lf_scorer(ordinary_image, key, lf_public_assets))}
     hf = {"registered": float(score_hf_image(ordinary_image, key, hf_public_assets))}
     for index, wrong_key in enumerate(wrong_keys):

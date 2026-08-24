@@ -9,6 +9,12 @@ import pytest
 import torch
 
 from cegwm.method.hf import FrozenHFPublicAssets
+from cegwm.method.lf import (
+    LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    FrozenLFPublicAssets,
+)
 from cegwm.protocol.content_chain_v4 import CONTENT_V4_PROTOCOL_DIGEST
 from experiments import run_content_adaptive_dual_branch_v2_clean as engine
 from experiments import run_content_v4_clean as runner
@@ -164,6 +170,45 @@ def test_generic_engine_v4_hook_scores_registered_16_wrong_and_null_with_same_as
         joint["joint"][label] == min(joint["lf"][label], joint["hf"][label])
         for label in joint["joint"]
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "malformed",
+    (
+        tuple(b"wrong" for _ in range(15)),
+        (*tuple(b"wrong" for _ in range(15)), bytearray(b"not-bytes")),
+    ),
+)
+def test_shared_blind_score_boundary_rejects_wrong_key_count_and_type(
+    malformed: tuple[object, ...],
+) -> None:
+    vae, processor = _BlindVAE(), _BlindProcessor()
+    image_processor_id = "stabilityai/stable-diffusion-3.5-medium:image_processor"
+    hf_assets = FrozenHFPublicAssets(vae, processor, image_processor_id)
+    legacy_lf_assets = FrozenLFPublicAssets(
+        vae,
+        processor,
+        image_processor_id,
+        LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+        LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    )
+    image = Image.new("RGB", (8, 8))
+    key = b"registered"
+    with pytest.raises(ValueError, match="exactly 16 normalized external wrong keys"):
+        engine._blind_scores(
+            image, key, malformed, hf_assets, legacy_lf_assets  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="exactly 16 normalized external wrong keys"):
+        engine._blind_scores_with_lf_scorer(
+            image,
+            key,
+            malformed,  # type: ignore[arg-type]
+            hf_assets,
+            object(),
+            lambda image, received_key, assets: 0.0,
+        )
 
 
 @pytest.mark.integration
