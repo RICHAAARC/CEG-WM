@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
+from dataclasses import dataclass
 import hashlib
 import json
 import math
@@ -91,6 +93,26 @@ _IDENTITY_FIELDS = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class ContentRunnerVariant:
+    """Method-specific identities and real-runtime delegates for one runner."""
+
+    name: str
+    execution_scope_id: str
+    complete_execution: str
+    arms: tuple[str, str]
+    record_contract_id: str
+    state_schema_id: str
+    run_prefix: str
+    load_protocol: Callable[[Path], ContentChainProtocol]
+    load_pipeline_and_assets: Callable[[str, str], tuple[Any, Any]]
+    run_joint: Callable[..., Any]
+
+
+def _runner_variant(variant: ContentRunnerVariant | None) -> ContentRunnerVariant:
+    return V2_RUNNER_VARIANT if variant is None else variant
+
+
 def _finite_real(value: Any, name: str) -> float:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise TypeError(f"{name} must be a real scalar")
@@ -100,12 +122,18 @@ def _finite_real(value: Any, name: str) -> float:
     return scalar
 
 
-def _validate_content_v2_record(record: Mapping[str, Any]) -> None:
-    """Validate the narrow public JSON contract owned only by this v2 runner."""
+def _validate_content_v2_record(
+    record: Mapping[str, Any],
+    *,
+    variant: ContentRunnerVariant | None = None,
+) -> None:
+    """Validate the narrow public JSON contract for one explicit variant."""
+
+    selected = _runner_variant(variant)
 
     if tuple(record) != RECORD_FIELDS:
         raise ValueError("content v2 record fields or order differ from the frozen contract")
-    if record["record_contract_id"] != RECORD_CONTRACT_ID:
+    if record["record_contract_id"] != selected.record_contract_id:
         raise ValueError("content v2 record contract identity differs")
     for name in (
         "run_id", "unit_id", "source_cluster_id", "arm", "condition",
@@ -113,7 +141,7 @@ def _validate_content_v2_record(record: Mapping[str, Any]) -> None:
     ):
         if not isinstance(record[name], str) or not record[name].strip():
             raise ValueError(f"content v2 record {name} must be nonempty text")
-    if record["arm"] not in ARMS or record["condition"] != "clean":
+    if record["arm"] not in selected.arms or record["condition"] != "clean":
         raise ValueError("content v2 record arm or condition differs")
     if re.fullmatch(r"[0-9a-f]{40}", record["code_revision"]) is None:
         raise ValueError("content v2 record revision must be an exact lowercase commit")
@@ -141,14 +169,16 @@ def _validate_content_v2_record(record: Mapping[str, Any]) -> None:
     if any(not -1.0 <= _finite_real(value, name) <= 1.0 for name, value in scores.items()):
         raise ValueError("successful record scores must lie in [-1, 1]")
     expected_metrics = (
-        _CANDIDATE_METRIC_FIELDS if record["arm"] == ARMS[0] else _NULL_METRIC_FIELDS
+        _CANDIDATE_METRIC_FIELDS
+        if record["arm"] == selected.arms[0]
+        else _NULL_METRIC_FIELDS
     )
     if set(metrics) != set(expected_metrics):
         raise ValueError("successful record metrics differ from the exact arm contract")
     finite_metrics = {name: _finite_real(metrics[name], name) for name in expected_metrics}
     if finite_metrics["paired_rgb_psnr_db"] < 0.0:
         raise ValueError("paired_rgb_psnr_db must be nonnegative")
-    if record["arm"] == ARMS[1]:
+    if record["arm"] == selected.arms[1]:
         return
     if not 0.0 <= finite_metrics["combined_relative_l2"] <= 0.012:
         raise ValueError("combined_relative_l2 escaped the frozen budget")
@@ -186,7 +216,9 @@ def _content_v2_record(
     failure_reason: str | None = None,
     scores: Mapping[str, float] | None = None,
     metrics: Mapping[str, float] | None = None,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     record = {
         "run_id": run_id,
         "unit_id": unit_id,
@@ -200,9 +232,9 @@ def _content_v2_record(
         "failure_reason": failure_reason,
         "scores": dict(scores or {}),
         "metrics": dict(metrics or {}),
-        "record_contract_id": RECORD_CONTRACT_ID,
+        "record_contract_id": selected.record_contract_id,
     }
-    _validate_content_v2_record(record)
+    _validate_content_v2_record(record, variant=selected)
     return record
 
 
@@ -259,6 +291,20 @@ def _load_pipeline_and_assets(model_id: str, token: str) -> tuple[Any, ContentEm
     dino_model.to("cuda")
     dino_model.eval()
     return pipeline, ContentEmbedAssets(dino_model, dino_processor, hf, lf)
+
+
+V2_RUNNER_VARIANT = ContentRunnerVariant(
+    name="Content V2",
+    execution_scope_id=EXECUTION_SCOPE_ID,
+    complete_execution=COMPLETE_EXECUTION,
+    arms=ARMS,
+    record_contract_id=RECORD_CONTRACT_ID,
+    state_schema_id=STATE_SCHEMA_ID,
+    run_prefix="content-adaptive-v2",
+    load_protocol=_load_protocol,
+    load_pipeline_and_assets=_load_pipeline_and_assets,
+    run_joint=run_sd35_content_adaptive,
+)
 
 
 def _wrong_keys(key: bytes, protocol: ContentChainProtocol) -> tuple[bytes, ...]:
@@ -448,7 +494,13 @@ def _branch_share_population_summary(
     return lf_population_std, hf_population_std, supports_nonidentical, True
 
 
-def _gate_evidence(records: list[dict[str, Any]], unit_metrics: list[dict[str, Any]]) -> dict[str, Any]:
+def _gate_evidence(
+    records: list[dict[str, Any]],
+    unit_metrics: list[dict[str, Any]],
+    *,
+    variant: ContentRunnerVariant | None = None,
+) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     by_unit: dict[str, dict[str, dict[str, Any]]] = {}
     for record in records:
         by_unit.setdefault(record["unit_id"], {})[record["arm"]] = record
@@ -457,8 +509,8 @@ def _gate_evidence(records: list[dict[str, Any]], unit_metrics: list[dict[str, A
         gate_a = 0
         gate_b = 0
         for transaction in by_unit.values():
-            joint = transaction[ARMS[0]]["scores"]
-            primary_null = transaction[ARMS[1]]["scores"]
+            joint = transaction[selected.arms[0]]["scores"]
+            primary_null = transaction[selected.arms[1]]["scores"]
             registered = float(joint[f"{branch}__registered"])
             wrong = [float(joint[f"{branch}__wrong_{index:02d}"]) for index in range(16)]
             gate_a += int(registered > max(wrong))
@@ -547,11 +599,13 @@ def _public_identity(
     exact: str,
     key_digest: str,
     run_id: str,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     return {
         "run_id": run_id,
         "exact": exact,
-        "execution_scope_id": EXECUTION_SCOPE_ID,
+        "execution_scope_id": selected.execution_scope_id,
         "protocol_id": protocol.protocol_id,
         "protocol_digest": protocol.protocol_digest,
         "public_key_digest": key_digest,
@@ -560,8 +614,8 @@ def _public_identity(
             [unit.unit_id, unit.source_id]
             for unit in protocol.roster
         ],
-        "ordered_arms": list(ARMS),
-        "record_contract_id": RECORD_CONTRACT_ID,
+        "ordered_arms": list(selected.arms),
+        "record_contract_id": selected.record_contract_id,
         "fixed_unit_count": FIXED_UNIT_COUNT,
         "records_per_unit": RECORDS_PER_UNIT,
         "fixed_record_count": FIXED_RECORD_COUNT,
@@ -569,9 +623,15 @@ def _public_identity(
     }
 
 
-def _new_state(identity: dict[str, Any], now: float) -> dict[str, Any]:
+def _new_state(
+    identity: dict[str, Any],
+    now: float,
+    *,
+    variant: ContentRunnerVariant | None = None,
+) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     return {
-        "state_schema_id": STATE_SCHEMA_ID,
+        "state_schema_id": selected.state_schema_id,
         "identity": identity,
         "checkpoint_sequence": 0,
         "checkpoint_time_anchor_unix_seconds": _finite_real(now, "checkpoint time anchor"),
@@ -584,10 +644,13 @@ def _validate_state(
     state: Any,
     identity: dict[str, Any],
     protocol: ContentChainProtocol,
+    *,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     if not isinstance(state, dict) or tuple(state) != _STATE_FIELDS:
         raise ValueError("resumable state fields or order differ")
-    if state["state_schema_id"] != STATE_SCHEMA_ID:
+    if state["state_schema_id"] != selected.state_schema_id:
         raise ValueError("resumable state schema identity differs")
     received_identity = state["identity"]
     if not isinstance(received_identity, dict) or tuple(received_identity) != _IDENTITY_FIELDS:
@@ -614,12 +677,12 @@ def _validate_state(
         for arm_index, record in enumerate(transaction):
             if not isinstance(record, dict):
                 raise TypeError("committed record must be a plain JSON object")
-            _validate_content_v2_record(record)
+            _validate_content_v2_record(record, variant=selected)
             if (
                 record["run_id"] != identity["run_id"]
                 or record["unit_id"] != unit.unit_id
                 or record["source_cluster_id"] != unit.source_id
-                or record["arm"] != ARMS[arm_index]
+                or record["arm"] != selected.arms[arm_index]
                 or record["code_revision"] != identity["exact"]
                 or record["config_digest"] != identity["protocol_digest"]
                 or record["key_public_digest"] != identity["public_key_digest"]
@@ -719,7 +782,10 @@ def _load_sink_checkpoint(
     sink_run_root: Path,
     identity: dict[str, Any],
     protocol: ContentChainProtocol,
+    *,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any] | None:
+    selected = _runner_variant(variant)
     if not sink_run_root.exists():
         return None
     run_id = identity["run_id"]
@@ -744,7 +810,10 @@ def _load_sink_checkpoint(
     previous: dict[str, Any] | None = None
     for sequence in sequences:
         state = _validate_state(
-            _read_checkpoint_pair(archives[sequence], sidecars[sequence]), identity, protocol
+            _read_checkpoint_pair(archives[sequence], sidecars[sequence]),
+            identity,
+            protocol,
+            variant=selected,
         )
         if state["checkpoint_sequence"] != sequence + 1:
             raise ValueError("sink checkpoint metadata sequence differs from its name")
@@ -777,16 +846,23 @@ def _resolve_state(
     identity: dict[str, Any],
     protocol: ContentChainProtocol,
     now: float,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     _terminal_pair_presence(sink_run_root, identity["run_id"])
     local = None
     if local_state_path.exists():
         local = _validate_state(
-            _read_json_bytes(local_state_path.read_bytes()), identity, protocol
+            _read_json_bytes(local_state_path.read_bytes()),
+            identity,
+            protocol,
+            variant=selected,
         )
-    sink = _load_sink_checkpoint(sink_run_root, identity, protocol)
+    sink = _load_sink_checkpoint(
+        sink_run_root, identity, protocol, variant=selected
+    )
     if local is None and sink is None:
-        state = _new_state(identity, now)
+        state = _new_state(identity, now, variant=selected)
         _write_local_state(local_state_path, state)
         return state
     if local is None:
@@ -852,7 +928,10 @@ def _derive_result(
     records: list[dict[str, Any]],
     protocol: ContentChainProtocol,
     identity: dict[str, Any],
+    *,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
+    selected = _runner_variant(variant)
     unit_metrics: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
     for index, unit in enumerate(protocol.roster):
@@ -884,13 +963,17 @@ def _derive_result(
         rc = 1
         lf_share_std = hf_share_std = None
         supports_nonidentical = False
-    gates = _gate_evidence(records, unit_metrics) if rc == 0 else None
+    gates = (
+        _gate_evidence(records, unit_metrics, variant=selected)
+        if rc == 0
+        else None
+    )
     return {
         "rc": rc,
-        "completeness": COMPLETE_EXECUTION if rc == 0 else INCOMPLETE_EXECUTION,
+        "completeness": selected.complete_execution if rc == 0 else INCOMPLETE_EXECUTION,
         "scientific_outcome_allowed": rc == 0,
         "scientific_status": "not_adjudicated" if rc == 0 else "not_evaluable",
-        "execution_scope_id": EXECUTION_SCOPE_ID,
+        "execution_scope_id": selected.execution_scope_id,
         "exact": identity["exact"],
         "protocol_id": protocol.protocol_id,
         "protocol_digest": protocol.protocol_digest,
@@ -912,7 +995,10 @@ def _fatal_result(
     records: list[dict[str, Any]],
     identity: dict[str, Any],
     error: Exception,
+    *,
+    variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
+    _runner_variant(variant)
     return {
         "rc": 2,
         "completeness": INCOMPLETE_EXECUTION,
@@ -975,10 +1061,13 @@ def _unit_transaction(
     wrong_keys: tuple[bytes, ...],
     identity: dict[str, Any],
     protocol: ContentChainProtocol,
+    variant: ContentRunnerVariant | None = None,
 ) -> list[dict[str, Any]]:
+    selected = _runner_variant(variant)
     joint_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
     null_generator = torch.Generator(device="cuda").manual_seed(unit.seed)
-    output = run_sd35_content_adaptive(
+    joint_runner = run_sd35_content_adaptive if variant is None else selected.run_joint
+    output = joint_runner(
         pipeline, unit.prompt, key, assets,
         height=unit.height, width=unit.width, generator=joint_generator,
     )
@@ -1005,24 +1094,31 @@ def _unit_transaction(
     return [
         _content_v2_record(
             run_id=identity["run_id"], unit_id=unit.unit_id,
-            source_cluster_id=unit.source_id, arm=ARMS[0], condition="clean",
+            source_cluster_id=unit.source_id, arm=selected.arms[0], condition="clean",
             code_revision=identity["exact"], config_digest=identity["protocol_digest"],
             key_public_digest=identity["public_key_digest"], status="success",
             scores=_flat_scores(joint_scores),
             metrics={name: float(value) for name, value in metrics.items() if name != "unit_id"},
+            variant=selected,
         ),
         _content_v2_record(
             run_id=identity["run_id"], unit_id=unit.unit_id,
-            source_cluster_id=unit.source_id, arm=ARMS[1], condition="clean",
+            source_cluster_id=unit.source_id, arm=selected.arms[1], condition="clean",
             code_revision=identity["exact"], config_digest=identity["protocol_digest"],
             key_public_digest=identity["public_key_digest"], status="success",
             scores=_flat_scores(null_scores),
             metrics={"paired_rgb_psnr_db": metrics["paired_rgb_psnr_db"]},
+            variant=selected,
         ),
     ]
 
 
-def execute(args: argparse.Namespace) -> int:
+def execute(
+    args: argparse.Namespace,
+    *,
+    variant: ContentRunnerVariant | None = None,
+) -> int:
+    selected = _runner_variant(variant)
     repo_root = Path(args.repo_root).resolve()
     local_work_root = Path(args.local_work_root).resolve()
     artifact_sink = Path(args.artifact_sink).resolve()
@@ -1034,10 +1130,20 @@ def execute(args: argparse.Namespace) -> int:
     key = normalize_detection_key(key_text)
     key_text = ""
     exact = _git_exact(repo_root, args.expected_exact)
-    protocol = _load_protocol(repo_root)
+    protocol = (
+        _load_protocol(repo_root)
+        if variant is None
+        else selected.load_protocol(repo_root)
+    )
     key_digest = public_key_digest(key)
-    run_id = f"content-adaptive-v2-{protocol.protocol_digest[:12]}-{key_digest[:12]}"
-    identity = _public_identity(protocol, exact=exact, key_digest=key_digest, run_id=run_id)
+    run_id = f"{selected.run_prefix}-{protocol.protocol_digest[:12]}-{key_digest[:12]}"
+    identity = _public_identity(
+        protocol,
+        exact=exact,
+        key_digest=key_digest,
+        run_id=run_id,
+        variant=variant,
+    )
     local_run_root = local_work_root / run_id
     local_run_root.mkdir(parents=True, exist_ok=True)
     local_state_path = local_run_root / "state.json"
@@ -1048,13 +1154,16 @@ def execute(args: argparse.Namespace) -> int:
         identity=identity,
         protocol=protocol,
         now=_now(),
+        variant=variant,
     )
     _progress(identity, state["committed_unit_count"], "identity_ready")
     _progress(identity, state["committed_unit_count"], "resume_ready")
     if state["committed_unit_count"] == FIXED_UNIT_COUNT:
         key = b""
         token = ""
-        result = _derive_result(state["records"], protocol, identity)
+        result = _derive_result(
+            state["records"], protocol, identity, variant=variant
+        )
         rc = int(result["rc"])
         _publish_terminal(
             local_run_root, sink_run_root, identity, result, FIXED_UNIT_COUNT
@@ -1068,15 +1177,32 @@ def execute(args: argparse.Namespace) -> int:
     result: dict[str, Any]
     try:
         try:
-            pipeline, assets = _load_pipeline_and_assets(identity["model_id"], token)
+            if variant is None:
+                pipeline, assets = _load_pipeline_and_assets(
+                    identity["model_id"], token
+                )
+            else:
+                pipeline, assets = selected.load_pipeline_and_assets(
+                    identity["model_id"], token
+                )
         finally:
             token = ""
         for unit_index in range(state["committed_unit_count"], FIXED_UNIT_COUNT):
             unit = protocol.roster[unit_index]
             try:
-                transaction = _unit_transaction(
-                    unit=unit, pipeline=pipeline, assets=assets, key=key,
-                    wrong_keys=wrong_keys, identity=identity, protocol=protocol,
+                transaction_kwargs = {
+                    "unit": unit,
+                    "pipeline": pipeline,
+                    "assets": assets,
+                    "key": key,
+                    "wrong_keys": wrong_keys,
+                    "identity": identity,
+                    "protocol": protocol,
+                }
+                transaction = (
+                    _unit_transaction(**transaction_kwargs)
+                    if variant is None
+                    else _unit_transaction(**transaction_kwargs, variant=selected)
                 )
             except Exception as error:  # noqa: BLE001 - fixed denominator records the attempt
                 error_class = _public_operational_error_class(error)
@@ -1087,13 +1213,16 @@ def execute(args: argparse.Namespace) -> int:
                         code_revision=exact, config_digest=protocol.protocol_digest,
                         key_public_digest=key_digest, status="operational_failure",
                         failure_reason=error_class,
+                        variant=selected,
                     )
-                    for arm in ARMS
+                    for arm in selected.arms
                 ]
             prospective = dict(state)
             prospective["records"] = [*state["records"], *transaction]
             prospective["committed_unit_count"] = unit_index + 1
-            _validate_state(prospective, identity, protocol)
+            _validate_state(
+                prospective, identity, protocol, variant=variant
+            )
             _write_local_state(local_state_path, prospective)
             state = prospective
             _progress(identity, state["committed_unit_count"], "unit_committed")
@@ -1114,9 +1243,13 @@ def execute(args: argparse.Namespace) -> int:
                 _write_local_state(local_state_path, checkpoint_state)
                 state = checkpoint_state
                 _progress(identity, state["committed_unit_count"], "checkpoint_published")
-        result = _derive_result(state["records"], protocol, identity)
+        result = _derive_result(
+            state["records"], protocol, identity, variant=variant
+        )
     except Exception as error:  # noqa: BLE001 - sanitized operational terminal only
-        result = _fatal_result(state["records"], identity, error)
+        result = _fatal_result(
+            state["records"], identity, error, variant=variant
+        )
     committed = state["committed_unit_count"]
     rc = int(result["rc"])
     _publish_terminal(local_run_root, sink_run_root, identity, result, committed)
