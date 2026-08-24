@@ -108,6 +108,9 @@ class ContentRunnerVariant:
     load_pipeline_and_assets: Callable[[str, str], tuple[Any, Any]]
     run_joint: Callable[..., Any]
     lf_scorer: Callable[[Any, bytes, Any], float] | None = None
+    decision_evaluator: Callable[
+        [list[dict[str, Any]], tuple[str, str]], dict[str, Any]
+    ] | None = None
 
 
 def _runner_variant(variant: ContentRunnerVariant | None) -> ContentRunnerVariant:
@@ -543,27 +546,41 @@ def _gate_evidence(
     variant: ContentRunnerVariant | None = None,
 ) -> dict[str, Any]:
     selected = _runner_variant(variant)
-    by_unit: dict[str, dict[str, dict[str, Any]]] = {}
-    for record in records:
-        by_unit.setdefault(record["unit_id"], {})[record["arm"]] = record
-    gates: dict[str, dict[str, Any]] = {}
-    for branch in BRANCHES:
-        gate_a = 0
-        gate_b = 0
-        for transaction in by_unit.values():
-            joint = transaction[selected.arms[0]]["scores"]
-            primary_null = transaction[selected.arms[1]]["scores"]
-            registered = float(joint[f"{branch}__registered"])
-            wrong = [float(joint[f"{branch}__wrong_{index:02d}"]) for index in range(16)]
-            gate_a += int(registered > max(wrong))
-            gate_b += int(registered > float(primary_null[f"{branch}__registered"]))
-        gates[branch] = {
-            "gate_a_pass_units": gate_a,
-            "gate_b_pass_units": gate_b,
-            "gate_a_pass": gate_a >= 7,
-            "gate_b_pass": gate_b >= 7,
-            "strict_ties_fail": True,
-        }
+    if selected.decision_evaluator is None:
+        by_unit: dict[str, dict[str, dict[str, Any]]] = {}
+        for record in records:
+            by_unit.setdefault(record["unit_id"], {})[record["arm"]] = record
+        gates: dict[str, dict[str, Any]] = {}
+        for branch in BRANCHES:
+            gate_a = 0
+            gate_b = 0
+            for transaction in by_unit.values():
+                joint = transaction[selected.arms[0]]["scores"]
+                primary_null = transaction[selected.arms[1]]["scores"]
+                registered = float(joint[f"{branch}__registered"])
+                wrong = [float(joint[f"{branch}__wrong_{index:02d}"]) for index in range(16)]
+                gate_a += int(registered > max(wrong))
+                gate_b += int(registered > float(primary_null[f"{branch}__registered"]))
+            gates[branch] = {
+                "gate_a_pass_units": gate_a,
+                "gate_b_pass_units": gate_b,
+                "gate_a_pass": gate_a >= 7,
+                "gate_b_pass": gate_b >= 7,
+                "strict_ties_fail": True,
+            }
+        decision_evidence: dict[str, Any] = {"branches": gates}
+        decision_pass = all(
+            item[gate]
+            for item in gates.values()
+            for gate in ("gate_a_pass", "gate_b_pass")
+        )
+    else:
+        decision_evidence = selected.decision_evaluator(records, selected.arms)
+        if tuple(decision_evidence) != (
+            "branches", "branchwise_or", "all_decision_gates_pass"
+        ):
+            raise ValueError("variant decision evidence fields or order differ")
+        decision_pass = decision_evidence["all_decision_gates_pass"] is True
     budget_units = sum(metric["combined_relative_l2"] <= 0.012 for metric in unit_metrics)
     nonzero_units = sum(
         metric["lf_effective_relative_l2"] > 0.0 and metric["hf_effective_relative_l2"] > 0.0
@@ -597,11 +614,11 @@ def _gate_evidence(
     pass_all = (
         len(records) == 16
         and len(unit_metrics) == 8
-        and all(item[gate] for item in gates.values() for gate in ("gate_a_pass", "gate_b_pass"))
+        and decision_pass
         and budget_units == nonzero_units == response_units == probe_count_units == share_units == psnr_units == 8
     )
     return {
-        "branches": gates,
+        **decision_evidence,
         "combined_budget_pass_units": budget_units,
         "both_nonzero_branches_pass_units": nonzero_units,
         "baseline_differenced_probe_response_pass_units": response_units,
