@@ -49,7 +49,6 @@ SEED = 2026082600
 HEIGHT = 512
 WIDTH = 512
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
-BRANCH = "stage-a-content-v6-detector-domain-iss"
 KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
 PREFIX = "CEGWM_CONTENT_V6_CANARY_RESULT"
@@ -108,8 +107,6 @@ def _validate_execution_identity(repo_root: Path, expected_exact: str, exact: st
         raise RuntimeError("repo root must be the checkout root")
     if exact != expected_exact:
         raise RuntimeError("resolved revision differs from expected exact")
-    if _run_git(repo_root, "branch", "--show-current") != BRANCH:
-        raise RuntimeError("execution branch differs from the canary branch")
     if _run_git(repo_root, "status", "--porcelain"):
         raise RuntimeError("execution checkout must be clean")
     if not torch.cuda.is_available():

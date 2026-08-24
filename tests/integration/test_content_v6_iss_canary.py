@@ -25,6 +25,43 @@ def test_canary_identity_is_frozen_and_disjoint_from_all_bound_data() -> None:
 
 
 @pytest.mark.integration
+def test_execution_identity_requires_exact_clean_checkout_without_named_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exact = "a" * 40
+    calls: list[tuple[str, ...]] = []
+
+    def run_git(repo_root: Path, *arguments: str) -> str:
+        calls.append(arguments)
+        if arguments == ("rev-parse", "--show-toplevel"):
+            return str(repo_root)
+        if arguments == ("status", "--porcelain"):
+            return ""
+        raise AssertionError(f"unexpected git query: {arguments}")
+
+    monkeypatch.setattr(canary, "_run_git", run_git)
+    monkeypatch.setattr(canary.torch.cuda, "is_available", lambda: True)
+    canary._validate_execution_identity(_ROOT, exact, exact)
+    assert calls == [
+        ("rev-parse", "--show-toplevel"),
+        ("status", "--porcelain"),
+    ]
+    with pytest.raises(RuntimeError, match="resolved revision differs"):
+        canary._validate_execution_identity(_ROOT, "b" * 40, exact)
+    monkeypatch.setattr(
+        canary,
+        "_run_git",
+        lambda repo_root, *arguments: (
+            str(repo_root)
+            if arguments == ("rev-parse", "--show-toplevel")
+            else " M changed.py"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="checkout must be clean"):
+        canary._validate_execution_identity(_ROOT, exact, exact)
+
+
+@pytest.mark.integration
 def test_canary_uses_one_paired_runtime_and_reports_denominator_zero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
