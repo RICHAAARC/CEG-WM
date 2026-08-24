@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from cegwm.protocol.content_chain_v2 import (
@@ -39,22 +40,18 @@ CONTENT_V5_PROTOCOL_ID = (
 CONTENT_V5_RECORD_CONTRACT_ID = (
     "content_v5_whitened_lf_adaptive_hf_branchwise_or_record_v1"
 )
-CONTENT_V5_STATE_SCHEMA_ID = "content_v5_resumable_state_v1"
+CONTENT_V5_STATE_SCHEMA_ID = "content_v5_umbrella_whole_unit_checkpoint_state_v1"
 CONTENT_V5_RUN_PREFIX = "content-v5"
 CONTENT_V5_EXECUTION_SCOPE_ID = (
-    "content_v5_paired_primary_and_reference_cohort_evaluation_v1"
+    "content_v5_reference_then_primary_umbrella_evaluation_v1"
 )
-CONTENT_V5_PRIMARY_EXECUTION_SCOPE_ID = (
-    "content_v5_primary_1_whitened_lf_adaptive_hf_branchwise_or_evaluation_v1"
+CONTENT_V5_CONTROL_RESULT_SCOPE_ID = "content_v5_control_1_independent_result_v1"
+CONTENT_V5_PRIMARY_RESULT_SCOPE_ID = "content_v5_primary_1_independent_result_v1"
+CONTENT_V5_ARTIFACT_CONTRACT_ID = (
+    "content_v5_reference_then_primary_umbrella_artifact_v1"
 )
-CONTENT_V5_CONTROL_EXECUTION_SCOPE_ID = (
-    "content_v5_control_1_whitened_lf_adaptive_hf_branchwise_or_"
-    "reference_evaluation_v1"
-)
-CONTENT_V5_PRIMARY_RUN_PREFIX = "content-v5-primary-1"
-CONTENT_V5_CONTROL_RUN_PREFIX = "content-v5-control-1"
 CONTENT_V5_PROTOCOL_DIGEST = (
-    "7d8f1ebef662a45dfd760261efbc81b733eed97bfea7bfd9fde72fa15f025314"
+    "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204"
 )
 CONTENT_V5_ARMS = (
     CONTENT_V5_EVALUATED_CANDIDATE_ID,
@@ -69,18 +66,6 @@ _METHOD_IDENTITIES = {
 _UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
 _COHORTS_IN_ORDER = [
     {
-        "cohort_id": "primary_1",
-        "cohort_role": "primary_evaluation",
-        "manifest_path": "configs/content_chain/content_v5_primary_evaluation_v1.jsonl",
-        "manifest_sha256": (
-            "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c"
-        ),
-        "manifest_git_blob": "1b134b998820427b53be0d82ba61cab1b4a8ad79",
-        "split": "content_v5_primary_evaluation_v1",
-        "run_prefix": CONTENT_V5_PRIMARY_RUN_PREFIX,
-        "execution_scope_id": CONTENT_V5_PRIMARY_EXECUTION_SCOPE_ID,
-    },
-    {
         "cohort_id": "control_1",
         "cohort_role": "reference_cohort",
         "manifest_path": (
@@ -91,13 +76,30 @@ _COHORTS_IN_ORDER = [
         ),
         "manifest_git_blob": "7e0415ca14a3c37475ec796d4985698afbde4f89",
         "split": "content_adaptive_dual_branch_v2_clean_v1",
-        "run_prefix": CONTENT_V5_CONTROL_RUN_PREFIX,
-        "execution_scope_id": CONTENT_V5_CONTROL_EXECUTION_SCOPE_ID,
+        "result_scope_id": CONTENT_V5_CONTROL_RESULT_SCOPE_ID,
+    },
+    {
+        "cohort_id": "primary_1",
+        "cohort_role": "primary_evaluation",
+        "manifest_path": "configs/content_chain/content_v5_primary_evaluation_v1.jsonl",
+        "manifest_sha256": (
+            "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c"
+        ),
+        "manifest_git_blob": "1b134b998820427b53be0d82ba61cab1b4a8ad79",
+        "split": "content_v5_primary_evaluation_v1",
+        "result_scope_id": CONTENT_V5_PRIMARY_RESULT_SCOPE_ID,
     },
 ]
 _EXECUTION_FLOW = {
     "cohorts_in_order": _COHORTS_IN_ORDER,
-    "cohort_selection_required": True,
+    "single_top_level_invocation": True,
+    "cohort_selection_argument_allowed": False,
+    "umbrella_run_prefix": CONTENT_V5_RUN_PREFIX,
+    "umbrella_state_schema_id": CONTENT_V5_STATE_SCHEMA_ID,
+    "umbrella_artifact_contract_id": CONTENT_V5_ARTIFACT_CONTRACT_ID,
+    "single_local_and_artifact_run_root": True,
+    "single_terminal_zip_and_sha_pair": True,
+    "cohort_execution_order_unconditional": True,
     "fixed_units_per_cohort": 8,
     "record_arms_in_order": list(CONTENT_V5_ARMS),
     "unit_transaction_record_count": 2,
@@ -109,6 +111,17 @@ _EXECUTION_FLOW = {
     "cross_cohort_conjunction": False,
     "both_cohort_results_always_reported": True,
     "fresh_execution_required_on_final_v5_exact": True,
+    "unit_failures_recorded_and_execution_continues": True,
+    "fatal_interruption_checkpoint": "last_complete_whole_unit_only",
+    "checkpoint_purpose": "audit_only_never_resume",
+    "existing_local_or_artifact_run_root_rejected": True,
+    "automatic_resume_allowed": False,
+    "manual_resume_allowed": False,
+    "automatic_retry_allowed": False,
+    "umbrella_return_code_rule": (
+        "two_if_any_cohort_operationally_incomplete_after_both_reported_"
+        "else_zero_no_scientific_conjunction"
+    ),
     "reuse_from_prior_content_versions_forbidden": [
         "images", "scores", "records", "results", "checkpoints", "artifacts",
     ],
@@ -156,6 +169,24 @@ _DECISION_RULE = {
     "paired_rgb_psnr_pass_units": 8,
     "formal_fpr_claim": False,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ContentV5PairedProtocol:
+    protocol_id: str
+    config: Mapping[str, Any]
+    cohorts: Mapping[str, tuple[ContentChainUnit, ...]]
+    protocol_digest: str
+
+    def cohort_protocol(self, cohort_id: str) -> ContentChainProtocol:
+        if cohort_id not in self.cohorts:
+            raise ValueError("Content V5 cohort selection differs")
+        return ContentChainProtocol(
+            protocol_id=self.protocol_id,
+            config=self.config,
+            roster=self.cohorts[cohort_id],
+            protocol_digest=self.protocol_digest,
+        )
 
 
 def _mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -257,10 +288,8 @@ def load_content_v5_clean_protocol(
     config_path: str | Path,
     primary_roster_path: str | Path,
     control_roster_path: str | Path,
-    *,
-    cohort_id: str,
-) -> ContentChainProtocol:
-    """Bind both exact rosters and select one independent eight-unit denominator."""
+) -> ContentV5PairedProtocol:
+    """Bind the exact control-first paired protocol under one canonical digest."""
 
     config_path = Path(config_path).resolve()
     with config_path.open("r", encoding="utf-8") as handle:
@@ -293,8 +322,6 @@ def load_content_v5_clean_protocol(
         raise ValueError("Content V5 cohort unit identities collide")
     if {unit.source_id for unit in primary} & {unit.source_id for unit in control}:
         raise ValueError("Content V5 cohort source identities collide")
-    if cohort_id not in cohorts:
-        raise ValueError("Content V5 cohort selection differs")
     canonical = json.dumps(
         {"config": config, "ordered_cohorts": ordered_cohorts},
         sort_keys=True,
@@ -304,10 +331,10 @@ def load_content_v5_clean_protocol(
     protocol_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     if protocol_digest != CONTENT_V5_PROTOCOL_DIGEST:
         raise ValueError("Content V5 paired canonical protocol digest differs")
-    return ContentChainProtocol(
+    return ContentV5PairedProtocol(
         protocol_id=config["protocol_id"],
         config=_freeze(config),
-        roster=cohorts[cohort_id],
+        cohorts=MappingProxyType(dict(cohorts)),
         protocol_digest=protocol_digest,
     )
 
@@ -374,14 +401,13 @@ def evaluate_content_v5_decision(
 
 __all__ = [
     "CONTENT_V5_ARMS",
+    "CONTENT_V5_ARTIFACT_CONTRACT_ID",
+    "CONTENT_V5_CONTROL_RESULT_SCOPE_ID",
     "CONTENT_V5_DECISION_RULE_ID",
     "CONTENT_V5_EVALUATED_CANDIDATE_ID",
-    "CONTENT_V5_CONTROL_EXECUTION_SCOPE_ID",
-    "CONTENT_V5_CONTROL_RUN_PREFIX",
     "CONTENT_V5_EXECUTION_SCOPE_ID",
     "CONTENT_V5_METHOD_ID",
-    "CONTENT_V5_PRIMARY_EXECUTION_SCOPE_ID",
-    "CONTENT_V5_PRIMARY_RUN_PREFIX",
+    "CONTENT_V5_PRIMARY_RESULT_SCOPE_ID",
     "CONTENT_V5_PROTOCOL_DIGEST",
     "CONTENT_V5_PROTOCOL_ID",
     "CONTENT_V5_RECORD_CONTRACT_ID",
@@ -389,6 +415,7 @@ __all__ = [
     "CONTENT_V5_STATE_SCHEMA_ID",
     "ContentChainProtocol",
     "ContentChainUnit",
+    "ContentV5PairedProtocol",
     "evaluate_content_v5_decision",
     "load_content_v5_clean_protocol",
 ]

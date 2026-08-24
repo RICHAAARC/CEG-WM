@@ -8,11 +8,13 @@ import pytest
 
 from cegwm.protocol.content_chain_v5 import (
     CONTENT_V5_ARMS,
+    CONTENT_V5_ARTIFACT_CONTRACT_ID,
     CONTENT_V5_DECISION_RULE_ID,
     CONTENT_V5_EVALUATED_CANDIDATE_ID,
     CONTENT_V5_METHOD_ID,
     CONTENT_V5_PROTOCOL_DIGEST,
     CONTENT_V5_PROTOCOL_ID,
+    CONTENT_V5_STATE_SCHEMA_ID,
     evaluate_content_v5_decision,
     load_content_v5_clean_protocol,
 )
@@ -25,10 +27,8 @@ _CONTROL = _CONFIG_ROOT / "content_adaptive_dual_branch_v2_clean.jsonl"
 _V4_CONFIG = _CONFIG_ROOT / "content_v4_clean_v1.json"
 
 
-def _protocol(cohort_id: str):
-    return load_content_v5_clean_protocol(
-        _CONFIG, _PRIMARY, _CONTROL, cohort_id=cohort_id
-    )
+def _protocol():
+    return load_content_v5_clean_protocol(_CONFIG, _PRIMARY, _CONTROL)
 
 
 def _scores(registered: float, wrong: float, joint: float) -> dict[str, float]:
@@ -65,11 +65,15 @@ def _transaction(
 
 @pytest.mark.unit
 def test_content_v5_protocol_freezes_paired_manifest_and_method_identities() -> None:
-    primary = _protocol("primary_1")
-    control = _protocol("control_1")
-    config = primary.config
+    paired = _protocol()
+    primary = paired.cohort_protocol("primary_1")
+    control = paired.cohort_protocol("control_1")
+    config = paired.config
     assert config["protocol_id"] == CONTENT_V5_PROTOCOL_ID
     assert primary.protocol_digest == control.protocol_digest == CONTENT_V5_PROTOCOL_DIGEST
+    assert CONTENT_V5_PROTOCOL_DIGEST == (
+        "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204"
+    )
     assert config["method_identities"]["content_method_id"] == CONTENT_V5_METHOD_ID
     assert (
         config["method_identities"]["evaluated_candidate_id"]
@@ -78,11 +82,18 @@ def test_content_v5_protocol_freezes_paired_manifest_and_method_identities() -> 
     assert config["decision_rule"]["decision_rule_id"] == CONTENT_V5_DECISION_RULE_ID
     flow = config["execution_flow"]
     assert tuple(item["cohort_id"] for item in flow["cohorts_in_order"]) == (
-        "primary_1", "control_1"
+        "control_1", "primary_1"
     )
     assert tuple(item["cohort_role"] for item in flow["cohorts_in_order"]) == (
-        "primary_evaluation", "reference_cohort"
+        "reference_cohort", "primary_evaluation"
     )
+    assert flow["single_top_level_invocation"] is True
+    assert flow["cohort_selection_argument_allowed"] is False
+    assert flow["umbrella_state_schema_id"] == CONTENT_V5_STATE_SCHEMA_ID
+    assert flow["umbrella_artifact_contract_id"] == CONTENT_V5_ARTIFACT_CONTRACT_ID
+    assert flow["single_local_and_artifact_run_root"] is True
+    assert flow["single_terminal_zip_and_sha_pair"] is True
+    assert flow["cohort_execution_order_unconditional"] is True
     assert flow["fixed_units_per_cohort"] == 8
     assert flow["fixed_records_per_cohort"] == 16
     assert flow["cohort_denominators_independent"] is True
@@ -92,6 +103,13 @@ def test_content_v5_protocol_freezes_paired_manifest_and_method_identities() -> 
     assert flow["cross_cohort_conjunction"] is False
     assert flow["both_cohort_results_always_reported"] is True
     assert flow["fresh_execution_required_on_final_v5_exact"] is True
+    assert flow["unit_failures_recorded_and_execution_continues"] is True
+    assert flow["fatal_interruption_checkpoint"] == "last_complete_whole_unit_only"
+    assert flow["checkpoint_purpose"] == "audit_only_never_resume"
+    assert flow["existing_local_or_artifact_run_root_rejected"] is True
+    assert flow["automatic_resume_allowed"] is False
+    assert flow["manual_resume_allowed"] is False
+    assert flow["automatic_retry_allowed"] is False
     assert tuple(flow["reuse_from_prior_content_versions_forbidden"]) == (
         "images", "scores", "records", "results", "checkpoints", "artifacts"
     )
@@ -141,8 +159,9 @@ def test_content_v5_reference_manifest_exact_identity_and_cohorts_are_disjoint()
     assert hashlib.sha1(header + payload).hexdigest() == (
         "7e0415ca14a3c37475ec796d4985698afbde4f89"
     )
-    primary = _protocol("primary_1")
-    control = _protocol("control_1")
+    paired = _protocol()
+    primary = paired.cohort_protocol("primary_1")
+    control = paired.cohort_protocol("control_1")
     assert len(primary.roster) == len(control.roster) == 8
     assert {unit.unit_id for unit in primary.roster}.isdisjoint(
         unit.unit_id for unit in control.roster
@@ -239,5 +258,5 @@ def test_content_v5_definition_rejects_identity_drift(tmp_path: Path) -> None:
     modified.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="decision rule"):
         load_content_v5_clean_protocol(
-            modified, _PRIMARY, _CONTROL, cohort_id="primary_1"
+            modified, _PRIMARY, _CONTROL
         )

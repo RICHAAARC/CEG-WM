@@ -1,7 +1,7 @@
 {
   "protocol_version": 1,
   "protocol_id": "cegwm-stage-a-content-v5-whitened-lf-adaptive-hf-branchwise-or-clean-v1",
-  "execution_scope_id": "content_v5_paired_primary_and_reference_cohort_evaluation_v1",
+  "execution_scope_id": "content_v5_reference_then_primary_umbrella_evaluation_v1",
   "scientific_status": "not_evaluated_until_each_cohort_complete_real_gpu_rc0",
   "generation_runtime": {
     "model_id": "stabilityai/stable-diffusion-3.5-medium",
@@ -113,27 +113,32 @@
   "execution_flow": {
     "cohorts_in_order": [
       {
-        "cohort_id": "primary_1",
-        "cohort_role": "primary_evaluation",
-        "manifest_path": "configs/content_chain/content_v5_primary_evaluation_v1.jsonl",
-        "manifest_sha256": "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c",
-        "manifest_git_blob": "1b134b998820427b53be0d82ba61cab1b4a8ad79",
-        "split": "content_v5_primary_evaluation_v1",
-        "run_prefix": "content-v5-primary-1",
-        "execution_scope_id": "content_v5_primary_1_whitened_lf_adaptive_hf_branchwise_or_evaluation_v1"
-      },
-      {
         "cohort_id": "control_1",
         "cohort_role": "reference_cohort",
         "manifest_path": "configs/content_chain/content_adaptive_dual_branch_v2_clean.jsonl",
         "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88",
         "manifest_git_blob": "7e0415ca14a3c37475ec796d4985698afbde4f89",
         "split": "content_adaptive_dual_branch_v2_clean_v1",
-        "run_prefix": "content-v5-control-1",
-        "execution_scope_id": "content_v5_control_1_whitened_lf_adaptive_hf_branchwise_or_reference_evaluation_v1"
+        "result_scope_id": "content_v5_control_1_independent_result_v1"
+      },
+      {
+        "cohort_id": "primary_1",
+        "cohort_role": "primary_evaluation",
+        "manifest_path": "configs/content_chain/content_v5_primary_evaluation_v1.jsonl",
+        "manifest_sha256": "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c",
+        "manifest_git_blob": "1b134b998820427b53be0d82ba61cab1b4a8ad79",
+        "split": "content_v5_primary_evaluation_v1",
+        "result_scope_id": "content_v5_primary_1_independent_result_v1"
       }
     ],
-    "cohort_selection_required": true,
+    "single_top_level_invocation": true,
+    "cohort_selection_argument_allowed": false,
+    "umbrella_run_prefix": "content-v5",
+    "umbrella_state_schema_id": "content_v5_umbrella_whole_unit_checkpoint_state_v1",
+    "umbrella_artifact_contract_id": "content_v5_reference_then_primary_umbrella_artifact_v1",
+    "single_local_and_artifact_run_root": true,
+    "single_terminal_zip_and_sha_pair": true,
+    "cohort_execution_order_unconditional": true,
     "fixed_units_per_cohort": 8,
     "record_arms_in_order": ["content_v5_clean_null_whitened_lf_adaptive_hf_branchwise_or_gate_v1", "primary_null__content_v5_clean_null_whitened_lf_adaptive_hf_branchwise_or_gate_v1"],
     "unit_transaction_record_count": 2,
@@ -145,6 +150,14 @@
     "cross_cohort_conjunction": false,
     "both_cohort_results_always_reported": true,
     "fresh_execution_required_on_final_v5_exact": true,
+    "unit_failures_recorded_and_execution_continues": true,
+    "fatal_interruption_checkpoint": "last_complete_whole_unit_only",
+    "checkpoint_purpose": "audit_only_never_resume",
+    "existing_local_or_artifact_run_root_rejected": true,
+    "automatic_resume_allowed": false,
+    "manual_resume_allowed": false,
+    "automatic_retry_allowed": false,
+    "umbrella_return_code_rule": "two_if_any_cohort_operationally_incomplete_after_both_reported_else_zero_no_scientific_conjunction",
     "reuse_from_prior_content_versions_forbidden": ["images", "scores", "records", "results", "checkpoints", "artifacts"],
     "record_score_prefixes_in_order": ["lf", "hf", "joint"],
     "joint_score_prefix_status": "diagnostic_only_never_consumed_by_v5_decision",
