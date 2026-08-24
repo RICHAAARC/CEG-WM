@@ -62,3 +62,19 @@ method-development base and must not be merged into `main`. The corresponding
 W-fit, non-roster canary, and formal-run notebooks are retained here so that
 the execution provenance stays attached to the method version that produced
 it.
+
+## Portable scalar evidence
+
+The exact artifact members are committed at
+`evidence/content-v4/content-v4-a9fdf3e5d384-805bc21e173a/`. The package
+preserves every scalar score and aggregate needed for later read-only
+recomputation without retaining images or private runtime state.
+
+- Exact `receipt.json` SHA-256:
+  `d1b1511a4534168427238a74db68b8eba426872c7c637829fc26db1758bbeb30`
+- Exact `result.json` SHA-256:
+  `77dea1a209e8df6d83a3526ff17d51d88c9d15a51a9e768c02386b26a5558fb8`
+
+The package does not record the later 50/50 posthoc analysis. Any future
+statistic recomputed from these records remains a new analysis and cannot
+retroactively change the frozen Content V4 adjudication.
