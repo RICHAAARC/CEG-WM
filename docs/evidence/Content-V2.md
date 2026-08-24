@@ -37,3 +37,19 @@ LF Gate-A failures were units `0001`, `0003`, and `0004`. The preregistered conj
 The preserved narrow adjudication is `SCIENTIFIC_NEGATIVE` only for the exact method, run, roster, key identity, and artifact listed above. It does not establish general LF/HF invalidity, attacks, complementarity, fixed-FPR detection, robustness, geometry, Stage completion, main promotion, or paper evidence. It authorizes no retry, resampling, tuning, threshold change, or roster replacement.
 
 The original execution and handoff revisions are merge parents of this evidence branch. The canonical `Content-V2` branch is a clean method-first reconstruction; the historical artifact remains bound only to its original source exact.
+
+## Portable scalar evidence
+
+The exact artifact members are committed at
+`evidence/content-v2/content-adaptive-v2-e3fe3fd32ca2-805bc21e173a/`.
+The package preserves every scalar score and aggregate needed for later
+read-only recomputation without retaining images or private runtime state.
+
+- Exact `receipt.json` SHA-256:
+  `1ed043d527bad4e92b33ceeea4409c140a384f83538b351426c90e480f4ef011`
+- Exact `result.json` SHA-256:
+  `2556f71a39a9b6fce13d943f2314eb6bf16b113679a46da5a73008b348eeb471`
+
+The package does not record the later 50/50 posthoc analysis. Any future
+statistic recomputed from these records remains a new analysis and cannot
+retroactively change the frozen Content V2 adjudication.
