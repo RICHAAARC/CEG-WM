@@ -1,0 +1,51 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V3",
+  "run_id": "content-v3-6b812bbef380-805bc21e173a",
+  "source_exact": "aa2ff4476901033bff2564d93298889a9967303c",
+  "protocol_id": "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v2",
+  "protocol_digest": "6b812bbef380085b67c33ea380444c379278faad1822762d4028465ecfd6058c",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "roster_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88",
+  "source_archive": {
+    "filename": "content-v3-6b812bbef380-805bc21e173a.zip",
+    "byte_count": 12864,
+    "sha256": "6fe33b16fdefba29de14a9e3e03fa9c1772bfd12b25b5ceaaa99557eb1a63355",
+    "sidecar_filename": "content-v3-6b812bbef380-805bc21e173a.zip.sha256",
+    "sidecar_byte_count": 107,
+    "sidecar_file_sha256": "0cdd576e558677949ef6769fc6e6be17534da98d52cd5cf4097c4e9e9a7cf38e",
+    "sidecar_binding": "6fe33b16fdefba29de14a9e3e03fa9c1772bfd12b25b5ceaaa99557eb1a63355  content-v3-6b812bbef380-805bc21e173a.zip\n",
+    "crc_check": "pass",
+    "members": [
+      {
+        "path": "receipt.json",
+        "byte_count": 659,
+        "sha256": "f2b370959c67bc34bc896aea6d548de92384c6bd0500c5baeabb5b61a0c03f9c",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      },
+      {
+        "path": "result.json",
+        "byte_count": 67839,
+        "sha256": "b62e81f0530fe51bbc79a106390892bd1c0db1b413902dccf97029ed54cdbf13",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      }
+    ]
+  },
+  "contents": {
+    "fixed_unit_count": 8,
+    "record_count": 16,
+    "score_fields_per_record": 51,
+    "scalar_score_count": 816,
+    "unit_aggregate_count": 8,
+    "status": "complete_rc0",
+    "failed_unit_count": 0
+  },
+  "independently_recomputed_frozen_gates": {
+    "lf": {"gate_a": 5, "gate_b": 8},
+    "hf": {"gate_a": 8, "gate_b": 8},
+    "joint": {"gate_a": 7, "gate_b": 8},
+    "required_units": 7,
+    "strict_ties_fail": true
+  },
+  "evidence_ceiling": "authenticated_complete_scalar_formal_evidence_for_the_exact_frozen_candidate; narrow_scientific_negative_only"
+}

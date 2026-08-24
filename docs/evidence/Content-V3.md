@@ -49,3 +49,19 @@ supports no retry, resampling, tuning, threshold change, attack,
 complementarity, fixed-FPR, robustness, geometry, Stage, main, or paper claim.
 
 The original canary/formal revisions are merge parents of this branch, and their runners and notebooks are retained here. The canonical `Content-V3` branch is a clean method-first reconstruction; the historical artifact remains bound only to its original source exact.
+
+## Portable scalar evidence
+
+The exact artifact members are committed at
+`evidence/content-v3/content-v3-6b812bbef380-805bc21e173a/`. The package
+preserves every scalar score and aggregate needed for later read-only
+recomputation without retaining images or private runtime state.
+
+- Exact `receipt.json` SHA-256:
+  `f2b370959c67bc34bc896aea6d548de92384c6bd0500c5baeabb5b61a0c03f9c`
+- Exact `result.json` SHA-256:
+  `b62e81f0530fe51bbc79a106390892bd1c0db1b413902dccf97029ed54cdbf13`
+
+The package does not record the later 50/50 posthoc analysis. Any future
+statistic recomputed from these records remains a new analysis and cannot
+retroactively change the frozen Content V3 adjudication.
