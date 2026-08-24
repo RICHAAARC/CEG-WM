@@ -107,6 +107,7 @@ class ContentRunnerVariant:
     load_protocol: Callable[[Path], ContentChainProtocol]
     load_pipeline_and_assets: Callable[[str, str], tuple[Any, Any]]
     run_joint: Callable[..., Any]
+    lf_scorer: Callable[[Any, bytes, Any], float] | None = None
 
 
 def _runner_variant(variant: ContentRunnerVariant | None) -> ContentRunnerVariant:
@@ -327,13 +328,54 @@ def _blind_scores(
         raise TypeError("blind HF score requires FrozenHFPublicAssets")
     if not isinstance(lf_public_assets, FrozenLFPublicAssets):
         raise TypeError("blind LF score requires FrozenLFPublicAssets")
+    return _blind_scores_from_ordinary(
+        ordinary_image,
+        key,
+        wrong_keys,
+        hf_public_assets,
+        lf_public_assets,
+        score_lf_image,
+    )
+
+
+def _blind_scores_with_lf_scorer(
+    image: Any,
+    key: bytes,
+    wrong_keys: tuple[bytes, ...],
+    hf_public_assets: FrozenHFPublicAssets,
+    lf_public_assets: Any,
+    lf_scorer: Callable[[Any, bytes, Any], float],
+) -> dict[str, dict[str, float]]:
+    ordinary_image = require_ordinary_rgb_image(image)
+    if not isinstance(hf_public_assets, FrozenHFPublicAssets):
+        raise TypeError("blind HF score requires FrozenHFPublicAssets")
+    if not callable(lf_scorer):
+        raise TypeError("blind LF scorer hook must be callable")
+    return _blind_scores_from_ordinary(
+        ordinary_image,
+        key,
+        wrong_keys,
+        hf_public_assets,
+        lf_public_assets,
+        lf_scorer,
+    )
+
+
+def _blind_scores_from_ordinary(
+    ordinary_image: Any,
+    key: bytes,
+    wrong_keys: tuple[bytes, ...],
+    hf_public_assets: FrozenHFPublicAssets,
+    lf_public_assets: Any,
+    lf_scorer: Callable[[Any, bytes, Any], float],
+) -> dict[str, dict[str, float]]:
     if len(wrong_keys) != 16 or any(not isinstance(item, bytes) for item in wrong_keys):
         raise ValueError("blind score requires exactly 16 normalized external wrong keys")
-    lf = {"registered": float(score_lf_image(ordinary_image, key, lf_public_assets))}
+    lf = {"registered": float(lf_scorer(ordinary_image, key, lf_public_assets))}
     hf = {"registered": float(score_hf_image(ordinary_image, key, hf_public_assets))}
     for index, wrong_key in enumerate(wrong_keys):
         label = f"wrong_{index:02d}"
-        lf[label] = float(score_lf_image(ordinary_image, wrong_key, lf_public_assets))
+        lf[label] = float(lf_scorer(ordinary_image, wrong_key, lf_public_assets))
         hf[label] = float(score_hf_image(ordinary_image, wrong_key, hf_public_assets))
     joint = {label: min(lf[label], hf[label]) for label in lf}
     values = {"lf": lf, "hf": hf, "joint": joint}
@@ -1075,14 +1117,24 @@ def _unit_transaction(
         pipeline, unit.prompt,
         height=unit.height, width=unit.width, generator=null_generator,
     )
-    joint_scores = _blind_scores(
-        output.image, key, wrong_keys,
-        assets.hf_public_assets, assets.lf_public_assets,
-    )
-    null_scores = _blind_scores(
-        primary_null, key, wrong_keys,
-        assets.hf_public_assets, assets.lf_public_assets,
-    )
+    if selected.lf_scorer is None:
+        joint_scores = _blind_scores(
+            output.image, key, wrong_keys,
+            assets.hf_public_assets, assets.lf_public_assets,
+        )
+        null_scores = _blind_scores(
+            primary_null, key, wrong_keys,
+            assets.hf_public_assets, assets.lf_public_assets,
+        )
+    else:
+        joint_scores = _blind_scores_with_lf_scorer(
+            output.image, key, wrong_keys,
+            assets.hf_public_assets, assets.lf_public_assets, selected.lf_scorer,
+        )
+        null_scores = _blind_scores_with_lf_scorer(
+            primary_null, key, wrong_keys,
+            assets.hf_public_assets, assets.lf_public_assets, selected.lf_scorer,
+        )
     metrics = _candidate_aggregate_metrics(
         unit.unit_id,
         output.measurement,
