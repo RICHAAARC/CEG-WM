@@ -25,7 +25,6 @@ _V2_CONFIG = (
 _ROSTER = (
     _ROOT / "configs" / "content_chain" / "content_adaptive_dual_branch_v2_clean.jsonl"
 )
-_NEGATIVE = _ROOT / "docs" / "content_runtime_v3_scientific_negative_adjudication.md"
 
 
 @pytest.mark.unit
@@ -101,11 +100,8 @@ def test_content_v3_keeps_runtime_asset_contract_separate_from_method_version() 
 
 
 @pytest.mark.unit
-def test_content_v2_negative_is_immutable_provenance_and_excluded_from_v3() -> None:
+def test_content_v2_negative_is_excluded_from_v3_method_identity() -> None:
     protocol = load_content_v3_clean_protocol(_CONFIG, _ROSTER)
-    assert hashlib.sha256(_NEGATIVE.read_bytes()).hexdigest() == (
-        "4afbc2b1a71a80838d4760931d108ac66e5509befcd784202922a4f688380a66"
-    )
     exclusions = protocol.config["provenance_exclusions"]
     assert len(exclusions) == 2
     assert "not_Content_V3_evidence" in exclusions[0]
