@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 import re
+import struct
+from dataclasses import fields
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
+from PIL import Image
 
 from cegwm.method import content_whitening_v4 as v4
+from cegwm.method.lf import (
+    LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+    LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+    FrozenLFPublicAssets,
+    reconstruct_lf_carrier,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MANIFEST = _REPO_ROOT / v4.FIT_MANIFEST_REPO_PATH
@@ -265,3 +277,178 @@ def test_degenerate_affine_observations_fail_closed() -> None:
 def test_whitening_word_contract_fails_closed(words: tuple[str, ...], match: str) -> None:
     with pytest.raises(ValueError, match=match):
         v4.build_whitening_asset(_PRODUCER_EXACT, words)
+
+
+class _DetectorProcessor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def preprocess(self, image: Image.Image) -> torch.Tensor:
+        self.calls += 1
+        pixels = np.asarray(image.resize((64, 64)), dtype=np.float32) / 255.0
+        return torch.from_numpy(pixels).permute(2, 0, 1).unsqueeze(0).contiguous()
+
+
+class _DetectorVAE(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.zeros(()))
+        self.config = SimpleNamespace(scaling_factor=0.5, shift_factor=0.1)
+        self.calls = 0
+
+    def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
+        self.calls += 1
+        mode = torch.cat([pixels] * 5 + [pixels.mean(dim=1, keepdim=True)], dim=1)
+        return SimpleNamespace(latent_dist=SimpleNamespace(mode=lambda: mode))
+
+
+def _detector_fixture() -> tuple[
+    Image.Image,
+    bytes,
+    v4.FrozenContentV4LFPublicAssets,
+    _DetectorProcessor,
+    _DetectorVAE,
+]:
+    y, x = np.mgrid[:64, :64]
+    pixels = np.stack(
+        ((3 * x + 5 * y) % 256, (7 * x + 11 * y + 13) % 256, (x * x + 3 * y) % 256),
+        axis=-1,
+    ).astype(np.uint8)
+    image = Image.fromarray(pixels, mode="RGB")
+    processor = _DetectorProcessor()
+    vae = _DetectorVAE()
+    carrier_assets = FrozenLFPublicAssets(
+        vae,
+        processor,
+        "stabilityai/stable-diffusion-3.5-medium:image_processor",
+        LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+        LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    )
+    asset = v4.load_frozen_content_v4_whitening_asset(_REPO_ROOT)
+    return (
+        image,
+        b"content-v4-detector-golden-key",
+        v4.FrozenContentV4LFPublicAssets(carrier_assets, asset),
+        processor,
+        vae,
+    )
+
+
+def _independent_detector_oracle(
+    image: Image.Image,
+    key: bytes,
+    assets: v4.FrozenContentV4LFPublicAssets,
+) -> float:
+    pixels = np.asarray(image.resize((64, 64)), dtype=np.float32) / 255.0
+    chw = np.transpose(pixels, (2, 0, 1))[None]
+    mode = np.concatenate([chw] * 5 + [chw.mean(axis=1, keepdims=True)], axis=1)
+    observation = np.asarray((mode - 0.1) * 0.5, dtype=np.float32)
+    carrier = reconstruct_lf_carrier(
+        key,
+        (1, 16, 64, 64),
+        assets.carrier_assets,
+        dtype=torch.float32,
+        device="cpu",
+    ).numpy()
+    dct = _oracle_dct_matrix()
+    observation_dct = np.matmul(
+        np.matmul(dct, _oracle_affine_residual(observation)), dct.T
+    )
+    carrier_dct = np.matmul(np.matmul(dct, _oracle_affine_residual(carrier)), dct.T)
+    words = assets.whitening_asset.payload["whitening_words_be_hex"]
+    weights = np.frombuffer(bytes.fromhex("".join(words)), dtype=">f4").astype(
+        np.float64
+    ).reshape(16, 6)
+    observation_parts = []
+    carrier_parts = []
+    for channel in range(16):
+        for band, mask in enumerate(_oracle_ring_masks()):
+            observation_parts.append(observation_dct[0, channel][mask] * weights[channel, band])
+            carrier_parts.append(carrier_dct[0, channel][mask] * weights[channel, band])
+    observation_vector = np.concatenate(observation_parts)
+    carrier_vector = np.concatenate(carrier_parts)
+    return float(
+        np.dot(observation_vector, carrier_vector)
+        / (np.linalg.norm(observation_vector) * np.linalg.norm(carrier_vector))
+    )
+
+
+@pytest.mark.unit
+def test_frozen_repository_asset_pair_exact_and_key_independent(tmp_path: Path) -> None:
+    asset = v4.load_frozen_content_v4_whitening_asset(_REPO_ROOT)
+    assert hashlib.sha256(asset.json_bytes).hexdigest() == v4.ASSET_SHA256
+    assert hashlib.sha256(
+        (_REPO_ROOT / v4.ASSET_SIDECAR_REPO_PATH).read_bytes()
+    ).hexdigest() == v4.ASSET_SIDECAR_SHA256
+    weights = v4.decode_whitening_weights(asset)
+    assert tuple(weights.shape) == (16, 6)
+    assert weights.dtype == torch.float32
+    assert bool(torch.isfinite(weights).all()) and bool((weights > 0.0).all())
+    assert set(asset.payload) == {
+        "schema_version", "observation_contract_id", "whitening_shape",
+        "whitening_order", "whitening_words_be_hex", "fit_sample_count",
+        "producer_exact",
+    }
+    assert asset.payload["schema_version"] == v4.ASSET_SCHEMA_ID
+    assert asset.payload["producer_exact"] == v4.ASSET_PRODUCER_EXACT
+    assert tuple(field.name for field in fields(v4.FrozenContentV4LFPublicAssets)) == (
+        "carrier_assets", "whitening_asset"
+    )
+    assert tuple(inspect.signature(v4.decode_whitening_weights).parameters) == ("asset",)
+
+    root = tmp_path / "repo"
+    destination = root / v4.ASSET_REPO_PATH
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(asset.json_bytes)
+    sidecar = root / v4.ASSET_SIDECAR_REPO_PATH
+    sidecar.write_bytes((_REPO_ROOT / v4.ASSET_SIDECAR_REPO_PATH).read_bytes() + b"x")
+    with pytest.raises(ValueError, match="sidecar SHA"):
+        v4.load_frozen_content_v4_whitening_asset(root)
+
+
+@pytest.mark.unit
+def test_content_v4_detector_matches_independent_oracle_golden_and_real_boundary() -> None:
+    image, key, assets, processor, vae = _detector_fixture()
+    oracle = _independent_detector_oracle(image, key, assets)
+    assert hashlib.sha256(struct.pack(">d", oracle)).hexdigest() == (
+        "ca91ddfa70e2f675f8d5aa994c1c05bb13528e2c5ffa9281131b8a597a0e8453"
+    )
+    score = v4.score_content_v4_lf_image(image, key, assets)
+    assert score == pytest.approx(oracle, rel=0.0, abs=2e-17)
+    assert score == pytest.approx(-0.008900470647137703, rel=0.0, abs=1e-18)
+    assert processor.calls == 1 and vae.calls == 1
+    assert v4.decode_whitening_weights(assets.whitening_asset).equal(
+        v4.decode_whitening_weights(assets.whitening_asset)
+    )
+
+
+@pytest.mark.unit
+def test_content_v4_detector_is_blind_and_fails_closed_on_degenerate_observation() -> None:
+    image, key, assets, _, _ = _detector_fixture()
+    assert tuple(inspect.signature(v4.score_content_v4_lf_image).parameters) == (
+        "image", "detection_key", "frozen_public_assets"
+    )
+    with pytest.raises(TypeError):
+        v4.score_content_v4_lf_image(image, key, assets, object())
+
+    class _ZeroVAE(_DetectorVAE):
+        def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
+            mode = torch.zeros((1, 16, 64, 64), dtype=pixels.dtype, device=pixels.device)
+            return SimpleNamespace(latent_dist=SimpleNamespace(mode=lambda: mode))
+
+    zero_vae = _ZeroVAE()
+    zero_assets = FrozenLFPublicAssets(
+        zero_vae,
+        assets.carrier_assets.image_processor,
+        assets.carrier_assets.image_processor_id,
+        LF_BALANCED_BLOCKS_CARRIER_METHOD_ID,
+        LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
+        LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID,
+    )
+    with pytest.raises(ValueError, match="denominator"):
+        v4.score_content_v4_lf_image(
+            image,
+            key,
+            v4.FrozenContentV4LFPublicAssets(zero_assets, assets.whitening_asset),
+        )
