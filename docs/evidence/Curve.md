@@ -19,8 +19,23 @@ Both historical tips are parents of this evidence branch so their commits remain
 ## Evidence status
 
 - Repository implementation and lightweight tests are preserved.
-- No authenticated terminal Curve artifact is registered in this branch at the time of consolidation.
+- The authenticated RC0 terminal artifact is registered as a portable scalar
+  evidence package at
+  `evidence/curve/slhfr-196e620c349c2604baeb824d/`.
+- The exact artifact completed all 8 units, 10 ordered conditions per unit, and
+  320 records. Its `result.json` preserves all 5,440 registered/wrong-key
+  scalar scores and the original descriptive summaries.
+- Original ZIP SHA-256:
+  `c947320b3e175c3a1b11563cc01e02f90cacb4d1a746bd70c720b49591991900`.
+- Exact `receipt.json` SHA-256:
+  `76297134b08ed24226dd71270f6fa5da87f29cb12ea6324bf428786fbde313aa`.
+- Exact `result.json` SHA-256:
+  `514e7afd77a5fec0faa0e69df91d2846033b63fe52f06664234cfa28aee5ad5c`.
 - Scientific status: `not_adjudicated`.
 - This branch does not establish a winner, complementarity, joint detection, calibrated threshold, fixed FPR, robustness, or promotion claim.
+
+The committed scalar records permit later read-only recomputation under a new,
+explicitly declared statistic. No image or private runtime state is archived,
+and no posthoc 50/50 analysis is recorded here.
 
 `Curve` and `Curve-Evidence` are independent experiment branches and must not be merged into `main`.

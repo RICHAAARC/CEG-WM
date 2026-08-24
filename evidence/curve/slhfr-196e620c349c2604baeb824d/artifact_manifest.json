@@ -1,0 +1,43 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Curve",
+  "run_id": "slhfr-196e620c349c2604baeb824d",
+  "source_exact": "b1a806a34a16435c4242e45eafa3818b3a37b8a6",
+  "protocol_id": "standalone-lf-hf-frequency-response-v1",
+  "protocol_digest": "e84d79a3b98659e5a4816e39fdaecbf4fa41580b18201821cc576442e7874f77",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "roster_digest": "082a50d97b8b6cc07fc5c1f13f892ce41c36ae8d0c21170d56c45ac45bc10a9b",
+  "source_archive": {
+    "filename": "slhfr-196e620c349c2604baeb824d.zip",
+    "byte_count": 70553,
+    "sha256": "c947320b3e175c3a1b11563cc01e02f90cacb4d1a746bd70c720b49591991900",
+    "sidecar_filename": "slhfr-196e620c349c2604baeb824d.zip.sha256",
+    "sidecar_byte_count": 101,
+    "sidecar_file_sha256": "01476b174c71bda2d49d277669bf8be499fc5cde74f8764c2ab983b9ae9b0818",
+    "sidecar_binding": "c947320b3e175c3a1b11563cc01e02f90cacb4d1a746bd70c720b49591991900  slhfr-196e620c349c2604baeb824d.zip\n",
+    "crc_check": "pass",
+    "members": [
+      {
+        "path": "receipt.json",
+        "byte_count": 1399,
+        "sha256": "76297134b08ed24226dd71270f6fa5da87f29cb12ea6324bf428786fbde313aa",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      },
+      {
+        "path": "result.json",
+        "byte_count": 369852,
+        "sha256": "514e7afd77a5fec0faa0e69df91d2846033b63fe52f06664234cfa28aee5ad5c",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      }
+    ]
+  },
+  "contents": {
+    "fixed_unit_count": 8,
+    "fixed_condition_count": 10,
+    "record_count": 320,
+    "score_fields_per_record": 17,
+    "scalar_score_count": 5440,
+    "status": "complete_rc0"
+  },
+  "evidence_ceiling": "authenticated_complete_descriptive_scalar_response_evidence_only; scientific_status_not_adjudicated"
+}
