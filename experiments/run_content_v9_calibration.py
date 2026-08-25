@@ -71,13 +71,17 @@ def _publish_create_only(asset_path: Path, sidecar_path: Path, payload: bytes) -
     _require_create_only(asset_path, sidecar_path)
     asset_path.parent.mkdir(parents=True, exist_ok=True)
     created_asset = False
+    created_sidecar = False
     try:
         with asset_path.open("xb") as handle:
             handle.write(payload)
         created_asset = True
         with sidecar_path.open("xb") as handle:
+            created_sidecar = True
             handle.write(f"{digest}  {ASSET_FILENAME}\n".encode("ascii"))
     except BaseException:
+        if created_sidecar:
+            sidecar_path.unlink(missing_ok=True)
         if created_asset:
             asset_path.unlink(missing_ok=True)
         raise

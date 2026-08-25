@@ -18,7 +18,7 @@ CONTENT_V9_CALIBRATION_PROTOCOL_ID = (
     "cegwm-stage-a-content-v9-calibrated-weighted-joint-calibration-v1"
 )
 CONTENT_V9_CALIBRATION_PROTOCOL_DIGEST = (
-    "20d5ce7dcc833650f9a9307f70ecd71478881c085af236fb758c3f7be842f2d8"
+    "68f37585eb6eab123bad7c1703767df08404718ce4771f73fbbec236491a1e01"
 )
 CONTENT_V9_FUTURE_EVALUATION_PROTOCOL_ID = (
     "cegwm-stage-a-content-v9-calibrated-weighted-joint-clean-v1"
@@ -159,11 +159,17 @@ def _expected_config() -> dict[str, Any]:
             "asset_role_id": CONTENT_V9_CALIBRATION_ASSET_ROLE_ID,
             "asset_schema_id": CONTENT_V9_CALIBRATION_ASSET_SCHEMA_ID,
             "create_only_json_and_sha256_sidecar": True,
+            "fit_unit_count": CONTENT_V9_CALIBRATION_COUNT,
+            "iss_asset_sha256": "d66ff88640a3d1a020646cfde3face7502282bf835c9d3fb746b518dfb02c231",
+            "iss_asset_sidecar_file_sha256": "27094d56994bc6f5d93564bad79ddd9ce8218d2d193786f4816535ee1e7f6538",
             "numeric_payload": "five_binary64_big_endian_hex_values",
             "raw_calibration_scores_persisted": False,
+            "whitening_asset_sha256": "a7021dd8b98bc4282b98ed5d1fe276236d99a3c9e80b9bdce015d28cf715633f",
+            "whitening_asset_sidecar_file_sha256": "c900cce0980348eeadcf07d782b6169c4d46ac55d7154db0fc0a0a878cce0ced",
         },
         "calibration": {
             "candidate_registered_excluded": True,
+            "key_domain": CONTENT_V9_CALIBRATION_KEY_DOMAIN,
             "manifest": CONTENT_V9_CALIBRATION_MANIFEST,
             "manifest_sha256": CONTENT_V9_CALIBRATION_MANIFEST_SHA256,
             "ordered_pair_count": CONTENT_V9_PAIRED_NULL_SCORE_COUNT,
@@ -216,6 +222,7 @@ def _expected_config() -> dict[str, Any]:
         },
         "protocol_id": CONTENT_V9_CALIBRATION_PROTOCOL_ID,
         "protocol_version": 1,
+        "claim_ceiling": "calibrated_combined_attribution_only",
         "scientific_status": "calibration_not_run_no_final_v9_evaluation_identity",
     }
 

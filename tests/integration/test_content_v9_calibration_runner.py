@@ -90,3 +90,39 @@ def test_runner_fails_closed_on_nonfinite_or_incomplete_pairs(monkeypatch: pytes
         )
     with pytest.raises(ValueError, match="exactly 1056"):
         runner.fit_weighted_joint_calibration([LFHFScorePair(0.0, 0.1)] * 1055)
+
+
+@pytest.mark.integration
+def test_create_only_publish_removes_both_partial_files_on_sidecar_write_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    asset_path = tmp_path / runner.ASSET_FILENAME
+    sidecar_path = tmp_path / f"{runner.ASSET_FILENAME}.sha256"
+    original_open = Path.open
+
+    class _FailingSidecar:
+        def __init__(self, handle: object) -> None:
+            self._handle = handle
+
+        def __enter__(self) -> "_FailingSidecar":
+            self._handle.__enter__()
+            return self
+
+        def write(self, payload: bytes) -> None:
+            self._handle.write(payload[:7])
+            raise OSError("simulated sidecar write failure")
+
+        def __exit__(self, *args: object) -> object:
+            return self._handle.__exit__(*args)
+
+    def patched_open(path: Path, *args: object, **kwargs: object) -> object:
+        handle = original_open(path, *args, **kwargs)
+        if path == sidecar_path and args and args[0] == "xb":
+            return _FailingSidecar(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", patched_open)
+    with pytest.raises(OSError, match="sidecar write failure"):
+        runner._publish_create_only(asset_path, sidecar_path, b"asset")
+    assert not asset_path.exists()
+    assert not sidecar_path.exists()

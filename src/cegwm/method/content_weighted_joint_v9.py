@@ -11,9 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from cegwm.method.content_iss_v6 import ISS_ASSET_SHA256 as V6_ISS_ASSET_SHA256
+from cegwm.method.content_iss_v6 import (
+    ISS_ASSET_SHA256 as V6_ISS_ASSET_SHA256,
+    ISS_ASSET_SIDECAR_SHA256 as V6_ISS_ASSET_SIDECAR_FILE_SHA256,
+)
 from cegwm.method.content_whitening_v4 import (
     ASSET_SHA256 as V4_WHITENING_ASSET_SHA256,
+    ASSET_SIDECAR_SHA256 as V4_WHITENING_ASSET_SIDECAR_FILE_SHA256,
     CONTENT_V4_LF_SCORER_ID,
 )
 from cegwm.protocol.content_chain_v9 import (
@@ -31,7 +35,7 @@ from cegwm.protocol.content_chain_v9 import (
 
 LF_WEIGHT = 0.25
 HF_WEIGHT = 0.75
-HF_SCORER_ID = "hf_final_rgb_public_vae_global_normalized_correlation_v1"
+HF_SCORER_ID = "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
 CALIBRATION_PAIR_ORDER = (
     "per_unit_candidate_wrong_00_to_15_then_primary_null_registered_then_"
     "primary_null_wrong_00_to_15_each_lf_then_hf"
@@ -219,10 +223,12 @@ def _validate_asset_payload(value: Any) -> Mapping[str, Any]:
         "calibration_prompt_list_sha256", "calibration_protocol_digest",
         "calibration_protocol_id", "calibration_public_key_digest",
         "evaluated_candidate_id", "hf_scorer_id", "hf_weight_be_hex",
-        "iss_asset_sha256", "joint_formula", "lf_scorer_id", "lf_weight_be_hex",
+        "fit_unit_count", "iss_asset_sha256", "iss_asset_sidecar_file_sha256",
+        "joint_formula", "lf_scorer_id", "lf_weight_be_hex",
         "method_id", "mu_hf_be_hex", "mu_lf_be_hex", "producer_exact",
         "rho_be_hex", "schema_version", "sigma_hf_be_hex", "sigma_lf_be_hex",
         "statistic_id", "value_dtype", "whitening_asset_sha256",
+        "whitening_asset_sidecar_file_sha256",
     }
     if set(value) != required:
         raise ValueError("Content V9 calibration asset fields differ")
@@ -235,8 +241,10 @@ def _validate_asset_payload(value: Any) -> Mapping[str, Any]:
         "calibration_prompt_list_sha256": CONTENT_V9_CALIBRATION_PROMPT_LIST_SHA256,
         "calibration_protocol_id": CONTENT_V9_CALIBRATION_PROTOCOL_ID,
         "evaluated_candidate_id": CONTENT_V9_EVALUATED_CANDIDATE_ID,
+        "fit_unit_count": CONTENT_V9_CALIBRATION_COUNT,
         "hf_scorer_id": HF_SCORER_ID,
         "iss_asset_sha256": V6_ISS_ASSET_SHA256,
+        "iss_asset_sidecar_file_sha256": V6_ISS_ASSET_SIDECAR_FILE_SHA256,
         "joint_formula": "J=(0.25*z_lf+0.75*z_hf)/sqrt(0.25^2+0.75^2+2*0.25*0.75*rho)",
         "lf_scorer_id": CONTENT_V4_LF_SCORER_ID,
         "method_id": CONTENT_V9_METHOD_ID,
@@ -244,6 +252,9 @@ def _validate_asset_payload(value: Any) -> Mapping[str, Any]:
         "statistic_id": CALIBRATION_STATISTIC_ID,
         "value_dtype": "IEEE-754_binary64_big_endian_hex",
         "whitening_asset_sha256": V4_WHITENING_ASSET_SHA256,
+        "whitening_asset_sidecar_file_sha256": (
+            V4_WHITENING_ASSET_SIDECAR_FILE_SHA256
+        ),
     }
     if any(value.get(name) != expected_value for name, expected_value in expected.items()):
         raise ValueError("Content V9 calibration asset frozen identity differs")
@@ -287,9 +298,11 @@ def build_calibration_asset(
         "calibration_protocol_id": CONTENT_V9_CALIBRATION_PROTOCOL_ID,
         "calibration_public_key_digest": public_key_digest,
         "evaluated_candidate_id": CONTENT_V9_EVALUATED_CANDIDATE_ID,
+        "fit_unit_count": CONTENT_V9_CALIBRATION_COUNT,
         "hf_scorer_id": HF_SCORER_ID,
         "hf_weight_be_hex": _encode_f64(HF_WEIGHT, "hf_weight"),
         "iss_asset_sha256": V6_ISS_ASSET_SHA256,
+        "iss_asset_sidecar_file_sha256": V6_ISS_ASSET_SIDECAR_FILE_SHA256,
         "joint_formula": "J=(0.25*z_lf+0.75*z_hf)/sqrt(0.25^2+0.75^2+2*0.25*0.75*rho)",
         "lf_scorer_id": CONTENT_V4_LF_SCORER_ID,
         "lf_weight_be_hex": _encode_f64(LF_WEIGHT, "lf_weight"),
@@ -304,6 +317,9 @@ def build_calibration_asset(
         "statistic_id": CALIBRATION_STATISTIC_ID,
         "value_dtype": "IEEE-754_binary64_big_endian_hex",
         "whitening_asset_sha256": V4_WHITENING_ASSET_SHA256,
+        "whitening_asset_sidecar_file_sha256": (
+            V4_WHITENING_ASSET_SIDECAR_FILE_SHA256
+        ),
     }
     validated = _validate_asset_payload(dict(sorted(payload.items())))
     raw = stable_json_bytes(validated)

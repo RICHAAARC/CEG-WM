@@ -69,6 +69,16 @@ def test_asset_is_stable_create_only_payload_with_exact_five_f64_values(tmp_path
         "rho_be_hex",
     }
     assert len(numeric) == 5 and numeric <= set(asset.payload)
+    assert asset.payload["hf_scorer_id"] == (
+        "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
+    )
+    assert asset.payload["fit_unit_count"] == 32
+    assert asset.payload["whitening_asset_sidecar_file_sha256"] == (
+        "c900cce0980348eeadcf07d782b6169c4d46ac55d7154db0fc0a0a878cce0ced"
+    )
+    assert asset.payload["iss_asset_sidecar_file_sha256"] == (
+        "27094d56994bc6f5d93564bad79ddd9ce8218d2d193786f4816535ee1e7f6538"
+    )
     assert asset.json_bytes == json.dumps(
         asset.payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
         allow_nan=False,

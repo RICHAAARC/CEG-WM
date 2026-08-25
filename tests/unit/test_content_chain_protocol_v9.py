@@ -62,6 +62,17 @@ def test_v9_phase1_identity_has_calibration_digest_but_no_fabricated_final_asset
     assert contract.config["joint_operator"]["lf_hf_gates"] == (
         "diagnostic_only_no_hard_veto"
     )
+    assert contract.config["calibration"]["key_domain"] == (
+        "stage-a/content-v9-calibrated-weighted-joint-calibration-key/v1"
+    )
+    assert contract.config["claim_ceiling"] == "calibrated_combined_attribution_only"
+    assert contract.config["asset_contract"]["fit_unit_count"] == 32
+    assert contract.config["asset_contract"]["whitening_asset_sidecar_file_sha256"] == (
+        "c900cce0980348eeadcf07d782b6169c4d46ac55d7154db0fc0a0a878cce0ced"
+    )
+    assert contract.config["asset_contract"]["iss_asset_sidecar_file_sha256"] == (
+        "27094d56994bc6f5d93564bad79ddd9ce8218d2d193786f4816535ee1e7f6538"
+    )
     assert "asset_sha256" not in contract.config["asset_contract"]
     run_id = v9.deterministic_calibration_run_id(contract.protocol_digest, "a" * 64)
     assert run_id == f"content-v9-calibration-{contract.protocol_digest[:12]}-{'a' * 12}"
