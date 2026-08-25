@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-_NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "stage_a2_hf_colab.ipynb"
+_NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "content_curve_formal_initial_colab.ipynb"
 
 
 @pytest.mark.unit
@@ -19,7 +19,8 @@ def test_stage_a_frequency_response_notebook_has_one_thin_handoff_path() -> None
     assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in code_cells)
     trees = [ast.parse(source) for source in sources]
     combined = "\n".join(sources)
-    assert "refs/heads/stage-a-standalone-lf-hf-frequency-response-resumable-v2" in combined
+    assert "refs/heads/Content-Curve-Evidence" in combined
+    assert "b1a806a34a16435c4242e45eafa3818b3a37b8a6" in combined
     assert "/content/drive/MyDrive/CEG-WM/stage_a_standalone_lf_hf_frequency_response" in combined
     assert "slhfr-[0-9a-f]{24}" in combined
     assert "experiments.stage_a_frequency_response.run_colab" in combined
