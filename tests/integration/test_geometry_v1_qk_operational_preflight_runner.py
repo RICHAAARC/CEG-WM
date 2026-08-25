@@ -30,6 +30,18 @@ def test_layer_discovery_fails_closed_for_one_block() -> None:
         runner._discover_layers(transformer)
 
 
+def test_unknown_public_revision_is_recorded_without_placeholder() -> None:
+    pipeline = type("Pipeline", (), {})()
+    pipeline.vae = torch.nn.Linear(1, 1)
+    pipeline.transformer = torch.nn.Linear(1, 1)
+    pipeline.scheduler = object()
+    pipeline.image_processor = object()
+    record = runner._runtime_record(pipeline)
+    assert record["requested_revision"] is None
+    assert record["resolved_revision"] is None
+    assert record["resolution_status"] == "unavailable_from_public_runtime"
+
+
 def test_preflight_requires_cuda_before_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner.torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(runner, "_validate_execution_exact", lambda *_args: "geometry-v1-b2b-000000000000-operational-01")

@@ -52,6 +52,22 @@ def _image_digest(image: Image.Image) -> str:
     return _sha256_bytes(np.asarray(image, dtype=np.uint8).tobytes())
 
 
+def _public_revision(pipeline: Any) -> tuple[str | None, str]:
+    """Use only a public commit-shaped identity; unknown is recorded, never guessed."""
+    for source in (pipeline, getattr(pipeline, "config", None)):
+        value = getattr(source, "_commit_hash", None)
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{7,64}", value):
+            return value, "proven_public_commit"
+    return None, "unavailable_from_public_runtime"
+
+
+def _module_dtype(value: Any) -> str | None:
+    try:
+        return str(next(value.parameters()).dtype)
+    except (AttributeError, StopIteration, TypeError):
+        return None
+
+
 def _runtime_record(pipeline: Any) -> dict[str, Any]:
     def version(name: str) -> str | None:
         try:
@@ -59,14 +75,7 @@ def _runtime_record(pipeline: Any) -> dict[str, Any]:
         except importlib.metadata.PackageNotFoundError:
             return None
 
-    public_config = getattr(pipeline, "config", None)
-    revision = None
-    resolution_status = "unavailable"
-    for source in (pipeline, public_config):
-        for name in ("_commit_hash",):
-            value = getattr(source, name, None)
-            if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{7,64}", value):
-                revision, resolution_status = value, "public_commit_hash"
+    revision, resolution_status = _public_revision(pipeline)
     name_or_path = getattr(pipeline, "_name_or_path", getattr(pipeline, "name_or_path", None))
     return {
         "python": sys.version.split()[0],
@@ -74,12 +83,15 @@ def _runtime_record(pipeline: Any) -> dict[str, Any]:
         "transformers": version("transformers"), "numpy": getattr(np, "__version__", None), "pillow": version("Pillow"),
         "cuda_available": bool(torch.cuda.is_available()),
         "cuda_device": torch.cuda.get_device_name() if torch.cuda.is_available() else None,
-        "requested_model_id": MODEL_ID, "requested_torch_dtype": str(torch.float16),
+        "requested_model_id": MODEL_ID, "requested_revision": None, "requested_torch_dtype": str(torch.float16), "selected_device": "cuda",
         "pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}",
         "pipeline_name_or_path": str(name_or_path) if name_or_path is not None else None,
-        "public_revision": revision, "revision_resolution_status": resolution_status,
+        "resolved_revision": revision, "resolution_status": resolution_status,
         "vae_class": f"{type(getattr(pipeline, 'vae', None)).__module__}.{type(getattr(pipeline, 'vae', None)).__qualname__}",
         "transformer_class": f"{type(getattr(pipeline, 'transformer', None)).__module__}.{type(getattr(pipeline, 'transformer', None)).__qualname__}",
+        "scheduler_class": f"{type(getattr(pipeline, 'scheduler', None)).__module__}.{type(getattr(pipeline, 'scheduler', None)).__qualname__}",
+        "image_processor_class": f"{type(getattr(pipeline, 'image_processor', None)).__module__}.{type(getattr(pipeline, 'image_processor', None)).__qualname__}",
+        "vae_dtype": _module_dtype(getattr(pipeline, "vae", None)), "transformer_dtype": _module_dtype(getattr(pipeline, "transformer", None)),
     }
 
 
@@ -123,7 +135,7 @@ def _discover_layers(transformer: torch.nn.Module) -> tuple[str, str]:
 
 def _observation_record(observation: SD35QKObservation, *, elapsed_seconds: float) -> dict[str, Any]:
     return {
-        "latent_shape": list(observation.latent_shape), "latent_dtype": None, "schedule_index": observation.schedule_index,
+        "latent_shape": list(observation.latent_shape), "schedule_index": observation.schedule_index,
         "timestep": str(observation.timestep.item()), "elapsed_seconds": elapsed_seconds,
         "layers": [
             {"path": layer.layer_path, "query_shape": list(layer.query.shape), "key_shape": list(layer.key.shape),
@@ -185,7 +197,8 @@ def operational_preflight(
         raise TypeError("pipeline transformer must be a torch module")
     candidates = _discover_candidates(transformer)
     shallow, deep = _discover_layers(transformer)
-    spec = SD35QKObservationSpec(MODEL_ID, str(getattr(pipeline, "revision", "runtime-resolved")), (shallow, deep), INFERENCE_STEPS, SCHEDULE_INDEX, PUBLIC_NOISE_SEED, MAX_GRID, null_hidden, null_pooled)
+    resolved_revision, _ = _public_revision(pipeline)
+    spec = SD35QKObservationSpec(MODEL_ID, resolved_revision, (shallow, deep), INFERENCE_STEPS, SCHEDULE_INDEX, PUBLIC_NOISE_SEED, MAX_GRID, null_hidden, null_pooled)
     results: list[dict[str, Any]] = []
     first: SD35QKObservation | None = None
     baseline, counter_handles, counts = _counter_targets(transformer, (shallow, deep))

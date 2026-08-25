@@ -21,7 +21,7 @@ class SD35QKObservationSpec:
     """Explicit public inputs for one detector-side Q/K observation."""
 
     model_id: str
-    revision: str
+    revision: str | None
     attention_layer_paths: tuple[str, ...]
     inference_steps: int
     schedule_index: int
@@ -67,8 +67,8 @@ def _validate_spec(spec: SD35QKObservationSpec) -> None:
         raise TypeError("spec must be an explicit SD35QKObservationSpec")
     if not isinstance(spec.model_id, str) or not spec.model_id.strip():
         raise ValueError("model_id must be explicit non-empty text")
-    if not isinstance(spec.revision, str) or not spec.revision.strip():
-        raise ValueError("revision must be explicit non-empty text")
+    if spec.revision is not None and (not isinstance(spec.revision, str) or not spec.revision.strip()):
+        raise ValueError("revision must be non-empty text or explicit None")
     if not isinstance(spec.attention_layer_paths, tuple) or not spec.attention_layer_paths:
         raise ValueError("attention_layer_paths must be a non-empty explicit tuple")
     if len(set(spec.attention_layer_paths)) != len(spec.attention_layer_paths):

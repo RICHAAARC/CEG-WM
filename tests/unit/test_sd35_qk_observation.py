@@ -126,6 +126,20 @@ def test_spec_has_no_production_defaults_and_api_has_no_private_inputs() -> None
     assert not forbidden.intersection(names)
 
 
+def test_revision_is_explicit_and_may_be_unknown_without_altering_observation() -> None:
+    assert "revision" in inspect.signature(SD35QKObservationSpec).parameters
+    unknown = _spec(revision=None)
+    known = _spec(revision="public-commit")
+    assert unknown.revision is None and known.revision == "public-commit"
+    pipeline = _Pipeline()
+    assert torch.equal(
+        observe_sd35_image_qk(_image(), pipeline=pipeline, spec=unknown).layers[0].query,
+        observe_sd35_image_qk(_image(), pipeline=pipeline, spec=known).layers[0].query,
+    )
+    with pytest.raises(ValueError, match="revision"):
+        observe_sd35_image_qk(_image(), pipeline=_Pipeline(), spec=_spec(revision=""))
+
+
 def test_observation_uses_rgb_numeric_values_and_direct_null_conditioning() -> None:
     pipeline = _Pipeline()
     first = observe_sd35_image_qk(_image(32), pipeline=pipeline, spec=_spec())
