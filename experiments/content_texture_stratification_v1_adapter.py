@@ -193,7 +193,7 @@ def _v234(root: Path, method: str, units: list[dict[str, Any]], key_text: str, t
         protocol = runner._load_protocol(root)
         _verify_protocol("v2", protocol, _ACTIVE_BINDINGS)
         pipeline, assets = runner._load_pipeline_and_assets("stabilityai/stable-diffusion-3.5-medium", token)
-        run_joint = runner.V2_RUNNER_VARIANT.run_joint
+        run_joint = runner.run_sd35_content_adaptive
         scorer = lambda image, key, wrong: engine._blind_scores(image, key, wrong, assets.hf_public_assets, assets.lf_public_assets)
     elif method == "v3":
         from experiments import run_content_v3_clean as runner

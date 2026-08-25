@@ -12,6 +12,7 @@ from argparse import Namespace
 from pathlib import Path
 from unittest import mock
 
+from experiments import content_texture_stratification_v1_adapter as adapter
 from experiments import run_content_texture_stratification_v1 as runner
 
 
@@ -62,6 +63,52 @@ def _score_payload(offset: float) -> dict[str, float]:
 
 
 class TextureRunnerTests(unittest.TestCase):
+ def test_v2_adapter_calls_the_frozen_entrypoint_without_a_variant_proxy(self) -> None:
+    fake_runner = types.ModuleType("experiments.run_content_adaptive_dual_branch_v2_clean")
+    fake_runtime = types.ModuleType("cegwm.runtime.diffusers_sd35")
+    fake_keys = types.ModuleType("cegwm.shared.keys")
+    calls = []
+    pipeline = object()
+    assets = types.SimpleNamespace(hf_public_assets=object(), lf_public_assets=object())
+    protocol = types.SimpleNamespace()
+    candidate = object()
+    primary_null = object()
+
+    fake_runner._load_protocol = lambda root: protocol
+    fake_runner._load_pipeline_and_assets = lambda model_id, token: (pipeline, assets)
+    fake_runner._wrong_keys = lambda key, loaded_protocol: (b"wrong",)
+    fake_runner._blind_scores = lambda image, key, wrong, hf, lf: image
+    fake_runner._flat_scores = lambda image: {"image": image}
+
+    def run_sd35_content_adaptive(loaded_pipeline, prompt, key, loaded_assets, *, height, width, generator):
+        calls.append((loaded_pipeline, prompt, key, loaded_assets, height, width, generator))
+        return types.SimpleNamespace(image=candidate)
+
+    fake_runner.run_sd35_content_adaptive = run_sd35_content_adaptive
+    fake_runtime.run_sd35_plain = lambda loaded_pipeline, prompt, *, height, width, generator: primary_null
+    fake_keys.normalize_detection_key = lambda text: b"registered"
+    unit = {"prompt": "frozen V2 prompt", "seed": 1213061, "unit_id": "content-adaptive-v2-0001", "global_ordinal": 1}
+    emitted = []
+
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "experiments.run_content_adaptive_dual_branch_v2_clean": fake_runner,
+            "cegwm.runtime.diffusers_sd35": fake_runtime,
+            "cegwm.shared.keys": fake_keys,
+        },
+    ), mock.patch.object(adapter, "_modules_inside"), mock.patch.object(adapter, "_verify_protocol"), mock.patch.object(
+        adapter, "_generator", side_effect=lambda seed: f"generator-{seed}"
+    ), mock.patch.object(adapter, "_emit_success", side_effect=lambda *args: emitted.append(args)):
+        adapter._v234(Path("/detached-v2"), "v2", [unit], "secret key", "token")
+
+    self.assertFalse(hasattr(fake_runner, "V2_RUNNER_VARIANT"))
+    self.assertFalse(hasattr(fake_runner, "ContentRunnerVariant"))
+    self.assertFalse(hasattr(fake_runner, "run_joint"))
+    self.assertEqual(calls, [(pipeline, unit["prompt"], b"registered", assets, 512, 512, "generator-1213061")])
+    self.assertEqual(emitted[0][:4], ("v2", unit, candidate, primary_null))
+    self.assertEqual(emitted[0][4:], ({"image": candidate}, {"image": primary_null}))
+
  def test_checkpoint_cleans_only_files_created_by_this_call(self) -> None:
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)

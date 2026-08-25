@@ -4,6 +4,7 @@ import hashlib
 import ast
 import json
 import math
+import subprocess
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -46,6 +47,41 @@ def _scores(registered: float, wrong: float) -> dict[str, float]:
 
 
 class TextureProtocolTests(unittest.TestCase):
+    def test_frozen_v2_exposes_the_real_content_adaptive_entrypoint(self) -> None:
+        exact = "4d8b0df5bf7840d242115669f1d3115cdf6810cc"
+        engine_source = subprocess.run(
+            ["git", "show", f"{exact}:experiments/run_content_adaptive_dual_branch_v2_clean.py"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        runtime_source = subprocess.run(
+            ["git", "show", f"{exact}:src/cegwm/runtime/content_adaptive_sd35_v2.py"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        engine_tree = ast.parse(engine_source)
+        runtime_tree = ast.parse(runtime_source)
+        imported = {
+            alias.name
+            for node in engine_tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "cegwm.runtime.content_adaptive_sd35_v2"
+            for alias in node.names
+        }
+        self.assertIn("run_sd35_content_adaptive", imported)
+        self.assertNotIn("V2_RUNNER_VARIANT", {node.id for node in ast.walk(engine_tree) if isinstance(node, ast.Name)})
+        function = next(
+            node
+            for node in runtime_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "run_sd35_content_adaptive"
+        )
+        self.assertEqual([argument.arg for argument in function.args.args], ["pipeline", "prompt", "detection_key", "assets"])
+        self.assertEqual([argument.arg for argument in function.args.kwonlyargs], ["height", "width", "generator"])
+
     def test_protocol_freezes_sources_rosters_counts_and_claim_ceiling(self) -> None:
         protocol = load_protocol(ROOT)
         self.assertEqual(list(protocol.config["sources"]), ["v2", "v3", "v4", "v5", "v6", "v7", "v8"])
