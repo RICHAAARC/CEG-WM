@@ -1,0 +1,14 @@
+{
+  "artifact_kind": "terminal",
+  "run_id": "content-v8-bd6269861412-0ba01f405106",
+  "exact": "bd6269861412b8628009238ace84d3278ff1e17a",
+  "protocol_digest": "7670d54434906ae246ef76c097bf54f997c3a0ca6b036c0f55e0fe5b31489a1c",
+  "runtime_asset_member": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json",
+  "runtime_asset_sha256": "a122a8dea1bc2615cc80e17ed1fb55235ede23b8a7498c1618ab47ecf151a438",
+  "result_member": "result.json",
+  "evaluation_roster_roles_in_order": [
+    "content_v2_reference",
+    "content_v6_current"
+  ],
+  "external_validation_required": true
+}

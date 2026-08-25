@@ -1,0 +1,47 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V8",
+  "run_id": "content-v8-bd6269861412-0ba01f405106",
+  "source_exact": "bd6269861412b8628009238ace84d3278ff1e17a",
+  "protocol_id": "cegwm-stage-a-content-v8-v2-spatial-lf-detector-domain-iss-formal-initial-v1",
+  "protocol_digest": "7670d54434906ae246ef76c097bf54f997c3a0ca6b036c0f55e0fe5b31489a1c",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "runtime_asset": {
+    "path": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json",
+    "byte_count": 1267,
+    "sha256": "a122a8dea1bc2615cc80e17ed1fb55235ede23b8a7498c1618ab47ecf151a438",
+    "sidecar_byte_count": 115,
+    "sidecar_file_sha256": "e9dfa9a4f3f23c9dec164b1c4c32ede211c0c54963bc2734a79b599dc904547b"
+  },
+  "cohorts_in_order": [
+    {"cohort_id": "content_v2_reference", "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"},
+    {"cohort_id": "content_v6_current", "manifest_sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f"}
+  ],
+  "source_archive": {
+    "filename": "content-v8-bd6269861412-0ba01f405106.zip",
+    "byte_count": 123175,
+    "sha256": "c0626ee67fb7c96506fb6cc6a45d7971c0ff911eb8c12c5cfced6108928e86ca",
+    "sidecar_filename": "content-v8-bd6269861412-0ba01f405106.zip.sha256",
+    "sidecar_byte_count": 107,
+    "sidecar_file_sha256": "da91c68be0fc2ae87554b58229aa192b10142647bf3c0403c587f2de81648a26",
+    "sidecar_binding": "c0626ee67fb7c96506fb6cc6a45d7971c0ff911eb8c12c5cfced6108928e86ca  content-v8-bd6269861412-0ba01f405106.zip\n",
+    "all_members_read_check": "pass",
+    "members": [
+      {"path": "receipt.json", "byte_count": 588, "sha256": "4b9d7e0ddecf3f20dc2ba5fb6b61c36cefbfe751be6a58b585d7de57b4c65ff3", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "result.json", "byte_count": 120571, "sha256": "b40117358e2b2b884e1d84d02331c8970e7be9a70748d609038f62dcf5bbde57", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json", "byte_count": 1267, "sha256": "a122a8dea1bc2615cc80e17ed1fb55235ede23b8a7498c1618ab47ecf151a438", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json.sha256", "byte_count": 115, "sha256": "e9dfa9a4f3f23c9dec164b1c4c32ede211c0c54963bc2734a79b599dc904547b", "zip_timestamp": "1980-01-01T00:00:00"}
+    ]
+  },
+  "contents": {"cohort_count": 2, "fixed_unit_count_per_cohort": 8, "record_count_per_cohort": 16, "total_record_count": 32, "score_fields_per_record": 51, "scalar_score_count": 1632, "failed_unit_count_per_cohort": 0, "cross_roster_pooling": false, "cross_roster_outcome_control": false, "status": "complete_rc0"},
+  "independently_recomputed_frozen_gates": {
+    "content_v2_reference": {"lf": {"gate_a": 5, "gate_b": 8}, "hf": {"gate_a": 8, "gate_b": 8}, "joint": {"gate_a": 7, "gate_b": 8}, "all_predeclared_gates_pass": false},
+    "content_v6_current": {"lf": {"gate_a": 6, "gate_b": 8}, "hf": {"gate_a": 8, "gate_b": 8}, "joint": {"gate_a": 8, "gate_b": 8}, "all_predeclared_gates_pass": false},
+    "required_units": 7,
+    "strict_ties_fail": true,
+    "tie_count": 0,
+    "formal_fpr_claim": false
+  },
+  "personal_adjudication": "SCIENTIFIC_NEGATIVE",
+  "evidence_ceiling": "exact_two_cohort_clean_only_negative; no_pooling_or_cross_roster_outcome_control_or_general_invalidity_or_fixed_fpr_or_attack_or_robustness_or_geometry_or_promotion_claim"
+}
