@@ -16,11 +16,11 @@ from cegwm.shared.keys import public_key_digest
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def _result(invocation_id: str) -> dict[str, object]:
+def _result(invocation_id: str, *, rc: int = 0) -> dict[str, object]:
     return {
         "invocation_id": invocation_id,
-        "rc": 0,
-        "gate_evidence": {"all_predeclared_gates_pass": True},
+        "rc": rc,
+        "gate_evidence": {"all_predeclared_gates_pass": rc == 0},
     }
 
 
@@ -87,7 +87,10 @@ def test_integrated_runner_fits_publishes_then_calls_two_rosters_and_one_termina
         asset_path, sidecar, _, _ = runner._paths(tmp_path / "sink", exact)
         assert asset_path.exists() and sidecar.exists()
         calls.append(("evaluation", tuple(unit.unit_id for unit in protocol.roster)))
-        return _result(protocol.protocol_id.rsplit("/", 1)[-1] + f"-{index}")
+        return _result(
+            protocol.protocol_id.rsplit("/", 1)[-1] + f"-{index}",
+            rc=0 if index == 1 else 2,
+        )
 
     monkeypatch.setattr(runner, "_evaluate_invocation", evaluate)
     monkeypatch.setenv(runner.KEY_ENV, "content-v7-root-key-material")
@@ -115,8 +118,19 @@ def test_integrated_runner_fits_publishes_then_calls_two_rosters_and_one_termina
         result = json.loads(archive.read("result.json"))
     assert result["evaluation_result_count"] == 2
     assert len(result["evaluations"]) == 2
+    assert [item["rc"] for item in result["evaluations"]] == [0, 2]
     assert result["pooling_applied"] is False
-    assert result["joint_min_all_predeclared_gates_pass"] is True
+    assert result["cross_cohort_conjunction_applied"] is False
+    assert result["combined_result_produced"] is False
+    assert all(
+        field not in result
+        for field in (
+            "rc",
+            "scientific_status",
+            "scientific_outcome_allowed",
+            "joint_min_all_predeclared_gates_pass",
+        )
+    )
     with pytest.raises(FileExistsError, match="create-only"):
         runner.execute(args)
 

@@ -344,18 +344,22 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         "implicit_resume_allowed": False,
         "interruption_action": "stop",
         "terminal_result_count": 2,
-        "terminal_joint_rule": "minimum_of_two_independent_results",
+        "terminal_reporting": {
+            "evaluation_01": {"fixed_units": 8, "fixed_records": 16},
+            "evaluation_02": {"fixed_units": 8, "fixed_records": 16},
+        },
+        "cross_cohort_conjunction_allowed": False,
+        "combined_result_allowed": False,
     }:
         raise ValueError("Content V7 formal execution flow differs")
     if _mapping(config, "decision_rule") != {
         "fixed_units_per_invocation": 8,
+        "fixed_records_per_invocation": 16,
         "registered_top_rank_among_17_min_units_per_branch": 7,
         "joint_registered_gt_primary_null_registered_min_units_per_branch": 7,
         "strict_comparison_ties_fail": True,
         "quality_and_runtime_gates_apply_separately": True,
         "paired_rgb_psnr_min_db": 30.0,
-        "scientific_outcome_requires_both_independent_rc0": True,
-        "joint_result": "min(evaluation_01,evaluation_02)",
         "formal_fpr_claim": False,
     }:
         raise ValueError("Content V7 decision rule differs")

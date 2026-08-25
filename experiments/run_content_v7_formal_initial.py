@@ -326,15 +326,7 @@ def _terminal_payload(
 ) -> dict[str, Any]:
     if len(evaluations) != 2:
         raise RuntimeError("Content V7 terminal requires exactly two evaluation results")
-    independent_rc0 = [item["rc"] == 0 for item in evaluations]
-    independent_gate_pass = [
-        bool((item.get("gate_evidence") or {}).get("all_predeclared_gates_pass", False))
-        for item in evaluations
-    ]
     return {
-        "rc": 0 if all(independent_rc0) else 2,
-        "scientific_status": "not_adjudicated" if all(independent_rc0) else "not_evaluable",
-        "scientific_outcome_allowed": all(independent_rc0),
         "exact": exact,
         "execution_scope_id": CONTENT_V7_EXECUTION_SCOPE_ID,
         "formal_protocol_id": formal.protocol_id,
@@ -350,7 +342,8 @@ def _terminal_payload(
         "independent_fixed_denominators": [8, 8],
         "independent_fixed_record_counts": [16, 16],
         "pooling_applied": False,
-        "joint_min_all_predeclared_gates_pass": bool(min(map(int, independent_gate_pass))),
+        "cross_cohort_conjunction_applied": False,
+        "combined_result_produced": False,
         "limitations": list(formal.config["limitations"]),
     }
 
@@ -471,18 +464,18 @@ def execute(args: argparse.Namespace) -> int:
         sidecar_path=sidecar_path,
         result=result,
     )
-    rc = int(result["rc"])
     print(
         f"{SUMMARY_PREFIX} "
         + stable_json_bytes({
             "asset_sha256": asset_sha256,
             "evaluation_result_count": 2,
+            "evaluation_rcs": [int(item["rc"]) for item in evaluations],
             "formal_protocol_digest": formal.protocol_digest,
-            "rc": rc,
+            "terminal_published": True,
         }).decode("ascii"),
         flush=True,
     )
-    return rc
+    return 0
 
 
 def _arguments() -> argparse.Namespace:

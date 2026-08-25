@@ -55,9 +55,18 @@ def test_v7_formal_flow_is_fit_first_nonresumable_and_never_pools() -> None:
     assert flow["cross_invocation_resume_allowed"] is False
     assert flow["implicit_resume_allowed"] is False
     assert flow["terminal_result_count"] == 2
-    assert protocol.config["decision_rule"]["joint_result"] == (
-        "min(evaluation_01,evaluation_02)"
-    )
+    assert flow["terminal_reporting"] == {
+        "evaluation_01": {"fixed_units": 8, "fixed_records": 16},
+        "evaluation_02": {"fixed_units": 8, "fixed_records": 16},
+    }
+    assert flow["cross_cohort_conjunction_allowed"] is False
+    assert flow["combined_result_allowed"] is False
+    assert "terminal_joint_rule" not in flow
+    rule = protocol.config["decision_rule"]
+    assert rule["fixed_units_per_invocation"] == 8
+    assert rule["fixed_records_per_invocation"] == 16
+    assert "scientific_outcome_requires_both_independent_rc0" not in rule
+    assert "joint_result" not in rule
     assert "asset_sha256" not in protocol.config["iss_fit"]
 
 
