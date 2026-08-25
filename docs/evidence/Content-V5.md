@@ -24,8 +24,6 @@ branch, and each Gate requires at least 7 of 8 units.
 - Reference manifest SHA-256: `dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88`
 - Primary manifest SHA-256: `5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c`
 - Artifact ZIP SHA-256: `c58c904dd8a030abd4ad0c19faed7c952b79aafe55083d462d1c661175cb2c39`
-- Formal handoff exact: `2d0ccb23cbe289d0b3c3b7c566f4f9e4b85db3cc`
-- Formal Notebook SHA-256: `a16d2e4d20132ea1b25bfb68a49a07774b337484397e6656b46a9a56417c700c`
 
 The single umbrella invocation completed RC0. It unconditionally executed the
 reference cohort followed by the primary cohort. Each cohort retained its own
@@ -76,8 +74,8 @@ promotion, or permission for retry, tuning, replacement, or new execution.
 ## Branch role
 
 `Content-V5-Evidence` is an evidence leaf under `Content-V5`. It is not a
-method-development base and must not be merged into `main`. The formal handoff
-Notebook is retained here as execution provenance.
+method-development base and must not be merged into `main`. Its current tree
+retains one final formal Notebook and the portable scalar result only.
 
 ## Portable scalar evidence
 
@@ -88,11 +86,12 @@ The exact terminal artifact members are committed at
   `e4b118eb696e36bf982264aa1dea2b3ecdd02ff45d70b63cf4b487866d63f8c4`
 - Exact `result.json` SHA-256:
   `f043fcca0a5a483d2419751730155d221e3e69a1b8ac735224b8e7c05cc42c68`
-- Exact `audit-state.json` SHA-256:
-  `301001d81e97f134ac79f06aa5acd2c1c9bcc12834e2759cac3cb27e7468e163`
 
 The package preserves every scalar score and aggregate required for read-only
-recomputation. It contains no image, raw prompt text, raw key, token, latent,
-delta, route, mask, tensor, or private embed state. Any future statistic
-recomputed from these records is a new analysis and cannot retroactively
-change this frozen adjudication.
+recomputation. The terminal `audit-state.json` is intentionally omitted because
+it duplicates committed records and is unnecessary for comparison or
+recalculation; its source-archive hash remains recorded in the manifest. The
+package contains no image, raw prompt text, raw key, token, latent, delta,
+route, mask, tensor, or private embed state. Any future statistic recomputed
+from these records is a new analysis and cannot retroactively change this
+frozen adjudication.

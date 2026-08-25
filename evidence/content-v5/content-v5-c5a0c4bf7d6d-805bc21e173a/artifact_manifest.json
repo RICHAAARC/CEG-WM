@@ -6,11 +6,6 @@
   "protocol_id": "cegwm-stage-a-content-v5-whitened-lf-adaptive-hf-branchwise-or-clean-v1",
   "protocol_digest": "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204",
   "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
-  "handoff_provenance": {
-    "exact": "2d0ccb23cbe289d0b3c3b7c566f4f9e4b85db3cc",
-    "notebook_path": "notebooks/content_v5_lf_or_hf_formal_colab.ipynb",
-    "notebook_sha256": "a16d2e4d20132ea1b25bfb68a49a07774b337484397e6656b46a9a56417c700c"
-  },
   "cohorts_in_order": [
     {
       "cohort_id": "control_1",
