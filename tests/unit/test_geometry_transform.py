@@ -44,11 +44,23 @@ def test_out_of_bounds_and_ambiguity_are_reported_not_hidden() -> None:
         estimate_bounded_similarity(POINTS, moved, (20, 20), max_translation=10)
 
 
-def test_equal_d4_boundary_candidates_are_marked_ambiguous() -> None:
+def test_d4_boundary_rotation_candidates_are_marked_ambiguous() -> None:
     target = apply_h(POINTS, _h(angle=math.pi / 4, tx=1, ty=1))
     fitted = estimate_bounded_similarity(POINTS, target, (20, 20), ambiguity_tolerance=1e-8)
     assert fitted.uniqueness_gap <= 1e-8
     assert not fitted.valid_corners
+
+
+def test_asymmetric_reflection_uses_one_d4_family_without_negative_scale_alias() -> None:
+    asymmetric = np.array(((2, 3), (13, 4), (9, 15), (4, 11), (11, 9)), dtype=float)
+    reflection = np.array(((-1, 0, 38), (0, 1, 3), (0, 0, 1)), dtype=float)
+    fitted = estimate_bounded_similarity(asymmetric, apply_h(asymmetric, reflection), (40, 40))
+    d4_determinants = (1, 1, 1, 1, -1, -1, -1, -1)
+    residual_determinant = np.linalg.det(fitted.h_canonical_to_observed[:2, :2]) / d4_determinants[fitted.d4_index]
+    assert fitted.scale > 0
+    assert residual_determinant > 0
+    assert fitted.uniqueness_gap > 1e-8
+    assert fitted.valid_corners
 
 
 def test_crop_uses_visible_correspondences_and_reports_coverage() -> None:

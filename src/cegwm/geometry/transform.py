@@ -92,8 +92,8 @@ def estimate_bounded_similarity(
         h = residual_h @ d4_h
         predicted = apply_h(source, h)
         residual = float(np.sqrt(np.mean(np.sum((predicted - target) ** 2, axis=1))))
-        if scale_bounds[0] <= abs(scale) <= scale_bounds[1] and abs(angle) <= max_residual_rotation_radians and np.linalg.norm(translation) <= max_translation:
-            candidates.append((residual, index, h, abs(scale), angle, translation))
+        if scale_bounds[0] <= scale <= scale_bounds[1] and abs(angle) <= max_residual_rotation_radians and np.linalg.norm(translation) <= max_translation:
+            candidates.append((residual, index, h, scale, angle, translation))
     if not candidates:
         raise ValueError("no D4/similarity candidate satisfies bounds")
     candidates.sort(key=lambda item: (item[0], item[1]))
