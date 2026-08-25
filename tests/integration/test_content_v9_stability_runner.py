@@ -118,19 +118,28 @@ def test_one_invocation_runs_all_80_in_order_with_one_checkpoint_and_independent
     assert receipt["calibration_asset_sha256"] == (
         "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
     )
-    assert result["sections_in_order"] == list(runner.SECTION_IDS)
-    assert [item["fixed_denominator_units"] for item in result["section_results"]] == [
-        8, 8, 32, 32,
-    ]
-    assert [len(item["records"]) for item in result["section_results"]] == [16, 16, 64, 64]
-    assert all(item["gate_evidence"]["all_section_weighted_gates_pass"] for item in result["section_results"])
+    assert result["sections_in_order"] == list(runner.LOGICAL_SECTION_IDS)
+    assert len(result["section_results"]) == 3
+    old, current, novel = result["section_results"]
+    assert [item["fixed_denominator_units"] for item in (old, current)] == [8, 8]
+    assert [len(item["records"]) for item in (old, current)] == [16, 16]
+    assert all(
+        item["gate_evidence"]["all_section_weighted_gates_pass"]
+        for item in (old, current)
+    )
+    assert novel["section_id"] == "novel_seed_stability"
+    assert novel["seed_strata_in_order"] == list(runner.SECTION_IDS[2:])
+    seed_results = novel["seed_stratum_results"]
+    assert [item["fixed_denominator_units"] for item in seed_results] == [32, 32]
+    assert [len(item["records"]) for item in seed_results] == [64, 64]
+    assert all(item["gate_evidence"]["all_section_weighted_gates_pass"] for item in seed_results)
     assert all(
         item["gate_evidence"]["lf_hf_diagnostics_only_no_hard_veto"]["lf"][
             "gate_a_pass_units"
         ] == 0
-        for item in result["section_results"]
+        for item in (old, current, *seed_results)
     )
-    assert len(result["novel_two_seed_prompt_descriptives"]) == 32
+    assert len(novel["per_prompt_descriptives"]) == 32
     assert result["pooled_denominator_absent"] is True
     assert result["cross_section_conjunction_absent"] is True
     assert result["combined_result_absent"] is True
@@ -177,7 +186,10 @@ def test_unit_failure_is_retained_and_does_not_control_later_sections(
         "status": "failed",
         "error_type": "RuntimeError",
     }]
-    assert [item["rc"] for item in sections[1:]] == [0, 0, 0]
+    assert sections[1]["rc"] == 0
+    novel = sections[2]
+    assert novel["section_id"] == "novel_seed_stability"
+    assert [item["rc"] for item in novel["seed_stratum_results"]] == [0, 0]
     assert result["committed_unit_count"] == 80
     assert result["section_outcome_controls_later_execution"] is False
     assert result["operational_error_class"] is None

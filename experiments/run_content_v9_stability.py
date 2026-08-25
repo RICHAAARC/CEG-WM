@@ -51,6 +51,11 @@ SECTION_IDS = (
     "novel_seed_stability_seed_01",
     "novel_seed_stability_seed_02",
 )
+LOGICAL_SECTION_IDS = (
+    "old_roster_reference",
+    "current_v6_roster_reference",
+    "novel_seed_stability",
+)
 SECTION_COUNTS = (8, 8, 32, 32)
 SECTION_GATE_MINIMUMS = (7, 7, 28, 28)
 ARMS = (
@@ -607,6 +612,18 @@ def _result(
         record_offset += len(units) * 2
     all_attempted = state["committed_unit_count"] == FIXED_UNIT_COUNT
     rc = 0 if fatal_error is None and all_attempted and all(item["rc"] == 0 for item in results) else 2
+    logical_results = [
+        results[0],
+        results[1],
+        {
+            "section_id": "novel_seed_stability",
+            "seed_strata_in_order": list(SECTION_IDS[2:]),
+            "seed_stratum_results": results[2:],
+            "per_prompt_descriptives": _novel_descriptives(results),
+            "result_is_independent": True,
+            "controls_other_section_execution": False,
+        },
+    ]
     return {
         "rc": rc,
         "completeness": COMPLETE_EXECUTION if rc == 0 else INCOMPLETE_EXECUTION,
@@ -624,9 +641,8 @@ def _result(
         "fixed_unit_count_metadata_only_not_a_denominator": FIXED_UNIT_COUNT,
         "fixed_record_count_metadata_only_not_a_denominator": FIXED_RECORD_COUNT,
         "committed_unit_count": state["committed_unit_count"],
-        "sections_in_order": list(SECTION_IDS),
-        "section_results": results,
-        "novel_two_seed_prompt_descriptives": _novel_descriptives(results),
+        "sections_in_order": list(LOGICAL_SECTION_IDS),
+        "section_results": logical_results,
         "pooled_denominator_absent": True,
         "cross_section_conjunction_absent": True,
         "combined_result_absent": True,
