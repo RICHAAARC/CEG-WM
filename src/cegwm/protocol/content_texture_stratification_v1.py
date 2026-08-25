@@ -71,8 +71,10 @@ def load_protocol(repo_root: str | Path) -> TextureProtocol:
     if list(config["sources"]) != ["v2", "v3", "v4", "v5", "v6", "v7", "v8"]:
         raise ValueError("texture method order differs")
     execution = config["execution"]
-    if (execution["total_diffusion_calls"], execution["callback_writes"], execution["probe_evaluations"], execution["fixed_analysis_rows"], execution["checkpoint_count"], execution["resume_allowed"]) != (208, 96, 6144, 112, 129, False):
+    if (execution["total_diffusion_calls"], execution["callback_writes"], execution["probe_evaluations"], execution["fixed_analysis_rows"], execution["checkpoint_count"], execution["checkpoint_scope"], execution["resume_allowed"]) != (208, 96, 6144, 112, 9, "local_transient", False):
         raise ValueError("texture execution identity differs")
+    if execution["checkpoint_stages"] != ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"]:
+        raise ValueError("texture checkpoint stage order differs")
     digest = sha256_bytes(stable_json_bytes(config))
     return TextureProtocol(root, config, digest, f"content-texture-stratification-v1-{digest[:12]}")
 

@@ -124,18 +124,24 @@ def _checkpoint(root: Path, index: int, identity: Mapping[str, Any], state: Mapp
     payload = stable_json_bytes({"schema_version": "content_texture_stratification_checkpoint_v1", "identity": dict(identity), "checkpoint_index": index, "resume_allowed": False, "state": dict(state)})
     path = root / f"checkpoint-{index:04d}.json"
     sidecar = root / f"checkpoint-{index:04d}.json.sha256"
-    created = False
+    json_created = False
+    sidecar_created = False
     try:
         handle = path.open("xb")
-        created = True
+        json_created = True
         with handle:
             handle.write(payload)
             handle.flush()
         digest = sha256_bytes(payload)
-        with sidecar.open("xb") as handle:
+        handle = sidecar.open("xb")
+        sidecar_created = True
+        with handle:
             handle.write(f"{digest}  {path.name}\n".encode("ascii"))
+            handle.flush()
     except BaseException:
-        if created:
+        if sidecar_created:
+            sidecar.unlink(missing_ok=True)
+        if json_created:
             path.unlink(missing_ok=True)
         raise
 
@@ -361,7 +367,7 @@ def execute(args: argparse.Namespace) -> int:
     identity = {"analysis_id": protocol.config["analysis_id"], "exact": exact, "protocol_id": protocol.config["protocol_id"], "protocol_digest": protocol.protocol_digest, "run_id": run_id, "public_key_digest": key_digest, "fixed_plain_units": 16, "fixed_method_rows": 112, "resume_allowed": False}
     plain_events = _unit_events(_child(adapter, checkouts["v2"], protocol.config["sources"]["v2"]["exact"], "common_plain_v2", units_path, output, cache, bindings_path, child_env), "common_plain", 16)
     plains = []
-    state: dict[str, Any] = {"phase": "common_plain16", "plain_bindings": [], "method_records": []}
+    state: dict[str, Any] = {"phase": "common_plain", "plain_bindings": [], "method_records": []}
     checkpoint_index = 0
     for event in plain_events:
         if event["status"] == "success":
@@ -371,33 +377,33 @@ def execute(args: argparse.Namespace) -> int:
             event["texture_be_hex"] = f64_hex(texture)
         plains.append(event)
         state["plain_bindings"].append({key: value for key, value in event.items() if key != "absolute_path"})
-        checkpoint_index += 1
-        _checkpoint(checkpoints, checkpoint_index, identity, state)
+    checkpoint_index += 1
+    _checkpoint(checkpoints, checkpoint_index, identity, state)
     _write_json_exclusive(output / "plain_bindings.json", state["plain_bindings"])
     method_events: dict[str, list[dict[str, Any]]] = {}
     for method in ("v2", "v3", "v4"):
         events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env), method, 16)
         method_events[method] = events
-        state["phase"] = f"{method}-16"
+        state["phase"] = method
         for event in events:
             state["method_records"].append(_checkpoint_event(event))
-            checkpoint_index += 1
-            _checkpoint(checkpoints, checkpoint_index, identity, state)
-    _child(adapter, checkouts["v5"], protocol.config["sources"]["v5"]["exact"], "v5_validate", units_path, output, cache, bindings_path, child_env)
-    method_events["v5"] = [{**item, "method": "v5"} for item in method_events["v4"]]
-    state["phase"] = "v5-derived-16"
-    for event in method_events["v5"]:
-        state["method_records"].append(_checkpoint_event(event))
         checkpoint_index += 1
         _checkpoint(checkpoints, checkpoint_index, identity, state)
+    _child(adapter, checkouts["v5"], protocol.config["sources"]["v5"]["exact"], "v5_validate", units_path, output, cache, bindings_path, child_env)
+    method_events["v5"] = [{**item, "method": "v5"} for item in method_events["v4"]]
+    state["phase"] = "v5_derived"
+    for event in method_events["v5"]:
+        state["method_records"].append(_checkpoint_event(event))
+    checkpoint_index += 1
+    _checkpoint(checkpoints, checkpoint_index, identity, state)
     for method, asset in (("v6", None), ("v7", asset_v7), ("v8", asset_v8)):
         events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env, v7_asset=asset if method == "v7" else None, v8_asset=asset if method == "v8" else None), method, 16)
         method_events[method] = events
-        state["phase"] = f"{method}-16"
+        state["phase"] = method
         for event in events:
             state["method_records"].append(_checkpoint_event(event))
-            checkpoint_index += 1
-            _checkpoint(checkpoints, checkpoint_index, identity, state)
+        checkpoint_index += 1
+        _checkpoint(checkpoints, checkpoint_index, identity, state)
     key_text = token = ""
     rows = []
     for method in METHOD_ORDER:
@@ -413,8 +419,8 @@ def execute(args: argparse.Namespace) -> int:
     state["analysis_status"] = status
     checkpoint_index += 1
     _checkpoint(checkpoints, checkpoint_index, identity, state)
-    if checkpoint_index != 129:
-        raise RuntimeError("checkpoint denominator differs")
+    if checkpoint_index != 9 or state["phase"] != protocol.config["execution"]["checkpoint_stages"][-1]:
+        raise RuntimeError("local transient checkpoint stage count differs")
     per_unit_csv = _csv_bytes(PER_UNIT_COLUMNS, rows)
     associations_csv = _csv_bytes(ASSOCIATION_COLUMNS, associations)
     public_records = _public_records(rows)

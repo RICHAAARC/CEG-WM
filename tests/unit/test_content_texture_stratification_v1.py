@@ -50,7 +50,7 @@ class TextureProtocolTests(unittest.TestCase):
         protocol = load_protocol(ROOT)
         self.assertEqual(list(protocol.config["sources"]), ["v2", "v3", "v4", "v5", "v6", "v7", "v8"])
         self.assertEqual([item["sha256"] for item in protocol.config["rosters_in_order"]], ["dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88", "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f"])
-        self.assertEqual(protocol.config["execution"], {"plain_generations": 16, "paired_method_generations": 192, "total_diffusion_calls": 208, "callback_writes": 96, "probe_evaluations": 6144, "fixed_analysis_rows": 112, "checkpoint_count": 129, "resume_allowed": False})
+        self.assertEqual(protocol.config["execution"], {"plain_generations": 16, "paired_method_generations": 192, "total_diffusion_calls": 208, "callback_writes": 96, "probe_evaluations": 6144, "fixed_analysis_rows": 112, "checkpoint_count": 9, "checkpoint_stages": ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"], "checkpoint_scope": "local_transient", "resume_allowed": False})
         self.assertEqual(protocol.config["claim_ceiling"], "exploratory_prospective_texture_stratification_only")
         self.assertEqual(len(protocol.protocol_digest), 64)
 

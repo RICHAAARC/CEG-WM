@@ -15,6 +15,35 @@ from unittest import mock
 from experiments import run_content_texture_stratification_v1 as runner
 
 
+class _FailingBinaryFile:
+    def __init__(self, handle, operation: str) -> None:
+        self._handle = handle
+        self._operation = operation
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+        return False
+
+    def write(self, payload: bytes):
+        if self._operation == "write":
+            self._handle.write(payload[:1])
+            raise OSError("controlled partial write")
+        return self._handle.write(payload)
+
+    def flush(self):
+        self._handle.flush()
+        if self._operation == "flush":
+            raise OSError("controlled flush failure")
+
+    def close(self):
+        self._handle.close()
+        if self._operation == "close":
+            raise OSError("controlled close failure")
+
+
 def _roster(prefix: str, seed: int) -> bytes:
     rows = [
         {"unit_id": f"{prefix}-{index:04d}", "split": prefix, "source_id": f"{prefix}-source-{index:04d}", "prompt": f"private prompt {index}", "seed": seed + index, "height": 512, "width": 512}
@@ -33,6 +62,49 @@ def _score_payload(offset: float) -> dict[str, float]:
 
 
 class TextureRunnerTests(unittest.TestCase):
+ def test_checkpoint_cleans_only_files_created_by_this_call(self) -> None:
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    original_open = type(root).open
+    identity = {"exact": "0" * 40}
+    state = {"phase": "common_plain"}
+
+    for target in ("json", "sidecar"):
+        for operation in ("write", "flush", "close"):
+            with self.subTest(target=target, operation=operation):
+                stage = root / f"{target}-{operation}"
+                stage.mkdir()
+
+                def controlled_open(path, mode="r", *args, **kwargs):
+                    handle = original_open(path, mode, *args, **kwargs)
+                    is_target = path.name.endswith(".json") if target == "json" else path.name.endswith(".json.sha256")
+                    return _FailingBinaryFile(handle, operation) if mode == "xb" and is_target else handle
+
+                with mock.patch.object(type(root), "open", new=controlled_open):
+                    with self.assertRaises(OSError):
+                        runner._checkpoint(stage, 1, identity, state)
+                self.assertFalse((stage / "checkpoint-0001.json").exists())
+                self.assertFalse((stage / "checkpoint-0001.json.sha256").exists())
+
+    preexisting_json = root / "preexisting-json"
+    preexisting_json.mkdir()
+    json_path = preexisting_json / "checkpoint-0001.json"
+    json_path.write_bytes(b"existing-json")
+    with self.assertRaises(FileExistsError):
+        runner._checkpoint(preexisting_json, 1, identity, state)
+    self.assertEqual(json_path.read_bytes(), b"existing-json")
+    self.assertFalse((preexisting_json / "checkpoint-0001.json.sha256").exists())
+
+    preexisting_sidecar = root / "preexisting-sidecar"
+    preexisting_sidecar.mkdir()
+    sidecar_path = preexisting_sidecar / "checkpoint-0001.json.sha256"
+    sidecar_path.write_bytes(b"existing-sidecar")
+    with self.assertRaises(FileExistsError):
+        runner._checkpoint(preexisting_sidecar, 1, identity, state)
+    self.assertFalse((preexisting_sidecar / "checkpoint-0001.json").exists())
+    self.assertEqual(sidecar_path.read_bytes(), b"existing-sidecar")
+
  def test_fake_coordinator_preserves_counts_separation_and_create_only_artifact(self) -> None:
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
@@ -109,8 +181,10 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertEqual(result["fixed_method_rows"], 112)
         self.assertEqual(len(records), 112)
         self.assertNotIn(b"private prompt", archive.read("records.json"))
-    self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json"))), 129)
-    self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json.sha256"))), 129)
+    checkpoints = sorted((local / "checkpoints").glob("checkpoint-*.json"))
+    self.assertEqual(len(checkpoints), 9)
+    self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json.sha256"))), 9)
+    self.assertEqual([json.loads(path.read_text())["state"]["phase"] for path in checkpoints], ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"])
 
 
 if __name__ == "__main__":
