@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-reference-oldroster-v1",
+  "execution_scope_id": "content_v6_detector_domain_iss_reference_oldroster_engineering_and_stage_a_evaluation_v1",
+  "content_method_id": "content_v6_detector_domain_iss_lf_adaptive_hf_reference_oldroster_v1",
+  "evaluated_candidate_id": "content_v6_detector_domain_iss_lf_adaptive_hf_semantic_gate_reference_oldroster_v1",
+  "record_contract_id": "content_v6_detector_domain_iss_reference_oldroster_record_v1",
+  "state_schema_id": "content_v6_reference_oldroster_resumable_state_v1",
+  "run_prefix": "content-v6-reference-oldroster",
+  "base_v6_protocol": {
+    "protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-clean-v1",
+    "protocol_digest": "855fb511afa23548c30a5fcad17525589b340aac7067ae3491941fc8fc99427d",
+    "config_repo_path": "configs/content_chain/content_v6_iss_clean_v1.json"
+  },
+  "cohort": {
+    "roster_manifest": "content_adaptive_dual_branch_v2_clean.jsonl",
+    "roster_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88",
+    "split": "content_adaptive_dual_branch_v2_clean_v1",
+    "fixed_units": 8,
+    "fixed_records": 16
+  },
+  "execution_separation": {
+    "fresh_generation_required": true,
+    "independent_artifact_required": true,
+    "pooling_allowed": false,
+    "current_v6_evaluation_roster_allowed": false,
+    "imported_result_or_artifact_allowed": false
+  }
+}
