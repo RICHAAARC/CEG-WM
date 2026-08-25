@@ -33,7 +33,8 @@ def test_notebook_is_complete_prepared_create_only_handoff_with_fixed_rgb_input(
     assert 'drive.mount("/content/drive", force_remount=False)' in codes[0]
     assert "from google.colab import files" not in source and "files.upload" not in source
     assert "from google.colab import userdata" in source
-    assert "2044187863797a619fd0fd56311e766dafbf75d5" in source
+    assert "9d22c39c460ea54ec4a878598668c68156f12c10" in source
+    assert "geometry-v1-b2b-9d22c39c460e-operational-01" in source
     assert 'PROPOSED_PENDING_FINAL_USER_CONFIRMATION="/content/drive/MyDrive/CEG-WM/Geometry-V1/Batch2B"' in source
     assert "PREPARED_NOT_EXECUTED" in source and "try: pass" not in source
     assert "git','checkout','--detach',EXECUTION_EXACT" in source and "pip','install'" in source
@@ -66,5 +67,7 @@ def test_fixed_operational_rgb_is_exact_deterministic_non_degenerate_input() -> 
     assert not np.array_equal(first_array[0, 0], first_array[511, 511])
     assert len(np.unique(first_array.reshape(-1, 3), axis=0)) > 100
     helper_source = ast.unparse(next(node for node in ast.parse("\n".join(codes)).body if isinstance(node, ast.FunctionDef) and node.name == "build_fixed_operational_rgb")).lower()
+    assert "image.fromarray(array)" in helper_source
+    assert "mode=" not in helper_source
     for forbidden in ("random", "seed", "http", "prompt", "content", "private", "upload"):
         assert forbidden not in helper_source
