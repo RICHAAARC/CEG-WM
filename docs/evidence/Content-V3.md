@@ -48,7 +48,11 @@ This evidence-branch adjudication establishes no general LF/HF invalidity and
 supports no retry, resampling, tuning, threshold change, attack,
 complementarity, fixed-FPR, robustness, geometry, Stage, main, or paper claim.
 
-The original canary/formal revisions are merge parents of this branch, and their runners and notebooks are retained here. The canonical `Content-V3` branch is a clean method-first reconstruction; the historical artifact remains bound only to its original source exact.
+`Content-V3-Evidence` is a results-only leaf under the canonical `Content-V3`
+method branch. The committed scalar result remains bound only to its original
+source exact and is not a method-development base. Only the final formal
+Notebook is retained; canary execution material is omitted from the current
+Evidence tree.
 
 ## Portable scalar evidence
 
