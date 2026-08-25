@@ -1,0 +1,88 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V5",
+  "run_id": "content-v5-c5a0c4bf7d6d-805bc21e173a",
+  "source_exact": "ed5ed5a303c4eb3a8e7cafb8410109b68f5e41fa",
+  "protocol_id": "cegwm-stage-a-content-v5-whitened-lf-adaptive-hf-branchwise-or-clean-v1",
+  "protocol_digest": "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "handoff_provenance": {
+    "exact": "2d0ccb23cbe289d0b3c3b7c566f4f9e4b85db3cc",
+    "notebook_path": "notebooks/content_v5_lf_or_hf_formal_colab.ipynb",
+    "notebook_sha256": "a16d2e4d20132ea1b25bfb68a49a07774b337484397e6656b46a9a56417c700c"
+  },
+  "cohorts_in_order": [
+    {
+      "cohort_id": "control_1",
+      "cohort_role": "reference_cohort",
+      "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
+    },
+    {
+      "cohort_id": "primary_1",
+      "cohort_role": "primary_evaluation",
+      "manifest_sha256": "5303a0284e36d2e6e159526c7ba61a7106fb3db72de35f0ada98fcfd5da2ec2c"
+    }
+  ],
+  "source_archive": {
+    "filename": "content-v5-c5a0c4bf7d6d-805bc21e173a.zip",
+    "byte_count": 47151,
+    "sha256": "c58c904dd8a030abd4ad0c19faed7c952b79aafe55083d462d1c661175cb2c39",
+    "sidecar_filename": "content-v5-c5a0c4bf7d6d-805bc21e173a.zip.sha256",
+    "sidecar_byte_count": 107,
+    "sidecar_file_sha256": "cb58b0afac92b5ac441107de04bd08223ecb997369feb426139dc9e34a980a33",
+    "sidecar_binding": "c58c904dd8a030abd4ad0c19faed7c952b79aafe55083d462d1c661175cb2c39  content-v5-c5a0c4bf7d6d-805bc21e173a.zip\n",
+    "all_members_read_check": "pass",
+    "members": [
+      {
+        "path": "receipt.json",
+        "byte_count": 862,
+        "sha256": "e4b118eb696e36bf982264aa1dea2b3ecdd02ff45d70b63cf4b487866d63f8c4",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      },
+      {
+        "path": "result.json",
+        "byte_count": 155728,
+        "sha256": "f043fcca0a5a483d2419751730155d221e3e69a1b8ac735224b8e7c05cc42c68",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      },
+      {
+        "path": "audit-state.json",
+        "byte_count": 130880,
+        "sha256": "301001d81e97f134ac79f06aa5acd2c1c9bcc12834e2759cac3cb27e7468e163",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      }
+    ]
+  },
+  "contents": {
+    "cohort_count": 2,
+    "fixed_unit_count_per_cohort": 8,
+    "record_count_per_cohort": 16,
+    "total_record_count": 32,
+    "score_fields_per_record": 51,
+    "scalar_score_count": 1632,
+    "unit_aggregate_count_per_cohort": 8,
+    "total_unit_aggregate_count": 16,
+    "status": "complete_rc0",
+    "failed_unit_count_per_cohort": 0,
+    "pooled_decision_absent": true,
+    "cross_cohort_conjunction": false
+  },
+  "independently_recomputed_frozen_gates": {
+    "control_1": {
+      "lf_diagnostic": {"gate_a": 4, "gate_b": 8},
+      "hf_diagnostic": {"gate_a": 8, "gate_b": 8},
+      "branchwise_or": {"gate_a": 8, "gate_b": 8}
+    },
+    "primary_1": {
+      "lf_diagnostic": {"gate_a": 5, "gate_b": 8},
+      "hf_diagnostic": {"gate_a": 8, "gate_b": 8},
+      "branchwise_or": {"gate_a": 8, "gate_b": 8}
+    },
+    "required_units": 7,
+    "strict_ties_fail": true,
+    "tie_count": 0,
+    "formal_fpr_claim": false
+  },
+  "personal_adjudication": "CONTENT_CHAIN_MECHANISM_COMPLETE",
+  "evidence_ceiling": "authenticated_complete_scalar_formal_evidence_for_the_exact_content_v5_branchwise_logical_or_clean_only_mechanism; no_independent_lf_or_complementarity_or_fixed_fpr_or_attack_or_robustness_or_geometry_or_generalization_or_promotion_claim"
+}
