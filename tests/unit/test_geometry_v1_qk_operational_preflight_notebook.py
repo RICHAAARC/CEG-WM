@@ -33,8 +33,8 @@ def test_notebook_is_complete_prepared_create_only_handoff_with_fixed_rgb_input(
     assert 'drive.mount("/content/drive", force_remount=False)' in codes[0]
     assert "from google.colab import files" not in source and "files.upload" not in source
     assert "from google.colab import userdata" in source
-    assert "9d22c39c460ea54ec4a878598668c68156f12c10" in source
-    assert "geometry-v1-b2b-9d22c39c460e-operational-01" in source
+    assert "fa7223fd429633012193068c18c92206d4df8a65" in source
+    assert "geometry-v1-b2b-fa7223fd4296-operational-01" in source
     assert 'PROPOSED_PENDING_FINAL_USER_CONFIRMATION="/content/drive/MyDrive/CEG-WM/Geometry-V1/Batch2B"' in source
     assert "PREPARED_NOT_EXECUTED" in source and "try: pass" not in source
     assert "git','checkout','--detach',EXECUTION_EXACT" in source and "pip','install'" in source
