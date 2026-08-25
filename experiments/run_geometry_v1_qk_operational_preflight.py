@@ -249,6 +249,7 @@ def _architecture_record(transformer: torch.nn.Module, candidates: list[dict[str
     for candidate in candidates:
         path = candidate["path"]
         attention = transformer.get_submodule(path)
+        block = transformer.get_submodule(path.rsplit(".", 1)[0])
         inventory.append({
             "path": path,
             "block_index": candidate["block_index"],
@@ -257,8 +258,13 @@ def _architecture_record(transformer: torch.nn.Module, candidates: list[dict[str
             "to_q": _projection_identity(getattr(attention, "to_q", None)),
             "to_k": _projection_identity(getattr(attention, "to_k", None)),
             "other_routes": {
-                name: isinstance(getattr(attention, name, None), torch.nn.Module)
-                for name in ("attn2", "add_q_proj", "add_k_proj", "to_qkv")
+                # In SD3 JointTransformerBlock, attn2 is a sibling of the
+                # sample-side attn; the added/fused projections belong to attn.
+                "attn2": isinstance(getattr(block, "attn2", None), torch.nn.Module),
+                **{
+                    name: isinstance(getattr(attention, name, None), torch.nn.Module)
+                    for name in ("add_q_proj", "add_k_proj", "to_qkv")
+                },
             },
         })
     return {
@@ -269,12 +275,15 @@ def _architecture_record(transformer: torch.nn.Module, candidates: list[dict[str
 
 
 def _observation_record(observation: SD35QKObservation, *, elapsed_seconds: float) -> dict[str, Any]:
+    source_grid = observation.layers[0].source_grid
     return {
         "latent_shape": list(observation.latent_shape), "schedule_index": observation.schedule_index,
+        "latent_grid": list(observation.latent_shape[-2:]), "patch_grid": list(source_grid),
+        "token_count": source_grid[0] * source_grid[1],
         "timestep": str(observation.timestep.item()), "elapsed_seconds": elapsed_seconds,
         "layers": [
             {"path": layer.layer_path, "query_shape": list(layer.query.shape), "key_shape": list(layer.key.shape),
-             "dtype": str(layer.query.dtype), "source_dtype": str(layer.source_dtype), "device": str(layer.query.device), "finite": bool(torch.isfinite(layer.query).all() and torch.isfinite(layer.key).all()),
+             "dtype": str(layer.query.dtype), "source_dtype": str(layer.source_dtype), "source_device": str(layer.source_device), "source_query_shape": list(layer.source_shape), "source_key_shape": list(layer.source_shape), "device": str(layer.query.device), "finite": bool(torch.isfinite(layer.query).all() and torch.isfinite(layer.key).all()),
              "query_sha256": _tensor_digest(layer.query), "key_sha256": _tensor_digest(layer.key),
              "source_grid": list(layer.source_grid), "heads": layer.heads, "head_dim": layer.head_dim}
             for layer in observation.layers

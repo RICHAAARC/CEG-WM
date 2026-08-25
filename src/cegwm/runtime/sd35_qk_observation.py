@@ -39,6 +39,8 @@ class SD35QKLayerObservation:
     query: torch.Tensor
     key: torch.Tensor
     source_dtype: torch.dtype
+    source_device: torch.device
+    source_shape: tuple[int, int, int]
     source_grid: tuple[int, int]
     sample_indices: torch.Tensor
     heads: int
@@ -154,6 +156,12 @@ def observe_sd35_image_qk(
     transformer = _get_pipeline_member(pipeline, "transformer")
     if not isinstance(transformer, torch.nn.Module):
         raise TypeError("transformer must be a torch module")
+    try:
+        transformer_parameter = next(transformer.parameters())
+    except StopIteration as error:
+        raise TypeError("transformer must expose floating parameters for direct observation") from error
+    if not transformer_parameter.dtype.is_floating_point:
+        raise TypeError("transformer parameters must use a floating dtype")
 
     try:
         latent = encode_final_rgb_image(rgb_image, image_processor, vae)
@@ -166,6 +174,8 @@ def observe_sd35_image_qk(
         raise ValueError("VAE observation must be a batch-one floating NCHW tensor")
     if not bool(torch.isfinite(latent).all()):
         raise ValueError("VAE observation must be finite")
+    if latent.device != transformer_parameter.device or latent.dtype != transformer_parameter.dtype:
+        raise ValueError("VAE latent must match the direct transformer device and dtype")
     latent_shape = tuple(int(value) for value in latent.shape)
     patch_size = _patch_size(transformer)
     if latent.shape[-2] % patch_size or latent.shape[-1] % patch_size:
@@ -226,8 +236,14 @@ def observe_sd35_image_qk(
                 transformer(
                     hidden_states=observed_latent,
                     timestep=timestep,
-                    encoder_hidden_states=spec.null_encoder_hidden_states.to(device=latent.device),
-                    pooled_projections=spec.null_pooled_projections.to(device=latent.device),
+                    # SD3 feeds both values directly to transformer linear layers;
+                    # align this public null conditioning to those parameters.
+                    encoder_hidden_states=spec.null_encoder_hidden_states.to(
+                        device=transformer_parameter.device, dtype=transformer_parameter.dtype
+                    ),
+                    pooled_projections=spec.null_pooled_projections.to(
+                        device=transformer_parameter.device, dtype=transformer_parameter.dtype
+                    ),
                 )
         except BaseException as error:
             setattr(error, "geometry_failure_point", "transformer_call")
@@ -250,12 +266,15 @@ def observe_sd35_image_qk(
             heads = _require_int(getattr(_resolve_attention(transformer, path), "heads", None), f"{path}.heads", minimum=1)
             if query.shape[-1] % heads:
                 raise ValueError(f"{path} Q/K features must divide evenly into heads")
+            source_indices = sample_indices.to(device=query.device)
             layers.append(
                 SD35QKLayerObservation(
                     layer_path=path,
-                    query=query[0, sample_indices].detach().to(device="cpu", dtype=torch.float32),
-                    key=key[0, sample_indices].detach().to(device="cpu", dtype=torch.float32),
+                    query=query[0, source_indices].detach().to(device="cpu", dtype=torch.float32),
+                    key=key[0, source_indices].detach().to(device="cpu", dtype=torch.float32),
                     source_dtype=query.dtype,
+                    source_device=query.device,
+                    source_shape=tuple(int(value) for value in query.shape),
                     source_grid=source_grid,
                     sample_indices=sample_indices.cpu(),
                     heads=heads,

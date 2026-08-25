@@ -160,12 +160,16 @@ def test_observation_uses_rgb_numeric_values_and_direct_null_conditioning() -> N
     assert layer.query.shape == layer.key.shape == (6, 4)
     assert layer.query.dtype == layer.key.dtype == torch.float32
     assert layer.query.device.type == layer.key.device.type == "cpu"
+    assert layer.source_dtype == torch.float32 and layer.source_device.type == "cpu"
+    assert layer.source_shape == (1, 16, 4)
     assert layer.source_grid == (4, 4)
     assert layer.sample_indices.tolist() == [0, 2, 3, 12, 14, 15]
     assert layer.heads == 2 and layer.head_dim == 2
     assert not torch.equal(first.layers[0].query, second.layers[0].query)
     assert pipeline.transformer.seen_null is not None
     assert torch.equal(pipeline.transformer.seen_null[0].cpu(), _spec().null_encoder_hidden_states)
+    assert pipeline.transformer.seen_null[0].dtype == next(pipeline.transformer.parameters()).dtype
+    assert pipeline.transformer.seen_null[1].dtype == next(pipeline.transformer.parameters()).dtype
     assert first.latent_shape == (1, 4, 8, 8)
     assert first.schedule_index == 1 and first.public_noise_seed == 17
 

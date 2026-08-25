@@ -7,6 +7,7 @@ from PIL import Image
 from pathlib import Path
 
 from experiments import run_geometry_v1_qk_operational_preflight as runner
+from cegwm.runtime.sd35_qk_observation import SD35QKLayerObservation, SD35QKObservation
 
 
 def test_layer_discovery_requires_distinct_real_attention_blocks() -> None:
@@ -48,6 +49,7 @@ def test_architecture_record_is_complete_for_only_sample_side_candidates() -> No
     for _ in range(2):
         block = torch.nn.Module()
         block.attn = Attention()
+        block.attn2 = torch.nn.Module()
         transformer.transformer_blocks.append(block)
     candidates = runner._discover_candidates(transformer)
     record = runner._architecture_record(transformer, candidates)
@@ -58,7 +60,33 @@ def test_architecture_record_is_complete_for_only_sample_side_candidates() -> No
     first = record["attention_candidates"][0]
     assert first["to_q"]["present"] and first["to_k"]["present"]
     assert first["to_q"]["weight_shape"] == [4, 3]
-    assert first["other_routes"] == {"attn2": False, "add_q_proj": True, "add_k_proj": True, "to_qkv": True}
+    assert first["other_routes"] == {"attn2": True, "add_q_proj": True, "add_k_proj": True, "to_qkv": True}
+
+
+def test_observation_record_retains_runtime_source_shape_dtype_device_and_grids() -> None:
+    source = torch.ones((1, 16, 4), dtype=torch.float32)
+    layer = SD35QKLayerObservation(
+        layer_path="transformer_blocks.0.attn",
+        query=source[0, :2].detach().to(dtype=torch.float32),
+        key=source[0, :2].detach().to(dtype=torch.float32),
+        source_dtype=source.dtype,
+        source_device=source.device,
+        source_shape=(1, 16, 4),
+        source_grid=(4, 4),
+        sample_indices=torch.tensor([0, 1]),
+        heads=2,
+        head_dim=2,
+    )
+    record = runner._observation_record(
+        SD35QKObservation(layers=(layer,), latent_shape=(1, 4, 8, 8), schedule_index=7, timestep=torch.tensor([1.0]), public_noise_seed=0),
+        elapsed_seconds=0.0,
+    )
+    assert record["latent_grid"] == [8, 8]
+    assert record["patch_grid"] == [4, 4] and record["token_count"] == 16
+    assert record["layers"][0]["source_query_shape"] == [1, 16, 4]
+    assert record["layers"][0]["source_key_shape"] == [1, 16, 4]
+    assert record["layers"][0]["source_dtype"] == "torch.float32"
+    assert record["layers"][0]["source_device"] == "cpu"
 
 
 def test_unknown_public_revision_is_recorded_without_placeholder() -> None:
