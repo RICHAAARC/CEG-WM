@@ -42,6 +42,11 @@ def test_unknown_public_revision_is_recorded_without_placeholder() -> None:
     assert record["resolution_status"] == "unavailable_from_public_runtime"
 
 
+def test_snapshot_extraction_never_returns_a_path() -> None:
+    assert runner._snapshot_hex("/cache/models/snapshots/abcdef0123456/component") == "abcdef0123456"
+    assert runner._snapshot_hex("/cache/models/no-commit") is None
+
+
 def test_preflight_requires_cuda_before_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner.torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(runner, "_validate_execution_exact", lambda *_args: "geometry-v1-b2b-000000000000-operational-01")

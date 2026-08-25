@@ -34,6 +34,7 @@ SCHEDULE_INDEX = 7
 PUBLIC_NOISE_SEED = 0
 MAX_GRID = (8, 8)
 _ATTENTION_PATH = re.compile(r"(?:^|\.)transformer_blocks\.(\d+)\.attn(?:\.|$)")
+_SNAPSHOT_HEX = re.compile(r"(?:^|/)snapshots/([0-9a-f]{7,64})(?:/|$)")
 _PUBLIC_ERRORS = {"FileNotFoundError", "ImportError", "ModuleNotFoundError", "OSError", "RuntimeError", "TypeError", "ValueError"}
 
 
@@ -68,6 +69,29 @@ def _module_dtype(value: Any) -> str | None:
         return None
 
 
+def _snapshot_hex(value: Any) -> str | None:
+    """Extract only a commit-shaped public snapshot name, never its path."""
+    if not isinstance(value, str):
+        return None
+    match = _SNAPSHOT_HEX.search(value)
+    return match.group(1) if match else None
+
+
+def _public_config_identity(component: Any) -> dict[str, Any]:
+    config = getattr(component, "config", None)
+    scalar: dict[str, str | int | float | bool | None] = {}
+    for name, value in vars(config).items() if hasattr(config, "__dict__") else ():
+        lowered = name.lower()
+        if any(token in lowered for token in ("token", "key", "secret", "path", "directory", "file")):
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            scalar[name] = value
+    encoded = json.dumps(scalar, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    source = getattr(component, "_name_or_path", getattr(component, "name_or_path", None))
+    commit = getattr(component, "_commit_hash", None)
+    return {"class": f"{type(component).__module__}.{type(component).__qualname__}", "config_class": f"{type(config).__module__}.{type(config).__qualname__}", "commit_candidate": commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{7,64}", commit) else None, "snapshot_candidate": _snapshot_hex(source), "config_scalar_sha256": _sha256_bytes(encoded)}
+
+
 def _runtime_record(pipeline: Any) -> dict[str, Any]:
     def version(name: str) -> str | None:
         try:
@@ -92,6 +116,7 @@ def _runtime_record(pipeline: Any) -> dict[str, Any]:
         "scheduler_class": f"{type(getattr(pipeline, 'scheduler', None)).__module__}.{type(getattr(pipeline, 'scheduler', None)).__qualname__}",
         "image_processor_class": f"{type(getattr(pipeline, 'image_processor', None)).__module__}.{type(getattr(pipeline, 'image_processor', None)).__qualname__}",
         "vae_dtype": _module_dtype(getattr(pipeline, "vae", None)), "transformer_dtype": _module_dtype(getattr(pipeline, "transformer", None)),
+        "components": {name: _public_config_identity(getattr(pipeline, name, None)) for name in ("vae", "transformer", "scheduler", "image_processor")},
     }
 
 
@@ -157,10 +182,20 @@ def _validate_execution_exact(expected_exact: str, repo_root: Path) -> str:
     return f"geometry-v1-b2b-{expected_exact[:12]}-operational-01"
 
 
-def _counter_targets(transformer: torch.nn.Module, paths: tuple[str, str]) -> tuple[dict[str, int], list[Any], dict[str, int]]:
+def _counter_targets(transformer: torch.nn.Module, paths: tuple[str, str]) -> tuple[dict[str, int], list[Any], dict[str, int], dict[str, Any]]:
     baseline: dict[str, int] = {}
     counts: dict[str, int] = {}
     handles: list[Any] = []
+    transformer_baseline = len(transformer._forward_pre_hooks)
+    hidden_metadata: dict[str, Any] = {"count": 0, "device": None, "dtype": None, "baseline": transformer_baseline}
+    def prehook(_module: Any, _args: Any, kwargs: Any) -> None:
+        hidden = kwargs.get("hidden_states") if isinstance(kwargs, dict) else None
+        if not isinstance(hidden, torch.Tensor):
+            raise ValueError("transformer prehook did not receive hidden_states")
+        hidden_metadata["count"] += 1
+        hidden_metadata["device"] = str(hidden.device)
+        hidden_metadata["dtype"] = str(hidden.dtype)
+    handles.append(transformer.register_forward_pre_hook(prehook, with_kwargs=True))
     for path in paths:
         attention = transformer.get_submodule(path)
         for name in ("to_q", "to_k"):
@@ -171,7 +206,7 @@ def _counter_targets(transformer: torch.nn.Module, paths: tuple[str, str]) -> tu
             def count(_module: Any, _inputs: Any, _output: Any, *, label: str = label) -> None:
                 counts[label] += 1
             handles.append(module.register_forward_hook(count))
-    return baseline, handles, counts
+    return baseline, handles, counts, hidden_metadata
 
 
 def operational_preflight(
@@ -201,7 +236,7 @@ def operational_preflight(
     spec = SD35QKObservationSpec(MODEL_ID, resolved_revision, (shallow, deep), INFERENCE_STEPS, SCHEDULE_INDEX, PUBLIC_NOISE_SEED, MAX_GRID, null_hidden, null_pooled)
     results: list[dict[str, Any]] = []
     first: SD35QKObservation | None = None
-    baseline, counter_handles, counts = _counter_targets(transformer, (shallow, deep))
+    baseline, counter_handles, counts, hidden_metadata = _counter_targets(transformer, (shallow, deep))
     try:
       for index, image in enumerate(images):
         started = time.monotonic()
@@ -230,11 +265,13 @@ def operational_preflight(
               label = f"{path}.{name}"
               if len(getattr(attention, name)._forward_hooks) != baseline[label]:
                   raise RuntimeError("projection hook cleanup differs")
+      if len(transformer._forward_pre_hooks) != hidden_metadata["baseline"]:
+          raise RuntimeError("transformer prehook cleanup differs")
     assert first is not None
     relation = keyed_qk_relation(first.layers[0].query.numpy(), first.layers[0].key.numpy(), root_key)
     if not np.isfinite(relation.relation).all():
         raise ValueError("keyed relation compatibility is nonfinite")
-    return {"status": "operational_preflight_complete", "run_id": run_id, "science_denominator": 0, "runtime": _runtime_record(pipeline), "null_conditioning": null_record, "candidate_layers": candidates, "selected_candidates": [{"path": path, "block_index": int(_ATTENTION_PATH.search(path).group(1))} for path in (shallow, deep)], "images": results, "relation_compatibility": "pass", "relation": {"relation_shape": list(relation.relation.shape), "relation_finite": bool(np.isfinite(relation.relation).all()), "projection_scalar_finite": bool(np.isfinite(relation.projection)), "coverage_finite": bool(np.isfinite(relation.coverage)), "gap_finite": bool(np.isfinite(relation.gap)), "wrong_key_margin_finite": bool(np.isfinite(relation.wrong_key_margin))}, "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated())}
+    return {"status": "operational_preflight_complete", "run_id": run_id, "science_denominator": 0, "runtime": _runtime_record(pipeline), "null_conditioning": null_record, "candidate_layers": candidates, "selected_candidates": [{"path": path, "block_index": int(_ATTENTION_PATH.search(path).group(1))} for path in (shallow, deep)], "transformer_hidden_states": {"device": hidden_metadata["device"], "dtype": hidden_metadata["dtype"], "call_count": hidden_metadata["count"]}, "hook_cleanup": True, "images": results, "relation_compatibility": "pass", "relation": {"relation_shape": list(relation.relation.shape), "relation_finite": bool(np.isfinite(relation.relation).all()), "projection_scalar_finite": bool(np.isfinite(relation.projection)), "coverage_finite": bool(np.isfinite(relation.coverage)), "gap_finite": bool(np.isfinite(relation.gap)), "wrong_key_margin_finite": bool(np.isfinite(relation.wrong_key_margin))}, "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated())}
 
 
 def _main(argv: list[str] | None = None) -> int:
