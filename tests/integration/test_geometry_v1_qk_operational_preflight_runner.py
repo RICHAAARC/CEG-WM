@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 from PIL import Image
+from pathlib import Path
 
 from experiments import run_geometry_v1_qk_operational_preflight as runner
 
@@ -31,5 +32,6 @@ def test_layer_discovery_fails_closed_for_one_block() -> None:
 
 def test_preflight_requires_cuda_before_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner.torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(runner, "_validate_execution_exact", lambda *_args: "geometry-v1-b2b-000000000000-operational-01")
     with pytest.raises(RuntimeError, match="cuda_required"):
-        runner.operational_preflight([Image.new("RGB", (2, 2))], hf_token="token", root_key="key")
+        runner.operational_preflight([Image.new("RGB", (2, 2))], hf_token="token", root_key="key", expected_exact="0" * 40, repo_root=Path("."))
