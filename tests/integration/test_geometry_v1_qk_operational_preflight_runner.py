@@ -59,7 +59,7 @@ def test_component_identity_is_uniform_and_never_leaks_paths() -> None:
     assert set(components) == {"pipeline", "vae", "transformer", "scheduler", "image_processor"}
     expected = {"class", "config_class", "commit_candidate", "snapshot_candidate", "sanitized_config_digest", "public_name_or_path"}
     assert all(set(record) == expected for record in components.values())
-    assert components["pipeline"]["snapshot_candidate"] == "abcdef0123456"
+    assert components["pipeline"]["snapshot_candidate"] is None
     assert "/private" not in repr(components)
 
 
