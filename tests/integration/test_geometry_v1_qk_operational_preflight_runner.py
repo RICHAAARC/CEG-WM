@@ -47,10 +47,20 @@ def test_snapshot_extraction_never_returns_a_path() -> None:
     assert runner._snapshot_hex("/cache/models/no-commit") is None
 
 
-def test_model_identity_never_serializes_noncanonical_paths() -> None:
-    record = runner._model_identity("/private/cache/snapshots/abcdef0123456/model")
-    assert record["name"] is None and record["snapshot_candidate"] == "abcdef0123456"
-    assert "/private" not in repr(record)
+def test_component_identity_is_uniform_and_never_leaks_paths() -> None:
+    class Config:
+        _name_or_path = "/private/cache/snapshots/abcdef0123456/config"
+        public_scalar = 1
+
+    pipeline = type("Pipeline", (), {"_name_or_path": "/private/cache/snapshots/abcdef0123456/model", "config": Config()})()
+    for name in ("vae", "transformer", "scheduler", "image_processor"):
+        setattr(pipeline, name, type("Component", (), {"config": Config()})())
+    components = runner._runtime_record(pipeline)["components"]
+    assert set(components) == {"pipeline", "vae", "transformer", "scheduler", "image_processor"}
+    expected = {"class", "config_class", "commit_candidate", "snapshot_candidate", "sanitized_config_digest", "public_name_or_path"}
+    assert all(set(record) == expected for record in components.values())
+    assert components["pipeline"]["snapshot_candidate"] == "abcdef0123456"
+    assert "/private" not in repr(components)
 
 
 def test_unique_public_snapshot_is_a_revision_candidate() -> None:

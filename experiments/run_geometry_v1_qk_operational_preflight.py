@@ -59,12 +59,7 @@ def _public_revision(pipeline: Any) -> tuple[str | None, str]:
         value = getattr(source, "_commit_hash", None)
         if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{7,64}", value):
             return value, "proven_public_commit"
-    snapshots = {
-        candidate for candidate in (
-            _snapshot_hex(getattr(pipeline, "_name_or_path", getattr(pipeline, "name_or_path", None)),),
-            _snapshot_hex(getattr(getattr(pipeline, "config", None), "_name_or_path", None)),
-        ) if candidate is not None
-    }
+    snapshots = _component_snapshot_candidates(pipeline)
     if len(snapshots) == 1:
         return next(iter(snapshots)), "unique_public_snapshot"
     return None, "unavailable_from_public_runtime"
@@ -85,7 +80,22 @@ def _snapshot_hex(value: Any) -> str | None:
     return match.group(1) if match else None
 
 
-def _public_config_identity(component: Any) -> dict[str, Any]:
+def _public_name_or_path(component: Any) -> Any:
+    return getattr(component, "_name_or_path", getattr(component, "name_or_path", None))
+
+
+def _component_snapshot_candidates(component: Any) -> set[str]:
+    config = getattr(component, "config", None)
+    return {
+        candidate for candidate in (
+            _snapshot_hex(_public_name_or_path(component)),
+            _snapshot_hex(_public_name_or_path(config)),
+        ) if candidate is not None
+    }
+
+
+def _component_identity(component: Any) -> dict[str, Any]:
+    """Return the fixed, path-safe public identity record for one component."""
     config = getattr(component, "config", None)
     scalar: dict[str, str | int | float | bool | None] = {}
     for name, value in vars(config).items() if hasattr(config, "__dict__") else ():
@@ -95,17 +105,21 @@ def _public_config_identity(component: Any) -> dict[str, Any]:
         if isinstance(value, (str, int, float, bool)) or value is None:
             scalar[name] = value
     encoded = json.dumps(scalar, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    source = getattr(component, "_name_or_path", getattr(component, "name_or_path", None))
-    config_source = getattr(config, "_name_or_path", getattr(config, "name_or_path", None))
-    commit = getattr(component, "_commit_hash", None)
-    return {"class": f"{type(component).__module__}.{type(component).__qualname__}", "config_class": f"{type(config).__module__}.{type(config).__qualname__}", "commit_candidate": commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{7,64}", commit) else None, "snapshot_candidate": _snapshot_hex(source), "config_snapshot_candidate": _snapshot_hex(config_source), "config_scalar_sha256": _sha256_bytes(encoded)}
-
-
-def _model_identity(value: Any) -> dict[str, str | None]:
-    if value == MODEL_ID:
-        return {"name": MODEL_ID, "digest": None, "snapshot_candidate": None}
-    text = value if isinstance(value, str) else ""
-    return {"name": None, "digest": _sha256_bytes(text.encode("utf-8")) if text else None, "snapshot_candidate": _snapshot_hex(text)}
+    commits = [
+        getattr(source, "_commit_hash", None)
+        for source in (component, config)
+    ]
+    commit = next((value for value in commits if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{7,64}", value)), None)
+    snapshots = _component_snapshot_candidates(component)
+    source = _public_name_or_path(component)
+    return {
+        "class": f"{type(component).__module__}.{type(component).__qualname__}",
+        "config_class": f"{type(config).__module__}.{type(config).__qualname__}",
+        "commit_candidate": commit,
+        "snapshot_candidate": next(iter(snapshots)) if len(snapshots) == 1 else None,
+        "sanitized_config_digest": _sha256_bytes(encoded),
+        "public_name_or_path": MODEL_ID if source == MODEL_ID else None,
+    }
 
 
 def _runtime_record(pipeline: Any) -> dict[str, Any]:
@@ -116,7 +130,7 @@ def _runtime_record(pipeline: Any) -> dict[str, Any]:
             return None
 
     revision, resolution_status = _public_revision(pipeline)
-    name_or_path = getattr(pipeline, "_name_or_path", getattr(pipeline, "name_or_path", None))
+    components = {name: _component_identity(getattr(pipeline, name, None)) for name in ("pipeline", "vae", "transformer", "scheduler", "image_processor")}
     return {
         "python": sys.version.split()[0],
         "torch": getattr(torch, "__version__", None), "diffusers": version("diffusers"),
@@ -124,15 +138,13 @@ def _runtime_record(pipeline: Any) -> dict[str, Any]:
         "cuda_available": bool(torch.cuda.is_available()),
         "cuda_device": torch.cuda.get_device_name() if torch.cuda.is_available() else None,
         "requested_model_id": MODEL_ID, "requested_revision": None, "requested_torch_dtype": str(torch.float16), "selected_device": "cuda",
-        "pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}",
-        "pipeline_identity": _model_identity(name_or_path),
         "resolved_revision": revision, "resolution_status": resolution_status,
         "vae_class": f"{type(getattr(pipeline, 'vae', None)).__module__}.{type(getattr(pipeline, 'vae', None)).__qualname__}",
         "transformer_class": f"{type(getattr(pipeline, 'transformer', None)).__module__}.{type(getattr(pipeline, 'transformer', None)).__qualname__}",
         "scheduler_class": f"{type(getattr(pipeline, 'scheduler', None)).__module__}.{type(getattr(pipeline, 'scheduler', None)).__qualname__}",
         "image_processor_class": f"{type(getattr(pipeline, 'image_processor', None)).__module__}.{type(getattr(pipeline, 'image_processor', None)).__qualname__}",
         "vae_dtype": _module_dtype(getattr(pipeline, "vae", None)), "transformer_dtype": _module_dtype(getattr(pipeline, "transformer", None)),
-        "components": {name: _public_config_identity(getattr(pipeline, name, None)) for name in ("vae", "transformer", "scheduler", "image_processor")},
+        "components": components,
     }
 
 
