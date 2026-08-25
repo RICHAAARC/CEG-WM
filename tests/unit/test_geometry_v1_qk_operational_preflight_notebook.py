@@ -10,11 +10,11 @@ def test_geometry_notebook_is_thin_and_exact_bound() -> None:
     assert notebook["nbformat"] == 4
     assert all(cell.get("execution_count") is None and cell.get("outputs", []) == [] for cell in notebook["cells"] if cell["cell_type"] == "code")
     source = "\n".join("".join(cell["source"]) for cell in notebook["cells"])
-    assert "bbd1972cfc3f2dbd16516b18cf78a6f2cac08dee" in source
+    assert "f8f953c29326055c142ec63cf57bd52b3d973035" in source
     assert "BRANCH = 'Geometry-V1'" in source
     assert "PREPARED_NOT_EXECUTABLE_FROM_COLAB" in source
     assert "drive.mount" not in source
     assert "CEG_WM_ROOT_KEY" in source and "HF_TOKEN" in source
     assert "subprocess.run" in source and "stderr=subprocess.DEVNULL" in source
     assert "pip', 'install'" in source and "verify_checkout()" in source
-    assert "--expected-exact" in source and "geometry-v1-b2b-bbd1972cfc3f-operational-01" in source
+    assert "--expected-exact" in source and "geometry-v1-b2b-f8f953c29326-operational-01" in source
