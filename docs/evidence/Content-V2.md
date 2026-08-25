@@ -36,7 +36,9 @@ LF Gate-A failures were units `0001`, `0003`, and `0004`. The preregistered conj
 
 The preserved narrow adjudication is `SCIENTIFIC_NEGATIVE` only for the exact method, run, roster, key identity, and artifact listed above. It does not establish general LF/HF invalidity, attacks, complementarity, fixed-FPR detection, robustness, geometry, Stage completion, main promotion, or paper evidence. It authorizes no retry, resampling, tuning, threshold change, or roster replacement.
 
-The original execution and handoff revisions are merge parents of this evidence branch. The canonical `Content-V2` branch is a clean method-first reconstruction; the historical artifact remains bound only to its original source exact.
+`Content-V2-Evidence` is a results-only leaf under the canonical `Content-V2`
+method branch. The committed scalar result remains bound only to its original
+source exact and is not a method-development base.
 
 ## Portable scalar evidence
 
