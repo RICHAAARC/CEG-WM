@@ -1,6 +1,6 @@
 {
   "schema_version": "cegwm_scalar_evidence_package_v1",
-  "route": "Curve",
+  "route": "Content-Curve",
   "run_id": "slhfr-196e620c349c2604baeb824d",
   "source_exact": "b1a806a34a16435c4242e45eafa3818b3a37b8a6",
   "protocol_id": "standalone-lf-hf-frequency-response-v1",

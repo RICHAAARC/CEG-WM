@@ -1,4 +1,4 @@
-# Curve scalar evidence package
+# Content-Curve scalar evidence package
 
 This directory preserves the exact scalar JSON members of the authenticated
 terminal artifact for `slhfr-196e620c349c2604baeb824d`.
