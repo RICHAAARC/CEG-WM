@@ -121,3 +121,21 @@ def test_weights_apply_only_to_z_and_branch_diagnostics_cannot_veto_weighted_gat
     assert evidence.hf_gate_b_diagnostic is True
     with pytest.raises(TypeError):
         v9.weighted_joint_score(True, 0.0, asset)
+
+
+@pytest.mark.unit
+def test_accepted_asset_golden_values_and_weighted_score_are_not_raw_minimum() -> None:
+    root = Path(__file__).resolve().parents[2]
+    path = root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"
+    asset = v9.load_calibration_asset(path, path.with_name(f"{path.name}.sha256"))
+    fit = asset.fit
+    assert fit == v9.CalibrationFit(
+        -0.00014715595446671882,
+        0.005302081251443399,
+        -0.0008069255018524792,
+        0.007815012245497268,
+        0.004058131987799612,
+    )
+    score = v9.weighted_joint_score(0.01, 0.02, asset)
+    assert math.isfinite(score)
+    assert score != min(0.01, 0.02)

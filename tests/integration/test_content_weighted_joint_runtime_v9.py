@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image
 import pytest
 
 from cegwm.protocol.content_chain_v9 import CONTENT_V9_CALIBRATION_SPLIT, ContentV9Unit
+from cegwm.protocol.content_chain_v9_stability import ContentV9StabilityUnit
+from cegwm.method.content_weighted_joint_v9 import load_calibration_asset
 from cegwm.runtime import content_weighted_joint_sd35_v9 as runtime
 from cegwm.runtime.content_iss_sd35_v6 import ContentV6RunOutput
 
@@ -66,3 +69,52 @@ def test_runtime_rejects_non_calibration_unit_before_generation(monkeypatch: pyt
     unit = ContentV9Unit("u", "wrong", "s", "p", 1, 512, 512)
     with pytest.raises(TypeError, match="validated calibration unit"):
         runtime.run_content_v9_calibration_unit(object(), unit, b"k" * 32, _assets())
+
+
+@pytest.mark.integration
+def test_stability_runtime_uses_one_real_v6_pair_and_same_asset_for_candidate_and_null(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    asset_path = root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"
+    asset = load_calibration_asset(asset_path, asset_path.with_name(f"{asset_path.name}.sha256"))
+    candidate = Image.new("RGB", (512, 512), "gray")
+    primary_null = Image.new("RGB", (512, 512), "white")
+    measurement = object()
+    pair_calls: list[dict[str, object]] = []
+    score_calls: list[tuple[Image.Image, bytes]] = []
+    monkeypatch.setattr(
+        runtime,
+        "run_content_v6_evaluation_pair",
+        lambda *args, **kwargs: pair_calls.append(kwargs)
+        or ContentV6RunOutput(candidate, primary_null, measurement),
+    )
+    monkeypatch.setattr(runtime, "require_ordinary_rgb_image", lambda image: image)
+    monkeypatch.setattr(
+        runtime,
+        "score_content_v4_lf_image",
+        lambda image, key, assets: score_calls.append((image, key)) or key[0] / 255.0,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "score_hf_image",
+        lambda image, key, assets: -(key[0] / 255.0),
+    )
+    unit = ContentV9StabilityUnit("u", "s", "source", "prompt", 7, 512, 512)
+    registered = b"r" * 32
+    wrong = tuple(bytes([index + 1]) * 32 for index in range(16))
+    output = runtime.run_content_v9_stability_unit(
+        object(), unit, registered, wrong, _assets(), asset
+    )
+    assert len(pair_calls) == 1 and pair_calls[0]["seed"] == 7
+    assert output.image is candidate and output.primary_null is primary_null
+    assert output.measurement is measurement
+    assert tuple(output.candidate_scores) == ("lf", "hf", "weighted_joint")
+    assert tuple(output.primary_null_scores) == ("lf", "hf", "weighted_joint")
+    assert len(score_calls) == 34
+    assert [image for image, _ in score_calls[:17]] == [candidate] * 17
+    assert [image for image, _ in score_calls[17:]] == [primary_null] * 17
+    assert output.candidate_scores["weighted_joint"]["registered"] != min(
+        output.candidate_scores["lf"]["registered"],
+        output.candidate_scores["hf"]["registered"],
+    )

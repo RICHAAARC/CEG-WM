@@ -10,6 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from cegwm.method.content_weighted_joint_v9 import (
+    WeightedJointAsset,
+    load_calibration_asset,
+)
+from cegwm.protocol.content_chain_v2 import ContentChainProtocol
+from cegwm.protocol.content_chain_v6 import load_content_v6_clean_protocol
+
 CONTENT_V9_STABILITY_SOURCE_EXACT = "c38522dcab6cb173cedf8415cee2fd30998222ba"
 CONTENT_V9_STABILITY_METHOD_ID = (
     "content_v9_v6_calibrated_weighted_joint_multi_cohort_stability_v1"
@@ -25,6 +32,37 @@ CONTENT_V9_STABILITY_PROTOCOL_DIGEST = (
 )
 CONTENT_V9_STABILITY_RECORD_CONTRACT_ID = (
     "content_v9_calibrated_weighted_joint_stability_record_v1"
+)
+CONTENT_V9_STABILITY_STATE_SCHEMA_ID = "content_v9_multi_cohort_stability_state_v1"
+CONTENT_V9_STABILITY_ARTIFACT_CONTRACT_ID = (
+    "content_v9_multi_cohort_stability_artifact_v1"
+)
+CONTENT_V9_STABILITY_TERMINAL_RECEIPT_ID = (
+    "content_v9_multi_cohort_stability_terminal_receipt_v1"
+)
+CONTENT_V9_STABILITY_EXECUTION_SCOPE_ID = (
+    "content_v9_multi_cohort_stability_evaluation_v1"
+)
+CONTENT_V9_STABILITY_CALIBRATION_ASSET = (
+    "assets/content_v9_calibrated_weighted_joint_v1.json"
+)
+CONTENT_V9_STABILITY_CALIBRATION_ASSET_SHA256 = (
+    "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+)
+CONTENT_V9_STABILITY_CALIBRATION_ASSET_SIDECAR_FILE_SHA256 = (
+    "d543d604e5d9226ddb4c378e160fa389abce223fe8adbb54562c3e6666537301"
+)
+CONTENT_V9_STABILITY_CALIBRATION_PRODUCER_EXACT = (
+    "c38522dcab6cb173cedf8415cee2fd30998222ba"
+)
+CONTENT_V9_STABILITY_CALIBRATION_PROTOCOL_DIGEST = (
+    "68f37585eb6eab123bad7c1703767df08404718ce4771f73fbbec236491a1e01"
+)
+CONTENT_V9_STABILITY_CALIBRATION_PUBLIC_KEY_DIGEST = (
+    "a82b191410993cc2619ab239b62e5f58040bba0affde8e56b43844e58edaebb3"
+)
+CONTENT_V9_STABILITY_PUBLIC_KEY_DIGEST = (
+    "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77"
 )
 CONTENT_V9_STABILITY_RUN_TEMPLATE = (
     "content-v9-stability-{protocol_digest_12}-{calibration_asset_sha256_12}-"
@@ -81,6 +119,8 @@ class ContentV9StabilityContract:
     novel_seed_02: tuple[ContentV9StabilityUnit, ...]
     config: Mapping[str, Any]
     protocol_digest: str
+    v6_protocol: ContentChainProtocol
+    calibration_asset: WeightedJointAsset
 
 
 def _stable_line(value: Mapping[str, Any]) -> bytes:
@@ -195,7 +235,8 @@ def _canonical_digest(
 
 
 def load_content_v9_stability_contract(repo_root: str | Path) -> ContentV9StabilityContract:
-    root = Path(repo_root) / "configs" / "content_chain"
+    repo = Path(repo_root)
+    root = repo / "configs" / "content_chain"
     old_rows = _load_rows(
         root / CONTENT_V9_STABILITY_OLD_MANIFEST,
         expected_sha256=CONTENT_V9_STABILITY_OLD_MANIFEST_SHA256,
@@ -241,8 +282,38 @@ def load_content_v9_stability_contract(repo_root: str | Path) -> ContentV9Stabil
     protocol_digest = _canonical_digest(config, old_rows, current_rows, novel_rows)
     if protocol_digest != CONTENT_V9_STABILITY_PROTOCOL_DIGEST:
         raise ValueError("Content V9 stability canonical protocol digest differs")
+    asset_path = root / CONTENT_V9_STABILITY_CALIBRATION_ASSET
+    sidecar_path = asset_path.with_name(f"{asset_path.name}.sha256")
+    asset_bytes = asset_path.read_bytes()
+    sidecar_bytes = sidecar_path.read_bytes()
+    if (
+        hashlib.sha256(asset_bytes).hexdigest()
+        != CONTENT_V9_STABILITY_CALIBRATION_ASSET_SHA256
+        or hashlib.sha256(sidecar_bytes).hexdigest()
+        != CONTENT_V9_STABILITY_CALIBRATION_ASSET_SIDECAR_FILE_SHA256
+    ):
+        raise ValueError("Content V9 stability accepted calibration asset bytes differ")
+    calibration_asset = load_calibration_asset(asset_path, sidecar_path)
+    payload = calibration_asset.payload
+    if (
+        payload["producer_exact"]
+        != CONTENT_V9_STABILITY_CALIBRATION_PRODUCER_EXACT
+        or payload["calibration_protocol_digest"]
+        != CONTENT_V9_STABILITY_CALIBRATION_PROTOCOL_DIGEST
+        or payload["calibration_public_key_digest"]
+        != CONTENT_V9_STABILITY_CALIBRATION_PUBLIC_KEY_DIGEST
+    ):
+        raise ValueError("Content V9 stability accepted calibration identity differs")
+    v6_protocol = load_content_v6_clean_protocol(repo)
     return ContentV9StabilityContract(
-        old, current, novel_seed_01, novel_seed_02, config, protocol_digest
+        old,
+        current,
+        novel_seed_01,
+        novel_seed_02,
+        config,
+        protocol_digest,
+        v6_protocol,
+        calibration_asset,
     )
 
 

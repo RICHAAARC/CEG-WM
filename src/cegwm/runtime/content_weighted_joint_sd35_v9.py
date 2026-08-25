@@ -18,6 +18,7 @@ from cegwm.protocol.content_chain_v9 import (
     CONTENT_V9_WRONG_KEY_DOMAIN,
     ContentV9Unit,
 )
+from cegwm.protocol.content_chain_v9_stability import ContentV9StabilityUnit
 from cegwm.runtime.content_iss_sd35_v6 import (
     ContentV6EvaluationAssets,
     ContentV6RunOutput,
@@ -37,12 +38,27 @@ class ContentV9CalibrationAssets:
             raise TypeError("Content V9 calibration requires real Content V6 assets")
 
 
+@dataclass(frozen=True, slots=True)
+class ContentV9StabilityOutput:
+    image: Any
+    primary_null: Any
+    measurement: Any
+    candidate_scores: dict[str, dict[str, float]]
+    primary_null_scores: dict[str, dict[str, float]]
+
+
 def derive_calibration_wrong_keys(calibration_key: bytes) -> tuple[bytes, ...]:
     key = normalize_detection_key(calibration_key)
     return tuple(
         prg_bytes(key, f"{CONTENT_V9_WRONG_KEY_DOMAIN}/index={index}", 32)
         for index in range(16)
     )
+
+
+def derive_stability_wrong_keys(detection_key: bytes) -> tuple[bytes, ...]:
+    """Use the unchanged formal external-wrong-key domain for stability scoring."""
+
+    return derive_calibration_wrong_keys(detection_key)
 
 
 def _blind_pair(image: Any, key: bytes, assets: ContentV9CalibrationAssets) -> LFHFScorePair:
@@ -116,9 +132,56 @@ def blind_weighted_scores(
     return {"lf": lf, "hf": hf, "weighted_joint": weighted}
 
 
+def run_content_v9_stability_unit(
+    pipeline: Any,
+    unit: ContentV9StabilityUnit,
+    detection_key: bytes,
+    wrong_keys: Sequence[bytes],
+    assets: ContentV9CalibrationAssets,
+    calibration_asset: WeightedJointAsset,
+) -> ContentV9StabilityOutput:
+    """Run the unchanged V6 pair and score both final images with frozen V9 J."""
+
+    if not isinstance(unit, ContentV9StabilityUnit):
+        raise TypeError("Content V9 stability runtime requires a validated unit")
+    if not isinstance(assets, ContentV9CalibrationAssets):
+        raise TypeError("Content V9 stability runtime requires frozen V6 assets")
+    if not isinstance(calibration_asset, WeightedJointAsset):
+        raise TypeError("Content V9 stability runtime requires the accepted calibration asset")
+    if len(wrong_keys) != 16 or any(not isinstance(key, bytes) for key in wrong_keys):
+        raise ValueError("Content V9 stability runtime requires exactly 16 wrong keys")
+    output = run_content_v6_evaluation_pair(
+        pipeline,
+        unit.prompt,
+        detection_key,
+        assets.v6_assets,
+        height=unit.height,
+        width=unit.width,
+        seed=unit.seed,
+    )
+    if not isinstance(output, ContentV6RunOutput):
+        raise TypeError("Content V9 stability requires a real Content V6 pair result")
+    candidate_scores = blind_weighted_scores(
+        output.image, detection_key, wrong_keys, assets, calibration_asset
+    )
+    primary_null_scores = blind_weighted_scores(
+        output.primary_null, detection_key, wrong_keys, assets, calibration_asset
+    )
+    return ContentV9StabilityOutput(
+        output.image,
+        output.primary_null,
+        output.measurement,
+        candidate_scores,
+        primary_null_scores,
+    )
+
+
 __all__ = [
     "ContentV9CalibrationAssets",
+    "ContentV9StabilityOutput",
     "blind_weighted_scores",
     "derive_calibration_wrong_keys",
+    "derive_stability_wrong_keys",
     "run_content_v9_calibration_unit",
+    "run_content_v9_stability_unit",
 ]

@@ -177,6 +177,33 @@ def test_v9_stability_run_identity_requires_a_real_calibration_asset_digest() ->
 
 
 @pytest.mark.unit
+def test_v9_stability_binds_the_exact_accepted_asset_and_final_run_identity() -> None:
+    contract = stability.load_content_v9_stability_contract(_ROOT)
+    asset_path = _CONFIG_ROOT / stability.CONTENT_V9_STABILITY_CALIBRATION_ASSET
+    sidecar_path = asset_path.with_name(f"{asset_path.name}.sha256")
+    assert hashlib.sha256(asset_path.read_bytes()).hexdigest() == (
+        stability.CONTENT_V9_STABILITY_CALIBRATION_ASSET_SHA256
+    )
+    assert hashlib.sha256(sidecar_path.read_bytes()).hexdigest() == (
+        stability.CONTENT_V9_STABILITY_CALIBRATION_ASSET_SIDECAR_FILE_SHA256
+    )
+    assert contract.calibration_asset.payload["producer_exact"] == (
+        stability.CONTENT_V9_STABILITY_CALIBRATION_PRODUCER_EXACT
+    )
+    assert contract.calibration_asset.payload["calibration_protocol_digest"] == (
+        stability.CONTENT_V9_STABILITY_CALIBRATION_PROTOCOL_DIGEST
+    )
+    assert contract.calibration_asset.payload["calibration_public_key_digest"] == (
+        stability.CONTENT_V9_STABILITY_CALIBRATION_PUBLIC_KEY_DIGEST
+    )
+    assert stability.deterministic_stability_run_id(
+        contract.protocol_digest,
+        stability.CONTENT_V9_STABILITY_CALIBRATION_ASSET_SHA256,
+        stability.CONTENT_V9_STABILITY_PUBLIC_KEY_DIGEST,
+    ) == "content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a"
+
+
+@pytest.mark.unit
 def test_v9_stability_preserves_unused_future_manifest_and_fails_on_drift(
     tmp_path: Path,
 ) -> None:
