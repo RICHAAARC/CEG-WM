@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pytest
 import torch
 from PIL import Image
@@ -83,13 +84,25 @@ def test_null_conditioning_uses_only_sd3_hidden_and_pooled_tuple_slots() -> None
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
-        def encode_prompt(self, **kwargs: object) -> tuple[torch.Tensor, None, torch.Tensor, None]:
-            self.calls.append(kwargs)
+        def encode_prompt(
+            self,
+            prompt: str,
+            prompt_2: str,
+            prompt_3: str,
+            *,
+            do_classifier_free_guidance: bool,
+        ) -> tuple[torch.Tensor, None, torch.Tensor, None]:
+            self.calls.append({
+                "prompt": prompt,
+                "prompt_2": prompt_2,
+                "prompt_3": prompt_3,
+                "do_classifier_free_guidance": do_classifier_free_guidance,
+            })
             return hidden, None, pooled, None
 
     pipeline = Pipeline()
     actual_hidden, actual_pooled, record = runner._null_conditioning(pipeline)
-    assert pipeline.calls == [{"prompt": "", "do_classifier_free_guidance": False}]
+    assert pipeline.calls == [{"prompt": "", "prompt_2": "", "prompt_3": "", "do_classifier_free_guidance": False}]
     assert actual_hidden is not hidden and torch.equal(actual_hidden, hidden)
     assert actual_pooled is not pooled and torch.equal(actual_pooled, pooled)
     assert actual_hidden.shape != actual_pooled.shape
@@ -111,9 +124,66 @@ def test_null_conditioning_uses_only_sd3_hidden_and_pooled_tuple_slots() -> None
 )
 def test_null_conditioning_rejects_non_sd3_or_invalid_selected_values(result: object, error: str) -> None:
     class Pipeline:
-        def encode_prompt(self, **kwargs: object) -> object:
-            assert kwargs == {"prompt": "", "do_classifier_free_guidance": False}
+        def encode_prompt(
+            self,
+            prompt: str,
+            prompt_2: str,
+            prompt_3: str,
+            *,
+            do_classifier_free_guidance: bool,
+        ) -> object:
+            assert (prompt, prompt_2, prompt_3, do_classifier_free_guidance) == ("", "", "", False)
             return result
 
     with pytest.raises((TypeError, ValueError), match=error):
         runner._null_conditioning(Pipeline())
+
+
+def test_null_conditioning_requires_all_three_sd3_prompt_arguments() -> None:
+    class Pipeline:
+        def encode_prompt(
+            self,
+            prompt: str,
+            prompt_2: str,
+            prompt_3: str,
+            *,
+            do_classifier_free_guidance: bool,
+        ) -> tuple[torch.Tensor, None, torch.Tensor, None]:
+            return torch.ones((1, 2)), None, torch.ones((1, 3)), None
+
+    pipeline = Pipeline()
+    with pytest.raises(TypeError):
+        pipeline.encode_prompt(prompt="", do_classifier_free_guidance=False)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        pipeline.encode_prompt(prompt="", prompt_2="", do_classifier_free_guidance=False)  # type: ignore[call-arg]
+    hidden, pooled, _record = runner._null_conditioning(pipeline)
+    assert hidden.shape == (1, 2)
+    assert pooled.shape == (1, 3)
+
+
+def test_sanitized_failure_receipt_has_only_a_finite_failure_point(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error = TypeError("not emitted")
+    error.geometry_failure_point = "null_conditioning_call"  # type: ignore[attr-defined]
+    monkeypatch.setattr(runner.Image, "open", lambda _path: Image.new("RGB", (1, 1)))
+    monkeypatch.setattr(runner, "operational_preflight", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+    assert runner._main(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"]) == 1
+    line = capsys.readouterr().out.strip()
+    prefix, payload = line.split(" ", 1)
+    assert prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
+    receipt = json.loads(payload)
+    assert receipt["failure_point"] == "null_conditioning_call"
+    assert receipt["failure_point"] in runner._FAILURE_POINTS
+    assert "not emitted" not in line
+
+
+def test_input_open_failure_still_emits_a_bounded_sanitized_receipt(
+    capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert runner._main(["--repo-root", ".", "--expected-exact", "0" * 40, "missing.png"]) == 1
+    prefix, payload = capsys.readouterr().out.strip().split(" ", 1)
+    assert prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
+    receipt = json.loads(payload)
+    assert receipt["run_id"] == "geometry-v1-b2b-000000000000-operational-01"
+    assert receipt["failure_point"] == "receipt_packaging"

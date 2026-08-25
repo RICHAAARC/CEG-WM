@@ -36,6 +36,17 @@ MAX_GRID = (8, 8)
 _ATTENTION_PATH = re.compile(r"(?:^|\.)transformer_blocks\.(\d+)\.attn(?:\.|$)")
 _SNAPSHOT_HEX = re.compile(r"(?:^|/)snapshots/([0-9a-f]{7,64})(?:/|$)")
 _PUBLIC_ERRORS = {"FileNotFoundError", "ImportError", "ModuleNotFoundError", "OSError", "RuntimeError", "TypeError", "ValueError"}
+_FAILURE_POINTS = frozenset({
+    "model_load",
+    "null_conditioning_call",
+    "null_conditioning_validate",
+    "vae_encode",
+    "scheduler",
+    "transformer_call",
+    "qk_capture",
+    "relation",
+    "receipt_packaging",
+})
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -152,23 +163,36 @@ def _null_conditioning(pipeline: Any) -> tuple[torch.Tensor, torch.Tensor, dict[
     encode_prompt = getattr(pipeline, "encode_prompt", None)
     if not callable(encode_prompt):
         raise TypeError("pipeline must expose public encode_prompt for the one null construction")
-    result = encode_prompt(prompt="", do_classifier_free_guidance=False)
-    if not isinstance(result, (tuple, list)) or len(result) != 4:
-        raise ValueError("null encode_prompt must return the SD3 four-item tuple")
+    try:
+        result = encode_prompt(
+            prompt="",
+            prompt_2="",
+            prompt_3="",
+            do_classifier_free_guidance=False,
+        )
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "null_conditioning_call")
+        raise
+    try:
+        if not isinstance(result, (tuple, list)) or len(result) != 4:
+            raise ValueError("null encode_prompt must return the SD3 four-item tuple")
     # StableDiffusion3Pipeline returns (prompt, negative_prompt, pooled,
     # negative_pooled).  The no-CFG negative positions are intentionally not
     # consumed by this image-observation preflight.
-    hidden, pooled = result[0], result[2]
-    if not isinstance(hidden, torch.Tensor) or not isinstance(pooled, torch.Tensor):
-        raise TypeError("selected null encode_prompt outputs must be tensors")
-    if not torch.is_floating_point(hidden) or not torch.is_floating_point(pooled):
-        raise TypeError("selected null encode_prompt outputs must be floating tensors")
-    if hidden.ndim < 2 or pooled.ndim < 2:
-        raise ValueError("selected null conditioning tensors must be rank two or higher")
-    if hidden.shape[0] != 1 or pooled.shape[0] != 1:
-        raise ValueError("null conditioning must be batch one")
-    if not bool(torch.isfinite(hidden).all()) or not bool(torch.isfinite(pooled).all()):
-        raise ValueError("selected null conditioning tensors must be finite")
+        hidden, pooled = result[0], result[2]
+        if not isinstance(hidden, torch.Tensor) or not isinstance(pooled, torch.Tensor):
+            raise TypeError("selected null encode_prompt outputs must be tensors")
+        if not torch.is_floating_point(hidden) or not torch.is_floating_point(pooled):
+            raise TypeError("selected null encode_prompt outputs must be floating tensors")
+        if hidden.ndim < 2 or pooled.ndim < 2:
+            raise ValueError("selected null conditioning tensors must be rank two or higher")
+        if hidden.shape[0] != 1 or pooled.shape[0] != 1:
+            raise ValueError("null conditioning must be batch one")
+        if not bool(torch.isfinite(hidden).all()) or not bool(torch.isfinite(pooled).all()):
+            raise ValueError("selected null conditioning tensors must be finite")
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "null_conditioning_validate")
+        raise
     return hidden.detach(), pooled.detach(), {
         "hidden_shape": list(hidden.shape), "hidden_dtype": str(hidden.dtype), "hidden_sha256": _tensor_digest(hidden),
         "pooled_shape": list(pooled.shape), "pooled_dtype": str(pooled.dtype), "pooled_sha256": _tensor_digest(pooled),
@@ -246,6 +270,18 @@ def _counter_targets(transformer: torch.nn.Module, paths: tuple[str, str]) -> tu
     return baseline, handles, counts, hidden_metadata
 
 
+def _observation_failure_point(error: BaseException) -> str:
+    """Classify existing fail-closed adapter errors without serializing details."""
+    message = str(error).lower()
+    if "scheduler" in message or "timestep" in message:
+        return "scheduler"
+    if "vae" in message or "preprocess" in message or "image processor" in message:
+        return "vae_encode"
+    if "transformer" in message or "hidden_states" in message:
+        return "transformer_call"
+    return "qk_capture"
+
+
 def operational_preflight(
     images: list[Image.Image], *, hf_token: str, root_key: str | bytes,
     expected_exact: str, repo_root: Path,
@@ -261,8 +297,12 @@ def operational_preflight(
     run_id = _validate_execution_exact(expected_exact, repo_root)
     if not torch.cuda.is_available():
         raise RuntimeError("cuda_required_for_geometry_v1_operational_preflight")
-    pipeline = loader(MODEL_ID, torch_dtype=torch.float16, token=hf_token)
-    pipeline = pipeline.to("cuda")
+    try:
+        pipeline = loader(MODEL_ID, torch_dtype=torch.float16, token=hf_token)
+        pipeline = pipeline.to("cuda")
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "model_load")
+        raise
     null_hidden, null_pooled, null_record = _null_conditioning(pipeline)
     transformer = getattr(pipeline, "transformer", None)
     if not isinstance(transformer, torch.nn.Module):
@@ -278,7 +318,11 @@ def operational_preflight(
       for index, image in enumerate(images):
         started = time.monotonic()
         before = dict(counts)
-        observation = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
+        try:
+            observation = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
+        except BaseException as error:
+            setattr(error, "geometry_failure_point", _observation_failure_point(error))
+            raise
         record = _observation_record(observation, elapsed_seconds=time.monotonic() - started)
         record["input_sha256"] = _image_digest(image)
         record["projection_call_counts"] = {name: counts[name] - before[name] for name in counts}
@@ -288,7 +332,11 @@ def operational_preflight(
         if index == 0:
             first = observation
             before = dict(counts)
-            repeated = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
+            try:
+                repeated = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
+            except BaseException as error:
+                setattr(error, "geometry_failure_point", _observation_failure_point(error))
+                raise
             repeat_counts = {name: counts[name] - before[name] for name in counts}
             record["repeat_projection_call_counts"] = repeat_counts
             if any(value != 1 for value in repeat_counts.values()):
@@ -307,7 +355,11 @@ def operational_preflight(
       if len(transformer._forward_pre_hooks) != hidden_metadata["baseline"]:
           raise RuntimeError("transformer prehook cleanup differs")
     assert first is not None
-    relation = keyed_qk_relation(first.layers[0].query.numpy(), first.layers[0].key.numpy(), root_key)
+    try:
+        relation = keyed_qk_relation(first.layers[0].query.numpy(), first.layers[0].key.numpy(), root_key)
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "relation")
+        raise
     if not np.isfinite(relation.relation).all():
         raise ValueError("keyed relation compatibility is nonfinite")
     return {"status": "operational_preflight_complete", "run_id": run_id, "science_denominator": 0, "runtime": _runtime_record(pipeline), "null_conditioning": null_record, "candidate_layers": candidates, "selected_candidates": [{"path": path, "block_index": int(_ATTENTION_PATH.search(path).group(1))} for path in (shallow, deep)], "transformer_hidden_states": {"device": hidden_metadata["device"], "dtype": hidden_metadata["dtype"], "call_count": hidden_metadata["count"]}, "hook_cleanup": True, "images": results, "relation_compatibility": "pass", "relation": {"relation_shape": list(relation.relation.shape), "relation_finite": bool(np.isfinite(relation.relation).all()), "projection_scalar_finite": bool(np.isfinite(relation.projection)), "coverage_finite": bool(np.isfinite(relation.coverage)), "gap_finite": bool(np.isfinite(relation.gap)), "wrong_key_margin_finite": bool(np.isfinite(relation.wrong_key_margin))}, "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated())}
@@ -319,15 +371,18 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--expected-exact", required=True)
     args = parser.parse_args(argv)
+    run_id = f"geometry-v1-b2b-{args.expected_exact[:12]}-operational-01" if re.fullmatch(r"[0-9a-f]{40}", args.expected_exact) else None
     try:
         images = [Image.open(path).convert("RGB") for path in args.images]
-        run_id = f"geometry-v1-b2b-{args.expected_exact[:12]}-operational-01" if re.fullmatch(r"[0-9a-f]{40}", args.expected_exact) else None
         receipt = operational_preflight(images, hf_token=os.environ.get("HF_TOKEN", ""), root_key=os.environ.get("CEG_WM_ROOT_KEY", ""), expected_exact=args.expected_exact, repo_root=Path(args.repo_root))
         print("CEGWM_GEOMETRY_V1_OPERATIONAL_PREFLIGHT " + json.dumps(receipt, sort_keys=True, separators=(",", ":")), flush=True)
         return 0
     except BaseException as error:
         error_class = type(error).__name__ if type(error).__name__ in _PUBLIC_ERRORS else "OtherOperationalError"
-        print("CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps({"status": "operational_failure", "run_id": run_id, "stage": "preflight", "error_class": error_class}, sort_keys=True, separators=(",", ":")), flush=True)
+        failure_point = getattr(error, "geometry_failure_point", "receipt_packaging")
+        if failure_point not in _FAILURE_POINTS:
+            failure_point = "receipt_packaging"
+        print("CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps({"status": "operational_failure", "run_id": run_id, "stage": "preflight", "failure_point": failure_point, "error_class": error_class}, sort_keys=True, separators=(",", ":")), flush=True)
         return 1
 
 
