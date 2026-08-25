@@ -31,6 +31,36 @@ def test_layer_discovery_fails_closed_for_one_block() -> None:
         runner._discover_layers(transformer)
 
 
+def test_architecture_record_is_complete_for_only_sample_side_candidates() -> None:
+    class Attention(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.to_q = torch.nn.Linear(3, 4, bias=False)
+            self.to_k = torch.nn.Linear(3, 4, bias=False)
+            self.add_q_proj = torch.nn.Linear(3, 4, bias=False)
+            self.add_k_proj = torch.nn.Linear(3, 4, bias=False)
+            self.to_qkv = torch.nn.Linear(3, 12, bias=False)
+            self.processor = object()
+
+    transformer = torch.nn.Module()
+    transformer.config = type("Config", (), {"num_layers": 2, "patch_size": 2, "in_channels": 4})()
+    transformer.transformer_blocks = torch.nn.ModuleList()
+    for _ in range(2):
+        block = torch.nn.Module()
+        block.attn = Attention()
+        transformer.transformer_blocks.append(block)
+    candidates = runner._discover_candidates(transformer)
+    record = runner._architecture_record(transformer, candidates)
+    assert record["config"]["num_layers"] == 2
+    assert [item["path"] for item in record["attention_candidates"]] == [
+        "transformer_blocks.0.attn", "transformer_blocks.1.attn",
+    ]
+    first = record["attention_candidates"][0]
+    assert first["to_q"]["present"] and first["to_k"]["present"]
+    assert first["to_q"]["weight_shape"] == [4, 3]
+    assert first["other_routes"] == {"attn2": False, "add_q_proj": True, "add_k_proj": True, "to_qkv": True}
+
+
 def test_unknown_public_revision_is_recorded_without_placeholder() -> None:
     pipeline = type("Pipeline", (), {})()
     pipeline.vae = torch.nn.Linear(1, 1)
@@ -176,6 +206,24 @@ def test_sanitized_failure_receipt_has_only_a_finite_failure_point(
     assert receipt["failure_point"] == "null_conditioning_call"
     assert receipt["failure_point"] in runner._FAILURE_POINTS
     assert "not emitted" not in line
+
+
+def test_late_failure_keeps_only_bounded_runtime_and_architecture_records(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error = TypeError("not emitted")
+    error.geometry_failure_point = "scheduler"  # type: ignore[attr-defined]
+    error.geometry_runtime_record = {"requested_model_id": runner.MODEL_ID}  # type: ignore[attr-defined]
+    error.geometry_architecture_record = {"attention_candidates": []}  # type: ignore[attr-defined]
+    monkeypatch.setattr(runner.Image, "open", lambda _path: Image.new("RGB", (1, 1)))
+    monkeypatch.setattr(runner, "operational_preflight", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+    assert runner._main(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"]) == 1
+    _prefix, payload = capsys.readouterr().out.strip().split(" ", 1)
+    receipt = json.loads(payload)
+    assert receipt["failure_point"] == "scheduler"
+    assert receipt["runtime"] == {"requested_model_id": runner.MODEL_ID}
+    assert receipt["architecture"] == {"attention_candidates": []}
+    assert "not emitted" not in payload
 
 
 def test_input_open_failure_still_emits_a_bounded_sanitized_receipt(

@@ -219,6 +219,55 @@ def _discover_layers(transformer: torch.nn.Module) -> tuple[str, str]:
     return shallow["path"], deep["path"]
 
 
+def _shape(value: Any) -> list[int] | None:
+    if not isinstance(value, torch.Tensor):
+        return None
+    return [int(dimension) for dimension in value.shape]
+
+
+def _projection_identity(value: Any) -> dict[str, Any]:
+    """Bounded public facts about an eligible sample-side projection."""
+    return {
+        "present": isinstance(value, torch.nn.Module),
+        "class": f"{type(value).__module__}.{type(value).__qualname__}" if isinstance(value, torch.nn.Module) else None,
+        "in_features": getattr(value, "in_features", None) if isinstance(value, torch.nn.Module) else None,
+        "out_features": getattr(value, "out_features", None) if isinstance(value, torch.nn.Module) else None,
+        "weight_shape": _shape(getattr(value, "weight", None)) if isinstance(value, torch.nn.Module) else None,
+        "dtype": _module_dtype(value) if isinstance(value, torch.nn.Module) else None,
+        "device": str(getattr(getattr(value, "weight", None), "device", None)) if isinstance(value, torch.nn.Module) and isinstance(getattr(value, "weight", None), torch.Tensor) else None,
+    }
+
+
+def _architecture_record(transformer: torch.nn.Module, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """Record public SD3 attention topology without retaining weights or tensors."""
+    config = getattr(transformer, "config", None)
+    config_fields = (
+        "num_layers", "patch_size", "in_channels", "joint_attention_dim",
+        "caption_projection_dim", "num_attention_heads", "attention_head_dim",
+    )
+    inventory: list[dict[str, Any]] = []
+    for candidate in candidates:
+        path = candidate["path"]
+        attention = transformer.get_submodule(path)
+        inventory.append({
+            "path": path,
+            "block_index": candidate["block_index"],
+            "attention_class": f"{type(attention).__module__}.{type(attention).__qualname__}",
+            "processor_class": f"{type(getattr(attention, 'processor', None)).__module__}.{type(getattr(attention, 'processor', None)).__qualname__}" if getattr(attention, "processor", None) is not None else None,
+            "to_q": _projection_identity(getattr(attention, "to_q", None)),
+            "to_k": _projection_identity(getattr(attention, "to_k", None)),
+            "other_routes": {
+                name: isinstance(getattr(attention, name, None), torch.nn.Module)
+                for name in ("attn2", "add_q_proj", "add_k_proj", "to_qkv")
+            },
+        })
+    return {
+        "transformer_class": f"{type(transformer).__module__}.{type(transformer).__qualname__}",
+        "config": {name: getattr(config, name, None) for name in config_fields},
+        "attention_candidates": inventory,
+    }
+
+
 def _observation_record(observation: SD35QKObservation, *, elapsed_seconds: float) -> dict[str, Any]:
     return {
         "latent_shape": list(observation.latent_shape), "schedule_index": observation.schedule_index,
@@ -271,15 +320,9 @@ def _counter_targets(transformer: torch.nn.Module, paths: tuple[str, str]) -> tu
 
 
 def _observation_failure_point(error: BaseException) -> str:
-    """Classify existing fail-closed adapter errors without serializing details."""
-    message = str(error).lower()
-    if "scheduler" in message or "timestep" in message:
-        return "scheduler"
-    if "vae" in message or "preprocess" in message or "image processor" in message:
-        return "vae_encode"
-    if "transformer" in message or "hidden_states" in message:
-        return "transformer_call"
-    return "qk_capture"
+    """Use the adapter's bounded stage tag; never classify exception text."""
+    point = getattr(error, "geometry_failure_point", None)
+    return point if point in _FAILURE_POINTS else "qk_capture"
 
 
 def operational_preflight(
@@ -303,66 +346,75 @@ def operational_preflight(
     except BaseException as error:
         setattr(error, "geometry_failure_point", "model_load")
         raise
-    null_hidden, null_pooled, null_record = _null_conditioning(pipeline)
-    transformer = getattr(pipeline, "transformer", None)
-    if not isinstance(transformer, torch.nn.Module):
-        raise TypeError("pipeline transformer must be a torch module")
-    candidates = _discover_candidates(transformer)
-    shallow, deep = _discover_layers(transformer)
-    resolved_revision, _ = _public_revision(pipeline)
-    spec = SD35QKObservationSpec(MODEL_ID, resolved_revision, (shallow, deep), INFERENCE_STEPS, SCHEDULE_INDEX, PUBLIC_NOISE_SEED, MAX_GRID, null_hidden, null_pooled)
-    results: list[dict[str, Any]] = []
-    first: SD35QKObservation | None = None
-    baseline, counter_handles, counts, hidden_metadata = _counter_targets(transformer, (shallow, deep))
+    runtime = _runtime_record(pipeline)
+    architecture: dict[str, Any] | None = None
     try:
-      for index, image in enumerate(images):
-        started = time.monotonic()
-        before = dict(counts)
+        null_hidden, null_pooled, null_record = _null_conditioning(pipeline)
+        transformer = getattr(pipeline, "transformer", None)
+        if not isinstance(transformer, torch.nn.Module):
+            raise TypeError("pipeline transformer must be a torch module")
+        candidates = _discover_candidates(transformer)
+        architecture = _architecture_record(transformer, candidates)
+        shallow, deep = _discover_layers(transformer)
+        resolved_revision, _ = _public_revision(pipeline)
+        spec = SD35QKObservationSpec(MODEL_ID, resolved_revision, (shallow, deep), INFERENCE_STEPS, SCHEDULE_INDEX, PUBLIC_NOISE_SEED, MAX_GRID, null_hidden, null_pooled)
+        results: list[dict[str, Any]] = []
+        first: SD35QKObservation | None = None
+        baseline, counter_handles, counts, hidden_metadata = _counter_targets(transformer, (shallow, deep))
         try:
-            observation = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
-        except BaseException as error:
-            setattr(error, "geometry_failure_point", _observation_failure_point(error))
-            raise
-        record = _observation_record(observation, elapsed_seconds=time.monotonic() - started)
-        record["input_sha256"] = _image_digest(image)
-        record["projection_call_counts"] = {name: counts[name] - before[name] for name in counts}
-        if any(value != 1 for value in record["projection_call_counts"].values()):
-            raise ValueError("selected projections were not called exactly once")
-        results.append(record)
-        if index == 0:
-            first = observation
+          for index, image in enumerate(images):
+            started = time.monotonic()
             before = dict(counts)
             try:
-                repeated = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
+                observation = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
             except BaseException as error:
                 setattr(error, "geometry_failure_point", _observation_failure_point(error))
                 raise
-            repeat_counts = {name: counts[name] - before[name] for name in counts}
-            record["repeat_projection_call_counts"] = repeat_counts
-            if any(value != 1 for value in repeat_counts.values()):
-                raise ValueError("repeated selected projections were not called exactly once")
-            if _tensor_digest(repeated.layers[0].query) != _tensor_digest(observation.layers[0].query) or _tensor_digest(repeated.layers[0].key) != _tensor_digest(observation.layers[0].key):
-                raise ValueError("first image observation is not deterministic")
-    finally:
-      for handle in counter_handles:
-          handle.remove()
-      for path in (shallow, deep):
-          attention = transformer.get_submodule(path)
-          for name in ("to_q", "to_k"):
-              label = f"{path}.{name}"
-              if len(getattr(attention, name)._forward_hooks) != baseline[label]:
-                  raise RuntimeError("projection hook cleanup differs")
-      if len(transformer._forward_pre_hooks) != hidden_metadata["baseline"]:
-          raise RuntimeError("transformer prehook cleanup differs")
-    assert first is not None
-    try:
-        relation = keyed_qk_relation(first.layers[0].query.numpy(), first.layers[0].key.numpy(), root_key)
+            record = _observation_record(observation, elapsed_seconds=time.monotonic() - started)
+            record["input_sha256"] = _image_digest(image)
+            record["projection_call_counts"] = {name: counts[name] - before[name] for name in counts}
+            if any(value != 1 for value in record["projection_call_counts"].values()):
+                raise ValueError("selected projections were not called exactly once")
+            results.append(record)
+            if index == 0:
+                first = observation
+                before = dict(counts)
+                try:
+                    repeated = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
+                except BaseException as error:
+                    setattr(error, "geometry_failure_point", _observation_failure_point(error))
+                    raise
+                repeat_counts = {name: counts[name] - before[name] for name in counts}
+                record["repeat_projection_call_counts"] = repeat_counts
+                if any(value != 1 for value in repeat_counts.values()):
+                    raise ValueError("repeated selected projections were not called exactly once")
+                if _tensor_digest(repeated.layers[0].query) != _tensor_digest(observation.layers[0].query) or _tensor_digest(repeated.layers[0].key) != _tensor_digest(observation.layers[0].key):
+                    raise ValueError("first image observation is not deterministic")
+        finally:
+          for handle in counter_handles:
+              handle.remove()
+          for path in (shallow, deep):
+              attention = transformer.get_submodule(path)
+              for name in ("to_q", "to_k"):
+                  label = f"{path}.{name}"
+                  if len(getattr(attention, name)._forward_hooks) != baseline[label]:
+                      raise RuntimeError("projection hook cleanup differs")
+          if len(transformer._forward_pre_hooks) != hidden_metadata["baseline"]:
+              raise RuntimeError("transformer prehook cleanup differs")
+        assert first is not None
+        try:
+            relation = keyed_qk_relation(first.layers[0].query.numpy(), first.layers[0].key.numpy(), root_key)
+        except BaseException as error:
+            setattr(error, "geometry_failure_point", "relation")
+            raise
+        if not np.isfinite(relation.relation).all():
+            raise ValueError("keyed relation compatibility is nonfinite")
+        return {"status": "operational_preflight_complete", "run_id": run_id, "science_denominator": 0, "runtime": runtime, "architecture": architecture, "null_conditioning": null_record, "candidate_layers": candidates, "selected_candidates": [{"path": path, "block_index": int(_ATTENTION_PATH.search(path).group(1))} for path in (shallow, deep)], "transformer_hidden_states": {"device": hidden_metadata["device"], "dtype": hidden_metadata["dtype"], "call_count": hidden_metadata["count"]}, "hook_cleanup": True, "images": results, "relation_compatibility": "pass", "relation": {"relation_shape": list(relation.relation.shape), "relation_finite": bool(np.isfinite(relation.relation).all()), "projection_scalar_finite": bool(np.isfinite(relation.projection)), "coverage_finite": bool(np.isfinite(relation.coverage)), "gap_finite": bool(np.isfinite(relation.gap)), "wrong_key_margin_finite": bool(np.isfinite(relation.wrong_key_margin))}, "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated())}
     except BaseException as error:
-        setattr(error, "geometry_failure_point", "relation")
+        setattr(error, "geometry_runtime_record", runtime)
+        if architecture is not None:
+            setattr(error, "geometry_architecture_record", architecture)
         raise
-    if not np.isfinite(relation.relation).all():
-        raise ValueError("keyed relation compatibility is nonfinite")
-    return {"status": "operational_preflight_complete", "run_id": run_id, "science_denominator": 0, "runtime": _runtime_record(pipeline), "null_conditioning": null_record, "candidate_layers": candidates, "selected_candidates": [{"path": path, "block_index": int(_ATTENTION_PATH.search(path).group(1))} for path in (shallow, deep)], "transformer_hidden_states": {"device": hidden_metadata["device"], "dtype": hidden_metadata["dtype"], "call_count": hidden_metadata["count"]}, "hook_cleanup": True, "images": results, "relation_compatibility": "pass", "relation": {"relation_shape": list(relation.relation.shape), "relation_finite": bool(np.isfinite(relation.relation).all()), "projection_scalar_finite": bool(np.isfinite(relation.projection)), "coverage_finite": bool(np.isfinite(relation.coverage)), "gap_finite": bool(np.isfinite(relation.gap)), "wrong_key_margin_finite": bool(np.isfinite(relation.wrong_key_margin))}, "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated())}
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -382,7 +434,14 @@ def _main(argv: list[str] | None = None) -> int:
         failure_point = getattr(error, "geometry_failure_point", "receipt_packaging")
         if failure_point not in _FAILURE_POINTS:
             failure_point = "receipt_packaging"
-        print("CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps({"status": "operational_failure", "run_id": run_id, "stage": "preflight", "failure_point": failure_point, "error_class": error_class}, sort_keys=True, separators=(",", ":")), flush=True)
+        failure = {"status": "operational_failure", "run_id": run_id, "stage": "preflight", "failure_point": failure_point, "error_class": error_class}
+        runtime = getattr(error, "geometry_runtime_record", None)
+        architecture = getattr(error, "geometry_architecture_record", None)
+        if isinstance(runtime, dict):
+            failure["runtime"] = runtime
+        if isinstance(architecture, dict):
+            failure["architecture"] = architecture
+        print("CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(failure, sort_keys=True, separators=(",", ":")), flush=True)
         return 1
 
 

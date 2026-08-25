@@ -155,7 +155,13 @@ def observe_sd35_image_qk(
     if not isinstance(transformer, torch.nn.Module):
         raise TypeError("transformer must be a torch module")
 
-    latent = encode_final_rgb_image(rgb_image, image_processor, vae)
+    try:
+        latent = encode_final_rgb_image(rgb_image, image_processor, vae)
+    except BaseException as error:
+        # The operational runner consumes this bounded stage tag without
+        # inspecting exception strings.  It carries no model or image data.
+        setattr(error, "geometry_failure_point", "vae_encode")
+        raise
     if latent.ndim != 4 or latent.shape[0] != 1 or not latent.dtype.is_floating_point:
         raise ValueError("VAE observation must be a batch-one floating NCHW tensor")
     if not bool(torch.isfinite(latent).all()):
@@ -173,21 +179,33 @@ def observe_sd35_image_qk(
     scale_noise = getattr(scheduler, "scale_noise", None)
     if not callable(set_timesteps) or not callable(scale_noise):
         raise TypeError("scheduler must provide set_timesteps and scale_noise")
-    set_timesteps(spec.inference_steps)
-    timesteps = getattr(scheduler, "timesteps", None)
-    if not isinstance(timesteps, torch.Tensor) or timesteps.ndim != 1:
-        raise ValueError("scheduler must expose a rank-one timestep schedule")
-    if spec.schedule_index >= timesteps.numel():
-        raise ValueError("schedule_index is outside the explicit scheduler schedule")
-    timestep = timesteps[spec.schedule_index]
-    generator = torch.Generator(device=latent.device)
-    generator.manual_seed(spec.public_noise_seed)
-    noise = torch.randn(latent.shape, dtype=latent.dtype, device=latent.device, generator=generator)
-    observed_latent = scale_noise(latent, timestep, noise)
-    if not isinstance(observed_latent, torch.Tensor) or observed_latent.shape != latent.shape:
-        raise ValueError("scheduler scale_noise must preserve latent shape")
-    if not observed_latent.dtype.is_floating_point or not bool(torch.isfinite(observed_latent).all()):
-        raise ValueError("scheduler observation latent must be finite")
+    try:
+        set_timesteps(spec.inference_steps, device=latent.device)
+        timesteps = getattr(scheduler, "timesteps", None)
+        if not isinstance(timesteps, torch.Tensor) or timesteps.ndim != 1:
+            raise ValueError("scheduler must expose a rank-one timestep schedule")
+        if timesteps.device != latent.device:
+            raise ValueError("scheduler timesteps must be on the latent device")
+        if not bool(torch.isfinite(timesteps).all()):
+            raise ValueError("scheduler timesteps must be finite")
+        if spec.schedule_index >= timesteps.numel():
+            raise ValueError("schedule_index is outside the explicit scheduler schedule")
+        # FlowMatchEulerDiscreteScheduler consumes a batch-shaped timestep.
+        # Keep it rank one for both scale_noise and the transformer call.
+        timestep = timesteps[spec.schedule_index : spec.schedule_index + 1]
+        if timestep.shape != (1,):
+            raise ValueError("scheduler timestep must preserve the batch-one shape")
+        generator = torch.Generator(device=latent.device)
+        generator.manual_seed(spec.public_noise_seed)
+        noise = torch.randn(latent.shape, dtype=latent.dtype, device=latent.device, generator=generator)
+        observed_latent = scale_noise(latent, timestep, noise)
+        if not isinstance(observed_latent, torch.Tensor) or observed_latent.shape != latent.shape:
+            raise ValueError("scheduler scale_noise must preserve latent shape")
+        if not observed_latent.dtype.is_floating_point or not bool(torch.isfinite(observed_latent).all()):
+            raise ValueError("scheduler observation latent must be finite")
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "scheduler")
+        raise
 
     captured: dict[str, dict[str, list[torch.Tensor]]] = {}
     handles: list[Any] = []
@@ -203,42 +221,50 @@ def observe_sd35_image_qk(
                     captured[layer][projection_name].append(output)
 
                 handles.append(projection.register_forward_hook(capture))
-        with torch.no_grad():
-            transformer(
-                hidden_states=observed_latent,
-                timestep=timestep.reshape(1),
-                encoder_hidden_states=spec.null_encoder_hidden_states.to(device=latent.device),
-                pooled_projections=spec.null_pooled_projections.to(device=latent.device),
-            )
+        try:
+            with torch.no_grad():
+                transformer(
+                    hidden_states=observed_latent,
+                    timestep=timestep,
+                    encoder_hidden_states=spec.null_encoder_hidden_states.to(device=latent.device),
+                    pooled_projections=spec.null_pooled_projections.to(device=latent.device),
+                )
+        except BaseException as error:
+            setattr(error, "geometry_failure_point", "transformer_call")
+            raise
     finally:
         for handle in handles:
             handle.remove()
 
     sample_indices = _uniform_indices(source_grid[0], source_grid[1], spec.max_grid)
     layers: list[SD35QKLayerObservation] = []
-    for path in spec.attention_layer_paths:
-        values = captured[path]
-        if len(values["to_q"]) != 1 or len(values["to_k"]) != 1:
-            raise ValueError(f"{path} projections must each be reached exactly once")
-        query = _projection_output(values["to_q"][0], path=path, name="to_q", expected_tokens=expected_tokens)
-        key = _projection_output(values["to_k"][0], path=path, name="to_k", expected_tokens=expected_tokens)
-        if query.shape != key.shape:
-            raise ValueError(f"{path} Q/K shapes must match")
-        heads = _require_int(getattr(_resolve_attention(transformer, path), "heads", None), f"{path}.heads", minimum=1)
-        if query.shape[-1] % heads:
-            raise ValueError(f"{path} Q/K features must divide evenly into heads")
-        layers.append(
-            SD35QKLayerObservation(
-                layer_path=path,
-                query=query[0, sample_indices].detach().to(device="cpu", dtype=torch.float32),
-                key=key[0, sample_indices].detach().to(device="cpu", dtype=torch.float32),
-                source_dtype=query.dtype,
-                source_grid=source_grid,
-                sample_indices=sample_indices.cpu(),
-                heads=heads,
-                head_dim=query.shape[-1] // heads,
+    try:
+        for path in spec.attention_layer_paths:
+            values = captured[path]
+            if len(values["to_q"]) != 1 or len(values["to_k"]) != 1:
+                raise ValueError(f"{path} projections must each be reached exactly once")
+            query = _projection_output(values["to_q"][0], path=path, name="to_q", expected_tokens=expected_tokens)
+            key = _projection_output(values["to_k"][0], path=path, name="to_k", expected_tokens=expected_tokens)
+            if query.shape != key.shape:
+                raise ValueError(f"{path} Q/K shapes must match")
+            heads = _require_int(getattr(_resolve_attention(transformer, path), "heads", None), f"{path}.heads", minimum=1)
+            if query.shape[-1] % heads:
+                raise ValueError(f"{path} Q/K features must divide evenly into heads")
+            layers.append(
+                SD35QKLayerObservation(
+                    layer_path=path,
+                    query=query[0, sample_indices].detach().to(device="cpu", dtype=torch.float32),
+                    key=key[0, sample_indices].detach().to(device="cpu", dtype=torch.float32),
+                    source_dtype=query.dtype,
+                    source_grid=source_grid,
+                    sample_indices=sample_indices.cpu(),
+                    heads=heads,
+                    head_dim=query.shape[-1] // heads,
+                )
             )
-        )
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "qk_capture")
+        raise
     return SD35QKObservation(
         layers=tuple(layers),
         latent_shape=latent_shape,

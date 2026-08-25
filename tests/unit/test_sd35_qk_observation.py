@@ -33,10 +33,21 @@ class _VAE(torch.nn.Module):
 
 
 class _Scheduler:
-    def set_timesteps(self, count: int) -> None:
-        self.timesteps = torch.arange(count, 0, -1, dtype=torch.float32)
+    def __init__(self) -> None:
+        self.set_device: torch.device | None = None
+        self.scale_timestep: torch.Tensor | None = None
+
+    def set_timesteps(self, num_inference_steps: int, *, device: torch.device) -> None:
+        self.set_device = device
+        self.timesteps = torch.arange(num_inference_steps, 0, -1, dtype=torch.float32, device=device)
 
     def scale_noise(self, latent: torch.Tensor, timestep: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+        # Match the public FlowMatch behavior that iterates a batch-shaped
+        # timestep; a legacy scalar therefore raises TypeError.
+        tuple(timestep)
+        if timestep.shape != (latent.shape[0],) or timestep.device != latent.device:
+            raise ValueError("timestep must be device-aligned batch one")
+        self.scale_timestep = timestep
         return latent + noise * 0.01 + timestep.to(latent.dtype) * 0.001
 
 
@@ -62,6 +73,7 @@ class _Transformer(torch.nn.Module):
         self.blocks[0].attn = _Attention()
         self.duplicate, self.reach, self.nonfinite = duplicate, reach, nonfinite
         self.seen_null: tuple[torch.Tensor, torch.Tensor] | None = None
+        self.seen_timestep: torch.Tensor | None = None
 
     def forward(
         self,
@@ -71,7 +83,7 @@ class _Transformer(torch.nn.Module):
         encoder_hidden_states: torch.Tensor,
         pooled_projections: torch.Tensor,
     ) -> torch.Tensor:
-        del timestep
+        self.seen_timestep = timestep
         self.seen_null = (encoder_hidden_states, pooled_projections)
         if not self.reach:
             return hidden_states
@@ -156,6 +168,37 @@ def test_observation_uses_rgb_numeric_values_and_direct_null_conditioning() -> N
     assert torch.equal(pipeline.transformer.seen_null[0].cpu(), _spec().null_encoder_hidden_states)
     assert first.latent_shape == (1, 4, 8, 8)
     assert first.schedule_index == 1 and first.public_noise_seed == 17
+
+
+def test_scheduler_and_transformer_receive_the_same_rank_one_device_timestep() -> None:
+    pipeline = _Pipeline()
+    observation = observe_sd35_image_qk(_image(), pipeline=pipeline, spec=_spec())
+    scheduler_timestep = pipeline.scheduler.scale_timestep
+    transformer_timestep = pipeline.transformer.seen_timestep
+    assert pipeline.scheduler.set_device is not None
+    assert scheduler_timestep is transformer_timestep
+    assert scheduler_timestep is not None and scheduler_timestep.shape == (1,)
+    assert scheduler_timestep.device == torch.device("cpu")
+    assert observation.timestep.shape == (1,)
+
+
+def test_realistic_scheduler_rejects_the_legacy_scalar_timestep() -> None:
+    scheduler = _Scheduler()
+    scheduler.set_timesteps(3, device=torch.device("cpu"))
+    with pytest.raises(TypeError):
+        scheduler.scale_noise(torch.zeros((1, 1)), scheduler.timesteps[1], torch.zeros((1, 1)))
+
+
+def test_scheduler_boundary_is_tagged_without_exception_text_classification() -> None:
+    class _FailingScheduler(_Scheduler):
+        def scale_noise(self, latent: torch.Tensor, timestep: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+            raise TypeError("public scheduler boundary")
+
+    pipeline = _Pipeline()
+    pipeline.scheduler = _FailingScheduler()
+    with pytest.raises(TypeError) as captured:
+        observe_sd35_image_qk(_image(), pipeline=pipeline, spec=_spec())
+    assert getattr(captured.value, "geometry_failure_point") == "scheduler"
 
 
 def test_public_seed_is_deterministic_and_does_not_mutate_global_rng() -> None:
