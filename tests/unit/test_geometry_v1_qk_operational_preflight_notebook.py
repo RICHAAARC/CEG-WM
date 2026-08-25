@@ -46,6 +46,7 @@ def test_notebook_is_complete_prepared_create_only_handoff_with_fixed_rgb_input(
     assert "process.kill" in source and "runner_env.pop('HF_TOKEN'" in source and "input_dir.rmdir" in source
     assert "geometry_v1_batch2b_fixed_rgb.png" in source and "fixed_path.open('xb')" in source
     assert "str(fixed_path)" in source and "input_paths.append(fixed_path)" in source
+    assert source.index("input_paths.append(fixed_path)") < source.index("fixed_path.open('xb')")
     assert "fixed_image=None; fixed_array=None" in source
     assert "geometry_v1_batch2b_fixed_rgb.png" not in source[source.index("allowed="):]
 
