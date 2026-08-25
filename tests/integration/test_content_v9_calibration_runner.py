@@ -126,3 +126,87 @@ def test_create_only_publish_removes_both_partial_files_on_sidecar_write_failure
         runner._publish_create_only(asset_path, sidecar_path, b"asset")
     assert not asset_path.exists()
     assert not sidecar_path.exists()
+
+
+@pytest.mark.integration
+def test_create_only_publish_removes_partial_json_on_write_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    asset_path = tmp_path / runner.ASSET_FILENAME
+    sidecar_path = tmp_path / f"{runner.ASSET_FILENAME}.sha256"
+    original_open = Path.open
+
+    class _FailingJSONWrite:
+        def __init__(self, handle: object) -> None:
+            self._handle = handle
+
+        def __enter__(self) -> "_FailingJSONWrite":
+            self._handle.__enter__()
+            return self
+
+        def write(self, payload: bytes) -> None:
+            self._handle.write(payload[:3])
+            raise OSError("simulated JSON write failure")
+
+        def __exit__(self, *args: object) -> object:
+            return self._handle.__exit__(*args)
+
+    def patched_open(path: Path, *args: object, **kwargs: object) -> object:
+        handle = original_open(path, *args, **kwargs)
+        if path == asset_path and args and args[0] == "xb":
+            return _FailingJSONWrite(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", patched_open)
+    with pytest.raises(OSError, match="JSON write failure"):
+        runner._publish_create_only(asset_path, sidecar_path, b"asset")
+    assert not asset_path.exists()
+    assert not sidecar_path.exists()
+
+
+@pytest.mark.integration
+def test_create_only_publish_removes_json_on_close_flush_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    asset_path = tmp_path / runner.ASSET_FILENAME
+    sidecar_path = tmp_path / f"{runner.ASSET_FILENAME}.sha256"
+    original_open = Path.open
+
+    class _FailingJSONClose:
+        def __init__(self, handle: object) -> None:
+            self._handle = handle
+
+        def __enter__(self) -> object:
+            return self._handle.__enter__()
+
+        def __exit__(self, *args: object) -> object:
+            self._handle.__exit__(*args)
+            raise OSError("simulated JSON flush close failure")
+
+    def patched_open(path: Path, *args: object, **kwargs: object) -> object:
+        handle = original_open(path, *args, **kwargs)
+        if path == asset_path and args and args[0] == "xb":
+            return _FailingJSONClose(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", patched_open)
+    with pytest.raises(OSError, match="JSON flush close failure"):
+        runner._publish_create_only(asset_path, sidecar_path, b"asset")
+    assert not asset_path.exists()
+    assert not sidecar_path.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("preexisting", ["json", "sidecar"])
+def test_create_only_publish_preserves_preexisting_destination(
+    tmp_path: Path, preexisting: str,
+) -> None:
+    asset_path = tmp_path / runner.ASSET_FILENAME
+    sidecar_path = tmp_path / f"{runner.ASSET_FILENAME}.sha256"
+    existing_path = asset_path if preexisting == "json" else sidecar_path
+    existing_path.write_bytes(b"preexisting")
+    with pytest.raises(FileExistsError, match="destination exists"):
+        runner._publish_create_only(asset_path, sidecar_path, b"new asset")
+    assert existing_path.read_bytes() == b"preexisting"
+    absent_path = sidecar_path if preexisting == "json" else asset_path
+    assert not absent_path.exists()

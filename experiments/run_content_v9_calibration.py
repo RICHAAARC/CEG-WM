@@ -74,8 +74,8 @@ def _publish_create_only(asset_path: Path, sidecar_path: Path, payload: bytes) -
     created_sidecar = False
     try:
         with asset_path.open("xb") as handle:
+            created_asset = True
             handle.write(payload)
-        created_asset = True
         with sidecar_path.open("xb") as handle:
             created_sidecar = True
             handle.write(f"{digest}  {ASSET_FILENAME}\n".encode("ascii"))
