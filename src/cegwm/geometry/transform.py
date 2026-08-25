@@ -15,6 +15,7 @@ _D4: tuple[NDArray[np.float64], ...] = (
     np.array(((-1.0, 0.0), (0.0, 1.0))), np.array(((1.0, 0.0), (0.0, -1.0))),
     np.array(((0.0, 1.0), (1.0, 0.0))), np.array(((0.0, -1.0), (-1.0, 0.0))),
 )
+_D4_ANGLE_BOUNDARY_ABS_TOLERANCE = 8 * np.finfo(np.float64).eps
 
 
 def apply_h(points: ArrayLike, h_canonical_to_observed: ArrayLike) -> NDArray[np.float64]:
@@ -92,7 +93,14 @@ def estimate_bounded_similarity(
         h = residual_h @ d4_h
         predicted = apply_h(source, h)
         residual = float(np.sqrt(np.mean(np.sum((predicted - target) ** 2, axis=1))))
-        if scale_bounds[0] <= scale <= scale_bounds[1] and abs(angle) <= max_residual_rotation_radians and np.linalg.norm(translation) <= max_translation:
+        angle_magnitude = abs(angle)
+        at_d4_boundary = math.isclose(
+            angle_magnitude,
+            max_residual_rotation_radians,
+            rel_tol=0.0,
+            abs_tol=_D4_ANGLE_BOUNDARY_ABS_TOLERANCE,
+        )
+        if scale_bounds[0] <= scale <= scale_bounds[1] and (angle_magnitude < max_residual_rotation_radians or at_d4_boundary) and np.linalg.norm(translation) <= max_translation:
             candidates.append((residual, index, h, scale, angle, translation))
     if not candidates:
         raise ValueError("no D4/similarity candidate satisfies bounds")

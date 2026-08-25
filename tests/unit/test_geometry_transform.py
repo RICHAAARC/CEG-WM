@@ -53,7 +53,7 @@ def test_d4_boundary_rotation_candidates_are_marked_ambiguous() -> None:
 
 def test_asymmetric_reflection_uses_one_d4_family_without_negative_scale_alias() -> None:
     asymmetric = np.array(((2, 3), (13, 4), (9, 15), (4, 11), (11, 9)), dtype=float)
-    reflection = np.array(((-1, 0, 38), (0, 1, 3), (0, 0, 1)), dtype=float)
+    reflection = np.array(((-1, 0, 39), (0, 1, 0), (0, 0, 1)), dtype=float)
     fitted = estimate_bounded_similarity(asymmetric, apply_h(asymmetric, reflection), (40, 40))
     d4_determinants = (1, 1, 1, 1, -1, -1, -1, -1)
     residual_determinant = np.linalg.det(fitted.h_canonical_to_observed[:2, :2]) / d4_determinants[fitted.d4_index]
