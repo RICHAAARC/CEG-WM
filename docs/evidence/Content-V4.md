@@ -58,10 +58,10 @@ robustness, geometry, Stage, main, or publication claim.
 ## Branch role
 
 `Content-V4-Evidence` is an evidence leaf under `Content-V4`. It is not a
-method-development base and must not be merged into `main`. The corresponding
-W-fit, non-roster canary, and formal-run notebooks are retained here so that
-the execution provenance stays attached to the method version that produced
-it.
+method-development base and must not be merged into `main`. Its current tree
+retains the final formal Notebook and the portable scalar result only; W-fit
+and canary execution material are omitted. The accepted public whitening asset
+remains part of the canonical method branch.
 
 ## Portable scalar evidence
 
