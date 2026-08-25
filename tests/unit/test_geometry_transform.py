@@ -29,12 +29,26 @@ def test_similarity_recovers_flip_and_h_direction_corners() -> None:
     assert np.allclose(transform_corners(fitted.h_canonical_to_observed, (20, 20)), apply_h(np.array(((0,0),(19,0),(19,19),(0,19))), flip))
 
 
+def test_similarity_recovers_d4_ninety_degree_rotation() -> None:
+    quarter_turn = np.array(((0, -1, 18), (1, 0, 0), (0, 0, 1)), dtype=float)
+    fitted = estimate_bounded_similarity(POINTS, apply_h(POINTS, quarter_turn), (20, 20))
+    assert fitted.d4_index == 1
+    assert np.allclose(apply_h(POINTS, fitted.h_canonical_to_observed), apply_h(POINTS, quarter_turn))
+
+
 def test_out_of_bounds_and_ambiguity_are_reported_not_hidden() -> None:
     moved = apply_h(POINTS, _h(tx=100, ty=100))
     fitted = estimate_bounded_similarity(POINTS, moved, (20, 20), max_translation=200)
     assert not fitted.valid_corners
     with pytest.raises(ValueError):
         estimate_bounded_similarity(POINTS, moved, (20, 20), max_translation=10)
+
+
+def test_equal_d4_boundary_candidates_are_marked_ambiguous() -> None:
+    target = apply_h(POINTS, _h(angle=math.pi / 4, tx=1, ty=1))
+    fitted = estimate_bounded_similarity(POINTS, target, (20, 20), ambiguity_tolerance=1e-8)
+    assert fitted.uniqueness_gap <= 1e-8
+    assert not fitted.valid_corners
 
 
 def test_crop_uses_visible_correspondences_and_reports_coverage() -> None:

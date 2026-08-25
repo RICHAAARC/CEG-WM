@@ -41,7 +41,11 @@ def _fit_similarity(source: NDArray[np.float64], target: NDArray[np.float64]) ->
     src_center, dst_center = source.mean(0), target.mean(0)
     centered_source, centered_target = source - src_center, target - dst_center
     u, _, vt = np.linalg.svd(centered_source.T @ centered_target)
-    rotation = u @ vt
+    # D4 supplies every discrete reflection.  The remaining similarity must be
+    # a proper rotation so a reflection cannot silently bypass D4 selection.
+    orientation = np.eye(2, dtype=np.float64)
+    orientation[-1, -1] = np.linalg.det(u @ vt)
+    rotation = u @ orientation @ vt
     scale = float(np.sum((centered_source @ rotation) * centered_target) / np.sum(centered_source**2))
     translation = dst_center - scale * (src_center @ rotation)
     linear = scale * rotation.T
