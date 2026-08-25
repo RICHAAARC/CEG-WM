@@ -59,6 +59,14 @@ def _public_revision(pipeline: Any) -> tuple[str | None, str]:
         value = getattr(source, "_commit_hash", None)
         if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{7,64}", value):
             return value, "proven_public_commit"
+    snapshots = {
+        candidate for candidate in (
+            _snapshot_hex(getattr(pipeline, "_name_or_path", getattr(pipeline, "name_or_path", None)),),
+            _snapshot_hex(getattr(getattr(pipeline, "config", None), "_name_or_path", None)),
+        ) if candidate is not None
+    }
+    if len(snapshots) == 1:
+        return next(iter(snapshots)), "unique_public_snapshot"
     return None, "unavailable_from_public_runtime"
 
 
@@ -88,8 +96,9 @@ def _public_config_identity(component: Any) -> dict[str, Any]:
             scalar[name] = value
     encoded = json.dumps(scalar, sort_keys=True, separators=(",", ":")).encode("utf-8")
     source = getattr(component, "_name_or_path", getattr(component, "name_or_path", None))
+    config_source = getattr(config, "_name_or_path", getattr(config, "name_or_path", None))
     commit = getattr(component, "_commit_hash", None)
-    return {"class": f"{type(component).__module__}.{type(component).__qualname__}", "config_class": f"{type(config).__module__}.{type(config).__qualname__}", "commit_candidate": commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{7,64}", commit) else None, "snapshot_candidate": _snapshot_hex(source), "config_scalar_sha256": _sha256_bytes(encoded)}
+    return {"class": f"{type(component).__module__}.{type(component).__qualname__}", "config_class": f"{type(config).__module__}.{type(config).__qualname__}", "commit_candidate": commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{7,64}", commit) else None, "snapshot_candidate": _snapshot_hex(source), "config_snapshot_candidate": _snapshot_hex(config_source), "config_scalar_sha256": _sha256_bytes(encoded)}
 
 
 def _model_identity(value: Any) -> dict[str, str | None]:

@@ -53,6 +53,11 @@ def test_model_identity_never_serializes_noncanonical_paths() -> None:
     assert "/private" not in repr(record)
 
 
+def test_unique_public_snapshot_is_a_revision_candidate() -> None:
+    pipeline = type("Pipeline", (), {"_name_or_path": "/x/snapshots/abcdef0123456/model", "config": object()})()
+    assert runner._public_revision(pipeline) == ("abcdef0123456", "unique_public_snapshot")
+
+
 def test_preflight_requires_cuda_before_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner.torch.cuda, "is_available", lambda: False)
     monkeypatch.setattr(runner, "_validate_execution_exact", lambda *_args: "geometry-v1-b2b-000000000000-operational-01")
