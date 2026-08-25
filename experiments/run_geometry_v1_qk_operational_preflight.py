@@ -92,6 +92,13 @@ def _public_config_identity(component: Any) -> dict[str, Any]:
     return {"class": f"{type(component).__module__}.{type(component).__qualname__}", "config_class": f"{type(config).__module__}.{type(config).__qualname__}", "commit_candidate": commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{7,64}", commit) else None, "snapshot_candidate": _snapshot_hex(source), "config_scalar_sha256": _sha256_bytes(encoded)}
 
 
+def _model_identity(value: Any) -> dict[str, str | None]:
+    if value == MODEL_ID:
+        return {"name": MODEL_ID, "digest": None, "snapshot_candidate": None}
+    text = value if isinstance(value, str) else ""
+    return {"name": None, "digest": _sha256_bytes(text.encode("utf-8")) if text else None, "snapshot_candidate": _snapshot_hex(text)}
+
+
 def _runtime_record(pipeline: Any) -> dict[str, Any]:
     def version(name: str) -> str | None:
         try:
@@ -109,7 +116,7 @@ def _runtime_record(pipeline: Any) -> dict[str, Any]:
         "cuda_device": torch.cuda.get_device_name() if torch.cuda.is_available() else None,
         "requested_model_id": MODEL_ID, "requested_revision": None, "requested_torch_dtype": str(torch.float16), "selected_device": "cuda",
         "pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}",
-        "pipeline_name_or_path": str(name_or_path) if name_or_path is not None else None,
+        "pipeline_identity": _model_identity(name_or_path),
         "resolved_revision": revision, "resolution_status": resolution_status,
         "vae_class": f"{type(getattr(pipeline, 'vae', None)).__module__}.{type(getattr(pipeline, 'vae', None)).__qualname__}",
         "transformer_class": f"{type(getattr(pipeline, 'transformer', None)).__module__}.{type(getattr(pipeline, 'transformer', None)).__qualname__}",
@@ -252,7 +259,9 @@ def operational_preflight(
             first = observation
             before = dict(counts)
             repeated = observe_sd35_image_qk(image, pipeline=pipeline, spec=spec)
-            if any(counts[name] - before[name] != 1 for name in counts):
+            repeat_counts = {name: counts[name] - before[name] for name in counts}
+            record["repeat_projection_call_counts"] = repeat_counts
+            if any(value != 1 for value in repeat_counts.values()):
                 raise ValueError("repeated selected projections were not called exactly once")
             if _tensor_digest(repeated.layers[0].query) != _tensor_digest(observation.layers[0].query) or _tensor_digest(repeated.layers[0].key) != _tensor_digest(observation.layers[0].key):
                 raise ValueError("first image observation is not deterministic")
