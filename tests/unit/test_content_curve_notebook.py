@@ -21,7 +21,7 @@ def test_stage_a_frequency_response_notebook_has_one_thin_handoff_path() -> None
     combined = "\n".join(sources)
     assert "refs/heads/Content-Curve-Evidence" in combined
     assert "b1a806a34a16435c4242e45eafa3818b3a37b8a6" in combined
-    assert "/content/drive/MyDrive/CEG-WM/stage_a_standalone_lf_hf_frequency_response" in combined
+    assert "/content/drive/MyDrive/CEG-WM/content_curve" in combined
     assert "slhfr-[0-9a-f]{24}" in combined
     assert "experiments.stage_a_frequency_response.run_colab" in combined
     for flag in ("--repo-root", "--expected-exact", "--local-work-root", "--artifact-sink"):
