@@ -153,13 +153,22 @@ def _null_conditioning(pipeline: Any) -> tuple[torch.Tensor, torch.Tensor, dict[
     if not callable(encode_prompt):
         raise TypeError("pipeline must expose public encode_prompt for the one null construction")
     result = encode_prompt(prompt="", do_classifier_free_guidance=False)
-    if not isinstance(result, (tuple, list)) or len(result) < 2:
-        raise ValueError("null encode_prompt must return hidden and pooled tensors")
-    hidden, pooled = result[0], result[1]
+    if not isinstance(result, (tuple, list)) or len(result) != 4:
+        raise ValueError("null encode_prompt must return the SD3 four-item tuple")
+    # StableDiffusion3Pipeline returns (prompt, negative_prompt, pooled,
+    # negative_pooled).  The no-CFG negative positions are intentionally not
+    # consumed by this image-observation preflight.
+    hidden, pooled = result[0], result[2]
     if not isinstance(hidden, torch.Tensor) or not isinstance(pooled, torch.Tensor):
-        raise TypeError("null encode_prompt outputs must be tensors")
+        raise TypeError("selected null encode_prompt outputs must be tensors")
+    if not torch.is_floating_point(hidden) or not torch.is_floating_point(pooled):
+        raise TypeError("selected null encode_prompt outputs must be floating tensors")
+    if hidden.ndim < 2 or pooled.ndim < 2:
+        raise ValueError("selected null conditioning tensors must be rank two or higher")
     if hidden.shape[0] != 1 or pooled.shape[0] != 1:
         raise ValueError("null conditioning must be batch one")
+    if not bool(torch.isfinite(hidden).all()) or not bool(torch.isfinite(pooled).all()):
+        raise ValueError("selected null conditioning tensors must be finite")
     return hidden.detach(), pooled.detach(), {
         "hidden_shape": list(hidden.shape), "hidden_dtype": str(hidden.dtype), "hidden_sha256": _tensor_digest(hidden),
         "pooled_shape": list(pooled.shape), "pooled_dtype": str(pooled.dtype), "pooled_sha256": _tensor_digest(pooled),

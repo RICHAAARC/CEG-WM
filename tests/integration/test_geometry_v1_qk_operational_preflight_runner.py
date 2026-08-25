@@ -73,3 +73,47 @@ def test_preflight_requires_cuda_before_loader(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(runner, "_validate_execution_exact", lambda *_args: "geometry-v1-b2b-000000000000-operational-01")
     with pytest.raises(RuntimeError, match="cuda_required"):
         runner.operational_preflight([Image.new("RGB", (2, 2))], hf_token="token", root_key="key", expected_exact="0" * 40, repo_root=Path("."))
+
+
+def test_null_conditioning_uses_only_sd3_hidden_and_pooled_tuple_slots() -> None:
+    hidden = torch.full((1, 3, 2), 1.25, dtype=torch.float32)
+    pooled = torch.full((1, 5), 9.5, dtype=torch.float64)
+
+    class Pipeline:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def encode_prompt(self, **kwargs: object) -> tuple[torch.Tensor, None, torch.Tensor, None]:
+            self.calls.append(kwargs)
+            return hidden, None, pooled, None
+
+    pipeline = Pipeline()
+    actual_hidden, actual_pooled, record = runner._null_conditioning(pipeline)
+    assert pipeline.calls == [{"prompt": "", "do_classifier_free_guidance": False}]
+    assert actual_hidden is not hidden and torch.equal(actual_hidden, hidden)
+    assert actual_pooled is not pooled and torch.equal(actual_pooled, pooled)
+    assert actual_hidden.shape != actual_pooled.shape
+    assert record["hidden_shape"] == [1, 3, 2]
+    assert record["pooled_shape"] == [1, 5]
+
+
+@pytest.mark.parametrize(
+    ("result", "error"),
+    [
+        ((torch.ones((1, 2)), torch.ones((1, 2))), "four-item"),
+        ((torch.ones((1, 2)), None, torch.ones((1, 2))), "four-item"),
+        (("not-a-tensor", None, torch.ones((1, 2)), None), "tensors"),
+        ((torch.ones((1, 2), dtype=torch.int64), None, torch.ones((1, 2)), None), "floating"),
+        ((torch.ones(2), None, torch.ones((1, 2)), None), "rank"),
+        ((torch.ones((2, 2)), None, torch.ones((1, 2)), None), "batch one"),
+        ((torch.tensor([[float("nan")]]), None, torch.ones((1, 2)), None), "finite"),
+    ],
+)
+def test_null_conditioning_rejects_non_sd3_or_invalid_selected_values(result: object, error: str) -> None:
+    class Pipeline:
+        def encode_prompt(self, **kwargs: object) -> object:
+            assert kwargs == {"prompt": "", "do_classifier_free_guidance": False}
+            return result
+
+    with pytest.raises((TypeError, ValueError), match=error):
+        runner._null_conditioning(Pipeline())
