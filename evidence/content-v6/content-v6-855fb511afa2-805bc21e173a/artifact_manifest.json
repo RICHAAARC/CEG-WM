@@ -1,0 +1,39 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V6",
+  "cohort_role": "current_v6_evaluation",
+  "run_id": "content-v6-855fb511afa2-805bc21e173a",
+  "source_exact": "49bb03ed697a47048f5730ecfc85a9f29cb0b58a",
+  "protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-clean-v1",
+  "protocol_digest": "855fb511afa23548c30a5fcad17525589b340aac7067ae3491941fc8fc99427d",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "roster_sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f",
+  "iss_asset_sha256": "d66ff88640a3d1a020646cfde3face7502282bf835c9d3fb746b518dfb02c231",
+  "source_archive": {
+    "filename": "content-v6-855fb511afa2-805bc21e173a.zip",
+    "byte_count": 12914,
+    "sha256": "bb187802b8e376f0c1f00d740cdb7010068f49f6a46fea578bdf64aefa71fbb1",
+    "sidecar_filename": "content-v6-855fb511afa2-805bc21e173a.zip.sha256",
+    "sidecar_byte_count": 107,
+    "sidecar_file_sha256": "eb57db034bc22d736ba406f63b7f46fedc8a965d58728a4fcc234303d35506b1",
+    "sidecar_binding": "bb187802b8e376f0c1f00d740cdb7010068f49f6a46fea578bdf64aefa71fbb1  content-v6-855fb511afa2-805bc21e173a.zip\n",
+    "all_members_read_check": "pass",
+    "members": [
+      {"path": "receipt.json", "byte_count": 647, "sha256": "48bc27f99ec3ee20b719a9790c848c8ff4dd815d044eec675089e26f79f80966", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "result.json", "byte_count": 68377, "sha256": "6801b0f56ee6eef36d3a854758c264479e21afbf76c08a6ec5e2a64f0e42310e", "zip_timestamp": "1980-01-01T00:00:00"}
+    ]
+  },
+  "contents": {"fixed_unit_count": 8, "fixed_record_count": 16, "score_fields_per_record": 51, "scalar_score_count": 816, "failed_unit_count": 0, "status": "complete_rc0"},
+  "independently_recomputed_frozen_gates": {
+    "lf": {"gate_a": 7, "gate_b": 8},
+    "hf": {"gate_a": 8, "gate_b": 8},
+    "joint": {"gate_a": 8, "gate_b": 8},
+    "required_units": 7,
+    "strict_ties_fail": true,
+    "tie_count": 0,
+    "formal_fpr_claim": false,
+    "all_predeclared_gates_pass": true
+  },
+  "personal_adjudication": "CONTENT_CHAIN_MECHANISM_COMPLETE",
+  "evidence_ceiling": "exact_current_roster_clean_only_mechanism_result; no_cross_roster_generalization_or_fixed_fpr_or_attack_or_robustness_or_geometry_or_promotion_claim"
+}

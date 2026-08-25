@@ -1,0 +1,14 @@
+{
+  "artifact_kind": "terminal",
+  "run_id": "content-v6-reference-oldroster-c98175252406-805bc21e173a",
+  "exact": "39720994cc3316af8c2cac586689d0811232b4c7",
+  "execution_scope_id": "content_v6_detector_domain_iss_reference_oldroster_engineering_and_stage_a_evaluation_v1",
+  "protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-reference-oldroster-v1",
+  "protocol_digest": "c98175252406cce147b329b016fe3f6acb62b2ed1ba5bba66ca9fea5ae37fa80",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "fixed_unit_count": 8,
+  "fixed_record_count": 16,
+  "committed_unit_count": 8,
+  "result_member": "result.json",
+  "external_validation_required": true
+}

@@ -1,0 +1,14 @@
+{
+  "artifact_kind": "terminal",
+  "run_id": "content-v6-855fb511afa2-805bc21e173a",
+  "exact": "49bb03ed697a47048f5730ecfc85a9f29cb0b58a",
+  "execution_scope_id": "content_v6_detector_domain_iss_engineering_and_stage_a_evaluation_v1",
+  "protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-clean-v1",
+  "protocol_digest": "855fb511afa23548c30a5fcad17525589b340aac7067ae3491941fc8fc99427d",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "fixed_unit_count": 8,
+  "fixed_record_count": 16,
+  "committed_unit_count": 8,
+  "result_member": "result.json",
+  "external_validation_required": true
+}
