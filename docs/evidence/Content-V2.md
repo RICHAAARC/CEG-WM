@@ -55,3 +55,16 @@ read-only recomputation without retaining images or private runtime state.
 The package does not record the later 50/50 posthoc analysis. Any future
 statistic recomputed from these records remains a new analysis and cannot
 retroactively change the frozen Content V2 adjudication.
+
+## Drive-first Notebook rerun
+
+The unified Drive-first Notebook completed an additional RC0 run at exact
+`c1ed8450218f080b50e76b843a590aa51efd3f30` on `20260826T025039Z` using
+`[8V1] content_units_8_v1`. Its ZIP SHA-256 is
+`4a5d1d60e908363cd9936528d739ecd1e1d382387a9f53eb49a99b9fe17dd319`.
+
+The rerun is preserved append-only under
+`evidence/content-v2/content-adaptive-v2-e3fe3fd32ca2-805bc21e173a/reruns/20260826T025039Z-c1ed8450218f/`.
+After excluding only execution provenance (`exact` and record-level
+`code_revision`), it is identical to the prior scalar evidence. It does not
+change the frozen Gate outcome or adjudication boundary above.

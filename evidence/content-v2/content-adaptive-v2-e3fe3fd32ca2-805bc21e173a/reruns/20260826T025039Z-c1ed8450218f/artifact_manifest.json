@@ -1,0 +1,83 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V2",
+  "run_id": "content-adaptive-v2-e3fe3fd32ca2-805bc21e173a",
+  "source_exact": "c1ed8450218f080b50e76b843a590aa51efd3f30",
+  "run_utc": "20260826T025039Z",
+  "unit_set": {
+    "unit_set_id": "content_units_8_v1",
+    "display_label": "[8V1]"
+  },
+  "protocol_id": "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v3",
+  "protocol_digest": "e3fe3fd32ca2df7a1b1d2afe0318ff6c81cd67765b1f1be79a3ed89db7e87345",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "roster_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88",
+  "drive_source": {
+    "drive_run_root": "/content/drive/MyDrive/CEG-WM/Content/Content-V2-c1ed8450218f-20260826T025039Z",
+    "drive_folder_id": "1jVGmHZ03Cbd6m_vPC2OPlfuYy72BWStp",
+    "run_directory": "/content/drive/MyDrive/CEG-WM/Content/Content-V2-c1ed8450218f-20260826T025039Z/content-adaptive-v2-e3fe3fd32ca2-805bc21e173a"
+  },
+  "source_archive": {
+    "filename": "content-adaptive-v2-e3fe3fd32ca2-805bc21e173a.zip",
+    "byte_count": 12872,
+    "sha256": "4a5d1d60e908363cd9936528d739ecd1e1d382387a9f53eb49a99b9fe17dd319",
+    "sidecar_filename": "content-adaptive-v2-e3fe3fd32ca2-805bc21e173a.zip.sha256",
+    "sidecar_byte_count": 116,
+    "sidecar_file_sha256": "a147e7d2d955e403d789b98d7b023e25d7b259c65280cef541d805e211cc7b1f",
+    "sidecar_binding": "4a5d1d60e908363cd9936528d739ecd1e1d382387a9f53eb49a99b9fe17dd319  content-adaptive-v2-e3fe3fd32ca2-805bc21e173a.zip\n",
+    "crc_check": "pass",
+    "members": [
+      {
+        "path": "receipt.json",
+        "byte_count": 703,
+        "sha256": "051af3529e950b0a11bac54b50fc083908d9b367ea082a983d7309e84c73613c",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      },
+      {
+        "path": "result.json",
+        "byte_count": 68037,
+        "sha256": "a9fc964a0738fee20618e022da8b4d0dc48675deb1e65b59862d25f890333a36",
+        "zip_timestamp": "1980-01-01T00:00:00"
+      }
+    ]
+  },
+  "contents": {
+    "fixed_unit_count": 8,
+    "record_count": 16,
+    "score_fields_per_record": 51,
+    "scalar_score_count": 816,
+    "unit_aggregate_count": 8,
+    "status": "complete_rc0",
+    "failed_unit_count": 0
+  },
+  "independently_recomputed_frozen_gates": {
+    "lf": {
+      "gate_a": 5,
+      "gate_b": 8
+    },
+    "hf": {
+      "gate_a": 8,
+      "gate_b": 8
+    },
+    "joint": {
+      "gate_a": 7,
+      "gate_b": 8
+    },
+    "required_units": 7,
+    "strict_ties_fail": true
+  },
+  "prior_scalar_evidence": {
+    "relative_path": "evidence/content-v2/content-adaptive-v2-e3fe3fd32ca2-805bc21e173a",
+    "source_exact": "4d8b0df5bf7840d242115669f1d3115cdf6810cc",
+    "archive_sha256": "d29873a61baebe47deb41d989e19ab5a78008e279807e78f0302479acea65b77"
+  },
+  "normalized_comparison_to_prior": {
+    "ignored_provenance_fields": [
+      "exact",
+      "records[*].code_revision"
+    ],
+    "equal": true,
+    "max_numeric_abs_diff": 0.0
+  },
+  "evidence_ceiling": "authenticated_complete_scalar_formal_evidence_for_the_exact_frozen_candidate; narrow_scientific_negative_only"
+}

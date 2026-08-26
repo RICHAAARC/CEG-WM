@@ -1,0 +1,14 @@
+{
+  "artifact_kind": "terminal",
+  "run_id": "content-adaptive-v2-e3fe3fd32ca2-805bc21e173a",
+  "exact": "c1ed8450218f080b50e76b843a590aa51efd3f30",
+  "execution_scope_id": "content_adaptive_dual_branch_v2_semantic_gate_engineering_and_stage_a_evaluation_v1",
+  "protocol_id": "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v3",
+  "protocol_digest": "e3fe3fd32ca2df7a1b1d2afe0318ff6c81cd67765b1f1be79a3ed89db7e87345",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "fixed_unit_count": 8,
+  "fixed_record_count": 16,
+  "committed_unit_count": 8,
+  "result_member": "result.json",
+  "external_validation_required": true
+}
