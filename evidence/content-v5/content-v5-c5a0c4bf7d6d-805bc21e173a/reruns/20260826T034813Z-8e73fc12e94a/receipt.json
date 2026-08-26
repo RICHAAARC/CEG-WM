@@ -1,0 +1,20 @@
+{
+  "artifact_kind": "terminal",
+  "artifact_contract_id": "content_v5_reference_then_primary_umbrella_artifact_v1",
+  "run_id": "content-v5-c5a0c4bf7d6d-805bc21e173a",
+  "exact": "8e73fc12e94acae976527c6ea704305e601203b8",
+  "execution_scope_id": "content_v5_reference_then_primary_umbrella_evaluation_v1",
+  "protocol_id": "cegwm-stage-a-content-v5-whitened-lf-adaptive-hf-branchwise-or-clean-v1",
+  "protocol_digest": "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "cohorts_in_order": [
+    "control_1",
+    "primary_1"
+  ],
+  "fixed_units_per_cohort": 8,
+  "fixed_records_per_cohort": 16,
+  "committed_whole_unit_count": 16,
+  "result_member": "result.json",
+  "audit_state_member": "audit-state.json",
+  "external_validation_required": true
+}

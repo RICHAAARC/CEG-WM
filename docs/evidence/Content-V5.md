@@ -97,3 +97,16 @@ package contains no image, raw prompt text, raw key, token, latent, delta,
 route, mask, tensor, or private embed state. Any future statistic recomputed
 from these records is a new analysis and cannot retroactively change this
 frozen adjudication.
+
+## Drive-first Notebook rerun
+
+The unified Drive-first Notebook completed an additional RC0 run at exact
+`8e73fc12e94acae976527c6ea704305e601203b8` on `20260826T034813Z` using
+`[8V1] content_units_8_v1` and `[8V2] content_units_8_v2`. Its ZIP SHA-256 is
+`6eec4185b13db59313c54d32efcc7192fa16d98594476a722358ac294e0f2915`.
+
+The rerun is preserved append-only under
+`evidence/content-v5/content-v5-c5a0c4bf7d6d-805bc21e173a/reruns/20260826T034813Z-8e73fc12e94a/`.
+After excluding only execution provenance, both independent cohort results are
+identical to the prior scalar evidence. It does not change the frozen Gate
+outcomes, original `scientific_status`, or the personal adjudication above.

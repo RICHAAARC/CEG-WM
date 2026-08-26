@@ -1,0 +1,54 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V5",
+  "run_id": "content-v5-c5a0c4bf7d6d-805bc21e173a",
+  "source_exact": "8e73fc12e94acae976527c6ea704305e601203b8",
+  "run_utc": "20260826T034813Z",
+  "unit_sets": [
+    {"unit_set_id": "content_units_8_v1", "display_label": "[8V1]"},
+    {"unit_set_id": "content_units_8_v2", "display_label": "[8V2]"}
+  ],
+  "protocol_id": "cegwm-stage-a-content-v5-whitened-lf-adaptive-hf-branchwise-or-clean-v1",
+  "protocol_digest": "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "drive_source": {
+    "drive_run_root": "/content/drive/MyDrive/CEG-WM/Content/Content-V5-8e73fc12e94a-20260826T034813Z",
+    "drive_folder_id": "1wDvNBZu1yDcJgkDXsVHNlpka1zu_K4mQ",
+    "run_directory_id": "14dCrWi2yjz2UNiASgzDfYfxA41tmjopu"
+  },
+  "source_archive": {
+    "filename": "content-v5-c5a0c4bf7d6d-805bc21e173a.zip",
+    "byte_count": 47147,
+    "sha256": "6eec4185b13db59313c54d32efcc7192fa16d98594476a722358ac294e0f2915",
+    "sidecar_filename": "content-v5-c5a0c4bf7d6d-805bc21e173a.zip.sha256",
+    "sidecar_byte_count": 107,
+    "sidecar_file_sha256": "2427f1703d16f0cf54f83b049f2a6159b74537a531d1cec47556fc4f90c2f07a",
+    "sidecar_binding": "6eec4185b13db59313c54d32efcc7192fa16d98594476a722358ac294e0f2915  content-v5-c5a0c4bf7d6d-805bc21e173a.zip\n",
+    "crc_check": "pass",
+    "members": [
+      {"path": "receipt.json", "byte_count": 862, "sha256": "74b3c61b3290338dfc07343c96c3af51ba329f608f0bca0a9739a0a4658961e3", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "result.json", "byte_count": 155728, "sha256": "efa375177651c023d16d6d8f1f9cc4510bc0c818b9282b8faecdbb2963bb5e16", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "audit-state.json", "byte_count": 130880, "sha256": "fbd1a45ca9fac71b472c255249cc8ea35cab50be0ad9c781490d37ece277b947", "zip_timestamp": "1980-01-01T00:00:00", "committed": false, "omission_reason": "duplicates_committed_records_and_is_not_required_for_scalar_recomputation"}
+    ]
+  },
+  "contents": {
+    "independent_fixed_unit_counts": [8, 8],
+    "independent_record_counts": [16, 16],
+    "failed_unit_counts": [0, 0],
+    "status": "complete_rc0"
+  },
+  "independently_recomputed_frozen_gates": {
+    "control_1": {"branchwise_or_gate_a": 8, "branchwise_or_gate_b": 8, "required_units": 7, "all_predeclared_gates_pass": true},
+    "primary_1": {"branchwise_or_gate_a": 8, "branchwise_or_gate_b": 8, "required_units": 7, "all_predeclared_gates_pass": true}
+  },
+  "prior_scalar_evidence": {
+    "relative_path": "evidence/content-v5/content-v5-c5a0c4bf7d6d-805bc21e173a",
+    "source_exact": "ed5ed5a303c4eb3a8e7cafb8410109b68f5e41fa"
+  },
+  "normalized_comparison_to_prior": {
+    "ignored_provenance_fields": ["exact", "cohort_results[*].result.exact", "cohort_results[*].result.records[*].code_revision"],
+    "equal": true,
+    "max_numeric_abs_diff": 0.0
+  },
+  "evidence_ceiling": "authenticated_complete_scalar_formal_evidence_for_the_exact_frozen_candidate; prior_personal_adjudication_unchanged"
+}
