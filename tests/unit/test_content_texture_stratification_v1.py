@@ -143,6 +143,32 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertNotIn("--resume", joined)
         self.assertNotIn("Gate", joined)
 
+    def test_notebook_parses_terminal_and_operational_runner_schemas(self) -> None:
+        notebook = json.loads((ROOT / "notebooks/content_texture_stratification_v1_colab.ipynb").read_text())
+        runner_cell = ["".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code"][2]
+        tree = ast.parse(runner_cell)
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "parse_runner_result")
+        namespace = {
+            "json": json,
+            "RESULT_PREFIX": "CEGWM_TEXTURE_RESULT",
+            "CAPTURE_LIMIT": 4096,
+            "TERMINAL_RESULT_FIELDS": {"status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256"},
+            "OPERATIONAL_RESULT_FIELDS": {"status", "failure_class", "failure_stage"},
+            "RUNNER_PUBLIC_FAILURES": {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"},
+            "RUNNER_FAILURE_STAGES": {"identity", "protocol", "secrets", "checkouts", "rosters", "assets", "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication"},
+        }
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "<notebook-parser>", "exec"), namespace)
+        parse = namespace["parse_runner_result"]
+        terminal = {"status": "analysis_complete", "claim_ceiling": "ceiling", "exact": "a" * 40, "protocol_digest": "b" * 64, "run_id": "run", "terminal_sha256": "c" * 64}
+        self.assertEqual(parse(0, ("CEGWM_TEXTURE_RESULT " + json.dumps(terminal) + "\n").encode())[0], "terminal")
+        terminal["status"] = "not_interpretable"
+        self.assertEqual(parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(terminal) + "\n").encode())[0], "terminal")
+        operational = {"status": "analysis_incomplete", "failure_class": "MemoryError", "failure_stage": "v6"}
+        self.assertEqual(parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(operational) + "\n").encode()), ("operational_incomplete", operational))
+        for bad in ({"status": "analysis_incomplete", "failure_class": "UnknownError", "failure_stage": "v6"}, {"status": "analysis_incomplete", "failure_class": "RuntimeError", "failure_stage": "unknown"}):
+            with self.assertRaises(RuntimeError):
+                parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(bad) + "\n").encode())
+
 
 if __name__ == "__main__":
     unittest.main()
