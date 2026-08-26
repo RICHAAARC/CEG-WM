@@ -2,11 +2,17 @@
 
 ## Research question
 
-Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image, while an LF branch adds attack complementarity without becoming a generic image-content signal?
+Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image through the frozen content-adaptive simultaneous LF+HF embedding and its clean joint statistic?
+
+The content-adaptive simultaneous LF+HF embedding and its clean joint statistic are authorized for this narrow route. The earlier attack-complementarity result remains historical `SCIENTIFIC_NEGATIVE` evidence against its preregistered incremental-complementarity claim; it does not negate this clean simultaneous-embedding question. Only broader downstream or promotion-level LF/HF fusion and routing remain unauthorized.
+
+The four positive neutral-counterfactual effects establish only that each frozen allocation input changed the allocation. The two public branch-share population standard deviations can support only that allocation was not identical across the fixed eight-image roster, and only when both independently computed RC0 values are finite and strictly positive. They do not expose or recover masks, tile weights, attention, latents, deltas, or probe state.
+
+Local CPU, fake, and runtime checks are engineering evidence only; they do not scientifically validate this route, finish original Stage A, or complete the content chain. Geometry, fixed-FPR calibration, and paper promotion are outside this route.
 
 ## Stage-A decision
 
-Stage A evaluates attribution foundations before content adaptation or geometry:
+The original Stage A evaluates attribution foundations and remains unfinished:
 
 1. reproduce one HF keyed-attribution anchor;
 2. evaluate finite LF candidates independently;
@@ -19,7 +25,6 @@ Stage A may produce a scientific negative. Passing Stage A only authorizes desig
 
 ## Deferred work
 
-- semantic/texture/stability-based spatial allocation;
 - LF/HF combined detector calibration;
 - crop oracle fault decomposition;
 - Q/K synchronization and geometric estimation;

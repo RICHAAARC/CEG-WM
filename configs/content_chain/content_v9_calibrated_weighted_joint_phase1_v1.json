@@ -1,0 +1,76 @@
+{
+  "protocol_version": 1,
+  "protocol_id": "cegwm-stage-a-content-v9-calibrated-weighted-joint-calibration-v1",
+  "claim_ceiling": "calibrated_combined_attribution_only",
+  "scientific_status": "calibration_not_run_no_final_v9_evaluation_identity",
+  "identities": {
+    "base_exact": "49bb03ed697a47048f5730ecfc85a9f29cb0b58a",
+    "method_id": "content_v9_v6_calibrated_weighted_joint_v1",
+    "evaluated_candidate_id": "content_v9_v6_calibrated_weighted_joint_semantic_gate_v1",
+    "record_contract_id": "content_v9_calibrated_weighted_joint_record_v1",
+    "state_schema_id": "content_v9_resumable_state_v1"
+  },
+  "inherited_v6": {
+    "embedding_and_branch_scorers": "byte_semantic_unchanged_from_Content_V6_production",
+    "joint_replacement_only": true,
+    "wrong_key_domain": "stage-a/content-adaptive-v2-external-wrong-key/v1"
+  },
+  "calibration": {
+    "manifest": "content_v9_calibration_v1.jsonl",
+    "manifest_sha256": "1e7bafcce363177684c1edf5d858df5baa03933affb28e066603a616c6e1c785",
+    "prompt_list_sha256": "81fb52e376022744e02a7be3f4d3ee2e36ff9398d37bcb9428e99fa40f64fc95",
+    "units": 32,
+    "ordered_pair_count": 1056,
+    "pair_order": "per_unit_candidate_wrong_00_to_15_then_primary_null_registered_then_primary_null_wrong_00_to_15_each_lf_then_hf",
+    "candidate_registered_excluded": true,
+    "key_domain": "stage-a/content-v9-calibrated-weighted-joint-calibration-key/v1"
+  },
+  "joint_operator": {
+    "lf_weight": 0.25,
+    "hf_weight": 0.75,
+    "statistics": "binary64_fsum_mean_ddof1_std_and_pearson_rho",
+    "denominator": "sqrt(w_lf^2+w_hf^2+2*w_lf*w_hf*rho)",
+    "formula": "(w_lf*z_lf+w_hf*z_hf)/denominator",
+    "weighted_gate_a": "registered_strictly_greater_than_max_16_wrong_ties_fail",
+    "weighted_gate_b": "candidate_registered_strictly_greater_than_primary_null_registered",
+    "weighted_gate_min_units": 7,
+    "lf_hf_gates": "diagnostic_only_no_hard_veto"
+  },
+  "asset_contract": {
+    "asset_schema_id": "cegwm_content_v9_calibrated_weighted_joint_asset_v1",
+    "asset_role_id": "content_v9_calibrated_weighted_joint_v1",
+    "numeric_payload": "five_binary64_big_endian_hex_values",
+    "create_only_json_and_sha256_sidecar": true,
+    "raw_calibration_scores_persisted": false,
+    "fit_unit_count": 32,
+    "whitening_asset_sha256": "a7021dd8b98bc4282b98ed5d1fe276236d99a3c9e80b9bdce015d28cf715633f",
+    "whitening_asset_sidecar_file_sha256": "c900cce0980348eeadcf07d782b6169c4d46ac55d7154db0fc0a0a878cce0ced",
+    "iss_asset_sha256": "d66ff88640a3d1a020646cfde3face7502282bf835c9d3fb746b518dfb02c231",
+    "iss_asset_sidecar_file_sha256": "27094d56994bc6f5d93564bad79ddd9ce8218d2d193786f4816535ee1e7f6538"
+  },
+  "future_evaluation": {
+    "protocol_id": "cegwm-stage-a-content-v9-calibrated-weighted-joint-clean-v1",
+    "manifest": "content_v9_clean_evaluation_v1.jsonl",
+    "manifest_sha256": "dd9d9c60974f07f3727b0c46b08c1678dfb9b57339a662735ad4178b9473849d",
+    "prompt_list_sha256": "ed8796c183200ec826023d44f9ebe06293968f5a387dbcf242addaf036e46617",
+    "units": 8,
+    "records": 16,
+    "formal_fpr_claim": false
+  },
+  "future_read_only_comparison_provenance": {
+    "required_route_evidence": [
+      "Content-V2",
+      "Content-V3",
+      "Content-V4",
+      "Content-V5",
+      "Content-V6-current",
+      "Content-V6-old-roster-reference",
+      "Content-V7",
+      "Content-V8"
+    ],
+    "v6_current_producer_exact": "49bb03ed697a47048f5730ecfc85a9f29cb0b58a",
+    "v6_old_roster_reference_exact": "39720994cc3316af8c2cac586689d0811232b4c7",
+    "consumed_by_v9_calibration_or_evaluation": false,
+    "comparison_stage": "later_independent_read_only_artifact_comparison_only"
+  }
+}
