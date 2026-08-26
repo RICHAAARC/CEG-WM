@@ -18,9 +18,17 @@ def test_content_v9_evidence_notebook_is_self_contained() -> None:
     source = "\n".join(code_cells)
 
     ast.parse(source)
+    assert len(notebook["cells"]) == 10
+    assert len(code_cells) == 4
     assert all(not cell.get("outputs") for cell in notebook["cells"])
     assert 'BRANCH = "Content-V9-Evidence"' in source
     assert 'RUNNER_MODULE = "experiments.run_content_v9_stability"' in source
     assert source.count("RUNNER_RC = subprocess.run(") == 1
+    assert "subprocess.Popen(" not in source
+    assert "CAPTURE_LIMIT" not in source
+    assert "POST_INSTALL_COMMIT = git(" in source
+    assert 'runner_env["CEG_WM_ROOT_KEY"] = root_key' in source
+    assert 'runner_env["HF_TOKEN"] = hf_token' in source
+    assert ".checkpoint-" in code_cells[-1]
     assert "RUNNER_RC = subprocess.run(" not in code_cells[-1]
     assert _RUNNER.is_file()
