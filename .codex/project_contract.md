@@ -2,9 +2,11 @@
 
 ## Current authorization
 
-- Project stage: `stage_a_method_feasibility_authorized`.
-- Substantive Stage-A method, runtime, protocol, runner, configuration, and lightweight test work is allowed.
-- This stage does not claim that LF, HF, routing, geometry, fixed-FPR detection, or the complete CEG-WM method has been scientifically validated.
+- Project stage: `content_chain_method_complete`.
+- `Content-V9@d9cd6932c3e9532453511203c5a2f5fcbefe8428` is the validated and accepted content-chain method promoted to `main`.
+- The promotion is bound to `Content-V9-Evidence@cb3d30d4c3ee498ab4696291124d899aeacc685c` and terminal archive SHA-256 `d7a850db67398aab66aab74a48e84ba38ba48866d2f9eeb1f74a239e80382177`.
+- The V9 calibrated weighted-joint method and its independent 8/8/32/32 stability strata are accepted as completing the content chain.
+- This stage does not claim geometry completion, fixed-FPR calibration, attack robustness, paper readiness, or completion of the full CEG-WM system.
 
 ## Research invariants
 

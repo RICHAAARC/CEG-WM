@@ -4,24 +4,24 @@
 
 Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image through the frozen content-adaptive simultaneous LF+HF embedding and its clean joint statistic?
 
-The content-adaptive simultaneous LF+HF embedding and its clean joint statistic are authorized for this narrow route. The earlier attack-complementarity result remains historical `SCIENTIFIC_NEGATIVE` evidence against its preregistered incremental-complementarity claim; it does not negate this clean simultaneous-embedding question. Only broader downstream or promotion-level LF/HF fusion and routing remain unauthorized.
+The Content V9 content-adaptive simultaneous LF+HF embedding and calibrated weighted-joint statistic are the validated content-chain method. The earlier attack-complementarity result remains historical `SCIENTIFIC_NEGATIVE` evidence against its preregistered incremental-complementarity claim; it does not negate the validated clean simultaneous-embedding route.
 
 The four positive neutral-counterfactual effects establish only that each frozen allocation input changed the allocation. The two public branch-share population standard deviations can support only that allocation was not identical across the fixed eight-image roster, and only when both independently computed RC0 values are finite and strictly positive. They do not expose or recover masks, tile weights, attention, latents, deltas, or probe state.
 
-Local CPU, fake, and runtime checks are engineering evidence only; they do not scientifically validate this route, finish original Stage A, or complete the content chain. Geometry, fixed-FPR calibration, and paper promotion are outside this route.
+Local CPU, fake, and runtime checks remain engineering evidence only. Content-chain completion is instead bound to the accepted V9 formal artifact and its four independent physical strata. Geometry, fixed-FPR calibration, attack robustness, and paper promotion remain outside this completion.
 
-## Stage-A decision
+## Content-chain decision
 
-The original Stage A evaluates attribution foundations and remains unfinished:
+The content-chain method progression is complete:
 
-1. reproduce one HF keyed-attribution anchor;
-2. evaluate finite LF candidates independently;
-3. compare correct-key scores against both internal controls and external wrong keys;
-4. evaluate unwatermarked primary-null behavior separately;
-5. retain quality, runtime, and failure observations for every predeclared unit;
-6. stop if the winning LF candidate fails untouched confirmation.
+1. the keyed HF attribution anchor and LF content statistic remain distinct inputs;
+2. correct-key evidence, external wrong keys, and primary-null controls remain separately represented;
+3. the V9 public calibration asset freezes the weighted-joint statistic;
+4. the formal V9 stability evaluation retains four independent 8/8/32/32 physical strata without pooling;
+5. all predeclared units and failures remain in their physical denominators;
+6. the accepted V9 formal artifact completes the content chain without adjudicating deferred geometry or fixed-FPR claims.
 
-Stage A may produce a scientific negative. Passing Stage A only authorizes design of adaptive LF/HF allocation; it is not a formal detector, fixed-FPR result, or complete-method success.
+The accepted status is `content_chain_method_complete`. This is a content-method conclusion, not a fixed-FPR detector, geometry, robustness, full-system, or paper-readiness conclusion.
 
 ## Deferred work
 
