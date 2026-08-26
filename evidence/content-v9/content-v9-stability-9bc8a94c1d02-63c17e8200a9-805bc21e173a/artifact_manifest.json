@@ -2,8 +2,9 @@
   "schema_version": "cegwm_content_v9_evidence_manifest_v1",
   "route": "Content-V9",
   "run_id": "content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a",
-  "source_method_exact": "26151aad22402c8d1df41dacf2bb140391e8e349",
-  "execution_exact": "26151aad22402c8d1df41dacf2bb140391e8e349",
+  "source_method_exact": "647e88862f2e8f8594b14a9e9e731161765729f8",
+  "execution_branch": "Content-V9-Evidence",
+  "execution_exact": "647e88862f2e8f8594b14a9e9e731161765729f8",
   "protocol_id": "cegwm-stage-a-content-v9-calibrated-weighted-joint-multi-cohort-stability-v1",
   "protocol_digest": "9bc8a94c1d022cfaaf3c36018422b245e42764571314ee048d612e58a19ca031",
   "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
@@ -22,29 +23,49 @@
     "novel_roster_sha256": "d9dd998fb3e7e3e0c4693d1188fd18cc7df32424f47ee378b385cabcee51ceb2"
   },
   "archive": {
-    "path": "/content/drive/MyDrive/CEG-WM/content_v9_multi_cohort_stability_evaluation/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a.zip",
-    "sha256": "f0ee27da408ca45042f0a4b907b34d38d429d72ca30b944728c82ba9101de39f",
-    "sidecar_path": "/content/drive/MyDrive/CEG-WM/content_v9_multi_cohort_stability_evaluation/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a.zip.sha256",
-    "sidecar_file_sha256": "a30cd42609d793dbeaa03fbfc4ad7dabb56302568bfc916a5f2b7922fe2e9a27",
-    "sidecar_binding": "f0ee27da408ca45042f0a4b907b34d38d429d72ca30b944728c82ba9101de39f  content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a.zip"
+    "drive_run_root": "/content/drive/MyDrive/CEG-WM/Content/Content-V9-647e888-20260826T041543Z",
+    "path": "/content/drive/MyDrive/CEG-WM/Content/Content-V9-647e888-20260826T041543Z/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a.zip",
+    "sha256": "d7a850db67398aab66aab74a48e84ba38ba48866d2f9eeb1f74a239e80382177",
+    "sidecar_path": "/content/drive/MyDrive/CEG-WM/Content/Content-V9-647e888-20260826T041543Z/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a/content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a.zip.sha256",
+    "sidecar_file_sha256": "1c672c20eb2d64e5b189a30c85d091a9bb49424c7283d1fa96d8893e9af6b37c",
+    "sidecar_binding": "d7a850db67398aab66aab74a48e84ba38ba48866d2f9eeb1f74a239e80382177  content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a.zip"
   },
   "archive_members": [
     {
       "name": "receipt.json",
       "size": 1041,
-      "sha256": "24ae3779294f8123e8da9f603d4f614f45c815840c622a12844f6106351a1570"
+      "sha256": "a2f9a6692ab24996b3fd883c1485f28fec24d287361a1f341f9206889cb7a29b"
     },
     {
       "name": "result.json",
       "size": 811099,
-      "sha256": "0282db7c40ab4dd9ba663abc3047575c7f86425f8aab4b22ded6b6e28f9c4273"
+      "sha256": "3621d5f94737f4e10d46089843b1d769f8b5e07d57f12bcaca5c888e23489d21"
     }
   ],
-  "receipt_sha256": "24ae3779294f8123e8da9f603d4f614f45c815840c622a12844f6106351a1570",
-  "result_sha256": "0282db7c40ab4dd9ba663abc3047575c7f86425f8aab4b22ded6b6e28f9c4273",
+  "receipt_sha256": "a2f9a6692ab24996b3fd883c1485f28fec24d287361a1f341f9206889cb7a29b",
+  "result_sha256": "3621d5f94737f4e10d46089843b1d769f8b5e07d57f12bcaca5c888e23489d21",
   "calibration_asset": {
     "sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96",
     "sidecar_file_sha256": "d543d604e5d9226ddb4c378e160fa389abce223fe8adbb54562c3e6666537301",
-    "retained_in": "Content-V9"
+    "retained_in": "Content-V9",
+    "legacy_drive_source": {
+      "directory": "/content/drive/MyDrive/CEG-WM/content_v9_calibration/content-v9-calibration-68f37585eb6e-a82b19141099",
+      "folder_id": "1FW83vpsdN7f55BgPZ4-MHJbgJp0BaAf2",
+      "created_utc": "2026-08-25T11:52:27.065Z",
+      "asset": {
+        "name": "content_v9_calibrated_weighted_joint_v1.json",
+        "file_id": "1PuvJcEy1quUTWUD7cZiEXg11TN-ht1ZE",
+        "size": 2023,
+        "sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "sidecar": {
+        "name": "content_v9_calibrated_weighted_joint_v1.json.sha256",
+        "file_id": "1qgLtisde7ByRrV9SiJLPOUz3Qq5yBTue",
+        "size": 111,
+        "sha256": "d543d604e5d9226ddb4c378e160fa389abce223fe8adbb54562c3e6666537301",
+        "binding": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96  content_v9_calibrated_weighted_joint_v1.json"
+      },
+      "byte_equal_to_retained_asset_and_sidecar": true
+    }
   }
 }

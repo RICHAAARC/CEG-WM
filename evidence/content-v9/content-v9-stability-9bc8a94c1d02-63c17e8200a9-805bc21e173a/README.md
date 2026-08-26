@@ -5,9 +5,14 @@ This directory preserves the minimal, byte-bound evidence for the terminal
 original archive is not committed. `receipt.json` and `result.json` were
 extracted without transformation from the identified ZIP members.
 
-The preserved result's canonical method source is
-`Content-V9@26151aad22402c8d1df41dacf2bb140391e8e349`. The repeatable comparison
-notebook clones the named `Content-V9` branch, records its actual commit,
+The preserved result was produced from
+`Content-V9-Evidence@647e88862f2e8f8594b14a9e9e731161765729f8`. The formal
+notebook clones the named `Content-V9-Evidence` branch, records its actual commit,
 branch identity, and clean state, and writes each new invocation to an
 independent create-only Drive directory. It does not alter this preserved
 result or adjudicate a comparison.
+
+The manifest also records the file identity of the legacy
+`content_v9_calibration` Drive directory. Its public calibration asset and
+sidecar were verified byte-for-byte equal to the copies retained in this
+checkout; the legacy directory is not a runtime dependency.
