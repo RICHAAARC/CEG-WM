@@ -63,6 +63,26 @@ def _score_payload(offset: float) -> dict[str, float]:
 
 
 class TextureRunnerTests(unittest.TestCase):
+ def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
+    original = runner._failure_stage
+    self.addCleanup(runner._set_failure_stage, original)
+    runner._set_failure_stage("v6")
+    with self.assertRaises(ValueError):
+        runner._set_failure_stage("unknown_stage")
+    runtime = runner._failure_line(RuntimeError("private diagnostic text"))
+    unknown = runner._failure_line(LookupError("/private/path"))
+    for line, failure_class in ((runtime, "RuntimeError"), (unknown, "OtherOperationalError")):
+        self.assertLessEqual(len(line.encode("utf-8")), 4096)
+        self.assertTrue(line.startswith(runner.RESULT_PREFIX + " "))
+        payload = json.loads(line.split(" ", 1)[1])
+        self.assertEqual(payload, {
+            "status": "analysis_incomplete",
+            "failure_class": failure_class,
+            "failure_stage": "v6",
+        })
+        self.assertNotIn("private", line)
+        self.assertNotIn("/", line)
+
  def test_v2_adapter_calls_the_frozen_entrypoint_without_a_variant_proxy(self) -> None:
     fake_runner = types.ModuleType("experiments.run_content_adaptive_dual_branch_v2_clean")
     fake_runtime = types.ModuleType("cegwm.runtime.diffusers_sd35")

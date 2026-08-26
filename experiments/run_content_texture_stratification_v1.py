@@ -35,6 +35,12 @@ TOKEN_ENV = "HF_TOKEN"
 EVENT_PREFIX = "CEGWM_TEXTURE_EVENT "
 RESULT_PREFIX = "CEGWM_TEXTURE_RESULT"
 PUBLIC_FAILURES = {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"}
+FAILURE_STAGES = frozenset({
+    "identity", "protocol", "secrets", "checkouts", "rosters", "assets",
+    "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6",
+    "v7", "v8", "analysis", "terminal_publication",
+})
+_failure_stage = "identity"
 METHOD_ORDER = ("v2", "v3", "v4", "v5", "v6", "v7", "v8")
 PER_UNIT_COLUMNS = (
     "global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_value", "texture_be_hex", "texture_rank", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "lf_registered", "lf_max_wrong", "lf_null_registered", "lf_margin_a", "lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b", "joint_or_identity", "reuse_source_method", "missing_note",
@@ -42,6 +48,26 @@ PER_UNIT_COLUMNS = (
 ASSOCIATION_COLUMNS = (
     "method_id", "source_exact", "lf_score_domain", "branch_role", "branch", "margin_id", "scope", "roster_id", "fixed_n", "observed_pair_count", "statistic_id", "statistic_value", "statistic_be_hex", "c_numerator", "c_denominator", "permutation_scheme", "permutation_extreme_count", "permutation_total_count", "permutation_p_value", "permutation_p_be_hex", "texture_median", "margin_median", "rho_old", "rho_current", "rho_difference", "same_nonzero_sign", "interpretability", "missing_unit_ids", "note",
 )
+
+
+def _set_failure_stage(stage: str) -> None:
+    global _failure_stage
+    if stage not in FAILURE_STAGES:
+        raise ValueError("texture failure stage differs")
+    _failure_stage = stage
+
+
+def _failure_line(error: BaseException) -> str:
+    name = type(error).__name__
+    payload = {
+        "status": "analysis_incomplete",
+        "failure_class": name if name in PUBLIC_FAILURES else "OtherOperationalError",
+        "failure_stage": _failure_stage,
+    }
+    line = f"{RESULT_PREFIX} " + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    if len(line.encode("utf-8")) > 4096:
+        raise RuntimeError("texture failure diagnostic exceeds bound")
+    return line
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -321,13 +347,16 @@ def _publish_terminal(run_root: Path, run_id: str, members: Sequence[tuple[str, 
 def execute(args: argparse.Namespace) -> int:
     repo = Path(args.repo_root).resolve()
     exact = args.expected_exact
+    _set_failure_stage("identity")
     _identity(repo, exact)
+    _set_failure_stage("protocol")
     protocol = load_protocol(repo)
     local_parent = Path(args.local_work_root).resolve()
     artifact_sink = Path(args.artifact_sink).resolve()
     provenance_root = Path(args.provenance_root).resolve()
     if local_parent.exists():
         raise FileExistsError("initial-only local work root exists")
+    _set_failure_stage("secrets")
     key_text, token = os.environ.pop(KEY_ENV, ""), os.environ.pop(TOKEN_ENV, "")
     if not key_text.strip() or not token.strip():
         key_text = token = ""
@@ -348,16 +377,20 @@ def execute(args: argparse.Namespace) -> int:
     checkpoints.mkdir()
     output = local / "output"
     output.mkdir()
+    _set_failure_stage("checkouts")
     checkouts = _create_checkouts(repo, local / "source_checkouts", protocol.config["sources"])
     old_spec, current_spec = protocol.config["rosters_in_order"]
+    _set_failure_stage("rosters")
     units = _load_roster(checkouts["v2"] / old_spec["path"], old_spec["sha256"], old_spec["roster_id"], 0) + _load_roster(checkouts["v6"] / current_spec["path"], current_spec["sha256"], current_spec["roster_id"], 8)
     units_path = local / "units-private.json"
     _write_json_exclusive(units_path, units)
+    _set_failure_stage("assets")
     asset_v7 = _stage_asset(provenance_root, local / "public_assets" / "v7", protocol.config["assets"]["v7_iss"])
     asset_v8 = _stage_asset(provenance_root, local / "public_assets" / "v8", protocol.config["assets"]["v8_iss"])
     adapter = repo / "experiments" / "content_texture_stratification_v1_adapter.py"
     cache = local / "hf_home"
     child_env = {KEY_ENV: key_text, TOKEN_ENV: token}
+    _set_failure_stage("prefetch")
     prefetch = _child(adapter, checkouts["v2"], protocol.config["sources"]["v2"]["exact"], "asset_prefetch", units_path, output, cache, None, child_env)
     bindings_path = output / "model_bindings.json"
     bindings = json.loads(bindings_path.read_text(encoding="utf-8"))
@@ -365,6 +398,7 @@ def execute(args: argparse.Namespace) -> int:
     bindings["source_bindings"] = protocol.config["sources"]
     bindings_path.write_bytes(stable_json_bytes(bindings))
     identity = {"analysis_id": protocol.config["analysis_id"], "exact": exact, "protocol_id": protocol.config["protocol_id"], "protocol_digest": protocol.protocol_digest, "run_id": run_id, "public_key_digest": key_digest, "fixed_plain_units": 16, "fixed_method_rows": 112, "resume_allowed": False}
+    _set_failure_stage("common_plain")
     plain_events = _unit_events(_child(adapter, checkouts["v2"], protocol.config["sources"]["v2"]["exact"], "common_plain_v2", units_path, output, cache, bindings_path, child_env), "common_plain", 16)
     plains = []
     state: dict[str, Any] = {"phase": "common_plain", "plain_bindings": [], "method_records": []}
@@ -382,6 +416,7 @@ def execute(args: argparse.Namespace) -> int:
     _write_json_exclusive(output / "plain_bindings.json", state["plain_bindings"])
     method_events: dict[str, list[dict[str, Any]]] = {}
     for method in ("v2", "v3", "v4"):
+        _set_failure_stage(method)
         events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env), method, 16)
         method_events[method] = events
         state["phase"] = method
@@ -389,6 +424,7 @@ def execute(args: argparse.Namespace) -> int:
             state["method_records"].append(_checkpoint_event(event))
         checkpoint_index += 1
         _checkpoint(checkpoints, checkpoint_index, identity, state)
+    _set_failure_stage("v5_validate")
     _child(adapter, checkouts["v5"], protocol.config["sources"]["v5"]["exact"], "v5_validate", units_path, output, cache, bindings_path, child_env)
     method_events["v5"] = [{**item, "method": "v5"} for item in method_events["v4"]]
     state["phase"] = "v5_derived"
@@ -397,6 +433,7 @@ def execute(args: argparse.Namespace) -> int:
     checkpoint_index += 1
     _checkpoint(checkpoints, checkpoint_index, identity, state)
     for method, asset in (("v6", None), ("v7", asset_v7), ("v8", asset_v8)):
+        _set_failure_stage(method)
         events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env, v7_asset=asset if method == "v7" else None, v8_asset=asset if method == "v8" else None), method, 16)
         method_events[method] = events
         state["phase"] = method
@@ -405,6 +442,7 @@ def execute(args: argparse.Namespace) -> int:
         checkpoint_index += 1
         _checkpoint(checkpoints, checkpoint_index, identity, state)
     key_text = token = ""
+    _set_failure_stage("analysis")
     rows = []
     for method in METHOD_ORDER:
         source = protocol.config["sources"][method]
@@ -421,6 +459,7 @@ def execute(args: argparse.Namespace) -> int:
     _checkpoint(checkpoints, checkpoint_index, identity, state)
     if checkpoint_index != 9 or state["phase"] != protocol.config["execution"]["checkpoint_stages"][-1]:
         raise RuntimeError("local transient checkpoint stage count differs")
+    _set_failure_stage("terminal_publication")
     per_unit_csv = _csv_bytes(PER_UNIT_COLUMNS, rows)
     associations_csv = _csv_bytes(ASSOCIATION_COLUMNS, associations)
     public_records = _public_records(rows)
@@ -449,6 +488,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(execute(_arguments()))
     except Exception as error:
-        name = type(error).__name__
-        print(f"{RESULT_PREFIX} " + json.dumps({"status": "analysis_incomplete", "failure_class": name if name in PUBLIC_FAILURES else "OtherOperationalError"}, sort_keys=True, separators=(",", ":")), flush=True)
+        print(_failure_line(error), flush=True)
         raise SystemExit(2) from None
