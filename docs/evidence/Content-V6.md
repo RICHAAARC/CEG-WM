@@ -62,8 +62,8 @@ paper, retry, tuning, replacement, or promotion claim.
 ## Branch role
 
 `Content-V6` is the canonical method branch. `Content-V6-Evidence` is its
-evidence leaf and must not be used for development or merged into `main`. The
-current tree retains the latest old-roster formal Notebook plus two portable
-scalar evidence packages. Earlier fit, canary, and current-roster handoff
-commits remain reachable through branch history but are omitted from the
-current tree.
+complete executable evidence snapshot and must not be used for development or
+merged into `main`. The current tree retains the canonical total runner and
+formal protocol together with the unified formal Notebook and two portable
+scalar evidence packages. The Notebook clones this Evidence branch directly.
+Earlier fit and canary handoff commits remain reachable through branch history.
