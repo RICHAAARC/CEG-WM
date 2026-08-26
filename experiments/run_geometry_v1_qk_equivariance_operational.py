@@ -28,6 +28,10 @@ MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MAX_CONTROL_BYTES, MAX_UNIT_COUNT, MAX_UNIT_BYTES = 1024, 64, 16384
 MAX_TOTAL_UNIT_BYTES, MAX_SUMMARY_BYTES, MAX_MANIFEST_BYTES = 1048576, 262144, 131072
 MAX_ARCHIVE_BYTES, MAX_SIDECAR_BYTES = 2097152, 256
+# The exact E0 plan has eight fixed entries, two layer paths, eight 4 KiB
+# private paths, two digests and two 3x3 matrices per entry.  96 KiB leaves
+# a bounded JSON envelope for those declared structural fields only.
+MAX_PRIVATE_PATH_BYTES, MAX_PLAN_BYTES = 4096, 98304
 SUCCESS_PREFIX = "CEGWM_GEOMETRY_V1_QK_E0 "
 FAILURE_PREFIX = "CEGWM_GEOMETRY_V1_QK_E0_FAILURE "
 PLAN_SCHEMA = "geometry-v1-qk-e0-plan-v1"
@@ -35,7 +39,7 @@ _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\Z", re.ASCII)
 _TRANSFORMS = ("identity", "d4", "similarity", "crop_rescale")
 _CONTROLS = ("matched_h", "shuffled_h")
-_FAILURE_POINTS = frozenset({"plan", "model_load", "image_observation", "artifact_packaging"})
+_FAILURE_POINTS = frozenset({"plan", "execution_identity", "model_load", "image_observation", "artifact_packaging", "control_channel"})
 
 _harness_spec = importlib.util.spec_from_file_location("geometry_e0_harness", Path(__file__).with_name("run_geometry_v1_qk_equivariance_preflight.py"))
 assert _harness_spec and _harness_spec.loader
@@ -90,7 +94,7 @@ def _validate_plan(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
             raise ValueError("invalid_pair_identifier")
         if pair["transform_label"] not in _TRANSFORMS or not all(isinstance(pair[name], str) and _HEX.fullmatch(pair[name]) for name in ("reference_sha256", "attacked_sha256")):
             raise ValueError("invalid_pair_manifest")
-        if not all(isinstance(pair[name], str) and 1 <= len(pair[name]) <= 4096 for name in ("reference_path", "attacked_path")):
+        if not all(isinstance(pair[name], str) and 1 <= len(pair[name].encode("utf-8")) <= MAX_PRIVATE_PATH_BYTES for name in ("reference_path", "attacked_path")):
             raise ValueError("invalid_private_input_path")
         for name in ("reference_source_grid", "attacked_source_grid"):
             grid = pair[name]
@@ -104,6 +108,16 @@ def _validate_plan(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     if len(by_reference) != 2 or any(labels != set(_TRANSFORMS) for labels in by_reference.values()):
         raise ValueError("invalid_reference_transform_matrix")
     return list(pairs)
+
+
+def _read_plan(path: Path) -> Mapping[str, Any]:
+    """Read the one bounded plan before parsing or any image/model work."""
+    stat = path.stat()
+    if not path.is_file():
+        raise ValueError("plan_not_regular_file")
+    if stat.st_size > MAX_PLAN_BYTES:
+        raise ValueError("plan_bytes_exceeded")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _failure_unit(pair: Mapping[str, Any], layer_path: str, descriptor_kind: str, control: str, reason: str) -> dict[str, Any]:
@@ -238,16 +252,26 @@ def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(); parser.add_argument("--plan", required=True); parser.add_argument("--repo-root", required=True); parser.add_argument("--expected-exact", required=True); parser.add_argument("--output-root", required=True); parser.add_argument("--control-fd", required=True, type=int)
     args = parser.parse_args(argv); run_id = f"geometry-v1-qk-e0-{args.expected_exact[:12]}"
     summary: dict[str, Any] | None = None
+    stage = "plan"
     try:
-        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+        plan = _read_plan(Path(args.plan))
+        _validate_plan(plan)
+        stage = "execution_identity"
         summary, units = run_qk_equivariance_operational(plan, hf_token=os.environ.get("HF_TOKEN", ""), expected_exact=args.expected_exact, repo_root=Path(args.repo_root))
+        stage = "artifact_packaging"
         package = _package(Path(args.output_root), summary, units, expected_exact=args.expected_exact)
+        stage = "control_channel"
         _emit(args.control_fd, SUCCESS_PREFIX if summary["operational_status"] == "complete" else FAILURE_PREFIX, {"status": "success" if summary["operational_status"] == "complete" else "failure", "artifact_status": "complete", "run_id": summary["run_id"], **package})
         return 0 if summary["operational_status"] == "complete" else 1
     except BaseException:
-        control = {"status": "failure", "underlying_status": "operational_failure" if summary and summary["operational_status"] == "failure" else "unknown", "artifact_status": "unavailable", "failure_point": "artifact_packaging", "run_id": run_id}
-        try: _emit(args.control_fd, FAILURE_PREFIX, control)
-        except BaseException: pass
+        if stage == "control_channel":
+            return 1
+        known_failure = summary is not None and summary["operational_status"] == "failure"
+        control = {"status": "failure", "underlying_status": "operational_failure" if known_failure else "unknown", "artifact_status": "unavailable", "failure_point": stage, "run_id": run_id}
+        try:
+            _emit(args.control_fd, FAILURE_PREFIX, control)
+        except BaseException:
+            pass
         return 1
 
 

@@ -6,6 +6,7 @@ import json
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
+import os
 
 import numpy as np
 import pytest
@@ -114,3 +115,127 @@ def test_control_is_bounded_one_line_and_public_identifiers_are_not_semantically
     finally:
         __import__("os").close(read); __import__("os").close(write)
     assert line.endswith(b"\n") and len(line) <= RUNNER.MAX_CONTROL_BYTES and b"scientific-words" in line
+
+
+def test_main_marks_invalid_plan_as_plan_failure_not_artifact_packaging(tmp_path, monkeypatch) -> None:
+    plan_path = tmp_path / "bad.json"; plan_path.write_text("{}")
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--plan", str(plan_path), "--repo-root", str(tmp_path), "--expected-exact", "a" * 40,
+                           "--output-root", str(tmp_path / "out"), "--control-fd", str(write)])
+        payload = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    assert rc == 1
+    assert b'"failure_point":"plan"' in payload
+
+
+def test_plan_file_bound_is_checked_before_read_or_execution(tmp_path, monkeypatch) -> None:
+    plan_path = tmp_path / "large.json"; plan_path.write_bytes(b"x" * (RUNNER.MAX_PLAN_BYTES + 1))
+    monkeypatch.setattr(Path, "read_text", lambda *_a, **_k: pytest.fail("plan must not be read"))
+    with pytest.raises(ValueError, match="plan_bytes_exceeded"):
+        RUNNER._read_plan(plan_path)
+
+
+@pytest.mark.parametrize("mutate,reason", [
+    (lambda p: p.update(schema="wrong"), "invalid_plan_schema"),
+    (lambda p: p.update(attention_layer_paths=["one", "one"]), "invalid_attention_layer_paths"),
+    (lambda p: p.update(pairs=p["pairs"][:7]), "invalid_pair_count"),
+    (lambda p: p["pairs"][0].update(transform_label="other"), "invalid_pair_manifest"),
+    (lambda p: p["pairs"][0].update(reference_source_grid=[0, 2]), "invalid_expected_source_grid"),
+])
+def test_plan_structural_categories_fail_before_model_work(tmp_path, mutate, reason) -> None:
+    plan = _plan(tmp_path); mutate(plan)
+    with pytest.raises(ValueError, match=reason):
+        RUNNER.run_qk_equivariance_operational(plan, hf_token="x", expected_exact="c" * 40, repo_root=tmp_path,
+                                                loader=lambda *_a, **_k: pytest.fail("loader"))
+
+
+def test_pair_local_failure_retains_only_its_eight_units_and_keeps_fixed_order(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    calls = []
+    def observer(_image, *, pipeline, spec):
+        calls.append(1)
+        if len(calls) == 3:
+            raise RuntimeError("pair-local")
+        return _observation(spec.attention_layer_paths)
+    summary, units = RUNNER.run_qk_equivariance_operational(_plan(tmp_path), hf_token="x", expected_exact="c" * 40,
+                                                             repo_root=tmp_path, loader=lambda *_a, **_k: _Pipeline(), observer=observer)
+    # The failed pair is not relaunched; all seven later pairs still make their
+    # one reference/attacked observation attempt.
+    assert len(calls) == 15 and len(units) == 64 and summary["operational_failure_point"] == "image_observation"
+    assert {item["failure_reason"] for item in units[8:16]} == {"image_observation_failed"}
+    assert all(item["pair_id"] == "r0-d4" for item in units[8:16])
+    assert all(item["pair_id"] == "r1-crop_rescale" for item in units[-8:])
+
+
+def test_single_layer_source_grid_mismatch_is_retained_without_other_layer_loss(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    def observer(_image, *, pipeline, spec):
+        item = _observation(spec.attention_layer_paths)
+        layers = list(item.layers)
+        layers[0] = SimpleNamespace(**{**vars(layers[0]), "source_grid": (63, 64)})
+        return SimpleNamespace(layers=tuple(layers))
+    _summary, units = RUNNER.run_qk_equivariance_operational(_plan(tmp_path), hf_token="x", expected_exact="c" * 40,
+                                                               repo_root=tmp_path, loader=lambda *_a, **_k: _Pipeline(), observer=observer)
+    assert {u["failure_reason"] for u in units if u["layer_path"] == "blocks.0.attn"} == {"source_grid_mismatch"}
+    assert {u["status"] for u in units if u["layer_path"] == "blocks.1.attn"} == {"calculated"}
+
+
+def test_artifact_manifest_zip_sidecar_and_hashes_are_exact(tmp_path) -> None:
+    summary = {"run_id": "geometry-v1-qk-e0-aaaaaaaaaaaa", "operational_status": "failure", "artifact_status": "unavailable",
+               "method_status": "not_adjudicated", "scientific_status": "not_adjudicated", "science_denominator": 0}
+    unit = {"pair_id": "ordinary.scientific-words", "transform_label": "identity", "control_label": "matched_h", "descriptor_kind": "q", "layer_path": "blocks.0.attn", "reference_grid": [2, 2], "attacked_grid": [2, 2], "input_identity": None, "h_identity": None, "status": "failed", "failure_reason": "x", "candidate_correspondences": [], "true_match_ranks": [], "coverage": None, "ambiguity_gaps": [], "fit_residual": None, "recovery_error": None}
+    root = tmp_path / "out"; package = RUNNER._package(root, summary, [unit] * 64, expected_exact="a" * 40)
+    manifest = json.loads((root / "manifest.json").read_text()); assert len(manifest["units"]) == 64
+    assert manifest["members"] == ["receipt.json", "failure.json", "checkpoint.json", *[f"units/{i:03d}.json" for i in range(64)], "manifest.json", "SHA256SUMS"]
+    with __import__("zipfile").ZipFile(root / package["archive_filename"]) as bundle:
+        assert bundle.namelist() == manifest["members"]
+    digest, name = (root / package["sidecar_filename"]).read_text().split(); assert name == package["archive_filename"]
+    assert digest == sha256((root / name).read_bytes()).hexdigest()
+
+
+def test_control_fd_failure_has_no_stdout_fallback(tmp_path, capsys) -> None:
+    path = tmp_path / "plan.json"; path.write_text("{}")
+    assert RUNNER._main(["--plan", str(path), "--repo-root", str(tmp_path), "--expected-exact", "a" * 40,
+                         "--output-root", str(tmp_path / "out"), "--control-fd", "-1"]) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_packaging_failure_preserves_known_operational_failure_in_compact_control(tmp_path, monkeypatch) -> None:
+    plan_path = tmp_path / "plan.json"; plan_path.write_text(json.dumps(_plan(tmp_path)))
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    monkeypatch.setattr(RUNNER, "run_qk_equivariance_operational", lambda *_a, **_k: ({"run_id": "geometry-v1-qk-e0-aaaaaaaaaaaa", "operational_status": "failure"}, ()))
+    monkeypatch.setattr(RUNNER, "_package", lambda *_a, **_k: (_ for _ in ()).throw(OSError("package")))
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--plan", str(plan_path), "--repo-root", str(tmp_path), "--expected-exact", "a" * 40,
+                           "--output-root", str(tmp_path / "out"), "--control-fd", str(write)])
+        control = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    assert rc == 1
+    assert b'"artifact_status":"unavailable"' in control
+    assert b'"underlying_status":"operational_failure"' in control
+    assert b'"failure_point":"artifact_packaging"' in control
+
+
+def test_public_package_does_not_leak_secret_or_private_paths(tmp_path, monkeypatch) -> None:
+    token, private = "hf_token_very_private", "/private/input/reference.png"
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    plan = _plan(tmp_path)
+    plan["pairs"][0]["reference_path"] = private
+    # The digest mismatch is an operational observation result; the public
+    # transport is intentionally assembled only from field allowlists.
+    summary, units = RUNNER.run_qk_equivariance_operational(plan, hf_token=token, expected_exact="a" * 40,
+                                                             repo_root=tmp_path, loader=lambda *_a, **_k: _Pipeline(), observer=lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("raw-tensor-like")))
+    root = tmp_path / "out"; package = RUNNER._package(root, summary, units, expected_exact="a" * 40)
+    public = b"".join(path.read_bytes() for path in root.rglob("*") if path.is_file())
+    assert token.encode() not in public and private.encode() not in public and b"raw-tensor-like" not in public
+    assert b"r0-identity" in public
+
+
+def test_runner_never_references_valid_corners_or_old_relation_transport() -> None:
+    source = MODULE.read_text()
+    for forbidden in ("valid_" + "corners", "CEG_WM_" + "ROOT_KEY", "keyed_" + "qk_relation", "_sanitize_" + "public"):
+        assert forbidden not in source
