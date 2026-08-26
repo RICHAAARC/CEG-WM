@@ -3,9 +3,11 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 
@@ -24,6 +26,26 @@ def _fixed_helper(codes: list[str]):
     namespace = {"np": np, "Image": Image}
     exec(compile(ast.Module(body=[helper], type_ignores=[]), "fixed_helper", "exec"), namespace)
     return namespace["build_fixed_operational_rgb"]
+
+
+def _notebook_function(codes: list[str], name: str):
+    module = ast.parse("\n".join(codes))
+    node = next(item for item in module.body if isinstance(item, ast.FunctionDef) and item.name == name)
+    namespace = {"os": os, "json": json, "re": __import__("re"), "MAX_CONTROL_BYTES": 1024, "MAX_RECEIPT_BYTES": 262144, "MAX_ARCHIVE_BYTES": 524288}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), name, "exec"), namespace)
+    return namespace[name]
+
+
+def _parse_control(parse_child, rc: int, line: bytes, run_id: str):
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, line)
+    finally:
+        os.close(write_fd)
+    try:
+        return parse_child(rc, read_fd, run_id)
+    finally:
+        os.close(read_fd)
 
 
 def test_notebook_is_complete_prepared_create_only_handoff_with_fixed_rgb_input() -> None:
@@ -78,3 +100,37 @@ def test_fixed_operational_rgb_is_exact_deterministic_non_degenerate_input() -> 
     assert "mode=" not in helper_source
     for forbidden in ("random", "seed", "http", "prompt", "content", "private", "upload"):
         assert forbidden not in helper_source
+
+
+def test_parse_child_dynamically_enforces_prefix_status_rc_keysets_and_bounds() -> None:
+    _value, codes, _source_text = _source()
+    parse_child = _notebook_function(codes, "parse_child")
+    run_id = "geometry-v1-b2b-" + "0" * 12 + "-operational-01"
+    complete = {"status": "success", "run_id": run_id, "artifact_status": "complete", "archive_filename": run_id + ".zip", "sidecar_filename": run_id + ".zip.sha256", "receipt_bytes": 0, "receipt_sha256": "0" * 64, "archive_bytes": 0}
+    success = b"CEGWM_GEOMETRY_V1_OPERATIONAL_PREFLIGHT " + json.dumps(complete).encode() + b"\n"
+    assert _parse_control(parse_child, 0, success, run_id)[0] == "success"
+    failed = dict(complete, status="failure", underlying_status="operational_failure", failure_point="scheduler")
+    failure = b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(failed).encode() + b"\n"
+    assert _parse_control(parse_child, 1, failure, run_id)[0] == "failure"
+    unavailable = {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": run_id}
+    assert _parse_control(parse_child, 1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(unavailable).encode() + b"\n", run_id)[1] == unavailable
+    for rc, line in ((0, failure), (1, success), (1, b"bad {}\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE {bad}\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(dict(failed, status="success")).encode() + b"\n"), (1, b"x" * 1025)):
+        with pytest.raises(RuntimeError):
+            _parse_control(parse_child, rc, line, run_id)
+
+
+def test_artifact_only_cell_dynamically_preserves_unavailable_and_retained_failure(tmp_path: Path) -> None:
+    _value, codes, _source_text = _source()
+    artifact = codes[-1]
+    run_id = "geometry-v1-b2b-" + "0" * 12 + "-operational-01"
+    run_dir = tmp_path / "retained"; run_dir.mkdir()
+    namespace = {"run_dir": run_dir, "RUN_ID": run_id, "MAX_ARCHIVE_BYTES": 524288, "MAX_SIDECAR_BYTES": 256, "re": __import__("re"), "payload": {"artifact_status": "unavailable", "underlying_status": "unknown"}}
+    with pytest.raises(RuntimeError, match="artifact unavailable"):
+        exec(compile(ast.parse(artifact), "artifact", "exec"), namespace)
+    assert run_dir.is_dir()
+    namespace.pop("payload")
+    (run_dir / "failure.json").write_text("{}")
+    (run_dir / "checkpoint.json").write_text("{}")
+    (run_dir / (run_id + ".zip")).write_bytes(b"zip")
+    (run_dir / (run_id + ".zip.sha256")).write_text("0" * 64 + "  " + run_id + ".zip\n")
+    exec(compile(ast.parse(artifact), "artifact", "exec"), namespace)

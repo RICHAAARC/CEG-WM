@@ -309,3 +309,56 @@ def test_packaging_failure_emits_only_artifact_unavailable_control(monkeypatch: 
     prefix, body = line.strip().split(" ", 1)
     assert rc == 1 and prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
     assert json.loads(body) == {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": "geometry-v1-b2b-" + "0" * 12 + "-operational-01"}
+
+
+def test_failure_package_strips_injected_secrets_paths_and_tensor_like_values(tmp_path: Path) -> None:
+    """The actual failure receipt/package path must not publish injected private data."""
+    error = RuntimeError("HF_TOKEN=token-sentinel CEG_WM_ROOT_KEY=key-sentinel /private/input.png tensor([1])")
+    error.geometry_failure_point = "scheduler"  # type: ignore[attr-defined]
+    error.geometry_runtime_record = {  # type: ignore[attr-defined]
+        "safe": "public", "HF_TOKEN": "token-sentinel", "private_path": "/private/input.png", "raw_tensor": "tensor([1])",
+    }
+    run_id = "geometry-v1-b2b-" + "0" * 12 + "-operational-01"
+    receipt = runner._failure_receipt(error, run_id)
+    runner._package_receipt(output_root=tmp_path / "package", receipt=receipt, status_name="failure.json", expected_exact="0" * 40, run_id=run_id)
+    public = "".join(path.read_text(errors="ignore") for path in (tmp_path / "package").iterdir() if path.suffix != ".zip")
+    for sentinel in ("token-sentinel", "key-sentinel", "/private/input.png", "tensor([1])", "HF_TOKEN", "CEG_WM_ROOT_KEY"):
+        assert sentinel not in public
+
+
+@pytest.mark.parametrize("status_name,status,rc,prefix", [
+    ("success.json", "success", 0, "CEGWM_GEOMETRY_V1_OPERATIONAL_PREFLIGHT"),
+    ("failure.json", "failure", 1, "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"),
+])
+def test_control_mapping_is_one_line_bounded_and_stdio_cannot_pollute_fd(status_name: str, status: str, rc: int, prefix: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run_id = "geometry-v1-b2b-" + "0" * 12 + "-operational-01"
+    receipt = {"status": "operational_preflight_complete" if rc == 0 else "operational_failure", "run_id": run_id, "science_denominator": 0}
+    package = runner._package_receipt(output_root=tmp_path / status, receipt=receipt, status_name=status_name, expected_exact="0" * 40, run_id=run_id)
+    read_fd, write_fd = os.pipe()
+    try:
+        print("third-party stdout noise")
+        runner._emit_control(write_fd, runner._SUCCESS_PREFIX if rc == 0 else runner._FAILURE_PREFIX, {"status": status, "run_id": run_id, "artifact_status": "complete", **package})
+    finally:
+        os.close(write_fd)
+    line = os.read(read_fd, runner.MAX_CONTROL_BYTES + 1); os.close(read_fd)
+    assert len(line) <= runner.MAX_CONTROL_BYTES and line.count(b"\n") == 1 and line.startswith(prefix.encode() + b" ")
+    assert b"third-party stdout noise" not in line
+    assert "third-party stdout noise" in capsys.readouterr().out
+
+
+def test_exact_bound_acceptance_and_max_plus_one_rejection() -> None:
+    accepted = {"x": "a" * (runner.MAX_RECEIPT_BYTES - len('{"x":""}'.encode()))}
+    assert len(runner._bounded_json(accepted, runner.MAX_RECEIPT_BYTES)) == runner.MAX_RECEIPT_BYTES
+    with pytest.raises(ValueError, match="bounded"):
+        runner._bounded_json({"x": accepted["x"] + "a"}, runner.MAX_RECEIPT_BYTES)
+    with pytest.raises(ValueError, match="bounded"):
+        runner._bounded_json({"x": "a" * runner.MAX_CONTROL_BYTES}, runner.MAX_CONTROL_BYTES - 1)
+
+
+def test_many_block_late_failure_is_package_bounded_and_preserves_failure_status(tmp_path: Path) -> None:
+    run_id = "geometry-v1-b2b-" + "0" * 12 + "-operational-01"
+    receipt = {"status": "operational_failure", "run_id": run_id, "science_denominator": 0, "failure_point": "scheduler", "architecture": {"attention_candidates": [{"block": index, "public": "x" * 180} for index in range(64)]}}
+    assert len(json.dumps(receipt, separators=(",", ":")).encode()) > 4096
+    package = runner._package_receipt(output_root=tmp_path / "failure", receipt=receipt, status_name="failure.json", expected_exact="0" * 40, run_id=run_id)
+    assert package["receipt_bytes"] <= runner.MAX_RECEIPT_BYTES
+    assert json.loads((tmp_path / "failure" / "receipt.json").read_text())["status"] == "operational_failure"

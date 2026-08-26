@@ -440,6 +440,26 @@ def _bounded_json(value: dict[str, Any], limit: int) -> bytes:
     return encoded
 
 
+def _sanitize_public(value: Any) -> Any:
+    """Drop values which are never permitted in runner-owned public evidence."""
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for name, item in value.items():
+            lowered = str(name).lower()
+            if lowered == "token" or any(marker in lowered for marker in ("hf_token", "secret", "root_key", "private", "raw_tensor")):
+                continue
+            cleaned = _sanitize_public(item)
+            if cleaned is not None:
+                result[str(name)] = cleaned
+        return result
+    if isinstance(value, (list, tuple)):
+        return [cleaned for item in value if (cleaned := _sanitize_public(item)) is not None]
+    if isinstance(value, str):
+        if value.startswith("/") or "tensor(" in value.lower() or "hf_token" in value.lower() or "ceg_wm_root_key" in value.lower():
+            return None
+    return value
+
+
 def _write_exclusive(path: Path, value: bytes) -> None:
     with path.open("xb") as handle:
         handle.write(value)
@@ -450,6 +470,7 @@ def _package_receipt(*, output_root: Path, receipt: dict[str, Any], status_name:
     if output_root.exists():
         raise FileExistsError("runner output root must be create-only")
     output_root.mkdir()
+    receipt = _sanitize_public(receipt)
     receipt_bytes = _bounded_json(receipt, MAX_RECEIPT_BYTES)
     _write_exclusive(output_root / "receipt.json", receipt_bytes)
     _write_exclusive(output_root / status_name, _bounded_json({"status": receipt["status"], "run_id": run_id}, MAX_RECEIPT_BYTES))
