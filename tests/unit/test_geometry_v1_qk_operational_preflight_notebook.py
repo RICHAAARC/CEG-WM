@@ -114,7 +114,9 @@ def test_parse_child_dynamically_enforces_prefix_status_rc_keysets_and_bounds() 
     assert _parse_control(parse_child, 1, failure, run_id)[0] == "failure"
     unavailable = {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": run_id}
     assert _parse_control(parse_child, 1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(unavailable).encode() + b"\n", run_id)[1] == unavailable
-    for rc, line in ((0, failure), (1, success), (1, b"bad {}\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE {bad}\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(dict(failed, status="success")).encode() + b"\n"), (1, b"x" * 1025)):
+    known_unavailable = dict(unavailable, underlying_status="operational_failure")
+    assert _parse_control(parse_child, 1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(known_unavailable).encode() + b"\n", run_id)[1] == known_unavailable
+    for rc, line in ((0, failure), (1, success), (1, b"bad {}\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE {bad}\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(dict(failed, status="success")).encode() + b"\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(dict(failed, underlying_status="unknown")).encode() + b"\n"), (1, b"CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(dict(unavailable, underlying_status="success")).encode() + b"\n"), (1, b"x" * 1025)):
         with pytest.raises(RuntimeError):
             _parse_control(parse_child, rc, line, run_id)
 

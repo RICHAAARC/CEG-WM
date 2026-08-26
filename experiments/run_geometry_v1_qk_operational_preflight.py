@@ -528,9 +528,11 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-fd", required=True, type=int)
     args = parser.parse_args(argv)
     run_id = f"geometry-v1-b2b-{args.expected_exact[:12]}-operational-01" if re.fullmatch(r"[0-9a-f]{40}", args.expected_exact) else None
+    preflight_succeeded = False
     try:
         images = [Image.open(path).convert("RGB") for path in args.images]
         receipt = operational_preflight(images, hf_token=os.environ.get("HF_TOKEN", ""), root_key=os.environ.get("CEG_WM_ROOT_KEY", ""), expected_exact=args.expected_exact, repo_root=Path(args.repo_root))
+        preflight_succeeded = True
         package = _package_receipt(output_root=Path(args.output_root), receipt=receipt, status_name="success.json", expected_exact=args.expected_exact, run_id=receipt["run_id"])
         _emit_control(args.control_fd, _SUCCESS_PREFIX, {"status": "success", "run_id": receipt["run_id"], "artifact_status": "complete", **package})
         return 0
@@ -540,7 +542,7 @@ def _main(argv: list[str] | None = None) -> int:
             package = _package_receipt(output_root=Path(args.output_root), receipt=failure, status_name="failure.json", expected_exact=args.expected_exact, run_id=run_id or "invalid-exact")
             control = {"status": "failure", "underlying_status": "operational_failure", "artifact_status": "complete", "failure_point": failure["failure_point"], "run_id": run_id, **package}
         except BaseException:
-            control = {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": run_id}
+            control = {"status": "failure", "underlying_status": "unknown" if preflight_succeeded else "operational_failure", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": run_id}
         try:
             _emit_control(args.control_fd, _FAILURE_PREFIX, control)
         except BaseException:

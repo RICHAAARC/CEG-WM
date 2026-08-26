@@ -311,6 +311,24 @@ def test_packaging_failure_emits_only_artifact_unavailable_control(monkeypatch: 
     assert json.loads(body) == {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": "geometry-v1-b2b-" + "0" * 12 + "-operational-01"}
 
 
+def test_late_operational_failure_followed_by_packaging_failure_preserves_known_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A lost package must not erase an already-known operational failure."""
+    error = RuntimeError("scheduler failure")
+    error.geometry_failure_point = "scheduler"  # type: ignore[attr-defined]
+    monkeypatch.setattr(runner.Image, "open", lambda _path: Image.new("RGB", (1, 1)))
+    monkeypatch.setattr(runner, "operational_preflight", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(runner, "_package_receipt", lambda **_kwargs: (_ for _ in ()).throw(OSError("package unavailable")))
+    rc, line = _run_with_control(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"], tmp_path)
+    prefix, body = line.strip().split(" ", 1)
+    assert rc == 1 and prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
+    assert json.loads(body) == {
+        "status": "failure", "underlying_status": "operational_failure", "artifact_status": "unavailable",
+        "failure_point": "receipt_packaging", "run_id": "geometry-v1-b2b-" + "0" * 12 + "-operational-01",
+    }
+
+
 def test_failure_package_strips_injected_secrets_paths_and_tensor_like_values(tmp_path: Path) -> None:
     """The actual failure receipt/package path must not publish injected private data."""
     error = RuntimeError("HF_TOKEN=token-sentinel CEG_WM_ROOT_KEY=key-sentinel /private/input.png tensor([1])")
