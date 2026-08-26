@@ -62,7 +62,8 @@ or promotion authority.
 
 ## Branch role
 
-`Content-V7` is the canonical method branch. `Content-V7-Evidence` is a
-results-only evidence leaf, not a development base and not mergeable to
-`main`. Its current tree retains the final formal Notebook, the exact public
-runtime asset, and the portable scalar evidence.
+`Content-V7` is the canonical method branch. `Content-V7-Evidence` is its
+complete executable evidence snapshot, not a development base and not
+mergeable to `main`. Its current tree retains the canonical execution path,
+the final formal Notebook, the exact public runtime asset, and the portable
+scalar evidence. The Notebook clones this Evidence branch directly.
