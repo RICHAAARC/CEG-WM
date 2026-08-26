@@ -63,6 +63,7 @@ or promotion claim.
 ## Branch role
 
 `Content-V8` is the canonical method branch. `Content-V8-Evidence` is its
-results-only evidence leaf, not a development base and not mergeable to
-`main`. Its current tree retains one formal Notebook, the exact public runtime
-asset, and the portable scalar result.
+complete executable evidence snapshot, not a development base and not
+mergeable to `main`. Its current tree retains the canonical execution path,
+one formal Notebook, the exact public runtime asset, and the portable scalar
+result. The Notebook clones this Evidence branch directly.
