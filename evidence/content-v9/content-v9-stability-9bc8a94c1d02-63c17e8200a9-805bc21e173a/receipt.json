@@ -1,0 +1,18 @@
+{
+  "artifact_kind": "terminal",
+  "artifact_contract_id": "content_v9_multi_cohort_stability_artifact_v1",
+  "receipt_contract_id": "content_v9_multi_cohort_stability_terminal_receipt_v1",
+  "run_id": "content-v9-stability-9bc8a94c1d02-63c17e8200a9-805bc21e173a",
+  "exact": "26151aad22402c8d1df41dacf2bb140391e8e349",
+  "execution_scope_id": "content_v9_multi_cohort_stability_evaluation_v1",
+  "protocol_id": "cegwm-stage-a-content-v9-calibrated-weighted-joint-multi-cohort-stability-v1",
+  "protocol_digest": "9bc8a94c1d022cfaaf3c36018422b245e42764571314ee048d612e58a19ca031",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96",
+  "calibration_asset_sidecar_file_sha256": "d543d604e5d9226ddb4c378e160fa389abce223fe8adbb54562c3e6666537301",
+  "fixed_unit_count": 80,
+  "fixed_record_count": 160,
+  "committed_unit_count": 80,
+  "result_member": "result.json",
+  "external_validation_required": true
+}
