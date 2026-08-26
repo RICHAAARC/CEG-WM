@@ -1,0 +1,15 @@
+{
+  "artifact_kind": "terminal",
+  "formal_protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-formal-initial-v1",
+  "formal_protocol_digest": "d3013d20506d5ee7f1f10f947a52205deffa5e6376644ee13f2daea6a6914240",
+  "unit_set_labels_in_order": [
+    "[32V1]",
+    "[8V1]",
+    "[8V3]"
+  ],
+  "runtime_asset_member": "content_v6_iss_gain_target_v1.json",
+  "runtime_asset_sidecar_member": "content_v6_iss_gain_target_v1.json.sha256",
+  "result_member": "result.json",
+  "evaluation_result_count": 2,
+  "external_validation_required": true
+}

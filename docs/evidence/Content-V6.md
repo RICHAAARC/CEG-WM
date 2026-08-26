@@ -67,3 +67,18 @@ merged into `main`. The current tree retains the canonical total runner and
 formal protocol together with the unified formal Notebook and two portable
 scalar evidence packages. The Notebook clones this Evidence branch directly.
 Earlier fit and canary handoff commits remain reachable through branch history.
+
+## Unified Drive-first Notebook rerun
+
+The unified Notebook completed an RC0 fit-and-evaluate invocation at exact
+`d19ac1d0e7e3646ac24cc41803811f25fff472d9` on `20260826T034856Z` using
+`[32V1]` for development and independent `[8V1]` and `[8V3]` evaluations.
+Its ZIP SHA-256 is
+`4c9345a33b43dd83edb971757c338aa1723e6a43c5848466e77068c06104bea9`.
+
+The append-only record is preserved under
+`evidence/content-v6/content-v6-formal-initial/reruns/20260826T034856Z-d19ac1d0e7e3/`.
+The `[8V1]` numerical result reproduces the old-roster reference with only
+unified label changes; `[8V3]` reproduces the current-roster scalar result; and
+the public runtime asset changes only `producer_exact`. The independent Gate
+outcomes and the prior personal adjudications remain unchanged.
