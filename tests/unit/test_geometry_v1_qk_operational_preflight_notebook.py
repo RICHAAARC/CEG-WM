@@ -33,24 +33,30 @@ def test_notebook_is_complete_prepared_create_only_handoff_with_fixed_rgb_input(
     assert "drive.mount('/content/drive', force_remount=False)" in codes[0]
     assert "from google.colab import files" not in source and "files.upload" not in source
     assert "from google.colab import userdata" in source
-    assert "621a33310493356c0bc295c9122a5888dfcae501" in source
-    assert "geometry-v1-b2b-621a33310493-operational-01" in source
-    assert "PROPOSED_PENDING_FINAL_USER_CONFIRMATION='/content/drive/MyDrive/CEG-WM/Geometry-V1/Batch2B'" in source
+    assert "--single-branch','--branch',BRANCH" in source
+    assert "checkout_commit=checkout_identity()" in source
+    assert "--detach" not in source and "EXECUTION_EXACT" not in source
+    assert "Geometry-V1-'+checkout_commit[:12]+'-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')" in source
     assert "PREPARED_NOT_EXECUTED" in source and "try: pass" not in source
-    assert "git','checkout','--detach',EXECUTION_EXACT" in source and "pip','install'" in source
+    assert "pip','install'" in source
     assert source.index("try:") < source.index("input_dir.mkdir()") < source.index("userdata.get('HF_TOKEN')")
     assert "CEGWM_GEOMETRY_V1_OPERATIONAL_PREFLIGHT " in source and "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " in source
-    assert "control/return-code mismatch" in source and "status=='failure'" in source
+    assert "control/return-code mismatch" in source and "artifact-unavailable" in source
     assert "pass_fds=(control_write,)" in source and "stdout=subprocess.DEVNULL" in source and "stderr=subprocess.DEVNULL" in source
     assert "MAX_CONTROL_BYTES+1" in source and "receipt_sha256" in source and "sidecar_value" in source
-    assert "source.open('rb')" in source and "target.open('xb')" in source
+    assert "--output-root',str(run_dir)" in source and "exclusive_copy" not in source
     assert "copy2" not in source and "write_bytes" not in source and "content_v" not in source and "Content" not in source
-    assert "process.kill" in source and "runner_env.pop('HF_TOKEN'" in source and "input_dir.rmdir" in source and "shutil.rmtree(output_root)" in source
+    assert "process.kill" in source and "runner_env.pop('HF_TOKEN'" in source and "input_dir.rmdir" in source and "shutil.rmtree(run_dir)" not in source
     assert "geometry_v1_batch2b_fixed_rgb.png" in source and "fixed_path.open('xb')" in source
     assert "str(fixed_path)" in source and "input_paths.append(fixed_path)" in source
     assert source.index("input_paths.append(fixed_path)") < source.index("fixed_path.open('xb')")
     assert "fixed_image=None; fixed_array=None" in source
     assert "zipfile" not in source and "archive.read_bytes" not in source
+    assert "re.fullmatch(r'[0-9a-f]{64}',payload['receipt_sha256'])" in source
+    assert "payload['archive_filename']!=run_id+'.zip'" in source
+    assert "payload['sidecar_filename']!=run_id+'.zip.sha256'" in source
+    assert "Artifact-only inspection" in codes[-1] and "Popen" not in codes[-1]
+    assert "checkpoint=run_dir/'checkpoint.json'" in codes[-1]
 
 
 def test_fixed_operational_rgb_is_exact_deterministic_non_degenerate_input() -> None:

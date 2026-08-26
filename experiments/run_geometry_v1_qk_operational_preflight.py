@@ -446,14 +446,17 @@ def _write_exclusive(path: Path, value: bytes) -> None:
 
 
 def _package_receipt(*, output_root: Path, receipt: dict[str, Any], status_name: str, expected_exact: str, run_id: str) -> dict[str, Any]:
-    """Create the complete local package before emitting compact control."""
+    """Create the runner-owned, create-only terminal package before control."""
     if output_root.exists():
         raise FileExistsError("runner output root must be create-only")
     output_root.mkdir()
     receipt_bytes = _bounded_json(receipt, MAX_RECEIPT_BYTES)
     _write_exclusive(output_root / "receipt.json", receipt_bytes)
     _write_exclusive(output_root / status_name, _bounded_json({"status": receipt["status"], "run_id": run_id}, MAX_RECEIPT_BYTES))
-    members = ["receipt.json", status_name, "manifest.json", "SHA256SUMS"]
+    # This is an operational checkpoint only.  It deliberately contains no
+    # resume state, tensors, secrets, paths, or scientific conclusion.
+    _write_exclusive(output_root / "checkpoint.json", _bounded_json({"status": receipt["status"], "run_id": run_id, "checkpoint": "terminal"}, MAX_RECEIPT_BYTES))
+    members = ["receipt.json", status_name, "checkpoint.json", "manifest.json", "SHA256SUMS"]
     _write_exclusive(output_root / "manifest.json", _bounded_json({"execution_exact": expected_exact, "run_id": run_id, "allowed_filenames": members}, MAX_RECEIPT_BYTES))
     sums = "".join(f"{_sha256_bytes((output_root / name).read_bytes())}  {name}\n" for name in members[:-1]).encode("ascii")
     _write_exclusive(output_root / "SHA256SUMS", sums)

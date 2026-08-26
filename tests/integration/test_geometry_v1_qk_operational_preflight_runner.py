@@ -286,3 +286,26 @@ def test_architecture_receipt_size_is_package_bounded(blocks: int) -> None:
     assert len(encoded) <= runner.MAX_RECEIPT_BYTES
     if blocks >= 24:
         assert len(encoded) > 4096
+
+
+def test_package_is_create_only_and_has_only_sanitized_terminal_members(tmp_path: Path) -> None:
+    run_id = "geometry-v1-b2b-" + "0" * 12 + "-operational-01"
+    receipt = {"status": "operational_preflight_complete", "run_id": run_id, "science_denominator": 0}
+    package = runner._package_receipt(output_root=tmp_path / "drive-run", receipt=receipt, status_name="success.json", expected_exact="0" * 40, run_id=run_id)
+    root = tmp_path / "drive-run"
+    assert set(path.name for path in root.iterdir()) == {"receipt.json", "success.json", "checkpoint.json", "manifest.json", "SHA256SUMS", package["archive_filename"], package["sidecar_filename"]}
+    with pytest.raises(FileExistsError):
+        runner._package_receipt(output_root=root, receipt=receipt, status_name="success.json", expected_exact="0" * 40, run_id=run_id)
+    public = "".join(path.read_text(errors="ignore") for path in root.iterdir() if path.suffix != ".zip")
+    for forbidden in ("HF_TOKEN", "CEG_WM_ROOT_KEY", "/private/", "tensor("):
+        assert forbidden not in public
+
+
+def test_packaging_failure_emits_only_artifact_unavailable_control(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(runner.Image, "open", lambda _path: Image.new("RGB", (1, 1)))
+    monkeypatch.setattr(runner, "operational_preflight", lambda *_args, **_kwargs: {"status": "operational_preflight_complete", "run_id": "geometry-v1-b2b-" + "0" * 12 + "-operational-01", "science_denominator": 0})
+    monkeypatch.setattr(runner, "_package_receipt", lambda **_kwargs: (_ for _ in ()).throw(OSError("private path")))
+    rc, line = _run_with_control(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"], tmp_path)
+    prefix, body = line.strip().split(" ", 1)
+    assert rc == 1 and prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
+    assert json.loads(body) == {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": "geometry-v1-b2b-" + "0" * 12 + "-operational-01"}
