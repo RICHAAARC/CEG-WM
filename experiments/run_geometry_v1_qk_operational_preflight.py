@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -47,6 +48,12 @@ _FAILURE_POINTS = frozenset({
     "relation",
     "receipt_packaging",
 })
+MAX_CONTROL_BYTES = 1024
+MAX_RECEIPT_BYTES = 262144
+MAX_ARCHIVE_BYTES = 524288
+MAX_SIDECAR_BYTES = 256
+_SUCCESS_PREFIX = "CEGWM_GEOMETRY_V1_OPERATIONAL_PREFLIGHT "
+_FAILURE_PREFIX = "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE "
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -426,31 +433,94 @@ def operational_preflight(
         raise
 
 
+def _bounded_json(value: dict[str, Any], limit: int) -> bytes:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > limit:
+        raise ValueError("sanitized receipt exceeds bounded package limit")
+    return encoded
+
+
+def _write_exclusive(path: Path, value: bytes) -> None:
+    with path.open("xb") as handle:
+        handle.write(value)
+
+
+def _package_receipt(*, output_root: Path, receipt: dict[str, Any], status_name: str, expected_exact: str, run_id: str) -> dict[str, Any]:
+    """Create the complete local package before emitting compact control."""
+    if output_root.exists():
+        raise FileExistsError("runner output root must be create-only")
+    output_root.mkdir()
+    receipt_bytes = _bounded_json(receipt, MAX_RECEIPT_BYTES)
+    _write_exclusive(output_root / "receipt.json", receipt_bytes)
+    _write_exclusive(output_root / status_name, _bounded_json({"status": receipt["status"], "run_id": run_id}, MAX_RECEIPT_BYTES))
+    members = ["receipt.json", status_name, "manifest.json", "SHA256SUMS"]
+    _write_exclusive(output_root / "manifest.json", _bounded_json({"execution_exact": expected_exact, "run_id": run_id, "allowed_filenames": members}, MAX_RECEIPT_BYTES))
+    sums = "".join(f"{_sha256_bytes((output_root / name).read_bytes())}  {name}\n" for name in members[:-1]).encode("ascii")
+    _write_exclusive(output_root / "SHA256SUMS", sums)
+    archive_name = f"{run_id}.zip"
+    archive = output_root / archive_name
+    with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for name in members:
+            bundle.write(output_root / name, name)
+    archive_bytes = archive.stat().st_size
+    if archive_bytes > MAX_ARCHIVE_BYTES:
+        raise ValueError("archive exceeds bounded package limit")
+    digest = _sha256_bytes(archive.read_bytes())
+    sidecar_name = f"{archive_name}.sha256"
+    sidecar = output_root / sidecar_name
+    sidecar_value = f"{digest}  {archive_name}\n".encode("ascii")
+    if len(sidecar_value) > MAX_SIDECAR_BYTES:
+        raise ValueError("sidecar exceeds bounded package limit")
+    _write_exclusive(sidecar, sidecar_value)
+    return {"archive_filename": archive_name, "sidecar_filename": sidecar_name, "receipt_bytes": len(receipt_bytes), "receipt_sha256": _sha256_bytes(receipt_bytes), "archive_bytes": archive_bytes}
+
+
+def _emit_control(fd: int, prefix: str, control: dict[str, Any]) -> None:
+    line = prefix.encode("ascii") + _bounded_json(control, MAX_CONTROL_BYTES - len(prefix) - 1) + b"\n"
+    if len(line) > MAX_CONTROL_BYTES:
+        raise ValueError("compact control exceeds bounded transport limit")
+    os.write(fd, line)
+
+
+def _failure_receipt(error: BaseException, run_id: str | None) -> dict[str, Any]:
+    error_class = type(error).__name__ if type(error).__name__ in _PUBLIC_ERRORS else "OtherOperationalError"
+    failure_point = getattr(error, "geometry_failure_point", "receipt_packaging")
+    if failure_point not in _FAILURE_POINTS:
+        failure_point = "receipt_packaging"
+    failure: dict[str, Any] = {"status": "operational_failure", "run_id": run_id, "stage": "preflight", "failure_point": failure_point, "error_class": error_class, "science_denominator": 0}
+    for name, attribute in (("runtime", "geometry_runtime_record"), ("architecture", "geometry_architecture_record")):
+        value = getattr(error, attribute, None)
+        if isinstance(value, dict):
+            failure[name] = value
+    return failure
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("images", nargs="+")
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--expected-exact", required=True)
+    parser.add_argument("--output-root", required=True)
+    parser.add_argument("--control-fd", required=True, type=int)
     args = parser.parse_args(argv)
     run_id = f"geometry-v1-b2b-{args.expected_exact[:12]}-operational-01" if re.fullmatch(r"[0-9a-f]{40}", args.expected_exact) else None
     try:
         images = [Image.open(path).convert("RGB") for path in args.images]
         receipt = operational_preflight(images, hf_token=os.environ.get("HF_TOKEN", ""), root_key=os.environ.get("CEG_WM_ROOT_KEY", ""), expected_exact=args.expected_exact, repo_root=Path(args.repo_root))
-        print("CEGWM_GEOMETRY_V1_OPERATIONAL_PREFLIGHT " + json.dumps(receipt, sort_keys=True, separators=(",", ":")), flush=True)
+        package = _package_receipt(output_root=Path(args.output_root), receipt=receipt, status_name="success.json", expected_exact=args.expected_exact, run_id=receipt["run_id"])
+        _emit_control(args.control_fd, _SUCCESS_PREFIX, {"status": "success", "run_id": receipt["run_id"], "artifact_status": "complete", **package})
         return 0
     except BaseException as error:
-        error_class = type(error).__name__ if type(error).__name__ in _PUBLIC_ERRORS else "OtherOperationalError"
-        failure_point = getattr(error, "geometry_failure_point", "receipt_packaging")
-        if failure_point not in _FAILURE_POINTS:
-            failure_point = "receipt_packaging"
-        failure = {"status": "operational_failure", "run_id": run_id, "stage": "preflight", "failure_point": failure_point, "error_class": error_class}
-        runtime = getattr(error, "geometry_runtime_record", None)
-        architecture = getattr(error, "geometry_architecture_record", None)
-        if isinstance(runtime, dict):
-            failure["runtime"] = runtime
-        if isinstance(architecture, dict):
-            failure["architecture"] = architecture
-        print("CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE " + json.dumps(failure, sort_keys=True, separators=(",", ":")), flush=True)
+        failure = _failure_receipt(error, run_id)
+        try:
+            package = _package_receipt(output_root=Path(args.output_root), receipt=failure, status_name="failure.json", expected_exact=args.expected_exact, run_id=run_id or "invalid-exact")
+            control = {"status": "failure", "underlying_status": "operational_failure", "artifact_status": "complete", "failure_point": failure["failure_point"], "run_id": run_id, **package}
+        except BaseException:
+            control = {"status": "failure", "underlying_status": "unknown", "artifact_status": "unavailable", "failure_point": "receipt_packaging", "run_id": run_id}
+        try:
+            _emit_control(args.control_fd, _FAILURE_PREFIX, control)
+        except BaseException:
+            pass
         return 1
 
 

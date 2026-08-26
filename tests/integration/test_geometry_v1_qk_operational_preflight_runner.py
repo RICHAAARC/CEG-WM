@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pytest
 import torch
 from PIL import Image
@@ -219,25 +220,36 @@ def test_null_conditioning_requires_all_three_sd3_prompt_arguments() -> None:
     assert pooled.shape == (1, 3)
 
 
+def _run_with_control(arguments: list[str], tmp_path: Path) -> tuple[int, str]:
+    read_fd, write_fd = os.pipe()
+    try:
+        result = runner._main([*arguments, "--output-root", str(tmp_path / "package"), "--control-fd", str(write_fd)])
+    finally:
+        os.close(write_fd)
+    line = os.read(read_fd, runner.MAX_CONTROL_BYTES + 1).decode("utf-8")
+    os.close(read_fd)
+    return result, line
+
+
 def test_sanitized_failure_receipt_has_only_a_finite_failure_point(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     error = TypeError("not emitted")
     error.geometry_failure_point = "null_conditioning_call"  # type: ignore[attr-defined]
     monkeypatch.setattr(runner.Image, "open", lambda _path: Image.new("RGB", (1, 1)))
     monkeypatch.setattr(runner, "operational_preflight", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
-    assert runner._main(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"]) == 1
-    line = capsys.readouterr().out.strip()
+    rc, line = _run_with_control(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"], tmp_path)
+    assert rc == 1
     prefix, payload = line.split(" ", 1)
     assert prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
     receipt = json.loads(payload)
     assert receipt["failure_point"] == "null_conditioning_call"
-    assert receipt["failure_point"] in runner._FAILURE_POINTS
+    assert receipt["artifact_status"] == "complete"
     assert "not emitted" not in line
 
 
 def test_late_failure_keeps_only_bounded_runtime_and_architecture_records(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     error = TypeError("not emitted")
     error.geometry_failure_point = "scheduler"  # type: ignore[attr-defined]
@@ -245,21 +257,32 @@ def test_late_failure_keeps_only_bounded_runtime_and_architecture_records(
     error.geometry_architecture_record = {"attention_candidates": []}  # type: ignore[attr-defined]
     monkeypatch.setattr(runner.Image, "open", lambda _path: Image.new("RGB", (1, 1)))
     monkeypatch.setattr(runner, "operational_preflight", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
-    assert runner._main(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"]) == 1
-    _prefix, payload = capsys.readouterr().out.strip().split(" ", 1)
-    receipt = json.loads(payload)
+    rc, line = _run_with_control(["--repo-root", ".", "--expected-exact", "0" * 40, "image.png"], tmp_path)
+    assert rc == 1 and len(line.encode()) <= runner.MAX_CONTROL_BYTES
+    package = tmp_path / "package"
+    receipt = json.loads((package / "receipt.json").read_text())
     assert receipt["failure_point"] == "scheduler"
     assert receipt["runtime"] == {"requested_model_id": runner.MODEL_ID}
     assert receipt["architecture"] == {"attention_candidates": []}
-    assert "not emitted" not in payload
+    assert "not emitted" not in (package / "receipt.json").read_text()
 
 
-def test_input_open_failure_still_emits_a_bounded_sanitized_receipt(
-    capsys: pytest.CaptureFixture[str]
+def test_input_open_failure_still_emits_a_bounded_sanitized_receipt(tmp_path: Path
 ) -> None:
-    assert runner._main(["--repo-root", ".", "--expected-exact", "0" * 40, "missing.png"]) == 1
-    prefix, payload = capsys.readouterr().out.strip().split(" ", 1)
+    rc, line = _run_with_control(["--repo-root", ".", "--expected-exact", "0" * 40, "missing.png"], tmp_path)
+    assert rc == 1
+    prefix, payload = line.strip().split(" ", 1)
     assert prefix == "CEGWM_GEOMETRY_V1_OPERATIONAL_FAILURE"
     receipt = json.loads(payload)
     assert receipt["run_id"] == "geometry-v1-b2b-000000000000-operational-01"
     assert receipt["failure_point"] == "receipt_packaging"
+
+
+@pytest.mark.parametrize("blocks", [18, 24, 38, 64])
+def test_architecture_receipt_size_is_package_bounded(blocks: int) -> None:
+    receipt = {"status": "operational_preflight_complete", "run_id": "geometry-v1-b2b-" + "0" * 12 + "-operational-01", "science_denominator": 0,
+               "architecture": {"attention_candidates": [{"path": f"transformer_blocks.{index}.attn", "metadata": "x" * 180} for index in range(blocks)]}}
+    encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+    assert len(encoded) <= runner.MAX_RECEIPT_BYTES
+    if blocks >= 24:
+        assert len(encoded) > 4096
