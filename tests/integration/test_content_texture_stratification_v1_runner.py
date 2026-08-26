@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import sys
@@ -8,6 +9,7 @@ import tempfile
 import types
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from argparse import Namespace
 from pathlib import Path
 from unittest import mock
@@ -129,6 +131,82 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertEqual(emitted[0][:4], ("v2", unit, candidate, primary_null))
     self.assertEqual(emitted[0][4:], ({"image": candidate}, {"image": primary_null}))
 
+ def test_prefetch_is_record_only_without_model_load_or_cache_byte_hashing(self) -> None:
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    cache = root / "cache"
+    cache.mkdir()
+    (cache / "metadata-only").write_bytes(b"not read")
+    output = root / "output"
+    with mock.patch.dict(os.environ, {"HF_HOME": str(cache)}, clear=False), mock.patch.object(adapter, "_load_v2", side_effect=AssertionError("prefetch must not load V2")), mock.patch.object(type(cache), "open", side_effect=AssertionError("cache bytes must not be read")):
+        observation = adapter._cache_observation(cache)
+    self.assertEqual(observation, {"status": "available", "file_count": 1, "record_only": True})
+    failure = {"status": "unavailable", "failure_class": "RuntimeError", "record_only": True}
+    with mock.patch.dict(os.environ, {"HF_HOME": str(cache)}, clear=False), mock.patch.object(adapter, "_load_v2", side_effect=AssertionError("prefetch must not load V2")), mock.patch.object(adapter, "_cache_observation", return_value=failure), redirect_stdout(io.StringIO()) as captured:
+        adapter._prefetch(root, "token", output, cache)
+    binding = json.loads((output / "model_bindings.json").read_text(encoding="ascii"))
+    self.assertEqual(binding["cache_observation"], failure)
+    self.assertNotIn("manifest_sha256", binding)
+    self.assertNotIn("model_bindings_path", captured.getvalue())
+    self.assertFalse(hasattr(adapter, "_verify_cache"))
+
+ def test_hf_home_mismatch_is_a_record_and_child_is_not_forced_offline(self) -> None:
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    expected = root / "expected"
+    actual = root / "actual"
+    actual.mkdir()
+    with mock.patch.dict(os.environ, {"HF_HOME": str(actual)}, clear=False):
+        bound, record = adapter._hf_home_binding(expected)
+    self.assertEqual(bound, actual.resolve())
+    self.assertEqual(record, {"status": "mismatched", "record_only": True})
+
+    seen = {}
+    class Process:
+        stdout = [runner.EVENT_PREFIX + json.dumps({"event": "phase_complete", "phase": "v2"}) + "\n"]
+        def wait(self):
+            return 0
+        def kill(self):
+            raise AssertionError("unexpected kill")
+    def popen(*args, **kwargs):
+        seen.update(kwargs["env"])
+        self.assertIs(kwargs["stderr"], runner.subprocess.DEVNULL)
+        return Process()
+    with mock.patch.object(runner.subprocess, "Popen", side_effect=popen):
+        self.assertEqual(runner._child(root / "adapter.py", root, "0" * 40, "v2", root / "units.json", root, expected, None, {}), [{"event": "phase_complete", "phase": "v2"}])
+    self.assertEqual(seen["HF_HOME"], str(expected))
+    self.assertNotIn("HF_HUB_OFFLINE", seen)
+    self.assertNotIn("TRANSFORMERS_OFFLINE", seen)
+
+ def test_common_plain_uses_only_sd35_pipeline_and_frozen_plain_runner(self) -> None:
+    calls = []
+    image = object()
+    class Pipeline:
+        def __call__(self, **kwargs):
+            return object()
+        def to(self, device):
+            calls.append(("to", device))
+            return self
+    pipeline = Pipeline()
+    class PipelineClass:
+        @staticmethod
+        def from_pretrained(model_id, *, torch_dtype, token):
+            calls.append(("from_pretrained", model_id, torch_dtype, token))
+            return pipeline
+    fake_torch = types.ModuleType("torch")
+    fake_torch.float16 = "float16"
+    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: True)
+    fake_diffusers = types.ModuleType("diffusers")
+    fake_diffusers.StableDiffusion3Pipeline = PipelineClass
+    fake_runtime = types.ModuleType("cegwm.runtime.diffusers_sd35")
+    fake_runtime.run_sd35_plain = lambda loaded, prompt, *, height, width, generator: calls.append(("plain", loaded, prompt, height, width, generator)) or image
+    unit = {"prompt": "frozen plain prompt", "seed": 17, "unit_id": "unit-0001", "global_ordinal": 1}
+    with mock.patch.dict(sys.modules, {"torch": fake_torch, "diffusers": fake_diffusers, "cegwm.runtime.diffusers_sd35": fake_runtime}), mock.patch.object(adapter, "_load_v2", side_effect=AssertionError("plain must not load V2")), mock.patch.object(adapter, "_generator", return_value="generator"), mock.patch.object(adapter, "_write_plain", return_value=("plain_rgb/01-unit-0001.ppm", "p", "r")), mock.patch.object(adapter, "_event"):
+        adapter._common_plain(Path("/detached"), [unit], "token", Path("/output"))
+    self.assertEqual(calls, [("from_pretrained", "stabilityai/stable-diffusion-3.5-medium", "float16", "token"), ("to", "cuda"), ("plain", pipeline, unit["prompt"], 512, 512, "generator")])
+
  def test_checkpoint_cleans_only_files_created_by_this_call(self) -> None:
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
@@ -201,7 +279,7 @@ class TextureRunnerTests(unittest.TestCase):
     def fake_child(adapter, source, exact, phase, units_path, output, cache, bindings_path, env, **kwargs):
         units = json.loads(units_path.read_text())
         if phase == "asset_prefetch":
-            (output / "model_bindings.json").write_text(json.dumps({"root": str(cache), "files": [], "manifest_sha256": "0" * 64}), encoding="ascii")
+            (output / "model_bindings.json").write_text(json.dumps({"cache_observation": {"status": "unavailable", "failure_class": "RuntimeError", "record_only": True}}), encoding="ascii")
             return [{"event": "source_validated"}, {"event": "asset_prefetch"}, {"event": "phase_complete", "phase": phase}]
         if phase == "v5_validate":
             return [{"event": "source_validated"}, {"event": "v5_validated"}, {"event": "phase_complete", "phase": phase}]
@@ -248,6 +326,7 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertEqual(result["fixed_method_rows"], 112)
         self.assertEqual(len(records), 112)
         self.assertNotIn(b"private prompt", archive.read("records.json"))
+        self.assertNotIn("model_manifest_sha256", json.loads(archive.read("bindings.json")))
     checkpoints = sorted((local / "checkpoints").glob("checkpoint-*.json"))
     self.assertEqual(len(checkpoints), 9)
     self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json.sha256"))), 9)

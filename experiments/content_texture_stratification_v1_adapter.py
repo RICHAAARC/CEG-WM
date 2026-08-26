@@ -102,25 +102,23 @@ def _secrets(require_key: bool = True) -> tuple[str, str]:
     return root_key, token
 
 
-def _cache_manifest(root: Path) -> dict[str, Any]:
-    files = []
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        relative = path.relative_to(root).as_posix()
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(block)
-        files.append({"path": relative, "size": path.stat().st_size, "sha256": digest.hexdigest()})
-    binding = {"root": str(root), "files": files}
-    binding["manifest_sha256"] = _sha((_stable(files) + "\n").encode("ascii"))
-    return binding
+def _failure_class(error: Exception) -> str:
+    name = type(error).__name__
+    return name if name in PUBLIC_FAILURES else "OtherOperationalError"
 
 
-def _verify_cache(binding: Mapping[str, Any]) -> None:
-    root = Path(binding["root"])
-    observed = _cache_manifest(root)
-    if observed["files"] != binding["files"] or observed["manifest_sha256"] != binding["manifest_sha256"]:
-        raise RuntimeError("frozen HF cache binding differs")
+def _cache_observation(root: Path) -> dict[str, Any]:
+    """Return cache metadata only; cache contents never qualify execution."""
+
+    try:
+        return {"status": "available", "file_count": sum(1 for item in root.rglob("*") if item.is_file()), "record_only": True}
+    except Exception as error:
+        return {"status": "unavailable", "failure_class": _failure_class(error), "record_only": True}
+
+
+def _hf_home_binding(expected: Path) -> tuple[Path, dict[str, Any]]:
+    actual = Path(os.environ.get("HF_HOME", "")).resolve()
+    return actual, {"status": "matched" if expected.resolve() == actual else "mismatched", "record_only": True}
 
 
 def _verify_protocol(method: str, protocol: Any, binding: Mapping[str, Any]) -> None:
@@ -137,27 +135,35 @@ def _load_v2(root: Path, token: str) -> tuple[Any, Any, Any]:
     return engine, protocol, (pipeline, assets)
 
 
-def _prefetch(root: Path, token: str, output: Path) -> None:
-    _load_v2(root, token)
-    cache = Path(os.environ["HF_HOME"]).resolve()
-    binding = _cache_manifest(cache)
-    def version(name: str) -> str:
+def _prefetch(root: Path, token: str, output: Path, expected_cache: Path) -> None:
+    del root, token
+    cache, hf_home_binding = _hf_home_binding(expected_cache)
+    def version(name: str) -> tuple[str, str | None]:
         try:
-            return importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            return "unavailable"
+            return importlib.metadata.version(name), None
+        except Exception as error:
+            return "unavailable", _failure_class(error)
     try:
         import torch
         cuda = str(torch.version.cuda)
         gpu = str(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else "unavailable"
-    except Exception:
+        environment_failure: str | None = None
+    except Exception as error:
         cuda = gpu = "unavailable"
-    binding["environment_record"] = {"python": sys.version.split()[0], "torch": version("torch"), "torchvision": version("torchvision"), "transformers": version("transformers"), "cuda": cuda, "gpu": gpu, "record_only": True}
+        environment_failure = _failure_class(error)
+    versions = {name: version(name) for name in ("torch", "torchvision", "transformers")}
+    if environment_failure is None:
+        environment_failure = next((failure for _, failure in versions.values() if failure is not None), None)
+    environment_status = "unavailable" if environment_failure is not None else "available"
+    environment = {"status": environment_status, "python": sys.version.split()[0], "torch": versions["torch"][0], "torchvision": versions["torchvision"][0], "transformers": versions["transformers"][0], "cuda": cuda, "gpu": gpu, "record_only": True}
+    if environment_failure is not None:
+        environment["failure_class"] = environment_failure
+    binding = {"hf_home": str(cache), "hf_home_binding": hf_home_binding, "cache_observation": _cache_observation(cache), "environment_record": environment}
     path = output / "model_bindings.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("xb") as handle:
         handle.write((_stable(binding) + "\n").encode("ascii"))
-    _event({"event": "asset_prefetch", "model_bindings_path": str(path), "model_manifest_sha256": binding["manifest_sha256"]})
+    _event({"event": "asset_prefetch", "cache_status": binding["cache_observation"]["status"], "environment_status": environment_status})
 
 
 def _unit_failure(method: str, unit: Mapping[str, Any], error: Exception) -> None:
@@ -171,8 +177,17 @@ def _emit_success(method: str, unit: Mapping[str, Any], image: Any, null: Any, s
 
 def _common_plain(root: Path, units: list[dict[str, Any]], token: str, output: Path) -> None:
     from cegwm.runtime.diffusers_sd35 import run_sd35_plain
-    _, _, loaded = _load_v2(root, token)
-    pipeline, _ = loaded
+    import torch
+    import diffusers
+    if not torch.cuda.is_available():
+        raise RuntimeError("cuda_required_for_plain_generation")
+    pipeline_class = getattr(diffusers, "StableDiffusion3Pipeline", None)
+    if pipeline_class is None or not callable(getattr(pipeline_class, "from_pretrained", None)):
+        raise RuntimeError("installed diffusers lacks StableDiffusion3Pipeline")
+    pipeline = pipeline_class.from_pretrained("stabilityai/stable-diffusion-3.5-medium", torch_dtype=torch.float16, token=token)
+    if not callable(pipeline):
+        raise TypeError("SD3.5 pipeline must be callable")
+    pipeline.to("cuda")
     for unit in units:
         try:
             image = run_sd35_plain(pipeline, unit["prompt"], height=512, width=512, generator=_generator(unit["seed"]))
@@ -315,17 +330,16 @@ def execute(args: argparse.Namespace) -> int:
     _identity(root, args.expected_exact)
     output = Path(args.local_output_root).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    if Path(args.hf_cache_root).resolve() != Path(os.environ.get("HF_HOME", "")).resolve():
-        raise RuntimeError("HF cache root binding differs")
+    actual_hf_home, hf_home_binding = _hf_home_binding(Path(args.hf_cache_root))
     units = _json(args.units_json) if args.units_json else []
     bindings = _json(args.model_bindings_json) if args.model_bindings_json else {}
     _ACTIVE_BINDINGS = bindings
-    if args.phase != "asset_prefetch":
-        _verify_cache(bindings)
+    bindings["hf_home"] = str(actual_hf_home)
+    bindings["hf_home_binding"] = hf_home_binding
     key, token = _secrets(require_key=args.phase not in {"asset_prefetch", "common_plain_v2", "v5_validate"})
     try:
         if args.phase == "asset_prefetch":
-            _prefetch(root, token, output)
+            _prefetch(root, token, output, Path(args.hf_cache_root))
         elif args.phase == "common_plain_v2":
             _common_plain(root, units, token, output)
         elif args.phase in {"v2", "v3", "v4"}:

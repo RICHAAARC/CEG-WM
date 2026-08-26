@@ -189,8 +189,6 @@ def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path
     if v8_asset is not None:
         command += ["--v8-asset-root", str(v8_asset)]
     child_env = {**os.environ, **env, "HF_HOME": str(cache)}
-    if phase != "asset_prefetch":
-        child_env.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
     process = subprocess.Popen(command, cwd=source, env=child_env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="strict")
     events = []
     assert process.stdout is not None
@@ -464,7 +462,9 @@ def execute(args: argparse.Namespace) -> int:
     associations_csv = _csv_bytes(ASSOCIATION_COLUMNS, associations)
     public_records = _public_records(rows)
     result = {"analysis_id": protocol.config["analysis_id"], "status": status, "claim_ceiling": protocol.config["claim_ceiling"], "fixed_plain_units": 16, "fixed_method_rows": 112, "association_rows": 84, "method_order": list(METHOD_ORDER), "roster_order": [item["roster_id"] for item in protocol.config["rosters_in_order"]], "gate_or_scientific_status_mutated": False, "interpretation": "exploratory_descriptive_only"}
-    bindings_public = {"identity": identity, "sources": protocol.config["sources"], "rosters": protocol.config["rosters_in_order"], "assets": protocol.config["assets"], "model_manifest_sha256": bindings["manifest_sha256"], "execution": protocol.config["execution"]}
+    bindings_public = {"identity": identity, "sources": protocol.config["sources"], "rosters": protocol.config["rosters_in_order"], "assets": protocol.config["assets"], "execution": protocol.config["execution"]}
+    if isinstance(bindings.get("manifest_sha256"), str):
+        bindings_public["model_manifest_sha256"] = bindings["manifest_sha256"]
     environment = dict(bindings.get("environment_record", {"python": sys.version.split()[0], "platform": sys.platform, "record_only": True}))
     receipt = {"artifact_kind": "terminal", "run_id": run_id, "exact": exact, "protocol_digest": protocol.protocol_digest, "status": status, "result_member": "result.json", "external_validation_required": True}
     members = [("receipt.json", stable_json_bytes(receipt)), ("bindings.json", stable_json_bytes(bindings_public)), ("environment_record.json", stable_json_bytes(environment)), ("records.json", stable_json_bytes(public_records)), ("result.json", stable_json_bytes(result)), ("per_unit.csv", per_unit_csv), ("associations.csv", associations_csv)]
