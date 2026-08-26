@@ -19,10 +19,15 @@ its two public files, their Drive IDs, sizes, hashes, sidecar binding, and the
 verified byte equality to the calibration asset retained in this checkout.
 The legacy directory is not required by the formal runtime.
 
-`result.json` is preserved exactly with `scientific_status=not_adjudicated`.
-This organization records no new personal scientific adjudication. It does
-not claim calibrated FPR, attack robustness, generalization, geometry,
-main promotion, or paper readiness.
+`result.json` is preserved exactly with the runner-produced
+`scientific_status=not_adjudicated`; the raw artifact is not rewritten by a
+later decision. On 2026-08-26 the project owner accepted this exact V9 result
+as the validated content-chain method. `Content-V9` was promoted through main
+merge `2f5e7e5f80616eefb22c586ca7430038be45807b`, and main recorded
+`content_chain_method_complete` at
+`e9308f0611d472568124a3b61b87a2cff36f28ee`. This adjudication does not claim
+calibrated FPR, attack robustness, generalization, geometry, full-system
+completion, or paper readiness.
 
 ## Branch role
 
