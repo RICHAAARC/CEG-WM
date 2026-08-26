@@ -18,3 +18,12 @@ present.
 This organization records no new personal scientific adjudication. It does
 not claim calibrated FPR, attack robustness, generalization, geometry,
 main promotion, or paper readiness.
+
+## Branch role
+
+`Content-V9` is the canonical method branch. `Content-V9-Evidence` is its
+complete executable evidence snapshot: it retains the canonical project,
+configuration, runtime, protocol, and stability runner together with the
+formal Notebook and portable scalar evidence. The Notebook clones this
+Evidence branch directly. The Evidence branch is not a method-development base
+and must not be merged into `main`.

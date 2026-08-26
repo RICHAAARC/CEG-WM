@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ceg-wm"
+version = "0.1.0"
+description = "Method-first research scaffold for keyed watermark attribution in generated images"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "diffusers>=0.31",
+    "numpy>=1.26",
+    "Pillow>=10",
+    "sentencepiece>=0.2",
+    "torch>=2.1",
+    "transformers>=4.44",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = ["-m", "(unit or quick) and not integration and not smoke and not slow and not formal"]
+markers = [
+    "unit: deterministic lightweight research test",
+    "quick: lightweight functional test using synthetic or temporary inputs",
+    "integration: multi-layer or model-backed integration test, excluded by default",
+    "smoke: explicit end-to-end execution check, excluded by default",
+    "slow: costly test, excluded by default",
+    "formal: formal evidence or release gate, excluded by default",
+]

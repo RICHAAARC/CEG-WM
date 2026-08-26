@@ -1,0 +1,134 @@
+{
+  "protocol_version": 1,
+  "protocol_id": "cegwm-stage-a-content-v9-calibrated-weighted-joint-multi-cohort-stability-v1",
+  "execution_scope_id": "content_v9_multi_cohort_stability_evaluation_v1",
+  "claim_ceiling": "calibrated_combined_attribution_multi_cohort_stability_only",
+  "scientific_status": "not_evaluated_calibration_asset_required",
+  "identities": {
+    "source_method_exact": "c38522dcab6cb173cedf8415cee2fd30998222ba",
+    "source_calibration_protocol_digest": "68f37585eb6eab123bad7c1703767df08404718ce4771f73fbbec236491a1e01",
+    "method_id": "content_v9_v6_calibrated_weighted_joint_multi_cohort_stability_v1",
+    "evaluated_candidate_id": "content_v9_v6_calibrated_weighted_joint_multi_cohort_stability_semantic_gate_v1",
+    "record_contract_id": "content_v9_calibrated_weighted_joint_stability_record_v1"
+  },
+  "inherited_v9": {
+    "production_semantics": "byte_semantic_unchanged_from_c38522dcab6cb173cedf8415cee2fd30998222ba",
+    "lf_weight": 0.25,
+    "hf_weight": 0.75,
+    "wrong_key_count": 16,
+    "primary_null": "same_unit_pass1_sole_primary_null",
+    "combined_actual_dtype_relative_l2_max": 0.012,
+    "callback_step_index_zero_based": 18,
+    "probe_evaluation_count": 64,
+    "blind_inputs": "final_image_detection_key_frozen_public_assets_only",
+    "failure_retention_and_create_only_artifacts": "unchanged_v6_v9"
+  },
+  "calibration_asset_input": {
+    "asset_schema_id": "cegwm_content_v9_calibrated_weighted_joint_asset_v1",
+    "asset_role_id": "content_v9_calibrated_weighted_joint_v1",
+    "required_before_execution": true,
+    "numeric_asset_sha256_bound_only_after_user_acceptance": true
+  },
+  "joint_operator": {
+    "formula": "correlation_adjusted_stouffer_from_one_frozen_calibration_asset",
+    "formal_fpr_claim": false,
+    "lf_hf_gates": "diagnostic_only_no_hard_veto",
+    "weighted_gate_a": "registered_strictly_greater_than_max_16_wrong_ties_fail",
+    "weighted_gate_b": "candidate_registered_strictly_greater_than_primary_null_registered"
+  },
+  "sections": [
+    {
+      "section_id": "old_roster_reference",
+      "manifest": "content_adaptive_dual_branch_v2_clean.jsonl",
+      "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88",
+      "fixed_units": 8,
+      "fixed_records": 16,
+      "weighted_gate_a_min_units": 7,
+      "weighted_gate_b_min_units": 7
+    },
+    {
+      "section_id": "current_v6_roster_reference",
+      "manifest": "content_v6_iss_clean.jsonl",
+      "manifest_sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f",
+      "fixed_units": 8,
+      "fixed_records": 16,
+      "weighted_gate_a_min_units": 7,
+      "weighted_gate_b_min_units": 7
+    },
+    {
+      "section_id": "novel_seed_stability",
+      "manifest": "content_v9_novel_seed_stability_v1.jsonl",
+      "manifest_sha256": "d9dd998fb3e7e3e0c4693d1188fd18cc7df32424f47ee378b385cabcee51ceb2",
+      "unique_prompt_list_sha256": "4691ebd78a05f3ab617dd83a9ee94b9632bfc4ca9ffc8483f25e71082ba38618",
+      "selection_provenance": "frozen_before_any_v9_calibration_asset_or_stability_result",
+      "identity_disjointness": "unit_source_prompt_seed_and_prompt_seed_tuple_against_all_prior_formal_canary_fit_development_and_unused_v9_evaluation",
+      "fixed_prompts": 32,
+      "fixed_units": 64,
+      "fixed_records": 128,
+      "seed_strata": [
+        {
+          "split": "content_v9_novel_seed_stability_seed_01_v1",
+          "seed_start": 2026101000,
+          "units": 32,
+          "records": 64,
+          "manifest_slice_sha256": "222b39f97c55cec48201f6782539c9bb8aabe27f27bcfb1f495361e870a77fef",
+          "weighted_gate_a_min_units": 28,
+          "weighted_gate_b_min_units": 28
+        },
+        {
+          "split": "content_v9_novel_seed_stability_seed_02_v1",
+          "seed_start": 2026102000,
+          "units": 32,
+          "records": 64,
+          "manifest_slice_sha256": "af7c58c3be501715b484977b3888d19a13ef29f7fce7be7f1a3a4e8461fbb83d",
+          "weighted_gate_a_min_units": 28,
+          "weighted_gate_b_min_units": 28
+        }
+      ],
+      "two_seed_prompt_agreement": "descriptive_only_no_threshold_or_conjunction"
+    }
+  ],
+  "execution_contract": {
+    "section_order": [
+      "old_roster_reference",
+      "current_v6_roster_reference",
+      "novel_seed_stability_seed_01",
+      "novel_seed_stability_seed_02"
+    ],
+    "total_units_metadata_only_not_a_denominator": 80,
+    "total_records_metadata_only_not_a_denominator": 160,
+    "separate_denominators": true,
+    "pooled_denominator": false,
+    "cross_section_conjunction": false,
+    "combined_result": false,
+    "outcome_conditioned_stop": false,
+    "replacement_units_allowed": false,
+    "selective_omission_allowed": false,
+    "failures_remain_in_section_denominator": true
+  },
+  "run_identity": {
+    "template": "content-v9-stability-{protocol_digest_12}-{calibration_asset_sha256_12}-{public_key_digest_12}",
+    "numeric_run_id_deferred_until_user_accepted_calibration_asset": true
+  },
+  "preserved_unused_future_evaluation": {
+    "manifest": "content_v9_clean_evaluation_v1.jsonl",
+    "manifest_sha256": "dd9d9c60974f07f3727b0c46b08c1678dfb9b57339a662735ad4178b9473849d",
+    "prompt_list_sha256": "ed8796c183200ec826023d44f9ebe06293968f5a387dbcf242addaf036e46617",
+    "status": "immutable_unexecuted_provenance_excluded_from_all_sections"
+  },
+  "later_read_only_comparison_provenance": {
+    "required_route_evidence": [
+      "Content-V2",
+      "Content-V3",
+      "Content-V4",
+      "Content-V5",
+      "Content-V6-current",
+      "Content-V6-old-roster-reference",
+      "Content-V7",
+      "Content-V8"
+    ],
+    "v6_current_producer_exact": "49bb03ed697a47048f5730ecfc85a9f29cb0b58a",
+    "v6_old_roster_reference_exact": "39720994cc3316af8c2cac586689d0811232b4c7",
+    "result_bytes_consumed_by_this_protocol": false
+  }
+}

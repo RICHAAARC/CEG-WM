@@ -1,0 +1,33 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.conda/
+
+# Editors and notebooks
+.vscode/
+.ipynb_checkpoints/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Build and coverage
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Models, data, and generated experiment material
+models/
+data/
+outputs/
+audit_reports/
+release_packages/
