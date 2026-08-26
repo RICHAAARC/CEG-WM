@@ -1,0 +1,10 @@
+{
+  "artifact_kind": "terminal",
+  "formal_protocol_id": "cegwm-stage-a-content-v7-ordinary-iss-formal-initial-v1",
+  "formal_protocol_digest": "2c2ce18c3d0fd3b1573ad335d0c9fe62b9583a7162f97d75194c8322efa0db0e",
+  "runtime_asset_member": "content_v7_ordinary_iss_gain_target_v1.json",
+  "runtime_asset_sidecar_member": "content_v7_ordinary_iss_gain_target_v1.json.sha256",
+  "result_member": "result.json",
+  "evaluation_result_count": 2,
+  "external_validation_required": true
+}

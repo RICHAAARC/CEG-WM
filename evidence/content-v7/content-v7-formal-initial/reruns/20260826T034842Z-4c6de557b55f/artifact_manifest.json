@@ -1,0 +1,55 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V7",
+  "source_exact": "4c6de557b55ff367ee0ff5940cb194ad83824d7c",
+  "run_utc": "20260826T034842Z",
+  "unit_sets": [
+    {"unit_set_id": "content_units_32_v1", "display_label": "[32V1]", "role": "development", "manifest_sha256": "4ff3efa6b98efb62d542b210ebf00f3fc624513342475ce417e9099e334066ea"},
+    {"unit_set_id": "content_units_8_v1", "display_label": "[8V1]", "role": "evaluation", "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"},
+    {"unit_set_id": "content_units_8_v3", "display_label": "[8V3]", "role": "evaluation", "manifest_sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f"}
+  ],
+  "formal_protocol_id": "cegwm-stage-a-content-v7-ordinary-iss-formal-initial-v1",
+  "formal_protocol_digest": "2c2ce18c3d0fd3b1573ad335d0c9fe62b9583a7162f97d75194c8322efa0db0e",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "drive_source": {
+    "drive_run_root": "/content/drive/MyDrive/CEG-WM/Content/Content-V7-4c6de557b55f-20260826T034842Z",
+    "drive_folder_id": "17SFgz9hTqfduZR2wpALVY7bqafYDNiYZ",
+    "execution_directory_id": "1_rTFIRvtu2gLpFejTY_h9g6Hi1dO6A_j",
+    "formal_directory_id": "1_lG3pKhKbBKltRE8w6xfAHXco1u3iaxb"
+  },
+  "source_archive": {
+    "filename": "content-v7-formal-initial.zip",
+    "byte_count": 26441,
+    "sha256": "0ddc30b0d5949911f002fcf58dfc62b40c85ee1c58ff94015047e1e5437cf1aa",
+    "sidecar_filename": "content-v7-formal-initial.zip.sha256",
+    "sidecar_byte_count": 96,
+    "sidecar_file_sha256": "0358d5163335e623dbf430b79acf9bd1a4e225d5142ea6a19a6a94db90607d47",
+    "sidecar_binding": "0ddc30b0d5949911f002fcf58dfc62b40c85ee1c58ff94015047e1e5437cf1aa  content-v7-formal-initial.zip\n",
+    "crc_check": "pass",
+    "members": [
+      {"path": "receipt.json", "byte_count": 480, "sha256": "e8a9fbdcd76c0eb6d2b71fc162e80427d4f6c85f0806e62af8d6ad87d3ab6fed", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "content_v7_ordinary_iss_gain_target_v1.json", "byte_count": 1489, "sha256": "a8c5587bf93a4b5ddebbaaf5b89374eb507220d3ebb2f39cdbf91bef5c315969", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "content_v7_ordinary_iss_gain_target_v1.json.sha256", "byte_count": 110, "sha256": "db7fa49e4442136b0ac63d13163ccb0b0b0498df480600334eb4b81e21eb4bd0", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "result.json", "byte_count": 148908, "sha256": "4ff442cf11db08623468711f4046dcde9b190853313bf9dfd87b98c9d9e55935", "zip_timestamp": "1980-01-01T00:00:00"}
+    ]
+  },
+  "contents": {
+    "development_fit_unit_count": 32,
+    "independent_evaluation_unit_counts": [8, 8],
+    "independent_record_counts": [16, 16],
+    "failed_unit_counts": [0, 0],
+    "status": "complete_rc0",
+    "pooling_applied": false,
+    "combined_result_produced": false
+  },
+  "independently_recomputed_frozen_gates": {
+    "content_units_8_v1": {"lf_gate_a": 5, "lf_gate_b": 8, "hf_gate_a": 8, "hf_gate_b": 8, "joint_gate_a": 7, "joint_gate_b": 8, "required_units": 7, "all_predeclared_gates_pass": false},
+    "content_units_8_v3": {"lf_gate_a": 6, "lf_gate_b": 8, "hf_gate_a": 8, "hf_gate_b": 8, "joint_gate_a": 8, "joint_gate_b": 8, "required_units": 7, "all_predeclared_gates_pass": false}
+  },
+  "normalized_comparison_to_prior": {
+    "evaluation_results_equal_after_execution_provenance": true,
+    "runtime_asset_equal_after_ignoring": ["producer_exact"],
+    "max_numeric_abs_diff": 0.0
+  },
+  "evidence_ceiling": "authenticated_complete_scalar_formal_evidence_for_two_independent_fixed_evaluations; prior_narrow_scientific_negative_unchanged"
+}

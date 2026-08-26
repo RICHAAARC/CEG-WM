@@ -67,3 +67,18 @@ complete executable evidence snapshot, not a development base and not
 mergeable to `main`. Its current tree retains the canonical execution path,
 the final formal Notebook, the exact public runtime asset, and the portable
 scalar evidence. The Notebook clones this Evidence branch directly.
+
+## Unified Drive-first Notebook rerun
+
+The unified Notebook completed an RC0 fit-and-evaluate invocation at exact
+`4c6de557b55ff367ee0ff5940cb194ad83824d7c` on `20260826T034842Z` using
+`[32V1]` development and independent `[8V1]` and `[8V3]` evaluations. Its ZIP
+SHA-256 is
+`0ddc30b0d5949911f002fcf58dfc62b40c85ee1c58ff94015047e1e5437cf1aa`.
+
+The append-only record is preserved under
+`evidence/content-v7/content-v7-formal-initial/reruns/20260826T034842Z-4c6de557b55f/`.
+After excluding execution provenance, both scalar results reproduce the prior
+evidence exactly, while the public runtime asset changes only
+`producer_exact`. The original `scientific_status`, Gate outcomes, and narrow
+personal adjudication remain unchanged.
