@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import ast
+import io
 import json
 import math
 import subprocess
+import tempfile
+import types
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -47,6 +50,64 @@ def _scores(registered: float, wrong: float) -> dict[str, float]:
 
 
 class TextureProtocolTests(unittest.TestCase):
+    def _run_notebook_dispatch(self, *, runner_rc: int, payload: dict[str, str], terminal_binding: str | None = None):
+        notebook = json.loads((ROOT / "notebooks/content_texture_stratification_v1_colab.ipynb").read_text())
+        runner_cell = ["".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code"][2]
+        tree = ast.parse(runner_cell)
+        tree.body = [node for node in tree.body if not (isinstance(node, ast.ImportFrom) and node.module == "google.colab")]
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        terminal_zip = root / "terminal.zip"
+        terminal_sha = root / "terminal.zip.sha256"
+        if terminal_binding is not None:
+            terminal_zip.write_bytes(b"terminal")
+            terminal_sha.write_text(terminal_binding, encoding="ascii")
+        captured_env: dict[str, str] = {}
+        devnull = object()
+
+        class Process:
+            def __init__(self, command, *, cwd, env, stdout, stderr):
+                self.stdout = io.BytesIO(("CEGWM_TEXTURE_RESULT " + json.dumps(payload) + "\n").encode())
+                self._rc = runner_rc
+                captured_env.update(env)
+                self.stderr = stderr
+
+            def poll(self):
+                return self._rc
+
+            def kill(self):
+                raise AssertionError("bounded fixture must not kill")
+
+            def wait(self):
+                return self._rc
+
+        failure_lines: list[str] = []
+        def fail(stage, error_class="RuntimeError"):
+            failure_lines.append("CEGWM_TEXTURE_HANDOFF_FAILURE " + json.dumps({"status": "operational_failure", "stage": stage, "error_class": error_class}, sort_keys=True, separators=(",", ":")))
+
+        namespace = {
+            "json": json, "re": __import__("re"), "Path": Path,
+            "subprocess": types.SimpleNamespace(Popen=Process, PIPE=object(), DEVNULL=devnull),
+            "sys": types.SimpleNamespace(executable="python"),
+            "os": types.SimpleNamespace(environ={"PUBLIC": "ok", "AWS_SECRET": "private"}),
+            "userdata": types.SimpleNamespace(get=lambda name: {"CEG_WM_ROOT_KEY": "root-key", "HF_TOKEN": "hf-token"}[name]),
+            "RESULT_PREFIX": "CEGWM_TEXTURE_RESULT", "CAPTURE_LIMIT": 4096,
+            "TERMINAL_RESULT_FIELDS": {"status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256"},
+            "OPERATIONAL_RESULT_FIELDS": {"status", "failure_class", "failure_stage"},
+            "RUNNER_PUBLIC_FAILURES": {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"},
+            "RUNNER_FAILURE_STAGES": {"identity", "protocol", "secrets", "checkouts", "rosters", "assets", "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication"},
+            "HANDOFF_FAILED": False, "RUNNER_ATTEMPTED": False, "ACCEPTED_ARTIFACT": None,
+            "TARGET_BRANCH": "stage-a-content-texture-stratification-v1", "EXPECTED_EXACT": "ac7883dddced981ba4e7b6067c5e437b9ff7c1b3",
+            "CLAIM_CEILING": "exploratory_prospective_texture_stratification_only", "PROTOCOL_DIGEST": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "RUN_ID": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a",
+            "SOURCE": root / "source", "LOCAL": root / "local", "RUN_ROOT": root / "run-root", "TERMINAL_ZIP": terminal_zip, "TERMINAL_SHA": terminal_sha,
+            "RUNNER_MODULE": "experiments.run_content_texture_stratification_v1", "SINK": root / "sink", "PROVENANCE": root / "provenance",
+            "git": lambda *args: {("branch", "--show-current"): "stage-a-content-texture-stratification-v1", ("rev-parse", "HEAD"): "ac7883dddced981ba4e7b6067c5e437b9ff7c1b3", ("status", "--porcelain"): ""}[args],
+            "fail": fail,
+        }
+        exec(compile(tree, "<notebook-runner-cell>", "exec"), namespace)
+        return namespace, captured_env, failure_lines, devnull
+
     def test_frozen_v2_exposes_the_real_content_adaptive_entrypoint(self) -> None:
         exact = "4d8b0df5bf7840d242115669f1d3115cdf6810cc"
         engine_source = subprocess.run(
@@ -141,6 +202,10 @@ class TextureProtocolTests(unittest.TestCase):
             self.assertEqual(joined.count(flag), 1)
         self.assertNotIn("files.download", joined)
         self.assertNotIn("--resume", joined)
+        self.assertNotIn("retry", joined)
+        self.assertNotIn("fallback", joined)
+        self.assertIn("stderr=subprocess.DEVNULL", joined)
+        self.assertLess(joined.index("process = subprocess.Popen"), joined.index("runner_env.pop('CEG_WM_ROOT_KEY', None)"))
         self.assertNotIn("Gate", joined)
 
     def test_notebook_parses_terminal_and_operational_runner_schemas(self) -> None:
@@ -168,6 +233,35 @@ class TextureProtocolTests(unittest.TestCase):
         for bad in ({"status": "analysis_incomplete", "failure_class": "UnknownError", "failure_stage": "v6"}, {"status": "analysis_incomplete", "failure_class": "RuntimeError", "failure_stage": "unknown"}):
             with self.assertRaises(RuntimeError):
                 parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(bad) + "\n").encode())
+
+    def test_notebook_dispatches_operational_diagnostic_before_clearing_capture(self) -> None:
+        payload = {"status": "analysis_incomplete", "failure_class": "MemoryError", "failure_stage": "v6"}
+        namespace, runner_env, failure_lines, devnull = self._run_notebook_dispatch(runner_rc=2, payload=payload)
+        self.assertEqual(len(failure_lines), 1)
+        self.assertTrue(failure_lines[0].startswith("CEGWM_TEXTURE_HANDOFF_FAILURE "))
+        self.assertEqual(json.loads(failure_lines[0].split(" ", 1)[1]), {"status": "operational_failure", "stage": "v6", "error_class": "MemoryError"})
+        self.assertIsNone(namespace["ACCEPTED_ARTIFACT"])
+        self.assertEqual(namespace["captured"], bytearray())
+        self.assertEqual(runner_env["CEG_WM_ROOT_KEY"], "root-key")
+        self.assertEqual(runner_env["HF_TOKEN"], "hf-token")
+        self.assertNotIn("AWS_SECRET", runner_env)
+        self.assertEqual(runner_env["PUBLIC"], "ok")
+        self.assertEqual(namespace["root_key"], "")
+        self.assertEqual(namespace["hf_token"], "")
+        self.assertIsNone(namespace["runner_env"])
+        self.assertEqual(namespace["process"].stderr, devnull)
+
+    def test_notebook_terminal_dispatch_validates_pairs_and_fails_closed(self) -> None:
+        terminal_sha = "a" * 64
+        for runner_rc, status in ((0, "analysis_complete"), (2, "not_interpretable")):
+            payload = {"status": status, "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "ac7883dddced981ba4e7b6067c5e437b9ff7c1b3", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha}
+            namespace, _, failure_lines, _ = self._run_notebook_dispatch(runner_rc=runner_rc, payload=payload, terminal_binding=terminal_sha + "  terminal.zip\n")
+            self.assertEqual(failure_lines, [])
+            self.assertEqual(namespace["ACCEPTED_ARTIFACT"]["status"], status)
+        payload = {"status": "analysis_complete", "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "ac7883dddced981ba4e7b6067c5e437b9ff7c1b3", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha}
+        namespace, _, failure_lines, _ = self._run_notebook_dispatch(runner_rc=0, payload=payload)
+        self.assertIsNone(namespace["ACCEPTED_ARTIFACT"])
+        self.assertEqual(json.loads(failure_lines[0].split(" ", 1)[1]), {"status": "operational_failure", "stage": "runner_result_or_artifact_validation", "error_class": "RuntimeError"})
 
 
 if __name__ == "__main__":
