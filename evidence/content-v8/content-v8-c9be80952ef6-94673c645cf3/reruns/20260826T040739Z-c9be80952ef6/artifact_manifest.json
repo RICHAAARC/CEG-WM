@@ -1,0 +1,62 @@
+{
+  "schema_version": "cegwm_scalar_evidence_package_v1",
+  "route": "Content-V8",
+  "run_id": "content-v8-c9be80952ef6-94673c645cf3",
+  "source_exact": "c9be80952ef6b23627f5ff45411addc955316950",
+  "run_utc": "20260826T040739Z",
+  "unit_sets": [
+    {"unit_set_id": "content_units_32_v1", "display_label": "[32V1]", "role": "development", "manifest_sha256": "4ff3efa6b98efb62d542b210ebf00f3fc624513342475ce417e9099e334066ea"},
+    {"unit_set_id": "content_units_8_v1", "display_label": "[8V1]", "role": "evaluation", "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"},
+    {"unit_set_id": "content_units_8_v3", "display_label": "[8V3]", "role": "evaluation", "manifest_sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f"}
+  ],
+  "protocol_id": "cegwm-stage-a-content-v8-v2-spatial-lf-detector-domain-iss-formal-initial-v1",
+  "protocol_digest": "7670d54434906ae246ef76c097bf54f997c3a0ca6b036c0f55e0fe5b31489a1c",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "drive_source": {
+    "drive_run_root": "/content/drive/MyDrive/CEG-WM/Content/Content-V8-c9be80952ef6-20260826T040739Z",
+    "drive_folder_id": "15l91cFbmOg0Drsx7x_zbBGrRUJEQyKos",
+    "run_directory_id": "1QRC1R1dnSLYtB4x8EUrCxTXJj08zJDRN",
+    "terminal_directory_id": "17hW7lD79bWZGPFsg_q6-J1BICybuczAS",
+    "runtime_asset_directory_id": "1jcPZdba1VMhRAYkJ4_Q-6ghtGd5ARAH3"
+  },
+  "source_archive": {
+    "filename": "content-v8-c9be80952ef6-94673c645cf3.zip",
+    "byte_count": 123175,
+    "sha256": "1f73303a12a8e15e1160b796b284f4462b53ad212ec7cc5438ec4bf1432caf7c",
+    "sidecar_filename": "content-v8-c9be80952ef6-94673c645cf3.zip.sha256",
+    "sidecar_byte_count": 107,
+    "sidecar_file_sha256": "e3921bbbbb14d7bcaff4b302e7a8383b0f7e5015abd3b9f401da60b3aaadf7bd",
+    "sidecar_binding": "1f73303a12a8e15e1160b796b284f4462b53ad212ec7cc5438ec4bf1432caf7c  content-v8-c9be80952ef6-94673c645cf3.zip\n",
+    "crc_check": "pass",
+    "members": [
+      {"path": "receipt.json", "byte_count": 588, "sha256": "f18967c32c250a53362529cfb69375e5e9c0079f12a805656bc5f0808ca20022", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "result.json", "byte_count": 120571, "sha256": "decb5b9ead6f9f765dee464cf4d16bd382bf78d25026a0618a1c2c44c2fb7f5c", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json", "byte_count": 1267, "sha256": "0016bf8c166fab5ff259b7122394da6ac73edf3bb1b1c65c308b6dc366083d20", "zip_timestamp": "1980-01-01T00:00:00"},
+      {"path": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json.sha256", "byte_count": 115, "sha256": "4c774b31789e8d328708c90a069769a27ab8a3f3c8864159921e8969840243e2", "zip_timestamp": "1980-01-01T00:00:00"}
+    ]
+  },
+  "contents": {
+    "development_fit_unit_count": 32,
+    "independent_evaluation_unit_counts": [8, 8],
+    "independent_record_counts": [16, 16],
+    "failed_unit_counts": [0, 0],
+    "runner_status": "complete_rc0",
+    "notebook_handoff_status": "operational_false_negative_stale_fixed_run_id",
+    "cross_roster_pooling": false,
+    "cross_roster_outcome_control": false
+  },
+  "independently_recomputed_frozen_gates": {
+    "content_units_8_v1": {"lf_gate_a": 5, "lf_gate_b": 8, "hf_gate_a": 8, "hf_gate_b": 8, "joint_gate_a": 7, "joint_gate_b": 8, "required_units": 7, "all_predeclared_gates_pass": false},
+    "content_units_8_v3": {"lf_gate_a": 6, "lf_gate_b": 8, "hf_gate_a": 8, "hf_gate_b": 8, "joint_gate_a": 8, "joint_gate_b": 8, "required_units": 7, "all_predeclared_gates_pass": false}
+  },
+  "normalized_comparison_to_prior": {
+    "evaluation_results_equal_after_execution_provenance": true,
+    "runtime_asset_equal_after_ignoring": ["producer_exact"],
+    "max_numeric_abs_diff": 0.0
+  },
+  "operational_followup": {
+    "fixed_evidence_exact": "062c6b0687d7d81c5ec1b39d2be223384959de40",
+    "original_handoff_output_is_not_rewritten": true
+  },
+  "evidence_ceiling": "authenticated_complete_scalar_runner_evidence_for_two_independent_fixed_evaluations; notebook_handoff_false_negative_recorded; prior_narrow_scientific_negative_unchanged"
+}

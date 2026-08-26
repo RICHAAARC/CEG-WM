@@ -67,3 +67,24 @@ complete executable evidence snapshot, not a development base and not
 mergeable to `main`. Its current tree retains the canonical execution path,
 one formal Notebook, the exact public runtime asset, and the portable scalar
 result. The Notebook clones this Evidence branch directly.
+
+## Drive-first Notebook rerun
+
+The formal runner completed RC0 at exact
+`c9be80952ef6b23627f5ff45411addc955316950` on `20260826T040739Z`, with
+independent `[8V1]` and `[8V3]` evaluations following `[32V1]` development.
+Its ZIP SHA-256 is
+`1f73303a12a8e15e1160b796b284f4462b53ad212ec7cc5438ec4bf1432caf7c`.
+
+The append-only record is preserved under
+`evidence/content-v8/content-v8-c9be80952ef6-94673c645cf3/reruns/20260826T040739Z-c9be80952ef6/`.
+The Notebook's final `artifact_pair_validation` output was an operational false
+negative caused by a stale fixed run ID: the dynamic runner directory already
+contained the valid terminal ZIP/SHA pair. The lookup was repaired later at
+Evidence exact `062c6b0687d7d81c5ec1b39d2be223384959de40`; the original handoff
+output is not rewritten.
+
+After excluding execution provenance, both scalar results reproduce the prior
+evidence exactly, and the public asset differs only in `producer_exact`. The
+original `scientific_status`, Gate outcomes, and narrow personal adjudication
+remain unchanged.
