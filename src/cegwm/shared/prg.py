@@ -1,4 +1,4 @@
-"""Domain-separated deterministic key streams for Stage-A carriers."""
+"""Domain-separated deterministic key streams for content carriers."""
 
 from __future__ import annotations
 

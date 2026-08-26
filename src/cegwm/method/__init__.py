@@ -1,4 +1,4 @@
-"""Stage-A keyed carrier implementations."""
+"""Keyed content-carrier implementations."""
 
 from cegwm.method.hf import (
     FrozenHFPublicAssets,

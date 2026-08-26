@@ -1,4 +1,4 @@
-"""Finite Stage-A LF carriers and blind final-image scores."""
+"""Finite LF carriers and blind final-image scores."""
 
 from __future__ import annotations
 
@@ -97,9 +97,9 @@ class FrozenLFPublicAssets:
         else:
             raise ValueError("LF detector statistic identity is not frozen")
         if self.injection_step_index != LF_INJECTION_STEP_INDEX:
-            raise ValueError("LF injection step differs from the frozen Stage-A plan")
+            raise ValueError("LF injection step differs from the frozen content plan")
         if not math.isclose(self.total_relative_l2, LF_TOTAL_RELATIVE_L2, abs_tol=0.0):
-            raise ValueError("LF budget differs from the frozen Stage-A plan")
+            raise ValueError("LF budget differs from the frozen content plan")
         if not isinstance(self.image_processor_id, str) or not self.image_processor_id.strip():
             raise ValueError("image_processor_id must be non-empty")
         if not callable(getattr(self.vae, "encode", None)):

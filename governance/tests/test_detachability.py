@@ -38,7 +38,10 @@ def test_research_tree_runs_after_outer_guard_is_removed(tmp_path: Path) -> None
     assert imported.returncode == 0, imported.stderr
 
     tested = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q"],
+        [
+            sys.executable, "-m", "pytest", "-q", "-s", "-p", "no:cacheprovider",
+            "tests/unit", "-o", "addopts=",
+        ],
         cwd=detached,
         env=environment,
         check=False,

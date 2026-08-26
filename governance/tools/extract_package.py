@@ -35,29 +35,23 @@ COMMON_EXCLUSIONS = (
     "release_packages",
     "__pycache__",
     ".pytest_cache",
+    ".egg-info",
 )
 
 PROFILES = {
-    "method_core": ExtractionProfile(
-        name="method_core",
-        required_paths=("src", "tests/unit", "pyproject.toml"),
-        optional_paths=("configs/method",),
-        excluded_prefixes=COMMON_EXCLUSIONS + ("experiments", "tests/integration"),
-        readme_template="templates/packages/method_core.md",
-    ),
-    "stage_a_execution": ExtractionProfile(
-        name="stage_a_execution",
+    "content_chain_execution": ExtractionProfile(
+        name="content_chain_execution",
         required_paths=(
             "src",
-            "experiments/stage_a",
-            "configs/stage_a",
+            "experiments",
+            "configs/content_chain",
             "tests/unit",
             "tests/integration",
             "pyproject.toml",
         ),
         optional_paths=(),
         excluded_prefixes=COMMON_EXCLUSIONS,
-        readme_template="templates/packages/stage_a_execution.md",
+        readme_template="templates/packages/content_chain_execution.md",
     ),
 }
 
@@ -76,6 +70,8 @@ def _is_excluded(relative: Path, excluded_prefixes: Iterable[str]) -> bool:
     for raw_prefix in excluded_prefixes:
         prefix = raw_prefix.strip("/").replace("\\", "/")
         if prefix in {"__pycache__", ".pytest_cache"} and prefix in relative.parts:
+            return True
+        if prefix == ".egg-info" and any(part.endswith(prefix) for part in relative.parts):
             return True
         if normalized == prefix or normalized.startswith(f"{prefix}/"):
             return True
@@ -170,29 +166,28 @@ def _readiness_violations(root: Path, profile_name: str) -> list[dict[str, str]]
         path for path in method_root.rglob("*.py")
         if path.name != "__init__.py" and _has_substantive_definition(path)
     ]
-    method_test_root = root / "tests" / "unit" / "method"
+    method_test_root = root / "tests" / "unit"
     method_tests = [] if not method_test_root.exists() else [
-        path for path in method_test_root.rglob("test_*.py") if _has_test(path)
+        path for path in method_test_root.glob("test_*method*.py") if _has_test(path)
     ]
     if not method_sources:
         violations.append({"path": "src/cegwm/method", "reason": "method_implementation_missing"})
     if not method_tests:
-        violations.append({"path": "tests/unit/method", "reason": "method_tests_missing"})
+        violations.append({"path": "tests/unit/test_*method*.py", "reason": "method_tests_missing"})
 
-    if profile_name == "stage_a_execution":
-        runner_root = root / "experiments" / "stage_a"
-        runners = [
-            path for path in runner_root.rglob("*.py")
-            if path.name != "__init__.py" and _has_substantive_definition(path)
-        ]
-        integration_root = root / "tests" / "integration"
-        integration_tests = [
-            path for path in integration_root.rglob("test_*.py") if _has_test(path)
-        ]
-        if not runners:
-            violations.append({"path": "experiments/stage_a", "reason": "stage_a_runner_missing"})
-        if not integration_tests:
-            violations.append({"path": "tests/integration", "reason": "stage_a_integration_tests_missing"})
+    runner_root = root / "experiments"
+    runners = [
+        path for path in runner_root.glob("run_content_*.py")
+        if _has_substantive_definition(path)
+    ]
+    integration_root = root / "tests" / "integration"
+    integration_tests = [
+        path for path in integration_root.glob("test_content_*.py") if _has_test(path)
+    ]
+    if not runners:
+        violations.append({"path": "experiments/run_content_*.py", "reason": "content_runner_missing"})
+    if not integration_tests:
+        violations.append({"path": "tests/integration/test_content_*.py", "reason": "content_integration_tests_missing"})
     return violations
 
 

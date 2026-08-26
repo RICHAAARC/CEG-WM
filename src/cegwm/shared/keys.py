@@ -11,7 +11,7 @@ _MAX_KEY_BYTES = 4096
 
 
 def normalize_detection_key(key: str | bytes | bytearray | memoryview) -> bytes:
-    """Return the canonical bytes used by every Stage-A keyed primitive.
+    """Return the canonical bytes used by every keyed content primitive.
 
     Text keys are NFC-normalized UTF-8. Byte keys are preserved exactly. The
     function deliberately does not trim whitespace because doing so would merge

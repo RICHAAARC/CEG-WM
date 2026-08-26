@@ -1,0 +1,99 @@
+{
+  "protocol_version": 1,
+  "protocol_id": "cegwm-content-calibrated-weighted-joint-stability-v1",
+  "execution_scope_id": "content_chain_evaluation_v1",
+  "claim_ceiling": "calibrated_combined_attribution_multi_cohort_stability_only",
+  "identities": {
+    "method_id": "content_calibrated_weighted_joint_stability_v1",
+    "evaluated_candidate_id": "content_calibrated_weighted_joint_stability_semantic_gate_v1",
+    "record_contract_id": "content_calibrated_weighted_joint_stability_record_v1"
+  },
+  "method": {
+    "production_semantics": "byte_semantic_unchanged_from_c38522dcab6cb173cedf8415cee2fd30998222ba",
+    "lf_weight": 0.25,
+    "hf_weight": 0.75,
+    "wrong_key_count": 16,
+    "primary_null": "same_unit_pass1_sole_primary_null",
+    "combined_actual_dtype_relative_l2_max": 0.012,
+    "callback_step_index_zero_based": 18,
+    "probe_evaluation_count": 64,
+    "blind_inputs": "final_image_detection_key_frozen_public_assets_only",
+    "failure_retention_and_create_only_artifacts": "fixed"
+  },
+  "calibration_asset_input": {
+    "asset_schema_id": "cegwm_content_v9_calibrated_weighted_joint_asset_v1",
+    "asset_role_id": "content_v9_calibrated_weighted_joint_v1"
+  },
+  "joint_operator": {
+    "formula": "correlation_adjusted_stouffer_from_one_frozen_calibration_asset",
+    "formal_fpr_claim": false,
+    "lf_hf_gates": "diagnostic_only_no_hard_veto",
+    "weighted_gate_a": "registered_strictly_greater_than_max_16_wrong_ties_fail",
+    "weighted_gate_b": "candidate_registered_strictly_greater_than_primary_null_registered"
+  },
+  "sections": [
+    {
+      "section_id": "reference_roster",
+      "manifest": "content_adaptive_dual_branch_v2_clean.jsonl",
+      "manifest_sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88",
+      "fixed_units": 8,
+      "fixed_records": 16,
+      "weighted_gate_a_min_units": 7,
+      "weighted_gate_b_min_units": 7
+    },
+    {
+      "section_id": "evaluation_roster",
+      "manifest": "content_v6_iss_clean.jsonl",
+      "manifest_sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f",
+      "fixed_units": 8,
+      "fixed_records": 16,
+      "weighted_gate_a_min_units": 7,
+      "weighted_gate_b_min_units": 7
+    },
+    {
+      "section_id": "novel_seed_stability",
+      "manifest": "content_chain_novel_seed_stability.jsonl",
+      "manifest_sha256": "33613cb24de87c86a573ac0dda80523912e001c922494051f5d89a9e2851831b",
+      "unique_prompt_list_sha256": "4691ebd78a05f3ab617dd83a9ee94b9632bfc4ca9ffc8483f25e71082ba38618",
+      "fixed_prompts": 32,
+      "fixed_units": 64,
+      "fixed_records": 128,
+      "seed_strata": [
+        {
+          "split": "content_chain_novel_seed_stability_seed_01_v1",
+          "seed_start": 2026101000,
+          "units": 32,
+          "records": 64,
+          "manifest_slice_sha256": "db7671e3214af784b43ba2344c03a38ceb793fc49bb631f3439cb177dfde5916",
+          "weighted_gate_a_min_units": 28,
+          "weighted_gate_b_min_units": 28
+        },
+        {
+          "split": "content_chain_novel_seed_stability_seed_02_v1",
+          "seed_start": 2026102000,
+          "units": 32,
+          "records": 64,
+          "manifest_slice_sha256": "462724d7f793398f20346c65eeeaa7110d385c984bfdd0ba1ba1f25a179c620c",
+          "weighted_gate_a_min_units": 28,
+          "weighted_gate_b_min_units": 28
+        }
+      ],
+      "two_seed_prompt_agreement": "descriptive_only_no_threshold_or_conjunction"
+    }
+  ],
+  "execution_contract": {
+    "section_order": [
+      "reference_roster",
+      "evaluation_roster",
+      "novel_seed_stability_seed_01",
+      "novel_seed_stability_seed_02"
+    ],
+    "aggregation_policy": "separate_section_denominators_no_cross_section_gate",
+    "failure_policy": "retain_in_section_denominator",
+    "replacement_units_allowed": false,
+    "retry_units_allowed": false
+  },
+  "run_identity": {
+    "template": "content-chain-{protocol_digest_12}-{calibration_asset_sha256_12}-{public_key_digest_12}"
+  }
+}
