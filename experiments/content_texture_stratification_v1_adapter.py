@@ -116,9 +116,13 @@ def _cache_observation(root: Path) -> dict[str, Any]:
         return {"status": "unavailable", "failure_class": _failure_class(error), "record_only": True}
 
 
-def _hf_home_binding(expected: Path) -> tuple[Path, dict[str, Any]]:
-    actual = Path(os.environ.get("HF_HOME", "")).resolve()
-    return actual, {"status": "matched" if expected.resolve() == actual else "mismatched", "record_only": True}
+def _hf_home_binding(expected: object) -> tuple[Path | None, dict[str, Any]]:
+    try:
+        actual = Path(os.environ.get("HF_HOME", "")).resolve()
+        expected_path = Path(expected).resolve()
+    except Exception as error:
+        return None, {"status": "unavailable", "failure_class": _failure_class(error), "record_only": True}
+    return actual, {"status": "matched" if expected_path == actual else "mismatched", "record_only": True}
 
 
 def _verify_protocol(method: str, protocol: Any, binding: Mapping[str, Any]) -> None:
@@ -158,12 +162,12 @@ def _prefetch(root: Path, token: str, output: Path, expected_cache: Path) -> Non
     environment = {"status": environment_status, "python": sys.version.split()[0], "torch": versions["torch"][0], "torchvision": versions["torchvision"][0], "transformers": versions["transformers"][0], "cuda": cuda, "gpu": gpu, "record_only": True}
     if environment_failure is not None:
         environment["failure_class"] = environment_failure
-    binding = {"hf_home": str(cache), "hf_home_binding": hf_home_binding, "cache_observation": _cache_observation(cache), "environment_record": environment}
+    binding = {"hf_home": str(cache) if cache is not None else "", "hf_home_binding": hf_home_binding, "cache_observation": _cache_observation(cache) if cache is not None else dict(hf_home_binding), "environment_record": environment}
     path = output / "model_bindings.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("xb") as handle:
         handle.write((_stable(binding) + "\n").encode("ascii"))
-    _event({"event": "asset_prefetch", "cache_status": binding["cache_observation"]["status"], "environment_status": environment_status})
+    _event({"event": "asset_prefetch", "hf_home_status": hf_home_binding["status"], "cache_status": binding["cache_observation"]["status"], "environment_status": environment_status})
 
 
 def _unit_failure(method: str, unit: Mapping[str, Any], error: Exception) -> None:
@@ -334,7 +338,7 @@ def execute(args: argparse.Namespace) -> int:
     units = _json(args.units_json) if args.units_json else []
     bindings = _json(args.model_bindings_json) if args.model_bindings_json else {}
     _ACTIVE_BINDINGS = bindings
-    bindings["hf_home"] = str(actual_hf_home)
+    bindings["hf_home"] = str(actual_hf_home) if actual_hf_home is not None else ""
     bindings["hf_home_binding"] = hf_home_binding
     key, token = _secrets(require_key=args.phase not in {"asset_prefetch", "common_plain_v2", "v5_validate"})
     try:

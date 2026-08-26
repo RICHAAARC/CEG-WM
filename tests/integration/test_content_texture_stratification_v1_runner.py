@@ -180,6 +180,30 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertNotIn("HF_HUB_OFFLINE", seen)
     self.assertNotIn("TRANSFORMERS_OFFLINE", seen)
 
+ def test_hf_home_observation_resolve_failure_does_not_block_prefetch_or_dispatch(self) -> None:
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    expected = root / "expected"
+    output = root / "output"
+    with mock.patch.object(Path, "resolve", side_effect=OSError("private path failure")):
+        actual, record = adapter._hf_home_binding(expected)
+        with redirect_stdout(io.StringIO()) as captured:
+            adapter._prefetch(root, "token", output, expected)
+    self.assertIsNone(actual)
+    self.assertEqual(record, {"status": "unavailable", "failure_class": "OSError", "record_only": True})
+    binding = json.loads((output / "model_bindings.json").read_text(encoding="ascii"))
+    self.assertEqual(binding["hf_home"], "")
+    self.assertEqual(binding["hf_home_binding"], record)
+    self.assertEqual(binding["cache_observation"], record)
+    self.assertIn('"hf_home_status":"unavailable"', captured.getvalue())
+    self.assertNotIn("private", captured.getvalue())
+
+    args = Namespace(source_root=str(root), expected_exact="0" * 40, local_output_root=str(root / "dispatch-output"), hf_cache_root=str(expected), units_json=None, model_bindings_json=None, phase="v5_validate", v7_asset_root=None, v8_asset_root=None)
+    with mock.patch.object(adapter, "_identity"), mock.patch.object(adapter, "_hf_home_binding", return_value=(None, record)), mock.patch.object(adapter, "_secrets", return_value=("", "token")), mock.patch.object(adapter, "_v5_validate") as v5_validate, mock.patch.object(adapter, "_event"):
+        self.assertEqual(adapter.execute(args), 0)
+    v5_validate.assert_called_once_with(root, {"hf_home": "", "hf_home_binding": record})
+
  def test_common_plain_uses_only_sd35_pipeline_and_frozen_plain_runner(self) -> None:
     calls = []
     image = object()
