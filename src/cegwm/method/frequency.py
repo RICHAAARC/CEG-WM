@@ -1,4 +1,4 @@
-"""Narrow keyed frequency-carrier primitives shared by Stage-A HF and LF."""
+"""Narrow keyed frequency-carrier primitives shared by content HF and LF."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class FrequencyCarrierSpec:
         ):
             raise ValueError("frequency carrier radial interval is invalid")
         if not math.isclose(self.total_relative_l2, 0.012, abs_tol=0.0):
-            raise ValueError("Stage-A frequency carrier budget must remain 0.012")
+            raise ValueError("content frequency carrier budget must remain 0.012")
 
 
 def _validate_latent_shape(shape: tuple[int, ...]) -> tuple[int, int, int, int]:

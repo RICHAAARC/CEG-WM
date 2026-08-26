@@ -1,4 +1,4 @@
-"""Thin SD3.5 adapter for the real Stage-A frequency-carrier callback path."""
+"""Thin SD3.5 adapter for the real frequency-carrier callback path."""
 
 from __future__ import annotations
 
@@ -173,7 +173,7 @@ def _run_sd35_frequency(
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("embedding prompt must be non-empty text")
     if not isinstance(height, int) or not isinstance(width, int) or height < 256 or width < 256:
-        raise ValueError("Stage-A image dimensions must be integer values of at least 256")
+        raise ValueError("image dimensions must be integer values of at least 256")
     _validate_pipeline_callback_api(pipeline)
     result = pipeline(
         prompt=prompt,
@@ -253,7 +253,7 @@ def run_sd35_plain(
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("generation prompt must be non-empty text")
     if not isinstance(height, int) or not isinstance(width, int) or height < 256 or width < 256:
-        raise ValueError("Stage-A image dimensions must be integer values of at least 256")
+        raise ValueError("image dimensions must be integer values of at least 256")
     if not callable(pipeline):
         raise TypeError("SD3.5 pipeline must be callable")
     result = pipeline(

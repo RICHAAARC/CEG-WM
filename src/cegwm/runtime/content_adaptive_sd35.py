@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,8 +15,12 @@ from PIL import Image
 
 from cegwm.method.content_adaptive import (
     DINO_ASSET_ID,
+    HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID,
+    JOINT_EVALUATED_CANDIDATE_ID,
+    LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID,
     ContentAdaptiveMeasurement,
     ContentSignals,
+    ProbeObservation,
     allocate_content,
     dino_last_layer_cls_patch_tiles,
     embed_content_adaptive,
@@ -35,6 +40,7 @@ _SD35_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 _SD35_IMAGE_PROCESSOR_ID = f"{_SD35_MODEL_ID}:image_processor"
 _HF_DETECTOR_STATISTIC_ID = "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
 _HF_EVALUATED_CANDIDATE_ID = "hf_tail_rademacher_v1_rankgate_v2"
+_MISSING_PROCESSOR_FIELD = object()
 
 
 def _dino_source_identity(asset: Any) -> str | None:
@@ -48,15 +54,95 @@ def _dino_source_identity(asset: Any) -> str | None:
     return None
 
 
+def _processor_public_size_integer(
+    processor: Any,
+    container_name: str,
+    field_name: str,
+    expected: int,
+) -> None:
+    container = getattr(processor, container_name, None)
+    if type(container) is not dict:
+        try:
+            image_utils = importlib.import_module("transformers.image_utils")
+        except (ImportError, ModuleNotFoundError) as error:
+            raise RuntimeError(
+                "transformers.image_utils.SizeDict is required for DINO processor size validation"
+            ) from error
+        size_dict_type = getattr(image_utils, "SizeDict", None)
+        if not isinstance(size_dict_type, type) or type(container) is not size_dict_type:
+            raise RuntimeError(
+                f"content DINO processor {container_name} is missing or invalid"
+            )
+    value = container.get(field_name, _MISSING_PROCESSOR_FIELD)
+    if (
+        value is _MISSING_PROCESSOR_FIELD
+        or not isinstance(value, int)
+        or isinstance(value, bool)
+        or value != expected
+    ):
+        raise RuntimeError(f"content DINO processor {container_name} is missing or invalid")
+
+
+def _processor_finite_sequence(
+    processor: Any,
+    name: str,
+    expected: tuple[float, ...],
+) -> None:
+    value = getattr(processor, name, None)
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes, bytearray))
+        or len(value) != len(expected)
+    ):
+        raise RuntimeError(f"content DINO processor {name} is missing or invalid")
+    received: list[float] = []
+    for item in value:
+        if not isinstance(item, (int, float)) or isinstance(item, bool):
+            raise RuntimeError(f"content DINO processor {name} is missing or invalid")
+        scalar = float(item)
+        if not math.isfinite(scalar):
+            raise RuntimeError(f"content DINO processor {name} is missing or invalid")
+        received.append(scalar)
+    if tuple(received) != expected:
+        raise RuntimeError(f"content DINO processor {name} differs")
+
+
+def _validate_dino_processor(processor: Any) -> None:
+    if not callable(processor):
+        raise TypeError("content DINO processor must be callable")
+    if processor.__class__.__name__ != "BitImageProcessor":
+        raise RuntimeError("content DINO processor class must be exactly BitImageProcessor")
+    for name in (
+        "do_resize", "do_center_crop", "do_convert_rgb", "do_rescale", "do_normalize",
+    ):
+        if getattr(processor, name, None) is not True:
+            raise RuntimeError(f"content DINO processor {name} must be exactly true")
+    _processor_public_size_integer(processor, "size", "shortest_edge", 256)
+    _processor_public_size_integer(processor, "crop_size", "height", 224)
+    _processor_public_size_integer(processor, "crop_size", "width", 224)
+    rescale_factor = getattr(processor, "rescale_factor", None)
+    if (
+        not isinstance(rescale_factor, (int, float))
+        or isinstance(rescale_factor, bool)
+        or not math.isfinite(float(rescale_factor))
+        or float(rescale_factor) != 1.0 / 255.0
+    ):
+        raise RuntimeError("content DINO processor rescale_factor differs")
+    _processor_finite_sequence(processor, "image_mean", (0.485, 0.456, 0.406))
+    _processor_finite_sequence(processor, "image_std", (0.229, 0.224, 0.225))
+    resample = getattr(processor, "resample", None)
+    if not isinstance(resample, int) or isinstance(resample, bool) or int(resample) != 3:
+        raise RuntimeError("content DINO processor resample must be bicubic public value 3")
+
+
 def _validate_dino_assets(model: Any, processor: Any) -> None:
     if _dino_source_identity(model) != DINO_ASSET_ID:
         raise RuntimeError("content DINO model identity is missing or differs")
-    if _dino_source_identity(processor) != DINO_ASSET_ID:
-        raise RuntimeError("content DINO processor identity is missing or differs")
     if getattr(getattr(model, "config", None), "_attn_implementation", None) != "eager":
         raise RuntimeError("content DINO asset must expose eager attention")
-    if not callable(processor):
-        raise TypeError("content DINO processor must be callable")
+    if not callable(model):
+        raise TypeError("content DINO model must be callable")
+    _validate_dino_processor(processor)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +156,13 @@ class ContentEmbedAssets:
     dino_asset_id: str = DINO_ASSET_ID
     hf_detector_statistic_id: str = field(default=_HF_DETECTOR_STATISTIC_ID, init=False)
     hf_evaluated_candidate_id: str = field(default=_HF_EVALUATED_CANDIDATE_ID, init=False)
+    hf_adaptive_embedding_transform_id: str = field(
+        default=HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID, init=False
+    )
+    lf_adaptive_embedding_transform_id: str = field(
+        default=LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID, init=False
+    )
+    evaluated_candidate_id: str = field(default=JOINT_EVALUATED_CANDIDATE_ID, init=False)
 
     def __post_init__(self) -> None:
         if self.dino_asset_id != DINO_ASSET_ID:
@@ -87,6 +180,8 @@ class ContentEmbedAssets:
             or hf.candidate_id != HF_CANDIDATE_ID
             or self.hf_detector_statistic_id != _HF_DETECTOR_STATISTIC_ID
             or self.hf_evaluated_candidate_id != _HF_EVALUATED_CANDIDATE_ID
+            or self.hf_adaptive_embedding_transform_id
+            != HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID
         ):
             raise ValueError("content HF frozen carrier, detector, or evaluated identity differs")
         if (
@@ -95,6 +190,9 @@ class ContentEmbedAssets:
             or lf.candidate_id != LF_BALANCED_BLOCKS_CARRIER_METHOD_ID
             or lf.detector_statistic_id != LF_BLOCKNORM_DETECTOR_STATISTIC_ID
             or lf.evaluated_candidate_id != LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID
+            or self.lf_adaptive_embedding_transform_id
+            != LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID
+            or self.evaluated_candidate_id != JOINT_EVALUATED_CANDIDATE_ID
         ):
             raise ValueError("content LF frozen carrier, detector, or evaluated identity differs")
         if hf.vae is not lf.vae or hf.image_processor is not lf.image_processor:
@@ -120,12 +218,15 @@ def load_dino_content_assets(*, token: str | None = None) -> tuple[Any, Any]:
     processor_class = getattr(transformers, "AutoImageProcessor", None)
     if model_class is None or processor_class is None:
         raise RuntimeError("installed transformers lacks DINO auto classes")
-    kwargs = {"token": token} if token else {}
-    processor = processor_class.from_pretrained(DINO_ASSET_ID, **kwargs)
     model = model_class.from_pretrained(
         DINO_ASSET_ID,
         attn_implementation="eager",
-        **kwargs,
+        token=token,
+    )
+    processor = processor_class.from_pretrained(
+        DINO_ASSET_ID,
+        backend="torchvision",
+        token=token,
     )
     _validate_dino_assets(model, processor)
     return model, processor
@@ -176,33 +277,19 @@ def _decode_callback_latents(pipeline: Any, latents: torch.Tensor) -> Image.Imag
     return require_ordinary_rgb_image(images[0])
 
 
-def _public_band_energy(
+def _probe_observation(
     image: Image.Image,
-    branch: str,
     assets: ContentEmbedAssets,
-) -> float:
-    """Key-independent public probe statistic derived through final-RGB VAE observation."""
+) -> ProbeObservation:
+    """Return I and E(I); content-adaptive responses are formed only by later subtraction."""
 
-    public = assets.lf_public_assets if branch == "lf" else assets.hf_public_assets
-    observation = encode_final_rgb_image(image, public.image_processor, public.vae)
-    spectrum = torch.fft.rfft2(observation.to(torch.float32), norm="ortho")
-    height, width = observation.shape[-2:]
-    vertical = np.fft.fftfreq(height)[:, None]
-    horizontal = np.fft.rfftfreq(width)[None, :]
-    radius = np.hypot(vertical, horizontal) / np.hypot(0.5, 0.5)
-    mask_array = (
-        (radius >= 0.14) & (radius <= 0.24)
-        if branch == "lf"
-        else (radius >= 0.58) & (radius <= 1.0)
-    )
-    mask = torch.from_numpy(mask_array).to(observation.device)
-    selected = spectrum[..., mask].abs().to(torch.float64)
-    if selected.numel() == 0 or not bool(torch.isfinite(selected).all()):
-        raise RuntimeError("public probe band observation is empty or nonfinite")
-    energy = float(torch.sqrt(torch.mean(selected.square())).item())
-    if not math.isfinite(energy):
-        raise RuntimeError("public probe band energy is nonfinite")
-    return energy
+    ordinary = require_ordinary_rgb_image(image)
+    pixels = torch.from_numpy(np.asarray(ordinary, dtype=np.float64).copy()).permute(
+        2, 0, 1
+    ).unsqueeze(0) / 255.0
+    public = assets.hf_public_assets
+    observation = encode_final_rgb_image(ordinary, public.image_processor, public.vae)
+    return ProbeObservation(rgb=pixels, vae=observation)
 
 
 class ContentAdaptiveInjectionCallback:
@@ -245,22 +332,28 @@ class ContentAdaptiveInjectionCallback:
         if pipeline is None:
             raise RuntimeError("content analysis requires the real callback pipeline")
         base_image = _decode_callback_latents(pipeline, latents)
-        attention = dino_last_layer_cls_patch_tiles(
+        semantic = dino_last_layer_cls_patch_tiles(
             base_image,
             self._assets.dino_processor,
             self._assets.dino_model,
         )
         texture = rgb_texture_tiles(base_image)
+        baseline = _probe_observation(base_image, self._assets)
 
-        def probe_evaluator(branch: str, candidate: torch.Tensor) -> float:
-            return _public_band_energy(
-                _decode_callback_latents(pipeline, candidate),
-                branch,
-                self._assets,
-            )
+        def probe_evaluator(branch: str, candidate: torch.Tensor) -> ProbeObservation:
+            if branch not in {"lf", "hf"}:
+                raise ValueError("public probe branch is invalid")
+            return _probe_observation(_decode_callback_latents(pipeline, candidate), self._assets)
 
-        lf_probe, hf_probe = evaluate_public_probes(latents, probe_evaluator)
-        allocation = allocate_content(ContentSignals(attention, texture, lf_probe, hf_probe))
+        probes = evaluate_public_probes(latents, baseline, probe_evaluator)
+        allocation = allocate_content(ContentSignals(
+            semantic,
+            texture,
+            probes.lf_two_scale_response_consistency,
+            probes.hf_two_scale_response_consistency,
+            probes.lf_local_perturbation_sensitivity,
+            probes.hf_local_perturbation_sensitivity,
+        ))
         embedded, measurement = embed_content_adaptive(
             latents,
             self._detection_key,

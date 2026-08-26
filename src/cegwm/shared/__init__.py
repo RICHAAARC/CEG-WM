@@ -1,4 +1,4 @@
-"""Small numerical building blocks shared by the Stage-A carriers."""
+"""Small numerical building blocks shared by the content carriers."""
 
 from cegwm.shared.bands import FrequencyBandMasks, make_frequency_band_masks
 from cegwm.shared.keys import normalize_detection_key, public_key_digest

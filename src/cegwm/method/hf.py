@@ -1,4 +1,4 @@
-"""Keyed high-frequency Stage-A anchor and blind final-image score."""
+"""Keyed high-frequency anchor and blind final-image score."""
 
 from __future__ import annotations
 
@@ -42,15 +42,15 @@ class FrozenHFPublicAssets:
         if self.model_id != _MODEL_ID:
             raise ValueError("HF public assets must use the frozen SD3.5 model identity")
         if self.candidate_id != HF_CANDIDATE_ID:
-            raise ValueError("HF candidate identity differs from the frozen Stage-A anchor")
+            raise ValueError("HF candidate identity differs from the frozen content anchor")
         if self.injection_step_index != HF_INJECTION_STEP_INDEX:
-            raise ValueError("HF injection step differs from the frozen Stage-A anchor")
+            raise ValueError("HF injection step differs from the frozen content anchor")
         if not math.isclose(self.total_relative_l2, HF_TOTAL_RELATIVE_L2, abs_tol=0.0):
-            raise ValueError("HF budget differs from the frozen Stage-A anchor")
+            raise ValueError("HF budget differs from the frozen content anchor")
         if not math.isclose(self.hf_min_radius, HF_MIN_RADIUS, abs_tol=0.0):
-            raise ValueError("HF minimum radius differs from the frozen Stage-A anchor")
+            raise ValueError("HF minimum radius differs from the frozen content anchor")
         if not math.isclose(self.hf_max_radius, HF_MAX_RADIUS, abs_tol=0.0):
-            raise ValueError("HF maximum radius differs from the frozen Stage-A anchor")
+            raise ValueError("HF maximum radius differs from the frozen content anchor")
         if not isinstance(self.image_processor_id, str) or not self.image_processor_id.strip():
             raise ValueError("image_processor_id must be non-empty")
         if not callable(getattr(self.vae, "encode", None)):

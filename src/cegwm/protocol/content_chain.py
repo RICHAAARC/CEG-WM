@@ -1,78 +1,97 @@
-"""Frozen loader for the clean content-adaptive dual-branch protocol."""
+"""Frozen data and decision contract for content chain evaluation."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+import math
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
-_UNIT_FIELDS = {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"}
-_ALLOWED_DETECTION_INPUTS = ("image", "detection_key", "frozen_public_assets")
-_COUNTERFACTUAL_EFFECT_FIELDS = [
-    "semantic_attention_counterfactual_effect",
-    "texture_energy_counterfactual_effect",
-    "lf_probe_response_counterfactual_effect",
-    "hf_probe_response_counterfactual_effect",
-]
-_CONTENT_ANALYSIS = {
-    "asset_id": "facebook/dinov2-small",
-    "attention_implementation": "eager",
-    "attention_layer": "last",
-    "attention_statistic": "mean_head_cls_to_patch",
-    "tile_grid": [4, 4],
-    "tile_count": 16,
-    "probe_evaluations_per_tile": {"lf": 1, "hf": 1},
-    "probe_evaluations_per_unit": 32,
-    "probe_relative_l2": 0.001,
-    "probe_measurement": "actual_callback_dtype_candidate_minus_complete_current_callback_latent",
-    "probe_independence": "each_probe_relative_to_complete_current_callback_latent_non_cumulative_never_evolving",
-    "probe_domain": "public_key_independent_branch_tile_public_shape_v1",
-    "probe_domain_forbidden_inputs": [
-        "detection_key", "unit", "prompt", "seed", "content", "source", "candidate_outcome", "results",
-    ],
-    "signals": ["semantic_attention", "texture_energy", "lf_probe_response", "hf_probe_response"],
-    "signal_requirement": "each_has_nonzero_neutral_counterfactual_allocation_effect",
-    "export": "irreversible_aggregate_scalars_only",
-}
-_DETECTION_ACCESS = {
-    "allowed_inputs": list(_ALLOWED_DETECTION_INPUTS),
-    "forbidden_inputs": [
-        "original_image", "prompt", "embed_record", "private_latent", "embedding_latent",
-        "embed_side_route", "route", "mask", "cached_qk", "qk",
-        "lf_branch_share", "hf_branch_share", *_COUNTERFACTUAL_EFFECT_FIELDS,
-        "minimum_counterfactual_effect",
-    ],
-    "threshold_status": "deferred_calibration_not_stage_a",
-    "hf_detector": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
-    "lf_detector": "frozen_lf_final_rgb_public_vae_block_centered_normalized_median_correlation",
-    "joint_score": "min(s_LF,s_HF)",
-}
-_AGGREGATE_MEASUREMENT = {
-    "counterfactual_effect_fields_in_order": _COUNTERFACTUAL_EFFECT_FIELDS,
-    "counterfactual_effect_source": "single_ContentAllocation_counterfactual_effects_pass_through_without_recompute_copy_swap_default_alias_or_fallback",
-    "counterfactual_effect_validation": "each_finite_and_strictly_positive",
-    "minimum_counterfactual_effect": "min_of_the_four_counterfactual_effect_fields",
-    "public_branch_share_fields_in_order": ["lf_branch_share", "hf_branch_share"],
-    "public_branch_share_source": "same_ContentAllocation_values_pass_through",
-    "public_branch_share_validation": "each_finite_strictly_between_0_and_1_and_sum_to_1_with_absolute_tolerance",
-    "branch_share_sum_absolute_tolerance": 1e-12,
-    "population_std_fields_in_order": [
-        "lf_branch_share_population_std", "hf_branch_share_population_std",
-    ],
-    "population_std_formula": "sqrt(sum((x_i-mean(x))^2)/8)_ddof_0_each_field_independently",
-    "population_std_fixed_roster_units": 8,
-    "population_std_absolute_tolerance": 1e-12,
-    "population_std_validation": "both_finite_and_theoretically_equal_with_absolute_tolerance",
-    "population_std_availability": "complete_finite_identity_valid_RC0_only_else_both_null_and_no_scientific_outcome",
-    "allocation_not_all_identical_support": "both_population_std_fields_strictly_positive",
-    "blind_score_consumes_aggregate_measurement": False,
-    "forbidden_private_exports": [
-        "mask", "tile_weights", "attention_map", "latent", "delta", "probe_state",
-    ],
-}
+from cegwm.method.content_weighted_joint import (
+    WeightedJointAsset,
+    load_calibration_asset,
+)
+from cegwm.protocol.content_adaptive import ContentChainProtocol
+from cegwm.protocol.content_iss import load_content_iss_protocol
+
+CONTENT_CHAIN_METHOD_ID = (
+    "content_calibrated_weighted_joint_stability_v1"
+)
+CONTENT_CHAIN_EVALUATED_CANDIDATE_ID = (
+    "content_calibrated_weighted_joint_stability_semantic_gate_v1"
+)
+CONTENT_CHAIN_PROTOCOL_ID = (
+    "cegwm-content-calibrated-weighted-joint-stability-v1"
+)
+CONTENT_CHAIN_PROTOCOL_DIGEST = (
+    "4b749a31346901c8a78b3512a68a335bd84aa17f4c8769dbbef9995c16cff529"
+)
+CONTENT_CHAIN_RECORD_CONTRACT_ID = (
+    "content_calibrated_weighted_joint_stability_record_v1"
+)
+CONTENT_CHAIN_STATE_SCHEMA_ID = "content_chain_state_v1"
+CONTENT_CHAIN_ARTIFACT_CONTRACT_ID = (
+    "content_chain_artifact_v1"
+)
+CONTENT_CHAIN_TERMINAL_RECEIPT_ID = (
+    "content_chain_terminal_receipt_v1"
+)
+CONTENT_CHAIN_EXECUTION_SCOPE_ID = (
+    "content_chain_evaluation_v1"
+)
+CONTENT_CHAIN_CALIBRATION_ASSET = (
+    "assets/content_v9_calibrated_weighted_joint_v1.json"
+)
+CONTENT_CHAIN_CALIBRATION_ASSET_SHA256 = (
+    "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+)
+CONTENT_CHAIN_CALIBRATION_ASSET_SIDECAR_FILE_SHA256 = (
+    "d543d604e5d9226ddb4c378e160fa389abce223fe8adbb54562c3e6666537301"
+)
+CONTENT_CHAIN_CALIBRATION_PRODUCER_EXACT = (
+    "c38522dcab6cb173cedf8415cee2fd30998222ba"
+)
+CONTENT_CHAIN_CALIBRATION_PROTOCOL_DIGEST = (
+    "68f37585eb6eab123bad7c1703767df08404718ce4771f73fbbec236491a1e01"
+)
+CONTENT_CHAIN_CALIBRATION_PUBLIC_KEY_DIGEST = (
+    "a82b191410993cc2619ab239b62e5f58040bba0affde8e56b43844e58edaebb3"
+)
+CONTENT_CHAIN_PUBLIC_KEY_DIGEST = (
+    "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77"
+)
+CONTENT_CHAIN_RUN_TEMPLATE = (
+    "content-chain-{protocol_digest_12}-{calibration_asset_sha256_12}-"
+    "{public_key_digest_12}"
+)
+
+CONTENT_CHAIN_REFERENCE_MANIFEST = "content_adaptive_dual_branch_v2_clean.jsonl"
+CONTENT_CHAIN_REFERENCE_MANIFEST_SHA256 = (
+    "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88"
+)
+CONTENT_CHAIN_EVALUATION_MANIFEST = "content_v6_iss_clean.jsonl"
+CONTENT_CHAIN_EVALUATION_MANIFEST_SHA256 = (
+    "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f"
+)
+CONTENT_CHAIN_NOVEL_MANIFEST = "content_chain_novel_seed_stability.jsonl"
+CONTENT_CHAIN_NOVEL_MANIFEST_SHA256 = (
+    "33613cb24de87c86a573ac0dda80523912e001c922494051f5d89a9e2851831b"
+)
+CONTENT_CHAIN_NOVEL_PROMPT_LIST_SHA256 = (
+    "4691ebd78a05f3ab617dd83a9ee94b9632bfc4ca9ffc8483f25e71082ba38618"
+)
+CONTENT_CHAIN_SEED_01_SLICE_SHA256 = (
+    "db7671e3214af784b43ba2344c03a38ceb793fc49bb631f3439cb177dfde5916"
+)
+CONTENT_CHAIN_SEED_02_SLICE_SHA256 = (
+    "462724d7f793398f20346c65eeeaa7110d385c984bfdd0ba1ba1f25a179c620c"
+)
+_CONFIG_NAME = "content_chain_stability.json"
+_FIELDS = ("unit_id", "split", "source_id", "prompt", "seed", "height", "width")
+_HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,204 +106,240 @@ class ContentChainUnit:
 
 
 @dataclass(frozen=True, slots=True)
-class ContentChainProtocol:
-    protocol_id: str
+class ContentChainContract:
+    reference_roster: tuple[ContentChainUnit, ...]
+    evaluation_roster: tuple[ContentChainUnit, ...]
+    novel_seed_01: tuple[ContentChainUnit, ...]
+    novel_seed_02: tuple[ContentChainUnit, ...]
     config: Mapping[str, Any]
-    roster: tuple[ContentChainUnit, ...]
     protocol_digest: str
+    runtime_protocol: ContentChainProtocol
+    calibration_asset: WeightedJointAsset
 
 
-def _mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    value = parent.get(key)
-    if not isinstance(value, dict):
-        raise ValueError(f"{key} must be an object")
-    return value
+def _stable_line(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
 
 
-def _freeze(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze(item) for item in value)
-    return value
+def _load_rows(path: Path, *, expected_sha256: str, count: int) -> tuple[dict[str, Any], ...]:
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected_sha256 or not raw.endswith(b"\n"):
+        raise ValueError("content chain manifest bytes differ")
+    lines = raw.splitlines()
+    if len(lines) != count:
+        raise ValueError("content chain manifest count differs")
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("content chain manifest must be UTF-8 JSONL") from error
+        if (
+            not isinstance(value, dict)
+            or tuple(value) != _FIELDS
+            or _stable_line(value) != line
+        ):
+            raise ValueError("content chain manifest fields, order, or encoding differ")
+        if any(not isinstance(value[name], str) or not value[name].strip() for name in _FIELDS[:4]):
+            raise ValueError("content chain text identity must be non-empty")
+        if (
+            isinstance(value["seed"], bool)
+            or not isinstance(value["seed"], int)
+            or value["height"] != 512
+            or value["width"] != 512
+        ):
+            raise ValueError("content chain seed or dimensions differ")
+        rows.append(value)
+    return tuple(rows)
 
 
-def _load_roster(path: Path) -> tuple[ContentChainUnit, ...]:
-    units: list[ContentChainUnit] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, 1):
-            if not line.strip():
-                raise ValueError(f"{path.name}:{line_number} cannot be blank")
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(f"{path.name}:{line_number} is invalid JSON") from error
-            if not isinstance(payload, dict) or set(payload) != _UNIT_FIELDS:
-                raise ValueError(f"{path.name}:{line_number} has unexpected fields")
-            if any(not isinstance(payload[name], str) or not payload[name].strip() for name in ("unit_id", "split", "source_id", "prompt")):
-                raise ValueError(f"{path.name}:{line_number} has empty identity text")
-            if payload["split"] != "content_adaptive_dual_branch_clean_v1":
-                raise ValueError(f"{path.name}:{line_number} has the wrong split")
-            if any(not isinstance(payload[name], int) or isinstance(payload[name], bool) for name in ("seed", "height", "width")):
-                raise ValueError(f"{path.name}:{line_number} has non-integer runtime values")
-            if payload["seed"] < 0 or payload["height"] < 256 or payload["width"] < 256:
-                raise ValueError(f"{path.name}:{line_number} has invalid runtime values")
-            units.append(ContentChainUnit(**payload))
-    expected_ids = [f"content-adaptive-{index:04d}" for index in range(1, 9)]
-    expected_sources = [f"content-prompt-{index}" for index in range(7001, 7009)]
-    if len(units) != 8 or [unit.unit_id for unit in units] != expected_ids or [unit.source_id for unit in units] != expected_sources:
-        raise ValueError("content-adaptive roster differs from the frozen eight units")
-    if len({unit.seed for unit in units}) != 8:
-        raise ValueError("content-adaptive roster seeds must be unique")
-    return tuple(units)
+def _unit(row: Mapping[str, Any]) -> ContentChainUnit:
+    return ContentChainUnit(**{name: row[name] for name in _FIELDS})
 
 
-def _validate_global_disjoint(roster_path: Path, roster: tuple[ContentChainUnit, ...]) -> None:
-    """Reject unit/source collisions with every other current configuration manifest."""
-
-    unit_ids = {unit.unit_id for unit in roster}
-    source_ids = {unit.source_id for unit in roster}
-    config_root = roster_path.resolve().parents[1]
-    for candidate in config_root.rglob("*.jsonl"):
-        if candidate.resolve() == roster_path.resolve():
-            continue
-        with candidate.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                if not line.strip():
-                    continue
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(payload, dict) and (
-                    payload.get("unit_id") in unit_ids or payload.get("source_id") in source_ids
-                ):
-                    raise ValueError("content-adaptive roster is not globally disjoint")
+def _identity_sets(units: Iterable[ContentChainUnit]) -> tuple[set[Any], ...]:
+    received = tuple(units)
+    return (
+        {unit.unit_id for unit in received},
+        {unit.source_id for unit in received},
+        {unit.prompt for unit in received},
+        {unit.seed for unit in received},
+        {(unit.prompt, unit.seed) for unit in received},
+    )
 
 
-def _validate_config(config: Mapping[str, Any]) -> None:
-    if config.get("protocol_version") != 1 or config.get("protocol_id") != "cegwm-stage-a-content-adaptive-dual-branch-clean-v1":
-        raise ValueError("unexpected content-adaptive protocol identity")
-    if config.get("execution_scope_id") != "content_adaptive_dual_branch_clean_engineering_and_stage_a_evaluation_v1":
-        raise ValueError("unexpected content-adaptive execution scope")
-    if config.get("scientific_status") != "not_evaluated_until_complete_real_gpu_rc0":
-        raise ValueError("content-adaptive protocol cannot preclaim scientific evidence")
-    runtime = _mapping(config, "generation_runtime")
-    if runtime != {
-        "model_id": "stabilityai/stable-diffusion-3.5-medium",
-        "inference_steps": 20,
-        "injection_step_index_zero_based": 18,
-        "generation_rule": "independent_same_seed_generators_for_joint_and_primary_null",
-    }:
-        raise ValueError("content-adaptive generation runtime differs")
-    analysis = _mapping(config, "content_analysis")
-    if analysis != _CONTENT_ANALYSIS:
-        raise ValueError("content analysis identity or fail-closed rules differ")
-    identities = _mapping(config, "method_identities")
-    if identities != {
-        "hf_base_carrier_method_id": "hf_tail_rademacher_v1",
-        "hf_base_evaluated_candidate_id": "hf_tail_rademacher_v1_rankgate_v2",
-        "lf_base_carrier_method_id": "lf_shell_balanced_blocks_v2",
-        "lf_base_evaluated_candidate_id": "lf_shell_balanced_blocks_v2_blocknorm_median_v1",
-        "hf_adaptive_embedding_transform_id": "hf_content_tiles_attention_probe_v1",
-        "lf_adaptive_embedding_transform_id": "lf_content_tiles_texture_probe_v1",
-        "combined_budget_projector_id": "dual_branch_actual_dtype_relative_l2_v1",
-        "evaluated_candidate_id": "content_adaptive_dual_branch_clean_v1",
-        "base_prg_domain_rule": "base_carrier_ids_only_adaptive_and_joint_ids_never_enter_base_hf_or_lf_prg_domain",
-    }:
-        raise ValueError("content-adaptive method identities differ")
-    budget = _mapping(config, "budget")
-    if budget != {
-        "combined_total_relative_l2": 0.012,
-        "measurement": "actual_dtype_final_minus_actual_dtype_base",
-        "single_shared_budget_not_per_branch": True,
-        "both_effective_branches_nonzero": True,
-    }:
-        raise ValueError("content-adaptive combined budget differs")
-    aggregate = _mapping(config, "aggregate_measurement")
-    if aggregate != _AGGREGATE_MEASUREMENT:
-        raise ValueError("content-adaptive aggregate measurement contract differs")
-    access = _mapping(config, "detection_access")
-    if access != _DETECTION_ACCESS:
-        raise ValueError("blind detection access differs")
-    keying = _mapping(config, "keying")
-    if keying != {
-        "task": "zero_bit_keyed_attribution",
-        "normalization": "NFC_UTF8_for_text_exact_bytes_for_binary",
-        "prg": "HMAC_SHA256_counter_v1",
-        "wrong_key_count": 16,
-        "wrong_key_derivation_domain": "stage-a/content-adaptive-external-wrong-key/v1",
-        "primary_null": True,
-        "payload_bits": 0,
-    }:
-        raise ValueError("content-adaptive key controls differ")
-    flow = _mapping(config, "execution_flow")
-    if flow != {
-        "roster_manifest": "content_adaptive_dual_branch_clean.jsonl",
-        "split": "content_adaptive_dual_branch_clean_v1",
-        "fixed_units": 8,
-        "record_arms_in_order": ["content_adaptive_dual_branch_clean_v1", "primary_null__content_adaptive_dual_branch_clean_v1"],
-        "unit_transaction_record_count": 2,
-        "fixed_records": 16,
-        "record_score_prefixes_in_order": ["lf", "hf", "joint"],
-        "score_labels_per_prefix": "registered_then_wrong_00_through_wrong_15",
-        "flat_score_field_rule": "prefix_double_underscore_label_within_StageARecord_v1",
-        "failure_units_remain_in_denominator": True,
-        "replacement_units_allowed": False,
-        "outcome_requires_complete_rc0": True,
-    }:
-        raise ValueError("content-adaptive transaction denominator differs")
-    decision = _mapping(config, "decision_rule")
-    expected_gates = {
-        "fixed_units": 8,
-        "lf_gate_a_registered_top_rank_among_17_min_units": 7,
-        "lf_gate_b_joint_registered_gt_primary_null_registered_min_units": 7,
-        "hf_gate_a_registered_top_rank_among_17_min_units": 7,
-        "hf_gate_b_joint_registered_gt_primary_null_registered_min_units": 7,
-        "joint_gate_a_registered_top_rank_among_17_min_units": 7,
-        "joint_gate_b_joint_registered_gt_primary_null_registered_min_units": 7,
-        "strict_comparison_ties_fail": True,
-        "combined_budget_pass_units": 8,
-        "both_nonzero_branches_pass_units": 8,
-        "paired_rgb_psnr_min_db": 30.0,
-        "paired_rgb_psnr_pass_units": 8,
-        "formal_fpr_claim": False,
-    }
-    if decision != expected_gates:
-        raise ValueError("content-adaptive strict gate choices differ")
-    if config.get("limitations") != [
-        "cpu_and_fake_tests_are_engineering_only",
-        "no_mechanism_or_scientific_completion_without_real_gpu_complete_rc0",
-        "no_calibrated_threshold_or_fixed_fpr_claim",
-        "clean_only_no_attack_or_geometry_claim",
-    ]:
-        raise ValueError("content-adaptive limitations differ")
+def _validate_novel(rows: tuple[dict[str, Any], ...]) -> tuple[
+    tuple[ContentChainUnit, ...], tuple[ContentChainUnit, ...]
+]:
+    blocks: list[tuple[ContentChainUnit, ...]] = []
+    for seed_index, block in enumerate((rows[:32], rows[32:]), 1):
+        raw = b"".join(_stable_line(row) + b"\n" for row in block)
+        expected_slice = (
+            CONTENT_CHAIN_SEED_01_SLICE_SHA256
+            if seed_index == 1
+            else CONTENT_CHAIN_SEED_02_SLICE_SHA256
+        )
+        if hashlib.sha256(raw).hexdigest() != expected_slice:
+            raise ValueError("content chain seed stratum bytes differ")
+        units = tuple(_unit(row) for row in block)
+        for ordinal, unit in enumerate(units, 1):
+            suffix = f"{seed_index:02d}"
+            if (
+                unit.unit_id != f"content-chain-seed-{suffix}-{ordinal:04d}"
+                or unit.split != f"content_chain_novel_seed_stability_seed_{suffix}_v1"
+                or unit.source_id
+                != f"content-chain-source-{ordinal:04d}-seed-{suffix}"
+                or unit.seed
+                != (2026101000 if seed_index == 1 else 2026102000) + ordinal - 1
+            ):
+                raise ValueError("content chain ordered novel identity differs")
+        blocks.append(units)
+    if tuple(unit.prompt for unit in blocks[0]) != tuple(unit.prompt for unit in blocks[1]):
+        raise ValueError("content chain seed strata prompts differ")
+    prompt_bytes = b"".join(unit.prompt.encode("utf-8") + b"\n" for unit in blocks[0])
+    if hashlib.sha256(prompt_bytes).hexdigest() != CONTENT_CHAIN_NOVEL_PROMPT_LIST_SHA256:
+        raise ValueError("content chain ordered prompt identity differs")
+    for units in blocks:
+        if any(len(values) != 32 for values in _identity_sets(units)):
+            raise ValueError("content chain stratum identities must be unique")
+    return blocks[0], blocks[1]
 
 
-def load_content_adaptive_dual_branch_clean_protocol(
-    config_path: str | Path,
-    roster_path: str | Path,
-) -> ContentChainProtocol:
-    """Load and bind the exact 8-unit, 16-record clean protocol."""
-
-    config_path = Path(config_path)
-    roster_path = Path(roster_path)
-    with config_path.open("r", encoding="utf-8") as handle:
-        config = json.load(handle)
-    if not isinstance(config, dict):
-        raise ValueError("content-adaptive config must be an object")
-    _validate_config(config)
-    roster = _load_roster(roster_path)
-    _validate_global_disjoint(roster_path, roster)
+def _canonical_digest(
+    config: Mapping[str, Any],
+    old_rows: Sequence[Mapping[str, Any]],
+    current_rows: Sequence[Mapping[str, Any]],
+    novel_rows: Sequence[Mapping[str, Any]],
+) -> str:
     canonical = json.dumps(
-        {"config": config, "roster": [asdict(unit) for unit in roster]},
+        {
+            "config": config,
+            "reference_roster": list(old_rows),
+            "evaluation_roster": list(current_rows),
+            "novel_seed_stability": list(novel_rows),
+        },
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def load_content_chain_contract(repo_root: str | Path) -> ContentChainContract:
+    repo = Path(repo_root)
+    root = repo / "configs" / "content_chain"
+    old_rows = _load_rows(
+        root / CONTENT_CHAIN_REFERENCE_MANIFEST,
+        expected_sha256=CONTENT_CHAIN_REFERENCE_MANIFEST_SHA256,
+        count=8,
     )
-    return ContentChainProtocol(
-        protocol_id=config["protocol_id"],
-        config=_freeze(config),
-        roster=roster,
-        protocol_digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    current_rows = _load_rows(
+        root / CONTENT_CHAIN_EVALUATION_MANIFEST,
+        expected_sha256=CONTENT_CHAIN_EVALUATION_MANIFEST_SHA256,
+        count=8,
     )
+    novel_rows = _load_rows(
+        root / CONTENT_CHAIN_NOVEL_MANIFEST,
+        expected_sha256=CONTENT_CHAIN_NOVEL_MANIFEST_SHA256,
+        count=64,
+    )
+    novel_seed_01, novel_seed_02 = _validate_novel(novel_rows)
+    old = tuple(_unit(row) for row in old_rows)
+    current = tuple(_unit(row) for row in current_rows)
+    section_sets = (_identity_sets(old), _identity_sets(current), _identity_sets(novel_seed_01))
+    for left_index, left in enumerate(section_sets):
+        for right in section_sets[left_index + 1 :]:
+            if any(a & b for a, b in zip(left, right, strict=True)):
+                raise ValueError("content chain section identities overlap")
+    novel_01_sets = _identity_sets(novel_seed_01)
+    novel_02_sets = _identity_sets(novel_seed_02)
+    if any(
+        left & right
+        for index, (left, right) in enumerate(
+            zip(novel_01_sets, novel_02_sets, strict=True)
+        )
+        if index != 2  # The same 32 prompts intentionally define both seed strata.
+    ):
+        raise ValueError("content chain novel seed identities overlap")
+    try:
+        config = json.loads((root / _CONFIG_NAME).read_bytes())
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("content chain config must be UTF-8 JSON") from error
+    if not isinstance(config, dict):
+        raise ValueError("content chain config must be an object")
+    protocol_digest = _canonical_digest(config, old_rows, current_rows, novel_rows)
+    if protocol_digest != CONTENT_CHAIN_PROTOCOL_DIGEST:
+        raise ValueError("content chain canonical protocol digest differs")
+    asset_path = root / CONTENT_CHAIN_CALIBRATION_ASSET
+    sidecar_path = asset_path.with_name(f"{asset_path.name}.sha256")
+    asset_bytes = asset_path.read_bytes()
+    sidecar_bytes = sidecar_path.read_bytes()
+    if (
+        hashlib.sha256(asset_bytes).hexdigest()
+        != CONTENT_CHAIN_CALIBRATION_ASSET_SHA256
+        or hashlib.sha256(sidecar_bytes).hexdigest()
+        != CONTENT_CHAIN_CALIBRATION_ASSET_SIDECAR_FILE_SHA256
+    ):
+        raise ValueError("content chain accepted calibration asset bytes differ")
+    calibration_asset = load_calibration_asset(asset_path, sidecar_path)
+    payload = calibration_asset.payload
+    if (
+        payload["producer_exact"]
+        != CONTENT_CHAIN_CALIBRATION_PRODUCER_EXACT
+        or payload["calibration_protocol_digest"]
+        != CONTENT_CHAIN_CALIBRATION_PROTOCOL_DIGEST
+        or payload["calibration_public_key_digest"]
+        != CONTENT_CHAIN_CALIBRATION_PUBLIC_KEY_DIGEST
+    ):
+        raise ValueError("content chain accepted calibration identity differs")
+    runtime_protocol = load_content_iss_protocol(repo)
+    return ContentChainContract(
+        old,
+        current,
+        novel_seed_01,
+        novel_seed_02,
+        config,
+        protocol_digest,
+        runtime_protocol,
+        calibration_asset,
+    )
+
+
+def strict_weighted_gate(margins: Sequence[float], *, required: int) -> tuple[int, bool]:
+    if isinstance(required, bool) or not isinstance(required, int) or required <= 0:
+        raise ValueError("required gate count must be a positive integer")
+    values = tuple(margins)
+    if len(values) < required:
+        raise ValueError("gate denominator is smaller than its required count")
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+        raise ValueError("gate margins must be real numbers")
+    numeric = tuple(float(value) for value in values)
+    if not all(math.isfinite(value) for value in numeric):
+        raise ValueError("gate margins must be finite")
+    count = sum(value > 0.0 for value in numeric)
+    return count, count >= required
+
+
+def deterministic_stability_run_id(
+    protocol_digest: str, calibration_asset_sha256: str, public_key_digest: str
+) -> str:
+    for value in (protocol_digest, calibration_asset_sha256, public_key_digest):
+        if not isinstance(value, str) or _HEX64.fullmatch(value) is None:
+            raise ValueError("run identity inputs must be lowercase 64-hex")
+    return CONTENT_CHAIN_RUN_TEMPLATE.format(
+        protocol_digest_12=protocol_digest[:12],
+        calibration_asset_sha256_12=calibration_asset_sha256[:12],
+        public_key_digest_12=public_key_digest[:12],
+    )
+
+
+__all__ = [name for name in globals() if name.startswith("CONTENT_CHAIN_")] + [
+    "ContentChainContract",
+    "ContentChainUnit",
+    "deterministic_stability_run_id",
+    "load_content_chain_contract",
+    "strict_weighted_gate",
+]

@@ -8,18 +8,18 @@
     },
     "cegwm.method": {
       "path": "src/cegwm/method",
-      "allowed_project_dependencies": ["cegwm.shared"]
+      "allowed_project_dependencies": ["cegwm.shared", "cegwm.runtime", "cegwm.protocol"]
     },
     "cegwm.runtime": {
       "path": "src/cegwm/runtime",
-      "allowed_project_dependencies": ["cegwm.shared", "cegwm.method"]
+      "allowed_project_dependencies": ["cegwm.shared", "cegwm.method", "cegwm.protocol"]
     },
     "cegwm.protocol": {
       "path": "src/cegwm/protocol",
-      "allowed_project_dependencies": []
+      "allowed_project_dependencies": ["cegwm.shared", "cegwm.method", "cegwm.runtime"]
     },
-    "experiments.stage_a": {
-      "path": "experiments/stage_a",
+    "experiments": {
+      "path": "experiments",
       "allowed_project_dependencies": [
         "cegwm.shared",
         "cegwm.method",
@@ -29,5 +29,5 @@
     }
   },
   "delivery_code_roots": ["notebooks"],
-  "record_writer_layers": ["experiments.stage_a"]
+  "record_writer_layers": ["experiments"]
 }

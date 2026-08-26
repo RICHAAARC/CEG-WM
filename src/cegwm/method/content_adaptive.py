@@ -1,7 +1,7 @@
-"""Content-adaptive dual-branch embedding with blind frozen base detectors.
+"""content-adaptive dual-branch embedding with blind frozen detectors.
 
-All spatial state in this module is embed-side only.  The public HF/LF detector
-identities remain unchanged and never receive the allocations produced here.
+The six 4x4 signal maps and both tile-weight maps are private embed-side state.
+Only irreversible scalar effects and branch shares may leave this module.
 """
 
 from __future__ import annotations
@@ -26,30 +26,69 @@ DINO_ATTENTION_LAYER = "last"
 DINO_ATTENTION_STATISTIC = "mean_head_cls_to_patch"
 TILE_GRID_SIDE = 4
 TILE_COUNT = 16
-PROBE_RELATIVE_L2 = 0.001
+PROBE_RELATIVE_L2_SCALES = (0.0005, 0.001)
+PROBE_EVALUATION_COUNT = 64
+PROBE_MEASUREMENT_ID = "baseline_differenced_branch_tile_two_scale_v1"
 COMBINED_RELATIVE_L2 = 0.012
-HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = "hf_content_tiles_attention_probe_v1"
-LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = "lf_content_tiles_texture_probe_v1"
-COMBINED_BUDGET_PROJECTOR_ID = "dual_branch_actual_dtype_relative_l2_v1"
-JOINT_EVALUATED_CANDIDATE_ID = "content_adaptive_dual_branch_clean_v1"
-BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE = 1e-12
-COUNTERFACTUAL_EFFECT_FIELDS = (
-    "semantic_attention_counterfactual_effect",
-    "texture_energy_counterfactual_effect",
-    "lf_probe_response_counterfactual_effect",
-    "hf_probe_response_counterfactual_effect",
+HF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = (
+    "hf_content_tiles_semantic_gate_texture_two_scale_response_consistency_sensitivity_v1"
 )
-_PUBLIC_PROBE_MASTER = b"CEG-WM/public-content-probe-master/v1"
+LF_ADAPTIVE_EMBEDDING_TRANSFORM_ID = (
+    "lf_content_tiles_semantic_gate_texture_two_scale_response_consistency_sensitivity_v1"
+)
+COMBINED_BUDGET_PROJECTOR_ID = "dual_branch_actual_dtype_relative_l2_v1"
+JOINT_EVALUATED_CANDIDATE_ID = "content_adaptive_dual_branch_v2_semantic_gate_v1"
+BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE = 1e-12
+RGB8_TEXTURE_COMPLEXITY_MAX = 255.0 * math.sqrt(2.0)
+SEMANTIC_GATE_GAMMA = 0.25
+COUNTERFACTUAL_EFFECT_FIELDS = (
+    "semantic_routing_strength_counterfactual_effect",
+    "texture_hf_suitability_counterfactual_effect",
+    "lf_two_scale_response_consistency_counterfactual_effect",
+    "hf_two_scale_response_consistency_counterfactual_effect",
+    "lf_local_perturbation_sensitivity_counterfactual_effect",
+    "hf_local_perturbation_sensitivity_counterfactual_effect",
+)
+_SIGNAL_FIELDS = (
+    "semantic_importance",
+    "texture_complexity",
+    "lf_two_scale_response_consistency",
+    "hf_two_scale_response_consistency",
+    "lf_local_perturbation_sensitivity",
+    "hf_local_perturbation_sensitivity",
+)
+_PUBLIC_PROBE_MASTER = b"CEG-WM/public-content-probe-master/v2"
 
 
 @dataclass(frozen=True, slots=True)
 class ContentSignals:
-    """Four real, per-tile embed-side signals."""
+    """Six private real per-tile maps used only while embedding."""
 
-    semantic_attention: tuple[float, ...]
-    texture_energy: tuple[float, ...]
-    lf_probe_response: tuple[float, ...]
-    hf_probe_response: tuple[float, ...]
+    semantic_importance: tuple[float, ...]
+    texture_complexity: tuple[float, ...]
+    lf_two_scale_response_consistency: tuple[float, ...]
+    hf_two_scale_response_consistency: tuple[float, ...]
+    lf_local_perturbation_sensitivity: tuple[float, ...]
+    hf_local_perturbation_sensitivity: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeObservation:
+    """Temporary public RGB/VAE observations; never runner output."""
+
+    rgb: torch.Tensor
+    vae: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class PublicProbeMaps:
+    """Four private maps derived only from baseline-differenced responses."""
+
+    lf_two_scale_response_consistency: tuple[float, ...]
+    hf_two_scale_response_consistency: tuple[float, ...]
+    lf_local_perturbation_sensitivity: tuple[float, ...]
+    hf_local_perturbation_sensitivity: tuple[float, ...]
+    evaluation_count: int = PROBE_EVALUATION_COUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,17 +99,23 @@ class ContentAllocation:
     hf_tile_weights: tuple[float, ...]
     lf_branch_share: float
     hf_branch_share: float
-    counterfactual_effects: tuple[float, float, float, float]
+    counterfactual_effects: tuple[float, float, float, float, float, float]
 
     def __post_init__(self) -> None:
+        for values, name in (
+            (self.lf_tile_weights, "lf_tile_weights"),
+            (self.hf_tile_weights, "hf_tile_weights"),
+        ):
+            vector = _positive_vector(values, name)
+            if not math.isclose(
+                float(vector.mean().item()), 1.0, rel_tol=0.0, abs_tol=1e-12
+            ):
+                raise ValueError(f"{name} must have frozen unit mean")
         _validate_public_branch_shares(self.lf_branch_share, self.hf_branch_share)
         if len(self.counterfactual_effects) != len(COUNTERFACTUAL_EFFECT_FIELDS):
-            raise ValueError("content allocation must carry exactly four counterfactual effects")
-        semantic, texture, lf_probe, hf_probe = self.counterfactual_effects
-        _positive_finite_scalar(semantic, "semantic_attention_counterfactual_effect")
-        _positive_finite_scalar(texture, "texture_energy_counterfactual_effect")
-        _positive_finite_scalar(lf_probe, "lf_probe_response_counterfactual_effect")
-        _positive_finite_scalar(hf_probe, "hf_probe_response_counterfactual_effect")
+            raise ValueError("content allocation must carry exactly six counterfactual effects")
+        for name, value in zip(COUNTERFACTUAL_EFFECT_FIELDS, self.counterfactual_effects, strict=True):
+            _nonnegative_finite_scalar(value, name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,41 +127,24 @@ class ContentAdaptiveMeasurement:
     hf_effective_relative_l2: float
     lf_branch_share: float
     hf_branch_share: float
-    semantic_attention_counterfactual_effect: float
-    texture_energy_counterfactual_effect: float
-    lf_probe_response_counterfactual_effect: float
-    hf_probe_response_counterfactual_effect: float
+    semantic_routing_strength_counterfactual_effect: float
+    texture_hf_suitability_counterfactual_effect: float
+    lf_two_scale_response_consistency_counterfactual_effect: float
+    hf_two_scale_response_consistency_counterfactual_effect: float
+    lf_local_perturbation_sensitivity_counterfactual_effect: float
+    hf_local_perturbation_sensitivity_counterfactual_effect: float
     probe_evaluation_count: int
 
     def __post_init__(self) -> None:
         _validate_public_branch_shares(self.lf_branch_share, self.hf_branch_share)
-        _positive_finite_scalar(
-            self.semantic_attention_counterfactual_effect,
-            "semantic_attention_counterfactual_effect",
-        )
-        _positive_finite_scalar(
-            self.texture_energy_counterfactual_effect,
-            "texture_energy_counterfactual_effect",
-        )
-        _positive_finite_scalar(
-            self.lf_probe_response_counterfactual_effect,
-            "lf_probe_response_counterfactual_effect",
-        )
-        _positive_finite_scalar(
-            self.hf_probe_response_counterfactual_effect,
-            "hf_probe_response_counterfactual_effect",
-        )
+        for name in COUNTERFACTUAL_EFFECT_FIELDS:
+            _nonnegative_finite_scalar(getattr(self, name), name)
+        if self.probe_evaluation_count != PROBE_EVALUATION_COUNT:
+            raise ValueError("content-adaptive measurement must report exactly 64 probe evaluations")
 
     @property
     def minimum_counterfactual_effect(self) -> float:
-        """Minimum of the four exported effects; never independent constructor state."""
-
-        return min(
-            self.semantic_attention_counterfactual_effect,
-            self.texture_energy_counterfactual_effect,
-            self.lf_probe_response_counterfactual_effect,
-            self.hf_probe_response_counterfactual_effect,
-        )
+        return min(getattr(self, name) for name in COUNTERFACTUAL_EFFECT_FIELDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,12 +156,12 @@ class ContentBlindScores:
     content: float
 
 
-def _positive_finite_scalar(value: Any, name: str) -> float:
+def _nonnegative_finite_scalar(value: Any, name: str) -> float:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise TypeError(f"{name} must be a real scalar")
     scalar = float(value)
-    if not math.isfinite(scalar) or scalar <= 0.0:
-        raise ValueError(f"{name} must be finite and strictly positive")
+    if not math.isfinite(scalar) or scalar < 0.0:
+        raise ValueError(f"{name} must be finite and nonnegative")
     return scalar
 
 
@@ -147,9 +175,7 @@ def _validate_public_branch_shares(lf_share: Any, hf_share: Any) -> None:
             raise ValueError(f"{name} must be finite and strictly between zero and one")
         values.append(scalar)
     if not math.isclose(
-        values[0] + values[1],
-        1.0,
-        rel_tol=0.0,
+        values[0] + values[1], 1.0, rel_tol=0.0,
         abs_tol=BRANCH_SHARE_SUM_ABSOLUTE_TOLERANCE,
     ):
         raise ValueError("public branch shares must sum to one within the frozen tolerance")
@@ -164,12 +190,42 @@ def _finite_vector(values: Any, name: str) -> torch.Tensor:
     return tensor
 
 
-def _unit_interval(values: torch.Tensor) -> torch.Tensor:
-    minimum = values.min()
-    span = values.max() - minimum
-    if float(span.item()) == 0.0:
-        return torch.full_like(values, 0.5)
-    return (values - minimum) / span
+def _positive_vector(values: Any, name: str) -> torch.Tensor:
+    tensor = _finite_vector(values, name)
+    if not bool((tensor > 0.0).all()):
+        raise ValueError(f"{name} must be strictly positive")
+    return tensor
+
+
+def _bounded_vector(values: Any, name: str) -> torch.Tensor:
+    tensor = _finite_vector(values, name)
+    if not bool(((0.0 <= tensor) & (tensor <= 1.0)).all()):
+        raise ValueError(f"{name} must lie in the closed unit interval")
+    return tensor
+
+
+def _rgb8_texture_vector(values: Any) -> torch.Tensor:
+    tensor = _finite_vector(values, "texture_complexity")
+    if not bool(((0.0 <= tensor) & (tensor <= RGB8_TEXTURE_COMPLEXITY_MAX)).all()):
+        raise ValueError(
+            "texture_complexity must lie in the frozen RGB8 range "
+            "[0, 255*sqrt(2)]"
+        )
+    return tensor
+
+
+def _semantic_gate(values: Any) -> torch.Tensor:
+    attention = _finite_vector(values, "semantic_importance")
+    if not bool((attention >= 0.0).all()):
+        raise ValueError("semantic_importance must be nonnegative")
+    maximum = float(attention.max().item())
+    if maximum == 0.0:
+        # The all-zero vector is reserved for the internal semantic counterfactual.
+        return torch.zeros_like(attention)
+    gate = attention / maximum
+    if not bool(((0.0 <= gate) & (gate <= 1.0)).all()):
+        raise RuntimeError("semantic gate escaped the closed unit interval")
+    return gate
 
 
 def dino_last_layer_cls_patch_tiles(
@@ -177,15 +233,11 @@ def dino_last_layer_cls_patch_tiles(
     processor: Any,
     model: Any,
 ) -> tuple[float, ...]:
-    """Extract actual last-layer mean-head CLS-to-patch attention into 4x4 tiles."""
+    """Extract only semantic importance from real final-layer DINO attention."""
 
-    if not callable(processor):
-        raise TypeError("DINO image processor must be callable")
-    if not callable(model):
-        raise TypeError("DINO model must be callable")
-    config = getattr(model, "config", None)
-    implementation = getattr(config, "_attn_implementation", None)
-    if implementation != DINO_ATTENTION_IMPLEMENTATION:
+    if not callable(processor) or not callable(model):
+        raise TypeError("DINO processor and model must be callable")
+    if getattr(getattr(model, "config", None), "_attn_implementation", None) != DINO_ATTENTION_IMPLEMENTATION:
         raise RuntimeError("DINO attention implementation must be eager")
     encoded = processor(images=image, return_tensors="pt")
     if not isinstance(encoded, Mapping) or not encoded:
@@ -194,9 +246,10 @@ def dino_last_layer_cls_patch_tiles(
         device = next(model.parameters()).device
     except (AttributeError, StopIteration, TypeError) as error:
         raise RuntimeError("DINO model device cannot be resolved") from error
-    inputs: dict[str, Any] = {}
-    for name, value in encoded.items():
-        inputs[name] = value.to(device) if isinstance(value, torch.Tensor) else value
+    inputs = {
+        name: value.to(device) if isinstance(value, torch.Tensor) else value
+        for name, value in encoded.items()
+    }
     with torch.no_grad():
         output = model(**inputs, output_attentions=True, return_dict=True)
     attentions = getattr(output, "attentions", None)
@@ -213,37 +266,49 @@ def dino_last_layer_cls_patch_tiles(
     patch_side = math.isqrt(patch_count)
     if patch_count < TILE_COUNT or patch_side * patch_side != patch_count:
         raise RuntimeError("DINO CLS-to-patch attention is not a square patch grid")
-    cls_to_patch = last[0, :, 0, 1:].mean(dim=0)
-    patch_grid = cls_to_patch.reshape(1, 1, patch_side, patch_side)
-    tiles = functional.adaptive_avg_pool2d(patch_grid, (TILE_GRID_SIDE, TILE_GRID_SIDE))
-    vector = tiles.reshape(-1).to(torch.float64)
+    patch_grid = last[0, :, 0, 1:].mean(dim=0).reshape(1, 1, patch_side, patch_side)
+    vector = functional.adaptive_avg_pool2d(
+        patch_grid, (TILE_GRID_SIDE, TILE_GRID_SIDE)
+    ).reshape(-1).to(torch.float64)
     if vector.numel() != TILE_COUNT or not bool(torch.isfinite(vector).all()):
-        raise RuntimeError("DINO tile attention is invalid")
-    if float(torch.linalg.vector_norm(vector).item()) == 0.0:
-        raise RuntimeError("DINO tile attention is identically zero")
+        raise RuntimeError("DINO semantic importance is invalid")
+    if not bool((vector >= 0.0).all()):
+        raise RuntimeError("DINO semantic importance is negative")
+    if float(vector.max().item()) == 0.0:
+        raise RuntimeError("DINO semantic importance is identically zero")
     return tuple(float(value) for value in vector.tolist())
 
 
 def rgb_texture_tiles(image: Any) -> tuple[float, ...]:
-    """Compute public local RGB gradient energy on the fixed 4x4 grid."""
+    """Compute bounded raw RGB8 gradient complexity; flat RGB maps to raw zero."""
 
     pixels = np.asarray(image).copy()
-    if pixels.ndim != 3 or pixels.shape[2] != 3 or pixels.shape[0] < 4 or pixels.shape[1] < 4:
-        raise ValueError("texture input must be an RGB image of at least 4x4")
+    if (
+        pixels.ndim != 3
+        or pixels.shape[2] != 3
+        or pixels.shape[0] < 4
+        or pixels.shape[1] < 4
+        or pixels.dtype != np.uint8
+    ):
+        raise ValueError("texture input must be an RGB8 image of at least 4x4")
     values = torch.as_tensor(pixels, dtype=torch.float64)
     if not bool(torch.isfinite(values).all()):
         raise ValueError("texture image must be finite")
-    gray = values.mean(dim=2)
-    dy = torch.zeros_like(gray)
-    dx = torch.zeros_like(gray)
-    dy[1:] = gray[1:] - gray[:-1]
-    dx[:, 1:] = gray[:, 1:] - gray[:, :-1]
-    energy = torch.sqrt(dx.square() + dy.square()).reshape(1, 1, *gray.shape)
-    pooled = functional.adaptive_avg_pool2d(energy, (TILE_GRID_SIDE, TILE_GRID_SIDE))
-    result = pooled.reshape(-1)
-    if float(torch.linalg.vector_norm(result).item()) == 0.0:
-        raise RuntimeError("texture signal is identically zero")
-    return tuple(float(value) for value in result.tolist())
+    dy = torch.zeros_like(values)
+    dx = torch.zeros_like(values)
+    dy[1:] = values[1:] - values[:-1]
+    dx[:, 1:] = values[:, 1:] - values[:, :-1]
+    magnitude = torch.sqrt(dx.square() + dy.square()).mean(dim=2)
+    magnitude = magnitude.reshape(1, 1, *magnitude.shape)
+    pooled = functional.adaptive_avg_pool2d(
+        magnitude, (TILE_GRID_SIDE, TILE_GRID_SIDE)
+    ).reshape(-1)
+    if not bool(
+        torch.isfinite(pooled).all()
+        and ((0.0 <= pooled) & (pooled <= RGB8_TEXTURE_COMPLEXITY_MAX)).all()
+    ):
+        raise RuntimeError("RGB8 texture complexity escaped its frozen finite range")
+    return tuple(float(value) for value in pooled.tolist())
 
 
 def _relative_l2(base: torch.Tensor, candidate: torch.Tensor) -> BudgetMeasurement:
@@ -265,24 +330,24 @@ def _public_probe_direction(shape: tuple[int, ...], branch: str, tile_index: int
     spectrum_shape = (batch, channels, height, width // 2 + 1)
     count = math.prod(spectrum_shape)
     domain = (
-        f"branch={branch}/tile={tile_index}/shape={'x'.join(str(value) for value in shape)}/v1"
+        f"branch={branch}/tile={tile_index}/shape={'x'.join(str(value) for value in shape)}/v2"
     ).encode("ascii")
     output = bytearray()
     counter = 0
     while len(output) < count:
-        output.extend(hashlib.sha256(_PUBLIC_PROBE_MASTER + b"/" + domain + counter.to_bytes(8, "big")).digest())
+        output.extend(hashlib.sha256(
+            _PUBLIC_PROBE_MASTER + b"/" + domain + counter.to_bytes(8, "big")
+        ).digest())
         counter += 1
     signs = torch.tensor(
-        [1.0 if value & 1 else -1.0 for value in output[:count]],
-        dtype=torch.float64,
+        [1.0 if value & 1 else -1.0 for value in output[:count]], dtype=torch.float64,
     ).reshape(spectrum_shape)
     vertical = np.fft.fftfreq(height)[:, None]
     horizontal = np.fft.rfftfreq(width)[None, :]
     radius = np.hypot(vertical, horizontal) / np.hypot(0.5, 0.5)
     band = (
         (radius >= 0.14) & (radius <= 0.24)
-        if branch == "lf"
-        else (radius >= 0.58) & (radius <= 1.0)
+        if branch == "lf" else (radius >= 0.58) & (radius <= 1.0)
     )
     if not np.any(band):
         raise ValueError("public probe branch band is empty for the callback shape")
@@ -297,9 +362,12 @@ def make_public_tile_probe(
     latents: torch.Tensor,
     branch: str,
     tile_index: int,
+    relative_l2: float,
 ) -> tuple[torch.Tensor, BudgetMeasurement]:
-    """Create one non-cumulative, public, key-independent actual-dtype probe."""
+    """Create one non-cumulative key-independent actual-dtype content-adaptive probe."""
 
+    if relative_l2 not in PROBE_RELATIVE_L2_SCALES:
+        raise ValueError("probe relative-L2 scale is not frozen")
     if not isinstance(latents, torch.Tensor) or latents.ndim != 4 or not latents.dtype.is_floating_point:
         raise TypeError("probe base must be a floating NCHW torch Tensor")
     if not bool(torch.isfinite(latents).all()):
@@ -319,12 +387,11 @@ def make_public_tile_probe(
     direction_l2 = torch.linalg.vector_norm(direction)
     if float(base_l2.item()) == 0.0 or float(direction_l2.item()) == 0.0:
         raise ValueError("probe requires nonzero base and direction")
-    delta = direction * (base_l2 * PROBE_RELATIVE_L2 / direction_l2)
+    delta = direction * (base_l2 * relative_l2 / direction_l2)
 
     def candidate_at(scale: float) -> torch.Tensor:
         return (base64 + scale * delta).to(latents.dtype)
 
-    # Maximize the representable scale that remains within the frozen budget.
     low, high = 0.0, 2.0
     best = latents.detach().clone()
     best_measurement = _relative_l2(latents, best)
@@ -332,81 +399,198 @@ def make_public_tile_probe(
         middle = (low + high) / 2.0
         trial = candidate_at(middle)
         measurement = _relative_l2(latents, trial)
-        if measurement.relative_l2 <= PROBE_RELATIVE_L2:
+        if measurement.relative_l2 <= relative_l2:
             low, best, best_measurement = middle, trial, measurement
         else:
             high = middle
     if best_measurement.perturbation_l2 == 0.0:
         raise RuntimeError("actual callback dtype cannot form a nonzero probe within budget")
-    if best_measurement.relative_l2 > PROBE_RELATIVE_L2:
-        raise RuntimeError("public probe exceeded its actual-dtype relative-L2 budget")
     return best, best_measurement
+
+
+def _observation_tensor(value: Any, name: str) -> torch.Tensor:
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{name} must be a torch Tensor")
+    tensor = value.detach().to(device="cpu", dtype=torch.float64)
+    if tensor.numel() == 0 or not bool(torch.isfinite(tensor).all()):
+        raise ValueError(f"{name} must be nonempty and finite")
+    return tensor
+
+
+def _difference(candidate: torch.Tensor, baseline: torch.Tensor, name: str) -> torch.Tensor:
+    value = _observation_tensor(candidate, name)
+    if value.shape != baseline.shape:
+        raise ValueError(f"{name} shape differs from its baseline")
+    return (value - baseline).reshape(-1)
+
+
+def _alignment_and_gain_consistency(
+    small: torch.Tensor,
+    large: torch.Tensor,
+    small_scale: float,
+    large_scale: float,
+) -> float:
+    small_norm = float(torch.linalg.vector_norm(small).item())
+    large_norm = float(torch.linalg.vector_norm(large).item())
+    if small_norm == 0.0 or large_norm == 0.0:
+        return 0.0
+    alignment = float(torch.dot(small, large).item()) / (small_norm * large_norm)
+    alignment = min(1.0, max(0.0, alignment))
+    small_gain = small_norm / small_scale
+    large_gain = large_norm / large_scale
+    consistency = min(small_gain, large_gain) / max(small_gain, large_gain)
+    value = alignment * consistency
+    if not math.isfinite(value):
+        raise RuntimeError("two-scale response consistency is nonfinite")
+    return value
+
+
+def _robust_sensitivity(values: list[float]) -> list[float]:
+    positives = [value for value in values if value > 0.0]
+    if not positives:
+        return [0.0] * len(values)
+    kappa = float(np.median(np.asarray(positives, dtype=np.float64)))
+    if not math.isfinite(kappa) or kappa <= 0.0:
+        raise RuntimeError("positive sensitivity median is invalid")
+    return [value / (value + kappa) for value in values]
 
 
 def evaluate_public_probes(
     latents: torch.Tensor,
-    evaluator: Callable[[str, torch.Tensor], float],
-) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    """Execute exactly one LF and one HF temporary evaluation for each tile."""
+    baseline: ProbeObservation,
+    evaluator: Callable[[str, torch.Tensor], ProbeObservation],
+) -> PublicProbeMaps:
+    """Run 64 probes and derive response-only consistency and sensitivity."""
 
     if not callable(evaluator):
         raise TypeError("probe evaluator must be callable")
-    responses: dict[str, list[float]] = {"lf": [], "hf": []}
+    baseline_rgb = _observation_tensor(baseline.rgb, "baseline RGB observation")
+    baseline_vae = _observation_tensor(baseline.vae, "baseline VAE observation")
+    differences: dict[tuple[str, int, int, str], torch.Tensor] = {}
+    raw: dict[str, list[float]] = {"rgb": [], "vae": []}
+    order: list[tuple[str, int, int]] = []
     for tile_index in range(TILE_COUNT):
         for branch in ("lf", "hf"):
-            probe, measurement = make_public_tile_probe(latents, branch, tile_index)
-            if measurement.perturbation_l2 == 0.0 or measurement.relative_l2 > PROBE_RELATIVE_L2:
-                raise RuntimeError("invalid actual-dtype public probe")
-            value = evaluator(branch, probe)
-            if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
-                raise RuntimeError("public probe evaluation must return one finite real scalar")
-            responses[branch].append(float(value))
-    if len(responses["lf"]) + len(responses["hf"]) != 32:
-        raise RuntimeError("content analysis did not execute exactly 32 probe evaluations")
-    return tuple(responses["lf"]), tuple(responses["hf"])
+            for scale_index, scale in enumerate(PROBE_RELATIVE_L2_SCALES):
+                probe, measurement = make_public_tile_probe(latents, branch, tile_index, scale)
+                if measurement.perturbation_l2 == 0.0 or measurement.relative_l2 > scale:
+                    raise RuntimeError("invalid actual-dtype public probe")
+                observation = evaluator(branch, probe)
+                if not isinstance(observation, ProbeObservation):
+                    raise TypeError("probe evaluator must return ProbeObservation")
+                rgb_delta = _difference(observation.rgb, baseline_rgb, "candidate RGB observation")
+                vae_delta = _difference(observation.vae, baseline_vae, "candidate VAE observation")
+                differences[(branch, tile_index, scale_index, "rgb")] = rgb_delta
+                differences[(branch, tile_index, scale_index, "vae")] = vae_delta
+                raw["rgb"].append(float(torch.linalg.vector_norm(rgb_delta).item()) / scale)
+                raw["vae"].append(float(torch.linalg.vector_norm(vae_delta).item()) / scale)
+                order.append((branch, tile_index, scale_index))
+    if len(order) != PROBE_EVALUATION_COUNT:
+        raise RuntimeError("content analysis did not execute exactly 64 probe evaluations")
+    normalized = {modality: _robust_sensitivity(values) for modality, values in raw.items()}
+    normalized_by_key = {
+        (branch, tile, scale_index, modality): normalized[modality][index]
+        for modality in ("rgb", "vae")
+        for index, (branch, tile, scale_index) in enumerate(order)
+    }
+    response_consistency: dict[str, list[float]] = {"lf": [], "hf": []}
+    sensitivity: dict[str, list[float]] = {"lf": [], "hf": []}
+    small_scale, large_scale = PROBE_RELATIVE_L2_SCALES
+    for branch in ("lf", "hf"):
+        for tile_index in range(TILE_COUNT):
+            modality_consistency = [
+                _alignment_and_gain_consistency(
+                    differences[(branch, tile_index, 0, modality)],
+                    differences[(branch, tile_index, 1, modality)],
+                    small_scale,
+                    large_scale,
+                )
+                for modality in ("rgb", "vae")
+            ]
+            response_consistency[branch].append(sum(modality_consistency) / 2.0)
+            sensitivity[branch].append(sum(
+                normalized_by_key[(branch, tile_index, scale_index, modality)]
+                for scale_index in range(2)
+                for modality in ("rgb", "vae")
+            ) / 4.0)
+    return PublicProbeMaps(
+        tuple(response_consistency["lf"]),
+        tuple(response_consistency["hf"]),
+        tuple(sensitivity["lf"]),
+        tuple(sensitivity["hf"]),
+    )
 
 
 def _allocation_vectors(signals: ContentSignals) -> tuple[torch.Tensor, torch.Tensor, float, float]:
-    attention = _unit_interval(_finite_vector(signals.semantic_attention, "semantic_attention"))
-    texture = _unit_interval(_finite_vector(signals.texture_energy, "texture_energy"))
-    lf_probe = _unit_interval(_finite_vector(signals.lf_probe_response, "lf_probe_response"))
-    hf_probe = _unit_interval(_finite_vector(signals.hf_probe_response, "hf_probe_response"))
-    lf_raw = 0.30 * (1.0 - attention) + 0.30 * texture + 0.30 * lf_probe + 0.10 * (1.0 - hf_probe)
-    hf_raw = 0.30 * attention + 0.20 * (1.0 - texture) + 0.30 * hf_probe + 0.20 * (1.0 - lf_probe)
-    lf_weights = 0.25 + lf_raw
-    hf_weights = 0.25 + hf_raw
-    lf_weights /= lf_weights.mean()
-    hf_weights /= hf_weights.mean()
-    lf_strength = float((texture.mean() + lf_probe.mean() + (1.0 - attention).mean()).item())
-    hf_strength = float((attention.mean() + hf_probe.mean() + (1.0 - texture).mean()).item())
-    total = lf_strength + hf_strength
-    if not math.isfinite(total) or total <= 0.0:
-        raise RuntimeError("content signals cannot allocate the two branches")
-    return lf_weights, hf_weights, lf_strength / total, hf_strength / total
+    semantic_gate = _semantic_gate(signals.semantic_importance)
+    texture_raw = _rgb8_texture_vector(signals.texture_complexity)
+    texture = 0.5 + 0.5 * texture_raw / RGB8_TEXTURE_COMPLEXITY_MAX
+    lf_consistency = _bounded_vector(
+        signals.lf_two_scale_response_consistency,
+        "lf_two_scale_response_consistency",
+    )
+    hf_consistency = _bounded_vector(
+        signals.hf_two_scale_response_consistency,
+        "hf_two_scale_response_consistency",
+    )
+    lf_sensitivity = _bounded_vector(
+        signals.lf_local_perturbation_sensitivity, "lf_local_perturbation_sensitivity"
+    )
+    hf_sensitivity = _bounded_vector(
+        signals.hf_local_perturbation_sensitivity, "hf_local_perturbation_sensitivity"
+    )
+    lf_suitability = (
+        0.20 + 0.30 * (1.0 - texture) + 0.30 * lf_consistency
+        + 0.20 * (1.0 - lf_sensitivity)
+    )
+    hf_suitability = (
+        0.20 + 0.30 * texture + 0.30 * hf_consistency
+        + 0.20 * (1.0 - hf_sensitivity)
+    )
+    direction = hf_suitability - lf_suitability
+    hf_allocation = 0.5 + SEMANTIC_GATE_GAMMA * semantic_gate * direction
+    lf_allocation = 1.0 - hf_allocation
+    bounds = (
+        (lf_suitability, 0.20, 0.85, "LF suitability"),
+        (hf_suitability, 0.35, 1.00, "HF suitability"),
+        (direction, -0.50, 0.80, "suitability direction"),
+        (hf_allocation, 0.375, 0.70, "HF allocation"),
+        (lf_allocation, 0.30, 0.625, "LF allocation"),
+    )
+    for values, lower, upper, name in bounds:
+        if not bool(torch.isfinite(values).all()) or not bool(
+            ((lower <= values) & (values <= upper)).all()
+        ):
+            raise RuntimeError(f"{name} escaped its frozen finite bounds")
+    hf_share = float(hf_allocation.mean().item())
+    lf_share = 1.0 - hf_share
+    _validate_public_branch_shares(lf_share, hf_share)
+    lf_weights = lf_allocation / lf_share
+    hf_weights = hf_allocation / hf_share
+    for weights, name in ((lf_weights, "LF tile weights"), (hf_weights, "HF tile weights")):
+        if not bool(torch.isfinite(weights).all()) or not bool((weights > 0.0).all()):
+            raise RuntimeError(f"{name} are invalid")
+        if not math.isclose(float(weights.mean().item()), 1.0, rel_tol=0.0, abs_tol=1e-12):
+            raise RuntimeError(f"{name} do not have frozen unit mean")
+    return lf_weights, hf_weights, lf_share, hf_share
 
 
 def allocate_content(signals: ContentSignals) -> ContentAllocation:
-    """Allocate both transformed embeddings and verify four real signal effects."""
+    """Allocate both content-adaptive transforms and measure six neutral counterfactuals."""
 
     lf, hf, lf_share, hf_share = _allocation_vectors(signals)
-    fields = (
-        "semantic_attention",
-        "texture_energy",
-        "lf_probe_response",
-        "hf_probe_response",
-    )
-    effects: list[float] = []
-    neutral = (0.5,) * TILE_COUNT
     original = torch.cat((lf, hf, torch.tensor([lf_share, hf_share], dtype=torch.float64)))
-    for field in fields:
-        values = {name: getattr(signals, name) for name in fields}
-        values[field] = neutral
-        counterfactual = ContentSignals(**values)
-        cf_lf, cf_hf, cf_lf_share, cf_hf_share = _allocation_vectors(counterfactual)
+    effects: list[float] = []
+    for field in _SIGNAL_FIELDS:
+        values = {name: getattr(signals, name) for name in _SIGNAL_FIELDS}
+        neutral_value = 0.0 if field in {"semantic_importance", "texture_complexity"} else 0.5
+        values[field] = (neutral_value,) * TILE_COUNT
+        alternate_signals = ContentSignals(**values)
+        cf_lf, cf_hf, cf_lf_share, cf_hf_share = _allocation_vectors(alternate_signals)
         alternate = torch.cat((cf_lf, cf_hf, torch.tensor([cf_lf_share, cf_hf_share])))
         effect = float(torch.linalg.vector_norm(original - alternate).item())
-        if not math.isfinite(effect) or effect == 0.0:
-            raise RuntimeError(f"{field} has no nonzero neutral-counterfactual allocation effect")
+        if not math.isfinite(effect) or effect < 0.0:
+            raise RuntimeError(f"{field} neutral-counterfactual effect is invalid")
         effects.append(effect)
     return ContentAllocation(
         tuple(float(value) for value in lf.tolist()),
@@ -418,18 +602,34 @@ def allocate_content(signals: ContentSignals) -> ContentAllocation:
 
 
 def _tile_weight_map(weights: tuple[float, ...], latents: torch.Tensor) -> torch.Tensor:
-    vector = _finite_vector(weights, "tile_weights").reshape(1, 1, 4, 4)
+    vector = _positive_vector(weights, "tile_weights").reshape(1, 1, 4, 4)
     return functional.interpolate(vector, size=latents.shape[-2:], mode="nearest").to(
         device=latents.device, dtype=torch.float64
     )
 
 
-def _transformed_delta(carrier: torch.Tensor, weights: tuple[float, ...], amplitude: torch.Tensor) -> torch.Tensor:
+def _branch_transformed_delta(
+    carrier: torch.Tensor,
+    weights: tuple[float, ...],
+    amplitude: torch.Tensor,
+) -> torch.Tensor:
     transformed = carrier.to(torch.float64) * _tile_weight_map(weights, carrier)
     norm = torch.linalg.vector_norm(transformed)
     if not bool(torch.isfinite(norm)) or float(norm.item()) == 0.0:
         raise RuntimeError("adaptive embedding transform produced an invalid branch")
     return transformed / norm * amplitude
+
+
+def _lf_transformed_delta(
+    carrier: torch.Tensor, weights: tuple[float, ...], amplitude: torch.Tensor,
+) -> torch.Tensor:
+    return _branch_transformed_delta(carrier, weights, amplitude)
+
+
+def _hf_transformed_delta(
+    carrier: torch.Tensor, weights: tuple[float, ...], amplitude: torch.Tensor,
+) -> torch.Tensor:
+    return _branch_transformed_delta(carrier, weights, amplitude)
 
 
 def embed_content_adaptive(
@@ -439,7 +639,7 @@ def embed_content_adaptive(
     lf_assets: FrozenLFPublicAssets,
     allocation: ContentAllocation,
 ) -> tuple[torch.Tensor, ContentAdaptiveMeasurement]:
-    """Simultaneously embed transformed LF/HF branches under one 0.012 budget."""
+    """Simultaneously embed separate content-adaptive LF/HF transforms under one 0.012 budget."""
 
     if not isinstance(latents, torch.Tensor) or latents.ndim != 4 or not latents.dtype.is_floating_point:
         raise TypeError("content embedding requires floating NCHW callback latents")
@@ -452,17 +652,21 @@ def embed_content_adaptive(
     if not bool(torch.isfinite(base_l2)) or float(base_l2.item()) == 0.0:
         raise ValueError("content embedding requires a finite nonzero latent")
     hf_base = reconstruct_hf_carrier(
-        detection_key, tuple(latents.shape), hf_assets, dtype=torch.float32, device=latents.device
+        detection_key, tuple(latents.shape), hf_assets, dtype=torch.float32,
+        device=latents.device,
     )
     lf_base = reconstruct_lf_carrier(
-        detection_key, tuple(latents.shape), lf_assets, dtype=torch.float32, device=latents.device
+        detection_key, tuple(latents.shape), lf_assets, dtype=torch.float32,
+        device=latents.device,
     )
-    # Adaptive/joint IDs intentionally never enter either frozen base PRG domain.
-    hf_delta = _transformed_delta(
-        hf_base, allocation.hf_tile_weights, base_l2 * COMBINED_RELATIVE_L2 * allocation.hf_branch_share
+    # content-adaptive and joint identities never enter either frozen base PRG domain.
+    hf_delta = _hf_transformed_delta(
+        hf_base, allocation.hf_tile_weights,
+        base_l2 * COMBINED_RELATIVE_L2 * allocation.hf_branch_share,
     )
-    lf_delta = _transformed_delta(
-        lf_base, allocation.lf_tile_weights, base_l2 * COMBINED_RELATIVE_L2 * allocation.lf_branch_share
+    lf_delta = _lf_transformed_delta(
+        lf_base, allocation.lf_tile_weights,
+        base_l2 * COMBINED_RELATIVE_L2 * allocation.lf_branch_share,
     )
     if float(torch.linalg.vector_norm(hf_delta).item()) == 0.0 or float(torch.linalg.vector_norm(lf_delta).item()) == 0.0:
         raise RuntimeError("both adaptive branches must be nonzero")
@@ -494,7 +698,7 @@ def embed_content_adaptive(
         allocation.lf_branch_share,
         allocation.hf_branch_share,
         *allocation.counterfactual_effects,
-        32,
+        PROBE_EVALUATION_COUNT,
     )
 
 
@@ -504,7 +708,7 @@ def score_content_image(
     hf_assets: FrozenHFPublicAssets,
     lf_assets: FrozenLFPublicAssets,
 ) -> ContentBlindScores:
-    """Blind joint score from final RGB, key, and frozen public VAE assets only."""
+    """Blind joint score from image, key, and frozen public VAE assets only."""
 
     lf = float(score_lf_image(image, detection_key, lf_assets))
     hf = float(score_hf_image(image, detection_key, hf_assets))
