@@ -73,9 +73,11 @@ promotion, or permission for retry, tuning, replacement, or new execution.
 
 ## Branch role
 
-`Content-V5-Evidence` is an evidence leaf under `Content-V5`. It is not a
-method-development base and must not be merged into `main`. Its current tree
-retains one final formal Notebook and the portable scalar result only.
+`Content-V5-Evidence` is a complete executable evidence snapshot under
+`Content-V5`. It retains the canonical execution tree together with the final
+formal Notebook and portable scalar result, and the Notebook clones this
+Evidence branch directly. It is not a method-development base and must not be
+merged into `main`.
 
 ## Portable scalar evidence
 
