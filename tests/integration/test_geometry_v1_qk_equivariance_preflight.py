@@ -23,10 +23,26 @@ def _unit(*, kind="q", h=None, reference=None, attacked=None, reference_grid=(2,
 
 
 def test_real_observer_coordinates_from_full_grids_not_fictional_dense_sample_grid() -> None:
-    indices = np.array([0, 63, 64, 127, 511, 1023, 2048, 4095], dtype=np.int64)
-    assert HARNESS.sampled_pixel_centers((64, 64), indices).tolist() == [[.5, .5], [63.5, .5], [.5, 1.5], [63.5, 1.5], [63.5, 7.5], [63.5, 15.5], [.5, 32.5], [63.5, 63.5]]
-    record = HARNESS.evaluate_unit(_unit(reference=np.eye(8), attacked=np.eye(8), reference_grid=(64, 64), attacked_grid=(64, 64), reference_indices=indices, attacked_indices=indices))
-    assert record["candidate_correspondences"][4]["reference_xy"] == [63.5, 7.5]
+    row_positions = np.rint(np.linspace(0, 63, 8)).astype(np.int64)
+    column_positions = np.rint(np.linspace(0, 63, 8)).astype(np.int64)
+    indices = (row_positions[:, None] * 64 + column_positions[None, :]).reshape(-1)
+    descriptors = np.eye(64)
+    record = HARNESS.evaluate_unit(_unit(reference=descriptors, attacked=descriptors,
+                                         reference_grid=(64, 64), attacked_grid=(64, 64),
+                                         reference_indices=indices, attacked_indices=indices))
+    candidates = record["candidate_correspondences"]
+    assert record["status"] == "calculated" and len(candidates) == 64
+    assert [(candidate["reference_index"], candidate["attacked_index"]) for candidate in candidates] == list(enumerate(range(64)))
+    expected = [[float(column) + .5, float(row) + .5]
+                for row in row_positions for column in column_positions]
+    for position in (0, 27, 63):
+        assert candidates[position]["reference_xy"] == expected[position]
+        assert candidates[position]["attacked_xy"] == expected[position]
+    assert candidates[27]["reference_xy"] != [3.5, 3.5]
+    assert record["true_match_ranks"] == [1] * 64 and record["coverage"] == 1.0
+    assert record["fit_residual"] == pytest.approx(0.0, abs=1e-12)
+    assert record["recovery_error"] == pytest.approx(0.0, abs=1e-12)
+    assert set(record) == HARNESS.public_record_fields()
 
 
 def test_h_is_truth_only_full_fov_and_quantization_is_sampled_stable() -> None:
@@ -99,6 +115,19 @@ def test_underconstrained_failures_whitelist_and_no_promotion() -> None:
 
 def test_separate_source_grids_keep_truth_metrics_and_identity() -> None:
     h = np.array(((1., 0., 1.), (0., 1., 1.), (0., 0., 1.)))
-    record = HARNESS.evaluate_unit(_unit(reference_grid=(4, 4), attacked_grid=(6, 6), reference_indices=np.array([0, 3, 12, 15]), attacked_indices=np.array([5, 8, 25, 28]), h=h))
+    record = HARNESS.evaluate_unit(_unit(reference_grid=(4, 4), attacked_grid=(6, 6),
+                                         reference_indices=np.array([0, 3, 12, 15]),
+                                         attacked_indices=np.array([7, 10, 25, 28]), h=h))
     assert record["reference_grid"] == [4, 4] and record["attacked_grid"] == [6, 6]
-    assert len(record["true_match_ranks"]) == len(record["ambiguity_gaps"]) == 4 and record["h_identity"]["shape"] == [3, 3]
+    assert [(candidate["reference_index"], candidate["attacked_index"])
+            for candidate in record["candidate_correspondences"]] == [(0, 0), (1, 1), (2, 2), (3, 3)]
+    assert [candidate["reference_xy"] for candidate in record["candidate_correspondences"]] == [
+        [.5, .5], [3.5, .5], [.5, 3.5], [3.5, 3.5],
+    ]
+    assert [candidate["attacked_xy"] for candidate in record["candidate_correspondences"]] == [
+        [1.5, 1.5], [4.5, 1.5], [1.5, 4.5], [4.5, 4.5],
+    ]
+    assert record["true_match_ranks"] == [1, 1, 1, 1] and record["coverage"] == 1.0
+    assert record["fit_residual"] == pytest.approx(0.0, abs=1e-12)
+    assert record["recovery_error"] == pytest.approx(0.0, abs=1e-12)
+    assert record["h_identity"] == HARNESS._identity(h)
