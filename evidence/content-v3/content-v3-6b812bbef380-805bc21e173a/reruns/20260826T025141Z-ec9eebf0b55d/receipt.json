@@ -1,0 +1,14 @@
+{
+  "artifact_kind": "terminal",
+  "run_id": "content-v3-6b812bbef380-805bc21e173a",
+  "exact": "ec9eebf0b55d5ba1eb42648d6ec539739117c26a",
+  "execution_scope_id": "content_v3_unweighted_lf_adaptive_hf_engineering_and_stage_a_evaluation_v1",
+  "protocol_id": "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v2",
+  "protocol_digest": "6b812bbef380085b67c33ea380444c379278faad1822762d4028465ecfd6058c",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "fixed_unit_count": 8,
+  "fixed_record_count": 16,
+  "committed_unit_count": 8,
+  "result_member": "result.json",
+  "external_validation_required": true
+}
