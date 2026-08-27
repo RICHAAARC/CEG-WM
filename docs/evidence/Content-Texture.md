@@ -11,7 +11,15 @@ execution exact; no new model, Colab, Drive, or N=96 run occurred here.
 
 Artifact identity is retained in
 `evidence/content-texture/content-texture-stratification-v1-3bf6552daa78-805bc21e173a/`.
-The ZIP itself and its plain RGB members remain only in Drive.
+The verified historical ZIP and its sidecar remain only in Drive at:
+
+- `/content/drive/MyDrive/CEG-WM/Content/Content-Texture-3ed6742-20260827T032538Z/3ed674236e9f562a1e5a537ae0e4bef7080d4853/content-texture-stratification-v1-3bf6552daa78-805bc21e173a/terminal/content-texture-stratification-v1-3bf6552daa78-805bc21e173a.zip`
+- `/content/drive/MyDrive/CEG-WM/Content/Content-Texture-3ed6742-20260827T032538Z/3ed674236e9f562a1e5a537ae0e4bef7080d4853/content-texture-stratification-v1-3bf6552daa78-805bc21e173a/terminal/content-texture-stratification-v1-3bf6552daa78-805bc21e173a.zip.sha256`
+
+Those paths bind the preserved artifact to its historical producer exact, not
+to a new execution. The notebook in this leaf derives a future run directory
+from the canonical method exact and a new UTC timestamp; it does not
+overwrite or reinterpret the historical artifact.
 
 Claim ceiling: `exploratory_prospective_texture_stratification_only`. The
 artifact reports `analysis_complete` with 16 fixed plain units and 112 fixed
