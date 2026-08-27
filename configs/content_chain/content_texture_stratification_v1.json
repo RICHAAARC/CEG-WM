@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "protocol_id": "cegwm-stage-a-content-texture-stratification-v1",
+  "analysis_id": "content_texture_stratification_v1",
+  "claim_ceiling": "exploratory_prospective_texture_stratification_only",
+  "public_key_digest": "805bc21e173a83898f3b7034d75e6ed02f65894a6885377d9659ee3091b4dd77",
+  "model_id": "stabilityai/stable-diffusion-3.5-medium",
+  "dino_asset_id": "facebook/dinov2-small",
+  "generation": {"height": 512, "width": 512, "inference_steps": 20, "callback_step_zero_based": 18, "probes_per_candidate": 64},
+  "rosters_in_order": [
+    {"roster_id": "content_v234_old", "source_method": "v2", "path": "configs/content_chain/content_adaptive_dual_branch_v2_clean.jsonl", "sha256": "dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88", "blob": "7e0415ca14a3c37475ec796d4985698afbde4f89"},
+    {"roster_id": "content_v6_current", "source_method": "v6", "path": "configs/content_chain/content_v6_iss_clean.jsonl", "sha256": "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f", "blob": "8fb58c4e71d0d3fd002626c85cc3b363a69d43fe"}
+  ],
+  "sources": {
+    "v2": {"exact": "4d8b0df5bf7840d242115669f1d3115cdf6810cc", "tree": "392833010fc57e256d899df8263626e9372b2ba7", "method_id": "content_adaptive_dual_branch_v2_semantic_gate_v1", "protocol_id": "cegwm-stage-a-content-adaptive-dual-branch-v2-semantic-gate-runtime-asset-contract-v3", "protocol_digest": "e3fe3fd32ca2df7a1b1d2afe0318ff6c81cd67765b1f1be79a3ed89db7e87345", "lf_score_domain": "ordinary_lf_block_centered_normalized_median_corr_v2"},
+    "v3": {"exact": "aa2ff4476901033bff2564d93298889a9967303c", "tree": "1ec31bb3cb4ab943b539f1521a4208601fc76aa4", "method_id": "content_v3_unweighted_lf_adaptive_hf_v1", "protocol_id": "cegwm-stage-a-content-v3-unweighted-lf-adaptive-hf-clean-v2", "protocol_digest": "6b812bbef380085b67c33ea380444c379278faad1822762d4028465ecfd6058c", "lf_score_domain": "ordinary_lf_block_centered_normalized_median_corr_v2"},
+    "v4": {"exact": "0387eefc1e2b943cfe2a7f16ba9cc2073693dd9a", "tree": "f14416daa3c1df5d1d3fe02159f8b0676cf14a55", "method_id": "content_v4_clean_null_whitened_lf_adaptive_hf_v1", "protocol_id": "cegwm-stage-a-content-v4-whitened-lf-adaptive-hf-clean-v1", "protocol_digest": "a9fdf3e5d384976c11bbd542c3248483806473ed1dca91dc5d753ab10ec5beb0", "lf_score_domain": "whitened_lf_dct_matched_cosine_v1"},
+    "v5": {"exact": "ed5ed5a303c4eb3a8e7cafb8410109b68f5e41fa", "tree": "c1f4ad4fabb37aa42652bc912052d3a224ba3b53", "method_id": "content_v5_clean_null_whitened_lf_adaptive_hf_branchwise_or_v1", "protocol_id": "cegwm-stage-a-content-v5-whitened-lf-adaptive-hf-branchwise-or-clean-v1", "protocol_digest": "c5a0c4bf7d6d3521ae233756ea07753dd002d842662b50f82a86de6a0f96c204", "lf_score_domain": "whitened_lf_dct_matched_cosine_v1", "reuse_source_method": "v4"},
+    "v6": {"exact": "49bb03ed697a47048f5730ecfc85a9f29cb0b58a", "tree": "c72fbb0143f99e9c7f0317cdafd3936e00c8905c", "method_id": "content_v6_detector_domain_iss_lf_adaptive_hf_v1", "protocol_id": "cegwm-stage-a-content-v6-detector-domain-iss-clean-v1", "protocol_digest": "855fb511afa23548c30a5fcad17525589b340aac7067ae3491941fc8fc99427d", "lf_score_domain": "whitened_lf_dct_matched_cosine_v1"},
+    "v7": {"exact": "884a4f6524440cf111def89e46d54258ee7c9e1a", "tree": "b008d8e66f3c52e7f0ec0b4ee6afde2efa69a4a1", "method_id": "content_v7_ordinary_score_iss_lf_adaptive_hf_v1", "protocol_id": "cegwm-stage-a-content-v7-ordinary-iss-formal-initial-v1", "protocol_digest": "2c2ce18c3d0fd3b1573ad335d0c9fe62b9583a7162f97d75194c8322efa0db0e", "lf_score_domain": "ordinary_lf_block_centered_normalized_median_corr_v2"},
+    "v8": {"exact": "bd6269861412b8628009238ace84d3278ff1e17a", "tree": "1dfb0e938f26612c06ca785a997697e4f4904f85", "method_id": "content_v8_v2_spatial_lf_detector_domain_iss_v1", "protocol_id": "cegwm-stage-a-content-v8-v2-spatial-lf-detector-domain-iss-formal-initial-v1", "protocol_digest": "7670d54434906ae246ef76c097bf54f997c3a0ca6b036c0f55e0fe5b31489a1c", "lf_score_domain": "ordinary_lf_block_centered_normalized_median_corr_v2"}
+  },
+  "assets": {
+    "v4_whitening": {"sha256": "a7021dd8b98bc4282b98ed5d1fe276236d99a3c9e80b9bdce015d28cf715633f", "sidecar_file_sha256": "c900cce0980348eeadcf07d782b6169c4d46ac55d7154db0fc0a0a878cce0ced"},
+    "v6_iss": {"sha256": "d66ff88640a3d1a020646cfde3face7502282bf835c9d3fb746b518dfb02c231", "sidecar_file_sha256": "27094d56994bc6f5d93564bad79ddd9ce8218d2d193786f4816535ee1e7f6538"},
+    "v7_iss": {"provenance_zip": "content_v7_detector_domain_iss_unwhitened_formal_initial/884a4f6524440cf111def89e46d54258ee7c9e1a/content-v7-formal-initial/content-v7-formal-initial.zip", "zip_sha256": "eb588864d9d1af3182b96748adfcd8de1b10aaaa7e6dcfcec9654337b77848db", "member": "content_v7_ordinary_iss_gain_target_v1.json", "sha256": "34a5dda304ae431309dd0e54d0bf2eebc1be85d0fa678709f998f16b4ae124a1", "sidecar_member": "content_v7_ordinary_iss_gain_target_v1.json.sha256", "sidecar_file_sha256": "079b80bc880ccd0c55e7c1c239988f2eea14cb43dcf6272aeacf20f0cd1b23df"},
+    "v8_iss": {"provenance_zip": "content_v8_v2_spatial_lf_detector_domain_iss_formal_initial/content-v8-bd6269861412-0ba01f405106/terminal/content-v8-bd6269861412-0ba01f405106.zip", "zip_sha256": "c0626ee67fb7c96506fb6cc6a45d7971c0ff911eb8c12c5cfced6108928e86ca", "member": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json", "sha256": "a122a8dea1bc2615cc80e17ed1fb55235ede23b8a7498c1618ab47ecf151a438", "sidecar_member": "runtime_asset/content_v8_v2_spatial_lf_iss_gain_target_v1.json.sha256", "sidecar_file_sha256": "e9dfa9a4f3f23c9dec164b1c4c32ede211c0c54963bc2734a79b599dc904547b"}
+  },
+  "execution": {"plain_generations": 16, "paired_method_generations": 192, "total_diffusion_calls": 208, "callback_writes": 96, "probe_evaluations": 6144, "fixed_analysis_rows": 112, "checkpoint_count": 9, "checkpoint_stages": ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"], "checkpoint_scope": "local_transient", "resume_allowed": false},
+  "statistics": {"branches": ["lf", "hf"], "margins": ["a", "b"], "permutation_total_n8": 40320, "stratified_permutation_total": 1625702400, "ties": "average_rank", "test": "two_sided_abs_spearman_exact", "meta_rule": "facet_only_no_raw_score_pooling"},
+  "status_values": ["analysis_complete", "analysis_incomplete", "not_interpretable"]
+}
