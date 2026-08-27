@@ -81,7 +81,7 @@ def _reject_leak(value: Any, *, depth: int = 0) -> None:
         for item in value: _reject_leak(item, depth=depth + 1)
     elif isinstance(value, str):
         lowered = value.lower(); normalized = lowered.replace("\\", "/")
-        forbidden_path = (normalized.startswith("//") or normalized.startswith("~/") or "file://" in normalized or bool(re.search(r"\b[a-z]:/", normalized)) or any(match.group(0) not in ("/content/drive",) and not match.group(0).startswith("/content/drive/") for match in re.finditer(r"(?<![:/a-z0-9._-])/[a-z0-9_.-]+(?:/[a-z0-9_.-]+)*", normalized)))
+        forbidden_path = (normalized.startswith("//") or normalized.startswith("~/") or "file://" in normalized or bool(re.search(r"\b[a-z]:/", normalized)) or bool(re.search(r"(?<![:/a-z0-9._-])//[a-z0-9_.-]+/[a-z0-9_.-]+", normalized)) or any(match.group(0) not in ("/content/drive",) and not match.group(0).startswith("/content/drive/") for match in re.finditer(r"(?<![:/a-z0-9._-])/[a-z0-9_.-]+(?:/[a-z0-9_.-]+)*", normalized)))
         if any(word in lowered for word in ("hf_", "hf token", "secret", "prompt", "latent")) or any(pattern.search(lowered) for pattern in _VALUE_LEAKS) or forbidden_path: raise ValueError("forbidden_public_value")
 
 

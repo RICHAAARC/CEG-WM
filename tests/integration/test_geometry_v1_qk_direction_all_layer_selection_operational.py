@@ -104,6 +104,24 @@ def test_unit_value_leak_fails_before_selection_or_packaging(monkeypatch, tmp_pa
     assert rc == 1 and control["failure_point"] == "source_validation" and control["error_class"] == "validation_error"
 
 
+@pytest.mark.parametrize("sidecar,unit_value", (("receipt.json", None), (None, r"embedded \\server\share\private")))
+def test_embedded_unc_value_fails_before_selection_or_packaging(monkeypatch, tmp_path, sidecar, unit_value) -> None:
+    RUNNER._reject_leak("https://public.example/path")
+    RUNNER._reject_leak("/content/drive/MyDrive/CEG-WM/Geometry-V1/D0")
+    source = _source(tmp_path / "source", sidecar=sidecar, leak=r"embedded \\server\share\private" if sidecar else None, unit_value=unit_value)
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    monkeypatch.setattr(RUNNER, "_selection", lambda _units: pytest.fail("selection must not run"))
+    monkeypatch.setattr(RUNNER, "_package", lambda *_args: pytest.fail("package must not run"))
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--repo-root", str(tmp_path), "--expected-exact", "a" * 40, "--source-root", str(source), "--output-root", str(tmp_path / "out"), "--control-fd", str(write)])
+        line = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    control = json.loads(line[len(RUNNER.FAILURE_PREFIX):])
+    assert rc == 1 and control["failure_point"] == "source_validation" and control["error_class"] == "validation_error"
+
+
 def test_package_is_create_only_and_does_not_copy_source(tmp_path, monkeypatch) -> None:
     source = _source(tmp_path / "source"); monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
     summary = RUNNER.run_direction_selection(expected_exact="a" * 40, repo_root=tmp_path, source_root=source)
