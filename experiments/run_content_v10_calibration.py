@@ -49,7 +49,7 @@ def _publish(asset: Path, sidecar: Path, payload: bytes) -> str:
     if asset.exists() or sidecar.exists(): raise FileExistsError("Content V10 calibration destination is create-only")
     asset.parent.mkdir(parents=True,exist_ok=False); digest=hashlib.sha256(payload).hexdigest(); made_asset=False
     try:
-        with asset.open("xb") as handle: handle.write(payload); made_asset=True
+        with asset.open("xb") as handle: made_asset=True; handle.write(payload)
         with sidecar.open("xb") as handle: handle.write(f"{digest}  {ASSET_FILENAME}\n".encode("ascii"))
     except BaseException:
         sidecar.unlink(missing_ok=True)
@@ -77,19 +77,25 @@ def _publish_staged(stage_asset: Path, stage_sidecar: Path, final_asset: Path, f
     if final_asset.exists() or final_sidecar.exists(): raise FileExistsError("Content V10 calibration destination is create-only")
     final_root=final_asset.parent; final_root.mkdir(parents=True,exist_ok=False); made_asset=False
     try:
-        with final_asset.open("xb") as handle: handle.write(stage_asset.read_bytes()); made_asset=True
+        with final_asset.open("xb") as handle: made_asset=True; handle.write(stage_asset.read_bytes())
         with final_sidecar.open("xb") as handle: handle.write(stage_sidecar.read_bytes())
     except BaseException:
         final_sidecar.unlink(missing_ok=True)
         if made_asset: final_asset.unlink(missing_ok=True)
         final_root.rmdir(); raise
 
+def _rollback_final(asset: Path | None, sidecar: Path | None) -> None:
+    if asset is None or sidecar is None: return
+    sidecar.unlink(missing_ok=True); asset.unlink(missing_ok=True)
+    try: asset.parent.rmdir()
+    except OSError: pass
+
 def _summary(**values: Any) -> None:
     print(PREFIX+" "+stable_json_bytes(values).decode("ascii"),flush=True)
 
 def execute(args: argparse.Namespace) -> int:
     secret=os.environ.pop(KEY_ENV,""); token=os.environ.pop(TOKEN_ENV,"")
-    exact=""; run_id=""; asset_path=None; sidecar_path=None; local_run=None
+    exact=""; run_id=""; asset_path=None; sidecar_path=None; local_run=None; published=False
     try:
         root=Path(args.repo_root).resolve(); sink=Path(args.artifact_sink).resolve(); local=Path(args.local_work_root).resolve()
         exact=_git_exact(root,args.expected_exact); contract=load_content_v10_contract(root); units=_units(root)
@@ -108,10 +114,14 @@ def execute(args: argparse.Namespace) -> int:
         if len(pairs)!=1056: raise ValueError("Content V10 calibration pair count differs")
         fit=fit_weighted_joint_calibration(pairs); pairs.clear(); payload=_asset_payload(exact,contract.digest,public_digest,fit)
         staged_asset,staged_sidecar,digest=_stage_and_validate(local_run,payload,exact,contract.digest,public_digest,load_independent_calibration_asset)
+        complete={"status":"complete","completeness":"complete","scientific_status":"not_adjudicated","claim_ceiling":"v10_calibration_asset_generation_only_no_efficacy_claim","exact":exact,"manifest_digest":CALIBRATION_MANIFEST_DIGEST,"fixed_units":32,"committed_units":32,"failed_units":0,"pair_count":1056,"asset_path":str(asset_path),"sidecar_path":str(sidecar_path),"asset_sha256":digest}
+        complete_line=PREFIX+" "+stable_json_bytes(complete).decode("ascii")
         _publish_staged(staged_asset,staged_sidecar,asset_path,sidecar_path)
-        _summary(status="complete",completeness="complete",scientific_status="not_adjudicated",claim_ceiling="v10_calibration_asset_generation_only_no_efficacy_claim",exact=exact,manifest_digest=CALIBRATION_MANIFEST_DIGEST,fixed_units=32,committed_units=32,failed_units=0,pair_count=1056,asset_path=str(asset_path),sidecar_path=str(sidecar_path),asset_sha256=digest)
+        published=True
+        print(complete_line,flush=True)
         return 0
     except BaseException:
+        if published: _rollback_final(asset_path,sidecar_path)
         if local_run is not None: shutil.rmtree(local_run,ignore_errors=True)
         _summary(status="incomplete",completeness="incomplete",scientific_status="not_evaluable",claim_ceiling="v10_calibration_asset_generation_only_no_efficacy_claim",exact=exact,manifest_digest=CALIBRATION_MANIFEST_DIGEST,fixed_units=32,committed_units=0,failed_units=32,pair_count=0,asset_path=None,sidecar_path=None,asset_sha256=None)
         return 2

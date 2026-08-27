@@ -44,7 +44,7 @@ def allocate_texture_neutral(signals: Any) -> TextureNeutralAllocation:
     from cegwm.method.content_adaptive_v3 import allocate_content
     return TextureNeutralAllocation(allocate_content(replace(signals, texture_complexity=(0.0,)*16)), _summary(texture))
 
-def load_independent_calibration_asset(path: str | Path, sidecar: str | Path, *, producer_execution_exact: str | None = None, protocol_digest: str | None = None, calibration_public_key_digest: str | None = None) -> V10CalibrationAsset:
+def load_independent_calibration_asset(path: str |Path, sidecar: str | Path, *, producer_execution_exact: str, protocol_digest: str, calibration_public_key_digest: str) -> V10CalibrationAsset:
     raw = Path(path).read_bytes(); digest = hashlib.sha256(raw).hexdigest()
     if Path(sidecar).read_bytes() != f"{digest}  {Path(path).name}\n".encode("ascii"): raise ValueError("Content V10 calibration sidecar differs")
     value: Mapping[str, Any] = json.loads(raw)
@@ -53,7 +53,7 @@ def load_independent_calibration_asset(path: str | Path, sidecar: str | Path, *,
     if (value["lf_weight"],value["hf_weight"],value["lf_scorer_id"],value["hf_scorer_id"],value["calibration_manifest_digest"]) != (.25,.75,_LF_SCORER,_HF_SCORER,CALIBRATION_MANIFEST_DIGEST): raise ValueError("Content V10 calibration bindings differ")
     matcher=__import__("re").fullmatch
     if matcher(r"[0-9a-f]{40}",value["producer_execution_exact"]) is None or any(matcher(r"[0-9a-f]{64}",value[key]) is None for key in ("protocol_digest","calibration_public_key_digest")): raise ValueError("Content V10 calibration provenance differs")
-    if (producer_execution_exact is not None and value["producer_execution_exact"] != producer_execution_exact) or (protocol_digest is not None and value["protocol_digest"] != protocol_digest) or (calibration_public_key_digest is not None and value["calibration_public_key_digest"] != calibration_public_key_digest): raise ValueError("Content V10 calibration expected provenance differs")
+    if value["producer_execution_exact"] != producer_execution_exact or value["protocol_digest"] != protocol_digest or value["calibration_public_key_digest"] != calibration_public_key_digest: raise ValueError("Content V10 calibration expected provenance differs")
     values=tuple(float(value[x]) for x in ("mu_lf","sigma_lf","mu_hf","sigma_hf","rho"))
     if not all(math.isfinite(x) for x in values) or values[1]<=0 or values[3]<=0 or not -1<=values[4]<=1: raise ValueError("Content V10 calibration payload differs")
     return V10CalibrationAsset(*values)

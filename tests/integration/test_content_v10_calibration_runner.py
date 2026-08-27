@@ -26,6 +26,25 @@ class ContentV10CalibrationRunnerTests(unittest.TestCase):
    with self.assertRaises(RuntimeError): RUNNER._stage_and_validate(run,payload,'a'*40,'b'*64,'c'*64,mock.Mock(side_effect=RuntimeError('readback')))
    self.assertFalse((run/'staging').exists())
 
+ def test_final_publication_failures_clean_only_owned_run_directory(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root=Path(directory); stage=root/'stage'; stage.mkdir(); asset=stage/RUNNER.ASSET_FILENAME; sidecar=stage/(RUNNER.ASSET_FILENAME+'.sha256'); asset.write_bytes(b'asset'); sidecar.write_bytes(b'sidecar')
+   final=root/'sink'/'run'/RUNNER.ASSET_FILENAME; final_sidecar=final.with_name(final.name+'.sha256')
+   with mock.patch.object(Path,'open',side_effect=OSError('first write')):
+    with self.assertRaises(OSError): RUNNER._publish_staged(asset,sidecar,final,final_sidecar)
+   self.assertFalse(final.parent.exists())
+   original=Path.open; calls=[]
+   def second(path,*args,**kwargs):
+    calls.append(path)
+    if len(calls)==2: raise OSError('second write')
+    return original(path,*args,**kwargs)
+   with mock.patch.object(Path,'open',new=second):
+    with self.assertRaises(OSError): RUNNER._publish_staged(asset,sidecar,final,final_sidecar)
+   self.assertFalse(final.parent.exists())
+   kept=root/'sink'/'kept'; kept.mkdir(parents=True); protected=kept/RUNNER.ASSET_FILENAME; protected.write_bytes(b'old')
+   with self.assertRaises(FileExistsError): RUNNER._publish_staged(asset,sidecar,protected,protected.with_name(protected.name+'.sha256'))
+   self.assertEqual(protected.read_bytes(),b'old')
+
  def test_incomplete_maps_to_one_sanitized_summary_without_asset(self):
   with tempfile.TemporaryDirectory() as directory:
    root=Path(directory)/'repo'; root.mkdir(); sink=Path(directory)/'sink'; local=Path(directory)/'local'
