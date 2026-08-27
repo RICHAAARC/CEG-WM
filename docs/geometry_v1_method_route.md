@@ -75,7 +75,8 @@ references crossed with identity, D4, similarity, and crop-rescale transforms:
 eight pairs.  For each pair it independently recomputes reference and attacked
 observations at two layers, for Q and K, with matched-H and shuffled-H
 comparisons: 64 retained units.  Known `H` is truth-only.  E0 neither fits a
-threshold or reliability rule nor concludes a route outcome.
+threshold or reliability rule.  E0 does not conclude method success, detector
+success, or a scientific result.
 
 Its possible descriptive outcomes are:
 
