@@ -268,17 +268,30 @@ def _emit(fd: int, prefix: str, value: Mapping[str, Any]) -> None:
     os.write(fd, line)
 
 
+def _public_error_class(error: BaseException) -> str:
+    """A finite public diagnostic category; exception text never crosses it."""
+    if isinstance(error, (FileExistsError, FileNotFoundError, PermissionError, OSError)):
+        return "filesystem_error"
+    if isinstance(error, (ValueError, TypeError)):
+        return "validation_error"
+    if isinstance(error, subprocess.SubprocessError):
+        return "subprocess_error"
+    if isinstance(error, RuntimeError):
+        return "runtime_error"
+    return "unexpected_error"
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(); parser.add_argument("--repo-root", required=True); parser.add_argument("--expected-exact", required=True); parser.add_argument("--output-root", required=True); parser.add_argument("--control-fd", required=True, type=int)
-    args = parser.parse_args(argv); stage = "execution_identity"; summary = None; run_id = f"geometry-v1-qk-d0-{args.expected_exact[:12]}"
+    args = parser.parse_args(argv); stage = "run_d0"; summary = None; run_id = f"geometry-v1-qk-d0-{args.expected_exact[:12]}"
     try:
         summary, units = run_d0(expected_exact=args.expected_exact, repo_root=Path(args.repo_root), hf_token=os.environ.get("HF_TOKEN", ""))
         stage = "artifact_packaging"; package = _package(Path(args.output_root), summary, units, exact=args.expected_exact); stage = "control_channel"
         _emit(args.control_fd, SUCCESS_PREFIX, {"status": "success", "run_id": summary["run_id"], "d0_status": summary["d0_status"], "science_denominator": 0, "selected_layer_paths": summary["selection"].get("selected_layer_paths", []), **package})
         return 0
-    except BaseException:
+    except BaseException as error:
         if stage == "control_channel": return 1
-        try: _emit(args.control_fd, FAILURE_PREFIX, {"status": "failure", "run_id": run_id, "failure_point": stage, "artifact_status": "unavailable"})
+        try: _emit(args.control_fd, FAILURE_PREFIX, {"status": "failure", "run_id": run_id, "failure_point": stage, "error_class": _public_error_class(error), "artifact_status": "unavailable"})
         except BaseException: pass
         return 1
 

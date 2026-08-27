@@ -20,3 +20,7 @@ def test_d0_notebook_is_unexecuted_drive_first_and_single_runner_handoff() -> No
     for prohibited in ("zipfile", "read_bytes", "hashlib", "REFERENCES ="):
         assert prohibited not in source
     assert "science_denominator=0" in source and "Geometry-V1 D0 all-layer discovery handoff" in source
+    assert "'failure_point': receipt.get('failure_point')" in source
+    assert "'error_class': receipt.get('error_class')" in source
+    assert "def public_error_class(error):" in source and "type(error).__name__" not in source
+    assert "traceback" not in source and "stderr=subprocess.DEVNULL" in source

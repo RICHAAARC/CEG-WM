@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -166,3 +167,29 @@ def test_24_layer_shards_are_exact_and_bounds_fail_closed(tmp_path) -> None:
     units = tuple({**unit, "layer_path": f"transformer_blocks.{index}.attn"} for _pair in range(8) for index in range(24) for _kind in ("q", "k") for _control in ("matched_h", "shuffled_h"))
     RUNNER._package(tmp_path / "out", summary, units, exact="a" * 40)
     assert len(list((tmp_path / "out" / "layers").glob("*.zip"))) == 24
+
+
+def _main_failure_control(tmp_path, monkeypatch, *, run_d0, package) -> dict:
+    monkeypatch.setattr(RUNNER, "run_d0", run_d0); monkeypatch.setattr(RUNNER, "_package", package)
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--repo-root", str(tmp_path), "--expected-exact", "a" * 40,
+                           "--output-root", str(tmp_path / "out"), "--control-fd", str(write)])
+        line = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    assert rc == 1 and line.startswith(RUNNER.FAILURE_PREFIX.encode("ascii")) and line.endswith(b"\n")
+    return json.loads(line[len(RUNNER.FAILURE_PREFIX):])
+
+
+def test_main_reports_bounded_run_d0_and_artifact_failure_receipts(tmp_path, monkeypatch) -> None:
+    run_error = RuntimeError("secret /private/path must not cross control")
+    control = _main_failure_control(tmp_path, monkeypatch,
+        run_d0=lambda **_kwargs: (_ for _ in ()).throw(run_error), package=lambda *_a, **_k: pytest.fail("package"))
+    assert control == {"status": "failure", "run_id": "geometry-v1-qk-d0-" + "a" * 12,
+                       "failure_point": "run_d0", "error_class": "runtime_error", "artifact_status": "unavailable"}
+    summary = {"run_id": "geometry-v1-qk-d0-aaaaaaaaaaaa", "d0_status": "D0_STOPPED", "selection": {}}
+    control = _main_failure_control(tmp_path, monkeypatch,
+        run_d0=lambda **_kwargs: (summary, ()), package=lambda *_a, **_k: (_ for _ in ()).throw(OSError("private /path")))
+    assert control["failure_point"] == "artifact_packaging" and control["error_class"] == "filesystem_error"
+    assert b"secret" not in json.dumps(control, sort_keys=True).encode() and b"private" not in json.dumps(control, sort_keys=True).encode()
