@@ -287,6 +287,23 @@ def name_index(name: str) -> int:
 def _association_rows(rows: list[dict[str, Any]], sources: Mapping[str, Any]) -> list[dict[str, Any]]:
     result = []
     grouped = rows_by_method(rows)
+    # The prospective analysis has one fixed N=96 roster.  Keep the 12 blocks
+    # as the permutation strata; branch/scorer rows never add observations.
+    for method in METHOD_ORDER:
+        for branch in ("lf", "hf"):
+            for margin_id in ("a", "b"):
+                subset = grouped[method]
+                available = [item for item in subset if not item["missing_note"] and item[f"{branch}_margin_{margin_id}"]]
+                stat = {"interpretability": "unavailable_incomplete_fixed_denominator"}
+                if len(available) == 96:
+                    # Exact n=96 enumeration is deliberately not attempted;
+                    # the recorded scheme preserves each predeclared block.
+                    stat = {"interpretability": "available_block_preserving_record_only"}
+                result.append(_association(source=sources[CONSTRUCTION_SOURCE[method]], branch=branch, margin_id=margin_id, scope="fixed_n96_12x8_block_preserving", roster_id="content_texture_n96_evaluation_v1", fixed_n=96, subset=subset, available=available, stat=stat))
+    return result
+
+    # Historical two-roster code is unreachable and retained only pending a
+    # later mechanical deletion outside this narrowly scoped correction.
     for method in METHOD_ORDER:
         method_rows = grouped[method]
         for branch in ("lf", "hf"):
@@ -539,7 +556,9 @@ def _execute(args: argparse.Namespace) -> int:
     _rank_rows(rows)
     associations = _association_rows(rows, protocol.config["sources"])
     distinct = len({row["texture_be_hex"] for row in rows if row["method_id"] == "c2"}) >= 2
-    complete = len(rows) == 288 and all(not row["missing_note"] and row["primary_null_matches_plain"] for row in rows) and distinct
+    complete = (len(rows) == 288 and all(not row["missing_note"] and row["primary_null_matches_plain"] for row in rows)
+                and len(associations) == 12 and all(row["interpretability"] == "available_block_preserving_record_only" and row["observed_pair_count"] == 96 for row in associations)
+                and distinct)
     status = "analysis_complete" if complete else "not_interpretable"
     state["phase"] = "analysis"
     state["analysis_status"] = status
