@@ -26,17 +26,20 @@ def _units(*, eligible_layers: set[int] = set(), no_common: tuple[int, str] | No
     return [_unit(pair, kind, control, layer, eligible=layer in eligible_layers, no_common=no_common == (layer, kind)) for layer in range(24) for pair in RUNNER.PAIRS for kind in RUNNER.KINDS for control in RUNNER.CONTROLS]
 
 
-def _source(root: Path, *, leaked: dict | None = None) -> Path:
+def _source(root: Path, *, sidecar: str | None = None, leak: str | None = None, unit_value: str | None = None) -> Path:
     root.mkdir(); layers = root / "layers"; layers.mkdir(); units = _units(); shards = []
     for layer in range(24):
         target = layers / f"{layer:02d}.zip"; layer_units = [unit for unit in units if unit["layer_path"] == f"transformer_blocks.{layer}.attn"]
+        if layer == 0 and unit_value is not None: layer_units[0]["input_identity"] = {"sha256": unit_value}
         with zipfile.ZipFile(target, "x", zipfile.ZIP_DEFLATED) as archive:
             for ordinal, unit in enumerate(layer_units): archive.writestr(f"{ordinal:02d}.json", json.dumps(unit, sort_keys=True, separators=(",", ":")))
         shards.append({"filename": f"layers/{layer:02d}.zip", "layer_path": f"transformer_blocks.{layer}.attn", "unit_count": 32, "bytes": target.stat().st_size})
     receipt = {"run_id": RUNNER.SOURCE_RUN_ID, "protocol": RUNNER.SOURCE_PROTOCOL, "plan_digest": RUNNER.SOURCE_PLAN_DIGEST, "d0_status": RUNNER.SOURCE_STATUS, "science_denominator": 0, "declared_unit_count": 768, "calculated_unit_count": 768, "failed_unit_count": 0, "artifact_status": "complete", "operational_status": "complete", "operational_failure_point": None, "execution_identity": {"commit": RUNNER.SOURCE_EXACT}, "layer_shards": shards}
     manifest = {"run_id": RUNNER.SOURCE_RUN_ID, "protocol": RUNNER.SOURCE_PROTOCOL, "execution_exact": RUNNER.SOURCE_EXACT, "unit_count": 768, "layer_shards": shards}
-    if leaked: receipt.update(leaked)
-    (root / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8"); (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8"); (root / "terminal.json").write_text(json.dumps({"run_id": RUNNER.SOURCE_RUN_ID, "d0_status": RUNNER.SOURCE_STATUS}), encoding="utf-8")
+    terminal = {"run_id": RUNNER.SOURCE_RUN_ID, "d0_status": RUNNER.SOURCE_STATUS}
+    sidecars = {"receipt.json": receipt, "manifest.json": manifest, "terminal.json": terminal}
+    if sidecar is not None and leak is not None: sidecars[sidecar]["audit_note"] = leak
+    for name, value in sidecars.items(): (root / name).write_text(json.dumps(value), encoding="utf-8")
     return root
 
 
@@ -69,8 +72,25 @@ def test_route_audit_is_nonblocking_and_marks_all_layer_d4_crop_instability() ->
     assert all(item["all_layer_nonnegative"] for item in audit["per_transform"])
 
 
-def test_source_leak_fails_before_selection_or_packaging(monkeypatch, tmp_path) -> None:
-    source = _source(tmp_path / "source", leaked={"audit_note": "raw token material"})
+@pytest.mark.parametrize("sidecar", ("receipt.json", "manifest.json", "terminal.json"))
+@pytest.mark.parametrize("leak", ("audit note /mnt/private/source", "Bearer opaque-value", "authentication token material"))
+def test_root_sidecar_leaks_fail_before_selection_or_packaging(monkeypatch, tmp_path, sidecar, leak) -> None:
+    source = _source(tmp_path / "source", sidecar=sidecar, leak=leak)
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    monkeypatch.setattr(RUNNER, "_selection", lambda _units: pytest.fail("selection must not run"))
+    monkeypatch.setattr(RUNNER, "_package", lambda *_args: pytest.fail("package must not run"))
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--repo-root", str(tmp_path), "--expected-exact", "a" * 40, "--source-root", str(source), "--output-root", str(tmp_path / "out"), "--control-fd", str(write)])
+        line = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    control = json.loads(line[len(RUNNER.FAILURE_PREFIX):])
+    assert rc == 1 and control["failure_point"] == "source_validation" and control["error_class"] == "validation_error"
+
+
+def test_unit_value_leak_fails_before_selection_or_packaging(monkeypatch, tmp_path) -> None:
+    source = _source(tmp_path / "source", unit_value="embedded /mnt/private/source")
     monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
     monkeypatch.setattr(RUNNER, "_selection", lambda _units: pytest.fail("selection must not run"))
     monkeypatch.setattr(RUNNER, "_package", lambda *_args: pytest.fail("package must not run"))
