@@ -92,12 +92,16 @@ class ContentV6InjectionCallback:
         detection_key: str | bytes | bytearray | memoryview,
         assets: ContentV6EvaluationAssets,
         beta: float,
+        *, allocation_factory: Any = allocate_content,
     ) -> None:
         if not isinstance(assets, ContentV6EvaluationAssets):
             raise TypeError("Content V6 callback requires evaluation assets")
         self._detection_key = detection_key
         self._assets = assets
         self._beta = beta
+        if not callable(allocation_factory):
+            raise TypeError("Content V6 allocation factory must be callable")
+        self._allocation_factory = allocation_factory
         self._measurement: ContentAdaptiveMeasurement | None = None
 
     @property
@@ -139,7 +143,7 @@ class ContentV6InjectionCallback:
             return _probe_observation(_decode_callback_latents(pipeline, candidate), embed)
 
         probes = evaluate_public_probes(latents, baseline, probe_evaluator)
-        allocation = allocate_content(ContentSignals(
+        allocation = self._allocation_factory(ContentSignals(
             semantic,
             texture,
             probes.lf_two_scale_response_consistency,
@@ -220,6 +224,7 @@ def _run_content_v6_pass2(
     height: int,
     width: int,
     generator: torch.Generator,
+    allocation_factory: Any = allocate_content,
 ) -> tuple[Image.Image, ContentAdaptiveMeasurement]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("embedding prompt must be non-empty text")
@@ -231,7 +236,7 @@ def _run_content_v6_pass2(
     ):
         raise ValueError("image dimensions must be integers of at least 256")
     _validate_pipeline(pipeline)
-    callback = ContentV6InjectionCallback(detection_key, assets, beta)
+    callback = ContentV6InjectionCallback(detection_key, assets, beta, allocation_factory=allocation_factory)
     result = pipeline(
         prompt=prompt,
         num_inference_steps=20,

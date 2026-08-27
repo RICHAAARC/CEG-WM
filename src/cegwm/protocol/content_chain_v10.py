@@ -17,7 +17,7 @@ def load_content_v10_contract(root: str | Path) -> ContentV10Contract:
     raw = (Path(root) / CONFIG_PATH).read_bytes()
     value = json.loads(raw)
     expected = {"schema_version": 1, "method_id": METHOD_ID,
-        "base_method_id": "content_v9_calibrated_weighted_joint_v1",
+        "base_method_id": "content_v9_v6_calibrated_weighted_joint_v1",
         "texture_contribution": "fixed_0.5_no_allocation_authority",
         "joint_weights": {"lf": .25, "hf": .75}}
     if any(value.get(k) != v for k, v in expected.items()):
