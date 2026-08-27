@@ -21,7 +21,7 @@ def test_notebook_is_valid_unexecuted_and_mounts_drive_first() -> None:
 
 def test_notebook_binds_source_and_detached_runner_with_one_child() -> None:
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8")); source = _code(notebook); ast.parse(source)
-    assert "DIRECTION_RUNNER_EXACT = '4be67408ac353bd7adfa7c3662af55d579b888de'" in source
+    assert "DIRECTION_RUNNER_EXACT = '41742d462d62525189855c8ebb2ee1995fb9230a'" in source
     assert "SOURCE_D0_EXACT = '4732211beefbeface95cb842c117b9719e362f1a'" in source
     assert "geometry-v1-qk-d0-4732211beefb" in source and "geometry-v1-qk-d0-all-layer-discovery-v1" in source
     assert "/content/drive/MyDrive/CEG-WM/Geometry-V1/D0/Geometry-V1-QK-D0-4732211beefb-20260827T064555Z" in source
