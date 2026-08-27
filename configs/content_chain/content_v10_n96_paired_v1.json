@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "analysis_id": "content_v10_n96_paired_texture_allocator_v1",
+  "claim_ceiling": "exploratory_prospective_paired_texture_allocator_evaluation_no_superiority_claim",
+  "n96_manifest": {"path": "configs/content_chain/content_texture_n96_evaluation_v1.jsonl", "sha256": "73cdb9d6b840490567dd2a40dbf1bd10140e52ae46a43d00fdc01b24a9bc1fb8", "fixed_units": 96, "common_plain_per_unit": 1, "beta_per_unit": 1},
+  "c1_precondition": {"accepted_v10_asset_required": true, "calibration_manifest_sha256": "ae35cef6fa997a375987f77456aada0badcd7be3e029fd5115ebf3398dea5af5", "fixed_units": 32, "asset_readback_required": true},
+  "v9_precondition": {"asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96", "fitter_forbidden": true},
+  "paired_arms": {"v9": "default_allocate_content", "v10": "allocate_texture_neutral", "same_seed": true, "same_registered_and_16_wrong_keys": true, "scorers": ["content_v4_whitened_lf_dct_matched_cosine_v1", "frozen_hf_final_rgb_public_vae_global_normalized_correlation"]},
+  "statistics": {"margin_a": "registered_minus_max_wrong", "margin_b": "registered_minus_common_plain_registered", "paired": ["v10_minus_v9_mean", "v10_minus_v9_positive_count"], "texture_spearman": "tie_aware_method_margins_and_deltas", "joint": "whole_system_descriptive_only"},
+  "completion": {"fixed_denominator": 96, "any_arm_or_unit_failure": "rc2_incomplete"},
+  "compute": {"c1_diffusion_calls": 64, "n96_diffusion_calls": 288, "total_diffusion_calls": 352}
+}

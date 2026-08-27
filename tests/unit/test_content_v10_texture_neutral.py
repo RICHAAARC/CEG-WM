@@ -1,6 +1,6 @@
 import hashlib, importlib.util, json, sys, tempfile, unittest
 from pathlib import Path
-from cegwm.protocol.content_chain_v10 import CALIBRATION_MANIFEST_DIGEST, METHOD_ID, TEXTURE_N96_MANIFEST_DIGEST, load_content_v10_contract
+from cegwm.protocol.content_chain_v10 import CALIBRATION_MANIFEST_DIGEST, METHOD_ID, TEXTURE_N96_MANIFEST_DIGEST, load_content_v10_contract, load_content_v10_n96_paired_contract
 
 _PATH=Path(__file__).parents[2]/"src/cegwm/method/content_v10_texture_neutral.py"
 _SPEC=importlib.util.spec_from_file_location("v10_method",_PATH); _MODULE=importlib.util.module_from_spec(_SPEC); sys.modules["v10_method"]=_MODULE; _SPEC.loader.exec_module(_MODULE)
@@ -8,6 +8,12 @@ load_independent_calibration_asset=_MODULE.load_independent_calibration_asset; w
 def _load_asset(path,sidecar): return load_independent_calibration_asset(path,sidecar,producer_execution_exact="b"*40,protocol_digest="c"*64,calibration_public_key_digest="d"*64)
 
 class ContentV10Tests(unittest.TestCase):
+ def test_n96_paired_contract_binds_frozen_manifest_and_disjoint_c1(self):
+  root=Path(__file__).parents[2]; contract=load_content_v10_n96_paired_contract(root)
+  self.assertEqual(contract.config['n96_manifest']['sha256'],TEXTURE_N96_MANIFEST_DIGEST)
+  self.assertEqual(contract.config['v9_precondition']['asset_sha256'],'63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96')
+  self.assertEqual(contract.config['compute']['total_diffusion_calls'],352)
+  self.assertEqual(contract.config['completion'],{'fixed_denominator':96,'any_arm_or_unit_failure':'rc2_incomplete'})
  def test_calibration_roster_is_frozen_and_disjoint_from_texture_n96(self):
   root=Path(__file__).parents[2]
   calibration=root/'configs/content_chain/content_v10_calibration_v1.jsonl'
