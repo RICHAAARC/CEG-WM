@@ -1,6 +1,7 @@
 """Static contract checks for the thin Geometry-V1 QK-E0 Colab handoff."""
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -34,6 +35,24 @@ def test_notebook_builds_the_fixed_eight_pair_plan_and_calls_existing_runner_onc
     assert code.count("subprocess.Popen(") == 1
     assert "RUNNER_PATH = 'experiments/run_geometry_v1_qk_equivariance_operational.py'" in code
     assert "Known H is evaluation truth only" in code
+
+
+def test_fixed_layer_pair_has_one_assignment_and_flows_directly_to_the_plan() -> None:
+    tree = ast.parse(_code(_notebook()))
+    assignments = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "ATTENTION_LAYER_PATHS" for target in node.targets)
+    ]
+    assert len(assignments) == 1
+    value = assignments[0].value
+    assert isinstance(value, ast.List) and [element.value for element in value.elts if isinstance(element, ast.Constant)] == ["transformer_blocks.0.attn", "transformer_blocks.23.attn"]
+    assert not any(isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id == "ATTENTION_LAYER_PATHS" for node in ast.walk(tree))
+    plan_values = [
+        value for node in ast.walk(tree) if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values)
+        if isinstance(key, ast.Constant) and key.value == "attention_layer_paths"
+    ]
+    assert len(plan_values) == 1 and isinstance(plan_values[0], ast.Name) and plan_values[0].id == "ATTENTION_LAYER_PATHS"
 
 
 def test_runner_command_and_compact_control_are_bound_to_the_actual_checkout() -> None:
