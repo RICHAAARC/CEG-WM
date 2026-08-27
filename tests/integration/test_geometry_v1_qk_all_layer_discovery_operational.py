@@ -44,9 +44,30 @@ def test_fixed_plan_is_eight_pairs_and_known_h_has_deterministic_cyclic_shuffle(
     assert plan["protocol"] == RUNNER.PROTOCOL and plan["declared_unit_count"] == 768 and len(plan["pairs"]) == 8
     assert [p["transform_label"] for p in plan["pairs"][:4]] == list(RUNNER.TRANSFORMS)
     assert plan["pairs"][0]["shuffled_h"] == plan["pairs"][1]["matched_h"]
-    # A source-grid center follows the crop/rescale matrix into the same output location.
-    h = np.asarray(plan["pairs"][3]["matched_h"]); point = np.array([48., 32., 1.])
-    assert np.allclose((h @ point)[:2], (0., 0.))
+    # PIL uses output pixel indices; H uses pixel centres.  Verify the public
+    # inverse-coordinate contract against the actual Pillow affine interface,
+    # rather than merely re-evaluating the runner's H constants.
+    for pair in plan["pairs"]:
+        source = RUNNER._reference(pair["reference_id"])
+        attacked, matrix = RUNNER._attack(source, pair["transform_label"])
+        assert attacked.size == (512, 512)
+        h = np.asarray(matrix)
+        if pair["transform_label"] == "identity":
+            assert np.allclose(h @ np.array([31.5, 77.5, 1.]), [31.5, 77.5, 1.])
+        elif pair["transform_label"] == "d4":
+            assert np.allclose(h @ np.array([31.5, 77.5, 1.]), [434.5, 31.5, 1.])
+            assert attacked.getpixel((434, 31)) == source.getpixel((31, 77))
+        elif pair["transform_label"] == "similarity":
+            coefficients = RUNNER._pillow_inverse_affine(h)
+            destination_index = np.array([257., 199.])
+            source_index = np.array([[coefficients[0], coefficients[1]], [coefficients[3], coefficients[4]]]) @ destination_index + np.array([coefficients[2], coefficients[5]])
+            inverse_source_centre = np.linalg.inv(h) @ np.array([257.5, 199.5, 1.])
+            assert np.allclose(source_index + .5, inverse_source_centre[:2])
+        else:
+            # The first crop pixel centre remains (48.5,32.5), and the last
+            # maps to the last output centre under Pillow crop+resize.
+            assert np.allclose(h @ np.array([48.5, 32.5, 1.]), [.5, .5, 1.])
+            assert np.allclose(h @ np.array([463.5, 447.5, 1.]), [511.5, 511.5, 1.])
 
 
 def test_discovery_accepts_only_complete_contiguous_sample_side_roster() -> None:
@@ -64,6 +85,28 @@ def test_d0_observes_ten_images_and_retains_all_768_ordered_units(monkeypatch, t
     summary, units = RUNNER.run_d0(expected_exact="a" * 40, repo_root=tmp_path, hf_token="secret", loader=lambda *_a, **_k: _Pipeline(), observer=observer)
     assert len(calls) == 10 and len(units) == 768 and summary["science_denominator"] == 0
     assert [(u["pair_id"], u["layer_path"], u["descriptor_kind"], u["control_label"]) for u in units[:4]] == [("reference_a-identity", "transformer_blocks.0.attn", "q", "matched_h"), ("reference_a-identity", "transformer_blocks.0.attn", "q", "shuffled_h"), ("reference_a-identity", "transformer_blocks.0.attn", "k", "matched_h"), ("reference_a-identity", "transformer_blocks.0.attn", "k", "shuffled_h")]
+
+
+def test_reference_failure_still_attempts_ten_observations_and_keeps_768(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected); calls = []
+    def observer(image, *, pipeline, spec):
+        calls.append(image.size)
+        if len(calls) == 1: raise RuntimeError("reference unavailable")
+        return _observation(spec.attention_layer_paths)
+    _summary, units = RUNNER.run_d0(expected_exact="a" * 40, repo_root=tmp_path, hf_token="secret", loader=lambda *_a, **_k: _Pipeline(), observer=observer)
+    assert len(calls) == 10 and len(units) == 768
+    assert {item["failure_reason"] for item in units[:384]} == {"reference_observation_failed"}
+
+
+def test_global_observer_and_model_failures_keep_full_ordered_denominator(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected); calls = []
+    def observer(image, *, pipeline, spec):
+        calls.append(image.size); error = RuntimeError("transformer")
+        setattr(error, "geometry_failure_point", "transformer_call"); raise error
+    summary, units = RUNNER.run_d0(expected_exact="a" * 40, repo_root=tmp_path, hf_token="secret", loader=lambda *_a, **_k: _Pipeline(), observer=observer)
+    assert len(calls) == 10 and len(units) == 768 and {item["failure_reason"] for item in units} == {"global_transformer_failure"}
+    summary, units = RUNNER.run_d0(expected_exact="a" * 40, repo_root=tmp_path, hf_token="secret", loader=lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("model")), observer=lambda *_a, **_k: pytest.fail("observer must not run"))
+    assert summary["d0_status"] == "D0_STOPPED" and len(units) == 768 and {item["failure_reason"] for item in units} == {"model_or_topology_unavailable"}
 
 
 def test_24_layer_shards_are_exact_and_bounds_fail_closed(tmp_path) -> None:

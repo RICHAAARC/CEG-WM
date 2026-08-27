@@ -79,23 +79,35 @@ def _reference(reference_id: str) -> Image.Image:
 
 def _homography_similarity() -> np.ndarray:
     angle = np.deg2rad(12.0); scale = .90; c, s = np.cos(angle) * scale, np.sin(angle) * scale
-    center = np.array([255.5, 255.5]); translation = np.array([16.0, -12.0])
+    # The harness records pixel centres, so a 512x512 image centre is (256,256).
+    center = np.array([256., 256.]); translation = np.array([16.0, -12.0])
     offset = center + translation - np.array([[c, -s], [s, c]]) @ center
     return np.array([[c, -s, offset[0]], [s, c, offset[1]], [0., 0., 1.]])
+
+
+def _pillow_inverse_affine(h: np.ndarray) -> tuple[float, float, float, float, float, float]:
+    """Convert a centre-coordinate H into Pillow's destination-index inverse."""
+    inverse = np.linalg.inv(h); linear, offset = inverse[:2, :2], inverse[:2, 2]
+    # Pillow's affine coefficients receive integer pixel indices, while the
+    # harness H maps pixel centres.  Convert dst index -> dst centre, apply
+    # inverse H, then convert source centre -> source index.
+    index_offset = linear @ np.array([.5, .5]) + offset - .5
+    return (float(linear[0, 0]), float(linear[0, 1]), float(index_offset[0]),
+            float(linear[1, 0]), float(linear[1, 1]), float(index_offset[1]))
 
 
 def _attack(image: Image.Image, label: str) -> tuple[Image.Image, list[list[float]]]:
     if label == "identity": return image.copy(), np.eye(3).tolist()
     if label == "d4":
         # Pillow transpose is an exact clockwise D4 action in the 512 source grid.
-        return image.transpose(Image.Transpose.ROTATE_270), [[0., -1., 511.], [1., 0., 0.], [0., 0., 1.]]
+        return image.transpose(Image.Transpose.ROTATE_270), [[0., -1., 512.], [1., 0., 0.], [0., 0., 1.]]
     if label == "similarity":
-        h = _homography_similarity(); inverse = np.linalg.inv(h)
-        coeff = tuple(inverse[:2, :].reshape(-1).tolist())
-        return image.transform((512, 512), Image.Transform.AFFINE, coeff, resample=Image.Resampling.BICUBIC), h.tolist()
+        h = _homography_similarity()
+        return image.transform((512, 512), Image.Transform.AFFINE, _pillow_inverse_affine(h), resample=Image.Resampling.BICUBIC), h.tolist()
     if label == "crop_rescale":
-        # Source pixel centers map to enlarged crop coordinates.
-        return image.crop((48, 32, 464, 448)).resize((512, 512), Image.Resampling.BICUBIC), [[512/416, 0., -48 * 512/416], [0., 512/416, -32 * 512/416], [0., 0., 1.]]
+        scale = 512 / 416
+        # Crop source centre (48.5,32.5) maps to output centre (.5,.5).
+        return image.crop((48, 32, 464, 448)).resize((512, 512), Image.Resampling.BICUBIC), [[scale, 0., .5 - 48.5 * scale], [0., scale, .5 - 32.5 * scale], [0., 0., 1.]]
     raise ValueError("unknown_transform")
 
 
@@ -183,26 +195,31 @@ def run_d0(*, expected_exact: str, repo_root: Path, hf_token: str, loader: Calla
     plan, plan_bytes = build_fixed_plan(), None
     plan_bytes = _json(plan, MAX_ROOT_BYTES); exact = _exact(expected_exact, repo_root); run_id = f"geometry-v1-qk-d0-{exact[:12]}"
     paths: tuple[str, ...] = tuple(f"transformer_blocks.{i}.attn" for i in range(24)); units: list[dict[str, Any]] = []
-    runtime: dict[str, Any] = {}; pipeline = None; status, failure_point = "D0_STOPPED", "model_load"
+    runtime: dict[str, Any] = {}; pipeline = None; status, failure_point = "D0_STOPPED", "model_load"; global_reason = "model_or_topology_unavailable"
     try:
         pipeline = loader(MODEL_ID, torch_dtype=torch.float16, token=hf_token)
         if hasattr(pipeline, "to"): pipeline = pipeline.to("cuda" if torch.cuda.is_available() else "cpu")
         paths, topology = _discover(pipeline.transformer)
         runtime = {"pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}", "resolved_public_revision": getattr(pipeline, "_commit_hash", None), "topology": topology}
-        spec = _spec(pipeline, paths); status, failure_point = "D0_UNRESOLVED", None
+        spec = _spec(pipeline, paths); status, failure_point, global_reason = "D0_UNRESOLVED", None, None
     except BaseException:
         spec = None
     for ref in ("reference_a", "reference_b"):
-        reference = None
+        reference = None; reference_reason = None
         if spec is not None:
             try: reference = observer(_reference(ref), pipeline=pipeline, spec=spec)
-            except BaseException: failure_point = "image_observation"
+            except BaseException as error:
+                reference_reason, failure_point = "reference_observation_failed", "image_observation"
+                if getattr(error, "geometry_failure_point", None) == "transformer_call": global_reason = "global_transformer_failure"
         for pair in (item for item in plan["pairs"] if item["reference_id"] == ref):
             attacked = None; reason = None
-            if reference is None: reason = "runtime_not_observed"
+            if spec is None: reason = global_reason
             else:
                 try: attacked = observer(_attack(_reference(ref), pair["transform_label"])[0], pipeline=pipeline, spec=spec)
-                except BaseException: reason = "image_observation_failed"; failure_point = "image_observation"
+                except BaseException as error:
+                    reason, failure_point = "attacked_observation_failed", "image_observation"
+                    if getattr(error, "geometry_failure_point", None) == "transformer_call": global_reason = "global_transformer_failure"
+                if reference_reason is not None: reason = reference_reason
             for path in paths:
                 for kind in KINDS:
                     for control in CONTROLS:
@@ -210,7 +227,12 @@ def run_d0(*, expected_exact: str, repo_root: Path, hf_token: str, loader: Calla
                         except (AttributeError, KeyError, TypeError, ValueError): units.append(_failure(pair, path, kind, control, "layer_observation_or_calculation_failed"))
         del reference
     if len(units) != UNIT_COUNT: raise RuntimeError("d0_fixed_unit_expansion_mismatch")
-    if spec is not None:
+    if global_reason is not None:
+        units = [_failure(pair, path, kind, control, global_reason)
+                 for pair in plan["pairs"] for path in paths for kind in KINDS for control in CONTROLS]
+    if global_reason is not None:
+        status, selected, selection = "D0_STOPPED", [], {"selection_rule_id": "d0-stratum-median-lexicographic-v1", "plan_digest": _sha(plan_bytes)}
+    elif spec is not None:
         status, selected, selection = _status_and_selection(units, paths, plan)
     else: selected, selection = [], {"selection_rule_id": "d0-stratum-median-lexicographic-v1", "plan_digest": _sha(plan_bytes)}
     summary = {"schema": "geometry-v1-qk-d0-operational-v1", "protocol": PROTOCOL, "run_id": run_id, "execution_identity": {"commit": exact}, "plan_digest": _sha(plan_bytes), "operational_status": "complete" if failure_point is None else "failure", "d0_status": status, "science_denominator": 0, "declared_unit_count": UNIT_COUNT, "calculated_unit_count": sum(u["status"] == "calculated" for u in units), "failed_unit_count": sum(u["status"] == "failed" for u in units), "operational_failure_point": failure_point, "runtime": runtime, "selection": selection, "artifact_status": "unavailable"}
