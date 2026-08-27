@@ -268,7 +268,7 @@ def _v5_validate(root: Path, bindings: Mapping[str, Any]) -> None:
     _event({"event": "v5_validated", "reuse_source_method": "v4"})
 
 
-def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: str, *, event_method: str = "v6") -> None:
+def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: str, output_root: Path | None = None, *, event_method: str = "v6") -> None:
     from experiments import run_content_v6_clean as runner
     from experiments import run_content_adaptive_dual_branch_v2_clean as engine
     from cegwm.shared.keys import normalize_detection_key
@@ -280,7 +280,20 @@ def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: st
     wrong = engine._wrong_keys(key, protocol)
     for unit in units:
         try:
-            output = runner._run_pair(pipeline, unit["prompt"], key, assets, height=512, width=512, seed=unit["seed"])
+            if output_root is None:
+                output = runner._run_pair(pipeline, unit["prompt"], key, assets, height=512, width=512, seed=unit["seed"])
+            else:
+                from PIL import Image
+                from cegwm.method.content_iss_v6 import content_v6_h, iss_beta
+                from cegwm.runtime.content_iss_sd35_v6 import _generator, _run_content_v6_pass2
+                bindings = {item["global_ordinal"]: item for item in _json(str(output_root / "plain_bindings.json")) if item.get("status") == "success"}
+                binding = bindings.get(unit["global_ordinal"])
+                if not isinstance(binding, dict) or not isinstance(binding.get("relative_path"), str): raise RuntimeError("common plain binding missing")
+                with Image.open(output_root / binding["relative_path"]) as opened: null = opened.convert("RGB").copy()
+                evaluation = assets.evaluation_assets
+                beta = iss_beta(content_v6_h(null, key, evaluation.lf_public_assets), evaluation.iss_asset)
+                image, _measurement = _run_content_v6_pass2(pipeline, unit["prompt"], key, evaluation, beta, height=512, width=512, generator=_generator(unit["seed"]))
+                output = type("C6Output", (), {"image": image, "primary_null": null})()
             score = lambda image: engine._flat_scores(engine._blind_scores_with_lf_scorer(image, key, wrong, assets.hf_public_assets, assets.lf_public_assets, runner.score_content_v4_lf_image))
             _emit_success(event_method, unit, output.image, output.primary_null, score(output.image), score(output.primary_null))
         except Exception as error:
@@ -360,7 +373,7 @@ def execute(args: argparse.Namespace) -> int:
         elif args.phase == "v5_validate":
             _v5_validate(root, bindings)
         elif args.phase in {"v6", "c6"}:
-            _paired_v6(root, units, key, token, event_method=args.phase)
+            _paired_v6(root, units, key, token, output, event_method=args.phase)
         elif args.phase == "v7":
             _paired_v7(root, units, key, token, Path(args.v7_asset_root))
         elif args.phase == "v8":

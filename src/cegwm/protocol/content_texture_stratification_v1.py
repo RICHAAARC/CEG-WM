@@ -101,7 +101,7 @@ def load_protocol(repo_root: str | Path) -> TextureProtocol:
                 or not isinstance(unit["prompt"], str) or not unit["prompt"].strip()
                 or _PROMPT_FORBIDDEN.search(unit["prompt"])):
             raise ValueError("texture N96 unit fields differ")
-    if config["evaluation"].get("calibration_manifest_binding_status") != "pending_separate_C1":
+    if config["evaluation"].get("calibration_manifest_binding_status") != "not_applicable_until_E1" or config["evaluation"].get("future_calibration_preflight") != "not_applicable_until_E1":
         raise ValueError("texture calibration binding differs")
     digest = sha256_bytes(stable_json_bytes(config))
     return TextureProtocol(root, config, digest, f"content-texture-stratification-v1-{digest[:12]}")

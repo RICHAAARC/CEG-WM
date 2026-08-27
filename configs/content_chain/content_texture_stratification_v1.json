@@ -29,14 +29,14 @@
   "claim_ceiling": "exploratory_prospective_texture_stratification_only",
   "dino_asset_id": "facebook/dinov2-small",
   "evaluation": {
-    "calibration_manifest_binding_status": "pending_separate_C1",
+    "calibration_manifest_binding_status": "not_applicable_until_E1",
     "constructions": [
       "c2",
       "c3",
       "c6"
     ],
     "fixed_denominator": 96,
-    "future_calibration_preflight": "digest_required_distinct_and_unit_prompt_seed_disjoint"
+    "future_calibration_preflight": "not_applicable_until_E1"
   },
   "execution": {
     "callback_writes": 288,

@@ -87,6 +87,7 @@ class TextureProtocolTests(unittest.TestCase):
         protocol = load_protocol(ROOT)
         self.assertEqual(list(protocol.config["sources"]), ["v2", "v3", "v4", "v5", "v6", "v7", "v8"])
         self.assertEqual(protocol.config["execution"], {"plain_generations": 96, "candidate_generations": 288, "total_diffusion_calls": 384, "callback_writes": 288, "probe_evaluations": 18432, "score_vectors": 960, "primitive_blind_scorer_calls": 16320, "candidate_unit_rows": 288, "checkpoint_scope": "local_transient", "resume_allowed": False})
+        self.assertEqual(protocol.config["evaluation"]["calibration_manifest_binding_status"], "not_applicable_until_E1")
         self.assertEqual(protocol.config["claim_ceiling"], "exploratory_prospective_texture_stratification_only")
         self.assertEqual(len(protocol.protocol_digest), 64)
 

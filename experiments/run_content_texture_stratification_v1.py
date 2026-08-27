@@ -214,6 +214,7 @@ def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path
         command += ["--v8-asset-root", str(v8_asset)]
     child_env = {**os.environ, **env, "HF_HOME": str(cache)}
     process = subprocess.Popen(command, cwd=source, env=child_env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="strict")
+    expected_events = 3 if phase == "asset_prefetch" else 98
     events = []
     assert process.stdout is not None
     for line in process.stdout:
@@ -222,11 +223,11 @@ def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path
             raise RuntimeError("adapter output line exceeds bound")
         if line.startswith(EVENT_PREFIX):
             events.append(_adapter_event(line))
-            if len(events) > 64:
+            if len(events) > expected_events:
                 process.kill()
                 raise RuntimeError("adapter event count exceeds bound")
     rc = process.wait()
-    if rc != 0 or not events or events[-1] != {"event": "phase_complete", "phase": phase}:
+    if rc != 0 or len(events) != expected_events or events[-1] != {"event": "phase_complete", "phase": phase}:
         raise RuntimeError("adapter phase failed or ended out of order")
     return events
 
