@@ -18,7 +18,7 @@ REFS=("d2_confirmation_a","d2_confirmation_b"); TRANSFORMS=("identity","d4","sim
 UNIT_COUNT=64; MAX_CONTROL_BYTES=1024; MAX_ROOT_BYTES=262144; MAX_UNIT_BYTES=16384; MAX_LAYER_UNIT_BYTES=524288; MAX_LAYER_ZIP_BYTES=1048576; MAX_SOURCE_BYTES=50331648
 SUCCESS_PREFIX="CEGWM_GEOMETRY_V1_QK_D2 "; FAILURE_PREFIX="CEGWM_GEOMETRY_V1_QK_D2_FAILURE "
 UNIT_FIELDS=frozenset(("pair_id","transform_label","control_label","descriptor_kind","layer_path","reference_grid","attacked_grid","input_identity","h_identity","status","failure_reason","candidate_correspondences","true_match_ranks","coverage","ambiguity_gaps","fit_residual","recovery_error"))
-_LEAKS=(re.compile(r"\braw\s*(?:q\s*/\s*k|qk|query|key|token(?:\s+material)?)\b",re.I),re.compile(r"\b(?:hf[_ -]?token|access[_ -]?token|auth(?:entication)?[_ -]?token|api[_ -]?key|bearer\s+[a-z0-9._-]+|token\s+(?:material|credential|secret|value|data)|credential(?:s)?(?:\s+(?:material|value|data))?)\b",re.I))
+_LEAKS=(re.compile(r"\braw\s*(?:q\s*/\s*k|qk|query|key|token(?:\s+material)?)\b",re.I),re.compile(r"\b(?:hf[_ -]?token|access[_ -]?token|auth(?:entication)?[_ -]?token|api[_ -]?key|bearer\s+[a-z0-9._-]+|token\s+(?:material|credential|secret|value|data)|credential(?:s)?(?:\s+(?:material|value|data))?)\b",re.I),re.compile(r"\b(?:raw\s+weights?|model\s+weights?|weight\s+tensors?)\b",re.I))
 _hs=importlib.util.spec_from_file_location("d2_harness",Path(__file__).with_name("run_geometry_v1_qk_equivariance_preflight.py")); assert _hs and _hs.loader; HARNESS=importlib.util.module_from_spec(_hs); _hs.loader.exec_module(HARNESS)
 
 def _json(v:Any,m:int)->bytes:
@@ -43,7 +43,8 @@ def _reject_leak(v:Any,depth:int=0)->None:
  if depth>64:raise ValueError("public_value_structure_depth_exceeded")
  if isinstance(v,Mapping):
   for k,x in v.items():
-   if not isinstance(k,str) or any(z in k.lower() for z in ("raw","token","prompt","latent","secret","hf_","weight","private","image_bytes")):raise ValueError("forbidden_public_field")
+   low=k.lower() if isinstance(k,str) else "";bad=any(z in low for z in ("raw","token","prompt","latent","secret","hf_","private","image_bytes")) or ("weight" in low and low!="two_reference_equal_weight_median")
+   if not isinstance(k,str) or bad:raise ValueError("forbidden_public_field")
    _reject_leak(x,depth+1)
  elif isinstance(v,list):
   for x in v:_reject_leak(x,depth+1)
@@ -79,7 +80,7 @@ def _pillow_inv(h:np.ndarray)->tuple[float,...]:
  inv=np.linalg.inv(h);L,o=inv[:2,:2],inv[:2,2];z=L@np.array([.5,.5])+o-.5;return(float(L[0,0]),float(L[0,1]),float(z[0]),float(L[1,0]),float(L[1,1]),float(z[1]))
 def _attack(im:Image.Image,label:str)->tuple[Image.Image,list[list[float]]]:
  if label=="identity":return im.copy(),np.eye(3).tolist()
- if label=="d4":return im.transpose(Image.Transpose.ROTATE_270),[[0.,-1.,512.],[1.,0.,0.],[0.,0.,1.]]
+ if label=="d4":return im.transpose(Image.Transpose.ROTATE_90),[[0.,1.,0.],[-1.,0.,512.],[0.,0.,1.]]
  if label=="similarity":h=_sim_h();return im.transform((512,512),Image.Transform.AFFINE,_pillow_inv(h),resample=Image.Resampling.BICUBIC),h.tolist()
  if label=="crop_rescale":
   l,t,r,b=32,44,476,468;sx,sy=512/(r-l),512/(b-t);return im.crop((l,t,r,b)).resize((512,512),Image.Resampling.BICUBIC),[[sx,0.,-l*sx],[0.,sy,-t*sy],[0.,0.,1.]]
@@ -89,7 +90,7 @@ def build_fixed_plan()->dict[str,Any]:
  for r in REFS:
   for i,t in enumerate(TRANSFORMS):
    _,mh=_attack(_reference(r),t);_,sh=_attack(_reference(r),TRANSFORMS[(i+1)%4]);pairs.append({"reference_id":r,"pair_id":f"{r}-{t}","transform_label":t,"matched_h":mh,"shuffled_h":sh,"resampler":"PIL.Image.Resampling.BICUBIC"})
- return {"schema":"geometry-v1-qk-d2-plan-v1","protocol":PROTOCOL,"reference_recipe_ids":{REFS[0]:"d2-procedural-seed-3141",REFS[1]:"d2-procedural-seed-5926"},"public_observation_seed":73,"attention_layer_paths":list(ATTENTION_LAYER_PATHS),"pairs":pairs,"declared_unit_count":UNIT_COUNT}
+ return {"schema":"geometry-v1-qk-d2-plan-v1","protocol":PROTOCOL,"reference_recipe_ids":{REFS[0]:"d2-procedural-seed-3141",REFS[1]:"d2-procedural-seed-5926"},"public_observation_seed":73,"d4_transform":"rotate_90","attention_layer_paths":list(ATTENTION_LAYER_PATHS),"pairs":pairs,"declared_unit_count":UNIT_COUNT}
 def _null(p:Any)->tuple[torch.Tensor,torch.Tensor]:
  x=p.encode_prompt(prompt="",prompt_2="",prompt_3="",do_classifier_free_guidance=False)
  if not isinstance(x,(tuple,list)) or len(x)!=4 or not isinstance(x[0],torch.Tensor) or not isinstance(x[2],torch.Tensor):raise ValueError("invalid_null_conditioning")
@@ -199,7 +200,7 @@ def _error(e:BaseException)->str:
 def _main(argv:list[str]|None=None)->int:
  p=argparse.ArgumentParser();p.add_argument("--repo-root",required=True);p.add_argument("--expected-exact",required=True);p.add_argument("--source-root",required=True);p.add_argument("--output-root",required=True);p.add_argument("--control-fd",required=True,type=int);a=p.parse_args(argv);stage="source_validation";run=f"geometry-v1-qk-d2-{a.expected_exact[:12]}"
  try:
-  source=_validate_source(Path(a.source_root));summary,units=run_d2(expected_exact=a.expected_exact,repo_root=Path(a.repo_root),source_root=Path(a.source_root),hf_token=os.environ.get("HF_TOKEN",""),source_identity=source);stage="artifact_packaging";package=_package(Path(a.output_root),summary,units);stage="control_channel";_emit(a.control_fd,SUCCESS_PREFIX,{"status":"success","run_id":summary["run_id"],"d2_status":summary["status"],"fixed_layer_paths":list(ATTENTION_LAYER_PATHS),"science_denominator":0,**package});return 0
+  source=_validate_source(Path(a.source_root));stage="run_d2";summary,units=run_d2(expected_exact=a.expected_exact,repo_root=Path(a.repo_root),source_root=Path(a.source_root),hf_token=os.environ.get("HF_TOKEN",""),source_identity=source);stage="artifact_packaging";package=_package(Path(a.output_root),summary,units);stage="control_channel";_emit(a.control_fd,SUCCESS_PREFIX,{"status":"success","run_id":summary["run_id"],"d2_status":summary["status"],"fixed_layer_paths":list(ATTENTION_LAYER_PATHS),"science_denominator":0,**package});return 0
  except BaseException as e:
   if stage=="control_channel":return 1
   try:_emit(a.control_fd,FAILURE_PREFIX,{"status":"failure","run_id":run,"failure_point":stage,"error_class":_error(e),"artifact_status":"unavailable"})
