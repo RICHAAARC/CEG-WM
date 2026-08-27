@@ -92,6 +92,23 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertEqual(event["candidate_scores"]["v4_lf"]["registered"], scores["lf__registered"])
     with self.assertRaises(ValueError): runner._adapter_event(runner.EVENT_PREFIX + json.dumps({"event":"unit","method":"c3","global_ordinal":1,"unit_id":"unit-0001","status":"success","candidate_rgb_sha256":"a","primary_null_rgb_sha256":"b","scores":scores,"primary_null_scores":scores}))
 
+ def test_v4_rescore_calls_only_public_lf_scorer_and_emits_no_paths_or_keys(self) -> None:
+    temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name); bindings = root / "bindings.json"
+    bindings.write_text(json.dumps({"1": {"candidate_relative":"c3/001.ppm","candidate_ppm_sha256":"a" * 64,"candidate_rgb_sha256":"b" * 64,"plain_relative":"plain/001.ppm","plain_ppm_sha256":"c" * 64,"plain_rgb_sha256":"d" * 64}}), encoding="utf-8")
+    v4 = types.ModuleType("experiments.run_content_v4_clean"); engine = types.ModuleType("experiments.run_content_adaptive_dual_branch_v2_clean"); keys = types.ModuleType("cegwm.shared.keys")
+    v4._load_protocol = lambda _root: object(); v4._load_pipeline_and_assets = lambda *_: (object(), types.SimpleNamespace(lf_public_assets=object()))
+    calls = []
+    v4.score_content_v4_lf_image = lambda image, key, assets: calls.append((image, key, assets)) or .5
+    engine._wrong_keys = lambda key, protocol: tuple(f"wrong-{index}" for index in range(16)); keys.normalize_detection_key = lambda value: "registered"
+    unit = {"global_ordinal": 1, "unit_id": "u1"}; emitted = []
+    with mock.patch.dict(sys.modules, {"experiments.run_content_v4_clean": v4, "experiments.run_content_adaptive_dual_branch_v2_clean": engine, "cegwm.shared.keys": keys}), mock.patch.object(adapter, "_modules_inside"), mock.patch.object(adapter, "_verify_protocol"), mock.patch.object(adapter, "_safe_transient_ppm", side_effect=(object(), object())), mock.patch.object(adapter, "_event", side_effect=emitted.append):
+        adapter._c3_v4_lf_rescore(root, [unit], "secret", "token", bindings, root)
+    self.assertEqual(len(calls), 34)
+    event = emitted[0]; self.assertEqual(event["event"], "v4_lf_rescore")
+    self.assertEqual(tuple(event["candidate_scores"]["v4_lf"]), ("registered", *(f"wrong_{i:02d}" for i in range(16))))
+    self.assertNotIn("path", json.dumps(event)); self.assertNotIn("secret", json.dumps(event))
+
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage
     self.addCleanup(runner._set_failure_stage, original)
@@ -202,7 +219,8 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertIs(kwargs["stderr"], runner.subprocess.DEVNULL)
         return Process()
     with mock.patch.object(runner.subprocess, "Popen", side_effect=popen):
-        self.assertEqual(runner._child(root / "adapter.py", root, "0" * 40, "v2", root / "units.json", root, expected, None, {}), [{"event": "phase_complete", "phase": "v2"}])
+        with self.assertRaises(RuntimeError):
+            runner._child(root / "adapter.py", root, "0" * 40, "v2", root / "units.json", root, expected, None, {})
     self.assertEqual(seen["HF_HOME"], str(expected))
     self.assertNotIn("HF_HUB_OFFLINE", seen)
     self.assertNotIn("TRANSFORMERS_OFFLINE", seen)
@@ -351,12 +369,27 @@ class TextureRunnerTests(unittest.TestCase):
                 target.write_bytes(ppm)
                 events.append({"event": "plain", "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "relative_path": relative, "plain_ppm_sha256": hashlib.sha256(ppm).hexdigest(), "plain_rgb_sha256": hashlib.sha256(raw).hexdigest()})
             return [{"event": "source_validated"}, *events, {"event": "phase_complete", "phase": phase}]
+        if phase == "c3_v4_lf_rescore":
+            events = []
+            for unit in units:
+                raw = bytearray(512 * 512 * 3); raw[3] = unit["global_ordinal"]
+                digest = hashlib.sha256(raw).hexdigest()
+                scores = {"registered": .5, **{f"wrong_{index:02d}": .25 for index in range(16)}}
+                null = {"registered": .1, **{f"wrong_{index:02d}": .0 for index in range(16)}}
+                events.append({"event": "v4_lf_rescore", "method": "c3", "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": hashlib.sha256(f"c3-{unit['global_ordinal']}".encode()).hexdigest(), "plain_rgb_sha256": digest, "candidate_ppm_sha256": "a" * 64, "plain_ppm_sha256": "b" * 64, "candidate_scores": {"v4_lf": scores}, "null_scores": {"v4_lf": null}})
+            return [{"event": "source_validated"}, *events, {"event": "phase_complete", "phase": phase}]
         events = []
         for unit in units:
             raw = bytearray(512 * 512 * 3)
             raw[3] = unit["global_ordinal"]
             digest = hashlib.sha256(raw).hexdigest()
-            events.append({"event": "unit", "method": phase, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": hashlib.sha256(f"{phase}-{unit['global_ordinal']}".encode()).hexdigest(), "primary_null_rgb_sha256": digest, "scores": _score_payload(unit["global_ordinal"] * 0.001), "primary_null_scores": _score_payload(unit["global_ordinal"] * 0.001 - 0.01)})
+            score = _score_payload(unit["global_ordinal"] * 0.001); null = _score_payload(unit["global_ordinal"] * 0.001 - 0.01)
+            domains = ("v4_lf", "hf") if phase == "c6" else ("ordinary_lf", "hf")
+            branches = {"ordinary_lf": "lf", "v4_lf": "lf", "hf": "hf"}
+            event = {"event": "unit", "method": phase, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": hashlib.sha256(f"{phase}-{unit['global_ordinal']}".encode()).hexdigest(), "primary_null_rgb_sha256": digest, "candidate_scores": {domain: {label: score[f"{branches[domain]}__{label}"] for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))} for domain in domains}, "null_scores": {domain: {label: null[f"{branches[domain]}__{label}"] for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))} for domain in domains}}
+            if phase == "c3":
+                event.update({"candidate_ppm_sha256": "a" * 64, "candidate_raw_rgb_sha256": event["candidate_rgb_sha256"]})
+            events.append(event)
         return [{"event": "source_validated"}, *events, {"event": "phase_complete", "phase": phase}]
 
     local = tmp_path / "local"

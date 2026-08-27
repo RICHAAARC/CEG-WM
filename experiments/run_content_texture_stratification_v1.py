@@ -23,6 +23,7 @@ from cegwm.protocol.content_texture_stratification_v1 import (
     f64_hex,
     load_protocol,
     margins,
+    domain_margins,
     median,
     parse_p6_texture,
     require_scores,
@@ -50,7 +51,7 @@ SCORE_FIELDS = tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") fo
 OPERATIONAL_RESULT_FIELDS = ("artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member")
 _failure_context: dict[str, Any] | None = None
 PER_UNIT_COLUMNS = (
-    "global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_value", "texture_be_hex", "texture_rank", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "lf_registered", "lf_max_wrong", "lf_null_registered", "lf_margin_a", "lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b", "joint_or_identity", "reuse_source_method", "missing_note",
+    "global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_value", "texture_be_hex", "texture_rank", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "ordinary_lf_registered", "ordinary_lf_max_wrong", "ordinary_lf_null_registered", "ordinary_lf_margin_a", "ordinary_lf_margin_b", "v4_lf_registered", "v4_lf_max_wrong", "v4_lf_null_registered", "v4_lf_margin_a", "v4_lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b", "joint_or_identity", "reuse_source_method", "missing_note",
 )
 ASSOCIATION_COLUMNS = (
     "method_id", "source_exact", "lf_score_domain", "branch_role", "branch", "margin_id", "scope", "roster_id", "fixed_n", "observed_pair_count", "statistic_id", "statistic_value", "statistic_be_hex", "c_numerator", "c_denominator", "permutation_scheme", "permutation_extreme_count", "permutation_total_count", "permutation_p_value", "permutation_p_be_hex", "texture_median", "margin_median", "rho_old", "rho_current", "rho_difference", "same_nonzero_sign", "interpretability", "missing_unit_ids", "note",
@@ -203,10 +204,10 @@ def _checkpoint(root: Path, index: int, identity: Mapping[str, Any], state: Mapp
 
 
 def _checkpoint_event(event: Mapping[str, Any]) -> dict[str, Any]:
-    result = {name: value for name, value in event.items() if name not in {"scores", "primary_null_scores"}}
-    for group in ("scores", "primary_null_scores"):
+    result = {name: value for name, value in event.items() if name not in {"candidate_scores", "null_scores", "candidate_ppm_sha256", "candidate_raw_rgb_sha256"}}
+    for group in ("candidate_scores", "null_scores"):
         if group in event:
-            result[f"{group}_be_hex"] = {name: f64_hex(float(value)) for name, value in event[group].items()}
+            result[f"{group}_be_hex"] = {domain: {name: f64_hex(float(score)) for name, score in values.items()} for domain, values in event[group].items()}
     return result
 
 
@@ -223,20 +224,33 @@ def _adapter_event(line: str) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise ValueError("adapter event must be an object")
     if event.get("event") == "unit":
-        if set(event) != {"event", "method", "global_ordinal", "unit_id", "status", "candidate_rgb_sha256", "primary_null_rgb_sha256", "candidate_scores", "null_scores"}:
+        required = {"event", "method", "global_ordinal", "unit_id", "status", "candidate_rgb_sha256", "primary_null_rgb_sha256", "candidate_scores", "null_scores"}
+        if set(event) not in (required, required | {"candidate_ppm_sha256", "candidate_raw_rgb_sha256"}):
             raise ValueError("adapter unit event fields differ")
         construction = event["method"]
-        domains = DOMAIN_MATRIX.get(construction)
+        domains = ("ordinary_lf", "hf") if construction == "c3" and "candidate_ppm_sha256" in event else DOMAIN_MATRIX.get(construction)
         if domains is None or set(event["candidate_scores"]) != set(domains) or set(event["null_scores"]) != set(domains):
             raise ValueError("adapter scorer domains differ")
         event["candidate_scores"] = {domain: event["candidate_scores"][domain] for domain in domains}
         event["null_scores"] = {domain: event["null_scores"][domain] for domain in domains}
-        from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
-        require_construction_domains(construction, event["candidate_scores"], event["null_scores"])
+        from cegwm.protocol.content_texture_stratification_v1 import require_domain_scores, require_construction_domains
+        if construction == "c3" and "candidate_ppm_sha256" in event:
+            for domain in domains:
+                require_domain_scores(domain, event["candidate_scores"][domain])
+                require_domain_scores(domain, event["null_scores"][domain])
+        else:
+            require_construction_domains(construction, event["candidate_scores"], event["null_scores"])
+    elif event.get("event") == "v4_lf_rescore":
+        required = {"event", "method", "global_ordinal", "unit_id", "status", "candidate_rgb_sha256", "plain_rgb_sha256", "candidate_ppm_sha256", "plain_ppm_sha256", "candidate_scores", "null_scores"}
+        if set(event) != required or event["method"] != "c3" or set(event["candidate_scores"]) != {"v4_lf"} or set(event["null_scores"]) != {"v4_lf"}:
+            raise ValueError("adapter V4 LF event fields differ")
+        from cegwm.protocol.content_texture_stratification_v1 import require_domain_scores
+        require_domain_scores("v4_lf", event["candidate_scores"]["v4_lf"])
+        require_domain_scores("v4_lf", event["null_scores"]["v4_lf"])
     return event
 
 
-def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path, output: Path, cache: Path, bindings_path: Path | None, env: Mapping[str, str], *, v7_asset: Path | None = None, v8_asset: Path | None = None) -> list[dict[str, Any]]:
+def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path, output: Path, cache: Path, bindings_path: Path | None, env: Mapping[str, str], *, v7_asset: Path | None = None, v8_asset: Path | None = None, transient_root: Path | None = None, transient_bindings: Path | None = None) -> list[dict[str, Any]]:
     command = [sys.executable, str(adapter), "--source-root", str(source), "--expected-exact", exact, "--phase", phase, "--units-json", str(units_path), "--plain-bindings-json", str(output / "plain_bindings.json"), "--local-output-root", str(output), "--hf-cache-root", str(cache)]
     if bindings_path is not None:
         command += ["--model-bindings-json", str(bindings_path)]
@@ -244,6 +258,10 @@ def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path
         command += ["--v7-asset-root", str(v7_asset)]
     if v8_asset is not None:
         command += ["--v8-asset-root", str(v8_asset)]
+    if transient_root is not None:
+        command += ["--transient-root", str(transient_root)]
+    if transient_bindings is not None:
+        command += ["--transient-bindings-json", str(transient_bindings)]
     child_env = {**os.environ, **env, "HF_HOME": str(cache)}
     process = subprocess.Popen(command, cwd=source, env=child_env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="strict")
     expected_events = 3 if phase == "asset_prefetch" else 98
@@ -265,10 +283,11 @@ def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path
 
 
 def _unit_events(events: Sequence[Mapping[str, Any]], method: str, expected: int) -> list[dict[str, Any]]:
-    selected = [dict(item) for item in events if item.get("event") == ("plain" if method == "common_plain" else "unit")]
+    event_name = "plain" if method == "common_plain" else ("v4_lf_rescore" if method == "c3_v4_lf_rescore" else "unit")
+    selected = [dict(item) for item in events if item.get("event") == event_name]
     if len(selected) != expected or [item["global_ordinal"] for item in selected] != list(range(1, expected + 1)):
         raise RuntimeError("adapter unit event order differs")
-    if method != "common_plain" and any(item.get("method") != method for item in selected):
+    if method not in {"common_plain", "c3_v4_lf_rescore"} and any(item.get("method") != method for item in selected):
         raise RuntimeError("adapter method event identity differs")
     return selected
 
@@ -279,11 +298,19 @@ def _derive_row(unit: Mapping[str, Any], method: str, source: Mapping[str, Any],
     if event["status"] != "success" or plain.get("status") != "success":
         base["missing_note"] = "retained_unit_or_plain_failure"
         return base
-    scores, null_scores = event["scores"], event["primary_null_scores"]
-    lf_a, lf_b = margins(scores, null_scores, "lf")
-    hf_a, hf_b = margins(scores, null_scores, "hf")
+    scores, null_scores = event["candidate_scores"], event["null_scores"]
     texture = float(plain["texture_value"])
-    base.update({"texture_value": format(texture, ".17g"), "texture_be_hex": f64_hex(texture), "candidate_rgb_sha256": event["candidate_rgb_sha256"], "primary_null_rgb_sha256": event["primary_null_rgb_sha256"], "primary_null_matches_plain": event["primary_null_rgb_sha256"] == plain["plain_rgb_sha256"], "lf_registered": format(float(scores["lf__registered"]), ".17g"), "lf_max_wrong": format(max(float(scores[f"lf__wrong_{i:02d}"]) for i in range(16)), ".17g"), "lf_null_registered": format(float(null_scores["lf__registered"]), ".17g"), "lf_margin_a": format(lf_a, ".17g"), "lf_margin_b": format(lf_b, ".17g"), "hf_registered": format(float(scores["hf__registered"]), ".17g"), "hf_max_wrong": format(max(float(scores[f"hf__wrong_{i:02d}"]) for i in range(16)), ".17g"), "hf_null_registered": format(float(null_scores["hf__registered"]), ".17g"), "hf_margin_a": format(hf_a, ".17g"), "hf_margin_b": format(hf_b, ".17g")})
+    base.update({"texture_value": format(texture, ".17g"), "texture_be_hex": f64_hex(texture), "candidate_rgb_sha256": event["candidate_rgb_sha256"], "primary_null_rgb_sha256": plain["plain_rgb_sha256"], "primary_null_matches_plain": True})
+    for domain in DOMAIN_MATRIX[method]:
+        candidate, null = scores[domain], null_scores[domain]
+        margin_a, margin_b = domain_margins(candidate, null, domain)
+        base.update({
+            f"{domain}_registered": format(float(candidate["registered"]), ".17g"),
+            f"{domain}_max_wrong": format(max(float(candidate[f"wrong_{index:02d}"]) for index in range(16)), ".17g"),
+            f"{domain}_null_registered": format(float(null["registered"]), ".17g"),
+            f"{domain}_margin_a": format(margin_a, ".17g"),
+            f"{domain}_margin_b": format(margin_b, ".17g"),
+        })
     if not base["primary_null_matches_plain"]:
         base["missing_note"] = "method_primary_null_differs_from_dedicated_plain"
     return base
@@ -321,17 +348,15 @@ def _association_rows(rows: list[dict[str, Any]], sources: Mapping[str, Any]) ->
     grouped = rows_by_method(rows)
     # The prospective analysis has one fixed N=96 roster.  Keep the 12 blocks
     # as the permutation strata; branch/scorer rows never add observations.
-    for method in METHOD_ORDER:
-        for branch in ("lf", "hf"):
-            for margin_id in ("a", "b"):
+    for method, domain, margin_id in _required_association_matrix():
                 subset = grouped[method]
-                available = [item for item in subset if not item["missing_note"] and item[f"{branch}_margin_{margin_id}"]]
+                available = [item for item in subset if not item["missing_note"] and item[f"{domain}_margin_{margin_id}"]]
                 stat = {"interpretability": "unavailable_incomplete_fixed_denominator"}
                 if len(available) == 96:
                     # Exact n=96 enumeration is deliberately not attempted;
                     # the recorded scheme preserves each predeclared block.
                     stat = {"interpretability": "available_block_preserving_record_only"}
-                result.append(_association(source=sources[CONSTRUCTION_SOURCE[method]], branch=branch, margin_id=margin_id, scope="fixed_n96_12x8_block_preserving", roster_id="content_texture_n96_evaluation_v1", fixed_n=96, subset=subset, available=available, stat=stat))
+                result.append(_association(source=sources[CONSTRUCTION_SOURCE[method]], branch=domain, margin_id=margin_id, scope="fixed_n96_12x8_block_preserving", roster_id="content_texture_n96_evaluation_v1", fixed_n=96, subset=subset, available=available, stat=stat))
     return result
 
     # Historical two-roster code is unreachable and retained only pending a
@@ -361,7 +386,7 @@ def _association_rows(rows: list[dict[str, Any]], sources: Mapping[str, Any]) ->
 
 def _association(*, source: Mapping[str, Any], branch: str, margin_id: str, scope: str, roster_id: str, fixed_n: int, subset: Sequence[dict[str, Any]], available: Sequence[dict[str, Any]], stat: Mapping[str, Any]) -> dict[str, Any]:
     row = {name: "" for name in ASSOCIATION_COLUMNS}
-    row.update({"method_id": source["method_id"], "source_exact": source["exact"], "lf_score_domain": source["lf_score_domain"], "branch_role": "primary" if branch == "lf" else "control", "branch": branch, "margin_id": margin_id, "scope": scope, "roster_id": roster_id, "fixed_n": fixed_n, "observed_pair_count": len(available), "statistic_id": "spearman_exact_n8" if scope == "within_roster" else "roster_stratified_spearman_convolution", "interpretability": stat["interpretability"], "missing_unit_ids": ";".join(item["unit_id"] for item in subset if item not in available), "note": "exploratory_descriptive_only"})
+    row.update({"method_id": source["method_id"], "source_exact": source["exact"], "lf_score_domain": branch, "branch_role": "primary" if branch != "hf" else "control", "branch": branch, "margin_id": margin_id, "scope": scope, "roster_id": roster_id, "fixed_n": fixed_n, "observed_pair_count": len(available), "statistic_id": "block_preserving_spearman_record_only", "interpretability": stat["interpretability"], "missing_unit_ids": ";".join(item["unit_id"] for item in subset if item not in available), "note": "exploratory_descriptive_only"})
     if stat["interpretability"] == "available":
         row.update({"statistic_value": format(stat["rho"], ".17g"), "statistic_be_hex": stat["rho_be_hex"], "c_numerator": stat["c"]["numerator"], "c_denominator": stat["c"]["denominator"], "permutation_scheme": "all_8_factorial_labeled" if scope == "within_roster" else "independent_8_factorial_by_8_factorial_convolution", "permutation_extreme_count": stat["permutation_extreme_count"], "permutation_total_count": stat["permutation_total_count"], "permutation_p_value": format(stat["permutation_p_value"], ".17g"), "permutation_p_be_hex": stat["permutation_p_be_hex"], "texture_median": format(median(float(item["texture_value"]) for item in available), ".17g"), "margin_median": format(median(float(item[f"{branch}_margin_{margin_id}"]) for item in available), ".17g")})
     return row
@@ -379,7 +404,7 @@ def _public_records(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     result = []
     for row in rows:
         item = {name: row[name] for name in ("global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_be_hex", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "joint_or_identity", "reuse_source_method", "missing_note")}
-        for field in ("lf_registered", "lf_max_wrong", "lf_null_registered", "lf_margin_a", "lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b"):
+        for field in ("ordinary_lf_registered", "ordinary_lf_max_wrong", "ordinary_lf_null_registered", "ordinary_lf_margin_a", "ordinary_lf_margin_b", "v4_lf_registered", "v4_lf_max_wrong", "v4_lf_null_registered", "v4_lf_margin_a", "v4_lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b"):
             item[f"{field}_be_hex"] = f64_hex(float(row[field])) if row[field] != "" else ""
         result.append(item)
     return result
@@ -531,7 +556,7 @@ def _execute(args: argparse.Namespace) -> int:
     _set_failure_stage("checkouts")
     # Only the three production sources needed for the minimal mechanism matrix
     # are checked out.  Historical V4/V5/V7/V8 remain source bindings, not work.
-    selected_sources = {name: protocol.config["sources"][name] for name in ("v2", "v3", "v6")}
+    selected_sources = {name: protocol.config["sources"][name] for name in ("v2", "v3", "v4", "v6")}
     checkouts = _create_checkouts(repo, local / "source_checkouts", selected_sources)
     roster_spec = protocol.config["rosters_in_order"][0]
     _set_failure_stage("rosters")
@@ -567,17 +592,74 @@ def _execute(args: argparse.Namespace) -> int:
     _failure_context["last_completed_checkpoint"] = checkpoint_index
     _write_json_exclusive(output / "plain_bindings.json", state["plain_bindings"])
     method_events: dict[str, list[dict[str, Any]]] = {}
-    for construction in METHOD_ORDER:
-        source_name = CONSTRUCTION_SOURCE[construction]
-        _set_failure_stage(construction)
-        events = _unit_events(_child(adapter, checkouts[source_name], protocol.config["sources"][source_name]["exact"], construction, units_path, output, cache, bindings_path, child_env), construction, 96)
-        method_events[construction] = events
-        state["phase"] = construction
-        for event in events:
-            state["method_records"].append(_checkpoint_event(event))
-        checkpoint_index += 1
-        _checkpoint(checkpoints, checkpoint_index, identity, state)
-        _failure_context["last_completed_checkpoint"] = checkpoint_index
+    # Candidate PPMs exist only in this coordinator-owned directory.  It is
+    # removed even if V4 scoring or the later analysis fails.
+    with tempfile.TemporaryDirectory(prefix=".texture-c3-", dir=local) as transient_name:
+        transient = Path(transient_name)
+        for construction in METHOD_ORDER:
+            source_name = CONSTRUCTION_SOURCE[construction]
+            _set_failure_stage(construction)
+            events = _unit_events(_child(adapter, checkouts[source_name], protocol.config["sources"][source_name]["exact"], construction, units_path, output, cache, bindings_path, child_env, transient_root=transient if construction == "c3" else None), construction, 96)
+            if construction == "c3":
+                private_bindings: dict[str, dict[str, str]] = {}
+                for event, plain in zip(events, plains):
+                    if event.get("status") != "success" or plain.get("status") != "success":
+                        continue
+                    ppm = event.get("candidate_ppm_sha256")
+                    raw = event.get("candidate_raw_rgb_sha256")
+                    relative = f"c3/{event['global_ordinal']:03d}.ppm"
+                    if not isinstance(ppm, str) or not isinstance(raw, str) or event["candidate_rgb_sha256"] != raw:
+                        raise RuntimeError("C3 transient candidate binding differs")
+                    plain_relative = plain.get("relative_path")
+                    if not isinstance(plain_relative, str):
+                        raise RuntimeError("common plain relative binding differs")
+                    source_plain = output / plain_relative
+                    local_plain = transient / f"plain/{event['global_ordinal']:03d}.ppm"
+                    local_plain.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source_plain, local_plain)
+                    private_bindings[str(event["global_ordinal"])] = {"candidate_relative": relative, "candidate_ppm_sha256": ppm, "candidate_rgb_sha256": raw, "plain_relative": f"plain/{event['global_ordinal']:03d}.ppm", "plain_ppm_sha256": sha256_bytes(local_plain.read_bytes()), "plain_rgb_sha256": plain["plain_rgb_sha256"]}
+                transient_bindings = transient / "c3-bindings.json"
+                _write_json_exclusive(transient_bindings, private_bindings)
+                v4_events = _unit_events(_child(adapter, checkouts["v4"], protocol.config["sources"]["v4"]["exact"], "c3_v4_lf_rescore", units_path, output, cache, bindings_path, child_env, transient_root=transient, transient_bindings=transient_bindings), "c3_v4_lf_rescore", 96)
+                by_ordinal = {event["global_ordinal"]: event for event in v4_events}
+                for event, plain in zip(events, plains):
+                    v4_event = by_ordinal.get(event["global_ordinal"])
+                    if event.get("status") != "success" or v4_event is None or v4_event.get("status") != "success":
+                        event["status"] = "operational_failure"
+                        event["failure_class"] = "RuntimeError"
+                        continue
+                    if event["candidate_rgb_sha256"] != v4_event["candidate_rgb_sha256"] or plain.get("plain_rgb_sha256") != v4_event["plain_rgb_sha256"]:
+                        raise RuntimeError("C3 V4 join hash differs")
+                    event["candidate_scores"] = {"ordinary_lf": event["candidate_scores"]["ordinary_lf"], "v4_lf": v4_event["candidate_scores"]["v4_lf"], "hf": event["candidate_scores"]["hf"]}
+                    event["null_scores"] = {"ordinary_lf": event["null_scores"]["ordinary_lf"], "v4_lf": v4_event["null_scores"]["v4_lf"], "hf": event["null_scores"]["hf"]}
+                    event.pop("candidate_ppm_sha256", None)
+                    event.pop("candidate_raw_rgb_sha256", None)
+                    from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
+                    require_construction_domains("c3", event["candidate_scores"], event["null_scores"])
+            method_events[construction] = events
+            state["phase"] = construction
+            for event in events:
+                state["method_records"].append(_checkpoint_event(event))
+            checkpoint_index += 1
+            _checkpoint(checkpoints, checkpoint_index, identity, state)
+            _failure_context["last_completed_checkpoint"] = checkpoint_index
+    # The common-null cache is keyed by scorer domain and immutable common
+    # plain identity.  C2 produces ordinary/HF; the detached V4 phase produces
+    # V4-LF.  Consumers receive the producer values rather than rescoring.
+    null_cache: dict[tuple[str, int, str], Mapping[str, Any]] = {}
+    for event, plain in zip(method_events["c2"], plains):
+        if event.get("status") == "success" and plain.get("status") == "success":
+            for domain in ("ordinary_lf", "hf"):
+                _null_cache_put(null_cache, domain, event["global_ordinal"], plain["plain_rgb_sha256"], event["null_scores"][domain])
+    for event, plain in zip(method_events["c3"], plains):
+        if event.get("status") == "success" and plain.get("status") == "success":
+            for domain in ("ordinary_lf", "hf"):
+                event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
+            _null_cache_put(null_cache, "v4_lf", event["global_ordinal"], plain["plain_rgb_sha256"], event["null_scores"]["v4_lf"])
+    for event, plain in zip(method_events["c6"], plains):
+        if event.get("status") == "success" and plain.get("status") == "success":
+            for domain in ("v4_lf", "hf"):
+                event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
     key_text = token = ""
     _set_failure_stage("analysis")
     rows = []
@@ -589,7 +671,7 @@ def _execute(args: argparse.Namespace) -> int:
     associations = _association_rows(rows, protocol.config["sources"])
     distinct = len({row["texture_be_hex"] for row in rows if row["method_id"] == "c2"}) >= 2
     complete = (len(rows) == 288 and all(not row["missing_note"] and row["primary_null_matches_plain"] for row in rows)
-                and len(associations) == 12 and all(row["interpretability"] == "available_block_preserving_record_only" and row["observed_pair_count"] == 96 for row in associations)
+                and len(associations) == 14 and all(row["interpretability"] == "available_block_preserving_record_only" and row["observed_pair_count"] == 96 for row in associations)
                 and distinct)
     status = "analysis_complete" if complete else "not_interpretable"
     state["phase"] = "analysis"
