@@ -85,6 +85,29 @@ def test_d01_rejects_source_identity_bounds_and_public_leaks(monkeypatch, tmp_pa
         RUNNER.run_d01(expected_exact=RUNNER.SOURCE_EXACT, repo_root=tmp_path, source_root=source)
 
 
+@pytest.mark.parametrize(("sidecar", "leak"), (
+    ("receipt.json", {"raw_qk": "forbidden"}), ("receipt.json", {"audit_note": "secret"}),
+    ("manifest.json", {"raw_qk": "forbidden"}), ("manifest.json", {"audit_note": "secret"}),
+    ("terminal.json", {"raw_qk": "forbidden"}), ("terminal.json", {"audit_note": "secret"}),
+))
+def test_d01_rejects_leaked_root_sidecars_before_selection_or_packaging(monkeypatch, tmp_path, sidecar, leak) -> None:
+    source = _source(tmp_path / "source")
+    payload = json.loads((source / sidecar).read_text()); payload.update(leak)
+    (source / sidecar).write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    monkeypatch.setattr(RUNNER, "_select", lambda _units: pytest.fail("selection must not run"))
+    monkeypatch.setattr(RUNNER, "_package", lambda *_args, **_kwargs: pytest.fail("packaging must not run"))
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--repo-root", str(tmp_path), "--expected-exact", RUNNER.SOURCE_EXACT,
+                           "--source-root", str(source), "--output-root", str(tmp_path / "output"), "--control-fd", str(write)])
+        line = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    control = json.loads(line[len(RUNNER.FAILURE_PREFIX):])
+    assert rc == 1 and control["failure_point"] == "source_validation" and control["error_class"] == "validation_error"
+
+
 def test_d01_create_only_package_and_bounded_failure_control(monkeypatch, tmp_path) -> None:
     source = _source(tmp_path / "source"); summary = _run(monkeypatch, tmp_path, source)
     output = tmp_path / "output"; package = RUNNER._package(output, summary)

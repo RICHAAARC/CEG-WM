@@ -143,6 +143,9 @@ def _validate_source(source_root: Path) -> tuple[dict[str, Any], tuple[dict[str,
     receipt = _read_json(source_root / "receipt.json", MAX_ROOT_BYTES)
     manifest = _read_json(source_root / "manifest.json", MAX_ROOT_BYTES)
     terminal = _read_json(source_root / "terminal.json", MAX_CONTROL_BYTES)
+    _reject_leak(receipt)
+    _reject_leak(manifest)
+    _reject_leak(terminal)
     if (receipt.get("run_id"), receipt.get("protocol"), receipt.get("plan_digest"), receipt.get("d0_status"),
             receipt.get("science_denominator"), receipt.get("declared_unit_count"), receipt.get("calculated_unit_count"),
             receipt.get("failed_unit_count"), receipt.get("artifact_status"), receipt.get("operational_status"),
