@@ -2,6 +2,7 @@
   "base_method_id": "content_v9_v6_calibrated_weighted_joint_v1",
   "calibration_asset": {
     "asset_role": "content_v10_weighted_joint_calibration",
+    "calibration_manifest_digest": "ae35cef6fa997a375987f77456aada0badcd7be3e029fd5115ebf3398dea5af5",
     "calibration_manifest_digest_format": "lowercase_64_hex",
     "hf_scorer_id": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
     "lf_scorer_id": "content_v4_whitened_lf_dct_matched_cosine_v1",
@@ -9,11 +10,32 @@
     "required": true,
     "status": "independent_asset_required"
   },
+  "calibration_protocol": {
+    "claim_ceiling": "v10_calibration_asset_generation_only_no_efficacy_claim",
+    "fixed_units": 32,
+    "fit": {
+      "mean": "binary64_fsum",
+      "pearson_rho": "paired",
+      "sample_sd_ddof": 1
+    },
+    "key_domain": "stage-a/content-v10-texture-neutral-weighted-joint-calibration-key/v1",
+    "ordered_pairs_per_unit": 33,
+    "pair_order": ["candidate_wrong_00_to_15", "primary_null_registered", "primary_null_wrong_00_to_15"],
+    "required_pairs": 1056,
+    "terminal_failure": "all_or_none_rc2_no_asset",
+    "wrong_key_domain": "stage-a/content-adaptive-v2-external-wrong-key/v1",
+    "wrong_key_count": 16
+  },
   "joint_weights": {
     "hf": 0.75,
     "lf": 0.25
   },
   "method_id": "content_v10_texture_neutral_dual_branch_weighted_joint_v1",
   "schema_version": 1,
-  "texture_contribution": "fixed_0.5_no_allocation_authority"
+  "texture_contribution": "fixed_0.5_no_allocation_authority",
+  "texture_n96_provenance": {
+    "execution_exact": "7917a7da15fbeee79083b4938362d2bdf202a740",
+    "handoff_exact": "48cc344fb01c099557e620ab7556c731e127d0f2",
+    "manifest_digest": "73cdb9d6b840490567dd2a40dbf1bd10140e52ae46a43d00fdc01b24a9bc1fb8"
+  }
 }
