@@ -4,7 +4,7 @@ import hashlib, json, math, struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
-from cegwm.protocol.content_chain_v10 import METHOD_ID
+from cegwm.protocol.content_chain_v10 import CALIBRATION_MANIFEST_DIGEST, METHOD_ID
 
 _ROLE = "content_v10_weighted_joint_calibration"
 _MAX = 255.0 * math.sqrt(2.0)
@@ -44,13 +44,16 @@ def allocate_texture_neutral(signals: Any) -> TextureNeutralAllocation:
     from cegwm.method.content_adaptive_v3 import allocate_content
     return TextureNeutralAllocation(allocate_content(replace(signals, texture_complexity=(0.0,)*16)), _summary(texture))
 
-def load_independent_calibration_asset(path: str | Path, sidecar: str | Path) -> V10CalibrationAsset:
+def load_independent_calibration_asset(path: str | Path, sidecar: str | Path, *, producer_execution_exact: str | None = None, protocol_digest: str | None = None, calibration_public_key_digest: str | None = None) -> V10CalibrationAsset:
     raw = Path(path).read_bytes(); digest = hashlib.sha256(raw).hexdigest()
     if Path(sidecar).read_bytes() != f"{digest}  {Path(path).name}\n".encode("ascii"): raise ValueError("Content V10 calibration sidecar differs")
     value: Mapping[str, Any] = json.loads(raw)
-    required={"schema_version","method_id","asset_role_id","lf_weight","hf_weight","lf_scorer_id","hf_scorer_id","calibration_manifest_digest","mu_lf","sigma_lf","mu_hf","sigma_hf","rho"}
+    required={"schema_version","method_id","asset_role_id","lf_weight","hf_weight","lf_scorer_id","hf_scorer_id","calibration_manifest_digest","producer_execution_exact","protocol_digest","calibration_public_key_digest","mu_lf","sigma_lf","mu_hf","sigma_hf","rho"}
     if not isinstance(value,dict) or set(value)!=required or value.get("schema_version")!=1 or value.get("method_id")!=METHOD_ID or value.get("asset_role_id")!=_ROLE: raise ValueError("Content V10 calibration asset identity differs")
-    if (value["lf_weight"],value["hf_weight"],value["lf_scorer_id"],value["hf_scorer_id"]) != (.25,.75,_LF_SCORER,_HF_SCORER) or not isinstance(value["calibration_manifest_digest"],str) or not __import__("re").fullmatch(r"[0-9a-f]{64}", value["calibration_manifest_digest"]): raise ValueError("Content V10 calibration bindings differ")
+    if (value["lf_weight"],value["hf_weight"],value["lf_scorer_id"],value["hf_scorer_id"],value["calibration_manifest_digest"]) != (.25,.75,_LF_SCORER,_HF_SCORER,CALIBRATION_MANIFEST_DIGEST): raise ValueError("Content V10 calibration bindings differ")
+    matcher=__import__("re").fullmatch
+    if matcher(r"[0-9a-f]{40}",value["producer_execution_exact"]) is None or any(matcher(r"[0-9a-f]{64}",value[key]) is None for key in ("protocol_digest","calibration_public_key_digest")): raise ValueError("Content V10 calibration provenance differs")
+    if (producer_execution_exact is not None and value["producer_execution_exact"] != producer_execution_exact) or (protocol_digest is not None and value["protocol_digest"] != protocol_digest) or (calibration_public_key_digest is not None and value["calibration_public_key_digest"] != calibration_public_key_digest): raise ValueError("Content V10 calibration expected provenance differs")
     values=tuple(float(value[x]) for x in ("mu_lf","sigma_lf","mu_hf","sigma_hf","rho"))
     if not all(math.isfinite(x) for x in values) or values[1]<=0 or values[3]<=0 or not -1<=values[4]<=1: raise ValueError("Content V10 calibration payload differs")
     return V10CalibrationAsset(*values)

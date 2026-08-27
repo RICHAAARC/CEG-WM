@@ -1,13 +1,10 @@
 """Create-only producer for the independent Content V10 calibration asset."""
 from __future__ import annotations
-import argparse, hashlib, json, os, re, subprocess
+import argparse, hashlib, json, os, re, shutil, subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from cegwm.method.content_v10_texture_neutral import load_independent_calibration_asset
-from cegwm.method.content_weighted_joint_v9 import fit_weighted_joint_calibration, stable_json_bytes
 from cegwm.protocol.content_chain_v10 import CALIBRATION_MANIFEST_DIGEST, METHOD_ID, load_content_v10_contract
-from cegwm.runtime.content_v10_texture_neutral_sd35 import run_content_v10_calibration_unit
 from cegwm.shared.keys import normalize_detection_key, public_key_digest
 from cegwm.shared.prg import prg_bytes
 
@@ -61,39 +58,65 @@ def _publish(asset: Path, sidecar: Path, payload: bytes) -> str:
         raise
     return digest
 
-def _asset_payload(exact: str, fit: Any) -> bytes:
-    return stable_json_bytes({"schema_version":1,"method_id":METHOD_ID,"asset_role_id":"content_v10_weighted_joint_calibration","lf_weight":.25,"hf_weight":.75,"lf_scorer_id":"content_v4_whitened_lf_dct_matched_cosine_v1","hf_scorer_id":"frozen_hf_final_rgb_public_vae_global_normalized_correlation","calibration_manifest_digest":CALIBRATION_MANIFEST_DIGEST,"mu_lf":fit.mu_lf,"sigma_lf":fit.sigma_lf,"mu_hf":fit.mu_hf,"sigma_hf":fit.sigma_hf,"rho":fit.rho})
+def stable_json_bytes(value: Any) -> bytes:
+    return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=True,allow_nan=False).encode("ascii")
+
+def _asset_payload(exact: str, protocol_digest: str, public_digest: str, fit: Any) -> bytes:
+    return stable_json_bytes({"schema_version":1,"method_id":METHOD_ID,"asset_role_id":"content_v10_weighted_joint_calibration","lf_weight":.25,"hf_weight":.75,"lf_scorer_id":"content_v4_whitened_lf_dct_matched_cosine_v1","hf_scorer_id":"frozen_hf_final_rgb_public_vae_global_normalized_correlation","calibration_manifest_digest":CALIBRATION_MANIFEST_DIGEST,"producer_execution_exact":exact,"protocol_digest":protocol_digest,"calibration_public_key_digest":public_digest,"mu_lf":fit.mu_lf,"sigma_lf":fit.sigma_lf,"mu_hf":fit.mu_hf,"sigma_hf":fit.sigma_hf,"rho":fit.rho})
+
+def _stage_and_validate(local_run: Path, payload: bytes, exact: str, protocol_digest: str, public_digest: str, loader: Any) -> tuple[Path,Path,str]:
+    stage=local_run/"staging"; asset=stage/ASSET_FILENAME; sidecar=stage/(ASSET_FILENAME+".sha256")
+    digest=_publish(asset,sidecar,payload)
+    try:
+        loader(asset,sidecar,producer_execution_exact=exact,protocol_digest=protocol_digest,calibration_public_key_digest=public_digest)
+        return asset,sidecar,digest
+    except BaseException:
+        sidecar.unlink(missing_ok=True); asset.unlink(missing_ok=True); stage.rmdir(); raise
+
+def _publish_staged(stage_asset: Path, stage_sidecar: Path, final_asset: Path, final_sidecar: Path) -> None:
+    if final_asset.exists() or final_sidecar.exists(): raise FileExistsError("Content V10 calibration destination is create-only")
+    final_root=final_asset.parent; final_root.mkdir(parents=True,exist_ok=False); made_asset=False
+    try:
+        with final_asset.open("xb") as handle: handle.write(stage_asset.read_bytes()); made_asset=True
+        with final_sidecar.open("xb") as handle: handle.write(stage_sidecar.read_bytes())
+    except BaseException:
+        final_sidecar.unlink(missing_ok=True)
+        if made_asset: final_asset.unlink(missing_ok=True)
+        final_root.rmdir(); raise
 
 def _summary(**values: Any) -> None:
     print(PREFIX+" "+stable_json_bytes(values).decode("ascii"),flush=True)
 
 def execute(args: argparse.Namespace) -> int:
-    exact=""; run_id=""; asset_path=None; sidecar_path=None
+    secret=os.environ.pop(KEY_ENV,""); token=os.environ.pop(TOKEN_ENV,"")
+    exact=""; run_id=""; asset_path=None; sidecar_path=None; local_run=None
     try:
         root=Path(args.repo_root).resolve(); sink=Path(args.artifact_sink).resolve(); local=Path(args.local_work_root).resolve()
         exact=_git_exact(root,args.expected_exact); contract=load_content_v10_contract(root); units=_units(root)
-        secret=os.environ.pop(KEY_ENV,""); token=os.environ.pop(TOKEN_ENV,"")
-        try:
-            if not secret or not token.strip(): raise RuntimeError("Content V10 calibration child-only secrets are required")
-            key=derive_calibration_key(secret); public_digest=public_key_digest(key); run_id=hashlib.sha256((contract.digest+public_digest).encode("ascii")).hexdigest()[:24]
-            local_run=local/run_id
-            if local_run.exists(): raise FileExistsError("Content V10 calibration local work root is create-only")
-            local_run.mkdir(parents=True,exist_ok=False)
-            asset_path,sidecar_path=_paths(sink,run_id)
-            if asset_path.exists() or sidecar_path.exists(): raise FileExistsError("Content V10 calibration destination is create-only")
-            pipeline,assets=_load_pipeline_and_assets(token)
-            pairs=[]
-            for unit in units: pairs.extend(run_content_v10_calibration_unit(pipeline,unit,key,assets))
-            if len(pairs)!=1056: raise ValueError("Content V10 calibration pair count differs")
-            fit=fit_weighted_joint_calibration(pairs); pairs.clear(); payload=_asset_payload(exact,fit)
-            digest=_publish(asset_path,sidecar_path,payload); load_independent_calibration_asset(asset_path,sidecar_path)
-            _summary(status="complete",completeness="complete",scientific_status="not_adjudicated",claim_ceiling="v10_calibration_asset_generation_only_no_efficacy_claim",exact=exact,manifest_digest=CALIBRATION_MANIFEST_DIGEST,fixed_units=32,committed_units=32,failed_units=0,pair_count=1056,asset_path=str(asset_path),sidecar_path=str(sidecar_path),asset_sha256=digest)
-            return 0
-        finally:
-            secret=""; token=""; os.environ.pop(KEY_ENV,None); os.environ.pop(TOKEN_ENV,None)
+        if not secret or not token.strip(): raise RuntimeError("Content V10 calibration child-only secrets are required")
+        key=derive_calibration_key(secret); public_digest=public_key_digest(key); run_id=hashlib.sha256((contract.digest+public_digest).encode("ascii")).hexdigest()[:24]
+        local_run=local/run_id
+        if local_run.exists(): raise FileExistsError("Content V10 calibration local work root is create-only")
+        local_run.mkdir(parents=True,exist_ok=False)
+        asset_path,sidecar_path=_paths(sink,run_id)
+        if asset_path.exists() or sidecar_path.exists(): raise FileExistsError("Content V10 calibration destination is create-only")
+        from cegwm.method.content_v10_texture_neutral import load_independent_calibration_asset
+        from cegwm.method.content_weighted_joint_v9 import fit_weighted_joint_calibration
+        from cegwm.runtime.content_v10_texture_neutral_sd35 import run_content_v10_calibration_unit
+        pipeline,assets=_load_pipeline_and_assets(token); pairs=[]
+        for unit in units: pairs.extend(run_content_v10_calibration_unit(pipeline,unit,key,assets))
+        if len(pairs)!=1056: raise ValueError("Content V10 calibration pair count differs")
+        fit=fit_weighted_joint_calibration(pairs); pairs.clear(); payload=_asset_payload(exact,contract.digest,public_digest,fit)
+        staged_asset,staged_sidecar,digest=_stage_and_validate(local_run,payload,exact,contract.digest,public_digest,load_independent_calibration_asset)
+        _publish_staged(staged_asset,staged_sidecar,asset_path,sidecar_path)
+        _summary(status="complete",completeness="complete",scientific_status="not_adjudicated",claim_ceiling="v10_calibration_asset_generation_only_no_efficacy_claim",exact=exact,manifest_digest=CALIBRATION_MANIFEST_DIGEST,fixed_units=32,committed_units=32,failed_units=0,pair_count=1056,asset_path=str(asset_path),sidecar_path=str(sidecar_path),asset_sha256=digest)
+        return 0
     except BaseException:
+        if local_run is not None: shutil.rmtree(local_run,ignore_errors=True)
         _summary(status="incomplete",completeness="incomplete",scientific_status="not_evaluable",claim_ceiling="v10_calibration_asset_generation_only_no_efficacy_claim",exact=exact,manifest_digest=CALIBRATION_MANIFEST_DIGEST,fixed_units=32,committed_units=0,failed_units=32,pair_count=0,asset_path=None,sidecar_path=None,asset_sha256=None)
         return 2
+    finally:
+        secret=""; token=""; os.environ.pop(KEY_ENV,None); os.environ.pop(TOKEN_ENV,None)
 
 def _arguments() -> argparse.Namespace:
     parser=argparse.ArgumentParser(description=__doc__)
