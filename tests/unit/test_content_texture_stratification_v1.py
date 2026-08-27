@@ -123,6 +123,10 @@ class TextureProtocolTests(unittest.TestCase):
         cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
         self.assertEqual(cells[0]["source"], ["from google.colab import drive\n", "drive.mount('/content/drive')\n"])
         source = "".join(line for cell in cells for line in cell["source"])
+        self.assertIn("EXPECTED_EXACT = 'b3e265c18320705c7bae7f7dafdc07423da22e9e'", source)
+        self.assertIn("Content-Texture-b3e265c-local", source)
+        self.assertIn("Content-Texture-{EXPECTED_EXACT[:7]}-{RUN_UTC}", source)
+        self.assertNotIn("a0b75406f75585d567e3be2388a1a76d0cc8b2cd", source)
         self.assertEqual(source.count("subprocess.Popen("), 1)
         self.assertNotIn("force_remount", source)
         self.assertNotIn("retry", source.lower())
