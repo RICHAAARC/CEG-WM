@@ -292,11 +292,18 @@ class ReliabilityAssessment:
             or self.support is None
         ):
             raise ValueError("reliable assessment must be complete and geometry-bound")
-        if self.reliable and (
-            self.confidence < self.policy.min_confidence
-            or self.support < self.policy.min_support
-        ):
-            raise ValueError("reliable assessment does not satisfy its bound policy")
+        if self.reliable:
+            confidence = _finite_float(self.confidence, name="confidence")
+            support = _finite_float(self.support, name="support")
+            if not (0.0 <= confidence <= 1.0 and 0.0 <= support <= 1.0):
+                raise ValueError("reliable assessment measurements must be in [0, 1]")
+            if (
+                confidence < self.policy.min_confidence
+                or support < self.policy.min_support
+            ):
+                raise ValueError("reliable assessment does not satisfy its bound policy")
+            object.__setattr__(self, "confidence", confidence)
+            object.__setattr__(self, "support", support)
         if not self.reliable and self.reason not in {
             "invalid_geometry",
             "invalid_measurement",

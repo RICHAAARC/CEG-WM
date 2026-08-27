@@ -131,6 +131,36 @@ def test_unreliable_or_nonfinite_measurement_cannot_request_rectification() -> N
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("confidence", math.nan),
+        ("support", math.inf),
+        ("confidence", -math.inf),
+        ("confidence", -0.01),
+        ("support", 1.01),
+    ],
+)
+def test_direct_reliable_assessment_fails_closed_on_invalid_measurements(
+    field: str,
+    value: float,
+) -> None:
+    estimate = GeometryEstimate(CANONICAL_CORNERS, IDENTITY_H)
+    measurements = {"confidence": 1.0, "support": 1.0}
+    measurements[field] = value
+
+    with pytest.raises(ValueError):
+        ReliabilityAssessment(
+            reliable=True,
+            confidence=measurements["confidence"],
+            support=measurements["support"],
+            reason="reliable",
+            geometry_binding=estimate.binding,
+            policy=ReliabilityPolicy(0.8, 0.6),
+        )
+
+
+@pytest.mark.unit
 def test_reliable_geometry_only_requests_coordinates_and_preserves_detector_identity() -> None:
     corners = ((0.1, 0.2), (0.9, 0.2), (0.9, 0.8), (0.1, 0.8))
     homography = ((0.8, 0.0, 0.1), (0.0, 0.6, 0.2), (0.0, 0.0, 1.0))
