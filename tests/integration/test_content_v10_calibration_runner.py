@@ -66,4 +66,5 @@ class ContentV10CalibrationRunnerStaticTests(unittest.TestCase):
   self.assertIn('run_content_v10_calibration_unit',source); self.assertNotIn('run_content_v9_calibration_unit',source)
   for flag in ('--repo-root','--expected-exact','--local-work-root','--artifact-sink'):
    self.assertIn(flag,source)
+  self.assertIn('def produce_calibration_payload',source)
 if __name__=='__main__': unittest.main()

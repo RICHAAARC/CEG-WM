@@ -93,6 +93,16 @@ def _rollback_final(asset: Path | None, sidecar: Path | None) -> None:
 def _summary(**values: Any) -> None:
     print(PREFIX+" "+stable_json_bytes(values).decode("ascii"),flush=True)
 
+def produce_calibration_payload(pipeline: Any, assets: Any, units: tuple[CalibrationUnit, ...], key: bytes, *, exact: str, protocol_digest: str, public_digest: str) -> bytes:
+    """Non-printing C1 producer core for the combined N96 workflow."""
+    from cegwm.method.content_weighted_joint_v9 import fit_weighted_joint_calibration
+    from cegwm.runtime.content_v10_texture_neutral_sd35 import run_content_v10_calibration_unit
+    pairs=[]
+    for unit in units: pairs.extend(run_content_v10_calibration_unit(pipeline,unit,key,assets))
+    if len(pairs)!=1056: raise ValueError("Content V10 calibration pair count differs")
+    fit=fit_weighted_joint_calibration(pairs); pairs.clear()
+    return _asset_payload(exact,protocol_digest,public_digest,fit)
+
 def execute(args: argparse.Namespace) -> int:
     secret=os.environ.pop(KEY_ENV,""); token=os.environ.pop(TOKEN_ENV,"")
     exact=""; run_id=""; asset_path=None; sidecar_path=None; local_run=None; published=False
@@ -107,12 +117,8 @@ def execute(args: argparse.Namespace) -> int:
         asset_path,sidecar_path=_paths(sink,run_id)
         if asset_path.exists() or sidecar_path.exists(): raise FileExistsError("Content V10 calibration destination is create-only")
         from cegwm.method.content_v10_texture_neutral import load_independent_calibration_asset
-        from cegwm.method.content_weighted_joint_v9 import fit_weighted_joint_calibration
-        from cegwm.runtime.content_v10_texture_neutral_sd35 import run_content_v10_calibration_unit
-        pipeline,assets=_load_pipeline_and_assets(token); pairs=[]
-        for unit in units: pairs.extend(run_content_v10_calibration_unit(pipeline,unit,key,assets))
-        if len(pairs)!=1056: raise ValueError("Content V10 calibration pair count differs")
-        fit=fit_weighted_joint_calibration(pairs); pairs.clear(); payload=_asset_payload(exact,contract.digest,public_digest,fit)
+        pipeline,assets=_load_pipeline_and_assets(token)
+        payload=produce_calibration_payload(pipeline,assets,units,key,exact=exact,protocol_digest=contract.digest,public_digest=public_digest)
         staged_asset,staged_sidecar,digest=_stage_and_validate(local_run,payload,exact,contract.digest,public_digest,load_independent_calibration_asset)
         complete={"status":"complete","completeness":"complete","scientific_status":"not_adjudicated","claim_ceiling":"v10_calibration_asset_generation_only_no_efficacy_claim","exact":exact,"manifest_digest":CALIBRATION_MANIFEST_DIGEST,"fixed_units":32,"committed_units":32,"failed_units":0,"pair_count":1056,"asset_path":str(asset_path),"sidecar_path":str(sidecar_path),"asset_sha256":digest}
         complete_line=PREFIX+" "+stable_json_bytes(complete).decode("ascii")
