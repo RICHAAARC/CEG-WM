@@ -92,16 +92,13 @@ class ContentV6InjectionCallback:
         detection_key: str | bytes | bytearray | memoryview,
         assets: ContentV6EvaluationAssets,
         beta: float,
-        *, allocation_factory: Any = allocate_content,
     ) -> None:
         if not isinstance(assets, ContentV6EvaluationAssets):
             raise TypeError("Content V6 callback requires evaluation assets")
         self._detection_key = detection_key
         self._assets = assets
         self._beta = beta
-        if not callable(allocation_factory):
-            raise TypeError("Content V6 allocation factory must be callable")
-        self._allocation_factory = allocation_factory
+        self._allocation_factory = allocate_content
         self._measurement: ContentAdaptiveMeasurement | None = None
 
     @property
@@ -163,6 +160,16 @@ class ContentV6InjectionCallback:
         updated["latents"] = embedded
         self._measurement = measurement
         return updated
+
+
+class _ContentV6PrivateInjectionCallback(ContentV6InjectionCallback):
+    """Internal-only seam for a dedicated derived-method callback."""
+
+    def __init__(self, detection_key: Any, assets: ContentV6EvaluationAssets, beta: float, allocation_factory: Any) -> None:
+        super().__init__(detection_key, assets, beta)
+        if not callable(allocation_factory):
+            raise TypeError("Content V6 allocation factory must be callable")
+        self._allocation_factory = allocation_factory
 
 
 def _generator(seed: int) -> torch.Generator:
@@ -236,7 +243,9 @@ def _run_content_v6_pass2(
     ):
         raise ValueError("image dimensions must be integers of at least 256")
     _validate_pipeline(pipeline)
-    callback = ContentV6InjectionCallback(detection_key, assets, beta, allocation_factory=allocation_factory)
+    callback = (ContentV6InjectionCallback(detection_key, assets, beta)
+                if allocation_factory is allocate_content else
+                _ContentV6PrivateInjectionCallback(detection_key, assets, beta, allocation_factory))
     result = pipeline(
         prompt=prompt,
         num_inference_steps=20,

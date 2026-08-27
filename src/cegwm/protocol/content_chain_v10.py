@@ -24,6 +24,9 @@ def load_content_v10_contract(root: str | Path) -> ContentV10Contract:
         raise ValueError("Content V10 frozen identity differs")
     asset = value.get("calibration_asset")
     if not isinstance(asset, dict) or asset != {"required": True, "method_id": METHOD_ID,
-        "asset_role": "content_v10_weighted_joint_calibration", "status": "independent_asset_required"}:
+        "asset_role": "content_v10_weighted_joint_calibration", "status": "independent_asset_required",
+        "lf_scorer_id": "content_v4_whitened_lf_dct_matched_cosine_v1",
+        "hf_scorer_id": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
+        "calibration_manifest_digest_format": "lowercase_64_hex"}:
         raise ValueError("Content V10 independent calibration contract differs")
     return ContentV10Contract(value, hashlib.sha256(raw).hexdigest())

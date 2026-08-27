@@ -8,6 +8,8 @@ from cegwm.protocol.content_chain_v10 import METHOD_ID
 
 _ROLE = "content_v10_weighted_joint_calibration"
 _MAX = 255.0 * math.sqrt(2.0)
+_LF_SCORER = "content_v4_whitened_lf_dct_matched_cosine_v1"
+_HF_SCORER = "frozen_hf_final_rgb_public_vae_global_normalized_correlation"
 
 @dataclass(frozen=True)
 class TextureSummary:
@@ -32,8 +34,11 @@ def _summary(values: tuple[float, ...]) -> TextureSummary:
 
 def allocate_texture_neutral(signals: Any) -> TextureNeutralAllocation:
     """Use V3 allocator and its measurements, after only Texture is neutralized."""
-    texture = tuple(float(x) for x in signals.texture_complexity)
-    if len(texture) != 16 or any(not math.isfinite(x) or x < 0.0 or x > _MAX for x in texture):
+    raw = tuple(signals.texture_complexity)
+    if len(raw) != 16 or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in raw):
+        raise ValueError("Content V10 Texture diagnostics must be 16 real values")
+    texture = tuple(float(x) for x in raw)
+    if any(not math.isfinite(x) or x < 0.0 or x > _MAX for x in texture):
         raise ValueError("Content V10 Texture diagnostics must be finite RGB8 4-by-4 values")
     from dataclasses import replace
     from cegwm.method.content_adaptive_v3 import allocate_content
@@ -45,12 +50,20 @@ def load_independent_calibration_asset(path: str | Path, sidecar: str | Path) ->
     value: Mapping[str, Any] = json.loads(raw)
     required={"schema_version","method_id","asset_role_id","lf_weight","hf_weight","lf_scorer_id","hf_scorer_id","calibration_manifest_digest","mu_lf","sigma_lf","mu_hf","sigma_hf","rho"}
     if not isinstance(value,dict) or set(value)!=required or value.get("schema_version")!=1 or value.get("method_id")!=METHOD_ID or value.get("asset_role_id")!=_ROLE: raise ValueError("Content V10 calibration asset identity differs")
-    if (value["lf_weight"],value["hf_weight"]) != (.25,.75) or not all(isinstance(value[x],str) and value[x] for x in ("lf_scorer_id","hf_scorer_id","calibration_manifest_digest")): raise ValueError("Content V10 calibration bindings differ")
+    if (value["lf_weight"],value["hf_weight"],value["lf_scorer_id"],value["hf_scorer_id"]) != (.25,.75,_LF_SCORER,_HF_SCORER) or not isinstance(value["calibration_manifest_digest"],str) or not __import__("re").fullmatch(r"[0-9a-f]{64}", value["calibration_manifest_digest"]): raise ValueError("Content V10 calibration bindings differ")
     values=tuple(float(value[x]) for x in ("mu_lf","sigma_lf","mu_hf","sigma_hf","rho"))
     if not all(math.isfinite(x) for x in values) or values[1]<=0 or values[3]<=0 or not -1<=values[4]<=1: raise ValueError("Content V10 calibration payload differs")
     return V10CalibrationAsset(*values)
 
 def weighted_joint_v10(lf: Any, hf: Any, asset: V10CalibrationAsset) -> float:
     if not isinstance(asset,V10CalibrationAsset): raise TypeError("Content V10 requires validated independent calibration asset")
-    zlf=(float(lf)-asset.mu_lf)/asset.sigma_lf; zhf=(float(hf)-asset.mu_hf)/asset.sigma_hf
-    return (.25*zlf+.75*zhf)/math.sqrt(.25**2+.75**2+2*.25*.75*asset.rho)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in (lf, hf)):
+        raise TypeError("Content V10 branch scores must be real scalars")
+    lf, hf = float(lf), float(hf)
+    if not all(math.isfinite(value) and -1.0 <= value <= 1.0 for value in (lf, hf)):
+        raise ValueError("Content V10 branch scores must be finite in [-1,1]")
+    denominator=math.sqrt(.25**2+.75**2+2*.25*.75*asset.rho)
+    if not math.isfinite(denominator) or denominator <= 0.0: raise ValueError("Content V10 joint denominator differs")
+    result=((.25*(lf-asset.mu_lf)/asset.sigma_lf)+(.75*(hf-asset.mu_hf)/asset.sigma_hf))/denominator
+    if not math.isfinite(result): raise ValueError("Content V10 joint score must be finite")
+    return result

@@ -1,1 +1,19 @@
-{"schema_version":1,"method_id":"content_v10_texture_neutral_dual_branch_weighted_joint_v1","base_method_id":"content_v9_v6_calibrated_weighted_joint_v1","texture_contribution":"fixed_0.5_no_allocation_authority","joint_weights":{"lf":0.25,"hf":0.75},"calibration_asset":{"required":true,"method_id":"content_v10_texture_neutral_dual_branch_weighted_joint_v1","asset_role":"content_v10_weighted_joint_calibration","status":"independent_asset_required"}}
+{
+  "base_method_id": "content_v9_v6_calibrated_weighted_joint_v1",
+  "calibration_asset": {
+    "asset_role": "content_v10_weighted_joint_calibration",
+    "calibration_manifest_digest_format": "lowercase_64_hex",
+    "hf_scorer_id": "frozen_hf_final_rgb_public_vae_global_normalized_correlation",
+    "lf_scorer_id": "content_v4_whitened_lf_dct_matched_cosine_v1",
+    "method_id": "content_v10_texture_neutral_dual_branch_weighted_joint_v1",
+    "required": true,
+    "status": "independent_asset_required"
+  },
+  "joint_weights": {
+    "hf": 0.75,
+    "lf": 0.25
+  },
+  "method_id": "content_v10_texture_neutral_dual_branch_weighted_joint_v1",
+  "schema_version": 1,
+  "texture_contribution": "fixed_0.5_no_allocation_authority"
+}

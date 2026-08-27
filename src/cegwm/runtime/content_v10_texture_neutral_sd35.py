@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
-from cegwm.runtime.content_iss_sd35_v6 import ContentV6RunOutput, _generator, _run_content_v6_pass2, content_v6_h, iss_beta, require_ordinary_rgb_image, run_sd35_plain
+from cegwm.runtime.content_iss_sd35_v6 import ContentV6EvaluationAssets, _generator, _run_content_v6_pass2, content_v6_h, iss_beta, require_ordinary_rgb_image, run_sd35_plain
 
 @dataclass(frozen=True)
 class ContentV10RunOutput:
@@ -20,6 +20,10 @@ def require_v10_calibration_asset(asset: Any) -> Any:
 def run_content_v10_evaluation_pair(pipeline: Any, prompt: str, detection_key: Any, assets: Any, *, height: int, width: int, seed: int) -> ContentV10RunOutput:
     """Keep V6 primary-null/ISS behavior but route pass-2 through V10 at step 18."""
     from cegwm.method.content_v10_texture_neutral import allocate_texture_neutral
+    if not isinstance(assets, ContentV6EvaluationAssets):
+        raise TypeError("Content V10 evaluation pair requires frozen evaluation assets")
+    if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
+        raise ValueError("Content V10 evaluation seed must be a nonnegative integer")
     primary_null=require_ordinary_rgb_image(run_sd35_plain(pipeline,prompt,height=height,width=width,generator=_generator(seed)))
     beta=iss_beta(content_v6_h(primary_null,detection_key,assets.lf_public_assets),assets.iss_asset)
     summary=[]
