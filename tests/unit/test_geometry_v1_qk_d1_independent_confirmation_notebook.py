@@ -19,7 +19,7 @@ def test_d1_notebook_is_unexecuted_and_mounts_drive_first() -> None:
 def test_d1_notebook_binds_runner_and_source_identities_with_one_child() -> None:
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8")); source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
     assert "SOURCE_D01_ARTIFACT_EXACT = 'ccfb7bcefbb18f9812a4e800bbea18b91b031ebb'" in source
-    assert "D1_RUNNER_EXACT = '906478a04334118c1fd71996e38ab905bea6d35a'" in source
+    assert "D1_RUNNER_EXACT = '69171346d8fe8889dc2202d4f34c1cd4a834be34'" in source
     assert "geometry-v1-qk-d01-ccfb7bcefbb1" in source and "geometry-v1-qk-d01-artifact-selection-v1" in source
     assert "/content/drive/MyDrive/CEG-WM/Geometry-V1/D01/Geometry-V1-QK-D01-ccfb7bcefbb1-20260827T083601Z" in source
     assert "git', 'clone', '--no-checkout'" in source and "git', 'checkout', '--detach', D1_RUNNER_EXACT" in source
