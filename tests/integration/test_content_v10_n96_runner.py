@@ -16,4 +16,11 @@ class ContentV10N96RunnerTests(unittest.TestCase):
   self.assertAlmostEqual(module._spearman(list(range(96)),list(reversed(range(96)))),-1.0)
   with self.assertRaises(ValueError): module._spearman([1.0]*96,list(range(96)))
   with self.assertRaises(ValueError): module._spearman(list(range(95)),list(range(95)))
+
+ def test_c1_acceptance_state_never_exposes_unaccepted_provenance(self):
+  import importlib.util
+  spec=importlib.util.spec_from_file_location('n96_runner_state',Path(__file__).parents[2]/'experiments/run_content_v10_n96.py'); module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+  pending=module._c1_state(False,Path('asset'),Path('sidecar'),'a'*64); self.assertEqual(pending['status'],'incomplete_not_accepted'); self.assertIsNone(pending['asset_path'])
+  accepted=module._c1_state(True,Path('asset'),Path('sidecar'),'a'*64); self.assertEqual(accepted['status'],'calibration_complete'); self.assertEqual(accepted['asset_sha256'],'a'*64)
+  source=(Path(__file__).parents[2]/'experiments/run_content_v10_n96.py').read_text(); self.assertLess(source.index('c1_accepted=True; phase="n96"'),source.index('v9_path='))
 if __name__=='__main__': unittest.main()

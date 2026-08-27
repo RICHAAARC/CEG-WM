@@ -63,8 +63,11 @@ def _publish_result(path: Path, payload: bytes) -> str:
   raise
  return digest
 
+def _c1_state(accepted: bool, asset: Path | None, sidecar: Path | None, digest: str | None) -> dict[str,Any]:
+ return {"status":"calibration_complete" if accepted else "incomplete_not_accepted","asset_path":str(asset) if accepted else None,"sidecar_path":str(sidecar) if accepted else None,"asset_sha256":digest if accepted else None}
+
 def execute(args: argparse.Namespace) -> int:
- secret=os.environ.pop(c1.KEY_ENV,""); token=os.environ.pop(c1.TOKEN_ENV,""); local_run=None; c1_published=False; phase="c1"; failed=[]; c1_asset=c1_sidecar=None; digest=None
+ secret=os.environ.pop(c1.KEY_ENV,""); token=os.environ.pop(c1.TOKEN_ENV,""); local_run=None; c1_accepted=False; phase="c1"; failed=[]; c1_asset=c1_sidecar=None; digest=None
  try:
   root=Path(args.repo_root).resolve(); sink=Path(args.artifact_sink).resolve(); local=Path(args.local_work_root).resolve()
   exact=c1._git_exact(root,args.expected_exact); c1_contract=load_content_v10_contract(root); n96_contract=load_content_v10_n96_paired_contract(root); units=c1._units(root)
@@ -75,13 +78,12 @@ def execute(args: argparse.Namespace) -> int:
   from cegwm.method.content_v10_texture_neutral import load_independent_calibration_asset, weighted_joint_v10
   payload=c1.produce_calibration_payload(pipeline,assets,units,key,exact=exact,protocol_digest=c1_contract.digest,public_digest=public)
   c1_asset,c1_sidecar=c1._paths(sink,run_id); staged,stage_side,digest=c1._stage_and_validate(local_run,payload,exact,c1_contract.digest,public,load_independent_calibration_asset)
-  c1._publish_staged(staged,stage_side,c1_asset,c1_sidecar); c1_published=True; v10_asset=load_independent_calibration_asset(c1_asset,c1_sidecar,producer_execution_exact=exact,protocol_digest=c1_contract.digest,calibration_public_key_digest=public)
+  c1._publish_staged(staged,stage_side,c1_asset,c1_sidecar); v10_asset=load_independent_calibration_asset(c1_asset,c1_sidecar,producer_execution_exact=exact,protocol_digest=c1_contract.digest,calibration_public_key_digest=public); c1_accepted=True; phase="n96"
   from cegwm.method.content_weighted_joint_v9 import load_calibration_asset, weighted_joint_score
   v9_path=root/"configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"; v9_side=v9_path.with_name(v9_path.name+".sha256")
   if hashlib.sha256(v9_path.read_bytes()).hexdigest()!="63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96": raise ValueError("frozen V9 asset differs")
   v9_asset=load_calibration_asset(v9_path,v9_side); rows=[]
   import json
-  phase="n96"
   for ordinal,line in enumerate((root/"configs/content_chain/content_texture_n96_evaluation_v1.jsonl").read_text(encoding="utf-8").splitlines()):
    unit=json.loads(line)
    try:
@@ -99,7 +101,7 @@ def execute(args: argparse.Namespace) -> int:
   print(PREFIX+" "+c1.stable_json_bytes({"status":"complete","completeness":"complete","scientific_status":"exploratory_evaluable","claim_ceiling":n96_contract.config["claim_ceiling"],"exact":exact,"c1_committed_units":32,"c1_pair_count":1056,"n96_committed_units":96,"n96_failed_units":0,"result_path":str(result),"sidecar_path":str(result)+".sha256","result_sha256":result_sha}).decode("ascii"),flush=True); return 0
  except BaseException as error:
   if not failed: failed.append({"phase":phase,"ordinal":None,"unit_id":None,"arm":"unknown","error_class":type(error).__name__})
-  c1_state={"status":"calibration_complete","asset_path":str(c1_asset) if c1_published else None,"sidecar_path":str(c1_sidecar) if c1_published else None,"asset_sha256":digest if c1_published else None}
+  c1_state=_c1_state(c1_accepted,c1_asset,c1_sidecar,digest)
   print(PREFIX+" "+c1.stable_json_bytes({"status":"incomplete","completeness":"incomplete","scientific_status":"not_evaluable","fixed_units":96,"n96_committed_units":0,"n96_failed_units":len(failed),"failure_ledger":failed,"c1":c1_state,"result_path":None,"sidecar_path":None,"result_sha256":None}).decode("ascii"),flush=True); return 2
  finally:
   secret=""; token=""; os.environ.pop(c1.KEY_ENV,None); os.environ.pop(c1.TOKEN_ENV,None)
