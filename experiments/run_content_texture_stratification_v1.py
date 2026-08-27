@@ -38,11 +38,13 @@ RESULT_PREFIX = "CEGWM_TEXTURE_RESULT"
 PUBLIC_FAILURES = {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"}
 FAILURE_STAGES = frozenset({
     "identity", "protocol", "secrets", "checkouts", "rosters", "assets",
-    "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6",
-    "v7", "v8", "analysis", "terminal_publication",
+    "prefetch", "common_plain", "c2", "c3", "c6", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication",
 })
 _failure_stage = "identity"
-METHOD_ORDER = ("v2", "v3", "v4", "v5", "v6", "v7", "v8")
+# C2/C3/C6 are the only executed candidate constructions.  V4 is a C3
+# whitened-LF rescore and V5 is a C3 alias, not extra candidate/scorer rows.
+METHOD_ORDER = ("c2", "c3", "c6")
+CONSTRUCTION_SOURCE = {"c2": "v2", "c3": "v3", "c6": "v6"}
 SCORE_FIELDS = tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16))))
 OPERATIONAL_RESULT_FIELDS = ("artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member")
 _failure_context: dict[str, Any] | None = None
@@ -83,16 +85,16 @@ def _identity(repo: Path, expected: str) -> None:
         raise RuntimeError("analysis checkout identity differs")
 
 
-def _load_roster(path: Path, expected_sha: str, roster_id: str, offset: int) -> list[dict[str, Any]]:
+def _load_roster(path: Path, expected_sha: str, roster_id: str, offset: int = 0) -> list[dict[str, Any]]:
     raw = path.read_bytes()
     if sha256_bytes(raw) != expected_sha:
         raise RuntimeError("roster bytes differ")
     rows = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line]
-    if len(rows) != 8:
-        raise ValueError("texture roster must contain exactly eight units")
+    if len(rows) != 96:
+        raise ValueError("texture roster must contain exactly 96 units")
     units = []
     for ordinal, row in enumerate(rows, 1):
-        if set(row) != {"unit_id", "split", "source_id", "prompt", "seed", "height", "width"} or row["height"] != 512 or row["width"] != 512:
+        if set(row) != {"unit_id", "block_id", "slot_index", "semantic_family", "source_id", "prompt", "seed", "height", "width"} or row["height"] != 512 or row["width"] != 512:
             raise ValueError("texture roster unit schema differs")
         if not isinstance(row["seed"], int) or isinstance(row["seed"], bool):
             raise TypeError("texture seed differs")
@@ -240,7 +242,7 @@ def _unit_events(events: Sequence[Mapping[str, Any]], method: str, expected: int
 
 def _derive_row(unit: Mapping[str, Any], method: str, source: Mapping[str, Any], plain: Mapping[str, Any], event: Mapping[str, Any]) -> dict[str, Any]:
     base = {name: "" for name in PER_UNIT_COLUMNS}
-    base.update({"global_ordinal": unit["global_ordinal"], "roster_id": unit["roster_id"], "roster_ordinal": unit["roster_ordinal"], "unit_id": unit["unit_id"], "source_id": unit["source_id"], "seed": unit["seed"], "method_id": source["method_id"], "source_exact": source["exact"], "lf_score_domain": source["lf_score_domain"], "status": event["status"], "failure_class": event.get("failure_class", ""), "plain_ppm_sha256": plain.get("plain_ppm_sha256", ""), "plain_rgb_sha256": plain.get("plain_rgb_sha256", ""), "joint_or_identity": "branchwise_or_derived_only" if method == "v5" else "joint_min_recorded_not_analyzed", "reuse_source_method": source.get("reuse_source_method", "")})
+    base.update({"global_ordinal": unit["global_ordinal"], "roster_id": unit["roster_id"], "roster_ordinal": unit["roster_ordinal"], "unit_id": unit["unit_id"], "source_id": unit["source_id"], "seed": unit["seed"], "method_id": method, "source_exact": source["exact"], "lf_score_domain": source["lf_score_domain"], "status": event["status"], "failure_class": event.get("failure_class", ""), "plain_ppm_sha256": plain.get("plain_ppm_sha256", ""), "plain_rgb_sha256": plain.get("plain_rgb_sha256", ""), "joint_or_identity": "joint_min_recorded_not_analyzed", "reuse_source_method": "v3_for_v4_v5" if method == "c3" else ""})
     if event["status"] != "success" or plain.get("status") != "success":
         base["missing_note"] = "retained_unit_or_plain_failure"
         return base
@@ -257,13 +259,13 @@ def _derive_row(unit: Mapping[str, Any], method: str, source: Mapping[str, Any],
 def _rank_rows(rows: list[dict[str, Any]]) -> None:
     from cegwm.protocol.content_texture_stratification_v1 import average_ranks
     plain_by_unit: dict[tuple[str, str], tuple[str, str]] = {}
-    for roster in ("content_v234_old", "content_v6_current"):
-        subset = [row for row in rows if row["roster_id"] == roster and row["method_id"] == rows_by_method(rows)[METHOD_ORDER[0]][0]["method_id"]]
+    for block in range(12):
+        subset = rows_by_method(rows)[METHOD_ORDER[0]][block * 8:(block + 1) * 8]
         if len(subset) != 8 or any(not row["texture_value"] for row in subset):
             continue
         ranks = average_ranks([float(row["texture_value"]) for row in subset])
         for row, rank in zip(subset, ranks):
-            plain_by_unit[(roster, row["unit_id"])] = (str(float(rank)), f64_hex(float(rank)))
+            plain_by_unit[(row["roster_id"], row["unit_id"])] = (str(float(rank)), f64_hex(float(rank)))
     for row in rows:
         rank = plain_by_unit.get((row["roster_id"], row["unit_id"]))
         if rank:
@@ -273,7 +275,7 @@ def _rank_rows(rows: list[dict[str, Any]]) -> None:
 def rows_by_method(rows: Sequence[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {name: [] for name in METHOD_ORDER}
     for name in METHOD_ORDER:
-        result[name] = rows[name_index(name) * 16:(name_index(name) + 1) * 16]
+        result[name] = rows[name_index(name) * 96:(name_index(name) + 1) * 96]
     return result
 
 
@@ -294,12 +296,12 @@ def _association_rows(rows: list[dict[str, Any]], sources: Mapping[str, Any]) ->
                     available = [item for item in subset if not item["missing_note"] and item[f"{branch}_margin_{margin_id}"]]
                     stat = exact_spearman([float(item["texture_value"]) for item in available], [float(item[f"{branch}_margin_{margin_id}"]) for item in available]) if len(available) == 8 else {"interpretability": "unavailable_incomplete_fixed_denominator"}
                     roster_stats[roster] = stat
-                    result.append(_association(source=sources[method], branch=branch, margin_id=margin_id, scope="within_roster", roster_id=roster, fixed_n=8, subset=subset, available=available, stat=stat))
+                    result.append(_association(source=sources[CONSTRUCTION_SOURCE[method]], branch=branch, margin_id=margin_id, scope="within_roster", roster_id=roster, fixed_n=8, subset=subset, available=available, stat=stat))
                 old = [item for item in method_rows if item["roster_id"] == "content_v234_old" and not item["missing_note"]]
                 current = [item for item in method_rows if item["roster_id"] == "content_v6_current" and not item["missing_note"]]
                 stat = stratified_exact(([float(item["texture_value"]) for item in old], [float(item["texture_value"]) for item in current]), ([float(item[f"{branch}_margin_{margin_id}"]) for item in old], [float(item[f"{branch}_margin_{margin_id}"]) for item in current])) if len(old) == len(current) == 8 else {"interpretability": "unavailable_incomplete_fixed_denominator"}
                 combined = old + current
-                row = _association(source=sources[method], branch=branch, margin_id=margin_id, scope="roster_stratified", roster_id="content_v234_old+content_v6_current", fixed_n=16, subset=method_rows, available=combined, stat=stat)
+                row = _association(source=sources[CONSTRUCTION_SOURCE[method]], branch=branch, margin_id=margin_id, scope="roster_stratified", roster_id="content_v234_old+content_v6_current", fixed_n=16, subset=method_rows, available=combined, stat=stat)
                 if roster_stats["content_v234_old"].get("interpretability") == roster_stats["content_v6_current"].get("interpretability") == "available":
                     ro, rc = roster_stats["content_v234_old"]["rho"], roster_stats["content_v6_current"]["rho"]
                     row.update({"rho_old": format(ro, ".17g"), "rho_current": format(rc, ".17g"), "rho_difference": format(rc - ro, ".17g"), "same_nonzero_sign": ro != 0.0 and rc != 0.0 and ((ro > 0) == (rc > 0))})
@@ -477,15 +479,16 @@ def _execute(args: argparse.Namespace) -> int:
     output.mkdir()
     _failure_context.update({"checkpoints": checkpoints, "output": output})
     _set_failure_stage("checkouts")
-    checkouts = _create_checkouts(repo, local / "source_checkouts", protocol.config["sources"])
-    old_spec, current_spec = protocol.config["rosters_in_order"]
+    # Only the three production sources needed for the minimal mechanism matrix
+    # are checked out.  Historical V4/V5/V7/V8 remain source bindings, not work.
+    selected_sources = {name: protocol.config["sources"][name] for name in ("v2", "v3", "v6")}
+    checkouts = _create_checkouts(repo, local / "source_checkouts", selected_sources)
+    roster_spec = protocol.config["rosters_in_order"][0]
     _set_failure_stage("rosters")
-    units = _load_roster(checkouts["v2"] / old_spec["path"], old_spec["sha256"], old_spec["roster_id"], 0) + _load_roster(checkouts["v6"] / current_spec["path"], current_spec["sha256"], current_spec["roster_id"], 8)
+    units = _load_roster(repo / roster_spec["path"], roster_spec["sha256"], roster_spec["roster_id"])
     units_path = local / "units-private.json"
     _write_json_exclusive(units_path, units)
     _set_failure_stage("assets")
-    asset_v7 = _stage_asset(provenance_root, local / "public_assets" / "v7", protocol.config["assets"]["v7_iss"])
-    asset_v8 = _stage_asset(provenance_root, local / "public_assets" / "v8", protocol.config["assets"]["v8_iss"])
     adapter = repo / "experiments" / "content_texture_stratification_v1_adapter.py"
     cache = local / "hf_home"
     child_env = {KEY_ENV: key_text, TOKEN_ENV: token}
@@ -493,12 +496,11 @@ def _execute(args: argparse.Namespace) -> int:
     prefetch = _child(adapter, checkouts["v2"], protocol.config["sources"]["v2"]["exact"], "asset_prefetch", units_path, output, cache, None, child_env)
     bindings_path = output / "model_bindings.json"
     bindings = json.loads(bindings_path.read_text(encoding="utf-8"))
-    bindings["v4_blobs"] = _v4_blob_bindings(checkouts["v4"], checkouts["v5"])
     bindings["source_bindings"] = protocol.config["sources"]
     bindings_path.write_bytes(stable_json_bytes(bindings))
-    identity = {"analysis_id": protocol.config["analysis_id"], "exact": exact, "protocol_id": protocol.config["protocol_id"], "protocol_digest": protocol.protocol_digest, "run_id": run_id, "public_key_digest": key_digest, "fixed_plain_units": 16, "fixed_method_rows": 112, "resume_allowed": False}
+    identity = {"analysis_id": protocol.config["analysis_id"], "exact": exact, "protocol_id": protocol.config["protocol_id"], "protocol_digest": protocol.protocol_digest, "run_id": run_id, "public_key_digest": key_digest, "fixed_plain_units": 96, "fixed_method_rows": 288, "resume_allowed": False}
     _set_failure_stage("common_plain")
-    plain_events = _unit_events(_child(adapter, checkouts["v2"], protocol.config["sources"]["v2"]["exact"], "common_plain_v2", units_path, output, cache, bindings_path, child_env), "common_plain", 16)
+    plain_events = _unit_events(_child(adapter, checkouts["v2"], protocol.config["sources"]["v2"]["exact"], "common_plain_v2", units_path, output, cache, bindings_path, child_env), "common_plain", 96)
     plains = []
     state: dict[str, Any] = {"phase": "common_plain", "plain_bindings": [], "method_records": []}
     checkpoint_index = 0
@@ -515,30 +517,12 @@ def _execute(args: argparse.Namespace) -> int:
     _failure_context["last_completed_checkpoint"] = checkpoint_index
     _write_json_exclusive(output / "plain_bindings.json", state["plain_bindings"])
     method_events: dict[str, list[dict[str, Any]]] = {}
-    for method in ("v2", "v3", "v4"):
-        _set_failure_stage(method)
-        events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env), method, 16)
-        method_events[method] = events
-        state["phase"] = method
-        for event in events:
-            state["method_records"].append(_checkpoint_event(event))
-        checkpoint_index += 1
-        _checkpoint(checkpoints, checkpoint_index, identity, state)
-        _failure_context["last_completed_checkpoint"] = checkpoint_index
-    _set_failure_stage("v5_validate")
-    _child(adapter, checkouts["v5"], protocol.config["sources"]["v5"]["exact"], "v5_validate", units_path, output, cache, bindings_path, child_env)
-    method_events["v5"] = [{**item, "method": "v5"} for item in method_events["v4"]]
-    state["phase"] = "v5_derived"
-    for event in method_events["v5"]:
-        state["method_records"].append(_checkpoint_event(event))
-    checkpoint_index += 1
-    _checkpoint(checkpoints, checkpoint_index, identity, state)
-    _failure_context["last_completed_checkpoint"] = checkpoint_index
-    for method, asset in (("v6", None), ("v7", asset_v7), ("v8", asset_v8)):
-        _set_failure_stage(method)
-        events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env, v7_asset=asset if method == "v7" else None, v8_asset=asset if method == "v8" else None), method, 16)
-        method_events[method] = events
-        state["phase"] = method
+    for construction in METHOD_ORDER:
+        source_name = CONSTRUCTION_SOURCE[construction]
+        _set_failure_stage(construction)
+        events = _unit_events(_child(adapter, checkouts[source_name], protocol.config["sources"][source_name]["exact"], construction, units_path, output, cache, bindings_path, child_env), construction, 96)
+        method_events[construction] = events
+        state["phase"] = construction
         for event in events:
             state["method_records"].append(_checkpoint_event(event))
         checkpoint_index += 1
@@ -548,26 +532,24 @@ def _execute(args: argparse.Namespace) -> int:
     _set_failure_stage("analysis")
     rows = []
     for method in METHOD_ORDER:
-        source = protocol.config["sources"][method]
+        source = protocol.config["sources"][CONSTRUCTION_SOURCE[method]]
         for unit, plain, event in zip(units, plains, method_events[method]):
             rows.append(_derive_row(unit, method, source, plain, event))
     _rank_rows(rows)
     associations = _association_rows(rows, protocol.config["sources"])
-    distinct = all(len({row["texture_be_hex"] for row in rows if row["roster_id"] == roster and row["method_id"] == protocol.config["sources"]["v2"]["method_id"]}) >= 2 for roster in ("content_v234_old", "content_v6_current"))
-    complete = len(rows) == 112 and len(associations) == 84 and all(not row["missing_note"] and row["primary_null_matches_plain"] for row in rows) and distinct
+    distinct = len({row["texture_be_hex"] for row in rows if row["method_id"] == "c2"}) >= 2
+    complete = len(rows) == 288 and all(not row["missing_note"] and row["primary_null_matches_plain"] for row in rows) and distinct
     status = "analysis_complete" if complete else "not_interpretable"
     state["phase"] = "analysis"
     state["analysis_status"] = status
     checkpoint_index += 1
     _checkpoint(checkpoints, checkpoint_index, identity, state)
     _failure_context["last_completed_checkpoint"] = checkpoint_index
-    if checkpoint_index != 9 or state["phase"] != protocol.config["execution"]["checkpoint_stages"][-1]:
-        raise RuntimeError("local transient checkpoint stage count differs")
     _set_failure_stage("terminal_publication")
     per_unit_csv = _csv_bytes(PER_UNIT_COLUMNS, rows)
     associations_csv = _csv_bytes(ASSOCIATION_COLUMNS, associations)
     public_records = _public_records(rows)
-    result = {"analysis_id": protocol.config["analysis_id"], "status": status, "claim_ceiling": protocol.config["claim_ceiling"], "fixed_plain_units": 16, "fixed_method_rows": 112, "association_rows": 84, "method_order": list(METHOD_ORDER), "roster_order": [item["roster_id"] for item in protocol.config["rosters_in_order"]], "gate_or_scientific_status_mutated": False, "interpretation": "exploratory_descriptive_only"}
+    result = {"analysis_id": protocol.config["analysis_id"], "status": status, "claim_ceiling": protocol.config["claim_ceiling"], "fixed_plain_units": 96, "fixed_method_rows": 288, "association_rows": len(associations), "method_order": list(METHOD_ORDER), "roster_order": [item["roster_id"] for item in protocol.config["rosters_in_order"]], "gate_or_scientific_status_mutated": False, "interpretation": "exploratory_descriptive_only"}
     bindings_public = {"identity": identity, "sources": protocol.config["sources"], "rosters": protocol.config["rosters_in_order"], "assets": protocol.config["assets"], "execution": protocol.config["execution"]}
     if isinstance(bindings.get("manifest_sha256"), str):
         bindings_public["model_manifest_sha256"] = bindings["manifest_sha256"]

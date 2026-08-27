@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import ast
+import json
 import math
 import subprocess
 import unittest
@@ -16,6 +17,7 @@ from cegwm.protocol.content_texture_stratification_v1 import (
     f64_hex,
     load_protocol,
     margins,
+    N96_FAMILIES,
     parse_p6_texture,
     require_scores,
     stable_json_bytes,
@@ -81,13 +83,47 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertEqual([argument.arg for argument in function.args.args], ["pipeline", "prompt", "detection_key", "assets"])
         self.assertEqual([argument.arg for argument in function.args.kwonlyargs], ["height", "width", "generator"])
 
-    def test_protocol_freezes_sources_rosters_counts_and_claim_ceiling(self) -> None:
+    def test_protocol_freezes_n96_roster_counts_and_claim_ceiling(self) -> None:
         protocol = load_protocol(ROOT)
         self.assertEqual(list(protocol.config["sources"]), ["v2", "v3", "v4", "v5", "v6", "v7", "v8"])
-        self.assertEqual([item["sha256"] for item in protocol.config["rosters_in_order"]], ["dd30c719ae5a48b2a9a652420a3237adb74ffd26af8bac90e25c1d03fe845b88", "20058788bfe7d75878e7263efda2b8de94c6fdcd3a963f64368f2ba4d594868f"])
-        self.assertEqual(protocol.config["execution"], {"plain_generations": 16, "paired_method_generations": 192, "total_diffusion_calls": 208, "callback_writes": 96, "probe_evaluations": 6144, "fixed_analysis_rows": 112, "checkpoint_count": 9, "checkpoint_stages": ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"], "checkpoint_scope": "local_transient", "resume_allowed": False})
+        self.assertEqual(protocol.config["execution"], {"plain_generations": 96, "candidate_generations": 288, "total_diffusion_calls": 384, "callback_writes": 288, "probe_evaluations": 18432, "score_vectors": 960, "primitive_blind_scorer_calls": 16320, "candidate_unit_rows": 288, "checkpoint_scope": "local_transient", "resume_allowed": False})
         self.assertEqual(protocol.config["claim_ceiling"], "exploratory_prospective_texture_stratification_only")
         self.assertEqual(len(protocol.protocol_digest), 64)
+
+    def test_n96_manifest_has_fixed_slots_seeds_and_new_prompt_bytes(self) -> None:
+        protocol = load_protocol(ROOT)
+        spec = protocol.config["rosters_in_order"][0]
+        rows = [json.loads(line) for line in (ROOT / spec["path"]).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(rows), 96)
+        self.assertEqual(len({row["prompt"].encode("utf-8") for row in rows}), 96)
+        self.assertEqual([row["seed"] for row in rows], list(range(2026100000, 2026100096)))
+        self.assertEqual([row["semantic_family"] for row in rows[:8]], list(N96_FAMILIES))
+        old_prompts = set()
+        for path in (ROOT / "configs").rglob("*.json*"):
+            if path == ROOT / spec["path"]:
+                continue
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            stack = [value]
+            while stack:
+                item = stack.pop()
+                if isinstance(item, dict):
+                    if isinstance(item.get("prompt"), str): old_prompts.add(item["prompt"].encode("utf-8"))
+                    stack.extend(item.values())
+                elif isinstance(item, list): stack.extend(item)
+        self.assertFalse(old_prompts & {row["prompt"].encode("utf-8") for row in rows})
+
+    def test_thin_notebook_has_drive_first_mount_and_single_runner(self) -> None:
+        notebook = json.loads((ROOT / "notebooks/content_texture_stratification_v1_colab.ipynb").read_text(encoding="utf-8"))
+        cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+        self.assertEqual(cells[0]["source"], ["from google.colab import drive\n", "drive.mount('/content/drive')\n"])
+        source = "".join(line for cell in cells for line in cell["source"])
+        self.assertEqual(source.count("subprocess.Popen("), 1)
+        self.assertNotIn("force_remount", source)
+        self.assertNotIn("retry", source.lower())
+        self.assertTrue(all(cell["execution_count"] is None and cell["outputs"] == [] for cell in cells))
 
     def test_p6_and_texture_use_exact_rgb_forward_gradient(self) -> None:
         raw = bytearray(512 * 512 * 3)

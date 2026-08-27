@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import json
 import math
+import re
 import struct
 from collections import Counter
 from dataclasses import dataclass
@@ -17,6 +18,11 @@ from typing import Any, Iterable, Mapping, Sequence
 PROTOCOL_CONFIG = "configs/content_chain/content_texture_stratification_v1.json"
 PUBLIC_STATUS = frozenset({"analysis_complete", "analysis_incomplete", "not_interpretable"})
 SCORE_LABELS = ("registered", *(f"wrong_{index:02d}" for index in range(16)))
+N96_FAMILIES = (
+    "indoor_still_life", "natural_landscape", "urban_architecture", "people_activity",
+    "animals", "food_material_closeup", "abstract_geometry", "low_light_weather",
+)
+_PROMPT_FORBIDDEN = re.compile(r"\b(?:watermark|lf|hf|texture|frequency|robustness|expected[ _-]?outcome|content[-_ ]?texture|content_v\d+)\b", re.I)
 
 
 def stable_json_bytes(value: Any) -> bytes:
@@ -63,7 +69,7 @@ def load_protocol(repo_root: str | Path) -> TextureProtocol:
     path = root / PROTOCOL_CONFIG
     payload = path.read_bytes()
     config = json.loads(payload)
-    required = {"schema_version", "protocol_id", "analysis_id", "claim_ceiling", "public_key_digest", "model_id", "dino_asset_id", "generation", "rosters_in_order", "sources", "assets", "execution", "statistics", "status_values"}
+    required = {"schema_version", "protocol_id", "analysis_id", "claim_ceiling", "public_key_digest", "model_id", "dino_asset_id", "generation", "rosters_in_order", "sources", "assets", "execution", "statistics", "status_values", "evaluation"}
     if set(config) != required or config["schema_version"] != 1:
         raise ValueError("texture protocol config fields differ")
     if config["claim_ceiling"] != "exploratory_prospective_texture_stratification_only":
@@ -71,10 +77,32 @@ def load_protocol(repo_root: str | Path) -> TextureProtocol:
     if list(config["sources"]) != ["v2", "v3", "v4", "v5", "v6", "v7", "v8"]:
         raise ValueError("texture method order differs")
     execution = config["execution"]
-    if (execution["total_diffusion_calls"], execution["callback_writes"], execution["probe_evaluations"], execution["fixed_analysis_rows"], execution["checkpoint_count"], execution["checkpoint_scope"], execution["resume_allowed"]) != (208, 96, 6144, 112, 9, "local_transient", False):
+    if (execution["total_diffusion_calls"], execution["callback_writes"], execution["probe_evaluations"], execution["score_vectors"], execution["primitive_blind_scorer_calls"], execution["candidate_unit_rows"], execution["checkpoint_scope"], execution["resume_allowed"]) != (384, 288, 18432, 960, 16320, 288, "local_transient", False):
         raise ValueError("texture execution identity differs")
-    if execution["checkpoint_stages"] != ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"]:
-        raise ValueError("texture checkpoint stage order differs")
+    roster = config["rosters_in_order"]
+    if len(roster) != 1 or roster[0].get("unit_count") != 96 or roster[0].get("blocks") != 12 or roster[0].get("slots_per_block") != 8:
+        raise ValueError("texture N96 roster identity differs")
+    manifest = (root / roster[0]["path"]).read_bytes()
+    if sha256_bytes(manifest) != roster[0]["sha256"]:
+        raise ValueError("texture N96 manifest digest differs")
+    units = [json.loads(line) for line in manifest.splitlines()]
+    if len(units) != 96 or len({(u["unit_id"], u["prompt"].encode(), u["seed"]) for u in units}) != 96:
+        raise ValueError("texture N96 units differ")
+    for ordinal, unit in enumerate(units):
+        block, slot = divmod(ordinal, 8)
+        if (set(unit) != {"unit_id", "block_id", "slot_index", "semantic_family", "source_id", "prompt", "seed", "height", "width"}
+                or unit["unit_id"] != f"content-texture-n96-b{block + 1:02d}-s{slot + 1:02d}"
+                or unit["block_id"] != f"b{block + 1:02d}"
+                or unit["source_id"] != f"content-texture-n96-b{block + 1:02d}-s{slot + 1:02d}"
+                or unit["slot_index"] != slot + 1
+                or unit["semantic_family"] != N96_FAMILIES[slot]
+                or unit["seed"] != 2026100000 + ordinal
+                or unit["height"] != 512 or unit["width"] != 512
+                or not isinstance(unit["prompt"], str) or not unit["prompt"].strip()
+                or _PROMPT_FORBIDDEN.search(unit["prompt"])):
+            raise ValueError("texture N96 unit fields differ")
+    if config["evaluation"].get("calibration_manifest_binding_status") != "pending_separate_C1":
+        raise ValueError("texture calibration binding differs")
     digest = sha256_bytes(stable_json_bytes(config))
     return TextureProtocol(root, config, digest, f"content-texture-stratification-v1-{digest[:12]}")
 
@@ -215,4 +243,4 @@ def median(values: Iterable[float]) -> float:
     return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
 
 
-__all__ = ["PROTOCOL_CONFIG", "PUBLIC_STATUS", "SCORE_LABELS", "TextureProtocol", "average_ranks", "encode_p6_rgb", "exact_spearman", "f64_from_hex", "f64_hex", "load_protocol", "margins", "median", "parse_p6_texture", "rational", "require_scores", "sha256_bytes", "stable_json_bytes", "stratified_exact"]
+__all__ = ["N96_FAMILIES", "PROTOCOL_CONFIG", "PUBLIC_STATUS", "SCORE_LABELS", "TextureProtocol", "average_ranks", "encode_p6_rgb", "exact_spearman", "f64_from_hex", "f64_hex", "load_protocol", "margins", "median", "parse_p6_texture", "rational", "require_scores", "sha256_bytes", "stable_json_bytes", "stratified_exact"]

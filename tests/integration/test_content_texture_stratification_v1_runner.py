@@ -326,29 +326,12 @@ class TextureRunnerTests(unittest.TestCase):
     paths = {name: fake / name for name in protocol.config["sources"]}
     for path in paths.values():
         path.mkdir(parents=True)
-    old = _roster("content-adaptive-v2", 1213060)
-    current = _roster("content-v6-iss-eval", 2026082499)
-    old_path = paths["v2"] / protocol.config["rosters_in_order"][0]["path"]
-    current_path = paths["v6"] / protocol.config["rosters_in_order"][1]["path"]
-    old_path.parent.mkdir(parents=True)
-    current_path.parent.mkdir(parents=True)
-    old_path.write_bytes(old)
-    current_path.write_bytes(current)
-    protocol.config["rosters_in_order"][0]["sha256"] = hashlib.sha256(old).hexdigest()
-    protocol.config["rosters_in_order"][1]["sha256"] = hashlib.sha256(current).hexdigest()
-    for relative in ("experiments/run_content_v4_clean.py", "src/cegwm/method/content_whitening_v4.py", "src/cegwm/runtime/content_adaptive_sd35_v3.py"):
-        for name in ("v4", "v5"):
-            target = paths[name] / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("same", encoding="ascii")
 
     def fake_child(adapter, source, exact, phase, units_path, output, cache, bindings_path, env, **kwargs):
         units = json.loads(units_path.read_text())
         if phase == "asset_prefetch":
             (output / "model_bindings.json").write_text(json.dumps({"cache_observation": {"status": "unavailable", "failure_class": "RuntimeError", "record_only": True}}), encoding="ascii")
             return [{"event": "source_validated"}, {"event": "asset_prefetch"}, {"event": "phase_complete", "phase": phase}]
-        if phase == "v5_validate":
-            return [{"event": "source_validated"}, {"event": "v5_validated"}, {"event": "phase_complete", "phase": phase}]
         if phase == "common_plain_v2":
             events = []
             for unit in units:
@@ -385,18 +368,18 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertIsNone(archive.testzip())
         names = archive.namelist()
         self.assertEqual(names[:7], ["receipt.json", "bindings.json", "environment_record.json", "records.json", "result.json", "per_unit.csv", "associations.csv"])
-        self.assertEqual(len([name for name in names if name.startswith("plain_rgb/")]), 16)
+        self.assertEqual(len([name for name in names if name.startswith("plain_rgb/")]), 96)
         result = json.loads(archive.read("result.json"))
         records = json.loads(archive.read("records.json"))
         self.assertEqual(result["status"], "analysis_complete")
-        self.assertEqual(result["fixed_method_rows"], 112)
-        self.assertEqual(len(records), 112)
+        self.assertEqual(result["fixed_method_rows"], 288)
+        self.assertEqual(len(records), 288)
         self.assertNotIn(b"private prompt", archive.read("records.json"))
         self.assertNotIn("model_manifest_sha256", json.loads(archive.read("bindings.json")))
     checkpoints = sorted((local / "checkpoints").glob("checkpoint-*.json"))
-    self.assertEqual(len(checkpoints), 9)
-    self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json.sha256"))), 9)
-    self.assertEqual([json.loads(path.read_text())["state"]["phase"] for path in checkpoints], ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"])
+    self.assertEqual(len(checkpoints), 5)
+    self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json.sha256"))), 5)
+    self.assertEqual([json.loads(path.read_text())["state"]["phase"] for path in checkpoints], ["common_plain", "c2", "c3", "c6", "analysis"])
 
     failure_local, failure_sink = tmp_path / "failure-local", tmp_path / "failure-sink"
     failure_args = Namespace(repo_root=str(repo), expected_exact="19ed1a351dc860ea4446309a475eaa74fc976df5", local_work_root=str(failure_local), artifact_sink=str(failure_sink), provenance_root=str(tmp_path / "provenance"))
@@ -405,7 +388,7 @@ class TextureRunnerTests(unittest.TestCase):
     operational = json.loads(captured.getvalue().split(" ", 1)[1])
     self.assertLessEqual(len(captured.getvalue().encode("utf-8")), 4096)
     self.assertEqual(set(operational), set(runner.OPERATIONAL_RESULT_FIELDS))
-    self.assertEqual((operational["artifact_kind"], operational["status"], operational["failure_class"], operational["failure_stage"], operational["last_completed_checkpoint"], operational["result_member"]), ("operational_terminal", "operational_failure", "ValueError", "analysis", 8, "failure.json"))
+    self.assertEqual((operational["artifact_kind"], operational["status"], operational["failure_class"], operational["failure_stage"], operational["last_completed_checkpoint"], operational["result_member"]), ("operational_terminal", "operational_failure", "ValueError", "analysis", 4, "failure.json"))
     failure_root = failure_sink / failure_args.expected_exact / run_id
     failure_archive = failure_root / "terminal" / f"{run_id}.zip"
     failure_sidecar = failure_root / "terminal" / f"{run_id}.zip.sha256"
@@ -414,11 +397,11 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertIsNone(archive.testzip())
         names = archive.namelist()
         self.assertEqual(names[:2], ["receipt.json", "failure.json"])
-        self.assertEqual([name for name in names if name.startswith("checkpoints/")], [part for index in range(1, 9) for part in (f"checkpoints/checkpoint-{index:04d}.json", f"checkpoints/checkpoint-{index:04d}.json.sha256")])
+        self.assertEqual([name for name in names if name.startswith("checkpoints/")], [part for index in range(1, 5) for part in (f"checkpoints/checkpoint-{index:04d}.json", f"checkpoints/checkpoint-{index:04d}.json.sha256")])
         self.assertIn("audit/model_bindings.json", names)
         self.assertIn("audit/plain_bindings.json", names)
         receipt, failure = json.loads(archive.read("receipt.json")), json.loads(archive.read("failure.json"))
-        self.assertEqual((receipt["status"], receipt["failure_class"], receipt["failure_stage"], receipt["last_completed_checkpoint"], receipt["resume_allowed"]), ("operational_failure", "ValueError", "analysis", 8, False))
+        self.assertEqual((receipt["status"], receipt["failure_class"], receipt["failure_stage"], receipt["last_completed_checkpoint"], receipt["resume_allowed"]), ("operational_failure", "ValueError", "analysis", 4, False))
         self.assertEqual(receipt["result_member"], "failure.json")
         self.assertIn(receipt["result_member"], names)
         self.assertEqual(archive.read(receipt["result_member"]), runner.stable_json_bytes(failure))

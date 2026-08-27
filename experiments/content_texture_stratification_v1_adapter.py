@@ -202,8 +202,7 @@ def _common_plain(root: Path, units: list[dict[str, Any]], token: str, output: P
             _event({"event": "plain", "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "operational_failure", "failure_class": name if name in PUBLIC_FAILURES else "OtherOperationalError"})
 
 
-def _v234(root: Path, method: str, units: list[dict[str, Any]], key_text: str, token: str) -> None:
-    from cegwm.runtime.diffusers_sd35 import run_sd35_plain
+def _v234(root: Path, method: str, units: list[dict[str, Any]], key_text: str, token: str, output_root: Path | None = None, *, event_method: str | None = None) -> None:
     from cegwm.shared.keys import normalize_detection_key
     if method == "v2":
         from experiments import run_content_adaptive_dual_branch_v2_clean as runner
@@ -234,13 +233,23 @@ def _v234(root: Path, method: str, units: list[dict[str, Any]], key_text: str, t
         scorer = lambda image, key, wrong: engine._blind_scores_with_lf_scorer(image, key, wrong, assets.hf_public_assets, assets.lf_public_assets, runner.score_content_v4_lf_image)
     key = normalize_detection_key(key_text)
     wrong = engine._wrong_keys(key, protocol)
+    plain_bindings = {item["global_ordinal"]: item for item in _json(str(output_root / "plain_bindings.json")) if item.get("status") == "success"} if output_root is not None else {}
     for unit in units:
         try:
             output = run_joint(pipeline, unit["prompt"], key, assets, height=512, width=512, generator=_generator(unit["seed"]))
-            null = run_sd35_plain(pipeline, unit["prompt"], height=512, width=512, generator=_generator(unit["seed"]))
-            _emit_success(method, unit, output.image, null, engine._flat_scores(scorer(output.image, key, wrong)), engine._flat_scores(scorer(null, key, wrong)))
+            if output_root is None:
+                from cegwm.runtime.diffusers_sd35 import run_sd35_plain
+                null = run_sd35_plain(pipeline, unit["prompt"], height=512, width=512, generator=_generator(unit["seed"]))
+            else:
+                binding = plain_bindings.get(unit["global_ordinal"])
+                if not isinstance(binding, dict) or not isinstance(binding.get("relative_path"), str):
+                    raise RuntimeError("common plain binding missing")
+                from PIL import Image
+                with Image.open(output_root / binding["relative_path"]) as opened:
+                    null = opened.convert("RGB").copy()
+            _emit_success(event_method or method, unit, output.image, null, engine._flat_scores(scorer(output.image, key, wrong)), engine._flat_scores(scorer(null, key, wrong)))
         except Exception as error:
-            _unit_failure(method, unit, error)
+            _unit_failure(event_method or method, unit, error)
     key = b""
 
 
@@ -259,7 +268,7 @@ def _v5_validate(root: Path, bindings: Mapping[str, Any]) -> None:
     _event({"event": "v5_validated", "reuse_source_method": "v4"})
 
 
-def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: str) -> None:
+def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: str, *, event_method: str = "v6") -> None:
     from experiments import run_content_v6_clean as runner
     from experiments import run_content_adaptive_dual_branch_v2_clean as engine
     from cegwm.shared.keys import normalize_detection_key
@@ -273,9 +282,9 @@ def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: st
         try:
             output = runner._run_pair(pipeline, unit["prompt"], key, assets, height=512, width=512, seed=unit["seed"])
             score = lambda image: engine._flat_scores(engine._blind_scores_with_lf_scorer(image, key, wrong, assets.hf_public_assets, assets.lf_public_assets, runner.score_content_v4_lf_image))
-            _emit_success("v6", unit, output.image, output.primary_null, score(output.image), score(output.primary_null))
+            _emit_success(event_method, unit, output.image, output.primary_null, score(output.image), score(output.primary_null))
         except Exception as error:
-            _unit_failure("v6", unit, error)
+            _unit_failure(event_method, unit, error)
     key = b""
 
 
@@ -346,12 +355,12 @@ def execute(args: argparse.Namespace) -> int:
             _prefetch(root, token, output, Path(args.hf_cache_root))
         elif args.phase == "common_plain_v2":
             _common_plain(root, units, token, output)
-        elif args.phase in {"v2", "v3", "v4"}:
-            _v234(root, args.phase, units, key, token)
+        elif args.phase in {"v2", "v3", "v4", "c2", "c3"}:
+            _v234(root, {"c2": "v2", "c3": "v3"}.get(args.phase, args.phase), units, key, token, output, event_method=args.phase)
         elif args.phase == "v5_validate":
             _v5_validate(root, bindings)
-        elif args.phase == "v6":
-            _paired_v6(root, units, key, token)
+        elif args.phase in {"v6", "c6"}:
+            _paired_v6(root, units, key, token, event_method=args.phase)
         elif args.phase == "v7":
             _paired_v7(root, units, key, token, Path(args.v7_asset_root))
         elif args.phase == "v8":
@@ -368,7 +377,7 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True)
     parser.add_argument("--expected-exact", required=True)
-    parser.add_argument("--phase", required=True, choices=("asset_prefetch", "common_plain_v2", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8"))
+    parser.add_argument("--phase", required=True, choices=("asset_prefetch", "common_plain_v2", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "c2", "c3", "c6"))
     parser.add_argument("--units-json")
     parser.add_argument("--plain-bindings-json")
     parser.add_argument("--local-output-root", required=True)
