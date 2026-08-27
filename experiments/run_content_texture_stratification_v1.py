@@ -45,6 +45,7 @@ _failure_stage = "identity"
 # whitened-LF rescore and V5 is a C3 alias, not extra candidate/scorer rows.
 METHOD_ORDER = ("c2", "c3", "c6")
 CONSTRUCTION_SOURCE = {"c2": "v2", "c3": "v3", "c6": "v6"}
+DOMAIN_MATRIX = {"c2": ("ordinary_lf", "hf"), "c3": ("ordinary_lf", "v4_lf", "hf"), "c6": ("v4_lf", "hf")}
 SCORE_FIELDS = tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16))))
 OPERATIONAL_RESULT_FIELDS = ("artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member")
 _failure_context: dict[str, Any] | None = None
@@ -61,6 +62,29 @@ def _set_failure_stage(stage: str) -> None:
     if stage not in FAILURE_STAGES:
         raise ValueError("texture failure stage differs")
     _failure_stage = stage
+
+
+def _null_cache_put(cache: dict[tuple[str, int, str], Mapping[str, Any]], domain: str, ordinal: int, plain_sha: str, scores: Mapping[str, Any]) -> None:
+    key = (domain, ordinal, plain_sha)
+    if key in cache and cache[key] != scores:
+        raise ValueError("domain null cache conflict")
+    cache[key] = dict(scores)
+
+
+def _join_domain_maps(construction: str, candidate: Mapping[str, Mapping[str, Any]], cache: Mapping[tuple[str, int, str], Mapping[str, Any]], ordinal: int, plain_sha: str) -> dict[str, tuple[float, float]]:
+    from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
+    domains = DOMAIN_MATRIX[construction]
+    nulls = {}
+    for domain in domains:
+        value = cache.get((domain, ordinal, plain_sha))
+        if value is None:
+            raise ValueError("required domain null missing")
+        nulls[domain] = value
+    return require_construction_domains(construction, candidate, nulls)
+
+
+def _required_association_matrix() -> tuple[tuple[str, str, str], ...]:
+    return tuple((construction, domain, margin) for construction, domains in DOMAIN_MATRIX.items() for domain in domains for margin in ("a", "b"))
 
 
 def _failure_line(error: BaseException) -> str:

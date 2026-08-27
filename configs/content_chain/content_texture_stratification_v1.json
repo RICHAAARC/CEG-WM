@@ -36,7 +36,28 @@
       "c6"
     ],
     "fixed_denominator": 96,
-    "future_calibration_preflight": "not_applicable_until_E1"
+    "future_calibration_preflight": "not_applicable_until_E1",
+    "null_producers": {
+      "hf": "c2_common_plain",
+      "ordinary_lf": "c2_common_plain",
+      "v4_lf": "c3_v4_lf"
+    },
+    "required_associations": 14,
+    "scorer_domains": {
+      "c2": [
+        "ordinary_lf",
+        "hf"
+      ],
+      "c3": [
+        "ordinary_lf",
+        "v4_lf",
+        "hf"
+      ],
+      "c6": [
+        "v4_lf",
+        "hf"
+      ]
+    }
   },
   "execution": {
     "callback_writes": 288,

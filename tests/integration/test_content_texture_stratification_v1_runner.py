@@ -65,6 +65,14 @@ def _score_payload(offset: float) -> dict[str, float]:
 
 
 class TextureRunnerTests(unittest.TestCase):
+ def test_domain_null_cache_and_c3_join_fail_closed(self) -> None:
+    labels = {"registered": .5, **{f"wrong_{i:02d}": .25 for i in range(16)}}
+    null = {"registered": .1, **{f"wrong_{i:02d}": 0. for i in range(16)}}
+    cache = {}; plain = "a" * 64
+    for domain in ("ordinary_lf", "v4_lf", "hf"): runner._null_cache_put(cache, domain, 1, plain, null)
+    self.assertEqual(set(runner._join_domain_maps("c3", {d: labels for d in ("ordinary_lf", "v4_lf", "hf")}, cache, 1, plain)), {"ordinary_lf", "v4_lf", "hf"})
+    with self.assertRaises(ValueError): runner._join_domain_maps("c3", {d: labels for d in ("ordinary_lf", "v4_lf", "hf")}, {}, 1, plain)
+    self.assertEqual(len(runner._required_association_matrix()), 14)
  def test_runner_normalizes_real_adapter_canonical_score_serialization(self) -> None:
     class Image:
         mode, size = "RGB", (512, 512)
