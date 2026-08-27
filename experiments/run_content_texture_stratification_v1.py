@@ -25,6 +25,7 @@ from cegwm.protocol.content_texture_stratification_v1 import (
     margins,
     median,
     parse_p6_texture,
+    require_scores,
     sha256_bytes,
     stable_json_bytes,
     stratified_exact,
@@ -42,6 +43,8 @@ FAILURE_STAGES = frozenset({
 })
 _failure_stage = "identity"
 METHOD_ORDER = ("v2", "v3", "v4", "v5", "v6", "v7", "v8")
+SCORE_FIELDS = tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16))))
+_failure_context: dict[str, Any] | None = None
 PER_UNIT_COLUMNS = (
     "global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_value", "texture_be_hex", "texture_rank", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "lf_registered", "lf_max_wrong", "lf_null_registered", "lf_margin_a", "lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b", "joint_or_identity", "reuse_source_method", "missing_note",
 )
@@ -180,6 +183,24 @@ def _checkpoint_event(event: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _ordered_scores(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or len(value) != len(SCORE_FIELDS) or set(value) != set(SCORE_FIELDS):
+        raise ValueError("score fields differ")
+    ordered = {name: value[name] for name in SCORE_FIELDS}
+    require_scores(ordered)
+    return ordered
+
+
+def _adapter_event(line: str) -> dict[str, Any]:
+    event = json.loads(line[len(EVENT_PREFIX):])
+    if not isinstance(event, dict):
+        raise ValueError("adapter event must be an object")
+    for name in ("scores", "primary_null_scores"):
+        if name in event:
+            event[name] = _ordered_scores(event[name])
+    return event
+
+
 def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path, output: Path, cache: Path, bindings_path: Path | None, env: Mapping[str, str], *, v7_asset: Path | None = None, v8_asset: Path | None = None) -> list[dict[str, Any]]:
     command = [sys.executable, str(adapter), "--source-root", str(source), "--expected-exact", exact, "--phase", phase, "--units-json", str(units_path), "--plain-bindings-json", str(output / "plain_bindings.json"), "--local-output-root", str(output), "--hf-cache-root", str(cache)]
     if bindings_path is not None:
@@ -197,7 +218,7 @@ def _child(adapter: Path, source: Path, exact: str, phase: str, units_path: Path
             process.kill()
             raise RuntimeError("adapter output line exceeds bound")
         if line.startswith(EVENT_PREFIX):
-            events.append(json.loads(line[len(EVENT_PREFIX):]))
+            events.append(_adapter_event(line))
             if len(events) > 64:
                 process.kill()
                 raise RuntimeError("adapter event count exceeds bound")
@@ -338,11 +359,82 @@ def _publish_terminal(run_root: Path, run_id: str, members: Sequence[tuple[str, 
         except BaseException:
             for path in reversed(created):
                 path.unlink(missing_ok=True)
+            terminal.rmdir()
+            run_root.rmdir()
             raise
         return digest
 
 
-def execute(args: argparse.Namespace) -> int:
+def _complete_checkpoint_members(checkpoints: Path) -> list[tuple[str, bytes]]:
+    result = []
+    for index in range(1, 10):
+        path = checkpoints / f"checkpoint-{index:04d}.json"
+        sidecar = checkpoints / f"checkpoint-{index:04d}.json.sha256"
+        if not path.exists() and not sidecar.exists():
+            break
+        if not path.is_file() or not sidecar.is_file():
+            break
+        payload, binding = path.read_bytes(), sidecar.read_bytes()
+        if binding != f"{sha256_bytes(payload)}  {path.name}\n".encode("ascii"):
+            break
+        result.extend(((f"checkpoints/{path.name}", payload), (f"checkpoints/{sidecar.name}", binding)))
+    return result
+
+
+def _public_audit_members(output: Path) -> list[tuple[str, bytes]]:
+    result = []
+    bindings_path = output / "model_bindings.json"
+    if bindings_path.is_file():
+        bindings = json.loads(bindings_path.read_text(encoding="utf-8"))
+        if isinstance(bindings, dict):
+            bindings.pop("hf_home", None)
+            result.append(("audit/model_bindings.json", stable_json_bytes(bindings)))
+    plain_path = output / "plain_bindings.json"
+    if plain_path.is_file():
+        plains = json.loads(plain_path.read_text(encoding="utf-8"))
+        if isinstance(plains, list):
+            result.append(("audit/plain_bindings.json", stable_json_bytes(plains)))
+            for plain in plains:
+                relative = plain.get("relative_path") if isinstance(plain, dict) and plain.get("status") == "success" else None
+                if isinstance(relative, str) and relative.startswith("plain_rgb/") and not Path(relative).is_absolute() and ".." not in Path(relative).parts:
+                    path = output / relative
+                    if path.is_file():
+                        result.append((relative, path.read_bytes()))
+    return result
+
+
+def _publish_operational_terminal(context: Mapping[str, Any], error: Exception) -> str:
+    protocol = context["protocol"]
+    failure_class = type(error).__name__ if type(error).__name__ in PUBLIC_FAILURES else "OtherOperationalError"
+    receipt = {
+        "artifact_kind": "operational_terminal",
+        "analysis_id": protocol.config["analysis_id"],
+        "exact": context["exact"],
+        "protocol_digest": protocol.protocol_digest,
+        "run_id": context["run_id"],
+        "status": "operational_failure",
+        "claim_ceiling": protocol.config["claim_ceiling"],
+        "failure_class": failure_class,
+        "failure_stage": _failure_stage,
+        "last_completed_checkpoint": context["last_completed_checkpoint"],
+        "checkpoint_scope": "local_transient",
+        "resume_allowed": False,
+        "result_member": "result.json",
+        "external_validation_required": True,
+    }
+    result = {key: receipt[key] for key in ("analysis_id", "exact", "protocol_digest", "run_id", "status", "claim_ceiling", "failure_class", "failure_stage", "last_completed_checkpoint", "checkpoint_scope", "resume_allowed")}
+    members = [("receipt.json", stable_json_bytes(receipt)), ("failure.json", stable_json_bytes(result))]
+    checkpoints = context.get("checkpoints")
+    if isinstance(checkpoints, Path):
+        members.extend(_complete_checkpoint_members(checkpoints))
+    output = context.get("output")
+    if isinstance(output, Path):
+        members.extend(_public_audit_members(output))
+    return _publish_terminal(context["run_root"], context["run_id"], members, context["staging_parent"])
+
+
+def _execute(args: argparse.Namespace) -> int:
+    global _failure_context
     repo = Path(args.repo_root).resolve()
     exact = args.expected_exact
     _set_failure_stage("identity")
@@ -370,11 +462,13 @@ def execute(args: argparse.Namespace) -> int:
         key_text = token = ""
         raise FileExistsError("create-only artifact run exists")
     local = local_parent
+    _failure_context = {"protocol": protocol, "exact": exact, "run_id": run_id, "run_root": run_root, "staging_parent": local_parent.parent, "checkpoints": None, "output": None, "last_completed_checkpoint": 0}
     local.mkdir(parents=True)
     checkpoints = local / "checkpoints"
     checkpoints.mkdir()
     output = local / "output"
     output.mkdir()
+    _failure_context.update({"checkpoints": checkpoints, "output": output})
     _set_failure_stage("checkouts")
     checkouts = _create_checkouts(repo, local / "source_checkouts", protocol.config["sources"])
     old_spec, current_spec = protocol.config["rosters_in_order"]
@@ -411,6 +505,7 @@ def execute(args: argparse.Namespace) -> int:
         state["plain_bindings"].append({key: value for key, value in event.items() if key != "absolute_path"})
     checkpoint_index += 1
     _checkpoint(checkpoints, checkpoint_index, identity, state)
+    _failure_context["last_completed_checkpoint"] = checkpoint_index
     _write_json_exclusive(output / "plain_bindings.json", state["plain_bindings"])
     method_events: dict[str, list[dict[str, Any]]] = {}
     for method in ("v2", "v3", "v4"):
@@ -422,6 +517,7 @@ def execute(args: argparse.Namespace) -> int:
             state["method_records"].append(_checkpoint_event(event))
         checkpoint_index += 1
         _checkpoint(checkpoints, checkpoint_index, identity, state)
+        _failure_context["last_completed_checkpoint"] = checkpoint_index
     _set_failure_stage("v5_validate")
     _child(adapter, checkouts["v5"], protocol.config["sources"]["v5"]["exact"], "v5_validate", units_path, output, cache, bindings_path, child_env)
     method_events["v5"] = [{**item, "method": "v5"} for item in method_events["v4"]]
@@ -430,6 +526,7 @@ def execute(args: argparse.Namespace) -> int:
         state["method_records"].append(_checkpoint_event(event))
     checkpoint_index += 1
     _checkpoint(checkpoints, checkpoint_index, identity, state)
+    _failure_context["last_completed_checkpoint"] = checkpoint_index
     for method, asset in (("v6", None), ("v7", asset_v7), ("v8", asset_v8)):
         _set_failure_stage(method)
         events = _unit_events(_child(adapter, checkouts[method], protocol.config["sources"][method]["exact"], method, units_path, output, cache, bindings_path, child_env, v7_asset=asset if method == "v7" else None, v8_asset=asset if method == "v8" else None), method, 16)
@@ -439,6 +536,7 @@ def execute(args: argparse.Namespace) -> int:
             state["method_records"].append(_checkpoint_event(event))
         checkpoint_index += 1
         _checkpoint(checkpoints, checkpoint_index, identity, state)
+        _failure_context["last_completed_checkpoint"] = checkpoint_index
     key_text = token = ""
     _set_failure_stage("analysis")
     rows = []
@@ -455,6 +553,7 @@ def execute(args: argparse.Namespace) -> int:
     state["analysis_status"] = status
     checkpoint_index += 1
     _checkpoint(checkpoints, checkpoint_index, identity, state)
+    _failure_context["last_completed_checkpoint"] = checkpoint_index
     if checkpoint_index != 9 or state["phase"] != protocol.config["execution"]["checkpoint_stages"][-1]:
         raise RuntimeError("local transient checkpoint stage count differs")
     _set_failure_stage("terminal_publication")
@@ -472,6 +571,28 @@ def execute(args: argparse.Namespace) -> int:
     terminal_sha = _publish_terminal(run_root, run_id, members, local)
     print(f"{RESULT_PREFIX} " + json.dumps({"status": status, "claim_ceiling": protocol.config["claim_ceiling"], "exact": exact, "protocol_digest": protocol.protocol_digest, "run_id": run_id, "terminal_sha256": terminal_sha}, sort_keys=True, separators=(",", ":")), flush=True)
     return 0 if status == "analysis_complete" else 2
+
+
+def execute(args: argparse.Namespace) -> int:
+    global _failure_context
+    _failure_context = None
+    try:
+        return _execute(args)
+    except Exception as error:
+        if _failure_context is None:
+            raise
+        terminal_sha = _publish_operational_terminal(_failure_context, error)
+        protocol = _failure_context["protocol"]
+        payload = {
+            "status": "operational_failure",
+            "claim_ceiling": protocol.config["claim_ceiling"],
+            "exact": _failure_context["exact"],
+            "protocol_digest": protocol.protocol_digest,
+            "run_id": _failure_context["run_id"],
+            "terminal_sha256": terminal_sha,
+        }
+        print(f"{RESULT_PREFIX} " + json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
+        return 2
 
 
 def _arguments() -> argparse.Namespace:

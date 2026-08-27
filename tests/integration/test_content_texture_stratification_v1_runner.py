@@ -65,6 +65,26 @@ def _score_payload(offset: float) -> dict[str, float]:
 
 
 class TextureRunnerTests(unittest.TestCase):
+ def test_runner_normalizes_real_adapter_canonical_score_serialization(self) -> None:
+    class Image:
+        mode, size = "RGB", (512, 512)
+
+        def tobytes(self, *args):
+            if args != ("raw", "RGB"):
+                raise AssertionError(args)
+            return bytes(512 * 512 * 3)
+
+    scores = _score_payload(0.1)
+    unit = {"global_ordinal": 1, "unit_id": "unit-0001"}
+    with redirect_stdout(io.StringIO()) as captured:
+        adapter._emit_success("v6", unit, Image(), Image(), scores, scores)
+    line = captured.getvalue()
+    self.assertLess(line.index('"hf__registered"'), line.index('"lf__registered"'))
+    event = runner._adapter_event(line)
+    self.assertEqual(tuple(event["scores"]), tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))))
+    self.assertEqual(event["scores"], scores)
+    self.assertEqual(runner.margins(event["scores"], event["primary_null_scores"], "lf"), runner.margins(scores, scores, "lf"))
+
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage
     self.addCleanup(runner._set_failure_stage, original)
@@ -274,6 +294,19 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertFalse((preexisting_sidecar / "checkpoint-0001.json").exists())
     self.assertEqual(sidecar_path.read_bytes(), b"existing-sidecar")
 
+ def test_terminal_publish_cleans_partial_pair_and_refuses_existing_run(self) -> None:
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    run_root = root / "sink" / "exact" / "run"
+    with mock.patch.object(runner.shutil, "copyfileobj", side_effect=OSError("partial terminal")):
+        with self.assertRaises(OSError):
+            runner._publish_terminal(run_root, "run", [("receipt.json", b"{}")], root)
+    self.assertFalse(run_root.exists())
+    run_root.mkdir(parents=True)
+    with self.assertRaises(FileExistsError):
+        runner._publish_terminal(run_root, "run", [("receipt.json", b"{}")], root)
+
  def test_fake_coordinator_preserves_counts_separation_and_create_only_artifact(self) -> None:
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
@@ -355,6 +388,34 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertEqual(len(checkpoints), 9)
     self.assertEqual(len(list((local / "checkpoints").glob("checkpoint-*.json.sha256"))), 9)
     self.assertEqual([json.loads(path.read_text())["state"]["phase"] for path in checkpoints], ["common_plain", "v2", "v3", "v4", "v5_derived", "v6", "v7", "v8", "analysis"])
+
+    failure_local, failure_sink = tmp_path / "failure-local", tmp_path / "failure-sink"
+    failure_args = Namespace(repo_root=str(repo), expected_exact="19ed1a351dc860ea4446309a475eaa74fc976df5", local_work_root=str(failure_local), artifact_sink=str(failure_sink), provenance_root=str(tmp_path / "provenance"))
+    with mock.patch.object(runner, "load_protocol", lambda root: protocol), mock.patch.object(runner, "_identity", lambda *args: None), mock.patch.object(runner, "_create_checkouts", lambda *args: paths), mock.patch.object(runner, "_stage_asset", lambda provenance, output, spec: output), mock.patch.object(runner, "_child", fake_child), mock.patch.object(runner, "_derive_row", side_effect=ValueError("private analysis failure")), mock.patch.dict(sys.modules, {"cegwm.shared": shared, "cegwm.shared.keys": keys}), mock.patch.dict(os.environ, {"CEG_WM_ROOT_KEY": "secret", "HF_TOKEN": "token"}, clear=False), redirect_stdout(io.StringIO()) as captured:
+        self.assertEqual(runner.execute(failure_args), 2)
+    operational = json.loads(captured.getvalue().split(" ", 1)[1])
+    self.assertEqual(operational["status"], "operational_failure")
+    failure_root = failure_sink / failure_args.expected_exact / run_id
+    failure_archive = failure_root / "terminal" / f"{run_id}.zip"
+    failure_sidecar = failure_root / "terminal" / f"{run_id}.zip.sha256"
+    self.assertEqual(failure_sidecar.read_text(encoding="ascii"), f"{hashlib.sha256(failure_archive.read_bytes()).hexdigest()}  {failure_archive.name}\n")
+    with zipfile.ZipFile(failure_archive) as archive:
+        self.assertIsNone(archive.testzip())
+        names = archive.namelist()
+        self.assertEqual(names[:2], ["receipt.json", "failure.json"])
+        self.assertEqual([name for name in names if name.startswith("checkpoints/")], [part for index in range(1, 9) for part in (f"checkpoints/checkpoint-{index:04d}.json", f"checkpoints/checkpoint-{index:04d}.json.sha256")])
+        self.assertIn("audit/model_bindings.json", names)
+        self.assertIn("audit/plain_bindings.json", names)
+        receipt, failure = json.loads(archive.read("receipt.json")), json.loads(archive.read("failure.json"))
+        self.assertEqual((receipt["status"], receipt["failure_class"], receipt["failure_stage"], receipt["last_completed_checkpoint"], receipt["resume_allowed"]), ("operational_failure", "ValueError", "analysis", 8, False))
+        self.assertEqual(failure["exact"], failure_args.expected_exact)
+        public_bytes = b"".join(archive.read(name) for name in names)
+        for forbidden in (b"private prompt", b"secret", b"token", str(tmp_path).encode()):
+            self.assertNotIn(forbidden, public_bytes)
+    with mock.patch.object(runner, "load_protocol", lambda root: protocol), mock.patch.object(runner, "_identity", lambda *args: None), mock.patch.dict(sys.modules, {"cegwm.shared": shared, "cegwm.shared.keys": keys}), mock.patch.dict(os.environ, {"CEG_WM_ROOT_KEY": "secret", "HF_TOKEN": "token"}, clear=False):
+        with self.assertRaises(FileExistsError):
+            runner.execute(failure_args)
+    self.assertTrue(failure_archive.is_file())
 
 
 if __name__ == "__main__":
