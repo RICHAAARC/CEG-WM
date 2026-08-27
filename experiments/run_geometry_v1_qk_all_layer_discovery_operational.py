@@ -167,11 +167,31 @@ def _layer(observation: SD35QKAllLayerObservation, path: str) -> Any:
     raise ValueError("layer_not_observed")
 
 
+def _grid_h(h_rgb: Any, reference_grid: Any, attacked_grid: Any) -> np.ndarray:
+    """Conjugate a 512-boundary RGB-centre H into harness token-grid space."""
+    def grid(value: Any, name: str) -> tuple[int, int]:
+        if (not isinstance(value, tuple) or len(value) != 2 or
+                any(isinstance(item, bool) or not isinstance(item, int) or item < 1 for item in value)):
+            raise ValueError(f"invalid_{name}_source_grid")
+        return value
+    reference_rows, reference_columns = grid(reference_grid, "reference")
+    attacked_rows, attacked_columns = grid(attacked_grid, "attacked")
+    h = np.asarray(h_rgb, dtype=np.float64)
+    if h.shape != (3, 3) or not np.isfinite(h).all():
+        raise ValueError("invalid_rgb_h_reference_to_attacked")
+    reference_scale = np.diag((reference_columns / 512.0, reference_rows / 512.0, 1.0))
+    attacked_scale = np.diag((attacked_columns / 512.0, attacked_rows / 512.0, 1.0))
+    converted = attacked_scale @ h @ np.linalg.inv(reference_scale)
+    if not np.isfinite(converted).all():
+        raise ValueError("invalid_grid_h_reference_to_attacked")
+    return converted
+
+
 def _unit(pair: Mapping[str, Any], reference: SD35QKAllLayerObservation, attacked: SD35QKAllLayerObservation, path: str, kind: str, control: str) -> dict[str, Any]:
     r, a = _layer(reference, path), _layer(attacked, path); name = "query" if kind == "q" else "key"
     return HARNESS.evaluate_unit({"pair_id": pair["pair_id"], "transform_label": pair["transform_label"], "control_label": control, "descriptor_kind": kind, "layer_path": path,
         "reference_descriptors": getattr(r, name).numpy(), "attacked_descriptors": getattr(a, name).numpy(), "reference_source_grid": r.source_grid, "attacked_source_grid": a.source_grid,
-        "reference_sample_indices": r.sample_indices.numpy(), "attacked_sample_indices": a.sample_indices.numpy(), "H_reference_to_attacked": pair[control]})
+        "reference_sample_indices": r.sample_indices.numpy(), "attacked_sample_indices": a.sample_indices.numpy(), "H_reference_to_attacked": _grid_h(pair[control], r.source_grid, a.source_grid)})
 
 
 def _status_and_selection(units: Sequence[Mapping[str, Any]], paths: Sequence[str], plan: Mapping[str, Any]) -> tuple[str, list[str], dict[str, Any]]:
@@ -182,10 +202,10 @@ def _status_and_selection(units: Sequence[Mapping[str, Any]], paths: Sequence[st
             records = [u for u in units if u["layer_path"] == path and u["control_label"] == "matched_h"]
             if len(records) != 16 or any(u["status"] != "calculated" for u in records): continue
             fields = ("recovery_error", "fit_residual")
-            if any(not np.isfinite(float(u[field])) for u in records for field in fields): continue
+            if any(u[field] is None or not np.isfinite(float(u[field])) for u in records for field in fields): continue
             ranks = [value for u in records for value in u["true_match_ranks"]]
             gaps = [value for u in records for value in u["ambiguity_gaps"]]
-            if not ranks or not gaps or not np.isfinite(ranks).all() or not np.isfinite(gaps).all(): continue
+            if not ranks or not gaps or any(value is None for value in ranks) or any(value is None for value in gaps) or not np.isfinite(ranks).all() or not np.isfinite(gaps).all(): continue
             eligible.append((float(np.median([u["recovery_error"] for u in records])), float(np.median(ranks)), float(np.median([u["fit_residual"] for u in records])), -float(np.median(gaps)), index, path))
         if not eligible: return "D0_UNRESOLVED", [], {"selection_rule_id": "d0-stratum-median-lexicographic-v1", "plan_digest": _sha(_json(plan, MAX_ROOT_BYTES))}
         selected.append(min(eligible)[-1])

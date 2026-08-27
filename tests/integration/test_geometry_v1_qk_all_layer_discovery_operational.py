@@ -122,6 +122,62 @@ def test_actual_pillow_rgb_gaussian_centroids_independently_verify_similarity_an
                 assert np.linalg.norm(observed - disputed) > .075
 
 
+def _apply_known_h(h: np.ndarray, point: np.ndarray) -> np.ndarray:
+    mapped = h @ point
+    return mapped / mapped[2]
+
+
+def _rgb_to_grid(point: np.ndarray, grid: tuple[int, int]) -> np.ndarray:
+    rows, columns = grid
+    return np.array([point[0] * columns / 512.0, point[1] * rows / 512.0, 1.0])
+
+
+def test_rgb_h_is_independently_conjugated_into_same_and_heterogeneous_token_grids() -> None:
+    plan = RUNNER.build_fixed_plan(); rgb_point = np.array([211.5, 289.5, 1.])
+    grids = (((32, 32), (32, 32)), ((16, 64), (48, 24)))
+    for pair in plan["pairs"][:4]:
+        for control in ("matched_h", "shuffled_h"):
+            rgb_h = np.asarray(pair[control], dtype=np.float64)
+            for reference_grid, attacked_grid in grids:
+                transported = RUNNER._grid_h(rgb_h, reference_grid, attacked_grid)
+                expected = _rgb_to_grid(_apply_known_h(rgb_h, rgb_point), attacked_grid)
+                observed = _apply_known_h(transported, _rgb_to_grid(rgb_point, reference_grid))
+                assert np.allclose(observed, expected)
+    # Directly handing a 512-RGB D4 matrix to a 32-grid would map outside;
+    # the conjugated form keeps the same known point in the token domain.
+    d4 = np.asarray(plan[1]["matched_h"])
+    assert _apply_known_h(d4, _rgb_to_grid(rgb_point, (32, 32)))[0] > 32
+    assert _apply_known_h(RUNNER._grid_h(d4, (32, 32), (32, 32)), _rgb_to_grid(rgb_point, (32, 32)))[0] <= 31.5
+
+
+def test_grid_h_rejects_invalid_inputs_before_harness_transport() -> None:
+    with pytest.raises(ValueError, match="reference_source_grid"):
+        RUNNER._grid_h(np.eye(3), (0, 2), (2, 2))
+    with pytest.raises(ValueError, match="rgb_h"):
+        RUNNER._grid_h([[float("nan")]], (2, 2), (2, 2))
+
+
+def test_run_d0_out_of_view_calculated_records_fail_closed_without_validation_escape(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    def evaluator(payload):
+        h = np.asarray(payload["H_reference_to_attacked"], dtype=np.float64)
+        reference_grid, attacked_grid = tuple(payload["reference_source_grid"]), tuple(payload["attacked_source_grid"])
+        point = np.array([.5, .5, 1.]); mapped = _apply_known_h(h, point)
+        rows, columns = attacked_grid; in_view = .5 <= mapped[0] <= columns - .5 and .5 <= mapped[1] <= rows - .5
+        record = {"pair_id": payload["pair_id"], "transform_label": payload["transform_label"], "control_label": payload["control_label"], "descriptor_kind": payload["descriptor_kind"], "layer_path": payload["layer_path"], "status": "calculated", "reference_grid": list(reference_grid), "attacked_grid": list(attacked_grid), "input_identity": None, "h_identity": None, "failure_reason": None, "candidate_correspondences": [], "coverage": 1.0 if in_view else 0.0}
+        if in_view:
+            record.update({"true_match_ranks": [1], "ambiguity_gaps": [1.0], "fit_residual": 0.0, "recovery_error": 0.0})
+        else:
+            # This is the prior D4/RGB-scale failure shape: a retained
+            # calculated record with truth-derived None values, never deleted.
+            record.update({"true_match_ranks": [None], "ambiguity_gaps": [None], "fit_residual": 0.0, "recovery_error": None})
+        return record
+    monkeypatch.setattr(RUNNER.HARNESS, "evaluate_unit", evaluator)
+    summary, units = RUNNER.run_d0(expected_exact="a" * 40, repo_root=tmp_path, hf_token="secret", loader=lambda *_a, **_k: _Pipeline(), observer=lambda _image, *, pipeline, spec: _observation(spec.attention_layer_paths))
+    assert len(units) == 768 and summary["d0_status"] == "D0_UNRESOLVED"
+    assert summary["science_denominator"] == 0 and any(unit["recovery_error"] is None for unit in units)
+
+
 def test_discovery_accepts_only_complete_contiguous_sample_side_roster() -> None:
     paths, record = RUNNER._discover(_Pipeline().transformer)
     assert paths == tuple(f"transformer_blocks.{i}.attn" for i in range(24))
