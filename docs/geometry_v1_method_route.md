@@ -203,6 +203,37 @@ secret, weight, image bytes, or private paths. Its outcomes retain
 descriptor, not Q/K-route eligibility, keyed-anchor validation, method,
 detector, watermark, or scientific success.
 
+## 6d. Artifact-only all-layer direction selection boundary (2026-08-27)
+
+`geometry-v1-qk-direction-all-layer-selection-v1` is a CPU-only post-D0
+artifact analysis. It validates one immutable D0 run, its bounded sidecars,
+24 ordered layer ZIP shards, all 768 public records, fixed roster, and public
+leak boundary before calculating anything. It neither reads raw Q/K nor loads
+a model, and it never changes the D0 result.
+
+For all 24 fixed layers and each Q/K kind, it compares matched and shuffled
+true-match ranks only at equal reference-token list indices where both ranks
+are finite. Each pair yields a median matched-minus-shuffled value; its Q and
+K statistics are equal-weight medians over all eight fixed pairs. Missing
+common support for any pair makes that layer-kind ineligible. A layer needs
+both strict negative statistics. If at least two layers are eligible, exactly
+two are frozen by ascending `(max(Q,K), median(Q,K), block_index)`; otherwise
+the result is unresolved. No transform deletion, margin fitting, tuning,
+strata selection, or retry is permitted.
+
+The per-transform audit records two-reference medians and support alongside
+coverage/null/recovery/fit/gap observations, without making any of them a
+selection gate. A D4 or crop-rescale all-layer-nonnegative direction audit is
+recorded as `route_level_transform_instability`; it is nonblocking and never
+claims that a layer change solves the route. Outcomes are limited to
+`DIRECTION_ALL_LAYER_UNRESOLVED` and `DIRECTION_TWO_CANDIDATES_FROZEN`, with
+`science_denominator=0`. Frozen layers are not a D1 reversal, route, key,
+method, detector, watermark, or scientific success.
+
+Any future D2 confirmation requires separate authorization and must use fresh
+references, attacks, and observation seeds; it must use the frozen two layers,
+64 retained units, and no reselection.
+
 ## 7. Authorized progression nodes
 
 0. Under separate exact-bound authorization, close the `244f28a` B1 blockers
