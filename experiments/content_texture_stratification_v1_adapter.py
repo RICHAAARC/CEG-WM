@@ -176,7 +176,12 @@ def _unit_failure(method: str, unit: Mapping[str, Any], error: Exception) -> Non
 
 
 def _emit_success(method: str, unit: Mapping[str, Any], image: Any, null: Any, scores: Mapping[str, float], null_scores: Mapping[str, float]) -> None:
-    _event({"event": "unit", "method": method, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": _image_hash(image), "primary_null_rgb_sha256": _image_hash(null), "scores": dict(scores), "primary_null_scores": dict(null_scores)})
+    labels = ("registered", *(f"wrong_{index:02d}" for index in range(16)))
+    domains = ("v4_lf", "hf") if method == "c6" else ("ordinary_lf", "hf")
+    branch = {"ordinary_lf": "lf", "v4_lf": "lf", "hf": "hf"}
+    def mapped(value: Mapping[str, float]) -> dict[str, dict[str, float]]:
+        return {domain: {label: value[f"{branch[domain]}__{label}"] for label in labels} for domain in domains}
+    _event({"event": "unit", "method": method, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": _image_hash(image), "primary_null_rgb_sha256": _image_hash(null), "candidate_scores": mapped(scores), "null_scores": mapped(null_scores)})
 
 
 def _common_plain(root: Path, units: list[dict[str, Any]], token: str, output: Path) -> None:

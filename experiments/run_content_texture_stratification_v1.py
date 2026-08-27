@@ -222,9 +222,17 @@ def _adapter_event(line: str) -> dict[str, Any]:
     event = json.loads(line[len(EVENT_PREFIX):])
     if not isinstance(event, dict):
         raise ValueError("adapter event must be an object")
-    for name in ("scores", "primary_null_scores"):
-        if name in event:
-            event[name] = _ordered_scores(event[name])
+    if event.get("event") == "unit":
+        if set(event) != {"event", "method", "global_ordinal", "unit_id", "status", "candidate_rgb_sha256", "primary_null_rgb_sha256", "candidate_scores", "null_scores"}:
+            raise ValueError("adapter unit event fields differ")
+        construction = event["method"]
+        domains = DOMAIN_MATRIX.get(construction)
+        if domains is None or set(event["candidate_scores"]) != set(domains) or set(event["null_scores"]) != set(domains):
+            raise ValueError("adapter scorer domains differ")
+        event["candidate_scores"] = {domain: event["candidate_scores"][domain] for domain in domains}
+        event["null_scores"] = {domain: event["null_scores"][domain] for domain in domains}
+        from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
+        require_construction_domains(construction, event["candidate_scores"], event["null_scores"])
     return event
 
 

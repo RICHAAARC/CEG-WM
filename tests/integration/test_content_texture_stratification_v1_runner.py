@@ -85,13 +85,12 @@ class TextureRunnerTests(unittest.TestCase):
     scores = _score_payload(0.1)
     unit = {"global_ordinal": 1, "unit_id": "unit-0001"}
     with redirect_stdout(io.StringIO()) as captured:
-        adapter._emit_success("v6", unit, Image(), Image(), scores, scores)
+        adapter._emit_success("c6", unit, Image(), Image(), scores, scores)
     line = captured.getvalue()
-    self.assertLess(line.index('"hf__registered"'), line.index('"lf__registered"'))
     event = runner._adapter_event(line)
-    self.assertEqual(tuple(event["scores"]), tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))))
-    self.assertEqual(event["scores"], scores)
-    self.assertEqual(runner.margins(event["scores"], event["primary_null_scores"], "lf"), runner.margins(scores, scores, "lf"))
+    self.assertEqual(tuple(event["candidate_scores"]), ("v4_lf", "hf"))
+    self.assertEqual(event["candidate_scores"]["v4_lf"]["registered"], scores["lf__registered"])
+    with self.assertRaises(ValueError): runner._adapter_event(runner.EVENT_PREFIX + json.dumps({"event":"unit","method":"c3","global_ordinal":1,"unit_id":"unit-0001","status":"success","candidate_rgb_sha256":"a","primary_null_rgb_sha256":"b","scores":scores,"primary_null_scores":scores}))
 
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage
