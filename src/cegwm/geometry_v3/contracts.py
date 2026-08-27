@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import json
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Sequence
 
@@ -27,6 +27,9 @@ GEOMETRY_DECISION_CEILING = "coordinates_only_no_positive_watermark_authority"
 _ANCHOR_PRF_DOMAIN = b"CEG-WM/geometry-v3/keyed-qk-canonical-relation/v1\x00"
 _MIN_ANCHOR_POINTS = 4
 _MAX_ANCHOR_POINTS = 64
+_ANCHOR_DERIVATION_TOKEN = object()
+_STATE_ADMISSION_TOKEN = object()
+_ESTIMATE_TOKEN = object()
 
 
 class FeatureRole(str, Enum):
@@ -65,6 +68,57 @@ class CanonicalRelationAnchor:
     domain_id: str
     points: tuple[tuple[float, float], ...]
     public_digest: str
+    _derivation_token: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._derivation_token is not _ANCHOR_DERIVATION_TOKEN:
+            raise ValueError("canonical anchor must come from keyed derivation")
+        if self.method_id != METHOD_ID or self.domain_id != ANCHOR_DOMAIN_ID:
+            raise ValueError("canonical anchor identity differs")
+        points = _anchor_points(self.points)
+        if self.points != points:
+            raise ValueError("canonical anchor must use the frozen tuple representation")
+        if self.public_digest != _anchor_digest(points):
+            raise ValueError("canonical anchor public digest differs")
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalAnchorIdentity:
+    domain_id: str
+    point_count: int
+    coordinate_dimension: int
+    public_digest: str
+
+    def __post_init__(self) -> None:
+        if self.domain_id != ANCHOR_DOMAIN_ID:
+            raise ValueError("canonical anchor domain differs")
+        if (
+            not isinstance(self.point_count, int)
+            or isinstance(self.point_count, bool)
+            or not _MIN_ANCHOR_POINTS <= self.point_count <= _MAX_ANCHOR_POINTS
+        ):
+            raise ValueError("canonical anchor point count differs")
+        if self.coordinate_dimension != 2:
+            raise ValueError("canonical anchor coordinate dimension must be two")
+        _hex_digest(self.public_digest, name="canonical anchor public digest")
+
+
+@dataclass(frozen=True, slots=True)
+class ReliabilityPolicy:
+    protocol_id: str
+    minimum_support_fraction: float
+    minimum_reliability: float
+
+    def __post_init__(self) -> None:
+        _public_id(self.protocol_id, name="reliability protocol_id")
+        minimum_support = _unit_interval(
+            self.minimum_support_fraction, name="minimum_support_fraction"
+        )
+        minimum_reliability = _unit_interval(
+            self.minimum_reliability, name="minimum_reliability"
+        )
+        if minimum_support <= 0.0 or minimum_reliability <= 0.0:
+            raise ValueError("reliability policy minima must be strictly positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +156,7 @@ class WriterDeclaration:
     placement_basis: PlacementBasis
     placement_protocol_id: str
     interference_test_protocol_id: str
+    anchor_identity: CanonicalAnchorIdentity
     placements: tuple[WriterPlacement, ...]
     budget: WriterBudget
 
@@ -129,34 +184,34 @@ class ContentDetectorBinding:
 @dataclass(frozen=True, slots=True)
 class GeometryEstimate:
     observation_id: str
-    reliability_protocol_id: str
+    anchor_identity: CanonicalAnchorIdentity
+    reliability_policy: ReliabilityPolicy
     corners: tuple[tuple[float, float], ...]
     homography: tuple[tuple[float, float, float], ...]
     support_fraction: float
     reliability_score: float
-    minimum_support_fraction: float
-    minimum_reliability: float
     reliable: bool
+    _estimate_token: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if self._estimate_token is not _ESTIMATE_TOKEN:
+            raise ValueError("geometry estimate must come from the frozen state policy")
         _public_id(self.observation_id, name="observation_id")
-        _public_id(self.reliability_protocol_id, name="reliability_protocol_id")
+        if not isinstance(self.anchor_identity, CanonicalAnchorIdentity):
+            raise TypeError("anchor_identity must be a CanonicalAnchorIdentity")
+        if not isinstance(self.reliability_policy, ReliabilityPolicy):
+            raise TypeError("reliability_policy must be a ReliabilityPolicy")
         if self.corners != _corners(self.corners):
             raise ValueError("corners must use the canonical tuple representation")
         if self.homography != _homography(self.homography):
             raise ValueError("homography must use the canonical tuple representation")
         support = _unit_interval(self.support_fraction, name="support_fraction")
         score = _unit_interval(self.reliability_score, name="reliability_score")
-        minimum_support = _unit_interval(
-            self.minimum_support_fraction, name="minimum_support_fraction"
-        )
-        minimum_reliability = _unit_interval(
-            self.minimum_reliability, name="minimum_reliability"
-        )
         if not isinstance(self.reliable, bool):
             raise TypeError("reliable must be boolean")
         if self.reliable is not (
-            support >= minimum_support and score >= minimum_reliability
+            support >= self.reliability_policy.minimum_support_fraction
+            and score >= self.reliability_policy.minimum_reliability
         ):
             raise ValueError("reliable must be derived from the frozen reliability rule")
 
@@ -167,11 +222,27 @@ class RecoverabilityState:
     method_id: str
     phase: RecoverabilityPhase
     writer_declaration: WriterDeclaration
+    anchor_identity: CanonicalAnchorIdentity
+    reliability_policy: ReliabilityPolicy
     detector_binding: ContentDetectorBinding
+    _admission_token: object = field(repr=False, compare=False)
     final_rgb_id: str | None = None
     attacked_rgb_id: str | None = None
     fresh_qk_observation_id: str | None = None
     estimate: GeometryEstimate | None = None
+
+    def __post_init__(self) -> None:
+        if self._admission_token is not _STATE_ADMISSION_TOKEN:
+            raise ValueError("recoverability state must enter through start_recoverability")
+        if self.contract_id != RECOVERABILITY_CONTRACT_ID or self.method_id != METHOD_ID:
+            raise ValueError("recoverability state identity differs")
+        _validate_writer_declaration(self.writer_declaration)
+        if self.anchor_identity != self.writer_declaration.anchor_identity:
+            raise ValueError("recoverability state anchor identity differs")
+        if not isinstance(self.reliability_policy, ReliabilityPolicy):
+            raise TypeError("recoverability state requires a ReliabilityPolicy")
+        if not isinstance(self.detector_binding, ContentDetectorBinding):
+            raise TypeError("recoverability state requires a content detector binding")
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,17 +284,19 @@ def derive_canonical_relation_anchor(
         x = 0.1 + 0.8 * ((x_raw + 0.5) / 2**64)
         y = 0.1 + 0.8 * ((y_raw + 0.5) / 2**64)
         points.append((x, y))
-    encoded = json.dumps(points, separators=(",", ":"), allow_nan=False).encode("ascii")
+    frozen_points = tuple(points)
     return CanonicalRelationAnchor(
         method_id=METHOD_ID,
         domain_id=ANCHOR_DOMAIN_ID,
-        points=tuple(points),
-        public_digest=hashlib.sha256(encoded).hexdigest(),
+        points=frozen_points,
+        public_digest=_anchor_digest(frozen_points),
+        _derivation_token=_ANCHOR_DERIVATION_TOKEN,
     )
 
 
 def declare_writer_contract(
     *,
+    canonical_anchor: CanonicalRelationAnchor,
     placements: Sequence[WriterPlacement],
     budget: WriterBudget,
     placement_basis: PlacementBasis,
@@ -244,6 +317,7 @@ def declare_writer_contract(
             interference_test_protocol_id,
             name="interference_test_protocol_id",
         ),
+        anchor_identity=_validated_anchor_identity(canonical_anchor),
         placements=frozen,
         budget=budget,
     )
@@ -252,6 +326,8 @@ def declare_writer_contract(
 def start_recoverability(
     writer_declaration: WriterDeclaration | None,
     *,
+    canonical_anchor: CanonicalRelationAnchor | None,
+    reliability_policy: ReliabilityPolicy | None,
     detector_binding: ContentDetectorBinding,
 ) -> RecoverabilityState:
     """Enter the route only with a complete, explicit writer declaration."""
@@ -259,6 +335,13 @@ def start_recoverability(
     if not isinstance(writer_declaration, WriterDeclaration):
         raise ValueError("a validated writer declaration is required before writer admission")
     _validate_writer_declaration(writer_declaration)
+    if not isinstance(canonical_anchor, CanonicalRelationAnchor):
+        raise ValueError("the declared canonical anchor is required before writer admission")
+    anchor_identity = _validated_anchor_identity(canonical_anchor)
+    if anchor_identity != writer_declaration.anchor_identity:
+        raise ValueError("writer and recoverability canonical anchor identities differ")
+    if not isinstance(reliability_policy, ReliabilityPolicy):
+        raise ValueError("a frozen reliability policy is required before writer admission")
     if not isinstance(detector_binding, ContentDetectorBinding):
         raise TypeError("detector_binding must be a ContentDetectorBinding")
     return RecoverabilityState(
@@ -266,7 +349,10 @@ def start_recoverability(
         method_id=METHOD_ID,
         phase=RecoverabilityPhase.WRITER_ADMITTED,
         writer_declaration=writer_declaration,
+        anchor_identity=anchor_identity,
+        reliability_policy=reliability_policy,
         detector_binding=detector_binding,
+        _admission_token=_STATE_ADMISSION_TOKEN,
     )
 
 
@@ -300,6 +386,7 @@ def record_fresh_qk_observation(
     *,
     observation_id: str,
     attacked_rgb_id: str,
+    canonical_anchor: CanonicalRelationAnchor,
     provenance: ObservationProvenance,
 ) -> RecoverabilityState:
     """Admit only Q/K recomputed from the current attacked RGB image."""
@@ -307,6 +394,8 @@ def record_fresh_qk_observation(
     _require_phase(state, RecoverabilityPhase.ATTACKED_RGB_RECORDED)
     if _public_id(attacked_rgb_id, name="attacked_rgb_id") != state.attacked_rgb_id:
         raise ValueError("fresh Q/K observation must bind the current attacked RGB")
+    if _validated_anchor_identity(canonical_anchor) != state.anchor_identity:
+        raise ValueError("fresh Q/K observation canonical anchor identity differs")
     if provenance is not ObservationProvenance.FRESH_ATTACKED_RGB_QK:
         raise ValueError("detector Q/K must be freshly observed from current attacked RGB")
     return replace(
@@ -321,11 +410,8 @@ def make_geometry_estimate(
     *,
     corners: Sequence[Sequence[float]],
     homography: Sequence[Sequence[float]],
-    reliability_protocol_id: str,
     support_fraction: float,
     reliability_score: float,
-    minimum_support_fraction: float,
-    minimum_reliability: float,
 ) -> GeometryEstimate:
     """Validate corners/H and compute reliability without accepting a caller verdict."""
 
@@ -334,22 +420,20 @@ def make_geometry_estimate(
     frozen_h = _homography(homography)
     support = _unit_interval(support_fraction, name="support_fraction")
     score = _unit_interval(reliability_score, name="reliability_score")
-    min_support = _unit_interval(
-        minimum_support_fraction, name="minimum_support_fraction"
-    )
-    min_reliability = _unit_interval(minimum_reliability, name="minimum_reliability")
+    policy = state.reliability_policy
     return GeometryEstimate(
         observation_id=state.fresh_qk_observation_id or "",
-        reliability_protocol_id=_public_id(
-            reliability_protocol_id, name="reliability_protocol_id"
-        ),
+        anchor_identity=state.anchor_identity,
+        reliability_policy=policy,
         corners=frozen_corners,
         homography=frozen_h,
         support_fraction=support,
         reliability_score=score,
-        minimum_support_fraction=min_support,
-        minimum_reliability=min_reliability,
-        reliable=support >= min_support and score >= min_reliability,
+        reliable=(
+            support >= policy.minimum_support_fraction
+            and score >= policy.minimum_reliability
+        ),
+        _estimate_token=_ESTIMATE_TOKEN,
     )
 
 
@@ -362,6 +446,10 @@ def record_geometry_estimate(
         raise TypeError("estimate must be a GeometryEstimate")
     if estimate.observation_id != state.fresh_qk_observation_id:
         raise ValueError("estimate must bind the admitted fresh Q/K observation")
+    if estimate.anchor_identity != state.anchor_identity:
+        raise ValueError("estimate must bind the admitted canonical anchor identity")
+    if estimate.reliability_policy != state.reliability_policy:
+        raise ValueError("estimate must use the pre-observation reliability policy")
     phase = (
         RecoverabilityPhase.GEOMETRY_ESTIMATED
         if estimate.reliable
@@ -406,6 +494,57 @@ def _public_id(value: object, *, name: str) -> str:
     return value
 
 
+def _hex_digest(value: object, *, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _anchor_points(
+    value: Sequence[Sequence[float]],
+) -> tuple[tuple[float, float], ...]:
+    rows = tuple(tuple(row) for row in value)
+    if not _MIN_ANCHOR_POINTS <= len(rows) <= _MAX_ANCHOR_POINTS:
+        raise ValueError("canonical anchor point count differs")
+    if any(len(row) != 2 for row in rows):
+        raise ValueError("canonical anchor must contain 2-D points")
+    points = tuple(
+        tuple(_finite_float(coordinate, name="anchor coordinate") for coordinate in row)
+        for row in rows
+    )
+    if any(not 0.1 < coordinate < 0.9 for point in points for coordinate in point):
+        raise ValueError("canonical anchor coordinates must remain inside (0.1, 0.9)")
+    return points
+
+
+def _anchor_digest(points: Sequence[Sequence[float]]) -> str:
+    encoded = json.dumps(
+        tuple(tuple(point) for point in points),
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validated_anchor_identity(
+    anchor: CanonicalRelationAnchor,
+) -> CanonicalAnchorIdentity:
+    if not isinstance(anchor, CanonicalRelationAnchor):
+        raise TypeError("canonical_anchor must be a CanonicalRelationAnchor")
+    # Re-run validation instead of relying on construction history.
+    anchor.__post_init__()
+    return CanonicalAnchorIdentity(
+        domain_id=anchor.domain_id,
+        point_count=len(anchor.points),
+        coordinate_dimension=2,
+        public_digest=anchor.public_digest,
+    )
+
+
 def _validate_writer_declaration(declaration: WriterDeclaration) -> None:
     if declaration.contract_id != WRITER_CONTRACT_ID or declaration.method_id != METHOD_ID:
         raise ValueError("writer declaration identity differs")
@@ -416,6 +555,8 @@ def _validate_writer_declaration(declaration: WriterDeclaration) -> None:
         declaration.interference_test_protocol_id,
         name="interference_test_protocol_id",
     )
+    if not isinstance(declaration.anchor_identity, CanonicalAnchorIdentity):
+        raise TypeError("writer declaration requires a canonical anchor identity")
     if not isinstance(declaration.placements, tuple):
         raise TypeError("writer placements must use the frozen tuple representation")
     if not declaration.placements:
