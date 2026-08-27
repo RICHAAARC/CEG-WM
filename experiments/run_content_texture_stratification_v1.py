@@ -44,6 +44,7 @@ FAILURE_STAGES = frozenset({
 _failure_stage = "identity"
 METHOD_ORDER = ("v2", "v3", "v4", "v5", "v6", "v7", "v8")
 SCORE_FIELDS = tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16))))
+OPERATIONAL_RESULT_FIELDS = ("artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member")
 _failure_context: dict[str, Any] | None = None
 PER_UNIT_COLUMNS = (
     "global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_value", "texture_be_hex", "texture_rank", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "lf_registered", "lf_max_wrong", "lf_null_registered", "lf_margin_a", "lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b", "joint_or_identity", "reuse_source_method", "missing_note",
@@ -343,13 +344,17 @@ def _publish_terminal(run_root: Path, run_id: str, members: Sequence[tuple[str, 
                     info.external_attr = 0o600 << 16
                     archive.writestr(info, payload)
         digest = sha256_bytes(temporary.read_bytes())
-        run_root.mkdir(parents=True, exist_ok=False)
-        terminal = run_root / "terminal"
-        terminal.mkdir()
-        archive_path = terminal / temporary.name
-        sidecar_path = terminal / f"{temporary.name}.sha256"
         created: list[Path] = []
+        run_root_created = False
+        terminal_created = False
+        terminal = run_root / "terminal"
         try:
+            run_root.mkdir(parents=True, exist_ok=False)
+            run_root_created = True
+            terminal.mkdir()
+            terminal_created = True
+            archive_path = terminal / temporary.name
+            sidecar_path = terminal / f"{temporary.name}.sha256"
             with temporary.open("rb") as source, archive_path.open("xb") as target:
                 created.append(archive_path)
                 shutil.copyfileobj(source, target)
@@ -359,8 +364,10 @@ def _publish_terminal(run_root: Path, run_id: str, members: Sequence[tuple[str, 
         except BaseException:
             for path in reversed(created):
                 path.unlink(missing_ok=True)
-            terminal.rmdir()
-            run_root.rmdir()
+            if terminal_created:
+                terminal.rmdir()
+            if run_root_created:
+                run_root.rmdir()
             raise
         return digest
 
@@ -419,7 +426,7 @@ def _publish_operational_terminal(context: Mapping[str, Any], error: Exception) 
         "last_completed_checkpoint": context["last_completed_checkpoint"],
         "checkpoint_scope": "local_transient",
         "resume_allowed": False,
-        "result_member": "result.json",
+        "result_member": "failure.json",
         "external_validation_required": True,
     }
     result = {key: receipt[key] for key in ("analysis_id", "exact", "protocol_digest", "run_id", "status", "claim_ceiling", "failure_class", "failure_stage", "last_completed_checkpoint", "checkpoint_scope", "resume_allowed")}
@@ -583,14 +590,20 @@ def execute(args: argparse.Namespace) -> int:
             raise
         terminal_sha = _publish_operational_terminal(_failure_context, error)
         protocol = _failure_context["protocol"]
-        payload = {
+        receipt = {
+            "artifact_kind": "operational_terminal",
             "status": "operational_failure",
             "claim_ceiling": protocol.config["claim_ceiling"],
             "exact": _failure_context["exact"],
             "protocol_digest": protocol.protocol_digest,
             "run_id": _failure_context["run_id"],
             "terminal_sha256": terminal_sha,
+            "failure_class": type(error).__name__ if type(error).__name__ in PUBLIC_FAILURES else "OtherOperationalError",
+            "failure_stage": _failure_stage,
+            "last_completed_checkpoint": _failure_context["last_completed_checkpoint"],
+            "result_member": "failure.json",
         }
+        payload = {name: receipt[name] for name in OPERATIONAL_RESULT_FIELDS}
         print(f"{RESULT_PREFIX} " + json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
         return 2
 

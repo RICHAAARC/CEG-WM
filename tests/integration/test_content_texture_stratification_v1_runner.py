@@ -303,6 +303,15 @@ class TextureRunnerTests(unittest.TestCase):
         with self.assertRaises(OSError):
             runner._publish_terminal(run_root, "run", [("receipt.json", b"{}")], root)
     self.assertFalse(run_root.exists())
+    original_mkdir = type(root).mkdir
+    def controlled_mkdir(path, *args, **kwargs):
+        if path == run_root / "terminal":
+            raise OSError("terminal directory creation failed")
+        return original_mkdir(path, *args, **kwargs)
+    with mock.patch.object(type(root), "mkdir", new=controlled_mkdir):
+        with self.assertRaises(OSError):
+            runner._publish_terminal(run_root, "run", [("receipt.json", b"{}")], root)
+    self.assertFalse(run_root.exists())
     run_root.mkdir(parents=True)
     with self.assertRaises(FileExistsError):
         runner._publish_terminal(run_root, "run", [("receipt.json", b"{}")], root)
@@ -394,7 +403,9 @@ class TextureRunnerTests(unittest.TestCase):
     with mock.patch.object(runner, "load_protocol", lambda root: protocol), mock.patch.object(runner, "_identity", lambda *args: None), mock.patch.object(runner, "_create_checkouts", lambda *args: paths), mock.patch.object(runner, "_stage_asset", lambda provenance, output, spec: output), mock.patch.object(runner, "_child", fake_child), mock.patch.object(runner, "_derive_row", side_effect=ValueError("private analysis failure")), mock.patch.dict(sys.modules, {"cegwm.shared": shared, "cegwm.shared.keys": keys}), mock.patch.dict(os.environ, {"CEG_WM_ROOT_KEY": "secret", "HF_TOKEN": "token"}, clear=False), redirect_stdout(io.StringIO()) as captured:
         self.assertEqual(runner.execute(failure_args), 2)
     operational = json.loads(captured.getvalue().split(" ", 1)[1])
-    self.assertEqual(operational["status"], "operational_failure")
+    self.assertLessEqual(len(captured.getvalue().encode("utf-8")), 4096)
+    self.assertEqual(set(operational), set(runner.OPERATIONAL_RESULT_FIELDS))
+    self.assertEqual((operational["artifact_kind"], operational["status"], operational["failure_class"], operational["failure_stage"], operational["last_completed_checkpoint"], operational["result_member"]), ("operational_terminal", "operational_failure", "ValueError", "analysis", 8, "failure.json"))
     failure_root = failure_sink / failure_args.expected_exact / run_id
     failure_archive = failure_root / "terminal" / f"{run_id}.zip"
     failure_sidecar = failure_root / "terminal" / f"{run_id}.zip.sha256"
@@ -408,6 +419,9 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertIn("audit/plain_bindings.json", names)
         receipt, failure = json.loads(archive.read("receipt.json")), json.loads(archive.read("failure.json"))
         self.assertEqual((receipt["status"], receipt["failure_class"], receipt["failure_stage"], receipt["last_completed_checkpoint"], receipt["resume_allowed"]), ("operational_failure", "ValueError", "analysis", 8, False))
+        self.assertEqual(receipt["result_member"], "failure.json")
+        self.assertIn(receipt["result_member"], names)
+        self.assertEqual(archive.read(receipt["result_member"]), runner.stable_json_bytes(failure))
         self.assertEqual(failure["exact"], failure_args.expected_exact)
         public_bytes = b"".join(archive.read(name) for name in names)
         for forbidden in (b"private prompt", b"secret", b"token", str(tmp_path).encode()):
