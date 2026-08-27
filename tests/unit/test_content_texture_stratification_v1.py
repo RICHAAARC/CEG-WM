@@ -129,7 +129,7 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertIn("merge-base','--is-ancestor',EXPECTED_EXACT,HANDOFF_HEAD", source)
         self.assertIn("git('checkout', '--detach', EXPECTED_EXACT)", source)
         self.assertIn("%Y%m%dT%H%M%S%fZ", source)
-        self.assertIn("Content-Texture-{EXPECTED_EXACT[:7]}-{RUN_UTC}", source)
+        self.assertIn("Content-Texture-7917a7d-{RUN_UTC}", source)
         self.assertIn("(0,'terminal','analysis_complete','analysis_complete')", source)
         self.assertIn("(2,'terminal','not_interpretable','not_interpretable')", source)
         self.assertIn("(2,'operational_terminal','operational_failure','operational_failure')", source)
