@@ -137,6 +137,34 @@ residual, ambiguity gap, then block index.  It sets no threshold and does not
 mean Q/K-route eligibility, a method or detector success, or a scientific
 result.  Any later C0 use is independent and separately authorized.
 
+## 6b. D0.1 artifact-only missingness-aware selection boundary (2026-08-27)
+
+`geometry-v1-qk-d01-artifact-selection-v1` is a separate, CPU-only
+post-discovery selection protocol.  It reads one bounded, immutable D0
+artifact and never re-observes an image, loads a model, or changes that
+artifact.  The source identity, execution exact, protocol, plan digest,
+24-layer roster, 24 x 32 unit roster, and public-field and size bounds must
+all validate fail-closed before selection.  D0 remains `D0_UNRESOLVED`; D0.1
+does not replace or disguise that status as a rerun.
+
+D0.1 audits all matched and shuffled records, but uses only the 16
+`matched_h` records per layer for eligibility.  Every such record must be
+`calculated`, have finite positive coverage, finite recovery error and fit
+residual, non-empty finite ambiguity gaps, and at least one finite in-view
+true-match rank.  Evaluation-defined out-of-view `None` ranks remain recorded
+as missingness and are never imputed.  Eligible layers are ranked within each
+of shallow (0--7), middle (8--15), and deep (16--23) by median recovery error,
+median finite in-view rank, median fit residual, negative median ambiguity
+gap, then block index.  Coverage and null-rank counts are recorded but do not
+rank or threshold layers.
+
+D0.1 may emit only `D01_UNRESOLVED` or `D01_CANDIDATES_FROZEN`, with
+`science_denominator=0`.  A frozen three-layer set is an artifact-selection
+record only: it is not Q/K route eligibility, a keyed-anchor validation,
+method success, detector success, or a scientific result.  Any confirmation
+experiment and any keyed canonical anchor remain independent and separately
+authorized.
+
 ## 7. Authorized progression nodes
 
 0. Under separate exact-bound authorization, close the `244f28a` B1 blockers
