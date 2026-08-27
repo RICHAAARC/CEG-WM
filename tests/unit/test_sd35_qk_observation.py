@@ -11,6 +11,7 @@ from PIL import Image
 from cegwm.runtime.sd35_qk_observation import (
     SD35QKObservationSpec,
     observe_sd35_image_qk,
+    observe_sd35_image_qk_sampled_all_layers,
 )
 
 
@@ -244,5 +245,17 @@ def test_hooks_are_removed_after_transformer_failure() -> None:
     transformer = _FailingTransformer()
     with pytest.raises(RuntimeError, match="fake failure"):
         observe_sd35_image_qk(_image(), pipeline=_Pipeline(transformer), spec=_spec())
+    assert not transformer.blocks[0].attn.to_q._forward_hooks
+    assert not transformer.blocks[0].attn.to_k._forward_hooks
+
+
+def test_all_layer_entrypoint_samples_in_hooks_and_retains_per_layer_failure() -> None:
+    transformer = _Transformer()
+    observation = observe_sd35_image_qk_sampled_all_layers(_image(), pipeline=_Pipeline(transformer), spec=_spec())
+    assert len(observation.layers) == 1
+    layer = observation.layers[0]
+    assert layer.query.shape == layer.key.shape == (6, 4)
+    assert layer.query.device.type == layer.key.device.type == "cpu"
+    assert not observation.layer_failures
     assert not transformer.blocks[0].attn.to_q._forward_hooks
     assert not transformer.blocks[0].attn.to_k._forward_hooks

@@ -58,6 +58,23 @@ class SD35QKObservation:
     public_noise_seed: int
 
 
+@dataclass(frozen=True, slots=True)
+class SD35QKAllLayerObservation:
+    """Bounded all-layer observation for D0 discovery.
+
+    Unlike the legacy explicit-path observer, projections are sampled inside
+    hooks.  The returned mapping therefore never owns complete GPU projection
+    outputs for the full transformer roster.
+    """
+
+    layers: tuple[SD35QKLayerObservation, ...]
+    layer_failures: tuple[tuple[str, str], ...]
+    latent_shape: tuple[int, int, int, int]
+    schedule_index: int
+    timestep: torch.Tensor
+    public_noise_seed: int
+
+
 def _require_int(value: Any, name: str, *, minimum: int = 0) -> int:
     if isinstance(value, bool) or not isinstance(value, Integral) or int(value) < minimum:
         raise ValueError(f"{name} must be an integer of at least {minimum}")
@@ -291,3 +308,111 @@ def observe_sd35_image_qk(
         timestep=timestep.detach().to(device="cpu"),
         public_noise_seed=spec.public_noise_seed,
     )
+
+
+def observe_sd35_image_qk_sampled_all_layers(
+    image: Image.Image,
+    *,
+    pipeline: object,
+    spec: SD35QKObservationSpec,
+) -> SD35QKAllLayerObservation:
+    """Observe an explicit all-layer roster with hook-time bounded sampling.
+
+    A malformed or unreached individual projection is recorded as a bounded
+    layer failure while the remaining hooks continue.  Failures before the
+    transformer call retain the usual fail-closed boundary tag.
+    """
+    _validate_spec(spec)
+    rgb_image = require_ordinary_rgb_image(image)
+    image_processor = _get_pipeline_member(pipeline, "image_processor")
+    vae = _get_pipeline_member(pipeline, "vae")
+    scheduler = _get_pipeline_member(pipeline, "scheduler")
+    transformer = _get_pipeline_member(pipeline, "transformer")
+    if not isinstance(transformer, torch.nn.Module):
+        raise TypeError("transformer must be a torch module")
+    try:
+        parameter = next(transformer.parameters())
+    except StopIteration as error:
+        raise TypeError("transformer must expose floating parameters for direct observation") from error
+    try:
+        latent = encode_final_rgb_image(rgb_image, image_processor, vae)
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "vae_encode")
+        raise
+    if latent.ndim != 4 or latent.shape[0] != 1 or not latent.dtype.is_floating_point or not bool(torch.isfinite(latent).all()):
+        raise ValueError("VAE observation must be finite batch-one floating NCHW")
+    if latent.device != parameter.device or latent.dtype != parameter.dtype:
+        raise ValueError("VAE latent must match the direct transformer device and dtype")
+    patch_size = _patch_size(transformer)
+    if latent.shape[-2] % patch_size or latent.shape[-1] % patch_size:
+        raise ValueError("latent spatial dimensions must divide exactly by transformer patch_size")
+    source_grid = (latent.shape[-2] // patch_size, latent.shape[-1] // patch_size)
+    expected_tokens = source_grid[0] * source_grid[1]
+    if expected_tokens < 2:
+        raise ValueError("latent grid must provide at least two tokens")
+    sample_indices = _uniform_indices(source_grid[0], source_grid[1], spec.max_grid)
+    try:
+        scheduler.set_timesteps(spec.inference_steps, device=latent.device)
+        timesteps = scheduler.timesteps
+        if not isinstance(timesteps, torch.Tensor) or timesteps.ndim != 1 or spec.schedule_index >= timesteps.numel():
+            raise ValueError("invalid explicit scheduler schedule")
+        timestep = timesteps[spec.schedule_index : spec.schedule_index + 1]
+        generator = torch.Generator(device=latent.device); generator.manual_seed(spec.public_noise_seed)
+        noise = torch.randn(latent.shape, dtype=latent.dtype, device=latent.device, generator=generator)
+        observed_latent = scheduler.scale_noise(latent, timestep, noise)
+        if not isinstance(observed_latent, torch.Tensor) or observed_latent.shape != latent.shape or not bool(torch.isfinite(observed_latent).all()):
+            raise ValueError("scheduler observation latent must be finite")
+    except BaseException as error:
+        setattr(error, "geometry_failure_point", "scheduler")
+        raise
+    captures: dict[str, dict[str, tuple[torch.Tensor, torch.dtype, torch.device, tuple[int, int, int]]]] = {}
+    failures: dict[str, str] = {}
+    handles: list[Any] = []
+    try:
+        for path in spec.attention_layer_paths:
+            attention = _resolve_attention(transformer, path)
+            heads = _require_int(getattr(attention, "heads", None), f"{path}.heads", minimum=1)
+            for name in ("to_q", "to_k"):
+                projection = getattr(attention, name, None)
+                if not isinstance(projection, torch.nn.Module):
+                    failures[path] = "projection_missing"; continue
+                def capture(_module: torch.nn.Module, _inputs: tuple[Any, ...], output: Any, *, layer: str = path, projection_name: str = name, layer_heads: int = heads) -> None:
+                    if layer in failures:
+                        return
+                    try:
+                        value = _projection_output(output, path=layer, name=projection_name, expected_tokens=expected_tokens)
+                        if value.shape[-1] % layer_heads:
+                            raise ValueError("head_dimension_invalid")
+                        bucket = captures.setdefault(layer, {})
+                        if projection_name in bucket:
+                            raise ValueError("projection_call_count")
+                        selected = value[0, sample_indices.to(value.device)].detach().to(device="cpu", dtype=torch.float32)
+                        bucket[projection_name] = (selected, value.dtype, value.device, tuple(int(v) for v in value.shape))
+                    except (TypeError, ValueError):
+                        failures[layer] = "projection_capture_invalid"
+                handles.append(projection.register_forward_hook(capture))
+        try:
+            with torch.no_grad():
+                transformer(hidden_states=observed_latent, timestep=timestep,
+                            encoder_hidden_states=spec.null_encoder_hidden_states.to(device=parameter.device, dtype=parameter.dtype),
+                            pooled_projections=spec.null_pooled_projections.to(device=parameter.device, dtype=parameter.dtype))
+        except BaseException as error:
+            setattr(error, "geometry_failure_point", "transformer_call")
+            raise
+    finally:
+        for handle in handles:
+            handle.remove()
+    layers: list[SD35QKLayerObservation] = []
+    for path in spec.attention_layer_paths:
+        if path in failures:
+            continue
+        captured = captures.get(path, {})
+        if set(captured) != {"to_q", "to_k"}:
+            failures[path] = "projection_call_count"; continue
+        query, qdtype, qdevice, qshape = captured["to_q"]
+        key, kdtype, kdevice, kshape = captured["to_k"]
+        if qshape != kshape or qdtype != kdtype or qdevice != kdevice:
+            failures[path] = "qk_shape_mismatch"; continue
+        heads = _require_int(getattr(_resolve_attention(transformer, path), "heads", None), f"{path}.heads", minimum=1)
+        layers.append(SD35QKLayerObservation(path, query, key, qdtype, qdevice, qshape, source_grid, sample_indices.cpu(), heads, qshape[-1] // heads))
+    return SD35QKAllLayerObservation(tuple(layers), tuple((path, failures[path]) for path in spec.attention_layer_paths if path in failures), tuple(int(v) for v in latent.shape), spec.schedule_index, timestep.detach().cpu(), spec.public_noise_seed)

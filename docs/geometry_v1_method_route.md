@@ -112,6 +112,31 @@ This section is dated status, not a stable method invariant.
 - A4 has not started.  No real paired E0, sync writer, canonical anchor,
   reliability fit, detector recheck, or scientific result exists.
 
+## 6a. D0 all-layer discovery boundary (2026-08-27)
+
+`geometry-v1-qk-d0-all-layer-discovery-v1` is a separate, all-layer
+representation/equivariance discovery protocol.  It uses the same image-only
+observation boundary, two deterministic asymmetric procedural RGB references,
+and four fixed attacks per reference, but it is not an E0 rerun or execution
+entrypoint.  Its 8 pairs x 24 sample-side layers x Q/K x matched/shuffled-H
+matrix has 768 predeclared retained units and `science_denominator=0`.
+
+Known H is evaluation truth only.  Candidate enumeration accepts exactly the
+contiguous sample-side `transformer_blocks.0.attn` through
+`transformer_blocks.23.attn` paths exposing `to_q`, `to_k`, and positive
+`heads`; alternative, fused, context, or add-projection paths are recorded
+only and never selected or used as fallback.  Q/K is sampled in the hook to a
+bounded CPU `float32` grid, with no raw Q/K persisted.  A model topology
+mismatch stops D0 rather than substituting layers or models.
+
+D0 may emit only `D0_STOPPED`, `D0_UNRESOLVED`, or
+`D0_CANDIDATES_FROZEN`.  The final status freezes one lexicographically ranked
+eligible layer from each of shallow (0--7), middle (8--15), and deep (16--23)
+strata, using matched-unit medians of recovery error, true-match rank, fit
+residual, ambiguity gap, then block index.  It sets no threshold and does not
+mean Q/K-route eligibility, a method or detector success, or a scientific
+result.  Any later C0 use is independent and separately authorized.
+
 ## 7. Authorized progression nodes
 
 0. Under separate exact-bound authorization, close the `244f28a` B1 blockers
