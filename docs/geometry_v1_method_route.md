@@ -234,6 +234,25 @@ Any future D2 confirmation requires separate authorization and must use fresh
 references, attacks, and observation seeds; it must use the frozen two layers,
 64 retained units, and no reselection.
 
+## 6e. D2 independent two-layer confirmation boundary (2026-08-27)
+
+`geometry-v1-qk-d2-independent-confirmation-v1` is a separately authorized
+confirmation protocol. Before model work it boundedly validates the immutable
+all-layer direction artifact, its D0 provenance, selected ordered 23/14 layer
+identity, and public leak boundary. It then uses new deterministic RGB
+references, D4/similarity/crop instances, and seed 73 for a fixed 64-unit
+image-only roster. D2 retains every failed unit and never discovers, reselects,
+switches, retries, falls back, tunes, or persists raw Q/K.
+
+For each of the two fixed layers and Q/K, D2 takes only same list-index finite
+matched/shuffled ranks, then pair medians and an equal-weight median over all
+eight pairs. All four values must be strictly negative for
+`D2_CANDIDATES_CONFIRMED`; a complete contrary direction result is
+`D2_UNRESOLVED`; unavailable source, model, topology, transformer, capture, or
+other retained failure is `D2_STOPPED`. D4/crop all-nonnegative direction is a
+nonblocking route-instability record. D2 always has `science_denominator=0`:
+no outcome is route, key, method, detector, watermark, or scientific success.
+
 ## 7. Authorized progression nodes
 
 0. Under separate exact-bound authorization, close the `244f28a` B1 blockers
