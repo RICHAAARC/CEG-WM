@@ -72,6 +72,18 @@ def _null_cache_put(cache: dict[tuple[str, int, str], Mapping[str, Any]], domain
     cache[key] = dict(scores)
 
 
+def _retain_unit_failure(event: dict[str, Any], *causes: Mapping[str, Any] | None, fallback: str = "RuntimeError") -> None:
+    """Keep an attributable unit in the fixed denominator without a traceback."""
+    for cause in causes:
+        failure = cause.get("failure_class") if isinstance(cause, Mapping) else None
+        if failure in PUBLIC_FAILURES:
+            event["status"] = "operational_failure"
+            event["failure_class"] = failure
+            return
+    event["status"] = "operational_failure"
+    event["failure_class"] = fallback
+
+
 def _join_domain_maps(construction: str, candidate: Mapping[str, Mapping[str, Any]], cache: Mapping[tuple[str, int, str], Mapping[str, Any]], ordinal: int, plain_sha: str) -> dict[str, tuple[float, float]]:
     from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
     domains = DOMAIN_MATRIX[construction]

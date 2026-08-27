@@ -118,6 +118,17 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertEqual(ties["interpretability"], "available")
     self.assertEqual(runner._n96_spearman([0.0] * 96, list(range(96)))["interpretability"], "unavailable_zero_rank_variance")
 
+ def test_attributable_unit_failures_preserve_public_class(self) -> None:
+    c3 = {"event":"unit", "method":"c3", "global_ordinal":1, "unit_id":"u1", "status":"success"}
+    upstream = {"status":"operational_failure", "failure_class":"OSError"}
+    v4 = {"status":"operational_failure", "failure_class":"TimeoutError"}
+    runner._retain_unit_failure(c3, upstream, v4)
+    self.assertEqual((c3["status"], c3["failure_class"]), ("operational_failure", "OSError"))
+    c6 = {"status":"success"}; runner._retain_unit_failure(c6, {"status":"success"}, fallback="ValueError")
+    self.assertEqual((c6["status"], c6["failure_class"]), ("operational_failure", "ValueError"))
+    event = runner._adapter_event(runner.EVENT_PREFIX + json.dumps({"event":"unit","method":"c2","global_ordinal":1,"unit_id":"u1","status":"operational_failure","failure_class":"TimeoutError"}))
+    self.assertEqual(event["failure_class"], "TimeoutError")
+
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage
     self.addCleanup(runner._set_failure_stage, original)
