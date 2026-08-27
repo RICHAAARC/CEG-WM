@@ -155,6 +155,25 @@ def test_plan_json_contract_allows_current_bound_and_rejects_max_plus_one_before
                                                 loader=lambda *_a, **_k: pytest.fail("loader must not run"))
 
 
+def test_main_reports_serialized_max_plus_one_as_plan_before_execution(tmp_path, monkeypatch) -> None:
+    plan = _plan(tmp_path)
+    for pair in plan["pairs"]:
+        pair["reference_path"] = "r" * RUNNER.MAX_PRIVATE_PATH_BYTES
+        pair["attacked_path"] = "a" * RUNNER.MAX_PRIVATE_PATH_BYTES
+    payload = RUNNER._plan_json(plan)
+    plan_path = tmp_path / "serialized-max-plus-one.json"; plan_path.write_bytes(payload)
+    monkeypatch.setattr(RUNNER, "MAX_PLAN_BYTES", len(payload) - 1)
+    monkeypatch.setattr(RUNNER, "run_qk_equivariance_operational", lambda *_a, **_k: pytest.fail("execution must not start"))
+    read, write = os.pipe()
+    try:
+        rc = RUNNER._main(["--plan", str(plan_path), "--repo-root", str(tmp_path), "--expected-exact", "a" * 40,
+                           "--output-root", str(tmp_path / "out"), "--control-fd", str(write)])
+        control = os.read(read, RUNNER.MAX_CONTROL_BYTES + 1)
+    finally:
+        os.close(read); os.close(write)
+    assert rc == 1 and b'"failure_point":"plan"' in control
+
+
 @pytest.mark.parametrize("mutate,reason", [
     (lambda p: p.update(schema="wrong"), "invalid_plan_schema"),
     (lambda p: p.update(attention_layer_paths=["one", "one"]), "invalid_attention_layer_paths"),

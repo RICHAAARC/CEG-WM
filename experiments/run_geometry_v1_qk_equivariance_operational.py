@@ -171,9 +171,9 @@ def _runtime(pipeline: Any) -> dict[str, Any]:
     return {"pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}", "transformer_class": f"{type(transformer).__module__}.{type(transformer).__qualname__}", "device": str(next(transformer.parameters()).device) if transformer is not None else None, "dtype": str(next(transformer.parameters()).dtype) if transformer is not None else None, "resolved_public_revision": getattr(pipeline, "_commit_hash", None)}
 
 
-def run_qk_equivariance_operational(plan: Mapping[str, Any], *, hf_token: str, expected_exact: str, repo_root: Path, loader: Callable[..., Any] = load_sd35_pipeline, observer: Callable[..., SD35QKObservation] = observe_sd35_image_qk) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+def run_qk_equivariance_operational(plan: Mapping[str, Any], *, hf_token: str, expected_exact: str, repo_root: Path, loader: Callable[..., Any] = load_sd35_pipeline, observer: Callable[..., SD35QKObservation] = observe_sd35_image_qk, plan_bytes: bytes | None = None) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
     """Execute the fixed E0 plan once; all method outcomes remain descriptive."""
-    plan_bytes = _plan_json(plan)
+    plan_bytes = _plan_json(plan) if plan_bytes is None else plan_bytes
     pairs = _validate_plan(plan)
     exact = _exact(expected_exact, repo_root)
     paths = tuple(plan["attention_layer_paths"])
@@ -264,8 +264,9 @@ def _main(argv: list[str] | None = None) -> int:
     try:
         plan = _read_plan(Path(args.plan))
         _validate_plan(plan)
+        plan_bytes = _plan_json(plan)
         stage = "execution_identity"
-        summary, units = run_qk_equivariance_operational(plan, hf_token=os.environ.get("HF_TOKEN", ""), expected_exact=args.expected_exact, repo_root=Path(args.repo_root))
+        summary, units = run_qk_equivariance_operational(plan, hf_token=os.environ.get("HF_TOKEN", ""), expected_exact=args.expected_exact, repo_root=Path(args.repo_root), plan_bytes=plan_bytes)
         stage = "artifact_packaging"
         package = _package(Path(args.output_root), summary, units, expected_exact=args.expected_exact)
         stage = "control_channel"
