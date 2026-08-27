@@ -117,6 +117,8 @@ class TextureRunnerTests(unittest.TestCase):
     ties = runner._n96_spearman([index // 2 for index in range(96)], [index // 2 for index in range(96)])
     self.assertEqual(ties["interpretability"], "available")
     self.assertEqual(runner._n96_spearman([0.0] * 96, list(range(96)))["interpretability"], "unavailable_zero_rank_variance")
+    for left, right in ((95, 95), (95, 96), (96, 95)):
+        self.assertEqual(runner._n96_spearman(list(range(left)), list(range(right)))["interpretability"], "unavailable_incomplete_fixed_denominator")
 
  def test_attributable_unit_failures_preserve_public_class(self) -> None:
     c3 = {"event":"unit", "method":"c3", "global_ordinal":1, "unit_id":"u1", "status":"success"}
@@ -413,7 +415,7 @@ class TextureRunnerTests(unittest.TestCase):
             for unit in units:
                 raw = bytearray(512 * 512 * 3); raw[3] = unit["global_ordinal"]
                 digest = hashlib.sha256(raw).hexdigest()
-                scores = {"registered": .5, **{f"wrong_{index:02d}": .25 for index in range(16)}}
+                scores = {"registered": .5 + unit["global_ordinal"] * .00001, **{f"wrong_{index:02d}": .25 for index in range(16)}}
                 null = {"registered": .1, **{f"wrong_{index:02d}": .0 for index in range(16)}}
                 events.append({"event": "v4_lf_rescore", "method": "c3", "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": hashlib.sha256(f"c3-{unit['global_ordinal']}".encode()).hexdigest(), "plain_rgb_sha256": digest, "candidate_ppm_sha256": "a" * 64, "plain_ppm_sha256": "b" * 64, "candidate_scores": {"v4_lf": scores}, "null_scores": {"v4_lf": null}})
             return [{"event": "source_validated"}, *events, {"event": "phase_complete", "phase": phase}]
@@ -423,6 +425,8 @@ class TextureRunnerTests(unittest.TestCase):
             raw[3] = unit["global_ordinal"]
             digest = hashlib.sha256(raw).hexdigest()
             score = _score_payload(unit["global_ordinal"] * 0.001); null = _score_payload(unit["global_ordinal"] * 0.001 - 0.01)
+            for branch in ("lf", "hf", "joint"):
+                score[f"{branch}__registered"] += unit["global_ordinal"] * .00001
             domains = ("v4_lf", "hf") if phase == "c6" else ("ordinary_lf", "hf")
             branches = {"ordinary_lf": "lf", "v4_lf": "lf", "hf": "hf"}
             event = {"event": "unit", "method": phase, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": hashlib.sha256(f"{phase}-{unit['global_ordinal']}".encode()).hexdigest(), "primary_null_rgb_sha256": digest, "candidate_scores": {domain: {label: score[f"{branches[domain]}__{label}"] for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))} for domain in domains}, "null_scores": {domain: {label: null[f"{branches[domain]}__{label}"] for label in ("registered", *(f"wrong_{index:02d}" for index in range(16)))} for domain in domains}}
@@ -453,6 +457,9 @@ class TextureRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "analysis_complete")
         self.assertEqual(result["fixed_method_rows"], 288)
         self.assertEqual(len(records), 288)
+        associations = list(__import__("csv").DictReader(io.StringIO(archive.read("associations.csv").decode("utf-8"))))
+        self.assertEqual(len(associations), 14)
+        self.assertTrue(all(item["interpretability"] == "available" and item["observed_pair_count"] == "96" and item["statistic_value"] for item in associations))
         self.assertNotIn(b"private prompt", archive.read("records.json"))
         self.assertNotIn("model_manifest_sha256", json.loads(archive.read("bindings.json")))
     checkpoints = sorted((local / "checkpoints").glob("checkpoint-*.json"))

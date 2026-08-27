@@ -370,7 +370,7 @@ def name_index(name: str) -> int:
 def _n96_spearman(texture: Sequence[float], response: Sequence[float]) -> dict[str, Any]:
     """Tie-aware midrank Spearman for the fixed, non-replaceable N=96."""
     from cegwm.protocol.content_texture_stratification_v1 import average_ranks
-    if len(texture) != len(response) != 96 or any(not math.isfinite(float(value)) for value in (*texture, *response)):
+    if len(texture) != 96 or len(response) != 96 or any(not math.isfinite(float(value)) for value in (*texture, *response)):
         return {"interpretability": "unavailable_incomplete_fixed_denominator"}
     x, y = average_ranks(texture), average_ranks(response)
     xm = sum(float(value) for value in x) / 96.0; ym = sum(float(value) for value in y) / 96.0
