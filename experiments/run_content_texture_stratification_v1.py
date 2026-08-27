@@ -36,7 +36,7 @@ KEY_ENV = "CEG_WM_ROOT_KEY"
 TOKEN_ENV = "HF_TOKEN"
 EVENT_PREFIX = "CEGWM_TEXTURE_EVENT "
 RESULT_PREFIX = "CEGWM_TEXTURE_RESULT"
-PUBLIC_FAILURES = {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"}
+PUBLIC_FAILURES = {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OtherOperationalError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"}
 FAILURE_STAGES = frozenset({
     "identity", "protocol", "secrets", "checkouts", "rosters", "assets",
     "prefetch", "common_plain", "c2", "c3", "c6", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication",
@@ -662,7 +662,7 @@ def _execute(args: argparse.Namespace) -> int:
                 for event, plain in zip(events, plains):
                     v4_event = by_ordinal.get(event["global_ordinal"])
                     if event.get("status") != "success" or v4_event is None or v4_event.get("status") != "success":
-                        _retain_unit_failure(event, v4_event, fallback="RuntimeError")
+                        _retain_unit_failure(event, event, v4_event, fallback="RuntimeError")
                         continue
                     if event["candidate_rgb_sha256"] != v4_event["candidate_rgb_sha256"] or plain.get("plain_rgb_sha256") != v4_event["plain_rgb_sha256"]:
                         _retain_unit_failure(event, fallback="ValueError")

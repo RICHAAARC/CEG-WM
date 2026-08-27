@@ -136,6 +136,18 @@ class TextureRunnerTests(unittest.TestCase):
     self.assertGreaterEqual(source.count("_retain_unit_failure(event"), 3)
     self.assertIn("except (KeyError, TypeError, ValueError):", source)
 
+ def test_c3_v4_failure_priority_and_other_operational_parser(self) -> None:
+    c3 = {"status":"operational_failure", "failure_class":"OSError"}; v4 = {"status":"operational_failure", "failure_class":"ValueError"}
+    runner._retain_unit_failure(c3, c3, v4, fallback="RuntimeError")
+    self.assertEqual(c3["failure_class"], "OSError")
+    success = {"status":"success"}; runner._retain_unit_failure(success, success, v4, fallback="RuntimeError")
+    self.assertEqual(success["failure_class"], "ValueError")
+    for event_name in ("unit", "v4_lf_rescore"):
+        payload = {"event":event_name,"method":"c3","global_ordinal":1,"unit_id":"u1","status":"operational_failure","failure_class":"OtherOperationalError"}
+        self.assertEqual(runner._adapter_event(runner.EVENT_PREFIX + json.dumps(payload))["failure_class"], "OtherOperationalError")
+    source = (Path(__file__).parents[2] / "experiments" / "run_content_texture_stratification_v1.py").read_text(encoding="utf-8")
+    self.assertIn('_retain_unit_failure(event, event, v4_event, fallback="RuntimeError")', source)
+
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage
     self.addCleanup(runner._set_failure_stage, original)
