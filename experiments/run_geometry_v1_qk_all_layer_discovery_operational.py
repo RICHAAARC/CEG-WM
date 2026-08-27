@@ -106,8 +106,9 @@ def _attack(image: Image.Image, label: str) -> tuple[Image.Image, list[list[floa
         return image.transform((512, 512), Image.Transform.AFFINE, _pillow_inverse_affine(h), resample=Image.Resampling.BICUBIC), h.tolist()
     if label == "crop_rescale":
         scale = 512 / 416
-        # Crop source centre (48.5,32.5) maps to output centre (.5,.5).
-        return image.crop((48, 32, 464, 448)).resize((512, 512), Image.Resampling.BICUBIC), [[scale, 0., .5 - 48.5 * scale], [0., scale, .5 - 32.5 * scale], [0., 0., 1.]]
+        # Pillow crop+resize maps crop-boundary centre coordinates directly:
+        # destination_center=(source_center-crop_origin)*scale.
+        return image.crop((48, 32, 464, 448)).resize((512, 512), Image.Resampling.BICUBIC), [[scale, 0., -48 * scale], [0., scale, -32 * scale], [0., 0., 1.]]
     raise ValueError("unknown_transform")
 
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-from PIL import Image, ImageDraw
+from PIL import Image
 
 MODULE = Path(__file__).parents[2] / "experiments" / "run_geometry_v1_qk_all_layer_discovery_operational.py"
 SPEC = importlib.util.spec_from_file_location("geometry_d0_operational", MODULE)
@@ -61,36 +61,36 @@ def test_fixed_plan_is_eight_pairs_and_known_h_has_deterministic_cyclic_shuffle(
         elif pair["transform_label"] == "similarity":
             assert np.allclose(h, _frozen_similarity_h())
         else:
-            # The first crop pixel centre remains (48.5,32.5), and the last
-            # maps to the last output centre under Pillow crop+resize.
-            assert np.allclose(h @ np.array([48.5, 32.5, 1.]), [.5, .5, 1.])
-            assert np.allclose(h @ np.array([463.5, 447.5, 1.]), [511.5, 511.5, 1.])
+            scale = 512 / 416
+            assert np.allclose(h @ np.array([48.5, 32.5, 1.]), [.5 * scale, .5 * scale, 1.])
+            assert np.allclose(h @ np.array([463.5, 447.5, 1.]), [415.5 * scale, 415.5 * scale, 1.])
 
 
-def _marker_image() -> tuple[Image.Image, tuple[tuple[np.ndarray, tuple[int, int, int]], ...]]:
-    """Independent colour landmarks, deliberately far from every image edge."""
-    image = Image.new("RGB", (512, 512), (0, 0, 0)); draw = ImageDraw.Draw(image)
-    markers = ((np.array([121.5, 109.5, 1.]), (255, 31, 19)),
-               (np.array([366.5, 143.5, 1.]), (23, 255, 47)),
-               (np.array([174.5, 351.5, 1.]), (41, 61, 255)),
-               (np.array([341.5, 324.5, 1.]), (255, 223, 29)))
-    for centre, colour in markers:
-        x, y = (int(centre[0] - .5), int(centre[1] - .5))
-        draw.rectangle((x - 6, y - 6, x + 6, y + 6), fill=colour)
-    return image, markers
+_GAUSSIAN_SIGMA, _GAUSSIAN_BACKGROUND, _GAUSSIAN_AMPLITUDE = 24.0, 2.0, 250.0
+_GAUSSIAN_CENTRES = (np.array([133.5, 117.5, 1.]), np.array([357.5, 151.5, 1.]),
+                     np.array([181.5, 347.5, 1.]), np.array([329.5, 309.5, 1.]))
+_GAUSSIAN_CHANNELS = (0, 1, 2, 0)
+_CENTROID_WINDOW, _CENTROID_TOLERANCE = 64, .04
 
 
-def _colour_centres(image: Image.Image, colours: tuple[tuple[int, int, int], ...]) -> dict[tuple[int, int, int], np.ndarray]:
-    values = np.asarray(image, dtype=np.int16); yy, xx = np.indices(values.shape[:2])
-    result = {}
-    for colour in colours:
-        target = np.asarray(colour, dtype=np.int16)
-        # A pure 13x13 marker survives BICUBIC with a compact, high-confidence
-        # interior; this mask never relies on a production coordinate helper.
-        mask = (np.abs(values - target).max(axis=2) <= 28)
-        assert mask.sum() >= 20
-        result[colour] = np.array([(xx[mask].mean() + .5), (yy[mask].mean() + .5)])
-    return result
+def _gaussian_marker(centre: np.ndarray, channel: int) -> Image.Image:
+    """One wide, smooth RGB Gaussian; parameters are fixed before observation."""
+    yy, xx = np.indices((512, 512), dtype=np.float64); distance2 = (xx + .5 - centre[0]) ** 2 + (yy + .5 - centre[1]) ** 2
+    value = _GAUSSIAN_BACKGROUND + _GAUSSIAN_AMPLITUDE * np.exp(-distance2 / (2.0 * _GAUSSIAN_SIGMA ** 2))
+    rgb = np.full((512, 512, 3), _GAUSSIAN_BACKGROUND, dtype=np.uint8)
+    rgb[:, :, channel] = np.rint(value).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(rgb, "RGB")
+
+
+def _gaussian_centroid(image: Image.Image, *, centre: np.ndarray, channel: int) -> np.ndarray:
+    """Float64, background-subtracted centroid over a fixed internal window."""
+    values = np.asarray(image, dtype=np.float64)[:, :, channel]
+    cx, cy = (int(round(centre[0] - .5)), int(round(centre[1] - .5)))
+    left, top = cx - _CENTROID_WINDOW, cy - _CENTROID_WINDOW
+    window = values[top:cy + _CENTROID_WINDOW + 1, left:cx + _CENTROID_WINDOW + 1] - _GAUSSIAN_BACKGROUND
+    yy, xx = np.indices(window.shape, dtype=np.float64); weights = np.maximum(window, 0.0)
+    assert weights.sum() > 0.0
+    return np.array([(weights * (xx + left + .5)).sum() / weights.sum(), (weights * (yy + top + .5)).sum() / weights.sum()])
 
 
 def _frozen_similarity_h() -> np.ndarray:
@@ -100,24 +100,25 @@ def _frozen_similarity_h() -> np.ndarray:
     return np.array([[linear[0, 0], linear[0, 1], offset[0]], [linear[1, 0], linear[1, 1], offset[1]], [0., 0., 1.]])
 
 
-def test_actual_pillow_rgb_landmarks_independently_verify_similarity_and_crop_h() -> None:
-    source, markers = _marker_image(); colours = tuple(colour for _, colour in markers)
+def test_actual_pillow_rgb_gaussian_centroids_independently_verify_similarity_and_crop_h() -> None:
     frozen = {
         "similarity": _frozen_similarity_h(),
-        # Crop [48,32,464,448], then resize 416 -> 512: derive centre mapping
-        # directly from the frozen crop geometry, independent of runner helpers.
-        "crop_rescale": np.array([[512 / 416, 0., .5 - 48.5 * 512 / 416], [0., 512 / 416, .5 - 32.5 * 512 / 416], [0., 0., 1.]]),
+        # Pillow resize maps output pixel centres through crop boundaries:
+        # destination_center=(source_center-crop_origin)*512/416.
+        "crop_rescale": np.array([[512 / 416, 0., -48 * 512 / 416], [0., 512 / 416, -32 * 512 / 416], [0., 0., 1.]]),
     }
+    disputed_crop = np.array([[512 / 416, 0., .5 - 48.5 * 512 / 416], [0., 512 / 416, .5 - 32.5 * 512 / 416], [0., 0., 1.]])
     for label, expected_h in frozen.items():
-        attacked, returned_h = RUNNER._attack(source, label)
-        observed = _colour_centres(attacked, colours)
-        for point, colour in markers:
+        for point, channel in zip(_GAUSSIAN_CENTRES, _GAUSSIAN_CHANNELS):
+            source = _gaussian_marker(point, channel); attacked, returned_h = RUNNER._attack(source, label)
             expected = (expected_h @ point)[:2]
+            observed = _gaussian_centroid(attacked, centre=expected, channel=channel)
             returned = (np.asarray(returned_h) @ point)[:2]
-            # 1.25 px is a predeclared BICUBIC support/quantisation allowance,
-            # not a fitted quality threshold.
-            assert np.linalg.norm(observed[colour] - expected) <= 1.25
-            assert np.linalg.norm(observed[colour] - returned) <= 1.25
+            assert np.linalg.norm(observed - expected) <= _CENTROID_TOLERANCE
+            assert np.linalg.norm(observed - returned) <= _CENTROID_TOLERANCE
+            if label == "crop_rescale":
+                disputed = (disputed_crop @ point)[:2]
+                assert np.linalg.norm(observed - disputed) > .075
 
 
 def test_discovery_accepts_only_complete_contiguous_sample_side_roster() -> None:
