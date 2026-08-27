@@ -123,16 +123,16 @@ class TextureProtocolTests(unittest.TestCase):
             "userdata": types.SimpleNamespace(get=lambda name: {"CEG_WM_ROOT_KEY": "root-key", "HF_TOKEN": "hf-token"}[name]),
             "RESULT_PREFIX": "CEGWM_TEXTURE_RESULT", "FAILURE_PREFIX": "CEGWM_TEXTURE_HANDOFF_FAILURE", "CAPTURE_LIMIT": 4096,
             "TERMINAL_RESULT_FIELDS": {"status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256"},
-            "OPERATIONAL_RESULT_FIELDS": {"status", "failure_class", "failure_stage"},
+            "OPERATIONAL_RESULT_FIELDS": {"artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member"},
             "RUNNER_PUBLIC_FAILURES": {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"},
             "RUNNER_FAILURE_STAGES": {"identity", "protocol", "secrets", "checkouts", "rosters", "assets", "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication"},
             "_ALLOWED_ERRORS": {"CalledProcessError", "FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "ModuleNotFoundError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "UnicodeDecodeError", "ValueError"},
             "HANDOFF_FAILED": False, "RUNNER_ATTEMPTED": False, "ACCEPTED_ARTIFACT": None,
-            "ANALYSIS_ID": "content_texture_stratification_v1", "TARGET_BRANCH": "stage-a-content-texture-stratification-v1", "EXPECTED_EXACT": "18716f2b68f7916585e3fd50951ca2b4a384f3f8",
+            "ANALYSIS_ID": "content_texture_stratification_v1", "TARGET_BRANCH": "stage-a-content-texture-stratification-v1", "EXPECTED_EXACT": "3ed674236e9f562a1e5a537ae0e4bef7080d4853",
             "CLAIM_CEILING": "exploratory_prospective_texture_stratification_only", "PROTOCOL_DIGEST": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "RUN_ID": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a",
             "SOURCE": root / "source", "LOCAL": root / "local", "RUN_ROOT": root / "run-root", "TERMINAL_ZIP": terminal_zip, "TERMINAL_SHA": terminal_sha,
-            "RUNNER_MODULE": "experiments.run_content_texture_stratification_v1", "SINK": root / "sink", "PROVENANCE": root / "provenance",
-            "git": lambda *args: {("branch", "--show-current"): "stage-a-content-texture-stratification-v1", ("rev-parse", "HEAD"): "18716f2b68f7916585e3fd50951ca2b4a384f3f8", ("status", "--porcelain"): ""}[args],
+            "RUNNER_MODULE": "experiments.run_content_texture_stratification_v1", "SINK": root / "sink", "DRIVE_TARGET": root / "sink", "PROVENANCE": root / "provenance",
+            "git": lambda *args: {("branch", "--show-current"): "stage-a-content-texture-stratification-v1", ("rev-parse", "HEAD"): "3ed674236e9f562a1e5a537ae0e4bef7080d4853", ("status", "--porcelain"): ""}[args],
         }
         exec(compile(ast.Module(body=[fail_function], type_ignores=[]), "<notebook-fail>", "exec"), namespace)
         with contextlib.redirect_stdout(DispatchStdout()):
@@ -227,8 +227,18 @@ class TextureProtocolTests(unittest.TestCase):
                 ast.parse("".join(cell["source"])); self.assertIsNone(cell["execution_count"]); self.assertEqual(cell["outputs"], [])
         self.assertLess(code[0].index("drive.mount('/content/drive')"), code[0].index("REPO_URL"))
         joined = "\n".join(code)
-        self.assertEqual(joined.count("18716f2b68f7916585e3fd50951ca2b4a384f3f8"), 2)
+        self.assertEqual(joined.count("3ed674236e9f562a1e5a537ae0e4bef7080d4853"), 2)
+        self.assertNotIn("18716f2b68f7916585e3fd50951ca2b4a384f3f8", joined)
         self.assertNotIn("ac7883dddced981ba4e7b6067c5e437b9ff7c1b3", joined)
+        self.assertIn("SHORT_COMMIT = EXECUTION_COMMIT[:7]", joined)
+        self.assertIn("SHORT_COMMIT != '3ed6742'", joined)
+        self.assertIn("datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')", joined)
+        self.assertEqual(joined.count("datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')"), 1)
+        self.assertIn("DRIVE_CONTENT_ROOT = Path('/content/drive/MyDrive/CEG-WM/Content')", joined)
+        self.assertIn("Content-Texture-{SHORT_COMMIT}-{RUN_UTC}", joined)
+        self.assertIn("LOCAL = Path('/content') / (DRIVE_TARGET.name + '-local')", joined)
+        self.assertIn("'--artifact-sink', str(DRIVE_TARGET)", joined)
+        self.assertNotIn("/CEG-WM/content_texture_stratification_v1", joined)
         self.assertEqual(joined.count("subprocess.Popen("), 1)
         self.assertEqual(joined.count("experiments.run_content_texture_stratification_v1"), 1)
         for flag in ("--repo-root", "--expected-exact", "--local-work-root", "--artifact-sink", "--provenance-root"):
@@ -239,6 +249,8 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertNotIn("fallback", joined)
         self.assertIn("stderr=subprocess.DEVNULL", joined)
         self.assertLess(joined.index("process = subprocess.Popen"), joined.index("runner_env.pop('CEG_WM_ROOT_KEY', None)"))
+        self.assertNotIn("subprocess.Popen", code[3])
+        self.assertIn("globals().get('ACCEPTED_ARTIFACT')", code[3])
         self.assertNotIn("Gate", joined)
 
     def test_notebook_parses_terminal_and_operational_runner_schemas(self) -> None:
@@ -251,7 +263,7 @@ class TextureProtocolTests(unittest.TestCase):
             "RESULT_PREFIX": "CEGWM_TEXTURE_RESULT",
             "CAPTURE_LIMIT": 4096,
             "TERMINAL_RESULT_FIELDS": {"status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256"},
-            "OPERATIONAL_RESULT_FIELDS": {"status", "failure_class", "failure_stage"},
+            "OPERATIONAL_RESULT_FIELDS": {"artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member"},
             "RUNNER_PUBLIC_FAILURES": {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"},
             "RUNNER_FAILURE_STAGES": {"identity", "protocol", "secrets", "checkouts", "rosters", "assets", "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication"},
         }
@@ -261,21 +273,21 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertEqual(parse(0, ("CEGWM_TEXTURE_RESULT " + json.dumps(terminal) + "\n").encode())[0], "terminal")
         terminal["status"] = "not_interpretable"
         self.assertEqual(parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(terminal) + "\n").encode())[0], "terminal")
-        operational = {"status": "analysis_incomplete", "failure_class": "MemoryError", "failure_stage": "v6"}
-        self.assertEqual(parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(operational) + "\n").encode()), ("operational_incomplete", operational))
-        for bad in ({"status": "analysis_incomplete", "failure_class": "UnknownError", "failure_stage": "v6"}, {"status": "analysis_incomplete", "failure_class": "RuntimeError", "failure_stage": "unknown"}):
+        operational = {"artifact_kind": "operational_terminal", "status": "operational_failure", "claim_ceiling": "ceiling", "exact": "a" * 40, "protocol_digest": "b" * 64, "run_id": "run", "terminal_sha256": "c" * 64, "failure_class": "MemoryError", "failure_stage": "v6", "last_completed_checkpoint": 8, "result_member": "failure.json"}
+        self.assertEqual(parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(operational) + "\n").encode()), ("operational_terminal", operational))
+        for bad in ({**operational, "failure_class": "UnknownError"}, {**operational, "failure_stage": "unknown"}, {**operational, "last_completed_checkpoint": 10}, {**operational, "result_member": "result.json"}):
             with self.assertRaises(RuntimeError):
                 parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(bad) + "\n").encode())
 
-    def test_notebook_dispatches_operational_diagnostic_before_clearing_capture(self) -> None:
-        payload = {"status": "analysis_incomplete", "failure_class": "MemoryError", "failure_stage": "v6"}
-        namespace, stdout_chunks, capture_at_dispatch, devnull = self._run_notebook_dispatch(runner_rc=2, payload=payload)
-        failure_line = "".join(stdout_chunks)
-        self.assertTrue(failure_line.startswith("CEGWM_TEXTURE_HANDOFF_FAILURE "))
-        self.assertLessEqual(len(failure_line.encode("utf-8")), 4096)
-        self.assertEqual(json.loads(failure_line.split(" ", 1)[1]), {"status": "operational_failure", "analysis_id": "content_texture_stratification_v1", "execution_exact": "18716f2b68f7916585e3fd50951ca2b4a384f3f8", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "stage": "v6", "error_class": "MemoryError"})
-        self.assertIn(("CEGWM_TEXTURE_RESULT " + json.dumps(payload) + "\n").encode(), capture_at_dispatch)
-        self.assertIsNone(namespace["ACCEPTED_ARTIFACT"])
+    def test_notebook_accepts_operational_terminal_before_clearing_capture(self) -> None:
+        terminal_bytes = b"operational-terminal-fixture"
+        terminal_sha = hashlib.sha256(terminal_bytes).hexdigest()
+        payload = {"artifact_kind": "operational_terminal", "status": "operational_failure", "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "3ed674236e9f562a1e5a537ae0e4bef7080d4853", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha, "failure_class": "MemoryError", "failure_stage": "v6", "last_completed_checkpoint": 8, "result_member": "failure.json"}
+        namespace, stdout_chunks, capture_at_dispatch, devnull = self._run_notebook_dispatch(runner_rc=2, payload=payload, terminal_bytes=terminal_bytes, terminal_binding=terminal_sha + "  terminal.zip\n")
+        self.assertEqual(stdout_chunks, [])
+        self.assertEqual(capture_at_dispatch, [])
+        self.assertEqual(namespace["ACCEPTED_ARTIFACT"]["artifact_kind"], "operational_terminal")
+        self.assertEqual(namespace["ACCEPTED_ARTIFACT"]["result_member"], "failure.json")
         self.assertEqual(namespace["captured"], bytearray())
         runner_env = namespace["process"].env
         self.assertEqual(namespace["process"].launch_env["CEG_WM_ROOT_KEY"], "root-key")
@@ -294,11 +306,11 @@ class TextureProtocolTests(unittest.TestCase):
         terminal_bytes = b"terminal-fixture"
         terminal_sha = hashlib.sha256(terminal_bytes).hexdigest()
         for runner_rc, status in ((0, "analysis_complete"), (2, "not_interpretable")):
-            payload = {"status": status, "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "18716f2b68f7916585e3fd50951ca2b4a384f3f8", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha}
+            payload = {"status": status, "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "3ed674236e9f562a1e5a537ae0e4bef7080d4853", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha}
             namespace, stdout_chunks, _, _ = self._run_notebook_dispatch(runner_rc=runner_rc, payload=payload, terminal_bytes=terminal_bytes, terminal_binding=terminal_sha + "  terminal.zip\n")
             self.assertEqual(stdout_chunks, [])
             self.assertEqual(namespace["ACCEPTED_ARTIFACT"]["status"], status)
-        payload = {"status": "analysis_complete", "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "18716f2b68f7916585e3fd50951ca2b4a384f3f8", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha}
+        payload = {"status": "analysis_complete", "claim_ceiling": "exploratory_prospective_texture_stratification_only", "exact": "3ed674236e9f562a1e5a537ae0e4bef7080d4853", "protocol_digest": "3bf6552daa78ea11b3038d682f2ec623d011f4cbb5709233b1702fae1437a70e", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "terminal_sha256": terminal_sha}
         namespace, stdout_chunks, _, _ = self._run_notebook_dispatch(runner_rc=0, payload=payload)
         self.assertIsNone(namespace["ACCEPTED_ARTIFACT"])
         self.assertEqual(json.loads("".join(stdout_chunks).split(" ", 1)[1])["stage"], "runner_result_or_artifact_validation")
