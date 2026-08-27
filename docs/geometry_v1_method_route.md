@@ -165,6 +165,44 @@ method success, detector success, or a scientific result.  Any confirmation
 experiment and any keyed canonical anchor remain independent and separately
 authorized.
 
+## 6c. D1 independent fixed-layer confirmation boundary (2026-08-27)
+
+`geometry-v1-qk-d1-independent-confirmation-v1` is a separate independent
+confirmation protocol. It reads only the three bounded sidecars of immutable
+D0.1 run `geometry-v1-qk-d01-ccfb7bcefbb1` at
+`ccfb7bcefbb18f9812a4e800bbea18b91b031ebb`. Before any identity use, model
+work, selection calculation, or packaging, it rejects source sidecars that
+fail their run/exact/protocol/status/zero-denominator identity or expose a
+forbidden public field or value. The source must remain
+`D01_CANDIDATES_FROZEN` with exactly `transformer_blocks.6.attn`,
+`transformer_blocks.13.attn`, and `transformer_blocks.18.attn`. D1 neither
+reads D0 ZIPs nor modifies, replaces, or disguises the D0/D0.1 result.
+
+D1 observes two new deterministic asymmetric procedural RGB references using
+new D4, similarity, crop-rescale, and public observation-seed instances. Its
+fixed roster is 8 pairs x the fixed 6/13/18 layer order x Q/K x
+matched/shuffled-H = 96 retained units. Known H remains evaluation truth only;
+failed units remain retained. It has no discovery, re-selection, retry,
+fallback, layer switch, per-sample choice, or parameter tuning.
+
+For each fixed layer and Q/K kind, every one of the eight pairs compares only
+ranks at the same reference-token indices for which both matched and shuffled
+records are finite. The pair statistic is the median of
+`matched_rank - shuffled_rank`; the layer-kind statistic is the equal-weight
+median of those eight pair medians. A missing common finite position fails that
+layer-kind closed. All six statistics must be strictly below zero for
+`D1_CANDIDATES_CONFIRMED`; any complete run that does not meet this fixed
+direction rule is `D1_UNRESOLVED`; unavailable source identity or runtime
+topology is `D1_STOPPED`. Recovery error, fit residual, ambiguity gaps,
+coverage, and null counts are retained records only, not confirmation gates.
+
+D1 writes a create-only bounded receipt, manifest, terminal record, and three
+fixed 32-unit layer shards. It never persists raw Q/K, token, prompt, latent,
+secret, weight, image bytes, or private paths. Its outcomes retain
+`science_denominator=0`: even `D1_CANDIDATES_CONFIRMED` is an operational
+descriptor, not Q/K-route eligibility, keyed-anchor validation, method,
+detector, watermark, or scientific success.
+
 ## 7. Authorized progression nodes
 
 0. Under separate exact-bound authorization, close the `244f28a` B1 blockers
