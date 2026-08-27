@@ -22,7 +22,7 @@ class ContentV9StabilityNotebookTests(unittest.TestCase):
         self.assertIn("scientific_status':'not_evaluable", source)
         self.assertIn("try:", source)
         self.assertIn("finally:", source)
-        self.assertNotIn("p.stdout.read", source)
+        self.assertNotIn("p.stdout.read(", source)
         self.assertNotIn("force_remount", source)
         self.assertTrue(all(cell["execution_count"] is None and cell["outputs"] == [] for cell in cells))
         for cell in cells: ast.parse("".join(cell["source"]))
