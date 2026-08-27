@@ -25,6 +25,11 @@ def test_d1_notebook_binds_runner_and_source_identities_with_one_child() -> None
     assert "git', 'clone', '--no-checkout'" in source and "git', 'checkout', '--detach', D1_RUNNER_EXACT" in source
     assert "execution_commit != D1_RUNNER_EXACT or not checkout_clean" in source
     assert "RUNNER_PATH = 'experiments/run_geometry_v1_qk_d1_independent_confirmation_operational.py'" in source and "runner_path = repo / RUNNER_PATH" in source
+    assert "subprocess.run([sys.executable, '-m', 'pip', 'install', str(repo)], check=True" in source
+    assert "hf_token = userdata.get('HF_TOKEN')" in source and "not isinstance(hf_token, str) or not hf_token" in source
+    assert "runner_env = {name: value for name, value in os.environ.items() if 'TOKEN' not in name.upper()}" in source
+    assert "runner_env['HF_TOKEN'] = hf_token" in source and "env=runner_env" in source
+    assert "hf_token = None" in source and "runner_env.pop('HF_TOKEN', None)" in source
     assert source.count("subprocess.Popen(") == 1 and "'--control-fd', str(control_write)" in source and "timeout=7200" in source
     assert "/content/drive/MyDrive/CEG-WM/Geometry-V1/D1" in source and "source_d01_artifact_identity" in source and "runner_execution_identity" in source
 
@@ -33,6 +38,6 @@ def test_d1_notebook_has_no_model_or_retry_surface() -> None:
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8")); source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
     tree = ast.parse(source)
     assert isinstance(tree, ast.Module)
-    for forbidden in ("torch", "diffusers", "HF_TOKEN", "retry", "force_remount", "zipfile", "ZipFile"):
+    for forbidden in ("torch", "diffusers", "retry", "force_remount", "zipfile", "ZipFile"):
         assert forbidden not in source
     assert "stdout=subprocess.DEVNULL" in source and "stderr=subprocess.DEVNULL" in source

@@ -39,6 +39,7 @@ def _record(pair: dict, path: str, kind: str, control: str, *, matched: float = 
 def _run(monkeypatch, tmp_path, *, common: bool = True, reversed_direction: bool = False):
     source = _source(tmp_path / "source"); calls = []
     monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    monkeypatch.setattr(RUNNER, "_validate_fixed_paths", lambda pipeline: None)
     monkeypatch.setattr(RUNNER, "_spec", lambda pipeline: object())
     def observer(_image, *, pipeline, spec): calls.append(1); return object()
     def unit(pair, _reference, _attacked, path, kind, control):
@@ -62,6 +63,29 @@ def test_d1_common_finite_pairing_and_direction_fail_closed_without_dropping_ros
     summary, units, _calls = _run(monkeypatch, tmp_path, reversed_direction=True)
     assert summary["d1_status"] == "D1_UNRESOLVED" and len(units) == 96
     assert any(not item["strictly_negative"] for item in summary["direction_statistics"])
+
+
+@pytest.mark.parametrize("failure_point", ("transformer_call", "qk_capture"))
+def test_d1_transformer_or_capture_failure_stops_and_retains_ordered_96(monkeypatch, tmp_path, failure_point) -> None:
+    source = _source(tmp_path / "source")
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    monkeypatch.setattr(RUNNER, "_validate_fixed_paths", lambda pipeline: None)
+    monkeypatch.setattr(RUNNER, "_spec", lambda pipeline: object())
+    def observer(_image, *, pipeline, spec):
+        error = RuntimeError("opaque runtime failure"); setattr(error, "geometry_failure_point", failure_point); raise error
+    summary, units = RUNNER.run_d1(expected_exact="a" * 40, repo_root=tmp_path, source_root=source, hf_token="", loader=lambda *_a, **_k: object(), observer=observer)
+    assert summary["d1_status"] == "D1_STOPPED" and len(units) == 96
+    assert {unit["failure_reason"] for unit in units} == {"global_transformer_or_capture_failure"}
+
+
+def test_d1_fixed_path_topology_failure_stops_before_observation_and_retains_96(monkeypatch, tmp_path) -> None:
+    source = _source(tmp_path / "source"); calls = []
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    def unavailable(_pipeline): raise ValueError("fixed_path_topology_unavailable")
+    monkeypatch.setattr(RUNNER, "_validate_fixed_paths", unavailable)
+    summary, units = RUNNER.run_d1(expected_exact="a" * 40, repo_root=tmp_path, source_root=source, hf_token="", loader=lambda *_a, **_k: object(), observer=lambda *_a, **_k: calls.append("observer"))
+    assert summary["d1_status"] == "D1_STOPPED" and len(units) == 96 and calls == []
+    assert {unit["failure_reason"] for unit in units} == {"model_or_topology_unavailable"}
 
 
 def test_d1_source_identity_and_leaks_fail_before_model_or_selection(monkeypatch, tmp_path) -> None:

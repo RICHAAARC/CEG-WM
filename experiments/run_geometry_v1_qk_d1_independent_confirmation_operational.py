@@ -189,6 +189,20 @@ def _spec(pipeline: Any) -> SD35QKObservationSpec:
     return SD35QKObservationSpec(MODEL_ID, getattr(pipeline, "_commit_hash", None), ATTENTION_LAYER_PATHS, 20, 7, 41, (8, 8), hidden, pooled)
 
 
+def _validate_fixed_paths(pipeline: Any) -> None:
+    """Validate the predeclared sample-side roster without discovery or fallback."""
+    transformer = getattr(pipeline, "transformer", None)
+    get_submodule = getattr(transformer, "get_submodule", None)
+    if not callable(get_submodule):
+        raise ValueError("fixed_path_topology_unavailable")
+    for path in ATTENTION_LAYER_PATHS:
+        attention = get_submodule(path)
+        query, key, heads = getattr(attention, "to_q", None), getattr(attention, "to_k", None), getattr(attention, "heads", None)
+        if (not isinstance(query, torch.nn.Module) or not isinstance(key, torch.nn.Module) or
+                isinstance(heads, bool) or not isinstance(heads, int) or heads < 1):
+            raise ValueError("fixed_path_topology_unavailable")
+
+
 def _grid_h(h_rgb: Any, reference_grid: Any, attacked_grid: Any) -> np.ndarray:
     def grid(value: Any, name: str) -> tuple[int, int]:
         if not isinstance(value, tuple) or len(value) != 2 or any(isinstance(v, bool) or not isinstance(v, int) or v < 1 for v in value): raise ValueError(f"invalid_{name}_grid")
@@ -261,7 +275,8 @@ def run_d1(*, expected_exact: str, repo_root: Path, source_root: Path, hf_token:
     try:
         pipeline = loader(MODEL_ID, torch_dtype=torch.float16, token=hf_token)
         if hasattr(pipeline, "to"): pipeline = pipeline.to("cuda" if torch.cuda.is_available() else "cpu")
-        spec = _spec(pipeline); runtime = {"pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}", "resolved_public_revision": getattr(pipeline, "_commit_hash", None)}
+        _validate_fixed_paths(pipeline); spec = _spec(pipeline)
+        runtime = {"pipeline_class": f"{type(pipeline).__module__}.{type(pipeline).__qualname__}", "resolved_public_revision": getattr(pipeline, "_commit_hash", None)}
         status, failure_point, reason = "D1_UNRESOLVED", None, None
     except BaseException: spec = None
     units: list[dict[str, Any]] = []; global_reason = None
@@ -271,14 +286,14 @@ def run_d1(*, expected_exact: str, repo_root: Path, source_root: Path, hf_token:
             try: reference = observer(_reference(reference_id), pipeline=pipeline, spec=spec)
             except BaseException as error:
                 reference_reason, failure_point = "reference_observation_failed", "image_observation"
-                if getattr(error, "geometry_failure_point", None) == "transformer_call": global_reason = "global_transformer_failure"
+                if getattr(error, "geometry_failure_point", None) in ("transformer_call", "qk_capture"): global_reason = "global_transformer_or_capture_failure"
         for pair in (item for item in plan["pairs"] if item["reference_id"] == reference_id):
             attacked, pair_reason = None, reason if spec is None else None
             if spec is not None:
                 try: attacked = observer(_attack(_reference(reference_id), pair["transform_label"])[0], pipeline=pipeline, spec=spec)
                 except BaseException as error:
                     pair_reason, failure_point = "attacked_observation_failed", "image_observation"
-                    if getattr(error, "geometry_failure_point", None) == "transformer_call": global_reason = "global_transformer_failure"
+                    if getattr(error, "geometry_failure_point", None) in ("transformer_call", "qk_capture"): global_reason = "global_transformer_or_capture_failure"
                 if reference_reason is not None: pair_reason = reference_reason
             for path in ATTENTION_LAYER_PATHS:
                 for kind in KINDS:
