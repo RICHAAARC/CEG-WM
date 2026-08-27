@@ -30,4 +30,17 @@ class ContentV10RuntimeTests(unittest.TestCase):
    result=runtime.run_content_v10_evaluation_pair(object(),'prompt',b'key',fake_assets,height=512,width=512,seed=7)
   neutral_signals=allocate.call_args.args[0]; self.assertEqual(neutral_signals,replace(original['signals'],texture_complexity=(0.0,)*16))
   self.assertIs(result.image,image); self.assertIs(result.primary_null,plain); self.assertEqual(captured['generator'],('generator',7))
+
+ def test_calibration_unit_uses_real_v10_pair_and_frozen_33_order(self):
+  if importlib.util.find_spec('torch') is None: self.skipTest('bundled runtime has no torch; production behavior requires its real tensor dependency')
+  from cegwm.runtime import content_v10_texture_neutral_sd35 as runtime
+  class FakeAssets: pass
+  unit=types.SimpleNamespace(prompt='prompt',height=512,width=512,seed=9)
+  output=runtime.ContentV10RunOutput('candidate','plain','measurement','summary')
+  with mock.patch.object(runtime,'ContentV6EvaluationAssets',FakeAssets), mock.patch.object(runtime,'derive_v10_calibration_wrong_keys',return_value=tuple(bytes([index]) for index in range(16))), mock.patch.object(runtime,'run_content_v10_evaluation_pair',return_value=output) as pair, mock.patch.object(runtime,'_blind_calibration_pair',side_effect=lambda image,key,assets:(image,key)) as blind:
+   values=runtime.run_content_v10_calibration_unit(object(),unit,b'registered',FakeAssets())
+  self.assertEqual(len(values),33); pair.assert_called_once()
+  self.assertEqual([value[0] for value in values],['candidate']*16+['plain']*17)
+  self.assertEqual([value[1] for value in values],[bytes([index]) for index in range(16)]+[b'registered']+[bytes([index]) for index in range(16)])
+  self.assertEqual(blind.call_count,33)
 if __name__=="__main__": unittest.main()
