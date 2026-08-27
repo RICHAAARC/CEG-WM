@@ -85,10 +85,11 @@ def test_d01_rejects_source_identity_bounds_and_public_leaks(monkeypatch, tmp_pa
         RUNNER.run_d01(expected_exact=RUNNER.SOURCE_EXACT, repo_root=tmp_path, source_root=source)
 
 
-@pytest.mark.parametrize(("sidecar", "leak"), (
-    ("receipt.json", {"raw_qk": "forbidden"}), ("receipt.json", {"audit_note": "secret"}),
-    ("manifest.json", {"raw_qk": "forbidden"}), ("manifest.json", {"audit_note": "secret"}),
-    ("terminal.json", {"raw_qk": "forbidden"}), ("terminal.json", {"audit_note": "secret"}),
+@pytest.mark.parametrize("sidecar", ("receipt.json", "manifest.json", "terminal.json"))
+@pytest.mark.parametrize("leak", (
+    {"raw_qk": "forbidden"}, {"audit_note": "secret"}, {"audit_note": "raw Q/K material"},
+    {"audit_note": "raw token material"}, {"audit_note": "/mnt/private/source"},
+    {"audit_note": r"C:\\private\\source"},
 ))
 def test_d01_rejects_leaked_root_sidecars_before_selection_or_packaging(monkeypatch, tmp_path, sidecar, leak) -> None:
     source = _source(tmp_path / "source")

@@ -36,6 +36,12 @@ UNIT_FIELDS = frozenset(("pair_id", "transform_label", "control_label", "descrip
                          "failure_reason", "candidate_correspondences", "true_match_ranks", "coverage",
                          "ambiguity_gaps", "fit_residual", "recovery_error"))
 LAYER_RE = re.compile(r"transformer_blocks\.(\d+)\.attn\Z")
+_VALUE_LEAK_PATTERNS = (
+    re.compile(r"\braw\s*(?:q\s*/\s*k|qk|query|key|token(?:\s+material)?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:hf[_ -]?token|access[_ -]?token|auth(?:entication)?[_ -]?token|api[_ -]?key|"
+               r"bearer\s+[a-z0-9._-]+|token\s+(?:material|credential|secret|value|data)|"
+               r"credential(?:s)?(?:\s+(?:material|value|data))?)\b", re.IGNORECASE),
+)
 
 
 def _json(value: Any, maximum: int) -> bytes:
@@ -81,20 +87,29 @@ def _read_json(path: Path, maximum: int) -> Mapping[str, Any]:
     return value
 
 
-def _reject_leak(value: Any, *, field: str = "") -> None:
+def _reject_leak(value: Any, *, field: str = "", depth: int = 0) -> None:
     """Reject forbidden public-field names and bounded string indicators."""
+    if depth > 64:
+        raise ValueError("public_value_structure_depth_exceeded")
     prohibited = ("raw", "token", "prompt", "latent", "secret", "hf_", "weight", "private", "image_bytes")
     if isinstance(value, Mapping):
         for key, item in value.items():
             if not isinstance(key, str) or any(word in key.lower() for word in prohibited):
                 raise ValueError("forbidden_public_field")
-            _reject_leak(item, field=key)
+            _reject_leak(item, field=key, depth=depth + 1)
     elif isinstance(value, list):
         for item in value:
-            _reject_leak(item, field=field)
+            _reject_leak(item, field=field, depth=depth + 1)
     elif isinstance(value, str):
         lowered = value.lower()
-        if any(word in lowered for word in ("hf_", "hf token", "secret", "prompt", "latent", "/content/", "/home/", "c:\\users\\", "\\\\")):
+        normalized = lowered.replace("\\", "/")
+        forbidden_path = (normalized.startswith("//") or normalized.startswith("~/") or
+                          "file://" in normalized or bool(re.search(r"\b[a-z]:/", normalized)) or
+                          any(match.group(0) not in ("/content/drive",) and
+                              not match.group(0).startswith("/content/drive/")
+                              for match in re.finditer(r"(?<![:/a-z0-9._-])/[a-z0-9_.-]+(?:/[a-z0-9_.-]+)*", normalized)))
+        if (any(word in lowered for word in ("hf_", "hf token", "secret", "prompt", "latent")) or
+                any(pattern.search(lowered) for pattern in _VALUE_LEAK_PATTERNS) or forbidden_path):
             raise ValueError("forbidden_public_value")
 
 
