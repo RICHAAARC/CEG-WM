@@ -58,6 +58,11 @@ def _json(value: Mapping[str, Any] | Sequence[Any], maximum: int) -> bytes:
     return data
 
 
+def _plan_json(plan: Mapping[str, Any]) -> bytes:
+    """Apply the one plan byte contract before any execution work."""
+    return _json(plan, MAX_PLAN_BYTES)
+
+
 def _write(path: Path, data: bytes) -> None:
     with path.open("xb") as handle:
         handle.write(data)
@@ -112,12 +117,14 @@ def _validate_plan(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 def _read_plan(path: Path) -> Mapping[str, Any]:
     """Read the one bounded plan before parsing or any image/model work."""
-    stat = path.stat()
     if not path.is_file():
         raise ValueError("plan_not_regular_file")
-    if stat.st_size > MAX_PLAN_BYTES:
+    if path.stat().st_size > MAX_PLAN_BYTES:
         raise ValueError("plan_bytes_exceeded")
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = path.read_bytes()
+    if len(data) > MAX_PLAN_BYTES:
+        raise ValueError("plan_bytes_exceeded")
+    return json.loads(data.decode("utf-8"))
 
 
 def _failure_unit(pair: Mapping[str, Any], layer_path: str, descriptor_kind: str, control: str, reason: str) -> dict[str, Any]:
@@ -166,6 +173,7 @@ def _runtime(pipeline: Any) -> dict[str, Any]:
 
 def run_qk_equivariance_operational(plan: Mapping[str, Any], *, hf_token: str, expected_exact: str, repo_root: Path, loader: Callable[..., Any] = load_sd35_pipeline, observer: Callable[..., SD35QKObservation] = observe_sd35_image_qk) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
     """Execute the fixed E0 plan once; all method outcomes remain descriptive."""
+    plan_bytes = _plan_json(plan)
     pairs = _validate_plan(plan)
     exact = _exact(expected_exact, repo_root)
     paths = tuple(plan["attention_layer_paths"])
@@ -207,7 +215,7 @@ def run_qk_equivariance_operational(plan: Mapping[str, Any], *, hf_token: str, e
                             units.append(_failure_unit(pair, path, kind, control, "selected_layer_observation_invalid"))
     if len(units) != MAX_UNIT_COUNT:
         raise RuntimeError("fixed_unit_expansion_mismatch")
-    summary = {"schema": "geometry-v1-qk-e0-operational-v1", "run_id": run_id, "execution_identity": {"commit": exact}, "plan_digest": _sha(_json(plan, 65536)), "operational_status": operational_status, "resource_status": resource_status, "artifact_status": "unavailable", "method_status": "not_adjudicated", "scientific_status": "not_adjudicated", "science_denominator": 0, "operational_failure_point": failure_point, "runtime": runtime, "declared_unit_count": 64, "calculated_unit_count": sum(item["status"] == "calculated" for item in units), "failed_unit_count": sum(item["status"] == "failed" for item in units)}
+    summary = {"schema": "geometry-v1-qk-e0-operational-v1", "run_id": run_id, "execution_identity": {"commit": exact}, "plan_digest": _sha(plan_bytes), "operational_status": operational_status, "resource_status": resource_status, "artifact_status": "unavailable", "method_status": "not_adjudicated", "scientific_status": "not_adjudicated", "science_denominator": 0, "operational_failure_point": failure_point, "runtime": runtime, "declared_unit_count": 64, "calculated_unit_count": sum(item["status"] == "calculated" for item in units), "failed_unit_count": sum(item["status"] == "failed" for item in units)}
     return summary, tuple(units)
 
 

@@ -132,9 +132,27 @@ def test_main_marks_invalid_plan_as_plan_failure_not_artifact_packaging(tmp_path
 
 def test_plan_file_bound_is_checked_before_read_or_execution(tmp_path, monkeypatch) -> None:
     plan_path = tmp_path / "large.json"; plan_path.write_bytes(b"x" * (RUNNER.MAX_PLAN_BYTES + 1))
-    monkeypatch.setattr(Path, "read_text", lambda *_a, **_k: pytest.fail("plan must not be read"))
+    monkeypatch.setattr(Path, "read_bytes", lambda *_a, **_k: pytest.fail("plan must not be read"))
     with pytest.raises(ValueError, match="plan_bytes_exceeded"):
         RUNNER._read_plan(plan_path)
+
+
+def test_plan_json_contract_allows_current_bound_and_rejects_max_plus_one_before_loader(tmp_path, monkeypatch) -> None:
+    plan = _plan(tmp_path)
+    for pair in plan["pairs"]:
+        pair["reference_path"] = "r" * RUNNER.MAX_PRIVATE_PATH_BYTES
+        pair["attacked_path"] = "a" * RUNNER.MAX_PRIVATE_PATH_BYTES
+    encoded = RUNNER._plan_json(plan)
+    assert 65536 < len(encoded) <= RUNNER.MAX_PLAN_BYTES
+    monkeypatch.setattr(RUNNER, "_exact", lambda expected, root: expected)
+    summary, units = RUNNER.run_qk_equivariance_operational(plan, hf_token="x", expected_exact="c" * 40,
+                                                             repo_root=tmp_path, loader=lambda *_a, **_k: _Pipeline(),
+                                                             observer=lambda *_a, **_k: _observation(("blocks.0.attn", "blocks.1.attn")))
+    assert summary["plan_digest"] == sha256(encoded).hexdigest() and len(units) == 64
+    monkeypatch.setattr(RUNNER, "MAX_PLAN_BYTES", len(encoded) - 1)
+    with pytest.raises(ValueError, match="bounded_json_exceeded"):
+        RUNNER.run_qk_equivariance_operational(plan, hf_token="x", expected_exact="c" * 40, repo_root=tmp_path,
+                                                loader=lambda *_a, **_k: pytest.fail("loader must not run"))
 
 
 @pytest.mark.parametrize("mutate,reason", [
