@@ -224,29 +224,39 @@ def _adapter_event(line: str) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise ValueError("adapter event must be an object")
     if event.get("event") == "unit":
+        if event.get("status") == "operational_failure":
+            if set(event) != {"event", "method", "global_ordinal", "unit_id", "status", "failure_class"} or event["method"] not in METHOD_ORDER or event["failure_class"] not in PUBLIC_FAILURES:
+                raise ValueError("adapter unit failure fields differ")
+            return event
         required = {"event", "method", "global_ordinal", "unit_id", "status", "candidate_rgb_sha256", "primary_null_rgb_sha256", "candidate_scores", "null_scores"}
         if set(event) not in (required, required | {"candidate_ppm_sha256", "candidate_raw_rgb_sha256"}):
             raise ValueError("adapter unit event fields differ")
         construction = event["method"]
         domains = ("ordinary_lf", "hf") if construction == "c3" and "candidate_ppm_sha256" in event else DOMAIN_MATRIX.get(construction)
-        if domains is None or set(event["candidate_scores"]) != set(domains) or set(event["null_scores"]) != set(domains):
+        null_domains = () if construction in {"c3", "c6"} else domains
+        if domains is None or set(event["candidate_scores"]) != set(domains) or set(event["null_scores"]) != set(null_domains):
             raise ValueError("adapter scorer domains differ")
         event["candidate_scores"] = {domain: event["candidate_scores"][domain] for domain in domains}
-        event["null_scores"] = {domain: event["null_scores"][domain] for domain in domains}
+        event["null_scores"] = {domain: event["null_scores"][domain] for domain in null_domains}
         from cegwm.protocol.content_texture_stratification_v1 import require_domain_scores, require_construction_domains
-        if construction == "c3" and "candidate_ppm_sha256" in event:
+        if (construction == "c3" and "candidate_ppm_sha256" in event) or construction == "c6":
             for domain in domains:
-                require_domain_scores(domain, event["candidate_scores"][domain])
-                require_domain_scores(domain, event["null_scores"][domain])
+                require_domain_scores(event["candidate_scores"][domain], domain)
+                if domain in event["null_scores"]:
+                    require_domain_scores(event["null_scores"][domain], domain)
         else:
             require_construction_domains(construction, event["candidate_scores"], event["null_scores"])
     elif event.get("event") == "v4_lf_rescore":
+        if event.get("status") == "operational_failure":
+            if set(event) != {"event", "method", "global_ordinal", "unit_id", "status", "failure_class"} or event["method"] != "c3" or event["failure_class"] not in PUBLIC_FAILURES:
+                raise ValueError("adapter V4 LF failure fields differ")
+            return event
         required = {"event", "method", "global_ordinal", "unit_id", "status", "candidate_rgb_sha256", "plain_rgb_sha256", "candidate_ppm_sha256", "plain_ppm_sha256", "candidate_scores", "null_scores"}
         if set(event) != required or event["method"] != "c3" or set(event["candidate_scores"]) != {"v4_lf"} or set(event["null_scores"]) != {"v4_lf"}:
             raise ValueError("adapter V4 LF event fields differ")
         from cegwm.protocol.content_texture_stratification_v1 import require_domain_scores
-        require_domain_scores("v4_lf", event["candidate_scores"]["v4_lf"])
-        require_domain_scores("v4_lf", event["null_scores"]["v4_lf"])
+        require_domain_scores(event["candidate_scores"]["v4_lf"], "v4_lf")
+        require_domain_scores(event["null_scores"]["v4_lf"], "v4_lf")
     return event
 
 
@@ -300,7 +310,9 @@ def _derive_row(unit: Mapping[str, Any], method: str, source: Mapping[str, Any],
         return base
     scores, null_scores = event["candidate_scores"], event["null_scores"]
     texture = float(plain["texture_value"])
-    base.update({"texture_value": format(texture, ".17g"), "texture_be_hex": f64_hex(texture), "candidate_rgb_sha256": event["candidate_rgb_sha256"], "primary_null_rgb_sha256": plain["plain_rgb_sha256"], "primary_null_matches_plain": True})
+    primary_null_sha = event["primary_null_rgb_sha256"]
+    matches_plain = primary_null_sha == plain["plain_rgb_sha256"]
+    base.update({"texture_value": format(texture, ".17g"), "texture_be_hex": f64_hex(texture), "candidate_rgb_sha256": event["candidate_rgb_sha256"], "primary_null_rgb_sha256": primary_null_sha, "primary_null_matches_plain": matches_plain})
     for domain in DOMAIN_MATRIX[method]:
         candidate, null = scores[domain], null_scores[domain]
         margin_a, margin_b = domain_margins(candidate, null, domain)
@@ -311,7 +323,7 @@ def _derive_row(unit: Mapping[str, Any], method: str, source: Mapping[str, Any],
             f"{domain}_margin_a": format(margin_a, ".17g"),
             f"{domain}_margin_b": format(margin_b, ".17g"),
         })
-    if not base["primary_null_matches_plain"]:
+    if not matches_plain:
         base["missing_note"] = "method_primary_null_differs_from_dedicated_plain"
     return base
 
@@ -343,6 +355,23 @@ def name_index(name: str) -> int:
     return METHOD_ORDER.index(name)
 
 
+def _n96_spearman(texture: Sequence[float], response: Sequence[float]) -> dict[str, Any]:
+    """Tie-aware midrank Spearman for the fixed, non-replaceable N=96."""
+    from cegwm.protocol.content_texture_stratification_v1 import average_ranks
+    if len(texture) != len(response) != 96 or any(not math.isfinite(float(value)) for value in (*texture, *response)):
+        return {"interpretability": "unavailable_incomplete_fixed_denominator"}
+    x, y = average_ranks(texture), average_ranks(response)
+    xm = sum(float(value) for value in x) / 96.0; ym = sum(float(value) for value in y) / 96.0
+    numerator = sum((float(left) - xm) * (float(right) - ym) for left, right in zip(x, y))
+    xss = sum((float(value) - xm) ** 2 for value in x); yss = sum((float(value) - ym) ** 2 for value in y)
+    if xss <= 0.0 or yss <= 0.0:
+        return {"interpretability": "unavailable_zero_rank_variance"}
+    rho = numerator / math.sqrt(xss * yss)
+    if not math.isfinite(rho):
+        return {"interpretability": "unavailable_nonfinite"}
+    return {"interpretability": "available", "rho": rho, "rho_be_hex": f64_hex(rho)}
+
+
 def _association_rows(rows: list[dict[str, Any]], sources: Mapping[str, Any]) -> list[dict[str, Any]]:
     result = []
     grouped = rows_by_method(rows)
@@ -351,11 +380,7 @@ def _association_rows(rows: list[dict[str, Any]], sources: Mapping[str, Any]) ->
     for method, domain, margin_id in _required_association_matrix():
                 subset = grouped[method]
                 available = [item for item in subset if not item["missing_note"] and item[f"{domain}_margin_{margin_id}"]]
-                stat = {"interpretability": "unavailable_incomplete_fixed_denominator"}
-                if len(available) == 96:
-                    # Exact n=96 enumeration is deliberately not attempted;
-                    # the recorded scheme preserves each predeclared block.
-                    stat = {"interpretability": "available_block_preserving_record_only"}
+                stat = _n96_spearman([float(item["texture_value"]) for item in available], [float(item[f"{domain}_margin_{margin_id}"]) for item in available]) if len(available) == 96 else {"interpretability": "unavailable_incomplete_fixed_denominator"}
                 result.append(_association(source=sources[CONSTRUCTION_SOURCE[method]], branch=domain, margin_id=margin_id, scope="fixed_n96_12x8_block_preserving", roster_id="content_texture_n96_evaluation_v1", fixed_n=96, subset=subset, available=available, stat=stat))
     return result
 
@@ -388,7 +413,7 @@ def _association(*, source: Mapping[str, Any], branch: str, margin_id: str, scop
     row = {name: "" for name in ASSOCIATION_COLUMNS}
     row.update({"method_id": source["method_id"], "source_exact": source["exact"], "lf_score_domain": branch, "branch_role": "primary" if branch != "hf" else "control", "branch": branch, "margin_id": margin_id, "scope": scope, "roster_id": roster_id, "fixed_n": fixed_n, "observed_pair_count": len(available), "statistic_id": "block_preserving_spearman_record_only", "interpretability": stat["interpretability"], "missing_unit_ids": ";".join(item["unit_id"] for item in subset if item not in available), "note": "exploratory_descriptive_only"})
     if stat["interpretability"] == "available":
-        row.update({"statistic_value": format(stat["rho"], ".17g"), "statistic_be_hex": stat["rho_be_hex"], "c_numerator": stat["c"]["numerator"], "c_denominator": stat["c"]["denominator"], "permutation_scheme": "all_8_factorial_labeled" if scope == "within_roster" else "independent_8_factorial_by_8_factorial_convolution", "permutation_extreme_count": stat["permutation_extreme_count"], "permutation_total_count": stat["permutation_total_count"], "permutation_p_value": format(stat["permutation_p_value"], ".17g"), "permutation_p_be_hex": stat["permutation_p_be_hex"], "texture_median": format(median(float(item["texture_value"]) for item in available), ".17g"), "margin_median": format(median(float(item[f"{branch}_margin_{margin_id}"]) for item in available), ".17g")})
+        row.update({"statistic_value": format(stat["rho"], ".17g"), "statistic_be_hex": stat["rho_be_hex"], "permutation_scheme": "12_block_preserving_record_only", "texture_median": format(median(float(item["texture_value"]) for item in available), ".17g"), "margin_median": format(median(float(item[f"{branch}_margin_{margin_id}"]) for item in available), ".17g")})
     return row
 
 
@@ -631,11 +656,9 @@ def _execute(args: argparse.Namespace) -> int:
                     if event["candidate_rgb_sha256"] != v4_event["candidate_rgb_sha256"] or plain.get("plain_rgb_sha256") != v4_event["plain_rgb_sha256"]:
                         raise RuntimeError("C3 V4 join hash differs")
                     event["candidate_scores"] = {"ordinary_lf": event["candidate_scores"]["ordinary_lf"], "v4_lf": v4_event["candidate_scores"]["v4_lf"], "hf": event["candidate_scores"]["hf"]}
-                    event["null_scores"] = {"ordinary_lf": event["null_scores"]["ordinary_lf"], "v4_lf": v4_event["null_scores"]["v4_lf"], "hf": event["null_scores"]["hf"]}
+                    event["null_scores"] = {"v4_lf": v4_event["null_scores"]["v4_lf"]}
                     event.pop("candidate_ppm_sha256", None)
                     event.pop("candidate_raw_rgb_sha256", None)
-                    from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
-                    require_construction_domains("c3", event["candidate_scores"], event["null_scores"])
             method_events[construction] = events
             state["phase"] = construction
             for event in events:
@@ -656,6 +679,9 @@ def _execute(args: argparse.Namespace) -> int:
             for domain in ("ordinary_lf", "hf"):
                 event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
             _null_cache_put(null_cache, "v4_lf", event["global_ordinal"], plain["plain_rgb_sha256"], event["null_scores"]["v4_lf"])
+            event["null_scores"] = {domain: event["null_scores"][domain] for domain in DOMAIN_MATRIX["c3"]}
+            from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
+            require_construction_domains("c3", event["candidate_scores"], event["null_scores"])
     for event, plain in zip(method_events["c6"], plains):
         if event.get("status") == "success" and plain.get("status") == "success":
             for domain in ("v4_lf", "hf"):
@@ -671,7 +697,7 @@ def _execute(args: argparse.Namespace) -> int:
     associations = _association_rows(rows, protocol.config["sources"])
     distinct = len({row["texture_be_hex"] for row in rows if row["method_id"] == "c2"}) >= 2
     complete = (len(rows) == 288 and all(not row["missing_note"] and row["primary_null_matches_plain"] for row in rows)
-                and len(associations) == 14 and all(row["interpretability"] == "available_block_preserving_record_only" and row["observed_pair_count"] == 96 for row in associations)
+                and len(associations) == 14 and all(row["interpretability"] == "available" and row["observed_pair_count"] == 96 and row["statistic_value"] != "" for row in associations)
                 and distinct)
     status = "analysis_complete" if complete else "not_interpretable"
     state["phase"] = "analysis"

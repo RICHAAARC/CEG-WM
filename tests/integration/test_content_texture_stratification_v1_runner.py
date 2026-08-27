@@ -85,7 +85,7 @@ class TextureRunnerTests(unittest.TestCase):
     scores = _score_payload(0.1)
     unit = {"global_ordinal": 1, "unit_id": "unit-0001"}
     with redirect_stdout(io.StringIO()) as captured:
-        adapter._emit_success("c6", unit, Image(), Image(), scores, scores)
+        adapter._emit_success("c6", unit, Image(), Image(), scores, None)
     line = captured.getvalue()
     event = runner._adapter_event(line)
     self.assertEqual(tuple(event["candidate_scores"]), ("v4_lf", "hf"))
@@ -108,6 +108,15 @@ class TextureRunnerTests(unittest.TestCase):
     event = emitted[0]; self.assertEqual(event["event"], "v4_lf_rescore")
     self.assertEqual(tuple(event["candidate_scores"]["v4_lf"]), ("registered", *(f"wrong_{i:02d}" for i in range(16))))
     self.assertNotIn("path", json.dumps(event)); self.assertNotIn("secret", json.dumps(event))
+
+ def test_failure_events_and_n96_spearman_fail_closed(self) -> None:
+    failure = runner._adapter_event(runner.EVENT_PREFIX + json.dumps({"event":"v4_lf_rescore","method":"c3","global_ordinal":1,"unit_id":"u1","status":"operational_failure","failure_class":"RuntimeError"}))
+    self.assertEqual(failure["status"], "operational_failure")
+    monotone = runner._n96_spearman(list(range(96)), list(range(96)))
+    self.assertEqual(monotone["interpretability"], "available"); self.assertAlmostEqual(monotone["rho"], 1.0)
+    ties = runner._n96_spearman([index // 2 for index in range(96)], [index // 2 for index in range(96)])
+    self.assertEqual(ties["interpretability"], "available")
+    self.assertEqual(runner._n96_spearman([0.0] * 96, list(range(96)))["interpretability"], "unavailable_zero_rank_variance")
 
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage

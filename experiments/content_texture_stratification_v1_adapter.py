@@ -184,18 +184,18 @@ def _prefetch(root: Path, token: str, output: Path, expected_cache: Path) -> Non
     _event({"event": "asset_prefetch", "hf_home_status": hf_home_binding["status"], "cache_status": binding["cache_observation"]["status"], "environment_status": environment_status})
 
 
-def _unit_failure(method: str, unit: Mapping[str, Any], error: Exception) -> None:
+def _unit_failure(method: str, unit: Mapping[str, Any], error: Exception, *, event_name: str = "unit") -> None:
     name = type(error).__name__
-    _event({"event": "unit", "method": method, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "operational_failure", "failure_class": name if name in PUBLIC_FAILURES else "OtherOperationalError"})
+    _event({"event": event_name, "method": method, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "operational_failure", "failure_class": name if name in PUBLIC_FAILURES else "OtherOperationalError"})
 
 
-def _emit_success(method: str, unit: Mapping[str, Any], image: Any, null: Any, scores: Mapping[str, float], null_scores: Mapping[str, float], *, transient_candidate: tuple[str, str, str] | None = None) -> None:
+def _emit_success(method: str, unit: Mapping[str, Any], image: Any, null: Any, scores: Mapping[str, float], null_scores: Mapping[str, float] | None, *, transient_candidate: tuple[str, str, str] | None = None) -> None:
     labels = ("registered", *(f"wrong_{index:02d}" for index in range(16)))
     domains = ("v4_lf", "hf") if method == "c6" else ("ordinary_lf", "hf")
     branch = {"ordinary_lf": "lf", "v4_lf": "lf", "hf": "hf"}
     def mapped(value: Mapping[str, float]) -> dict[str, dict[str, float]]:
         return {domain: {label: value[f"{branch[domain]}__{label}"] for label in labels} for domain in domains}
-    event = {"event": "unit", "method": method, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": _image_hash(image), "primary_null_rgb_sha256": _image_hash(null), "candidate_scores": mapped(scores), "null_scores": mapped(null_scores)}
+    event = {"event": "unit", "method": method, "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": _image_hash(image), "primary_null_rgb_sha256": _image_hash(null), "candidate_scores": mapped(scores), "null_scores": mapped(null_scores) if null_scores is not None else {}}
     if transient_candidate is not None:
         _relative, ppm_sha, rgb_sha = transient_candidate
         if rgb_sha != event["candidate_rgb_sha256"]:
@@ -275,7 +275,7 @@ def _v234(root: Path, method: str, units: list[dict[str, Any]], key_text: str, t
                     null = opened.convert("RGB").copy()
             transient = _write_transient_candidate(output.image, transient_root, unit["global_ordinal"]) if event_method == "c3" and transient_root is not None else None
             emitted_scores = engine._flat_scores(scorer(output.image, key, wrong))
-            emitted_null_scores = engine._flat_scores(scorer(null, key, wrong))
+            emitted_null_scores = None if event_method == "c3" else engine._flat_scores(scorer(null, key, wrong))
             if transient is None:
                 _emit_success(event_method or method, unit, output.image, null, emitted_scores, emitted_null_scores)
             else:
@@ -327,7 +327,7 @@ def _paired_v6(root: Path, units: list[dict[str, Any]], key_text: str, token: st
                 image, _measurement = _run_content_v6_pass2(pipeline, unit["prompt"], key, evaluation, beta, height=512, width=512, generator=_generator(unit["seed"]))
                 output = type("C6Output", (), {"image": image, "primary_null": null})()
             score = lambda image: engine._flat_scores(engine._blind_scores_with_lf_scorer(image, key, wrong, assets.hf_public_assets, assets.lf_public_assets, runner.score_content_v4_lf_image))
-            _emit_success(event_method, unit, output.image, output.primary_null, score(output.image), score(output.primary_null))
+            _emit_success(event_method, unit, output.image, output.primary_null, score(output.image), score(output.primary_null) if event_method != "c6" else None)
         except Exception as error:
             _unit_failure(event_method, unit, error)
     key = b""
@@ -428,7 +428,7 @@ def _c3_v4_lf_rescore(root: Path, units: list[dict[str, Any]], key_text: str, to
             null_scores = {label: float(runner.score_content_v4_lf_image(plain, item, assets.lf_public_assets)) for label, item in zip(labels, keys)}
             _event({"event": "v4_lf_rescore", "method": "c3", "global_ordinal": unit["global_ordinal"], "unit_id": unit["unit_id"], "status": "success", "candidate_rgb_sha256": binding["candidate_rgb_sha256"], "plain_rgb_sha256": binding["plain_rgb_sha256"], "candidate_ppm_sha256": binding["candidate_ppm_sha256"], "plain_ppm_sha256": binding["plain_ppm_sha256"], "candidate_scores": {"v4_lf": candidate_scores}, "null_scores": {"v4_lf": null_scores}})
         except Exception as error:
-            _unit_failure("c3", unit, error)
+            _unit_failure("c3", unit, error, event_name="v4_lf_rescore")
     key = b""
 
 
