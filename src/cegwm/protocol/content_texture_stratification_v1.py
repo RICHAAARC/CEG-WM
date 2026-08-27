@@ -18,6 +18,8 @@ from typing import Any, Iterable, Mapping, Sequence
 PROTOCOL_CONFIG = "configs/content_chain/content_texture_stratification_v1.json"
 PUBLIC_STATUS = frozenset({"analysis_complete", "analysis_incomplete", "not_interpretable"})
 SCORE_LABELS = ("registered", *(f"wrong_{index:02d}" for index in range(16)))
+SCORE_DOMAINS = ("ordinary_lf", "v4_lf", "hf")
+CONSTRUCTION_DOMAINS = {"c2": ("ordinary_lf", "hf"), "c3": SCORE_DOMAINS, "c6": ("v4_lf", "hf")}
 N96_FAMILIES = (
     "indoor_still_life", "natural_landscape", "urban_architecture", "people_activity",
     "animals", "food_material_closeup", "abstract_geometry", "low_light_weather",
@@ -160,6 +162,30 @@ def margins(candidate: Mapping[str, Any], primary_null: Mapping[str, Any], branc
     registered = left[f"{branch}__registered"]
     wrong = max(left[f"{branch}__wrong_{index:02d}"] for index in range(16))
     return registered - wrong, registered - right[f"{branch}__registered"]
+
+
+def require_domain_scores(value: Mapping[str, Any], domain: str) -> dict[str, float]:
+    if domain not in SCORE_DOMAINS or tuple(value) != SCORE_LABELS:
+        raise ValueError("score domain labels differ")
+    result = {}
+    for label in SCORE_LABELS:
+        item = value[label]
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(float(item)):
+            raise ValueError("domain score differs")
+        result[label] = float(item)
+    return result
+
+
+def domain_margins(candidate: Mapping[str, Any], primary_null: Mapping[str, Any], domain: str) -> tuple[float, float]:
+    left, right = require_domain_scores(candidate, domain), require_domain_scores(primary_null, domain)
+    return left["registered"] - max(left[f"wrong_{index:02d}"] for index in range(16)), left["registered"] - right["registered"]
+
+
+def require_construction_domains(construction: str, candidate: Mapping[str, Any], primary_null: Mapping[str, Any]) -> dict[str, tuple[float, float]]:
+    required = CONSTRUCTION_DOMAINS.get(construction)
+    if required is None or tuple(candidate) != required or tuple(primary_null) != required:
+        raise ValueError("construction scorer domains differ")
+    return {domain: domain_margins(candidate[domain], primary_null[domain], domain) for domain in required}
 
 
 def average_ranks(values: Sequence[float]) -> tuple[Fraction, ...]:

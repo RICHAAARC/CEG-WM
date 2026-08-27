@@ -11,6 +11,7 @@ from pathlib import Path
 
 from cegwm.protocol.content_texture_stratification_v1 import (
     average_ranks,
+    domain_margins,
     encode_p6_rgb,
     exact_spearman,
     f64_from_hex,
@@ -18,6 +19,7 @@ from cegwm.protocol.content_texture_stratification_v1 import (
     load_protocol,
     margins,
     N96_FAMILIES,
+    require_construction_domains,
     parse_p6_texture,
     require_scores,
     stable_json_bytes,
@@ -146,6 +148,15 @@ class TextureProtocolTests(unittest.TestCase):
         with self.assertRaises(TypeError): require_scores(malformed)
         malformed["lf__registered"] = math.inf
         with self.assertRaises(ValueError): require_scores(malformed)
+
+    def test_domain_qualified_c3_requires_all_three_scorers(self) -> None:
+        labels = {label: (0.5 if label == "registered" else 0.25) for label in ("registered", *(f"wrong_{i:02d}" for i in range(16)))}
+        null = {label: (0.1 if label == "registered" else 0.0) for label in labels}
+        domains = {name: dict(labels) for name in ("ordinary_lf", "v4_lf", "hf")}
+        nulls = {name: dict(null) for name in domains}
+        self.assertEqual(set(require_construction_domains("c3", domains, nulls)), {"ordinary_lf", "v4_lf", "hf"})
+        self.assertEqual(domain_margins(labels, null, "v4_lf"), (.25, .4))
+        with self.assertRaises(ValueError): require_construction_domains("c3", {"ordinary_lf": labels, "hf": labels}, {"ordinary_lf": null, "hf": null})
 
     def test_average_ranks_and_exact_two_sided_permutations(self) -> None:
         self.assertEqual(average_ranks([1.0, 1.0, 3.0]), (Fraction(3, 2), Fraction(3, 2), Fraction(3)))
