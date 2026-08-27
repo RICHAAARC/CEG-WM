@@ -124,6 +124,7 @@ class TextureProtocolTests(unittest.TestCase):
             "RESULT_PREFIX": "CEGWM_TEXTURE_RESULT", "FAILURE_PREFIX": "CEGWM_TEXTURE_HANDOFF_FAILURE", "CAPTURE_LIMIT": 4096,
             "TERMINAL_RESULT_FIELDS": {"status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256"},
             "OPERATIONAL_RESULT_FIELDS": {"artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member"},
+            "BOOTSTRAP_RESULT_FIELDS": {"status", "failure_class", "failure_stage"},
             "RUNNER_PUBLIC_FAILURES": {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"},
             "RUNNER_FAILURE_STAGES": {"identity", "protocol", "secrets", "checkouts", "rosters", "assets", "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication"},
             "_ALLOWED_ERRORS": {"CalledProcessError", "FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "ModuleNotFoundError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "UnicodeDecodeError", "ValueError"},
@@ -238,6 +239,7 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertIn("Content-Texture-{SHORT_COMMIT}-{RUN_UTC}", joined)
         self.assertIn("LOCAL = Path('/content') / (DRIVE_TARGET.name + '-local')", joined)
         self.assertIn("'--artifact-sink', str(DRIVE_TARGET)", joined)
+        self.assertIn("or DRIVE_TARGET.exists() or RUN_ROOT.exists()", joined)
         self.assertNotIn("/CEG-WM/content_texture_stratification_v1", joined)
         self.assertEqual(joined.count("subprocess.Popen("), 1)
         self.assertEqual(joined.count("experiments.run_content_texture_stratification_v1"), 1)
@@ -264,6 +266,7 @@ class TextureProtocolTests(unittest.TestCase):
             "CAPTURE_LIMIT": 4096,
             "TERMINAL_RESULT_FIELDS": {"status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256"},
             "OPERATIONAL_RESULT_FIELDS": {"artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member"},
+            "BOOTSTRAP_RESULT_FIELDS": {"status", "failure_class", "failure_stage"},
             "RUNNER_PUBLIC_FAILURES": {"FileExistsError", "FileNotFoundError", "ImportError", "MemoryError", "OSError", "OutOfMemoryError", "RuntimeError", "TimeoutError", "TypeError", "ValueError"},
             "RUNNER_FAILURE_STAGES": {"identity", "protocol", "secrets", "checkouts", "rosters", "assets", "prefetch", "common_plain", "v2", "v3", "v4", "v5_validate", "v6", "v7", "v8", "analysis", "terminal_publication"},
         }
@@ -278,6 +281,11 @@ class TextureProtocolTests(unittest.TestCase):
         for bad in ({**operational, "failure_class": "UnknownError"}, {**operational, "failure_stage": "unknown"}, {**operational, "last_completed_checkpoint": 10}, {**operational, "result_member": "result.json"}):
             with self.assertRaises(RuntimeError):
                 parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(bad) + "\n").encode())
+        bootstrap = {"status": "analysis_incomplete", "failure_class": "MemoryError", "failure_stage": "protocol"}
+        self.assertEqual(parse(2, ("CEGWM_TEXTURE_RESULT " + json.dumps(bootstrap) + "\n").encode()), ("bootstrap_incomplete", bootstrap))
+        for bad_rc, bad in ((0, bootstrap), (2, {**bootstrap, "extra": "no"}), (2, {**bootstrap, "failure_class": "UnknownError"}), (2, {**bootstrap, "failure_stage": "unknown"})):
+            with self.assertRaises(RuntimeError):
+                parse(bad_rc, ("CEGWM_TEXTURE_RESULT " + json.dumps(bad) + "\n").encode())
 
     def test_notebook_accepts_operational_terminal_before_clearing_capture(self) -> None:
         terminal_bytes = b"operational-terminal-fixture"
@@ -301,6 +309,16 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertEqual(namespace["hf_token"], "")
         self.assertIsNone(namespace["runner_env"])
         self.assertEqual(namespace["process"].stderr, devnull)
+
+    def test_notebook_dispatches_bootstrap_failure_without_artifact(self) -> None:
+        payload = {"status": "analysis_incomplete", "failure_class": "MemoryError", "failure_stage": "protocol"}
+        namespace, stdout_chunks, capture_at_dispatch, _ = self._run_notebook_dispatch(runner_rc=2, payload=payload)
+        line = "".join(stdout_chunks)
+        self.assertTrue(line.startswith("CEGWM_TEXTURE_HANDOFF_FAILURE "))
+        self.assertLessEqual(len(line.encode("utf-8")), 4096)
+        self.assertEqual(json.loads(line.split(" ", 1)[1]), {"status": "operational_failure", "analysis_id": "content_texture_stratification_v1", "execution_exact": "3ed674236e9f562a1e5a537ae0e4bef7080d4853", "run_id": "content-texture-stratification-v1-3bf6552daa78-805bc21e173a", "stage": "protocol", "error_class": "MemoryError"})
+        self.assertIn(("CEGWM_TEXTURE_RESULT " + json.dumps(payload) + "\n").encode(), capture_at_dispatch)
+        self.assertIsNone(namespace["ACCEPTED_ARTIFACT"])
 
     def test_notebook_terminal_dispatch_validates_pairs_and_fails_closed(self) -> None:
         terminal_bytes = b"terminal-fixture"
