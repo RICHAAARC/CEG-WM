@@ -13,7 +13,7 @@ from cegwm.runtime.sd35_qk_observation import SD35QKObservation, SD35QKObservati
 PROTOCOL="geometry-v1-qk-d2-independent-confirmation-v1"; SCHEMA="geometry-v1-qk-d2-independent-confirmation-operational-v1"; MODEL_ID="stabilityai/stable-diffusion-3.5-medium"
 SOURCE_RUN_ID="geometry-v1-qk-direction-all-layer-41742d462d62"; SOURCE_PROTOCOL="geometry-v1-qk-direction-all-layer-selection-v1"; SOURCE_RUNNER_EXACT="41742d462d62525189855c8ebb2ee1995fb9230a"; SOURCE_STATUS="DIRECTION_TWO_CANDIDATES_FROZEN"
 SOURCE_SELECTED=("transformer_blocks.23.attn","transformer_blocks.14.attn"); ATTENTION_LAYER_PATHS=SOURCE_SELECTED
-D0_EXACT="4732211beefbeface95cb842c117b9719e362f1a"; D0_RUN_ID="geometry-v1-qk-d0-4732211beefb"; D0_PLAN_DIGEST="96e1e5ae6fb8ae66a545b1b10d6c896176989272c81ef1fd737184dcdfaea7b8"; D0_ROSTER_DIGEST="88850de32ae0783427f86d0a5c82c6272a30811931ca0f883f6888cf8b83ac9e"
+D0_EXACT="4732211beefbeface95cb842c117b9719e362f1a"; D0_RUN_ID="geometry-v1-qk-d0-4732211beefb"; D0_PROTOCOL="geometry-v1-qk-d0-all-layer-discovery-v1"; D0_STATUS="D0_UNRESOLVED"; D0_PLAN_DIGEST="96e1e5ae6fb8ae66a545b1b10d6c896176989272c81ef1fd737184dcdfaea7b8"; D0_ROSTER_DIGEST="88850de32ae0783427f86d0a5c82c6272a30811931ca0f883f6888cf8b83ac9e"
 REFS=("d2_confirmation_a","d2_confirmation_b"); TRANSFORMS=("identity","d4","similarity","crop_rescale"); KINDS=("q","k"); CONTROLS=("matched_h","shuffled_h"); PAIRS=tuple(f"{r}-{t}" for r in REFS for t in TRANSFORMS)
 UNIT_COUNT=64; MAX_CONTROL_BYTES=1024; MAX_ROOT_BYTES=262144; MAX_UNIT_BYTES=16384; MAX_LAYER_UNIT_BYTES=524288; MAX_LAYER_ZIP_BYTES=1048576; MAX_SOURCE_BYTES=50331648
 SUCCESS_PREFIX="CEGWM_GEOMETRY_V1_QK_D2 "; FAILURE_PREFIX="CEGWM_GEOMETRY_V1_QK_D2_FAILURE "
@@ -55,12 +55,13 @@ def _validate_source(root:Path)->dict[str,Any]:
  if root.is_symlink() or not root.is_dir() or any(not p.is_file() or p.is_symlink() for p in root.iterdir()) or {p.name for p in root.iterdir()}!={"receipt.json","manifest.json","terminal.json"}:raise ValueError("source_file_roster_mismatch")
  receipt,manifest,terminal=_read(root/"receipt.json",MAX_ROOT_BYTES),_read(root/"manifest.json",MAX_ROOT_BYTES),_read(root/"terminal.json",MAX_CONTROL_BYTES)
  _reject_leak(receipt);_reject_leak(manifest);_reject_leak(terminal)
- if (receipt.get("run_id"),receipt.get("protocol"),receipt.get("status"),receipt.get("science_denominator"),receipt.get("runner_execution_identity",{}).get("commit"),receipt.get("selected_layer_paths"))!=(SOURCE_RUN_ID,SOURCE_PROTOCOL,SOURCE_STATUS,0,SOURCE_RUNNER_EXACT,list(SOURCE_SELECTED)):raise ValueError("source_receipt_identity_mismatch")
+ if (receipt.get("run_id"),receipt.get("protocol"),receipt.get("status"),receipt.get("science_denominator"),receipt.get("runner_execution_identity",{}).get("commit"),receipt.get("selected_layer_paths"),receipt.get("declared_unit_count"),receipt.get("audited_unit_count"),receipt.get("artifact_status"))!=(SOURCE_RUN_ID,SOURCE_PROTOCOL,SOURCE_STATUS,0,SOURCE_RUNNER_EXACT,list(SOURCE_SELECTED),768,768,"complete"):raise ValueError("source_receipt_identity_mismatch")
  d0=receipt.get("source_d0_artifact_identity",{})
- if (d0.get("execution_exact"),d0.get("run_id"),d0.get("plan_digest"),d0.get("roster_digest"),d0.get("science_denominator"))!=(D0_EXACT,D0_RUN_ID,D0_PLAN_DIGEST,D0_ROSTER_DIGEST,0):raise ValueError("source_d0_identity_mismatch")
- if (manifest.get("run_id"),manifest.get("protocol"),manifest.get("runner_execution_exact"),manifest.get("status"))!=(SOURCE_RUN_ID,SOURCE_PROTOCOL,SOURCE_RUNNER_EXACT,SOURCE_STATUS):raise ValueError("source_manifest_identity_mismatch")
- if (terminal.get("run_id"),terminal.get("status"),terminal.get("science_denominator"))!=(SOURCE_RUN_ID,SOURCE_STATUS,0):raise ValueError("source_terminal_identity_mismatch")
- return {"run_id":SOURCE_RUN_ID,"runner_execution_exact":SOURCE_RUNNER_EXACT,"protocol":SOURCE_PROTOCOL,"status":SOURCE_STATUS,"selected_layer_paths":list(SOURCE_SELECTED),"d0_identity":{"execution_exact":D0_EXACT,"run_id":D0_RUN_ID,"plan_digest":D0_PLAN_DIGEST,"roster_digest":D0_ROSTER_DIGEST},"science_denominator":0}
+ if (d0.get("execution_exact"),d0.get("run_id"),d0.get("protocol"),d0.get("plan_digest"),d0.get("roster_digest"),d0.get("status"),d0.get("science_denominator"))!=(D0_EXACT,D0_RUN_ID,D0_PROTOCOL,D0_PLAN_DIGEST,D0_ROSTER_DIGEST,D0_STATUS,0):raise ValueError("source_d0_identity_mismatch")
+ md0=manifest.get("source_d0_artifact_identity",{})
+ if (manifest.get("run_id"),manifest.get("protocol"),manifest.get("runner_execution_exact"),manifest.get("status"),manifest.get("unit_count"),md0)!=(SOURCE_RUN_ID,SOURCE_PROTOCOL,SOURCE_RUNNER_EXACT,SOURCE_STATUS,768,d0):raise ValueError("source_manifest_identity_mismatch")
+ if (terminal.get("run_id"),terminal.get("status"),terminal.get("science_denominator"),terminal.get("selected_layer_paths"))!=(SOURCE_RUN_ID,SOURCE_STATUS,0,list(SOURCE_SELECTED)):raise ValueError("source_terminal_identity_mismatch")
+ return {"run_id":SOURCE_RUN_ID,"runner_execution_exact":SOURCE_RUNNER_EXACT,"protocol":SOURCE_PROTOCOL,"status":SOURCE_STATUS,"selected_layer_paths":list(SOURCE_SELECTED),"d0_identity":d0,"science_denominator":0}
 
 def _reference(r:str)->Image.Image:
  im=Image.new("RGB",(512,512),(41,22,71));d=ImageDraw.Draw(im)
@@ -137,8 +138,8 @@ def _stats(units:Sequence[Mapping[str,Any]])->tuple[bool,list[dict[str,Any]],dic
  for t in TRANSFORMS:
   vals=[s["per_transform_audit"][TRANSFORMS.index(t)]["two_reference_equal_weight_median"] for s in stats];fin=[x for x in vals if x is not None and math.isfinite(float(x))];route.append({"transform_label":t,"finite_stat_count":len(fin),"nonnegative_stat_count":sum(x>=0 for x in fin),"all_layer_nonnegative":len(fin)==4 and all(x>=0 for x in fin)})
  audit={"per_transform":route,"route_level_transform_instability":any(x["transform_label"] in ("d4","crop_rescale") and x["all_layer_nonnegative"] for x in route)};return all(x["strictly_negative"] for x in stats),stats,audit
-def run_d2(*,expected_exact:str,repo_root:Path,source_root:Path,hf_token:str,loader:Callable[...,Any]=load_sd35_pipeline,observer:Callable[...,SD35QKObservation]=observe_sd35_image_qk)->tuple[dict[str,Any],tuple[dict[str,Any],...]]:
- source=_validate_source(source_root);plan=build_fixed_plan();exact=_exact(expected_exact,repo_root);status="D2_STOPPED";reason="model_or_topology_unavailable";failure="model_load";runtime={}
+def run_d2(*,expected_exact:str,repo_root:Path,source_root:Path,hf_token:str,loader:Callable[...,Any]=load_sd35_pipeline,observer:Callable[...,SD35QKObservation]=observe_sd35_image_qk,source_identity:Mapping[str,Any]|None=None)->tuple[dict[str,Any],tuple[dict[str,Any],...]]:
+ source=dict(source_identity) if source_identity is not None else _validate_source(source_root);plan=build_fixed_plan();exact=_exact(expected_exact,repo_root);status="D2_STOPPED";reason="model_or_topology_unavailable";failure="model_load";runtime={}
  try:
   p=loader(MODEL_ID,torch_dtype=torch.float16,token=hf_token);p=p.to("cuda" if torch.cuda.is_available() else "cpu") if hasattr(p,"to") else p;_topology(p);spec=_spec(p);status="D2_UNRESOLVED";reason=None;failure=None;runtime={"pipeline_class":f"{type(p).__module__}.{type(p).__qualname__}"}
  except BaseException:spec=None;p=None
@@ -198,7 +199,7 @@ def _error(e:BaseException)->str:
 def _main(argv:list[str]|None=None)->int:
  p=argparse.ArgumentParser();p.add_argument("--repo-root",required=True);p.add_argument("--expected-exact",required=True);p.add_argument("--source-root",required=True);p.add_argument("--output-root",required=True);p.add_argument("--control-fd",required=True,type=int);a=p.parse_args(argv);stage="source_validation";run=f"geometry-v1-qk-d2-{a.expected_exact[:12]}"
  try:
-  summary,units=run_d2(expected_exact=a.expected_exact,repo_root=Path(a.repo_root),source_root=Path(a.source_root),hf_token=os.environ.get("HF_TOKEN",""));stage="artifact_packaging";package=_package(Path(a.output_root),summary,units);stage="control_channel";_emit(a.control_fd,SUCCESS_PREFIX,{"status":"success","run_id":summary["run_id"],"d2_status":summary["status"],"fixed_layer_paths":list(ATTENTION_LAYER_PATHS),"science_denominator":0,**package});return 0
+  source=_validate_source(Path(a.source_root));summary,units=run_d2(expected_exact=a.expected_exact,repo_root=Path(a.repo_root),source_root=Path(a.source_root),hf_token=os.environ.get("HF_TOKEN",""),source_identity=source);stage="artifact_packaging";package=_package(Path(a.output_root),summary,units);stage="control_channel";_emit(a.control_fd,SUCCESS_PREFIX,{"status":"success","run_id":summary["run_id"],"d2_status":summary["status"],"fixed_layer_paths":list(ATTENTION_LAYER_PATHS),"science_denominator":0,**package});return 0
  except BaseException as e:
   if stage=="control_channel":return 1
   try:_emit(a.control_fd,FAILURE_PREFIX,{"status":"failure","run_id":run,"failure_point":stage,"error_class":_error(e),"artifact_status":"unavailable"})
