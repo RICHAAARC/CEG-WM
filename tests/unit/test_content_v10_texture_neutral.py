@@ -7,6 +7,25 @@ _SPEC=importlib.util.spec_from_file_location("v10_method",_PATH); _MODULE=import
 load_independent_calibration_asset=_MODULE.load_independent_calibration_asset; weighted_joint_v10=_MODULE.weighted_joint_v10
 
 class ContentV10Tests(unittest.TestCase):
+ def test_calibration_roster_is_frozen_and_disjoint_from_texture_n96(self):
+  root=Path(__file__).parents[2]
+  calibration=root/'configs/content_chain/content_v10_calibration_v1.jsonl'
+  texture=Path('D:/Projects/Image-WM/CEG-WM/worktrees/content-texture-normalization/configs/content_chain/content_texture_n96_evaluation_v1.jsonl')
+  self.assertEqual(hashlib.sha256(texture.read_bytes()).hexdigest(),'73cdb9d6b840490567dd2a40dbf1bd10140e52ae46a43d00fdc01b24a9bc1fb8')
+  rows=[json.loads(line) for line in calibration.read_text(encoding='utf-8').splitlines()]
+  self.assertEqual(len(rows),32)
+  families=('indoor_still_life','landscape','architecture','people','animals','food_material_closeup','abstract_geometry','low_light_weather')
+  self.assertEqual([row['unit_id'] for row in rows],[f'content-v10-calibration-b{block:02d}-s{slot:02d}' for block in range(1,5) for slot in range(1,9)])
+  self.assertEqual([row['source_id'] for row in rows],[f'content-v10-calibration-b{block:02d}-s{slot:02d}-source' for block in range(1,5) for slot in range(1,9)])
+  self.assertEqual([row['seed'] for row in rows],list(range(2026110000,2026110032)))
+  self.assertEqual([(row['block_id'],row['block_slot'],row['semantic_family'],row['height'],row['width']) for row in rows],[(f'b{block:02d}',slot,families[slot-1],512,512) for block in range(1,5) for slot in range(1,9)])
+  for key in ('unit_id','source_id','seed'):
+   self.assertEqual(len({row[key] for row in rows}),32)
+  prompts=[row['prompt'].encode('utf-8') for row in rows]
+  self.assertEqual(len(set(prompts)),32)
+  texture_rows=[json.loads(line) for line in texture.read_text(encoding='utf-8').splitlines()]
+  for ours,theirs in (({row['unit_id'] for row in rows},{row['unit_id'] for row in texture_rows}),({row['source_id'] for row in rows},{row['source_id'] for row in texture_rows}),(set(prompts),{row['prompt'].encode('utf-8') for row in texture_rows}),({row['seed'] for row in rows},{row['seed'] for row in texture_rows}),({(row['prompt'].encode('utf-8'),row['seed']) for row in rows},{(row['prompt'].encode('utf-8'),row['seed']) for row in texture_rows})):
+   self.assertFalse(ours & theirs)
  def test_contract_and_v10_only_asset(self):
   self.assertEqual(load_content_v10_contract(Path(__file__).parents[2]).config["base_method_id"],"content_v9_v6_calibrated_weighted_joint_v1")
   root=Path(__file__).parents[2]; v9=root/'configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json'
