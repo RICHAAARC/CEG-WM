@@ -129,6 +129,13 @@ class TextureRunnerTests(unittest.TestCase):
     event = runner._adapter_event(runner.EVENT_PREFIX + json.dumps({"event":"unit","method":"c2","global_ordinal":1,"unit_id":"u1","status":"operational_failure","failure_class":"TimeoutError"}))
     self.assertEqual(event["failure_class"], "TimeoutError")
 
+ def test_production_join_and_cache_calls_retain_failures(self) -> None:
+    source = (Path(__file__).parents[2] / "experiments" / "run_content_texture_stratification_v1.py").read_text(encoding="utf-8")
+    self.assertNotIn('event["failure_class"] = "RuntimeError"', source)
+    self.assertNotIn('raise RuntimeError("C3 V4 join hash differs")', source)
+    self.assertGreaterEqual(source.count("_retain_unit_failure(event"), 3)
+    self.assertIn("except (KeyError, TypeError, ValueError):", source)
+
  def test_failure_stage_enum_fails_closed_and_failure_line_is_bounded(self) -> None:
     original = runner._failure_stage
     self.addCleanup(runner._set_failure_stage, original)

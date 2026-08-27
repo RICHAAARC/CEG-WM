@@ -662,11 +662,11 @@ def _execute(args: argparse.Namespace) -> int:
                 for event, plain in zip(events, plains):
                     v4_event = by_ordinal.get(event["global_ordinal"])
                     if event.get("status") != "success" or v4_event is None or v4_event.get("status") != "success":
-                        event["status"] = "operational_failure"
-                        event["failure_class"] = "RuntimeError"
+                        _retain_unit_failure(event, v4_event, fallback="RuntimeError")
                         continue
                     if event["candidate_rgb_sha256"] != v4_event["candidate_rgb_sha256"] or plain.get("plain_rgb_sha256") != v4_event["plain_rgb_sha256"]:
-                        raise RuntimeError("C3 V4 join hash differs")
+                        _retain_unit_failure(event, fallback="ValueError")
+                        continue
                     event["candidate_scores"] = {"ordinary_lf": event["candidate_scores"]["ordinary_lf"], "v4_lf": v4_event["candidate_scores"]["v4_lf"], "hf": event["candidate_scores"]["hf"]}
                     event["null_scores"] = {"v4_lf": v4_event["null_scores"]["v4_lf"]}
                     event.pop("candidate_ppm_sha256", None)
@@ -688,16 +688,22 @@ def _execute(args: argparse.Namespace) -> int:
                 _null_cache_put(null_cache, domain, event["global_ordinal"], plain["plain_rgb_sha256"], event["null_scores"][domain])
     for event, plain in zip(method_events["c3"], plains):
         if event.get("status") == "success" and plain.get("status") == "success":
-            for domain in ("ordinary_lf", "hf"):
-                event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
-            _null_cache_put(null_cache, "v4_lf", event["global_ordinal"], plain["plain_rgb_sha256"], event["null_scores"]["v4_lf"])
-            event["null_scores"] = {domain: event["null_scores"][domain] for domain in DOMAIN_MATRIX["c3"]}
-            from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
-            require_construction_domains("c3", event["candidate_scores"], event["null_scores"])
+            try:
+                for domain in ("ordinary_lf", "hf"):
+                    event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
+                _null_cache_put(null_cache, "v4_lf", event["global_ordinal"], plain["plain_rgb_sha256"], event["null_scores"]["v4_lf"])
+                event["null_scores"] = {domain: event["null_scores"][domain] for domain in DOMAIN_MATRIX["c3"]}
+                from cegwm.protocol.content_texture_stratification_v1 import require_construction_domains
+                require_construction_domains("c3", event["candidate_scores"], event["null_scores"])
+            except (KeyError, TypeError, ValueError):
+                _retain_unit_failure(event, method_events["c2"][event["global_ordinal"] - 1], fallback="RuntimeError")
     for event, plain in zip(method_events["c6"], plains):
         if event.get("status") == "success" and plain.get("status") == "success":
-            for domain in ("v4_lf", "hf"):
-                event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
+            try:
+                for domain in ("v4_lf", "hf"):
+                    event["null_scores"][domain] = dict(null_cache[(domain, event["global_ordinal"], plain["plain_rgb_sha256"])])
+            except (KeyError, TypeError, ValueError):
+                _retain_unit_failure(event, method_events["c2"][event["global_ordinal"] - 1], method_events["c3"][event["global_ordinal"] - 1], fallback="RuntimeError")
     key_text = token = ""
     _set_failure_stage("analysis")
     rows = []
