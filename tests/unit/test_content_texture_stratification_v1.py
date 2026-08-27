@@ -4,7 +4,9 @@ import hashlib
 import ast
 import json
 import math
+import pathlib
 import subprocess
+import tempfile
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -126,10 +128,12 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertIn("EXPECTED_EXACT = '7917a7da15fbeee79083b4938362d2bdf202a740'", source)
         self.assertIn("ATTEMPT_NONCE = uuid.uuid4().hex[:12]", source)
         self.assertIn("Content-Texture-7917a7d-{ATTEMPT_NONCE}-local", source)
-        self.assertIn("merge-base','--is-ancestor',EXPECTED_EXACT,HANDOFF_HEAD", source)
-        self.assertIn("git('checkout', '--detach', EXPECTED_EXACT)", source)
+        self.assertIn("merge-base','--is-ancestor',expected_exact,handoff_head", source)
+        self.assertIn("_texture_git(source, 'checkout', '--detach', expected_exact)", source)
         self.assertIn("%Y%m%dT%H%M%S%fZ", source)
-        self.assertIn("Content-Texture-7917a7d-{RUN_UTC}", source)
+        self.assertIn("Content-Texture-7917a7d-{run_utc}", source)
+        self.assertIn("detach_texture_execution_checkout(SOURCE, BRANCH, EXPECTED_EXACT)", source)
+        self.assertIn("allocate_texture_attempt_paths(", source)
         self.assertIn("(0,'terminal','analysis_complete','analysis_complete')", source)
         self.assertIn("(2,'terminal','not_interpretable','not_interpretable')", source)
         self.assertIn("(2,'operational_terminal','operational_failure','operational_failure')", source)
@@ -139,6 +143,64 @@ class TextureProtocolTests(unittest.TestCase):
         self.assertNotIn("force_remount", source)
         self.assertNotIn("retry", source.lower())
         self.assertTrue(all(cell["execution_count"] is None and cell["outputs"] == [] for cell in cells))
+        for cell in cells:
+            ast.parse("".join(cell["source"]))
+
+    def _notebook_checkout_helpers(self) -> dict[str, object]:
+        notebook = json.loads((ROOT / "notebooks/content_texture_stratification_v1_colab.ipynb").read_text(encoding="utf-8"))
+        tree = ast.parse("".join(line for cell in notebook["cells"] if cell["cell_type"] == "code" for line in cell["source"]))
+        names = {"_texture_git", "detach_texture_execution_checkout", "allocate_texture_attempt_paths"}
+        helpers = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+        self.assertEqual({node.name for node in helpers}, names)
+        namespace = {"pathlib": pathlib, "subprocess": subprocess}
+        exec(compile(ast.Module(body=helpers, type_ignores=[]), "texture-notebook-helpers", "exec"), namespace)
+        return namespace
+
+    def test_notebook_checkout_helper_detaches_ancestor_and_rejects_unrelated(self) -> None:
+        detach = self._notebook_checkout_helpers()["detach_texture_execution_checkout"]
+        self.assertTrue(callable(detach))
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary) / "repo"
+            def git(*args: str) -> str:
+                return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            git("config", "user.email", "texture-test@example.invalid")
+            git("config", "user.name", "Texture Test")
+            git("checkout", "-q", "-b", "Content-Texture")
+            (repo / "fixture.txt").write_text("ancestor\n", encoding="utf-8")
+            git("add", "fixture.txt"); git("commit", "-qm", "ancestor")
+            execution = git("rev-parse", "HEAD")
+            (repo / "fixture.txt").write_text("handoff\n", encoding="utf-8")
+            git("commit", "-am", "handoff", "-q")
+            git("checkout", "-q", "--orphan", "unrelated")
+            git("rm", "-q", "-rf", ".")
+            (repo / "unrelated.txt").write_text("unrelated\n", encoding="utf-8")
+            git("add", "unrelated.txt"); git("commit", "-qm", "unrelated")
+            unrelated = git("rev-parse", "HEAD")
+            git("checkout", "-q", "Content-Texture")
+            self.assertTrue(callable(detach)); detach(repo, "Content-Texture", execution)
+            self.assertEqual(git("rev-parse", "HEAD"), execution)
+            self.assertEqual(git("branch", "--show-current"), "")
+            git("checkout", "-q", "Content-Texture")
+            with self.assertRaises(RuntimeError):
+                detach(repo, "Content-Texture", unrelated)
+
+    def test_notebook_path_helper_retries_preexisting_drive_without_deleting_it(self) -> None:
+        allocate = self._notebook_checkout_helpers()["allocate_texture_attempt_paths"]
+        self.assertTrue(callable(allocate))
+        class Clock:
+            def __init__(self, values: list[str]) -> None: self.values = iter(values)
+            def __call__(self):
+                value = next(self.values)
+                return type("Moment", (), {"strftime": lambda self, _format: value})()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); content, drive = root / "content", root / "drive"; content.mkdir(); drive.mkdir()
+            source_one, local_one, drive_one, _ = allocate(content, drive, "nonce-one001", Clock(["20260828T010203123456Z"]))
+            drive_one.mkdir()
+            source_two, local_two, drive_two, _ = allocate(content, drive, "nonce-two002", Clock(["20260828T010203123456Z", "20260828T010203123457Z"]))
+            self.assertNotEqual((source_one, local_one, drive_one), (source_two, local_two, drive_two))
+            self.assertTrue(drive_one.exists())
+            self.assertFalse(drive_two.exists())
 
     def test_p6_and_texture_use_exact_rgb_forward_gradient(self) -> None:
         raw = bytearray(512 * 512 * 3)
