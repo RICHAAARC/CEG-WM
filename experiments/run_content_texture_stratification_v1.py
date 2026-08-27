@@ -48,7 +48,7 @@ METHOD_ORDER = ("c2", "c3", "c6")
 CONSTRUCTION_SOURCE = {"c2": "v2", "c3": "v3", "c6": "v6"}
 DOMAIN_MATRIX = {"c2": ("ordinary_lf", "hf"), "c3": ("ordinary_lf", "v4_lf", "hf"), "c6": ("v4_lf", "hf")}
 SCORE_FIELDS = tuple(f"{branch}__{label}" for branch in ("lf", "hf", "joint") for label in ("registered", *(f"wrong_{index:02d}" for index in range(16))))
-OPERATIONAL_RESULT_FIELDS = ("artifact_kind", "status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member")
+OPERATIONAL_RESULT_FIELDS = ("artifact_kind", "status", "analysis_status", "claim_ceiling", "exact", "protocol_digest", "run_id", "terminal_sha256", "failure_class", "failure_stage", "last_completed_checkpoint", "result_member")
 _failure_context: dict[str, Any] | None = None
 PER_UNIT_COLUMNS = (
     "global_ordinal", "roster_id", "roster_ordinal", "unit_id", "source_id", "seed", "method_id", "source_exact", "lf_score_domain", "status", "failure_class", "plain_ppm_sha256", "plain_rgb_sha256", "texture_value", "texture_be_hex", "texture_rank", "texture_rank_be_hex", "candidate_rgb_sha256", "primary_null_rgb_sha256", "primary_null_matches_plain", "ordinary_lf_registered", "ordinary_lf_max_wrong", "ordinary_lf_null_registered", "ordinary_lf_margin_a", "ordinary_lf_margin_b", "v4_lf_registered", "v4_lf_max_wrong", "v4_lf_null_registered", "v4_lf_margin_a", "v4_lf_margin_b", "hf_registered", "hf_max_wrong", "hf_null_registered", "hf_margin_a", "hf_margin_b", "joint_or_identity", "reuse_source_method", "missing_note",
@@ -736,7 +736,7 @@ def _execute(args: argparse.Namespace) -> int:
     members = [("receipt.json", stable_json_bytes(receipt)), ("bindings.json", stable_json_bytes(bindings_public)), ("environment_record.json", stable_json_bytes(environment)), ("records.json", stable_json_bytes(public_records)), ("result.json", stable_json_bytes(result)), ("per_unit.csv", per_unit_csv), ("associations.csv", associations_csv)]
     members.extend((event["relative_path"], Path(event["absolute_path"]).read_bytes()) for event in plains if event["status"] == "success")
     terminal_sha = _publish_terminal(run_root, run_id, members, local)
-    print(f"{RESULT_PREFIX} " + json.dumps({"status": status, "claim_ceiling": protocol.config["claim_ceiling"], "exact": exact, "protocol_digest": protocol.protocol_digest, "run_id": run_id, "terminal_sha256": terminal_sha}, sort_keys=True, separators=(",", ":")), flush=True)
+    print(f"{RESULT_PREFIX} " + json.dumps({"artifact_kind": "terminal", "status": status, "analysis_status": status, "claim_ceiling": protocol.config["claim_ceiling"], "exact": exact, "protocol_digest": protocol.protocol_digest, "run_id": run_id, "terminal_sha256": terminal_sha}, sort_keys=True, separators=(",", ":")), flush=True)
     return 0 if status == "analysis_complete" else 2
 
 
@@ -753,6 +753,7 @@ def execute(args: argparse.Namespace) -> int:
         receipt = {
             "artifact_kind": "operational_terminal",
             "status": "operational_failure",
+            "analysis_status": "operational_failure",
             "claim_ceiling": protocol.config["claim_ceiling"],
             "exact": _failure_context["exact"],
             "protocol_digest": protocol.protocol_digest,

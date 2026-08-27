@@ -65,6 +65,12 @@ def _score_payload(offset: float) -> dict[str, float]:
 
 
 class TextureRunnerTests(unittest.TestCase):
+ def test_terminal_result_contract_declares_three_statuses(self) -> None:
+    source = (Path(__file__).parents[2] / "experiments" / "run_content_texture_stratification_v1.py").read_text(encoding="utf-8")
+    self.assertIn('"artifact_kind": "terminal", "status": status, "analysis_status": status', source)
+    self.assertIn('"artifact_kind": "operational_terminal",', source)
+    self.assertIn('"analysis_status": "operational_failure",', source)
+    self.assertIn('"analysis_status",', source)
  def test_domain_null_cache_and_c3_join_fail_closed(self) -> None:
     labels = {"registered": .5, **{f"wrong_{i:02d}": .25 for i in range(16)}}
     null = {"registered": .1, **{f"wrong_{i:02d}": 0. for i in range(16)}}
