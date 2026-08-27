@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import json
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import InitVar, dataclass, field, replace
 from enum import Enum
 from typing import Sequence
 
@@ -27,8 +27,8 @@ GEOMETRY_DECISION_CEILING = "coordinates_only_no_positive_watermark_authority"
 _ANCHOR_PRF_DOMAIN = b"CEG-WM/geometry-v3/keyed-qk-canonical-relation/v1\x00"
 _MIN_ANCHOR_POINTS = 4
 _MAX_ANCHOR_POINTS = 64
-_ANCHOR_DERIVATION_TOKEN = object()
-_STATE_ADMISSION_TOKEN = object()
+_ANCHOR_DERIVATION_SEAL = object()
+_STATE_ADMISSION_SEAL = object()
 _ESTIMATE_TOKEN = object()
 
 
@@ -68,18 +68,22 @@ class CanonicalRelationAnchor:
     domain_id: str
     points: tuple[tuple[float, float], ...]
     public_digest: str
-    _derivation_token: object = field(repr=False, compare=False)
+    _derivation_seal: InitVar[object]
 
-    def __post_init__(self) -> None:
-        if self._derivation_token is not _ANCHOR_DERIVATION_TOKEN:
+    def __post_init__(self, _derivation_seal: object) -> None:
+        if _derivation_seal is not _ANCHOR_DERIVATION_SEAL:
             raise ValueError("canonical anchor must come from keyed derivation")
-        if self.method_id != METHOD_ID or self.domain_id != ANCHOR_DOMAIN_ID:
-            raise ValueError("canonical anchor identity differs")
-        points = _anchor_points(self.points)
-        if self.points != points:
-            raise ValueError("canonical anchor must use the frozen tuple representation")
-        if self.public_digest != _anchor_digest(points):
-            raise ValueError("canonical anchor public digest differs")
+        _validate_anchor_values(self)
+
+
+def _validate_anchor_values(anchor: CanonicalRelationAnchor) -> None:
+    if anchor.method_id != METHOD_ID or anchor.domain_id != ANCHOR_DOMAIN_ID:
+        raise ValueError("canonical anchor identity differs")
+    points = _anchor_points(anchor.points)
+    if anchor.points != points:
+        raise ValueError("canonical anchor must use the frozen tuple representation")
+    if anchor.public_digest != _anchor_digest(points):
+        raise ValueError("canonical anchor public digest differs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,14 +229,14 @@ class RecoverabilityState:
     anchor_identity: CanonicalAnchorIdentity
     reliability_policy: ReliabilityPolicy
     detector_binding: ContentDetectorBinding
-    _admission_token: object = field(repr=False, compare=False)
+    _admission_seal: InitVar[object]
     final_rgb_id: str | None = None
     attacked_rgb_id: str | None = None
     fresh_qk_observation_id: str | None = None
     estimate: GeometryEstimate | None = None
 
-    def __post_init__(self) -> None:
-        if self._admission_token is not _STATE_ADMISSION_TOKEN:
+    def __post_init__(self, _admission_seal: object) -> None:
+        if _admission_seal is not _STATE_ADMISSION_SEAL:
             raise ValueError("recoverability state must enter through start_recoverability")
         if self.contract_id != RECOVERABILITY_CONTRACT_ID or self.method_id != METHOD_ID:
             raise ValueError("recoverability state identity differs")
@@ -290,7 +294,7 @@ def derive_canonical_relation_anchor(
         domain_id=ANCHOR_DOMAIN_ID,
         points=frozen_points,
         public_digest=_anchor_digest(frozen_points),
-        _derivation_token=_ANCHOR_DERIVATION_TOKEN,
+        _derivation_seal=_ANCHOR_DERIVATION_SEAL,
     )
 
 
@@ -352,13 +356,13 @@ def start_recoverability(
         anchor_identity=anchor_identity,
         reliability_policy=reliability_policy,
         detector_binding=detector_binding,
-        _admission_token=_STATE_ADMISSION_TOKEN,
+        _admission_seal=_STATE_ADMISSION_SEAL,
     )
 
 
 def record_final_rgb(state: RecoverabilityState, *, final_rgb_id: str) -> RecoverabilityState:
     _require_phase(state, RecoverabilityPhase.WRITER_ADMITTED)
-    return replace(
+    return _replace_state(
         state,
         phase=RecoverabilityPhase.FINAL_RGB_RECORDED,
         final_rgb_id=_public_id(final_rgb_id, name="final_rgb_id"),
@@ -374,7 +378,7 @@ def record_attacked_rgb(
     attacked = _public_id(attacked_rgb_id, name="attacked_rgb_id")
     if attacked == state.final_rgb_id:
         raise ValueError("attacked RGB identity must be distinct from final RGB identity")
-    return replace(
+    return _replace_state(
         state,
         phase=RecoverabilityPhase.ATTACKED_RGB_RECORDED,
         attacked_rgb_id=attacked,
@@ -398,7 +402,7 @@ def record_fresh_qk_observation(
         raise ValueError("fresh Q/K observation canonical anchor identity differs")
     if provenance is not ObservationProvenance.FRESH_ATTACKED_RGB_QK:
         raise ValueError("detector Q/K must be freshly observed from current attacked RGB")
-    return replace(
+    return _replace_state(
         state,
         phase=RecoverabilityPhase.FRESH_QK_OBSERVED,
         fresh_qk_observation_id=_public_id(observation_id, name="observation_id"),
@@ -455,7 +459,7 @@ def record_geometry_estimate(
         if estimate.reliable
         else RecoverabilityPhase.STOPPED_UNRELIABLE
     )
-    return replace(state, phase=phase, estimate=estimate)
+    return _replace_state(state, phase=phase, estimate=estimate)
 
 
 def authorize_rectification(
@@ -479,7 +483,7 @@ def authorize_rectification(
         detector_binding=state.detector_binding,
     )
     return (
-        replace(state, phase=RecoverabilityPhase.RECTIFICATION_AUTHORIZED),
+        _replace_state(state, phase=RecoverabilityPhase.RECTIFICATION_AUTHORIZED),
         authorization,
     )
 
@@ -535,8 +539,8 @@ def _validated_anchor_identity(
 ) -> CanonicalAnchorIdentity:
     if not isinstance(anchor, CanonicalRelationAnchor):
         raise TypeError("canonical_anchor must be a CanonicalRelationAnchor")
-    # Re-run validation instead of relying on construction history.
-    anchor.__post_init__()
+    # Re-run public-value validation without exposing or storing the factory seal.
+    _validate_anchor_values(anchor)
     return CanonicalAnchorIdentity(
         domain_id=anchor.domain_id,
         point_count=len(anchor.points),
@@ -634,3 +638,12 @@ def _require_phase(state: RecoverabilityState, expected: RecoverabilityPhase) ->
         raise TypeError("state must be a RecoverabilityState")
     if state.phase is not expected:
         raise ValueError(f"expected phase {expected.value}, received {state.phase.value}")
+
+
+def _replace_state(
+    state: RecoverabilityState,
+    **changes: object,
+) -> RecoverabilityState:
+    """Perform an internal transition while retaining construction authority."""
+
+    return replace(state, _admission_seal=_STATE_ADMISSION_SEAL, **changes)

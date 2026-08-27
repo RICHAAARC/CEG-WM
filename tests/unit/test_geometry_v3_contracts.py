@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
+
+import cegwm.geometry_v3 as geometry_v3
 
 from cegwm.geometry_v3.contracts import (
     ANCHOR_DOMAIN_ID,
@@ -136,7 +138,28 @@ def test_public_contract_cannot_substitute_an_underived_anchor() -> None:
             domain_id=ANCHOR_DOMAIN_ID,
             points=derived.points,
             public_digest=derived.public_digest,
-            _derivation_token=object(),
+            _derivation_seal=object(),
+        )
+
+
+@pytest.mark.unit
+def test_dataclasses_replace_cannot_inherit_anchor_derivation_authority() -> None:
+    derived = _anchor()
+    changed_points = ((derived.points[0][0] + 1e-6, derived.points[0][1]),) + (
+        derived.points[1:]
+    )
+    with pytest.raises(ValueError, match="InitVar.*derivation_seal"):
+        replace(
+            derived,
+            points=changed_points,
+            public_digest="0" * 64,
+        )
+    with pytest.raises(ValueError, match="keyed derivation"):
+        replace(
+            derived,
+            points=changed_points,
+            public_digest="0" * 64,
+            _derivation_seal=object(),
         )
 
 
@@ -349,6 +372,14 @@ def test_reliability_policy_is_frozen_before_observation_and_cannot_be_lowered()
     assert estimate.reliability_policy == policy
     assert estimate.anchor_identity == observed.anchor_identity
     assert estimate.reliable is False
+    with pytest.raises(ValueError, match="InitVar.*admission_seal"):
+        replace(observed, reliability_policy=_policy(0.1, 0.1))
+    with pytest.raises(ValueError, match="start_recoverability"):
+        replace(
+            observed,
+            reliability_policy=_policy(0.1, 0.1),
+            _admission_seal=object(),
+        )
 
 
 @pytest.mark.unit
@@ -450,3 +481,64 @@ def test_corners_and_homography_are_constrained() -> None:
             support_fraction=1.0,
             reliability_score=1.0,
         )
+
+
+@pytest.mark.unit
+def test_package_level_reliability_policy_runs_the_complete_public_chain() -> None:
+    anchor = geometry_v3.derive_canonical_relation_anchor(KEY_A, point_count=8)
+    policy = geometry_v3.ReliabilityPolicy(
+        protocol_id="geometry-v3-package-reliability-v1",
+        minimum_support_fraction=0.7,
+        minimum_reliability=0.8,
+    )
+    declaration = geometry_v3.declare_writer_contract(
+        canonical_anchor=anchor,
+        placements=(
+            geometry_v3.WriterPlacement(
+                "transformer_blocks.4.attn",
+                geometry_v3.FeatureRole.QUERY,
+            ),
+        ),
+        budget=geometry_v3.WriterBudget(0.002, 0.001),
+        placement_basis=geometry_v3.PlacementBasis.INDEPENDENT_PREDECLARED,
+        placement_protocol_id="geometry-v3-package-placement-v1",
+        interference_test_protocol_id="geometry-v3-package-interference-v1",
+    )
+    binding = geometry_v3.ContentDetectorBinding(
+        "content-detector-v1",
+        "content-key-semantics-v1",
+        "content-preprocessing-v1",
+        "content-threshold-v1",
+    )
+    state = geometry_v3.start_recoverability(
+        declaration,
+        canonical_anchor=anchor,
+        reliability_policy=policy,
+        detector_binding=binding,
+    )
+    state = geometry_v3.record_final_rgb(state, final_rgb_id="package-final-rgb")
+    state = geometry_v3.record_attacked_rgb(
+        state,
+        attacked_rgb_id="package-attacked-rgb",
+    )
+    state = geometry_v3.record_fresh_qk_observation(
+        state,
+        observation_id="package-fresh-qk",
+        attacked_rgb_id="package-attacked-rgb",
+        canonical_anchor=anchor,
+        provenance=geometry_v3.ObservationProvenance.FRESH_ATTACKED_RGB_QK,
+    )
+    estimate = geometry_v3.make_geometry_estimate(
+        state,
+        corners=((0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)),
+        homography=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+        support_fraction=0.9,
+        reliability_score=0.9,
+    )
+    state = geometry_v3.record_geometry_estimate(state, estimate)
+    final_state, authorization = geometry_v3.authorize_rectification(
+        state,
+        detector_binding_after_rectification=binding,
+    )
+    assert final_state.phase is geometry_v3.RecoverabilityPhase.RECTIFICATION_AUTHORIZED
+    assert authorization.detector_binding == binding
