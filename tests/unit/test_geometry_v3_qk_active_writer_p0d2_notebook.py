@@ -16,7 +16,7 @@ RUNNER = (
     / "experiments"
     / "run_geometry_v3_qk_active_writer_p0d2.py"
 )
-RUNNER_EXACT = "199b2adbd871d87756bc770e6e213d8840feb968"
+RUNNER_EXACT = "a27a940ae1ef4d1141925c6304caab55b89ec999"
 
 
 def _code_cells() -> list[str]:
