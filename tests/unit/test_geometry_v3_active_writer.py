@@ -12,6 +12,7 @@ from cegwm.geometry_v3.active_writer import (
     P0_INFERENCE_STEPS,
     P0_PLACEMENT_BLOCKS,
     P0_Q_DIAGNOSTIC_CHECKPOINTS,
+    P0D2_Q_DIAGNOSTIC_CHECKPOINTS,
     P0_WRITER_STEP_INDEX,
     canonical_qk_pattern,
 )
@@ -175,8 +176,6 @@ def test_q_diagnostic_observer_is_default_off_and_semantically_neutral() -> None
         "q_base_rms_validated",
         "q_delta_materialized",
         "q_ratio_validated",
-        "q_initial_budget_comparison_completed",
-        "q_hard_budget_accepted",
         "q_budget_validated",
         "q_measurement_recorded",
     ]
@@ -193,8 +192,6 @@ def test_q_diagnostic_observer_is_default_off_and_semantically_neutral() -> None
         "q_base_rms_validated",
         "q_delta_materialized",
         "q_ratio_validated",
-        "q_initial_budget_comparison_completed",
-        "q_hard_budget_accepted",
         "q_budget_validated",
         "q_measurement_recorded",
     ),
@@ -218,8 +215,6 @@ def test_q_diagnostic_observer_reports_only_completed_production_checkpoints(
         "q_base_rms_validated",
         "q_delta_materialized",
         "q_ratio_validated",
-        "q_initial_budget_comparison_completed",
-        "q_hard_budget_accepted",
         "q_budget_validated",
         "q_measurement_recorded",
     ]
@@ -235,6 +230,7 @@ def _invoke_q_hook_with_output(output: torch.Tensor, observer):
         P0_CONFIGS[0],
         derive_canonical_relation_anchor("geometry-key-0001", point_count=16),
         q_diagnostic_observer=observer,
+        q_diagnostic_checkpoints=P0D2_Q_DIAGNOSTIC_CHECKPOINTS,
     )
     session._armed = True
     session._current_transformer_call = P0_WRITER_STEP_INDEX

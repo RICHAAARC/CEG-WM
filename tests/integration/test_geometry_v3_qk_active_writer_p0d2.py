@@ -167,7 +167,7 @@ def test_real_production_super_hook_completes_each_accepted_branch(
 
     assert result.status == RUNNER.P0D2_STATUS_COMPLETE
     assert result.failure_point == "none"
-    for checkpoint in RUNNER.P0_Q_DIAGNOSTIC_CHECKPOINTS:
+    for checkpoint in RUNNER.P0D2_Q_DIAGNOSTIC_CHECKPOINTS:
         assert result.counters[f"{checkpoint}_count"] == int(
             checkpoint in expected_path
         )
@@ -212,7 +212,7 @@ def test_correction_branch_adjacent_stops_retain_only_completed_checkpoints(
     assert result.failure_point == "pipeline_callback"
     assert result.error_class == "runtime_error"
     stop_index = CORRECTION_ACCEPTED_PATH.index(stop_checkpoint)
-    for checkpoint in RUNNER.P0_Q_DIAGNOSTIC_CHECKPOINTS:
+    for checkpoint in RUNNER.P0D2_Q_DIAGNOSTIC_CHECKPOINTS:
         expected = checkpoint in CORRECTION_ACCEPTED_PATH[: stop_index + 1]
         assert result.counters[f"{checkpoint}_count"] == int(expected)
     assert result.counters["block4_to_k_injection_count"] == 0

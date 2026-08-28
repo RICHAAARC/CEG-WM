@@ -23,7 +23,7 @@ from cegwm.geometry_v3.active_writer import (
     P0_IMAGE_SIZE,
     P0_INFERENCE_STEPS,
     P0_MODEL_ID,
-    P0_Q_DIAGNOSTIC_CHECKPOINTS,
+    P0D2_Q_DIAGNOSTIC_CHECKPOINTS,
     P0_SEED,
     P0WriterConfig,
 )
@@ -62,7 +62,7 @@ COUNTER_NAMES = (
     "block4_to_k_hook_hit_count",
     "block4_to_q_injection_count",
     "block4_to_k_injection_count",
-    *(f"{checkpoint}_count" for checkpoint in P0_Q_DIAGNOSTIC_CHECKPOINTS),
+    *(f"{checkpoint}_count" for checkpoint in P0D2_Q_DIAGNOSTIC_CHECKPOINTS),
     "session_completion_count",
     "final_rgb_validation_count",
 )
@@ -95,11 +95,12 @@ class DiagnosticWriterSession(ActiveQKWriterSession):
             P0D2_CONFIG,
             anchor,
             q_diagnostic_observer=self._record_q_checkpoint,
+            q_diagnostic_checkpoints=P0D2_Q_DIAGNOSTIC_CHECKPOINTS,
         )
 
     def _record_q_checkpoint(self, checkpoint: str) -> None:
         name = f"{checkpoint}_count"
-        if checkpoint not in P0_Q_DIAGNOSTIC_CHECKPOINTS or name not in self._diagnostic_counts:
+        if checkpoint not in P0D2_Q_DIAGNOSTIC_CHECKPOINTS or name not in self._diagnostic_counts:
             raise RuntimeError("P0D2 Q checkpoint differs from the finite public roster")
         if self._diagnostic_counts[name] != 0:
             raise RuntimeError("P0D2 Q checkpoint was repeated")

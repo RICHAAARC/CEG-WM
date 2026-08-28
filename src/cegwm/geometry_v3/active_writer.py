@@ -31,6 +31,15 @@ P0_Q_DIAGNOSTIC_CHECKPOINTS = (
     "q_base_rms_validated",
     "q_delta_materialized",
     "q_ratio_validated",
+    "q_budget_validated",
+    "q_measurement_recorded",
+)
+P0D2_Q_DIAGNOSTIC_CHECKPOINTS = (
+    "q_output_contract_pass",
+    "q_pattern_materialized",
+    "q_base_rms_validated",
+    "q_delta_materialized",
+    "q_ratio_validated",
     "q_initial_budget_comparison_completed",
     "q_correction_branch_entered",
     "q_corrected_output_materialized",
@@ -182,6 +191,7 @@ class ActiveQKWriterSession:
         anchor: CanonicalRelationAnchor,
         *,
         q_diagnostic_observer: Callable[[str], None] | None = None,
+        q_diagnostic_checkpoints: Sequence[str] = P0_Q_DIAGNOSTIC_CHECKPOINTS,
     ) -> None:
         self.transformer = transformer
         self.config = config
@@ -193,12 +203,20 @@ class ActiveQKWriterSession:
         self._callback_steps: list[int] = []
         self._measurements: dict[str, WriterInjectionMeasurement] = {}
         self._q_diagnostic_observer = q_diagnostic_observer
+        self._q_diagnostic_checkpoints = tuple(q_diagnostic_checkpoints)
+        if self._q_diagnostic_checkpoints not in {
+            P0_Q_DIAGNOSTIC_CHECKPOINTS,
+            P0D2_Q_DIAGNOSTIC_CHECKPOINTS,
+        }:
+            raise ValueError("P0 Q diagnostic checkpoint roster is not public")
 
     def _observe_q_checkpoint(self, kind: str, checkpoint: str) -> None:
         if kind != "q" or self._q_diagnostic_observer is None:
             return
-        if checkpoint not in P0_Q_DIAGNOSTIC_CHECKPOINTS:
+        if checkpoint not in P0D2_Q_DIAGNOSTIC_CHECKPOINTS:
             raise RuntimeError("P0 Q diagnostic checkpoint is not public")
+        if checkpoint not in self._q_diagnostic_checkpoints:
+            return
         self._q_diagnostic_observer(checkpoint)
 
     @property
