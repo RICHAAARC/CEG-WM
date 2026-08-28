@@ -95,4 +95,3 @@ def test_notebook_plan_is_single_fixed_execution_without_method_choices() -> Non
         "selection",
     ):
         assert forbidden not in plan_block.lower()
-
