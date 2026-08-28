@@ -18,7 +18,7 @@ def test_n0_notebook_is_exact_bound_single_runner_create_only_handoff() -> None:
     assert cells[0]["source"] == ["from google.colab import drive\n", "drive.mount('/content/drive')\n"]
     source = "".join("".join(cell.get("source", [])) for cell in cells)
     match = re.search(r"N0_RUNNER_EXACT = '([^']+)'", source)
-    assert match and (match.group(1) == "TO_BE_BOUND_AFTER_IMPLEMENTATION_COMMIT" or re.fullmatch(r"[0-9a-f]{40}", match.group(1)))
+    assert match and match.group(1) == "054953fe20d717faf740ba4e51a71d9b21e8f44a"
     assert "git', 'checkout', '--detach', N0_RUNNER_EXACT" in source
     assert "execution_commit != N0_RUNNER_EXACT" in source and "git_output(repo, 'status', '--porcelain')" in source
     assert source.count("subprocess.Popen(") == 1 and "RUNNER_ATTEMPTED" in source
