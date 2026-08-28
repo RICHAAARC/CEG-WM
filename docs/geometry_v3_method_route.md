@@ -7,11 +7,13 @@
 - Route role: active keyed geometric synchronization through a canonical
   relation anchor written into predeclared SD3.5 Q/K/attention feature
   placements.
-- Current delivery: local P0 active-writer discovery implementation plus
-  deterministic fake/CPU contract tests. The real model path remains unrun.
-- Evidence ceiling: engineering structure and deterministic contract tests.
-  No SD3.5 runtime artifact, recoverability result, detector result, watermark
-  result, or scientific conclusion exists at this stage.
+- Current delivery: the P0 active-writer discovery implementation has one real
+  SD3.5 operational artifact, followed by a bounded P0D single-configuration
+  diagnostic implementation.
+- Evidence ceiling: the real P0 artifact is controlled operational evidence
+  with `science_denominator=0`; P0D local fake/CPU/static results are
+  engineering evidence until a separately authorized real run. Neither class
+  is a recoverability, detector, watermark, or scientific conclusion.
 
 Geometry can recover coordinates only. It has no authority to create a
 positive watermark decision. Any image rectified by this route must be judged
@@ -66,6 +68,19 @@ The frozen phase order is:
 Detection must not consume original RGB, embedding records, embedding latent,
 embed-side routes, or cached embedding Q/K. The scaffold records only public
 identities and geometric estimates; it does not carry raw Q/K tensors.
+
+The complete intended method route is therefore fixed as follows. A
+domain-separated geometry root/key derives V3 key material and a two-dimensional
+keyed canonical relation anchor. Generation writes that anchor only at an
+independently predeclared SD3.5 Q/K/attention placement under a hard budget and
+an independent content-interference check. The final RGB is attacked by the
+predeclared attack roster. Detection reconstructs fresh Q/K from that attacked
+RGB alone and aligns it to the keyed canonical anchor to estimate corners, H,
+support, and reliability. Reliability fails closed. Only a reliable estimate
+may authorize rectification, after which the unchanged content detector must
+run with the same content key, preprocessing identity, and frozen threshold.
+Geometry has coordinate authority only and cannot produce positive content
+watermark evidence.
 
 ## Reliability and decision boundary
 
@@ -126,10 +141,43 @@ images, prompts, keys, raw anchors, Q/K, latents, weights and private paths.
 
 ## Next separately authorized work
 
-The P0 implementation is ready only for separate exact-bound real execution.
-Any later confirmation must use new generation and attack instances with the
-single P0 candidate frozen and no reselection. It must preserve retained
-failures, bounded artifacts and the same coordinate-only evidence ceiling.
+### Real P0 operational state
+
+The completed real P0 run retained its fixed 144-unit roster as 0 calculated
+and 144 failed units. It stopped at the public `writer_generation` boundary;
+all six writer configurations retained `runtime_error`, while writer
+measurements, interference records, fresh attacked-RGB Q/K observations, and
+candidate selection were not reached. Its status is `P0_STOPPED` with
+`science_denominator=0`. This is a complete controlled-failure artifact, not a
+failure adjudication of the keyed-Q/K-anchor method, and the same full P0 exact
+must not be rerun unchanged.
+
+### P0D single-configuration diagnostic
+
+The next operational protocol is
+`geometry-v3-keyed-qk-active-writer-p0d-v1`. It freezes exactly one run of
+`block4-qk-rms0p0025`; it has no baseline substitute, alternate placement,
+alternate budget, retry, fallback, or candidate selection. It reuses the P0
+writer semantics and exposes only these bounded public facts:
+
+1. pipeline-load and writer-session setup counts;
+2. denoising callback count and whether transformer call 18 was reached;
+3. transformer-root call count;
+4. block-4 `to_q`/`to_k` hook-hit and injection counts;
+5. session-completion and final-RGB-validation counts;
+6. one finite failure-point enum and generic error class.
+
+The only statuses are `P0D_STOPPED` and `P0D_DIAGNOSTIC_COMPLETE`, always with
+`science_denominator=0`. Create-only receipt, manifest, and terminal artifacts
+exclude exception text, tensors, raw Q/K, anchor material, latent, prompt text,
+geometry key, Hugging Face token, model weights, and private paths. P0D does not
+attack RGB, observe fresh Q/K, select a writer, or make a scientific decision.
+
+After writer generation is mechanically repaired, P0 discovery may be run
+under a separately reviewed exact. Only after it freezes one placement and
+budget may an independent confirmation use new generation and attack instances
+with no reselection. It must preserve retained failures, bounded artifacts, and
+the same coordinate-only evidence ceiling.
 
 Real SD3.5, GPU, Colab, Drive, Hugging Face access, push, formal evaluation,
-and scientific adjudication remain outside this scaffold delivery.
+and scientific adjudication remain separately authorized actions.
