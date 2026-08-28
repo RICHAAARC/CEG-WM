@@ -92,6 +92,27 @@ class WriterInjectionMeasurement:
     writer_step_index: int
 
 
+@dataclass(frozen=True, slots=True)
+class WriterScalarObservation:
+    """Bounded public scalars from the transient production writer hook."""
+
+    feature_kind: str
+    module_path: str
+    writer_step_index: int
+    token_grid_side: int
+    token_count: int
+    channel_count: int
+    spatial_axis: str
+    normalization: str
+    injection_sign: str
+    contract_pass: bool
+    pre_correct_correlation: float
+    pre_wrong_correlation: float
+    post_correct_correlation: float
+    post_wrong_correlation: float
+    actual_relative_rms: float
+
+
 def _project_final_dtype_hard_budget(
     output: torch.Tensor,
     direction_delta: torch.Tensor,
@@ -240,6 +261,8 @@ class ActiveQKWriterSession:
         *,
         q_diagnostic_observer: Callable[[str], None] | None = None,
         q_diagnostic_checkpoints: Sequence[str] = P0_Q_DIAGNOSTIC_CHECKPOINTS,
+        scalar_observer: Callable[[WriterScalarObservation], None] | None = None,
+        scalar_wrong_anchor: CanonicalRelationAnchor | None = None,
     ) -> None:
         self.transformer = transformer
         self.config = config
@@ -252,6 +275,10 @@ class ActiveQKWriterSession:
         self._measurements: dict[str, WriterInjectionMeasurement] = {}
         self._q_diagnostic_observer = q_diagnostic_observer
         self._q_diagnostic_checkpoints = tuple(q_diagnostic_checkpoints)
+        self._scalar_observer = scalar_observer
+        self._scalar_wrong_anchor = scalar_wrong_anchor
+        if (scalar_observer is None) != (scalar_wrong_anchor is None):
+            raise ValueError("P1M0 scalar observer and wrong anchor must be enabled together")
         if self._q_diagnostic_checkpoints not in {
             P0_Q_DIAGNOSTIC_CHECKPOINTS,
             P0D2_Q_DIAGNOSTIC_CHECKPOINTS,
@@ -362,6 +389,47 @@ class ActiveQKWriterSession:
                 call_count=1,
                 writer_step_index=P0_WRITER_STEP_INDEX,
             )
+            if self._scalar_observer is not None:
+                wrong_pattern = canonical_qk_pattern(
+                    self._scalar_wrong_anchor,
+                    output,
+                    module_path=module_path,
+                )
+                token_count, channel_count = int(output.shape[-2]), int(output.shape[-1])
+                token_grid_side = math.isqrt(token_count)
+                pattern32 = pattern.detach().to(torch.float32)
+                pattern_mean = float(pattern32.mean())
+                pattern_rms = float(torch.sqrt(torch.mean(pattern32.square())))
+                signed_projection = float(torch.sum(actual_delta * pattern32))
+                contract_pass = (
+                    kind in {"q", "k"}
+                    and module_path == f"{self.config.layer_path}.to_{kind}"
+                    and token_grid_side * token_grid_side == token_count
+                    and channel_count >= 2
+                    and math.isfinite(pattern_mean)
+                    and abs(pattern_mean) <= 1e-5
+                    and math.isfinite(pattern_rms)
+                    and abs(pattern_rms - 1.0) <= 1e-4
+                    and math.isfinite(signed_projection)
+                    and signed_projection > 0.0
+                )
+                self._scalar_observer(WriterScalarObservation(
+                    feature_kind=kind,
+                    module_path=module_path,
+                    writer_step_index=P0_WRITER_STEP_INDEX,
+                    token_grid_side=token_grid_side,
+                    token_count=token_count,
+                    channel_count=channel_count,
+                    spatial_axis="row_major_yx",
+                    normalization="zero_mean_unit_rms",
+                    injection_sign="positive",
+                    contract_pass=contract_pass,
+                    pre_correct_correlation=normalized_pattern_correlation(output, pattern),
+                    pre_wrong_correlation=normalized_pattern_correlation(output, wrong_pattern),
+                    post_correct_correlation=normalized_pattern_correlation(injected, pattern),
+                    post_wrong_correlation=normalized_pattern_correlation(injected, wrong_pattern),
+                    actual_relative_rms=actual,
+                ))
             self._observe_q_checkpoint(kind, "q_measurement_recorded")
             return injected
 

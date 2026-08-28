@@ -7,6 +7,8 @@ import pytest
 import torch
 from PIL import Image
 
+import cegwm.geometry_v3.active_writer as ACTIVE
+
 from cegwm.geometry_v3.active_writer import (
     ActiveQKWriterSession,
     P0_CONFIGS,
@@ -429,3 +431,72 @@ def test_final_dtype_projection_fails_closed_without_positive_representable_delt
         assert observed[-1] == "q_hard_budget_rejected"
         assert "q_hard_budget_accepted" not in observed
         assert "q_measurement_recorded" not in observed
+
+
+def _independent_normalized_correlation(value: torch.Tensor, pattern: torch.Tensor) -> float:
+    left = value.detach().to(torch.float64)
+    right = pattern.detach().to(torch.float64)
+    left = left - left.mean(dim=(-2, -1), keepdim=True)
+    right = right - right.mean(dim=(-2, -1), keepdim=True)
+    return float(torch.sum(left * right) / torch.sqrt(torch.sum(left.square()) * torch.sum(right.square())))
+
+
+@pytest.mark.unit
+def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8)
+    correct = torch.arange(16 * 8, dtype=torch.float32).reshape(1, 16, 8)
+    correct = correct - correct.mean()
+    correct = correct / torch.sqrt(torch.mean(correct.square()))
+    wrong = torch.flip(correct, dims=(-1,))
+    correct_anchor = derive_canonical_relation_anchor("geometry-key-0001", point_count=16)
+    wrong_anchor = derive_canonical_relation_anchor("geometry-key-0002", point_count=16)
+
+    def fixed_pattern(anchor, like, *, module_path, transformed_points=None):
+        del like, module_path, transformed_points
+        return correct if anchor == correct_anchor else wrong
+
+    monkeypatch.setattr(ACTIVE, "canonical_qk_pattern", fixed_pattern)
+    observations = []
+    transformer = _Transformer()
+    session = ActiveQKWriterSession(
+        transformer, P0_CONFIGS[0], correct_anchor,
+        scalar_observer=observations.append, scalar_wrong_anchor=wrong_anchor,
+    )
+    session._armed = True
+    session._current_transformer_call = P0_WRITER_STEP_INDEX
+    injected = session._feature_hook("q", "transformer_blocks.4.attn.to_q")(None, (), output)
+
+    assert len(observations) == 1
+    observed = observations[0]
+    assert observed.contract_pass is True
+    assert observed.feature_kind == "q"
+    assert observed.module_path == "transformer_blocks.4.attn.to_q"
+    assert observed.spatial_axis == "row_major_yx"
+    assert observed.normalization == "zero_mean_unit_rms"
+    assert observed.injection_sign == "positive"
+    assert (observed.token_grid_side, observed.token_count, observed.channel_count) == (4, 16, 8)
+    assert observed.pre_correct_correlation == pytest.approx(
+        _independent_normalized_correlation(output, correct), abs=1e-7,
+    )
+    assert observed.pre_wrong_correlation == pytest.approx(
+        _independent_normalized_correlation(output, wrong), abs=1e-7,
+    )
+    assert observed.post_correct_correlation == pytest.approx(
+        _independent_normalized_correlation(injected, correct), abs=1e-7,
+    )
+    assert observed.post_wrong_correlation == pytest.approx(
+        _independent_normalized_correlation(injected, wrong), abs=1e-7,
+    )
+    assert 0.0 < observed.actual_relative_rms <= 0.0025 * 1.0002
+
+
+@pytest.mark.unit
+def test_scalar_observer_requires_paired_wrong_anchor() -> None:
+    with pytest.raises(ValueError, match="enabled together"):
+        ActiveQKWriterSession(
+            _Transformer(), P0_CONFIGS[0],
+            derive_canonical_relation_anchor("geometry-key-0001", point_count=16),
+            scalar_observer=lambda _: None,
+        )

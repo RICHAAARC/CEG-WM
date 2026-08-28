@@ -336,3 +336,44 @@ stopped exact, and scientific adjudication remain outside this route.
 
 Real SD3.5, GPU, Colab, Drive, Hugging Face access, push, formal evaluation,
 and scientific adjudication remain separately authorized actions.
+
+## P1M0 posterior mechanism audit
+
+The diagnostic protocol
+`geometry-v3-keyed-qk-canonical-anchor-p1m0-mechanism-audit-v1` follows the
+independent P1 operational result without reopening discovery or advancing to
+blind coordinate recovery. Before model loading it validates the immutable P0
+and P1 receipt, manifest, terminal, metrics, hashes, byte counts, roster and
+zero-denominator identities. It retains the selected P0 configuration's 24
+public score components, all 24 P1 public score components, and the six
+identity-control differences labelled only as `two_instance_displacement`.
+Two instances do not establish a population variance.
+
+P1M0 fixes `block12-qk-rms0p0025`, writer step 18, identity geometry, one new
+public prompt identity and seed. It performs exactly one paired no-writer
+generation and one writer generation. It cannot retry, switch placement or
+budget, select a candidate, tune a threshold, or use another attack. A
+default-disabled production writer observer may retain only bounded public
+scalars and contract facts: pre/post correct- and wrong-anchor normalized
+correlations, actual relative RMS, Q/K module identity, row-major y/x token
+axis, square token-grid and channel counts, zero-mean unit-RMS normalization,
+positive injection sign, and finite booleans.
+
+Writer-step-18 and final predecode latents are transient in-process snapshots.
+They and the final RGB re-encode are each observed under the same frozen fresh
+noise, timestep and zero-text contract. The paired no-writer path is observed
+at the same three stages. Public output contains only derived scores,
+writer-versus-control separation, and stage-to-stage score changes. It cannot
+contain images, Q/K, latents, anchor or pattern material, prompt text, keys,
+tokens, model weights, exception text, or private paths.
+
+The predeclared diagnostic statuses are limited to
+`P1M0_IMPLEMENTATION_MISMATCH_INDICATED`,
+`P1M0_OBSERVABILITY_INSUFFICIENCY_INDICATED`, `P1M0_INCONCLUSIVE`, and
+`P1M0_STOPPED`. A mismatch indication requires a public layout,
+normalization, module, or positive-injection-sign contract failure.
+Observability insufficiency requires all such contracts to pass, positive Q
+and K writer-hook lifts, and nonpositive Q and K separation after final-RGB
+re-encoding. Every other complete pattern is inconclusive. These are
+mechanism-diagnostic indications, not method, detector, watermark, or
+scientific success/failure. `science_denominator=0` remains fixed.
