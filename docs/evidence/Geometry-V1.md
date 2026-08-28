@@ -9,52 +9,44 @@
 - Scientific denominator: `0`
 - Semantics-freeze exact: `95dd416d541450145436b685897d5ee210eb04e5`
 
-Geometry-V1 records whether natural Q/K observations retain useful geometric direction under the frozen operational protocols. Geometry only provides coordinate-recovery evidence and cannot create a positive watermark decision. All entries below are operational evidence; none is a scientific conclusion or a claim of method or detector success.
+Geometry-V1 records bounded operational coordinate-recovery observations. Geometry cannot create a positive watermark decision. The evidence branch remains separate from Geometry-V1.
 
-## Evidence summary
+## Stage results
 
-| Stage | Protocol | Runner exact | Run | Public result |
-| --- | --- | --- | --- | --- |
-| D0 | `geometry-v1-qk-d0-all-layer-discovery-v1` | `4732211beefbeface95cb842c117b9719e362f1a` | `geometry-v1-qk-d0-4732211beefb` | 24 shards x 32 = 768 calculated, 0 failed; `D0_UNRESOLVED` |
-| D0.1 | `geometry-v1-qk-d01-artifact-selection-v1` | `ccfb7bcefbb18f9812a4e800bbea18b91b031ebb` | `geometry-v1-qk-d01-ccfb7bcefbb1` | 768 source units; ordered layers 6, 13, 18; `D01_CANDIDATES_FROZEN` |
-| D0.2 | `geometry-v1-qk-direction-all-layer-selection-v1` | `41742d462d62525189855c8ebb2ee1995fb9230a` | `geometry-v1-qk-direction-all-layer-41742d462d62` | 768 source units; ordered layers 23, 14; `DIRECTION_TWO_CANDIDATES_FROZEN` |
-| D1 | `geometry-v1-qk-d1-independent-confirmation-v1` | `69171346d8fe8889dc2202d4f34c1cd4a834be34` | `geometry-v1-qk-d1-69171346d8fe` | 96/96 calculated, 0 failed; `D1_UNRESOLVED` |
-| D2 | `geometry-v1-qk-d2-independent-confirmation-v1` | `d54492044e7789da3883fc75e2075a253ac22c75` | `geometry-v1-qk-d2-d54492044e77` | 2 shards x 32 = 64 calculated, 0 failed; `D2_UNRESOLVED` |
+| Stage | Units | Frozen public state | Drive folder |
+| --- | ---: | --- | --- |
+| D0 | 768/768 calculated, 0 failed | `D0_UNRESOLVED`; 24 ordered layer shards | [artifact](https://drive.google.com/drive/folders/1swYs6hQUQYsDWA6vBNPLJT7aPSJJIp1E) |
+| D0.1 | 768 audited | `D01_CANDIDATES_FROZEN`; layers 6, 13, 18 | [artifact](https://drive.google.com/drive/folders/1DXelqcoC6LLJ-TmFVPuog-aXQVk3fkWk) |
+| D0.2 | 768 audited | `DIRECTION_TWO_CANDIDATES_FROZEN`; layers 23, 14 | [artifact](https://drive.google.com/drive/folders/1EfpzIO-ENWDHGlSTlo5NCHTkvgQmvkkm) |
+| D1 | 96/96 calculated, 0 failed | `D1_UNRESOLVED` | [artifact](https://drive.google.com/drive/folders/1ye3mFWkF6JJqJQg1IhSldIMqUEOCSvc6) |
+| D2 | 64/64 calculated, 0 failed | `D2_UNRESOLVED` | [artifact](https://drive.google.com/drive/folders/1QbtPkS2l5phSNDkWLdOKyrQDyiNLZz2y) |
 
-## Bound identities
+D0 plan digest is `96e1e5ae6fb8ae66a545b1b10d6c896176989272c81ef1fd737184dcdfaea7b8`; roster digest is `88850de32ae0783427f86d0a5c82c6272a30811931ca0f883f6888cf8b83ac9e`.
 
-D0 used plan digest `96e1e5ae6fb8ae66a545b1b10d6c896176989272c81ef1fd737184dcdfaea7b8` and roster digest `88850de32ae0783427f86d0a5c82c6272a30811931ca0f883f6888cf8b83ac9e`.
+## Detailed comparison data
 
-D0.1 froze the ordered observations `transformer_blocks.6.attn`, `transformer_blocks.13.attn`, and `transformer_blocks.18.attn` from the immutable 768-unit D0 source.
+The bounded package adds:
 
-D0.2 performed artifact-only all-layer direction selection over the immutable 768-unit D0 source. It froze the ordered observations `transformer_blocks.23.attn` and `transformer_blocks.14.attn`; this stage is selection evidence, not confirmation evidence.
+- `data/provenance.json`: Drive folder, sidecar, and shard metadata plus read-only validation facts.
+- `data/comparison_records.jsonl`: one deterministic public-derived statistic per line.
+- `data/comparison_summary.json`: the 24-layer D0/D0.1/D0.2 table and focused 6/13/18/14/23 cross-stage view.
 
-D1 reported the following frozen layer-kind statistics:
+D0.2 contributes all 24 layers, Q/K aggregate direction values, eight pair medians per layer-kind, per-transform two-reference statistics, common-finite support, eligibility, selected state, and route audit. D1 and D2 contribute their public layer-kind, pair, and available per-transform statistics. D0 contributes only the aggregate and shard facts present in its public receipt. D0.1 contributes finite/null support, record counts, eligibility, frozen selected state, and its opaque public selection tuple.
 
-| Layer | Q | K |
-| --- | ---: | ---: |
-| 6 | 0 | 0 |
-| 13 | -1 | -0.75 |
-| 18 | -0.75 | -0.25 |
+The D0.2 public receipt does not expose coverage, recovery error, fit residual, ambiguity gap, or layer-level null counts. These fields are explicitly marked unavailable rather than reconstructed. Selection observations and confirmation observations remain distinct.
 
-D2 used plan digest `81394d4bd2ed9e437a8914c707b3dca60cb0842c67f79c716b39b5b8610db310` and the ordered observations 23 and 14. Its independently audited frozen statistics were:
+## Focus comparison
 
-| Layer | Q | K |
-| --- | ---: | ---: |
-| 23 | -3.5 | 0.0 |
-| 14 | -3.5 | -3.5 |
+| Layer | D0.1 selected | D0.2 Q/K | D0.2 selected | D1 Q/K | D2 Q/K |
+| ---: | --- | --- | --- | --- | --- |
+| 6 | yes | -2.75 / -2.25 | no | 0 / 0 | — |
+| 13 | yes | -5.5 / -4 | no | -1 / -0.75 | — |
+| 18 | yes | -8 / -8 | no | -0.75 / -0.25 | — |
+| 14 | no | -9.25 / -8.75 | yes | — | -3.5 / -3.5 |
+| 23 | no | -15 / -10 | yes | — | -3.5 / 0 |
 
-The frozen D2 rule requires all four statistics to be strictly below zero. The sole unmet term was layer 23 K at `0.0`. Similarity and crop-rescale each reported zero across all four layer-kind cells, and `route_level_transform_instability` was `true`.
-
-## Public artifact locations
-
-- D1 folder: https://drive.google.com/drive/folders/1ye3mFWkF6JJqJQg1IhSldIMqUEOCSvc6
-- D2 folder: https://drive.google.com/drive/folders/1QbtPkS2l5phSNDkWLdOKyrQDyiNLZz2y
-- D2 layer 23 shard, 58,142 bytes: https://drive.google.com/file/d/1zwkGICM-WxusY9cJ-xCLhJ47hyZZ73Cb/view
-- D2 layer 14 shard, 58,579 bytes: https://drive.google.com/file/d/12psW3azzr2Ie3SU1sh8GIWBSScj6rr68/view
-
-No trusted folder URL was supplied for D0, D0.1, or D0.2. No trusted artifact hash was supplied for the listed Drive artifacts, so the machine-readable index records those fields as `null` rather than inferring them.
+D2's frozen rule requires all four layer-kind statistics to be strictly negative. Layer 23 K is `0`; similarity and crop-rescale are `0` in all four D2 layer-kind cells, and the public route audit records `route_level_transform_instability=true`.
 
 ## Evidence ceiling
 
-This package records bounded public operational observations only. The route remains `OPERATIONAL_UNRESOLVED` with `science_denominator=0`. It does not establish geometric reliability, content detection, watermark attribution, or scientific success.
+This package is operational evidence only. The route remains `OPERATIONAL_UNRESOLVED` with `science_denominator=0`. It does not establish geometric reliability, content detection, watermark attribution, or scientific success.

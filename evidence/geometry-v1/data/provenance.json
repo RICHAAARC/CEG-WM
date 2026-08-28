@@ -1,0 +1,492 @@
+{
+  "schema": "ceg-wm-geometry-v1-drive-provenance-v1",
+  "access": {
+    "mode": "google_drive_connector_read_only",
+    "drive_writes": 0,
+    "zip_content_reads": 0,
+    "sidecar_json_bound_bytes": 131072,
+    "bounded_json_objects_parsed": 15,
+    "pre_extraction_leak_scan": "passed",
+    "source_content_sha256_policy": "null unless an independently stable exact-text representation is available; connector-returned encoded stored content was not promoted to a raw-byte hash"
+  },
+  "stages": [
+    {
+      "stage": "D0",
+      "folder": {
+        "id": "1swYs6hQUQYsDWA6vBNPLJT7aPSJJIp1E",
+        "title": "Geometry-V1-QK-D0-4732211beefb-20260827T064555Z",
+        "url": "https://drive.google.com/drive/folders/1swYs6hQUQYsDWA6vBNPLJT7aPSJJIp1E",
+        "size_bytes": null
+      },
+      "sidecars": [
+        {
+          "role": "receipt",
+          "id": "1VNcmfR5SlWny30SsjkMRyzAH-Y43WUWU",
+          "title": "receipt.json",
+          "url": "https://drive.google.com/file/d/1VNcmfR5SlWny30SsjkMRyzAH-Y43WUWU/view",
+          "size_bytes": 20478,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "manifest",
+          "id": "1KD-K2q94WyTxZ61-XxOifNuajsBtsc8u",
+          "title": "manifest.json",
+          "url": "https://drive.google.com/file/d/1KD-K2q94WyTxZ61-XxOifNuajsBtsc8u/view",
+          "size_bytes": 2606,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "terminal",
+          "id": "1hgnnKehn4YMGLSL2cxo7s9X2tO27mJJZ",
+          "title": "terminal.json",
+          "url": "https://drive.google.com/file/d/1hgnnKehn4YMGLSL2cxo7s9X2tO27mJJZ/view",
+          "size_bytes": 71,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        }
+      ],
+      "layer_shards": [
+        {
+          "id": "1FOBIYpNJ8RBnrtdGU3l3P6AZiU6TdK4J",
+          "title": "00.zip",
+          "url": "https://drive.google.com/file/d/1FOBIYpNJ8RBnrtdGU3l3P6AZiU6TdK4J/view?usp=drivesdk",
+          "size_bytes": 62102,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1jfkfHrxj7IMd0zon_snzZRb7uHRylQwy",
+          "title": "01.zip",
+          "url": "https://drive.google.com/file/d/1jfkfHrxj7IMd0zon_snzZRb7uHRylQwy/view?usp=drivesdk",
+          "size_bytes": 63296,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1HprQUlk10rtBr8L9CTLY_cqbGLGjDs4E",
+          "title": "02.zip",
+          "url": "https://drive.google.com/file/d/1HprQUlk10rtBr8L9CTLY_cqbGLGjDs4E/view?usp=drivesdk",
+          "size_bytes": 62621,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1W5pxQJxlNlGtrsYkYGAWK4d_md5aJ0KW",
+          "title": "03.zip",
+          "url": "https://drive.google.com/file/d/1W5pxQJxlNlGtrsYkYGAWK4d_md5aJ0KW/view?usp=drivesdk",
+          "size_bytes": 63947,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1f7ZjPbMONzzHAEATl8dG25aXNR91lXed",
+          "title": "04.zip",
+          "url": "https://drive.google.com/file/d/1f7ZjPbMONzzHAEATl8dG25aXNR91lXed/view?usp=drivesdk",
+          "size_bytes": 61964,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1HBsqpG0mCp7gmusL19jg_EQmYRLjTps-",
+          "title": "05.zip",
+          "url": "https://drive.google.com/file/d/1HBsqpG0mCp7gmusL19jg_EQmYRLjTps-/view?usp=drivesdk",
+          "size_bytes": 61062,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1gclz9wtMw_qX_I3grhvyOwCQF3_fTFLf",
+          "title": "06.zip",
+          "url": "https://drive.google.com/file/d/1gclz9wtMw_qX_I3grhvyOwCQF3_fTFLf/view?usp=drivesdk",
+          "size_bytes": 60256,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1J41QvfcR2SBzCrrUayl2ezCO_9hXUCN_",
+          "title": "07.zip",
+          "url": "https://drive.google.com/file/d/1J41QvfcR2SBzCrrUayl2ezCO_9hXUCN_/view?usp=drivesdk",
+          "size_bytes": 61167,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1GsQSbIP896I-cg9Abr0xfysdy4Rqrk3-",
+          "title": "08.zip",
+          "url": "https://drive.google.com/file/d/1GsQSbIP896I-cg9Abr0xfysdy4Rqrk3-/view?usp=drivesdk",
+          "size_bytes": 60524,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1jZZUQljoaIwkQ6VKoqZRuQBwnDiXbCAc",
+          "title": "09.zip",
+          "url": "https://drive.google.com/file/d/1jZZUQljoaIwkQ6VKoqZRuQBwnDiXbCAc/view?usp=drivesdk",
+          "size_bytes": 58216,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1bVuphXEDDpgSAs-rYyQeM8z6owD4u6uk",
+          "title": "10.zip",
+          "url": "https://drive.google.com/file/d/1bVuphXEDDpgSAs-rYyQeM8z6owD4u6uk/view?usp=drivesdk",
+          "size_bytes": 60331,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1JXM0liZXeXRlNYDdXyR2AwmofESZWb5I",
+          "title": "11.zip",
+          "url": "https://drive.google.com/file/d/1JXM0liZXeXRlNYDdXyR2AwmofESZWb5I/view?usp=drivesdk",
+          "size_bytes": 59170,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1bLTUXfglt-7PdId__WocLVXJwijP-1bb",
+          "title": "12.zip",
+          "url": "https://drive.google.com/file/d/1bLTUXfglt-7PdId__WocLVXJwijP-1bb/view?usp=drivesdk",
+          "size_bytes": 62466,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1t2l_BM_RFcXxMA-nQM4BreuPKOixVTNq",
+          "title": "13.zip",
+          "url": "https://drive.google.com/file/d/1t2l_BM_RFcXxMA-nQM4BreuPKOixVTNq/view?usp=drivesdk",
+          "size_bytes": 58259,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1kAkJcMd52GMxHUWDDnBb2_dtJyjb-QPg",
+          "title": "14.zip",
+          "url": "https://drive.google.com/file/d/1kAkJcMd52GMxHUWDDnBb2_dtJyjb-QPg/view?usp=drivesdk",
+          "size_bytes": 58363,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1sdAS0mYLjOJCBrZWR0qsiALPuETXWPIk",
+          "title": "15.zip",
+          "url": "https://drive.google.com/file/d/1sdAS0mYLjOJCBrZWR0qsiALPuETXWPIk/view?usp=drivesdk",
+          "size_bytes": 58128,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1YC2UhI9aPL1F8Ap0aYdhSIUexrvN1FaG",
+          "title": "16.zip",
+          "url": "https://drive.google.com/file/d/1YC2UhI9aPL1F8Ap0aYdhSIUexrvN1FaG/view?usp=drivesdk",
+          "size_bytes": 58678,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1hPSDUCQXUZhowGWg0OeCCPJyVRFN9vId",
+          "title": "17.zip",
+          "url": "https://drive.google.com/file/d/1hPSDUCQXUZhowGWg0OeCCPJyVRFN9vId/view?usp=drivesdk",
+          "size_bytes": 59781,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1F3DNmkSqa2DfvLGGu_1adsnzoE1aEF9x",
+          "title": "18.zip",
+          "url": "https://drive.google.com/file/d/1F3DNmkSqa2DfvLGGu_1adsnzoE1aEF9x/view?usp=drivesdk",
+          "size_bytes": 57453,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "115EkUgU6JjrJ9ZiuWzd_eGr5vz6G0JIS",
+          "title": "19.zip",
+          "url": "https://drive.google.com/file/d/115EkUgU6JjrJ9ZiuWzd_eGr5vz6G0JIS/view?usp=drivesdk",
+          "size_bytes": 59539,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1prAhcnw-M1h_wKxEwRodBmrcy3l2fDVc",
+          "title": "20.zip",
+          "url": "https://drive.google.com/file/d/1prAhcnw-M1h_wKxEwRodBmrcy3l2fDVc/view?usp=drivesdk",
+          "size_bytes": 57866,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1UwuNH4rHN1TVTd0qTcnh_1WlHD_5ygJq",
+          "title": "21.zip",
+          "url": "https://drive.google.com/file/d/1UwuNH4rHN1TVTd0qTcnh_1WlHD_5ygJq/view?usp=drivesdk",
+          "size_bytes": 58300,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1gKVpa6SaUqvjTgcCNF6L9Y7feFJJlNA6",
+          "title": "22.zip",
+          "url": "https://drive.google.com/file/d/1gKVpa6SaUqvjTgcCNF6L9Y7feFJJlNA6/view?usp=drivesdk",
+          "size_bytes": 58389,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1EiVQp0dSD1r2HyF3YR0cum21k80j4ata",
+          "title": "23.zip",
+          "url": "https://drive.google.com/file/d/1EiVQp0dSD1r2HyF3YR0cum21k80j4ata/view?usp=drivesdk",
+          "size_bytes": 56878,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        }
+      ],
+      "layers_folder": {
+        "id": "1rJhv4ev3x5cESW8SK0PYaKbSZGOYJ1vZ",
+        "title": "layers",
+        "url": "https://drive.google.com/drive/folders/1rJhv4ev3x5cESW8SK0PYaKbSZGOYJ1vZ",
+        "size_bytes": null
+      }
+    },
+    {
+      "stage": "D0.1",
+      "folder": {
+        "id": "1DXelqcoC6LLJ-TmFVPuog-aXQVk3fkWk",
+        "title": "Geometry-V1-QK-D01-ccfb7bcefbb1-20260827T083601Z",
+        "url": "https://drive.google.com/drive/folders/1DXelqcoC6LLJ-TmFVPuog-aXQVk3fkWk",
+        "size_bytes": null
+      },
+      "sidecars": [
+        {
+          "role": "receipt",
+          "id": "14u0ebNzPosv_iz2MXQWX-CpuAFe9D_zk",
+          "title": "receipt.json",
+          "url": "https://drive.google.com/file/d/14u0ebNzPosv_iz2MXQWX-CpuAFe9D_zk/view",
+          "size_bytes": 7297,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "manifest",
+          "id": "1z9FQec_3Tss8dessFcRGE0_iJFY5LFzf",
+          "title": "manifest.json",
+          "url": "https://drive.google.com/file/d/1z9FQec_3Tss8dessFcRGE0_iJFY5LFzf/view",
+          "size_bytes": 580,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "terminal",
+          "id": "1F9u685c_zPrj2vL3jf0EzYQD-SGl6RN2",
+          "title": "terminal.json",
+          "url": "https://drive.google.com/file/d/1F9u685c_zPrj2vL3jf0EzYQD-SGl6RN2/view",
+          "size_bytes": 105,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        }
+      ],
+      "layer_shards": []
+    },
+    {
+      "stage": "D0.2",
+      "folder": {
+        "id": "1EfpzIO-ENWDHGlSTlo5NCHTkvgQmvkkm",
+        "title": "Geometry-V1-Direction-All-Layer-41742d462d62-20260827T123709Z",
+        "url": "https://drive.google.com/drive/folders/1EfpzIO-ENWDHGlSTlo5NCHTkvgQmvkkm",
+        "size_bytes": null
+      },
+      "sidecars": [
+        {
+          "role": "receipt",
+          "id": "1_zZVs9k0EustrTNiIN1vXkYEgwbk4xRn",
+          "title": "receipt.json",
+          "url": "https://drive.google.com/file/d/1_zZVs9k0EustrTNiIN1vXkYEgwbk4xRn/view",
+          "size_bytes": 79583,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "manifest",
+          "id": "17ZJXHFzWi8_tF-7LNeF5n8HmbUKuK0pR",
+          "title": "manifest.json",
+          "url": "https://drive.google.com/file/d/17ZJXHFzWi8_tF-7LNeF5n8HmbUKuK0pR/view",
+          "size_bytes": 651,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "terminal",
+          "id": "1GGewXnBGy7_7lpGx6jr9oCaYzJwPbyhO",
+          "title": "terminal.json",
+          "url": "https://drive.google.com/file/d/1GGewXnBGy7_7lpGx6jr9oCaYzJwPbyhO/view",
+          "size_bytes": 210,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        }
+      ],
+      "layer_shards": []
+    },
+    {
+      "stage": "D1",
+      "folder": {
+        "id": "1ye3mFWkF6JJqJQg1IhSldIMqUEOCSvc6",
+        "title": "Geometry-V1-QK-D1-69171346d8fe-20260827T114057Z",
+        "url": "https://drive.google.com/drive/folders/1ye3mFWkF6JJqJQg1IhSldIMqUEOCSvc6",
+        "size_bytes": null
+      },
+      "sidecars": [
+        {
+          "role": "receipt",
+          "id": "1-uQbHwWuXDpAIXhZ35ykPvc91EjQtHFp",
+          "title": "receipt.json",
+          "url": "https://drive.google.com/file/d/1-uQbHwWuXDpAIXhZ35ykPvc91EjQtHFp/view",
+          "size_bytes": 6375,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "manifest",
+          "id": "1y-pejLW9Y_08PiWgeONpiIjRiIcbUKOk",
+          "title": "manifest.json",
+          "url": "https://drive.google.com/file/d/1y-pejLW9Y_08PiWgeONpiIjRiIcbUKOk/view",
+          "size_bytes": 885,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "terminal",
+          "id": "1ls8oemBG6ZTfoDcOyxSpElk5n6WjXHzU",
+          "title": "terminal.json",
+          "url": "https://drive.google.com/file/d/1ls8oemBG6ZTfoDcOyxSpElk5n6WjXHzU/view",
+          "size_bytes": 536,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        }
+      ],
+      "layer_shards": [
+        {
+          "id": "1SXhyUP7xuqE3eZHxbhf_8Ap2Ab4IBxII",
+          "title": "00.zip",
+          "url": "https://drive.google.com/file/d/1SXhyUP7xuqE3eZHxbhf_8Ap2Ab4IBxII/view?usp=drivesdk",
+          "size_bytes": 61337,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "1hnYADf68x-Xr3GYgRmAryu1F3pJ0DmIJ",
+          "title": "01.zip",
+          "url": "https://drive.google.com/file/d/1hnYADf68x-Xr3GYgRmAryu1F3pJ0DmIJ/view?usp=drivesdk",
+          "size_bytes": 58747,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "19RmD46B2zNIVHu305etO0-ap9Y8__xl3",
+          "title": "02.zip",
+          "url": "https://drive.google.com/file/d/19RmD46B2zNIVHu305etO0-ap9Y8__xl3/view?usp=drivesdk",
+          "size_bytes": 58491,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        }
+      ],
+      "layers_folder": {
+        "id": "1k1v9y8a56IsV5CM6BIQjF9M03MKGKlge",
+        "title": "layers",
+        "url": "https://drive.google.com/drive/folders/1k1v9y8a56IsV5CM6BIQjF9M03MKGKlge",
+        "size_bytes": null
+      }
+    },
+    {
+      "stage": "D2",
+      "folder": {
+        "id": "1QbtPkS2l5phSNDkWLdOKyrQDyiNLZz2y",
+        "title": "Geometry-V1-QK-D2-d54492044e77-20260827T140442Z",
+        "url": "https://drive.google.com/drive/folders/1QbtPkS2l5phSNDkWLdOKyrQDyiNLZz2y",
+        "size_bytes": null
+      },
+      "sidecars": [
+        {
+          "role": "receipt",
+          "id": "1AIIbBZJHA1GaqqHQxo0g_sE6AtT7zoZy",
+          "title": "receipt.json",
+          "url": "https://drive.google.com/file/d/1AIIbBZJHA1GaqqHQxo0g_sE6AtT7zoZy/view",
+          "size_bytes": 8932,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "manifest",
+          "id": "1qD5QOlM7J8LfdI-XKIJr3VcMxbdrHuoq",
+          "title": "manifest.json",
+          "url": "https://drive.google.com/file/d/1qD5QOlM7J8LfdI-XKIJr3VcMxbdrHuoq/view",
+          "size_bytes": 1193,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        },
+        {
+          "role": "terminal",
+          "id": "18EkRPkvMPKFUO46NFMQ4jfmOyzPaX7L-",
+          "title": "terminal.json",
+          "url": "https://drive.google.com/file/d/18EkRPkvMPKFUO46NFMQ4jfmOyzPaX7L-/view",
+          "size_bytes": 172,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "not independently verified from raw Drive bytes",
+          "bounded_parse_status": "passed",
+          "pre_extraction_leak_scan": "passed"
+        }
+      ],
+      "layer_shards": [
+        {
+          "id": "1zwkGICM-WxusY9cJ-xCLhJ47hyZZ73Cb",
+          "title": "00.zip",
+          "url": "https://drive.google.com/file/d/1zwkGICM-WxusY9cJ-xCLhJ47hyZZ73Cb/view?usp=drivesdk",
+          "size_bytes": 58142,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        },
+        {
+          "id": "12psW3azzr2Ie3SU1sh8GIWBSScj6rr68",
+          "title": "01.zip",
+          "url": "https://drive.google.com/file/d/12psW3azzr2Ie3SU1sh8GIWBSScj6rr68/view?usp=drivesdk",
+          "size_bytes": 58579,
+          "source_content_sha256": null,
+          "source_content_sha256_note": "ZIP bytes were not read"
+        }
+      ],
+      "layers_folder": {
+        "id": "1Nso9kizkKqpz44jXT_FxaK30AqeDOFMt",
+        "title": "layers",
+        "url": "https://drive.google.com/drive/folders/1Nso9kizkKqpz44jXT_FxaK30AqeDOFMt",
+        "size_bytes": null
+      }
+    }
+  ]
+}

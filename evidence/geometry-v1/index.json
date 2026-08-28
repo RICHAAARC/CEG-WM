@@ -1,161 +1,134 @@
 {
   "branch": "Geometry-V1-Evidence",
-  "evidence_ceiling": "operational_evidence_only",
+  "schema": "ceg-wm-geometry-v1-operational-evidence-index-v2",
+  "method_identity": "geometry_v1_natural_qk_geometry_observation",
   "final_semantic_identity": "passive_natural_qk_geometry_observation",
   "final_status": "OPERATIONAL_UNRESOLVED",
+  "science_denominator": 0,
+  "evidence_ceiling": "operational_evidence_only",
   "merge_policy": "do_not_merge_into_Geometry-V1",
-  "method_identity": "geometry_v1_natural_qk_geometry_observation",
+  "semantics_freeze_exact": "95dd416d541450145436b685897d5ee210eb04e5",
+  "data_files": {
+    "provenance": {
+      "path": "data/provenance.json",
+      "bytes": 20236
+    },
+    "comparison_records": {
+      "path": "data/comparison_records.jsonl",
+      "bytes": 499388,
+      "record_count": 1099,
+      "required_fields": [
+        "stage",
+        "protocol",
+        "run",
+        "layer",
+        "kind",
+        "control",
+        "transform",
+        "reference_or_pair",
+        "metric",
+        "value",
+        "support",
+        "count",
+        "status",
+        "source_sidecar_id"
+      ]
+    },
+    "comparison_summary": {
+      "path": "data/comparison_summary.json",
+      "bytes": 66147,
+      "layer_count": 24
+    }
+  },
   "records": [
     {
-      "artifact_sha256": null,
-      "artifact_sha256_note": "not supplied",
-      "calculated_units": 768,
-      "drive_folder_url": null,
-      "drive_folder_url_note": "not supplied",
-      "failed_units": 0,
-      "plan_digest": "96e1e5ae6fb8ae66a545b1b10d6c896176989272c81ef1fd737184dcdfaea7b8",
+      "stage": "D0",
       "protocol": "geometry-v1-qk-d0-all-layer-discovery-v1",
-      "roster_digest": "88850de32ae0783427f86d0a5c82c6272a30811931ca0f883f6888cf8b83ac9e",
       "run_id": "geometry-v1-qk-d0-4732211beefb",
       "runner_exact": "4732211beefbeface95cb842c117b9719e362f1a",
-      "science_denominator": 0,
-      "shard_count": 24,
-      "stage": "D0",
       "status": "D0_UNRESOLVED",
-      "units_per_shard": 32
+      "science_denominator": 0,
+      "calculated_units": 768,
+      "failed_units": 0,
+      "drive_folder_url": "https://drive.google.com/drive/folders/1swYs6hQUQYsDWA6vBNPLJT7aPSJJIp1E",
+      "plan_digest": "96e1e5ae6fb8ae66a545b1b10d6c896176989272c81ef1fd737184dcdfaea7b8",
+      "roster_digest": "88850de32ae0783427f86d0a5c82c6272a30811931ca0f883f6888cf8b83ac9e",
+      "shard_count": 24
     },
     {
-      "artifact_sha256": null,
-      "artifact_sha256_note": "not supplied",
-      "drive_folder_url": null,
-      "drive_folder_url_note": "not supplied",
-      "evidence_role": "artifact_only_candidate_selection",
+      "stage": "D0.1",
       "protocol": "geometry-v1-qk-d01-artifact-selection-v1",
       "run_id": "geometry-v1-qk-d01-ccfb7bcefbb1",
       "runner_exact": "ccfb7bcefbb18f9812a4e800bbea18b91b031ebb",
+      "status": "D01_CANDIDATES_FROZEN",
       "science_denominator": 0,
+      "source_units": 768,
+      "drive_folder_url": "https://drive.google.com/drive/folders/1DXelqcoC6LLJ-TmFVPuog-aXQVk3fkWk",
       "selected_layer_paths": [
         "transformer_blocks.6.attn",
         "transformer_blocks.13.attn",
         "transformer_blocks.18.attn"
       ],
-      "source_units": 768,
-      "stage": "D0.1",
-      "status": "D01_CANDIDATES_FROZEN"
+      "evidence_role": "artifact_only_candidate_selection"
     },
     {
-      "artifact_sha256": null,
-      "artifact_sha256_note": "not supplied",
-      "drive_folder_url": null,
-      "drive_folder_url_note": "not supplied",
-      "evidence_role": "artifact_only_direction_selection_not_confirmation",
+      "stage": "D0.2",
       "protocol": "geometry-v1-qk-direction-all-layer-selection-v1",
       "run_id": "geometry-v1-qk-direction-all-layer-41742d462d62",
       "runner_exact": "41742d462d62525189855c8ebb2ee1995fb9230a",
+      "status": "DIRECTION_TWO_CANDIDATES_FROZEN",
       "science_denominator": 0,
+      "source_units": 768,
+      "drive_folder_url": "https://drive.google.com/drive/folders/1EfpzIO-ENWDHGlSTlo5NCHTkvgQmvkkm",
       "selected_layer_paths": [
         "transformer_blocks.23.attn",
         "transformer_blocks.14.attn"
       ],
-      "source_units": 768,
-      "stage": "D0.2",
-      "status": "DIRECTION_TWO_CANDIDATES_FROZEN"
+      "evidence_role": "artifact_only_direction_selection_not_confirmation",
+      "route_level_transform_instability": true
     },
     {
-      "artifact_sha256": null,
-      "artifact_sha256_note": "not supplied",
-      "calculated_units": 96,
-      "drive_folder_url": "https://drive.google.com/drive/folders/1ye3mFWkF6JJqJQg1IhSldIMqUEOCSvc6",
-      "drive_folder_url_note": "supplied",
-      "failed_units": 0,
-      "layer_kind_statistics": {
-        "transformer_blocks.13.attn": {
-          "K": -0.75,
-          "Q": -1.0
-        },
-        "transformer_blocks.18.attn": {
-          "K": -0.25,
-          "Q": -0.75
-        },
-        "transformer_blocks.6.attn": {
-          "K": 0.0,
-          "Q": 0.0
-        }
-      },
+      "stage": "D1",
       "protocol": "geometry-v1-qk-d1-independent-confirmation-v1",
       "run_id": "geometry-v1-qk-d1-69171346d8fe",
       "runner_exact": "69171346d8fe8889dc2202d4f34c1cd4a834be34",
-      "science_denominator": 0,
-      "stage": "D1",
       "status": "D1_UNRESOLVED",
-      "total_units": 96
+      "science_denominator": 0,
+      "calculated_units": 96,
+      "failed_units": 0,
+      "drive_folder_url": "https://drive.google.com/drive/folders/1ye3mFWkF6JJqJQg1IhSldIMqUEOCSvc6",
+      "plan_digest": "06e765ca667b18682fb0a4e049c281fad7a043c1c7b7db290d387c10e60cd607",
+      "roster_digest": "c7ba358c79a468e8b3b51939ccb600ab9cf61a3612f26f5feb2851721f1fec70",
+      "selected_layer_paths": [
+        "transformer_blocks.6.attn",
+        "transformer_blocks.13.attn",
+        "transformer_blocks.18.attn"
+      ]
     },
     {
-      "artifact_sha256": null,
-      "artifact_sha256_note": "not supplied",
-      "calculated_units": 64,
-      "drive_folder_url": "https://drive.google.com/drive/folders/1QbtPkS2l5phSNDkWLdOKyrQDyiNLZz2y",
-      "drive_folder_url_note": "supplied",
-      "failed_units": 0,
-      "layer_kind_statistics": {
-        "transformer_blocks.14.attn": {
-          "K": -3.5,
-          "Q": -3.5
-        },
-        "transformer_blocks.23.attn": {
-          "K": 0.0,
-          "Q": -3.5
-        }
-      },
-      "plan_digest": "81394d4bd2ed9e437a8914c707b3dca60cb0842c67f79c716b39b5b8610db310",
+      "stage": "D2",
       "protocol": "geometry-v1-qk-d2-independent-confirmation-v1",
-      "route_level_transform_instability": true,
       "run_id": "geometry-v1-qk-d2-d54492044e77",
       "runner_exact": "d54492044e7789da3883fc75e2075a253ac22c75",
+      "status": "D2_UNRESOLVED",
       "science_denominator": 0,
+      "calculated_units": 64,
+      "failed_units": 0,
+      "drive_folder_url": "https://drive.google.com/drive/folders/1QbtPkS2l5phSNDkWLdOKyrQDyiNLZz2y",
+      "plan_digest": "81394d4bd2ed9e437a8914c707b3dca60cb0842c67f79c716b39b5b8610db310",
       "selected_layer_paths": [
         "transformer_blocks.23.attn",
         "transformer_blocks.14.attn"
       ],
-      "shard_count": 2,
-      "shards": [
-        {
-          "artifact_sha256": null,
-          "artifact_sha256_note": "not supplied",
-          "layer_path": "transformer_blocks.23.attn",
-          "size_bytes": 58142,
-          "url": "https://drive.google.com/file/d/1zwkGICM-WxusY9cJ-xCLhJ47hyZZ73Cb/view"
-        },
-        {
-          "artifact_sha256": null,
-          "artifact_sha256_note": "not supplied",
-          "layer_path": "transformer_blocks.14.attn",
-          "size_bytes": 58579,
-          "url": "https://drive.google.com/file/d/12psW3azzr2Ie3SU1sh8GIWBSScj6rr68/view"
-        }
-      ],
-      "stage": "D2",
-      "status": "D2_UNRESOLVED",
+      "route_level_transform_instability": true,
       "strict_negative_gate": {
         "condition": "all_four_layer_kind_statistics_strictly_below_zero",
         "sole_unmet_term": {
-          "kind": "K",
           "layer_path": "transformer_blocks.23.attn",
-          "value": 0.0
+          "kind": "K",
+          "value": 0
         }
-      },
-      "transform_statistics": {
-        "crop_rescale": {
-          "all_four_layer_kind_values": 0.0
-        },
-        "similarity": {
-          "all_four_layer_kind_values": 0.0
-        }
-      },
-      "units_per_shard": 32
+      }
     }
-  ],
-  "schema": "ceg-wm-geometry-v1-operational-evidence-index-v1",
-  "science_denominator": 0,
-  "semantics_freeze_exact": "95dd416d541450145436b685897d5ee210eb04e5"
+  ]
 }
