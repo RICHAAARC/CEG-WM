@@ -25,6 +25,7 @@ P0_WRITER_STEP_INDEX = 18
 P0_ANCHOR_POINT_COUNT = 16
 P0_PLACEMENT_BLOCKS = (4, 12, 20)
 P0_RELATIVE_RMS_BUDGETS = (0.0025, 0.005)
+P0_FINAL_DTYPE_PROJECTION_ROUNDS = 24
 P0_Q_DIAGNOSTIC_CHECKPOINTS = (
     "q_output_contract_pass",
     "q_pattern_materialized",
@@ -89,6 +90,53 @@ class WriterInjectionMeasurement:
     actual_relative_rms: float
     call_count: int
     writer_step_index: int
+
+
+def _project_final_dtype_hard_budget(
+    output: torch.Tensor,
+    direction_delta: torch.Tensor,
+    base: torch.Tensor,
+    base_rms: torch.Tensor,
+    hard_limit: float,
+) -> torch.Tensor | None:
+    """Return the largest sampled final-dtype perturbation inside the hard ball."""
+
+    lower, upper = 0.0, 1.0
+    best_scale = -1.0
+    best: torch.Tensor | None = None
+    candidate = (
+        output + direction_delta.to(device=output.device, dtype=output.dtype)
+    ).to(dtype=output.dtype)
+    actual_delta = candidate.detach().to(torch.float32) - base
+    ratio = torch.sqrt(torch.mean(actual_delta.square())) / base_rms
+    if (
+        bool(torch.isfinite(ratio))
+        and float(ratio) > 0.0
+        and float(ratio) <= hard_limit
+    ):
+        best_scale, best = 1.0, candidate
+    for _ in range(P0_FINAL_DTYPE_PROJECTION_ROUNDS):
+        scale = (lower + upper) * 0.5
+        candidate = (
+            output
+            + (direction_delta * scale).to(
+                device=output.device,
+                dtype=output.dtype,
+            )
+        ).to(dtype=output.dtype)
+        actual_delta = candidate.detach().to(torch.float32) - base
+        ratio = torch.sqrt(torch.mean(actual_delta.square())) / base_rms
+        finite = bool(torch.isfinite(ratio))
+        actual = float(ratio) if finite else math.inf
+        if finite and actual > 0.0 and actual <= hard_limit:
+            if scale > best_scale:
+                best_scale, best = scale, candidate
+            lower = scale
+        elif finite and actual <= 0.0:
+            lower = scale
+        else:
+            upper = scale
+    return best
 
 
 def _token_channel_pattern(
@@ -260,30 +308,47 @@ class ActiveQKWriterSession:
                 raise ValueError("SD3 Q/K output has zero or nonfinite RMS")
             self._observe_q_checkpoint(kind, "q_base_rms_validated")
             delta = pattern.to(torch.float32) * base_rms * self.config.relative_rms_budget
-            injected = output + delta.to(dtype=output.dtype)
+            injected = (
+                output + delta.to(device=output.device, dtype=output.dtype)
+            ).to(dtype=output.dtype)
             actual_delta = injected.detach().to(torch.float32) - base
             self._observe_q_checkpoint(kind, "q_delta_materialized")
             ratio = torch.sqrt(torch.mean(actual_delta.square())) / base_rms
-            if not bool(torch.isfinite(ratio)) or float(ratio) <= 0.0:
+            if not bool(torch.isfinite(ratio)):
                 raise ValueError("P0 writer actual relative RMS is invalid")
-            self._observe_q_checkpoint(kind, "q_ratio_validated")
+            if float(ratio) > 0.0:
+                self._observe_q_checkpoint(kind, "q_ratio_validated")
             needs_correction = (
-                float(ratio) > self.config.relative_rms_budget * (1.0 + 1e-4)
+                float(ratio) <= 0.0
+                or float(ratio) > self.config.relative_rms_budget * (1.0 + 1e-4)
             )
             self._observe_q_checkpoint(
                 kind, "q_initial_budget_comparison_completed"
             )
             if needs_correction:
                 self._observe_q_checkpoint(kind, "q_correction_branch_entered")
-                correction = self.config.relative_rms_budget / float(ratio)
-                injected = output + (actual_delta * correction).to(dtype=output.dtype)
+                hard_limit = self.config.relative_rms_budget * (1.0 + 2e-4)
+                projected = _project_final_dtype_hard_budget(
+                    output,
+                    delta,
+                    base,
+                    base_rms,
+                    hard_limit,
+                )
+                if projected is None:
+                    self._observe_q_checkpoint(kind, "q_hard_budget_rejected")
+                    raise RuntimeError(
+                        "P0 writer has no representable positive hard-budget injection"
+                    )
+                injected = projected
                 self._observe_q_checkpoint(kind, "q_corrected_output_materialized")
                 actual_delta = injected.detach().to(torch.float32) - base
                 self._observe_q_checkpoint(kind, "q_corrected_delta_materialized")
                 ratio = torch.sqrt(torch.mean(actual_delta.square())) / base_rms
                 self._observe_q_checkpoint(kind, "q_post_correction_ratio_computed")
             actual = float(ratio)
-            if actual > self.config.relative_rms_budget * (1.0 + 2e-4):
+            hard_limit = self.config.relative_rms_budget * (1.0 + 2e-4)
+            if not math.isfinite(actual) or actual <= 0.0 or actual > hard_limit:
                 self._observe_q_checkpoint(kind, "q_hard_budget_rejected")
                 raise RuntimeError("P0 writer exceeded its hard relative RMS budget")
             self._observe_q_checkpoint(kind, "q_hard_budget_accepted")

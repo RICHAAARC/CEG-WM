@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from PIL import Image
 from cegwm.geometry_v3.active_writer import (
     ActiveQKWriterSession,
     P0_CONFIGS,
+    P0_FINAL_DTYPE_PROJECTION_ROUNDS,
     P0_INFERENCE_STEPS,
     P0_PLACEMENT_BLOCKS,
     P0_Q_DIAGNOSTIC_CHECKPOINTS,
@@ -54,9 +56,15 @@ class _Transformer(torch.nn.Module):
 
 
 class _Pipeline:
-    def __init__(self, *, extra_call_at: int | None = None) -> None:
-        self.transformer = _Transformer()
+    def __init__(
+        self,
+        *,
+        extra_call_at: int | None = None,
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
+        self.transformer = _Transformer().to(dtype=dtype)
         self.extra_call_at = extra_call_at
+        self.dtype = dtype
 
     def __call__(
         self,
@@ -67,7 +75,7 @@ class _Pipeline:
     ) -> SimpleNamespace:
         assert callback_on_step_end_tensor_inputs == ["latents"]
         assert kwargs["num_inference_steps"] == P0_INFERENCE_STEPS
-        hidden = torch.linspace(-1.0, 1.0, 16 * 8).reshape(1, 16, 8)
+        hidden = torch.linspace(-1.0, 1.0, 16 * 8).reshape(1, 16, 8).to(self.dtype)
         state = {"latents": torch.zeros((1, 4, 4, 4))}
         for step in range(P0_INFERENCE_STEPS):
             hidden = self.transformer(hidden)
@@ -115,6 +123,75 @@ def test_real_torch_hooks_write_qk_once_at_step18_with_hard_budget_and_cleanup(c
     assert not q_module._forward_hooks
     assert not k_module._forward_hooks
     assert not pipeline.transformer._forward_pre_hooks
+
+
+def _independent_actual_relative_rms(
+    base: torch.Tensor, injected: torch.Tensor
+) -> float:
+    base32 = base.detach().to(torch.float32)
+    actual_delta = injected.detach().to(torch.float32) - base32
+    assert torch.isfinite(actual_delta).all()
+    return float(
+        torch.sqrt(torch.mean(actual_delta.square()))
+        / torch.sqrt(torch.mean(base32.square()))
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dtype", (torch.float32, torch.float16, torch.bfloat16))
+def test_registered_production_qk_hooks_complete_once_in_final_dtype(dtype) -> None:
+    pipeline = _Pipeline(dtype=dtype)
+    config = P0_CONFIGS[0]
+    assert config.config_id == "block4-qk-rms0p0025"
+    assert P0_WRITER_STEP_INDEX == 18
+    session = ActiveQKWriterSession(
+        pipeline.transformer,
+        config,
+        derive_canonical_relation_anchor("geometry-key-0001", point_count=16),
+    )
+    captures: dict[str, torch.Tensor] = {}
+
+    def capture(kind: str):
+        def hook(module, inputs, output) -> None:
+            del module, inputs
+            if session._current_transformer_call == P0_WRITER_STEP_INDEX:
+                captures[kind] = output.detach().clone()
+
+        return hook
+
+    with session:
+        q_module, k_module = session._resolve_modules()
+        q_capture = q_module.register_forward_hook(capture("q"))
+        k_capture = k_module.register_forward_hook(capture("k"))
+        try:
+            generated = pipeline(
+                prompt="public prompt",
+                num_inference_steps=P0_INFERENCE_STEPS,
+                height=512,
+                width=512,
+                generator=torch.Generator().manual_seed(73),
+                output_type="pil",
+                callback_on_step_end=session.callback_on_step_end,
+                callback_on_step_end_tensor_inputs=["latents"],
+            )
+        finally:
+            q_capture.remove()
+            k_capture.remove()
+    measurements = session.assert_complete()
+
+    original = torch.linspace(-1.0, 1.0, 16 * 8).reshape(1, 16, 8).to(dtype)
+    assert generated.images[0].mode == "RGB"
+    assert set(captures) == {"q", "k"}
+    assert {item.feature_kind for item in measurements} == {"q", "k"}
+    for item in measurements:
+        injected = captures[item.feature_kind]
+        actual = _independent_actual_relative_rms(original, injected)
+        assert injected.dtype == dtype
+        assert injected.shape == original.shape
+        assert torch.isfinite(injected).all()
+        assert 0.0 < actual <= config.relative_rms_budget * (1.0 + 2e-4)
+        assert item.actual_relative_rms == pytest.approx(actual, rel=0.0, abs=1e-12)
+        assert item.call_count == 1
 
 
 @pytest.mark.unit
@@ -224,6 +301,10 @@ def test_q_diagnostic_observer_reports_only_completed_production_checkpoints(
 
 
 def _invoke_q_hook_with_output(output: torch.Tensor, observer):
+    return _invoke_feature_hook_with_output("q", output, observer)
+
+
+def _invoke_feature_hook_with_output(kind: str, output: torch.Tensor, observer=None):
     transformer = _Transformer()
     session = ActiveQKWriterSession(
         transformer,
@@ -234,7 +315,7 @@ def _invoke_q_hook_with_output(output: torch.Tensor, observer):
     )
     session._armed = True
     session._current_transformer_call = P0_WRITER_STEP_INDEX
-    hook = session._feature_hook("q", "transformer_blocks.4.attn.to_q")
+    hook = session._feature_hook(kind, f"transformer_blocks.4.attn.to_{kind}")
     return hook(None, (), output), session
 
 
@@ -268,14 +349,83 @@ def test_q_correction_path_reports_accepted_checkpoints_without_math_change() ->
 
 
 @pytest.mark.unit
-def test_q_hard_budget_rejection_is_observed_before_existing_runtime_error() -> None:
+def test_final_dtype_projection_repairs_previous_float16_hard_rejection() -> None:
     observed: list[str] = []
     output = torch.full((1, 4, 4), 0.1, dtype=torch.float16)
 
-    with pytest.raises(RuntimeError, match="hard relative RMS budget"):
-        _invoke_q_hook_with_output(output, observed.append)
+    injected, session = _invoke_q_hook_with_output(output, observed.append)
 
-    assert observed[-1] == "q_hard_budget_rejected"
-    assert "q_hard_budget_accepted" not in observed
-    assert "q_budget_validated" not in observed
-    assert "q_measurement_recorded" not in observed
+    actual = _independent_actual_relative_rms(output, injected)
+    assert P0_FINAL_DTYPE_PROJECTION_ROUNDS == 24
+    assert injected.dtype == output.dtype
+    assert injected.device == output.device
+    assert injected.shape == output.shape
+    assert torch.isfinite(injected).all()
+    assert 0.0 < actual <= P0_CONFIGS[0].relative_rms_budget * (1.0 + 2e-4)
+    assert session.measurements[0].actual_relative_rms == pytest.approx(actual)
+    assert "q_correction_branch_entered" in observed
+    assert observed[-3:] == [
+        "q_hard_budget_accepted",
+        "q_budget_validated",
+        "q_measurement_recorded",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("dtype", "magnitude", "offset"),
+    (
+        pytest.param(torch.float32, 1.0, 0.0, id="float32-normal"),
+        pytest.param(torch.float16, 0.0, 0.1, id="float16-near-ulp"),
+        pytest.param(torch.bfloat16, 0.0, 1.0, id="bfloat16-near-ulp"),
+        pytest.param(torch.float32, 1e-10, 0.0, id="float32-tiny"),
+        pytest.param(torch.float16, 1e-3, 0.0, id="float16-tiny"),
+        pytest.param(torch.bfloat16, 1e-4, 0.0, id="bfloat16-tiny"),
+        pytest.param(torch.float32, 1e10, 0.0, id="float32-large"),
+        pytest.param(torch.float16, 1e3, 0.0, id="float16-large"),
+        pytest.param(torch.bfloat16, 1e10, 0.0, id="bfloat16-large"),
+    ),
+)
+@pytest.mark.parametrize("kind", ("q", "k"))
+def test_final_dtype_projection_is_deterministic_and_independently_bounded(
+    dtype: torch.dtype,
+    magnitude: float,
+    offset: float,
+    kind: str,
+) -> None:
+    noise = torch.randn(
+        (1, 16, 8), generator=torch.Generator().manual_seed(830)
+    )
+    output = (noise * magnitude + offset).to(dtype)
+
+    first, first_session = _invoke_feature_hook_with_output(kind, output)
+    second, second_session = _invoke_feature_hook_with_output(kind, output.clone())
+    actual = _independent_actual_relative_rms(output, first)
+
+    assert torch.equal(first, second)
+    assert first.dtype == output.dtype
+    assert first.device == output.device
+    assert first.shape == output.shape
+    assert torch.isfinite(first).all()
+    assert math.isfinite(actual)
+    assert 0.0 < actual <= P0_CONFIGS[0].relative_rms_budget * (1.0 + 2e-4)
+    assert first_session.measurements[0].feature_kind == kind
+    assert first_session.measurements == second_session.measurements
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", ("q", "k"))
+def test_final_dtype_projection_fails_closed_without_positive_representable_delta(
+    kind: str,
+) -> None:
+    smallest_subnormal = torch.finfo(torch.float16).smallest_normal * 2**-10
+    output = torch.full((1, 4, 4), smallest_subnormal, dtype=torch.float16)
+    observed: list[str] = []
+
+    with pytest.raises(RuntimeError, match="no representable positive"):
+        _invoke_feature_hook_with_output(kind, output, observed.append)
+
+    if kind == "q":
+        assert observed[-1] == "q_hard_budget_rejected"
+        assert "q_hard_budget_accepted" not in observed
+        assert "q_measurement_recorded" not in observed

@@ -44,7 +44,8 @@ class _FixedProjection(torch.nn.Module):
                 * 1000.0
             ).to(torch.float16)
         if self.kind == "hard_rejected":
-            return torch.full_like(hidden, 0.5, dtype=torch.float16)
+            smallest_subnormal = torch.finfo(torch.float16).smallest_normal * 2**-10
+            return torch.full_like(hidden, smallest_subnormal, dtype=torch.float16)
         raise AssertionError("unknown fixed projection")
 
 
@@ -229,7 +230,9 @@ def test_explicit_hard_budget_runtime_stop_retains_rejected_checkpoint() -> None
     assert result.status == RUNNER.P0D2_STATUS_STOPPED
     assert result.failure_point == "pipeline_callback"
     assert result.error_class == "runtime_error"
-    assert result.counters["q_post_correction_ratio_computed_count"] == 1
+    assert result.counters["q_correction_branch_entered_count"] == 1
+    assert result.counters["q_corrected_output_materialized_count"] == 0
+    assert result.counters["q_post_correction_ratio_computed_count"] == 0
     assert result.counters["q_hard_budget_rejected_count"] == 1
     assert result.counters["q_hard_budget_accepted_count"] == 0
     assert result.counters["q_budget_validated_count"] == 0
