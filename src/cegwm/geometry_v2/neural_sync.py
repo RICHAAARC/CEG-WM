@@ -89,7 +89,10 @@ class BlindCornerExtractor(nn.Module):
         if not torch.isfinite(attacked_rgb).all():
             raise ValueError("extractor input must be finite")
         values = self.head(self.features(attacked_rgb).flatten(1))
-        corners = torch.sigmoid(values[:, :8]).reshape(-1, 4, 2)
+        # The frozen geometry contracts admit crop/similarity corners in
+        # [-0.25, 1.25].  Parameterize that entire interval so the network can
+        # represent out-of-frame source corners without clipping them to RGB.
+        corners = (1.5 * torch.sigmoid(values[:, :8]) - 0.25).reshape(-1, 4, 2)
         confidence = torch.sigmoid(values[:, 8])
         # N0 support means that one complete finite four-corner estimate exists.
         support = torch.ones_like(confidence)
