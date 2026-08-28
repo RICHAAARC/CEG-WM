@@ -8,12 +8,12 @@
   relation anchor written into predeclared SD3.5 Q/K/attention feature
   placements.
 - Current delivery: the P0 active-writer discovery implementation has one real
-  SD3.5 operational artifact, followed by a bounded P0D single-configuration
-  diagnostic implementation.
-- Evidence ceiling: the real P0 artifact is controlled operational evidence
-  with `science_denominator=0`; P0D local fake/CPU/static results are
-  engineering evidence until a separately authorized real run. Neither class
-  is a recoverability, detector, watermark, or scientific conclusion.
+  SD3.5 controlled-stop artifact, and the bounded P0D sequence has culminated
+  in a real single-configuration writer-completion canary.
+- Evidence ceiling: the real P0 and P0D artifacts are controlled operational
+  evidence with `science_denominator=0`; local fake/CPU/static results remain
+  engineering evidence. Neither class is a recoverability, detector,
+  watermark, or scientific conclusion.
 
 Geometry can recover coordinates only. It has no authority to create a
 positive watermark decision. Any image rectified by this route must be judged
@@ -236,6 +236,23 @@ adjustment. Its only statuses are `P0D2_STOPPED` and
 `P0D2_DIAGNOSTIC_COMPLETE`, always with `science_denominator=0`. P0D.2 is a
 diagnostic location result only: it cannot be described as a budget failure or
 as authorization for mechanical repair before its real artifact is audited.
+
+### Stage-3 single-configuration writer closure
+
+The real P0D.2 completion canary used runner
+`a27a940ae1ef4d1141925c6304caab55b89ec999` and run
+`geometry-v3-qk-p0d2-a27a940ae1ef`. Its create-only artifact is complete with
+status `P0D2_DIAGNOSTIC_COMPLETE`: the fixed block-4 Q and K hooks each
+injected exactly once, all 20 pipeline callbacks and 20 transformer-root calls
+completed, the Q hard-budget path recorded one acceptance and zero rejections,
+and Q measurement, writer-session completion, and final-RGB validation each
+completed once. The artifact retains `science_denominator=0`.
+
+This is engineering and operational closure of the one frozen
+`block4-qk-rms0p0025` writer path only. It unlocks the separately controlled
+full P0 discovery stage, but does not establish attacked-RGB fresh-Q/K
+recoverability, writer placement or budget selection, blind coordinate
+recovery, content-watermark detection, or scientific success.
 
 ## Frozen progression after P0D.2
 
