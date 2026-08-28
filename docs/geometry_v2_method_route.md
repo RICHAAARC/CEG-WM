@@ -1,69 +1,74 @@
 # Geometry-V2 Method Route
 
-## Frozen identity and scope
+## Frozen identity and authority
 
 - Branch: `Geometry-V2`.
-- Method identity: `geometry_v2_keyed_neural_corner_sync`.
-- Protocol identity for the present contract scaffold: `geometry-v2-keyed-neural-corner-sync-contract-v1`.
-- Stage: local method-route and pure-CPU contract scaffold only.
-- Evidence ceiling: engineering readiness. There is no neural training result, model inference result, operational artifact, detector result, watermark result, or scientific conclusion.
+- Method: `geometry_v2_keyed_neural_corner_sync`.
+- Executable protocol: `geometry-v2-keyed-neural-corner-sync-n0-v1`.
+- N0 is an operational neural geometry candidate run with `science_denominator=0`.
 
-Geometry-V2 is an active deep synchronization method. A weak geometric synchronization signal is written by an embedder constrained by a domain-separated `geometry_key`. An extractor observes only the current attacked RGB image and predicts the four ordered image corners, a constrained homography, support, and an independent reliability measurement. A reliable estimate may request inverse rectification. The rectified RGB is then evaluated by the same content detector with the same detection key identity, preprocessing identity, and calibrated `tau`.
+Geometry-V2 actively writes a weak synchronization signal under a domain-separated `geometry_key`. Its extractor observes only the current attacked RGB and predicts ordered normalized corners `(TL, TR, BR, BL)`, confidence, and support. A constrained homography is determined from those corners and validated before any reliability or rectification request.
 
-Geometry has coordinate authority only. It cannot create a positive watermark conclusion. Positive attribution remains exclusively with the frozen content detector.
+Geometry has coordinate authority only. It cannot create positive watermark evidence. If a later separately authorized stage rectifies a reliable estimate, the same content detector, detection key, preprocessing, and calibrated `tau` must be used again unchanged. N0 itself does not run or adjudicate the content detector.
 
-## Method flow
+SyncSeal and SynTag may inform an independently named baseline. They are not this method and are never an automatic fallback.
 
-1. Normalize a public per-image context that is independent of detector outcome.
-2. Derive a bounded bipolar synchronization target with HMAC-SHA256 under the domain `CEG-WM/geometry-v2/keyed-neural-corner-sync/v1`. The contract exposes the target and public-context digest, never the raw `geometry_key`.
-3. A future trainable embedder writes a weak signal constrained by that target and by a separately frozen total distortion/interference budget.
-4. Apply the declared geometric attack to the final RGB image.
-5. A future extractor consumes only the current attacked RGB and predicts corners in canonical order: top-left, top-right, bottom-right, bottom-left. It also predicts the canonical-to-attacked 3x3 homography, confidence, and support.
-6. Validate that corners and homography are finite, bounded, strictly convex, non-degenerate, mutually consistent, and within the frozen coefficient limits.
-7. Apply the independent fail-closed reliability policy. Missing geometry, non-finite measurements, or values below either reliability threshold cannot produce a rectification request.
-8. If reliable, invert the validated homography and rectify coordinates only.
-9. Re-run the unchanged content detector. Detector identity, detection-key identity, preprocessing identity, and `tau` must match the pre-rectification identity exactly.
+## N0 architecture and training
 
-There is no automatic retry, layer switch, alternate geometry method, detector change, threshold change, or fallback in this route.
+N0 jointly optimizes two real PyTorch modules in one process:
 
-## Frozen contract surface
+1. `KeyedResidualEmbedder` receives ordinary RGB and a per-sample 64-bit bipolar target derived with HMAC-SHA256 under the frozen Geometry-V2 domain. It returns RGB in `[0,1]`; the actual post-clamp residual is hard-bounded by `L_inf <= 4/255`.
+2. `BlindCornerExtractor` receives only attacked RGB. It returns four corner slots in the fixed order plus bounded confidence and complete-estimate support. It has no geometry key, clean image, embed record, prompt, latent, detector score, or original-image input.
 
-The local scaffold freezes:
+The input data are procedural RGB at `128x128`; no external dataset is used. Splits are disjoint and fixed:
 
-- method, protocol, geometry-key domain, and coordinates-only authority constants;
-- deterministic key-separated target derivation with bounded key, context, and code lengths;
-- normalized canonical corner ordering;
-- finite, convex, bounded, non-degenerate corner validation;
-- finite, normalized, bounded, invertible 3x3 homography validation;
-- corner-to-homography consistency on all four canonical corners;
-- an independent confidence-and-support reliability policy that fails closed;
-- a reliability binding to the exact geometry estimate;
-- a coordinate-only inverse-rectification request;
-- an immutable content detector identity binding detector, detection key, preprocessing, and `tau` before and after rectification.
+- training seeds `1000..1127` (128);
+- validation seeds `2000..2031` (32);
+- independent confirmation seeds `3000..3031` (32).
 
-The scaffold intentionally contains no neural architecture, optimizer, dataset, trained weights, SD3.5 integration, GPU path, notebook, attack benchmark, or detector decision.
+Training uses seed 73, batch size 8, eight epochs, and Adam with learning rate `1e-3`. Each epoch assigns the four fixed attack classes equally across the training split; attack parameters are not tuned. The immutable loss is:
 
-## Future implementation gates
+`SmoothL1(corners) + 0.25 * sync_reconstruction + 0.05 * residual_L2`.
 
-Any executable neural implementation requires a separately exact-bound protocol before training or real execution. That protocol must predeclare at least:
+No checkpoint or model weight is saved. Validation and confirmation inference use the same in-memory trained modules.
 
-- embedder and extractor architecture and the exact final-RGB observation boundary;
-- geometry-key context construction and sample independence rules;
-- total weak-signal distortion budget and content-chain interference measurements;
-- training, validation, confirmation, and null splits with no reuse for selection and confirmation;
-- attack roster, corner/H truth convention, fixed denominator, retained failures, and stopping rules;
-- reliability statistic and calibration data independent of content-detector outcomes;
-- rectifier interpolation, boundary, and invalid-coordinate behavior;
-- preservation of the same content detector, detection key, preprocessing, and `tau`;
-- bounded public artifacts without raw keys, prompts, latents, model weights, private paths, image bytes, or embedding-side records;
-- operational and scientific evidence ceilings.
+## Frozen RGB attacks and truth
 
-Minimum targeted tests for that future implementation include key/domain separation, distortion-budget accounting, actual RGB attack-to-corner correspondence, H convention, failure retention, reliability false/true behavior, blind extractor inputs, and exact content-detector identity preservation. Model, GPU, Colab, Drive, and scientific evaluation remain separately authorized actions.
+Every validation and confirmation image is evaluated under all four actual Pillow transforms:
 
-## Relationship to prior methods
+- identity;
+- `rotate90`, implemented as `PIL.Image.Transpose.ROTATE_90`;
+- similarity with angle `7 deg`, scale `0.93`, and 512-coordinate translation `(13,17)` scaled to 128;
+- crop-rescale with 512-coordinate crop `[32,44,476,468]`, scaled to `[8,11,119,117]`, followed by BICUBIC resize to 128.
 
-SyncSeal and SynTag may inform design choices or be evaluated as independently named baselines. They are not the Geometry-V2 method identity, cannot silently supply its implementation or evidence, and cannot be invoked as an automatic fallback.
+Each transform returns the frozen source-to-attacked normalized H and its four mapped corner truths. Actual Pillow RGB correspondence is a required CPU regression. Invalid or non-finite predicted corners/H remain explicit failed units.
 
-## Current completion statement
+## Reliability and confirmation gate
 
-The method route and pure-CPU boundary contracts are frozen locally. The contracts demonstrate deterministic domain separation and fail-closed coordinate handoff behavior only. They do not demonstrate that a weak synchronization signal can be embedded, recovered after attack, or used to improve the unchanged content detector.
+Validation observes the predeclared reliability rule before confirmation:
+
+- `minimum_support = 1.0`;
+- score `clamp(1 - mean_corner_error / 0.25, 0,1)`;
+- threshold `0.5`.
+
+The threshold is fixed in source and is not fitted to validation results. Confirmation cannot change architecture, attack parameters, reliability, or gates. It has exactly `32 images x 4 attacks = 128` retained units.
+
+Allowed statuses are only:
+
+- `N0_STOPPED`: any retained confirmation unit failed;
+- `N0_UNRESOLVED`: all units calculated but one or more candidate gates failed;
+- `N0_GEOMETRY_CANDIDATE`: all 128 calculated, median corner error `<0.05`, p95 corner error `<0.10`, reliable fraction `>=0.75`, and observed residual maximum `<=4/255`.
+
+PSNR-equivalent residual summaries, key-separation, no-sync behavior, extractor confidence, validation observations, and per-attack records are audit-only. They do not alter the gate.
+
+## Runtime and artifact boundary
+
+The runner validates a bounded public plan, exact clean checkout, runtime-only geometry key, and CPU/GPU device before training. The Colab handoff uses one detached exact checkout and one child runner, bounded control receipt, suppressed child stdout/stderr, and a create-only Drive directory under `/content/drive/MyDrive/CEG-WM/Geometry-V2/N0/`. It has no retry, fallback, alternate route, or dynamic threshold.
+
+The geometry secret is read from Colab userdata or generated once with `secrets`; only an in-memory domain-separated digest reaches the child environment. The raw secret and derived runtime key are cleared and are never printed or written.
+
+Artifacts contain only bounded `receipt.json`, `manifest.json`, `terminal.json`, and 128 public `metrics.jsonl` records. They exclude images, raw key/key material, model/checkpoint weights, prompts, latents, tokens, private paths, raw Q/K, and detector decisions.
+
+## Evidence ceiling
+
+Local CPU tests establish engineering behavior only. A future controlled N0 run may establish operational candidate evidence with `science_denominator=0`; it cannot establish content detection, positive watermark attribution, attack robustness, method success, or a scientific conclusion. Training, inference, artifact completion, and a candidate status do not change that ceiling.

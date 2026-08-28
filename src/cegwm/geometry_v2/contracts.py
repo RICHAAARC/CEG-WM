@@ -1,7 +1,5 @@
-"""Pure-CPU contracts for Geometry-V2 keyed neural corner synchronization.
+"""Contracts for Geometry-V2 keyed neural corner synchronization.
 
-This module freezes identities and data boundaries.  It deliberately does not
-implement a neural embedder/extractor, model loading, or a watermark decision.
 Geometry output can authorize coordinate rectification only; the unchanged
 content detector remains the sole positive watermark authority.
 """
@@ -18,7 +16,7 @@ import struct
 
 
 METHOD_IDENTITY = "geometry_v2_keyed_neural_corner_sync"
-PROTOCOL_IDENTITY = "geometry-v2-keyed-neural-corner-sync-contract-v1"
+PROTOCOL_IDENTITY = "geometry-v2-keyed-neural-corner-sync-n0-v1"
 GEOMETRY_KEY_DOMAIN = b"CEG-WM/geometry-v2/keyed-neural-corner-sync/v1\x00"
 GEOMETRY_AUTHORITY = "coordinates_only"
 
