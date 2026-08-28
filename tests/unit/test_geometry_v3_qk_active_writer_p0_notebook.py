@@ -26,7 +26,7 @@ def test_first_executable_cell_is_exact_independent_drive_mount() -> None:
 def test_notebook_binds_checkout_runner_tokens_control_and_drive_contract() -> None:
     code = "\n".join(_code_cells())
     assert RUNNER.is_file()
-    assert "P0_RUNNER_EXACT = '9b5085c68b4748850aa937e08e54d92811dcdcd9'" in code
+    assert "P0_RUNNER_EXACT = '9b5085c805b6e3580fadc153598aac93fcc41eab'" in code
     assert "git', 'checkout', '--detach', P0_RUNNER_EXACT" in code
     assert "resolved != P0_RUNNER_EXACT or dirty" in code
     assert "runner_path = checkout / RUNNER_RELATIVE_PATH" in code
