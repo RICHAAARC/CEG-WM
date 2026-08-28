@@ -1,0 +1,64 @@
+{
+  "schema": "ceg-wm-geometry-v2-n0-drive-provenance-v1",
+  "access": {
+    "mode": "google_drive_connector_read_only",
+    "drive_writes": 0,
+    "model_runs": 0,
+    "source_files_read_as_complete_bytes": 4,
+    "source_total_bytes": 30728,
+    "copied_public_metrics_bytes": 28698,
+    "hash_method": "sha256_over_complete_source_bytes",
+    "metrics_parse_status": "passed_128_json_lines",
+    "public_payload_review": "passed"
+  },
+  "folder": {
+    "id": "1dyt4yBiJM7iR_zh_Mnxlmjv-u-3HoAtA",
+    "title": "Geometry-V2-N0-d82efc292db8-20260828T032136Z",
+    "url": "https://drive.google.com/drive/folders/1dyt4yBiJM7iR_zh_Mnxlmjv-u-3HoAtA",
+    "protocol_directory": "/content/drive/MyDrive/CEG-WM/Geometry-V2/N0/Geometry-V2-N0-d82efc292db8-20260828T032136Z",
+    "created_time": "2026-08-28T03:21:52.590Z"
+  },
+  "files": [
+    {
+      "role": "receipt",
+      "title": "receipt.json",
+      "id": "1Lq8awlF5Lq21Tq-JiFROAPzEc3lxHJDs",
+      "url": "https://drive.google.com/file/d/1Lq8awlF5Lq21Tq-JiFROAPzEc3lxHJDs/view?usp=drivesdk",
+      "bytes": 1420,
+      "sha256": "cdc84c2c77fcae05cb89351a1f7779a8bc32dbd68bc476998ea9c5747f49e42a",
+      "bounded_parse_status": "passed",
+      "copied_into_repository": false
+    },
+    {
+      "role": "manifest",
+      "title": "manifest.json",
+      "id": "1O5fFKiwYEgutsruUYCjUGdTxEHGoEdWa",
+      "url": "https://drive.google.com/file/d/1O5fFKiwYEgutsruUYCjUGdTxEHGoEdWa/view?usp=drivesdk",
+      "bytes": 395,
+      "sha256": "25df84f84148ceb8b58b4a7dcc3a2312e5abba94964111bd68b1889a57a17ed1",
+      "bounded_parse_status": "passed",
+      "copied_into_repository": false
+    },
+    {
+      "role": "terminal",
+      "title": "terminal.json",
+      "id": "1pLZh2Eu1zSbKNMhM4hfAt6Z7cLQAa2Td",
+      "url": "https://drive.google.com/file/d/1pLZh2Eu1zSbKNMhM4hfAt6Z7cLQAa2Td/view?usp=drivesdk",
+      "bytes": 215,
+      "sha256": "2cc8f3cd3eb4dbf736af42b91ecf3586f5c4a57d8cb5a3076ef636d612614e65",
+      "bounded_parse_status": "passed",
+      "copied_into_repository": false
+    },
+    {
+      "role": "metrics",
+      "title": "metrics.jsonl",
+      "id": "1rMSUJmPrko7QGlLwLh-BUR7ku5z1Ra0i",
+      "url": "https://drive.google.com/file/d/1rMSUJmPrko7QGlLwLh-BUR7ku5z1Ra0i/view?usp=drivesdk",
+      "bytes": 28698,
+      "sha256": "d10ccb3463ac3c2b8a1df8716ac3e7188f3449ea0cdf37ba158b9d6c88b94cae",
+      "bounded_parse_status": "passed_128_json_lines",
+      "copied_into_repository": true,
+      "repository_path": "evidence/geometry-v2/n0/metrics_public.jsonl"
+    }
+  ]
+}

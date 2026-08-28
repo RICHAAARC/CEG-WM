@@ -1,0 +1,87 @@
+{
+  "schema": "ceg-wm-geometry-v2-n0-public-receipt-summary-v1",
+  "method_identity": "geometry_v2_keyed_neural_corner_sync",
+  "protocol": "geometry-v2-keyed-neural-corner-sync-n0-v1",
+  "source_branch_final_exact": "bc147f8985d5e54477d0bbd47f7d44a73f70a6e6",
+  "execution_exact": "d82efc292db8a16f60d272635e577a4186ed866a",
+  "run_id": "geometry-v2-neural-corner-sync-n0-d82efc292db8",
+  "artifact_status": "complete",
+  "n0_status": "N0_UNRESOLVED",
+  "final_status": "OPERATIONAL_UNRESOLVED",
+  "science_denominator": 0,
+  "geometry_authority": "coordinates_only",
+  "fixed_splits": {
+    "training": {"seed_first": 1000, "seed_last": 1127, "seed_count": 128},
+    "validation": {"seed_first": 2000, "seed_last": 2031, "seed_count": 32, "observation_count": 128},
+    "confirmation": {"seed_first": 3000, "seed_last": 3031, "seed_count": 32, "attack_count": 4, "declared_unit_count": 128}
+  },
+  "training": {
+    "seed": 73,
+    "batch_size": 8,
+    "epochs": 8,
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "attack_sampling": "four_class_equal_weight_fixed",
+    "mean_losses": {
+      "corner": 0.05873519723536447,
+      "sync_reconstruction": 0.000008691412523686992,
+      "residual_l2": 0.000039920568546847335,
+      "total": 0.05873936603893526
+    }
+  },
+  "reliability": {
+    "minimum_support": 1.0,
+    "formula": "clamp(1-mean_corner_error/0.25,0,1)",
+    "threshold": 0.5
+  },
+  "candidate_gates": {
+    "all_declared_units_calculated": true,
+    "median_corner_error_lt": 0.05,
+    "p95_corner_error_lt": 0.1,
+    "reliable_fraction_gte": 0.75,
+    "actual_residual_max_lte": 0.01568627450980392
+  },
+  "observed_confirmation": {
+    "declared_unit_count": 128,
+    "calculated_unit_count": 128,
+    "failed_unit_count": 0,
+    "median_corner_error": 0.29130835680109846,
+    "p95_corner_error": 0.719844602879589,
+    "reliable_fraction": 0.0,
+    "actual_residual_max": 0.013113617897033691
+  },
+  "gate_results": {
+    "all_declared_units_calculated": "pass",
+    "median_corner_error": "fail",
+    "p95_corner_error": "fail",
+    "reliable_fraction": "fail",
+    "actual_residual_max": "pass"
+  },
+  "record_only": {
+    "audit_seed_count": 8,
+    "embedded_rgb_psnr_db": 43.53849341754671,
+    "key_separation_mean_rgb_l1": 0.006562439142726362,
+    "no_sync_similarity_mean_corner_error": 0.24897743865021887
+  },
+  "persistence_flags": {
+    "images": false,
+    "geometry_secret_material": false,
+    "trained_parameters": false
+  },
+  "source_metrics": {
+    "filename": "metrics.jsonl",
+    "bytes": 28698,
+    "sha256": "d10ccb3463ac3c2b8a1df8716ac3e7188f3449ea0cdf37ba158b9d6c88b94cae"
+  },
+  "route_decision": {
+    "action": "stop_after_n0",
+    "planned_additional_training_stages": 0,
+    "interpretation": "engineering_investment_stopped_after_frozen_operational_result",
+    "not_established": [
+      "theoretical_impossibility",
+      "behavior_of_differently_scoped_implementations",
+      "content_detection_success",
+      "scientific_conclusion"
+    ]
+  }
+}

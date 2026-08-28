@@ -1,0 +1,28 @@
+{
+  "schema": "ceg-wm-geometry-v2-operational-evidence-index-v1",
+  "branch": "Geometry-V2-Evidence",
+  "source_branch": "Geometry-V2",
+  "source_branch_final_exact": "bc147f8985d5e54477d0bbd47f7d44a73f70a6e6",
+  "method_identity": "geometry_v2_keyed_neural_corner_sync",
+  "protocol": "geometry-v2-keyed-neural-corner-sync-n0-v1",
+  "execution_exact": "d82efc292db8a16f60d272635e577a4186ed866a",
+  "run_id": "geometry-v2-neural-corner-sync-n0-d82efc292db8",
+  "artifact_status": "complete",
+  "run_status": "N0_UNRESOLVED",
+  "final_status": "OPERATIONAL_UNRESOLVED",
+  "science_denominator": 0,
+  "evidence_ceiling": "operational_evidence_only",
+  "merge_policy": "do_not_merge_into_Geometry-V2",
+  "drive_folder_url": "https://drive.google.com/drive/folders/1dyt4yBiJM7iR_zh_Mnxlmjv-u-3HoAtA",
+  "data_files": {
+    "provenance": "n0/provenance.json",
+    "receipt_summary": "n0/receipt_summary.json",
+    "metrics_public": {
+      "path": "n0/metrics_public.jsonl",
+      "bytes": 28698,
+      "records": 128,
+      "sha256": "d10ccb3463ac3c2b8a1df8716ac3e7188f3449ea0cdf37ba158b9d6c88b94cae"
+    },
+    "comparison_summary": "n0/comparison_summary.json"
+  }
+}
