@@ -173,11 +173,20 @@ def _independent_pattern_contract(
     expected = expected - expected.mean()
     expected = expected / torch.sqrt(torch.mean(expected.square()))
     expected = expected.reshape((1,) * (pattern.ndim - 2) + expected.shape).expand_as(pattern)
+    expected = expected.to(dtype=pattern.dtype).to(torch.float32)
     observed = pattern.detach().to(torch.float32)
     normalization_contract = (
         bool(torch.isfinite(observed).all())
-        and abs(float(observed.mean())) <= 1e-5
-        and abs(float(torch.sqrt(torch.mean(observed.square()))) - 1.0) <= 1e-4
+        and bool(torch.isfinite(expected).all())
+        and math.isclose(
+            float(observed.mean()), float(expected.mean()), rel_tol=0.0, abs_tol=1e-7,
+        )
+        and math.isclose(
+            float(torch.sqrt(torch.mean(observed.square()))),
+            float(torch.sqrt(torch.mean(expected.square()))),
+            rel_tol=0.0,
+            abs_tol=1e-7,
+        )
     )
     axis_contract = bool(torch.allclose(observed, expected, rtol=1e-5, atol=1e-5))
     expected_spatial = expected.reshape(-1, token_count, channel_count)[0]

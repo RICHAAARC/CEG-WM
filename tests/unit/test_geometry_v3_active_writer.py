@@ -475,9 +475,11 @@ def _handwritten_pattern(anchor, like: torch.Tensor, module_path: str) -> torch.
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("dtype", (torch.float16, torch.bfloat16))
 def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
+    dtype: torch.dtype,
 ) -> None:
-    output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8)
+    output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8).to(dtype)
     correct_anchor = derive_canonical_relation_anchor("geometry-key-0001", point_count=16)
     wrong_anchor = derive_canonical_relation_anchor("geometry-key-0002", point_count=16)
     module_path = "transformer_blocks.4.attn.to_q"
@@ -524,10 +526,11 @@ def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("permutation", ("axis", "token", "channel"))
+@pytest.mark.parametrize("dtype", (torch.float16, torch.bfloat16))
 def test_independent_scalar_contract_rejects_mean_rms_preserving_pattern_permutations(
-    monkeypatch: pytest.MonkeyPatch, permutation: str,
+    monkeypatch: pytest.MonkeyPatch, permutation: str, dtype: torch.dtype,
 ) -> None:
-    output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8)
+    output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8).to(dtype)
     correct_anchor = derive_canonical_relation_anchor("geometry-key-0001", point_count=16)
     wrong_anchor = derive_canonical_relation_anchor("geometry-key-0002", point_count=16)
     original = ACTIVE.canonical_qk_pattern
@@ -554,12 +557,19 @@ def test_independent_scalar_contract_rejects_mean_rms_preserving_pattern_permuta
     session._feature_hook("q", "transformer_blocks.4.attn.to_q")(None, (), output)
 
     assert len(observed) == 1
-    assert float(torch.abs(ACTIVE.canonical_qk_pattern(
+    production = ACTIVE.canonical_qk_pattern(
         correct_anchor, output, module_path="transformer_blocks.4.attn.to_q",
-    ).mean())) <= 1e-5
-    assert float(torch.sqrt(torch.mean(ACTIVE.canonical_qk_pattern(
+    )
+    unpermuted = original(
         correct_anchor, output, module_path="transformer_blocks.4.attn.to_q",
-    ).square()))) == pytest.approx(1.0, abs=1e-4)
+    )
+    assert production.dtype == dtype
+    assert float(production.to(torch.float32).mean()) == pytest.approx(
+        float(unpermuted.to(torch.float32).mean()), abs=1e-7,
+    )
+    assert float(torch.sqrt(torch.mean(production.to(torch.float32).square()))) == pytest.approx(
+        float(torch.sqrt(torch.mean(unpermuted.to(torch.float32).square()))), abs=1e-7,
+    )
     assert observed[0].contract_pass is False
     assert observed[0].axis_contract_pass is False
 
