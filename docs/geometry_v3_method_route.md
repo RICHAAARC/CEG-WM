@@ -143,14 +143,48 @@ images, prompts, keys, raw anchors, Q/K, latents, weights and private paths.
 
 ### Real P0 operational state
 
-The completed real P0 run retained its fixed 144-unit roster as 0 calculated
-and 144 failed units. It stopped at the public `writer_generation` boundary;
-all six writer configurations retained `runtime_error`, while writer
-measurements, interference records, fresh attacked-RGB Q/K observations, and
-candidate selection were not reached. Its status is `P0_STOPPED` with
-`science_denominator=0`. This is a complete controlled-failure artifact, not a
-failure adjudication of the keyed-Q/K-anchor method, and the same full P0 exact
-must not be rerun unchanged.
+The completed real P0 run `geometry-v3-qk-p0-9b5085c805b6` at runner exact
+`9b5085c805b6e3580fadc153598aac93fcc41eab` retained all 144 derived units as
+calculated with zero failed units. It completed the writer-final-RGB, attack,
+and fresh attacked-RGB Q/K path and froze the single discovery candidate
+`block12-qk-rms0p0025`. Its status is `P0_WRITER_CANDIDATE_FROZEN` with
+`science_denominator=0`. This is discovery evidence only. It does not establish
+independent confirmation, blind H/corners recovery, content detection,
+watermark success, or a scientific conclusion.
+
+### P1 independent active-anchor confirmation
+
+The separately authorized protocol is
+`geometry-v3-keyed-qk-active-writer-p1-confirmation-v1`. Before model work it
+fail-closed validates the immutable bounded P0 receipt, manifest, terminal and
+144 public metrics against the exact source run, protocol, execution commit,
+plan digest, roster digest, complete status, 144/0 counts, unique selected
+configuration and zero science denominator. It reads no raw Q/K, image, prompt
+text, key, token, latent, model weights or private path from that artifact.
+
+P1 fixes `block12-qk-rms0p0025`: block 12 sample-side Q/K, writer step 18 and
+hard relative-RMS budget 0.0025. There is no reselection, placement or budget
+switch, tuning, retry or fallback. Its independent generation uses public
+prompt identity `geometry-v3-p1-public-prompt-01`, generation seed 173,
+observation noise seed 19073 and timestep 500. These differ from P0. The four
+new attack instances are identity; Pillow `ROTATE_270`; similarity at -11
+degrees, scale 0.89 and translation (-17,+9) about image centre; and BICUBIC
+crop-rescale with box (46,28,470,482). Their coordinate mappings are frozen
+before execution.
+
+The fixed 24-unit roster is one configuration by four attacks by Q/K by
+correct-key anchor, wrong-key anchor and no-writer controls. Every failure is
+retained. Each attack/kind margin is correct-key correlation minus the larger
+of wrong-key and no-writer correlation. Confirmation requires only the Q
+equal-weight four-attack median and K equal-weight four-attack median to be
+strictly positive; per-transform margins remain audit records and are not
+separate gates. The only statuses are `P1_STOPPED`, `P1_UNRESOLVED`, and
+`P1_ACTIVE_ANCHOR_CONFIRMED`, always with `science_denominator=0`.
+
+Even `P1_ACTIVE_ANCHOR_CONFIRMED` means only that the frozen active anchor was
+observed in fresh attacked-RGB Q/K under independent instances. It is not a
+blind H/corners, reliability, rectification, content-watermark, detector, or
+scientific conclusion.
 
 ### P0D single-configuration diagnostic
 
