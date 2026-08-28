@@ -246,6 +246,70 @@ def _read_metrics(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(records)
 
 
+def _recompute_source_selection(
+    metrics: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[dict[str, Any], ...], str]:
+    """Independently replay the frozen P0 margin, gate, and winner rule."""
+
+    summaries: list[dict[str, Any]] = []
+    eligible: list[tuple[tuple[float, float, float, int], str]] = []
+    for config in P0_CONFIGS:
+        q_margins: list[float] = []
+        k_margins: list[float] = []
+        calculated = 0
+        for attack in ("identity", "rotate90", "similarity", "crop_rescale"):
+            for kind, destination in (("q", q_margins), ("k", k_margins)):
+                group = [
+                    record for record in metrics
+                    if record["config_id"] == config.config_id
+                    and record["attack_id"] == attack
+                    and record["feature_kind"] == kind
+                ]
+                if len(group) != 3 or {record["control"] for record in group} != set(P1_CONTROL_IDS):
+                    raise ValueError("P1 source control score structure differs")
+                by_control = {record["control"]: record for record in group}
+                scores = {
+                    control: float(by_control[control]["score"])
+                    for control in P1_CONTROL_IDS
+                }
+                recomputed = scores["correct_key_anchor"] - max(
+                    scores["wrong_key_anchor"], scores["no_writer"]
+                )
+                if not math.isfinite(recomputed):
+                    raise ValueError("P1 source recomputed margin is nonfinite")
+                for record in group:
+                    if float(record["margin"]) != recomputed:
+                        raise ValueError("P1 source recorded margin differs from scores")
+                destination.append(recomputed)
+                calculated += len(group)
+        if len(q_margins) != 4 or len(k_margins) != 4 or calculated != 24:
+            raise ValueError("P1 source configuration metric roster differs")
+        q_median = float(np.median(np.asarray(q_margins, dtype=np.float64)))
+        k_median = float(np.median(np.asarray(k_margins, dtype=np.float64)))
+        complete = calculated == 24
+        is_eligible = complete and q_median > 0.0 and k_median > 0.0
+        summaries.append({
+            "config_id": config.config_id,
+            "block_index": config.block_index,
+            "relative_rms_budget": config.relative_rms_budget,
+            "calculated_unit_count": calculated,
+            "q_four_attack_equal_weight_median_margin": q_median,
+            "k_four_attack_equal_weight_median_margin": k_median,
+            "eligible": is_eligible,
+        })
+        if is_eligible:
+            worst = min(q_median, k_median)
+            centre = float(np.median(np.asarray((q_median, k_median), dtype=np.float64)))
+            eligible.append((
+                (-worst, -centre, config.relative_rms_budget, config.block_index),
+                config.config_id,
+            ))
+    if len(eligible) != 1:
+        raise ValueError("P1 source must retain exactly one eligible P0 candidate")
+    eligible.sort(key=lambda item: item[0])
+    return tuple(summaries), eligible[0][1]
+
+
 def validate_p0_source(root: Path) -> dict[str, Any]:
     """Validate the immutable public P0 artifact before any model work."""
 
@@ -378,6 +442,11 @@ def validate_p0_source(root: Path) -> dict[str, Any]:
         raise ValueError("P1 source configuration summary fields differ")
     if [item["config_id"] for item in summaries] != [config.config_id for config in P0_CONFIGS]:
         raise ValueError("P1 source configuration summary roster differs")
+    recomputed_summaries, recomputed_winner = _recompute_source_selection(metrics)
+    if tuple(summaries) != recomputed_summaries:
+        raise ValueError("P1 source receipt summaries differ from metrics")
+    if recomputed_winner != receipt.get("selected_config_id"):
+        raise ValueError("P1 source selected candidate differs from frozen P0 replay")
     selected = [item for item in summaries if isinstance(item, dict) and item.get("config_id") == P1_CONFIG_ID]
     if len(selected) != 1 or selected[0].get("eligible") is not True or selected[0].get("calculated_unit_count") != 24:
         raise ValueError("P1 source selected configuration summary differs")

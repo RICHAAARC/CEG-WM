@@ -35,22 +35,31 @@ def _json_bytes(value: object) -> bytes:
 
 
 def _source_records() -> list[dict[str, object]]:
-    return [
-        {
-            "config_id": config.config_id,
-            "attack_id": attack,
-            "feature_kind": kind,
-            "control": control,
-            "status": "calculated",
-            "error_class": None,
-            "score": 0.25,
-            "margin": 0.05 if config.config_id == P1.P1_CONFIG_ID else -0.01,
+    records: list[dict[str, object]] = []
+    for config in P0_CONFIGS:
+        intended_margin = 0.05 if config.config_id == P1.P1_CONFIG_ID else -0.01
+        scores = {
+            "correct_key_anchor": 0.25,
+            "wrong_key_anchor": 0.20 if intended_margin > 0.0 else 0.26,
+            "no_writer": 0.19 if intended_margin > 0.0 else 0.25,
         }
-        for config in P0_CONFIGS
-        for attack in ("identity", "rotate90", "similarity", "crop_rescale")
-        for kind in P1.P1_KIND_IDS
-        for control in P1.P1_CONTROL_IDS
-    ]
+        margin = scores["correct_key_anchor"] - max(
+            scores["wrong_key_anchor"], scores["no_writer"]
+        )
+        for attack in ("identity", "rotate90", "similarity", "crop_rescale"):
+            for kind in P1.P1_KIND_IDS:
+                for control in P1.P1_CONTROL_IDS:
+                    records.append({
+                        "config_id": config.config_id,
+                        "attack_id": attack,
+                        "feature_kind": kind,
+                        "control": control,
+                        "status": "calculated",
+                        "error_class": None,
+                        "score": scores[control],
+                        "margin": margin,
+                    })
+    return records
 
 
 def _source_fixture(root: Path) -> Path:
@@ -59,13 +68,14 @@ def _source_fixture(root: Path) -> Path:
     summaries = []
     for config in P0_CONFIGS:
         selected = config.config_id == P1.P1_CONFIG_ID
+        fixture_margin = 0.25 - (0.20 if selected else 0.26)
         summaries.append({
             "config_id": config.config_id,
             "block_index": config.block_index,
             "relative_rms_budget": config.relative_rms_budget,
             "calculated_unit_count": 24,
-            "q_four_attack_equal_weight_median_margin": 0.05 if selected else -0.01,
-            "k_four_attack_equal_weight_median_margin": 0.05 if selected else -0.01,
+            "q_four_attack_equal_weight_median_margin": fixture_margin,
+            "k_four_attack_equal_weight_median_margin": fixture_margin,
             "eligible": selected,
         })
     receipt = {
@@ -143,6 +153,60 @@ def _rewrite_source(root: Path, filename: str, mutation) -> None:
             (root / entry["name"]).stat().st_size for entry in manifest["files"]
         )
         (root / "manifest.json").write_bytes(_json_bytes(manifest))
+
+
+def _rewrite_metrics(root: Path, mutation) -> None:
+    records = [json.loads(line) for line in (root / "metrics.jsonl").read_bytes().splitlines()]
+    mutation(records)
+    (root / "metrics.jsonl").write_bytes(
+        b"".join(_json_bytes(record) + b"\n" for record in records)
+    )
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    for entry in manifest["files"]:
+        if entry["name"] == "metrics.jsonl":
+            payload = (root / "metrics.jsonl").read_bytes()
+            entry["bytes"] = len(payload)
+            entry["sha256"] = hashlib.sha256(payload).hexdigest()
+    manifest["total_payload_bytes"] = sum(
+        (root / entry["name"]).stat().st_size for entry in manifest["files"]
+    )
+    (root / "manifest.json").write_bytes(_json_bytes(manifest))
+
+
+def _set_group_margin(
+    records: list[dict[str, object]], config_id: str,
+    attacks: tuple[str, ...], kinds: tuple[str, ...], margin: float,
+) -> None:
+    for record in records:
+        if (
+            record["config_id"] == config_id
+            and record["attack_id"] in attacks
+            and record["feature_kind"] in kinds
+        ):
+            control = record["control"]
+            record["score"] = (
+                0.25 if control == "correct_key_anchor"
+                else 0.25 - margin if control == "wrong_key_anchor"
+                else 0.24 - margin
+            )
+    for record in records:
+        if (
+            record["config_id"] == config_id
+            and record["attack_id"] in attacks
+            and record["feature_kind"] in kinds
+        ):
+            group = [
+                item for item in records
+                if item["config_id"] == config_id
+                and item["attack_id"] == record["attack_id"]
+                and item["feature_kind"] == record["feature_kind"]
+            ]
+            by_control = {item["control"]: item for item in group}
+            actual_margin = float(by_control["correct_key_anchor"]["score"]) - max(
+                float(by_control["wrong_key_anchor"]["score"]),
+                float(by_control["no_writer"]["score"]),
+            )
+            record["margin"] = actual_margin
 
 
 def _plan(tmp_path: Path, source: Path) -> Path:
@@ -291,6 +355,39 @@ def test_real_main_rejects_incomplete_143_metric_roster_before_model(
     (source / "manifest.json").write_bytes(_json_bytes(manifest))
     rc, control = _run_main(_plan(tmp_path, source), monkeypatch)
     assert rc == 1 and control["failure_point"] == "source_validation"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case", ("margin", "median", "eligibility", "winner"))
+def test_real_main_replays_p0_statistics_and_rejects_tampered_metrics_before_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    source = _source_fixture(tmp_path / "source")
+
+    def mutate(records: list[dict[str, object]]) -> None:
+        if case == "margin":
+            records[0]["margin"] = 999.0
+        elif case == "median":
+            _set_group_margin(
+                records, P1.P1_CONFIG_ID, ("identity", "rotate90"), ("q",), -0.4
+            )
+        elif case == "eligibility":
+            _set_group_margin(records, P1.P1_CONFIG_ID, tuple(P1.P1_ATTACK_IDS), ("k",), -0.2)
+        else:
+            _set_group_margin(
+                records, P0_CONFIGS[0].config_id, tuple(P1.P1_ATTACK_IDS), tuple(P1.P1_KIND_IDS), 0.2
+            )
+            _set_group_margin(
+                records, P1.P1_CONFIG_ID, tuple(P1.P1_ATTACK_IDS), tuple(P1.P1_KIND_IDS), -0.2
+            )
+
+    _rewrite_metrics(source, mutate)
+    rc, control = _run_main(_plan(tmp_path, source), monkeypatch)
+    assert rc == 1
+    assert control == {
+        "status": "failure", "failure_point": "source_validation",
+        "error_class": "validation_error", "science_denominator": 0,
+    }
 
 
 @pytest.mark.integration
