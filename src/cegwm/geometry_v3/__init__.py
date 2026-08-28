@@ -29,6 +29,12 @@ from cegwm.geometry_v3.contracts import (
     record_geometry_estimate,
     start_recoverability,
 )
+from cegwm.geometry_v3.active_writer import (
+    P0_CONFIGS,
+    P0_MODEL_ID,
+    P0_PROTOCOL_ID,
+    P0WriterConfig,
+)
 
 __all__ = [
     "ANCHOR_DOMAIN_ID",
@@ -36,6 +42,10 @@ __all__ = [
     "METHOD_ID",
     "RECOVERABILITY_CONTRACT_ID",
     "WRITER_CONTRACT_ID",
+    "P0_CONFIGS",
+    "P0_MODEL_ID",
+    "P0_PROTOCOL_ID",
+    "P0WriterConfig",
     "CanonicalRelationAnchor",
     "ContentDetectorBinding",
     "FeatureRole",

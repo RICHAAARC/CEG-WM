@@ -7,10 +7,11 @@
 - Route role: active keyed geometric synchronization through a canonical
   relation anchor written into predeclared SD3.5 Q/K/attention feature
   placements.
-- Current delivery: local pure-CPU contract scaffold only.
+- Current delivery: local P0 active-writer discovery implementation plus
+  deterministic fake/CPU contract tests. The real model path remains unrun.
 - Evidence ceiling: engineering structure and deterministic contract tests.
-  No SD3.5 writer, model execution, recoverability result, detector result,
-  watermark result, or scientific conclusion exists at this stage.
+  No SD3.5 runtime artifact, recoverability result, detector result, watermark
+  result, or scientific conclusion exists at this stage.
 
 Geometry can recover coordinates only. It has no authority to create a
 positive watermark decision. Any image rectified by this route must be judged
@@ -79,14 +80,56 @@ Passing this geometry contract means only that coordinate recovery may be used
 for rectification. It never means that a watermark was detected. The content
 detector remains the sole positive authority.
 
+## P0 active-writer discovery freeze
+
+The first model-backed protocol identity is
+`geometry-v3-keyed-qk-active-writer-p0-v1`. It freezes SD3.5-medium at 512 by
+512, 20 inference steps, seed 73 and one public prompt identity. The active
+writer has six independently declared configurations only: blocks 4, 12 and
+20, each writing sample-side `attn.to_q` and `attn.to_k` at hard relative-RMS
+budget 0.0025 or 0.005. A paired no-writer generation uses the same public
+prompt, seed and model load. There is no default or inherited placement and no
+all-layer scan.
+
+The writer is armed after denoising step 17, writes Q and K exactly once in
+the zero-based transformer call for step 18, and is verified after that call.
+A topology that is not exactly one transformer call per denoising step stops
+the configuration; it cannot select another step, layer or budget. The keyed
+anchor becomes a transient zero-mean unit-RMS low-rank token-grid by channel
+pattern. Actual relative RMS and call count are public scalar records; keys,
+anchor tensors and Q/K tensors are not artifacts.
+
+Every final writer RGB and the paired no-writer RGB is attacked by identity,
+90-degree rotation, the frozen similarity transform and the frozen
+crop-rescale transform. Fresh observation begins only from that current RGB:
+the public VAE posterior mode, public noise seed 9073 and public timestep 500
+feed a direct transformer call with frozen zero conditioning. It cannot use an
+embedding cache, prompt, route, latent or homography input. Known homography is
+truth metadata used only to transport the public anchor for derived metrics.
+
+The fixed denominator is 144 retained derived units: six configurations by
+four attacks by Q/K by correct-key-anchor, wrong-key-anchor and no-writer
+controls. The per-attack margin is correct-anchor normalized correlation minus
+the larger of wrong-anchor and no-writer correlation. A configuration is
+eligible only when all 24 units are calculated and both Q and K equal-weight
+four-attack median margins are strictly positive. Eligible configurations are
+ordered by descending worst-side margin, descending two-side median, ascending
+budget and ascending block index; exactly one is frozen. The only statuses are
+`P0_STOPPED`, `P0_UNRESOLVED` and `P0_WRITER_CANDIDATE_FROZEN`, always with
+`science_denominator=0`. A frozen P0 candidate is discovery output and is not
+confirmation.
+
+RGB MSE/PSNR and an unchanged-content-detector identity hook are record-only;
+they cannot alter P0 eligibility. Artifacts are create-only receipt, manifest,
+terminal and metrics JSONL under a two-MiB aggregate bound. They exclude
+images, prompts, keys, raw anchors, Q/K, latents, weights and private paths.
+
 ## Next separately authorized work
 
-Model-backed work must be separately exact-bound and must freeze placements,
-budgets, interference measures, attack roster, fixed denominators, retained
-failures, artifact limits, and stopping rules before execution. The first
-method experiment should validate the complete active-writer to final-RGB to
-attacked-RGB to fresh-Q/K recovery path at predeclared placements. It must not
-begin with adaptive all-layer selection, automatic fallback, or route mixing.
+The P0 implementation is ready only for separate exact-bound real execution.
+Any later confirmation must use new generation and attack instances with the
+single P0 candidate frozen and no reselection. It must preserve retained
+failures, bounded artifacts and the same coordinate-only evidence ceiling.
 
 Real SD3.5, GPU, Colab, Drive, Hugging Face access, push, formal evaluation,
 and scientific adjudication remain outside this scaffold delivery.
