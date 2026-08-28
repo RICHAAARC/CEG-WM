@@ -379,4 +379,3 @@ def test_runner_has_no_retry_fallback_or_stdout_stderr_control_path() -> None:
     assert "sys.stdout" not in source
     assert "sys.stderr" not in source
     assert "p0d1_config = p0writerconfig(4, 0.0025)" in source
-
