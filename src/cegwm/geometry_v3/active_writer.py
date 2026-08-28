@@ -106,11 +106,95 @@ class WriterScalarObservation:
     normalization: str
     injection_sign: str
     contract_pass: bool
+    axis_contract_pass: bool
+    token_contract_pass: bool
+    channel_contract_pass: bool
+    normalization_contract_pass: bool
     pre_correct_correlation: float
     pre_wrong_correlation: float
     post_correct_correlation: float
     post_wrong_correlation: float
     actual_relative_rms: float
+
+
+def _independent_pattern_contract(
+    anchor: CanonicalRelationAnchor,
+    pattern: torch.Tensor,
+    *,
+    module_path: str,
+) -> tuple[bool, bool, bool, bool]:
+    """Independently reconstruct the public row-major pattern contract."""
+
+    if not isinstance(pattern, torch.Tensor) or pattern.ndim < 3:
+        return False, False, False, False
+    token_count, channel_count = int(pattern.shape[-2]), int(pattern.shape[-1])
+    side = math.isqrt(token_count)
+    token_contract = side >= 2 and side * side == token_count
+    channel_contract = channel_count >= 2
+    if not token_contract or not channel_contract or len(anchor.public_digest) != 64:
+        return False, token_contract, channel_contract, False
+    device = pattern.device
+    flat = torch.arange(token_count, device=device, dtype=torch.long)
+    rows = torch.div(flat, side, rounding_mode="floor").to(torch.float32)
+    columns = torch.remainder(flat, side).to(torch.float32)
+    y_centres = (rows + 0.5) / side
+    x_centres = (columns + 0.5) / side
+    spatial = torch.zeros(token_count, device=device, dtype=torch.float32)
+    for index, point in enumerate(anchor.points):
+        if len(point) != 2:
+            return False, token_contract, channel_contract, False
+        px, py = float(point[0]), float(point[1])
+        if not math.isfinite(px) or not math.isfinite(py):
+            return False, token_contract, channel_contract, False
+        sign = 1.0 if index % 2 == 0 else -1.0
+        spatial = spatial + sign * torch.exp(
+            -((x_centres - px) ** 2 + (y_centres - py) ** 2) / (2.0 * 0.075**2)
+        )
+    spatial = spatial - spatial.mean()
+    spatial_rms = torch.sqrt(torch.mean(spatial.square()))
+    if not bool(torch.isfinite(spatial_rms)) or float(spatial_rms) <= 0.0:
+        return False, token_contract, channel_contract, False
+    spatial = spatial / spatial_rms
+
+    digest = hashlib.sha256(
+        (anchor.public_digest + "|" + module_path).encode("ascii")
+    ).digest()
+    frequency = 1 + digest[0] % 11
+    phase = 2.0 * math.pi * int.from_bytes(digest[1:5], "big") / 2**32
+    channel_indices = torch.arange(channel_count, device=device, dtype=torch.float32)
+    channel_centres = (channel_indices + 0.5) / channel_count
+    channel = torch.sin(2.0 * math.pi * frequency * channel_centres + phase)
+    channel = channel - channel.mean()
+    channel_rms = torch.sqrt(torch.mean(channel.square()))
+    if not bool(torch.isfinite(channel_rms)) or float(channel_rms) <= 0.0:
+        return False, token_contract, channel_contract, False
+    channel = channel / channel_rms
+    expected = spatial[:, None] * channel[None, :]
+    expected = expected - expected.mean()
+    expected = expected / torch.sqrt(torch.mean(expected.square()))
+    expected = expected.reshape((1,) * (pattern.ndim - 2) + expected.shape).expand_as(pattern)
+    observed = pattern.detach().to(torch.float32)
+    normalization_contract = (
+        bool(torch.isfinite(observed).all())
+        and abs(float(observed.mean())) <= 1e-5
+        and abs(float(torch.sqrt(torch.mean(observed.square()))) - 1.0) <= 1e-4
+    )
+    axis_contract = bool(torch.allclose(observed, expected, rtol=1e-5, atol=1e-5))
+    expected_spatial = expected.reshape(-1, token_count, channel_count)[0]
+    observed_spatial = observed.reshape(-1, token_count, channel_count)[0]
+    token_contract = token_contract and bool(torch.allclose(
+        observed_spatial @ channel,
+        expected_spatial @ channel,
+        rtol=1e-5,
+        atol=1e-5,
+    ))
+    channel_contract = channel_contract and bool(torch.allclose(
+        spatial @ observed_spatial,
+        spatial @ expected_spatial,
+        rtol=1e-5,
+        atol=1e-5,
+    ))
+    return axis_contract, token_contract, channel_contract, normalization_contract
 
 
 def _project_final_dtype_hard_budget(
@@ -401,15 +485,25 @@ class ActiveQKWriterSession:
                 pattern_mean = float(pattern32.mean())
                 pattern_rms = float(torch.sqrt(torch.mean(pattern32.square())))
                 signed_projection = float(torch.sum(actual_delta * pattern32))
+                (
+                    axis_contract_pass,
+                    token_contract_pass,
+                    channel_contract_pass,
+                    normalization_contract_pass,
+                ) = _independent_pattern_contract(
+                    self.anchor, pattern, module_path=module_path,
+                )
                 contract_pass = (
                     kind in {"q", "k"}
                     and module_path == f"{self.config.layer_path}.to_{kind}"
                     and token_grid_side * token_grid_side == token_count
                     and channel_count >= 2
                     and math.isfinite(pattern_mean)
-                    and abs(pattern_mean) <= 1e-5
                     and math.isfinite(pattern_rms)
-                    and abs(pattern_rms - 1.0) <= 1e-4
+                    and axis_contract_pass
+                    and token_contract_pass
+                    and channel_contract_pass
+                    and normalization_contract_pass
                     and math.isfinite(signed_projection)
                     and signed_projection > 0.0
                 )
@@ -424,6 +518,10 @@ class ActiveQKWriterSession:
                     normalization="zero_mean_unit_rms",
                     injection_sign="positive",
                     contract_pass=contract_pass,
+                    axis_contract_pass=axis_contract_pass,
+                    token_contract_pass=token_contract_pass,
+                    channel_contract_pass=channel_contract_pass,
+                    normalization_contract_pass=normalization_contract_pass,
                     pre_correct_correlation=normalized_pattern_correlation(output, pattern),
                     pre_wrong_correlation=normalized_pattern_correlation(output, wrong_pattern),
                     post_correct_correlation=normalized_pattern_correlation(injected, pattern),

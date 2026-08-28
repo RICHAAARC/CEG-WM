@@ -347,7 +347,10 @@ and P1 receipt, manifest, terminal, metrics, hashes, byte counts, roster and
 zero-denominator identities. It retains the selected P0 configuration's 24
 public score components, all 24 P1 public score components, and the six
 identity-control differences labelled only as `two_instance_displacement`.
-Two instances do not establish a population variance.
+Wrong-key differences are additionally labelled
+`wrong_key_domain_confounded_two_instance_displacement`, because the P0 and P1
+wrong-key domains differ. Two instances do not establish a population
+variance.
 
 P1M0 fixes `block12-qk-rms0p0025`, writer step 18, identity geometry, one new
 public prompt identity and seed. It performs exactly one paired no-writer
@@ -357,7 +360,12 @@ default-disabled production writer observer may retain only bounded public
 scalars and contract facts: pre/post correct- and wrong-anchor normalized
 correlations, actual relative RMS, Q/K module identity, row-major y/x token
 axis, square token-grid and channel counts, zero-mean unit-RMS normalization,
-positive injection sign, and finite booleans.
+positive injection sign, and finite booleans. The structural booleans are not
+inferred from literal labels or the production pattern helper: a separate
+oracle explicitly maps flat token indices to row-major `(y,x)` pixel centres
+and independently reconstructs the asymmetric-anchor spatial field,
+digest-derived channel frequency/phase and normalization before comparing the
+actual production pattern.
 
 Writer-step-18 and final predecode latents are transient in-process snapshots.
 They and the final RGB re-encode are each observed under the same frozen fresh

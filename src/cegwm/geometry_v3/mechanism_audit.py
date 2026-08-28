@@ -311,6 +311,11 @@ def validate_sources(p0_root: Path, p1_root: Path) -> ValidatedSources:
         "p0_score": p0_identity_scores[key]["score"],
         "p1_score": p1_identity_scores[key]["score"],
         "two_instance_displacement": p1_identity_scores[key]["score"] - p0_identity_scores[key]["score"],
+        "interpretation": (
+            "wrong_key_domain_confounded_two_instance_displacement"
+            if key[1] == "wrong_key_anchor"
+            else "two_instance_displacement"
+        ),
     } for key in sorted(p0_identity_scores))
     p1_identity = {
         "run_id": P1_RUN_ID, "protocol": P1_PROTOCOL,
@@ -510,6 +515,66 @@ def _records_for(
     } for kind in P1_KIND_IDS for index, control in enumerate(("correct_key_anchor", "wrong_key_anchor")))
 
 
+def classify_p1m0(
+    contract_audit: Sequence[Mapping[str, Any]],
+    stage_decay: Sequence[Mapping[str, Any]],
+) -> str:
+    """Apply the frozen diagnostic classification to a complete scalar fixture."""
+
+    if len(contract_audit) != 2 or {
+        item.get("feature_kind") for item in contract_audit
+    } != set(P1_KIND_IDS):
+        raise ValueError("P1M0 contract audit roster differs")
+    contract_fields = (
+        "contract_pass", "axis_contract_pass", "token_contract_pass",
+        "channel_contract_pass", "normalization_contract_pass",
+        "positive_injection_sign_consistent",
+    )
+    for item in contract_audit:
+        if any(not isinstance(item.get(field), bool) for field in contract_fields):
+            raise ValueError("P1M0 contract audit booleans differ")
+        if not isinstance(item.get("normalized_correct_correlation_lift_positive"), bool):
+            raise ValueError("P1M0 correlation-lift audit differs")
+    expected_stages = {
+        (kind, stage) for kind in P1_KIND_IDS for stage in P1M0_STAGES
+    }
+    if len(stage_decay) != 6 or {
+        (item.get("feature_kind"), item.get("stage")) for item in stage_decay
+    } != expected_stages:
+        raise ValueError("P1M0 stage-decay roster differs")
+    scalar_fields = (
+        "writer_correct_score", "writer_wrong_score", "no_writer_correct_score",
+        "no_writer_wrong_score", "correct_score_change_from_previous_stage",
+        "writer_separation",
+    )
+    if any(
+        isinstance(item.get(field), bool)
+        or not isinstance(item.get(field), (int, float))
+        or not math.isfinite(float(item[field]))
+        for item in stage_decay for field in scalar_fields
+    ):
+        raise ValueError("P1M0 stage-decay scalar differs")
+    mismatch = any(
+        not all(bool(item[field]) for field in contract_fields)
+        for item in contract_audit
+    )
+    if mismatch:
+        return P1M0_STATUS_MISMATCH
+    hook_lifts_positive = all(
+        bool(item["normalized_correct_correlation_lift_positive"])
+        for item in contract_audit
+    )
+    rgb_separations = {
+        item["feature_kind"]: float(item["writer_separation"])
+        for item in stage_decay if item["stage"] == "final_rgb_reencode"
+    }
+    if hook_lifts_positive and all(
+        rgb_separations[kind] <= 0.0 for kind in P1_KIND_IDS
+    ):
+        return P1M0_STATUS_INSUFFICIENT
+    return P1M0_STATUS_INCONCLUSIVE
+
+
 def run_p1m0(pipeline: Any, geometry_key: str | bytes | bytearray | memoryview) -> P1M0ExecutionResult:
     key = normalize_detection_key(geometry_key)
     correct_anchor = derive_canonical_relation_anchor(key, point_count=P0_ANCHOR_POINT_COUNT)
@@ -551,6 +616,10 @@ def run_p1m0(pipeline: Any, geometry_key: str | bytes | bytearray | memoryview) 
                 "token_count": hook["token_count"],
                 "channel_count": hook["channel_count"],
                 "contract_pass": bool(hook["contract_pass"]),
+                "axis_contract_pass": bool(hook["axis_contract_pass"]),
+                "token_contract_pass": bool(hook["token_contract_pass"]),
+                "channel_contract_pass": bool(hook["channel_contract_pass"]),
+                "normalization_contract_pass": bool(hook["normalization_contract_pass"]),
                 "positive_injection_sign_consistent": sign_consistent,
                 "normalized_correct_correlation_lift_positive": hook_lift > 0.0,
             })
@@ -570,26 +639,7 @@ def run_p1m0(pipeline: Any, geometry_key: str | bytes | bytearray | memoryview) 
                     "writer_separation": separation,
                 })
                 previous = float(writer_scores[0])
-        mismatch = any(
-            not item["contract_pass"] or not item["positive_injection_sign_consistent"]
-            for item in contract_audit
-        )
-        hook_lifts_positive = all(
-            item["normalized_correct_correlation_lift_positive"]
-            for item in contract_audit
-        )
-        rgb_separations = {
-            item["feature_kind"]: item["writer_separation"]
-            for item in stage_decay if item["stage"] == "final_rgb_reencode"
-        }
-        if mismatch:
-            status = P1M0_STATUS_MISMATCH
-        elif hook_lifts_positive and all(
-            rgb_separations[kind] <= 0.0 for kind in P1_KIND_IDS
-        ):
-            status = P1M0_STATUS_INSUFFICIENT
-        else:
-            status = P1M0_STATUS_INCONCLUSIVE
+        status = classify_p1m0(contract_audit, stage_decay)
         return P1M0ExecutionResult(
             status, tuple(records), hook_scalars, tuple(stage_decay),
             tuple(contract_audit), None,
@@ -612,6 +662,7 @@ def package_p1m0_artifacts(
         "p1_public_scores": list(sources.p1_scores),
         "identity_two_instance_displacement": list(sources.two_instance_displacement),
         "displacement_interpretation": "two_instance_displacement_not_population_variance",
+        "wrong_key_displacement_interpretation": "wrong_key_domain_confounded_two_instance_displacement",
     })
     plan_digest = _digest(_json_bytes(public_plan()))
     receipt = {

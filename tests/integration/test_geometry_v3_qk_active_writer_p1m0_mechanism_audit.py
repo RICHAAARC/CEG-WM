@@ -128,6 +128,15 @@ def test_real_structured_sources_bind_raw_components_and_two_instance_displaceme
     assert len(sources.two_instance_displacement) == 6
     assert {item["control"] for item in sources.two_instance_displacement} == set(P1.P1_CONTROL_IDS)
     assert all("two_instance_displacement" in item for item in sources.two_instance_displacement)
+    wrong = [
+        item for item in sources.two_instance_displacement
+        if item["control"] == "wrong_key_anchor"
+    ]
+    assert len(wrong) == 2
+    assert all(
+        item["interpretation"] == "wrong_key_domain_confounded_two_instance_displacement"
+        for item in wrong
+    )
     assert sources.p1_identity["status"] == "P1_UNRESOLVED"
 
 
@@ -176,19 +185,59 @@ def test_main_fails_source_validation_before_model_for_tampered_payload(
     }
 
 
+def _classification_fixture(
+    *, contract_pass: bool = True, q_lift: bool = True, k_lift: bool = True,
+    q_rgb_separation: float = -0.002, k_rgb_separation: float = -0.003,
+):
+    contracts = []
+    for kind, lift in (("q", q_lift), ("k", k_lift)):
+        contracts.append({
+            "feature_kind": kind,
+            "contract_pass": contract_pass,
+            "axis_contract_pass": contract_pass,
+            "token_contract_pass": contract_pass,
+            "channel_contract_pass": contract_pass,
+            "normalization_contract_pass": contract_pass,
+            "positive_injection_sign_consistent": contract_pass,
+            "normalized_correct_correlation_lift_positive": lift,
+        })
+    stages = []
+    for kind, rgb_separation in (("q", q_rgb_separation), ("k", k_rgb_separation)):
+        for index, stage in enumerate(P1M0.P1M0_STAGES):
+            separation = rgb_separation if stage == "final_rgb_reencode" else 0.004 - 0.001 * index
+            stages.append({
+                "feature_kind": kind,
+                "stage": stage,
+                "writer_correct_score": 0.008 - 0.001 * index,
+                "writer_wrong_score": 0.001,
+                "no_writer_correct_score": 0.002,
+                "no_writer_wrong_score": -0.001,
+                "correct_score_change_from_previous_stage": -0.001,
+                "writer_separation": separation,
+            })
+    return contracts, stages
+
+
 @pytest.mark.integration
-def test_status_rule_separates_mismatch_observability_and_inconclusive() -> None:
+@pytest.mark.parametrize(
+    ("fixture_kwargs", "expected"),
+    (
+        ({"contract_pass": False}, P1M0.P1M0_STATUS_MISMATCH),
+        ({}, P1M0.P1M0_STATUS_INSUFFICIENT),
+        ({"k_lift": False}, P1M0.P1M0_STATUS_INCONCLUSIVE),
+        ({"q_rgb_separation": 0.001}, P1M0.P1M0_STATUS_INCONCLUSIVE),
+    ),
+)
+def test_dynamic_status_classification_uses_complete_low_sensitivity_scalar_fixture(
+    fixture_kwargs: dict[str, object], expected: str,
+) -> None:
+    contracts, stages = _classification_fixture(**fixture_kwargs)
+    assert P1M0.classify_p1m0(contracts, stages) == expected
+
+
+@pytest.mark.integration
+def test_status_rule_is_frozen_without_method_promotion() -> None:
     plan = P1M0.public_plan()["decision_rule"]
     assert plan["implementation_mismatch"].startswith("any_public_contract")
     assert "qk_hook_lifts_positive" in plan["observability_insufficiency"]
-    assert {
-        P1M0.P1M0_STATUS_MISMATCH,
-        P1M0.P1M0_STATUS_INSUFFICIENT,
-        P1M0.P1M0_STATUS_INCONCLUSIVE,
-        P1M0.P1M0_STATUS_STOPPED,
-    } == {
-        "P1M0_IMPLEMENTATION_MISMATCH_INDICATED",
-        "P1M0_OBSERVABILITY_INSUFFICIENCY_INDICATED",
-        "P1M0_INCONCLUSIVE",
-        "P1M0_STOPPED",
-    }
+    assert P1M0.P1M0_SCIENCE_DENOMINATOR == 0

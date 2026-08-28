@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from types import SimpleNamespace
 
@@ -441,23 +442,48 @@ def _independent_normalized_correlation(value: torch.Tensor, pattern: torch.Tens
     return float(torch.sum(left * right) / torch.sqrt(torch.sum(left.square()) * torch.sum(right.square())))
 
 
+def _handwritten_pattern(anchor, like: torch.Tensor, module_path: str) -> torch.Tensor:
+    token_count, channel_count = like.shape[-2:]
+    side = math.isqrt(token_count)
+    flat = torch.arange(token_count, dtype=torch.long)
+    row = torch.div(flat, side, rounding_mode="floor").to(torch.float64)
+    column = torch.remainder(flat, side).to(torch.float64)
+    y = (row + 0.5) / side
+    x = (column + 0.5) / side
+    spatial = torch.zeros(token_count, dtype=torch.float64)
+    for index, (px, py) in enumerate(anchor.points):
+        spatial += (1.0 if index % 2 == 0 else -1.0) * torch.exp(
+            -((x - px) ** 2 + (y - py) ** 2) / (2.0 * 0.075**2)
+        )
+    spatial -= spatial.mean()
+    spatial /= torch.sqrt(torch.mean(spatial.square()))
+    digest = hashlib.sha256(
+        (anchor.public_digest + "|" + module_path).encode("ascii")
+    ).digest()
+    frequency = 1 + digest[0] % 11
+    phase = 2.0 * math.pi * int.from_bytes(digest[1:5], "big") / 2**32
+    channel_index = torch.arange(channel_count, dtype=torch.float64)
+    channel = torch.sin(
+        2.0 * math.pi * frequency * ((channel_index + 0.5) / channel_count) + phase
+    )
+    channel -= channel.mean()
+    channel /= torch.sqrt(torch.mean(channel.square()))
+    expected = spatial[:, None] * channel[None, :]
+    expected -= expected.mean()
+    expected /= torch.sqrt(torch.mean(expected.square()))
+    return expected.reshape((1,) * (like.ndim - 2) + expected.shape).expand_as(like).to(like.dtype)
+
+
 @pytest.mark.unit
 def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8)
-    correct = torch.arange(16 * 8, dtype=torch.float32).reshape(1, 16, 8)
-    correct = correct - correct.mean()
-    correct = correct / torch.sqrt(torch.mean(correct.square()))
-    wrong = torch.flip(correct, dims=(-1,))
     correct_anchor = derive_canonical_relation_anchor("geometry-key-0001", point_count=16)
     wrong_anchor = derive_canonical_relation_anchor("geometry-key-0002", point_count=16)
-
-    def fixed_pattern(anchor, like, *, module_path, transformed_points=None):
-        del like, module_path, transformed_points
-        return correct if anchor == correct_anchor else wrong
-
-    monkeypatch.setattr(ACTIVE, "canonical_qk_pattern", fixed_pattern)
+    module_path = "transformer_blocks.4.attn.to_q"
+    assert any(abs(float(px) - float(py)) > 1e-6 for px, py in correct_anchor.points)
+    correct = _handwritten_pattern(correct_anchor, output, module_path)
+    wrong = _handwritten_pattern(wrong_anchor, output, module_path)
     observations = []
     transformer = _Transformer()
     session = ActiveQKWriterSession(
@@ -466,7 +492,7 @@ def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
     )
     session._armed = True
     session._current_transformer_call = P0_WRITER_STEP_INDEX
-    injected = session._feature_hook("q", "transformer_blocks.4.attn.to_q")(None, (), output)
+    injected = session._feature_hook("q", module_path)(None, (), output)
 
     assert len(observations) == 1
     observed = observations[0]
@@ -476,6 +502,10 @@ def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
     assert observed.spatial_axis == "row_major_yx"
     assert observed.normalization == "zero_mean_unit_rms"
     assert observed.injection_sign == "positive"
+    assert observed.axis_contract_pass is True
+    assert observed.token_contract_pass is True
+    assert observed.channel_contract_pass is True
+    assert observed.normalization_contract_pass is True
     assert (observed.token_grid_side, observed.token_count, observed.channel_count) == (4, 16, 8)
     assert observed.pre_correct_correlation == pytest.approx(
         _independent_normalized_correlation(output, correct), abs=1e-7,
@@ -490,6 +520,48 @@ def test_default_disabled_scalar_observer_reports_only_bounded_public_contract(
         _independent_normalized_correlation(injected, wrong), abs=1e-7,
     )
     assert 0.0 < observed.actual_relative_rms <= 0.0025 * 1.0002
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("permutation", ("axis", "token", "channel"))
+def test_independent_scalar_contract_rejects_mean_rms_preserving_pattern_permutations(
+    monkeypatch: pytest.MonkeyPatch, permutation: str,
+) -> None:
+    output = torch.linspace(-0.7, 0.9, 16 * 8).reshape(1, 16, 8)
+    correct_anchor = derive_canonical_relation_anchor("geometry-key-0001", point_count=16)
+    wrong_anchor = derive_canonical_relation_anchor("geometry-key-0002", point_count=16)
+    original = ACTIVE.canonical_qk_pattern
+
+    def permuted(anchor, like, *, module_path, transformed_points=None):
+        value = original(
+            anchor, like, module_path=module_path,
+            transformed_points=transformed_points,
+        )
+        if permutation == "axis":
+            return value.reshape(1, 4, 4, 8).transpose(1, 2).reshape_as(value)
+        if permutation == "token":
+            return torch.roll(value, shifts=1, dims=-2)
+        return torch.roll(value, shifts=1, dims=-1)
+
+    monkeypatch.setattr(ACTIVE, "canonical_qk_pattern", permuted)
+    observed = []
+    session = ActiveQKWriterSession(
+        _Transformer(), P0_CONFIGS[0], correct_anchor,
+        scalar_observer=observed.append, scalar_wrong_anchor=wrong_anchor,
+    )
+    session._armed = True
+    session._current_transformer_call = P0_WRITER_STEP_INDEX
+    session._feature_hook("q", "transformer_blocks.4.attn.to_q")(None, (), output)
+
+    assert len(observed) == 1
+    assert float(torch.abs(ACTIVE.canonical_qk_pattern(
+        correct_anchor, output, module_path="transformer_blocks.4.attn.to_q",
+    ).mean())) <= 1e-5
+    assert float(torch.sqrt(torch.mean(ACTIVE.canonical_qk_pattern(
+        correct_anchor, output, module_path="transformer_blocks.4.attn.to_q",
+    ).square()))) == pytest.approx(1.0, abs=1e-4)
+    assert observed[0].contract_pass is False
+    assert observed[0].axis_contract_pass is False
 
 
 @pytest.mark.unit
