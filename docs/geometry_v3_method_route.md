@@ -196,7 +196,48 @@ fresh-Q/K observation, retry, fallback, alternate placement or budget, dynamic
 selection, or threshold adjustment. The only statuses are `P0D1_STOPPED` and
 `P0D1_DIAGNOSTIC_COMPLETE`, with `science_denominator=0`.
 
-## Frozen progression after P0D.1
+The real P0D.1 artifact completed callbacks 0 through 17, armed the writer,
+entered transformer call 18 and the block-4 Q production hook, and retained
+the checkpoints through `q_ratio_validated`. It stopped before
+`q_budget_validated`, Q measurement recording, the corresponding K hook,
+session completion, or final-RGB validation. This establishes only that the
+first actual Q ratio was finite and positive and that the stop occurred after
+that validation but before hard-budget validation. The public
+`runtime_error` does not distinguish correction-path tensor operations from
+the explicit hard-budget rejection and does not authorize changing the
+writer or its budget.
+
+### P0D.2 final inner-Q narrowing
+
+The final Stage-1 narrowing protocol is
+`geometry-v3-keyed-qk-active-writer-p0d2-v1`. It preserves the same single
+`block4-qk-rms0p0025` configuration, step-18 timing, one generation, writer
+math, hard budget, and production hook. Between `q_ratio_validated` and the
+existing `q_budget_validated`, the default-disabled observer may additionally
+count only these ordered, value-free events:
+
+1. `q_initial_budget_comparison_completed`, emitted after the fixed soft-limit
+   comparison whether or not correction is needed;
+2. `q_correction_branch_entered`, only when that branch is entered;
+3. `q_corrected_output_materialized`;
+4. `q_corrected_delta_materialized`;
+5. `q_post_correction_ratio_computed`;
+6. `q_hard_budget_rejected`, immediately before the existing explicit
+   hard-budget exception; or
+7. `q_hard_budget_accepted`, after the hard check passes and before the
+   existing `q_budget_validated` checkpoint.
+
+P0D.2 publishes integer counts and finite public stage/error enums only. It
+publishes no ratio, tensor, scalar measurement, dtype, device, shape, Q/K,
+pattern, anchor, latent, prompt, key, token, model weight, exception text, or
+private path. It has no baseline, attack, fresh-Q/K observation, retry,
+fallback, alternate placement/budget, candidate selection, or threshold
+adjustment. Its only statuses are `P0D2_STOPPED` and
+`P0D2_DIAGNOSTIC_COMPLETE`, always with `science_denominator=0`. P0D.2 is a
+diagnostic location result only: it cannot be described as a budget failure or
+as authorization for mechanical repair before its real artifact is audited.
+
+## Frozen progression after P0D.2
 
 The route advances only in this order:
 

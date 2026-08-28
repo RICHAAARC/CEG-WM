@@ -169,13 +169,36 @@ def test_q_diagnostic_observer_is_default_off_and_semantically_neutral() -> None
     default_output, default_measurements = _run_fixed_session()
     observed_output, observed_measurements = _run_fixed_session(observed.append)
 
-    assert observed == list(P0_Q_DIAGNOSTIC_CHECKPOINTS)
+    assert observed == [
+        "q_output_contract_pass",
+        "q_pattern_materialized",
+        "q_base_rms_validated",
+        "q_delta_materialized",
+        "q_ratio_validated",
+        "q_initial_budget_comparison_completed",
+        "q_hard_budget_accepted",
+        "q_budget_validated",
+        "q_measurement_recorded",
+    ]
     assert default_output.images[0].tobytes() == observed_output.images[0].tobytes()
     assert default_measurements == observed_measurements
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("stop_checkpoint", P0_Q_DIAGNOSTIC_CHECKPOINTS)
+@pytest.mark.parametrize(
+    "stop_checkpoint",
+    (
+        "q_output_contract_pass",
+        "q_pattern_materialized",
+        "q_base_rms_validated",
+        "q_delta_materialized",
+        "q_ratio_validated",
+        "q_initial_budget_comparison_completed",
+        "q_hard_budget_accepted",
+        "q_budget_validated",
+        "q_measurement_recorded",
+    ),
+)
 def test_q_diagnostic_observer_reports_only_completed_production_checkpoints(
     stop_checkpoint: str,
 ) -> None:
@@ -189,6 +212,74 @@ def test_q_diagnostic_observer_reports_only_completed_production_checkpoints(
     with pytest.raises(RuntimeError, match="diagnostic observer stop"):
         _run_fixed_session(observer)
 
-    stop_index = P0_Q_DIAGNOSTIC_CHECKPOINTS.index(stop_checkpoint)
-    assert observed == list(P0_Q_DIAGNOSTIC_CHECKPOINTS[: stop_index + 1])
+    expected = [
+        "q_output_contract_pass",
+        "q_pattern_materialized",
+        "q_base_rms_validated",
+        "q_delta_materialized",
+        "q_ratio_validated",
+        "q_initial_budget_comparison_completed",
+        "q_hard_budget_accepted",
+        "q_budget_validated",
+        "q_measurement_recorded",
+    ]
+    stop_index = expected.index(stop_checkpoint)
+    assert observed == expected[: stop_index + 1]
     assert all(isinstance(item, str) for item in observed)
+
+
+def _invoke_q_hook_with_output(output: torch.Tensor, observer):
+    transformer = _Transformer()
+    session = ActiveQKWriterSession(
+        transformer,
+        P0_CONFIGS[0],
+        derive_canonical_relation_anchor("geometry-key-0001", point_count=16),
+        q_diagnostic_observer=observer,
+    )
+    session._armed = True
+    session._current_transformer_call = P0_WRITER_STEP_INDEX
+    hook = session._feature_hook("q", "transformer_blocks.4.attn.to_q")
+    return hook(None, (), output), session
+
+
+@pytest.mark.unit
+def test_q_correction_path_reports_accepted_checkpoints_without_math_change() -> None:
+    observed: list[str] = []
+    output = (
+        torch.randn((1, 4, 4), generator=torch.Generator().manual_seed(28))
+        * 1000.0
+    ).to(torch.float16)
+
+    injected, session = _invoke_q_hook_with_output(output, observed.append)
+
+    assert injected.dtype == output.dtype
+    assert {measurement.feature_kind for measurement in session.measurements} == {"q"}
+    assert observed == [
+        "q_output_contract_pass",
+        "q_pattern_materialized",
+        "q_base_rms_validated",
+        "q_delta_materialized",
+        "q_ratio_validated",
+        "q_initial_budget_comparison_completed",
+        "q_correction_branch_entered",
+        "q_corrected_output_materialized",
+        "q_corrected_delta_materialized",
+        "q_post_correction_ratio_computed",
+        "q_hard_budget_accepted",
+        "q_budget_validated",
+        "q_measurement_recorded",
+    ]
+
+
+@pytest.mark.unit
+def test_q_hard_budget_rejection_is_observed_before_existing_runtime_error() -> None:
+    observed: list[str] = []
+    output = torch.full((1, 4, 4), 0.1, dtype=torch.float16)
+
+    with pytest.raises(RuntimeError, match="hard relative RMS budget"):
+        _invoke_q_hook_with_output(output, observed.append)
+
+    assert observed[-1] == "q_hard_budget_rejected"
+    assert "q_hard_budget_accepted" not in observed
+    assert "q_budget_validated" not in observed
+    assert "q_measurement_recorded" not in observed

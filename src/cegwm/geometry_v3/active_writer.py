@@ -31,6 +31,13 @@ P0_Q_DIAGNOSTIC_CHECKPOINTS = (
     "q_base_rms_validated",
     "q_delta_materialized",
     "q_ratio_validated",
+    "q_initial_budget_comparison_completed",
+    "q_correction_branch_entered",
+    "q_corrected_output_materialized",
+    "q_corrected_delta_materialized",
+    "q_post_correction_ratio_computed",
+    "q_hard_budget_rejected",
+    "q_hard_budget_accepted",
     "q_budget_validated",
     "q_measurement_recorded",
 )
@@ -242,14 +249,26 @@ class ActiveQKWriterSession:
             if not bool(torch.isfinite(ratio)) or float(ratio) <= 0.0:
                 raise ValueError("P0 writer actual relative RMS is invalid")
             self._observe_q_checkpoint(kind, "q_ratio_validated")
-            if float(ratio) > self.config.relative_rms_budget * (1.0 + 1e-4):
+            needs_correction = (
+                float(ratio) > self.config.relative_rms_budget * (1.0 + 1e-4)
+            )
+            self._observe_q_checkpoint(
+                kind, "q_initial_budget_comparison_completed"
+            )
+            if needs_correction:
+                self._observe_q_checkpoint(kind, "q_correction_branch_entered")
                 correction = self.config.relative_rms_budget / float(ratio)
                 injected = output + (actual_delta * correction).to(dtype=output.dtype)
+                self._observe_q_checkpoint(kind, "q_corrected_output_materialized")
                 actual_delta = injected.detach().to(torch.float32) - base
+                self._observe_q_checkpoint(kind, "q_corrected_delta_materialized")
                 ratio = torch.sqrt(torch.mean(actual_delta.square())) / base_rms
+                self._observe_q_checkpoint(kind, "q_post_correction_ratio_computed")
             actual = float(ratio)
             if actual > self.config.relative_rms_budget * (1.0 + 2e-4):
+                self._observe_q_checkpoint(kind, "q_hard_budget_rejected")
                 raise RuntimeError("P0 writer exceeded its hard relative RMS budget")
+            self._observe_q_checkpoint(kind, "q_hard_budget_accepted")
             self._observe_q_checkpoint(kind, "q_budget_validated")
             self._measurements[kind] = WriterInjectionMeasurement(
                 config_id=self.config.config_id,
