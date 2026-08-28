@@ -8,7 +8,7 @@ import pytest
 
 NOTEBOOK = Path(__file__).resolve().parents[2] / "notebooks" / "geometry_v3_qk_active_writer_p1_confirmation_colab.ipynb"
 RUNNER = Path(__file__).resolve().parents[2] / "experiments" / "run_geometry_v3_qk_active_writer_p1_confirmation.py"
-RUNNER_EXACT = "f4a78c6f3e820ea3ef3de25e741dfbbaddf0dfbd"
+RUNNER_EXACT = "517ba73993f11f51ade27fee181814294fe53797"
 
 
 def _code_cells() -> list[str]:
