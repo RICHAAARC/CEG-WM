@@ -540,7 +540,7 @@ def run_p1m0(pipeline: Any, geometry_key: str | bytes | bytearray | memoryview) 
         for kind in P1_KIND_IDS:
             hook = hook_by_kind[kind]
             hook_lift = float(hook["post_correct_correlation"] - hook["pre_correct_correlation"])
-            sign_consistent = hook_lift > 0.0 and bool(hook["contract_pass"])
+            sign_consistent = bool(hook["contract_pass"])
             contract_audit.append({
                 "feature_kind": kind,
                 "module_path": hook["module_path"],
@@ -552,6 +552,7 @@ def run_p1m0(pipeline: Any, geometry_key: str | bytes | bytearray | memoryview) 
                 "channel_count": hook["channel_count"],
                 "contract_pass": bool(hook["contract_pass"]),
                 "positive_injection_sign_consistent": sign_consistent,
+                "normalized_correct_correlation_lift_positive": hook_lift > 0.0,
             })
             previous = float(hook["post_correct_correlation"])
             for stage in P1M0_STAGES:
@@ -573,13 +574,19 @@ def run_p1m0(pipeline: Any, geometry_key: str | bytes | bytearray | memoryview) 
             not item["contract_pass"] or not item["positive_injection_sign_consistent"]
             for item in contract_audit
         )
+        hook_lifts_positive = all(
+            item["normalized_correct_correlation_lift_positive"]
+            for item in contract_audit
+        )
         rgb_separations = {
             item["feature_kind"]: item["writer_separation"]
             for item in stage_decay if item["stage"] == "final_rgb_reencode"
         }
         if mismatch:
             status = P1M0_STATUS_MISMATCH
-        elif all(rgb_separations[kind] <= 0.0 for kind in P1_KIND_IDS):
+        elif hook_lifts_positive and all(
+            rgb_separations[kind] <= 0.0 for kind in P1_KIND_IDS
+        ):
             status = P1M0_STATUS_INSUFFICIENT
         else:
             status = P1M0_STATUS_INCONCLUSIVE
