@@ -74,6 +74,219 @@ def test_fresh_observer_rejects_embedding_tensor_or_cached_qk_before_runtime_use
         )
 
 
+class _FakeImageProcessor:
+    def preprocess(self, image: Image.Image) -> torch.Tensor:
+        assert image.mode == "RGB" and image.size == (512, 512)
+        return torch.linspace(-1.0, 1.0, 3 * 4 * 4, dtype=torch.float32).reshape(1, 3, 4, 4)
+
+
+class _FakeLatentDistribution:
+    def mode(self) -> torch.Tensor:
+        return torch.linspace(-0.75, 0.75, 16, dtype=torch.float32).reshape(1, 4, 2, 2)
+
+
+class _FakeVAE(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.register_parameter("identity", torch.nn.Parameter(torch.zeros(1)))
+        self.config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
+
+    def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
+        assert pixels.shape == (1, 3, 4, 4)
+        assert pixels.dtype == self.identity.dtype and pixels.device == self.identity.device
+        return SimpleNamespace(latent_dist=_FakeLatentDistribution())
+
+
+class _FakeProjection(torch.nn.Module):
+    def __init__(self, offset: float) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.eye(4) + offset)
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        return value @ self.weight.T
+
+
+class _FakeAttention(torch.nn.Module):
+    def __init__(self, offset: float = 0.0) -> None:
+        super().__init__()
+        self.to_q = _FakeProjection(offset + 0.01)
+        self.to_k = _FakeProjection(offset + 0.02)
+
+
+class _FakeBlock(torch.nn.Module):
+    def __init__(self, offset: float = 0.0) -> None:
+        super().__init__()
+        self.attn = _FakeAttention(offset)
+
+
+class _FakeTransformer(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.transformer_blocks = torch.nn.ModuleList(_FakeBlock(index / 100.0) for index in range(21))
+        self.config = SimpleNamespace(joint_attention_dim=8, pooled_projection_dim=6)
+        self.received_hidden_states: torch.Tensor | None = None
+        self.call_count = 0
+
+    def forward(
+        self,
+        *,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        pooled_projections: torch.Tensor,
+        timestep: torch.Tensor,
+        return_dict: bool,
+    ) -> tuple[torch.Tensor]:
+        self.call_count += 1
+        self.received_hidden_states = hidden_states.detach().clone()
+        assert hidden_states.shape == (1, 4, 2, 2)
+        assert encoder_hidden_states.shape == (1, OP.P0_OBSERVATION_TEXT_TOKENS, 8)
+        assert pooled_projections.shape == (1, 6)
+        assert timestep.tolist() == [OP.P0_OBSERVATION_TIMESTEP]
+        assert return_dict is False
+        tokens = hidden_states.flatten(2).transpose(1, 2)
+        attention = self.transformer_blocks[P0_CONFIGS[0].block_index].attn
+        attention.to_q(tokens)
+        attention.to_k(tokens)
+        return (hidden_states,)
+
+
+class _FreshScaleNoiseScheduler:
+    constructed: list["_FreshScaleNoiseScheduler"] = []
+
+    def __init__(self, config: object, *, pipeline_instance: bool = False) -> None:
+        self.config = config
+        self.pipeline_instance = pipeline_instance
+        self.calls: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        self.__class__.constructed.append(self)
+
+    @classmethod
+    def from_config(cls, config: object) -> "_FreshScaleNoiseScheduler":
+        return cls(config)
+
+    def add_noise(self, *args: object) -> torch.Tensor:
+        raise AssertionError("fresh observation must not call add_noise")
+
+    def scale_noise(
+        self,
+        sample: torch.Tensor,
+        timestep: torch.Tensor,
+        noise: torch.Tensor,
+    ) -> torch.Tensor:
+        assert not self.pipeline_instance
+        assert sample.shape == noise.shape == (1, 4, 2, 2)
+        assert sample.dtype == noise.dtype == torch.float32
+        assert sample.device == noise.device == torch.device("cpu")
+        assert timestep.shape == (1,) and timestep.dtype == torch.long
+        assert timestep.device == sample.device
+        assert timestep.item() == OP.P0_OBSERVATION_TIMESTEP
+        self.calls.append((sample.detach().clone(), timestep.detach().clone(), noise.detach().clone()))
+        return sample + 0.125 * noise
+
+
+def _fake_observation_pipeline() -> tuple[SimpleNamespace, _FakeTransformer, _FreshScaleNoiseScheduler]:
+    _FreshScaleNoiseScheduler.constructed.clear()
+    transformer = _FakeTransformer()
+    mutated_scheduler = _FreshScaleNoiseScheduler({"public": "same-config"}, pipeline_instance=True)
+    pipeline = SimpleNamespace(
+        transformer=transformer,
+        vae=_FakeVAE(),
+        image_processor=_FakeImageProcessor(),
+        scheduler=mutated_scheduler,
+    )
+    return pipeline, transformer, mutated_scheduler
+
+
+@pytest.mark.integration
+def test_fresh_observer_rebuilds_scheduler_and_uses_public_scale_noise_with_actual_hooks() -> None:
+    pipeline, transformer, mutated_scheduler = _fake_observation_pipeline()
+    correct = OP.derive_canonical_relation_anchor("correct-key", point_count=OP.P0_ANCHOR_POINT_COUNT)
+    wrong = OP.derive_canonical_relation_anchor("wrong-key", point_count=OP.P0_ANCHOR_POINT_COUNT)
+    scores = OP.observe_fresh_attacked_rgb(
+        pipeline,
+        Image.new("RGB", (512, 512), (7, 11, 13)),
+        P0_CONFIGS[0],
+        correct,
+        wrong,
+        np.eye(3),
+    )
+    assert transformer.call_count == 1
+    assert all(math.isfinite(value) for value in (scores.q_correct, scores.q_wrong, scores.k_correct, scores.k_wrong))
+    assert len(_FreshScaleNoiseScheduler.constructed) == 2
+    fresh_scheduler = _FreshScaleNoiseScheduler.constructed[1]
+    assert fresh_scheduler is not mutated_scheduler
+    assert fresh_scheduler.config is mutated_scheduler.config
+    assert mutated_scheduler.calls == []
+    assert len(fresh_scheduler.calls) == 1
+    sample, _, noise = fresh_scheduler.calls[0]
+    assert transformer.received_hidden_states is not None
+    assert torch.equal(transformer.received_hidden_states, sample + 0.125 * noise)
+    assert transformer.received_hidden_states.shape == sample.shape
+    assert transformer.received_hidden_states.dtype == sample.dtype
+    assert transformer.received_hidden_states.device == sample.device
+    assert bool(torch.isfinite(transformer.received_hidden_states).all())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "same_instance",
+        "missing_scale_noise",
+        "wrong_shape",
+        "wrong_dtype",
+        "nonfinite_output",
+    ),
+)
+def test_fresh_observer_scheduler_contract_failures_stop_before_transformer(
+    failure: str,
+) -> None:
+    pipeline, transformer, scheduler = _fake_observation_pipeline()
+    correct = OP.derive_canonical_relation_anchor("correct-key", point_count=OP.P0_ANCHOR_POINT_COUNT)
+    wrong = OP.derive_canonical_relation_anchor("wrong-key", point_count=OP.P0_ANCHOR_POINT_COUNT)
+    if failure == "same_instance":
+        scheduler.__class__.from_config = classmethod(lambda cls, config: scheduler)
+    elif failure == "missing_scale_noise":
+        scheduler.__class__.from_config = classmethod(
+            lambda cls, config: SimpleNamespace(config=config)
+        )
+    elif failure == "wrong_shape":
+        scheduler.__class__.from_config = classmethod(
+            lambda cls, config: SimpleNamespace(
+                config=config,
+                scale_noise=lambda sample, timestep, noise: sample[:, :, :1, :],
+            )
+        )
+    elif failure == "wrong_dtype":
+        scheduler.__class__.from_config = classmethod(
+            lambda cls, config: SimpleNamespace(
+                config=config,
+                scale_noise=lambda sample, timestep, noise: sample.to(torch.float64),
+            )
+        )
+    else:
+        scheduler.__class__.from_config = classmethod(
+            lambda cls, config: SimpleNamespace(
+                config=config,
+                scale_noise=lambda sample, timestep, noise: torch.full_like(sample, float("nan")),
+            )
+        )
+    try:
+        with pytest.raises(RuntimeError):
+            OP.observe_fresh_attacked_rgb(
+                pipeline,
+                Image.new("RGB", (512, 512), (7, 11, 13)),
+                P0_CONFIGS[0],
+                correct,
+                wrong,
+                np.eye(3),
+            )
+    finally:
+        scheduler.__class__.from_config = classmethod(
+            lambda cls, config: cls(config)
+        )
+    assert transformer.call_count == 0
+
+
 def _calculated_records(margins: dict[str, tuple[float, float]]) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for config_id, attack, kind, control in OP.fixed_roster():

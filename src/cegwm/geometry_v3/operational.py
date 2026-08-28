@@ -232,6 +232,23 @@ def _config_number(config: Any, name: str) -> int:
     return value
 
 
+def _fresh_observation_scheduler(pipeline: Any) -> Any:
+    """Rebuild the public scheduler contract without generation-time state."""
+
+    scheduler = getattr(pipeline, "scheduler", None)
+    config = getattr(scheduler, "config", None)
+    scheduler_class = type(scheduler)
+    from_config = getattr(scheduler_class, "from_config", None)
+    if scheduler is None or config is None or not callable(from_config):
+        raise RuntimeError("pipeline scheduler reconstruction is unavailable")
+    observation_scheduler = from_config(config)
+    if observation_scheduler is scheduler:
+        raise RuntimeError("observation scheduler must be independent")
+    if not callable(getattr(observation_scheduler, "scale_noise", None)):
+        raise RuntimeError("observation scheduler scale_noise is unavailable")
+    return observation_scheduler
+
+
 def observe_fresh_attacked_rgb(
     pipeline: Any,
     image: Any,
@@ -246,20 +263,24 @@ def observe_fresh_attacked_rgb(
     transformer = getattr(pipeline, "transformer", None)
     vae = getattr(pipeline, "vae", None)
     processor = getattr(pipeline, "image_processor", None)
-    scheduler = getattr(pipeline, "scheduler", None)
     if not isinstance(transformer, torch.nn.Module):
         raise RuntimeError("pipeline transformer is unavailable")
-    add_noise = getattr(scheduler, "add_noise", None)
-    if not callable(add_noise):
-        raise RuntimeError("pipeline scheduler add_noise is unavailable")
+    scheduler = _fresh_observation_scheduler(pipeline)
+    scale_noise = scheduler.scale_noise
     latent = encode_final_rgb_image(ordinary, processor, vae)
     device, dtype = _module_device_dtype(transformer)
     latent = latent.to(device=device, dtype=dtype)
     generator = torch.Generator(device=device.type).manual_seed(P0_OBSERVATION_NOISE_SEED)
     noise = torch.randn(latent.shape, generator=generator, device=device, dtype=dtype)
     timestep = torch.tensor((P0_OBSERVATION_TIMESTEP,), device=device, dtype=torch.long)
-    noisy = add_noise(latent, noise, timestep)
-    if not isinstance(noisy, torch.Tensor) or noisy.shape != latent.shape:
+    noisy = scale_noise(latent, timestep, noise)
+    if (
+        not isinstance(noisy, torch.Tensor)
+        or noisy.shape != latent.shape
+        or noisy.dtype != latent.dtype
+        or noisy.device != latent.device
+        or not bool(torch.isfinite(noisy).all())
+    ):
         raise RuntimeError("frozen observation noise contract differs")
     config_object = getattr(transformer, "config", None)
     joint_dimension = _config_number(config_object, "joint_attention_dim")
