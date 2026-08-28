@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import torch
 
@@ -25,6 +25,15 @@ P0_WRITER_STEP_INDEX = 18
 P0_ANCHOR_POINT_COUNT = 16
 P0_PLACEMENT_BLOCKS = (4, 12, 20)
 P0_RELATIVE_RMS_BUDGETS = (0.0025, 0.005)
+P0_Q_DIAGNOSTIC_CHECKPOINTS = (
+    "q_output_contract_pass",
+    "q_pattern_materialized",
+    "q_base_rms_validated",
+    "q_delta_materialized",
+    "q_ratio_validated",
+    "q_budget_validated",
+    "q_measurement_recorded",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +173,8 @@ class ActiveQKWriterSession:
         transformer: Any,
         config: P0WriterConfig,
         anchor: CanonicalRelationAnchor,
+        *,
+        q_diagnostic_observer: Callable[[str], None] | None = None,
     ) -> None:
         self.transformer = transformer
         self.config = config
@@ -174,6 +185,14 @@ class ActiveQKWriterSession:
         self._root_call_count = 0
         self._callback_steps: list[int] = []
         self._measurements: dict[str, WriterInjectionMeasurement] = {}
+        self._q_diagnostic_observer = q_diagnostic_observer
+
+    def _observe_q_checkpoint(self, kind: str, checkpoint: str) -> None:
+        if kind != "q" or self._q_diagnostic_observer is None:
+            return
+        if checkpoint not in P0_Q_DIAGNOSTIC_CHECKPOINTS:
+            raise RuntimeError("P0 Q diagnostic checkpoint is not public")
+        self._q_diagnostic_observer(checkpoint)
 
     @property
     def measurements(self) -> tuple[WriterInjectionMeasurement, ...]:
@@ -207,17 +226,22 @@ class ActiveQKWriterSession:
                 raise RuntimeError("P0 writer attempted repeated Q/K injection")
             if not isinstance(output, torch.Tensor):
                 raise TypeError("SD3 Q/K projection must return a tensor")
+            self._observe_q_checkpoint(kind, "q_output_contract_pass")
             pattern = canonical_qk_pattern(self.anchor, output, module_path=module_path)
+            self._observe_q_checkpoint(kind, "q_pattern_materialized")
             base = output.detach().to(torch.float32)
             base_rms = torch.sqrt(torch.mean(base.square()))
             if not bool(torch.isfinite(base_rms)) or float(base_rms) <= 0.0:
                 raise ValueError("SD3 Q/K output has zero or nonfinite RMS")
+            self._observe_q_checkpoint(kind, "q_base_rms_validated")
             delta = pattern.to(torch.float32) * base_rms * self.config.relative_rms_budget
             injected = output + delta.to(dtype=output.dtype)
             actual_delta = injected.detach().to(torch.float32) - base
+            self._observe_q_checkpoint(kind, "q_delta_materialized")
             ratio = torch.sqrt(torch.mean(actual_delta.square())) / base_rms
             if not bool(torch.isfinite(ratio)) or float(ratio) <= 0.0:
                 raise ValueError("P0 writer actual relative RMS is invalid")
+            self._observe_q_checkpoint(kind, "q_ratio_validated")
             if float(ratio) > self.config.relative_rms_budget * (1.0 + 1e-4):
                 correction = self.config.relative_rms_budget / float(ratio)
                 injected = output + (actual_delta * correction).to(dtype=output.dtype)
@@ -226,6 +250,7 @@ class ActiveQKWriterSession:
             actual = float(ratio)
             if actual > self.config.relative_rms_budget * (1.0 + 2e-4):
                 raise RuntimeError("P0 writer exceeded its hard relative RMS budget")
+            self._observe_q_checkpoint(kind, "q_budget_validated")
             self._measurements[kind] = WriterInjectionMeasurement(
                 config_id=self.config.config_id,
                 feature_kind=kind,
@@ -235,6 +260,7 @@ class ActiveQKWriterSession:
                 call_count=1,
                 writer_step_index=P0_WRITER_STEP_INDEX,
             )
+            self._observe_q_checkpoint(kind, "q_measurement_recorded")
             return injected
 
         return hook

@@ -173,11 +173,74 @@ exclude exception text, tensors, raw Q/K, anchor material, latent, prompt text,
 geometry key, Hugging Face token, model weights, and private paths. P0D does not
 attack RGB, observe fresh Q/K, select a writer, or make a scientific decision.
 
-After writer generation is mechanically repaired, P0 discovery may be run
-under a separately reviewed exact. Only after it freezes one placement and
-budget may an independent confirmation use new generation and attack instances
-with no reselection. It must preserve retained failures, bounded artifacts, and
-the same coordinate-only evidence ceiling.
+The real P0D artifact reached denoising step 18 and entered the block-4 Q
+production hook, but stopped after hook entry and before the public Q
+measurement was recorded. Its K hook for that transformer call, session
+completion, and final-RGB validation were not reached. The complete artifact
+and zero science denominator establish only this bounded operational location;
+they do not establish writer, placement, budget, anchor, or method success or
+failure, and the stopped exact is not rerun unchanged.
+
+### P0D.1 inner-Q diagnostic
+
+The next protocol is `geometry-v3-keyed-qk-active-writer-p0d1-v1`. It keeps the
+single fixed `block4-qk-rms0p0025` configuration, one generation, step-18 hook
+timing, and hard 0.0025 relative-RMS budget unchanged. A default-disabled
+observer inside the production Q hook may count these ordered, value-free
+checkpoints only: `q_output_contract_pass`, `q_pattern_materialized`,
+`q_base_rms_validated`, `q_delta_materialized`, `q_ratio_validated`,
+`q_budget_validated`, and `q_measurement_recorded`. It exposes no shape, dtype,
+device, tensor, scalar measurement, pattern, anchor, exception text, prompt,
+latent, key, token, weight, or private path. There is no baseline, attack,
+fresh-Q/K observation, retry, fallback, alternate placement or budget, dynamic
+selection, or threshold adjustment. The only statuses are `P0D1_STOPPED` and
+`P0D1_DIAGNOSTIC_COMPLETE`, with `science_denominator=0`.
+
+## Frozen progression after P0D.1
+
+The route advances only in this order:
+
+1. **Mechanical writer repair.** The last completed checkpoint can authorize
+   only its adjacent narrow correction: make the pattern follow the Q device,
+   apply a controlled dtype conversion at the frozen position, correct the
+   predeclared pattern expansion, or correct the RMS/ratio calculation domain.
+   A genuine budget stop first requires checking unit-RMS delta normalization;
+   it does not authorize increasing 0.0025. Placement, budget, hook timing, and
+   method semantics remain frozen.
+2. **Single-configuration writer completion canary.** Still using
+   `block4-qk-rms0p0025`, Q and K must each write exactly once, both measured
+   relative RMS values must remain within the hard budget, the session must
+   complete, and final RGB must be finite and valid. This closes only writer
+   engineering, not recoverability.
+3. **Full P0 discovery.** Only after that canary may the frozen six
+   placement/budget configurations and 144 retained units run. Final writer RGB
+   receives all four attacks; detection recomputes fresh attacked-RGB Q/K and
+   compares correct-key anchor, wrong-key anchor, and no-writer controls under
+   the frozen selection rule. Status remains `P0_STOPPED`, `P0_UNRESOLVED`, or
+   `P0_WRITER_CANDIDATE_FROZEN`, with `science_denominator=0`. Discovery data
+   cannot also serve as confirmation.
+4. **Independent confirmation.** One frozen placement/budget is tested with
+   new prompts, seeds, generations, and attack instances. There is no
+   reselection, budget change, margin tuning, or transform deletion. A passing
+   result shows only that the active anchor is observable in fresh attacked-RGB
+   Q/K.
+5. **Blind H/corners recovery.** Attacked RGB produces fresh Q/K; keyed-anchor
+   alignment estimates H within a predeclared search domain and returns
+   corners, support, and fail-closed reliability. The H domain, optimization,
+   stopping rule, reliability rule, retained failures, and independent
+   validation are frozen before execution. Ground-truth attack H is evaluation
+   metadata only and cannot enter estimation or guide search. Correlation after
+   truth-H transport is signal evidence, not blind coordinate recovery.
+6. **Content-watermark end to end.** The content watermark and V3 anchor writer
+   produce final RGB, attacks are applied, V3 estimates H blindly, reliability
+   gates rectification, and the unchanged content detector reruns with the same
+   content key, preprocessing, and threshold. Writer interference with the
+   content chain is recorded. Only that content detector can issue positive
+   watermark evidence.
+
+No stage is unlocked merely because its artifact is complete. Automatic
+fallback, post-result budget or threshold tuning, unchanged repetition of a
+stopped exact, and scientific adjudication remain outside this route.
 
 Real SD3.5, GPU, Colab, Drive, Hugging Face access, push, formal evaluation,
 and scientific adjudication remain separately authorized actions.

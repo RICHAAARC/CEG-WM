@@ -11,6 +11,7 @@ from cegwm.geometry_v3.active_writer import (
     P0_CONFIGS,
     P0_INFERENCE_STEPS,
     P0_PLACEMENT_BLOCKS,
+    P0_Q_DIAGNOSTIC_CHECKPOINTS,
     P0_WRITER_STEP_INDEX,
     canonical_qk_pattern,
 )
@@ -138,3 +139,56 @@ def test_writer_session_rejects_missing_declared_module_path() -> None:
     )
     with pytest.raises(RuntimeError, match="Q/K modules"):
         session.__enter__()
+
+
+def _run_fixed_session(observer=None):
+    pipeline = _Pipeline()
+    session = ActiveQKWriterSession(
+        pipeline.transformer,
+        P0_CONFIGS[0],
+        derive_canonical_relation_anchor("geometry-key-0001", point_count=16),
+        q_diagnostic_observer=observer,
+    )
+    with session:
+        output = pipeline(
+            prompt="public prompt",
+            num_inference_steps=P0_INFERENCE_STEPS,
+            height=512,
+            width=512,
+            generator=torch.Generator().manual_seed(73),
+            output_type="pil",
+            callback_on_step_end=session.callback_on_step_end,
+            callback_on_step_end_tensor_inputs=["latents"],
+        )
+    return output, session.assert_complete()
+
+
+@pytest.mark.unit
+def test_q_diagnostic_observer_is_default_off_and_semantically_neutral() -> None:
+    observed: list[str] = []
+    default_output, default_measurements = _run_fixed_session()
+    observed_output, observed_measurements = _run_fixed_session(observed.append)
+
+    assert observed == list(P0_Q_DIAGNOSTIC_CHECKPOINTS)
+    assert default_output.images[0].tobytes() == observed_output.images[0].tobytes()
+    assert default_measurements == observed_measurements
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stop_checkpoint", P0_Q_DIAGNOSTIC_CHECKPOINTS)
+def test_q_diagnostic_observer_reports_only_completed_production_checkpoints(
+    stop_checkpoint: str,
+) -> None:
+    observed: list[str] = []
+
+    def observer(checkpoint: str) -> None:
+        observed.append(checkpoint)
+        if checkpoint == stop_checkpoint:
+            raise RuntimeError("diagnostic observer stop")
+
+    with pytest.raises(RuntimeError, match="diagnostic observer stop"):
+        _run_fixed_session(observer)
+
+    stop_index = P0_Q_DIAGNOSTIC_CHECKPOINTS.index(stop_checkpoint)
+    assert observed == list(P0_Q_DIAGNOSTIC_CHECKPOINTS[: stop_index + 1])
+    assert all(isinstance(item, str) for item in observed)
