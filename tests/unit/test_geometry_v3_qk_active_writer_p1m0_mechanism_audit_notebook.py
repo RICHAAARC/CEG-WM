@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK = ROOT / "notebooks" / "geometry_v3_qk_active_writer_p1m0_mechanism_audit_colab.ipynb"
 RUNNER = ROOT / "experiments" / "run_geometry_v3_qk_active_writer_p1m0_mechanism_audit.py"
-RUNNER_EXACT = "73c218e24811d880c4e135e008cd4b8ddce9baa2"
+RUNNER_EXACT = "b01067873fd80eea93aa71960c0c10aba8b34d9f"
 
 
 def _code_cells() -> list[str]:
