@@ -18,6 +18,7 @@ def test_contract_freezes_blind_boundary_anchors_roster_and_policy() -> None:
     assert c["local_anchors"]["centers"]==[.125,.375,.625,.875]
     assert c["residual_budget"]["total_luma_rms_cap"]==2/255
     assert c["content_rejudge"]["geometry_score"]=="never_votes"
+    assert c["reliability"]["aggregate"].endswith("gte_0.5")
 
 @pytest.mark.unit
 def test_root_key_digest_and_reliability_fail_closed() -> None:

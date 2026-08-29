@@ -24,7 +24,7 @@ matching unwatermarked negatives. Wrong key is one same-unit control, never a
 denominator. No replacement, retry, fallback, P1C tuning, or reselection.
 Reliability is fail-closed on finite PSR, support, inlier/coverage, reprojection
 RMS, condition, cross-scale spreads, and valid corners; RELIABLE needs all
-gates and aggregate >.5.
+gates and aggregate >=.5.
 
 Only F0 jointly freezes tau/delta for the whole negative roster. s0 is attacked
 RGB with the unchanged content path; s1 is eligible only for RELIABLE geometry
