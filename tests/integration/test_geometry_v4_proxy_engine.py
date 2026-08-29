@@ -98,13 +98,63 @@ def test_failures_keep_three_stopped_arms_and_equal_normalized_wrong_key_is_reje
 
 
 @pytest.mark.integration
-def test_canary_cannot_impersonate_full_or_cross_split_seed() -> None:
+def test_canary_cannot_impersonate_full_or_touch_p1c_seeds() -> None:
     full_subset = tuple((seed, attack) for seed in range(4101, 4109) for attack in P1_ATTACKS)
     with pytest.raises(ValueError, match="unique strict subset"):
         engine.run_canary(KEY, WRONG_KEY, subset=full_subset)
-    with pytest.raises(ValueError, match="outside every frozen seed roster"):
+    with pytest.raises(ValueError, match="P1D seeds 4101..4108 only"):
         engine.run_canary(
             KEY,
             WRONG_KEY,
-            subset=((9999, "identity"),),
+            subset=((4201, "identity"),),
         )
+    with pytest.raises(ValueError, match="P1D seeds 4101..4108 only"):
+        engine.run_canary(
+            KEY,
+            WRONG_KEY,
+            subset=((4101, "identity"), (4201, "identity")),
+        )
+
+
+@pytest.mark.integration
+def test_three_blind_detectors_complete_before_guarded_truth_is_inspected() -> None:
+    events = {"array_reads": 0, "truth_reads": 0}
+
+    class GuardedRgb:
+        def __init__(self, value: np.ndarray) -> None:
+            self.value = value
+
+        def __array__(self, dtype: object = None, copy: object = None) -> np.ndarray:
+            events["array_reads"] += 1
+            value = np.asarray(self.value, dtype=dtype)
+            return value.copy() if copy else value
+
+    class GuardedTruth:
+        def __init__(self, value: tuple[float, ...]) -> None:
+            self.value = value
+
+        def __ne__(self, other: object) -> bool:
+            assert events["array_reads"] >= 3
+            events["truth_reads"] += 1
+            assert isinstance(other, GuardedTruth)
+            return self.value != other.value
+
+    rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
+    marked, _ = engine.write_proxy(rgb, KEY)
+    truth = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    arms, guarded_truth, mismatch = engine._blind_outputs_then_truth(
+        (GuardedRgb(marked), GuardedTruth(truth)),
+        (GuardedRgb(rgb), GuardedTruth(truth)),
+        KEY,
+        WRONG_KEY,
+    )
+    assert set(arms) == {
+        "marked_correct_key",
+        "attacked_unwatermarked_negative",
+        "same_unit_wrong_key",
+    }
+    assert events == {"array_reads": 3, "truth_reads": 1}
+    assert isinstance(guarded_truth, GuardedTruth) and mismatch is False
+    helper_source = inspect.getsource(engine._blind_outputs_then_truth)
+    truth_read = helper_source.index("truth = marked_attack[1]")
+    assert helper_source.count("_detect_arm(", 0, truth_read) == 3

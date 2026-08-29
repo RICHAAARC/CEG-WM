@@ -164,6 +164,28 @@ def _detect_arm(attacked: np.ndarray, key: str | bytes) -> dict[str, object]:
         return _stopped_arm(message)
 
 
+def _blind_outputs_then_truth(
+    marked_attack: tuple[object, object],
+    negative_attack: tuple[object, object],
+    detection_key: str | bytes,
+    wrong_key: str | bytes,
+) -> tuple[dict[str, dict[str, object]], object, bool]:
+    """Freeze all blind arms before reading either evaluation-only truth object."""
+
+    correct = _detect_arm(marked_attack[0], detection_key)  # type: ignore[arg-type]
+    negative = _detect_arm(negative_attack[0], detection_key)  # type: ignore[arg-type]
+    wrong = _detect_arm(marked_attack[0], wrong_key)  # type: ignore[arg-type]
+    arms = {
+        "marked_correct_key": correct,
+        "attacked_unwatermarked_negative": negative,
+        "same_unit_wrong_key": wrong,
+    }
+    truth = marked_attack[1]
+    negative_truth = negative_attack[1]
+    truth_mismatch = bool(truth != negative_truth)
+    return arms, truth, truth_mismatch
+
+
 def _execute_generated_unit(
     detection_key: str | bytes,
     wrong_key: str | bytes,
@@ -190,27 +212,23 @@ def _execute_generated_unit(
         return record
     try:
         marked, budget = write_proxy(rgb, detection_key)
-        attacked_marked, truth = apply_proxy_attack(marked, attack)
-        attacked_unwatermarked, negative_truth = apply_proxy_attack(rgb, attack)
-        if truth != negative_truth:
-            raise RuntimeError("matching attack truth differs between arms")
+        marked_attack = apply_proxy_attack(marked, attack)
+        negative_attack = apply_proxy_attack(rgb, attack)
     except Exception as error:
         message = f"writer_or_attack:{type(error).__name__}: {error}"
         record["failure"] = message
         record["arms"] = _stopped_arms(message)
         return record
-    correct = _detect_arm(attacked_marked, detection_key)
-    negative = _detect_arm(attacked_unwatermarked, detection_key)
-    wrong = _detect_arm(attacked_marked, wrong_key)
-    # All blind detector calls complete before attacked-to-canonical truth is evaluated.
-    if correct["failure"] is None:
-        correct["evaluation"] = _evaluate_geometry(correct["detection"], truth)  # type: ignore[arg-type]
+    arms, truth, truth_mismatch = _blind_outputs_then_truth(
+        marked_attack, negative_attack, detection_key, wrong_key
+    )
     record["budget"] = budget
-    record["arms"] = {
-        "marked_correct_key": correct,
-        "attacked_unwatermarked_negative": negative,
-        "same_unit_wrong_key": wrong,
-    }
+    record["arms"] = arms
+    correct = arms["marked_correct_key"]
+    if truth_mismatch:
+        record["failure"] = "attack_truth_mismatch_after_blind_outputs"
+    elif correct["failure"] is None:
+        correct["evaluation"] = _evaluate_geometry(correct["detection"], truth)  # type: ignore[arg-type]
     if any(arm["failure"] is not None for arm in record["arms"].values()):  # type: ignore[union-attr]
         record["failure"] = "one_or_more_detector_arms_stopped"
     return record
@@ -231,11 +249,10 @@ def run_canary(
         raise ValueError("Geometry-V4 engineering canary requires a unique strict subset")
     resolved: list[tuple[str, int, str]] = []
     for seed, attack in selected:
-        split = next((name for name, seeds in P1_SPLITS.items() if seed in seeds), "")
-        if not split:
-            raise ValueError("Geometry-V4 canary seed is outside every frozen seed roster")
-        _identity("engineering_canary", split, seed, attack, None)
-        resolved.append((split, seed, attack))
+        if seed not in P1_SPLITS["P1D"]:
+            raise ValueError("Geometry-V4 engineering canary accepts P1D seeds 4101..4108 only")
+        _identity("engineering_canary", "P1D", seed, attack, None)
+        resolved.append(("P1D", seed, attack))
     return tuple(
         _execute_generated_unit(
             detection_key,

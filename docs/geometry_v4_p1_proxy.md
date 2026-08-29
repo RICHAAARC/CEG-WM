@@ -56,11 +56,17 @@ P1D seeds are 4101..4108 and P1C seeds are 4201..4208. A full mode accepts no
 external image mapping or attack subset and internally constructs exactly all
 8x16 units. `engineering_canary` is a separate non-formal identity requiring an
 explicit subset; it never claims P1D/P1C full membership or their denominator.
+The current development-canary API accepts only seeds 4101..4108. Every P1C
+seed, including a mixed P1D/P1C request, is rejected before source generation;
+a future P1C canary requires separate authorization after P1D freeze.
 
 Every planned physical unit retains a marked correct-key arm, a matching
 attacked-unwatermarked negative, a same-unit external wrong-key control, and
 any failure. Upstream failures materialize all three arms as `STOPPED` records.
 Correct and wrong keys must normalize to different bytes before execution.
-Attack truth uses the same attacked-to-canonical direction and is consulted only
-after detector calls to compute coordinate error. The present local canaries do
+Attack results retain opaque truth objects while the marked correct-key,
+unwatermarked-negative, and wrong-key blind detector outputs are frozen. Only
+then may truth consistency and attacked-to-canonical coordinate error be read;
+a mismatch cannot initialize, alter, or prematurely stop those detector arms.
+The present local canaries do
 not execute the full 8x16 P1D or any P1C outcome.
