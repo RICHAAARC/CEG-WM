@@ -1,35 +1,35 @@
 # Geometry-V4 method route (P0)
 
-`geometry_v4_keyed_multiscale_sync_anchor_v1` is a coordinate-recovery route.
-Its proxy RGB writer and formal generated writer are distinct identities. This
-route begins independently from shared `main`: V3 remains only
-`OPERATIONAL_UNRESOLVED` planning background. No V3 Q/K layer, step, statistic,
-or threshold is inherited.
+Geometry-V4 is coordinate recovery only. Its fixed public output is
+`(H_hat,corners_hat,support,reliability,status)` and it never votes for
+watermark presence. Content and Geometry are sibling domain-separated
+HKDF-SHA256 derivations from the same root key, never Geometry from a content
+subkey; raw root/key/pattern artifacts are forbidden. Existing content key
+bytes, preprocessing, assets, and weighted-joint score remain unchanged.
 
-Geometry preserves the existing content detection-key bytes, ordinary-RGB
-preprocessing, public assets, and weighted-joint score unchanged. A separate
-geometry subkey uses the versioned HKDF-SHA256 domain recorded in the P0
-contract; raw keys and patterns never enter a record. Geometry only returns
-`H_hat`, `corners_hat`, `support`, `reliability`, and a `RELIABLE`,
-`UNRELIABLE`, or `STOPPED` status. It cannot issue a watermark-existence
-decision or add a geometry score to content evidence.
+The detector accepts current attacked ordinary RGB only. Clean/original or
+pre-attack RGB, tensors, residuals, true H/corners, and attack parameters are
+forbidden from all detector roles; true transforms are evaluation-only after
+output freeze. H is finite row-major attacked-to-canonical, h[8]=1; corners
+are attacked TL,TR,BR,BL. P1 fits similarity and H0 model class is predeclared.
 
-The planned blind chain is global keyed multiscale asymmetric spectral sync for
-rotation and scale, Cartesian phase correlation after R/S for translation, and
-fixed canonical local tiles for crop correspondences and later homography H.
-Content adaptation may alter only local amplitude within frozen bounds. It may
-not alter tile coordinates or identities; minimum macro-region coverage and a
-single total-budget semantics are mandatory.
+Global anchors are keyed asymmetric 8/16/32 cycles/image and 0/45/90/135
+degrees. Local anchors are a fixed 4x4 row-major grid IDs 0..15 at centers
+{.125,.375,.625,.875}², side .25, fixed 2x2 macro regions. Adaptation only
+multiplies amplitude in [.75,1.25], then uses one normalization. RGB luma caps
+are RMS 2/255 and peak 8/255 with .40/.60 global/local energy; excess STOPPED.
 
-P1D/P1C are RGB proxy stages. G0 has one placement only: a 20-step sampling
-callback at step 19, after the final latent and before VAE decode, with a single
-budget and final-RGB observability as a hard gate. It precedes G1, H0D, H0C,
-F0, E0, and R0. F0 calibrates the complete two detection strategies at fixed
-FPR on its independently predeclared negative roster. Main has no current tau;
-F0 alone sets tau and the decision boundary for the unchanged weighted-joint
-content score.
+P1D and disjoint P1C each use 8 sources x16 fixed attacks (128 positives) and
+matching unwatermarked negatives. Wrong key is one same-unit control, never a
+denominator. No replacement, retry, fallback, P1C tuning, or reselection.
+Reliability is fail-closed on finite PSR, support, inlier/coverage, reprojection
+RMS, condition, cross-scale spreads, and valid corners; RELIABLE needs all
+gates and aggregate >.5.
 
-An evaluation unit is one physical image instance times one predeclared attack.
-Wrong keys are same-unit controls and never inflate a denominator. Failures
-remain; replacement, retry, and fallback are prohibited. P0 is local/static
-engineering evidence with `science_denominator=0`.
+Only F0 jointly freezes tau/delta for the whole negative roster. s0 is attacked
+RGB with the unchanged content path; s1 is eligible only for RELIABLE geometry
+and s0 in [tau-delta,tau), using the exact same content path/tau. Positive is
+`s0>=tau OR (eligible AND s1>=tau)`; Geometry never votes. G0 is only step-19
+final-latent-before-decode, four fixed canaries, one budget, and final-RGB
+observability (anchor, PSNR>40, SSIM>.98, caps, drift<.05) or STOPPED. P0 is
+local/static engineering evidence with science denominator 0.

@@ -1,47 +1,171 @@
 {
   "claim_ceiling": "P0_local_static_engineering_only_science_denominator_0",
-  "content_chain_boundary": {
-    "content_key_bytes": "reuse_existing_identity_unchanged",
-    "ordinary_rgb_weighted_joint_score": "reuse_unchanged",
-    "preprocessing": "reuse_unchanged",
-    "public_assets": "reuse_unchanged",
-    "tau_status": "absent_on_main_requires_F0_full_strategy_negative_roster_calibration",
-    "tau_source": "F0_only",
-    "weighted_joint_boundary": "same_score_only_geometry_score_cannot_contribute"
+  "content_rejudge": {
+    "eligibility": "geometry_RELIABLE_and_s0_in_F0_frozen_[tau-delta,tau)",
+    "final_positive": "s0>=tau_OR_(eligible_AND_s1>=tau)",
+    "geometry_score": "never_votes",
+    "s0": "attacked_RGB_unchanged_content_key_preprocess_weighted_joint",
+    "s1": "canonical_corrected_RGB_same_key_preprocess_score_tau",
+    "tau_delta": "F0_joint_complete_negative_roster_no_per_attack_image"
+  },
+  "detector_boundary": {
+    "allowed_input": "current_attacked_ordinary_RGB_only",
+    "forbidden_for_input_initializer_search_window_tiebreaker_reliability": [
+      "clean_or_original_RGB",
+      "pre_attack_RGB",
+      "internal_tensors",
+      "writer_residuals",
+      "true_H",
+      "true_corners",
+      "attack_parameters"
+    ],
+    "true_transform": "evaluation_only_after_output_freeze"
+  },
+  "false_reliable": {
+    "p1c": "P1D_frozen_thresholds_fail_closed",
+    "r0": "predeclare_regenerated_negative_threshold_denominator",
+    "report": "separate_numerator_denominator_no_pooling",
+    "strata": [
+      "clean_unwatermarked_attacked_negatives",
+      "wrong_key_same_unit_controls",
+      "regenerated_negatives_when_available"
+    ]
+  },
+  "future_rosters": "H0_F0_E0_R0_each_own_pre_run_frozen_contract_no_prior_claim",
+  "g0": {
+    "failure": "STOPPED",
+    "internal_tensor_write": "not_evidence",
+    "pass": [
+      "final_RGB_correct_key_anchor_exceeds_wrong_key_every_unit",
+      "PSNR_gt_40",
+      "SSIM_gt_0.98",
+      "luma_caps",
+      "content_score_absolute_drift_lt_0.05"
+    ],
+    "placement": "sole_20_step_callback_step_19_final_latent_before_VAE_decode",
+    "scope": "local_Colab_engineering_not_science",
+    "units": "4_predeclared_generated_seeds_x_identity_no_replacement_retry_alternate_placement_budget"
   },
   "geometry_key": {
     "derivation": "HKDF-SHA256",
     "domain": "CEG-WM/geometry-v4/keyed-multiscale-sync-anchor/v1",
-    "raw_key_material": "forbidden_in_artifacts",
-    "raw_pattern": "forbidden_in_artifacts",
-    "version": "v1"
+    "hierarchy": "geometry_and_content_are_sibling_domain_separated_derivations_from_same_root_key_never_geometry_from_content_subkey",
+    "raw_root_key_pattern_artifacts": "forbidden"
+  },
+  "global_anchors": {
+    "cycles_per_image": [
+      8,
+      16,
+      32
+    ],
+    "orientations_degrees": [
+      0,
+      45,
+      90,
+      135
+    ],
+    "phase_sign": "keyed_asymmetric"
   },
   "identities": {
     "generated_writer_id": "geometry_v4_generated_writer_v1",
     "method_id": "geometry_v4_keyed_multiscale_sync_anchor_v1",
     "proxy_writer_id": "geometry_v4_rgb_proxy_writer_v1"
   },
-  "local_tile_contract": {
-    "content_adaptive_amplitude": "allowed_only_within_frozen_bounds",
-    "content_adaptive_coordinate_change": "forbidden",
-    "content_adaptive_identity_change": "forbidden",
-    "coordinate_policy": "fixed_canonical",
-    "minimum_macro_region_coverage": "frozen_required",
-    "total_budget": "single_frozen_budget_required"
+  "local_anchors": {
+    "adaptation": "amplitude_only_then_single_combined_normalization",
+    "amplitude_multiplier": [
+      0.75,
+      1.25
+    ],
+    "centers": [
+      0.125,
+      0.375,
+      0.625,
+      0.875
+    ],
+    "coordinates_ids": "never_adapt",
+    "grid": "fixed_4x4",
+    "macro_regions": "fixed_2x2",
+    "tile_ids": "row_major_0_to_15",
+    "tile_side": 0.25
   },
   "p0_protocol_id": "cegwm-geometry-v4-p0-contract-v1",
   "p0_protocol_version": 1,
-  "pipeline": {
-    "global_sync": "keyed_multiscale_asymmetric_spectral_sync_blind_rotation_scale",
-    "local_correspondence": "fixed_canonical_local_tiles_crop_correspondence_then_H",
-    "translation": "cartesian_phase_correlation_after_R_S"
+  "p1_attack_roster": {
+    "attacks": [
+      "identity",
+      "rotation_-10",
+      "rotation_-5",
+      "rotation_+5",
+      "rotation_+10",
+      "scale_0.9",
+      "scale_1.1",
+      "translation_-0.10_0",
+      "translation_+0.10_0",
+      "translation_0_-0.10",
+      "translation_0_+0.10",
+      "crop_rescale_0.9",
+      "crop_rescale_0.8",
+      "crop_rescale_0.7",
+      "compound_-7_0.9_+0.05_-0.05",
+      "compound_+7_1.1_-0.05_+0.05"
+    ],
+    "failure": "retain_no_replacement_retry_fallback",
+    "p1c": "8_disjoint_sources_x16_128_positive_matching_unwatermarked_negatives_no_tuning_reselect",
+    "p1d": "8_deterministic_sources_x16_128_positive_matching_unwatermarked_negatives_freeze_before_P1C",
+    "wrong_key": "one_same_unit_control_not_denominator"
   },
-  "prohibitions": {
-    "geometry_positive_watermark_decision": true,
-    "replacement_units_allowed": false,
-    "retry_units_allowed": false,
-    "unit_fallback_allowed": false,
-    "v3_inheritance": false
+  "public_output": {
+    "H_hat": "finite_row_major_3x3_attacked_to_original_canonical_h8_1",
+    "coordinate_domain": "normalized_xy_[0,1]^2",
+    "corners_hat": "mapped_attacked_TL_TR_BR_BL",
+    "fields": [
+      "H_hat",
+      "corners_hat",
+      "support",
+      "reliability",
+      "status"
+    ],
+    "h0_models": "similarity_affine_or_homography_only_by_predeclared_attack_class",
+    "p1_model": "similarity"
+  },
+  "reliability": {
+    "aggregate": "finite_[0,1]_RELIABLE_iff_all_gates_and_gt_0.5",
+    "gates": {
+      "PSR_min": 8,
+      "condition_max": 10000,
+      "corner_range": [
+        -1,
+        2
+      ],
+      "coverage_min": 0.75,
+      "inlier_ratio_min": 0.5,
+      "log_scale_spread_max": 0.03,
+      "macro_regions_min": 3,
+      "reprojection_rms_max": 0.02,
+      "rotation_spread_max": 2,
+      "support_min": 6
+    },
+    "metrics": [
+      "PSR",
+      "inlier_ratio",
+      "spatial_coverage",
+      "reprojection_rms_diagonal",
+      "condition_number",
+      "cross_scale_rotation_spread_deg",
+      "cross_scale_log_scale_spread",
+      "corner_validity"
+    ],
+    "missing_nonfinite": "UNRELIABLE_no_fallback"
+  },
+  "residual_budget": {
+    "global_local_energy_shares": [
+      0.4,
+      0.6
+    ],
+    "over_cap": "STOPPED_no_per_image_budget_search_retry",
+    "peak_abs_cap": 0.03137254901960784,
+    "total_luma_rms_cap": 0.00784313725490196
   },
   "stages": [
     "P1D_RGB_PROXY",
@@ -58,10 +182,5 @@
     "RELIABLE",
     "UNRELIABLE",
     "STOPPED"
-  ],
-  "units": {
-    "failure_policy": "retain_declared_unit_without_replacement_retry_or_fallback",
-    "primary_unit": "physical_image_instance_x_predeclared_attack",
-    "wrong_key_policy": "within_same_unit_control_not_additional_denominator"
-  }
+  ]
 }
