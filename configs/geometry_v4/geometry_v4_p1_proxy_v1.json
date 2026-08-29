@@ -1,4 +1,10 @@
 {
+  "attack_operator": {
+    "compound_order": "canonical_translation_then_centered_rotation_scale",
+    "fill_rgb": 0.5,
+    "interpolation": "bilinear",
+    "output_shape": "input_shape"
+  },
   "attacks": [
     "identity",
     "rotation_-10",
@@ -17,7 +23,54 @@
     "compound_-7_0.9_+0.05_-0.05",
     "compound_+7_1.1_-0.05_+0.05"
   ],
-  "development_record": "procedural_rgb_v1; phase-correlation translation; R/S/local-fit details remain P1 development records",
+  "detector": {
+    "local_match_min_correlation": 0.42,
+    "local_match_min_margin": 0.025,
+    "local_search_radius_pixels_at_64": 4,
+    "log_polar_angles": 180,
+    "log_polar_radii": 64,
+    "reprojection_inlier_diagonal": 0.02,
+    "rs_refine_log_scale_offsets": [
+      -0.04,
+      0.0,
+      0.04
+    ],
+    "rs_refine_rotation_offsets_deg": [
+      -4.0,
+      0.0,
+      4.0
+    ]
+  },
+  "energy": {
+    "directions_deg": [
+      0,
+      45,
+      90,
+      135
+    ],
+    "global_fraction": 0.4,
+    "local_fraction": 0.6,
+    "luma_peak_cap": 0.03137254901960784,
+    "luma_rms_cap": 0.00784313725490196,
+    "luma_rms_target": 0.0058823529411764705,
+    "scales_cycles_per_image": [
+      8,
+      16,
+      32
+    ],
+    "tile_centers": [
+      0.125,
+      0.375,
+      0.625,
+      0.875
+    ]
+  },
+  "identities": {
+    "method_id": "geometry_v4_keyed_multiscale_sync_anchor_v1",
+    "protocol_id": "cegwm-geometry-v4-p0-contract-v1",
+    "proxy_writer_id": "geometry_v4_rgb_proxy_writer_v1",
+    "runner_id": "geometry_v4_p1_proxy_engine_v1"
+  },
   "splits": {
     "P1C": {
       "seeds": [
