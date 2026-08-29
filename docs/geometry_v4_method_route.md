@@ -2,9 +2,10 @@
 
 Geometry-V4 is coordinate recovery only. Its fixed public output is
 `(H_hat,corners_hat,support,reliability,status)` and it never votes for
-watermark presence. Content and Geometry are sibling domain-separated
-HKDF-SHA256 derivations from the same root key, never Geometry from a content
-subkey; raw root/key/pattern artifacts are forbidden. Existing content key
+watermark presence. Existing normalized detection-key bytes remain the unchanged
+content detector key and are the root input for Geometry-alone HKDF-SHA256 in
+its fixed domain; Content is not re-derived. Geometry is never from a content
+subkey and geometry-derived bytes never feed the content detector; raw root/key/pattern artifacts are forbidden. Existing content key
 bytes, preprocessing, assets, and weighted-joint score remain unchanged.
 
 The detector accepts current attacked ordinary RGB only. Clean/original or

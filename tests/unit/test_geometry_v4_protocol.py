@@ -11,7 +11,8 @@ def test_contract_freezes_blind_boundary_anchors_roster_and_policy() -> None:
     c=g.load_geometry_v4_p0_contract(ROOT)
     assert hashlib.sha256(CFG.read_bytes()).hexdigest()==g.GEOMETRY_V4_CONFIG_SHA256
     assert CFG.read_bytes()==(json.dumps(c,ensure_ascii=True,indent=2)+"\n").encode("ascii")
-    assert c["geometry_key"]["hierarchy"].startswith("geometry_and_content_are_sibling")
+    assert c["geometry_key"]["hierarchy"].startswith("geometry_alone_HKDF")
+    assert "sibling" not in c["geometry_key"]["hierarchy"]
     assert c["detector_boundary"]["allowed_input"]=="current_attacked_ordinary_RGB_only"
     assert len(c["p1_attack_roster"]["attacks"])==16
     assert c["global_anchors"]["cycles_per_image"]==[8,16,32]

@@ -47,10 +47,10 @@
     "units": "4_predeclared_generated_seeds_x_identity_no_replacement_retry_alternate_placement_budget"
   },
   "geometry_key": {
-    "content_boundary": "existing_content_detector_key_bytes_path_unchanged_not_redefined_or_asserted_HKDF_geometry_output_never_content_key_content_key_never_geometry_output",
+    "content_boundary": "existing_normalized_detection_key_bytes_remain_unchanged_content_detector_key_and_root_input_geometry_output_never_content_key_content_key_never_geometry_output",
     "derivation": "HKDF-SHA256",
     "domain": "CEG-WM/geometry-v4/keyed-multiscale-sync-anchor/v1",
-    "hierarchy": "geometry_and_content_are_sibling_domain_separated_derivations_from_same_root_key_never_geometry_from_content_subkey",
+    "hierarchy": "geometry_alone_HKDF_SHA256_from_normalized_detection_key_root_bytes_fixed_domain_never_from_content_subkey_content_not_rederived",
     "raw_root_key_pattern_artifacts": "forbidden"
   },
   "global_anchors": {
