@@ -33,3 +33,13 @@ and s0 in [tau-delta,tau), using the exact same content path/tau. Positive is
 final-latent-before-decode, four fixed canaries, one budget, and final-RGB
 observability (anchor, PSNR>40, SSIM>.98, caps, drift<.05) or STOPPED. P0 is
 local/static engineering evidence with science denominator 0.
+
+V4 begins from shared clean main and does not inherit V3 Q/K, block12, step18,
+rms0p0025, candidates, thresholds, or statistics. The blind route is keyed
+asymmetric multiscale spectrum, log-polar/phase rotation-scale, Cartesian phase
+translation, fixed keyed tiles, correspondences, predeclared robust fit, then
+H/corners/reliability. Units are physical-image-instance x predeclared-attack;
+failures remain and replacement/retry/fallback are forbidden. Attack operator
+details, aggregate calibration, fit candidates/tie-break, P1C false-reliable
+acceptance, packages, and environment records are P1/G0 pre-run records only:
+they are not P0 blockers or post-hoc confirmation choices.

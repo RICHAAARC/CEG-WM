@@ -26,15 +26,20 @@ def test_root_key_digest_and_reliability_fail_closed() -> None:
     with pytest.raises(TypeError,match="root_key"): g.derive_geometry_v4_key("bad") # type: ignore[arg-type]
     g.require_geometry_v4_contract_digest(g.GEOMETRY_V4_CONFIG_SHA256)
     with pytest.raises(ValueError,match="differs"): g.require_geometry_v4_contract_digest("0"*64)
-    good={"PSR":8,"support":6,"inlier_ratio":.5,"spatial_coverage":.75,"macro_regions":3,"reprojection_rms_diagonal":.02,"condition_number":1e4,"cross_scale_rotation_spread_deg":2,"cross_scale_log_scale_spread":.03,"corner_validity":True,"aggregate_reliability":.6}
+    good={"PSR":8,"support":6,"inlier_ratio":.5,"spatial_coverage":.75,"macro_regions":3,"reprojection_rms_diagonal":.02,"condition_number":1e4,"cross_scale_rotation_spread_deg":2,"cross_scale_log_scale_spread":.03,"corner_validity":True,"aggregate_reliability":.5}
     assert g.reliability_is_reliable(good)
     good["PSR"]=float("nan")
     assert not g.reliability_is_reliable(good)
+    for key,value in (("reprojection_rms_diagonal",-.1),("cross_scale_rotation_spread_deg",-.1),("condition_number",.5),("inlier_ratio",1.1),("support",6.5),("macro_regions",3.5)):
+        bad={"PSR":8,"support":6,"inlier_ratio":.5,"spatial_coverage":.75,"macro_regions":3,"reprojection_rms_diagonal":.02,"condition_number":1e4,"cross_scale_rotation_spread_deg":2,"cross_scale_log_scale_spread":.03,"corner_validity":True,"aggregate_reliability":.5}; bad[key]=value
+        assert not g.reliability_is_reliable(bad)
 
 @pytest.mark.unit
 def test_observation_reliable_and_nonfinite_regressions() -> None:
     corners=((0.,0.),(1.,0.),(1.,1.),(0.,1.))
-    assert g.GeometryV4Observation((1.,0.,0.,0.,1.,0.,0.,0.,1.),corners,7,.6,"RELIABLE").status=="RELIABLE"
+    assert g.GeometryV4Observation((1.,0.,0.,0.,1.,0.,0.,0.,1.),corners,6,.5,"RELIABLE").status=="RELIABLE"
     with pytest.raises(ValueError): g.GeometryV4Observation(None,(),6,.6,"RELIABLE")
     with pytest.raises(ValueError): g.GeometryV4Observation((1.,0.,0.,0.,1.,0.,0.,0.,1.),corners,7,float("nan"),"RELIABLE")
     with pytest.raises(ValueError): g.GeometryV4Observation(None,(),0,.1,"STOPPED")
+    with pytest.raises(ValueError): g.GeometryV4Observation((1.,0.,0.,0.,1.,0.,0.,0.,1.),((0.,0.),(1.,0.),(.5,.2),(0.,1.)),6,.5,"RELIABLE")
+    with pytest.raises(ValueError): g.GeometryV4Observation((1.,0.,.1,0.,1.,0.,0.,0.,1.),corners,6,.5,"RELIABLE")

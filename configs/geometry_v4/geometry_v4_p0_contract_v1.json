@@ -47,6 +47,7 @@
     "units": "4_predeclared_generated_seeds_x_identity_no_replacement_retry_alternate_placement_budget"
   },
   "geometry_key": {
+    "content_boundary": "existing_content_detector_key_bytes_path_unchanged_not_redefined_or_asserted_HKDF_geometry_output_never_content_key_content_key_never_geometry_output",
     "derivation": "HKDF-SHA256",
     "domain": "CEG-WM/geometry-v4/keyed-multiscale-sync-anchor/v1",
     "hierarchy": "geometry_and_content_are_sibling_domain_separated_derivations_from_same_root_key_never_geometry_from_content_subkey",
@@ -90,6 +91,19 @@
     "tile_side": 0.25
   },
   "p0_protocol_id": "cegwm-geometry-v4-p0-contract-v1",
+  "record_only_pre_run": [
+    "attack_operator_interpolation_fill_centers_compound_order",
+    "aggregate_reliability_formula_and_calibration",
+    "fit_candidates_and_tiebreak",
+    "P1C_false_reliable_numeric_acceptance",
+    "stage_output_packages_and_environment_reproducibility"
+  ],
+  "route_invariants": {
+    "base": "shared_clean_main_no_V3_QK_block12_step18_rms0p0025_candidates_thresholds_or_statistics",
+    "blind_chain": "keyed_asymmetric_multiscale_spectrum_to_log_polar_phase_rotation_scale_to_cartesian_phase_translation_to_fixed_keyed_local_tiles_to_correspondences_to_predeclared_robust_fit_to_H_corners_reliability",
+    "geometry_positive": "forbidden",
+    "units": "physical_image_instance_x_predeclared_attack_wrong_key_within_same_unit_control_not_additional_denominator_failures_retained_no_replacement_retry_fallback"
+  },
   "p0_protocol_version": 1,
   "p1_attack_roster": {
     "attacks": [
