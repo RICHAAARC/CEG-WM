@@ -1,0 +1,48 @@
+{
+  "attacks": [
+    "identity",
+    "rotation_-10",
+    "rotation_-5",
+    "rotation_+5",
+    "rotation_+10",
+    "scale_0.9",
+    "scale_1.1",
+    "translation_-0.10_0",
+    "translation_+0.10_0",
+    "translation_0_-0.10",
+    "translation_0_+0.10",
+    "crop_rescale_0.9",
+    "crop_rescale_0.8",
+    "crop_rescale_0.7",
+    "compound_-7_0.9_+0.05_-0.05",
+    "compound_+7_1.1_-0.05_+0.05"
+  ],
+  "development_record": "procedural_rgb_v1; phase-correlation translation; R/S/local-fit details remain P1 development records",
+  "splits": {
+    "P1C": {
+      "seeds": [
+        4201,
+        4202,
+        4203,
+        4204,
+        4205,
+        4206,
+        4207,
+        4208
+      ]
+    },
+    "P1D": {
+      "seeds": [
+        4101,
+        4102,
+        4103,
+        4104,
+        4105,
+        4106,
+        4107,
+        4108
+      ]
+    }
+  },
+  "version": "geometry_v4_proxy_v1"
+}
