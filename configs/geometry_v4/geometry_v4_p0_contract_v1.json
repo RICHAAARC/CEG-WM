@@ -1,0 +1,67 @@
+{
+  "claim_ceiling": "P0_local_static_engineering_only_science_denominator_0",
+  "content_chain_boundary": {
+    "content_key_bytes": "reuse_existing_identity_unchanged",
+    "ordinary_rgb_weighted_joint_score": "reuse_unchanged",
+    "preprocessing": "reuse_unchanged",
+    "public_assets": "reuse_unchanged",
+    "tau_status": "absent_on_main_requires_F0_full_strategy_negative_roster_calibration",
+    "tau_source": "F0_only",
+    "weighted_joint_boundary": "same_score_only_geometry_score_cannot_contribute"
+  },
+  "geometry_key": {
+    "derivation": "HKDF-SHA256",
+    "domain": "CEG-WM/geometry-v4/keyed-multiscale-sync-anchor/v1",
+    "raw_key_material": "forbidden_in_artifacts",
+    "raw_pattern": "forbidden_in_artifacts",
+    "version": "v1"
+  },
+  "identities": {
+    "generated_writer_id": "geometry_v4_generated_writer_v1",
+    "method_id": "geometry_v4_keyed_multiscale_sync_anchor_v1",
+    "proxy_writer_id": "geometry_v4_rgb_proxy_writer_v1"
+  },
+  "local_tile_contract": {
+    "content_adaptive_amplitude": "allowed_only_within_frozen_bounds",
+    "content_adaptive_coordinate_change": "forbidden",
+    "content_adaptive_identity_change": "forbidden",
+    "coordinate_policy": "fixed_canonical",
+    "minimum_macro_region_coverage": "frozen_required",
+    "total_budget": "single_frozen_budget_required"
+  },
+  "p0_protocol_id": "cegwm-geometry-v4-p0-contract-v1",
+  "p0_protocol_version": 1,
+  "pipeline": {
+    "global_sync": "keyed_multiscale_asymmetric_spectral_sync_blind_rotation_scale",
+    "local_correspondence": "fixed_canonical_local_tiles_crop_correspondence_then_H",
+    "translation": "cartesian_phase_correlation_after_R_S"
+  },
+  "prohibitions": {
+    "geometry_positive_watermark_decision": true,
+    "replacement_units_allowed": false,
+    "retry_units_allowed": false,
+    "unit_fallback_allowed": false,
+    "v3_inheritance": false
+  },
+  "stages": [
+    "P1D_RGB_PROXY",
+    "P1C_RGB_PROXY",
+    "G0_GENERATED_CALLBACK_STEP_19_FINAL_LATENT_BEFORE_VAE_DECODE",
+    "G1",
+    "H0D",
+    "H0C",
+    "F0_FULL_TWO_DETECTION_STRATEGY_FIXED_FPR_CALIBRATION",
+    "E0",
+    "R0"
+  ],
+  "status_enum": [
+    "RELIABLE",
+    "UNRELIABLE",
+    "STOPPED"
+  ],
+  "units": {
+    "failure_policy": "retain_declared_unit_without_replacement_retry_or_fallback",
+    "primary_unit": "physical_image_instance_x_predeclared_attack",
+    "wrong_key_policy": "within_same_unit_control_not_additional_denominator"
+  }
+}
