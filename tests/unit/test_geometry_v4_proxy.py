@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +10,14 @@ import pytest
 
 from cegwm.method import geometry_v4_proxy as proxy
 from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
-from cegwm.protocol.geometry_v4_proxy import P1_ATTACKS, P1_DIGEST, P1_SPLITS, load_p1_proxy
+from cegwm.protocol.geometry_v4_proxy import (
+    P1_ATTACKS,
+    P1_DIGEST,
+    P1_H_DIRECTION,
+    P1_SCALE_BOUNDS,
+    P1_SPLITS,
+    load_p1_proxy,
+)
 from cegwm.shared.keys import normalize_detection_key
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +43,15 @@ def test_proxy_config_digest_split_roster_and_canonical_bytes() -> None:
     assert tuple(contract["splits"]["P1D"]["seeds"]) == P1_SPLITS["P1D"]
     assert tuple(contract["splits"]["P1C"]["seeds"]) == P1_SPLITS["P1C"]
     assert set(P1_SPLITS["P1D"]).isdisjoint(P1_SPLITS["P1C"])
+    assert contract["attack_operator"]["public_h_direction"] == P1_H_DIRECTION == "attacked_to_canonical"
+    assert tuple(contract["detector"]["coarse_scale_bounds"]) == P1_SCALE_BOUNDS
+    assert P1_SCALE_BOUNDS[1] >= 1 / 0.7
+    rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
+    _, attacked_to_canonical = proxy.apply_proxy_attack(rgb, "crop_rescale_0.7")
+    constructed_scale = math.sqrt(
+        np.linalg.det(np.linalg.inv(np.asarray(attacked_to_canonical).reshape(3, 3))[:2, :2])
+    )
+    assert P1_SCALE_BOUNDS[0] <= constructed_scale <= P1_SCALE_BOUNDS[1]
 
 
 @pytest.mark.unit
@@ -83,3 +100,71 @@ def test_normalized_cross_power_and_blind_identity_observation_use_measured_matc
     assert negative["status"] == "UNRELIABLE"
     assert wrong["status"] == "UNRELIABLE"
     assert not {"key_digest", "derived_key", "root_key", "pattern"} & _record_keys(correct)
+
+
+@pytest.mark.unit
+def test_public_h_is_attacked_to_canonical_and_rectifies_nonidentity() -> None:
+    rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
+    marked, _ = proxy.write_proxy(rgb, KEY)
+    attacked, truth = proxy.apply_proxy_attack(marked, "rotation_+5")
+    detection = proxy.detect_proxy(attacked, KEY)
+    assert detection["diagnostics"]["public_h_direction"] == "attacked_to_canonical"
+    assert detection["H_hat"] is not None
+    estimate = np.asarray(detection["H_hat"]).reshape(3, 3)
+    assert np.max(np.abs(estimate - np.asarray(truth).reshape(3, 3))) < 0.02
+    rectified = proxy.rectify_proxy(attacked, detection["H_hat"])
+    wrong_direction = proxy._sample_h(attacked, estimate, float(np.median(attacked)))
+    assert np.mean(np.square(rectified - marked)) < np.mean(np.square(wrong_direction - marked)) / 2
+    assert np.asarray(detection["corners_hat"]) == pytest.approx(np.asarray(proxy._corners(estimate)))
+
+
+@pytest.mark.unit
+def test_independent_cross_scale_disagreement_fails_closed_instead_of_being_windowed_pass() -> None:
+    rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
+    marked, _ = proxy.write_proxy(rgb, KEY)
+    attacked, _ = proxy.apply_proxy_attack(marked, "rotation_+5")
+    detection = proxy.detect_proxy(attacked, KEY)
+    estimates = detection["diagnostics"]["cross_scale_estimates"]
+    assert len(estimates) == 3
+    assert detection["diagnostics"]["cross_scale_rotation_spread_deg"] > 2.0
+    assert detection["status"] == "UNRELIABLE"
+
+
+@pytest.mark.unit
+def test_robust_similarity_excludes_outliers_and_coverage_uses_inlier_geometry() -> None:
+    truth = proxy._similarity_h(4.0, 1.05, 0.03, -0.02)
+    canonical = (
+        (0.125, 0.125),
+        (0.375, 0.125),
+        (0.875, 0.125),
+        (0.125, 0.625),
+        (0.875, 0.625),
+        (0.125, 0.875),
+        (0.625, 0.875),
+        (0.875, 0.875),
+    )
+    matches = []
+    for index, (x, y) in enumerate(canonical):
+        point = truth @ np.asarray((x, y, 1.0))
+        matches.append(
+            {
+                "tile": (index // 4, index % 4),
+                "canonical": (x, y),
+                "attacked": (float(point[0]), float(point[1])),
+                "correlation": 0.9,
+            }
+        )
+    matches.extend(
+        (
+            {"tile": (2, 2), "canonical": (0.375, 0.375), "attacked": (0.9, 0.1), "correlation": 0.95},
+            {"tile": (2, 3), "canonical": (0.625, 0.375), "attacked": (0.1, 0.9), "correlation": 0.95},
+        )
+    )
+    estimate, inliers, residuals, condition = proxy._robust_similarity_fit(matches)
+    assert estimate is not None
+    assert len(inliers) == len(canonical)
+    assert all(match["tile"] not in {(2, 2), (2, 3)} for match in inliers)
+    assert np.max(np.abs(estimate - truth)) < 1e-12
+    assert np.max(residuals) < 1e-12 and condition < 1e4
+    assert proxy._spatial_coverage(inliers) >= 0.75
+    assert proxy._spatial_coverage(inliers[:3]) < 0.75

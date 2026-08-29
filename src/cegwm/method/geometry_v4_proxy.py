@@ -27,6 +27,8 @@ _LOCAL_ENERGY = 0.60
 _LUMA_RMS_TARGET = 1.5 / 255.0
 _LUMA_RMS_CAP = 2.0 / 255.0
 _LUMA_PEAK_CAP = 8.0 / 255.0
+_RS_SCALE_MIN = 0.65
+_RS_SCALE_MAX = 1.55
 _REC709 = np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float64)
 
 
@@ -240,7 +242,7 @@ def _similarity_h(angle_deg: float, scale: float, tx: float = 0.0, ty: float = 0
 
 
 def apply_proxy_attack(rgb: np.ndarray, attack_id: str) -> tuple[np.ndarray, tuple[float, ...]]:
-    """Apply one frozen public attack and return truth only to the runner."""
+    """Apply one attack and return attacked-to-canonical truth to the runner."""
 
     source = _require_rgb(rgb)
     angle = 0.0
@@ -265,9 +267,23 @@ def apply_proxy_attack(rgb: np.ndarray, attack_id: str) -> tuple[np.ndarray, tup
         angle, scale, tx, ty = 7.0, 1.1, -0.05, 0.05
     else:
         raise ValueError(f"unknown Geometry-V4 P1 attack: {attack_id}")
-    truth = _similarity_h(angle, scale, tx, ty)
-    attacked = _sample_h(source, np.linalg.inv(truth), 0.5)
-    return np.clip(attacked, 0.0, 1.0), tuple(float(value) for value in truth.reshape(-1))
+    canonical_to_attacked = _similarity_h(angle, scale, tx, ty)
+    attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
+    attacked = _sample_h(source, attacked_to_canonical, 0.5)
+    return np.clip(attacked, 0.0, 1.0), tuple(float(value) for value in attacked_to_canonical.reshape(-1))
+
+
+def rectify_proxy(attacked: np.ndarray, h_attacked_to_canonical: tuple[float, ...]) -> np.ndarray:
+    """Inverse-sample attacked RGB into the canonical frame using public H_hat."""
+
+    source = _require_rgb(attacked)
+    homography = np.asarray(h_attacked_to_canonical, dtype=np.float64)
+    if homography.shape != (9,) or not np.all(np.isfinite(homography)):
+        raise ValueError("Geometry-V4 public H_hat must contain nine finite values")
+    homography = homography.reshape(3, 3)
+    if abs(float(np.linalg.det(homography))) <= 1e-12:
+        raise ValueError("Geometry-V4 public H_hat must be non-singular")
+    return np.clip(_sample_h(source, np.linalg.inv(homography), float(np.median(source))), 0.0, 1.0)
 
 
 def _spectral_magnitude(plane: np.ndarray) -> np.ndarray:
@@ -299,7 +315,7 @@ def _coarse_rotation_scale(observed: np.ndarray, reference: np.ndarray) -> tuple
     rotation = ((rotation + 90.0) % 180.0) - 90.0
     rotation = float(np.clip(rotation, -15.0, 15.0))
     log_scale = -float(result["shift_x"]) * log_step
-    scale = float(np.clip(math.exp(log_scale), 0.82, 1.22))
+    scale = float(np.clip(math.exp(log_scale), _RS_SCALE_MIN, _RS_SCALE_MAX))
     return rotation, scale, {"rotation_deg": rotation, "scale": scale, "PSR": float(result["PSR"])}
 
 
@@ -308,9 +324,41 @@ def _rectify_rs(attacked: np.ndarray, angle: float, scale: float) -> np.ndarray:
     return _sample_h(attacked, _similarity_h(angle, scale), fill)
 
 
-def _rs_score(attacked: np.ndarray, reference: np.ndarray, angle: float, scale: float) -> float:
+def _bandpass(plane: np.ndarray, cycles: int) -> np.ndarray:
+    height, width = plane.shape
+    fy = np.fft.fftfreq(height) * height
+    fx = np.fft.fftfreq(width) * width
+    radius = np.sqrt(np.square(fy[:, None]) + np.square(fx[None, :]))
+    mask = (radius >= cycles * 0.45) & (radius <= cycles * 1.8)
+    return np.fft.ifft2(np.fft.fft2(plane - float(np.mean(plane))) * mask).real
+
+
+def _rs_score(
+    attacked: np.ndarray, reference: np.ndarray, angle: float, scale: float, *, cycles: int | None = None
+) -> float:
     rectified = _luma(_rectify_rs(attacked, angle, scale))
+    if cycles is not None:
+        rectified = _bandpass(rectified, cycles)
+        reference = _bandpass(reference, cycles)
     return float(normalized_phase_correlation(rectified, reference)["PSR"])
+
+
+def _refine_one_rotation_scale(
+    attacked: np.ndarray,
+    reference: np.ndarray,
+    coarse_angle: float,
+    coarse_scale: float,
+    *,
+    cycles: int | None = None,
+) -> tuple[float, float]:
+    candidates: list[tuple[float, float, float]] = []
+    for rotation_offset in (-4.0, 0.0, 4.0):
+        for log_scale_offset in (-0.08, 0.0, 0.08):
+            angle = float(np.clip(coarse_angle + rotation_offset, -16.0, 16.0))
+            scale = float(np.clip(coarse_scale * math.exp(log_scale_offset), _RS_SCALE_MIN, _RS_SCALE_MAX))
+            candidates.append((_rs_score(attacked, reference, angle, scale, cycles=cycles), angle, scale))
+    _, angle, scale = max(candidates, key=lambda item: (item[0], -abs(item[1]), -abs(math.log(item[2]))))
+    return float(angle), float(scale)
 
 
 def _refine_rotation_scale(
@@ -320,25 +368,18 @@ def _refine_rotation_scale(
     coarse_angle: float,
     coarse_scale: float,
 ) -> tuple[float, float, list[tuple[float, float]]]:
-    candidates: list[tuple[float, float, float]] = []
-    for rotation_offset in (-4.0, 0.0, 4.0):
-        for log_scale_offset in (-0.04, 0.0, 0.04):
-            angle = float(np.clip(coarse_angle + rotation_offset, -16.0, 16.0))
-            scale = float(np.clip(coarse_scale * math.exp(log_scale_offset), 0.80, 1.25))
-            candidates.append((_rs_score(attacked, global_reference, angle, scale), angle, scale))
-    _, angle, scale = max(candidates, key=lambda item: (item[0], -abs(item[1]), -abs(math.log(item[2]))))
+    angle, scale = _refine_one_rotation_scale(attacked, global_reference, coarse_angle, coarse_scale)
     per_scale: list[tuple[float, float]] = []
     for cycles in _SCALES:
-        local_candidates: list[tuple[float, float, float]] = []
-        for rotation_offset in (-1.0, 0.0, 1.0):
-            for log_scale_offset in (-0.01, 0.0, 0.01):
-                candidate_angle = angle + rotation_offset
-                candidate_scale = scale * math.exp(log_scale_offset)
-                local_candidates.append(
-                    (_rs_score(attacked, by_scale[cycles], candidate_angle, candidate_scale), candidate_angle, candidate_scale)
-                )
-        _, selected_angle, selected_scale = max(
-            local_candidates, key=lambda item: (item[0], -abs(item[1] - angle), -abs(math.log(item[2] / scale)))
+        observed_band = _bandpass(_luma(attacked), cycles)
+        reference_band = _bandpass(by_scale[cycles], cycles)
+        independent_angle, independent_scale, _ = _coarse_rotation_scale(observed_band, reference_band)
+        selected_angle, selected_scale = _refine_one_rotation_scale(
+            attacked,
+            by_scale[cycles],
+            independent_angle,
+            independent_scale,
+            cycles=cycles,
         )
         per_scale.append((float(selected_angle), float(selected_scale)))
     return float(angle), float(scale), per_scale
@@ -410,29 +451,106 @@ def _match_tiles(
     return matches
 
 
-def _fit_similarity(matches: Iterable[dict[str, object]]) -> tuple[np.ndarray | None, np.ndarray, float]:
-    material = list(matches)
-    if len(material) < 2:
-        return None, np.full(len(material), 1.0, dtype=np.float64), 1e12
+def _similarity_design(material: list[dict[str, object]], indices: list[int]) -> tuple[np.ndarray, np.ndarray]:
     rows: list[list[float]] = []
     targets: list[float] = []
-    for match in material:
+    for index in indices:
+        match = material[index]
         u, v = match["canonical"]  # type: ignore[misc]
         x, y = match["attacked"]  # type: ignore[misc]
         rows.extend(([u, -v, 1.0, 0.0], [v, u, 0.0, 1.0]))
         targets.extend((x, y))
-    design = np.asarray(rows, dtype=np.float64)
-    target = np.asarray(targets, dtype=np.float64)
-    parameters, _, _, _ = np.linalg.lstsq(design, target, rcond=None)
+    return np.asarray(rows, dtype=np.float64), np.asarray(targets, dtype=np.float64)
+
+
+def _estimate_from_parameters(parameters: np.ndarray) -> np.ndarray:
     a, b, tx, ty = (float(item) for item in parameters)
-    estimate = np.asarray(((a, -b, tx), (b, a, ty), (0.0, 0.0, 1.0)), dtype=np.float64)
+    return np.asarray(((a, -b, tx), (b, a, ty), (0.0, 0.0, 1.0)), dtype=np.float64)
+
+
+def _similarity_residuals(estimate: np.ndarray, material: list[dict[str, object]]) -> np.ndarray:
     residuals: list[float] = []
     for match in material:
         u, v = match["canonical"]  # type: ignore[misc]
         x, y = match["attacked"]  # type: ignore[misc]
         predicted = estimate @ np.asarray((u, v, 1.0), dtype=np.float64)
         residuals.append(math.hypot(float(predicted[0]) - x, float(predicted[1]) - y) / math.sqrt(2.0))
-    return estimate, np.asarray(residuals, dtype=np.float64), float(np.linalg.cond(design))
+    return np.asarray(residuals, dtype=np.float64)
+
+
+def _pair_hypothesis(first: dict[str, object], second: dict[str, object]) -> np.ndarray | None:
+    u1, v1 = first["canonical"]  # type: ignore[misc]
+    u2, v2 = second["canonical"]  # type: ignore[misc]
+    x1, y1 = first["attacked"]  # type: ignore[misc]
+    x2, y2 = second["attacked"]  # type: ignore[misc]
+    canonical_delta = complex(u2 - u1, v2 - v1)
+    if abs(canonical_delta) <= 1e-12:
+        return None
+    multiplier = complex(x2 - x1, y2 - y1) / canonical_delta
+    translation = complex(x1, y1) - multiplier * complex(u1, v1)
+    return np.asarray(
+        (
+            (multiplier.real, -multiplier.imag, translation.real),
+            (multiplier.imag, multiplier.real, translation.imag),
+            (0.0, 0.0, 1.0),
+        ),
+        dtype=np.float64,
+    )
+
+
+def _weighted_refit(material: list[dict[str, object]], indices: list[int]) -> tuple[np.ndarray, float]:
+    design, target = _similarity_design(material, indices)
+    point_weights = np.asarray(
+        [max(1e-6, float(material[index]["correlation"])) for index in indices], dtype=np.float64
+    )
+    row_weights = np.repeat(np.sqrt(point_weights), 2)
+    weighted_design = design * row_weights[:, None]
+    weighted_target = target * row_weights
+    parameters, _, _, _ = np.linalg.lstsq(weighted_design, weighted_target, rcond=None)
+    return _estimate_from_parameters(parameters), float(np.linalg.cond(weighted_design))
+
+
+def _robust_similarity_fit(
+    matches: Iterable[dict[str, object]], *, inlier_threshold: float = 0.02, minimum_inliers: int = 6
+) -> tuple[np.ndarray | None, list[dict[str, object]], np.ndarray, float]:
+    material = list(matches)
+    if len(material) < 2:
+        return None, [], np.empty(0, dtype=np.float64), 1e12
+    best: tuple[tuple[object, ...], list[int]] | None = None
+    for first_index in range(len(material) - 1):
+        for second_index in range(first_index + 1, len(material)):
+            hypothesis = _pair_hypothesis(material[first_index], material[second_index])
+            if hypothesis is None:
+                continue
+            residuals = _similarity_residuals(hypothesis, material)
+            inliers = [index for index, value in enumerate(residuals) if value <= inlier_threshold]
+            if not inliers:
+                continue
+            weights = np.asarray(
+                [max(1e-6, float(material[index]["correlation"])) for index in inliers], dtype=np.float64
+            )
+            weighted_rms = float(np.sqrt(np.average(np.square(residuals[inliers]), weights=weights)))
+            pair_identity = tuple(sorted((material[first_index]["tile"], material[second_index]["tile"])))
+            rank: tuple[object, ...] = (-len(inliers), weighted_rms, pair_identity)
+            if best is None or rank < best[0]:
+                best = (rank, inliers)
+    if best is None:
+        return None, [], np.empty(0, dtype=np.float64), 1e12
+    selected = best[1]
+    estimate, condition = _weighted_refit(material, selected)
+    for _ in range(2):
+        residuals_all = _similarity_residuals(estimate, material)
+        retained = [index for index in selected if residuals_all[index] <= inlier_threshold]
+        if retained == selected or len(retained) < 2:
+            selected = retained
+            break
+        selected = retained
+        estimate, condition = _weighted_refit(material, selected)
+    if len(selected) < minimum_inliers:
+        return None, [material[index] for index in selected], _similarity_residuals(estimate, material)[selected], condition
+    estimate, condition = _weighted_refit(material, selected)
+    final_residuals = _similarity_residuals(estimate, material)[selected]
+    return estimate, [material[index] for index in selected], final_residuals, condition
 
 
 def _corners(homography: np.ndarray) -> tuple[tuple[float, float], ...]:
@@ -466,6 +584,36 @@ def _macro_regions(matches: Iterable[dict[str, object]]) -> int:
         x, y = match["canonical"]  # type: ignore[misc]
         regions.add((int(y >= 0.5), int(x >= 0.5)))
     return len(regions)
+
+
+def _spatial_coverage(matches: Iterable[dict[str, object]]) -> float:
+    points = sorted({tuple(match["canonical"]) for match in matches})  # type: ignore[arg-type]
+    if len(points) < 3:
+        return 0.0
+
+    def cross(origin: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in points:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+            lower.pop()
+        lower.append(point)
+    upper: list[tuple[float, float]] = []
+    for point in reversed(points):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    area = abs(
+        sum(
+            hull[index][0] * hull[(index + 1) % len(hull)][1]
+            - hull[(index + 1) % len(hull)][0] * hull[index][1]
+            for index in range(len(hull))
+        )
+    ) / 2.0
+    maximum = (_CENTERS[-1] - _CENTERS[0]) ** 2
+    return float(min(1.0, area / maximum))
 
 
 def _aggregate_reliability(metrics: dict[str, object], mean_tile_correlation: float) -> float:
@@ -512,19 +660,28 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     shift_x = int(translation["shift_x"])
     shift_y = int(translation["shift_y"])
     matches = _match_tiles(rectified_plane, local_reference, shift_x, shift_y, h_rs)
-    fitted_h, residuals, condition = _fit_similarity(matches)
-    corners = _corners(fitted_h) if fitted_h is not None else ()
-    corner_validity = fitted_h is not None and _valid_corners(corners)
-    support = len(matches)
-    inlier_ratio = float(np.mean(residuals <= 0.02)) if support else 0.0
+    canonical_to_attacked, inlier_matches, residuals, condition = _robust_similarity_fit(matches)
+    if canonical_to_attacked is not None:
+        attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
+        attacked_to_canonical /= attacked_to_canonical[2, 2]
+        attacked_to_canonical[2, 2] = 1.0
+        corners = _corners(attacked_to_canonical)
+    else:
+        attacked_to_canonical = None
+        corners = ()
+    corner_validity = attacked_to_canonical is not None and _valid_corners(corners)
+    support = len(inlier_matches)
+    inlier_ratio = support / len(matches) if matches else 0.0
     reprojection = float(np.sqrt(np.mean(np.square(residuals)))) if support else 1.0
-    macro_regions = _macro_regions(matches)
-    spatial_coverage = macro_regions / 4.0
+    macro_regions = _macro_regions(inlier_matches)
+    spatial_coverage = _spatial_coverage(inlier_matches)
     rotations = np.asarray([item[0] for item in per_scale], dtype=np.float64)
     log_scales = np.log(np.asarray([item[1] for item in per_scale], dtype=np.float64))
     rotation_spread = float(np.max(rotations) - np.min(rotations))
     log_scale_spread = float(np.max(log_scales) - np.min(log_scales))
-    mean_tile_correlation = float(np.mean([float(item["correlation"]) for item in matches])) if matches else 0.0
+    mean_tile_correlation = (
+        float(np.mean([float(item["correlation"]) for item in inlier_matches])) if inlier_matches else 0.0
+    )
     metrics: dict[str, object] = {
         "PSR": float(translation["PSR"]),
         "support": support,
@@ -542,7 +699,11 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     metrics["aggregate_reliability"] = aggregate
     reliable = reliability_is_reliable(metrics)
     status = "RELIABLE" if reliable else "UNRELIABLE"
-    h_tuple = tuple(float(value) for value in fitted_h.reshape(-1)) if fitted_h is not None else None
+    h_tuple = (
+        tuple(float(value) for value in attacked_to_canonical.reshape(-1))
+        if attacked_to_canonical is not None
+        else None
+    )
     if corner_validity:
         observation = GeometryV4Observation(h_tuple, corners, support, aggregate, status)
     else:
@@ -555,7 +716,9 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
             "scale": scale,
             "translation_pixels": (shift_x, shift_y),
             "mean_tile_correlation": mean_tile_correlation,
-            "matches": tuple(matches),
+            "candidate_match_count": len(matches),
+            "matches": tuple(inlier_matches),
+            "public_h_direction": "attacked_to_canonical",
             "cross_scale_estimates": tuple((float(a), float(s)) for a, s in per_scale),
         }
     )

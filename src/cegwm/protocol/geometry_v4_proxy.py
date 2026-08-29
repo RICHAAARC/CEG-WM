@@ -14,8 +14,12 @@ from cegwm.protocol.geometry_v4 import (
 )
 
 P1_CONFIG = "geometry_v4_p1_proxy_v1.json"
-P1_DIGEST = "7495f741a143d9a21ab39c17fd0d28e4549dcbbfb478bf5da5f321f286b62cc4"
+P1_DIGEST = "b7f030de43c1b15a31c5344a11f0745081f0a0c11b637c2b16efefeadaa9c925"
 P1_RUNNER_ID = "geometry_v4_p1_proxy_engine_v1"
+P1_SOURCE_ID = "geometry_v4_procedural_rgb_v1"
+P1_SOURCE_SHAPE = (64, 64, 3)
+P1_H_DIRECTION = "attacked_to_canonical"
+P1_SCALE_BOUNDS = (0.65, 1.55)
 P1_ATTACKS = (
     "identity",
     "rotation_-10",
@@ -72,4 +76,21 @@ def load_p1_proxy(root: str | Path) -> Mapping[str, Any]:
         or energy.get("luma_peak_cap") != 8 / 255
     ):
         raise ValueError("P1 proxy anchor or budget identity differs")
+    detector = value.get("detector", {})
+    attack_operator = value.get("attack_operator", {})
+    source = value.get("source", {})
+    modes = value.get("runner_modes", {})
+    if (
+        attack_operator.get("public_h_direction") != P1_H_DIRECTION
+        or tuple(detector.get("coarse_scale_bounds", ())) != P1_SCALE_BOUNDS
+        or tuple(detector.get("rs_refine_scale_bounds", ())) != P1_SCALE_BOUNDS
+        or P1_SCALE_BOUNDS[1] < 1 / 0.7
+        or source.get("generator_id") != P1_SOURCE_ID
+        or (source.get("height"), source.get("width"), 3) != P1_SOURCE_SHAPE
+        or modes.get("full", {}).get("units_per_split") != 128
+        or modes.get("full", {}).get("external_images_allowed") is not False
+        or modes.get("full", {}).get("attack_subset_allowed") is not False
+        or modes.get("engineering_canary", {}).get("formal_denominator_member") is not False
+    ):
+        raise ValueError("P1 proxy H, search, source, or runner-mode identity differs")
     return value

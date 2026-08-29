@@ -28,19 +28,39 @@ cross-power phase correlation of log-polar spectral magnitudes, refines that
 estimate on a fixed public neighbourhood, rectifies rotation/scale, then uses
 Cartesian normalized cross-power phase correlation for translation. Fixed
 canonical tile templates are matched in the rectified attacked image. Those
-measured correspondences, not a fixed count, determine support and a
-deterministic least-squares similarity fit. Its measured diagnostics are passed
-to the frozen P0 `reliability_is_reliable` gate and a
+measured correspondences, not a fixed count, enter a deterministic robust
+similarity fit. It enumerates every two-point hypothesis, ranks by inlier count,
+weighted inlier RMS, and lexicographic tile IDs, then refits only the selected
+inliers. Support, macro regions, and normalized convex-hull spatial coverage are
+computed from those inliers. Each scale obtains its own log-polar and fixed
+neighbourhood R/S estimate; the reliability spread is not constrained around a
+shared estimate. Its measured diagnostics are passed to the frozen P0
+`reliability_is_reliable` gate and a
 `GeometryV4Observation`; geometry never produces positive watermark evidence.
 There is no original/residual/truth input, oracle initialization, retry, or
 fallback in this path.
 
+The public `H_hat` direction is attacked-to-canonical. `corners_hat` maps the
+attacked-image TL/TR/BR/BL unit-square corners into canonical coordinates. A
+consumer rectifies by inverse sampling with that public transform. Internal
+canonical-to-attacked correspondences are inverted before the public
+observation is constructed. The fixed scale search is 0.65 through 1.55, which
+contains every frozen attack, including the 1/0.7 crop-rescale construction.
+
 ## Runner and evidence boundary
 
-The runner validates the canonical P1 config digest before enumerating the 16
-frozen attacks. P1D seeds are 4101..4108 and P1C seeds are 4201..4208. Every
-physical image-by-attack unit retains a marked correct-key arm, a matching
+The runner validates the canonical P1 config digest and creates every source
+with the sole `geometry_v4_procedural_rgb_v1` generator. Its public source ID,
+seed, shape, and ordinary-image SHA-256 identity are bound into each record.
+P1D seeds are 4101..4108 and P1C seeds are 4201..4208. A full mode accepts no
+external image mapping or attack subset and internally constructs exactly all
+8x16 units. `engineering_canary` is a separate non-formal identity requiring an
+explicit subset; it never claims P1D/P1C full membership or their denominator.
+
+Every planned physical unit retains a marked correct-key arm, a matching
 attacked-unwatermarked negative, a same-unit external wrong-key control, and
-any failure. Attack truth is used only after all detector calls to compute
-coordinate error. Missing or failed units stay in the enumerated denominator.
-The present local canaries do not execute the full 8x16 P1D or any P1C outcome.
+any failure. Upstream failures materialize all three arms as `STOPPED` records.
+Correct and wrong keys must normalize to different bytes before execution.
+Attack truth uses the same attacked-to-canonical direction and is consulted only
+after detector calls to compute coordinate error. The present local canaries do
+not execute the full 8x16 P1D or any P1C outcome.
