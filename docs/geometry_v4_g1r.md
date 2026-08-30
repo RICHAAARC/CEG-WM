@@ -41,17 +41,23 @@ output, immediately before ordinary RGB postprocess. The clean arm has no hook;
 the marked arm registers it only for its final decode, requires exactly one
 invocation, and removes it in a `finally` block. There is no latent-adjoint
 writer, final-RGB feedback, search, retry, fallback, or budget increase. The
-update may not exceed luma RMS 2/255 or peak 8/255. CPU tests use only a fake
+fixed update targets .375 of the luma RMS cap (half the prior fixed target) and
+may not exceed luma RMS 2/255 or peak 8/255; it is never content-adaptive. CPU tests use only a fake
 decoder module; real final-RGB observability requires separate GPU authorization.
 
 ## Blind detector
 
 The detector accepts only current attacked ordinary RGB and normalized key.
 Truth, original or clean RGB, writer residuals, latents, and attack names are
-forbidden. Search uses normalized narrow-band and normalized cross-power phase
-evidence over fixed physical bounds and retains exactly the fixed top K. Raw
-pixel sums are not core evidence. No candidate means `UNRELIABLE`; search can
-never emit `RELIABLE` and has no fallback.
+forbidden. Every fixed coarse and fine rotation/scale hypothesis is ranked by
+the keyed search reference's normalized complex cross-power phase-correlation
+under the same valid mask and Hann window. Magnitude-only FFT evidence is not a
+candidate control quantity. For each hypothesis, three deterministic translated
+peaks are selected inside the frozen physical bounds with two-pixel NMS; each
+peak has its own PSR, phase consistency, and normalized narrow-band correlation.
+The joint candidates use the frozen lexicographic rank and retain exactly the
+fixed top K. Raw pixel sums are not core evidence. No candidate means
+`UNRELIABLE`; search can never emit `RELIABLE` and has no fallback.
 
 Each fit tile contributes at most one masked normalized-correlation match with
 fixed cubic-polynomial local detrending followed by the frozen narrow band,
@@ -62,6 +68,12 @@ most .02, inlier ratio at least .5, and strictly convex H-consistent corners.
 Public H always maps attacked to canonical. Any translation or holdout PSR used
 by a `RELIABLE` decision must be at least 8.
 
+Fit uses the fixed divisor-20 local window so translated edge tiles remain
+eligible without changing their canonical identity or any gate. Holdout uses
+fixed divisor-20 and divisor-24 windows and computes its fixed-H correlation
+only on radius 12--31 frequencies whose keyed-reference magnitude is at least
+.10 of its maximum; this is fixed preprocessing, not per-image selection.
+
 `k_validate` bytes are absent from search, rank, fit, and tie-breaking. Only
 after H is frozen are the eight validation tiles evaluated for correlation,
 margin, PSR, cross-scale consistency, coverage, and corner validity. Fit and
@@ -71,9 +83,10 @@ only `RELIABLE`/`UNRELIABLE`, never the selected candidate or H.
 The public detector returns exactly `(H_hat, corners_hat, support, reliability,
 status)`. Each blind arm's fixed top-K search summary, selected fit gates, and
 holdout gates are captured once from that same detector execution as private,
-JSON-safe engineering records. They contain no key material, field patterns,
-truth, clean/original RGB, or writer residual and cannot enlarge that public
-geometry interface.
+JSON-safe engineering records. Fit diagnostics also preserve each tile's
+pre-threshold best correlation and margin plus deterministic rejection counts.
+They contain no key material, field patterns, truth, clean/original RGB, or
+writer residual and cannot enlarge that public geometry interface.
 
 ## Rosters and evidence ceiling
 

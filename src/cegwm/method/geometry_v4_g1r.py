@@ -29,13 +29,21 @@ from cegwm.protocol.geometry_v4_g1r import (
     FINAL_RGB_PSNR_MIN,
     FINAL_RGB_SSIM_MIN,
     FIT_GATES,
+    FIT_PATCH_WINDOW_DIVISOR,
     FIT_TILE_IDS,
+    HOLDOUT_FREQUENCY_RADIUS,
     HOLDOUT_GATES,
+    HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
+    HOLDOUT_PATCH_WINDOW_DIVISORS,
     LUMA_PEAK_CAP,
     LUMA_RMS_CAP,
+    SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
     SEARCH_TOP_K,
+    TRANSLATION_NMS_RADIUS_PIXELS,
+    TRANSLATION_PEAKS_PER_RS,
     TRANSLATION_PSR_MIN,
     VALIDATE_TILE_IDS,
+    WRITER_TARGET_RMS_FRACTION,
     derive_g1r_keys,
 )
 from cegwm.shared.keys import normalize_detection_key
@@ -176,7 +184,7 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
 def _g1r_luma_delta(shape: tuple[int, int], detection_key: object) -> np.ndarray:
     """Return the single fixed luma-space update shared by both writer placements."""
     anchor = g1r_anchor_fields(shape, detection_key).combined
-    target = 0.75 * LUMA_RMS_CAP
+    target = WRITER_TARGET_RMS_FRACTION * LUMA_RMS_CAP
     scale = min(target * math.sqrt(anchor.size), LUMA_PEAK_CAP / max(1e-12, float(np.max(np.abs(anchor)))))
     delta = scale * anchor
     rms, peak = float(np.sqrt(np.mean(delta * delta))), float(np.max(np.abs(delta)))
@@ -269,56 +277,99 @@ def _normalized_score(left: np.ndarray, right: np.ndarray, valid: np.ndarray) ->
 
 
 def _search_band(plane: np.ndarray) -> np.ndarray:
-    """Fixed normalized constellation bands around the 8/16/24-cycle carriers."""
+    """Fixed narrow neighborhoods around the twelve oriented search carriers."""
     value = np.asarray(plane, dtype=np.float64) - float(np.mean(plane))
     fy = np.fft.fftfreq(value.shape[0]) * value.shape[0]
     fx = np.fft.fftfreq(value.shape[1]) * value.shape[1]
-    radius = np.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2)
-    mask = np.minimum.reduce(tuple(np.abs(radius - cycles) for cycles in (8.0, 16.0, 24.0))) <= 1.5
+    mask = np.zeros(value.shape, dtype=bool)
+    for cycles in (8.0, 16.0, 24.0):
+        for angle_degrees in (0.0, 45.0, 90.0, 135.0):
+            angle = math.radians(angle_degrees)
+            carrier_x, carrier_y = cycles * math.cos(angle), cycles * math.sin(angle)
+            for sign in (-1.0, 1.0):
+                distance = np.sqrt((fy[:, None] - sign * carrier_y) ** 2 + (fx[None, :] - sign * carrier_x) ** 2)
+                mask |= distance <= 1.5
     return np.fft.ifft2(np.fft.fft2(value) * mask).real
 
 
-def _translation(rs_rgb: np.ndarray, valid: np.ndarray, reference: np.ndarray) -> Mapping[str, object]:
+def _translation_surface(rs_rgb: np.ndarray, valid: np.ndarray, reference: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Candidate-specific normalized cross-power surface under the fixed mask/window."""
     plane = _search_band(_luma(rs_rgb))
     reference = _search_band(reference)
     window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
     weight = valid.astype(np.float64) * window
     if float(weight.sum()) <= 1e-12:
-        return {"shift_x": 0, "shift_y": 0, "PSR": 0.0}
+        return np.zeros_like(plane), plane, reference
     observed = (plane - float(np.sum(plane * weight) / np.sum(weight))) * weight
     keyed = (reference - float(np.sum(reference * weight) / np.sum(weight))) * weight
-    return normalized_phase_correlation(observed, keyed)
+    observed_fft, keyed_fft = np.fft.fft2(observed), np.fft.fft2(keyed)
+    cross = observed_fft * np.conj(keyed_fft)
+    magnitude, keyed_magnitude = np.abs(cross), np.abs(keyed_fft)
+    # A fixed keyed-reference support removes window-leakage bins where
+    # normalized cross-power would otherwise amplify unrelated image content.
+    valid_frequency = (keyed_magnitude >= SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION * float(np.max(keyed_magnitude))) & (magnitude > np.finfo(np.float64).eps * max(1.0, float(np.max(magnitude))))
+    normalized = np.zeros_like(cross)
+    normalized[valid_frequency] = cross[valid_frequency] / magnitude[valid_frequency]
+    return np.fft.ifft2(normalized).real, plane, reference
 
 
-def _fixed_translation_candidate(image: np.ndarray, reference: np.ndarray, angle: float, scale: float, tx: float, ty: float, phase: Mapping[str, object]) -> dict[str, object]:
+def _candidate_psr(surface: np.ndarray, dx: int, dy: int) -> float:
+    iy, ix = dy % surface.shape[0], dx % surface.shape[1]
+    sidelobe = np.ones(surface.shape, dtype=bool)
+    for oy in range(-TRANSLATION_NMS_RADIUS_PIXELS, TRANSLATION_NMS_RADIUS_PIXELS + 1):
+        for ox in range(-TRANSLATION_NMS_RADIUS_PIXELS, TRANSLATION_NMS_RADIUS_PIXELS + 1):
+            sidelobe[(iy + oy) % surface.shape[0], (ix + ox) % surface.shape[1]] = False
+    side = surface[sidelobe]
+    return float(max(0.0, (float(surface[iy, ix]) - float(np.mean(side))) / (float(np.std(side)) + 1e-12)))
+
+
+def _align_translation(plane: np.ndarray, valid: np.ndarray, dx: int, dy: int) -> tuple[np.ndarray, np.ndarray]:
+    aligned = np.roll(plane, shift=(-dy, -dx), axis=(0, 1))
+    aligned_valid = np.roll(valid, shift=(-dy, -dx), axis=(0, 1)).copy()
+    if dy > 0:
+        aligned_valid[-dy:, :] = False
+    elif dy < 0:
+        aligned_valid[:-dy, :] = False
+    if dx > 0:
+        aligned_valid[:, -dx:] = False
+    elif dx < 0:
+        aligned_valid[:, :-dx] = False
+    return aligned, aligned_valid
+
+
+def _translation_peaks(surface: np.ndarray) -> tuple[tuple[int, int], ...]:
+    max_x = int(math.floor(0.12 * (surface.shape[1] - 1)))
+    max_y = int(math.floor(0.12 * (surface.shape[0] - 1)))
+    ranked = sorted(
+        ((float(surface[dy % surface.shape[0], dx % surface.shape[1]]), -abs(dx) - abs(dy), -abs(dy), -abs(dx), -dy, -dx, dx, dy) for dy in range(-max_y, max_y + 1) for dx in range(-max_x, max_x + 1)),
+        reverse=True,
+    )
+    selected: list[tuple[int, int]] = []
+    for *_, dx, dy in ranked:
+        if all(max(abs(dx - prior_x), abs(dy - prior_y)) > TRANSLATION_NMS_RADIUS_PIXELS for prior_x, prior_y in selected):
+            selected.append((dx, dy))
+            if len(selected) == TRANSLATION_PEAKS_PER_RS:
+                break
+    return tuple(selected)
+
+
+def _joint_candidates_for_rs(image: np.ndarray, reference: np.ndarray, angle: float, scale: float) -> tuple[dict[str, object], ...]:
     rs = _similarity_h(angle, scale)
-    translation = np.asarray(((1.0, 0.0, tx), (0.0, 1.0, ty), (0.0, 0.0, 1.0)), dtype=np.float64)
-    canonical_to_attacked = rs @ translation
-    rectified, valid = _valid_warp(image, canonical_to_attacked)
-    ncc = _normalized_score(_search_band(_luma(rectified)), _search_band(reference), valid)
-    surface = np.asarray(phase["surface"], dtype=np.float64)
-    ix, iy = int(round(tx * (image.shape[1] - 1))) % image.shape[1], int(round(ty * (image.shape[0] - 1))) % image.shape[0]
-    phase_z = float((surface[iy, ix] - float(np.mean(surface))) / (float(np.std(surface)) + 1e-12))
-    phase_consistency = max(0.0, ncc) * max(0.0, phase_z)
-    rank = (phase_consistency, ncc, phase_z, float(phase["PSR"]), -abs(angle), -abs(math.log(scale)), -abs(tx) - abs(ty), -angle, -scale, -tx, -ty)
-    return {"angle": float(angle), "scale": float(scale), "canonical_to_attacked": canonical_to_attacked, "rank": rank, "ncc": ncc, "translation_psr": float(phase["PSR"])}
-
-
-def _rs_spectral_score(image: np.ndarray, reference: np.ndarray, angle: float, scale: float) -> tuple[object, ...]:
-    rectified, valid = _valid_warp(image, _similarity_h(angle, scale))
-    window = np.outer(np.hanning(image.shape[0]), np.hanning(image.shape[1])) * valid.astype(np.float64)
-    observed = np.log1p(np.abs(np.fft.fftshift(np.fft.fft2((_luma(rectified) - float(np.mean(_luma(rectified)[valid]))) * window))))
-    keyed = np.log1p(np.abs(np.fft.fftshift(np.fft.fft2(reference * window))))
-    height, width = image.shape[:2]
-    fy = np.arange(height) - height // 2
-    fx = np.arange(width) - width // 2
-    radius = np.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2)
-    mask = np.minimum.reduce(tuple(np.abs(radius - cycles) for cycles in (8.0, 16.0, 24.0))) <= 2.0
-    left, right = observed[mask], keyed[mask]
-    left, right = left - float(np.mean(left)), right - float(np.mean(right))
-    denominator = float(np.sqrt(np.sum(left * left) * np.sum(right * right)))
-    score = -1.0 if denominator <= 1e-12 else float(np.sum(left * right) / denominator)
-    return (score, -abs(angle), -abs(math.log(scale)), -angle, -scale)
+    rectified, valid = _valid_warp(image, rs)
+    surface, observed_band, reference_band = _translation_surface(rectified, valid, reference)
+    candidates = []
+    for dx, dy in _translation_peaks(surface):
+        tx, ty = dx / (image.shape[1] - 1), dy / (image.shape[0] - 1)
+        aligned, aligned_valid = _align_translation(observed_band, valid, dx, dy)
+        ncc = _normalized_score(aligned, reference_band, aligned_valid)
+        psr = _candidate_psr(surface, dx, dy)
+        phase_peak = float(surface[dy % surface.shape[0], dx % surface.shape[1]])
+        phase_consistency = phase_peak / (float(np.sqrt(np.mean(surface * surface))) + 1e-12)
+        translation = np.asarray(((1.0, 0.0, tx), (0.0, 1.0, ty), (0.0, 0.0, 1.0)), dtype=np.float64)
+        canonical_to_attacked = rs @ translation
+        rank = (phase_consistency, ncc, psr, -abs(angle), -abs(math.log(scale)), -abs(tx) - abs(ty), -angle, -scale, -tx, -ty)
+        candidates.append({"angle": float(angle), "scale": float(scale), "canonical_to_attacked": canonical_to_attacked, "rank": rank, "ncc": ncc, "translation_psr": psr, "phase_consistency": phase_consistency})
+    return tuple(candidates)
 
 
 def _search_candidates(image: np.ndarray, search_key: bytes) -> tuple[dict[str, object], ...]:
@@ -326,25 +377,22 @@ def _search_candidates(image: np.ndarray, search_key: bytes) -> tuple[dict[str, 
     resized = np.asarray(ordinary.resize((_SEARCH_SIZE, _SEARCH_SIZE), Image.Resampling.BICUBIC), dtype=np.float64) / 255.0
     neutral = {"search": search_key, "fit": hashlib.sha256(b"fit-neutral").digest(), "validate": hashlib.sha256(b"validate-neutral").digest()}
     reference = _domain_fields((_SEARCH_SIZE, _SEARCH_SIZE), neutral).search
-    coarse = sorted(({"angle": angle, "scale": scale, "rank": _rs_spectral_score(resized, reference, angle, scale)} for angle in _COARSE_ANGLES for scale in _COARSE_SCALES), key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K]
-    fine: list[dict[str, object]] = []
+    coarse = []
+    for angle in _COARSE_ANGLES:
+        for scale in _COARSE_SCALES:
+            candidates = _joint_candidates_for_rs(resized, reference, angle, scale)
+            if candidates:
+                coarse.append(max(candidates, key=lambda item: item["rank"]))
+    coarse = sorted(coarse, key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K]
+    fine_pairs: set[tuple[float, float]] = set()
     for seed in coarse:
         for angle_offset in _FINE_ANGLE_OFFSETS:
             for scale_offset in _FINE_SCALE_OFFSETS:
                 angle, scale = float(seed["angle"]) + angle_offset, float(seed["scale"]) + scale_offset
                 if -10.0 <= angle <= 10.0 and 0.84 <= scale <= 1.16:
-                    fine.append({"angle": angle, "scale": scale, "rank": _rs_spectral_score(resized, reference, angle, scale)})
-    refined_rs = sorted(fine, key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K]
-    translated: list[dict[str, object]] = []
-    translation_grid = (-0.12, -0.08, -0.04, 0.0, 0.04, 0.08, 0.12)
-    for seed in refined_rs:
-        angle, scale = float(seed["angle"]), float(seed["scale"])
-        rs_rgb, rs_valid = _valid_warp(resized, _similarity_h(angle, scale))
-        phase = _translation(rs_rgb, rs_valid, reference)
-        for tx in translation_grid:
-            for ty in translation_grid:
-                translated.append(_fixed_translation_candidate(resized, reference, angle, scale, tx, ty, phase))
-    return tuple(sorted(translated, key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K])
+                    fine_pairs.add((round(angle, 12), round(scale, 12)))
+    joint = [candidate for angle, scale in sorted(fine_pairs) for candidate in _joint_candidates_for_rs(resized, reference, angle, scale)]
+    return tuple(sorted(joint, key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K])
 
 
 def _patch(array: np.ndarray, center_x: int, center_y: int, radius: int) -> np.ndarray | None:
@@ -378,16 +426,25 @@ def _narrow_patch(patch: np.ndarray) -> np.ndarray:
     return np.fft.ifft2(np.fft.fft2(value) * mask).real
 
 
-def _holdout_band(plane: np.ndarray) -> np.ndarray:
-    value = np.asarray(plane, dtype=np.float64) - float(np.mean(plane))
-    fy = np.fft.fftfreq(value.shape[0]) * value.shape[0]
-    fx = np.fft.fftfreq(value.shape[1]) * value.shape[1]
+def _keyed_holdout_correlation(plane: np.ndarray, reference: np.ndarray, valid: np.ndarray) -> float:
+    """Correlation on the fixed strong-frequency support of the keyed holdout."""
+    window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
+    weight = valid.astype(np.float64) * window
+    if float(weight.sum()) <= 1e-12:
+        return -1.0
+    observed = (np.asarray(plane, dtype=np.float64) - float(np.sum(plane * weight) / np.sum(weight))) * weight
+    keyed = (np.asarray(reference, dtype=np.float64) - float(np.sum(reference * weight) / np.sum(weight))) * weight
+    keyed_fft = np.fft.fft2(keyed)
+    fy = np.fft.fftfreq(plane.shape[0]) * plane.shape[0]
+    fx = np.fft.fftfreq(plane.shape[1]) * plane.shape[1]
     radius = np.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2)
-    mask = (radius >= 6.0) & (radius <= min(value.shape) * 0.45)
-    return np.fft.ifft2(np.fft.fft2(value) * mask).real
+    support = (radius >= HOLDOUT_FREQUENCY_RADIUS[0]) & (radius <= min(HOLDOUT_FREQUENCY_RADIUS[1], min(plane.shape) * 0.45)) & (np.abs(keyed_fft) >= HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION * float(np.max(np.abs(keyed_fft))))
+    observed_band = np.fft.ifft2(np.fft.fft2(observed) * support).real
+    keyed_band = np.fft.ifft2(keyed_fft * support).real
+    return _normalized_score(observed_band, keyed_band, valid)
 
 
-def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, reference: np.ndarray, tile_ids: tuple[int, ...], *, correlation_min: float, margin_min: float, window_divisor: int = 16, allow_offset: bool = True) -> list[dict[str, object]]:
+def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, reference: np.ndarray, tile_ids: tuple[int, ...], *, correlation_min: float, margin_min: float, window_divisor: int = 16, allow_offset: bool = True, prethreshold: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
     rectified, valid = _valid_warp(image, canonical_to_attacked)
     plane, height, width = _luma(rectified), image.shape[0], image.shape[1]
     radius, search_radius = max(4, min(height, width) // window_divisor), max(2, min(height, width) // 48)
@@ -398,6 +455,8 @@ def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, referenc
         px, py = int(round(cx * (width - 1))), int(round(cy * (height - 1)))
         template = _patch(reference, px, py, radius)
         if template is None:
+            if prethreshold is not None:
+                prethreshold.append({"tile_id": tile_id, "best_correlation": None, "margin": None, "accepted": False, "rejection": "missing_template"})
             continue
         template = _narrow_patch(template)
         candidates: list[tuple[float, int, int]] = []
@@ -408,6 +467,8 @@ def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, referenc
                     score = _normalized_score(_narrow_patch(observed), template, mask)
                     candidates.append((score, ox, oy))
         if not candidates:
+            if prethreshold is not None:
+                prethreshold.append({"tile_id": tile_id, "best_correlation": None, "margin": None, "accepted": False, "rejection": "missing_valid_patch"})
             continue
         best = max(candidates, key=lambda item: (item[0], -abs(item[1]) - abs(item[2]), -item[2], -item[1])) if allow_offset else next(item for item in candidates if item[1:] == (0, 0))
         separated = [item for item in candidates if abs(item[1] - best[1]) > 1 or abs(item[2] - best[2]) > 1]
@@ -415,7 +476,12 @@ def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, referenc
         best_patch = _patch(plane, px + best[1], py + best[2], radius)
         psr = 0.0 if best_patch is None else float(normalized_phase_correlation(_narrow_patch(best_patch), template)["PSR"])
         margin = float(best[0] - second)
-        if best[0] < correlation_min or margin < margin_min:
+        correlation_ok, margin_ok = best[0] >= correlation_min, margin >= margin_min
+        accepted = bool(correlation_ok and margin_ok)
+        if prethreshold is not None:
+            rejection = "accepted" if accepted else "correlation_and_margin" if not correlation_ok and not margin_ok else "correlation" if not correlation_ok else "margin"
+            prethreshold.append({"tile_id": tile_id, "best_correlation": float(best[0]), "margin": margin, "accepted": accepted, "rejection": rejection})
+        if not accepted:
             continue
         q = np.asarray(((px + best[1]) / (width - 1), (py + best[2]) / (height - 1), 1.0), dtype=np.float64)
         attacked = canonical_to_attacked @ q
@@ -427,7 +493,8 @@ def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, referenc
 def _fit_candidate(image: np.ndarray, candidate: Mapping[str, object], fit_key: bytes) -> dict[str, object]:
     neutral = {"search": hashlib.sha256(b"search-neutral").digest(), "fit": fit_key, "validate": hashlib.sha256(b"validate-neutral").digest()}
     reference = _domain_fields(image.shape[:2], neutral).fit
-    matches = _tile_matches(image, np.asarray(candidate["canonical_to_attacked"]), reference, FIT_TILE_IDS, correlation_min=FIT_GATES["correlation"], margin_min=FIT_GATES["margin"])
+    prethreshold: list[dict[str, object]] = []
+    matches = _tile_matches(image, np.asarray(candidate["canonical_to_attacked"]), reference, FIT_TILE_IDS, correlation_min=FIT_GATES["correlation"], margin_min=FIT_GATES["margin"], window_divisor=FIT_PATCH_WINDOW_DIVISOR, prethreshold=prethreshold)
     estimate, inliers, residuals, condition = _robust_similarity_fit(matches, inlier_threshold=FIT_GATES["reprojection"], minimum_inliers=FIT_GATES["support"])
     support = len(inliers)
     coverage, macro = _spatial_coverage(inliers), _macro_regions(inliers)
@@ -435,7 +502,7 @@ def _fit_candidate(image: np.ndarray, candidate: Mapping[str, object], fit_key: 
     ratio = support / len(matches) if matches else 0.0
     valid = bool(estimate is not None and float(candidate["translation_psr"]) >= TRANSLATION_PSR_MIN and support >= FIT_GATES["support"] and coverage >= FIT_GATES["coverage"] and macro >= FIT_GATES["macro_regions"] and condition <= FIT_GATES["condition"] and reprojection <= FIT_GATES["reprojection"] and ratio >= 0.5)
     rank = (int(valid), support, macro, coverage, ratio, -reprojection, -condition, float(candidate["ncc"]), candidate["rank"])
-    return {"valid": valid, "canonical_to_attacked": estimate, "matches": tuple(inliers), "support": support, "coverage": coverage, "macro_regions": macro, "reprojection": reprojection, "condition": condition, "inlier_ratio": ratio, "rank": rank, "search": candidate}
+    return {"valid": valid, "canonical_to_attacked": estimate, "matches": tuple(inliers), "prethreshold": tuple(prethreshold), "support": support, "coverage": coverage, "macro_regions": macro, "reprojection": reprojection, "condition": condition, "inlier_ratio": ratio, "rank": rank, "search": candidate}
 
 
 def _rotation_scale(h: np.ndarray) -> tuple[float, float]:
@@ -445,7 +512,7 @@ def _rotation_scale(h: np.ndarray) -> tuple[float, float]:
 def _holdout_metrics(image: np.ndarray, canonical_to_attacked: np.ndarray, validate_key: bytes) -> dict[str, object]:
     neutral = {"search": hashlib.sha256(b"search-neutral").digest(), "fit": hashlib.sha256(b"fit-neutral").digest(), "validate": validate_key}
     reference = _domain_fields(image.shape[:2], neutral).validate
-    matches = _tile_matches(image, canonical_to_attacked, reference, VALIDATE_TILE_IDS, correlation_min=HOLDOUT_GATES["correlation"], margin_min=HOLDOUT_GATES["margin"])
+    matches = _tile_matches(image, canonical_to_attacked, reference, VALIDATE_TILE_IDS, correlation_min=HOLDOUT_GATES["correlation"], margin_min=HOLDOUT_GATES["margin"], window_divisor=HOLDOUT_PATCH_WINDOW_DIVISORS[0])
     estimate, inliers, residuals, condition = _robust_similarity_fit(matches, inlier_threshold=FIT_GATES["reprojection"], minimum_inliers=6)
     coverage, macro = _spatial_coverage(inliers), _macro_regions(inliers)
     correlations = [float(match["correlation"]) for match in inliers]
@@ -455,8 +522,8 @@ def _holdout_metrics(image: np.ndarray, canonical_to_attacked: np.ndarray, valid
     window = np.outer(np.hanning(image.shape[0]), np.hanning(image.shape[1]))
     weight = valid.astype(np.float64) * window
     holdout_psr = float(normalized_phase_correlation((_luma(rectified) - float(np.mean(_luma(rectified)[valid]))) * weight, reference * weight)["PSR"])
-    holdout_correlation = _normalized_score(_holdout_band(_luma(rectified)), _holdout_band(reference), valid)
-    secondary_matches = _tile_matches(image, canonical_to_attacked, reference, VALIDATE_TILE_IDS, correlation_min=HOLDOUT_GATES["correlation"], margin_min=HOLDOUT_GATES["margin"], window_divisor=14)
+    holdout_correlation = _keyed_holdout_correlation(_luma(rectified), reference, valid)
+    secondary_matches = _tile_matches(image, canonical_to_attacked, reference, VALIDATE_TILE_IDS, correlation_min=HOLDOUT_GATES["correlation"], margin_min=HOLDOUT_GATES["margin"], window_divisor=HOLDOUT_PATCH_WINDOW_DIVISORS[1])
     secondary_estimate, secondary_inliers, _, _ = _robust_similarity_fit(secondary_matches, inlier_threshold=FIT_GATES["reprojection"], minimum_inliers=6)
     rotation_spread = log_scale_spread = corner_consistency = math.inf
     if estimate is not None and secondary_estimate is not None:
@@ -553,6 +620,20 @@ def _detect_g1r_engineering_from_image(image: np.ndarray, detection_key: object)
         "translation_psr": finite(search.get("translation_psr", 0.0)),
         "ncc": finite(search.get("ncc", -1.0)),
     }
+    prethreshold_summary = []
+    rejection_counts: dict[str, int] = {}
+    for item in fit.get("prethreshold", ()):
+        rejection = str(item.get("rejection", "invalid"))
+        rejection_counts[rejection] = rejection_counts.get(rejection, 0) + 1
+        prethreshold_summary.append({
+            "tile_id": int(item["tile_id"]),
+            "best_correlation": None if item.get("best_correlation") is None else finite(item["best_correlation"]),
+            "margin": None if item.get("margin") is None else finite(item["margin"]),
+            "accepted": bool(item.get("accepted", False)),
+            "rejection": rejection,
+        })
+    fit_summary["prethreshold_tiles"] = tuple(prethreshold_summary)
+    fit_summary["rejection_counts"] = rejection_counts
     holdout = result.get("holdout") if isinstance(result.get("holdout"), Mapping) else {}
     holdout_names = (
         "passed", "support", "secondary_window_support", "coverage", "macro_regions",

@@ -18,6 +18,7 @@
     ],
     "luma_peak_cap": 0.03137254901960784,
     "luma_rms_cap": 0.00784313725490196,
+    "writer_target_rms_fraction": 0.375,
     "validate_tile_ids": [
       1,
       3,
@@ -92,6 +93,7 @@
     "masked_normalized_correlation_min": 0.42,
     "match_margin_min": 0.025,
     "one_correspondence_per_tile": true,
+    "patch_window_divisor": 20,
     "reprojection_rms_diagonal_max": 0.02,
     "spatial_coverage_min": 0.75,
     "support_min": 6
@@ -124,8 +126,15 @@
     "macro_regions_min": 3,
     "masked_normalized_correlation_min": 0.06,
     "match_margin_min": 0.015,
+    "narrow_band_frequency_radius": [
+      12.0,
+      31.0
+    ],
+    "primary_patch_window_divisor": 20,
     "psr_min": 8.0,
-    "spatial_coverage_min": 0.75
+    "secondary_patch_window_divisor": 24,
+    "spatial_coverage_min": 0.75,
+    "strong_keyed_frequency_support_min_fraction": 0.1
   },
   "identity": {
     "method_id": "geometry_v4_keyed_multiscale_sync_anchor_v1",
@@ -219,6 +228,8 @@
       1.1,
       1.14
     ],
+    "coarse_control": "keyed_normalized_complex_cross_power_phase_correlation",
+    "keyed_reference_frequency_support_min_fraction": 0.1,
     "fine_rotation_offsets_degrees": [
       -1.0,
       -0.5,
@@ -248,8 +259,11 @@
         0.12
       ]
     },
+    "phase_consistency": "candidate_peak_over_surface_rms",
     "top_k": 5,
+    "translation_nms_radius_pixels": 2,
     "translation_operator": "valid_mask_hann_normalized_cross_power_phase_correlation",
+    "translation_peaks_per_rs": 3,
     "translation_psr_min_for_reliable": 8.0
   }
 }

@@ -10,11 +10,41 @@ import pytest
 from PIL import Image
 
 from experiments import geometry_v4_g1r_engine as engine
+from cegwm.method import geometry_v4_g1r as method
 from cegwm.method.geometry_v4_g1r import G1RFinalRGBObservability
-from cegwm.protocol.geometry_v4_g1r import ATTACKS, PLACEMENT, WRITER_ID
+from cegwm.protocol.geometry_v4_g1r import ATTACKS, PLACEMENT, SEARCH_TOP_K, WRITER_ID, derive_g1r_keys
 from cegwm.runtime.geometry_v4_g1r_sd35 import G1RGeneratedPair
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.integration
+def test_keyed_joint_search_is_deterministic_bounded_and_contains_five_attack_truths() -> None:
+    key = b"geometry-v4-g1r-cpu-key-v1"
+    search_key = derive_g1r_keys(key)["search"]
+    wrong_search_key = derive_g1r_keys(b"geometry-v4-g1r-cpu-wrong-key-v1")["search"]
+    field = method.g1r_anchor_fields((96, 96), key).search
+    plane = np.clip(.5 + .02 * field * np.sqrt(field.size), 0.0, 1.0)
+    rgb = np.repeat(plane[..., None], 3, axis=2)
+    identities = []
+    for attack in ATTACKS:
+        attacked = engine._apply_attack(rgb, attack)
+        candidates = method._search_candidates(attacked, search_key)
+        repeated = method._search_candidates(attacked, search_key)
+        assert len(candidates) == len(repeated) == SEARCH_TOP_K
+        assert [tuple(item["rank"]) for item in candidates] == [tuple(item["rank"]) for item in repeated]
+        assert all(-10.0 <= item["angle"] <= 10.0 and .84 <= item["scale"] <= 1.16 for item in candidates)
+        for item in candidates:
+            relative_translation = np.linalg.inv(method._similarity_h(item["angle"], item["scale"])) @ np.asarray(item["canonical_to_attacked"])
+            assert abs(relative_translation[0, 2]) <= .12 and abs(relative_translation[1, 2]) <= .12
+        truth = np.linalg.inv(engine._truth_for_attack(attack))
+        truth_points = engine._points(truth)
+        errors = [float(np.max(np.linalg.norm(engine._points(np.asarray(item["canonical_to_attacked"])) - truth_points, axis=1) / np.sqrt(2.0))) for item in candidates]
+        assert min(errors) <= .025
+        identities.append(tuple((item["angle"], item["scale"], tuple(np.asarray(item["canonical_to_attacked"]).reshape(-1)), item["ncc"], item["translation_psr"]) for item in candidates))
+    wrong = method._search_candidates(rgb, wrong_search_key)
+    assert identities[0] != tuple((item["angle"], item["scale"], tuple(np.asarray(item["canonical_to_attacked"]).reshape(-1)), item["ncc"], item["translation_psr"]) for item in wrong)
+    assert len({round(float(item["translation_psr"]), 8) for item in method._search_candidates(rgb, search_key)}) > 1
 
 
 @pytest.mark.integration

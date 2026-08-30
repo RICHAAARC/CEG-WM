@@ -12,7 +12,7 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "318509ef39d693f8e961413832cb75a048efc3d156176fafc8218756cf973e1f"
+CONFIG_SHA256 = "f6b08c7fa2a960ea3643319daa93a4bbdcae64654bc66d2da07c6d82233757d1"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
 WRITER_ID = "geometry_v4_g1r_vae_decoder_output_writer_v2"
@@ -23,6 +23,7 @@ DECODER_HOOK_CALLS_REQUIRED = 1
 LUMA_RMS_CAP = 2.0 / 255.0
 LUMA_PEAK_CAP = 8.0 / 255.0
 ENERGY_SHARES = (0.40, 0.36, 0.24)
+WRITER_TARGET_RMS_FRACTION = 0.375
 FIT_TILE_IDS = (0, 2, 5, 7, 8, 10, 13, 15)
 VALIDATE_TILE_IDS = (1, 3, 4, 6, 9, 11, 12, 14)
 ATTACKS = ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9")
@@ -30,8 +31,15 @@ DEVELOPMENT_SEEDS = (6201, 6202, 6203, 6204)
 CONFIRMATION_SEEDS = (6301, 6302, 6303, 6304)
 LEGACY_SEEDS = (6101, 6102, 6103, 6104)
 SEARCH_TOP_K = 5
+TRANSLATION_PEAKS_PER_RS = 3
+TRANSLATION_NMS_RADIUS_PIXELS = 2
+SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION = 0.10
 TRANSLATION_PSR_MIN = 8.0
 LOCAL_PREPROCESSING = "fixed_cubic_polynomial_detrend_then_narrow_band"
+FIT_PATCH_WINDOW_DIVISOR = 20
+HOLDOUT_PATCH_WINDOW_DIVISORS = (20, 24)
+HOLDOUT_FREQUENCY_RADIUS = (12.0, 31.0)
+HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION = 0.10
 DEVELOPMENT_ARTIFACT_FILES = ("g1r-development-records.json", "g1r-development-summary.json", "g1r-development-manifest.json")
 DEVELOPMENT_NOTEBOOK_ID = "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
 DEVELOPMENT_SOURCE_REQUIRED = 4
@@ -75,19 +83,24 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     shares = anchor.get("energy_shares", {})
     if (shares.get("search_global"), shares.get("fit_local"), shares.get("validate_holdout")) != ENERGY_SHARES or tuple(anchor.get("fit_tile_ids", ())) != FIT_TILE_IDS or tuple(anchor.get("validate_tile_ids", ())) != VALIDATE_TILE_IDS:
         raise ValueError("V4-G1R anchor partition differs")
-    if anchor.get("luma_rms_cap") != LUMA_RMS_CAP or anchor.get("luma_peak_cap") != LUMA_PEAK_CAP:
+    if anchor.get("luma_rms_cap") != LUMA_RMS_CAP or anchor.get("luma_peak_cap") != LUMA_PEAK_CAP or anchor.get("writer_target_rms_fraction") != WRITER_TARGET_RMS_FRACTION:
         raise ValueError("V4-G1R budget differs")
     if tuple(rosters.get("attacks", ())) != ATTACKS or tuple(rosters.get("development", {}).get("seeds", ())) != DEVELOPMENT_SEEDS or tuple(rosters.get("confirmation", {}).get("seeds", ())) != CONFIRMATION_SEEDS or tuple(rosters.get("forbidden_legacy_seeds", ())) != LEGACY_SEEDS or rosters.get("units_per_split") != 20:
         raise ValueError("V4-G1R roster differs")
     if set(FIT_TILE_IDS) & set(VALIDATE_TILE_IDS) or set(FIT_TILE_IDS) | set(VALIDATE_TILE_IDS) != set(range(16)):
         raise ValueError("V4-G1R tile partitions differ")
-    if value.get("search", {}).get("top_k") != SEARCH_TOP_K or value.get("search", {}).get("translation_psr_min_for_reliable") != TRANSLATION_PSR_MIN or value.get("blind_boundary", {}).get("h_direction") != "attacked_to_canonical" or value.get("blind_boundary", {}).get("geometry_can_form_positive") is not False:
+    search = value.get("search", {})
+    if search.get("top_k") != SEARCH_TOP_K or search.get("translation_peaks_per_rs") != TRANSLATION_PEAKS_PER_RS or search.get("translation_nms_radius_pixels") != TRANSLATION_NMS_RADIUS_PIXELS or search.get("coarse_control") != "keyed_normalized_complex_cross_power_phase_correlation" or search.get("keyed_reference_frequency_support_min_fraction") != SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION or search.get("phase_consistency") != "candidate_peak_over_surface_rms" or search.get("translation_psr_min_for_reliable") != TRANSLATION_PSR_MIN or value.get("blind_boundary", {}).get("h_direction") != "attacked_to_canonical" or value.get("blind_boundary", {}).get("geometry_can_form_positive") is not False:
         raise ValueError("V4-G1R blind boundary differs")
     fit, holdout = value.get("fit", {}), value.get("holdout", {})
     if fit.get("local_preprocessing") != LOCAL_PREPROCESSING or (fit.get("support_min"), fit.get("spatial_coverage_min"), fit.get("macro_regions_min"), fit.get("condition_number_max"), fit.get("reprojection_rms_diagonal_max"), fit.get("masked_normalized_correlation_min"), fit.get("match_margin_min")) != (FIT_GATES["support"], FIT_GATES["coverage"], FIT_GATES["macro_regions"], FIT_GATES["condition"], FIT_GATES["reprojection"], FIT_GATES["correlation"], FIT_GATES["margin"]):
         raise ValueError("V4-G1R local preprocessing differs")
+    if fit.get("patch_window_divisor") != FIT_PATCH_WINDOW_DIVISOR:
+        raise ValueError("V4-G1R fit patch differs")
     if (holdout.get("spatial_coverage_min"), holdout.get("macro_regions_min"), holdout.get("masked_normalized_correlation_min"), holdout.get("match_margin_min"), holdout.get("psr_min"), holdout.get("cross_scale_rotation_spread_degrees_max"), holdout.get("cross_scale_log_scale_spread_max")) != (HOLDOUT_GATES["coverage"], HOLDOUT_GATES["macro_regions"], HOLDOUT_GATES["correlation"], HOLDOUT_GATES["margin"], HOLDOUT_GATES["psr"], HOLDOUT_GATES["rotation_spread"], HOLDOUT_GATES["log_scale_spread"]):
         raise ValueError("V4-G1R holdout gates differ")
+    if (holdout.get("primary_patch_window_divisor"), holdout.get("secondary_patch_window_divisor"), tuple(holdout.get("narrow_band_frequency_radius", ())), holdout.get("strong_keyed_frequency_support_min_fraction")) != (*HOLDOUT_PATCH_WINDOW_DIVISORS, HOLDOUT_FREQUENCY_RADIUS, HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION):
+        raise ValueError("V4-G1R holdout preprocessing differs")
     development = value.get("development_runner", {})
     if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
         raise ValueError("V4-G1R development runner differs")

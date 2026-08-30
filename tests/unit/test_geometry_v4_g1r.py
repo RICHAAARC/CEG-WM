@@ -17,11 +17,19 @@ from cegwm.protocol.geometry_v4_g1r import (
     DEVELOPMENT_NOTEBOOK_ID,
     ENERGY_SHARES,
     FIT_GATES,
+    FIT_PATCH_WINDOW_DIVISOR,
     FIT_TILE_IDS,
     HOLDOUT_GATES,
+    HOLDOUT_FREQUENCY_RADIUS,
+    HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
+    HOLDOUT_PATCH_WINDOW_DIVISORS,
     LOCAL_PREPROCESSING,
+    SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
     TRANSLATION_PSR_MIN,
+    TRANSLATION_NMS_RADIUS_PIXELS,
+    TRANSLATION_PEAKS_PER_RS,
     VALIDATE_TILE_IDS,
+    WRITER_TARGET_RMS_FRACTION,
     contract_sha256,
     derive_g1r_keys,
     load_contract,
@@ -64,6 +72,12 @@ def test_contract_freezes_domains_tiles_rosters_and_old_seed_rejection() -> None
     contract = load_contract(ROOT)
     assert contract_sha256(ROOT) == CONFIG_SHA256
     assert ENERGY_SHARES == (.4, .36, .24) and sum(ENERGY_SHARES) == 1.0
+    assert WRITER_TARGET_RMS_FRACTION == .375
+    assert TRANSLATION_PEAKS_PER_RS == 3 and TRANSLATION_NMS_RADIUS_PIXELS == 2
+    assert SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION == .1
+    assert FIT_PATCH_WINDOW_DIVISOR == 20
+    assert HOLDOUT_PATCH_WINDOW_DIVISORS == (20, 24) and HOLDOUT_FREQUENCY_RADIUS == (12.0, 31.0)
+    assert HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION == .1
     assert set(FIT_TILE_IDS) | set(VALIDATE_TILE_IDS) == set(range(16))
     assert not set(FIT_TILE_IDS) & set(VALIDATE_TILE_IDS)
     assert len(require_split(contract, "development")) == len(require_split(contract, "confirmation")) == 20
@@ -102,6 +116,7 @@ def test_rgb_and_decoder_output_writers_keep_frozen_budget_and_single_hook() -> 
     assert not np.array_equal(marked, ordinary)
     assert budget["luma_rms"] <= budget["luma_rms_cap"] == 2 / 255
     assert budget["luma_peak"] <= budget["luma_peak_cap"] == 8 / 255
+    assert budget["luma_rms"] == pytest.approx(WRITER_TARGET_RMS_FRACTION * 2 / 255)
     decoded = torch.zeros((1, 3, 64, 64), dtype=torch.float32)
     updated = method.write_g1r_decoder_output(decoded, KEY)
     final_luma_delta = updated[0, 0].numpy() / 2.0
@@ -171,6 +186,9 @@ def test_detector_has_no_oracle_surface_and_preserves_original_fit_gates() -> No
     serialized = json.dumps(diagnostics, allow_nan=False, sort_keys=True)
     assert "H_hat" not in diagnostics and "key" not in serialized.lower()
     assert KEY.hex() not in serialized and KEY.decode("ascii") not in serialized
+    assert len(diagnostics["selected_fit"]["prethreshold_tiles"]) == 8
+    assert sum(diagnostics["selected_fit"]["rejection_counts"].values()) == 8
+    assert all(set(item) == {"tile_id", "best_correlation", "margin", "accepted", "rejection"} for item in diagnostics["selected_fit"]["prethreshold_tiles"])
     forbidden = {"truth", "original", "clean", "residual", "latent", "attack"}
     assert not forbidden & set(inspect.signature(method._search_candidates).parameters)
     assert FIT_GATES["support"] == 6 and FIT_GATES["coverage"] == .75 and FIT_GATES["macro_regions"] == 3
@@ -179,3 +197,4 @@ def test_detector_has_no_oracle_surface_and_preserves_original_fit_gates() -> No
     assert LOCAL_PREPROCESSING == "fixed_cubic_polynomial_detrend_then_narrow_band"
     assert HOLDOUT_GATES["psr"] >= 8.0 and TRANSLATION_PSR_MIN >= 8.0
     assert HOLDOUT_GATES["rotation_spread"] == 2.0 and HOLDOUT_GATES["log_scale_spread"] == .03
+    assert not hasattr(method, "_rs_spectral_score")
